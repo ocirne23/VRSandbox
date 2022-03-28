@@ -1,0 +1,29 @@
+{
+  "bindings": {
+    "/actions/demo": {
+      "poses": [
+        {
+          "output": "/actions/demo/in/hand_left",
+          "path": "/user/hand/left/pose/raw"
+        },
+        {
+          "output": "/actions/demo/in/hand_right",
+          "path": "/user/hand/right/pose/raw"
+        }
+      ],
+      "haptics": [
+        {
+          "output": "/actions/demo/out/haptic_right",
+          "path": "/user/hand/right/output/haptic"
+        },
+        {
+          "output": "/actions/demo/out/haptic_left",
+          "path": "/user/hand/left/output/haptic"
+        }
+      ]
+    },
+    "controller_type": "generic",
+    "description": "Bindings for the OpenVR SDK \"hellovr_opengl\" demo for a generic controller",
+    "name": "HelloVR bindings for a generic controller"
+  }
+}
