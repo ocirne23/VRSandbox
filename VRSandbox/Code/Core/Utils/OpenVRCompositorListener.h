@@ -6,7 +6,7 @@
 #include <OgreMatrix4.h>
 #include <OgreCamera.h>
 
-#include "OpenVRInclude.h"
+#include <openvr.h>
 
 namespace VrWaitingMode
 {

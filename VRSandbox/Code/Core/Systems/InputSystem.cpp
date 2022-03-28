@@ -5,42 +5,9 @@
 #include <OgreWindowEventUtilities.h>
 #include <SDL.h>
 #include <OgreLogManager.h>
-#include <filesystem>
-
-namespace
-{
-Ogre::Matrix4 convertSteamVRMatrixToMatrix4(vr::HmdMatrix34_t matPose)
-{
-	Ogre::Matrix4 matrixObj(
-		matPose.m[0][0], matPose.m[0][1], matPose.m[0][2], matPose.m[0][3],
-		matPose.m[1][0], matPose.m[1][1], matPose.m[1][2], matPose.m[1][3],
-		matPose.m[2][0], matPose.m[2][1], matPose.m[2][2], matPose.m[2][3],
-		0.0f, 0.0f, 0.0f, 1.0f);
-	return matrixObj;
-}
-}
 
 InputSystem::InputSystem(GraphicsSystem* pGraphics) : m_pGraphics(pGraphics)
 {
-	if (m_pGraphics->getHMD())
-	{
-		auto* pVrInput = vr::VRInput();
-		std::error_code fs_err;
-		std::filesystem::path actionsPath = std::filesystem::absolute("../VRSandbox/Assets/vr/hellovr_actions.json", fs_err);
-		vr::EVRInputError vr_err = pVrInput->SetActionManifestPath(actionsPath.string().c_str());
-		OGRE_ASSERT(vr_err == vr::EVRInputError::VRInputError_None);
-
-		pVrInput->GetActionSetHandle("/actions/demo", &m_actionsetDemo);
-
-		pVrInput->GetActionHandle("/actions/demo/out/Haptic_Left", &m_actionLeftHaptic);
-		pVrInput->GetActionHandle("/actions/demo/in/Hand_Left", &m_actionLeftPose);
-
-		pVrInput->GetActionHandle("/actions/demo/out/Haptic_Right", &m_actionLeftHaptic);
-		pVrInput->GetActionHandle("/actions/demo/in/Hand_Right", &m_actionRightPose);
-
-		pVrInput->GetActionHandle("/actions/demo/in/lefthand_anim", &m_actionLeftHandSkeleton);
-		pVrInput->GetActionHandle("/actions/demo/in/righthand_anim", &m_actionRightHandSkeleton);
-	}
 }
 
 InputSystem::~InputSystem()
@@ -118,69 +85,6 @@ void InputSystem::update(double deltaSec, entt::registry& registry)
 			break;
 		}
 	}
-
-	if (m_pGraphics->getHMD())
-	{
-		updateVRInput();
-	}
-}
-
-void InputSystem::getVRSkeletalData(HandSkeletonData& outData, vr::VRActionHandle_t skeletonActionHandle)
-{
-	vr::InputSkeletalActionData_t skelData;
-	vr::VRInput()->GetSkeletalActionData(skeletonActionHandle, &skelData, sizeof(skelData));
-	if (skelData.bActive)
-	{
-		m_hasHandSkeletonData = true;
-#ifdef OGRE_ASSERTS_ENABLED
-		uint32_t boneCount;
-		vr::VRInput()->GetBoneCount(skeletonActionHandle, &boneCount);
-		OGRE_ASSERT(boneCount == HandSkeletonBone::eBone_Count);
-#endif
-		{
-			vr::VRBoneTransform_t boneTransforms[HandSkeletonBone::eBone_Count];
-			vr::VRInput()->GetSkeletalBoneData(skeletonActionHandle, vr::VRSkeletalTransformSpace_Parent,
-				vr::VRSkeletalMotionRange_WithoutController, boneTransforms, HandSkeletonBone::eBone_Count);
-			for (int i = 0; i < HandSkeletonBone::eBone_Count; ++i)
-			{
-				outData.boneTransforms[i].bonePos = *reinterpret_cast<Ogre::Vector4*>(&boneTransforms[i].position);
-				outData.boneTransforms[i].boneRot = *reinterpret_cast<Ogre::Quaternion*>(&boneTransforms[i].orientation);
-			}
-		}
-	}
-	vr::InputPoseActionData_t poseData;
-	vr::VRInput()->GetPoseActionDataForNextFrame(skeletonActionHandle, vr::ETrackingUniverseOrigin::TrackingUniverseStanding,
-		&poseData, sizeof(poseData), vr::k_ulInvalidInputValueHandle);
-	outData.handTransform = convertSteamVRMatrixToMatrix4(poseData.pose.mDeviceToAbsoluteTracking);
-}
-
-void InputSystem::updateVRInput()
-{
-	// Process SteamVR events
-	vr::VREvent_t event;
-	while (m_pGraphics->getHMD()->PollNextEvent(&event, sizeof(event)))
-	{
-		switch (event.eventType)
-		{
-		case vr::VREvent_TrackedDeviceDeactivated:
-		{
-			printf("Device %u detached.\n", event.trackedDeviceIndex);
-		}
-		break;
-		case vr::VREvent_TrackedDeviceUpdated:
-		{
-			printf("Device %u updated.\n", event.trackedDeviceIndex);
-		}
-		break;
-		}
-	}
-
-	vr::VRActiveActionSet_t actionSet = { 0 };
-	actionSet.ulActionSet = m_actionsetDemo;
-	vr::VRInput()->UpdateActionState(&actionSet, sizeof(actionSet), 1);
-
-	getVRSkeletalData(m_leftHandSkeletonData, m_actionLeftHandSkeleton);
-	getVRSkeletalData(m_rightHandSkeletonData, m_actionRightHandSkeleton);
 }
 
 void InputSystem::updateMouseSettings()

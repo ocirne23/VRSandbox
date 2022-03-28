@@ -27,7 +27,6 @@
 #include <OgreHlmsPbs.h>
 #include <OgreLogManager.h>
 #include <Animation/OgreSkeletonInstance.h>
-#include <Animation/OgreSkeletonDef.h>
 
 #include <entt/entity/registry.hpp>
 #include <btBulletDynamicsCommon.h>
@@ -42,11 +41,13 @@ extern const bool c_useRDM;
 // causing glitches in NVIDIA GPUs in Linux, see https://github.com/OGRECave/ogre-next/issues/53
 const bool c_useRDM = true;
 
-TestWorld::TestWorld(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene) :
+TestWorld::TestWorld(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene,
+    VRInputSystem& vrInput) :
     m_registry(registry),
     m_graphics(graphics),
     m_physics(physics),
-    m_scene(scene)
+    m_scene(scene),
+    m_vrInput(vrInput)
 {
 }
 
@@ -64,6 +65,9 @@ void TestWorld::createScene()
     for (int i = 0; i < 5000; ++i)
         TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-5, 5), Ogre::Math::RangeRandom(20, 100), Ogre::Math::RangeRandom(-5, 5)));
 #endif
+
+    m_handEntities[0] = VRHandEntities::createLeftHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput);
+    m_handEntities[1] = VRHandEntities::createRightHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput);
 
     Ogre::SceneManager* pSceneManager = m_graphics.getSceneManager();
 
@@ -107,43 +111,3 @@ void TestWorld::createScene()
 
     m_lightNodes[2] = lightNode;
 }
-
-void TestWorld::setVRHandTrackingData(const HandSkeletonData& left, const HandSkeletonData& right)
-{
-    if (m_handEntities[0] == entt::null)
-        m_handEntities[0] = VRHandEntities::createLeftHand(m_registry, m_graphics, m_physics, m_scene, left);
-    if (m_handEntities[1] == entt::null)
-        m_handEntities[1] = VRHandEntities::createRightHand(m_registry, m_graphics, m_physics, m_scene, right);
-
-    for (int hand = 0; hand < 2; ++hand)
-    {
-        const HandSkeletonData& data = hand == 0 ? left : right;
-
-        SceneComponent& sceneComp = m_registry.get<SceneComponent>(m_handEntities[hand]);
-        sceneComp.pNode->setPosition(data.handTransform.getTrans());
-        sceneComp.pNode->setOrientation(data.handTransform.extractQuaternion());
-
-        GraphicsComponent& graphics = m_registry.get<GraphicsComponent>(m_handEntities[hand]);
-        auto* skelInstance = graphics.pItem->getSkeletonInstance();
-        for (int i = 0; i < eBone_Count; ++i)
-        {
-            auto* pBone = skelInstance->getBone(i);
-            pBone->setOrientation(data.boneTransforms[i].boneRot);
-            pBone->setPosition(data.boneTransforms[i].bonePos.xyz());
-        }
-
-        VRHandTrackingComponent& handComp = m_registry.get<VRHandTrackingComponent>(m_handEntities[hand]);
-        handComp.pArrSceneNodes[0]->setPosition(data.handTransform.getTrans());
-        handComp.pArrSceneNodes[0]->setOrientation(data.handTransform.extractQuaternion());
-
-        for (int i = eBone_Wrist; i < eBone_PinkyFinger4; ++i)
-        {
-            auto& trans = data.boneTransforms[i];
-            handComp.pArrSceneNodes[i]->setPosition(trans.bonePos.xyz());
-            handComp.pArrSceneNodes[i]->setOrientation(trans.boneRot);
-        }
-    }
-}
-
-
-//    phys.pBody->setWorldTransform(btTransform(btQuaternion(trackingRot.x, trackingRot.y, trackingRot.z, trackingRot.w), btVector3(trackingPos.x, trackingPos.y, trackingPos.z)));

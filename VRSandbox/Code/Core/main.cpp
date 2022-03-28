@@ -2,6 +2,7 @@
 #include "Systems/PhysicsSystem.h"
 #include "Systems/InputSystem.h"
 #include "Systems/SceneSystem.h"
+#include "Systems/VRInputSystem.h"
 
 #include "TestWorld.h"
 #include "Utils/CameraController.h"
@@ -17,6 +18,8 @@
 
 const double FIXED_TIMESTEP_TIME = 1.0 / 60.0;
 
+const RenderMode RENDER_MODE = RenderMode::VR;
+
 int main(int argc, const char *argv[])
 {
     PathUtils::setHardcodedWorkingDir();
@@ -24,11 +27,13 @@ int main(int argc, const char *argv[])
 
     PhysicsSystem physics;
 
-    GraphicsSystem graphics("test", RenderMode::VR);
+    GraphicsSystem graphics("test", RENDER_MODE);
     InputSystem input(&graphics);
     input.setWantMouseGrab(true);
     input.setWantMouseRelative(true);
     input.setWantMouseVisible(false);
+
+    VRInputSystem vrInput(graphics.getHMD(), graphics);
 
     SceneSystem scene(&graphics);
 
@@ -54,33 +59,27 @@ int main(int argc, const char *argv[])
         cameraController.keyReleased(e);
     };
 
-    TestWorld testWorld(registry, graphics, physics, scene);
+    TestWorld testWorld(registry, graphics, physics, scene, vrInput);
     testWorld.createScene();
 
     Ogre::Timer timer;
     Ogre::uint64 startTime = timer.getMicroseconds();
-    double timeSinceLast = 1.0 / 60.0;
+    double deltaSec = 1.0 / 60.0;
     const double PHYSICS_TIMESTEP = 1.0 / 60.0;
     while (!input.hasQuit())
     {
-        physics.update(timeSinceLast, PHYSICS_TIMESTEP, registry);
-
-        input.update(timeSinceLast, registry);
+        physics.update(deltaSec, PHYSICS_TIMESTEP, registry);
+        input.update(deltaSec, registry);
+        vrInput.update(deltaSec, registry);
         //cameraController.update(timeSinceLast);
-
-        if (input.hasHandSkeletonData())
-            testWorld.setVRHandTrackingData(input.getLeftHandSkeletonData(), input.getRightHandSkeletonData());
-
-        graphics.update(timeSinceLast, registry);
+        graphics.update(deltaSec, registry);
 
         if (!graphics.getRenderWindow()->isVisible())
-        {
             Ogre::Threads::Sleep(500);
-        }
 
         Ogre::uint64 endTime = timer.getMicroseconds();
-        timeSinceLast = (endTime - startTime) / 1'000'000.0;
-        timeSinceLast = std::min(1.0, timeSinceLast); //Prevent from going haywire.
+        deltaSec = (endTime - startTime) / 1'000'000.0;
+        deltaSec = std::min(1.0, deltaSec); //Prevent from going haywire.
         startTime = endTime;
     }
 

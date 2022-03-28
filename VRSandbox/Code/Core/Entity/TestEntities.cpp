@@ -37,7 +37,7 @@ entt::entity createTestFloorEntity(entt::registry& registry, GraphicsSystem& gra
             planeMeshV1.get(), true, true, true);
     }
 
-	const auto entity = registry.create();
+    const auto entity = registry.create();
     auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC);
     auto& physicsComponent = physics.addPhysicsBodyComponent(registry, entity, physics.createBoxShape(Ogre::Vector3(25, 1, 25)),
         Ogre::Vector3(0, -1, 0), Ogre::Quaternion::IDENTITY, 0.0f);
@@ -60,7 +60,7 @@ entt::entity createTestFloorEntity(entt::registry& registry, GraphicsSystem& gra
 	return entity;
 }
 
-entt::entity createTestSphere(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, Ogre::Vector3 pos)
+entt::entity createTestSphere(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos)
 {
     const auto entity = registry.create();
     auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC);
@@ -71,6 +71,5 @@ entt::entity createTestSphere(entt::registry& registry, GraphicsSystem& graphics
     physicsComponent.pBody->setSpinningFriction(0.5f);
     return entity;
 }
-
 
 }

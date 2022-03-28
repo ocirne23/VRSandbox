@@ -8,19 +8,18 @@
 class GraphicsSystem;
 class PhysicsSystem;
 class SceneSystem;
+class VRInputSystem;
 struct HandSkeletonData;
 
 class TestWorld
 {
 public:
 
-	TestWorld(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene);
+	TestWorld(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, VRInputSystem& vrInput);
 	virtual ~TestWorld();
 	TestWorld(const TestWorld& copy) = delete;
 
 	void createScene();
-
-	void setVRHandTrackingData(const HandSkeletonData& left, const HandSkeletonData& right);
 
 private:
 
@@ -28,6 +27,7 @@ private:
 	GraphicsSystem& m_graphics;
 	PhysicsSystem& m_physics; 
 	SceneSystem& m_scene;
+	VRInputSystem& m_vrInput;
 
 	Ogre::SceneNode* m_lightNodes[3] = {};
 	Ogre::SceneNode* m_controllerNodes[2] = {};
