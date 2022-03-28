@@ -31,58 +31,13 @@ namespace VRHandEntities
 		}
 	}
 
-	VRHandTrackingComponent& createHandTrackingComponentRig(entt::registry& registry, entt::entity entity, GraphicsSystem& graphics, const HandSkeletonData& handData)
-	{
-		VRHandTrackingComponent& hand = registry.emplace<VRHandTrackingComponent>(entity);
-
-		auto& rootTrans = handData.boneTransforms[eBone_Root];
-		Ogre::SceneNode* handRootNode = graphics.getSceneManager()->getRootSceneNode(Ogre::SCENE_DYNAMIC)->createChildSceneNode(Ogre::SCENE_DYNAMIC, rootTrans.bonePos.xyz(), rootTrans.boneRot);
-		hand.pArrSceneNodes[eBone_Root] = handRootNode;
-		{
-			auto& wristTrans = handData.boneTransforms[eBone_Wrist];
-			Ogre::SceneNode* wristNode = handRootNode->createChildSceneNode(Ogre::SCENE_DYNAMIC, wristTrans.bonePos.xyz(), wristTrans.boneRot);
-			hand.pArrSceneNodes[eBone_Wrist] = wristNode;
-			Ogre::SceneNode* parentNode = wristNode;
-			for (int i = eBone_Thumb0; i <= eBone_Thumb3; ++i)
-			{
-				auto& trans = handData.boneTransforms[i];
-				hand.pArrSceneNodes[i] = parentNode = parentNode->createChildSceneNode(Ogre::SCENE_DYNAMIC, trans.bonePos.xyz(), trans.boneRot);
-			}
-			parentNode = wristNode;
-			for (int i = eBone_IndexFinger0; i <= eBone_IndexFinger4; ++i)
-			{
-				auto& trans = handData.boneTransforms[i];
-				hand.pArrSceneNodes[i] = parentNode = parentNode->createChildSceneNode(Ogre::SCENE_DYNAMIC, trans.bonePos.xyz(), trans.boneRot);
-			}
-			parentNode = wristNode;
-			for (int i = eBone_MiddleFinger0; i <= eBone_MiddleFinger4; ++i)
-			{
-				auto& trans = handData.boneTransforms[i];
-				hand.pArrSceneNodes[i] = parentNode = parentNode->createChildSceneNode(Ogre::SCENE_DYNAMIC, trans.bonePos.xyz(), trans.boneRot);
-			}
-			parentNode = wristNode;
-			for (int i = eBone_RingFinger0; i <= eBone_RingFinger4; ++i)
-			{
-				auto& trans = handData.boneTransforms[i];
-				hand.pArrSceneNodes[i] = parentNode = parentNode->createChildSceneNode(Ogre::SCENE_DYNAMIC, trans.bonePos.xyz(), trans.boneRot);
-			}
-			parentNode = wristNode;
-			for (int i = eBone_PinkyFinger0; i <= eBone_PinkyFinger4; ++i)
-			{
-				auto& trans = handData.boneTransforms[i];
-				hand.pArrSceneNodes[i] = parentNode = parentNode->createChildSceneNode(Ogre::SCENE_DYNAMIC, trans.bonePos.xyz(), trans.boneRot);
-			}
-		}
-
-		return hand;
-	}
-
 	entt::entity createLeftHand(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, VRInputSystem& vrInput)
 	{
 		const auto entity = registry.create();
 		auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC);
 		auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "vr_glove_left.mesh");
 		auto& handComponent = vrInput.addHandTrackingComponent(registry, entity, VRInputSystem::EHand::LEFT);
+		addDebugSpheres(handComponent, graphics);
 		return entity;
 	}
 
@@ -92,10 +47,11 @@ namespace VRHandEntities
 		auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC);
 		auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "vr_glove_right.mesh");
 		auto& handComponent = vrInput.addHandTrackingComponent(registry, entity, VRInputSystem::EHand::RIGHT);
+		addDebugSpheres(handComponent, graphics);
 		return entity;
 	}
-	/*
 
+	/*
 	for (int i = 0; i < eBone_PinkyFinger4; ++i)
 	{
 		btCollisionShape* pShape = pPhysics->createSphereShape(0.04f);
@@ -114,35 +70,6 @@ namespace VRHandEntities
 		sceneNode->attachObject(item);
 
 		hand.pArrDebugGraphics[i] = item;
-	}
-
-
-	entt::entity createLeftHand(entt::registry& registry, Graphics* pGraphics, Physics* pPhysics)
-	{
-		const auto entity = registry.create();
-		auto& graphicsComponent = pGraphics->addGraphicsComponent(registry, entity, "vr_glove_left.mesh");
-		auto& physicsComponent = pPhysics->addPhysicsBodyComponent(registry, entity, pPhysics->createSphereShape(0.05f), Ogre::Vector3(0.2, 5, 0), Ogre::Quaternion::IDENTITY, 0.1f);
-		auto* pBody = physicsComponent.pBody;
-
-		pBody->forceActivationState(DISABLE_DEACTIVATION);
-		pBody->setFriction(0);
-		pBody->setRollingFriction(0);
-		pBody->setSpinningFriction(0);
-		return entity;
-	}
-
-	entt::entity createRightHand(entt::registry& registry, Graphics* pGraphics, Physics* pPhysics)
-	{
-		const auto entity = registry.create();
-		auto& graphicsComponent = pGraphics->addGraphicsComponent(registry, entity, "vr_glove_right.mesh");
-		auto& physicsComponent = pPhysics->addPhysicsBodyComponent(registry, entity, pPhysics->createSphereShape(0.05f), Ogre::Vector3(-0.2, 5, 0), Ogre::Quaternion::IDENTITY, 0.1f);
-		auto* pBody = physicsComponent.pBody;
-
-		pBody->forceActivationState(DISABLE_DEACTIVATION);
-		pBody->setFriction(0);
-		pBody->setRollingFriction(0);
-		pBody->setSpinningFriction(0);
-		return entity;
 	}
 
 	entt::entity createHandAnchor(entt::registry& registry, Graphics* pGraphics, Physics* pPhysics, entt::entity handEntity)

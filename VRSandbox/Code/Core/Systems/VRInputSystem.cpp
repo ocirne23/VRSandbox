@@ -88,23 +88,26 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 
 			for (int i = 0; i < eBone_PinkyFinger4; ++i)
 			{
-				auto& trans = handData.boneTransforms[i];
-				handComp.pArrSceneNodes[i]->setPosition(trans.bonePos.xyz());
-				handComp.pArrSceneNodes[i]->setOrientation(trans.boneRot);
+				auto pos = handData.boneTransforms[i].bonePos.xyz();
+				auto& rot = handData.boneTransforms[i].boneRot;
+				if (i == eBone_Root)
+				{
+					pos = handData.handTransform.getTrans() + pos;
+					rot = handData.handTransform.extractQuaternion() * rot;
+				}
+
+				handComp.pArrSceneNodes[i]->setPosition(pos);
+				handComp.pArrSceneNodes[i]->setOrientation(rot);
 			}
 		});
-
+	
 	auto updateHandPosition = registry.view<const VRHandTrackingComponent, SceneComponent>();
 	updateHandPosition.each([&](const VRHandTrackingComponent& handComp, SceneComponent& sceneComp)
 		{
-			if (handComp.trackingID >= EHand::COUNT || !m_isHandTrackingActive[handComp.trackingID])
-				return;
-			HandSkeletonData& handData = handComp.trackingID == EHand::LEFT ? m_leftHandSkeletonData : m_rightHandSkeletonData;
-
-			sceneComp.pNode->setPosition(handData.handTransform.getTrans());
-			sceneComp.pNode->setOrientation(handData.handTransform.extractQuaternion());
+			sceneComp.pNode->setPosition(handComp.pArrSceneNodes[eBone_Root]->getPosition());
+			sceneComp.pNode->setOrientation(handComp.pArrSceneNodes[eBone_Root]->getOrientation());
 		});
-
+		
 	auto updateHandGraphics = registry.view<const VRHandTrackingComponent, GraphicsComponent>();
 	updateHandGraphics.each([&](const VRHandTrackingComponent& handComp, GraphicsComponent& graphicsComp)
 		{
@@ -113,7 +116,7 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 			HandSkeletonData& handData = handComp.trackingID == EHand::LEFT ? m_leftHandSkeletonData : m_rightHandSkeletonData;
 
 			auto* skelInstance = graphicsComp.pItem->getSkeletonInstance();
-			for (int i = 0; i < eBone_Count; ++i)
+			for (int i = eBone_Wrist; i < eBone_Count; ++i)
 			{
 				auto* pBone = skelInstance->getBone(i);
 				pBone->setOrientation(handData.boneTransforms[i].boneRot);
