@@ -19,11 +19,24 @@ SceneSystem::~SceneSystem()
 
 }
 
-SceneComponent& SceneSystem::addSceneNodeComponent(entt::registry& registry, entt::entity entity, Ogre::SceneMemoryMgrTypes nodeType)
+SceneComponent& SceneSystem::addSceneComponentFromNode(entt::registry& registry, entt::entity entity, Ogre::SceneNode* pNode)
 {
 	SceneComponent& comp = registry.emplace<SceneComponent>(entity);
-	comp.pNode = m_sceneManager.getRootSceneNode(nodeType)->createChildSceneNode(nodeType);
-	OGRE_ASSERT(comp.pNode);
+	comp.pNode = pNode;
+	return comp;
+}
+
+SceneComponent& SceneSystem::addSceneNodeComponentWithParent(entt::registry& registry, entt::entity entity, Ogre::SceneNode* pParentNode, const Ogre::Vector3& position, const Ogre::Quaternion& orientation)
+{
+	SceneComponent& comp = registry.emplace<SceneComponent>(entity);
+	comp.pNode = pParentNode->createChildSceneNode(pParentNode->isStatic() ? Ogre::SCENE_STATIC : Ogre::SCENE_DYNAMIC, position, orientation);
+	return comp;
+}
+
+SceneComponent& SceneSystem::addSceneNodeComponent(entt::registry& registry, entt::entity entity, Ogre::SceneMemoryMgrTypes nodeType, const Ogre::Vector3& position, const Ogre::Quaternion& orientation)
+{
+	SceneComponent& comp = registry.emplace<SceneComponent>(entity);
+	comp.pNode = m_sceneManager.getRootSceneNode(nodeType)->createChildSceneNode(nodeType, position, orientation);
 	return comp;
 }
 

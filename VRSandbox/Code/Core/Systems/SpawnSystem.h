@@ -6,7 +6,7 @@
 class PhysicsSystem;
 namespace Ogre { class SceneManager; }
 
-struct PhysicsComponent;
+struct DynamicPhysicsComponent;
 
 class SpawnSystem
 {
@@ -20,8 +20,6 @@ public:
 
 	PhysicsSystem& getPhysicsSystem() { return *m_pPhysics; }
 	Ogre::SceneManager& getSceneManager() { return *m_pSceneManager; }
-
-	PhysicsComponent& createTestFloor();
 
 private:
 

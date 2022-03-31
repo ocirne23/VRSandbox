@@ -1,6 +1,5 @@
 #include "PhysicsMotionState.h"
 
-#include "Components/PhysicsComponents.h"
 #include "Components/SceneComponent.h"
 
 #include <OgreSceneNode.h>
@@ -11,7 +10,7 @@ void PhysicsMotionState::getWorldTransform(btTransform& worldTrans) const
 {
 	const auto& sceneComp = registry.get<SceneComponent>(entity);
 	const auto& pos = sceneComp.pNode->_getDerivedPositionUpdated();
-	const auto& ori = sceneComp.pNode->_getDerivedOrientationUpdated();
+	const auto& ori = sceneComp.pNode->_getDerivedOrientation();
 
 	//TODO: evaluate reinterpret_cast
 	worldTrans.setOrigin(btVector3(pos.x, pos.y, pos.z));
@@ -20,10 +19,12 @@ void PhysicsMotionState::getWorldTransform(btTransform& worldTrans) const
 
 void PhysicsMotionState::setWorldTransform(const btTransform& worldTrans)
 {
-	auto& physComp = registry.get<PhysicsComponent>(entity);
 	auto& sceneComp = registry.get<SceneComponent>(entity);
 	const auto& pos = worldTrans.getOrigin();
 	const auto& ori = worldTrans.getRotation();
+
+	if (sceneComp.pNode->isStatic())
+		__debugbreak();
 
 	//TODO: evaluate reinterpret_cast
 	sceneComp.pNode->setPosition(Ogre::Vector3(pos.x(), pos.y(), pos.z()));

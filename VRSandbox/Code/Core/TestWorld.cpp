@@ -1,12 +1,13 @@
 #include "TestWorld.h"
 
 #include "Components/GraphicsComponent.h"
-#include "Components/PhysicsComponents.h"
+#include "Components/DynamicPhysicsComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/VRHandTrackingComponent.h"
 #include "Systems/GraphicsSystem.h"
 #include "Utils/CameraController.h"
 #include "Systems/InputSystem.h"
+#include "Systems/VRInputSystem.h"
 #include "Utils/DebugDrawer.h"
 #include "Entity/TestEntities.h"
 #include "Entity/VRHandEntities.h"
@@ -66,8 +67,7 @@ void TestWorld::createScene()
         TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-5, 5), Ogre::Math::RangeRandom(20, 100), Ogre::Math::RangeRandom(-5, 5)));
 #endif
 
-    m_handEntities[0] = VRHandEntities::createLeftHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput);
-    m_handEntities[1] = VRHandEntities::createRightHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput);
+
 
     Ogre::SceneManager* pSceneManager = m_graphics.getSceneManager();
 
@@ -110,4 +110,13 @@ void TestWorld::createScene()
     light->setAttenuationBasedOnRadius(10.0f, 0.01f);
 
     m_lightNodes[2] = lightNode;
+}
+
+void TestWorld::update(double deltaSec)
+{
+    if (m_handEntities[0] == entt::null && m_vrInput.isHandTrackingActive(EHandType::LEFT))
+        m_handEntities[0] = VRHandEntities::createHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput, EHandType::LEFT);
+    if (m_handEntities[1] == entt::null && m_vrInput.isHandTrackingActive(EHandType::RIGHT))
+        m_handEntities[1] = VRHandEntities::createHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput, EHandType::RIGHT);
+
 }

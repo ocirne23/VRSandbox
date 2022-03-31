@@ -1,7 +1,9 @@
 #include "TestEntities.h"
 
 #include "Components/GraphicsComponent.h"
-#include "Components/PhysicsComponents.h"
+#include "Components/DynamicPhysicsComponent.h"
+#include "Components/StaticPhysicsComponent.h"
+#include "Components/KinematicPhysicsComponent.h"
 #include "Components/SceneComponent.h"
 
 #include "Systems/GraphicsSystem.h"
@@ -38,9 +40,8 @@ entt::entity createTestFloorEntity(entt::registry& registry, GraphicsSystem& gra
     }
 
     const auto entity = registry.create();
-    auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC);
-    auto& physicsComponent = physics.addPhysicsBodyComponent(registry, entity, physics.createBoxShape(Ogre::Vector3(25, 1, 25)),
-        Ogre::Vector3(0, -1, 0), Ogre::Quaternion::IDENTITY, 0.0f);
+    auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_STATIC, Ogre::Vector3(0, -1, 0), Ogre::Quaternion::IDENTITY);
+    auto& physicsComponent = physics.addStaticPhysicsComponent(registry, entity, physics.createBoxShape(Ogre::Vector3(25, 1, 25)));
     physicsComponent.pBody->setFriction(0.5f);
     physicsComponent.pBody->setRollingFriction(0.5f);
     physicsComponent.pBody->setSpinningFriction(0.5f);
@@ -63,9 +64,9 @@ entt::entity createTestFloorEntity(entt::registry& registry, GraphicsSystem& gra
 entt::entity createTestSphere(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos)
 {
     const auto entity = registry.create();
-    auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC);
+    auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
     auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Sphere1000.mesh", "Marble");
-    auto& physicsComponent = physics.addPhysicsBodyComponent(registry, entity, physics.createSphereShape(0.5f), pos, Ogre::Quaternion::IDENTITY, 100.0f);
+    auto& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createSphereShape(0.5f), 100.0f);
     physicsComponent.pBody->setFriction(0.5f);
     physicsComponent.pBody->setRollingFriction(0.5f);
     physicsComponent.pBody->setSpinningFriction(0.5f);

@@ -2,7 +2,7 @@
 
 class btRigidBody;
 
-struct PhysicsComponent
+struct DynamicPhysicsComponent
 {
 	btRigidBody* pBody = nullptr;
 };

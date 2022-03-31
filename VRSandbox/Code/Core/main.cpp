@@ -74,6 +74,8 @@ int main(int argc, const char *argv[])
         //cameraController.update(timeSinceLast);
         graphics.update(deltaSec, registry);
 
+        testWorld.update(deltaSec);
+
         if (!graphics.getRenderWindow()->isVisible())
             Ogre::Threads::Sleep(500);
 

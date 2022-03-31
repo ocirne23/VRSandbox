@@ -1,7 +1,10 @@
 #include "PhysicsSystem.h"
 
-#include "Components/PhysicsComponents.h"
+#include "Components/DynamicPhysicsComponent.h"
+#include "Components/StaticPhysicsComponent.h"
+#include "Components/KinematicPhysicsComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/SpringJointComponent.h"
 #include "Utils/PhysicsMotionState.h"
 
 #include <btBulletDynamicsCommon.h>
@@ -23,7 +26,6 @@ PhysicsSystem::PhysicsSystem()
 PhysicsSystem::~PhysicsSystem() 
 {
 	OGRE_ASSERT(m_pDynamicsWorld->getNumCollisionObjects() == 0);
-
 	m_pDynamicsWorld.release();
 	m_pSolver.release();
 	m_pOverlappingPairCache.release();
@@ -33,17 +35,34 @@ PhysicsSystem::~PhysicsSystem()
 
 void PhysicsSystem::update(double deltaSec, double fixedTimestep, entt::registry& registry)
 {
+	auto staticSync = registry.view<StaticPhysicsComponent, SceneComponent>();
+	staticSync.each([](StaticPhysicsComponent& physComp, SceneComponent& nodeComp)
+		{
+			auto pos = nodeComp.pNode->_getDerivedPosition();
+			auto rot = nodeComp.pNode->_getDerivedOrientation();
+			physComp.pBody->setWorldTransform(btTransform(btQuaternion(rot.x, rot.y, rot.z, rot.w), btVector3(pos.x, pos.y, pos.z)));
+		});
+
+	auto kinematicSync = registry.view<KinematicPhysicsComponent, SceneComponent>();
+	kinematicSync.each([](KinematicPhysicsComponent& physComp, SceneComponent& nodeComp)
+		{
+			auto pos = nodeComp.pNode->_getDerivedPosition();
+			auto rot = nodeComp.pNode->_getDerivedOrientation();
+			physComp.pBody->setWorldTransform(btTransform(btQuaternion(rot.x, rot.y, rot.z, rot.w), btVector3(pos.x, pos.y, pos.z)));
+		});
+
 	m_pDynamicsWorld->stepSimulation(btScalar(deltaSec), 1, btScalar(fixedTimestep));
 
-	auto view = registry.view<PhysicsComponent, SceneComponent>();
-	view.each([](PhysicsComponent& physComp, SceneComponent& nodeComp)
+	/*
+	auto dynamicSync = registry.view<DynamicPhysicsComponent, SceneComponent>();
+	dynamicSync.each([](DynamicPhysicsComponent& physComp, SceneComponent& nodeComp)
 		{
 			auto& trans = physComp.pBody->getWorldTransform();
 			auto& physPos = trans.getOrigin();
 			auto& physRot = trans.getRotation();
 			nodeComp.pNode->setPosition(*reinterpret_cast<Ogre::Vector3*>(&physPos));
 			nodeComp.pNode->setOrientation(Ogre::Quaternion(physRot.w(), physRot.x(), physRot.y(), physRot.z()));
-		});
+		});*/
 }
 
 btCollisionShape* PhysicsSystem::createBoxShape(Ogre::Vector3 dimensions)
@@ -69,32 +88,74 @@ void PhysicsSystem::destroyShape(btCollisionShape* pShape)
 	auto it = std::find(m_shapes.begin(), m_shapes.end(), pShape);
 	OGRE_ASSERT(it != m_shapes.end());
 	m_shapes.erase(it);
+	delete pShape;
 }
 
-PhysicsComponent& PhysicsSystem::addPhysicsBodyComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape,
-	const Ogre::Vector3& position, const Ogre::Quaternion& orientation, float mass)
+btRigidBody* PhysicsSystem::createRigidBody(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, float mass)
+{
+	btVector3 localInertia(0, 0, 0);
+	if (pShape && mass >= 0.0f)
+	{
+		if (pShape->getShapeType() == EMPTY_SHAPE_PROXYTYPE)
+			btSphereShape(0.1f).calculateLocalInertia(mass, localInertia);
+		else
+			pShape->calculateLocalInertia(mass, localInertia);
+	}
+	btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, new PhysicsMotionState(entity, registry), pShape, localInertia);
+	return new btRigidBody(rbInfo);
+}
+
+DynamicPhysicsComponent& PhysicsSystem::addDynamicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, float mass)
+{
+	OGRE_ASSERT(registry.try_get<SceneComponent>(entity));
+	OGRE_ASSERT(mass > 0.0f);
+	SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
+	OGRE_ASSERT(!sceneComponent.pNode->isStatic());
+
+	DynamicPhysicsComponent& component = registry.emplace<DynamicPhysicsComponent>(entity);
+	component.pBody = createRigidBody(registry, entity, pShape, mass);
+
+	m_pDynamicsWorld->addRigidBody(component.pBody);
+	OGRE_ASSERT(!component.pBody->isStaticOrKinematicObject());
+
+	return component;
+}
+StaticPhysicsComponent& PhysicsSystem::addStaticPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape)
 {
 	OGRE_ASSERT(registry.try_get<SceneComponent>(entity));
 	SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
-	PhysicsComponent& component = registry.emplace<PhysicsComponent>(entity);
-	sceneComponent.pNode->setPosition(position);
-	sceneComponent.pNode->setOrientation(orientation);
+	OGRE_ASSERT(sceneComponent.pNode->isStatic());
 
-	btVector3 localInertia(0, 0, 0);
-	if (pShape && mass >= 0.0f)
-		pShape->calculateLocalInertia(mass, localInertia);
-	btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, new PhysicsMotionState(entity, registry), pShape, localInertia);
-
-	component.pBody = new btRigidBody(rbInfo);
+	StaticPhysicsComponent& component = registry.emplace<StaticPhysicsComponent>(entity);
+	component.pBody = createRigidBody(registry, entity, pShape, 0.0f);
 
 	m_pDynamicsWorld->addRigidBody(component.pBody);
+
 	return component;
 }
 
-void PhysicsSystem::removePhysicsBodyComponent(entt::registry& registry, entt::entity entity)
+KinematicPhysicsComponent& PhysicsSystem::addKinematicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape)
 {
-	const auto& component = registry.get<PhysicsComponent>(entity);
-	btRigidBody* pBody = component.pBody;
+	OGRE_ASSERT(registry.try_get<SceneComponent>(entity));
+	SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
+	OGRE_ASSERT(!sceneComponent.pNode->isStatic());
+
+	KinematicPhysicsComponent& component = registry.emplace<KinematicPhysicsComponent>(entity);
+	component.pBody = createRigidBody(registry, entity, pShape, 0.0f);
+
+	auto collisionFlags = component.pBody->getCollisionFlags();
+	collisionFlags &= ~btCollisionObject::CF_STATIC_OBJECT;
+	collisionFlags |= btCollisionObject::CF_KINEMATIC_OBJECT;
+	component.pBody->setCollisionFlags(collisionFlags);
+	component.pBody->setActivationState(DISABLE_DEACTIVATION);
+
+	m_pDynamicsWorld->addRigidBody(component.pBody);
+
+	return component;
+}
+
+void PhysicsSystem::destroyRigidBody(btRigidBody* pBody)
+{
 	OGRE_ASSERT(pBody);
 
 	btMotionState* pMotionState = pBody->getMotionState();
@@ -110,7 +171,57 @@ void PhysicsSystem::removePhysicsBodyComponent(entt::registry& registry, entt::e
 		shape->setUserIndex(userCount - 1);
 	m_pDynamicsWorld->removeRigidBody(pBody);
 	delete pBody;
+}
 
-	size_t numRemoved = registry.remove<PhysicsComponent>(entity);
-	OGRE_ASSERT(numRemoved == 1);
+SpringJointComponent& PhysicsSystem::addSpringJointComponent(entt::registry& registry, entt::entity entity, btRigidBody* pBody1, btRigidBody* pBody2)
+{
+	SpringJointComponent& springComponent = registry.emplace<SpringJointComponent>(entity);
+	
+	btGeneric6DofSpringConstraint* pSpring = new btGeneric6DofSpringConstraint(*pBody1, *pBody2,
+		btTransform(btQuaternion::getIdentity(), { 0, 0, 0 }),
+		btTransform(btQuaternion::getIdentity(), { 0, 0, 0 }), false);
+
+	springComponent.pSpring = pSpring;
+
+
+	for (int i = 0; i < 3; ++i)
+	{
+		pSpring->enableSpring(i, true);
+		pSpring->setStiffness(i, 0.1f);
+		pSpring->setDamping(i, 0.5f);
+		//pSpring->setLimit(i, 0, 1);
+		//pSpring->setDamping(i, 0.01f);
+	}
+	for (int i = 3; i < 6; ++i)
+	{
+		pSpring->enableSpring(i, false);
+		pSpring->setStiffness(i, 10.00f);
+		pSpring->setDamping(i, 100.0f);
+	}
+
+	pSpring->setAngularLowerLimit(btVector3(0, 0, 0));
+	pSpring->setAngularUpperLimit(btVector3(0, 0, 0));
+
+	/*
+	for (int i = 0; i < 3; ++i)
+	{
+		pSpring->enableSpring(i, true);
+		pSpring->setStiffness(i, 100.0f);
+		pSpring->setDamping(i, 0.001f);
+		//pSpring->setLimit(i, 0, 1);
+		//pSpring->setDamping(i, 0.01f);
+	}
+
+	for (int i = 3; i < 6; ++i)
+	{
+		pSpring->enableSpring(i, true);
+		pSpring->setLimit(i, 0, 0);
+	}
+
+	//pSpring->setBreakingImpulseThreshold(FLT_MAX);
+	*/
+	m_pDynamicsWorld->addConstraint(pSpring);
+	
+	return springComponent;
+
 }

@@ -1,7 +1,6 @@
 #include "GraphicsSystem.h"
 
 #include "Components/GraphicsComponent.h"
-#include "Components/PhysicsComponents.h"
 #include "Components/SceneComponent.h"
 
 #include "Utils/NullCompositorListener.h"
@@ -507,8 +506,6 @@ void GraphicsSystem::update(double deltaSec, entt::registry& registry)
     m_pCamera->setPosition(m_pControllerNode->getPosition());
     m_pCamera->setOrientation(m_pControllerNode->getOrientation());
 
-    auto view = registry.view<GraphicsComponent, const SceneComponent>();
-
     m_pDebugDrawer->build();
     if (m_pRenderWindow->isVisible())
         m_pRoot->renderOneFrame();
@@ -529,15 +526,16 @@ GraphicsComponent& GraphicsSystem::addGraphicsComponent(entt::registry& registry
     OGRE_ASSERT(registry.try_get<SceneComponent>(entity));
 
     SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
-    GraphicsComponent& graphicsComponent = registry.emplace<GraphicsComponent>(entity);
-    Ogre::Item* item = m_pSceneManager->createItem(meshName, Ogre::ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME, Ogre::SCENE_DYNAMIC);
-    Ogre::SceneNode* pGraphicsNode = sceneComponent.pNode->createChildSceneNode(sceneComponent.pNode->isStatic() ? Ogre::SCENE_STATIC : Ogre::SCENE_DYNAMIC);
-    pGraphicsNode->attachObject(item);
 
+    Ogre::Item* pItem = m_pSceneManager->createItem(meshName, Ogre::ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME, sceneComponent.pNode->isStatic() ? Ogre::SCENE_STATIC : Ogre::SCENE_DYNAMIC);
     if (datablockName != Ogre::IdString(""))
-        item->setDatablock(datablockName);
+        pItem->setDatablock(datablockName);
 
-    graphicsComponent.pItem = item;
+    Ogre::SceneNode* pGraphicsNode = sceneComponent.pNode->createChildSceneNode(sceneComponent.pNode->isStatic() ? Ogre::SCENE_STATIC : Ogre::SCENE_DYNAMIC);
+    pGraphicsNode->attachObject(pItem);
+
+    GraphicsComponent& graphicsComponent = registry.emplace<GraphicsComponent>(entity);
+    graphicsComponent.pItem = pItem;
     return graphicsComponent;
 }
 
@@ -548,22 +546,34 @@ void GraphicsSystem::removeGraphicsComponent(entt::registry& registry, entt::ent
 	OGRE_ASSERT(numRemoved == 1);
 }
 
+void GraphicsSystem::setGraphicsOffset(GraphicsComponent& comp, const Ogre::Vector3& offset)
+{
+    comp.pItem->getParentNode()->setPosition(offset);
+}
+
 void GraphicsSystem::setGraphicsOffset(entt::registry& registry, entt::entity entity, const Ogre::Vector3& offset)
 {
-    GraphicsComponent& graphicsComponent = registry.get<GraphicsComponent>(entity);
-    graphicsComponent.pItem->getParentNode()->setPosition(offset);
+    setGraphicsOffset(registry.get<GraphicsComponent>(entity), offset);
+}
+
+void GraphicsSystem::setGraphicsScale(GraphicsComponent& comp, const Ogre::Vector3& scale)
+{
+    comp.pItem->getParentNode()->setScale(scale);
 }
 
 void GraphicsSystem::setGraphicsScale(entt::registry& registry, entt::entity entity, const Ogre::Vector3& scale)
 {
-    GraphicsComponent& graphicsComponent = registry.get<GraphicsComponent>(entity);
-    graphicsComponent.pItem->getParentNode()->setScale(scale);
+    setGraphicsScale(registry.get<GraphicsComponent>(entity), scale);
+}
+
+void GraphicsSystem::setGraphicsRotation(GraphicsComponent& comp, const Ogre::Quaternion& rot)
+{
+    comp.pItem->getParentNode()->setOrientation(rot);
 }
 
 void GraphicsSystem::setGraphicsRotation(entt::registry& registry, entt::entity entity, const Ogre::Quaternion& rot)
 {
-    GraphicsComponent& graphicsComponent = registry.get<GraphicsComponent>(entity);
-    graphicsComponent.pItem->getParentNode()->setOrientation(rot);
+    setGraphicsRotation(registry.get<GraphicsComponent>(entity), rot);
 }
 
 void GraphicsSystem::handleWindowEvent(SDL_Event& evt)

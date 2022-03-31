@@ -13,7 +13,10 @@ class btSequentialImpulseConstraintSolver;
 class btDiscreteDynamicsWorld;
 class btRigidBody;
 class btCollisionShape;
-struct PhysicsComponent;
+struct DynamicPhysicsComponent;
+struct StaticPhysicsComponent;
+struct KinematicPhysicsComponent;
+struct SpringJointComponent;
 
 class PhysicsSystem
 {
@@ -28,10 +31,19 @@ public:
 	btCollisionShape* createBoxShape(Ogre::Vector3 dimensions);
 	btCollisionShape* createSphereShape(Ogre::Real radius);
 	void destroyShape(btCollisionShape* pShape);
-	PhysicsComponent& addPhysicsBodyComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, const Ogre::Vector3& position, const Ogre::Quaternion& orientation, float mass);
-	void removePhysicsBodyComponent(entt::registry & registry, entt::entity entity);
+
+	DynamicPhysicsComponent& addDynamicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, float mass);
+	StaticPhysicsComponent& addStaticPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape);
+	KinematicPhysicsComponent& addKinematicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape);
+
+	SpringJointComponent& addSpringJointComponent(entt::registry& registry, entt::entity entity, btRigidBody* pBody1, btRigidBody* pBody2);
 
 	btDiscreteDynamicsWorld* getWorld() const { return m_pDynamicsWorld.get(); }
+
+private:
+
+	btRigidBody* createRigidBody(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, float mass);
+	void destroyRigidBody(btRigidBody* pBody);
 
 private:
 

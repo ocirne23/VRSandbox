@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Utils/HandSkeletonData.h"
+#include "Utils/EHandType.h"
 
 #include <entt/fwd.hpp>
 
@@ -19,17 +20,10 @@ public:
 
 	void update(double deltaSec, entt::registry& registry);
 
-    VRHandTrackingComponent& addHandTrackingComponent(entt::registry& registry, entt::entity entity, int trackingID);
+    VRHandTrackingComponent& addHandTrackingComponent(entt::registry& registry, entt::entity entity, EHandType handType);
     void removeHandTrackingComponent(entt::registry& registry, entt::entity entity);
 
-    enum EHand
-    {
-        LEFT = 0,
-        RIGHT,
-        COUNT
-    };
-
-    bool isHandTrackingActive(EHand hand);
+    bool isHandTrackingActive(EHandType hand);
 
 private:
 
@@ -52,5 +46,5 @@ private:
     HandSkeletonData m_leftHandSkeletonData;
     HandSkeletonData m_rightHandSkeletonData;
 
-    bool m_isHandTrackingActive[EHand::COUNT] = { false, false };
+    bool m_isHandTrackingActive[(int)EHandType::COUNT] = { false, false };
 };

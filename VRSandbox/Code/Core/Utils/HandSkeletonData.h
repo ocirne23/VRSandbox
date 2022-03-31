@@ -13,5 +13,5 @@ struct HandSkeletonData
     {
         Ogre::Vector4 bonePos;
         Ogre::Quaternion boneRot;
-    } boneTransforms[EHandSkeletonBone::eBone_Count];
+    } boneTransforms[EHandSkeletonBone::Count];
 };

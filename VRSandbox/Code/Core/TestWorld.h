@@ -21,6 +21,8 @@ public:
 
 	void createScene();
 
+	void update(double deltaSec);
+
 private:
 
 	entt::registry& m_registry;

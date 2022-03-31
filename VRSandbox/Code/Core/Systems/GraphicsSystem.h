@@ -51,8 +51,13 @@ public:
     GraphicsComponent& addGraphicsComponent(entt::registry& registry, entt::entity entity, Ogre::String meshName, Ogre::IdString datablockName = Ogre::IdString(""));
     void removeGraphicsComponent(entt::registry& registry, entt::entity entity);
 
+    void setGraphicsOffset(GraphicsComponent& comp, const Ogre::Vector3& offset);
     void setGraphicsOffset(entt::registry& registry, entt::entity entity, const Ogre::Vector3& offset);
+
+    void setGraphicsScale(GraphicsComponent& comp, const Ogre::Vector3& scale);
     void setGraphicsScale(entt::registry& registry, entt::entity entity, const Ogre::Vector3& scale);
+
+    void setGraphicsRotation(GraphicsComponent& comp, const Ogre::Quaternion& rot);
     void setGraphicsRotation(entt::registry& registry, entt::entity entity, const Ogre::Quaternion& rot);
 
     void handleWindowEvent(SDL_Event& evt);
