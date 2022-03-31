@@ -60,13 +60,14 @@ void TestWorld::createScene()
 {
     TestEntities::createTestFloorEntity(m_registry, m_graphics, m_physics, m_scene);
 #if 1
-    for (int i = 0; i < 10; ++i)
-        TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-1, 1), Ogre::Math::RangeRandom(5, 10), Ogre::Math::RangeRandom(-1, 1)));
+  //  for (int i = 0; i < 10; ++i)
+   //     TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-1, 1), Ogre::Math::RangeRandom(5, 10), Ogre::Math::RangeRandom(-1, 1)));
 #else
     for (int i = 0; i < 5000; ++i)
         TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-5, 5), Ogre::Math::RangeRandom(20, 100), Ogre::Math::RangeRandom(-5, 5)));
 #endif
-
+    TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(0, 1, 0));
+    TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(0, 1, 1));
 
 
     Ogre::SceneManager* pSceneManager = m_graphics.getSceneManager();

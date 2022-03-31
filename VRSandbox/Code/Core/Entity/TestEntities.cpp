@@ -66,7 +66,7 @@ entt::entity createTestSphere(entt::registry& registry, GraphicsSystem& graphics
     const auto entity = registry.create();
     auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
     auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Sphere1000.mesh", "Marble");
-    auto& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createSphereShape(0.5f), 100.0f);
+    auto& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createSphereShape(0.5f), 1000.0f);
     physicsComponent.pBody->setFriction(0.5f);
     physicsComponent.pBody->setRollingFriction(0.5f);
     physicsComponent.pBody->setSpinningFriction(0.5f);

@@ -10,7 +10,6 @@ namespace Ogre { class Item; class SceneNode; }
 struct VRHandTrackingComponent
 {
 	EHandType handType = EHandType::LEFT;
-	Ogre::Vector3 rootOffset;
 	entt::entity colliderEntities[6];
 	Ogre::SceneNode* pArrSceneNodes[(int)EHandSkeletonBone::PinkyFinger4];
 };

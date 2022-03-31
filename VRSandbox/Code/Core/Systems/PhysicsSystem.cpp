@@ -176,52 +176,10 @@ void PhysicsSystem::destroyRigidBody(btRigidBody* pBody)
 SpringJointComponent& PhysicsSystem::addSpringJointComponent(entt::registry& registry, entt::entity entity, btRigidBody* pBody1, btRigidBody* pBody2)
 {
 	SpringJointComponent& springComponent = registry.emplace<SpringJointComponent>(entity);
-	
 	btGeneric6DofSpringConstraint* pSpring = new btGeneric6DofSpringConstraint(*pBody1, *pBody2,
 		btTransform(btQuaternion::getIdentity(), { 0, 0, 0 }),
 		btTransform(btQuaternion::getIdentity(), { 0, 0, 0 }), false);
-
 	springComponent.pSpring = pSpring;
-
-
-	for (int i = 0; i < 3; ++i)
-	{
-		pSpring->enableSpring(i, true);
-		pSpring->setStiffness(i, 0.1f);
-		pSpring->setDamping(i, 0.5f);
-		//pSpring->setLimit(i, 0, 1);
-		//pSpring->setDamping(i, 0.01f);
-	}
-	for (int i = 3; i < 6; ++i)
-	{
-		pSpring->enableSpring(i, false);
-		pSpring->setStiffness(i, 10.00f);
-		pSpring->setDamping(i, 100.0f);
-	}
-
-	pSpring->setAngularLowerLimit(btVector3(0, 0, 0));
-	pSpring->setAngularUpperLimit(btVector3(0, 0, 0));
-
-	/*
-	for (int i = 0; i < 3; ++i)
-	{
-		pSpring->enableSpring(i, true);
-		pSpring->setStiffness(i, 100.0f);
-		pSpring->setDamping(i, 0.001f);
-		//pSpring->setLimit(i, 0, 1);
-		//pSpring->setDamping(i, 0.01f);
-	}
-
-	for (int i = 3; i < 6; ++i)
-	{
-		pSpring->enableSpring(i, true);
-		pSpring->setLimit(i, 0, 0);
-	}
-
-	//pSpring->setBreakingImpulseThreshold(FLT_MAX);
-	*/
 	m_pDynamicsWorld->addConstraint(pSpring);
-	
 	return springComponent;
-
 }

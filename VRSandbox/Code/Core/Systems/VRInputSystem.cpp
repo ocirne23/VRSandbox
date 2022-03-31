@@ -83,22 +83,21 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 	auto updateHandNodes = registry.view<VRHandTrackingComponent>();
 	updateHandNodes.each([&](VRHandTrackingComponent& handComp)
 		{
-			if ((int)handComp.handType >= (int)EHandType::COUNT || !m_isHandTrackingActive[(int)handComp.handType])
+			if ((int)handComp.handType >= (int)EHandType::COUNT || !isHandTrackingActive(handComp.handType))
 				return;
 			const HandSkeletonData& handData = handComp.handType == EHandType::LEFT ? m_leftHandSkeletonData : m_rightHandSkeletonData;
 
 			for (int i = 0; i < (int)EHandSkeletonBone::PinkyFinger4; ++i)
 			{
-				if (i == 0) handComp.pArrSceneNodes[i]->setPosition(handData.boneTransforms[i].bonePos.xyz() + handComp.rootOffset);
-				else handComp.pArrSceneNodes[i]->setPosition(handData.boneTransforms[i].bonePos.xyz());
+				handComp.pArrSceneNodes[i]->setPosition(handData.boneTransforms[i].bonePos.xyz());
 				handComp.pArrSceneNodes[i]->setOrientation(handData.boneTransforms[i].boneRot);
 			}
 		});
 	
-	auto updateHandPositionNoPhys = registry.view<const VRHandTrackingComponent, SceneComponent>(entt::exclude<DynamicPhysicsComponent>);
-	updateHandPositionNoPhys.each([&](const VRHandTrackingComponent& handComp, SceneComponent& sceneComp)
+	auto updateHandTransformNoPhysics = registry.view<const VRHandTrackingComponent, SceneComponent>(entt::exclude<DynamicPhysicsComponent>);
+	updateHandTransformNoPhysics.each([&](const VRHandTrackingComponent& handComp, SceneComponent& sceneComp)
 		{
-			if (handComp.handType >= EHandType::COUNT || !m_isHandTrackingActive[(int)handComp.handType])
+			if (handComp.handType >= EHandType::COUNT || !isHandTrackingActive(handComp.handType))
 				return;
 			const HandSkeletonData& handData = handComp.handType == EHandType::LEFT ? m_leftHandSkeletonData : m_rightHandSkeletonData;
 
@@ -106,19 +105,17 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 			sceneComp.pNode->setOrientation(handData.handTransform.extractQuaternion());
 		});
 	
-	auto updateHandRotationPhys = registry.view<const VRHandTrackingComponent, GraphicsComponent, SceneComponent, DynamicPhysicsComponent>();
-	updateHandRotationPhys.each([&](const VRHandTrackingComponent& handComp, GraphicsComponent& grapComp, SceneComponent& sceneComp, DynamicPhysicsComponent& physComp)
+	auto updatePhysicsHandRotation = registry.view<const VRHandTrackingComponent, GraphicsComponent, DynamicPhysicsComponent>();
+	updatePhysicsHandRotation.each([&](const VRHandTrackingComponent& handComp, GraphicsComponent& grapComp, DynamicPhysicsComponent& physComp)
 		{
 			HandSkeletonData& handData = handComp.handType == EHandType::LEFT ? m_leftHandSkeletonData : m_rightHandSkeletonData;
-			grapComp.pItem->getParentSceneNode()->setInheritOrientation(false);
-			m_graphics.setGraphicsOffset(grapComp, -handComp.rootOffset);
 			m_graphics.setGraphicsRotation(grapComp, handData.handTransform.extractQuaternion());
 		});
 		
 	auto updateHandGraphics = registry.view<const VRHandTrackingComponent, GraphicsComponent>();
 	updateHandGraphics.each([&](const VRHandTrackingComponent& handComp, GraphicsComponent& graphicsComp)
 		{
-			if (handComp.handType >= EHandType::COUNT || !m_isHandTrackingActive[(int)handComp.handType])
+			if (handComp.handType >= EHandType::COUNT || !isHandTrackingActive(handComp.handType))
 				return;
 			HandSkeletonData& handData = handComp.handType == EHandType::LEFT ? m_leftHandSkeletonData : m_rightHandSkeletonData;
 			
@@ -132,7 +129,6 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 		});
 }
 
-
 VRHandTrackingComponent& VRInputSystem::addHandTrackingComponent(entt::registry& registry, entt::entity entity, EHandType handType)
 {
 	OGRE_ASSERT(handType < EHandType::COUNT); // TODO: more than 2 controllers for multiplayer?
@@ -140,7 +136,6 @@ VRHandTrackingComponent& VRInputSystem::addHandTrackingComponent(entt::registry&
 	SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
 	VRHandTrackingComponent& hand = registry.emplace<VRHandTrackingComponent>(entity);
 	hand.handType = handType;
-	hand.rootOffset = handType == EHandType::LEFT ? Ogre::Vector3(-0.03f, 0.0, 0.12f) : Ogre::Vector3(0.03f, 0.0, 0.12f);
 
 	Ogre::SceneNode* handRootNode = sceneComponent.pNode->createChildSceneNode(Ogre::SCENE_DYNAMIC);
 	hand.pArrSceneNodes[(int)EHandSkeletonBone::Root] = handRootNode;
