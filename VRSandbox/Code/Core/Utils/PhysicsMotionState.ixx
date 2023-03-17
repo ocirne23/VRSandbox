@@ -1,9 +1,11 @@
-#pragma once
+module;
 
 #include <LinearMath/btMotionState.h>
 #include <entt/fwd.hpp>
 
-struct PhysicsMotionState : public btMotionState
+export module Utils.PhysicsMotionState;
+
+export struct PhysicsMotionState : public btMotionState
 {
 	PhysicsMotionState(entt::entity entity, entt::registry& registry) : entity(entity), registry(registry) {}
 	~PhysicsMotionState() {}

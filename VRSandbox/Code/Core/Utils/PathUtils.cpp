@@ -1,8 +1,10 @@
-#include "PathUtils.h"
+module;
 
 #include <windows.h>
 #include <filesystem>
 #include <libloaderapi.h>
+
+module Utils.PathUtils;
 
 namespace PathUtils
 {
@@ -12,8 +14,9 @@ namespace PathUtils
         char buf[512] = {};
         GetModuleFileName(nullptr, buf, sizeof(buf));
         std::filesystem::path rootPath(buf);
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < 1; ++i)
             rootPath = rootPath.parent_path();
+
         std::filesystem::current_path(rootPath);
         if (!std::filesystem::exists(rootPath.append("resources2.cfg")))
         {

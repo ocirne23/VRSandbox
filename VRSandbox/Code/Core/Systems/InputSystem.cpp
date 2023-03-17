@@ -1,10 +1,13 @@
-#include "InputSystem.h"
-
-#include "GraphicsSystem.h"
+module;
 
 #include <OgreWindowEventUtilities.h>
 #include <SDL.h>
 #include <OgreLogManager.h>
+#include <entt/fwd.hpp>
+
+module Systems.InputSystem;
+
+import Systems.GraphicsSystem;
 
 InputSystem::InputSystem(GraphicsSystem* pGraphics) : m_pGraphics(pGraphics)
 {

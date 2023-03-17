@@ -1,10 +1,11 @@
-#include "PhysicsMotionState.h"
-
-#include "Components/SceneComponent.h"
+module;
 
 #include <OgreSceneNode.h>
-
 #include <entt/entity/registry.hpp>
+
+module Utils.PhysicsMotionState;
+
+import Components.SceneComponent;
 
 void PhysicsMotionState::getWorldTransform(btTransform& worldTrans) const
 {

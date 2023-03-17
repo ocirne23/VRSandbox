@@ -1,16 +1,4 @@
-#include "TestWorld.h"
-
-#include "Components/GraphicsComponent.h"
-#include "Components/DynamicPhysicsComponent.h"
-#include "Components/SceneComponent.h"
-#include "Components/VRHandTrackingComponent.h"
-#include "Systems/GraphicsSystem.h"
-#include "Utils/CameraController.h"
-#include "Systems/InputSystem.h"
-#include "Systems/VRInputSystem.h"
-#include "Utils/DebugDrawer.h"
-#include "Entity/TestEntities.h"
-#include "Entity/VRHandEntities.h"
+module;
 
 #include <OgreSceneManager.h>
 #include <OgreItem.h>
@@ -31,6 +19,24 @@
 
 #include <entt/entity/registry.hpp>
 #include <btBulletDynamicsCommon.h>
+
+module TestWorld;
+
+import Components.VRHandTrackingComponent;
+
+import Components.GraphicsComponent;
+import Components.DynamicPhysicsComponent;
+import Components.SceneComponent;
+
+import Systems.GraphicsSystem;
+import Systems.InputSystem;
+import Systems.VRInputSystem;
+
+import Utils.CameraController;
+import Utils.DebugDrawer;
+
+import Entity.TestEntities;
+import Entity.VRHandEntities;
 
 extern const bool c_useRDM;
 
@@ -60,8 +66,8 @@ void TestWorld::createScene()
 {
     TestEntities::createTestFloorEntity(m_registry, m_graphics, m_physics, m_scene);
 #if 1
-  //  for (int i = 0; i < 10; ++i)
-   //     TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-1, 1), Ogre::Math::RangeRandom(5, 10), Ogre::Math::RangeRandom(-1, 1)));
+    for (int i = 0; i < 10; ++i)
+        TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-1, 1), Ogre::Math::RangeRandom(5, 10), Ogre::Math::RangeRandom(-1, 1)));
 #else
     for (int i = 0; i < 5000; ++i)
         TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-5, 5), Ogre::Math::RangeRandom(20, 100), Ogre::Math::RangeRandom(-5, 5)));

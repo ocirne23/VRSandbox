@@ -1,16 +1,4 @@
-#include "VRHandEntities.h"
-
-#include "Components/GraphicsComponent.h"
-#include "Components/VRHandTrackingComponent.h"
-#include "Components/SceneComponent.h"
-#include "Components/KinematicPhysicsComponent.h"
-#include "Components/DynamicPhysicsComponent.h"
-#include "Components/SpringJointComponent.h"
-
-#include "Systems/GraphicsSystem.h"
-#include "Systems/PhysicsSystem.h"
-#include "Systems/SceneSystem.h"
-#include "Systems/VRInputSystem.h"
+module;
 
 #include "Utils/ArraySize.h"
 
@@ -22,6 +10,24 @@
 #include <entt/entity/registry.hpp>
 #include <btBulletDynamicsCommon.h>
 #include <btBulletCollisionCommon.h>
+
+module Entity.VRHandEntities;
+
+import Components.VRHandTrackingComponent;
+
+import Components.GraphicsComponent;
+import Components.SceneComponent;
+import Components.KinematicPhysicsComponent;
+import Components.DynamicPhysicsComponent;
+import Components.SpringJointComponent;
+
+import Systems.GraphicsSystem;
+import Systems.PhysicsSystem;
+import Systems.SceneSystem;
+import Systems.VRInputSystem;
+
+import Utils.EHandSkeletonBone;
+
 
 namespace VRHandEntities
 {

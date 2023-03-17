@@ -1,16 +1,21 @@
-#pragma once
-
-#include "Utils/HandSkeletonData.h"
-#include "Utils/EHandType.h"
+module;
 
 #include <entt/fwd.hpp>
 
-struct VRHandTrackingComponent;
-class GraphicsSystem;
+export module Systems.VRInputSystem;
 
-namespace vr { class IVRSystem; typedef uint64_t VRActionHandle_t; typedef uint64_t VRActionSetHandle_t; }
+import Utils.HandSkeletonData;
+import Utils.EHandType;
 
-class VRInputSystem
+export struct VRHandTrackingComponent;
+export class GraphicsSystem;
+
+export namespace vr
+{
+    class IVRSystem; typedef uint64_t VRActionHandle_t; typedef uint64_t VRActionSetHandle_t; struct InputAnalogActionData_t; typedef uint64_t VRInputValueHandle_t;
+}
+
+export class VRInputSystem
 {
 public:
 
@@ -28,6 +33,7 @@ public:
 private:
 
     bool getVRSkeletalData(HandSkeletonData& outData, vr::VRActionHandle_t skeletonActionHandle);
+    vr::InputAnalogActionData_t getAnalogDataForHand(EHandType hand);
 
 private:
 
@@ -36,6 +42,11 @@ private:
 
     vr::VRActionSetHandle_t m_actionsetDemo = 0;
 
+    vr::VRInputValueHandle_t m_valueHandleRightHand = 0;
+    vr::VRInputValueHandle_t m_valueHandleLeftHand = 0;
+
+    vr::VRActionHandle_t m_actionLeftThumbStick = 0;
+    vr::VRActionHandle_t m_actionRightThumbStick = 0;
     vr::VRActionHandle_t m_actionLeftPose = 0;
     vr::VRActionHandle_t m_actionRightPose = 0;
     vr::VRActionHandle_t m_actionLeftHaptic = 0;

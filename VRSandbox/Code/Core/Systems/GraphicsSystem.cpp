@@ -1,16 +1,10 @@
-#include "GraphicsSystem.h"
-
-#include "Components/GraphicsComponent.h"
-#include "Components/SceneComponent.h"
-
-#include "Utils/NullCompositorListener.h"
-#include "Utils/OpenVRCompositorListener.h"
-#include "Utils/DebugDrawer.h"
+module;
 
 #include <entt/entity/registry.hpp>
 
 #include <SDL.h>
 #include <SDL_syswm.h>
+
 #include <OgreRoot.h>
 #include <OgreException.h>
 #include <OgreLogManager.h>
@@ -35,8 +29,17 @@
 #include <OgrePlatformInformation.h>
 #include <OgreHlmsPbsDatablock.h>
 
-#include <algorithm>
+#include <openvr.h>
 #include <fstream>
+
+module Systems.GraphicsSystem;
+
+import Components.SceneComponent;
+import Components.GraphicsComponent;
+
+import Utils.DebugDrawer;
+import Utils.NullCompositorListener;
+import Utils.OpenVRCompositorListener;
 
 namespace
 {
@@ -510,7 +513,7 @@ void GraphicsSystem::update(double deltaSec, entt::registry& registry)
     if (m_pRenderWindow->isVisible())
         m_pRoot->renderOneFrame();
     m_pDebugDrawer->clear();
-    
+
     m_timeAccumulator += deltaSec;
     if (m_timeAccumulator >= 1.0)
     {
@@ -542,8 +545,8 @@ GraphicsComponent& GraphicsSystem::addGraphicsComponent(entt::registry& registry
 void GraphicsSystem::removeGraphicsComponent(entt::registry& registry, entt::entity entity)
 {
     const auto& component = registry.get<GraphicsComponent>(entity);
-	size_t numRemoved = registry.remove<GraphicsComponent>(entity);
-	OGRE_ASSERT(numRemoved == 1);
+    size_t numRemoved = registry.remove<GraphicsComponent>(entity);
+    OGRE_ASSERT(numRemoved == 1);
 }
 
 void GraphicsSystem::setGraphicsOffset(GraphicsComponent& comp, const Ogre::Vector3& offset)

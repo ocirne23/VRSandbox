@@ -1,12 +1,14 @@
-#include "SceneSystem.h"
-
-#include "GraphicsSystem.h"
-#include "Components/SceneComponent.h"
+module;
 
 #include <OgreAssert.h>
 #include <OgreRoot.h>
-
 #include <entt/entity/registry.hpp>
+#include <OgreResource.h>
+
+module Systems.SceneSystem;
+
+import Systems.GraphicsSystem;
+import Components.SceneComponent;
 
 SceneSystem::SceneSystem(GraphicsSystem* pGraphics) : 
 	m_sceneManager(*pGraphics->getSceneManager())
@@ -45,3 +47,6 @@ void SceneSystem::removeSceneNodeComponent(entt::registry& registry, entt::entit
 	size_t numRemoved = registry.remove<SceneComponent>(entity);
 	OGRE_ASSERT(numRemoved);
 }
+
+// idk
+Ogre::Resource::Listener::~Listener() {}

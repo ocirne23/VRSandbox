@@ -1,13 +1,14 @@
-#pragma once
+module;
 
 #include <OgrePrerequisites.h>
 
-struct SDL_KeyboardEvent;
-struct SDL_MouseMotionEvent;
+export module Utils.CameraController;
 
-enum class RenderMode;
+export struct SDL_KeyboardEvent;
+export struct SDL_MouseMotionEvent;
+export enum class RenderMode;
 
-class CameraController
+export class CameraController
 {
 public:
 

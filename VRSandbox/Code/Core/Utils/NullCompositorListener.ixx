@@ -1,12 +1,13 @@
-#pragma once
+module;
 
 #include <Compositor/OgreCompositorWorkspaceListener.h>
 #include <OgreFrameListener.h>
 #include <OgreCamera.h>
 #include <OgreMatrix4.h>
 
+export module Utils.NullCompositorListener;
 
-class NullCompositorListener : public Ogre::FrameListener, public Ogre::CompositorWorkspaceListener
+export class NullCompositorListener : public Ogre::FrameListener, public Ogre::CompositorWorkspaceListener
 {
 public:
 protected:

@@ -1,4 +1,4 @@
-#pragma once
+module;
 
 #include <memory.h>
 
@@ -9,36 +9,24 @@
 #include <SDL_events.h>
 #include <entt/fwd.hpp>
 
-#if __cplusplus <= 199711L
-#ifndef nullptr
-#define OgreDemoNullptrDefined
-#define nullptr (0)
-#endif
-#endif
-#include "openvr.h"
-#if __cplusplus <= 199711L
-#ifdef OgreDemoNullptrDefined
-#undef OgreDemoNullptrDefined
-#undef nullptr
-#endif
-#endif
+#include <openvr.h>
 
+export module Systems.GraphicsSystem;
 
-struct SDL_Window;
-namespace Ogre { class HlmsUnlit; class HlmsPbs; namespace v1 { class OverlaySystem; } class Item; }
-class OpenVRCompositorListener;
-class NullCompositorListener;
-class DebugDrawer;
-struct GraphicsComponent;
-namespace vr { class IVRSystem; }
+export struct SDL_Window;
+export namespace Ogre { class HlmsUnlit; class HlmsPbs; namespace v1 { class OverlaySystem; } class Item; }
+export class OpenVRCompositorListener;
+export class NullCompositorListener;
+export class DebugDrawer;
+export struct GraphicsComponent;
 
-enum class RenderMode
+export enum class RenderMode
 {
     VR,
     Desktop
 };
 
-class GraphicsSystem
+export class GraphicsSystem
 {
 public:
 

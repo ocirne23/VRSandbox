@@ -1,8 +1,4 @@
-#pragma once
-
-#include "Components/VRHandTrackingComponent.h"
-
-#include "Utils/HandSkeletonData.h"
+module;
 
 #include <OgreMatrix4.h>
 
@@ -12,23 +8,26 @@
 #include <entt/fwd.hpp>
 #include <openvr.h>
 
-class GraphicsSystem;
+export module Systems.InputSystem;
 
-struct SDL_MouseWheelEvent;
-struct SDL_MouseMotionEvent;
-struct SDL_MouseButtonEvent;
+import Components.VRHandTrackingComponent;
+import Utils.HandSkeletonData;
 
-struct SDL_TextEditingEvent;
-struct SDL_TextInputEvent;
-struct SDL_KeyboardEvent;
+export class GraphicsSystem;
 
-struct SDL_JoyButtonEvent;
-struct SDL_JoyAxisEvent;
-struct SDL_JoyHatEvent;
+export struct SDL_MouseWheelEvent;
+export struct SDL_MouseMotionEvent;
+export struct SDL_MouseButtonEvent;
 
-namespace vr { typedef uint64_t VRActionHandle_t; }
+export struct SDL_TextEditingEvent;
+export struct SDL_TextInputEvent;
+export struct SDL_KeyboardEvent;
 
-class MouseListener
+export struct SDL_JoyButtonEvent;
+export struct SDL_JoyAxisEvent;
+export struct SDL_JoyHatEvent;
+
+export class MouseListener
 {
 public:
     std::function<void(const SDL_MouseMotionEvent&)> onMouseMoved;
@@ -37,7 +36,7 @@ public:
     std::function<void(const SDL_MouseButtonEvent&)> onMouseReleased;
 };
 
-class KeyboardListener
+export class KeyboardListener
 {
 public:
     std::function<void(const SDL_TextEditingEvent&)> onTextEditing;
@@ -46,7 +45,7 @@ public:
     std::function<void(const SDL_KeyboardEvent&)>    onKeyReleased;
 };
 
-class JoystickListener
+export class JoystickListener
 {
 public:
     virtual void joyButtonPressed(const SDL_JoyButtonEvent& evt, int button) {}
@@ -55,13 +54,13 @@ public:
     virtual void joyPovMoved(const SDL_JoyHatEvent& arg, int index) {}
 };
 
-class InputSystem
+export class InputSystem
 {
 public:
 
-	InputSystem(GraphicsSystem* pGraphics);
+    InputSystem(GraphicsSystem* pGraphics);
     virtual ~InputSystem();
-    InputSystem(const InputSystem &copy) = delete;
+    InputSystem(const InputSystem& copy) = delete;
 
     void update(double deltaSec, entt::registry& registry);
     bool hasQuit() const { return m_hasQuit; }

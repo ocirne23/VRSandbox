@@ -1,14 +1,4 @@
-#include "TestEntities.h"
-
-#include "Components/GraphicsComponent.h"
-#include "Components/DynamicPhysicsComponent.h"
-#include "Components/StaticPhysicsComponent.h"
-#include "Components/KinematicPhysicsComponent.h"
-#include "Components/SceneComponent.h"
-
-#include "Systems/GraphicsSystem.h"
-#include "Systems/PhysicsSystem.h"
-#include "Systems/SceneSystem.h"
+module;
 
 #include <entt/entity/registry.hpp>
 #include <btBulletDynamicsCommon.h>
@@ -19,6 +9,18 @@
 #include <OgreMeshManager2.h>
 #include <OgreHlmsPbsDatablock.h>
 #include <OgreHlmsSamplerblock.h>
+
+module Entity.TestEntities;
+
+import Components.GraphicsComponent;
+import Components.SceneComponent;
+import Components.KinematicPhysicsComponent;
+import Components.DynamicPhysicsComponent;
+import Components.StaticPhysicsComponent;
+
+import Systems.GraphicsSystem;
+import Systems.PhysicsSystem;
+import Systems.SceneSystem;
 
 namespace TestEntities
 {

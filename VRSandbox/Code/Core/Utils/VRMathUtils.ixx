@@ -1,9 +1,11 @@
-#pragma once
+module;
 
 #include <OgreMatrix4.h>
 #include <openvr.h>
 
-namespace VRMathUtils
+export module Utils.VRMathUtils;
+
+export namespace VRMathUtils
 {
 	Ogre::Matrix4 convertSteamVRMatrixToMatrix4(vr::HmdMatrix34_t matPose)
 	{

@@ -1,17 +1,19 @@
-#pragma once
+module;
 
 #include "OgrePrerequisites.h"
 
 #include <memory.h>
 #include <entt/entity/entity.hpp>
 
-class GraphicsSystem;
-class PhysicsSystem;
-class SceneSystem;
-class VRInputSystem;
-struct HandSkeletonData;
+export module TestWorld;
 
-class TestWorld
+export class GraphicsSystem;
+export class PhysicsSystem;
+export class SceneSystem;
+export class VRInputSystem;
+export struct HandSkeletonData;
+
+export class TestWorld
 {
 public:
 

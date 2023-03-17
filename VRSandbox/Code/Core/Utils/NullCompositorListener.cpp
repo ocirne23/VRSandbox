@@ -1,4 +1,4 @@
-#include "NullCompositorListener.h"
+module;
 
 #include <Compositor/Pass/OgreCompositorPass.h>
 #include <Compositor/Pass/OgreCompositorPassDef.h>
@@ -6,6 +6,8 @@
 #include <OgreRenderSystem.h>
 #include <OgreTextureGpu.h>
 #include <Compositor/OgreCompositorWorkspace.h>
+
+module Utils.NullCompositorListener;
 
 NullCompositorListener::NullCompositorListener(Ogre::TextureGpu* vrTexture, Ogre::Root* root,
     Ogre::CompositorWorkspace* workspace,

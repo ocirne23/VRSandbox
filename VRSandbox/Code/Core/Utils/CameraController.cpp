@@ -1,10 +1,12 @@
-#include "CameraController.h"
+module;
 
-#include "Systems/GraphicsSystem.h"
-
-#include "OgreCamera.h"
-#include "OgreWindow.h"
+#include <OgreCamera.h>
+#include <OgreWindow.h>
 #include <SDL_events.h>
+
+module Utils.CameraController;
+
+import Systems.GraphicsSystem;
 
 CameraController::CameraController(Ogre::Window* pWindow, Ogre::Node* pSceneNode, const Ogre::Camera* pCamera, RenderMode renderMode) :
     m_pWindow(pWindow),

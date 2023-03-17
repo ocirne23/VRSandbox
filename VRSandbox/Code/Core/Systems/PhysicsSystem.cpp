@@ -1,17 +1,19 @@
-#include "PhysicsSystem.h"
-
-#include "Components/DynamicPhysicsComponent.h"
-#include "Components/StaticPhysicsComponent.h"
-#include "Components/KinematicPhysicsComponent.h"
-#include "Components/SceneComponent.h"
-#include "Components/SpringJointComponent.h"
-#include "Utils/PhysicsMotionState.h"
+module;
 
 #include <btBulletDynamicsCommon.h>
 #include <OgreAssert.h>
 #include <OgreVector3.h>
 #include <OgreSceneNode.h>
 #include <entt/entity/registry.hpp>
+
+module Systems.PhysicsSystem;
+
+import Components.DynamicPhysicsComponent;
+import Components.StaticPhysicsComponent;
+import Components.KinematicPhysicsComponent;
+import Components.SceneComponent;
+import Components.SpringJointComponent;
+import Utils.PhysicsMotionState;
 
 PhysicsSystem::PhysicsSystem() 
 {

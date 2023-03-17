@@ -1,14 +1,15 @@
-#ifndef DEBUGDRAWER_H_INCLUDED
-#define DEBUGDRAWER_H_INCLUDED
+module;
 
 #include <OgreSingleton.h>
 #include <map>
 
+export module Utils.DebugDrawer;
+
 typedef std::pair<Ogre::Vector3, Ogre::ColourValue> VertexPair;
 
-#define DEFAULT_ICOSPHERE_RECURSION_LEVEL	1
+export const size_t DEFAULT_ICOSPHERE_RECURSION_LEVEL = 1;
 
-class IcoSphere
+export class IcoSphere
 {
 public:
 	struct TriangleIndices
@@ -57,7 +58,7 @@ private:
 	int index;
 };
 
-class DebugDrawer
+export class DebugDrawer
 {
 public:
 	DebugDrawer(Ogre::SceneManager* _sceneManager, float _fillAlpha);
@@ -126,5 +127,3 @@ private:
 
 	void addQuadIndices(int index1, int index2, int index3, int index4);
 };
-
-#endif

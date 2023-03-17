@@ -1,6 +1,6 @@
-#pragma once
+export module Utils.EHandSkeletonBone;
 
-enum class EHandSkeletonBone : int
+export enum class EHandSkeletonBone : int
 {
     Root = 0,
     Wrist,

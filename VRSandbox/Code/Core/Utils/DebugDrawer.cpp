@@ -1,9 +1,11 @@
-#include "DebugDrawer.h"
+module;
 
 #include <OgreSceneManager.h>
 #include <OgreRenderQueue.h>
 #include <OgreAxisAlignedBox.h>
 #include <OgreManualObject2.h>
+
+module Utils.DebugDrawer;
 
 IcoSphere::IcoSphere()
 	: index(0)

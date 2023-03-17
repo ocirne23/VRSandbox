@@ -2,11 +2,14 @@ set(PROJECT_NAME Core)
 
 project(${PROJECT_NAME})
 
-file(GLOB_RECURSE PROJECT_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+file(GLOB_RECURSE PROJECT_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/*.ixx" "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 
 add_executable(${PROJECT_NAME} ${PROJECT_FILES} )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "1.Modules")
+set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
+
+target_compile_options(${PROJECT_NAME} PRIVATE /experimental:module /Zc:__cplusplus)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/)
 

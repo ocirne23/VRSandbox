@@ -1,4 +1,4 @@
-#pragma once
+module;
 
 #include <OgreFrameListener.h>
 #include <Compositor/OgreCompositorWorkspaceListener.h>
@@ -8,7 +8,9 @@
 
 #include <openvr.h>
 
-namespace VrWaitingMode
+export module Utils.OpenVRCompositorListener;
+
+export namespace VrWaitingMode
 {
     /** OpenVR's WaitGetPoses blocks until 3ms before VSync/start of the frame. Valve
         calls this 'running start'.
@@ -90,7 +92,7 @@ namespace VrWaitingMode
     };
 }
 
-class OpenVRCompositorListener : public Ogre::FrameListener, public Ogre::CompositorWorkspaceListener
+export class OpenVRCompositorListener : public Ogre::FrameListener, public Ogre::CompositorWorkspaceListener
 {
 public:
 

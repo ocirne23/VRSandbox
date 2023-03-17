@@ -1,12 +1,4 @@
-#include "VRInputSystem.h"
-
-#include "Components/VRHandTrackingComponent.h"
-#include "Components/GraphicsComponent.h"
-#include "Components/SceneComponent.h"
-#include "Components/DynamicPhysicsComponent.h"
-
-#include "Systems/GraphicsSystem.h"
-#include "Utils/VRMathUtils.h"
+module;
 
 #include <OgreSceneManager.h>
 #include <OgreSceneNode.h>
@@ -16,6 +8,17 @@
 #include <entt/entity/registry.hpp>
 #include <openvr.h>
 #include <filesystem>
+
+module Systems.VRInputSystem;
+
+import Systems.GraphicsSystem;
+
+import Components.GraphicsComponent;
+import Components.SceneComponent;
+import Components.DynamicPhysicsComponent;
+import Components.VRHandTrackingComponent;
+
+import Utils.VRMathUtils;
 
 VRInputSystem::VRInputSystem(vr::IVRSystem* pIVRSystem, GraphicsSystem& graphics) :
 	m_pIVRSystem(pIVRSystem),
@@ -28,7 +31,7 @@ VRInputSystem::VRInputSystem(vr::IVRSystem* pIVRSystem, GraphicsSystem& graphics
 	{
 		auto* pVrInput = vr::VRInput();
 		std::error_code fs_err;
-		std::filesystem::path actionsPath = std::filesystem::absolute("../VRSandbox/Assets/vr/hellovr_actions.json", fs_err);
+		std::filesystem::path actionsPath = std::filesystem::absolute("C:/Github/VRSandbox/VRSandbox/Assets/vr/hellovr_actions.json", fs_err);
 		vr::EVRInputError vr_err = pVrInput->SetActionManifestPath(actionsPath.string().c_str());
 		OGRE_ASSERT(vr_err == vr::EVRInputError::VRInputError_None);
 
@@ -42,6 +45,10 @@ VRInputSystem::VRInputSystem(vr::IVRSystem* pIVRSystem, GraphicsSystem& graphics
 
 		pVrInput->GetActionHandle("/actions/demo/in/lefthand_anim", &m_actionLeftHandSkeleton);
 		pVrInput->GetActionHandle("/actions/demo/in/righthand_anim", &m_actionRightHandSkeleton);
+
+		// TODO: fix strings
+		pVrInput->GetInputSourceHandle("user/hand/left", &m_valueHandleLeftHand);
+		pVrInput->GetInputSourceHandle("user/hand/right", &m_valueHandleRightHand);
 	}
 }
 
@@ -201,4 +208,16 @@ bool VRInputSystem::getVRSkeletalData(HandSkeletonData& outData, vr::VRActionHan
 	outData.handTransform = VRMathUtils::convertSteamVRMatrixToMatrix4(poseData.pose.mDeviceToAbsoluteTracking);
 
 	return skelData.bActive;
+}
+
+vr::InputAnalogActionData_t VRInputSystem::getAnalogDataForHand(EHandType hand)
+{
+	vr::VRActionHandle_t actionHandle = hand == EHandType::LEFT ? m_actionLeftThumbStick : m_actionRightThumbStick;
+	vr::VRInputValueHandle_t valueHandle = hand == EHandType::LEFT ? m_valueHandleLeftHand : m_valueHandleRightHand;
+
+	vr::InputAnalogActionData_t analogData;
+	vr::EVRInputError err = vr::VRInput()->GetAnalogActionData(actionHandle, &analogData, sizeof(analogData), valueHandle);
+	OGRE_ASSERT(err == vr::VRInputError_None);
+
+	return analogData;
 }

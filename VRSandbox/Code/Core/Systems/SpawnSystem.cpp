@@ -1,8 +1,8 @@
-#include "SpawnSystem.h"
-
-#include "Entity/TestEntities.h"
+module;
 
 #include <OgreAssert.h>
+
+module Systems.SpawnSystem;
 
 SpawnSystem* SpawnSystem::s_instance = nullptr;
 

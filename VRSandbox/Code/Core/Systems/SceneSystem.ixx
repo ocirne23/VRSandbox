@@ -1,16 +1,16 @@
-#pragma once
+module;
 
 #include <entt/fwd.hpp>
-
 #include <OgreVector3.h>
 #include <OgreQuaternion.h>
+#include <OgreRoot.h>
 
-class GraphicsSystem;
-struct SceneComponent;
+export module Systems.SceneSystem;
 
-namespace Ogre { class SceneManager; enum SceneMemoryMgrTypes; class SceneNode; }
+export class GraphicsSystem;
+export struct SceneComponent;
 
-class SceneSystem
+export class SceneSystem
 {
 public:
 

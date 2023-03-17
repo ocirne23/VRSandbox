@@ -1,20 +1,22 @@
-#include "Systems/GraphicsSystem.h"
-#include "Systems/PhysicsSystem.h"
-#include "Systems/InputSystem.h"
-#include "Systems/SceneSystem.h"
-#include "Systems/VRInputSystem.h"
-
-#include "TestWorld.h"
-#include "Utils/CameraController.h"
-#include "Utils/OpenVRCompositorListener.h"
-#include "Utils/PathUtils.h"
-
 #include <OgrePrerequisites.h>
 #include <OgreTimer.h>
 #include <OgreWindow.h>
 #include <Threading/OgreThreads.h>
 #include <OgreLogManager.h>
 #include <entt/entity/registry.hpp>
+#include <OgreCamera.h>
+
+import Systems.GraphicsSystem;
+import Systems.PhysicsSystem;
+import Systems.InputSystem;
+import Systems.SceneSystem;
+import Systems.VRInputSystem;
+
+import Utils.CameraController;
+import Utils.OpenVRCompositorListener;
+import Utils.PathUtils;
+
+import TestWorld;
 
 const double FIXED_TIMESTEP_TIME = 1.0 / 60.0;
 
@@ -23,11 +25,11 @@ const RenderMode RENDER_MODE = RenderMode::VR;
 int main(int argc, const char *argv[])
 {
     PathUtils::setHardcodedWorkingDir();
+
     entt::registry registry;
-
     PhysicsSystem physics;
-
     GraphicsSystem graphics("test", RENDER_MODE);
+    
     InputSystem input(&graphics);
     input.setWantMouseGrab(true);
     input.setWantMouseRelative(true);
@@ -87,6 +89,6 @@ int main(int argc, const char *argv[])
 
     input.destroyMouseListener(pMouseListener);
     input.destroyKeyboardListener(pKeyboardListener);
-
+    
     return 0;
 }

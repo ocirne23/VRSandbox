@@ -1,6 +1,4 @@
-#include "OpenVRCompositorListener.h"
-
-#include "Utils/DebugDrawer.h"
+module;
 
 #include <OgreTextureGpu.h>
 #include <OgreRenderSystem.h>
@@ -10,6 +8,11 @@
 #include <Compositor/OgreCompositorWorkspace.h>
 #include <OgreLogManager.h>
 #include <filesystem>
+#include <openvr.h>
+
+module Utils.OpenVRCompositorListener;
+
+import Utils.DebugDrawer;
 
 OpenVRCompositorListener::OpenVRCompositorListener(
     vr::IVRSystem* hmd, vr::IVRCompositor* vrCompositor,

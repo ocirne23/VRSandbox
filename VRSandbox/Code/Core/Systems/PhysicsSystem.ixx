@@ -1,4 +1,4 @@
-#pragma once
+module;
 
 #include <memory>
 #include <vector>
@@ -6,19 +6,21 @@
 #include <OgreVector3.h>
 #include <OgreQuaternion.h>
 
-class btDefaultCollisionConfiguration;
-class btCollisionDispatcher;
-class btBroadphaseInterface;
-class btSequentialImpulseConstraintSolver;
-class btDiscreteDynamicsWorld;
-class btRigidBody;
-class btCollisionShape;
-struct DynamicPhysicsComponent;
-struct StaticPhysicsComponent;
-struct KinematicPhysicsComponent;
-struct SpringJointComponent;
+export module Systems.PhysicsSystem;
 
-class PhysicsSystem
+export class btDefaultCollisionConfiguration;
+export class btCollisionDispatcher;
+export class btBroadphaseInterface;
+export class btSequentialImpulseConstraintSolver;
+export class btDiscreteDynamicsWorld;
+export class btRigidBody;
+export class btCollisionShape;
+export struct DynamicPhysicsComponent;
+export struct StaticPhysicsComponent;
+export struct KinematicPhysicsComponent;
+export struct SpringJointComponent;
+
+export class PhysicsSystem
 {
 public:
 

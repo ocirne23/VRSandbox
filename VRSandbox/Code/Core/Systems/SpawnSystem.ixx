@@ -1,14 +1,15 @@
-#pragma once
+module;
 
 #include <memory>
 #include <entt/fwd.hpp>
 
-class PhysicsSystem;
-namespace Ogre { class SceneManager; }
+export module Systems.SpawnSystem;
 
-struct DynamicPhysicsComponent;
+export class PhysicsSystem;
+export namespace Ogre { class SceneManager; }
+export struct DynamicPhysicsComponent;
 
-class SpawnSystem
+export class SpawnSystem
 {
 public:
 	
@@ -16,7 +17,7 @@ public:
 	virtual ~SpawnSystem();
 	SpawnSystem(const SpawnSystem& copy) = delete;
 
-	static SpawnSystem& getInstance() { }
+	//static SpawnSystem& getInstance();
 
 	PhysicsSystem& getPhysicsSystem() { return *m_pPhysics; }
 	Ogre::SceneManager& getSceneManager() { return *m_pSceneManager; }
