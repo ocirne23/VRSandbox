@@ -67,10 +67,14 @@ void TestWorld::createScene()
 {
     TestEntities::createTestFloorEntity(m_registry, m_graphics, m_physics, m_scene);
 #if 1
-    for (int i = 0; i < 10; ++i)
-        TestEntities::createTestCube(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-1, 1), Ogre::Math::RangeRandom(5, 10), Ogre::Math::RangeRandom(-1, 1)));
-    for (int i = 0; i < 10; ++i)
-        TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-1, 1), Ogre::Math::RangeRandom(5, 10), Ogre::Math::RangeRandom(-1, 1)));
+    const Ogre::Vector3 minSpawn(-3, 5, -3);
+    const Ogre::Vector3 maxSpawn(3, 10, 3);
+    for (int i = 0; i < 10; ++i) TestEntities::createTestCube   (m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
+    for (int i = 0; i < 10; ++i) TestEntities::createTestSphere (m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
+    for (int i = 0; i < 10; ++i) TestEntities::createTestCone   (m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
+    for (int i = 0; i < 10; ++i) TestEntities::createTestCapsule(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
+    for (int i = 0; i < 10; ++i) TestEntities::createTestRamp   (m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
+    for (int i = 0; i < 10; ++i) TestEntities::createTestWedge  (m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
 #else
     for (int i = 0; i < 5000; ++i)
         TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-5, 5), Ogre::Math::RangeRandom(20, 100), Ogre::Math::RangeRandom(-5, 5)));
@@ -80,7 +84,7 @@ void TestWorld::createScene()
 
     auto c1 = m_registry.get<DynamicPhysicsComponent>(e1);
     auto c2 = m_registry.get<DynamicPhysicsComponent>(e2);
-   // m_physics.addFixedJointComponent(m_registry, e1, c1.pBody, c2.pBody, { 0, 0, 0.5}, { 0, 0, -0.5 });
+    // m_physics.addFixedJointComponent(m_registry, e1, c1.pBody, c2.pBody, { 0, 0, 0.5}, { 0, 0, -0.5 });
     m_physics.addSpringJointComponent(m_registry, e1, c1.pBody, c2.pBody);
 
 

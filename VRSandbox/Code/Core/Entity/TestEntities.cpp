@@ -67,8 +67,8 @@ entt::entity createTestSphere(entt::registry& registry, GraphicsSystem& graphics
 {
     const auto entity = registry.create();
     auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
-    auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Sphere1000.mesh", "Marble");
-    DynamicPhysicsComponent& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createSphereShape(0.5f), 1000.0f);
+    auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Sphere.mesh");
+    DynamicPhysicsComponent& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createSphereShape(1.0f), 1000.0f);
     physicsComponent.pBody->setFriction(0.5f);
     physicsComponent.pBody->setRollingFriction(0.5f);
     physicsComponent.pBody->setSpinningFriction(0.5f);
@@ -81,8 +81,60 @@ entt::entity createTestCube(entt::registry& registry, GraphicsSystem& graphics, 
 {
     const auto entity = registry.create();
     auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
-    auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Cube_d.mesh", "Marble");
+    auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Cube.mesh");
     auto& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createBoxShape(Ogre::Vector3(1,1,1)), 1000.0f);
+    physicsComponent.pBody->setFriction(0.5f);
+    physicsComponent.pBody->setRollingFriction(0.5f);
+    physicsComponent.pBody->setSpinningFriction(0.5f);
+    physicsComponent.pBody->setDamping(0.0f, 0.5f);
+    return entity;
+}
+
+entt::entity createTestCone(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos)
+{
+    const auto entity = registry.create();
+    auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
+    auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Cone.mesh");
+    auto& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createConeShape(1.0f, 1.0f), 1000.0f);
+    physicsComponent.pBody->setFriction(0.5f);
+    physicsComponent.pBody->setRollingFriction(0.5f);
+    physicsComponent.pBody->setSpinningFriction(0.5f);
+    physicsComponent.pBody->setDamping(0.0f, 0.5f);
+    return entity;
+}
+
+entt::entity createTestCapsule(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos)
+{
+    const auto entity = registry.create();
+    auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
+    auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Capsule.mesh");
+    auto& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createCapsuleShape(1.0f, 1.0f), 1000.0f);
+    physicsComponent.pBody->setFriction(0.5f);
+    physicsComponent.pBody->setRollingFriction(0.5f);
+    physicsComponent.pBody->setSpinningFriction(0.5f);
+    physicsComponent.pBody->setDamping(0.0f, 0.5f);
+    return entity;
+}
+
+entt::entity createTestRamp(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos)
+{
+    const auto entity = registry.create();
+    auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
+    auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Ramp.mesh");
+    auto& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createTriangleShapeFromOgreMesh("Ramp.mesh"), 1000.0f);
+    physicsComponent.pBody->setFriction(0.5f);
+    physicsComponent.pBody->setRollingFriction(0.5f);
+    physicsComponent.pBody->setSpinningFriction(0.5f);
+    physicsComponent.pBody->setDamping(0.0f, 0.5f);
+    return entity;
+}
+
+entt::entity createTestWedge(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos)
+{
+    const auto entity = registry.create();
+    auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
+    auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, "Wedge.mesh");
+    auto& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, physics.createTriangleShapeFromOgreMesh("Wedge.mesh"), 1000.0f);
     physicsComponent.pBody->setFriction(0.5f);
     physicsComponent.pBody->setRollingFriction(0.5f);
     physicsComponent.pBody->setSpinningFriction(0.5f);

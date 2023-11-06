@@ -30,7 +30,7 @@ int main(int argc, const char *argv[])
     PhysicsSystem physics;
     GraphicsSystem graphics("test", RENDER_MODE);
     physics.setDebugDrawer(graphics.getDebugDrawer());
-    physics.setEnableDebugDraw(false);
+    physics.setEnableDebugDraw(true);
     
     InputSystem input(&graphics);
     input.setWantMouseGrab(true);

@@ -35,8 +35,11 @@ public:
 	void setDebugDrawer(DebugDrawer* pDebugDrawer);
 	void setEnableDebugDraw(bool enable);
 
+	btCollisionShape* createTriangleShapeFromOgreMesh(Ogre::String meshName);
 	btCollisionShape* createBoxShape(const Ogre::Vector3& dimensions);
 	btCollisionShape* createSphereShape(Ogre::Real radius);
+	btCollisionShape* createConeShape(Ogre::Real radius, Ogre::Real height);
+	btCollisionShape* createCapsuleShape(Ogre::Real radius, Ogre::Real height);
 	void destroyShape(btCollisionShape* pShape);
 
 	DynamicPhysicsComponent& addDynamicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, float mass);
@@ -64,6 +67,7 @@ private:
 private:
 
 	std::vector<btCollisionShape*> m_shapes;
+	std::unordered_map<Ogre::String, btCollisionShape*> m_triangleShapeMap;
 
 	std::unique_ptr<btDefaultCollisionConfiguration> m_pCollisionConfiguration;
 	std::unique_ptr<btCollisionDispatcher> m_pDispatcher;
