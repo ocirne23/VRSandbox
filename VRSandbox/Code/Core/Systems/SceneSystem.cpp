@@ -49,4 +49,4 @@ void SceneSystem::removeSceneNodeComponent(entt::registry& registry, entt::entit
 }
 
 // idk
-Ogre::Resource::Listener::~Listener() {}
+//Ogre::Resource::Listener::~Listener() {}

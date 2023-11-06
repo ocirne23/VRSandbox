@@ -1,5 +1,3 @@
-module;
-
 export module Components.KinematicPhysicsComponent;
 
 export class btRigidBody;

@@ -19,6 +19,7 @@ export struct DynamicPhysicsComponent;
 export struct StaticPhysicsComponent;
 export struct KinematicPhysicsComponent;
 export struct SpringJointComponent;
+export struct FixedJointComponent;
 
 export class PhysicsSystem
 {
@@ -30,15 +31,24 @@ public:
 
 	void update(double deltaSec, double fixedTimestep, entt::registry& registry);
 
-	btCollisionShape* createBoxShape(Ogre::Vector3 dimensions);
+	btCollisionShape* createBoxShape(const Ogre::Vector3& dimensions);
 	btCollisionShape* createSphereShape(Ogre::Real radius);
 	void destroyShape(btCollisionShape* pShape);
 
 	DynamicPhysicsComponent& addDynamicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, float mass);
 	StaticPhysicsComponent& addStaticPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape);
 	KinematicPhysicsComponent& addKinematicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape);
+	SpringJointComponent& addSpringJointComponent(entt::registry& registry, entt::entity entity, 
+		btRigidBody* pBody1, btRigidBody* pBody2, float stiffness = 1000.0f, float damping = 1.0f,
+		const Ogre::Vector3& attach1 = Ogre::Vector3(0, 0, 0), const Ogre::Vector3& attach2 = Ogre::Vector3(0, 0, 0), 
+		const Ogre::Vector3& limitMin = Ogre::Vector3(-10, -10, -10), const Ogre::Vector3& limitMax = Ogre::Vector3(10, 10, 10));
+	FixedJointComponent& addFixedJointComponent(entt::registry& registry, entt::entity entity, btRigidBody* pBody1, btRigidBody* pBody2, const Ogre::Vector3& attach1 = Ogre::Vector3(), const Ogre::Vector3& attach2 = Ogre::Vector3());
 
-	SpringJointComponent& addSpringJointComponent(entt::registry& registry, entt::entity entity, btRigidBody* pBody1, btRigidBody* pBody2);
+	void removeDynamicPhysicsComponent(entt::registry& registry, entt::entity entity);
+	void removeStaticPhysicsComponent(entt::registry& registry, entt::entity entity);
+	void removeKinematicPhysicsComponent(entt::registry& registry, entt::entity entity);
+	void removeSpringJointComponent(entt::registry& registry, entt::entity entity);
+	void removeFixedJointComponent(entt::registry& registry, entt::entity entity);
 
 	btDiscreteDynamicsWorld* getWorld() const { return m_pDynamicsWorld.get(); }
 

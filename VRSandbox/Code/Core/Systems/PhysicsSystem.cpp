@@ -10,9 +10,11 @@ module Systems.PhysicsSystem;
 
 import Components.DynamicPhysicsComponent;
 import Components.StaticPhysicsComponent;
+
 import Components.KinematicPhysicsComponent;
 import Components.SceneComponent;
 import Components.SpringJointComponent;
+import Components.FixedJointComponent;
 import Utils.PhysicsMotionState;
 
 PhysicsSystem::PhysicsSystem() 
@@ -27,7 +29,12 @@ PhysicsSystem::PhysicsSystem()
 
 PhysicsSystem::~PhysicsSystem() 
 {
-	OGRE_ASSERT(m_pDynamicsWorld->getNumCollisionObjects() == 0);
+	//OGRE_ASSERT(m_pDynamicsWorld->getNumCollisionObjects() == 0);
+	
+	for (auto* pShape : m_shapes)
+		delete pShape;
+	m_shapes.clear();
+
 	m_pDynamicsWorld.release();
 	m_pSolver.release();
 	m_pOverlappingPairCache.release();
@@ -67,9 +74,9 @@ void PhysicsSystem::update(double deltaSec, double fixedTimestep, entt::registry
 		});*/
 }
 
-btCollisionShape* PhysicsSystem::createBoxShape(Ogre::Vector3 dimensions)
+btCollisionShape* PhysicsSystem::createBoxShape(const Ogre::Vector3& dimensions)
 {
-	//TODO: reuse shapes if dimensions are same
+	//TODO: reuse shapes if dimensions are same?
 	btCollisionShape* shape = new btBoxShape(btVector3(btScalar(dimensions.x), btScalar(dimensions.y), btScalar(dimensions.z)));
 	shape->setUserIndex(1);
 	m_shapes.emplace_back(shape);
@@ -107,6 +114,26 @@ btRigidBody* PhysicsSystem::createRigidBody(entt::registry& registry, entt::enti
 	return new btRigidBody(rbInfo);
 }
 
+void PhysicsSystem::destroyRigidBody(btRigidBody* pBody)
+{
+	OGRE_ASSERT(pBody);
+
+	m_pDynamicsWorld->removeRigidBody(pBody);
+
+	btMotionState* pMotionState = pBody->getMotionState();
+	OGRE_ASSERT(pMotionState);
+	delete pMotionState;
+
+	const auto shape = pBody->getCollisionShape();
+	const int userCount = shape->getUserIndex();
+	OGRE_ASSERT(userCount >= 1);
+	if (userCount <= 1)
+		destroyShape(shape);
+	else
+		shape->setUserIndex(userCount - 1);
+	delete pBody;
+}
+
 DynamicPhysicsComponent& PhysicsSystem::addDynamicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, float mass)
 {
 	OGRE_ASSERT(registry.try_get<SceneComponent>(entity));
@@ -130,7 +157,7 @@ StaticPhysicsComponent& PhysicsSystem::addStaticPhysicsComponent(entt::registry&
 
 	StaticPhysicsComponent& component = registry.emplace<StaticPhysicsComponent>(entity);
 	component.pBody = createRigidBody(registry, entity, pShape, 0.0f);
-
+	component.pBody->setCollisionFlags(component.pBody->getCollisionFlags() | btCollisionObject::CF_STATIC_OBJECT);
 	m_pDynamicsWorld->addRigidBody(component.pBody);
 
 	return component;
@@ -156,32 +183,81 @@ KinematicPhysicsComponent& PhysicsSystem::addKinematicPhysicsComponent(entt::reg
 	return component;
 }
 
-void PhysicsSystem::destroyRigidBody(btRigidBody* pBody)
-{
-	OGRE_ASSERT(pBody);
-
-	btMotionState* pMotionState = pBody->getMotionState();
-	OGRE_ASSERT(pMotionState);
-	delete pMotionState;
-
-	const auto shape = pBody->getCollisionShape();
-	const int userCount = shape->getUserIndex();
-	OGRE_ASSERT(userCount >= 1);
-	if (userCount <= 1)
-		destroyShape(shape);
-	else
-		shape->setUserIndex(userCount - 1);
-	m_pDynamicsWorld->removeRigidBody(pBody);
-	delete pBody;
-}
-
-SpringJointComponent& PhysicsSystem::addSpringJointComponent(entt::registry& registry, entt::entity entity, btRigidBody* pBody1, btRigidBody* pBody2)
+SpringJointComponent& PhysicsSystem::addSpringJointComponent(entt::registry& registry, entt::entity entity, 
+	btRigidBody* pBody1, btRigidBody* pBody2, float stiffness, float damping,
+	const Ogre::Vector3& attach1, const Ogre::Vector3& attach2, 
+	const Ogre::Vector3& limitMin, const Ogre::Vector3& limitMax)
 {
 	SpringJointComponent& springComponent = registry.emplace<SpringJointComponent>(entity);
-	btGeneric6DofSpringConstraint* pSpring = new btGeneric6DofSpringConstraint(*pBody1, *pBody2,
-		btTransform(btQuaternion::getIdentity(), { 0, 0, 0 }),
-		btTransform(btQuaternion::getIdentity(), { 0, 0, 0 }), false);
+	btGeneric6DofSpring2Constraint* pSpring = new btGeneric6DofSpring2Constraint(*pBody1, *pBody2,
+		btTransform(btQuaternion::getIdentity(), { attach1.x, attach1.y, attach1.z }),
+		btTransform(btQuaternion::getIdentity(), { attach2.x, attach2.y, attach2.z }));
 	springComponent.pSpring = pSpring;
+
+	pSpring->setLinearLowerLimit(btVector3(limitMin.x, limitMin.y, limitMin.z));
+	pSpring->setLinearUpperLimit(btVector3(limitMax.x, limitMax.y, limitMax.z));
+
+	for (int i = 0; i < 3; ++i)
+	{
+		pSpring->enableSpring(i, true);
+		pSpring->setStiffness(i, stiffness);
+		pSpring->setDamping(i, damping);
+		pSpring->setEquilibriumPoint(i, 0.0f);
+	}
+
 	m_pDynamicsWorld->addConstraint(pSpring);
 	return springComponent;
+}
+
+FixedJointComponent& PhysicsSystem::addFixedJointComponent(entt::registry& registry, entt::entity entity, btRigidBody* pBody1, btRigidBody* pBody2, const Ogre::Vector3& attach1, const Ogre::Vector3& attach2)
+{
+	FixedJointComponent& fixedJointComponent = registry.emplace<FixedJointComponent>(entity);
+	btFixedConstraint* pJoint = new btFixedConstraint(*pBody1, *pBody2,
+		btTransform(btQuaternion::getIdentity(), { attach1.x, attach1.y, attach1.z }),
+		btTransform(btQuaternion::getIdentity(), { attach2.x, attach2.y, attach2.z }));
+	fixedJointComponent.pJoint = pJoint;
+	m_pDynamicsWorld->addConstraint(pJoint);
+	return fixedJointComponent;
+}
+
+void PhysicsSystem::removeDynamicPhysicsComponent(entt::registry& registry, entt::entity entity)
+{
+	const auto& component = registry.get<DynamicPhysicsComponent>(entity);
+	destroyRigidBody(component.pBody);
+	size_t numRemoved = registry.remove<DynamicPhysicsComponent>(entity);
+	OGRE_ASSERT(numRemoved == 1);
+}
+
+void PhysicsSystem::removeStaticPhysicsComponent(entt::registry& registry, entt::entity entity)
+{
+	const auto& component = registry.get<StaticPhysicsComponent>(entity);
+	destroyRigidBody(component.pBody);
+	size_t numRemoved = registry.remove<StaticPhysicsComponent>(entity);
+	OGRE_ASSERT(numRemoved == 1);
+}
+
+void PhysicsSystem::removeKinematicPhysicsComponent(entt::registry& registry, entt::entity entity)
+{
+	const auto& component = registry.get<KinematicPhysicsComponent>(entity);
+	destroyRigidBody(component.pBody);
+	size_t numRemoved = registry.remove<KinematicPhysicsComponent>(entity);
+	OGRE_ASSERT(numRemoved == 1);
+}
+
+void PhysicsSystem::removeSpringJointComponent(entt::registry& registry, entt::entity entity)
+{
+	const auto& component = registry.get<SpringJointComponent>(entity);
+	m_pDynamicsWorld->removeConstraint(component.pSpring);
+	delete component.pSpring;
+	size_t numRemoved = registry.remove<SpringJointComponent>(entity);
+	OGRE_ASSERT(numRemoved == 1);
+}
+
+void PhysicsSystem::removeFixedJointComponent(entt::registry& registry, entt::entity entity)
+{
+	const auto& component = registry.get<FixedJointComponent>(entity);
+	m_pDynamicsWorld->removeConstraint(component.pJoint);
+	delete component.pJoint;
+	size_t numRemoved = registry.remove<FixedJointComponent>(entity);
+	OGRE_ASSERT(numRemoved == 1);
 }

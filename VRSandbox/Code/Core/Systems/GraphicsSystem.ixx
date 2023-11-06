@@ -58,8 +58,12 @@ public:
     Ogre::Camera* getCamera() const { return m_pCamera; }
     OpenVRCompositorListener* getVRCompositor() const { return m_pOvrCompositorListener.get(); }
     vr::IVRSystem* getHMD() const { return m_pHMD; }
-    Ogre::SceneNode* getControllerNode() const { return m_pControllerNode; }
+    Ogre::SceneNode* getCameraNode() const { return m_pCameraNode; }
     RenderMode getRenderMode() const { return m_renderMode; }
+
+private:
+
+    void initializeWindow(const char* pWindowTitle);
 
 private:
 
@@ -70,11 +74,11 @@ private:
     Ogre::Window* m_pRenderWindow = nullptr;
     Ogre::SceneManager* m_pSceneManager = nullptr;
     Ogre::Camera* m_pCamera = nullptr;
-    Ogre::Camera* m_pVrCullCamera = nullptr;
-    Ogre::SceneNode* m_pControllerNode = nullptr;
-    Ogre::CompositorWorkspace* m_pCompositorWorkspace = nullptr;
-    Ogre::CompositorWorkspace* m_pVRWorkspace = nullptr;
-    Ogre::TextureGpu* m_vrTexture = nullptr;
+    Ogre::Camera* m_pCullCamera = nullptr;
+    Ogre::SceneNode* m_pCameraNode = nullptr;
+    Ogre::CompositorWorkspace* m_pVRMirrorWorkspace = nullptr;
+    Ogre::CompositorWorkspace* m_pWorkspace = nullptr;
+    Ogre::TextureGpu* m_pWorkspaceTexture = nullptr;
     Ogre::Item* m_hiddenAreaMeshVr = nullptr;
 
     vr::IVRSystem* m_pHMD = nullptr;
@@ -84,8 +88,6 @@ private:
     vr::TrackedDevicePose_t m_trackedDevicePose[vr::k_unMaxTrackedDeviceCount] = {};
 
     std::unique_ptr<OpenVRCompositorListener> m_pOvrCompositorListener;
-    std::unique_ptr<NullCompositorListener> m_pNullCompositorListener;
-
     std::unique_ptr<Ogre::v1::OverlaySystem> m_pOverlaySystem;
     std::unique_ptr<Ogre::HlmsUnlit> m_pHlmsUnlit;
     std::unique_ptr<Ogre::HlmsPbs> m_pHlmsPbs;

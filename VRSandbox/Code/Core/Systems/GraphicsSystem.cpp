@@ -31,6 +31,7 @@ module;
 
 #include <openvr.h>
 #include <fstream>
+#include <filesystem>
 
 module Systems.GraphicsSystem;
 
@@ -59,6 +60,40 @@ namespace
     }
 }
 
+void GraphicsSystem::initializeWindow(const char* pWindowTitle)
+{
+    const int width = 1280;
+    const int height = 720;
+    const int screen = 0;
+    const int posX = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
+    const int posY = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
+    const bool fullscreen = false;
+    m_pSDLWindow = SDL_CreateWindow(pWindowTitle, posX, posY, width, height,
+        SDL_WINDOW_SHOWN | (fullscreen ? SDL_WINDOW_FULLSCREEN : 0) | SDL_WINDOW_RESIZABLE);
+
+    SDL_SysWMinfo wmInfo;
+    SDL_VERSION(&wmInfo.version);
+    if (SDL_GetWindowWMInfo(m_pSDLWindow, &wmInfo) == SDL_FALSE)
+    {
+        OGRE_EXCEPT(Ogre::Exception::ERR_INTERNAL_ERROR,
+            "Couldn't get WM Info! (SDL2)",
+            "GraphicsSystem::initialize");
+    }
+    Ogre::ConfigOptionMap& cfgOpts = m_pRoot->getRenderSystem()->getConfigOptions();
+
+    Ogre::NameValuePairList params;
+    params.insert(std::make_pair("externalWindowHandle", Ogre::StringConverter::toString((uintptr_t)wmInfo.info.win.window)));
+    params.insert(std::make_pair("title", pWindowTitle));
+    params.insert(std::make_pair("gamma", cfgOpts["sRGB Gamma Conversion"].currentValue));
+    if (cfgOpts.find("VSync Method") != cfgOpts.end())
+        params.insert(std::make_pair("vsync_method", cfgOpts["VSync Method"].currentValue));
+    params.insert(std::make_pair("FSAA", cfgOpts["FSAA"].currentValue));
+    params.insert(std::make_pair("vsync", cfgOpts["VSync"].currentValue));
+    params.insert(std::make_pair("reverse_depth", "Yes"));
+
+    m_pRenderWindow = Ogre::Root::getSingleton().createRenderWindow(pWindowTitle, width, height, fullscreen, &params);
+}
+
 GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
 {
     m_renderMode = renderMode;
@@ -67,84 +102,37 @@ GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
         OGRE_EXCEPT(Ogre::Exception::ERR_INTERNAL_ERROR, "Cannot initialize SDL2!", "Graphics::initialize");
     }
 
-    m_pRoot = std::make_unique<Ogre::Root>("", "ogre.cfg", "Ogre.log", pWindowTitle);
 #if OGRE_DEBUG_MODE == OGRE_DEBUG_LEVEL_DEBUG
-    m_pRoot->loadPlugin("RenderSystem_Direct3D11_d", false);
+    const char* pluginsFile = "plugins_d.cfg";
 #else
-    m_pRoot->loadPlugin("RenderSystem_Direct3D11", false);
+    const char* pluginsFile = "plugins.cfg";
 #endif
+    m_pRoot = std::make_unique<Ogre::Root>(nullptr, pluginsFile, "ogre.cfg", "Ogre.log");
     m_pRoot->setRenderSystem(m_pRoot->getRenderSystemByName("Direct3D11 Rendering Subsystem"));
     m_pRoot->getRenderSystem()->setConfigOption("sRGB Gamma Conversion", "Yes");
-    m_pRoot->initialise(false, pWindowTitle);
+    m_pRoot->initialise(false);
+    initializeWindow(pWindowTitle);
 
-    {
-        const int width = 1280;
-        const int height = 720;
-        const int screen = 0;
-        const int posX = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
-        const int posY = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
-        const bool fullscreen = false;
-        m_pSDLWindow = SDL_CreateWindow(pWindowTitle, posX, posY, width, height,
-            SDL_WINDOW_SHOWN | (fullscreen ? SDL_WINDOW_FULLSCREEN : 0) | SDL_WINDOW_RESIZABLE);
-
-        SDL_SysWMinfo wmInfo;
-        SDL_VERSION(&wmInfo.version);
-        if (SDL_GetWindowWMInfo(m_pSDLWindow, &wmInfo) == SDL_FALSE)
-        {
-            OGRE_EXCEPT(Ogre::Exception::ERR_INTERNAL_ERROR,
-                "Couldn't get WM Info! (SDL2)",
-                "GraphicsSystem::initialize");
-        }
-        Ogre::ConfigOptionMap& cfgOpts = m_pRoot->getRenderSystem()->getConfigOptions();
-
-        Ogre::NameValuePairList params;
-        params.insert(std::make_pair("externalWindowHandle", Ogre::StringConverter::toString((uintptr_t)wmInfo.info.win.window)));
-        params.insert(std::make_pair("title", pWindowTitle));
-        params.insert(std::make_pair("gamma", cfgOpts["sRGB Gamma Conversion"].currentValue));
-        if (cfgOpts.find("VSync Method") != cfgOpts.end())
-            params.insert(std::make_pair("vsync_method", cfgOpts["VSync Method"].currentValue));
-        params.insert(std::make_pair("FSAA", cfgOpts["FSAA"].currentValue));
-        params.insert(std::make_pair("vsync", cfgOpts["VSync"].currentValue));
-        params.insert(std::make_pair("reverse_depth", "Yes"));
-
-        m_pRenderWindow = Ogre::Root::getSingleton().createRenderWindow(pWindowTitle, width, height, fullscreen, &params);
-    }
     m_pOverlaySystem.reset(OGRE_NEW Ogre::v1::OverlaySystem());
 
     Ogre::ConfigFile cf;
-    cf.loadDirect("resources2.cfg");
-    Ogre::String rootHlmsFolder = cf.getSetting("DoNotUseAsResource", "Hlms", "");
-    if (rootHlmsFolder.empty())
-        rootHlmsFolder = "./";
-    else if (*(rootHlmsFolder.end() - 1) != '/')
-        rootHlmsFolder += "/";
+    cf.loadDirect("resources.cfg");
+    Ogre::String assetsFolderPath = cf.getSetting("AssetsFolderLocation", "General", "");
+    if (assetsFolderPath.empty())
+        assetsFolderPath = "./";
+    else if (*(assetsFolderPath.end() - 1) != '/')
+        assetsFolderPath += "/";
 
-    const char* c_locations[] =
-    {
-        "Hlms/Common/GLSL",
-        "Hlms/Common/HLSL",
-        "Hlms/Common/Metal",
-        "Compute/Tools/Any",
-        "Compute/VR",
-        "Compute/VR/Foveated",
-        "2.0/scripts/materials/PbsMaterials"
-    };
+    std::vector<std::string> subdirectories;
+    for (auto& dir : std::filesystem::recursive_directory_iterator(std::string(assetsFolderPath.c_str())))
+        if (dir.is_directory())
+        {
+            std::string path = dir.path().string();
+            std::replace(path.begin(), path.end(), '\\', '/');
+            subdirectories.push_back(path);
+            Ogre::ResourceGroupManager::getSingleton().addResourceLocation(path, "FileSystem", "General");
+        }
 
-    for (size_t i = 0; i < sizeof(c_locations) / sizeof(c_locations[0]); ++i)
-    {
-        Ogre::String dataFolder = rootHlmsFolder + c_locations[i];
-        Ogre::ResourceGroupManager::getSingleton().addResourceLocation(dataFolder, "FileSystem", "General");
-    }
-
-    for (auto section : cf.getSectionIterator())
-    {
-        if (section.first != "Hlms")
-            for (auto setting : *section.second)
-            {
-                if (setting.first != "DoNotUseAsResource")
-                    Ogre::ResourceGroupManager::getSingleton().addResourceLocation(setting.second, setting.first, section.first);
-            }
-    }
     Ogre::ArchiveManager& archiveManager = Ogre::ArchiveManager::getSingleton();
     const Ogre::String& archiveType = "FileSystem";
 
@@ -154,8 +142,8 @@ GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
         Ogre::HlmsUnlit::getDefaultPaths(mainFolderPath, libraryFoldersPaths);
         Ogre::ArchiveVec archiveLibraryFolders;
         for (auto it : libraryFoldersPaths)
-            archiveLibraryFolders.push_back(archiveManager.load(rootHlmsFolder + it, archiveType, true));
-        m_pHlmsUnlit.reset(OGRE_NEW Ogre::HlmsUnlit(archiveManager.load(rootHlmsFolder + mainFolderPath, archiveType, true), &archiveLibraryFolders));
+            archiveLibraryFolders.push_back(archiveManager.load(assetsFolderPath + it, archiveType, true));
+        m_pHlmsUnlit.reset(OGRE_NEW Ogre::HlmsUnlit(archiveManager.load(assetsFolderPath + mainFolderPath, archiveType, true), &archiveLibraryFolders));
         m_pHlmsUnlit->setDebugOutputPath(false, false);
         Ogre::Root::getSingleton().getHlmsManager()->registerHlms(m_pHlmsUnlit.get());
     }
@@ -163,8 +151,8 @@ GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
         Ogre::HlmsPbs::getDefaultPaths(mainFolderPath, libraryFoldersPaths);
         Ogre::ArchiveVec archiveLibraryFolders;
         for (auto it : libraryFoldersPaths)
-            archiveLibraryFolders.push_back(archiveManager.load(rootHlmsFolder + it, archiveType, true));
-        m_pHlmsPbs.reset(OGRE_NEW Ogre::HlmsPbs(archiveManager.load(rootHlmsFolder + mainFolderPath, archiveType, true), &archiveLibraryFolders));
+            archiveLibraryFolders.push_back(archiveManager.load(assetsFolderPath + it, archiveType, true));
+        m_pHlmsPbs.reset(OGRE_NEW Ogre::HlmsPbs(archiveManager.load(assetsFolderPath + mainFolderPath, archiveType, true), &archiveLibraryFolders));
         m_pHlmsPbs->setDebugOutputPath(false, false);
         Ogre::Root::getSingleton().getHlmsManager()->registerHlms(m_pHlmsPbs.get());
     }
@@ -292,21 +280,19 @@ GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
     m_pSceneManager->setShadowFarDistance(500.0f);
 
     m_pCamera = m_pSceneManager->createCamera("Main Camera");
-
-    // Position it at 500 in Z direction
     m_pCamera->setNearClipDistance(0.05f);
     m_pCamera->setFarClipDistance(1000.0f);
     m_pCamera->setAutoAspectRatio(true);
 
-    m_pControllerNode = m_pSceneManager->createSceneNode(Ogre::SCENE_DYNAMIC);
-
-    bool c_useRDM = renderMode == RenderMode::VR;
-    const Ogre::IdString workspaceName = c_useRDM ? "Tutorial_OpenVRWorkspaceRDM" : "Tutorial_OpenVRWorkspaceNoRDM";
+    m_pCameraNode = m_pSceneManager->createSceneNode(Ogre::SCENE_DYNAMIC);
 
     Ogre::CompositorManager2* compositorManager = m_pRoot->getCompositorManager2();
 
     if (renderMode == RenderMode::VR)
     {
+        bool c_useRDM = renderMode == RenderMode::VR;
+        const Ogre::IdString workspaceName = c_useRDM ? "Tutorial_OpenVRWorkspaceRDM" : "Tutorial_OpenVRWorkspaceNoRDM";
+
         // Loading the SteamVR Runtime
         vr::EVRInitError eError = vr::VRInitError_None;
         m_pHMD = vr::VR_Init(&eError, vr::VRApplication_Scene);
@@ -337,83 +323,65 @@ GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
 
         Ogre::TextureGpuManager* textureManager = m_pRoot->getRenderSystem()->getTextureGpuManager();
         //Radial Density Mask requires the VR texture to be UAV & reinterpretable
-        m_vrTexture = textureManager->createOrRetrieveTexture("OpenVR Both Eyes", Ogre::GpuPageOutStrategy::Discard,
+        m_pWorkspaceTexture = textureManager->createOrRetrieveTexture("OpenVR Both Eyes", Ogre::GpuPageOutStrategy::Discard,
             Ogre::TextureFlags::RenderToTexture | Ogre::TextureFlags::Uav | Ogre::TextureFlags::Reinterpretable, Ogre::TextureTypes::Type2D);
-        m_vrTexture->setResolution(width << 1u, height);
-        m_vrTexture->setPixelFormat(Ogre::PFG_RGBA8_UNORM_SRGB);
+        m_pWorkspaceTexture->setResolution(width << 1u, height);
+        m_pWorkspaceTexture->setPixelFormat(Ogre::PFG_RGBA8_UNORM_SRGB);
         if (!c_useRDM)
-            m_vrTexture->setSampleDescription(Ogre::SampleDescription(4u));
-        m_vrTexture->scheduleTransitionTo(Ogre::GpuResidency::Resident);
+            m_pWorkspaceTexture->setSampleDescription(Ogre::SampleDescription(4u));
+        m_pWorkspaceTexture->scheduleTransitionTo(Ogre::GpuResidency::Resident);
 
-        m_pVrCullCamera = m_pSceneManager->createCamera("VrCullCamera");
-        m_pVRWorkspace = compositorManager->addWorkspace(m_pSceneManager, m_vrTexture, m_pCamera, workspaceName, true, 0);
-        m_pOvrCompositorListener = std::make_unique<OpenVRCompositorListener>(m_pHMD, vr::VRCompositor(), m_vrTexture,
-            m_pRoot.get(), m_pVRWorkspace, m_pCamera, m_pVrCullCamera, m_pControllerNode);
+        m_pCullCamera = m_pSceneManager->createCamera("CullCamera");
+        m_pWorkspace = compositorManager->addWorkspace(m_pSceneManager, m_pWorkspaceTexture, m_pCamera, workspaceName, true, 0);
+        m_pOvrCompositorListener = std::make_unique<OpenVRCompositorListener>(m_pHMD, vr::VRCompositor(), m_pWorkspaceTexture,
+            m_pRoot.get(), m_pWorkspace, m_pCamera, m_pCullCamera, m_pCameraNode);
+
+        if (c_useRDM)
+        {
+            const float radiuses[3] = { 0.25f, 0.7f, 0.85f };
+            m_pSceneManager->setRadialDensityMask(true, radiuses);
+        }
+
+        try
+        {
+            Ogre::ConfigFile cfgFile;
+            cfgFile.load("HiddenAreaMeshVr.cfg");
+            Ogre::HiddenAreaVrSettings setting = Ogre::HiddenAreaMeshVrGenerator::loadSettings(m_deviceModelNumber, cfgFile);
+            if (setting.tessellation > 0u)
+                Ogre::HiddenAreaMeshVrGenerator::generate("HiddenAreaMeshVr.mesh", setting);
+        }
+        catch (Ogre::FileNotFoundException& e)
+        {
+            Ogre::LogManager& logManager = Ogre::LogManager::getSingleton();
+            logManager.logMessage(e.getDescription());
+            logManager.logMessage("HiddenAreaMeshVR optimization won't be available");
+        }
+
+        const bool bIsHamVrOptEnabled = !Ogre::MeshManager::getSingleton().getByName("HiddenAreaMeshVr.mesh", Ogre::ResourceGroupManager::INTERNAL_RESOURCE_GROUP_NAME).isNull();
+        if (bIsHamVrOptEnabled)
+        {
+            m_hiddenAreaMeshVr = m_pSceneManager->createItem("HiddenAreaMeshVr.mesh", Ogre::ResourceGroupManager::INTERNAL_RESOURCE_GROUP_NAME, Ogre::SCENE_STATIC);
+            m_hiddenAreaMeshVr->setCastShadows(false);
+            m_hiddenAreaMeshVr->setRenderQueueGroup(0u);
+            m_hiddenAreaMeshVr->getSubItem(0)->setUseIdentityProjection(true);
+            // Set to render *after* the RadialDensityMask
+            m_hiddenAreaMeshVr->getSubItem(0)->setRenderQueueSubGroup(1u);
+            m_pSceneManager->getRootSceneNode(Ogre::SCENE_STATIC)->attachObject(m_hiddenAreaMeshVr);
+        }
+
+        Ogre::CompositorChannelVec channels(2u);
+        channels[0] = m_pRenderWindow->getTexture();
+        channels[1] = m_pWorkspaceTexture;
+        m_pVRMirrorWorkspace = compositorManager->addWorkspace(m_pSceneManager, channels, m_pCamera, "Tutorial_OpenVRMirrorWindowWorkspace", true);
     }
     else
     {
-        Ogre::TextureGpuManager* textureManager = m_pRoot->getRenderSystem()->getTextureGpuManager();
-        //Radial Density Mask requires the VR texture to be UAV & reinterpretable
-        m_vrTexture = textureManager->createOrRetrieveTexture("OpenVR Both Eyes",
-            Ogre::GpuPageOutStrategy::Discard,
-            Ogre::TextureFlags::RenderToTexture |
-            Ogre::TextureFlags::Uav |
-            Ogre::TextureFlags::Reinterpretable,
-            Ogre::TextureTypes::Type2D);
-        m_vrTexture->setResolution(3704u, 2056u);
-        m_vrTexture->setPixelFormat(Ogre::PFG_RGBA8_UNORM_SRGB);
-        if (!c_useRDM)
-            m_vrTexture->setSampleDescription(Ogre::SampleDescription(4u));
-        m_vrTexture->scheduleTransitionTo(Ogre::GpuResidency::Resident);
-
-        m_pVrCullCamera = m_pSceneManager->createCamera("VrCullCamera");
-        m_pVRWorkspace = compositorManager->addWorkspace(m_pSceneManager, m_vrTexture, m_pCamera, workspaceName, true, 0);
-        m_deviceModelNumber = "Vive"; // Pretend we have a Vive so the HAM works.
-        m_pNullCompositorListener = std::make_unique<NullCompositorListener>(m_vrTexture, m_pRoot.get(), m_pVRWorkspace, m_pCamera, m_pVrCullCamera);
-    }
-
-    try
-    {
-        Ogre::ConfigFile cfgFile;
-        cfgFile.load("HiddenAreaMeshVr.cfg");
-        Ogre::HiddenAreaVrSettings setting = Ogre::HiddenAreaMeshVrGenerator::loadSettings(m_deviceModelNumber, cfgFile);
-        if (setting.tessellation > 0u)
-            Ogre::HiddenAreaMeshVrGenerator::generate("HiddenAreaMeshVr.mesh", setting);
-    }
-    catch (Ogre::FileNotFoundException& e)
-    {
-        Ogre::LogManager& logManager = Ogre::LogManager::getSingleton();
-        logManager.logMessage(e.getDescription());
-        logManager.logMessage("HiddenAreaMeshVR optimization won't be available");
-    }
-
-    Ogre::CompositorChannelVec channels(2u);
-    channels[0] = m_pRenderWindow->getTexture();
-    channels[1] = m_vrTexture;
-    m_pCompositorWorkspace = compositorManager->addWorkspace(m_pSceneManager, channels, m_pCamera, "Tutorial_OpenVRMirrorWindowWorkspace", true);
-
-    const bool bIsHamVrOptEnabled = !Ogre::MeshManager::getSingleton().getByName("HiddenAreaMeshVr.mesh", Ogre::ResourceGroupManager::INTERNAL_RESOURCE_GROUP_NAME).isNull();
-    if (bIsHamVrOptEnabled && renderMode == RenderMode::VR)
-    {
-        m_hiddenAreaMeshVr = m_pSceneManager->createItem("HiddenAreaMeshVr.mesh", Ogre::ResourceGroupManager::INTERNAL_RESOURCE_GROUP_NAME, Ogre::SCENE_STATIC);
-        m_hiddenAreaMeshVr->setCastShadows(false);
-        m_hiddenAreaMeshVr->setRenderQueueGroup(0u);
-        m_hiddenAreaMeshVr->getSubItem(0)->setUseIdentityProjection(true);
-        // Set to render *after* the RadialDensityMask
-        m_hiddenAreaMeshVr->getSubItem(0)->setRenderQueueSubGroup(1u);
-        m_pSceneManager->getRootSceneNode(Ogre::SCENE_STATIC)->attachObject(m_hiddenAreaMeshVr);
-    }
-
-    if (c_useRDM)
-    {
-        const float radiuses[3] = { 0.25f, 0.7f, 0.85f };
-        m_pSceneManager->setRadialDensityMask(true, radiuses);
+        m_pWorkspace = compositorManager->addWorkspace(m_pSceneManager, m_pRenderWindow->getTexture(), m_pCamera, "PbsMaterialsWorkspace", true);
     }
 }
 
 GraphicsSystem::~GraphicsSystem()
 {
-
     if (m_pRoot->getRenderSystem())
     {
         Ogre::TextureGpuManager* textureManager = m_pRoot->getRenderSystem()->getTextureGpuManager();
@@ -461,32 +429,32 @@ GraphicsSystem::~GraphicsSystem()
     }
 
     Ogre::CompositorManager2* compositorManager = m_pRoot->getCompositorManager2();
-    compositorManager->removeWorkspace(m_pVRWorkspace);
-    compositorManager->removeWorkspace(m_pCompositorWorkspace);
+    compositorManager->removeWorkspace(m_pWorkspace);
+    if (m_pVRMirrorWorkspace)
+        compositorManager->removeWorkspace(m_pVRMirrorWorkspace);
 
     m_pHlmsUnlit.release();
     m_pHlmsPbs.release();
 
     m_pOvrCompositorListener.release();
-    m_pNullCompositorListener.release();
 
-    if (m_vrTexture)
+    if (m_pWorkspaceTexture)
     {
         Ogre::TextureGpuManager* textureManager = m_pRoot->getRenderSystem()->getTextureGpuManager();
-        textureManager->destroyTexture(m_vrTexture);
-        m_vrTexture = 0;
+        textureManager->destroyTexture(m_pWorkspaceTexture);
+        m_pWorkspaceTexture = nullptr;
     }
 
-    if (m_pVrCullCamera)
+    if (m_pCullCamera)
     {
-        m_pSceneManager->destroyCamera(m_pVrCullCamera);
-        m_pVrCullCamera = 0;
+        m_pSceneManager->destroyCamera(m_pCullCamera);
+        m_pCullCamera = nullptr;
     }
 
     if (m_pHMD)
     {
         vr::VR_Shutdown();
-        m_pHMD = NULL;
+        m_pHMD = nullptr;
     }
 
     m_pDebugDrawer.reset();
@@ -499,15 +467,15 @@ GraphicsSystem::~GraphicsSystem()
     {
         SDL_SetWindowFullscreen(m_pSDLWindow, 0);
         SDL_DestroyWindow(m_pSDLWindow);
-        m_pSDLWindow = 0;
+        m_pSDLWindow = nullptr;
     }
     SDL_Quit();
 }
 
 void GraphicsSystem::update(double deltaSec, entt::registry& registry)
 {
-    m_pCamera->setPosition(m_pControllerNode->getPosition());
-    m_pCamera->setOrientation(m_pControllerNode->getOrientation());
+    m_pCamera->setPosition(m_pCameraNode->getPosition());
+    m_pCamera->setOrientation(m_pCameraNode->getOrientation());
 
     m_pDebugDrawer->build();
     if (m_pRenderWindow->isVisible())

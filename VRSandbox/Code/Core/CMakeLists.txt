@@ -8,7 +8,7 @@ add_executable(${PROJECT_NAME} ${PROJECT_FILES} )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "1.Modules")
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
-
+set_target_properties(${PROJECT_NAME} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_compile_options(${PROJECT_NAME} PRIVATE /experimental:module /Zc:__cplusplus)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/)
@@ -25,6 +25,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/Dependenc
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/Dependencies/include/entt)
 
 target_link_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/Dependencies/lib/$<CONFIG>)
-target_link_libraries(${PROJECT_NAME} BulletDynamics BulletCollision LinearMath)
+target_link_libraries(${PROJECT_NAME} Bullet3Common BulletDynamics BulletCollision LinearMath)
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} PREFIX "" FILES ${PROJECT_FILES})

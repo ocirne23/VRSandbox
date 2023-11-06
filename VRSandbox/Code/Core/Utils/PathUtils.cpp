@@ -18,7 +18,7 @@ namespace PathUtils
             rootPath = rootPath.parent_path();
 
         std::filesystem::current_path(rootPath);
-        if (!std::filesystem::exists(rootPath.append("resources2.cfg")))
+        if (!std::filesystem::exists(rootPath.append("resources.cfg")))
         {
             printf("Could not find resources2.cfg in path: %s, exiting", rootPath.string().c_str());
             __debugbreak();

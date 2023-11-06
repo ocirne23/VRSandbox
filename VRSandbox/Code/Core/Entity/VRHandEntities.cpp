@@ -62,7 +62,7 @@ namespace VRHandEntities
 		graphicsComponent.pItem->getParentSceneNode()->setInheritOrientation(false); // Use tracking rotation instead of physics rotation
 		auto& handComponent = vrInput.addHandTrackingComponent(registry, entity, hand);
 		
-		btGeneric6DofSpringConstraint* pSpring = physics.addSpringJointComponent(registry, entity, physicsComponent.pBody, attachmentBody).pSpring;
+		btGeneric6DofSpring2Constraint* pSpring = physics.addSpringJointComponent(registry, entity, physicsComponent.pBody, attachmentBody).pSpring;
 		for (int i = 0; i < 3; ++i)
 		{
 			pSpring->enableSpring(i, true);

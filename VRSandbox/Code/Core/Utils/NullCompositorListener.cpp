@@ -51,12 +51,16 @@ void NullCompositorListener::syncCullCamera(void)
 //-------------------------------------------------------------------------
 void NullCompositorListener::syncCameraProjection(bool bForceUpdate)
 {
+    const float IPD = 0.06f; // eye separation
+
     const Ogre::Real camNear = mCamera->getNearClipDistance();
     const Ogre::Real camFar = mCamera->getFarClipDistance();
 
     if (mLastCamNear != camNear || mLastCamFar != camFar || bForceUpdate)
     {
         Ogre::Matrix4 eyeToHead[2] = { Ogre::Matrix4::IDENTITY, Ogre::Matrix4::IDENTITY };
+        eyeToHead[0].makeTrans(Ogre::Vector3(IPD * -0.5f, 0, 0));
+        eyeToHead[1].makeTrans(Ogre::Vector3(IPD * 0.5f, 0, 0));
         Ogre::Matrix4 projectionMatrixRS[2] = { mCamera->getProjectionMatrixWithRSDepth(),
                                                 mCamera->getProjectionMatrixWithRSDepth() };
 

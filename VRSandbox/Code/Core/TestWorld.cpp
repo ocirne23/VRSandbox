@@ -30,6 +30,7 @@ import Components.SceneComponent;
 
 import Systems.GraphicsSystem;
 import Systems.InputSystem;
+import Systems.PhysicsSystem;
 import Systems.VRInputSystem;
 
 import Utils.CameraController;
@@ -67,13 +68,20 @@ void TestWorld::createScene()
     TestEntities::createTestFloorEntity(m_registry, m_graphics, m_physics, m_scene);
 #if 1
     for (int i = 0; i < 10; ++i)
+        TestEntities::createTestCube(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-1, 1), Ogre::Math::RangeRandom(5, 10), Ogre::Math::RangeRandom(-1, 1)));
+    for (int i = 0; i < 10; ++i)
         TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-1, 1), Ogre::Math::RangeRandom(5, 10), Ogre::Math::RangeRandom(-1, 1)));
 #else
     for (int i = 0; i < 5000; ++i)
         TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-5, 5), Ogre::Math::RangeRandom(20, 100), Ogre::Math::RangeRandom(-5, 5)));
 #endif
-    TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(0, 1, 0));
-    TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(0, 1, 1));
+    entt::entity e1 = TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(2, 30, 0));
+    entt::entity e2 = TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(3, 30, 0));
+
+    auto c1 = m_registry.get<DynamicPhysicsComponent>(e1);
+    auto c2 = m_registry.get<DynamicPhysicsComponent>(e2);
+   // m_physics.addFixedJointComponent(m_registry, e1, c1.pBody, c2.pBody, { 0, 0, 0.5}, { 0, 0, -0.5 });
+    m_physics.addSpringJointComponent(m_registry, e1, c1.pBody, c2.pBody);
 
 
     Ogre::SceneManager* pSceneManager = m_graphics.getSceneManager();
@@ -102,9 +110,9 @@ void TestWorld::createScene()
     lightNode->setPosition(-10.0f, 10.0f, 10.0f);
     light->setDirection(Ogre::Vector3(1, -1, -1).normalisedCopy());
     light->setAttenuationBasedOnRadius(10.0f, 0.01f);
-
+    
     m_lightNodes[1] = lightNode;
-
+    /*
     light = pSceneManager->createLight();
     lightNode = rootNode->createChildSceneNode();
     lightNode->attachObject(light);
@@ -116,7 +124,7 @@ void TestWorld::createScene()
     light->setDirection(Ogre::Vector3(-1, -1, 1).normalisedCopy());
     light->setAttenuationBasedOnRadius(10.0f, 0.01f);
 
-    m_lightNodes[2] = lightNode;
+    m_lightNodes[2] = lightNode;*/
 }
 
 void TestWorld::update(double deltaSec)
@@ -125,5 +133,4 @@ void TestWorld::update(double deltaSec)
         m_handEntities[0] = VRHandEntities::createHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput, EHandType::LEFT);
     if (m_handEntities[1] == entt::null && m_vrInput.isHandTrackingActive(EHandType::RIGHT))
         m_handEntities[1] = VRHandEntities::createHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput, EHandType::RIGHT);
-
 }

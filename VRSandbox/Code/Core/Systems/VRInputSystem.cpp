@@ -24,9 +24,6 @@ VRInputSystem::VRInputSystem(vr::IVRSystem* pIVRSystem, GraphicsSystem& graphics
 	m_pIVRSystem(pIVRSystem),
 	m_graphics(graphics)
 {
-	memset(&m_leftHandSkeletonData, 0, sizeof(m_leftHandSkeletonData));
-	memset(&m_rightHandSkeletonData, 0, sizeof(m_rightHandSkeletonData));
-
 	if (m_pIVRSystem)
 	{
 		auto* pVrInput = vr::VRInput();
@@ -118,7 +115,7 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 			HandSkeletonData& handData = handComp.handType == EHandType::LEFT ? m_leftHandSkeletonData : m_rightHandSkeletonData;
 			m_graphics.setGraphicsRotation(grapComp, handData.handTransform.extractQuaternion());
 		});
-		
+	
 	auto updateHandGraphics = registry.view<const VRHandTrackingComponent, GraphicsComponent>();
 	updateHandGraphics.each([&](const VRHandTrackingComponent& handComp, GraphicsComponent& graphicsComp)
 		{
@@ -138,7 +135,7 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 
 VRHandTrackingComponent& VRInputSystem::addHandTrackingComponent(entt::registry& registry, entt::entity entity, EHandType handType)
 {
-	OGRE_ASSERT(handType < EHandType::COUNT); // TODO: more than 2 controllers for multiplayer?
+	OGRE_ASSERT(handType < EHandType::COUNT);
 
 	SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
 	VRHandTrackingComponent& hand = registry.emplace<VRHandTrackingComponent>(entity);

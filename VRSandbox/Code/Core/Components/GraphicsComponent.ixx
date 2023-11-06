@@ -1,5 +1,3 @@
-module;
-
 export module Components.GraphicsComponent;
 
 export namespace Ogre { class Item; }

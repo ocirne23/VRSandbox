@@ -1,5 +1,3 @@
-module;
-
 export module Components.DynamicPhysicsComponent;
 
 export class btRigidBody;

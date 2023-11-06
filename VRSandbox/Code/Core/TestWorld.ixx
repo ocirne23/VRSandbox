@@ -33,7 +33,7 @@ private:
 	SceneSystem& m_scene;
 	VRInputSystem& m_vrInput;
 
-	Ogre::SceneNode* m_lightNodes[3] = {};
+	Ogre::SceneNode* m_lightNodes[2] = {};
 	Ogre::SceneNode* m_controllerNodes[2] = {};
 	entt::entity m_handAnchorEntities[2] = { entt::null, entt::null };
 	entt::entity m_handEntities[2] = { entt::null, entt::null };

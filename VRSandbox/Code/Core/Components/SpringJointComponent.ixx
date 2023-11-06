@@ -1,10 +1,8 @@
-module;
-
 export module Components.SpringJointComponent;
 
-export class btGeneric6DofSpringConstraint;
+export class btGeneric6DofSpring2Constraint;
 
 export struct SpringJointComponent
 {
-	btGeneric6DofSpringConstraint* pSpring = nullptr;
+	btGeneric6DofSpring2Constraint* pSpring = nullptr;
 };

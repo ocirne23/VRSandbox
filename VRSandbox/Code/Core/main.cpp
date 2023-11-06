@@ -20,7 +20,7 @@ import TestWorld;
 
 const double FIXED_TIMESTEP_TIME = 1.0 / 60.0;
 
-const RenderMode RENDER_MODE = RenderMode::VR;
+const RenderMode RENDER_MODE = RenderMode::Desktop;
 
 int main(int argc, const char *argv[])
 {
@@ -40,11 +40,12 @@ int main(int argc, const char *argv[])
     SceneSystem scene(&graphics);
 
     Ogre::Camera* pCamera = graphics.getCamera();
-    pCamera->setPosition(Ogre::Vector3(0, 0, 1));
+    pCamera->setPosition(Ogre::Vector3(15, 15, 15));
     pCamera->lookAt(Ogre::Vector3(0, 0, 0));
 
-    CameraController cameraController(graphics.getRenderWindow(), graphics.getControllerNode(), 
+    CameraController cameraController(graphics.getRenderWindow(), graphics.getCameraNode(), 
         graphics.getCamera(), graphics.getRenderMode());
+
     MouseListener* pMouseListener = input.createMouseListener();
     pMouseListener->onMouseMoved = [&](const SDL_MouseMotionEvent& e)
     {
@@ -73,7 +74,10 @@ int main(int argc, const char *argv[])
         physics.update(deltaSec, PHYSICS_TIMESTEP, registry);
         input.update(deltaSec, registry);
         vrInput.update(deltaSec, registry);
-        //cameraController.update(timeSinceLast);
+
+        if (RENDER_MODE == RenderMode::Desktop)
+            cameraController.update(deltaSec);
+
         graphics.update(deltaSec, registry);
 
         testWorld.update(deltaSec);
@@ -82,8 +86,7 @@ int main(int argc, const char *argv[])
             Ogre::Threads::Sleep(500);
 
         Ogre::uint64 endTime = timer.getMicroseconds();
-        deltaSec = (endTime - startTime) / 1'000'000.0;
-        deltaSec = std::min(1.0, deltaSec); //Prevent from going haywire.
+        deltaSec = std::min(1.0, (endTime - startTime) / 1'000'000.0); // Prevent from going haywire.
         startTime = endTime;
     }
 

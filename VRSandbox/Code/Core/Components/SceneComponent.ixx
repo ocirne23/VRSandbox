@@ -1,5 +1,3 @@
-module;
-
 export module Components.SceneComponent;
 
 export namespace Ogre { class SceneNode; }
