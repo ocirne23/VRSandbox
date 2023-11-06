@@ -10,12 +10,12 @@ module Systems.PhysicsSystem;
 
 import Components.DynamicPhysicsComponent;
 import Components.StaticPhysicsComponent;
-
 import Components.KinematicPhysicsComponent;
 import Components.SceneComponent;
 import Components.SpringJointComponent;
 import Components.FixedJointComponent;
 import Utils.PhysicsMotionState;
+import Utils.PhysicsDebugDrawer;
 
 PhysicsSystem::PhysicsSystem() 
 {
@@ -72,6 +72,22 @@ void PhysicsSystem::update(double deltaSec, double fixedTimestep, entt::registry
 			nodeComp.pNode->setPosition(*reinterpret_cast<Ogre::Vector3*>(&physPos));
 			nodeComp.pNode->setOrientation(Ogre::Quaternion(physRot.w(), physRot.x(), physRot.y(), physRot.z()));
 		});*/
+
+	m_pDynamicsWorld->debugDrawWorld();
+}
+
+void PhysicsSystem::setDebugDrawer(DebugDrawer* pDebugDrawer)
+{
+	m_pPhysicsDebugDrawer.reset(new PhysicsDebugDrawer(pDebugDrawer));
+	m_pDynamicsWorld->setDebugDrawer(m_pPhysicsDebugDrawer.get());
+}
+
+void PhysicsSystem::setEnableDebugDraw(bool enable)
+{
+	if (enable)
+		m_pPhysicsDebugDrawer->setDebugMode(btIDebugDraw::DBG_DrawWireframe | btIDebugDraw::DBG_DrawConstraints | btIDebugDraw::DBG_DrawContactPoints);
+	else
+		m_pPhysicsDebugDrawer->setDebugMode(btIDebugDraw::DBG_NoDebug);
 }
 
 btCollisionShape* PhysicsSystem::createBoxShape(const Ogre::Vector3& dimensions)

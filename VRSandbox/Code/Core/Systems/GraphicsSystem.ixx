@@ -60,6 +60,7 @@ public:
     vr::IVRSystem* getHMD() const { return m_pHMD; }
     Ogre::SceneNode* getCameraNode() const { return m_pCameraNode; }
     RenderMode getRenderMode() const { return m_renderMode; }
+    DebugDrawer* getDebugDrawer() const { return m_pDebugDrawer.get(); }
 
 private:
 

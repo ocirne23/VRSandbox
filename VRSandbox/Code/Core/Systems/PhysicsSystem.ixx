@@ -15,6 +15,8 @@ export class btSequentialImpulseConstraintSolver;
 export class btDiscreteDynamicsWorld;
 export class btRigidBody;
 export class btCollisionShape;
+export class DebugDrawer;
+export class PhysicsDebugDrawer;
 export struct DynamicPhysicsComponent;
 export struct StaticPhysicsComponent;
 export struct KinematicPhysicsComponent;
@@ -30,6 +32,8 @@ public:
 	PhysicsSystem(const PhysicsSystem& copy) = delete;
 
 	void update(double deltaSec, double fixedTimestep, entt::registry& registry);
+	void setDebugDrawer(DebugDrawer* pDebugDrawer);
+	void setEnableDebugDraw(bool enable);
 
 	btCollisionShape* createBoxShape(const Ogre::Vector3& dimensions);
 	btCollisionShape* createSphereShape(Ogre::Real radius);
@@ -66,4 +70,5 @@ private:
 	std::unique_ptr<btBroadphaseInterface> m_pOverlappingPairCache;
 	std::unique_ptr<btSequentialImpulseConstraintSolver> m_pSolver;
 	std::unique_ptr<btDiscreteDynamicsWorld> m_pDynamicsWorld;
+	std::unique_ptr<PhysicsDebugDrawer> m_pPhysicsDebugDrawer;
 };

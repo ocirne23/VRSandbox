@@ -29,6 +29,8 @@ int main(int argc, const char *argv[])
     entt::registry registry;
     PhysicsSystem physics;
     GraphicsSystem graphics("test", RENDER_MODE);
+    physics.setDebugDrawer(graphics.getDebugDrawer());
+    physics.setEnableDebugDraw(false);
     
     InputSystem input(&graphics);
     input.setWantMouseGrab(true);
