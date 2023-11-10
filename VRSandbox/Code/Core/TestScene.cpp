@@ -20,7 +20,7 @@ module;
 #include <entt/entity/registry.hpp>
 #include <btBulletDynamicsCommon.h>
 
-module TestWorld;
+module TestScene;
 
 import Components.VRHandTrackingComponent;
 
@@ -39,6 +39,8 @@ import Utils.DebugDrawer;
 import Entity.TestEntities;
 import Entity.VRHandEntities;
 
+import World;
+
 extern const bool c_useRDM;
 
 // Set this to false to disable Radial Density Mask (RDM) optimization
@@ -49,24 +51,19 @@ extern const bool c_useRDM;
 // causing glitches in NVIDIA GPUs in Linux, see https://github.com/OGRECave/ogre-next/issues/53
 const bool c_useRDM = true;
 
-TestWorld::TestWorld(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene,
-    VRInputSystem& vrInput) :
-    m_registry(registry),
-    m_graphics(graphics),
-    m_physics(physics),
-    m_scene(scene),
-    m_vrInput(vrInput)
+TestScene::TestScene(World& world) : m_world(world)
 {
 }
 
-TestWorld::~TestWorld()
+TestScene::~TestScene()
 {
 }
 
-void TestWorld::createScene()
+void TestScene::createScene()
 {
-    TestEntities::createTestFloorEntity(m_registry, m_graphics, m_physics, m_scene);
-#if 1
+    TestEntities::createTestFloorEntity(m_world);
+#if 0
+    {
     const Ogre::Vector3 minSpawn(-3, 5, -3);
     const Ogre::Vector3 maxSpawn(3, 10, 3);
     for (int i = 0; i < 10; ++i) TestEntities::createTestCube   (m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
@@ -75,20 +72,18 @@ void TestWorld::createScene()
     for (int i = 0; i < 10; ++i) TestEntities::createTestCapsule(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
     for (int i = 0; i < 10; ++i) TestEntities::createTestRamp   (m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
     for (int i = 0; i < 10; ++i) TestEntities::createTestWedge  (m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
-#else
-    for (int i = 0; i < 5000; ++i)
-        TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(Ogre::Math::RangeRandom(-5, 5), Ogre::Math::RangeRandom(20, 100), Ogre::Math::RangeRandom(-5, 5)));
+    }
 #endif
-    entt::entity e1 = TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(2, 30, 0));
-    entt::entity e2 = TestEntities::createTestSphere(m_registry, m_graphics, m_physics, m_scene, Ogre::Vector3(3, 30, 0));
+    m_waterEntity = TestEntities::createTestWater(m_world, Ogre::Vector3(0, 0, 0));
 
-    auto c1 = m_registry.get<DynamicPhysicsComponent>(e1);
-    auto c2 = m_registry.get<DynamicPhysicsComponent>(e2);
-    // m_physics.addFixedJointComponent(m_registry, e1, c1.pBody, c2.pBody, { 0, 0, 0.5}, { 0, 0, -0.5 });
-    m_physics.addSpringJointComponent(m_registry, e1, c1.pBody, c2.pBody);
+    m_boatEntity = TestEntities::createTestBoat(m_world, Ogre::Vector3(0, 15, 0));
+    const Ogre::Vector3 minSpawn(-20, 100, -20);
+    const Ogre::Vector3 maxSpawn(20, 5000, 20);
 
 
-    Ogre::SceneManager* pSceneManager = m_graphics.getSceneManager();
+    for (int i = 0; i < 1000; ++i) TestEntities::createTestSphere(m_world, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
+
+    Ogre::SceneManager* pSceneManager = m_world.getGraphics().getSceneManager();
 
     Ogre::SceneNode* rootNode = pSceneManager->getRootSceneNode();
 
@@ -131,10 +126,15 @@ void TestWorld::createScene()
     m_lightNodes[2] = lightNode;*/
 }
 
-void TestWorld::update(double deltaSec)
+float wave = 0.0f;
+void TestScene::update(double deltaSec)
 {
+
+}
+
+/*
     if (m_handEntities[0] == entt::null && m_vrInput.isHandTrackingActive(EHandType::LEFT))
         m_handEntities[0] = VRHandEntities::createHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput, EHandType::LEFT);
     if (m_handEntities[1] == entt::null && m_vrInput.isHandTrackingActive(EHandType::RIGHT))
         m_handEntities[1] = VRHandEntities::createHand(m_registry, m_graphics, m_physics, m_scene, m_vrInput, EHandType::RIGHT);
-}
+*/

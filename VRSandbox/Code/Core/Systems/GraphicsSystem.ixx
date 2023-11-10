@@ -19,6 +19,7 @@ export class OpenVRCompositorListener;
 export class NullCompositorListener;
 export class DebugDrawer;
 export struct GraphicsComponent;
+export class World;
 
 export enum class RenderMode
 {
@@ -30,26 +31,21 @@ export class GraphicsSystem
 {
 public:
 
-    GraphicsSystem(const char* pWindowTitle, RenderMode renderMode);
+    GraphicsSystem(World& world, entt::registry& registry);
     virtual ~GraphicsSystem();
     GraphicsSystem(const GraphicsSystem& copy) = delete;
 
-    void update(double deltaSec, entt::registry& registry);
+    void initialize(const char* pWindowTitle, RenderMode renderMode);
 
-    GraphicsComponent& addGraphicsComponent(entt::registry& registry, entt::entity entity, Ogre::String meshName, Ogre::IdString datablockName = Ogre::IdString(""));
-    void removeGraphicsComponent(entt::registry& registry, entt::entity entity);
+    void update(double deltaSec);
 
-    void setGraphicsOffset(GraphicsComponent& comp, const Ogre::Vector3& offset);
-    void setGraphicsOffset(entt::registry& registry, entt::entity entity, const Ogre::Vector3& offset);
-
-    void setGraphicsScale(GraphicsComponent& comp, const Ogre::Vector3& scale);
-    void setGraphicsScale(entt::registry& registry, entt::entity entity, const Ogre::Vector3& scale);
-
-    void setGraphicsRotation(GraphicsComponent& comp, const Ogre::Quaternion& rot);
-    void setGraphicsRotation(entt::registry& registry, entt::entity entity, const Ogre::Quaternion& rot);
+    GraphicsComponent& addGraphicsComponent(entt::entity entity, Ogre::String meshName, Ogre::IdString datablockName = Ogre::IdString(""));
+    void removeGraphicsComponent(entt::entity entity);
 
     void handleWindowEvent(SDL_Event& evt);
     void setWindowTitle(std::string str);
+    bool isWindowVisible() const;
+    bool isWindowFocused() const;
 
     Ogre::SceneManager* getSceneManager() const { return m_pSceneManager; }
     Ogre::Root* getRoot() const { return m_pRoot.get(); }
@@ -67,6 +63,9 @@ private:
     void initializeWindow(const char* pWindowTitle);
 
 private:
+
+    World& m_world;
+    entt::registry& m_registry;
 
     RenderMode m_renderMode;
 

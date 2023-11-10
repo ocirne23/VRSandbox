@@ -20,10 +20,14 @@ import Components.VRHandTrackingComponent;
 
 import Utils.VRMathUtils;
 
-VRInputSystem::VRInputSystem(vr::IVRSystem* pIVRSystem, GraphicsSystem& graphics) :
-	m_pIVRSystem(pIVRSystem),
-	m_graphics(graphics)
+VRInputSystem::VRInputSystem(World& world, entt::registry& registry) : m_world(world), m_registry(registry) {}
+VRInputSystem::~VRInputSystem() {}
+
+void VRInputSystem::initialize(vr::IVRSystem* pIVRSystem, GraphicsSystem* pGraphics)
 {
+	m_pIVRSystem = pIVRSystem;
+	m_pGraphics = pGraphics;
+
 	if (m_pIVRSystem)
 	{
 		auto* pVrInput = vr::VRInput();
@@ -49,12 +53,7 @@ VRInputSystem::VRInputSystem(vr::IVRSystem* pIVRSystem, GraphicsSystem& graphics
 	}
 }
 
-VRInputSystem::~VRInputSystem()
-{
-
-}
-
-void VRInputSystem::update(double deltaSec, entt::registry& registry)
+void VRInputSystem::update(double deltaSec)
 {
 	if (m_pIVRSystem)
 	{
@@ -84,7 +83,7 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 		m_isHandTrackingActive[(int)EHandType::RIGHT] = getVRSkeletalData(m_rightHandSkeletonData, m_actionRightHandSkeleton);
 	}
 
-	auto updateHandNodes = registry.view<VRHandTrackingComponent>();
+	auto updateHandNodes = m_registry.view<VRHandTrackingComponent>();
 	updateHandNodes.each([&](VRHandTrackingComponent& handComp)
 		{
 			if ((int)handComp.handType >= (int)EHandType::COUNT || !isHandTrackingActive(handComp.handType))
@@ -98,7 +97,7 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 			}
 		});
 	
-	auto updateHandTransformNoPhysics = registry.view<const VRHandTrackingComponent, SceneComponent>(entt::exclude<DynamicPhysicsComponent>);
+	auto updateHandTransformNoPhysics = m_registry.view<const VRHandTrackingComponent, SceneComponent>(entt::exclude<DynamicPhysicsComponent>);
 	updateHandTransformNoPhysics.each([&](const VRHandTrackingComponent& handComp, SceneComponent& sceneComp)
 		{
 			if (handComp.handType >= EHandType::COUNT || !isHandTrackingActive(handComp.handType))
@@ -109,14 +108,14 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 			sceneComp.pNode->setOrientation(handData.handTransform.extractQuaternion());
 		});
 	
-	auto updatePhysicsHandRotation = registry.view<const VRHandTrackingComponent, GraphicsComponent, DynamicPhysicsComponent>();
+	auto updatePhysicsHandRotation = m_registry.view<const VRHandTrackingComponent, GraphicsComponent, DynamicPhysicsComponent>();
 	updatePhysicsHandRotation.each([&](const VRHandTrackingComponent& handComp, GraphicsComponent& grapComp, DynamicPhysicsComponent& physComp)
 		{
 			HandSkeletonData& handData = handComp.handType == EHandType::LEFT ? m_leftHandSkeletonData : m_rightHandSkeletonData;
-			m_graphics.setGraphicsRotation(grapComp, handData.handTransform.extractQuaternion());
+			grapComp.setRotation(handData.handTransform.extractQuaternion());
 		});
 	
-	auto updateHandGraphics = registry.view<const VRHandTrackingComponent, GraphicsComponent>();
+	auto updateHandGraphics = m_registry.view<const VRHandTrackingComponent, GraphicsComponent>();
 	updateHandGraphics.each([&](const VRHandTrackingComponent& handComp, GraphicsComponent& graphicsComp)
 		{
 			if (handComp.handType >= EHandType::COUNT || !isHandTrackingActive(handComp.handType))
@@ -133,12 +132,12 @@ void VRInputSystem::update(double deltaSec, entt::registry& registry)
 		});
 }
 
-VRHandTrackingComponent& VRInputSystem::addHandTrackingComponent(entt::registry& registry, entt::entity entity, EHandType handType)
+VRHandTrackingComponent& VRInputSystem::addHandTrackingComponent(entt::entity entity, EHandType handType)
 {
 	OGRE_ASSERT(handType < EHandType::COUNT);
 
-	SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
-	VRHandTrackingComponent& hand = registry.emplace<VRHandTrackingComponent>(entity);
+	SceneComponent& sceneComponent = m_registry.get<SceneComponent>(entity);
+	VRHandTrackingComponent& hand = m_registry.emplace<VRHandTrackingComponent>(entity);
 	hand.handType = handType;
 
 	Ogre::SceneNode* handRootNode = sceneComponent.pNode->createChildSceneNode(Ogre::SCENE_DYNAMIC);
@@ -165,11 +164,11 @@ VRHandTrackingComponent& VRInputSystem::addHandTrackingComponent(entt::registry&
 	return hand;
 }
 
-void VRInputSystem::removeHandTrackingComponent(entt::registry& registry, entt::entity entity)
+void VRInputSystem::removeHandTrackingComponent(entt::entity entity)
 {
-	VRHandTrackingComponent& hand = registry.get<VRHandTrackingComponent>(entity);
-	m_graphics.getSceneManager()->getRootSceneNode(Ogre::SCENE_DYNAMIC)->removeChild(hand.pArrSceneNodes[(int)EHandSkeletonBone::Root]);
-	registry.erase<VRHandTrackingComponent>(entity);
+	VRHandTrackingComponent& hand = m_registry.get<VRHandTrackingComponent>(entity);
+	m_pGraphics->getSceneManager()->getRootSceneNode(Ogre::SCENE_DYNAMIC)->removeChild(hand.pArrSceneNodes[(int)EHandSkeletonBone::Root]);
+	m_registry.erase<VRHandTrackingComponent>(entity);
 }
 
 bool VRInputSystem::isHandTrackingActive(EHandType hand)

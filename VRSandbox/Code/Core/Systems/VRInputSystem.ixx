@@ -7,6 +7,7 @@ export module Systems.VRInputSystem;
 import Utils.HandSkeletonData;
 import Utils.EHandType;
 
+export class World;
 export struct VRHandTrackingComponent;
 export class GraphicsSystem;
 
@@ -19,14 +20,16 @@ export class VRInputSystem
 {
 public:
 
-	VRInputSystem(vr::IVRSystem* pIVRSystem, GraphicsSystem& graphics);
+	VRInputSystem(World& world, entt::registry& registry);
 	virtual ~VRInputSystem();
 	VRInputSystem(const VRInputSystem& copy) = delete;
 
-	void update(double deltaSec, entt::registry& registry);
+    void initialize(vr::IVRSystem* pIVRSystem, GraphicsSystem* pGraphics);
 
-    VRHandTrackingComponent& addHandTrackingComponent(entt::registry& registry, entt::entity entity, EHandType handType);
-    void removeHandTrackingComponent(entt::registry& registry, entt::entity entity);
+	void update(double deltaSec);
+
+    VRHandTrackingComponent& addHandTrackingComponent(entt::entity entity, EHandType handType);
+    void removeHandTrackingComponent(entt::entity entity);
 
     bool isHandTrackingActive(EHandType hand);
 
@@ -37,8 +40,11 @@ private:
 
 private:
 
+    World& m_world;
+    entt::registry& m_registry;
+
 	vr::IVRSystem* m_pIVRSystem = nullptr;
-    GraphicsSystem& m_graphics;
+    GraphicsSystem* m_pGraphics;
 
     vr::VRActionSetHandle_t m_actionsetDemo = 0;
 

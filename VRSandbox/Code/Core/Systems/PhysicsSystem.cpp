@@ -28,7 +28,39 @@ import Components.FixedJointComponent;
 import Utils.PhysicsMotionState;
 import Utils.PhysicsDebugDrawer;
 
-PhysicsSystem::PhysicsSystem() 
+import Utils.Owner;
+
+PhysicsSystem::PhysicsSystem(World& world, entt::registry& registry) : m_world(world), m_registry(registry)
+{
+}
+
+PhysicsSystem::~PhysicsSystem() 
+{
+	OGRE_ASSERT(m_pDynamicsWorld->getNumCollisionObjects() == 0);
+
+	for (auto& it : m_triangleShapeMap)
+	{
+		gsl::owner<btCollisionShape*> pShape = it.second.first;
+		delete pShape;
+		gsl::owner<btTriangleMesh*> pTriangleMesh = it.second.second;
+		delete pTriangleMesh;
+	}
+	m_triangleShapeMap.clear();
+
+	while (!m_shapes.empty())
+		destroyShape(m_shapes.back());
+
+	while (!m_bodies.empty()) 
+		destroyRigidBody(m_bodies.back());
+
+	m_pDynamicsWorld.release();
+	m_pSolver.release();
+	m_pOverlappingPairCache.release();
+	m_pDispatcher.release();
+	m_pCollisionConfiguration.release();
+}
+
+void PhysicsSystem::initialize()
 {
 	m_pCollisionConfiguration = std::make_unique<btDefaultCollisionConfiguration>();
 	m_pDispatcher = std::make_unique<btCollisionDispatcher>(m_pCollisionConfiguration.get());
@@ -38,24 +70,9 @@ PhysicsSystem::PhysicsSystem()
 	m_pDynamicsWorld->setGravity(btVector3(0, -9.81, 0));
 }
 
-PhysicsSystem::~PhysicsSystem() 
+void PhysicsSystem::update(double deltaSec, double fixedTimestep)
 {
-	//OGRE_ASSERT(m_pDynamicsWorld->getNumCollisionObjects() == 0);
-	
-	for (auto* pShape : m_shapes)
-		delete pShape;
-	m_shapes.clear();
-
-	m_pDynamicsWorld.release();
-	m_pSolver.release();
-	m_pOverlappingPairCache.release();
-	m_pDispatcher.release();
-	m_pCollisionConfiguration.release();
-}
-
-void PhysicsSystem::update(double deltaSec, double fixedTimestep, entt::registry& registry)
-{
-	auto staticSync = registry.view<StaticPhysicsComponent, SceneComponent>();
+	auto staticSync = m_registry.view<StaticPhysicsComponent, SceneComponent>();
 	staticSync.each([](StaticPhysicsComponent& physComp, SceneComponent& nodeComp)
 		{
 			auto pos = nodeComp.pNode->_getDerivedPosition();
@@ -63,7 +80,7 @@ void PhysicsSystem::update(double deltaSec, double fixedTimestep, entt::registry
 			physComp.pBody->setWorldTransform(btTransform(btQuaternion(rot.x, rot.y, rot.z, rot.w), btVector3(pos.x, pos.y, pos.z)));
 		});
 
-	auto kinematicSync = registry.view<KinematicPhysicsComponent, SceneComponent>();
+	auto kinematicSync = m_registry.view<KinematicPhysicsComponent, SceneComponent>();
 	kinematicSync.each([](KinematicPhysicsComponent& physComp, SceneComponent& nodeComp)
 		{
 			auto pos = nodeComp.pNode->_getDerivedPosition();
@@ -74,7 +91,7 @@ void PhysicsSystem::update(double deltaSec, double fixedTimestep, entt::registry
 	m_pDynamicsWorld->stepSimulation(btScalar(deltaSec), 1, btScalar(fixedTimestep));
 
 	/*
-	auto dynamicSync = registry.view<DynamicPhysicsComponent, SceneComponent>();
+	auto dynamicSync = m_registry.view<DynamicPhysicsComponent, SceneComponent>();
 	dynamicSync.each([](DynamicPhysicsComponent& physComp, SceneComponent& nodeComp)
 		{
 			auto& trans = physComp.pBody->getWorldTransform();
@@ -101,60 +118,52 @@ void PhysicsSystem::setEnableDebugDraw(bool enable)
 		m_pPhysicsDebugDrawer->setDebugMode(btIDebugDraw::DBG_NoDebug);
 }
 
+//TODO: reuse shapes if dimensions are same?
+
 btCollisionShape* PhysicsSystem::createBoxShape(const Ogre::Vector3& dimensions)
 {
-	//TODO: reuse shapes if dimensions are same?
-	btCollisionShape* pShape = new btBoxShape(btVector3(btScalar(dimensions.x), btScalar(dimensions.y), btScalar(dimensions.z)));
-	pShape->setUserIndex(1);
-	m_shapes.emplace_back(pShape);
-	return pShape;
+	return m_shapes.emplace_back(new btBoxShape(btVector3(btScalar(dimensions.x), btScalar(dimensions.y), btScalar(dimensions.z))));
 }
 
 btCollisionShape* PhysicsSystem::createSphereShape(Ogre::Real radius)
 {
-	btCollisionShape* pShape = new btSphereShape(btScalar(radius));
-	pShape->setUserIndex(1);
-	m_shapes.emplace_back(pShape);
-	return pShape;
+	return m_shapes.emplace_back(new btSphereShape(btScalar(radius)));
 }
 
 btCollisionShape* PhysicsSystem::createConeShape(Ogre::Real radius, Ogre::Real height)
 {
-	btCollisionShape* pShape = new btConeShape(btScalar(radius), btScalar(height * 2.0f));
-	pShape->setUserIndex(1);
-	m_shapes.emplace_back(pShape);
-	return pShape;
+	return m_shapes.emplace_back(new btConeShape(btScalar(radius), btScalar(height * 2.0f)));
 }
 
 btCollisionShape* PhysicsSystem::createCapsuleShape(Ogre::Real radius, Ogre::Real height)
 {
-	btCollisionShape* pShape = new btCapsuleShape(btScalar(radius), btScalar(height * 2.0f));
-	pShape->setUserIndex(1);
-	m_shapes.emplace_back(pShape);
-	return pShape;
+	return m_shapes.emplace_back(new btCapsuleShape(btScalar(radius), btScalar(height * 2.0f)));
 }
 
 void PhysicsSystem::destroyShape(btCollisionShape* pShape)
 {
-	OGRE_ASSERT(pShape->getUserIndex() == 1);
+	OGRE_ASSERT(pShape->getUserIndex() == 0);
 	auto it = std::find(m_shapes.begin(), m_shapes.end(), pShape);
 	OGRE_ASSERT(it != m_shapes.end());
+	gsl::owner<btCollisionShape*> pShapeOwner = *it;
+	delete pShapeOwner;
 	m_shapes.erase(it);
-	delete pShape;
 }
 
-btRigidBody* PhysicsSystem::createRigidBody(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, float mass)
+btRigidBody* PhysicsSystem::createRigidBody(entt::entity entity, btCollisionShape* pShape, float mass)
 {
 	btVector3 localInertia(0, 0, 0);
-	if (pShape && mass >= 0.0f)
+	pShape->setUserIndex(pShape->getUserIndex() + 1);
+	if (mass >= 0.0f)
 	{
 		if (pShape->getShapeType() == EMPTY_SHAPE_PROXYTYPE)
 			btSphereShape(0.1f).calculateLocalInertia(mass, localInertia);
 		else
 			pShape->calculateLocalInertia(mass, localInertia);
 	}
-	btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, new PhysicsMotionState(entity, registry), pShape, localInertia);
-	return new btRigidBody(rbInfo);
+	// PhysicsMotionState will be cleaned up on destruction of the body
+	btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, new PhysicsMotionState(entity, m_registry), pShape, localInertia);
+	return m_bodies.emplace_back(new btRigidBody(rbInfo));
 }
 
 void PhysicsSystem::destroyRigidBody(btRigidBody* pBody)
@@ -170,50 +179,54 @@ void PhysicsSystem::destroyRigidBody(btRigidBody* pBody)
 	const auto shape = pBody->getCollisionShape();
 	const int userCount = shape->getUserIndex();
 	OGRE_ASSERT(userCount >= 1);
-	if (userCount <= 1)
+	shape->setUserIndex(userCount - 1);
+	if (userCount <= 0)
 		destroyShape(shape);
-	else
-		shape->setUserIndex(userCount - 1);
-	delete pBody;
+
+	auto it = std::find(m_bodies.begin(), m_bodies.end(), pBody);
+	OGRE_ASSERT(it != m_bodies.end());
+	gsl::owner<btRigidBody*> pBodyOwner = *it;
+	delete pBodyOwner;
+	m_bodies.erase(it);
 }
 
-DynamicPhysicsComponent& PhysicsSystem::addDynamicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape, float mass)
+DynamicPhysicsComponent& PhysicsSystem::addDynamicPhysicsComponent(entt::entity entity, btCollisionShape* pShape, float mass)
 {
-	OGRE_ASSERT(registry.try_get<SceneComponent>(entity));
+	OGRE_ASSERT(m_registry.try_get<SceneComponent>(entity));
 	OGRE_ASSERT(mass > 0.0f);
-	SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
+	SceneComponent& sceneComponent = m_registry.get<SceneComponent>(entity);
 	OGRE_ASSERT(!sceneComponent.pNode->isStatic());
 
-	DynamicPhysicsComponent& component = registry.emplace<DynamicPhysicsComponent>(entity);
-	component.pBody = createRigidBody(registry, entity, pShape, mass);
+	DynamicPhysicsComponent& component = m_registry.emplace<DynamicPhysicsComponent>(entity);
+	component.pBody = createRigidBody(entity, pShape, mass);
 
 	m_pDynamicsWorld->addRigidBody(component.pBody);
 	OGRE_ASSERT(!component.pBody->isStaticOrKinematicObject());
 
 	return component;
 }
-StaticPhysicsComponent& PhysicsSystem::addStaticPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape)
+StaticPhysicsComponent& PhysicsSystem::addStaticPhysicsComponent(entt::entity entity, btCollisionShape* pShape)
 {
-	OGRE_ASSERT(registry.try_get<SceneComponent>(entity));
-	SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
+	OGRE_ASSERT(m_registry.try_get<SceneComponent>(entity));
+	SceneComponent& sceneComponent = m_registry.get<SceneComponent>(entity);
 	OGRE_ASSERT(sceneComponent.pNode->isStatic());
 
-	StaticPhysicsComponent& component = registry.emplace<StaticPhysicsComponent>(entity);
-	component.pBody = createRigidBody(registry, entity, pShape, 0.0f);
+	StaticPhysicsComponent& component = m_registry.emplace<StaticPhysicsComponent>(entity);
+	component.pBody = createRigidBody(entity, pShape, 0.0f);
 	component.pBody->setCollisionFlags(component.pBody->getCollisionFlags() | btCollisionObject::CF_STATIC_OBJECT);
 	m_pDynamicsWorld->addRigidBody(component.pBody);
 
 	return component;
 }
 
-KinematicPhysicsComponent& PhysicsSystem::addKinematicPhysicsComponent(entt::registry& registry, entt::entity entity, btCollisionShape* pShape)
+KinematicPhysicsComponent& PhysicsSystem::addKinematicPhysicsComponent(entt::entity entity, btCollisionShape* pShape)
 {
-	OGRE_ASSERT(registry.try_get<SceneComponent>(entity));
-	SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
+	OGRE_ASSERT(m_registry.try_get<SceneComponent>(entity));
+	SceneComponent& sceneComponent = m_registry.get<SceneComponent>(entity);
 	OGRE_ASSERT(!sceneComponent.pNode->isStatic());
 
-	KinematicPhysicsComponent& component = registry.emplace<KinematicPhysicsComponent>(entity);
-	component.pBody = createRigidBody(registry, entity, pShape, 0.0f);
+	KinematicPhysicsComponent& component = m_registry.emplace<KinematicPhysicsComponent>(entity);
+	component.pBody = createRigidBody(entity, pShape, 0.0f);
 
 	auto collisionFlags = component.pBody->getCollisionFlags();
 	collisionFlags &= ~btCollisionObject::CF_STATIC_OBJECT;
@@ -226,12 +239,12 @@ KinematicPhysicsComponent& PhysicsSystem::addKinematicPhysicsComponent(entt::reg
 	return component;
 }
 
-SpringJointComponent& PhysicsSystem::addSpringJointComponent(entt::registry& registry, entt::entity entity, 
+SpringJointComponent& PhysicsSystem::addSpringJointComponent(entt::entity entity, 
 	btRigidBody* pBody1, btRigidBody* pBody2, float stiffness, float damping,
 	const Ogre::Vector3& attach1, const Ogre::Vector3& attach2, 
 	const Ogre::Vector3& limitMin, const Ogre::Vector3& limitMax)
 {
-	SpringJointComponent& springComponent = registry.emplace<SpringJointComponent>(entity);
+	SpringJointComponent& springComponent = m_registry.emplace<SpringJointComponent>(entity);
 	btGeneric6DofSpring2Constraint* pSpring = new btGeneric6DofSpring2Constraint(*pBody1, *pBody2,
 		btTransform(btQuaternion::getIdentity(), { attach1.x, attach1.y, attach1.z }),
 		btTransform(btQuaternion::getIdentity(), { attach2.x, attach2.y, attach2.z }));
@@ -252,9 +265,9 @@ SpringJointComponent& PhysicsSystem::addSpringJointComponent(entt::registry& reg
 	return springComponent;
 }
 
-FixedJointComponent& PhysicsSystem::addFixedJointComponent(entt::registry& registry, entt::entity entity, btRigidBody* pBody1, btRigidBody* pBody2, const Ogre::Vector3& attach1, const Ogre::Vector3& attach2)
+FixedJointComponent& PhysicsSystem::addFixedJointComponent(entt::entity entity, btRigidBody* pBody1, btRigidBody* pBody2, const Ogre::Vector3& attach1, const Ogre::Vector3& attach2)
 {
-	FixedJointComponent& fixedJointComponent = registry.emplace<FixedJointComponent>(entity);
+	FixedJointComponent& fixedJointComponent = m_registry.emplace<FixedJointComponent>(entity);
 	btFixedConstraint* pJoint = new btFixedConstraint(*pBody1, *pBody2,
 		btTransform(btQuaternion::getIdentity(), { attach1.x, attach1.y, attach1.z }),
 		btTransform(btQuaternion::getIdentity(), { attach2.x, attach2.y, attach2.z }));
@@ -263,58 +276,54 @@ FixedJointComponent& PhysicsSystem::addFixedJointComponent(entt::registry& regis
 	return fixedJointComponent;
 }
 
-void PhysicsSystem::removeDynamicPhysicsComponent(entt::registry& registry, entt::entity entity)
+void PhysicsSystem::removeDynamicPhysicsComponent(entt::entity entity)
 {
-	const auto& component = registry.get<DynamicPhysicsComponent>(entity);
+	const auto& component = m_registry.get<DynamicPhysicsComponent>(entity);
 	destroyRigidBody(component.pBody);
-	size_t numRemoved = registry.remove<DynamicPhysicsComponent>(entity);
+	size_t numRemoved = m_registry.remove<DynamicPhysicsComponent>(entity);
 	OGRE_ASSERT(numRemoved == 1);
 }
 
-void PhysicsSystem::removeStaticPhysicsComponent(entt::registry& registry, entt::entity entity)
+void PhysicsSystem::removeStaticPhysicsComponent(entt::entity entity)
 {
-	const auto& component = registry.get<StaticPhysicsComponent>(entity);
+	const auto& component = m_registry.get<StaticPhysicsComponent>(entity);
 	destroyRigidBody(component.pBody);
-	size_t numRemoved = registry.remove<StaticPhysicsComponent>(entity);
+	size_t numRemoved = m_registry.remove<StaticPhysicsComponent>(entity);
 	OGRE_ASSERT(numRemoved == 1);
 }
 
-void PhysicsSystem::removeKinematicPhysicsComponent(entt::registry& registry, entt::entity entity)
+void PhysicsSystem::removeKinematicPhysicsComponent(entt::entity entity)
 {
-	const auto& component = registry.get<KinematicPhysicsComponent>(entity);
+	const auto& component = m_registry.get<KinematicPhysicsComponent>(entity);
 	destroyRigidBody(component.pBody);
-	size_t numRemoved = registry.remove<KinematicPhysicsComponent>(entity);
+	size_t numRemoved = m_registry.remove<KinematicPhysicsComponent>(entity);
 	OGRE_ASSERT(numRemoved == 1);
 }
 
-void PhysicsSystem::removeSpringJointComponent(entt::registry& registry, entt::entity entity)
+void PhysicsSystem::removeSpringJointComponent(entt::entity entity)
 {
-	const auto& component = registry.get<SpringJointComponent>(entity);
+	const auto& component = m_registry.get<SpringJointComponent>(entity);
 	m_pDynamicsWorld->removeConstraint(component.pSpring);
 	delete component.pSpring;
-	size_t numRemoved = registry.remove<SpringJointComponent>(entity);
+	size_t numRemoved = m_registry.remove<SpringJointComponent>(entity);
 	OGRE_ASSERT(numRemoved == 1);
 }
 
-void PhysicsSystem::removeFixedJointComponent(entt::registry& registry, entt::entity entity)
+void PhysicsSystem::removeFixedJointComponent(entt::entity entity)
 {
-	const auto& component = registry.get<FixedJointComponent>(entity);
+	const auto& component = m_registry.get<FixedJointComponent>(entity);
 	m_pDynamicsWorld->removeConstraint(component.pJoint);
 	delete component.pJoint;
-	size_t numRemoved = registry.remove<FixedJointComponent>(entity);
+	size_t numRemoved = m_registry.remove<FixedJointComponent>(entity);
 	OGRE_ASSERT(numRemoved == 1);
 }
 
-btCollisionShape* PhysicsSystem::createTriangleShapeFromOgreMesh(Ogre::String meshName)
+btCollisionShape* PhysicsSystem::createTriangleShapeFromOgreMesh(Ogre::String meshName, Ogre::Vector3 scale, Ogre::Vector3 position, Ogre::Quaternion orient)
 {
 	if (m_triangleShapeMap.find(meshName) != m_triangleShapeMap.end())
-		return m_triangleShapeMap[meshName];
+		return m_triangleShapeMap[meshName].first;
 
 	Ogre::MeshPtr mesh = Ogre::MeshManager::getSingleton().load(meshName, Ogre::ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME);
-
-	const Ogre::Vector3 position = Ogre::Vector3(0, 0, 0);
-	const Ogre::Quaternion& orient = Ogre::Quaternion::IDENTITY;
-	const Ogre::Vector3 scale = Ogre::Vector3(1, 1, 1);
 
 	size_t numVertices = 0;
 	size_t numIndices = 0;
@@ -330,8 +339,8 @@ btCollisionShape* PhysicsSystem::createTriangleShapeFromOgreMesh(Ogre::String me
 		subMeshIterator++;
 	}
 
-	Ogre::Vector3* vertices = new Ogre::Vector3[numVertices];
-	Ogre::uint32* indices = new Ogre::uint32[numIndices];
+	std::unique_ptr<Ogre::Vector3[]> vertices(new Ogre::Vector3[numVertices]);
+	std::unique_ptr<Ogre::uint32[]> indices(new Ogre::uint32[numIndices]);
 
 	size_t addedVertices = 0;
 	size_t addedIndices = 0;
@@ -429,29 +438,23 @@ btCollisionShape* PhysicsSystem::createTriangleShapeFromOgreMesh(Ogre::String me
 		subMeshIterator++;
 	}
 
-	// The Bullet triangle mesh
-	btTriangleMesh* triMesh = new btTriangleMesh();
-	btVector3 vert0, vert1, vert2;
-	int i = 0;
+	gsl::owner<btTriangleMesh*> pTriMesh = new btTriangleMesh();
 
+	int i = 0;
 	for (unsigned int y = 0; y < numIndices / 3; y++)
 	{
-		vert0.setValue(vertices[indices[i]].x, vertices[indices[i]].y, vertices[indices[i]].z);
-		vert1.setValue(vertices[indices[i + 1]].x, vertices[indices[i + 1]].y, vertices[indices[i + 1]].z);
-		vert2.setValue(vertices[indices[i + 2]].x, vertices[indices[i + 2]].y, vertices[indices[i + 2]].z);
-		triMesh->addTriangle(vert0, vert1, vert2);
+		btVector3 vert0(vertices[indices[i]].x, vertices[indices[i]].y, vertices[indices[i]].z);
+		btVector3 vert1(vertices[indices[i + 1]].x, vertices[indices[i + 1]].y, vertices[indices[i + 1]].z);
+		btVector3 vert2(vertices[indices[i + 2]].x, vertices[indices[i + 2]].y, vertices[indices[i + 2]].z);
+		pTriMesh->addTriangle(vert0, vert1, vert2);
 		i += 3;
 	}
 
-	// --------------- Cleanup
+	vertices.release();
+	indices.release();
 
-	delete[] vertices;
-	delete[] indices;
+	gsl::owner<btCollisionShape*> pShape = new btConvexTriangleMeshShape(pTriMesh);
+	m_triangleShapeMap.insert(std::make_pair(meshName, std::make_pair(pShape, pTriMesh)));
 
-	// Create the collision shape
-	btConvexTriangleMeshShape* pShape = new btConvexTriangleMeshShape(triMesh);
-	pShape->setUserIndex(1);
-	m_shapes.push_back(pShape);
-	m_triangleShapeMap.insert(std::make_pair(meshName, pShape));
 	return pShape;
 }

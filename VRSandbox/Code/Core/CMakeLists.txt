@@ -6,6 +6,9 @@ file(GLOB_RECURSE PROJECT_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*.h" "${CMAKE_CURRE
 
 add_executable(${PROJECT_NAME} ${PROJECT_FILES} )
 
+# "Warning C5105: macro expansion producing 'defined' has undefined behavior" in windows SDK with c++experimental
+target_compile_definitions(${PROJECT_NAME} PRIVATE /wd5105) 
+
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "1.Modules")
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
 set_target_properties(${PROJECT_NAME} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

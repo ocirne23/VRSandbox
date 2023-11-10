@@ -9,16 +9,20 @@ module Systems.InputSystem;
 
 import Systems.GraphicsSystem;
 
-InputSystem::InputSystem(GraphicsSystem* pGraphics) : m_pGraphics(pGraphics)
+InputSystem::InputSystem(World& world, entt::registry& registry) : m_world(world), m_registry(registry)
 {
 }
 
 InputSystem::~InputSystem()
 {
-
 }
 
-void InputSystem::update(double deltaSec, entt::registry& registry)
+void InputSystem::initialize(GraphicsSystem* pGraphics)
+{
+	m_pGraphics = pGraphics;
+}
+
+void InputSystem::update(double deltaSec)
 {
 	Ogre::WindowEventUtilities::messagePump();
 

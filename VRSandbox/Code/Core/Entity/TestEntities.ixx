@@ -5,17 +5,19 @@ module;
 
 export module Entity.TestEntities;
 
-export class GraphicsSystem;
-export class PhysicsSystem;
-export class SceneSystem;
+export class World;
 
 export namespace TestEntities
 {
-	entt::entity createTestFloorEntity(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene);
-	entt::entity createTestSphere(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos);
-	entt::entity createTestCube(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos);
-	entt::entity createTestCone(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos);
-	entt::entity createTestCapsule(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos);
-	entt::entity createTestRamp(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos);
-	entt::entity createTestWedge(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, const Ogre::Vector3& pos);
+	entt::entity createTestFloorEntity(World& world);
+	entt::entity createTestSphere(World& world, const Ogre::Vector3& pos);
+	entt::entity createTestCube(World& world, const Ogre::Vector3& pos);
+	entt::entity createTestCone(World& world, const Ogre::Vector3& pos);
+	entt::entity createTestCapsule(World& world, const Ogre::Vector3& pos);
+	entt::entity createTestRamp(World& world, const Ogre::Vector3& pos);
+	entt::entity createTestWedge(World& world, const Ogre::Vector3& pos);
+	entt::entity createTestBoat(World& world, const Ogre::Vector3& pos);
+	entt::entity createTestWater(World& world, const Ogre::Vector3& pos);
+
+
 };

@@ -14,6 +14,7 @@ import Components.VRHandTrackingComponent;
 import Utils.HandSkeletonData;
 
 export class GraphicsSystem;
+export class World;
 
 export struct SDL_MouseWheelEvent;
 export struct SDL_MouseMotionEvent;
@@ -58,11 +59,13 @@ export class InputSystem
 {
 public:
 
-    InputSystem(GraphicsSystem* pGraphics);
+    InputSystem(World& world, entt::registry& registry);
     virtual ~InputSystem();
     InputSystem(const InputSystem& copy) = delete;
 
-    void update(double deltaSec, entt::registry& registry);
+    void initialize(GraphicsSystem* pGraphics);
+
+    void update(double deltaSec);
     bool hasQuit() const { return m_hasQuit; }
     void setWantMouseGrab(bool grab) { m_wantMouseGrab = grab; updateMouseSettings(); }
     void setWantMouseRelative(bool relative) { m_wantMouseRelative = relative; updateMouseSettings(); }
@@ -90,6 +93,9 @@ private:
     void getVRSkeletalData(HandSkeletonData& outData, vr::VRActionHandle_t skeletonActionHandle);
 
 private:
+
+    World& m_world;
+    entt::registry& m_registry;
 
     GraphicsSystem* m_pGraphics = nullptr;
     bool m_hasQuit = false;

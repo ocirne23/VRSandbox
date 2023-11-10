@@ -1,5 +1,7 @@
 module;
 
+#pragma warning( disable : 5105 ) // Warning C5105: macro expansion producing 'defined' has undefined behavior
+
 #include <windows.h>
 #include <filesystem>
 #include <libloaderapi.h>

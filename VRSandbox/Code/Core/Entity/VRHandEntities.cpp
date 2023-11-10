@@ -27,6 +27,7 @@ import Systems.SceneSystem;
 import Systems.VRInputSystem;
 
 import Utils.EHandSkeletonBone;
+import World;
 
 
 namespace VRHandEntities
@@ -43,26 +44,26 @@ namespace VRHandEntities
 		}
 	}
 
-	void addPhysicsHand(entt::registry& registry, btRigidBody* attachmentBody, PhysicsSystem& physics, SceneSystem& scene, GraphicsSystem& graphics, VRInputSystem& vrInput, EHandType hand)
+	void addPhysicsHand(World& world, btRigidBody* attachmentBody, EHandType hand)
 	{
-		entt::entity entity = registry.create();
-		auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC);
+		entt::entity entity = world.getRegistry().create();
+		auto& sceneComponent = world.getScene().addSceneNodeComponent(entity, Ogre::SCENE_DYNAMIC);
 
 		float colSize = 0.045f;
 		Ogre::Vector3 handColPos = hand == EHandType::LEFT ? Ogre::Vector3(-0.03f, 0.0, 0.12f) : Ogre::Vector3(0.03f, 0.0, 0.12f);
 
 		btCompoundShape* pShape = new btCompoundShape(true, 1);
 		btTransform shapePos(btQuaternion::getIdentity(), btVector3(handColPos.x, handColPos.y, handColPos.z));
-		pShape->addChildShape(shapePos, physics.createSphereShape(colSize));
+		pShape->addChildShape(shapePos, world.getPhysics().createSphereShape(colSize));
 		pShape->setMargin(0.5f); // Neccessary for proper physics origin for whatever reason, value doesn't seem to matter.
 
-		auto& physicsComponent = physics.addDynamicPhysicsComponent(registry, entity, pShape, 1.0f);
+		auto& physicsComponent = world.getPhysics().addDynamicPhysicsComponent(entity, pShape, 1.0f);
 		physicsComponent.pBody->setActivationState(DISABLE_DEACTIVATION);
-		auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, hand == EHandType::LEFT ? "vr_glove_left.mesh" : "vr_glove_right.mesh");
+		auto& graphicsComponent = world.getGraphics().addGraphicsComponent(entity, hand == EHandType::LEFT ? "vr_glove_left.mesh" : "vr_glove_right.mesh");
 		graphicsComponent.pItem->getParentSceneNode()->setInheritOrientation(false); // Use tracking rotation instead of physics rotation
-		auto& handComponent = vrInput.addHandTrackingComponent(registry, entity, hand);
+		auto& handComponent = world.getVRInput().addHandTrackingComponent(entity, hand);
 		
-		btGeneric6DofSpring2Constraint* pSpring = physics.addSpringJointComponent(registry, entity, physicsComponent.pBody, attachmentBody).pSpring;
+		btGeneric6DofSpring2Constraint* pSpring = world.getPhysics().addSpringJointComponent(entity, physicsComponent.pBody, attachmentBody).pSpring;
 		for (int i = 0; i < 3; ++i)
 		{
 			pSpring->enableSpring(i, true);
@@ -85,7 +86,7 @@ namespace VRHandEntities
 #endif
 	}
 
-	void addHandColliderEntities(entt::registry& registry, VRHandTrackingComponent& hand, PhysicsSystem& physics, SceneSystem& scene, GraphicsSystem& graphics)
+	void addHandColliderEntities(World& world, VRHandTrackingComponent& hand)
 	{
 		EHandSkeletonBone handBones[] = { EHandSkeletonBone::Root, EHandSkeletonBone::Thumb3, 
 			EHandSkeletonBone::IndexFinger4, EHandSkeletonBone::MiddleFinger4, 
@@ -95,20 +96,21 @@ namespace VRHandEntities
 		int colliderEntityIdx = 0;
 		for (EHandSkeletonBone bone : handBones)
 		{
-			entt::entity entity = registry.create();
+			entt::entity entity = world.getRegistry().create();
 			hand.colliderEntities[colliderEntityIdx++] = entity;
-			SceneComponent& sceneComp = scene.addSceneNodeComponentWithParent(registry, entity, hand.pArrSceneNodes[(int)bone]);
-			physics.addKinematicPhysicsComponent(registry, entity, new btEmptyShape());
+			SceneComponent& sceneComp = world.getScene().addSceneNodeComponentWithParent(entity, hand.pArrSceneNodes[(int)bone]);
+			world.getPhysics().addKinematicPhysicsComponent(entity, new btEmptyShape());
 		}
 	}
 
-	entt::entity createHand(entt::registry& registry, GraphicsSystem& graphics, PhysicsSystem& physics, SceneSystem& scene, VRInputSystem& vrInput, EHandType hand)
+	entt::entity createHand(World& world, EHandType hand)
 	{
+		entt::registry& registry = world.getRegistry();
 		const auto entity = registry.create();
-		auto& sceneComponent = scene.addSceneNodeComponent(registry, entity, Ogre::SCENE_DYNAMIC);
-		auto& handComponent = vrInput.addHandTrackingComponent(registry, entity, hand);
-		addHandColliderEntities(registry, handComponent, physics, scene, graphics);
-		addPhysicsHand(registry, registry.get<KinematicPhysicsComponent>(handComponent.colliderEntities[0]).pBody, physics, scene, graphics, vrInput, hand);
+		auto& sceneComponent = world.getScene().addSceneNodeComponent(entity, Ogre::SCENE_DYNAMIC);
+		auto& handComponent = world.getVRInput().addHandTrackingComponent(entity, hand);
+		addHandColliderEntities(world, handComponent);
+		addPhysicsHand(world, registry.get<KinematicPhysicsComponent>(handComponent.colliderEntities[0]).pBody, hand);
 		// Visualize tracking position with hand mesh or spheres
 		//auto& graphicsComponent = graphics.addGraphicsComponent(registry, entity, hand == EHandType::LEFT ? "vr_glove_left.mesh": "vr_glove_right.mesh");
 		//addTrackingDebugSpheres(handComponent, graphics);

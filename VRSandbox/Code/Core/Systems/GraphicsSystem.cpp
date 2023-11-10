@@ -52,18 +52,23 @@ namespace
         uint32_t unRequiredBufferLen = vrSystem->GetStringTrackedDeviceProperty(unDevice, prop, NULL, 0, peError);
         if (unRequiredBufferLen == 0)
             return "";
-        char* pchBuffer = new char[unRequiredBufferLen];
-        unRequiredBufferLen = vrSystem->GetStringTrackedDeviceProperty(unDevice, prop, pchBuffer, unRequiredBufferLen, peError);
-        std::string sResult = pchBuffer;
-        delete[] pchBuffer;
+        std::unique_ptr<char[]> pchBuffer(new char[unRequiredBufferLen]);
+        unRequiredBufferLen = vrSystem->GetStringTrackedDeviceProperty(unDevice, prop, pchBuffer.get(), unRequiredBufferLen, peError);
+        std::string sResult = pchBuffer.get();
+        pchBuffer.release();
         return sResult;
     }
 }
 
+GraphicsSystem::GraphicsSystem(World& world, entt::registry& registry) : m_world(world), m_registry(registry)
+{
+
+}
+
 void GraphicsSystem::initializeWindow(const char* pWindowTitle)
 {
-    const int width = 1280;
-    const int height = 720;
+    const int width = 1500;
+    const int height = 1000;
     const int screen = 0;
     const int posX = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
     const int posY = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
@@ -94,7 +99,7 @@ void GraphicsSystem::initializeWindow(const char* pWindowTitle)
     m_pRenderWindow = Ogre::Root::getSingleton().createRenderWindow(pWindowTitle, width, height, fullscreen, &params);
 }
 
-GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
+void GraphicsSystem::initialize(const char* pWindowTitle, RenderMode renderMode)
 {
     m_renderMode = renderMode;
     if (SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0)
@@ -113,7 +118,7 @@ GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
     m_pRoot->initialise(false);
     initializeWindow(pWindowTitle);
 
-    m_pOverlaySystem.reset(OGRE_NEW Ogre::v1::OverlaySystem());
+    m_pOverlaySystem = std::make_unique<Ogre::v1::OverlaySystem>();
 
     Ogre::ConfigFile cf;
     cf.loadDirect("resources.cfg");
@@ -143,7 +148,7 @@ GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
         Ogre::ArchiveVec archiveLibraryFolders;
         for (auto it : libraryFoldersPaths)
             archiveLibraryFolders.push_back(archiveManager.load(assetsFolderPath + it, archiveType, true));
-        m_pHlmsUnlit.reset(OGRE_NEW Ogre::HlmsUnlit(archiveManager.load(assetsFolderPath + mainFolderPath, archiveType, true), &archiveLibraryFolders));
+        m_pHlmsUnlit.reset(new Ogre::HlmsUnlit(archiveManager.load(assetsFolderPath + mainFolderPath, archiveType, true), &archiveLibraryFolders));
         m_pHlmsUnlit->setDebugOutputPath(false, false);
         Ogre::Root::getSingleton().getHlmsManager()->registerHlms(m_pHlmsUnlit.get());
     }
@@ -152,7 +157,7 @@ GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
         Ogre::ArchiveVec archiveLibraryFolders;
         for (auto it : libraryFoldersPaths)
             archiveLibraryFolders.push_back(archiveManager.load(assetsFolderPath + it, archiveType, true));
-        m_pHlmsPbs.reset(OGRE_NEW Ogre::HlmsPbs(archiveManager.load(assetsFolderPath + mainFolderPath, archiveType, true), &archiveLibraryFolders));
+        m_pHlmsPbs.reset(new Ogre::HlmsPbs(archiveManager.load(assetsFolderPath + mainFolderPath, archiveType, true), &archiveLibraryFolders));
         m_pHlmsPbs->setDebugOutputPath(false, false);
         Ogre::Root::getSingleton().getHlmsManager()->registerHlms(m_pHlmsPbs.get());
     }
@@ -380,6 +385,7 @@ GraphicsSystem::GraphicsSystem(const char* pWindowTitle, RenderMode renderMode)
     }
 }
 
+
 GraphicsSystem::~GraphicsSystem()
 {
     if (m_pRoot->getRenderSystem())
@@ -472,7 +478,7 @@ GraphicsSystem::~GraphicsSystem()
     SDL_Quit();
 }
 
-void GraphicsSystem::update(double deltaSec, entt::registry& registry)
+void GraphicsSystem::update(double deltaSec)
 {
     m_pCamera->setPosition(m_pCameraNode->getPosition());
     m_pCamera->setOrientation(m_pCameraNode->getOrientation());
@@ -492,11 +498,11 @@ void GraphicsSystem::update(double deltaSec, entt::registry& registry)
     m_fpsCounter++;
 }
 
-GraphicsComponent& GraphicsSystem::addGraphicsComponent(entt::registry& registry, entt::entity entity, Ogre::String meshName, Ogre::IdString datablockName)
+GraphicsComponent& GraphicsSystem::addGraphicsComponent(entt::entity entity, Ogre::String meshName, Ogre::IdString datablockName)
 {
-    OGRE_ASSERT(registry.try_get<SceneComponent>(entity));
+    OGRE_ASSERT(m_registry.try_get<SceneComponent>(entity));
 
-    SceneComponent& sceneComponent = registry.get<SceneComponent>(entity);
+    SceneComponent& sceneComponent = m_registry.get<SceneComponent>(entity);
 
     Ogre::Item* pItem = m_pSceneManager->createItem(meshName, Ogre::ResourceGroupManager::AUTODETECT_RESOURCE_GROUP_NAME, sceneComponent.pNode->isStatic() ? Ogre::SCENE_STATIC : Ogre::SCENE_DYNAMIC);
     if (datablockName != Ogre::IdString(""))
@@ -505,46 +511,31 @@ GraphicsComponent& GraphicsSystem::addGraphicsComponent(entt::registry& registry
     Ogre::SceneNode* pGraphicsNode = sceneComponent.pNode->createChildSceneNode(sceneComponent.pNode->isStatic() ? Ogre::SCENE_STATIC : Ogre::SCENE_DYNAMIC);
     pGraphicsNode->attachObject(pItem);
 
-    GraphicsComponent& graphicsComponent = registry.emplace<GraphicsComponent>(entity);
+    GraphicsComponent& graphicsComponent = m_registry.emplace<GraphicsComponent>(entity);
     graphicsComponent.pItem = pItem;
     return graphicsComponent;
 }
 
-void GraphicsSystem::removeGraphicsComponent(entt::registry& registry, entt::entity entity)
+void GraphicsSystem::removeGraphicsComponent(entt::entity entity)
 {
-    const auto& component = registry.get<GraphicsComponent>(entity);
-    size_t numRemoved = registry.remove<GraphicsComponent>(entity);
+    const auto& component = m_registry.get<GraphicsComponent>(entity);
+    size_t numRemoved = m_registry.remove<GraphicsComponent>(entity);
     OGRE_ASSERT(numRemoved == 1);
 }
 
-void GraphicsSystem::setGraphicsOffset(GraphicsComponent& comp, const Ogre::Vector3& offset)
+void GraphicsComponent::setOffset(const Ogre::Vector3& offset)
 {
-    comp.pItem->getParentNode()->setPosition(offset);
+    pItem->getParentNode()->setPosition(offset);
 }
 
-void GraphicsSystem::setGraphicsOffset(entt::registry& registry, entt::entity entity, const Ogre::Vector3& offset)
+void GraphicsComponent::setScale(const Ogre::Vector3& scale)
 {
-    setGraphicsOffset(registry.get<GraphicsComponent>(entity), offset);
+    pItem->getParentNode()->setScale(scale);
 }
 
-void GraphicsSystem::setGraphicsScale(GraphicsComponent& comp, const Ogre::Vector3& scale)
+void GraphicsComponent::setRotation(const Ogre::Quaternion& rot)
 {
-    comp.pItem->getParentNode()->setScale(scale);
-}
-
-void GraphicsSystem::setGraphicsScale(entt::registry& registry, entt::entity entity, const Ogre::Vector3& scale)
-{
-    setGraphicsScale(registry.get<GraphicsComponent>(entity), scale);
-}
-
-void GraphicsSystem::setGraphicsRotation(GraphicsComponent& comp, const Ogre::Quaternion& rot)
-{
-    comp.pItem->getParentNode()->setOrientation(rot);
-}
-
-void GraphicsSystem::setGraphicsRotation(entt::registry& registry, entt::entity entity, const Ogre::Quaternion& rot)
-{
-    setGraphicsRotation(registry.get<GraphicsComponent>(entity), rot);
+    pItem->getParentNode()->setOrientation(rot);
 }
 
 void GraphicsSystem::handleWindowEvent(SDL_Event& evt)
@@ -585,4 +576,14 @@ void GraphicsSystem::handleWindowEvent(SDL_Event& evt)
 void GraphicsSystem::setWindowTitle(std::string str)
 {
     SDL_SetWindowTitle(m_pSDLWindow, str.c_str());
+}
+
+bool GraphicsSystem::isWindowVisible() const
+{
+    return m_pRenderWindow->isVisible();
+}
+
+bool GraphicsSystem::isWindowFocused() const
+{
+    return m_pRenderWindow->isFocused();
 }
