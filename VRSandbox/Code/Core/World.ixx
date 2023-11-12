@@ -45,10 +45,6 @@ public:
 
 private:
 
-	void setupCamera();
-
-private:
-
 	entt::registry& m_registry;
 	GraphicsSystem m_graphics;
 	PhysicsSystem m_physics;

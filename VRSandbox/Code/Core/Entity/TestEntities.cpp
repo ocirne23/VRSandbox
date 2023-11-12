@@ -129,6 +129,24 @@ entt::entity createTestWedge(World& world, const Ogre::Vector3& pos)
     return entity;
 }
 
+entt::entity createTestBoatNPC(World& world, const Ogre::Vector3& pos)
+{
+    const auto entity = world.getRegistry().create();
+    auto& sceneComponent = world.getScene().addSceneNodeComponent(entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
+    auto& graphicsComponent = world.getGraphics().addGraphicsComponent(entity, "Boat.mesh");
+    auto& physicsComponent = world.getPhysics().addDynamicPhysicsComponent(entity, world.getPhysics().createTriangleShapeFromOgreMesh("Boat.mesh", Ogre::Vector3(2, 2, 2)), 1000.0f);
+    auto& waterPhysicsComponent = world.getWaterPhysics().addWaterPhysicsComponent(entity);
+
+    graphicsComponent.setScale(Ogre::Vector3(2, 2, 2));
+
+    physicsComponent.pBody->setFriction(0.5f);
+    physicsComponent.pBody->setRollingFriction(0.5f);
+    physicsComponent.pBody->setSpinningFriction(0.5f);
+    physicsComponent.pBody->setDamping(0.5f, 0.75f);
+    physicsComponent.pBody->setSleepingThresholds(0.0, 0.0);
+    return entity;
+}
+
 entt::entity createTestBoat(World& world, const Ogre::Vector3& pos)
 {
     const auto entity = world.getRegistry().create();

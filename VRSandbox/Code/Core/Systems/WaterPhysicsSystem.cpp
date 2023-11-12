@@ -42,15 +42,14 @@ void WaterPhysicsSystem::update(double deltaSec)
 			const float bouyuancyPercentage = Ogre::Math::Clamp((targetHeight - minHeight) / heightRange, 0.0f, 1.0f);
 			const float bouyancyForce = water.bouyancyForce * bouyuancyPercentage;
 
-			pBody->applyCentralForce(btVector3(0, bouyancyForce, 0));
-
+			pBody->applyCentralImpulse(pBody->getInvInertiaTensorWorld().inverse() * btVector3(0, bouyancyForce * (float)deltaSec, 0));
 			if (bouyuancyPercentage > 0.0f) // only apply torgue if in water
 			{
 				const float rightingForce = 2.0f;
 				const btVector3 up(0, 1, 0); // todo, wave angle
 				btVector3 bodyUp = pBody->getWorldTransform().getBasis() * up;
 				btVector3 direction = bodyUp.cross(up);
-				pBody->applyTorque(pBody->getInvInertiaTensorWorld().inverse() * direction * rightingForce);
+				pBody->applyTorqueImpulse(pBody->getInvInertiaTensorWorld().inverse() * direction * rightingForce * (float)deltaSec);
 			}
 		});
 }

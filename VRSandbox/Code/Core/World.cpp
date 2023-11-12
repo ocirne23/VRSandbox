@@ -39,64 +39,36 @@ void World::initialize()
 
     m_physics.initialize();
     m_physics.setDebugDrawer(m_graphics.getDebugDrawer());
-    //physics.setEnableDebugDraw(true);
+    //m_physics.setEnableDebugDraw(true);
 
     m_waterPhysics.initialize();
 
     m_boatControl.initialize();
 
-    setupCamera();
-
-    m_pTestScene = std::make_unique<TestScene>(*this);
+    m_pTestScene = std::make_unique<TestScene>(*this, m_registry);
     m_pTestScene->createScene();
 }
 
-void World::setupCamera()
-{
-    Ogre::Camera* pCamera = m_graphics.getCamera();
-    pCamera->setPosition(Ogre::Vector3(30, 30, 30));
-    pCamera->lookAt(Ogre::Vector3(0, 0, 0));
-}
 
 void World::updateLoop()
 {
     Ogre::Timer timer;
     Ogre::uint64 startTime = timer.getMicroseconds();
     double deltaSec = 1.0 / 60.0;
-    double timeAccumulator = 0.0;
-    const double PHYSICS_TIMESTEP = 1.0 / 60.0;
+    const double PHYSICS_FIXED_TIMESTEP = 1.0 / 20.0;
     while (!m_wantsShutdown && !m_input.hasQuit())
     {
-        timeAccumulator += deltaSec;
-        while (timeAccumulator >= PHYSICS_TIMESTEP)
-        {
-            timeAccumulator -= PHYSICS_TIMESTEP;
-            m_physics.update(PHYSICS_TIMESTEP, PHYSICS_TIMESTEP);
-            m_waterPhysics.update(PHYSICS_TIMESTEP);
-            if (timeAccumulator > 1.0f)
-            {
-                Ogre::LogManager::getSingleton().logMessage("Physics is running too slow!");
-                timeAccumulator = 0.0f;
-            }
-        }
+        m_physics.update(deltaSec, PHYSICS_FIXED_TIMESTEP);
+        m_waterPhysics.update(deltaSec);
+        m_boatControl.update(deltaSec);
 
         m_input.update(deltaSec);
         m_vrInput.update(deltaSec);
-
         m_graphics.update(deltaSec);
-        m_boatControl.update(deltaSec);
 
         m_pTestScene->update(deltaSec);
 
         Ogre::uint64 endTime = timer.getMicroseconds();
-        /*
-        if (!m_graphics.isWindowFocused())
-        {
-            uint64_t ms = 100 - (endTime - startTime) / 1'000;
-            if (ms > 0)
-                Ogre::Threads::Sleep((int)ms);
-        }*/
-
         deltaSec = std::min(1.0, (endTime - startTime) / 1'000'000.0); // Prevent from going haywire.
         startTime = endTime;
     }

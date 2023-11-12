@@ -56,7 +56,7 @@ extern const bool c_useRDM;
 // causing glitches in NVIDIA GPUs in Linux, see https://github.com/OGRECave/ogre-next/issues/53
 const bool c_useRDM = true;
 
-TestScene::TestScene(World& world) : m_world(world)
+TestScene::TestScene(World& world, entt::registry& registry) : m_world(world), m_registry(registry)
 {
 }
 
@@ -82,10 +82,14 @@ void TestScene::createScene()
     m_waterEntity = TestEntities::createTestWater(m_world, Ogre::Vector3(0, 0, 0));
 
     m_boatEntity = TestEntities::createTestBoat(m_world, Ogre::Vector3(0, 15, 0));
+
+    TestEntities::createTestBoatNPC(m_world, Ogre::Vector3(10, 15, 0));
+
+
     const Ogre::Vector3 minSpawn(-20, 100, -20);
     const Ogre::Vector3 maxSpawn(20, 5000, 20);
 
-    for (int i = 0; i < 1000; ++i) TestEntities::createTestSphere(m_world, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
+    //for (int i = 0; i < 1000; ++i) TestEntities::createTestSphere(m_world, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
 
     Ogre::SceneManager* pSceneManager = m_world.getGraphics().getSceneManager();
 
@@ -110,9 +114,9 @@ void TestScene::createScene()
     light->setSpecularColour(0.8f, 0.4f, 0.2f);
     light->setPowerScale(Ogre::Math::PI);
     light->setType(Ogre::Light::LT_SPOTLIGHT);
-    lightNode->setPosition(-10.0f, 10.0f, 10.0f);
+    lightNode->setPosition(-10.0f, 50.0f, 10.0f);
     light->setDirection(Ogre::Vector3(1, -1, -1).normalisedCopy());
-    light->setAttenuationBasedOnRadius(10.0f, 0.01f);
+    light->setAttenuationBasedOnRadius(60.0f, 0.01f);
     
     m_lightNodes[1] = lightNode;
     /*
@@ -135,6 +139,8 @@ float wave = 0.0f;
 void TestScene::update(double deltaSec)
 {
     auto& input = m_world.getInput();
+    auto& boatCtrl = m_world.getRegistry().get<BoatControlComponent>(m_boatEntity);
+
     if (input.isKeyCurrentlyPressed(SDL_SCANCODE_LALT))
     {
         bool w = input.isKeyCurrentlyPressed(SDL_SCANCODE_W);
@@ -142,24 +148,35 @@ void TestScene::update(double deltaSec)
         bool s = input.isKeyCurrentlyPressed(SDL_SCANCODE_S);
         bool d = input.isKeyCurrentlyPressed(SDL_SCANCODE_D);
 
-        auto& boatCtrl = m_world.getRegistry().get<BoatControlComponent>(m_boatEntity);
-        boatCtrl.forwardBack = w ? 1.0f : (s ? -1.0f : 0.0f);
+        boatCtrl.forwardBack = w ? 1.0f : (s ? -0.3f : 0.0f);
         boatCtrl.rightLeft = d ? 1.0f : (a ? -1.0f : 0.0f);
     }
+    else
+    {
+		boatCtrl.forwardBack = 0.0f;
+		boatCtrl.rightLeft = 0.0f;
+	}
 
-    m_pCameraFlyingController->update(deltaSec);
+    if (m_world.getGraphics().getRenderMode() == RenderMode::Desktop)
+        m_pCameraFlyingController->update(deltaSec);
+
+    /*
+    Ogre::SceneNode* pCameraNode = m_world.getGraphics().getCameraNode();
+    pCameraNode->_getDerivedPositionUpdated(); // to avoid crash in lookat
+    pCameraNode->lookAt(m_registry.get<SceneComponent>(m_boatEntity).pNode->getPosition(), Ogre::Node::TS_WORLD);*/
 }
 
 void TestScene::setupControls()
 {
     auto& graphics = m_world.getGraphics();
-
-    //if (graphics.getRenderMode() == RenderMode::Desktop)
-     //   m_pCameraController->update(deltaSec);
-
     m_pCameraFlyingController = std::make_unique<CameraFlyingController>(m_world,
         graphics.getRenderWindow(), graphics.getCameraNode(),
         graphics.getCamera(), graphics.getRenderMode());
+
+    Ogre::SceneNode* pCameraNode = graphics.getCameraNode();
+    pCameraNode->setPosition(Ogre::Vector3(0, 70, 50));
+    pCameraNode->_getDerivedPositionUpdated(); // to avoid crash in lookat
+    pCameraNode->lookAt(Ogre::Vector3(0, 15, 0), Ogre::Node::TS_WORLD);
 
     auto& boatCtrl = m_world.getRegistry().get<BoatControlComponent>(m_boatEntity);
 

@@ -20,7 +20,7 @@ export class TestScene
 {
 public:
 
-	TestScene(World& world);
+	TestScene(World& world, entt::registry& registry);
 	virtual ~TestScene();
 	TestScene(const TestScene& copy) = delete;
 
@@ -32,6 +32,7 @@ public:
 private:
 
 	World& m_world;
+	entt::registry& m_registry;
 
 	std::unique_ptr<CameraFlyingController> m_pCameraFlyingController;
 	Ogre::SceneNode* m_lightNodes[2] = {};

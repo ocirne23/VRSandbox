@@ -10,4 +10,7 @@ export struct BoatControlComponent
 	float rightLeft = 0.0f;   // 1.0 right, -1.0 left
 	Ogre::Vector3 aimPoint;
 	bool fire = false;
+
+	float moveSpeedMultiplier = 3.0f;
+	float rotationSpeedMultiplier = 1.5f;
 };

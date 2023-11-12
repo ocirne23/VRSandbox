@@ -17,6 +17,7 @@ export namespace TestEntities
 	entt::entity createTestRamp(World& world, const Ogre::Vector3& pos);
 	entt::entity createTestWedge(World& world, const Ogre::Vector3& pos);
 	entt::entity createTestBoat(World& world, const Ogre::Vector3& pos);
+	entt::entity createTestBoatNPC(World& world, const Ogre::Vector3& pos);
 	entt::entity createTestWater(World& world, const Ogre::Vector3& pos);
 
 

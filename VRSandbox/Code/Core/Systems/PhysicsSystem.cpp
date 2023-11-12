@@ -4,6 +4,7 @@ module;
 #include <OgreAssert.h>
 #include <OgreVector3.h>
 #include <OgreSceneNode.h>
+#include <OgreLogManager.h>
 #include <entt/entity/registry.hpp>
 
 #include <OgreMeshManager2.h>
@@ -72,48 +73,38 @@ void PhysicsSystem::initialize()
 
 void PhysicsSystem::update(double deltaSec, double fixedTimestep)
 {
-	auto staticSync = m_registry.view<StaticPhysicsComponent, SceneComponent>();
-	
-	/* Update physics transforms from scene nodes?
-	staticSync.each([](StaticPhysicsComponent& physComp, SceneComponent& nodeComp)
-		{
-			auto pos = nodeComp.pNode->_getDerivedPosition();
-			auto rot = nodeComp.pNode->_getDerivedOrientation();
-			physComp.pBody->setWorldTransform(btTransform(btQuaternion(rot.x, rot.y, rot.z, rot.w), btVector3(pos.x, pos.y, pos.z)));
-		});
+	if (deltaSec > fixedTimestep)
+		Ogre::LogManager::getSingleton().logMessage("Physics quality affected by framerate!");
 
-	auto kinematicSync = m_registry.view<KinematicPhysicsComponent, SceneComponent>();
-	kinematicSync.each([](KinematicPhysicsComponent& physComp, SceneComponent& nodeComp)
-		{
-			auto pos = nodeComp.pNode->_getDerivedPosition();
-			auto rot = nodeComp.pNode->_getDerivedOrientation();
-			physComp.pBody->setWorldTransform(btTransform(btQuaternion(rot.x, rot.y, rot.z, rot.w), btVector3(pos.x, pos.y, pos.z)));
-		});
-		*/
-
-#if FIXED_TIMESTEP
-	m_timeAccumulator += deltaSec;
-	while (m_timeAccumulator >= fixedTimestep)
-	{
-		m_timeAccumulator -= fixedTimestep;
-		m_pDynamicsWorld->stepSimulation(btScalar(fixedTimestep), 1, btScalar(fixedTimestep));
-	}
-#else
 	m_pDynamicsWorld->stepSimulation(btScalar(deltaSec), 1, btScalar(fixedTimestep));
-#endif
-	/*
-	auto dynamicSync = m_registry.view<DynamicPhysicsComponent, SceneComponent>();
-	dynamicSync.each([](DynamicPhysicsComponent& physComp, SceneComponent& nodeComp)
-		{
-			auto& trans = physComp.pBody->getWorldTransform();
-			auto& physPos = trans.getOrigin();
-			auto& physRot = trans.getRotation();
-			nodeComp.pNode->setPosition(*reinterpret_cast<Ogre::Vector3*>(&physPos));
-			nodeComp.pNode->setOrientation(Ogre::Quaternion(physRot.w(), physRot.x(), physRot.y(), physRot.z()));
-		});*/
-
 	m_pDynamicsWorld->debugDrawWorld();
 }
+
+/* Update physics transforms from scene nodes?
+auto staticSync = m_registry.view<StaticPhysicsComponent, SceneComponent>();
+staticSync.each([](StaticPhysicsComponent& physComp, SceneComponent& nodeComp)
+	{
+		auto pos = nodeComp.pNode->_getDerivedPosition();
+		auto rot = nodeComp.pNode->_getDerivedOrientation();
+		physComp.pBody->setWorldTransform(btTransform(btQuaternion(rot.x, rot.y, rot.z, rot.w), btVector3(pos.x, pos.y, pos.z)));
+	});
+
+auto kinematicSync = m_registry.view<KinematicPhysicsComponent, SceneComponent>();
+kinematicSync.each([](KinematicPhysicsComponent& physComp, SceneComponent& nodeComp)
+	{
+		auto pos = nodeComp.pNode->_getDerivedPosition();
+		auto rot = nodeComp.pNode->_getDerivedOrientation();
+		physComp.pBody->setWorldTransform(btTransform(btQuaternion(rot.x, rot.y, rot.z, rot.w), btVector3(pos.x, pos.y, pos.z)));
+	});
+auto dynamicSync = m_registry.view<DynamicPhysicsComponent, SceneComponent>();
+dynamicSync.each([](DynamicPhysicsComponent& physComp, SceneComponent& nodeComp)
+	{
+		auto& trans = physComp.pBody->getWorldTransform();
+		auto& physPos = trans.getOrigin();
+		auto& physRot = trans.getRotation();
+		nodeComp.pNode->setPosition(*reinterpret_cast<Ogre::Vector3*>(&physPos));
+		nodeComp.pNode->setOrientation(Ogre::Quaternion(physRot.w(), physRot.x(), physRot.y(), physRot.z()));
+*/
 
 void PhysicsSystem::setDebugDrawer(DebugDrawer* pDebugDrawer)
 {
