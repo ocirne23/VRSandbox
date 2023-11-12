@@ -2,6 +2,8 @@ module;
 
 #include <entt/entity/registry.hpp>
 #include <btBulletDynamicsCommon.h>
+#include <OgreLogManager.h>
+#include <OgreStringConverter.h>
 #include <OgreSceneNode.h>
 
 module Systems.WaterPhysicsSystem;
@@ -22,28 +24,35 @@ void WaterPhysicsSystem::initialize()
 
 void WaterPhysicsSystem::update(double deltaSec)
 {
-	m_timePassed += deltaSec;	
+	m_timePassed += deltaSec;
 	const float targetHeight = 15.0f + sinf((float)m_timePassed * m_waveFrequency) * 5.0f;
 	m_registry.get<SceneComponent>(m_waterEntity).pNode->setPosition(5, targetHeight, 0);
+
 	auto bouyuancyUpdate = m_registry.view<SceneComponent, WaterPhysicsComponent, DynamicPhysicsComponent>();
 	bouyuancyUpdate.each([&](SceneComponent& scene, WaterPhysicsComponent& water, DynamicPhysicsComponent& phys)
 		{
-			float height = scene.pNode->getPosition().y;
 			auto* pBody = phys.pBody;
-			float baseForce = pow(fmin((targetHeight / height), 1.5f), 5.f);
-			float force = baseForce * water.bouyancy;
-			if (height > targetHeight)
-			{
-				force = 0.0f;
-			}
-			pBody->applyCentralForce(btVector3(0, force, 0));
-			float x, y, z;
-			pBody->getWorldTransform().getRotation().inverse().getEulerZYX(z, y, x);
-			pBody->applyTorque(water.rightingTorque * btVector3(x, y, z));
-		});
+			
+			btVector3 aabbMin, aabbMax;
+			pBody->getAabb(aabbMin, aabbMax);
 
-	//Ogre::LogManager::getSingleton().logMessage("baseForce: " + Ogre::StringConverter::toString(baseForce));
-	//Ogre::LogManager::getSingleton().logMessage("target: " + Ogre::StringConverter::toString(targetHeight) + " height: " + Ogre::StringConverter::toString(height));
+			const float maxHeight = aabbMax.y();
+			const float minHeight = aabbMin.y();
+			const float heightRange = maxHeight - minHeight;
+			const float bouyuancyPercentage = Ogre::Math::Clamp((targetHeight - minHeight) / heightRange, 0.0f, 1.0f);
+			const float bouyancyForce = water.bouyancyForce * bouyuancyPercentage;
+
+			pBody->applyCentralForce(btVector3(0, bouyancyForce, 0));
+
+			if (bouyuancyPercentage > 0.0f) // only apply torgue if in water
+			{
+				const float rightingForce = 2.0f;
+				const btVector3 up(0, 1, 0); // todo, wave angle
+				btVector3 bodyUp = pBody->getWorldTransform().getBasis() * up;
+				btVector3 direction = bodyUp.cross(up);
+				pBody->applyTorque(pBody->getInvInertiaTensorWorld().inverse() * direction * rightingForce);
+			}
+		});
 }
 
 WaterPhysicsComponent& WaterPhysicsSystem::addWaterPhysicsComponent(entt::entity entity)

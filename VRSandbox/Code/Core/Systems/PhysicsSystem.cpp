@@ -73,6 +73,8 @@ void PhysicsSystem::initialize()
 void PhysicsSystem::update(double deltaSec, double fixedTimestep)
 {
 	auto staticSync = m_registry.view<StaticPhysicsComponent, SceneComponent>();
+	
+	/* Update physics transforms from scene nodes?
 	staticSync.each([](StaticPhysicsComponent& physComp, SceneComponent& nodeComp)
 		{
 			auto pos = nodeComp.pNode->_getDerivedPosition();
@@ -87,9 +89,18 @@ void PhysicsSystem::update(double deltaSec, double fixedTimestep)
 			auto rot = nodeComp.pNode->_getDerivedOrientation();
 			physComp.pBody->setWorldTransform(btTransform(btQuaternion(rot.x, rot.y, rot.z, rot.w), btVector3(pos.x, pos.y, pos.z)));
 		});
+		*/
 
+#if FIXED_TIMESTEP
+	m_timeAccumulator += deltaSec;
+	while (m_timeAccumulator >= fixedTimestep)
+	{
+		m_timeAccumulator -= fixedTimestep;
+		m_pDynamicsWorld->stepSimulation(btScalar(fixedTimestep), 1, btScalar(fixedTimestep));
+	}
+#else
 	m_pDynamicsWorld->stepSimulation(btScalar(deltaSec), 1, btScalar(fixedTimestep));
-
+#endif
 	/*
 	auto dynamicSync = m_registry.view<DynamicPhysicsComponent, SceneComponent>();
 	dynamicSync.each([](DynamicPhysicsComponent& physComp, SceneComponent& nodeComp)
@@ -161,6 +172,7 @@ btRigidBody* PhysicsSystem::createRigidBody(entt::entity entity, btCollisionShap
 		else
 			pShape->calculateLocalInertia(mass, localInertia);
 	}
+
 	// PhysicsMotionState will be cleaned up on destruction of the body
 	btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, new PhysicsMotionState(entity, m_registry), pShape, localInertia);
 	return m_bodies.emplace_back(new btRigidBody(rbInfo));

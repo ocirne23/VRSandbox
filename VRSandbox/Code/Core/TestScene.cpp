@@ -19,21 +19,26 @@ module;
 
 #include <entt/entity/registry.hpp>
 #include <btBulletDynamicsCommon.h>
+#include <SDL_scancode.h>
+#include <SDL_events.h>
 
 module TestScene;
+
+import <memory>;
 
 import Components.VRHandTrackingComponent;
 
 import Components.GraphicsComponent;
 import Components.DynamicPhysicsComponent;
 import Components.SceneComponent;
+import Components.BoatControlComponent;
 
 import Systems.GraphicsSystem;
 import Systems.InputSystem;
 import Systems.PhysicsSystem;
 import Systems.VRInputSystem;
 
-import Utils.CameraController;
+import Utils.CameraFlyingController;
 import Utils.DebugDrawer;
 
 import Entity.TestEntities;
@@ -80,7 +85,6 @@ void TestScene::createScene()
     const Ogre::Vector3 minSpawn(-20, 100, -20);
     const Ogre::Vector3 maxSpawn(20, 5000, 20);
 
-
     for (int i = 0; i < 1000; ++i) TestEntities::createTestSphere(m_world, Ogre::Vector3(Ogre::Math::RangeRandom(minSpawn.x, maxSpawn.x), Ogre::Math::RangeRandom(minSpawn.y, maxSpawn.y), Ogre::Math::RangeRandom(minSpawn.z, maxSpawn.z)));
 
     Ogre::SceneManager* pSceneManager = m_world.getGraphics().getSceneManager();
@@ -124,12 +128,56 @@ void TestScene::createScene()
     light->setAttenuationBasedOnRadius(10.0f, 0.01f);
 
     m_lightNodes[2] = lightNode;*/
+    setupControls();
 }
 
 float wave = 0.0f;
 void TestScene::update(double deltaSec)
 {
+    auto& input = m_world.getInput();
+    if (input.isKeyCurrentlyPressed(SDL_SCANCODE_LALT))
+    {
+        bool w = input.isKeyCurrentlyPressed(SDL_SCANCODE_W);
+        bool a = input.isKeyCurrentlyPressed(SDL_SCANCODE_A);
+        bool s = input.isKeyCurrentlyPressed(SDL_SCANCODE_S);
+        bool d = input.isKeyCurrentlyPressed(SDL_SCANCODE_D);
 
+        auto& boatCtrl = m_world.getRegistry().get<BoatControlComponent>(m_boatEntity);
+        boatCtrl.forwardBack = w ? 1.0f : (s ? -1.0f : 0.0f);
+        boatCtrl.rightLeft = d ? 1.0f : (a ? -1.0f : 0.0f);
+    }
+
+    m_pCameraFlyingController->update(deltaSec);
+}
+
+void TestScene::setupControls()
+{
+    auto& graphics = m_world.getGraphics();
+
+    //if (graphics.getRenderMode() == RenderMode::Desktop)
+     //   m_pCameraController->update(deltaSec);
+
+    m_pCameraFlyingController = std::make_unique<CameraFlyingController>(m_world,
+        graphics.getRenderWindow(), graphics.getCameraNode(),
+        graphics.getCamera(), graphics.getRenderMode());
+
+    auto& boatCtrl = m_world.getRegistry().get<BoatControlComponent>(m_boatEntity);
+
+    MouseListener* pMouseListener = m_world.getInput().createMouseListener();
+    pMouseListener->onMouseMoved = [&](const SDL_MouseMotionEvent& e)
+        {
+            m_pCameraFlyingController->mouseMoved(e);
+        };
+
+    KeyboardListener* pKeyboardListener = m_world.getInput().createKeyboardListener();
+    pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& e)
+        {
+            m_pCameraFlyingController->keyPressed(e);
+        };
+    pKeyboardListener->onKeyReleased = [&](const SDL_KeyboardEvent& e)
+        {
+            m_pCameraFlyingController->keyReleased(e);
+        };
 }
 
 /*

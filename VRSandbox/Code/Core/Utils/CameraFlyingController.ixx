@@ -2,19 +2,20 @@ module;
 
 #include <OgrePrerequisites.h>
 
-export module Utils.CameraController;
+export module Utils.CameraFlyingController;
 
 export struct SDL_KeyboardEvent;
 export struct SDL_MouseMotionEvent;
 export enum class RenderMode;
+export class World;
 
-export class CameraController
+export class CameraFlyingController
 {
 public:
 
-    CameraController(Ogre::Window* pWindow, Ogre::Node* pSceneNode, const Ogre::Camera* pCamera, RenderMode renderMode);
-    virtual ~CameraController();
-    CameraController(const CameraController& copy) = delete;
+    CameraFlyingController(World& world, Ogre::Window* pWindow, Ogre::Node* pSceneNode, const Ogre::Camera* pCamera, RenderMode renderMode);
+    virtual ~CameraFlyingController();
+    CameraFlyingController(const CameraFlyingController& copy) = delete;
 
     void update(double timeSinceLast);
 
@@ -27,17 +28,18 @@ public:
 
 private:
 
+    World& m_world;
     RenderMode m_renderMode;
     Ogre::Window* m_pWindow = nullptr;
     Ogre::Node* m_pNode = nullptr;
     const Ogre::Camera* m_pCamera = nullptr;
-    bool  mUseSceneNode;
-    bool  mSpeedMofifier;
-    bool  mWASD[4];
-    bool  mSlideUpDown[2];
-    float mCameraYaw;
-    float mCameraPitch;
-    float mCameraBaseSpeed;
-    float mCameraSpeedBoost;
+    bool  m_useSceneNode;
+    bool  m_speedModifier;
+    bool  m_wasd[4];
+    bool  m_upDown[2];
+    float m_yaw;
+    float m_pitch;
+    float m_camSpeed;
+    float m_boostSpeed;
 };
 

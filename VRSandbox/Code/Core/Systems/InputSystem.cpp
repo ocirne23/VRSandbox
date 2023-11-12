@@ -20,6 +20,10 @@ InputSystem::~InputSystem()
 void InputSystem::initialize(GraphicsSystem* pGraphics)
 {
 	m_pGraphics = pGraphics;
+
+	int numKeys = 0;
+	m_pKeyStates = SDL_GetKeyboardState(&numKeys);
+	OGRE_ASSERT(numKeys <= SDL_NUM_SCANCODES);
 }
 
 void InputSystem::update(double deltaSec)
@@ -92,6 +96,14 @@ void InputSystem::update(double deltaSec)
 			break;
 		}
 	}
+}
+
+bool InputSystem::isKeyCurrentlyPressed(SDL_Scancode sc)
+{
+	if (sc < SDL_NUM_SCANCODES)
+		return m_pKeyStates[sc] != 0;
+	else
+		return false;
 }
 
 void InputSystem::updateMouseSettings()

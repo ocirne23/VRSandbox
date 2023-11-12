@@ -80,6 +80,8 @@ private:
 	World& m_world;
 	entt::registry& m_registry;
 
+	double m_timeAccumulator = 0.0;
+
 	std::vector<gsl::owner<btCollisionShape*>> m_shapes;
 	std::unordered_map<Ogre::String, std::pair<gsl::owner<btCollisionShape*>, gsl::owner<btTriangleMesh*>>> m_triangleShapeMap;
 	std::vector<gsl::owner<btRigidBody*>> m_bodies;

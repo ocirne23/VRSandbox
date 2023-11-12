@@ -11,6 +11,7 @@ export class GraphicsSystem;
 export class PhysicsSystem;
 export class SceneSystem;
 export class VRInputSystem;
+export class CameraFlyingController;
 export struct HandSkeletonData;
 
 export class World;
@@ -26,10 +27,13 @@ public:
 	void createScene();
 	void update(double deltaSec);
 
+	void setupControls();
+
 private:
 
 	World& m_world;
 
+	std::unique_ptr<CameraFlyingController> m_pCameraFlyingController;
 	Ogre::SceneNode* m_lightNodes[2] = {};
 	Ogre::SceneNode* m_controllerNodes[2] = {};
 	entt::entity m_handAnchorEntities[2] = { entt::null, entt::null };

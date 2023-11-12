@@ -136,7 +136,8 @@ entt::entity createTestBoat(World& world, const Ogre::Vector3& pos)
     auto& graphicsComponent = world.getGraphics().addGraphicsComponent(entity, "Boat.mesh");
     auto& physicsComponent = world.getPhysics().addDynamicPhysicsComponent(entity, world.getPhysics().createTriangleShapeFromOgreMesh("Boat.mesh", Ogre::Vector3(2, 2, 2)), 1000.0f);
     auto& waterPhysicsComponent = world.getWaterPhysics().addWaterPhysicsComponent(entity);
-    
+    auto& boatControlComponent = world.getBoatControl().addBoatControlComponent(entity);
+
     graphicsComponent.setScale(Ogre::Vector3(2, 2, 2));
 
     physicsComponent.pBody->setFriction(0.5f);
@@ -151,9 +152,9 @@ entt::entity createTestWater(World& world, const Ogre::Vector3& pos)
 {
     const auto entity = world.getRegistry().create();
     auto& sceneComponent = world.getScene().addSceneNodeComponent(entity, Ogre::SCENE_DYNAMIC, pos, Ogre::Quaternion::IDENTITY);
-    auto& graphicsComponent = world.getGraphics().addGraphicsComponent(entity, "Plane.mesh");
+    auto& graphicsComponent = world.getGraphics().addGraphicsComponent(entity, "Plane.mesh", "Water");
     
-    graphicsComponent.setScale(Ogre::Vector3(10, 1, 10));
+    graphicsComponent.setScale(Ogre::Vector3(500, 1, 500));
     return entity;
 }
 

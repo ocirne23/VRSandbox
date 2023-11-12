@@ -12,9 +12,10 @@ import Systems.SceneSystem;
 import Systems.VRInputSystem;
 import Systems.InputSystem;
 import Systems.WaterPhysicsSystem;
+import Systems.BoatControlSystem;
 
 export class TestScene;
-export class CameraController;
+export class CameraFlyingController;
 
 /***
 * The World class owns all systems and mirrors as a global object container for them.
@@ -40,6 +41,7 @@ public:
 	VRInputSystem& getVRInput() { return m_vrInput; }
 	InputSystem& getInput() { return m_input; }
 	WaterPhysicsSystem& getWaterPhysics() { return m_waterPhysics; }
+	BoatControlSystem& getBoatControl() { return m_boatControl; }
 
 private:
 
@@ -54,10 +56,10 @@ private:
 	VRInputSystem m_vrInput;
 	InputSystem m_input;
 	WaterPhysicsSystem m_waterPhysics;
+	BoatControlSystem m_boatControl;
 
 private:
 
 	bool m_wantsShutdown = false;
 	std::unique_ptr<TestScene> m_pTestScene;
-	std::unique_ptr<CameraController> m_pCameraController;
 };

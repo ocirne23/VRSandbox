@@ -28,6 +28,8 @@ export struct SDL_JoyButtonEvent;
 export struct SDL_JoyAxisEvent;
 export struct SDL_JoyHatEvent;
 
+export enum SDL_Scancode;
+
 export class MouseListener
 {
 public:
@@ -83,6 +85,8 @@ public:
     const HandSkeletonData& getLeftHandSkeletonData() const { return m_leftHandSkeletonData; }
     const HandSkeletonData& getRightHandSkeletonData() const { return m_rightHandSkeletonData; }
 
+    bool isKeyCurrentlyPressed(SDL_Scancode sc);
+
 private:
 
     void updateVRInput();
@@ -96,6 +100,8 @@ private:
 
     World& m_world;
     entt::registry& m_registry;
+
+    const uint8_t* m_pKeyStates = nullptr;
 
     GraphicsSystem* m_pGraphics = nullptr;
     bool m_hasQuit = false;

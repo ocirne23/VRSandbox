@@ -51,6 +51,3 @@ void SceneSystem::removeSceneNodeComponent(entt::entity entity)
 	size_t numRemoved = m_registry.remove<SceneComponent>(entity);
 	OGRE_ASSERT(numRemoved);
 }
-
-// idk
-//Ogre::Resource::Listener::~Listener() {}
