@@ -1,0 +1,39 @@
+module;
+
+#include "VK.h"
+#include <glm/glm.hpp>
+
+export module RendererVK.RenderObject;
+
+import RendererVK.Buffer;
+import RendererVK.Pipeline;
+import File.MeshData;
+
+export class StagingManager;
+
+export class RenderObject final
+{
+public:
+
+	struct VertexLayout
+	{
+		glm::vec3 position;
+		glm::vec3 normal;
+		glm::vec2 textCoord;
+	};
+
+	RenderObject();
+	~RenderObject();
+	RenderObject(const RenderObject&) = delete;
+
+	bool initialize(const Device& device, StagingManager& stagingManager, MeshData& meshData);
+	static VertexLayoutInfo getVertexLayoutInfo();
+	uint32_t getNumIndices() const { return m_numIndices; }
+
+	Buffer m_vertexBuffer;
+	Buffer m_indexBuffer;
+
+private:
+	
+	uint32_t m_numIndices;
+};

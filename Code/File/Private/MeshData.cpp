@@ -1,0 +1,76 @@
+module;
+
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
+#include <glm/glm.hpp>
+
+module File.MeshData;
+
+using namespace Assimp;
+
+MeshData::MeshData()
+{
+}
+
+MeshData::~MeshData()
+{
+}
+
+bool MeshData::initialize(const aiMesh* pMesh)
+{
+	m_pMesh = pMesh;
+	m_pName = pMesh->mName.C_Str();
+
+	m_indices.resize(pMesh->mNumFaces * 3);
+	for (uint32_t i = 0; i < pMesh->mNumFaces; i++)
+	{
+		memcpy(&m_indices[i * 3], pMesh->mFaces[i].mIndices, 3 * sizeof(uint32_t));
+	}
+	return true;
+}
+
+glm::vec3* MeshData::getVertices()
+{
+	return reinterpret_cast<glm::vec3*>(m_pMesh->mVertices);
+}
+
+glm::vec3* MeshData::getNormals()
+{
+	return reinterpret_cast<glm::vec3*>(m_pMesh->mNormals);
+}
+
+glm::vec3* MeshData::getTexCoords()
+{
+	return reinterpret_cast<glm::vec3*>(m_pMesh->mTextureCoords[0]);
+}
+
+uint32_t MeshData::getNumVertices()
+{
+	return m_pMesh->mNumVertices;
+}
+
+uint32_t* MeshData::getIndices()
+{
+	return m_indices.data();
+}
+
+uint32_t MeshData::getNumIndices()
+{
+	return (uint32_t)m_indices.size();
+}
+
+void MeshData::getIndices(std::vector<uint32_t>& indices)
+{
+	assert(indices.empty());
+	indices.resize(m_pMesh->mNumFaces * 3);
+	for (uint32_t i = 0; i < m_pMesh->mNumFaces; i++)
+	{
+		memcpy(&indices[i * 3], m_pMesh->mFaces[i].mIndices, 3 * sizeof(uint32_t));
+	}
+}
+
+uint32_t MeshData::getMaterialIndex()
+{
+	return m_pMesh->mMaterialIndex;
+}
