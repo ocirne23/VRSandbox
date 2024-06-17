@@ -1,9 +1,6 @@
-module;
-
-#include "VK.h"
-
 module RendererVK.RenderPass;
 
+import RendererVK.VK;
 import RendererVK.Device;
 import RendererVK.SwapChain;
 
@@ -47,7 +44,7 @@ bool RenderPass::initialize(const Device& device, const SwapChain& swapChain)
     vk::PipelineStageFlags depthStages = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests;
     std::array<vk::SubpassDependency, 2> dependencies;
     dependencies[0] = vk::SubpassDependency{
-		.srcSubpass = VK_SUBPASS_EXTERNAL,
+		.srcSubpass = vk::SubpassExternal,
 		.dstSubpass = 0,
 		.srcStageMask = depthStages,
 		.dstStageMask = depthStages,
@@ -55,7 +52,7 @@ bool RenderPass::initialize(const Device& device, const SwapChain& swapChain)
 		.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
 	};
     dependencies[1] = vk::SubpassDependency {
-        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .srcSubpass = vk::SubpassExternal,
         .dstSubpass = 0,
         .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,// | vk::PipelineStageFlagBits::eEarlyFragmentTests,
         .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,// | vk::PipelineStageFlagBits::eEarlyFragmentTests,

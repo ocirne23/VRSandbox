@@ -1,24 +1,14 @@
-module;
-
-#include <stdlib.h>
-#include <vector>
-#include <string_view>
-#include <string>
-#include "VK.h"
-#include <fstream>
-#include <Windows.h>
-#include <WinUser.h>
-#include <filesystem>
-#include <SDL3/SDL_vulkan.h>
-#ifdef USE_AFTERMATH
-#include <Aftermath/GFSDK_Aftermath_Defines.h>
-#include <Aftermath/GFSDK_Aftermath.h>
-#include <Aftermath/GFSDK_Aftermath_GpuCrashDump.h>
-#include <Aftermath/GFSDK_Aftermath_GpuCrashDumpDecoding.h>
-#endif
 module RendererVK.Instance;
 
+import Core;
+import Core.SDL;
+import RendererVK.VK;
 import Core.Window;
+
+#ifdef USE_AFTERMATH
+import RendererVK.Aftermath;
+import Core.Windows;
+#endif
 
 #ifdef USE_AFTERMATH
 void ShaderDebugInfoCallback(const void* pShaderDebugInfo, const uint32_t shaderDebugInfoSize, void* pUserData)
@@ -169,7 +159,7 @@ Instance::~Instance()
 		m_instance.destroy();
 }
 
-static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType,
+static VkBool32 __stdcall debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType,
     const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
 {
     const char* severity = "UNKNOWN";
@@ -187,7 +177,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 	{
 		__debugbreak();
 	}
-    return VK_FALSE;
+    return vk::False;
 }
 
 bool Instance::initialize(Window& window, bool enableValidationLayers)
@@ -215,7 +205,7 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
         if (ppExtensions[i] && supportsExtension(ppExtensions[i]))
             extensions.push_back(ppExtensions[i]);
 
-    vk::ApplicationInfo appInfo { .pApplicationName = "App", .applicationVersion = VK_MAKE_VERSION(1, 0, 0), .pEngineName = "VRSandbox", .engineVersion = VK_MAKE_VERSION(1, 0, 0), .apiVersion = VK_API_VERSION_1_3 };
+    vk::ApplicationInfo appInfo { .pApplicationName = "App", .applicationVersion = VK_MAKE_VERSION(1, 0, 0), .pEngineName = "VRSandbox", .engineVersion = VK_MAKE_VERSION(1, 0, 0), .apiVersion = VK_MAKE_API_VERSION(0, 1, 3, 0) };
     vk::InstanceCreateInfo createInfo { .pApplicationInfo = &appInfo };
 
     vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo {

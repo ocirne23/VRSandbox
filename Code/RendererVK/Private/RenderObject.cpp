@@ -1,10 +1,7 @@
-module;
-
-#include "VK.h"
-#include <glm/glm.hpp>
-
 module RendererVK.RenderObject;
 
+import Core;
+import RendererVK.VK;
 import RendererVK.Device;
 import RendererVK.Buffer;
 import RendererVK.CommandBuffer;

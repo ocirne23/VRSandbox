@@ -1,11 +1,8 @@
-module;
-
-#include <SDL3/SDL_vulkan.h>
-#include <stdio.h>
-#include "VK.h"
-
 module RendererVK.Surface;
 
+import Core;
+import Core.SDL;
+import RendererVK.VK;
 import Core.Window;
 import RendererVK.Instance;
 import RendererVK.Device;
@@ -23,7 +20,7 @@ bool Surface::initialize(const Instance& instance, const Window& window)
 {
 	m_instance = instance.getHandle();
 	VkSurfaceKHR vkSurface = nullptr;
-	if (SDL_Vulkan_CreateSurface((SDL_Window*)window.getWindowHandle(), instance.getHandle(), nullptr, &vkSurface) != SDL_TRUE 
+	if (SDL_Vulkan_CreateSurface((SDL_Window*)window.getWindowHandle(), instance.getHandle(), nullptr, &vkSurface) != 1 
 		|| vkSurface == nullptr)
 	{
 		printf("Failed to create Vulkan surface: %s\n", SDL_GetError());

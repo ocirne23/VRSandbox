@@ -1,11 +1,9 @@
-module;
-
-#include "VK.h"
-#include <span>
-
 export module RendererVK.Buffer;
 
 export class Device;
+
+import Core;
+import RendererVK.VK;
 
 export class Buffer
 {
@@ -15,8 +13,6 @@ public:
 	Buffer(const Buffer&) = delete;
 
 	bool initialize(const Device& device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
-
-	void copyBuffer(Buffer& srcBuffer, vk::DeviceSize size);
 
 	std::span<uint8_t> mapMemory();
 	void unmapMemory();

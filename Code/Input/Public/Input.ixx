@@ -1,10 +1,6 @@
-module;
-
-#include <functional>
-#include <memory>
-#include <vector>
-
 export module Input.Input;
+
+import Core;
 
 export class GraphicsSystem;
 export class World;

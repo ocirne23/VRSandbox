@@ -1,13 +1,8 @@
-module;
-
-#include "VK.h"
-#include <glslang/Public/ShaderLang.h>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <stdlib.h>
-
 module RendererVK.RendererVK;
 
+import Core;
+import RendererVK.VK;
+import RendererVK.glslang;
 import Core.Window;
 import RendererVK.RenderObject;
 import RendererVK.Texture;

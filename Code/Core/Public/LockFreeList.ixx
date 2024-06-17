@@ -1,11 +1,10 @@
 module;
 
-#include <list>
-#include <mutex>
-#include <cassert>
+#include <cstddef>
 
-export module Core.LockedList;
+export module Core.LockFreeList;
 
+import Core;
 import Core.Allocator;
 
 export template <typename T>
@@ -107,12 +106,12 @@ template<typename T> inline T atomicLoad_128bit(T* pAddress)
 	return interlockedCompareExchange_128bit(pAddress, T(), T());
 }
 
-struct SInterlockedLinkedListEntry
+export struct SInterlockedLinkedListEntry
 {
 	SInterlockedLinkedListEntry* pNext = nullptr;
 };
 
-struct alignas(16) SInterlockedLinkedListHeader
+export struct alignas(16) SInterlockedLinkedListHeader
 {
 	SInterlockedLinkedListEntry* pNext = nullptr;
 	uint64_t                     nSalt = 0;

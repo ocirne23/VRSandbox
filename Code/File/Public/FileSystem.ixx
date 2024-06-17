@@ -1,5 +1,3 @@
-module;
-
 export module File.FileSystem;
 
 export class FileSystem

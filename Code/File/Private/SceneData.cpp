@@ -1,11 +1,6 @@
-module;
-
-#include <assimp/postprocess.h>
-#include <assimp/scene.h>
-#include <cassert>
-
 module File.SceneData;
 
+import File.Assimp;
 import File.MeshData;
 
 using namespace Assimp;

@@ -1,9 +1,6 @@
-module;
-
-#include "VK.h"
-
 module RendererVK.Device;
 
+import RendererVK.VK;
 import RendererVK.Instance;
 
 Device::Device() {}
@@ -71,12 +68,12 @@ bool Device::initialize(const Instance& inst)
 	};
 
 	vk::PhysicalDeviceSynchronization2Features syncFeatures {
-		.synchronization2 = VK_TRUE,
+		.synchronization2 = vk::True,
 	};
 	vk::PhysicalDeviceFeatures2 deviceFeatures {
 		.pNext = &syncFeatures,
 		.features = vk::PhysicalDeviceFeatures {
-			.samplerAnisotropy = VK_TRUE,
+			.samplerAnisotropy = vk::True,
 		},
 	};
 	m_physicalDevice.getFeatures2(&deviceFeatures);

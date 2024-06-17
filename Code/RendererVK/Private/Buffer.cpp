@@ -1,11 +1,7 @@
-module;
-
-#include "VK.h"
-
 module RendererVK.Buffer;
 
+import RendererVK.VK;
 import RendererVK.Device;
-import RendererVK.CommandBuffer;
 
 Buffer::Buffer() {}
 Buffer::~Buffer() 
@@ -45,28 +41,9 @@ bool Buffer::initialize(const Device& device, vk::DeviceSize size, vk::BufferUsa
 	return true;
 }
 
-void Buffer::copyBuffer(Buffer& buffer, vk::DeviceSize size)
-{
-	/*
-	CommandBuffer commandBuffer;
-	vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
-	vk::BufferCopy copyRegion = { .size = size };
-
-	vkCommandBuffer.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
-	vkCommandBuffer.copyBuffer(buffer.getBuffer(), m_buffer, 1, &copyRegion);
-	vkCommandBuffer.end();
-
-	vk::SubmitInfo submitInfo = {};
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &vkCommandBuffer;
-
-	m_device->getGraphicsQueue().submit(1, &submitInfo, nullptr);
-	m_device->getGraphicsQueue().waitIdle();*/
-}
-
 std::span<uint8_t> Buffer::mapMemory()
 {
-	return std::span<uint8_t>((uint8_t*)m_device->getDevice().mapMemory(m_memory, 0, VK_WHOLE_SIZE), (size_t)m_size);
+	return std::span<uint8_t>((uint8_t*)m_device->getDevice().mapMemory(m_memory, 0, vk::WholeSize), (size_t)m_size);
 }
 
 void Buffer::unmapMemory()

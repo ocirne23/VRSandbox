@@ -1,9 +1,6 @@
-module;
-
-#include "VK.h"
-
 module RendererVK.Framebuffers;
 
+import RendererVK.VK;
 import RendererVK.Device;
 import RendererVK.RenderPass;
 import RendererVK.SwapChain;

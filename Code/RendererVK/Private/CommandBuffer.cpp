@@ -1,9 +1,6 @@
-module;
-
-#include "VK.h"
-
 module RendererVK.CommandBuffer;
 
+import RendererVK.VK;
 import RendererVK.Device;
 
 CommandBuffer::CommandBuffer() {}

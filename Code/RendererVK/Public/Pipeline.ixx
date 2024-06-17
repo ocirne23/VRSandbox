@@ -1,9 +1,7 @@
-module;
-
-#include "VK.h"
-#include <variant>
-
 export module RendererVK.Pipeline;
+
+import Core;
+import RendererVK.VK;
 
 export class Device;
 export class RenderPass;

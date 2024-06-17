@@ -1,10 +1,6 @@
 module;
 
-#include <memory>
-#include <bitset>
-#include <cassert>
 #include <intrin.h>
-#include <thread>
 
 #ifndef _MSC_VER
 #define __debugbreak void
@@ -27,6 +23,8 @@ module;
 #endif
 
 export module Core.Allocator;
+
+import Core;
 
 export template<typename T, typename Alloc>
 class STLAllocator final

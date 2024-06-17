@@ -1,9 +1,7 @@
-module;
-
-#include "VK.h"
-
 module RendererVK.StagingManager;
 
+import Core;
+import RendererVK.VK;
 import RendererVK.Device;
 import RendererVK.Buffer;
 import RendererVK.CommandBuffer;
@@ -71,7 +69,7 @@ void StagingManager::update(SwapChain& swapChain)
 	}
 
 	vk::Device device = m_device->getDevice();
-	vk::Result result = device.waitForFences(1, &m_fences[m_currentBuffer], VK_TRUE, UINT64_MAX);
+	vk::Result result = device.waitForFences(1, &m_fences[m_currentBuffer], vk::True, UINT64_MAX);
 	if (result != vk::Result::eSuccess)
 		assert(false && "Failed to wait for fence");
 	result = device.resetFences(1, &m_fences[m_currentBuffer]);

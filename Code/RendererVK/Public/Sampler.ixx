@@ -1,8 +1,6 @@
-module;
-
-#include "VK.h"
-
 export module RendererVK.Sampler;
+
+import RendererVK.VK;
 
 import RendererVK.Device;
 

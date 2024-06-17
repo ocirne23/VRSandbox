@@ -1,11 +1,11 @@
 module;
 
-#include "VK.h"
-
 #include <stb/stb_image.h>
 
 module RendererVK.Texture;
 
+import Core;
+import RendererVK.VK;
 import RendererVK.Buffer;
 import RendererVK.CommandBuffer;
 
@@ -111,8 +111,8 @@ bool Texture::initialize(Device& device, CommandBuffer& commandBuffer, const cha
 		.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
 		.oldLayout = vk::ImageLayout::eUndefined,
 		.newLayout = vk::ImageLayout::eTransferDstOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+		.dstQueueFamilyIndex = vk::QueueFamilyIgnored,
 		.image = m_image,
 		.subresourceRange = vk::ImageSubresourceRange
 		{
@@ -148,8 +148,8 @@ bool Texture::initialize(Device& device, CommandBuffer& commandBuffer, const cha
 		.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
 		.oldLayout = vk::ImageLayout::eTransferDstOptimal,
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+		.dstQueueFamilyIndex = vk::QueueFamilyIgnored,
 		.image = m_image,
 		.subresourceRange = vk::ImageSubresourceRange
 		{
@@ -169,7 +169,7 @@ bool Texture::initialize(Device& device, CommandBuffer& commandBuffer, const cha
 	commandBuffer.addSignalSemaphore(m_imageReadySemaphore);
 	vk::Fence fence = m_device.createFence(vk::FenceCreateInfo{});
 	commandBuffer.submitGraphics(fence);
-	vk::Result result = m_device.waitForFences(fence, VK_TRUE, UINT64_MAX);
+	vk::Result result = m_device.waitForFences(fence, vk::True, UINT64_MAX);
 	m_device.destroyFence(fence);
 	return true;
 }

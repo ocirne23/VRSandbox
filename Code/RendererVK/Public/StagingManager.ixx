@@ -1,14 +1,11 @@
-module;
-
-#include "VK.h"
-
 export module RendererVK.StagingManager;
+
+import RendererVK.VK;
+import RendererVK.Buffer;
+import RendererVK.CommandBuffer;
 
 export class Device;
 export class SwapChain;
-
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
 
 export class StagingManager
 {

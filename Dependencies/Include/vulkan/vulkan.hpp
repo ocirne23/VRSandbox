@@ -8,6 +8,9 @@
 #ifndef VULKAN_HPP
 #define VULKAN_HPP
 
+#define VULKAN_HPP_NO_CONSTRUCTORS
+#define VULKAN_HPP_NO_SPACESHIP_OPERATOR
+
 #include <algorithm>
 #include <array>     // ArrayWrapperND
 #include <string.h>  // strnlen

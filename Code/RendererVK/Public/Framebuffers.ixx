@@ -1,8 +1,6 @@
-module;
-
-#include "VK.h"
-
 export module RendererVK.Framebuffers;
+
+import RendererVK.VK;
 
 export class Device;
 export class RenderPass;

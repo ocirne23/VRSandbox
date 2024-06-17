@@ -1,11 +1,7 @@
-module;
-
-#include <assimp/Importer.hpp>
-#include <assimp/postprocess.h>
-#include <assimp/scene.h>
-#include <glm/glm.hpp>
-
 module File.MeshData;
+
+import Core;
+import File.Assimp;
 
 using namespace Assimp;
 

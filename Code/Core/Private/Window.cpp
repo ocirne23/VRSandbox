@@ -1,11 +1,7 @@
-module;
-
-#include <glm/vec2.hpp>
-#include <string_view>
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
-
 module Core.Window;
+
+import Core;
+import Core.SDL;
 
 bool Window::initialize(std::string_view windowTitle, glm::ivec2 pos, glm::ivec2 size)
 {

@@ -1,9 +1,6 @@
-module;
-
-#include <string_view>
-#include <glm/vec2.hpp>
-
 export module Core.Window;
+
+import Core;
 
 export class Window
 {

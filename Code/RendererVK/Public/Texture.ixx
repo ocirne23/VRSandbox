@@ -1,9 +1,6 @@
-module;
-
-#include "VK.h"
-
 export module RendererVK.Texture;
 
+import RendererVK.VK;
 import RendererVK.Device;
 
 export class CommandBuffer;

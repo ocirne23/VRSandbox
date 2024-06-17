@@ -1,9 +1,6 @@
-module;
-
-#include <glm/glm.hpp>
-#include <vector>
-
 export module File.MeshData;
+
+import Core;
 
 export struct aiMesh;
 

@@ -1,9 +1,8 @@
-module;
-
-#include <vector>
-#include <VK.h>
-
 export module RendererVK.Instance;
+
+import Core;
+import RendererVK.VK;
+
 
 export class Window;
 

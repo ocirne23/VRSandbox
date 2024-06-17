@@ -1,8 +1,6 @@
-module;
-
-#include <SDL3/SDL.h>
-
 module Input.Input;
+
+import Core.SDL;
 
 Input::Input() {}
 Input::~Input() {}

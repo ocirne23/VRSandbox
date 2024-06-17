@@ -1,10 +1,7 @@
-module;
-
-#include "VK.h"
-#include <vector>
-
 export module RendererVK.SwapChain;
 
+import Core;
+import RendererVK.VK;
 import RendererVK.CommandBuffer;
 
 export class Device;

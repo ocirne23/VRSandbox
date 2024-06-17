@@ -1,10 +1,7 @@
-module;
-
-#include <iostream>
-#include <filesystem>
-#include <Windows.h>
-
 module File.FileSystem;
+
+import Core;
+import Core.Windows;
 
 bool FileSystem::initialize()
 {

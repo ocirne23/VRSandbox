@@ -1,8 +1,6 @@
-module;
-
-#include <string>
-
 export module File.MaterialData;
+
+import Core;
 
 export struct aiMaterial;
 

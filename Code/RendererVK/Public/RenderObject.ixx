@@ -1,10 +1,7 @@
-module;
-
-#include "VK.h"
-#include <glm/glm.hpp>
-
 export module RendererVK.RenderObject;
 
+import Core;
+import RendererVK.VK;
 import RendererVK.Buffer;
 import RendererVK.Pipeline;
 import File.MeshData;

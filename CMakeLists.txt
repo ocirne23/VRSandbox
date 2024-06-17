@@ -12,7 +12,10 @@ set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "_Build")
 list(APPEND COMPILE_OPTIONS "/std:c++latest" "/experimental:module" "/Zc:__cplusplus" "/fp:fast" "/arch:AVX2" "$<$<NOT:$<CONFIG:DEBUG>>:/GL>" "/Oi" "/Ot")
 list(APPEND LINK_OPTIONS "$<$<NOT:$<CONFIG:DEBUG>>:/LTCG>" "$<$<NOT:$<CONFIG:DEBUG>>:/INCREMENTAL:NO>")
 
-add_subdirectory(Code)
+if(MSVC)
+    add_definitions(/FI"cassert" /wd5260 /wd5105)
+else()
+    add_definitions(-include cassert)
+endif()
 
-get_directory_property(AWA DIRECTORY Code/App BUILDSYSTEM_TARGETS)
-message("all targets: ${AWA}")
+add_subdirectory(Code)

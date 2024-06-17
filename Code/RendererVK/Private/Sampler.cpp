@@ -1,9 +1,6 @@
-module;
-
-#include "VK.h"
-
 module RendererVK.Sampler;
 
+import RendererVK.VK;
 import RendererVK.Device;
 
 Sampler::Sampler()
@@ -27,14 +24,14 @@ bool Sampler::initialize(const Device& device)
 		.addressModeV = vk::SamplerAddressMode::eRepeat,
 		.addressModeW = vk::SamplerAddressMode::eRepeat,
 		.mipLodBias = 0.0f,
-		.anisotropyEnable = VK_TRUE,
+		.anisotropyEnable = vk::True,
 		.maxAnisotropy = 16,
-		.compareEnable = VK_FALSE,
+		.compareEnable = vk::False,
 		.compareOp = vk::CompareOp::eNever,
 		.minLod = 0.0f,
 		.maxLod = 0.0f,
 		.borderColor = vk::BorderColor::eFloatOpaqueBlack,
-		.unnormalizedCoordinates = VK_FALSE
+		.unnormalizedCoordinates = vk::False
 	};
 	m_sampler = m_device.createSampler(samplerInfo);
 	if (!m_sampler)

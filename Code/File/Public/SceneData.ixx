@@ -1,10 +1,7 @@
-module;
-
-#include <assimp/Importer.hpp>
-#include <vector>
-
 export module File.SceneData;
 
+import Core;
+import File.Assimp;
 import File.MeshData;
 import File.TextureData;
 import File.MaterialData;

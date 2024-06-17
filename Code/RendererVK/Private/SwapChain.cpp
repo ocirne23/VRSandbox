@@ -1,10 +1,6 @@
-module;
-
-#include "VK.h"
-#include <algorithm>
-
 module RendererVK.SwapChain;
 
+import RendererVK.VK;
 import RendererVK.Device;
 import RendererVK.Surface;
 import RendererVK.CommandBuffer;
@@ -73,7 +69,7 @@ bool SwapChain::initialize(const Device& device, const Surface& surface, uint32_
         .preTransform = capabilities.currentTransform,
         .compositeAlpha = compositeAlpha,
         .presentMode = vk::PresentModeKHR::eImmediate,
-        .clipped = VK_TRUE,
+        .clipped = vk::True,
     };
 
     m_layout.numImages = imageCount;
@@ -96,7 +92,7 @@ uint32_t SwapChain::acquireNextImage()
     vk::Device vkDevice = m_device->getDevice();
 	SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
     
-    vk::Result result = vkDevice.waitForFences(1, &syncObjects.inFlight, VK_TRUE, UINT64_MAX);
+    vk::Result result = vkDevice.waitForFences(1, &syncObjects.inFlight, vk::True, UINT64_MAX);
     if (result != vk::Result::eSuccess)
 		assert(false && "Failed to wait for fence");
     result = vkDevice.resetFences(1, &syncObjects.inFlight);

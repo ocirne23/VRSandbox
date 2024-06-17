@@ -1,15 +1,7 @@
-module;
-
-#include <cassert>
-#include <coroutine>
-#include <thread>
-#include <vector>
-#include <mutex>
-#include <list>
-
 export module Core.JobSystem;
 
-import Core.LockedList;
+import Core;
+import Core.LockFreeList;
 import Core.Allocator;
 
 struct promise_type;

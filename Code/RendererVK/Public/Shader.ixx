@@ -1,11 +1,7 @@
-module;
-
-#include <string>
-#include <vector>
-#include "VK.h"
-
 export module RendererVK.Shader;
 
+import Core;
+import RendererVK.VK;
 import RendererVK.Device;
 
 export class Shader

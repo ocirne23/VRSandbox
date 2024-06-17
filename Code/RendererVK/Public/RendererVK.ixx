@@ -1,11 +1,6 @@
-module;
-
-#include <cstdint>
-#include <array>
-#include "VK.h"
-
 export module RendererVK.RendererVK;
 
+import RendererVK.VK;
 import RendererVK.Instance;
 import RendererVK.Device;
 import RendererVK.Surface;

@@ -1,8 +1,6 @@
-module;
-
-#include "VK.h"
-
 export module RendererVK.Surface;
+
+import RendererVK.VK;
 
 export class Instance;
 export class Device;

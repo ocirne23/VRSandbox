@@ -1,10 +1,7 @@
-module;
-
-#include "VK.h"
-#include <variant>
-
 module RendererVK.Pipeline;
 
+import Core;
+import RendererVK.VK;
 import RendererVK.Device;
 import RendererVK.Shader;
 import RendererVK.RenderPass;
@@ -99,7 +96,7 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	{
 		.flags = {},
 		.topology = vk::PrimitiveTopology::eTriangleList,
-		.primitiveRestartEnable = VK_FALSE,
+		.primitiveRestartEnable = vk::False,
 	};
 	vk::PipelineViewportStateCreateInfo pipelineViewportStateCreateInfo
 	{
@@ -112,12 +109,12 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	vk::PipelineRasterizationStateCreateInfo pipelineRasterizationStateCreateInfo
 	{
 		.flags = {},
-		.depthClampEnable = VK_FALSE,
-		.rasterizerDiscardEnable = VK_FALSE,
+		.depthClampEnable = vk::False,
+		.rasterizerDiscardEnable = vk::False,
 		.polygonMode = vk::PolygonMode::eFill,
 		.cullMode = vk::CullModeFlagBits::eBack,
 		.frontFace = vk::FrontFace::eClockwise,
-		.depthBiasEnable = VK_FALSE,
+		.depthBiasEnable = vk::False,
 		.depthBiasConstantFactor = 0.0f,
 		.depthBiasClamp = 0.0f,
 		.depthBiasSlopeFactor = 0.0f,
@@ -128,11 +125,11 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	{
 		.flags = {},
 		.rasterizationSamples = vk::SampleCountFlagBits::e1,
-		.sampleShadingEnable = VK_FALSE,
+		.sampleShadingEnable = vk::False,
 		.minSampleShading = 0.0f,
 		.pSampleMask = nullptr,
-		.alphaToCoverageEnable = VK_FALSE,
-		.alphaToOneEnable = VK_FALSE,
+		.alphaToCoverageEnable = vk::False,
+		.alphaToOneEnable = vk::False,
 	};
 
 	vk::StencilOpState stencilOpState
@@ -147,11 +144,11 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	};
 	vk::PipelineDepthStencilStateCreateInfo pipelineDepthStencilStateCreateInfo{
 		.flags = {},
-		.depthTestEnable = VK_TRUE,
-		.depthWriteEnable = VK_TRUE,
+		.depthTestEnable = vk::True,
+		.depthWriteEnable = vk::True,
 		.depthCompareOp = vk::CompareOp::eLess,
-		.depthBoundsTestEnable = VK_FALSE,
-		.stencilTestEnable = VK_FALSE,
+		.depthBoundsTestEnable = vk::False,
+		.stencilTestEnable = vk::False,
 	//	.front = stencilOpState,
 	//	.back = stencilOpState,
 	//	.minDepthBounds = 0.0f,
@@ -161,7 +158,7 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	vk::ColorComponentFlags colorComponentFlags = vk::FlagTraits<vk::ColorComponentFlagBits>::allFlags;
 	vk::PipelineColorBlendAttachmentState pipelineColorBlendAttachmentState
 	{
-		.blendEnable = VK_FALSE,
+		.blendEnable = vk::False,
 		.srcColorBlendFactor = vk::BlendFactor::eZero,
 		.dstColorBlendFactor = vk::BlendFactor::eZero,
 		.colorBlendOp = vk::BlendOp::eAdd,
@@ -173,7 +170,7 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	vk::PipelineColorBlendStateCreateInfo pipelineColorBlendStateCreateInfo
 	{
 		.flags = {},
-		.logicOpEnable = VK_FALSE,
+		.logicOpEnable = vk::False,
 		.logicOp = vk::LogicOp::eCopy,
 		.attachmentCount = 1,
 		.pAttachments = &pipelineColorBlendAttachmentState,
@@ -228,7 +225,7 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 
 void Pipeline::updateDescriptorSets(const std::span<DescriptorSetUpdateInfo>& updateInfo)
 {
-	vk::WriteDescriptorSet* descriptorWrites = (vk::WriteDescriptorSet*)alloca(sizeof(vk::WriteDescriptorSet) * updateInfo.size());
+	vk::WriteDescriptorSet* descriptorWrites = (vk::WriteDescriptorSet*)_alloca(sizeof(vk::WriteDescriptorSet) * updateInfo.size());
 	for (uint32_t i = 0; i < updateInfo.size(); i++)
 	{
 		descriptorWrites[i] =

@@ -1,8 +1,6 @@
-module;
-
-#include <stdint.h>
-
 export module File.TextureData;
+
+import Core;
 
 export struct aiTexture;
 
@@ -22,8 +20,8 @@ public:
 	};
 
 	const Pixel* getPixels();
-	uint32_t getWidth();
-	uint32_t getHeight();
+	uint32 getWidth();
+	uint32 getHeight();
 
 private:
 

@@ -1,17 +1,8 @@
-module;
-
-#include <assert.h>
-#include <string>
-#include <vector>
-#include <fstream>
-
-#include <glslang/Public/ResourceLimits.h>
-#include <glslang/Public/ShaderLang.h>
-#include <glslang/SPIRV/GlslangToSpv.h>
-
-#include "VK.h"
-
 module RendererVK.Shader;
+
+import Core;
+import RendererVK.VK;
+import RendererVK.glslang;
 
 Shader::Shader() {}
 Shader::~Shader() {}
@@ -102,7 +93,7 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
     {
         puts(shader.getInfoLog());
         puts(shader.getInfoDebugLog());
-        fflush(stdout);
+        std::cout.flush();
         return false;
     }
 
