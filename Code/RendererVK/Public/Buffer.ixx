@@ -14,9 +14,8 @@ public:
 
 	bool initialize(const Device& device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
 
-	std::span<uint8_t> mapMemory();
+	std::span<uint8> mapMemory();
 	void unmapMemory();
-
 	vk::Buffer getBuffer() const { return m_buffer; }
 	vk::DeviceMemory getMemory() const { return m_memory; }
 

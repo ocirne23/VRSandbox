@@ -197,11 +197,11 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
 	m_supportedExtensions = vk::enumerateInstanceExtensionProperties();
 	m_supportedLayers = vk::enumerateInstanceLayerProperties();
 
-    uint32_t numExtensions = 0;
+    uint32 numExtensions = 0;
     const char* const* ppExtensions = SDL_Vulkan_GetInstanceExtensions(&numExtensions);
     std::vector<const char*> extensions;
     
-    for (uint32_t i = 0; i < numExtensions; i++)
+    for (uint32 i = 0; i < numExtensions; i++)
         if (ppExtensions[i] && supportsExtension(ppExtensions[i]))
             extensions.push_back(ppExtensions[i]);
 
@@ -230,10 +230,10 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
 			extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
         createInfo.pNext = &debugCreateInfo;
     }
-    createInfo.enabledLayerCount = (uint32_t)m_enabledLayers.size();
+    createInfo.enabledLayerCount = (uint32)m_enabledLayers.size();
     createInfo.ppEnabledLayerNames = m_enabledLayers.data();
 
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    createInfo.enabledExtensionCount = static_cast<uint32>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
 
     m_instance = vk::createInstance(createInfo);

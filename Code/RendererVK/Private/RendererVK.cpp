@@ -49,34 +49,15 @@ void main()
 }
 )";
 
-constexpr static uint32_t NUM_FRAMES_IN_FLIGHT = 2;
-constexpr static uint32_t MAX_INDIRECT_COMMANDS = 10;
+constexpr static float CAMERA_FOV_DEG = 45.0f;
+constexpr static float CAMERA_NEAR = 0.1f;
+constexpr static float CAMERA_FAR = 100.0f;
+
+constexpr static uint32 NUM_FRAMES_IN_FLIGHT = 2;
+constexpr static uint32 MAX_INDIRECT_COMMANDS = 10;
 
 RendererVK::RendererVK() {}
 RendererVK::~RendererVK() {}
-
-static const glm::mat4 clipMatrix = glm::mat4(
-	1.0f, 0.0f, 0.0f, 0.0f,
-	0.0f, -1.0f, 0.0f, 0.0f,
-	0.0f, 0.0f, 0.5f, 0.0f,
-	0.0f, 0.0f, 0.5f, 1.0f);
-
-glm::mat4x4 createModelViewProjectionClipMatrix(vk::Extent2D const& extent)
-{
-	const float fov = glm::radians(45.0f);
-	const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
-
-	const glm::mat4x4 model = glm::mat4x4(1.0f);
-	const glm::mat4x4 view = glm::lookAt(glm::vec3(-5.0f, 3.0f, -10.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
-	const glm::mat4x4 projection = glm::perspective(fov, aspect, 0.1f, 100.0f);
-	// vulkan clip space has inverted y and half z !
-	const glm::mat4x4 clip = glm::mat4x4(
-		1.0f, 0.0f, 0.0f, 0.0f,
-		0.0f, -1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 0.5f, 0.0f,
-		0.0f, 0.0f, 0.5f, 1.0f);
-	return clip * projection * view * model;
-}
 
 bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 {
@@ -139,11 +120,8 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 void RendererVK::update(const glm::mat4& viewMatrix)
 {
 	const vk::Extent2D extent = m_swapChain.getLayout().extent;
-	vk::CommandBuffer vkCommandBuffer = m_swapChain.getCurrentCommandBuffer().getCommandBuffer();
-	const float fov = glm::radians(45.0f);
 	const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
-
-	const glm::mat4x4 projection = glm::perspective(fov, aspect, 0.1f, 100.0f);
+	const glm::mat4x4 projection = glm::perspective(glm::radians(CAMERA_FOV_DEG), aspect, CAMERA_NEAR, CAMERA_FAR);
 	// vulkan clip space has inverted y and half z !
 	const static glm::mat4x4 clip = glm::mat4x4(
 		1.0f, 0.0f, 0.0f, 0.0f,
@@ -181,7 +159,7 @@ void RendererVK::render()
 		.extent = extent
 	};
 
-	const uint32_t imageIdx = m_swapChain.acquireNextImage();
+	const uint32 imageIdx = m_swapChain.acquireNextImage();
 	const vk::RenderPassBeginInfo renderPassBeginInfo{
 		.renderPass = m_renderPass.getRenderPass(),
 		.framebuffer = m_framebuffers.getFramebuffer(imageIdx),
@@ -189,11 +167,11 @@ void RendererVK::render()
 			.offset = vk::Offset2D { 0, 0 },
 			.extent = extent,
 		},
-		.clearValueCount = (uint32_t)clearValues.size(),
+		.clearValueCount = (uint32)clearValues.size(),
 		.pClearValues = clearValues.data(),
 	};
 
-	std::span<uint8_t> pUniformData = m_uniformBuffer.mapMemory();
+	std::span<uint8> pUniformData = m_uniformBuffer.mapMemory();
 	memcpy(pUniformData.data(), &m_mvpMatrix, sizeof(m_mvpMatrix));
 	m_uniformBuffer.unmapMemory();
 

@@ -19,9 +19,9 @@ bool MeshData::initialize(const aiMesh* pMesh)
 	m_pName = pMesh->mName.C_Str();
 
 	m_indices.resize(pMesh->mNumFaces * 3);
-	for (uint32_t i = 0; i < pMesh->mNumFaces; i++)
+	for (uint32 i = 0; i < pMesh->mNumFaces; i++)
 	{
-		memcpy(&m_indices[i * 3], pMesh->mFaces[i].mIndices, 3 * sizeof(uint32_t));
+		memcpy(&m_indices[i * 3], pMesh->mFaces[i].mIndices, 3 * sizeof(uint32));
 	}
 	return true;
 }
@@ -41,32 +41,32 @@ glm::vec3* MeshData::getTexCoords()
 	return reinterpret_cast<glm::vec3*>(m_pMesh->mTextureCoords[0]);
 }
 
-uint32_t MeshData::getNumVertices()
+uint32 MeshData::getNumVertices()
 {
 	return m_pMesh->mNumVertices;
 }
 
-uint32_t* MeshData::getIndices()
+uint32* MeshData::getIndices()
 {
 	return m_indices.data();
 }
 
-uint32_t MeshData::getNumIndices()
+uint32 MeshData::getNumIndices()
 {
-	return (uint32_t)m_indices.size();
+	return (uint32)m_indices.size();
 }
 
-void MeshData::getIndices(std::vector<uint32_t>& indices)
+void MeshData::getIndices(std::vector<uint32>& indices)
 {
 	assert(indices.empty());
 	indices.resize(m_pMesh->mNumFaces * 3);
-	for (uint32_t i = 0; i < m_pMesh->mNumFaces; i++)
+	for (uint32 i = 0; i < m_pMesh->mNumFaces; i++)
 	{
-		memcpy(&indices[i * 3], m_pMesh->mFaces[i].mIndices, 3 * sizeof(uint32_t));
+		memcpy(&indices[i * 3], m_pMesh->mFaces[i].mIndices, 3 * sizeof(uint32));
 	}
 }
 
-uint32_t MeshData::getMaterialIndex()
+uint32 MeshData::getMaterialIndex()
 {
 	return m_pMesh->mMaterialIndex;
 }

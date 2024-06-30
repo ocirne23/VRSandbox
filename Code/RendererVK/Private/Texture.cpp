@@ -69,15 +69,6 @@ bool Texture::initialize(Device& device, CommandBuffer& commandBuffer, const cha
 		return false;
 	}
 	m_device.bindImageMemory(m_image, m_imageMemory, 0);
-	/*
-	const vk::DeviceSize nomCoherentAtomSize = device.getPhysicalDevice().getProperties().limits.nonCoherentAtomSize;
-	const vk::DeviceSize alignedSize = (imageSize - 1) - ((imageSize - 1) % nomCoherentAtomSize) + nomCoherentAtomSize;
-	vk::MappedMemoryRange mappedMemoryRange = {
-		.memory = m_imageMemory,
-		.offset = 0,
-		.size = alignedSize
-	};
-	m_device.flushMappedMemoryRanges(mappedMemoryRange);*/
 
 	vk::ImageViewCreateInfo imageViewInfo {
 		.image = m_image,

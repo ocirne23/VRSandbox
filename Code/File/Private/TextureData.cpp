@@ -24,12 +24,12 @@ const TextureData::Pixel* TextureData::getPixels()
 	return reinterpret_cast<const Pixel*>(m_pTexture->pcData);
 }
 
-uint32_t TextureData::getWidth()
+uint32 TextureData::getWidth()
 {
 	return m_pTexture->mWidth;
 }
 
-uint32_t TextureData::getHeight()
+uint32 TextureData::getHeight()
 {
 	return m_pTexture->mHeight;
 }

@@ -1,5 +1,6 @@
 export module RendererVK.Texture;
 
+import Core;
 import RendererVK.VK;
 import RendererVK.Device;
 
@@ -20,9 +21,9 @@ public:
 
 private:
 
-	uint32_t m_width = 0;
-	uint32_t m_height = 0;
-	uint32_t m_numChannels = 0;
+	uint32 m_width = 0;
+	uint32 m_height = 0;
+	uint32 m_numChannels = 0;
 	vk::Image m_image;
 	vk::DeviceMemory m_imageMemory;
 	vk::ImageView m_imageView;

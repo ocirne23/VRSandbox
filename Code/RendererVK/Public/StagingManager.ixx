@@ -1,5 +1,6 @@
 export module RendererVK.StagingManager;
 
+import Core;
 import RendererVK.VK;
 import RendererVK.Buffer;
 import RendererVK.CommandBuffer;
@@ -16,8 +17,8 @@ public:
 	StagingManager(const StagingManager&) = delete;
 
 	bool initialize(Device& device);
-	vk::Semaphore upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
 
+	vk::Semaphore upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
 	void update(SwapChain& swapChain);
 
 private:
@@ -32,5 +33,5 @@ private:
 	int m_currentBuffer = 0;
 	vk::DeviceSize m_currentBufferOffset = 0;
 	std::vector<std::pair<vk::Buffer, vk::BufferCopy>> m_copyRegions;
-	uint8_t* m_mappedMemory = nullptr;
+	uint8* m_mappedMemory = nullptr;
 };

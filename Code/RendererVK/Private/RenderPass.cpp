@@ -60,11 +60,11 @@ bool RenderPass::initialize(const Device& device, const SwapChain& swapChain)
         .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
     };
     vk::RenderPassCreateInfo renderPassInfo {
-		.attachmentCount = static_cast<uint32_t>(attachments.size()),
+		.attachmentCount = static_cast<uint32>(attachments.size()),
 		.pAttachments = attachments.data(),
 		.subpassCount = 1,
 		.pSubpasses = &subpass,
-		.dependencyCount = (uint32_t)dependencies.size(),
+		.dependencyCount = (uint32)dependencies.size(),
 		.pDependencies = dependencies.data(),
 	};
 

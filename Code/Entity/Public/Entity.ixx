@@ -14,11 +14,11 @@ export struct EntityID
 	constexpr static uint64_t isZoneBit    = 0b10000000'00000000'00000000'00000000'00000000'00000000'00000000'00000000;
 
 	Entity* getEntity() const;
-	uint8_t getSalt() const
+	uint8 getSalt() const
 	{
 		return uint8_t(id & SaltBits);
 	}
-	uint16_t getType() const
+	uint16 getType() const
 	{
 		return uint16_t((id & TypeBits) >> 48);
 	}
@@ -32,10 +32,10 @@ export struct alignas(32) Entity
 {
 	glm::vec4 m_positionRadius;
 	glm::vec3 m_orientation;
-	uint32_t salt : 4;
-	uint32_t state : 4;
-	uint32_t zoneIdx : 8;
-	uint32_t zoneID : 16;
+	uint32 salt : 4;
+	uint32 state : 4;
+	uint32 zoneIdx : 8;
+	uint32 zoneID : 16;
 };
 
 Entity* EntityID::getEntity() const

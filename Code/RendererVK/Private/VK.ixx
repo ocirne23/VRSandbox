@@ -2,6 +2,8 @@ export module RendererVK.VK;
 
 export import <vulkan/vulkan.hpp>;
 
+import Core;
+
 #undef VK_NULL_HANDLE
 export nullptr_t VK_NULL_HANDLE = nullptr;
 
@@ -18,15 +20,15 @@ export const char* VK_EXT_DEBUG_REPORT_EXTENSION_NAME = "VK_EXT_debug_report";
 export const char* VK_EXT_DEBUG_UTILS_EXTENSION_NAME = "VK_EXT_debug_utils";
 
 #undef VK_MAKE_API_VERSION
-export constexpr uint32_t VK_MAKE_API_VERSION(uint32_t variant, uint32_t major, uint32_t minor, uint32_t patch)
+export constexpr uint32 VK_MAKE_API_VERSION(uint32 variant, uint32 major, uint32 minor, uint32_t patch)
 {
-	return ((((uint32_t)(variant)) << 29U) | (((uint32_t)(major)) << 22U) | (((uint32_t)(minor)) << 12U) | ((uint32_t)(patch)));
+	return ((((uint32)(variant)) << 29U) | (((uint32)(major)) << 22U) | (((uint32)(minor)) << 12U) | ((uint32)(patch)));
 }
 
 #undef VK_MAKE_VERSION
-export constexpr uint32_t VK_MAKE_VERSION(uint32_t major, uint32_t minor, uint32_t patch)
+export constexpr uint32 VK_MAKE_VERSION(uint32 major, uint32 minor, uint32 patch)
 {
-	return ((((uint32_t)(major)) << 22U) | (((uint32_t)(minor)) << 12U) | ((uint32_t)(patch)));
+	return ((((uint32)(major)) << 22U) | (((uint32)(minor)) << 12U) | ((uint32)(patch)));
 }
 
 export PFN_vkCmdPushDescriptorSetKHR pfVkCmdPushDescriptorSetKHR = nullptr;

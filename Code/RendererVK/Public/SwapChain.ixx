@@ -13,7 +13,7 @@ public:
 
 	struct Layout
 	{
-		uint32_t numImages;
+		uint32 numImages;
 		vk::Format format;
 		vk::ColorSpaceKHR colorSpace;
 		vk::Extent2D extent;
@@ -30,10 +30,10 @@ public:
 	~SwapChain();
 	SwapChain(const SwapChain&) = delete;
 
-	bool initialize(const Device& device, const Surface& surface, uint32_t swapChainSize);
-	uint32_t acquireNextImage();
-	bool present(uint32_t imageIdx);
+	bool initialize(const Device& device, const Surface& surface, uint32 swapChainSize);
 
+	uint32 acquireNextImage();
+	bool present(uint32 imageIdx);
 	vk::SwapchainKHR getSwapChain() const { return m_swapChain; }
 	const Layout& getLayout() const { return m_layout; }
 	CommandBuffer& getCurrentCommandBuffer() { return m_commandBuffers[m_currentFrame]; }
@@ -45,7 +45,7 @@ private:
 	Layout m_layout;
 	const Device* m_device = nullptr;
 
-	uint32_t m_currentFrame = 0;
+	uint32 m_currentFrame = 0;
 	std::vector<CommandBuffer> m_commandBuffers;
 	std::vector<SyncObjects> m_syncObjects;
 };

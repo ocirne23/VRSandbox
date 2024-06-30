@@ -1,12 +1,11 @@
 module;
 
 #include <cstdint>
-#include <glm/glm.hpp>
-#include <vector>
 #include <intrin.h>
 
 export module Entity.Zone;
 
+import Core;
 import Entity.Entity;
 
 export struct EntityHash
@@ -24,12 +23,12 @@ export struct EntityHash
 	constexpr static float maxRadius     = 128.0f * 128.0f; // 16384.0f
 	constexpr static float maxError = 1.76f; // dist(vec3(0.4999), vec3(-0.5)) with some epsilon for large float math errors
 
-	inline uint64_t getRadiusMask(float radius)
+	inline uint64 getRadiusMask(float radius)
 	{
 		return uint64_t(glm::ceil(glm::sqrt(radius))) - 1;
 	}
 
-	inline float getRadiusFromMask(uint64_t mask)
+	inline float getRadiusFromMask(uint64 mask)
 	{
 		return (mask + 1) * (mask + 1) + maxError;
 	}

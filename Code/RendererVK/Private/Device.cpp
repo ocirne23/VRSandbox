@@ -38,7 +38,7 @@ bool Device::initialize(const Instance& inst)
 
 	m_graphicsQueueIndex = -1;
 	std::vector<vk::QueueFamilyProperties> queueFamilyProperties = m_physicalDevice.getQueueFamilyProperties();
-	for (uint32_t i = 0; i < queueFamilyProperties.size(); i++)
+	for (uint32 i = 0; i < queueFamilyProperties.size(); i++)
 	{
 		if (queueFamilyProperties[i].queueFlags & vk::QueueFlagBits::eGraphics)
 		{
@@ -76,11 +76,11 @@ bool Device::initialize(const Instance& inst)
 	const std::vector<const char*>& enabledLayers = inst.getEnabledLayers();
 	vk::DeviceCreateInfo deviceCreateInfo{
 		.pNext = &deviceFeatures,
-		.queueCreateInfoCount = (uint32_t)deviceQueueCreateInfos.size(),
+		.queueCreateInfoCount = (uint32)deviceQueueCreateInfos.size(),
 		.pQueueCreateInfos = deviceQueueCreateInfos.data(),
-		.enabledLayerCount = (uint32_t)enabledLayers.size(),
+		.enabledLayerCount = (uint32)enabledLayers.size(),
 		.ppEnabledLayerNames = enabledLayers.data(),
-		.enabledExtensionCount = (uint32_t)deviceExtensions.size(),
+		.enabledExtensionCount = (uint32)deviceExtensions.size(),
 		.ppEnabledExtensionNames = deviceExtensions.data(),
 	};
 	m_device = m_physicalDevice.createDevice(deviceCreateInfo);
@@ -133,11 +133,11 @@ bool Device::supportsExtensions(std::vector<const char*> extensions)
 	return true;
 }
 
-uint32_t Device::findMemoryType(uint32_t typeBits, vk::MemoryPropertyFlags requirementsMask) const
+uint32 Device::findMemoryType(uint32 typeBits, vk::MemoryPropertyFlags requirementsMask) const
 {
 	vk::PhysicalDeviceMemoryProperties memoryProperties = m_physicalDevice.getMemoryProperties();
-	uint32_t typeIndex = uint32_t(~0);
-	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
+	uint32 typeIndex = uint32(~0);
+	for (uint32 i = 0; i < memoryProperties.memoryTypeCount; i++)
 	{
 		if ((typeBits & 1) && ((memoryProperties.memoryTypes[i].propertyFlags & requirementsMask) == requirementsMask))
 		{
@@ -146,6 +146,6 @@ uint32_t Device::findMemoryType(uint32_t typeBits, vk::MemoryPropertyFlags requi
 		}
 		typeBits >>= 1;
 	}
-	assert(typeIndex != uint32_t(~0));
+	assert(typeIndex != uint32(~0));
 	return typeIndex;
 }

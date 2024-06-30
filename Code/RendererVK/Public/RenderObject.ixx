@@ -24,13 +24,14 @@ public:
 	RenderObject(const RenderObject&) = delete;
 
 	bool initialize(const Device& device, StagingManager& stagingManager, MeshData& meshData);
+
 	static VertexLayoutInfo getVertexLayoutInfo();
-	uint32_t getNumIndices() const { return m_numIndices; }
+	uint32 getNumIndices() const { return m_numIndices; }
 
 	Buffer m_vertexBuffer;
 	Buffer m_indexBuffer;
 
 private:
 	
-	uint32_t m_numIndices;
+	uint32 m_numIndices;
 };

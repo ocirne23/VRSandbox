@@ -26,7 +26,7 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	vk::DescriptorSetLayoutCreateInfo layoutInfo
 	{
 		.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
-		.bindingCount = (uint32_t)layout.descriptorSetLayoutBindings.size(),
+		.bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
 		.pBindings = layout.descriptorSetLayoutBindings.data(),
 	};
 	m_descriptorSetLayout = m_device.createDescriptorSetLayout(layoutInfo);
@@ -76,7 +76,7 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 		.flags = {},
 		.vertexBindingDescriptionCount = 1,
 		.pVertexBindingDescriptions = &layout.vertexLayoutInfo.bindingDescription,
-		.vertexAttributeDescriptionCount = static_cast<uint32_t>(layout.vertexLayoutInfo.attributeDescriptions.size()),
+		.vertexAttributeDescriptionCount = static_cast<uint32>(layout.vertexLayoutInfo.attributeDescriptions.size()),
 		.pVertexAttributeDescriptions = layout.vertexLayoutInfo.attributeDescriptions.data(),
 	};
 
@@ -168,13 +168,13 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	vk::PipelineDynamicStateCreateInfo pipelineDynamicStateCreateInfo
 	{
 		.flags = {},
-		.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
+		.dynamicStateCount = static_cast<uint32>(dynamicStates.size()),
 		.pDynamicStates = dynamicStates.data(),
 	};
 	vk::GraphicsPipelineCreateInfo graphicsPipelineCreateInfo
 	{
 		.flags = {},
-		.stageCount = static_cast<uint32_t>(pipelineShaderStageCreateInfos.size()),
+		.stageCount = static_cast<uint32>(pipelineShaderStageCreateInfos.size()),
 		.pStages = pipelineShaderStageCreateInfos.data(),
 		.pVertexInputState = &pipelineVertexInputStateCreateInfo,
 		.pInputAssemblyState = &pipelineInputAssemblyStateCreateInfo,

@@ -14,22 +14,18 @@ int main()
 	Window window;
 	window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(800, 600));
 
-	Input input;
-	input.initialize();
-
 	RendererVK renderer;
 	renderer.initialize(window, true);
 
+	Input input;
+	input.initialize();
+
 	FreeFlyCameraController cameraController;
-	cameraController.initialize(input, glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-
-
-	const float fov = glm::radians(45.0f);
-
+	cameraController.initialize(input, glm::vec3(10.0f, 0.0f, -10.0f), glm::vec3(0.0f, 0.0f, 0.0f));
 
 	auto startTime = std::chrono::high_resolution_clock::now();
 	double timeAccum = 0.0;
-	uint32_t frameCount = 0;
+	uint32 frameCount = 0;
 
 	char windowTitleBuf[256];
 	while (true)
@@ -37,9 +33,6 @@ int main()
 		const auto now = std::chrono::high_resolution_clock::now();
 		const double deltaSec = std::chrono::duration<double>(now - startTime).count();
 		startTime = now;
-
-		glm::ivec2 windowSize;
-		window.getWindowSize(windowSize);
 
 		input.update(deltaSec);
 		cameraController.update(deltaSec);

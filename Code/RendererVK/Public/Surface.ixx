@@ -14,8 +14,8 @@ public:
 	Surface(const Surface&) = delete;
 
 	bool initialize(const Instance& instance, const Window& window);
-	bool deviceSupportsSurface(const Device& device) const;
 
+	bool deviceSupportsSurface(const Device& device) const;
 	vk::SurfaceKHR getSurface() const { return m_surface; }
 
 private:

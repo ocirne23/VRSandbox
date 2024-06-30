@@ -41,9 +41,9 @@ bool Buffer::initialize(const Device& device, vk::DeviceSize size, vk::BufferUsa
 	return true;
 }
 
-std::span<uint8_t> Buffer::mapMemory()
+std::span<uint8> Buffer::mapMemory()
 {
-	return std::span<uint8_t>((uint8_t*)m_device->getDevice().mapMemory(m_memory, 0, vk::WholeSize), (size_t)m_size);
+	return std::span<uint8>((uint8*)m_device->getDevice().mapMemory(m_memory, 0, vk::WholeSize), (size_t)m_size);
 }
 
 void Buffer::unmapMemory()

@@ -19,7 +19,7 @@ public:
 	bool initialize(const char* fileName);
 	std::vector<MeshData>& getMeshes() { return m_meshes; }
 	MeshData* getMesh(const char* pMeshName);
-	MaterialData& getMaterial(uint32_t materialIdx);
+	MaterialData& getMaterial(uint32 materialIdx);
 
 private:
 

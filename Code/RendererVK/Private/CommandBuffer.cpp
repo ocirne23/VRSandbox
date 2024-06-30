@@ -39,12 +39,12 @@ bool CommandBuffer::initialize(const Device& device)
 void CommandBuffer::submitGraphics(vk::Fence fence)
 {
 	vk::SubmitInfo submitInfo {
-		.waitSemaphoreCount = (uint32_t)m_waitSemaphores.size(),
+		.waitSemaphoreCount = (uint32)m_waitSemaphores.size(),
 		.pWaitSemaphores = m_waitSemaphores.data(),
 		.pWaitDstStageMask = m_waitStages.data(),
 		.commandBufferCount = 1,
 		.pCommandBuffers = &m_commandBuffer,
-		.signalSemaphoreCount = (uint32_t)m_signalSemaphores.size(),
+		.signalSemaphoreCount = (uint32)m_signalSemaphores.size(),
 		.pSignalSemaphores = m_signalSemaphores.data(),
 	};
 	m_device->getGraphicsQueue().submit(submitInfo, fence);
@@ -58,7 +58,7 @@ void CommandBuffer::submitGraphics(vk::Fence fence)
 void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, const std::span<DescriptorSetUpdateInfo>& updateInfo)
 {
 	vk::WriteDescriptorSet* descriptorWrites = (vk::WriteDescriptorSet*)_alloca(sizeof(vk::WriteDescriptorSet) * updateInfo.size());
-	for (uint32_t i = 0; i < updateInfo.size(); i++)
+	for (uint32 i = 0; i < updateInfo.size(); i++)
 	{
 		descriptorWrites[i] =
 		{
@@ -70,5 +70,5 @@ void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, c
 				.pBufferInfo = std::get_if<vk::DescriptorBufferInfo>(&updateInfo[i].info),
 		};
 	}
-	m_commandBuffer.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, (uint32_t)updateInfo.size(), descriptorWrites);
+	m_commandBuffer.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, (uint32)updateInfo.size(), descriptorWrites);
 }

@@ -28,6 +28,7 @@ public:
 	RendererVK(const RendererVK&) = delete;
 
 	bool initialize(Window& window, bool enableValidationLayers);
+
 	void update(const glm::mat4& mvpMatrix);
 	void render();
 

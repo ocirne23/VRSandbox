@@ -47,8 +47,8 @@ struct AllocationHeader
 {
 	static constexpr int CHECK = 0x69696969;
 	void* pAllocator;
-	uint32_t size;
-	uint32_t checkVal;
+	uint32 size;
+	uint32 checkVal;
 };
 static_assert(sizeof(AllocationHeader) == __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 
@@ -78,7 +78,7 @@ public:
 	{
 		AllocationHeader* pAllocation = static_cast<AllocationHeader*>(std::malloc(size + sizeof(AllocationHeader)));
 		pAllocation->pAllocator = this;
-		pAllocation->size = (uint32_t)size;
+		pAllocation->size = (uint32)size;
 #ifdef TRACK_ALLOCATION_SIZE
 		m_usedSize += size + sizeof(AllocationHeader);
 		m_maxUsedSize = m_usedSize > m_maxUsedSize ? (size_t)m_usedSize : m_maxUsedSize;
@@ -171,7 +171,7 @@ public:
 			if (m_buffer[i] != 'f') { __debugbreak(); assert(false); }	
 #endif
 		pAllocation->pAllocator = this;
-		pAllocation->size = (uint32_t)sizeWithHeader;
+		pAllocation->size = (uint32)sizeWithHeader;
 #ifdef CHECK_BOUNDS
 		pAllocation->checkVal = AllocationHeader::CHECK;
 		AllocationTail* pTail = (AllocationTail*)((uint8_t*)(pAllocation + 1) + size);

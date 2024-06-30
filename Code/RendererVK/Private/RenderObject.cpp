@@ -18,22 +18,22 @@ bool RenderObject::initialize(const Device& device, StagingManager& stagingManag
 	glm::vec3* pNormals = meshData.getNormals();
 	glm::vec3* pTexCoords = meshData.getTexCoords();
 
-	for (uint32_t i = 0; i < meshData.getNumVertices(); i++)
+	for (uint32 i = 0; i < meshData.getNumVertices(); i++)
 	{
 		VertexLayout& vertex = vertices.emplace_back();
 		vertex.position = pVertices[i];
 		vertex.normal = pNormals[i];
 		vertex.textCoord = glm::vec2(pTexCoords[i]);
 	}
-	std::vector<uint32_t> indices;
+	std::vector<uint32> indices;
 	meshData.getIndices(indices);
-	m_numIndices = (uint32_t)indices.size();
+	m_numIndices = (uint32)indices.size();
 
 	m_vertexBuffer.initialize(device, vertices.size() * sizeof(VertexLayout), vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
-	m_indexBuffer.initialize(device, indices.size() * sizeof(uint32_t), vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
+	m_indexBuffer.initialize(device, indices.size() * sizeof(uint32), vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 	stagingManager.upload(m_vertexBuffer.getBuffer(), vertices.size() * sizeof(VertexLayout), vertices.data());
-	stagingManager.upload(m_indexBuffer.getBuffer(), indices.size() * sizeof(uint32_t), indices.data());
+	stagingManager.upload(m_indexBuffer.getBuffer(), indices.size() * sizeof(uint32), indices.data());
 	/*
 	Buffer vertexStagingBuffer;
 	vertexStagingBuffer.initialize(device, vertices.size() * sizeof(VertexLayout), vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);

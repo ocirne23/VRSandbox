@@ -75,7 +75,7 @@ bool Framebuffers::initialize(const Device& device, const RenderPass& renderPass
 
 	vk::PhysicalDeviceMemoryProperties memoryProperties = device.getPhysicalDevice().getMemoryProperties();
 	vk::MemoryRequirements memoryRequirements = m_device.getImageMemoryRequirements(m_depthImage);
-	const uint32_t typeIndex = device.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+	const uint32 typeIndex = device.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
 	vk::MemoryAllocateInfo depthImageAllocInfo {
 		.allocationSize = memoryRequirements.size,
 		.memoryTypeIndex = typeIndex
@@ -112,7 +112,7 @@ bool Framebuffers::initialize(const Device& device, const RenderPass& renderPass
 		vk::FramebufferCreateInfo framebufferInfo =
 		{
 			.renderPass = renderPass.getRenderPass(),
-			.attachmentCount = static_cast<uint32_t>(attachments.size()),
+			.attachmentCount = static_cast<uint32>(attachments.size()),
 			.pAttachments = attachments.data(),
 			.width = size.width,
 			.height = size.height,

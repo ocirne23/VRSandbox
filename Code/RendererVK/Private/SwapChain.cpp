@@ -21,7 +21,7 @@ SwapChain::~SwapChain()
     }
 }
 
-bool SwapChain::initialize(const Device& device, const Surface& surface, uint32_t swapChainSize)
+bool SwapChain::initialize(const Device& device, const Surface& surface, uint32 swapChainSize)
 {
     m_device = &device;
 
@@ -43,13 +43,13 @@ bool SwapChain::initialize(const Device& device, const Surface& surface, uint32_
     }
     vk::CompositeAlphaFlagBitsKHR compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
 
-    const uint32_t imageCount = std::max(capabilities.minImageCount, std::min(swapChainSize, capabilities.maxImageCount));
+    const uint32 imageCount = std::max(capabilities.minImageCount, std::min(swapChainSize, capabilities.maxImageCount));
 	m_commandBuffers.resize(imageCount);
 	m_commandBuffers.shrink_to_fit();
 	m_syncObjects.resize(imageCount);
 	m_syncObjects.shrink_to_fit();
     vk::Device vkDevice = device.getDevice();
-    for (uint32_t i = 0; i < imageCount; i++)
+    for (uint32 i = 0; i < imageCount; i++)
     {
         m_commandBuffers[i].initialize(device);
 		m_syncObjects[i].imageAvailable = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
@@ -87,7 +87,7 @@ bool SwapChain::initialize(const Device& device, const Surface& surface, uint32_
     return true;
 }
 
-uint32_t SwapChain::acquireNextImage()
+uint32 SwapChain::acquireNextImage()
 {
     vk::Device vkDevice = m_device->getDevice();
 	SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
@@ -99,11 +99,11 @@ uint32_t SwapChain::acquireNextImage()
     if (result != vk::Result::eSuccess)
 		assert(false && "Failed to reset fence");
 
-    vk::ResultValue<uint32_t> imageIdx = vkDevice.acquireNextImageKHR(m_swapChain, UINT64_MAX, syncObjects.imageAvailable);
+    vk::ResultValue<uint32> imageIdx = vkDevice.acquireNextImageKHR(m_swapChain, UINT64_MAX, syncObjects.imageAvailable);
     assert(imageIdx.result == vk::Result::eSuccess);
     return imageIdx.value;
 }
-bool SwapChain::present(uint32_t imageIdx)
+bool SwapChain::present(uint32 imageIdx)
 {
     vk::PipelineStageFlags2 waitStage = { vk::PipelineStageFlagBits2::eColorAttachmentOutput };
 	SyncObjects& syncObjects = m_syncObjects[m_currentFrame];

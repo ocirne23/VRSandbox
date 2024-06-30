@@ -13,12 +13,10 @@ public:
 	Instance(const Instance&) = delete;
 
 	bool initialize(Window& window, bool enableValidationLayers);
+
 	void setBreakOnValidationLayerError(bool value) { m_breakOnValidationLayerError = value; }
-
 	vk::Instance getHandle() const { return m_instance; }
-
 	const std::vector<const char*>& getEnabledLayers() const { return m_enabledLayers; }
-
 	bool supportsLayer(const char* pLayerName) const;
 	bool supportsExtension(const char* pExtensionName) const;
 
