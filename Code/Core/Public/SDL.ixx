@@ -4,6 +4,7 @@ import Core;
 
 export import <SDL3/SDL.h>;
 export import <SDL3/SDL_vulkan.h>;
+export import <SDL3/SDL_scancode.h>;
 
 #undef SDL_PROP_WINDOW_CREATE_ALWAYS_ON_TOP_BOOLEAN
 #undef SDL_PROP_WINDOW_CREATE_BORDERLESS_BOOLEAN

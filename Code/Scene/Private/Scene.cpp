@@ -1,5 +1,3 @@
-module;
-
 module Scene.Scene;
 
 Scene::Scene() {}

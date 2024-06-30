@@ -1,8 +1,6 @@
-module;
-
-#include <glm/glm.hpp>
-
 export module Entity.Entity;
+
+import Core;
 
 export struct Entity;
 

@@ -1,4 +1,6 @@
-export module RendererVK.RendererVK;
+export module RendererVK;
+
+import Core;
 
 import RendererVK.VK;
 import RendererVK.Instance;
@@ -26,7 +28,7 @@ public:
 	RendererVK(const RendererVK&) = delete;
 
 	bool initialize(Window& window, bool enableValidationLayers);
-	void update();
+	void update(const glm::mat4& mvpMatrix);
 	void render();
 
 private:
@@ -45,4 +47,6 @@ private:
 
 	StagingManager m_stagingManager;
 	Buffer m_indexedIndirectBuffer;
+
+	glm::mat4 m_mvpMatrix;
 };

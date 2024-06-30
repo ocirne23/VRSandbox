@@ -1,17 +1,15 @@
 export module RendererVK.VK;
 
-#pragma warning(push)
-#pragma warning(disable : 5244) // '#include <>' in the purview of module appears erroneous.
-
 export import <vulkan/vulkan.hpp>;
-
-#pragma warning(pop)
 
 #undef VK_NULL_HANDLE
 export nullptr_t VK_NULL_HANDLE = nullptr;
 
 #undef VK_KHR_SWAPCHAIN_EXTENSION_NAME
 export const char* VK_KHR_SWAPCHAIN_EXTENSION_NAME = "VK_KHR_swapchain";
+
+#undef VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME
+export const char* VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME = "VK_KHR_push_descriptor";
 
 #undef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
 export const char* VK_EXT_DEBUG_REPORT_EXTENSION_NAME = "VK_EXT_debug_report";
@@ -31,3 +29,8 @@ export constexpr uint32_t VK_MAKE_VERSION(uint32_t major, uint32_t minor, uint32
 	return ((((uint32_t)(major)) << 22U) | (((uint32_t)(minor)) << 12U) | ((uint32_t)(patch)));
 }
 
+export PFN_vkCmdPushDescriptorSetKHR pfVkCmdPushDescriptorSetKHR = nullptr;
+export void vkCmdPushDescriptorSetKHR(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipelineLayout layout, uint32_t set, uint32_t descriptorWriteCount, const VkWriteDescriptorSet* pDescriptorWrites)
+{
+	pfVkCmdPushDescriptorSetKHR(commandBuffer, pipelineBindPoint, layout, set, descriptorWriteCount, pDescriptorWrites);
+}

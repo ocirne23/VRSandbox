@@ -1,12 +1,11 @@
-#include <glm/glm.hpp>
-#include <chrono>
-
+import Core;
 import Core.Window;
-import RendererVK.RendererVK;
+import RendererVK;
+import Entity.FreeFlyCameraController;
 import File.FileSystem;
 import File.SceneData;
 import Core.Allocator;
-import Input.Input;
+import Input;
 
 int main()
 {
@@ -20,7 +19,14 @@ int main()
 
 	RendererVK renderer;
 	renderer.initialize(window, true);
-	
+
+	FreeFlyCameraController cameraController;
+	cameraController.initialize(input, glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+
+
+	const float fov = glm::radians(45.0f);
+
+
 	auto startTime = std::chrono::high_resolution_clock::now();
 	double timeAccum = 0.0;
 	uint32_t frameCount = 0;
@@ -32,8 +38,13 @@ int main()
 		const double deltaSec = std::chrono::duration<double>(now - startTime).count();
 		startTime = now;
 
+		glm::ivec2 windowSize;
+		window.getWindowSize(windowSize);
+
 		input.update(deltaSec);
-		renderer.update();
+		cameraController.update(deltaSec);
+
+		renderer.update(cameraController.getViewMatrix());
 		renderer.render();
 		frameCount++;
 

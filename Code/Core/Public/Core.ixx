@@ -40,6 +40,7 @@ export import <bitset>;
 export import <coroutine>;
 export import <atomic>;
 export import <type_traits>;
+export import <chrono>;
 
 export import <glm/glm.hpp>;
 export import <glm/gtc/matrix_transform.hpp>;

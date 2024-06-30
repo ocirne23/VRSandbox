@@ -36,8 +36,8 @@ public:
 
 	vk::SwapchainKHR getSwapChain() const { return m_swapChain; }
 	const Layout& getLayout() const { return m_layout; }
-	//CommandBuffer& getCommandBuffer(uint32_t imageIdx) { return m_commandBuffers[imageIdx]; }
 	CommandBuffer& getCurrentCommandBuffer() { return m_commandBuffers[m_currentFrame]; }
+	uint32 getCurrentFrameIndex() const { return m_currentFrame; }
 
 private:
 

@@ -21,7 +21,6 @@ bool Window::initialize(std::string_view windowTitle, glm::ivec2 pos, glm::ivec2
 	m_windowHandle = SDL_CreateWindowWithProperties(props);
 
 	//m_windowHandle = SDL_CreateWindow(windowTitle.data(), size.x, size.y, SDL_WINDOW_VULKAN);
-	
 	if (m_windowHandle == nullptr)
 	{
 		printf("SDL_CreateWindow Error: %s\n", SDL_GetError());
@@ -34,6 +33,11 @@ bool Window::initialize(std::string_view windowTitle, glm::ivec2 pos, glm::ivec2
 void Window::setTitle(std::string_view title)
 {
 	SDL_SetWindowTitle((SDL_Window*)m_windowHandle, title.data());
+}
+
+void Window::getWindowSize(glm::ivec2& size) const
+{
+	SDL_GetWindowSizeInPixels((SDL_Window*)m_windowHandle, &size.x, &size.y);
 }
 
 Window::Window()

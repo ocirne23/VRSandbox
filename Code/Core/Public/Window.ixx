@@ -13,6 +13,7 @@ public:
 
 	void* getWindowHandle() const { return m_windowHandle; }
 	void setTitle(std::string_view title);
+	void getWindowSize(glm::ivec2& size) const;
 
 private:
 	void* m_windowHandle = nullptr;

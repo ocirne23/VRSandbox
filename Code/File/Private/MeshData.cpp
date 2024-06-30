@@ -70,3 +70,11 @@ uint32_t MeshData::getMaterialIndex()
 {
 	return m_pMesh->mMaterialIndex;
 }
+
+AABB MeshData::getAABB()
+{
+	AABB aabb;
+	aabb.min = glm::vec3(m_pMesh->mAABB.mMin.x, m_pMesh->mAABB.mMin.y, m_pMesh->mAABB.mMin.z);
+	aabb.max = glm::vec3(m_pMesh->mAABB.mMax.x, m_pMesh->mAABB.mMax.y, m_pMesh->mAABB.mMax.z);
+	return aabb;
+}

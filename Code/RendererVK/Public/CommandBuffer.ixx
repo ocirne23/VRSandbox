@@ -1,8 +1,16 @@
 export module RendererVK.CommandBuffer;
 
+import Core;
 import RendererVK.VK;
 
 export class Device;
+
+export struct DescriptorSetUpdateInfo
+{
+	uint32_t binding;
+	vk::DescriptorType type;
+	std::variant<vk::DescriptorBufferInfo, vk::DescriptorImageInfo> info;
+};
 
 export class CommandBuffer
 {
@@ -25,6 +33,8 @@ public:
 	const std::vector<vk::Semaphore>& getSignalSemaphores() const { return m_signalSemaphores; }
 
 	void setWaitStage(vk::PipelineStageFlags2 stage) { m_waitStage = stage; }
+
+	void cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, const std::span<DescriptorSetUpdateInfo>& updateInfo);
 
 private:
 

@@ -19,7 +19,6 @@ public:
 	vk::CommandPool getCommandPool() const { return m_commandPool; }
 	uint32_t getGraphicsQueueIndex() const { return m_graphicsQueueIndex; }
 	vk::Queue getGraphicsQueue() const { return m_graphicsQueue; }
-	vk::DescriptorPool getDescriptorPool() const { return m_descriptorPool; }
 	bool supportsExtensions(std::vector<const char*> extensions);
 
 private:
@@ -29,5 +28,4 @@ private:
 	vk::CommandPool m_commandPool;
 	uint32_t m_graphicsQueueIndex;
 	vk::Queue m_graphicsQueue;
-	vk::DescriptorPool m_descriptorPool;
 };

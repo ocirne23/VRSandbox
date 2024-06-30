@@ -1,4 +1,4 @@
-module RendererVK.RendererVK;
+module RendererVK;
 
 import Core;
 import RendererVK.VK;
@@ -33,7 +33,6 @@ void main()
 }
 )";
 
-
 const std::string fragmentShaderText_C_C = R"(
 #version 400
 
@@ -55,6 +54,12 @@ constexpr static uint32_t MAX_INDIRECT_COMMANDS = 10;
 
 RendererVK::RendererVK() {}
 RendererVK::~RendererVK() {}
+
+static const glm::mat4 clipMatrix = glm::mat4(
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, -1.0f, 0.0f, 0.0f,
+	0.0f, 0.0f, 0.5f, 0.0f,
+	0.0f, 0.0f, 0.5f, 1.0f);
 
 glm::mat4x4 createModelViewProjectionClipMatrix(vk::Extent2D const& extent)
 {
@@ -125,40 +130,28 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 	commandBuffer.initialize(m_device);
 	m_texture.initialize(m_device, commandBuffer, "Textures/grid.png");
 
-	DescriptorSetUpdateInfo descriptorUpdateInfo{
-		.binding = 1,
-		.type = vk::DescriptorType::eCombinedImageSampler,
-		.info = vk::DescriptorImageInfo {
-			.sampler = m_sampler.getSampler(),
-			.imageView = m_texture.getImageView(),
-			.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		}
-	};
-	m_pipeline.updateDescriptorSets(std::span(&descriptorUpdateInfo, 1));
-
-	glm::mat4 mvp = createModelViewProjectionClipMatrix(m_swapChain.getLayout().extent);
-	std::span<uint8_t> pUniformData = m_uniformBuffer.mapMemory();
-	memcpy(pUniformData.data(), &mvp, sizeof(mvp));
-	m_uniformBuffer.unmapMemory();
-
-	DescriptorSetUpdateInfo descriptorUpdateInfo2{
-		.binding = 0,
-		.type = vk::DescriptorType::eUniformBuffer,
-		.info = vk::DescriptorBufferInfo {
-			.buffer = m_uniformBuffer.getBuffer(),
-			.range = sizeof(mvp),
-		}
-	};
-	m_pipeline.updateDescriptorSets(std::span(&descriptorUpdateInfo2, 1));
-
 	m_indexedIndirectBuffer.initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
 		vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, 
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	return true;
 }
 
-void RendererVK::update()
+void RendererVK::update(const glm::mat4& viewMatrix)
 {
+	const vk::Extent2D extent = m_swapChain.getLayout().extent;
+	vk::CommandBuffer vkCommandBuffer = m_swapChain.getCurrentCommandBuffer().getCommandBuffer();
+	const float fov = glm::radians(45.0f);
+	const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+
+	const glm::mat4x4 projection = glm::perspective(fov, aspect, 0.1f, 100.0f);
+	// vulkan clip space has inverted y and half z !
+	const static glm::mat4x4 clip = glm::mat4x4(
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, -1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 0.5f, 0.0f,
+		0.0f, 0.0f, 0.5f, 1.0f);
+
+	m_mvpMatrix = clip * projection * viewMatrix;
 	m_stagingManager.update(m_swapChain);
 }
 
@@ -200,14 +193,40 @@ void RendererVK::render()
 		.pClearValues = clearValues.data(),
 	};
 
-	vk::CommandBuffer vkCommandBuffer = m_swapChain.getCurrentCommandBuffer().getCommandBuffer();
+	std::span<uint8_t> pUniformData = m_uniformBuffer.mapMemory();
+	memcpy(pUniformData.data(), &m_mvpMatrix, sizeof(m_mvpMatrix));
+	m_uniformBuffer.unmapMemory();
+
+	std::array<DescriptorSetUpdateInfo, 2> descriptorSetUpdateInfos
+	{
+		DescriptorSetUpdateInfo{
+			.binding = 1,
+			.type = vk::DescriptorType::eCombinedImageSampler,
+			.info = vk::DescriptorImageInfo {
+				.sampler = m_sampler.getSampler(),
+				.imageView = m_texture.getImageView(),
+				.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+			}
+		},
+		DescriptorSetUpdateInfo{
+			.binding = 0,
+			.type = vk::DescriptorType::eUniformBuffer,
+			.info = vk::DescriptorBufferInfo {
+				.buffer = m_uniformBuffer.getBuffer(),
+				.range = sizeof(m_mvpMatrix),
+			}
+		}
+	};
+
+	CommandBuffer& commandBuffer = m_swapChain.getCurrentCommandBuffer();
+	vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
 	vkCommandBuffer.reset(vk::CommandBufferResetFlagBits::eReleaseResources);
 	vkCommandBuffer.begin(vk::CommandBufferBeginInfo{ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 	vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+	commandBuffer.cmdUpdateDescriptorSets(m_pipeline.getPipelineLayout(), descriptorSetUpdateInfos);
 	vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline.getPipeline());
 	vkCommandBuffer.setViewport(0, { viewport });
 	vkCommandBuffer.setScissor(0, { scissor });
-	vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_pipeline.getPipelineLayout(), 0, { m_pipeline.getDescriptorSet() }, nullptr);
 	vkCommandBuffer.bindVertexBuffers(0, { m_renderObject.m_vertexBuffer.getBuffer() }, { 0 });
 	vkCommandBuffer.bindIndexBuffer(m_renderObject.m_indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
 	vkCommandBuffer.drawIndexed(m_renderObject.getNumIndices(), 1, 0, 0, 0);

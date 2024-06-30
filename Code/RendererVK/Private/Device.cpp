@@ -6,16 +6,11 @@ import RendererVK.Instance;
 Device::Device() {}
 Device::~Device()
 {
-	if (m_descriptorPool)
-		m_device.destroyDescriptorPool(m_descriptorPool);
 	if (m_commandPool)
 		m_device.destroyCommandPool(m_commandPool);
 	if (m_device)
 		m_device.destroy();
 }
-
-constexpr static uint32_t DESCRIPTOR_POOL_NUM_UNIFORM_BUFFERS = 3;
-constexpr static uint32_t DESCRIPTOR_POOL_NUM_COMBINED_IMAGE_SAMPLERS = 3;
 
 bool Device::initialize(const Instance& inst)
 {
@@ -34,7 +29,7 @@ bool Device::initialize(const Instance& inst)
 	}
 	printf("Device: %s\n", m_physicalDevice.getProperties().deviceName.data());
 
-	std::vector<const char*> deviceExtensions { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+	std::vector<const char*> deviceExtensions { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME };
 	if (!supportsExtensions(deviceExtensions))
 	{
 		assert(false && "Physical device does not support the extension\n");
@@ -105,34 +100,12 @@ bool Device::initialize(const Instance& inst)
 		return false;
 	}
 
+	pfVkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)m_device.getProcAddr("vkCmdPushDescriptorSetKHR");
+
 	m_graphicsQueue = m_device.getQueue(m_graphicsQueueIndex, 0);
 	if (!m_graphicsQueue)
 	{
 		assert(false && "Could not get the graphics queue\n");
-		return false;
-	}
-
-	std::array<vk::DescriptorPoolSize, 2> descriptorPoolSizes
-	{
-		vk::DescriptorPoolSize {
-			.type = vk::DescriptorType::eUniformBuffer,
-			.descriptorCount = DESCRIPTOR_POOL_NUM_UNIFORM_BUFFERS
-		},
-		vk::DescriptorPoolSize {
-			.type = vk::DescriptorType::eCombinedImageSampler,
-			.descriptorCount = DESCRIPTOR_POOL_NUM_COMBINED_IMAGE_SAMPLERS
-		},
-	};
-	vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo
-	{
-		.maxSets = 1,
-		.poolSizeCount = (uint32_t)descriptorPoolSizes.size(),
-		.pPoolSizes = descriptorPoolSizes.data(),
-	};
-	m_descriptorPool = m_device.createDescriptorPool(descriptorPoolCreateInfo);
-	if (!m_descriptorPool)
-	{
-		assert(false && "Could not create a descriptor pool\n");
 		return false;
 	}
 	return true;

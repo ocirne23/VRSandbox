@@ -1,4 +1,4 @@
-module Input.Input;
+module Input;
 
 import Core.SDL;
 
@@ -7,6 +7,7 @@ Input::~Input() {}
 
 bool Input::initialize()
 {
+	m_pKeyStates = SDL_GetKeyboardState(nullptr);
 	return true;
 }
 
@@ -20,9 +21,14 @@ void Input::update(double deltaSec)
 	SDL_Event evt;
 	while (SDL_PollEvent(&evt))
 	{
-
 		switch (evt.type)
 		{
+		case SDL_EVENT_WINDOW_FOCUS_GAINED:
+			m_windowHasFocus = true;
+			break;
+		case SDL_EVENT_WINDOW_FOCUS_LOST:
+			m_windowHasFocus = false;
+			break;
 			/*
 		case SDL_EVENT_WINDOWEVENT:
 			for (auto& listener : m_systemEventListeners)

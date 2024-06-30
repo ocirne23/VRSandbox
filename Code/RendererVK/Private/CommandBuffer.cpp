@@ -48,40 +48,27 @@ void CommandBuffer::submitGraphics(vk::Fence fence)
 		.pSignalSemaphores = m_signalSemaphores.data(),
 	};
 	m_device->getGraphicsQueue().submit(submitInfo, fence);
-	/*
-	vk::CommandBufferSubmitInfo cmdSubmitInfo {
-		.commandBuffer = m_commandBuffer,
-	};
-	vk::SemaphoreSubmitInfo* pWaitSemaphoreInfos = (vk::SemaphoreSubmitInfo*)alloca(sizeof(vk::SemaphoreSubmitInfo) * m_waitSemaphores.size());
-	for (size_t i = 0; i < m_waitSemaphores.size(); i++)
-	{
-		pWaitSemaphoreInfos[i] = vk::SemaphoreSubmitInfo {
-			.semaphore = m_waitSemaphores[i],
-			.stageMask = m_waitStage,
-		};
-	};
-	vk::SemaphoreSubmitInfo* pSignalSemaphoreInfos = (vk::SemaphoreSubmitInfo*)alloca(sizeof(vk::SemaphoreSubmitInfo) * m_signalSemaphores.size());
-	for (size_t i = 0; i < m_signalSemaphores.size(); i++)
-	{
-		pSignalSemaphoreInfos[i] = vk::SemaphoreSubmitInfo {
-			.semaphore = m_signalSemaphores[i],
-			.stageMask = m_waitStage,
-		};
-	};
 
-	vk::SubmitInfo2 submitInfo2 {
-		.waitSemaphoreInfoCount = (uint32_t)m_waitSemaphores.size(),
-		.pWaitSemaphoreInfos = pWaitSemaphoreInfos,
-		.commandBufferInfoCount = 1,
-		.pCommandBufferInfos = &cmdSubmitInfo,
-		.signalSemaphoreInfoCount = (uint32_t)m_signalSemaphores.size(),
-		.pSignalSemaphoreInfos = pSignalSemaphoreInfos,
-	};
-	vk::Result result = m_device->getGraphicsQueue().submit2(1, &submitInfo2, fence);
-	assert(result == vk::Result::eSuccess);
-	*/
 	m_waitSemaphores.clear();
 	m_waitStages.clear();
 	m_signalSemaphores.clear();
 	m_waitStage = vk::PipelineStageFlagBits2::eNone;
+}
+
+void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, const std::span<DescriptorSetUpdateInfo>& updateInfo)
+{
+	vk::WriteDescriptorSet* descriptorWrites = (vk::WriteDescriptorSet*)_alloca(sizeof(vk::WriteDescriptorSet) * updateInfo.size());
+	for (uint32_t i = 0; i < updateInfo.size(); i++)
+	{
+		descriptorWrites[i] =
+		{
+				.dstBinding = updateInfo[i].binding,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = updateInfo[i].type,
+				.pImageInfo = std::get_if<vk::DescriptorImageInfo>(&updateInfo[i].info),
+				.pBufferInfo = std::get_if<vk::DescriptorBufferInfo>(&updateInfo[i].info),
+		};
+	}
+	m_commandBuffer.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, (uint32_t)updateInfo.size(), descriptorWrites);
 }

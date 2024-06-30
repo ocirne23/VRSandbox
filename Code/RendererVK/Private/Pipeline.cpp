@@ -22,8 +22,10 @@ Pipeline::~Pipeline()
 bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, PipelineLayout& layout)
 {
 	m_device = device.getDevice();
+
 	vk::DescriptorSetLayoutCreateInfo layoutInfo
 	{
+		.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
 		.bindingCount = (uint32_t)layout.descriptorSetLayoutBindings.size(),
 		.pBindings = layout.descriptorSetLayoutBindings.data(),
 	};
@@ -33,20 +35,6 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 		assert(false && "Failed to create descriptor set layout");
 		return false;
 	}
-
-	vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo
-	{
-		.descriptorPool = device.getDescriptorPool(),
-		.descriptorSetCount = 1,
-		.pSetLayouts = &m_descriptorSetLayout,
-	};
-	m_descriptorSet = m_device.allocateDescriptorSets(descriptorSetAllocateInfo)[0];
-	if (!m_descriptorSet)
-	{
-		assert(false && "Failed to allocate descriptor set");
-		return false;
-	}
-
 	vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo
 	{
 		.flags = {},
@@ -223,24 +211,7 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	return true;
 }
 
-void Pipeline::updateDescriptorSets(const std::span<DescriptorSetUpdateInfo>& updateInfo)
-{
-	vk::WriteDescriptorSet* descriptorWrites = (vk::WriteDescriptorSet*)_alloca(sizeof(vk::WriteDescriptorSet) * updateInfo.size());
-	for (uint32_t i = 0; i < updateInfo.size(); i++)
-	{
-		descriptorWrites[i] =
-		{
-			.dstSet = m_descriptorSet,
-			.dstBinding = updateInfo[i].binding,
-			.dstArrayElement = 0,
-			.descriptorCount = 1,
-			.descriptorType = updateInfo[i].type,
-			.pImageInfo = std::get_if<vk::DescriptorImageInfo>(&updateInfo[i].info),
-			.pBufferInfo = std::get_if<vk::DescriptorBufferInfo>(&updateInfo[i].info),
-		};
-	}
-	m_device.updateDescriptorSets((uint32_t)updateInfo.size(), descriptorWrites, 0, nullptr);
-}
+
 
 /*
 

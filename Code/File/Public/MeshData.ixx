@@ -1,6 +1,7 @@
 export module File.MeshData;
 
 import Core;
+import Core.AABB;
 
 export struct aiMesh;
 
@@ -20,6 +21,7 @@ public:
 	uint32_t getNumVertices();
 	uint32_t getNumIndices();
 	uint32_t getMaterialIndex();
+	AABB getAABB();
 	void getIndices(std::vector<uint32_t>& indices);
 	const char* getName() const { return m_pName; }
 

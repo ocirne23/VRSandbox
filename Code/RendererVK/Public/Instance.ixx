@@ -3,7 +3,6 @@ export module RendererVK.Instance;
 import Core;
 import RendererVK.VK;
 
-
 export class Window;
 
 export class Instance
