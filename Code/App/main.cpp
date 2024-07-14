@@ -44,7 +44,7 @@ int main()
 		timeAccum += deltaSec;
 		if (timeAccum > 1.0f)
 		{
-			sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i Used Mem: %f mb", frameCount, (double)g_heapAllocator.getUsedSize() / 1024.0 / 1024.0);
+			sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i Used Mem: %f mb", frameCount, (double)(g_heapAllocator.getUsedSize() + getAlignedAllocatedSize()) / 1024.0 / 1024.0);
 			window.setTitle(windowTitleBuf);
 			frameCount = 0;
 			timeAccum = 0.0;

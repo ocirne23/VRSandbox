@@ -1,30 +1,30 @@
 module;
 
 #include <intrin.h>
+#include <cstdlib>
 
-#ifndef _MSC_VER
-#define __debugbreak void
-#endif
-
-#if defined(_DEBUG) && false
+#if 0 //defined(_DEBUG)
 #define CHECK_BOUNDS
 #endif
 
-#if defined(_DEBUG) && false
+#if 0 //defined(_DEBUG)
 #define CHECK_FULL_MEMORY
 #endif
 
-#if defined(_DEBUG) || true
+#if defined(_DEBUG)
 #define TRACK_ALLOCATION_SIZE
 #endif
 
-#if defined(_DEBUG) && false
+#if 0 //defined(_DEBUG)
 #define CHECK_DIFFERENT_THREAD_ACCESS_FOR_NON_THREADSAFE
 #endif
 
 export module Core.Allocator;
 
 import Core;
+
+std::atomic<size_t> g_alignedAllocMemory = 0;
+export size_t getAlignedAllocatedSize() { return g_alignedAllocMemory.load(); }
 
 export template<typename T, typename Alloc>
 class STLAllocator final
@@ -37,15 +37,33 @@ public:
 	STLAllocator(const STLAllocator<U, Alloc>& other) noexcept : m_allocator(other.m_allocator) {}
 	~STLAllocator() {}
 
-	[[nodiscard]] T* allocate(std::size_t n) { return reinterpret_cast<T*>(m_allocator.allocate(n * sizeof(T))); }
-	void deallocate(T* p, [[maybe_unused]] std::size_t n = 0) { m_allocator.deallocate((void*)p, n); }
+	[[nodiscard]] T* allocate(std::size_t n) 
+	{ 
+		if constexpr (alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+			return reinterpret_cast<T*>(m_allocator.allocate(n));
+		else
+		{
+			g_alignedAllocMemory += n;
+			return reinterpret_cast<T*>(_aligned_malloc(n, alignof(T)));
+		}
+	}
+	void deallocate(T* p, [[maybe_unused]] std::size_t n = 0) 
+	{
+		if constexpr (alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+			m_allocator.deallocate((void*)p);
+		else
+		{
+			g_alignedAllocMemory -= _aligned_msize(p, alignof(T), 0);
+			_aligned_free(p);
+		}
+	}
 
 	Alloc& m_allocator;
 };
 
 struct AllocationHeader
 {
-	static constexpr int CHECK = 0x69696969;
+	static constexpr uint32 CHECK = 0x69696969;
 	void* pAllocator;
 	uint32 size;
 	uint32 checkVal;
@@ -54,8 +72,8 @@ static_assert(sizeof(AllocationHeader) == __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 
 struct AllocationTail
 {
-	static constexpr int CHECK = 0x78787878;
-	int checkVal;
+	static constexpr uint32 CHECK = 0x78787878;
+	uint32 checkVal;
 };
 
 export constexpr size_t getStackAllocatorOverhead()
@@ -76,21 +94,41 @@ public:
 	[[nodiscard]]
 	virtual void* allocate(size_t size)
 	{
-		AllocationHeader* pAllocation = static_cast<AllocationHeader*>(std::malloc(size + sizeof(AllocationHeader)));
+		const size_t sizeWithHeader = size
+#ifdef CHECK_BOUNDS
+			+ sizeof(AllocationTail)
+#endif
+			+ sizeof(AllocationHeader);
+		AllocationHeader* pAllocation = static_cast<AllocationHeader*>(std::malloc(sizeWithHeader));
 		pAllocation->pAllocator = this;
-		pAllocation->size = (uint32)size;
+		pAllocation->size = (uint32)sizeWithHeader;
 #ifdef TRACK_ALLOCATION_SIZE
-		m_usedSize += size + sizeof(AllocationHeader);
+		m_usedSize += size 
+#ifdef CHECK_BOUNDS
+			+ sizeof(AllocationTail)
+#endif
+			+ sizeof(AllocationHeader);
 		m_maxUsedSize = m_usedSize > m_maxUsedSize ? (size_t)m_usedSize : m_maxUsedSize;
+#endif
+
+#ifdef CHECK_BOUNDS
+		pAllocation->checkVal = AllocationHeader::CHECK;
+		AllocationTail* pTail = (AllocationTail*)((uint8_t*)(pAllocation) + sizeWithHeader - sizeof(AllocationTail));
+		pTail->checkVal = AllocationTail::CHECK;
 #endif
 		return pAllocation + 1;
 	}
 
-	virtual void deallocate(void* ptr, size_t size = 0)
+	virtual void deallocate(void* ptr)
 	{
 		AllocationHeader* pAllocation = static_cast<AllocationHeader*>(ptr) - 1;
 #ifdef TRACK_ALLOCATION_SIZE
-		m_usedSize -= size + sizeof(AllocationHeader);
+		m_usedSize -= pAllocation->size;
+#endif
+#ifdef CHECK_BOUNDS
+		AllocationTail* pTail = (AllocationTail*)(((uint8_t*)pAllocation) + pAllocation->size - sizeof(AllocationTail));
+		if (pAllocation->checkVal != AllocationHeader::CHECK) { assert(false && "Buffer underflow detected!"); __debugbreak(); }
+		if (pTail->checkVal != AllocationTail::CHECK) { assert(false && "Buffer overflow detected!"); __debugbreak(); }
 #endif
 		std::free(pAllocation);
 	}
@@ -192,7 +230,7 @@ public:
 		return true;
 	}
 
-	virtual void deallocate(void* ptr, size_t sz = 0) override
+	virtual void deallocate(void* ptr) override
 	{
 		AllocationHeader* pAllocation = reinterpret_cast<AllocationHeader*>(ptr) - 1;
 		const size_t size = pAllocation->size;
@@ -258,43 +296,43 @@ private:
 
 	int acquireRange(size_t size)
 	{
-		const int numBucketsWanted = (int)(size / BucketSize + (size % BucketSize != 0));
-		int numWantedBucketsRemaining = numBucketsWanted;
-		int continuousBitStart = -1;
-
-		const bool differentThread = checkDifferentThreadAccess();
-
-		int startSlot;
-		if (differentThread)
+#ifdef CHECK_DIFFERENT_THREAD_ACCESS_FOR_NON_THREADSAFE
+		if constexpr (!ThreadSafe)
 		{
-			if constexpr (ThreadSafe)
-			{	// In a multithreaded environment we spread out different thread allocations to minimize contention
-				const int lastUsed = m_lastUsedIdx.load(std::memory_order_relaxed);
-				int emptiestSlotBits = 64;
-				startSlot = 0;
-				for (int i = 0; i < NUM_BUCKET_INTS; ++i)
-				{
-					const int intIdx = (i + lastUsed + 1) % (NUM_BUCKET_INTS);
-					const int numSetBits = (int)__popcnt64(m_usedBits[intIdx].load(std::memory_order_relaxed));
-					if (numSetBits + numBucketsWanted * 2 < 64) // If we find a slot that can comfortably fit the allocation try to use it
-					{
-						startSlot = intIdx;
-						break;
-					}
-					if (numSetBits < emptiestSlotBits) // otherwise find the emptiest slot
-					{
-						startSlot = intIdx;
-						emptiestSlotBits = numSetBits;
-					}
-				}
-				m_lastUsedIdx.store(startSlot, std::memory_order_relaxed);
-			}
-			else
+			if (checkDifferentThreadAccess())
 			{
 				__debugbreak();
 				assert(false && "Detected different thread allocation in non-threadsafe allocator!");
 				return -1;
 			}
+		}
+#endif
+		const int numBucketsWanted = (int)(size / BucketSize + (size % BucketSize != 0));
+		int numWantedBucketsRemaining = numBucketsWanted;
+		int continuousBitStart = -1;
+		int startSlot;
+
+		if constexpr (ThreadSafe)
+		{	// In a multithreaded environment we spread out different thread allocations to minimize contention
+			const int lastUsed = m_lastUsedIdx.load(std::memory_order_relaxed);
+			int emptiestSlotBits = 64;
+			startSlot = 0;
+			for (int i = 0; i < NUM_BUCKET_INTS; ++i)
+			{
+				const int intIdx = (i + lastUsed + 1) % (NUM_BUCKET_INTS);
+				const int numSetBits = (int)__popcnt64(m_usedBits[intIdx].load(std::memory_order_relaxed));
+				if (numSetBits + numBucketsWanted * 2 < 64) // If we find a slot that can comfortably fit the allocation try to use it
+				{
+					startSlot = intIdx;
+					break;
+				}
+				if (numSetBits < emptiestSlotBits) // otherwise find the emptiest slot
+				{
+					startSlot = intIdx;
+					emptiestSlotBits = numSetBits;
+				}
+			}
+			m_lastUsedIdx.store(startSlot, std::memory_order_relaxed);
 		}
 		else
 		{
@@ -492,7 +530,12 @@ while (!m_usedBits[i].compare_exchange_weak(expected, expected | bitMasks[i], st
 }
 */
 
+#if 1
 export Allocator g_heapAllocator;
+#else
+constexpr size_t stackSize = 1024 * 48;
+export StackAllocator<stackSize, 32, false> g_heapAllocator;
+#endif
 
 void* operator new(std::size_t n)
 {
@@ -501,8 +544,13 @@ void* operator new(std::size_t n)
 
 void* operator new(std::size_t n, std::align_val_t align)
 {
-	assert((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-	return g_heapAllocator.allocate(n);
+	if ((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+		return g_heapAllocator.allocate(n);
+	else
+	{
+		g_alignedAllocMemory += n;
+		return _aligned_malloc(n, (size_t)align);
+	}
 }
 
 void* operator new[](std::size_t n)
@@ -512,8 +560,13 @@ void* operator new[](std::size_t n)
 
 void* operator new[](std::size_t n, std::align_val_t align)
 {
-	assert((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-	return g_heapAllocator.allocate(n);
+	if ((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+		return g_heapAllocator.allocate(n);
+	else
+	{
+		g_alignedAllocMemory += n;
+		return _aligned_malloc(n, (size_t)align);
+	}
 }
 
 void operator delete(void* p)
@@ -525,7 +578,15 @@ void operator delete(void* p)
 void operator delete(void* p, std::align_val_t align)
 {
 	if (p)
-		g_heapAllocator.deallocate(p);
+	{
+		if ((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+			return g_heapAllocator.deallocate(p);
+		else
+		{
+			g_alignedAllocMemory -= _aligned_msize(p, (size_t)align, 0);
+			return _aligned_free(p);
+		}
+	}
 }
 
 void operator delete[](void* p)
@@ -537,5 +598,13 @@ void operator delete[](void* p)
 void operator delete[](void* p, std::align_val_t align)
 {
 	if (p)
-		g_heapAllocator.deallocate(p);
+	{
+		if ((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+			return g_heapAllocator.deallocate(p);
+		else
+		{
+			g_alignedAllocMemory -= _aligned_msize(p, (size_t)align, 0);
+			return _aligned_free(p);
+		}
+	}
 }

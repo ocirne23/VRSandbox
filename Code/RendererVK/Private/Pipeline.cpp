@@ -74,10 +74,10 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	vk::PipelineVertexInputStateCreateInfo pipelineVertexInputStateCreateInfo
 	{
 		.flags = {},
-		.vertexBindingDescriptionCount = 1,
-		.pVertexBindingDescriptions = &layout.vertexLayoutInfo.bindingDescription,
-		.vertexAttributeDescriptionCount = static_cast<uint32>(layout.vertexLayoutInfo.attributeDescriptions.size()),
-		.pVertexAttributeDescriptions = layout.vertexLayoutInfo.attributeDescriptions.data(),
+		.vertexBindingDescriptionCount   = (uint32)layout.vertexLayoutInfo.bindingDescriptions.size(),
+		.pVertexBindingDescriptions      = layout.vertexLayoutInfo.bindingDescriptions.data(),
+		.vertexAttributeDescriptionCount = (uint32)layout.vertexLayoutInfo.attributeDescriptions.size(),
+		.pVertexAttributeDescriptions    = layout.vertexLayoutInfo.attributeDescriptions.data(),
 	};
 
 	vk::PipelineInputAssemblyStateCreateInfo pipelineInputAssemblyStateCreateInfo

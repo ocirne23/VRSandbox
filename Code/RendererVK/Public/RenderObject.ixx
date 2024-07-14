@@ -16,7 +16,14 @@ public:
 	{
 		glm::vec3 position;
 		glm::vec3 normal;
-		glm::vec2 textCoord;
+		glm::vec2 texCoord;
+	};
+
+	struct InstanceData
+	{
+		glm::vec3 pos;
+		float scale;
+		glm::vec4 rot;
 	};
 
 	RenderObject();

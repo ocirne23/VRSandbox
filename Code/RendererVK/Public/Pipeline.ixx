@@ -8,7 +8,7 @@ export class RenderPass;
 
 export struct VertexLayoutInfo
 {
-	vk::VertexInputBindingDescription bindingDescription;
+	std::vector<vk::VertexInputBindingDescription> bindingDescriptions;
 	std::vector<vk::VertexInputAttributeDescription> attributeDescriptions;
 };
 

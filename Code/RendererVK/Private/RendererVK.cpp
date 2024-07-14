@@ -10,7 +10,7 @@ import RendererVK.Pipeline;
 import File.SceneData;
 import File.MeshData;
 
-const std::string vertexShaderText_PC_C = R"(
+const char* vertexShaderText_PC_C = R"(
 #version 400
 
 #extension GL_ARB_separate_shader_objects : enable
@@ -24,6 +24,12 @@ layout (std140, binding = 0) uniform buffer
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in vec3 in_normal;
 layout (location = 2) in vec2 in_uv;
+
+// Instanced attributes
+layout (location = 3) in vec3 inst_pos;
+layout (location = 4) in float inst_scale;
+layout (location = 5) in vec4 inst_quat;
+
 layout (location = 0) out vec2 out_uv;
 
 void main()
@@ -33,7 +39,7 @@ void main()
 }
 )";
 
-const std::string fragmentShaderText_C_C = R"(
+const char* fragmentShaderText_C_C = R"(
 #version 400
 
 #extension GL_ARB_separate_shader_objects : enable
@@ -48,6 +54,12 @@ void main()
 	out_color = texture(u_tex, in_uv).xyz;
 }
 )";
+
+/*
+vec3 quat_transform( vec4 q, vec3 v )
+{
+	return v + 2.*cross( q.xyz, cross( q.xyz, v ) + q.w*v );
+}*/
 
 constexpr static float CAMERA_FOV_DEG = 45.0f;
 constexpr static float CAMERA_NEAR = 0.1f;
@@ -159,18 +171,6 @@ void RendererVK::render()
 		.extent = extent
 	};
 
-	const uint32 imageIdx = m_swapChain.acquireNextImage();
-	const vk::RenderPassBeginInfo renderPassBeginInfo{
-		.renderPass = m_renderPass.getRenderPass(),
-		.framebuffer = m_framebuffers.getFramebuffer(imageIdx),
-		.renderArea = vk::Rect2D {
-			.offset = vk::Offset2D { 0, 0 },
-			.extent = extent,
-		},
-		.clearValueCount = (uint32)clearValues.size(),
-		.pClearValues = clearValues.data(),
-	};
-
 	std::span<uint8> pUniformData = m_uniformBuffer.mapMemory();
 	memcpy(pUniformData.data(), &m_mvpMatrix, sizeof(m_mvpMatrix));
 	m_uniformBuffer.unmapMemory();
@@ -194,6 +194,18 @@ void RendererVK::render()
 				.range = sizeof(m_mvpMatrix),
 			}
 		}
+	};
+
+	const uint32 imageIdx = m_swapChain.acquireNextImage();
+	const vk::RenderPassBeginInfo renderPassBeginInfo{
+		.renderPass = m_renderPass.getRenderPass(),
+		.framebuffer = m_framebuffers.getFramebuffer(imageIdx),
+		.renderArea = vk::Rect2D {
+			.offset = vk::Offset2D { 0, 0 },
+			.extent = extent,
+		},
+		.clearValueCount = (uint32)clearValues.size(),
+		.pClearValues = clearValues.data(),
 	};
 
 	CommandBuffer& commandBuffer = m_swapChain.getCurrentCommandBuffer();
