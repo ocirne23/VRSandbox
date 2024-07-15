@@ -32,10 +32,16 @@ layout (location = 5) in vec4 inst_quat;
 
 layout (location = 0) out vec2 out_uv;
 
+vec3 quat_transform( vec3 v, vec4 q)
+{
+	return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
 void main()
 {
 	out_uv = in_uv;
-	gl_Position = u_mvp * vec4(in_pos, 1.0);
+	vec3 pos = quat_transform(in_pos * inst_scale, inst_quat);
+	gl_Position = u_mvp * vec4(pos + inst_pos, 1.0);
 }
 )";
 
@@ -54,12 +60,6 @@ void main()
 	out_color = texture(u_tex, in_uv).xyz;
 }
 )";
-
-/*
-vec3 quat_transform( vec4 q, vec3 v )
-{
-	return v + 2.*cross( q.xyz, cross( q.xyz, v ) + q.w*v );
-}*/
 
 constexpr static float CAMERA_FOV_DEG = 45.0f;
 constexpr static float CAMERA_NEAR = 0.1f;
@@ -123,14 +123,55 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 	commandBuffer.initialize(m_device);
 	m_texture.initialize(m_device, commandBuffer, "Textures/grid.png");
 
-	m_indexedIndirectBuffer.initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
-		vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, 
+	m_indirectCommandBuffer.initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
+		vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer, 
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+	m_instanceDataBuffer.initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(RenderObject::InstanceData),
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
 	return true;
 }
 
-void RendererVK::update(const glm::mat4& viewMatrix)
+float angle = 0.0f;
+
+void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
 {
+	angle += (float)deltaSec;;
+	if (angle > 1.0f) angle -= 2.0f;
+
+	std::vector<vk::DrawIndexedIndirectCommand> indirectCommands;
+	std::vector<RenderObject::InstanceData> instanceData;
+	for (uint32 i = 0; i < MAX_INDIRECT_COMMANDS; ++i)
+	{
+		vk::DrawIndexedIndirectCommand command{
+			.indexCount = m_renderObject.getNumIndices(),
+			.instanceCount = 1,
+			.firstIndex = 0,
+			.vertexOffset = 0,
+			.firstInstance = i
+		};
+		indirectCommands.push_back(command);
+
+		RenderObject::InstanceData data{
+			.pos = glm::vec3((float)i * 10, 0.0f, 0.0f),
+			.scale = 1.0f + 0.1f * i,
+			.rot = glm::normalize(glm::quat(1.0f, angle, 0.0f, 0.0f))
+		};
+		instanceData.push_back(data);
+	}
+	{
+		std::span<uint8> pMem = m_indirectCommandBuffer.mapMemory();
+		memcpy(pMem.data(), indirectCommands.data(), indirectCommands.size() * sizeof(vk::DrawIndexedIndirectCommand));
+		m_indirectCommandBuffer.unmapMemory();
+	}
+	{
+		std::span<uint8> pMem = m_instanceDataBuffer.mapMemory();
+		memcpy(pMem.data(), instanceData.data(), instanceData.size() * sizeof(RenderObject::InstanceData));
+		m_instanceDataBuffer.unmapMemory();
+	}
+
 	const vk::Extent2D extent = m_swapChain.getLayout().extent;
 	const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
 	const glm::mat4x4 projection = glm::perspective(glm::radians(CAMERA_FOV_DEG), aspect, CAMERA_NEAR, CAMERA_FAR);
@@ -218,8 +259,10 @@ void RendererVK::render()
 	vkCommandBuffer.setViewport(0, { viewport });
 	vkCommandBuffer.setScissor(0, { scissor });
 	vkCommandBuffer.bindVertexBuffers(0, { m_renderObject.m_vertexBuffer.getBuffer() }, { 0 });
+	vkCommandBuffer.bindVertexBuffers(1, { m_instanceDataBuffer.getBuffer() }, { 0 });
 	vkCommandBuffer.bindIndexBuffer(m_renderObject.m_indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
-	vkCommandBuffer.drawIndexed(m_renderObject.getNumIndices(), 1, 0, 0, 0);
+	//vkCommandBuffer.drawIndexed(m_renderObject.getNumIndices(), 1, 0, 0, 0);
+	vkCommandBuffer.drawIndexedIndirect(m_indirectCommandBuffer.getBuffer(), 0, MAX_INDIRECT_COMMANDS, sizeof(vk::DrawIndexedIndirectCommand));
 	vkCommandBuffer.endRenderPass();
 	vkCommandBuffer.end();
 

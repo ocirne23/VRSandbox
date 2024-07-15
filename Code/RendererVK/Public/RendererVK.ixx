@@ -29,7 +29,7 @@ public:
 
 	bool initialize(Window& window, bool enableValidationLayers);
 
-	void update(const glm::mat4& mvpMatrix);
+	void update(double deltaSec, const glm::mat4& mvpMatrix);
 	void render();
 
 private:
@@ -47,7 +47,8 @@ private:
 	Sampler m_sampler;
 
 	StagingManager m_stagingManager;
-	Buffer m_indexedIndirectBuffer;
+	Buffer m_indirectCommandBuffer;
+	Buffer m_instanceDataBuffer;
 
 	glm::mat4 m_mvpMatrix;
 };

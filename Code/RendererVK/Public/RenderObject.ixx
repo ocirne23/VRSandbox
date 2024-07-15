@@ -23,7 +23,7 @@ public:
 	{
 		glm::vec3 pos;
 		float scale;
-		glm::vec4 rot;
+		glm::quat rot;
 	};
 
 	RenderObject();

@@ -37,7 +37,7 @@ int main()
 		input.update(deltaSec);
 		cameraController.update(deltaSec);
 
-		renderer.update(cameraController.getViewMatrix());
+		renderer.update(deltaSec, cameraController.getViewMatrix());
 		renderer.render();
 		frameCount++;
 
