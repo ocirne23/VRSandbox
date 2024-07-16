@@ -79,7 +79,6 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 		.vertexAttributeDescriptionCount = (uint32)layout.vertexLayoutInfo.attributeDescriptions.size(),
 		.pVertexAttributeDescriptions    = layout.vertexLayoutInfo.attributeDescriptions.data(),
 	};
-
 	vk::PipelineInputAssemblyStateCreateInfo pipelineInputAssemblyStateCreateInfo
 	{
 		.flags = {},
@@ -108,7 +107,6 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 		.depthBiasSlopeFactor = 0.0f,
 		.lineWidth = 1.0f,
 	};
-
 	vk::PipelineMultisampleStateCreateInfo pipelineMultisampleStateCreateInfo
 	{
 		.flags = {},
@@ -119,7 +117,6 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 		.alphaToCoverageEnable = vk::False,
 		.alphaToOneEnable = vk::False,
 	};
-
 	vk::StencilOpState stencilOpState
 	{
 		.failOp = vk::StencilOp::eKeep,
@@ -205,34 +202,6 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 		assert(false && "Failed to create graphics pipeline");
 		return false;
 	}
-
 	m_pipeline = pipeline;
-
 	return true;
 }
-
-
-
-/*
-
-	vk::WriteDescriptorSet descriptorWrite[2];
-	descriptorWrite[0] =
-	{
-		.dstSet = m_descriptorSet,
-		.dstBinding = 0,
-		.dstArrayElement = 0,
-		.descriptorCount = 1,
-		.descriptorType = vk::DescriptorType::eUniformBuffer,
-		.pBufferInfo = &bufferInfo,
-	};
-	descriptorWrite[1] =
-	{
-		.dstSet = m_descriptorSet,
-		.dstBinding = 1,
-		.dstArrayElement = 0,
-		.descriptorCount = 1,
-		.descriptorType = vk::DescriptorType::eCombinedImageSampler,
-		.pImageInfo = &imageInfo,
-	};
-	device.getDevice().updateDescriptorSets(1, descriptorWrite, 0, nullptr);
-*/

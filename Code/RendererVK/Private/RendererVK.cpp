@@ -63,7 +63,7 @@ void main()
 
 constexpr static float CAMERA_FOV_DEG = 45.0f;
 constexpr static float CAMERA_NEAR = 0.1f;
-constexpr static float CAMERA_FAR = 100.0f;
+constexpr static float CAMERA_FAR = 1000.0f;
 
 constexpr static uint32 NUM_FRAMES_IN_FLIGHT = 2;
 constexpr static uint32 MAX_INDIRECT_COMMANDS = 10;
@@ -131,16 +131,6 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 
-	return true;
-}
-
-float angle = 0.0f;
-
-void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
-{
-	angle += (float)deltaSec;;
-	if (angle > 1.0f) angle -= 2.0f;
-
 	std::vector<vk::DrawIndexedIndirectCommand> indirectCommands;
 	std::vector<RenderObject::InstanceData> instanceData;
 	for (uint32 i = 0; i < MAX_INDIRECT_COMMANDS; ++i)
@@ -157,7 +147,7 @@ void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
 		RenderObject::InstanceData data{
 			.pos = glm::vec3((float)i * 10, 0.0f, 0.0f),
 			.scale = 1.0f + 0.1f * i,
-			.rot = glm::normalize(glm::quat(1.0f, angle, 0.0f, 0.0f))
+			.rot = glm::quat()
 		};
 		instanceData.push_back(data);
 	}
@@ -172,6 +162,11 @@ void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
 		m_instanceDataBuffer.unmapMemory();
 	}
 
+	return true;
+}
+
+void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
+{
 	const vk::Extent2D extent = m_swapChain.getLayout().extent;
 	const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
 	const glm::mat4x4 projection = glm::perspective(glm::radians(CAMERA_FOV_DEG), aspect, CAMERA_NEAR, CAMERA_FAR);

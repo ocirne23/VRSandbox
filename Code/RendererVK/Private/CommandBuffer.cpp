@@ -26,7 +26,7 @@ bool CommandBuffer::initialize(const Device& device)
 		return false;
 	}
 	m_signalSemaphores.reserve(4);
-	m_waitSemaphores.shrink_to_fit();
+	m_signalSemaphores.shrink_to_fit();
 
 	m_waitSemaphores.reserve(4);
 	m_waitSemaphores.shrink_to_fit();
@@ -62,12 +62,12 @@ void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, c
 	{
 		descriptorWrites[i] =
 		{
-				.dstBinding = updateInfo[i].binding,
-				.dstArrayElement = 0,
-				.descriptorCount = 1,
-				.descriptorType = updateInfo[i].type,
-				.pImageInfo = std::get_if<vk::DescriptorImageInfo>(&updateInfo[i].info),
-				.pBufferInfo = std::get_if<vk::DescriptorBufferInfo>(&updateInfo[i].info),
+			.dstBinding = updateInfo[i].binding,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = updateInfo[i].type,
+			.pImageInfo = std::get_if<vk::DescriptorImageInfo>(&updateInfo[i].info),
+			.pBufferInfo = std::get_if<vk::DescriptorBufferInfo>(&updateInfo[i].info),
 		};
 	}
 	m_commandBuffer.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, (uint32)updateInfo.size(), descriptorWrites);
