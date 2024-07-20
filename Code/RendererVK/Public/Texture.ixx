@@ -4,7 +4,7 @@ import Core;
 import RendererVK.VK;
 import RendererVK.Device;
 
-export class CommandBuffer;
+export class StagingManager;
 
 export class Texture
 {
@@ -13,7 +13,7 @@ public:
 	~Texture();
 	Texture(const Texture&) = delete;
 
-	bool initialize(Device& device, CommandBuffer& commandBuffer, const char* pFilePath);
+	bool initialize(Device& device, StagingManager& stagingManager, const char* pFilePath);
 
 	vk::ImageView getImageView() const { return m_imageView; }
 	vk::Image getImage() const { return m_image; }

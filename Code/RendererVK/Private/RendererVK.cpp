@@ -109,27 +109,44 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 		.stageFlags = vk::ShaderStageFlagBits::eFragment
 	});
 	m_pipeline.initialize(m_device, m_renderPass, pipelineLayout);
-	m_uniformBuffer.initialize(m_device, sizeof(glm::mat4), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	m_sampler.initialize(m_device);
 
-	m_stagingManager.initialize(m_device);
+	m_stagingManager.initialize(m_device, m_swapChain);
 
 	SceneData scene;
 	scene.initialize("baseshapes.fbx");
-	MeshData* pMesh = scene.getMesh("Boat");
-	m_renderObject.initialize(m_device, m_stagingManager, *pMesh);
+	m_renderObject.initialize(m_device, m_stagingManager, *scene.getMesh("Boat"));
+	m_texture.initialize(m_device, m_stagingManager, "Textures/grid.png");
 
-	CommandBuffer& commandBuffer = m_swapChain.getCurrentCommandBuffer();
-	commandBuffer.initialize(m_device);
-	m_texture.initialize(m_device, commandBuffer, "Textures/grid.png");
+	for (uint32 i = 0; i < m_swapChain.getLayout().numImages; ++i)
+	{
+		m_uniformBuffers.emplace_back().initialize(m_device, sizeof(glm::mat4), vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-	m_indirectCommandBuffer.initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
-		vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer, 
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		m_indirectCommandBuffers.emplace_back().initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
+			vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-	m_instanceDataBuffer.initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(RenderObject::InstanceData),
-		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		m_instanceDataBuffers.emplace_back().initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(RenderObject::InstanceData),
+			vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal);
+	}
+
+	return true;
+}
+
+void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
+{
+	const vk::Extent2D extent = m_swapChain.getLayout().extent;
+	const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+	const glm::mat4x4 projection = glm::perspective(glm::radians(CAMERA_FOV_DEG), aspect, CAMERA_NEAR, CAMERA_FAR);
+	// vulkan clip space has inverted y and half z !
+	const static glm::mat4x4 clip = glm::mat4x4(
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, -1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 0.5f, 0.0f,
+		0.0f, 0.0f, 0.5f, 1.0f);
+
+	m_mvpMatrix = clip * projection * viewMatrix;
 
 	std::vector<vk::DrawIndexedIndirectCommand> indirectCommands;
 	std::vector<RenderObject::InstanceData> instanceData;
@@ -151,34 +168,12 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 		};
 		instanceData.push_back(data);
 	}
-	{
-		std::span<uint8> pMem = m_indirectCommandBuffer.mapMemory();
-		memcpy(pMem.data(), indirectCommands.data(), indirectCommands.size() * sizeof(vk::DrawIndexedIndirectCommand));
-		m_indirectCommandBuffer.unmapMemory();
-	}
-	{
-		std::span<uint8> pMem = m_instanceDataBuffer.mapMemory();
-		memcpy(pMem.data(), instanceData.data(), instanceData.size() * sizeof(RenderObject::InstanceData));
-		m_instanceDataBuffer.unmapMemory();
-	}
 
-	return true;
-}
+	m_stagingManager.upload(m_uniformBuffers[m_swapChain.getCurrentFrameIndex()].getBuffer(), sizeof(m_mvpMatrix), &m_mvpMatrix);
+	m_stagingManager.upload(m_indirectCommandBuffers[m_swapChain.getCurrentFrameIndex()].getBuffer(), indirectCommands.size() * sizeof(indirectCommands[0]), indirectCommands.data());
+	m_stagingManager.upload(m_instanceDataBuffers[m_swapChain.getCurrentFrameIndex()].getBuffer(), instanceData.size() * sizeof(instanceData[0]), instanceData.data());
 
-void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
-{
-	const vk::Extent2D extent = m_swapChain.getLayout().extent;
-	const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
-	const glm::mat4x4 projection = glm::perspective(glm::radians(CAMERA_FOV_DEG), aspect, CAMERA_NEAR, CAMERA_FAR);
-	// vulkan clip space has inverted y and half z !
-	const static glm::mat4x4 clip = glm::mat4x4(
-		1.0f, 0.0f, 0.0f, 0.0f,
-		0.0f, -1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 0.5f, 0.0f,
-		0.0f, 0.0f, 0.5f, 1.0f);
-
-	m_mvpMatrix = clip * projection * viewMatrix;
-	m_stagingManager.update(m_swapChain);
+	m_stagingManager.update();
 }
 
 constexpr std::array<vk::ClearValue, 2> getClearValues()
@@ -207,10 +202,6 @@ void RendererVK::render()
 		.extent = extent
 	};
 
-	std::span<uint8> pUniformData = m_uniformBuffer.mapMemory();
-	memcpy(pUniformData.data(), &m_mvpMatrix, sizeof(m_mvpMatrix));
-	m_uniformBuffer.unmapMemory();
-
 	std::array<DescriptorSetUpdateInfo, 2> descriptorSetUpdateInfos
 	{
 		DescriptorSetUpdateInfo{
@@ -226,7 +217,7 @@ void RendererVK::render()
 			.binding = 0,
 			.type = vk::DescriptorType::eUniformBuffer,
 			.info = vk::DescriptorBufferInfo {
-				.buffer = m_uniformBuffer.getBuffer(),
+				.buffer = m_uniformBuffers[m_swapChain.getCurrentFrameIndex()].getBuffer(),
 				.range = sizeof(m_mvpMatrix),
 			}
 		}
@@ -254,10 +245,9 @@ void RendererVK::render()
 	vkCommandBuffer.setViewport(0, { viewport });
 	vkCommandBuffer.setScissor(0, { scissor });
 	vkCommandBuffer.bindVertexBuffers(0, { m_renderObject.m_vertexBuffer.getBuffer() }, { 0 });
-	vkCommandBuffer.bindVertexBuffers(1, { m_instanceDataBuffer.getBuffer() }, { 0 });
+	vkCommandBuffer.bindVertexBuffers(1, { m_instanceDataBuffers[m_swapChain.getCurrentFrameIndex()].getBuffer() }, { 0 });
 	vkCommandBuffer.bindIndexBuffer(m_renderObject.m_indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
-	//vkCommandBuffer.drawIndexed(m_renderObject.getNumIndices(), 1, 0, 0, 0);
-	vkCommandBuffer.drawIndexedIndirect(m_indirectCommandBuffer.getBuffer(), 0, MAX_INDIRECT_COMMANDS, sizeof(vk::DrawIndexedIndirectCommand));
+	vkCommandBuffer.drawIndexedIndirect(m_indirectCommandBuffers[m_swapChain.getCurrentFrameIndex()].getBuffer(), 0, MAX_INDIRECT_COMMANDS, sizeof(vk::DrawIndexedIndirectCommand));
 	vkCommandBuffer.endRenderPass();
 	vkCommandBuffer.end();
 

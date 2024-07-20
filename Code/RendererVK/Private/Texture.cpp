@@ -7,7 +7,7 @@ module RendererVK.Texture;
 import Core;
 import RendererVK.VK;
 import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
+import RendererVK.StagingManager;
 
 Texture::Texture()
 {
@@ -23,7 +23,7 @@ Texture::~Texture()
 		m_device.destroyImage(m_image);
 }
 
-bool Texture::initialize(Device& device, CommandBuffer& commandBuffer, const char* pFilePath)
+bool Texture::initialize(Device& device, StagingManager& stagingManager, const char* pFilePath)
 {
 	vk::SemaphoreTypeCreateInfo semaphoreTypeCreateInfo = { .semaphoreType = vk::SemaphoreType::eBinary };
 	vk::SemaphoreCreateInfo semaphoreCreateInfo = { .pNext = &semaphoreTypeCreateInfo };
@@ -54,6 +54,7 @@ bool Texture::initialize(Device& device, CommandBuffer& commandBuffer, const cha
 	if (!m_image)
 	{
 		assert(false && "Failed to create image");
+		stbi_image_free(pData);
 		return false;
 	}
 
@@ -66,6 +67,7 @@ bool Texture::initialize(Device& device, CommandBuffer& commandBuffer, const cha
 	if (!m_imageMemory)
 	{
 		assert(false && "Failed to allocate memory");
+		stbi_image_free(pData);
 		return false;
 	}
 	m_device.bindImageMemory(m_image, m_imageMemory, 0);
@@ -86,81 +88,10 @@ bool Texture::initialize(Device& device, CommandBuffer& commandBuffer, const cha
 	if (!m_imageView)
 	{
 		assert(false && "Failed to create image view");
+		stbi_image_free(pData);
 		return false;
 	}
-
-	Buffer stagingBuffer;
-	stagingBuffer.initialize(device, imageSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	std::span<uint8_t> pMem = stagingBuffer.mapMemory();
-	memcpy(pMem.data(), pData, imageSize);
-	stagingBuffer.unmapMemory();
-
+	stagingManager.uploadImage(m_image, m_width, m_height, imageSize, pData);
 	stbi_image_free(pData);
-
-	vk::ImageMemoryBarrier2 preCopyBarrier {
-		.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-		.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-		.oldLayout = vk::ImageLayout::eUndefined,
-		.newLayout = vk::ImageLayout::eTransferDstOptimal,
-		.srcQueueFamilyIndex = vk::QueueFamilyIgnored,
-		.dstQueueFamilyIndex = vk::QueueFamilyIgnored,
-		.image = m_image,
-		.subresourceRange = vk::ImageSubresourceRange
-		{
-			.aspectMask = vk::ImageAspectFlagBits::eColor,
-			.baseMipLevel = 0,
-			.levelCount = 1,
-			.baseArrayLayer = 0,
-			.layerCount = 1
-		}
-	};
-	vk::DependencyInfo dependencyInfo {
-		.imageMemoryBarrierCount = 1,
-		.pImageMemoryBarriers = &preCopyBarrier
-	};
-	vk::BufferImageCopy bufferImageCopy {
-		.bufferOffset = 0,
-		.imageSubresource = {
-			.aspectMask = vk::ImageAspectFlagBits::eColor,
-			.mipLevel = 0,
-			.baseArrayLayer = 0,
-			.layerCount = 1
-		},
-		.imageExtent = { m_width, m_height, 1 }
-	};
-
-	vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
-	vkCommandBuffer.reset();
-	vkCommandBuffer.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
-	vkCommandBuffer.pipelineBarrier2(dependencyInfo);
-	vkCommandBuffer.copyBufferToImage(stagingBuffer.getBuffer(), m_image, vk::ImageLayout::eTransferDstOptimal, bufferImageCopy);
-	vk::ImageMemoryBarrier2 postCopyBarrier {
-		.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-		.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-		.oldLayout = vk::ImageLayout::eTransferDstOptimal,
-		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		.srcQueueFamilyIndex = vk::QueueFamilyIgnored,
-		.dstQueueFamilyIndex = vk::QueueFamilyIgnored,
-		.image = m_image,
-		.subresourceRange = vk::ImageSubresourceRange
-		{
-			.aspectMask = vk::ImageAspectFlagBits::eColor,
-			.baseMipLevel = 0,
-			.levelCount = 1,
-			.baseArrayLayer = 0,
-			.layerCount = 1
-		}
-	};
-	vk::DependencyInfo postCopyDependencyInfo{
-		.imageMemoryBarrierCount = 1,
-		.pImageMemoryBarriers = &postCopyBarrier
-	};
-	vkCommandBuffer.pipelineBarrier2(postCopyDependencyInfo);
-	vkCommandBuffer.end();
-	commandBuffer.addSignalSemaphore(m_imageReadySemaphore);
-	vk::Fence fence = m_device.createFence(vk::FenceCreateInfo{});
-	commandBuffer.submitGraphics(fence);
-	vk::Result result = m_device.waitForFences(fence, vk::True, UINT64_MAX);
-	m_device.destroyFence(fence);
 	return true;
 }

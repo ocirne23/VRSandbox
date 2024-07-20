@@ -16,14 +16,17 @@ public:
 	~StagingManager();
 	StagingManager(const StagingManager&) = delete;
 
-	bool initialize(Device& device);
+	bool initialize(Device& device, SwapChain& swapChain);
 
 	vk::Semaphore upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
-	void update(SwapChain& swapChain);
+	vk::Semaphore uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
+	void update();
 
 private:
 
 	Device* m_device = nullptr;
+	SwapChain* m_swapChain = nullptr;
+
 	static constexpr int NUM_STAGING_BUFFERS = 2;
 	Buffer m_stagingBuffers[NUM_STAGING_BUFFERS];
 	vk::Fence m_fences[NUM_STAGING_BUFFERS];
@@ -32,6 +35,7 @@ private:
 
 	int m_currentBuffer = 0;
 	vk::DeviceSize m_currentBufferOffset = 0;
-	std::vector<std::pair<vk::Buffer, vk::BufferCopy>> m_copyRegions;
+	std::vector<std::pair<vk::Buffer, vk::BufferCopy>> m_bufferCopyRegions;
+	std::vector<std::pair<vk::Image, vk::BufferImageCopy>> m_imageCopyRegions;
 	uint8* m_mappedMemory = nullptr;
 };

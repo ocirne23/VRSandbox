@@ -10,6 +10,17 @@ export class Buffer
 public:
 	Buffer();
 	~Buffer();
+	Buffer(Buffer&& move)
+	{
+		m_size = move.m_size;
+		m_buffer = move.getBuffer();
+		m_memory = move.getMemory();
+		m_device = move.m_device;
+		move.m_size = 0;
+		move.m_buffer = nullptr;
+		move.m_memory = nullptr;
+		move.m_device = nullptr;
+	}
 	Buffer(const Buffer&) = delete;
 
 	bool initialize(const Device& device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);

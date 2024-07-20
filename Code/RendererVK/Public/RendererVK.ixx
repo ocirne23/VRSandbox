@@ -41,14 +41,15 @@ private:
 	RenderPass m_renderPass;
 	Framebuffers m_framebuffers;
 	Pipeline m_pipeline;
-	Buffer m_uniformBuffer;
 	RenderObject m_renderObject;
 	Texture m_texture;
 	Sampler m_sampler;
 
 	StagingManager m_stagingManager;
-	Buffer m_indirectCommandBuffer;
-	Buffer m_instanceDataBuffer;
+	
+	std::vector<Buffer> m_uniformBuffers;
+	std::vector<Buffer> m_indirectCommandBuffers;
+	std::vector<Buffer> m_instanceDataBuffers;
 
 	glm::mat4 m_mvpMatrix;
 };
