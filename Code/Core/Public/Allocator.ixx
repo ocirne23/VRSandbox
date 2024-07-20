@@ -530,12 +530,18 @@ while (!m_usedBits[i].compare_exchange_weak(expected, expected | bitMasks[i], st
 }
 */
 
+// Earliest possible static initialization for allocator
+#pragma warning(disable: 4075)
+#pragma init_seg(".CRT$XCA")
+
 #if 1
 export Allocator g_heapAllocator;
 #else
 constexpr size_t stackSize = 1024 * 48;
 export StackAllocator<stackSize, 32, false> g_heapAllocator;
 #endif
+
+#pragma warning(default: 4075)
 
 void* operator new(std::size_t n)
 {
