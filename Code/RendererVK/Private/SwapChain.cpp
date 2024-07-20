@@ -83,7 +83,7 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
     return true;
 }
 
-uint32 SwapChain::acquireNextImage()
+void SwapChain::acquireNextImage()
 {
     vk::Device vkDevice = VK::g_dev.getDevice();
 	SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
@@ -97,9 +97,10 @@ uint32 SwapChain::acquireNextImage()
 
     vk::ResultValue<uint32> imageIdx = vkDevice.acquireNextImageKHR(m_swapChain, UINT64_MAX, syncObjects.imageAvailable);
     assert(imageIdx.result == vk::Result::eSuccess);
-    return imageIdx.value;
+    m_currentImageIdx = imageIdx.value;
 }
-bool SwapChain::present(uint32 imageIdx)
+
+bool SwapChain::present()
 {
     vk::Device vkDevice = VK::g_dev.getDevice();
 
@@ -116,7 +117,7 @@ bool SwapChain::present(uint32 imageIdx)
         .pWaitSemaphores = &syncObjects.renderFinished,
         .swapchainCount = 1,
         .pSwapchains = &m_swapChain,
-        .pImageIndices = &imageIdx,
+        .pImageIndices = &m_currentImageIdx,
     };
     vk::Result result = VK::g_dev.getGraphicsQueue().presentKHR(presentInfo);
     switch (result)

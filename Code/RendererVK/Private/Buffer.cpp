@@ -14,6 +14,7 @@ Buffer::~Buffer()
 
 bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties)
 {
+	m_size = size;
 	vk::Device vkDevice = VK::g_dev.getDevice();
 	vk::BufferCreateInfo bufferInfo = {};
 	bufferInfo.size = size;
@@ -48,4 +49,11 @@ std::span<uint8> Buffer::mapMemory()
 void Buffer::unmapMemory()
 {
 	VK::g_dev.getDevice().unmapMemory(m_memory);
+}
+
+void Buffer::mapMemory(void* pData, vk::DeviceSize size)
+{
+	assert(size <= m_size);
+	memcpy(mapMemory().data(), pData, size);
+	unmapMemory();
 }

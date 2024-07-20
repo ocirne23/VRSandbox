@@ -70,11 +70,13 @@ struct AllocationHeader
 };
 static_assert(sizeof(AllocationHeader) == __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 
+#ifdef CHECK_BOUNDS
 struct AllocationTail
 {
 	static constexpr uint32 CHECK = 0x78787878;
 	uint32 checkVal;
 };
+#endif
 
 export constexpr size_t getStackAllocatorOverhead()
 {
@@ -221,12 +223,11 @@ public:
 	bool validateBuffer(void* ptr)
 	{
 		AllocationHeader* pAllocation = reinterpret_cast<AllocationHeader*>(ptr) - 1;
-		const size_t size = pAllocation->size;
-
 		if (pAllocation->checkVal != AllocationHeader::CHECK) { return false; }
-		AllocationTail* pTail = (AllocationTail*)((uint8_t*)(pAllocation) + size - sizeof(AllocationTail));
+#ifdef CHECK_BOUNDS
+		AllocationTail* pTail = (AllocationTail*)((uint8_t*)(pAllocation) + pAllocation->size - sizeof(AllocationTail));
 		if (pTail->checkVal != AllocationTail::CHECK) { return false; }
-
+#endif
 		return true;
 	}
 

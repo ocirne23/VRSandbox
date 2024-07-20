@@ -71,3 +71,24 @@ void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, c
 	}
 	m_commandBuffer.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, (uint32)updateInfo.size(), descriptorWrites);
 }
+
+vk::CommandBuffer CommandBuffer::begin(bool once)
+{
+	if (m_hasRecorded)
+		m_commandBuffer.reset(vk::CommandBufferResetFlagBits::eReleaseResources);
+	m_commandBuffer.begin({ .flags = once ? vk::CommandBufferUsageFlagBits::eOneTimeSubmit : (vk::CommandBufferUsageFlagBits)0 });
+	m_hasRecorded = true;
+
+	return m_commandBuffer;
+}
+
+void CommandBuffer::end()
+{
+	m_commandBuffer.end();
+}
+
+void CommandBuffer::reset()
+{
+	m_hasRecorded = false;
+	m_commandBuffer.reset(vk::CommandBufferResetFlagBits::eReleaseResources);
+}

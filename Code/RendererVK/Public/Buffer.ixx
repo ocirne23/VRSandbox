@@ -21,6 +21,7 @@ public:
 
 	bool initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
 
+	void mapMemory(void* pData, vk::DeviceSize size);
 	std::span<uint8> mapMemory();
 	void unmapMemory();
 	vk::Buffer getBuffer() const { return m_buffer; }

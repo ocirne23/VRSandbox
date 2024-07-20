@@ -16,6 +16,7 @@ import RendererVK.RenderObject;
 import RendererVK.Texture;
 import RendererVK.Sampler;
 import RendererVK.StagingManager;
+import RendererVK.MeshDataManager;
 
 export class Window;
 
@@ -29,8 +30,11 @@ public:
 
 	bool initialize(Window& window, bool enableValidationLayers);
 
+	void recordCommandBuffers();
 	void update(double deltaSec, const glm::mat4& mvpMatrix);
 	void render();
+
+	const char* getDebugText();
 
 private:
 
@@ -42,11 +46,13 @@ private:
 	Framebuffers m_framebuffers;
 	Pipeline m_pipeline;
 	RenderObject m_renderObject;
+	RenderObject m_renderObject2;
 	Texture m_texture;
 	Sampler m_sampler;
 
 	StagingManager m_stagingManager;
-	
+	MeshDataManager m_meshDataManager;
+
 	std::vector<Buffer> m_uniformBuffers;
 	std::vector<Buffer> m_indirectCommandBuffers;
 	std::vector<Buffer> m_instanceDataBuffers;

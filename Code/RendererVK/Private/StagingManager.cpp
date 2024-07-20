@@ -100,9 +100,7 @@ void StagingManager::update()
 
 	CommandBuffer& commandBuffer = m_commandBuffers[m_currentBuffer];
 	commandBuffer.addSignalSemaphore(m_semaphores[m_currentBuffer]);
-	vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
-	vkCommandBuffer.reset({});
-	vkCommandBuffer.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+	vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);
 
 	for (const auto& copyRegion : m_bufferCopyRegions)
 		vkCommandBuffer.copyBuffer(m_stagingBuffers[m_currentBuffer].getBuffer(), copyRegion.first, 1, &copyRegion.second);
@@ -148,7 +146,7 @@ void StagingManager::update()
 		vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &postCopyBarrier });
 	}
 
-	vkCommandBuffer.end();
+	commandBuffer.end();
 	commandBuffer.submitGraphics(m_fences[m_currentBuffer]);
 
 	m_swapChain->getCurrentCommandBuffer().addWaitSemaphore(m_semaphores[m_currentBuffer], vk::PipelineStageFlagBits::eVertexInput);

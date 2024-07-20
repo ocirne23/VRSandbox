@@ -7,14 +7,12 @@ module RendererVK.RenderObject;
 import Core;
 import RendererVK.VK;
 import RendererVK.Device;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.StagingManager;
+import RendererVK.MeshDataManager;
 
 RenderObject::RenderObject() {}
 RenderObject::~RenderObject() {}
 
-bool RenderObject::initialize(StagingManager& stagingManager, MeshData& meshData)
+bool RenderObject::initialize(MeshDataManager& meshDataManager, MeshData& meshData)
 {
 	std::vector<VertexLayout> vertices;
 	vertices.reserve(meshData.getNumVertices());
@@ -33,11 +31,8 @@ bool RenderObject::initialize(StagingManager& stagingManager, MeshData& meshData
 	meshData.getIndices(indices);
 	m_numIndices = (uint32)indices.size();
 
-	m_vertexBuffer.initialize(vertices.size() * sizeof(VertexLayout), vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
-	m_indexBuffer.initialize(indices.size() * sizeof(uint32), vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-	stagingManager.upload(m_vertexBuffer.getBuffer(), vertices.size() * sizeof(VertexLayout), vertices.data());
-	stagingManager.upload(m_indexBuffer.getBuffer(), indices.size() * sizeof(uint32), indices.data());
+	m_vertexOffset = (uint32)(meshDataManager.uploadVertexData(vertices.data(), vertices.size() * sizeof(VertexLayout)) / sizeof(VertexLayout));
+	m_indexOffset  = (uint32)(meshDataManager.uploadIndexData(indices.data(), indices.size() * sizeof(IndexLayout)) / sizeof(IndexLayout));
 
 	return true;
 }

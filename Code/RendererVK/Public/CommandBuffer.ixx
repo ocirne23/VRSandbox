@@ -20,8 +20,12 @@ public:
 
 	bool initialize();
 
+	vk::CommandBuffer begin(bool once = false);
+	void end();
+	bool hasRecorded() { return m_hasRecorded; }
+	void reset();
+
 	void submitGraphics(vk::Fence fence = VK_NULL_HANDLE);
-	vk::CommandBuffer getCommandBuffer() const { return m_commandBuffer; }
 	void addWaitSemaphore(vk::Semaphore semaphore, vk::PipelineStageFlags waitStageFlags) { m_waitSemaphores.push_back(semaphore); m_waitStages.push_back(waitStageFlags); }
 	void addSignalSemaphore(vk::Semaphore semaphore) { m_signalSemaphores.push_back(semaphore); }
 	const std::vector<vk::Semaphore>& getWaitSemaphores() const { return m_waitSemaphores; }
@@ -32,6 +36,7 @@ public:
 private:
 
 	vk::CommandBuffer m_commandBuffer;
+	bool m_hasRecorded = false;
 	std::vector<vk::Semaphore> m_signalSemaphores;
 	std::vector<vk::Semaphore> m_waitSemaphores;
 	std::vector<vk::PipelineStageFlags> m_waitStages;

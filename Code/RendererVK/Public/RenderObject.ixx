@@ -6,7 +6,7 @@ import RendererVK.Buffer;
 import RendererVK.Pipeline;
 import File.MeshData;
 
-export class StagingManager;
+export class MeshDataManager;
 
 export class RenderObject final
 {
@@ -19,6 +19,8 @@ public:
 		glm::vec2 texCoord;
 	};
 
+	using IndexLayout = uint32;
+
 	struct InstanceData
 	{
 		glm::vec3 pos;
@@ -30,15 +32,16 @@ public:
 	~RenderObject();
 	RenderObject(const RenderObject&) = delete;
 
-	bool initialize(StagingManager& stagingManager, MeshData& meshData);
+	bool initialize(MeshDataManager& meshDataManager, MeshData& meshData);
 
 	static VertexLayoutInfo getVertexLayoutInfo();
 	uint32 getNumIndices() const { return m_numIndices; }
-
-	Buffer m_vertexBuffer;
-	Buffer m_indexBuffer;
+	uint32 getVertexOffset() const { return m_vertexOffset; }
+	uint32 getIndexOffset() const { return m_indexOffset; }
 
 private:
 	
 	uint32 m_numIndices;
+	uint32 m_vertexOffset = 0;
+	uint32 m_indexOffset = 0;
 };
