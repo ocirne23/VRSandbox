@@ -4,7 +4,7 @@ import Core;
 
 export struct aiMaterial;
 
-export class MaterialData
+export class MaterialData final
 {
 public:
 	MaterialData();

@@ -15,20 +15,23 @@ Texture::Texture()
 
 Texture::~Texture()
 {
+	vk::Device vkDevice = VK::g_dev.getDevice();
 	if (m_imageView)
-		m_device.destroyImageView(m_imageView);
+		vkDevice.destroyImageView(m_imageView);
 	if (m_imageMemory)
-		m_device.freeMemory(m_imageMemory);
+		vkDevice.freeMemory(m_imageMemory);
 	if (m_image)
-		m_device.destroyImage(m_image);
+		vkDevice.destroyImage(m_image);
+	if (m_imageReadySemaphore)
+		vkDevice.destroySemaphore(m_imageReadySemaphore);
 }
 
-bool Texture::initialize(Device& device, StagingManager& stagingManager, const char* pFilePath)
+bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
 {
+	vk::Device vkDevice = VK::g_dev.getDevice();
 	vk::SemaphoreTypeCreateInfo semaphoreTypeCreateInfo = { .semaphoreType = vk::SemaphoreType::eBinary };
-	vk::SemaphoreCreateInfo semaphoreCreateInfo = { .pNext = &semaphoreTypeCreateInfo };
-	m_imageReadySemaphore = device.getDevice().createSemaphore(semaphoreCreateInfo);
-	m_device = device.getDevice();
+	m_imageReadySemaphore = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{ .pNext = &semaphoreTypeCreateInfo });
+
 	uint8_t* pData = stbi_load(pFilePath, (int*)&m_width, (int*)&m_height, (int*)&m_numChannels, 4);
 	const vk::DeviceSize imageSize = m_width * m_height * 4;
 	if (!pData)
@@ -50,7 +53,7 @@ bool Texture::initialize(Device& device, StagingManager& stagingManager, const c
 		.initialLayout = vk::ImageLayout::eUndefined
 	};
 
-	m_image = m_device.createImage(imageCreateInfo);
+	m_image = vkDevice.createImage(imageCreateInfo);
 	if (!m_image)
 	{
 		assert(false && "Failed to create image");
@@ -58,19 +61,19 @@ bool Texture::initialize(Device& device, StagingManager& stagingManager, const c
 		return false;
 	}
 
-	vk::MemoryRequirements memoryRequirements = m_device.getImageMemoryRequirements(m_image);
+	vk::MemoryRequirements memoryRequirements = vkDevice.getImageMemoryRequirements(m_image);
 	vk::MemoryAllocateInfo memoryAllocateInfo = {
 		.allocationSize = memoryRequirements.size,
-		.memoryTypeIndex = device.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
+		.memoryTypeIndex = VK::g_dev.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
 	};
-	m_imageMemory = m_device.allocateMemory(memoryAllocateInfo);
+	m_imageMemory = vkDevice.allocateMemory(memoryAllocateInfo);
 	if (!m_imageMemory)
 	{
 		assert(false && "Failed to allocate memory");
 		stbi_image_free(pData);
 		return false;
 	}
-	m_device.bindImageMemory(m_image, m_imageMemory, 0);
+	vkDevice.bindImageMemory(m_image, m_imageMemory, 0);
 
 	vk::ImageViewCreateInfo imageViewInfo {
 		.image = m_image,
@@ -84,7 +87,7 @@ bool Texture::initialize(Device& device, StagingManager& stagingManager, const c
 			.layerCount = imageCreateInfo.arrayLayers
 		}
 	};
-	m_imageView = m_device.createImageView(imageViewInfo);
+	m_imageView = vkDevice.createImageView(imageViewInfo);
 	if (!m_imageView)
 	{
 		assert(false && "Failed to create image view");

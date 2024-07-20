@@ -23,12 +23,19 @@ int main()
 	FreeFlyCameraController cameraController;
 	cameraController.initialize(input, glm::vec3(10.0f, 0.0f, -10.0f), glm::vec3(0.0f, 0.0f, 0.0f));
 
+	bool running = true;
+	SystemEventListener* systemEventListener = input.addSystemEventListener();
+	systemEventListener->onQuit = [&]()
+	{
+		running = false;
+	};
+
 	auto startTime = std::chrono::high_resolution_clock::now();
 	double timeAccum = 0.0;
 	uint32 frameCount = 0;
 
 	char windowTitleBuf[256];
-	while (true)
+	while (running)
 	{
 		const auto now = std::chrono::high_resolution_clock::now();
 		const double deltaSec = std::chrono::duration<double>(now - startTime).count();

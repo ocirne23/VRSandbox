@@ -4,7 +4,7 @@ import Core;
 
 export struct aiTexture;
 
-export class TextureData
+export class TextureData final
 {
 public:
 	TextureData();

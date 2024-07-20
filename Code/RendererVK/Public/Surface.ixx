@@ -6,16 +6,16 @@ export class Instance;
 export class Device;
 export class Window;
 
-export class Surface
+export class Surface final
 {
 public:
 	Surface();
 	~Surface();
 	Surface(const Surface&) = delete;
 
-	bool initialize(const Instance& instance, const Window& window);
+	bool initialize(const Window& window);
 
-	bool deviceSupportsSurface(const Device& device) const;
+	bool deviceSupportsSurface() const;
 	vk::SurfaceKHR getSurface() const { return m_surface; }
 
 private:

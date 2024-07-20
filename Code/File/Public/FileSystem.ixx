@@ -1,6 +1,6 @@
 export module File.FileSystem;
 
-export class FileSystem
+export class FileSystem final
 {
 public:
 

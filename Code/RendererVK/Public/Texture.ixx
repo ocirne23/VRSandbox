@@ -6,14 +6,14 @@ import RendererVK.Device;
 
 export class StagingManager;
 
-export class Texture
+export class Texture final
 {
 public:
 	Texture();
 	~Texture();
 	Texture(const Texture&) = delete;
 
-	bool initialize(Device& device, StagingManager& stagingManager, const char* pFilePath);
+	bool initialize(StagingManager& stagingManager, const char* pFilePath);
 
 	vk::ImageView getImageView() const { return m_imageView; }
 	vk::Image getImage() const { return m_image; }
@@ -28,5 +28,4 @@ private:
 	vk::DeviceMemory m_imageMemory;
 	vk::ImageView m_imageView;
 	vk::Semaphore m_imageReadySemaphore;
-	vk::Device m_device;
 };

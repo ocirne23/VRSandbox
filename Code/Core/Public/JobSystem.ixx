@@ -7,7 +7,7 @@ import Core.Allocator;
 struct promise_type;
 export class JobScheduler;
 
-export class Job
+export class Job final
 {
 public:
 	using promise_type = promise_type;
@@ -60,7 +60,7 @@ struct promise_type : LockFreeList<promise_type>::Entry
 	}
 };
 
-export class JobScheduler
+export class JobScheduler final
 {
 public:
 

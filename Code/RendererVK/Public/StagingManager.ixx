@@ -5,10 +5,9 @@ import RendererVK.VK;
 import RendererVK.Buffer;
 import RendererVK.CommandBuffer;
 
-export class Device;
 export class SwapChain;
 
-export class StagingManager
+export class StagingManager final
 {
 public:
 
@@ -16,7 +15,7 @@ public:
 	~StagingManager();
 	StagingManager(const StagingManager&) = delete;
 
-	bool initialize(Device& device, SwapChain& swapChain);
+	bool initialize(SwapChain& swapChain);
 
 	vk::Semaphore upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
 	vk::Semaphore uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
@@ -24,7 +23,6 @@ public:
 
 private:
 
-	Device* m_device = nullptr;
 	SwapChain* m_swapChain = nullptr;
 
 	static constexpr int NUM_STAGING_BUFFERS = 2;

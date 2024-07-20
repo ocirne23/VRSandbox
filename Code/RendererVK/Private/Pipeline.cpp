@@ -9,27 +9,27 @@ import RendererVK.RenderPass;
 Pipeline::Pipeline() {}
 Pipeline::~Pipeline()
 {
+	vk::Device vkDevice = VK::g_dev.getDevice();
 	if (m_pipeline)
-		m_device.destroyPipeline(m_pipeline);
+		vkDevice.destroyPipeline(m_pipeline);
 	if (m_pipelineCache)
-		m_device.destroyPipelineCache(m_pipelineCache);
+		vkDevice.destroyPipelineCache(m_pipelineCache);
 	if (m_pipelineLayout)
-		m_device.destroyPipelineLayout(m_pipelineLayout);
+		vkDevice.destroyPipelineLayout(m_pipelineLayout);
 	if (m_descriptorSetLayout)
-		m_device.destroyDescriptorSetLayout(m_descriptorSetLayout);
+		vkDevice.destroyDescriptorSetLayout(m_descriptorSetLayout);
 }
 
-bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, PipelineLayout& layout)
+bool Pipeline::initialize(const RenderPass& renderPass, PipelineLayout& layout)
 {
-	m_device = device.getDevice();
-
+	vk::Device vkDevice = VK::g_dev.getDevice();
 	vk::DescriptorSetLayoutCreateInfo layoutInfo
 	{
 		.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
 		.bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
 		.pBindings = layout.descriptorSetLayoutBindings.data(),
 	};
-	m_descriptorSetLayout = m_device.createDescriptorSetLayout(layoutInfo);
+	m_descriptorSetLayout = vkDevice.createDescriptorSetLayout(layoutInfo);
 	if (!m_descriptorSetLayout)
 	{
 		assert(false && "Failed to create descriptor set layout");
@@ -43,7 +43,7 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 		.pushConstantRangeCount = 0,
 		.pPushConstantRanges = nullptr,
 	};
-	m_pipelineLayout = m_device.createPipelineLayout(pipelineLayoutCreateInfo);
+	m_pipelineLayout = vkDevice.createPipelineLayout(pipelineLayoutCreateInfo);
 	if (!m_pipelineLayout)
 	{
 		assert(false && "Failed to create pipeline layout");
@@ -51,8 +51,8 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 	}
 
 	Shader vertexShader, fragmentShader;
-	vertexShader.initialize(device, vk::ShaderStageFlagBits::eVertex, layout.vertexShaderText);
-	fragmentShader.initialize(device, vk::ShaderStageFlagBits::eFragment, layout.fragmentShaderText);
+	vertexShader.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShaderText);
+	fragmentShader.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShaderText);
 	std::array<vk::PipelineShaderStageCreateInfo, 2> pipelineShaderStageCreateInfos =
 	{
 		vk::PipelineShaderStageCreateInfo
@@ -189,11 +189,11 @@ bool Pipeline::initialize(const Device& device, const RenderPass& renderPass, Pi
 		.basePipelineIndex = 0,
 	};
 
-	m_pipelineCache = m_device.createPipelineCache(vk::PipelineCacheCreateInfo());
+	m_pipelineCache = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
 
 	vk::Result   result;
 	vk::Pipeline pipeline;
-	std::tie(result, pipeline) = m_device.createGraphicsPipeline(m_pipelineCache, graphicsPipelineCreateInfo);
+	std::tie(result, pipeline) = vkDevice.createGraphicsPipeline(m_pipelineCache, graphicsPipelineCreateInfo);
 	switch (result)
 	{
 	case vk::Result::eSuccess:

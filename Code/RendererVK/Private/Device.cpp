@@ -6,15 +6,12 @@ import RendererVK.Instance;
 Device::Device() {}
 Device::~Device()
 {
-	if (m_commandPool)
-		m_device.destroyCommandPool(m_commandPool);
-	if (m_device)
-		m_device.destroy();
+	destroy();
 }
 
-bool Device::initialize(const Instance& inst)
+bool Device::initialize()
 {
-	vk::Instance instance = inst.getHandle();
+	vk::Instance instance = VK::g_inst.getInstance();
 	// try to find the discrete GPU with the most memory
 	for (vk::PhysicalDevice physDevice : instance.enumeratePhysicalDevices())
 	{
@@ -73,7 +70,7 @@ bool Device::initialize(const Instance& inst)
 	};
 	m_physicalDevice.getFeatures2(&deviceFeatures);
 
-	const std::vector<const char*>& enabledLayers = inst.getEnabledLayers();
+	const std::vector<const char*>& enabledLayers = VK::g_inst.getEnabledLayers();
 	vk::DeviceCreateInfo deviceCreateInfo{
 		.pNext = &deviceFeatures,
 		.queueCreateInfoCount = (uint32)deviceQueueCreateInfos.size(),
@@ -109,6 +106,16 @@ bool Device::initialize(const Instance& inst)
 		return false;
 	}
 	return true;
+}
+
+void Device::destroy()
+{
+	if (m_device)
+	{
+		m_device.destroyCommandPool(m_commandPool);
+		m_device.destroy();
+	}
+	m_device = nullptr;
 }
 
 bool Device::supportsExtensions(std::vector<const char*> extensions)

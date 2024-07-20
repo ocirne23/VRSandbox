@@ -10,12 +10,11 @@ Sampler::Sampler()
 Sampler::~Sampler()
 {
 	if (m_sampler)
-		m_device.destroySampler(m_sampler);
+		VK::g_dev.getDevice().destroySampler(m_sampler);
 }
 
-bool Sampler::initialize(const Device& device)
+bool Sampler::initialize()
 {
-	m_device = device.getDevice();
 	vk::SamplerCreateInfo samplerInfo = {
 		.magFilter = vk::Filter::eNearest,
 		.minFilter = vk::Filter::eLinear,
@@ -33,7 +32,7 @@ bool Sampler::initialize(const Device& device)
 		.borderColor = vk::BorderColor::eFloatOpaqueBlack,
 		.unnormalizedCoordinates = vk::False
 	};
-	m_sampler = m_device.createSampler(samplerInfo);
+	m_sampler = VK::g_dev.getDevice().createSampler(samplerInfo);
 	if (!m_sampler)
 	{
 		assert(false && "Failed to create sampler");

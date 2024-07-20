@@ -30,7 +30,7 @@ public:
 	~SwapChain();
 	SwapChain(const SwapChain&) = delete;
 
-	bool initialize(const Device& device, const Surface& surface, uint32 swapChainSize);
+	bool initialize(const Surface& surface, uint32 swapChainSize);
 
 	uint32 acquireNextImage();
 	bool present(uint32 imageIdx);
@@ -43,7 +43,6 @@ private:
 
 	vk::SwapchainKHR m_swapChain;
 	Layout m_layout;
-	const Device* m_device = nullptr;
 
 	uint32 m_currentFrame = 0;
 	std::vector<CommandBuffer> m_commandBuffers;

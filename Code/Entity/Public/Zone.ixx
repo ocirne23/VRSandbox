@@ -61,7 +61,7 @@ export struct EntityHash
 
 constexpr static int NUM_CONTAINERS = 255;
 
-export class Zone
+export class Zone final
 {
 public:
 	EntityHash m_zoneHash = 0;

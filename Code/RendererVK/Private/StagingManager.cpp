@@ -15,26 +15,26 @@ StagingManager::StagingManager()
 
 StagingManager::~StagingManager()
 {
+	vk::Device vkDevice = VK::g_dev.getDevice();
+	m_stagingBuffers[m_currentBuffer].unmapMemory();
 	for (int i = 0; i < NUM_STAGING_BUFFERS; i++)
 	{
-		m_stagingBuffers[i].unmapMemory();
-		m_device->getDevice().destroyFence(m_fences[i]);
-		m_device->getDevice().destroySemaphore(m_semaphores[i]);
+		vkDevice.destroyFence(m_fences[i]);
+		vkDevice.destroySemaphore(m_semaphores[i]);
 	}
 }
 
-bool StagingManager::initialize(Device& device, SwapChain& swapChain)
+bool StagingManager::initialize(SwapChain& swapChain)
 {
-	m_device = &device;
 	m_swapChain = &swapChain;
 
-	vk::Device vkDevice = device.getDevice();
+	vk::Device vkDevice = VK::g_dev.getDevice();
 	for (int i = 0; i < NUM_STAGING_BUFFERS; i++)
 	{
-		if (!m_stagingBuffers[i].initialize(device, STAGING_BUFFER_SIZE, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent))
+		if (!m_stagingBuffers[i].initialize(STAGING_BUFFER_SIZE, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent))
 			return false;
 
-		m_commandBuffers[i].initialize(device);
+		m_commandBuffers[i].initialize();
 
 		vk::FenceCreateInfo fenceCreateInfo = { .flags = vk::FenceCreateFlagBits::eSignaled };
 		m_fences[i] = vkDevice.createFence(fenceCreateInfo);
@@ -90,11 +90,11 @@ void StagingManager::update()
 
 	m_stagingBuffers[m_currentBuffer].unmapMemory();
 
-	vk::Device device = m_device->getDevice();
-	vk::Result result = device.waitForFences(1, &m_fences[m_currentBuffer], vk::True, UINT64_MAX);
+	vk::Device vkDevice = VK::g_dev.getDevice();
+	vk::Result result = vkDevice.waitForFences(1, &m_fences[m_currentBuffer], vk::True, UINT64_MAX);
 	if (result != vk::Result::eSuccess)
 		assert(false && "Failed to wait for fence");
-	result = device.resetFences(1, &m_fences[m_currentBuffer]);
+	result = vkDevice.resetFences(1, &m_fences[m_currentBuffer]);
 	if (result != vk::Result::eSuccess)
 		assert(false && "Failed to reset fence");
 

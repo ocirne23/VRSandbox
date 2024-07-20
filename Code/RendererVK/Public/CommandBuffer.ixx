@@ -3,8 +3,6 @@ export module RendererVK.CommandBuffer;
 import Core;
 import RendererVK.VK;
 
-export class Device;
-
 export struct DescriptorSetUpdateInfo
 {
 	uint32 binding;
@@ -12,7 +10,7 @@ export struct DescriptorSetUpdateInfo
 	std::variant<vk::DescriptorBufferInfo, vk::DescriptorImageInfo> info;
 };
 
-export class CommandBuffer
+export class CommandBuffer final
 {
 public:
 	CommandBuffer();
@@ -20,7 +18,7 @@ public:
 	CommandBuffer(const CommandBuffer&) = delete;
 	CommandBuffer(CommandBuffer&&) = default;
 
-	bool initialize(const Device& device);
+	bool initialize();
 
 	void submitGraphics(vk::Fence fence = VK_NULL_HANDLE);
 	vk::CommandBuffer getCommandBuffer() const { return m_commandBuffer; }
@@ -33,7 +31,6 @@ public:
 
 private:
 
-	const Device* m_device = nullptr;
 	vk::CommandBuffer m_commandBuffer;
 	std::vector<vk::Semaphore> m_signalSemaphores;
 	std::vector<vk::Semaphore> m_waitSemaphores;

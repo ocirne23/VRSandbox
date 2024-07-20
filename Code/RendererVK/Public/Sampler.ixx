@@ -2,21 +2,18 @@ export module RendererVK.Sampler;
 
 import RendererVK.VK;
 
-import RendererVK.Device;
-
-export class Sampler
+export class Sampler final
 {
 public:
 	Sampler();
 	~Sampler();
 	Sampler(const Sampler&) = delete;
 
-	bool initialize(const Device& device);
+	bool initialize();
 
 	vk::Sampler getSampler() const { return m_sampler; }
 
 private:
 
 	vk::Sampler m_sampler;
-	vk::Device m_device;
 };

@@ -8,24 +8,20 @@ import RendererVK.CommandBuffer;
 SwapChain::SwapChain() {}
 SwapChain::~SwapChain()
 {
-    if (m_device)
+    vk::Device vkDevice = VK::g_dev.getDevice();
+    for (SyncObjects& syncObjects : m_syncObjects)
     {
-        vk::Device vkDevice = m_device->getDevice();
-        for (SyncObjects& syncObjects : m_syncObjects)
-        {
-            vkDevice.destroySemaphore(syncObjects.imageAvailable);
-            vkDevice.destroySemaphore(syncObjects.renderFinished);
-            vkDevice.destroyFence(syncObjects.inFlight);
-        }
-        vkDevice.destroySwapchainKHR(m_swapChain);
+        vkDevice.destroySemaphore(syncObjects.imageAvailable);
+        vkDevice.destroySemaphore(syncObjects.renderFinished);
+        vkDevice.destroyFence(syncObjects.inFlight);
     }
+    vkDevice.destroySwapchainKHR(m_swapChain);
 }
 
-bool SwapChain::initialize(const Device& device, const Surface& surface, uint32 swapChainSize)
+bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
 {
-    m_device = &device;
-
-    vk::PhysicalDevice vkPhysicalDevice = device.getPhysicalDevice();
+    vk::Device vkDevice = VK::g_dev.getDevice();
+    vk::PhysicalDevice vkPhysicalDevice = VK::g_dev.getPhysicalDevice();
     vk::SurfaceKHR vkSurface = surface.getSurface();
 
     vk::SurfaceCapabilitiesKHR capabilities = vkPhysicalDevice.getSurfaceCapabilitiesKHR(vkSurface);
@@ -48,10 +44,10 @@ bool SwapChain::initialize(const Device& device, const Surface& surface, uint32 
 	m_commandBuffers.shrink_to_fit();
 	m_syncObjects.resize(imageCount);
 	m_syncObjects.shrink_to_fit();
-    vk::Device vkDevice = device.getDevice();
+
     for (uint32 i = 0; i < imageCount; i++)
     {
-        m_commandBuffers[i].initialize(device);
+        m_commandBuffers[i].initialize();
 		m_syncObjects[i].imageAvailable = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
 		m_syncObjects[i].renderFinished = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
 		m_syncObjects[i].inFlight = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
@@ -89,7 +85,7 @@ bool SwapChain::initialize(const Device& device, const Surface& surface, uint32 
 
 uint32 SwapChain::acquireNextImage()
 {
-    vk::Device vkDevice = m_device->getDevice();
+    vk::Device vkDevice = VK::g_dev.getDevice();
 	SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
     
     vk::Result result = vkDevice.waitForFences(1, &syncObjects.inFlight, vk::True, UINT64_MAX);
@@ -105,6 +101,8 @@ uint32 SwapChain::acquireNextImage()
 }
 bool SwapChain::present(uint32 imageIdx)
 {
+    vk::Device vkDevice = VK::g_dev.getDevice();
+
     vk::PipelineStageFlags2 waitStage = { vk::PipelineStageFlagBits2::eColorAttachmentOutput };
 	SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
 
@@ -120,7 +118,7 @@ bool SwapChain::present(uint32 imageIdx)
         .pSwapchains = &m_swapChain,
         .pImageIndices = &imageIdx,
     };
-    vk::Result result = m_device->getGraphicsQueue().presentKHR(presentInfo);
+    vk::Result result = VK::g_dev.getGraphicsQueue().presentKHR(presentInfo);
     switch (result)
     {
     case vk::Result::eSuccess:

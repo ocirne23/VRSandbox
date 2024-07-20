@@ -2,7 +2,6 @@ export module RendererVK.Device;
 
 import Core;
 import RendererVK.VK;
-import RendererVK.Instance;
 
 export class Device final
 {
@@ -11,7 +10,8 @@ public:
 	~Device();
 	Device(const Device&) = delete;
 
-	bool initialize(const Instance& instance);
+	bool initialize();
+	void destroy();
 
 	uint32 findMemoryType(uint32 typeBits, vk::MemoryPropertyFlags requirementsMask) const;
 
@@ -30,3 +30,8 @@ private:
 	uint32 m_graphicsQueueIndex;
 	vk::Queue m_graphicsQueue;
 };
+
+export namespace VK
+{
+	Device g_dev;
+}

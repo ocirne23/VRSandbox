@@ -3,7 +3,6 @@ export module RendererVK.Pipeline;
 import Core;
 import RendererVK.VK;
 
-export class Device;
 export class RenderPass;
 
 export struct VertexLayoutInfo
@@ -22,14 +21,14 @@ export struct PipelineLayout
 	std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
 };
 
-export class Pipeline
+export class Pipeline final
 {
 public:
 	Pipeline();
 	~Pipeline();
 	Pipeline(const Pipeline&) = delete;
 
-	bool initialize(const Device& device, const RenderPass& renderPass, PipelineLayout& layout);
+	bool initialize(const RenderPass& renderPass, PipelineLayout& layout);
 
 	vk::Pipeline getPipeline() const { return m_pipeline; }
 	vk::PipelineLayout getPipelineLayout() const { return m_pipelineLayout; }
@@ -41,5 +40,4 @@ private:
 	vk::PipelineCache m_pipelineCache;
 	vk::PipelineLayout m_pipelineLayout;
 	vk::DescriptorSetLayout m_descriptorSetLayout;
-	vk::Device m_device;
 };

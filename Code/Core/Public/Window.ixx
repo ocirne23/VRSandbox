@@ -2,7 +2,7 @@ export module Core.Window;
 
 import Core;
 
-export class Window
+export class Window final
 {
 public:
 	Window();

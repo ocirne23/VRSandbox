@@ -8,7 +8,7 @@ import File.MaterialData;
 
 export struct aiScene;
 
-export class SceneData
+export class SceneData final
 {
 public:
 	SceneData();

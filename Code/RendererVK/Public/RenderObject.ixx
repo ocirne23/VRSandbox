@@ -30,7 +30,7 @@ public:
 	~RenderObject();
 	RenderObject(const RenderObject&) = delete;
 
-	bool initialize(const Device& device, StagingManager& stagingManager, MeshData& meshData);
+	bool initialize(StagingManager& stagingManager, MeshData& meshData);
 
 	static VertexLayoutInfo getVertexLayoutInfo();
 	uint32 getNumIndices() const { return m_numIndices; }

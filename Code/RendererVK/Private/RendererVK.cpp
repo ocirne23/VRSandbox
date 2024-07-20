@@ -69,7 +69,10 @@ constexpr static uint32 NUM_FRAMES_IN_FLIGHT = 2;
 constexpr static uint32 MAX_INDIRECT_COMMANDS = 10;
 
 RendererVK::RendererVK() {}
-RendererVK::~RendererVK() {}
+RendererVK::~RendererVK() 
+{
+	VK::g_dev.getDevice().waitIdle();
+}
 
 bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 {
@@ -81,15 +84,17 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 
 	glslang::InitializeProcess();
 
-	m_instance.initialize(window, enableValidationLayers);
-	m_instance.setBreakOnValidationLayerError(enableValidationLayers);
-	m_surface.initialize(m_instance, window);
-	m_device.initialize(m_instance);
-	assert(m_surface.deviceSupportsSurface(m_device));
+	VK::g_inst.initialize(window, enableValidationLayers);
+	VK::g_inst.setBreakOnValidationLayerError(enableValidationLayers);
+	m_surface.initialize(window);
+	VK::g_dev.initialize();
+	assert(m_surface.deviceSupportsSurface());
 
-	m_swapChain.initialize(m_device, m_surface, NUM_FRAMES_IN_FLIGHT);
-	m_renderPass.initialize(m_device, m_swapChain);
-	m_framebuffers.initialize(m_device, m_renderPass, m_swapChain);
+	m_swapChain.initialize(m_surface, NUM_FRAMES_IN_FLIGHT);
+	m_stagingManager.initialize(m_swapChain);
+
+	m_renderPass.initialize(m_swapChain);
+	m_framebuffers.initialize(m_renderPass, m_swapChain);
 	
 	PipelineLayout pipelineLayout;
 	pipelineLayout.numUniformBuffers = 1;
@@ -108,25 +113,25 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 		.descriptorCount = 1,
 		.stageFlags = vk::ShaderStageFlagBits::eFragment
 	});
-	m_pipeline.initialize(m_device, m_renderPass, pipelineLayout);
-	m_sampler.initialize(m_device);
-
-	m_stagingManager.initialize(m_device, m_swapChain);
+	m_pipeline.initialize(m_renderPass, pipelineLayout);
+	m_sampler.initialize();
 
 	SceneData scene;
 	scene.initialize("baseshapes.fbx");
-	m_renderObject.initialize(m_device, m_stagingManager, *scene.getMesh("Boat"));
-	m_texture.initialize(m_device, m_stagingManager, "Textures/grid.png");
+	m_renderObject.initialize(m_stagingManager, *scene.getMesh("Boat"));
+	m_texture.initialize(m_stagingManager, "Textures/grid.png");
 
 	for (uint32 i = 0; i < m_swapChain.getLayout().numImages; ++i)
 	{
-		m_uniformBuffers.emplace_back().initialize(m_device, sizeof(glm::mat4), vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
+		m_uniformBuffers.emplace_back().initialize(sizeof(glm::mat4), 
+			vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst, 
+			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-		m_indirectCommandBuffers.emplace_back().initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
+		m_indirectCommandBuffers.emplace_back().initialize(MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
 			vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-		m_instanceDataBuffers.emplace_back().initialize(m_device, MAX_INDIRECT_COMMANDS * sizeof(RenderObject::InstanceData),
+		m_instanceDataBuffers.emplace_back().initialize(MAX_INDIRECT_COMMANDS * sizeof(RenderObject::InstanceData),
 			vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 	}

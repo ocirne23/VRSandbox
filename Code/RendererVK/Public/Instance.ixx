@@ -5,7 +5,7 @@ import RendererVK.VK;
 
 export class Window;
 
-export class Instance
+export class Instance final
 {
 public:
 	Instance();
@@ -13,9 +13,10 @@ public:
 	Instance(const Instance&) = delete;
 
 	bool initialize(Window& window, bool enableValidationLayers);
+	void destroy();
 
 	void setBreakOnValidationLayerError(bool value) { m_breakOnValidationLayerError = value; }
-	vk::Instance getHandle() const { return m_instance; }
+	vk::Instance getInstance() const { return m_instance; }
 	const std::vector<const char*>& getEnabledLayers() const { return m_enabledLayers; }
 	bool supportsLayer(const char* pLayerName) const;
 	bool supportsExtension(const char* pExtensionName) const;
@@ -28,4 +29,10 @@ private:
 
 	std::vector<vk::ExtensionProperties> m_supportedExtensions;
 	std::vector<vk::LayerProperties> m_supportedLayers;
+	VkDebugUtilsMessengerEXT m_debugMessenger;
 };
+
+export namespace VK
+{
+	Instance g_inst;
+}

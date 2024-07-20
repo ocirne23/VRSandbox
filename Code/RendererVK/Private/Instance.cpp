@@ -2,8 +2,10 @@ module RendererVK.Instance;
 
 import Core;
 import Core.SDL;
-import RendererVK.VK;
 import Core.Window;
+
+import RendererVK.VK;
+import RendererVK.Device;
 
 #ifdef USE_AFTERMATH
 import RendererVK.Aftermath;
@@ -155,8 +157,8 @@ void GpuCrashDumpCallback(const void* pGpuCrashDump, const uint32_t gpuCrashDump
 Instance::Instance() {}
 Instance::~Instance() 
 {
-	if (m_instance)
-		m_instance.destroy();
+    VK::g_dev.destroy();
+    destroy();
 }
 
 static VkBool32 __stdcall debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType,
@@ -246,12 +248,22 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
     if (enableValidationLayers)
     {
         VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo2 = debugCreateInfo;
-        VkDebugUtilsMessengerEXT m_debugMessenger;
-        auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(m_instance, "vkCreateDebugUtilsMessengerEXT");
-        func(m_instance, &debugCreateInfo2, nullptr, &m_debugMessenger);
+        auto createMessengerFunc = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(m_instance, "vkCreateDebugUtilsMessengerEXT");
+        createMessengerFunc(m_instance, &debugCreateInfo2, nullptr, &m_debugMessenger);
     }
 
     return true;
+}
+
+void Instance::destroy()
+{
+    if (m_instance)
+    {
+        auto destroyMessengerFunc = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(m_instance, "vkDestroyDebugUtilsMessengerEXT");
+        destroyMessengerFunc(m_instance, m_debugMessenger, nullptr);
+        m_instance.destroy();
+    }
+    m_instance = nullptr;
 }
 
 bool Instance::supportsExtension(const char* pExtensionName) const

@@ -8,7 +8,7 @@ import Core;
 import Core.Allocator;
 
 export template <typename T>
-class LockedList
+class LockedList final
 {
 public:
 	std::list<T> m_list;
@@ -203,7 +203,7 @@ inline bool interlockedIsListEmpty(SInterlockedLinkedListHeader& rHeader)
 }
 
 export template <typename T>
-class LockFreeList
+class LockFreeList final
 {
 private:
 	using Header = SInterlockedLinkedListHeader;

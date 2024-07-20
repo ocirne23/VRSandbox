@@ -8,12 +8,11 @@ RenderPass::RenderPass() {}
 RenderPass::~RenderPass() 
 {
     if (m_renderPass)
-		m_device.destroyRenderPass(m_renderPass);
+        VK::g_dev.getDevice().destroyRenderPass(m_renderPass);
 }
 
-bool RenderPass::initialize(const Device& device, const SwapChain& swapChain)
+bool RenderPass::initialize(const SwapChain& swapChain)
 {
-    m_device = device.getDevice();
     std::array<vk::AttachmentDescription, 2> attachments;
     attachments[0] = {
         .flags = vk::AttachmentDescriptionFlags(),
@@ -68,7 +67,7 @@ bool RenderPass::initialize(const Device& device, const SwapChain& swapChain)
 		.pDependencies = dependencies.data(),
 	};
 
-    m_renderPass = m_device.createRenderPass(renderPassInfo);
+    m_renderPass = VK::g_dev.getDevice().createRenderPass(renderPassInfo);
     if (!m_renderPass)
     {
         assert(false && "Failed to create renderpass\n");

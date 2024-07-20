@@ -5,7 +5,7 @@ import Core.AABB;
 
 export struct aiMesh;
 
-export class MeshData
+export class MeshData final
 {
 public:
 	MeshData();

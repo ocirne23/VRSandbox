@@ -2,12 +2,17 @@ module RendererVK.Shader;
 
 import Core;
 import RendererVK.VK;
+import RendererVK.Device;
 import RendererVK.glslang;
 
 Shader::Shader() {}
-Shader::~Shader() {}
+Shader::~Shader()
+{
+	if (m_shaderModule)
+		VK::g_dev.getDevice().destroyShaderModule(m_shaderModule);
+}
 
-bool Shader::initializeFromFile(const Device& device, vk::ShaderStageFlagBits stage, const std::string& filePath)
+bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath)
 {
     std::ifstream file(filePath, std::ios::ate | std::ios::binary);
     if (!file.is_open())
@@ -22,10 +27,10 @@ bool Shader::initializeFromFile(const Device& device, vk::ShaderStageFlagBits st
     file.read(fileStr.data(), fileSize);
     file.close();
 
-    return initialize(device, stage, fileStr);
+    return initialize(stage, fileStr);
 }
 
-bool Shader::initialize(const Device& device, vk::ShaderStageFlagBits stage, const std::string& shaderStr)
+bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr)
 {
 	std::vector<unsigned int> spirv;
     if (!GLSLtoSPV(stage, shaderStr, spirv))
@@ -38,7 +43,7 @@ bool Shader::initialize(const Device& device, vk::ShaderStageFlagBits stage, con
 	createInfo.codeSize = spirv.size() * sizeof(unsigned int);
 	createInfo.pCode = spirv.data();
 
-	m_shaderModule = device.getDevice().createShaderModule(createInfo);
+	m_shaderModule = VK::g_dev.getDevice().createShaderModule(createInfo);
     if (!m_shaderModule)
     {
 		assert(false && "Failed to create shader module");

@@ -2,11 +2,10 @@ export module RendererVK.Framebuffers;
 
 import RendererVK.VK;
 
-export class Device;
 export class RenderPass;
 export class SwapChain;
 
-export class Framebuffers
+export class Framebuffers final
 {
 public:
 
@@ -14,7 +13,7 @@ public:
 	~Framebuffers();
 	Framebuffers(const Framebuffers&) = delete;
 
-	bool initialize(const Device& device, const RenderPass& renderPass, const SwapChain& swapChain);
+	bool initialize(const RenderPass& renderPass, const SwapChain& swapChain);
 
 	const std::vector<vk::Framebuffer>& getFramebuffers() const { return m_framebuffers; }
 	vk::Framebuffer getFramebuffer(int index) { return m_framebuffers[index]; }
@@ -26,5 +25,4 @@ private:
 	vk::DeviceMemory m_depthImageMemory;
 	vk::Image m_depthImage;
 	vk::ImageView m_depthImageView;
-	vk::Device m_device;
 };

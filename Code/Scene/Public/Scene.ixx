@@ -1,6 +1,6 @@
 export module Scene.Scene;
 
-export class Scene
+export class Scene final
 {
 public:
 
