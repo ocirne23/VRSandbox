@@ -21,6 +21,7 @@ public:
 
 	glm::vec3 getPosition() const { return m_position; }
 	glm::vec3 getDirection() const { return m_direction; }
+	glm::vec3 getUp() const { return m_up; }
 	glm::mat4 getViewMatrix() const { return m_viewMatrix; }
 
 private:

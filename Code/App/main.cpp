@@ -65,9 +65,11 @@ int main()
 			if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_1)
 			{
 				Entity& entity = entities.emplace_back();
-				entity.position = cameraController.getPosition();
+				entity.position = cameraController.getPosition() + cameraController.getDirection();
+				entity.scale = 0.2f;
+				entity.orientation = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
 				MeshInstance& meshInstance = meshInstances.emplace_back();
-				meshSet[2].addInstance(&meshInstance);
+				meshSet[0].addInstance(&meshInstance);
 				meshInstance.setInstanceData((InstanceData*)&entity);
 			}
 			else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_2 && !meshInstances.empty())
@@ -75,7 +77,6 @@ int main()
 				meshInstances.back().remove();
 				meshInstances.pop_back();
 			}
-
 		};
 
 	auto startTime = std::chrono::high_resolution_clock::now();

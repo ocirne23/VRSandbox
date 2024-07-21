@@ -30,9 +30,9 @@ export struct EntityID
 
 export struct alignas(32) Entity
 {
-	glm::vec3 position = glm::vec3(0,0,0);
+	glm::vec3 position;
 	float scale = 1.0f;
-	glm::quat orientation = glm::quat(glm::vec3(1,0,0));
+	glm::quat orientation;
 };
 
 Entity* EntityID::getEntity() const
