@@ -238,7 +238,7 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
     createInfo.enabledExtensionCount = static_cast<uint32>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
 
-    m_instance = vk::createInstance(createInfo);
+    m_instance = vk::createInstance(createInfo, VK::getAllocationCallbacks());
     if (!m_instance)
     {
         assert(false && "Failed to create instance");

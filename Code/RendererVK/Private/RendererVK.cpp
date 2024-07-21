@@ -277,10 +277,11 @@ void RendererVK::render()
 
 const char* RendererVK::getDebugText()
 {
+	float memoryUsageMB = VK::getAllocatedSize() / 1024.0f / 1024.0f;
 	float vertexDataPercent = (float)(m_meshDataManager.getVertexBufUsed() / (float)m_meshDataManager.getVertexBufSize() * 100.0f);
 	float indexDataPercent  = (float)(m_meshDataManager.getIndexBufUsed() / (float)m_meshDataManager.getIndexBufSize()) * 100.0f;
 	static char buffer[256];
-	snprintf(buffer, sizeof(buffer), "Vertex Capacity: %0.1f%%, Index Capacity: %0.1f%%", vertexDataPercent, indexDataPercent);
+	snprintf(buffer, sizeof(buffer), "Memory Usage: %0.1f MB, Vertex Capacity: %0.1f%%, Index Capacity: %0.1f%%", memoryUsageMB, vertexDataPercent, indexDataPercent);
 	return buffer;
 }
 

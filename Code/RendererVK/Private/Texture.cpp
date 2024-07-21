@@ -32,7 +32,10 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
 	vk::SemaphoreTypeCreateInfo semaphoreTypeCreateInfo = { .semaphoreType = vk::SemaphoreType::eBinary };
 	m_imageReadySemaphore = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{ .pNext = &semaphoreTypeCreateInfo });
 
-	uint8_t* pData = stbi_load(pFilePath, (int*)&m_width, (int*)&m_height, (int*)&m_numChannels, 4);
+	std::unique_ptr<uint8, void(*)(uint8*)> pData(
+		stbi_load(pFilePath, (int*)&m_width, (int*)&m_height, (int*)&m_numChannels, 4), 
+		[](uint8* p) { if (p) stbi_image_free(p); });
+
 	const vk::DeviceSize imageSize = m_width * m_height * 4;
 	if (!pData)
 	{
@@ -57,7 +60,6 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
 	if (!m_image)
 	{
 		assert(false && "Failed to create image");
-		stbi_image_free(pData);
 		return false;
 	}
 
@@ -70,7 +72,6 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
 	if (!m_imageMemory)
 	{
 		assert(false && "Failed to allocate memory");
-		stbi_image_free(pData);
 		return false;
 	}
 	vkDevice.bindImageMemory(m_image, m_imageMemory, 0);
@@ -91,10 +92,8 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
 	if (!m_imageView)
 	{
 		assert(false && "Failed to create image view");
-		stbi_image_free(pData);
 		return false;
 	}
-	stagingManager.uploadImage(m_image, m_width, m_height, imageSize, pData);
-	stbi_image_free(pData);
+	stagingManager.uploadImage(m_image, m_width, m_height, imageSize, pData.get());
 	return true;
 }

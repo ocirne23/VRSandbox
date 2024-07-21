@@ -32,13 +32,14 @@ int main()
 	RendererVK& renderer = VK::g_renderer;
 	renderer.initialize(window, true);
 
-	SceneData scene;
-	scene.initialize("baseshapes.fbx");
-
 	std::vector<Mesh> meshSet;
-	meshSet.emplace_back().initialize(*scene.getMesh("Boat"));
-	meshSet.emplace_back().initialize(*scene.getMesh("BoatCollider"));
-	meshSet.emplace_back().initialize(*scene.getMesh("Cube"));
+	{
+		SceneData scene;
+		scene.initialize("baseshapes.fbx");
+		meshSet.emplace_back().initialize(*scene.getMesh("Boat"));
+		meshSet.emplace_back().initialize(*scene.getMesh("BoatCollider"));
+		meshSet.emplace_back().initialize(*scene.getMesh("Cube"));
+	}
 	renderer.updateMeshSet(meshSet);
 
 	std::vector<Entity> entities(10);
@@ -66,7 +67,7 @@ int main()
 			{
 				Entity& entity = entities.emplace_back();
 				entity.position = cameraController.getPosition() + cameraController.getDirection();
-				entity.scale = 0.2f;
+				entity.scale = 0.3f;
 				entity.orientation = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
 				MeshInstance& meshInstance = meshInstances.emplace_back();
 				meshSet[0].addInstance(&meshInstance);
