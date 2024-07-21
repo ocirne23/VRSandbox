@@ -6,6 +6,11 @@ import RendererVK.Device;
 Buffer::Buffer() {}
 Buffer::~Buffer() 
 {
+	destroy();
+}
+
+void Buffer::destroy()
+{
 	if (m_buffer)
 		VK::g_dev.getDevice().destroyBuffer(m_buffer);
 	if (m_memory)
@@ -14,6 +19,9 @@ Buffer::~Buffer()
 
 bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties)
 {
+	if (m_buffer)
+		destroy();
+
 	m_size = size;
 	vk::Device vkDevice = VK::g_dev.getDevice();
 	vk::BufferCreateInfo bufferInfo = {};

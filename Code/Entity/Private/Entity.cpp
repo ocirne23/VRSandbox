@@ -1,1 +1,1 @@
-module Entity.Entity;
+module Entity;

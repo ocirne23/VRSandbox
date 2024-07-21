@@ -30,6 +30,7 @@ size_t MeshDataManager::uploadVertexData(const void* pData, vk::DeviceSize size)
 	const size_t offset = m_vertexBufOffset;
 	m_stagingManager->upload(m_vertexBuffer.getBuffer(), size, pData, m_vertexBufOffset);
 	m_vertexBufOffset += size;
+	assert(m_vertexBufOffset <= m_vertexBufSize);
 	return offset;
 }
 
@@ -39,5 +40,6 @@ size_t MeshDataManager::uploadIndexData(const void* pData, vk::DeviceSize size)
 	const size_t offset = m_indexBufOffset;
 	m_stagingManager->upload(m_indexBuffer.getBuffer(), size, pData, m_indexBufOffset);
 	m_indexBufOffset += size;
+	assert(m_indexBufOffset <= m_indexBufSize);
 	return offset;
 }

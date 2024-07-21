@@ -20,6 +20,7 @@ public:
 	Buffer(const Buffer&) = delete;
 
 	bool initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
+	void destroy();
 
 	void mapMemory(void* pData, vk::DeviceSize size);
 	std::span<uint8> mapMemory();

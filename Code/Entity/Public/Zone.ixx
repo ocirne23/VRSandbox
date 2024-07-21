@@ -6,7 +6,7 @@ module;
 export module Entity.Zone;
 
 import Core;
-import Entity.Entity;
+import Entity;
 
 export struct EntityHash
 {

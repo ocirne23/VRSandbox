@@ -1,11 +1,16 @@
 import Core;
 import Core.Window;
-import RendererVK;
+import Entity;
 import Entity.FreeFlyCameraController;
 import File.FileSystem;
 import File.SceneData;
 import Core.Allocator;
 import Input;
+import Core.SDL;
+
+import RendererVK;
+import RendererVK.Mesh;
+import RendererVK.MeshInstance;
 
 int main()
 {
@@ -14,21 +19,64 @@ int main()
 	Window window;
 	window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(800, 600));
 
-	RendererVK renderer;
-	renderer.initialize(window, true);
-
 	Input input;
 	input.initialize();
+
+	bool running = true;
+	SystemEventListener* systemEventListener = input.addSystemEventListener();
+	systemEventListener->onQuit = [&]() { running = false; };
 
 	FreeFlyCameraController cameraController;
 	cameraController.initialize(input, glm::vec3(10.0f, 0.0f, -10.0f), glm::vec3(0.0f, 0.0f, 0.0f));
 
-	bool running = true;
-	SystemEventListener* systemEventListener = input.addSystemEventListener();
-	systemEventListener->onQuit = [&]()
+	RendererVK& renderer = VK::g_renderer;
+	renderer.initialize(window, true);
+
+	SceneData scene;
+	scene.initialize("baseshapes.fbx");
+
+	std::vector<Mesh> meshSet;
+	meshSet.emplace_back().initialize(*scene.getMesh("Boat"));
+	meshSet.emplace_back().initialize(*scene.getMesh("BoatCollider"));
+	meshSet.emplace_back().initialize(*scene.getMesh("Cube"));
+	renderer.updateMeshSet(meshSet);
+
+	std::vector<Entity> entities(10);
+	std::vector<MeshInstance> meshInstances(10);
+	entities.reserve(100);
+	meshInstances.reserve(100);
+	for (int i = 0; i < entities.size(); ++i)
 	{
-		running = false;
-	};
+		entities[i].position = glm::vec3(i * 5.0f, 0.0f, 0.0f);
+		if (i < 5)
+			meshSet[0].addInstance(&meshInstances[i]);
+		else
+			meshSet[1].addInstance(&meshInstances[i]);
+	}
+
+	for (int i = 0; i < entities.size(); ++i)
+	{
+		meshInstances[i].setInstanceData((InstanceData*)&entities[i]);
+	}
+
+	KeyboardListener* keyboardListener = input.addKeyboardListener();
+	keyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& e)
+		{
+			if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_1)
+			{
+				Entity& entity = entities.emplace_back();
+				entity.position = cameraController.getPosition();
+				MeshInstance& meshInstance = meshInstances.emplace_back();
+				meshSet[2].addInstance(&meshInstance);
+				meshInstance.setInstanceData((InstanceData*)&entity);
+			}
+			else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_2 && !meshInstances.empty())
+			{
+				meshInstances.back().remove();
+				meshInstances.pop_back();
+			}
+
+		};
 
 	auto startTime = std::chrono::high_resolution_clock::now();
 	double timeAccum = 0.0;

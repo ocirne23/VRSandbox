@@ -1,4 +1,4 @@
-export module Entity.Entity;
+export module Entity;
 
 import Core;
 
@@ -30,18 +30,14 @@ export struct EntityID
 
 export struct alignas(32) Entity
 {
-	glm::vec4 m_positionRadius;
-	glm::vec3 m_orientation;
-	uint32 salt : 4;
-	uint32 state : 4;
-	uint32 zoneIdx : 8;
-	uint32 zoneID : 16;
+	glm::vec3 position = glm::vec3(0,0,0);
+	float scale = 1.0f;
+	glm::quat orientation = glm::quat(glm::vec3(1,0,0));
 };
 
 Entity* EntityID::getEntity() const
 {
 	Entity* pEntity = reinterpret_cast<Entity*>(id & PointerBits);
-	assert(pEntity->salt == getSalt());
 	return pEntity;
 }
 

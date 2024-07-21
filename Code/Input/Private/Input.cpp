@@ -55,12 +55,18 @@ void Input::update(double deltaSec)
 				if (listener->onMouseReleased) listener->onMouseReleased(evt.button);
 			break;
 		case SDL_EVENT_KEY_DOWN:
-			for (auto& listener : m_keyboardListeners)
-				if (listener->onKeyPressed) listener->onKeyPressed(evt.key);
+			if (evt.key.repeat == 0)
+			{
+				for (auto& listener : m_keyboardListeners)
+					if (listener->onKeyPressed) listener->onKeyPressed(evt.key);
+			}
 			break;
 		case SDL_EVENT_KEY_UP:
-			for (auto& listener : m_keyboardListeners)
-				if (listener->onKeyReleased) listener->onKeyReleased(evt.key);
+			if (evt.key.repeat == 0)
+			{
+				for (auto& listener : m_keyboardListeners)
+					if (listener->onKeyReleased) listener->onKeyReleased(evt.key);
+			}
 			break;
 		default:
 			break;

@@ -12,17 +12,22 @@ import RendererVK.Framebuffers;
 import RendererVK.Pipeline;
 import RendererVK.CommandBuffer;
 import RendererVK.Buffer;
-import RendererVK.RenderObject;
 import RendererVK.Texture;
 import RendererVK.Sampler;
 import RendererVK.StagingManager;
 import RendererVK.MeshDataManager;
 
+export class Mesh;
 export class Window;
+export class MeshData;
+
+export struct InstanceData;
 
 export class RendererVK final
 {
 public:
+
+	constexpr static uint32 NUM_FRAMES_IN_FLIGHT = 2;
 
 	RendererVK();
 	~RendererVK();
@@ -30,11 +35,16 @@ public:
 
 	bool initialize(Window& window, bool enableValidationLayers);
 
-	void recordCommandBuffers();
 	void update(double deltaSec, const glm::mat4& mvpMatrix);
 	void render();
 
+	void updateMeshSet(std::vector<Mesh>& meshData);
+
 	const char* getDebugText();
+
+private:
+
+	void recordCommandBuffers();
 
 private:
 
@@ -45,17 +55,30 @@ private:
 	RenderPass m_renderPass;
 	Framebuffers m_framebuffers;
 	Pipeline m_pipeline;
-	RenderObject m_renderObject;
-	RenderObject m_renderObject2;
 	Texture m_texture;
 	Sampler m_sampler;
-
 	StagingManager m_stagingManager;
+
+	friend class Mesh;
 	MeshDataManager m_meshDataManager;
 
-	std::vector<Buffer> m_uniformBuffers;
-	std::vector<Buffer> m_indirectCommandBuffers;
-	std::vector<Buffer> m_instanceDataBuffers;
+	std::vector<Mesh>* m_pMeshSet = nullptr;
 
+	struct PerFrameData
+	{
+		Buffer uniformBuffer;
+		Buffer indirectCommandBuffer;
+		Buffer instanceDataBuffer;
+
+		void* mappedUniformBuffer = nullptr;
+		vk::DrawIndexedIndirectCommand* mappedIndirectCommands = nullptr;
+		InstanceData* mappedInstanceData = nullptr;
+	};
+	std::array<PerFrameData, NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 	glm::mat4 m_mvpMatrix;
 };
+
+export namespace VK
+{
+	RendererVK g_renderer;
+}
