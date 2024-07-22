@@ -112,6 +112,7 @@ void Device::destroy()
 {
 	if (m_device)
 	{
+		m_device.waitIdle();
 		m_device.destroyCommandPool(m_commandPool);
 		m_device.destroy();
 	}

@@ -33,5 +33,8 @@ private:
 
 export namespace VK
 {
+#pragma warning(disable: 4075)
+#pragma init_seg(".CRT$XCU2")
 	Device g_dev;
+#pragma warning(default: 4075)
 }

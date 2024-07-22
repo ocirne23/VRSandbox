@@ -34,5 +34,8 @@ private:
 
 export namespace VK
 {
+#pragma warning(disable: 4075)
+#pragma init_seg(".CRT$XCU1")
 	Instance g_inst;
+#pragma warning(default: 4075)
 }

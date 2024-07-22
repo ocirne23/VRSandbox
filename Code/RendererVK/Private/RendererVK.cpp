@@ -81,7 +81,6 @@ constexpr static double INDEX_DATA_SIZE_MB = INDEX_DATA_SIZE / 1024.0 / 1024.0;
 RendererVK::RendererVK() {}
 RendererVK::~RendererVK() 
 {
-	VK::g_dev.getDevice().waitIdle();
 }
 
 bool RendererVK::initialize(Window& window, bool enableValidationLayers)

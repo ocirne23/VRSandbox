@@ -14,13 +14,13 @@ import RendererVK;
 Mesh::Mesh() {}
 Mesh::~Mesh() {}
 
-Mesh::Mesh(Mesh&& copy)
+Mesh::Mesh(Mesh&& move)
 {
-	m_numIndices = copy.m_numIndices;
-	m_vertexOffset = copy.m_vertexOffset;
-	m_indexOffset = copy.m_indexOffset;
-	m_instanceData = std::move(copy.m_instanceData);
-	m_instances = std::move(copy.m_instances);
+	m_numIndices = move.m_numIndices;
+	m_vertexOffset = move.m_vertexOffset;
+	m_indexOffset = move.m_indexOffset;
+	m_instanceData = std::move(move.m_instanceData);
+	m_instances = std::move(move.m_instances);
 }
 
 bool Mesh::initialize(MeshData& meshData)
@@ -48,6 +48,9 @@ bool Mesh::initialize(MeshData& meshData)
 
 	m_instances.shrink_to_fit();
 	m_instances.reserve(1);
+
+	m_instanceData.shrink_to_fit();
+	m_instanceData.reserve(1);
 
 	return true;
 }
