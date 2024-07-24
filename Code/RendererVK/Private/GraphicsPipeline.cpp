@@ -1,4 +1,4 @@
-module RendererVK.Pipeline;
+module RendererVK.GraphicsPipeline;
 
 import Core;
 import RendererVK.VK;
@@ -6,8 +6,8 @@ import RendererVK.Device;
 import RendererVK.Shader;
 import RendererVK.RenderPass;
 
-Pipeline::Pipeline() {}
-Pipeline::~Pipeline()
+GraphicsPipeline::GraphicsPipeline() {}
+GraphicsPipeline::~GraphicsPipeline()
 {
 	vk::Device vkDevice = VK::g_dev.getDevice();
 	if (m_pipeline)
@@ -20,7 +20,7 @@ Pipeline::~Pipeline()
 		vkDevice.destroyDescriptorSetLayout(m_descriptorSetLayout);
 }
 
-bool Pipeline::initialize(const RenderPass& renderPass, PipelineLayout& layout)
+bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipelineLayout& layout)
 {
 	vk::Device vkDevice = VK::g_dev.getDevice();
 	vk::DescriptorSetLayoutCreateInfo layoutInfo

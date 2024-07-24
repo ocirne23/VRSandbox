@@ -9,7 +9,7 @@ import RendererVK.Surface;
 import RendererVK.SwapChain;
 import RendererVK.RenderPass;
 import RendererVK.Framebuffers;
-import RendererVK.Pipeline;
+import RendererVK.GraphicsPipeline;
 import RendererVK.CommandBuffer;
 import RendererVK.Buffer;
 import RendererVK.Texture;
@@ -52,7 +52,7 @@ private:
 	SwapChain m_swapChain;
 	RenderPass m_renderPass;
 	Framebuffers m_framebuffers;
-	Pipeline m_pipeline;
+	GraphicsPipeline m_pipeline;
 	Texture m_texture;
 	Sampler m_sampler;
 	StagingManager m_stagingManager;

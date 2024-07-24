@@ -4,7 +4,7 @@ import Core;
 import RendererVK;
 import RendererVK.VK;
 import RendererVK.Buffer;
-import RendererVK.Pipeline;
+import RendererVK.GraphicsPipeline;
 import File.MeshData;
 
 export class MeshDataManager;

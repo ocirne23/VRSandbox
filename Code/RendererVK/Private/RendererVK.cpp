@@ -3,11 +3,8 @@ module RendererVK;
 import Core;
 import RendererVK.VK;
 import RendererVK.glslang;
+import RendererVK.Mesh;
 import Core.Window;
-import RendererVK.Mesh;
-import RendererVK.Texture;
-import RendererVK.Pipeline;
-import RendererVK.Mesh;
 import File.SceneData;
 import File.MeshData;
 
@@ -106,7 +103,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 	m_renderPass.initialize(m_swapChain);
 	m_framebuffers.initialize(m_renderPass, m_swapChain);
 	
-	PipelineLayout pipelineLayout;
+	GraphicsPipelineLayout pipelineLayout;
 	pipelineLayout.numUniformBuffers = 1;
 	pipelineLayout.vertexShaderText = vertexShaderText_PC_C;
 	pipelineLayout.fragmentShaderText = fragmentShaderText_C_C;
@@ -160,6 +157,9 @@ void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
 		0.0f, -1.0f, 0.0f, 0.0f,
 		0.0f, 0.0f, 0.5f, 0.0f,
 		0.0f, 0.0f, 0.5f, 1.0f);
+
+	glm::frustum f;
+
 
 	m_mvpMatrix = clip * projection * viewMatrix;
 

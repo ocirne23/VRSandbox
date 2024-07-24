@@ -15,7 +15,6 @@ SceneData::~SceneData()
 
 bool SceneData::initialize(const char* fileName)
 {
-	//const bool isFBX = std::string(fileName).ends_with(".fbx");
 	m_pScene = m_importer.ReadFile(fileName, aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_MakeLeftHanded);
 	for (uint32 i = 0; i < m_pScene->mNumMeshes; i++)
 	{

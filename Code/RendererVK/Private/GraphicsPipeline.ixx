@@ -1,4 +1,4 @@
-export module RendererVK.Pipeline;
+export module RendererVK.GraphicsPipeline;
 
 import Core;
 import RendererVK.VK;
@@ -11,7 +11,7 @@ export struct VertexLayoutInfo
 	std::vector<vk::VertexInputAttributeDescription> attributeDescriptions;
 };
 
-export struct PipelineLayout
+export struct GraphicsPipelineLayout
 {
 	std::string fragmentShaderText;
 	std::string vertexShaderText;
@@ -21,14 +21,14 @@ export struct PipelineLayout
 	std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
 };
 
-export class Pipeline final
+export class GraphicsPipeline final
 {
 public:
-	Pipeline();
-	~Pipeline();
-	Pipeline(const Pipeline&) = delete;
+	GraphicsPipeline();
+	~GraphicsPipeline();
+	GraphicsPipeline(const GraphicsPipeline&) = delete;
 
-	bool initialize(const RenderPass& renderPass, PipelineLayout& layout);
+	bool initialize(const RenderPass& renderPass, GraphicsPipelineLayout& layout);
 
 	vk::Pipeline getPipeline() const { return m_pipeline; }
 	vk::PipelineLayout getPipelineLayout() const { return m_pipelineLayout; }

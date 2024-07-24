@@ -45,6 +45,11 @@ bool Device::initialize()
 				assert(false && "Separate transfer queue not supported!");
 				return false;
 			}
+			if (!(queueFamilyProperties[i].queueFlags & vk::QueueFlagBits::eCompute))
+			{
+				assert(false && "Separate compute queue not supported!");
+				return false;
+			}
 			break;
 		}
 	}
