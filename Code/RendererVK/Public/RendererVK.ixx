@@ -20,6 +20,7 @@ import RendererVK.MeshDataManager;
 
 export class Mesh;
 export struct MeshInfo;
+export struct UboData;
 export class MeshInstance;
 export class Window;
 export class MeshData;
@@ -70,10 +71,12 @@ private:
         Buffer indirectCommandBuffer;
         Buffer instanceDataBuffer;
 
+        Buffer indirectDispatchBuffer;
         Buffer computeMeshInfoBuffer;
         Buffer computeMeshInstanceBuffer;
 
-        void* mappedUniformBuffer = nullptr;
+        vk::DispatchIndirectCommand* mappedDispatchBuffer = nullptr;
+        UboData* mappedUniformBuffer = nullptr;
         MeshInfo* mappedMeshInfo = nullptr;
         MeshInstance* mappedMeshInstances = nullptr;
     };

@@ -38,12 +38,10 @@ int main()
         scene.initialize("baseshapes.fbx");
         meshSet.emplace_back().initialize(*scene.getMesh("Boat"), 0);
         meshSet.emplace_back().initialize(*scene.getMesh("BoatCollider"), 1);
-        //meshSet.emplace_back().initialize(*scene.getMesh("Cube"));
     }
     renderer.updateMeshSet(meshSet);
 
-    std::vector<MeshInstance> meshInstances(100);
-    meshInstances.reserve(512);
+    std::vector<MeshInstance> meshInstances(10);
     for (int i = 0; i < meshInstances.size(); ++i)
     {
         meshInstances[i].transform.pos = glm::vec3(i * 5.0f, i % 2 == 0 ? 5.0f : 0.0f, 0.0f);
