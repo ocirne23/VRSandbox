@@ -69,6 +69,7 @@ void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, c
 			.pBufferInfo = std::get_if<vk::DescriptorBufferInfo>(&updateInfo[i].info),
 		};
 	}
+	//VK::g_dev.getDevice().updateDescriptorSets((uint32)updateInfo.size(), descriptorWrites, 0, nullptr);
 	m_commandBuffer.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, (uint32)updateInfo.size(), descriptorWrites);
 }
 

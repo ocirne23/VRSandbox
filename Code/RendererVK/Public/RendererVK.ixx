@@ -10,6 +10,7 @@ import RendererVK.SwapChain;
 import RendererVK.RenderPass;
 import RendererVK.Framebuffers;
 import RendererVK.GraphicsPipeline;
+import RendererVK.ComputePipeline;
 import RendererVK.CommandBuffer;
 import RendererVK.Buffer;
 import RendererVK.Texture;
@@ -53,6 +54,7 @@ private:
 	RenderPass m_renderPass;
 	Framebuffers m_framebuffers;
 	GraphicsPipeline m_pipeline;
+	ComputePipeline m_computePipeline;
 	Texture m_texture;
 	Sampler m_sampler;
 	StagingManager m_stagingManager;
@@ -68,12 +70,14 @@ private:
 		Buffer indirectCommandBuffer;
 		Buffer instanceDataBuffer;
 
+		Buffer computeIndirectCommandBuffer;
+		Buffer computeInstanceDataBuffer;
+
 		void* mappedUniformBuffer = nullptr;
 		vk::DrawIndexedIndirectCommand* mappedIndirectCommands = nullptr;
 		InstanceData* mappedInstanceData = nullptr;
 	};
 	std::array<PerFrameData, NUM_FRAMES_IN_FLIGHT> m_perFrameData;
-	glm::mat4 m_mvpMatrix;
 };
 
 export namespace VK

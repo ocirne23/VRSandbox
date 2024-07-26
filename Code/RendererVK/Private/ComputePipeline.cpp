@@ -6,6 +6,9 @@ import RendererVK.Shader;
 bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
 {
 	vk::Device vkDevice = VK::g_dev.getDevice();
+
+	m_pipelineCache = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
+
 	vk::DescriptorSetLayoutCreateInfo layoutInfo
 	{
 		.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
@@ -50,6 +53,7 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
 	};
 
 
+	m_pipeline = VK::g_dev.getDevice().createComputePipeline(m_pipelineCache, pipelineCreateInfo).value;
 
 	return true;
 }

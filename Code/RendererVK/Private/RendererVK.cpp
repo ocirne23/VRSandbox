@@ -5,6 +5,7 @@ import RendererVK.VK;
 import RendererVK.glslang;
 import RendererVK.Mesh;
 import Core.Window;
+import Core.Frustum;
 import File.SceneData;
 import File.MeshData;
 
@@ -17,6 +18,7 @@ const char* vertexShaderText_PC_C = R"(
 layout (std140, binding = 0) uniform buffer
 {
 	mat4 u_mvp;
+	vec4 u_frustumPlanes[6];
 };
 
 layout (location = 0) in vec3 in_pos;
@@ -59,6 +61,54 @@ void main()
 }
 )";
 
+const char* computeShaderText = R"(
+#version 450
+
+struct InstanceData
+{
+	vec3 pos;
+	float scale;
+	vec4 quat;
+};
+struct IndexedIndirectCommand
+{
+	uint indexCount;
+	uint instanceCount;
+	uint firstIndex;
+	int vertexOffset;
+	uint firstInstance;
+};
+
+layout (binding = 5, std140) uniform UBO
+{
+	mat4 u_mvp;
+	vec4 u_frustumPlanes[6];
+};
+layout (binding = 6) readonly buffer InInstanceDataBuffer
+{
+	InstanceData in_instanceData[];
+};
+layout (binding = 7) readonly buffer InIndexedIndirectCommandBuffer
+{
+	IndexedIndirectCommand in_indirectCommands[];
+};
+layout (binding = 8, std430) writeonly buffer OutInstanceDataBuffer
+{
+	InstanceData out_instanceData[];
+};
+layout (binding = 9, std430) writeonly buffer OutIndexedIndirectCommandBuffer
+{
+	IndexedIndirectCommand out_indirectCommands[];
+};
+
+void main()
+{
+	uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+	out_instanceData[idx] = in_instanceData[idx];
+	out_indirectCommands[idx] = in_indirectCommands[idx];
+}
+)";
+
 constexpr static float CAMERA_FOV_DEG = 45.0f;
 constexpr static float CAMERA_NEAR = 0.1f;
 constexpr static float CAMERA_FAR = 1000.0f;
@@ -79,6 +129,12 @@ RendererVK::RendererVK() {}
 RendererVK::~RendererVK() 
 {
 }
+
+struct UboData
+{
+	glm::mat4 mvp;
+	glm::vec4 frustumPlanes[6];
+};
 
 bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 {
@@ -121,26 +177,70 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 		.stageFlags = vk::ShaderStageFlagBits::eFragment
 	});
 	m_pipeline.initialize(m_renderPass, pipelineLayout);
-	m_sampler.initialize();
 
+	ComputePipelineLayout computePipelineLayout;
+	computePipelineLayout.numUniformBuffers = 1;
+	computePipelineLayout.computeShaderText = computeShaderText;
+	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+		.binding = 5,
+		.descriptorType = vk::DescriptorType::eUniformBuffer,
+		.descriptorCount = 1,
+		.stageFlags = vk::ShaderStageFlagBits::eCompute
+	});
+	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+		.binding = 6,
+		.descriptorType = vk::DescriptorType::eStorageBuffer,
+		.descriptorCount = 1,
+		.stageFlags = vk::ShaderStageFlagBits::eCompute
+	});
+	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+		.binding = 7,
+		.descriptorType = vk::DescriptorType::eStorageBuffer,
+		.descriptorCount = 1,
+		.stageFlags = vk::ShaderStageFlagBits::eCompute
+	});
+	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+		.binding = 8,
+		.descriptorType = vk::DescriptorType::eStorageBuffer,
+		.descriptorCount = 1,
+		.stageFlags = vk::ShaderStageFlagBits::eCompute
+	});
+	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+		.binding = 9,
+		.descriptorType = vk::DescriptorType::eStorageBuffer,
+		.descriptorCount = 1,
+		.stageFlags = vk::ShaderStageFlagBits::eCompute
+	});
+	m_computePipeline.initialize(computePipelineLayout);
+
+
+	m_sampler.initialize();
 	m_texture.initialize(m_stagingManager, "Textures/grid.png");
 
 	for (PerFrameData& perFrame : m_perFrameData)
 	{
-		perFrame.uniformBuffer.initialize(sizeof(glm::mat4),
+		perFrame.uniformBuffer.initialize(sizeof(UboData),
 			vk::BufferUsageFlagBits::eUniformBuffer,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		perFrame.mappedUniformBuffer = perFrame.uniformBuffer.mapMemory().data();
 
-		perFrame.indirectCommandBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
-			vk::BufferUsageFlagBits::eIndirectBuffer,
+		perFrame.computeIndirectCommandBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-		perFrame.mappedIndirectCommands = (vk::DrawIndexedIndirectCommand*)perFrame.indirectCommandBuffer.mapMemory().data();
+		perFrame.mappedIndirectCommands = (vk::DrawIndexedIndirectCommand*)perFrame.computeIndirectCommandBuffer.mapMemory().data();
+
+		perFrame.computeInstanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(InstanceData),
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		perFrame.mappedInstanceData = (InstanceData*)perFrame.computeInstanceDataBuffer.mapMemory().data();
+
+		perFrame.indirectCommandBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
+			vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 		perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(InstanceData),
-			vk::BufferUsageFlagBits::eVertexBuffer,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-		perFrame.mappedInstanceData = (InstanceData*)perFrame.instanceDataBuffer.mapMemory().data();
+			vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal);
 	}
 
 	return true;
@@ -157,14 +257,15 @@ void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
 		0.0f, -1.0f, 0.0f, 0.0f,
 		0.0f, 0.0f, 0.5f, 0.0f,
 		0.0f, 0.0f, 0.5f, 1.0f);
-
-	glm::frustum f;
-
-
-	m_mvpMatrix = clip * projection * viewMatrix;
+	
+	UboData uboData;
+	uboData.mvp = clip * projection * viewMatrix;
+	Frustum frustum;
+	frustum.fromMatrix(uboData.mvp);
+	memcpy(uboData.frustumPlanes, frustum.planes, sizeof(frustum.planes));
 
 	PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-	memcpy(frameData.mappedUniformBuffer, &m_mvpMatrix, sizeof(m_mvpMatrix));
+	memcpy(frameData.mappedUniformBuffer, &uboData, sizeof(UboData));
 
 	uint32 instanceCounter = 0;
 	for (uint32 i = 0, num = (uint32)m_pMeshSet->size(); i < num; ++i)
@@ -234,7 +335,50 @@ void RendererVK::recordCommandBuffers()
 				.type = vk::DescriptorType::eUniformBuffer,
 				.info = vk::DescriptorBufferInfo {
 					.buffer = frameData.uniformBuffer.getBuffer(),
-					.range = sizeof(m_mvpMatrix),
+					.range = sizeof(UboData),
+				}
+			}
+		};
+		std::array<DescriptorSetUpdateInfo, 5> computeDescriptorSetUpdateInfos
+		{
+			DescriptorSetUpdateInfo{
+				.binding = 5,
+				.type = vk::DescriptorType::eUniformBuffer,
+				.info = vk::DescriptorBufferInfo {
+					.buffer = frameData.uniformBuffer.getBuffer(),
+					.range = sizeof(UboData),
+				}
+			},
+			DescriptorSetUpdateInfo{
+				.binding = 6,
+				.type = vk::DescriptorType::eStorageBuffer,
+				.info = vk::DescriptorBufferInfo {
+					.buffer = m_perFrameData[i].computeInstanceDataBuffer.getBuffer(),
+					.range = MAX_INSTANCE_DATA * sizeof(InstanceData),
+				}
+			},
+			DescriptorSetUpdateInfo{
+				.binding = 7,
+				.type = vk::DescriptorType::eStorageBuffer,
+				.info = vk::DescriptorBufferInfo {
+					.buffer = m_perFrameData[i].computeIndirectCommandBuffer.getBuffer(),
+					.range = MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
+				}
+			},
+			DescriptorSetUpdateInfo{
+				.binding = 8,
+				.type = vk::DescriptorType::eStorageBuffer,
+				.info = vk::DescriptorBufferInfo {
+					.buffer = m_perFrameData[i].instanceDataBuffer.getBuffer(),
+					.range = MAX_INSTANCE_DATA * sizeof(InstanceData),
+				}
+			},
+			DescriptorSetUpdateInfo{
+				.binding = 9,
+				.type = vk::DescriptorType::eStorageBuffer,
+				.info = vk::DescriptorBufferInfo {
+					.buffer = m_perFrameData[i].indirectCommandBuffer.getBuffer(),
+					.range = MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
 				}
 			}
 		};
@@ -252,6 +396,17 @@ void RendererVK::recordCommandBuffers()
 
 		CommandBuffer& commandBuffer = m_swapChain.getCommandBuffer(i);
 		vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
+		commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), computeDescriptorSetUpdateInfos);
+		vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
+		vkCommandBuffer.fillBuffer(frameData.computeIndirectCommandBuffer.getBuffer(), 0, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand), 0);
+		vkCommandBuffer.fillBuffer(frameData.computeInstanceDataBuffer.getBuffer(), 0, MAX_INSTANCE_DATA * sizeof(InstanceData), 0);
+		vk::MemoryBarrier memoryBarrier{
+			.srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+			.dstAccessMask = vk::AccessFlagBits::eShaderRead,
+		};
+		vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), { memoryBarrier }, {}, {});
+
+		vkCommandBuffer.dispatch(1, 1, 1);
 
 		vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
 		commandBuffer.cmdUpdateDescriptorSets(m_pipeline.getPipelineLayout(), descriptorSetUpdateInfos);

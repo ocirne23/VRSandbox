@@ -6,7 +6,6 @@ import RendererVK.VK;
 export struct ComputePipelineLayout
 {
 	std::string computeShaderText;
-	std::string vertexShaderText;
 	uint32 numUniformBuffers;
 	std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
 };
@@ -20,9 +19,10 @@ public:
 
 	bool initialize(const ComputePipelineLayout& layout);
 
-	//vk::Pipeline getPipeline() const { return m_pipeline; }
-	//vk::PipelineLayout getPipelineLayout() const { return m_pipelineLayout; }
-	//vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
+	vk::Pipeline getPipeline() const { return m_pipeline; }
+	vk::PipelineLayout getPipelineLayout() const { return m_pipelineLayout; }
+	vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
+
 private:
 
 	vk::Pipeline m_pipeline;
