@@ -10,7 +10,7 @@ import Core.Frustum;
 import File.SceneData;
 import File.MeshData;
 
-const char* vertexShaderText_PC_C = R"(
+const char* vertexShaderText = R"(
 #version 400
 
 #extension GL_ARB_separate_shader_objects : enable
@@ -47,7 +47,7 @@ void main()
 }
 )";
 
-const char* fragmentShaderText_C_C = R"(
+const char* fragmentShaderText = R"(
 #version 400
 
 #extension GL_ARB_separate_shader_objects : enable
@@ -66,37 +66,6 @@ void main()
 const char* computeShaderText = R"(
 #version 450
 
-struct MeshInstance
-{
-	vec4 posScale;
-	vec4 quat;
-	uint meshIdx;
-};
-
-struct MeshRenderLayout
-{
-	vec4 posScale;
-	vec4 quat;
-};
-
-struct MeshInfo
-{
-	float radius;
-    uint indexCount;
-    uint firstIndex;
-    int  vertexOffset;
-    uint firstInstance;
-};
-
-struct InstancedIndirectCommand
-{
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    int  vertexOffset;
-    uint firstInstance;
-};
-
 layout (std140, binding = 0) uniform UBO
 {
 	mat4 u_mvp;
@@ -104,24 +73,51 @@ layout (std140, binding = 0) uniform UBO
 	uint u_numInstances;
 };
 
+struct InMeshInstance
+{
+	vec4 posScale;
+	vec4 quat;
+	uint meshIdx;
+};
 layout (binding = 4, std430) readonly buffer InMeshInstances
 {
-	MeshInstance in_instances[];
+	InMeshInstance in_instances[];
 };
 
+struct InMeshInfo
+{
+	float radius;
+    uint indexCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
 layout (binding = 5, std430) readonly buffer InMeshInfoBuffer
 {
-	MeshInfo in_meshInfo[];
+	InMeshInfo in_meshInfo[];
 };
 
+struct OutMeshRenderLayout
+{
+	vec4 posScale;
+	vec4 quat;
+};
 layout (binding = 6, std430) writeonly buffer OutRenderData
 {
-	MeshRenderLayout out_renderData[];
+	OutMeshRenderLayout out_renderData[];
 };
 
+struct OutInstancedIndirectCommand
+{
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
 layout (binding = 7, std430) writeonly buffer OutIndirectCommandBufer
 {
-	InstancedIndirectCommand out_indirectCommands[];
+	OutInstancedIndirectCommand out_indirectCommands[];
 };
 
 bool frustumCheck(vec4 pos, float radius)
@@ -165,17 +161,12 @@ constexpr static float CAMERA_FOV_DEG = 45.0f;
 constexpr static float CAMERA_NEAR = 0.1f;
 constexpr static float CAMERA_FAR = 1000.0f;
 
+// TODO make these dynamic
 constexpr static uint32 MAX_INDIRECT_COMMANDS = 10;
 constexpr static uint32 MAX_INSTANCE_DATA = 100;
 
 constexpr static size_t VERTEX_DATA_SIZE = 3 * 1024 * sizeof(Mesh::VertexLayout);
-constexpr static size_t INDEX_DATA_SIZE = 5 * 1024 * sizeof(Mesh::IndexLayout);
-
-constexpr static double VERTEX_DATA_SIZE_KB = VERTEX_DATA_SIZE / 1024.0;
-constexpr static double INDEX_DATA_SIZE_KB = INDEX_DATA_SIZE / 1024.0;
-
-constexpr static double VERTEX_DATA_SIZE_MB = VERTEX_DATA_SIZE / 1024.0 / 1024.0;
-constexpr static double INDEX_DATA_SIZE_MB = INDEX_DATA_SIZE / 1024.0 / 1024.0;
+constexpr static size_t INDEX_DATA_SIZE = 5 * 1024 * sizeof(Mesh::IndexLayout);;
 
 RendererVK::RendererVK() {}
 RendererVK::~RendererVK() {}
@@ -210,57 +201,61 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 	m_renderPass.initialize(m_swapChain);
 	m_framebuffers.initialize(m_renderPass, m_swapChain);
 	
-	GraphicsPipelineLayout graphicsPipelineLayout;
-	graphicsPipelineLayout.vertexShaderText = vertexShaderText_PC_C;
-	graphicsPipelineLayout.fragmentShaderText = fragmentShaderText_C_C;
-	graphicsPipelineLayout.vertexLayoutInfo = Mesh::getVertexLayoutInfo();
-	graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 0,
-		.descriptorType = vk::DescriptorType::eUniformBuffer,
-		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eVertex
-	});
-	graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 1,
-		.descriptorType = vk::DescriptorType::eCombinedImageSampler,
-		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eFragment
-	});
-	m_graphicsPipeline.initialize(m_renderPass, graphicsPipelineLayout);
+	{
+		GraphicsPipelineLayout graphicsPipelineLayout;
+		graphicsPipelineLayout.vertexShaderText = vertexShaderText;
+		graphicsPipelineLayout.fragmentShaderText = fragmentShaderText;
+		graphicsPipelineLayout.vertexLayoutInfo = Mesh::getVertexLayoutInfo();
+		graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+			.binding = 0,
+			.descriptorType = vk::DescriptorType::eUniformBuffer,
+			.descriptorCount = 1,
+			.stageFlags = vk::ShaderStageFlagBits::eVertex
+			});
+		graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+			.binding = 1,
+			.descriptorType = vk::DescriptorType::eCombinedImageSampler,
+			.descriptorCount = 1,
+			.stageFlags = vk::ShaderStageFlagBits::eFragment
+			});
+		m_graphicsPipeline.initialize(m_renderPass, graphicsPipelineLayout);
+	}
 
-	ComputePipelineLayout computePipelineLayout;
-	computePipelineLayout.computeShaderText = computeShaderText;
-	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 0,
-		.descriptorType = vk::DescriptorType::eUniformBuffer,
-		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eCompute
-	});
-	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 4,
-		.descriptorType = vk::DescriptorType::eStorageBuffer,
-		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eCompute
-	});
-	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 5,
-		.descriptorType = vk::DescriptorType::eStorageBuffer,
-		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eCompute
-	});
-	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 6,
-		.descriptorType = vk::DescriptorType::eStorageBuffer,
-		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
-	});
-	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 7,
-		.descriptorType = vk::DescriptorType::eStorageBuffer,
-		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
-	});
-	m_computePipeline.initialize(computePipelineLayout);
+	{
+		ComputePipelineLayout computePipelineLayout;
+		computePipelineLayout.computeShaderText = computeShaderText;
+		computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+			.binding = 0,
+			.descriptorType = vk::DescriptorType::eUniformBuffer,
+			.descriptorCount = 1,
+			.stageFlags = vk::ShaderStageFlagBits::eCompute
+			});
+		computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+			.binding = 4,
+			.descriptorType = vk::DescriptorType::eStorageBuffer,
+			.descriptorCount = 1,
+			.stageFlags = vk::ShaderStageFlagBits::eCompute
+			});
+		computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+			.binding = 5,
+			.descriptorType = vk::DescriptorType::eStorageBuffer,
+			.descriptorCount = 1,
+			.stageFlags = vk::ShaderStageFlagBits::eCompute
+			});
+		computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+			.binding = 6,
+			.descriptorType = vk::DescriptorType::eStorageBuffer,
+			.descriptorCount = 1,
+			.stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
+			});
+		computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+			.binding = 7,
+			.descriptorType = vk::DescriptorType::eStorageBuffer,
+			.descriptorCount = 1,
+			.stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
+			});
+		m_computePipeline.initialize(computePipelineLayout);
+	}
 
 	m_sampler.initialize();
 	m_texture.initialize(m_stagingManager, "Textures/grid.png");
@@ -283,7 +278,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 		perFrame.mappedMeshInstances = (MeshInstance*)perFrame.computeMeshInstanceBuffer.mapMemory().data();
 
 		perFrame.indirectCommandBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
-			vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 		perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout),
@@ -426,27 +421,29 @@ void RendererVK::recordCommandBuffers()
 		CommandBuffer& commandBuffer = m_swapChain.getCommandBuffer(i);
 		vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
 
-		vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
-		commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
-
-		vkCommandBuffer.fillBuffer(frameData.instanceDataBuffer.getBuffer(), 0, MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout), 0);
-		vkCommandBuffer.fillBuffer(frameData.indirectCommandBuffer.getBuffer(), 0, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand), 0);
-		vk::MemoryBarrier memoryBarrier{ .srcAccessMask = vk::AccessFlagBits::eTransferWrite, .dstAccessMask = vk::AccessFlagBits::eShaderRead };
-		vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), { memoryBarrier }, {}, {});
-
-		vkCommandBuffer.dispatch(1, MAX_INSTANCE_DATA, 1);
-
-		vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
-		commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, graphicsDescriptorSetUpdateInfos);
-		vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
-		vkCommandBuffer.setViewport(0, { viewport });
-		vkCommandBuffer.setScissor(0, { scissor });
-		vkCommandBuffer.bindVertexBuffers(0, { m_meshDataManager.getVertexBuffer().getBuffer() }, { 0 });
-		vkCommandBuffer.bindVertexBuffers(1, { frameData.instanceDataBuffer.getBuffer() }, { 0 });
-		vkCommandBuffer.bindIndexBuffer(m_meshDataManager.getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
-		vkCommandBuffer.drawIndexedIndirect(frameData.indirectCommandBuffer.getBuffer(), 0, (uint32)m_pMeshSet->size(), sizeof(vk::DrawIndexedIndirectCommand));
-		vkCommandBuffer.endRenderPass();
-
+		{	// Compute shader frustum cull and indirect command buffer generation
+			vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
+			commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
+			vkCommandBuffer.fillBuffer(frameData.instanceDataBuffer.getBuffer(), 0, MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout), 0);
+			vkCommandBuffer.fillBuffer(frameData.indirectCommandBuffer.getBuffer(), 0, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand), 0);
+			vk::MemoryBarrier memoryBarrier{ .srcAccessMask = vk::AccessFlagBits::eTransferWrite, .dstAccessMask = vk::AccessFlagBits::eShaderRead };
+			vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), { memoryBarrier }, {}, {});
+			vkCommandBuffer.dispatch(1, MAX_INSTANCE_DATA, 1);
+			vk::MemoryBarrier memoryBarrier2{ .srcAccessMask = vk::AccessFlagBits::eShaderWrite, .dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead };
+			vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlags::Flags(0), { memoryBarrier2 }, {}, {});
+		}
+		{	// Graphics pipeline draw
+			vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+			commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, graphicsDescriptorSetUpdateInfos);
+			vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
+			vkCommandBuffer.setViewport(0, { viewport });
+			vkCommandBuffer.setScissor(0, { scissor });
+			vkCommandBuffer.bindVertexBuffers(0, { m_meshDataManager.getVertexBuffer().getBuffer() }, { 0 });
+			vkCommandBuffer.bindVertexBuffers(1, { frameData.instanceDataBuffer.getBuffer() }, { 0 });
+			vkCommandBuffer.bindIndexBuffer(m_meshDataManager.getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
+			vkCommandBuffer.drawIndexedIndirect(frameData.indirectCommandBuffer.getBuffer(), 0, (uint32)m_pMeshSet->size(), sizeof(vk::DrawIndexedIndirectCommand));
+			vkCommandBuffer.endRenderPass();
+		}
 		commandBuffer.end();
 	}
 }
@@ -460,9 +457,6 @@ void RendererVK::render()
 void RendererVK::updateMeshSet(std::vector<Mesh>& meshData)
 {
 	m_pMeshSet = &meshData;
-	for (uint32 i = 0; i < meshData.size(); ++i)
-	{
-	}
 	recordCommandBuffers();
 }
 
