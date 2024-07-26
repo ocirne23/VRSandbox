@@ -7,15 +7,15 @@ export class SwapChain;
 export class RenderPass final
 {
 public:
-	RenderPass();
-	~RenderPass();
-	RenderPass(const RenderPass&) = delete;
+    RenderPass();
+    ~RenderPass();
+    RenderPass(const RenderPass&) = delete;
 
-	bool initialize(const SwapChain& swapChain);
+    bool initialize(const SwapChain& swapChain);
 
-	vk::RenderPass getRenderPass() const { return m_renderPass; }
+    vk::RenderPass getRenderPass() const { return m_renderPass; }
 
 private:
 
-	vk::RenderPass m_renderPass;
+    vk::RenderPass m_renderPass;
 };

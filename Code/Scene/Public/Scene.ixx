@@ -4,8 +4,8 @@ export class Scene final
 {
 public:
 
-	Scene();
-	~Scene();
+    Scene();
+    ~Scene();
 
-	bool initialize();
+    bool initialize();
 };

@@ -7,16 +7,16 @@ export class alignas(16) MeshInstance final
 {
 public:
 
-	struct alignas(16) RenderLayout
-	{
-		glm::vec3 pos;
-		float scale = 1.0f;
-		glm::quat rot;
-	};
-	RenderLayout transform;
+    struct alignas(16) RenderLayout
+    {
+        glm::vec3 pos;
+        float scale = 1.0f;
+        glm::quat rot;
+    };
+    RenderLayout transform;
 
 private:
 
-	friend class Mesh;
-	uint32 meshIdx;
+    friend class Mesh;
+    uint32 meshIdx;
 };

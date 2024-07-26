@@ -8,8 +8,8 @@ import RendererVK.glslang;
 Shader::Shader() {}
 Shader::~Shader()
 {
-	if (m_shaderModule)
-		VK::g_dev.getDevice().destroyShaderModule(m_shaderModule);
+    if (m_shaderModule)
+        VK::g_dev.getDevice().destroyShaderModule(m_shaderModule);
 }
 
 bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath)
@@ -32,25 +32,25 @@ bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string
 
 bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr)
 {
-	std::vector<unsigned int> spirv;
+    std::vector<unsigned int> spirv;
     if (!GLSLtoSPV(stage, shaderStr, spirv))
     {
         assert(false && "Failed to compile shader SPIRV");
         return false;
     }
 
-	vk::ShaderModuleCreateInfo createInfo;
-	createInfo.codeSize = spirv.size() * sizeof(unsigned int);
-	createInfo.pCode = spirv.data();
+    vk::ShaderModuleCreateInfo createInfo;
+    createInfo.codeSize = spirv.size() * sizeof(unsigned int);
+    createInfo.pCode = spirv.data();
 
-	m_shaderModule = VK::g_dev.getDevice().createShaderModule(createInfo);
+    m_shaderModule = VK::g_dev.getDevice().createShaderModule(createInfo);
     if (!m_shaderModule)
     {
-		assert(false && "Failed to create shader module");
-		return false;
-	}
+        assert(false && "Failed to create shader module");
+        return false;
+    }
 
-	return true;
+    return true;
 }
 
 EShLanguage translateShaderStage(vk::ShaderStageFlagBits stage)

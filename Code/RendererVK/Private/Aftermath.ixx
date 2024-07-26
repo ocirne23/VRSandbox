@@ -8,7 +8,7 @@ export import <Aftermath/GFSDK_Aftermath_GpuCrashDumpDecoding.h>;
 #undef GFSDK_Aftermath_SUCCEED
 export constexpr bool GFSDK_Aftermath_SUCCEED(int value)
 {
-	return (((value) & 0xFFF00000) != GFSDK_Aftermath_Result_Fail);
+    return (((value) & 0xFFF00000) != GFSDK_Aftermath_Result_Fail);
 }
 
 #undef MB_OK

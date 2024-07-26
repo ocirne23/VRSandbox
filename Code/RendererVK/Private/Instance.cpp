@@ -65,7 +65,7 @@ inline std::string  AftermathErrorMessage(GFSDK_Aftermath_Result result)
 
 void GpuCrashDumpCallback(const void* pGpuCrashDump, const uint32_t gpuCrashDumpSize, void* pUserData)
 {
-	printf("GpuCrashDumpCallback\n");
+    printf("GpuCrashDumpCallback\n");
 
     GFSDK_Aftermath_GpuCrashDump_Decoder decoder = {};
     AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_GpuCrashDump_CreateDecoder(
@@ -120,7 +120,7 @@ void GpuCrashDumpCallback(const void* pGpuCrashDump, const uint32_t gpuCrashDump
         dumpFile.write((const char*)pGpuCrashDump, gpuCrashDumpSize);
         dumpFile.close();
     }
-    
+
     // Decode the crash dump to a JSON string.
     // Step 1: Generate the JSON and get the size.
     uint32_t jsonSize = 0;
@@ -155,7 +155,7 @@ void GpuCrashDumpCallback(const void* pGpuCrashDump, const uint32_t gpuCrashDump
 }
 #endif
 Instance::Instance() {}
-Instance::~Instance() 
+Instance::~Instance()
 {
     VK::g_dev.destroy();
     destroy();
@@ -176,9 +176,9 @@ static VkBool32 __stdcall debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT m
     printf("Validation layer %s: %s\n", severity, pCallbackData->pMessage);
     bool* pBreakOnValidationLayerError = reinterpret_cast<bool*>(pUserData);
     if (*pBreakOnValidationLayerError && (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT))
-	{
-		__debugbreak();
-	}
+    {
+        __debugbreak();
+    }
     return vk::False;
 }
 
@@ -196,40 +196,40 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
         nullptr));                                                        // Set the GpuCrashTracker object as user data for the above callbacks.
 #endif
 
-	m_supportedExtensions = vk::enumerateInstanceExtensionProperties();
-	m_supportedLayers = vk::enumerateInstanceLayerProperties();
+    m_supportedExtensions = vk::enumerateInstanceExtensionProperties();
+    m_supportedLayers = vk::enumerateInstanceLayerProperties();
 
     uint32 numExtensions = 0;
     const char* const* ppExtensions = SDL_Vulkan_GetInstanceExtensions(&numExtensions);
     std::vector<const char*> extensions;
-    
+
     for (uint32 i = 0; i < numExtensions; i++)
         if (ppExtensions[i] && supportsExtension(ppExtensions[i]))
             extensions.push_back(ppExtensions[i]);
 
-    vk::ApplicationInfo appInfo { .pApplicationName = "App", .applicationVersion = VK_MAKE_VERSION(1, 0, 0), .pEngineName = "VRSandbox", .engineVersion = VK_MAKE_VERSION(1, 0, 0), .apiVersion = VK_MAKE_API_VERSION(0, 1, 3, 0) };
-    vk::InstanceCreateInfo createInfo { .pApplicationInfo = &appInfo };
+    vk::ApplicationInfo appInfo{ .pApplicationName = "App", .applicationVersion = VK_MAKE_VERSION(1, 0, 0), .pEngineName = "VRSandbox", .engineVersion = VK_MAKE_VERSION(1, 0, 0), .apiVersion = VK_MAKE_API_VERSION(0, 1, 3, 0) };
+    vk::InstanceCreateInfo createInfo{ .pApplicationInfo = &appInfo };
 
-    vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo {
+    vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo{
         .messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo | vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose | vk::DebugUtilsMessageSeverityFlagBitsEXT::eError | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning,
         .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
         .pfnUserCallback = debugCallback,
         .pUserData = &m_breakOnValidationLayerError,
     };
-	
-	//static const char* SYNCHRONIZATION_2_LAYER_NAME = "VK_LAYER_KHRONOS_synchronization2";
-	//if (supportsLayer(SYNCHRONIZATION_2_LAYER_NAME))
-	//	m_enabledLayers.push_back(SYNCHRONIZATION_2_LAYER_NAME);
+
+    //static const char* SYNCHRONIZATION_2_LAYER_NAME = "VK_LAYER_KHRONOS_synchronization2";
+    //if (supportsLayer(SYNCHRONIZATION_2_LAYER_NAME))
+    //	m_enabledLayers.push_back(SYNCHRONIZATION_2_LAYER_NAME);
 
     if (enableValidationLayers)
     {
         static const char* VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
-		if (supportsLayer(VALIDATION_LAYER_NAME))
-			m_enabledLayers.push_back(VALIDATION_LAYER_NAME);
-		if (supportsExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
-			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-		if (supportsExtension(VK_EXT_DEBUG_REPORT_EXTENSION_NAME))
-			extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+        if (supportsLayer(VALIDATION_LAYER_NAME))
+            m_enabledLayers.push_back(VALIDATION_LAYER_NAME);
+        if (supportsExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
+            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        if (supportsExtension(VK_EXT_DEBUG_REPORT_EXTENSION_NAME))
+            extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
         createInfo.pNext = &debugCreateInfo;
     }
     createInfo.enabledLayerCount = (uint32)m_enabledLayers.size();
@@ -268,16 +268,16 @@ void Instance::destroy()
 
 bool Instance::supportsExtension(const char* pExtensionName) const
 {
-	for (auto extension : m_supportedExtensions)
-		if (strcmp(pExtensionName, extension.extensionName) == 0)
-			return true;
-	return false;
+    for (auto extension : m_supportedExtensions)
+        if (strcmp(pExtensionName, extension.extensionName) == 0)
+            return true;
+    return false;
 }
 
 bool Instance::supportsLayer(const char* pLayerName) const
 {
-	for (auto layer : m_supportedLayers)
-		if (strcmp(pLayerName, layer.layerName) == 0)
-			return true;
-	return false;
+    for (auto layer : m_supportedLayers)
+        if (strcmp(pLayerName, layer.layerName) == 0)
+            return true;
+    return false;
 }

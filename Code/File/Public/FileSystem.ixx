@@ -4,9 +4,9 @@ export class FileSystem final
 {
 public:
 
-	static bool initialize();
+    static bool initialize();
 
 private:
-	FileSystem() {};
-	~FileSystem() {};
+    FileSystem() {};
+    ~FileSystem() {};
 };

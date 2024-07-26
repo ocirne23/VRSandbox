@@ -58,25 +58,25 @@ public:
 export class Input final
 {
 public:
-	Input();
-	~Input();
+    Input();
+    ~Input();
     Input(const Input&) = delete;
 
-	bool initialize();
-    
+    bool initialize();
+
     void update_MT(double deltaSec);
     void update(double deltaSec);
 
-	void setMouseInWindow(bool inWindow) { m_mouseInWindow = inWindow; }
-	void setWindowHasFocus(bool hasFocus) { m_windowHasFocus = hasFocus; }
-	void setWantMouseGrab(bool wantGrab) { m_wantMousieGrab = wantGrab; }
-	void setWantMouseVisible(bool wantVisible) { m_wantMouseVisible = wantVisible; }
+    void setMouseInWindow(bool inWindow) { m_mouseInWindow = inWindow; }
+    void setWindowHasFocus(bool hasFocus) { m_windowHasFocus = hasFocus; }
+    void setWantMouseGrab(bool wantGrab) { m_wantMousieGrab = wantGrab; }
+    void setWantMouseVisible(bool wantVisible) { m_wantMouseVisible = wantVisible; }
 
-	bool isKeyDown(SDL_Scancode key) const { return m_pKeyStates[key]; }
-	bool isMouseInWindow() const { return m_mouseInWindow; }
-	bool isWindowHasFocus() const { return m_windowHasFocus; }
-	bool wantMouseGrab() const { return m_wantMousieGrab; }
-	bool wantMouseVisible() const { return m_wantMouseVisible; }
+    bool isKeyDown(SDL_Scancode key) const { return m_pKeyStates[key]; }
+    bool isMouseInWindow() const { return m_mouseInWindow; }
+    bool isWindowHasFocus() const { return m_windowHasFocus; }
+    bool wantMouseGrab() const { return m_wantMousieGrab; }
+    bool wantMouseVisible() const { return m_wantMouseVisible; }
 
     MouseListener* addMouseListener() { return m_mouseListeners.emplace_back(std::make_unique<MouseListener>()).get(); }
     KeyboardListener* addKeyboardListener() { return m_keyboardListeners.emplace_back(std::make_unique<KeyboardListener>()).get(); }

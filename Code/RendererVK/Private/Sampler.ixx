@@ -5,15 +5,15 @@ import RendererVK.VK;
 export class Sampler final
 {
 public:
-	Sampler();
-	~Sampler();
-	Sampler(const Sampler&) = delete;
+    Sampler();
+    ~Sampler();
+    Sampler(const Sampler&) = delete;
 
-	bool initialize();
+    bool initialize();
 
-	vk::Sampler getSampler() const { return m_sampler; }
+    vk::Sampler getSampler() const { return m_sampler; }
 
 private:
 
-	vk::Sampler m_sampler;
+    vk::Sampler m_sampler;
 };

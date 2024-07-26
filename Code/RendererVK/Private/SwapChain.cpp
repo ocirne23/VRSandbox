@@ -40,17 +40,17 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
     vk::CompositeAlphaFlagBitsKHR compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
 
     const uint32 imageCount = std::max(capabilities.minImageCount, std::min(swapChainSize, capabilities.maxImageCount));
-	m_commandBuffers.resize(imageCount);
-	m_commandBuffers.shrink_to_fit();
-	m_syncObjects.resize(imageCount);
-	m_syncObjects.shrink_to_fit();
+    m_commandBuffers.resize(imageCount);
+    m_commandBuffers.shrink_to_fit();
+    m_syncObjects.resize(imageCount);
+    m_syncObjects.shrink_to_fit();
 
     for (uint32 i = 0; i < imageCount; i++)
     {
         m_commandBuffers[i].initialize();
-		m_syncObjects[i].imageAvailable = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
-		m_syncObjects[i].renderFinished = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
-		m_syncObjects[i].inFlight = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
+        m_syncObjects[i].imageAvailable = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
+        m_syncObjects[i].renderFinished = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
+        m_syncObjects[i].inFlight = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
     }
 
     vk::SwapchainCreateInfoKHR createInfo{
@@ -86,14 +86,14 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
 void SwapChain::acquireNextImage()
 {
     vk::Device vkDevice = VK::g_dev.getDevice();
-	SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
-    
+    SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
+
     vk::Result result = vkDevice.waitForFences(1, &syncObjects.inFlight, vk::True, UINT64_MAX);
     if (result != vk::Result::eSuccess)
-		assert(false && "Failed to wait for fence");
+        assert(false && "Failed to wait for fence");
     result = vkDevice.resetFences(1, &syncObjects.inFlight);
     if (result != vk::Result::eSuccess)
-		assert(false && "Failed to reset fence");
+        assert(false && "Failed to reset fence");
 
     vk::ResultValue<uint32> imageIdx = vkDevice.acquireNextImageKHR(m_swapChain, UINT64_MAX, syncObjects.imageAvailable);
     assert(imageIdx.result == vk::Result::eSuccess);
@@ -105,7 +105,7 @@ bool SwapChain::present()
     vk::Device vkDevice = VK::g_dev.getDevice();
 
     vk::PipelineStageFlags2 waitStage = { vk::PipelineStageFlagBits2::eColorAttachmentOutput };
-	SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
+    SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
 
     CommandBuffer& commandBuffer = m_commandBuffers[m_currentFrame];
     commandBuffer.setWaitStage(waitStage);
