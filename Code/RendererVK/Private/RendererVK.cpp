@@ -163,7 +163,7 @@ constexpr static float CAMERA_FAR = 1000.0f;
 
 // TODO make these dynamic
 constexpr static uint32 MAX_INDIRECT_COMMANDS = 10;
-constexpr static uint32 MAX_INSTANCE_DATA = 100;
+constexpr static uint32 MAX_INSTANCE_DATA = 512;
 
 constexpr static size_t VERTEX_DATA_SIZE = 3 * 1024 * sizeof(Mesh::VertexLayout);
 constexpr static size_t INDEX_DATA_SIZE = 5 * 1024 * sizeof(Mesh::IndexLayout);;
@@ -190,8 +190,8 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 
     VK::g_inst.initialize(window, enableValidationLayers);
     VK::g_inst.setBreakOnValidationLayerError(enableValidationLayers);
-    m_surface.initialize(window);
     VK::g_dev.initialize();
+    m_surface.initialize(window);
     assert(m_surface.deviceSupportsSurface());
 
     m_swapChain.initialize(m_surface, NUM_FRAMES_IN_FLIGHT);

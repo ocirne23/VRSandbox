@@ -43,6 +43,7 @@ int main()
     renderer.updateMeshSet(meshSet);
 
     std::vector<MeshInstance> meshInstances(100);
+    meshInstances.reserve(512);
     for (int i = 0; i < meshInstances.size(); ++i)
     {
         meshInstances[i].transform.pos = glm::vec3(i * 5.0f, i % 2 == 0 ? 5.0f : 0.0f, 0.0f);
@@ -53,25 +54,34 @@ int main()
             meshSet[1].addInstance(&meshInstances[i]);
     }
 
-    /*
+    
     KeyboardListener* keyboardListener = input.addKeyboardListener();
     keyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& e)
         {
             if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_1)
             {
-                entity.position = cameraController.getPosition() + cameraController.getDirection();
-                entity.scale = 0.3f;
-                entity.orientation = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
                 MeshInstance& meshInstance = meshInstances.emplace_back();
+                meshInstance.transform.pos = cameraController.getPosition() + cameraController.getDirection();
+                meshInstance.transform.scale = 0.3f;
+                meshInstance.transform.rot = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
                 meshSet[0].addInstance(&meshInstance);
             }
-            else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_2 && !meshInstances.empty())
+            else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_2)
             {
-                meshInstances.back().remove();
+                MeshInstance& meshInstance = meshInstances.emplace_back();
+                meshInstance.transform.pos = cameraController.getPosition() + cameraController.getDirection();
+                meshInstance.transform.scale = 0.3f;
+                meshInstance.transform.rot = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
+                meshSet[1].addInstance(&meshInstance);
+            }
+            else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_3 && !meshInstances.empty())
+            {
+                MeshInstance& meshInstance = meshInstances.back();
+                meshSet[meshInstance.getMeshIdx()].removeInstance(&meshInstance);
                 meshInstances.pop_back();
             }
         };
-    */
+    
     auto startTime = std::chrono::high_resolution_clock::now();
     double timeAccum = 0.0;
     uint32 frameCount = 0;

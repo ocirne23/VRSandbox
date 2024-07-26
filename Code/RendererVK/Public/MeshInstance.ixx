@@ -15,6 +15,8 @@ public:
     };
     RenderLayout transform;
 
+    uint32 getMeshIdx() const { return meshIdx; }
+
 private:
 
     friend class Mesh;
