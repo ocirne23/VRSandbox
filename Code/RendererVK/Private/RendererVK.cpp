@@ -4,6 +4,7 @@ import Core;
 import RendererVK.VK;
 import RendererVK.glslang;
 import RendererVK.Mesh;
+import RendererVK.MeshInstance;
 import Core.Window;
 import Core.Frustum;
 import File.SceneData;
@@ -19,6 +20,7 @@ layout (std140, binding = 0) uniform buffer
 {
 	mat4 u_mvp;
 	vec4 u_frustumPlanes[6];
+	uint u_numInstances;
 };
 
 layout (location = 0) in vec3 in_pos;
@@ -64,48 +66,98 @@ void main()
 const char* computeShaderText = R"(
 #version 450
 
-struct InstanceData
+struct MeshInstance
 {
-	vec3 pos;
-	float scale;
+	vec4 posScale;
 	vec4 quat;
-};
-struct IndexedIndirectCommand
-{
-	uint indexCount;
-	uint instanceCount;
-	uint firstIndex;
-	int vertexOffset;
-	uint firstInstance;
+	uint meshIdx;
 };
 
-layout (binding = 5, std140) uniform UBO
+struct MeshRenderLayout
+{
+	vec4 posScale;
+	vec4 quat;
+};
+
+struct MeshInfo
+{
+	float radius;
+    uint indexCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
+
+struct InstancedIndirectCommand
+{
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
+
+layout (std140, binding = 0) uniform UBO
 {
 	mat4 u_mvp;
 	vec4 u_frustumPlanes[6];
+	uint u_numInstances;
 };
-layout (binding = 6) readonly buffer InInstanceDataBuffer
+
+layout (binding = 4, std430) readonly buffer InMeshInstances
 {
-	InstanceData in_instanceData[];
+	MeshInstance in_instances[];
 };
-layout (binding = 7) readonly buffer InIndexedIndirectCommandBuffer
+
+layout (binding = 5, std430) readonly buffer InMeshInfoBuffer
 {
-	IndexedIndirectCommand in_indirectCommands[];
+	MeshInfo in_meshInfo[];
 };
-layout (binding = 8, std430) writeonly buffer OutInstanceDataBuffer
+
+layout (binding = 6, std430) writeonly buffer OutRenderData
 {
-	InstanceData out_instanceData[];
+	MeshRenderLayout out_renderData[];
 };
-layout (binding = 9, std430) writeonly buffer OutIndexedIndirectCommandBuffer
+
+layout (binding = 7, std430) writeonly buffer OutIndirectCommandBufer
 {
-	IndexedIndirectCommand out_indirectCommands[];
+	InstancedIndirectCommand out_indirectCommands[];
 };
+
+bool frustumCheck(vec4 pos, float radius)
+{
+	// Check sphere against frustum planes
+	for (int i = 0; i < 6; i++) 
+	{
+		if (dot(pos, u_frustumPlanes[i]) + radius < 0.0)
+		{
+			return false;
+		}
+	}
+	return true;
+}
 
 void main()
 {
-	uint idx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
-	out_instanceData[idx] = in_instanceData[idx];
-	out_indirectCommands[idx] = in_indirectCommands[idx];
+	const uint instanceIdx   = gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+	if (instanceIdx >= u_numInstances)
+		return;
+	const uint meshIdx       = in_instances[instanceIdx].meshIdx;
+	const uint firstInstance = in_meshInfo[meshIdx].firstInstance;
+
+	out_indirectCommands[meshIdx].indexCount    = in_meshInfo[meshIdx].indexCount;
+	out_indirectCommands[meshIdx].firstIndex    = in_meshInfo[meshIdx].firstIndex;
+	out_indirectCommands[meshIdx].vertexOffset  = in_meshInfo[meshIdx].vertexOffset;
+	out_indirectCommands[meshIdx].firstInstance = in_meshInfo[meshIdx].firstInstance;
+
+	const vec4 instancePos = vec4(in_instances[instanceIdx].posScale.xyz, 1.0);
+	const float radius = in_meshInfo[meshIdx].radius * in_instances[instanceIdx].posScale.w;
+	if (frustumCheck(instancePos, radius))
+	{
+		const uint idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
+		out_renderData[firstInstance + idx].posScale = in_instances[instanceIdx].posScale;
+		out_renderData[firstInstance + idx].quat     = in_instances[instanceIdx].quat;
+	}
 }
 )";
 
@@ -126,14 +178,13 @@ constexpr static double VERTEX_DATA_SIZE_MB = VERTEX_DATA_SIZE / 1024.0 / 1024.0
 constexpr static double INDEX_DATA_SIZE_MB = INDEX_DATA_SIZE / 1024.0 / 1024.0;
 
 RendererVK::RendererVK() {}
-RendererVK::~RendererVK() 
-{
-}
+RendererVK::~RendererVK() {}
 
-struct UboData
+struct alignas(16) UboData
 {
 	glm::mat4 mvp;
-	glm::vec4 frustumPlanes[6];
+	Frustum frustum;
+	uint32 numInstances;
 };
 
 bool RendererVK::initialize(Window& window, bool enableValidationLayers)
@@ -159,31 +210,41 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 	m_renderPass.initialize(m_swapChain);
 	m_framebuffers.initialize(m_renderPass, m_swapChain);
 	
-	GraphicsPipelineLayout pipelineLayout;
-	pipelineLayout.numUniformBuffers = 1;
-	pipelineLayout.vertexShaderText = vertexShaderText_PC_C;
-	pipelineLayout.fragmentShaderText = fragmentShaderText_C_C;
-	pipelineLayout.vertexLayoutInfo = Mesh::getVertexLayoutInfo();
-	pipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+	GraphicsPipelineLayout graphicsPipelineLayout;
+	graphicsPipelineLayout.vertexShaderText = vertexShaderText_PC_C;
+	graphicsPipelineLayout.fragmentShaderText = fragmentShaderText_C_C;
+	graphicsPipelineLayout.vertexLayoutInfo = Mesh::getVertexLayoutInfo();
+	graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
 		.binding = 0,
 		.descriptorType = vk::DescriptorType::eUniformBuffer,
 		.descriptorCount = 1,
 		.stageFlags = vk::ShaderStageFlagBits::eVertex
 	});
-	pipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+	graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
 		.binding = 1,
 		.descriptorType = vk::DescriptorType::eCombinedImageSampler,
 		.descriptorCount = 1,
 		.stageFlags = vk::ShaderStageFlagBits::eFragment
 	});
-	m_pipeline.initialize(m_renderPass, pipelineLayout);
+	m_graphicsPipeline.initialize(m_renderPass, graphicsPipelineLayout);
 
 	ComputePipelineLayout computePipelineLayout;
-	computePipelineLayout.numUniformBuffers = 1;
 	computePipelineLayout.computeShaderText = computeShaderText;
 	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 5,
+		.binding = 0,
 		.descriptorType = vk::DescriptorType::eUniformBuffer,
+		.descriptorCount = 1,
+		.stageFlags = vk::ShaderStageFlagBits::eCompute
+	});
+	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+		.binding = 4,
+		.descriptorType = vk::DescriptorType::eStorageBuffer,
+		.descriptorCount = 1,
+		.stageFlags = vk::ShaderStageFlagBits::eCompute
+	});
+	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+		.binding = 5,
+		.descriptorType = vk::DescriptorType::eStorageBuffer,
 		.descriptorCount = 1,
 		.stageFlags = vk::ShaderStageFlagBits::eCompute
 	});
@@ -191,28 +252,15 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 		.binding = 6,
 		.descriptorType = vk::DescriptorType::eStorageBuffer,
 		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eCompute
+		.stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
 	});
 	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
 		.binding = 7,
 		.descriptorType = vk::DescriptorType::eStorageBuffer,
 		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eCompute
-	});
-	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 8,
-		.descriptorType = vk::DescriptorType::eStorageBuffer,
-		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eCompute
-	});
-	computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-		.binding = 9,
-		.descriptorType = vk::DescriptorType::eStorageBuffer,
-		.descriptorCount = 1,
-		.stageFlags = vk::ShaderStageFlagBits::eCompute
+		.stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
 	});
 	m_computePipeline.initialize(computePipelineLayout);
-
 
 	m_sampler.initialize();
 	m_texture.initialize(m_stagingManager, "Textures/grid.png");
@@ -224,21 +272,21 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		perFrame.mappedUniformBuffer = perFrame.uniformBuffer.mapMemory().data();
 
-		perFrame.computeIndirectCommandBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
-			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
+		perFrame.computeMeshInfoBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(MeshInfo),
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-		perFrame.mappedIndirectCommands = (vk::DrawIndexedIndirectCommand*)perFrame.computeIndirectCommandBuffer.mapMemory().data();
+		perFrame.mappedMeshInfo = (MeshInfo*)perFrame.computeMeshInfoBuffer.mapMemory().data();
 
-		perFrame.computeInstanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(InstanceData),
-			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
+		perFrame.computeMeshInstanceBuffer.initialize(MAX_INSTANCE_DATA * sizeof(MeshInstance),
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-		perFrame.mappedInstanceData = (InstanceData*)perFrame.computeInstanceDataBuffer.mapMemory().data();
+		perFrame.mappedMeshInstances = (MeshInstance*)perFrame.computeMeshInstanceBuffer.mapMemory().data();
 
 		perFrame.indirectCommandBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
-			vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-		perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(InstanceData),
+		perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout),
 			vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 	}
@@ -246,7 +294,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 	return true;
 }
 
-void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
+void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix, std::span<MeshInstance> instances)
 {
 	const vk::Extent2D extent = m_swapChain.getLayout().extent;
 	const float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
@@ -260,29 +308,23 @@ void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix)
 	
 	UboData uboData;
 	uboData.mvp = clip * projection * viewMatrix;
-	Frustum frustum;
-	frustum.fromMatrix(uboData.mvp);
-	memcpy(uboData.frustumPlanes, frustum.planes, sizeof(frustum.planes));
+	uboData.frustum.fromMatrix(uboData.mvp);
 
 	PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-	memcpy(frameData.mappedUniformBuffer, &uboData, sizeof(UboData));
 
 	uint32 instanceCounter = 0;
 	for (uint32 i = 0, num = (uint32)m_pMeshSet->size(); i < num; ++i)
 	{
 		Mesh& mesh = (*m_pMeshSet)[i];
-		uint32 numInstances = (uint32)mesh.m_instances.size();
-		frameData.mappedIndirectCommands[i] = vk::DrawIndexedIndirectCommand{
-			.indexCount = mesh.getNumIndices(),
-			.instanceCount = numInstances,
-			.firstIndex = mesh.getIndexOffset(),
-			.vertexOffset = (int32)mesh.getVertexOffset(),
-			.firstInstance = instanceCounter
-		};
-		memcpy(frameData.mappedInstanceData + instanceCounter, mesh.m_instanceData.data(), numInstances * sizeof(InstanceData));
-		instanceCounter += numInstances;
+		mesh.m_info.firstInstance = instanceCounter;
+		instanceCounter += mesh.m_numInstances;
 		assert(instanceCounter <= MAX_INSTANCE_DATA);
+		memcpy(&frameData.mappedMeshInfo[i], &mesh.m_info, sizeof(MeshInfo));
 	}
+	memcpy(frameData.mappedMeshInstances, instances.data(), instances.size() * sizeof(MeshInstance));
+
+	uboData.numInstances = instanceCounter;
+	memcpy(frameData.mappedUniformBuffer, &uboData, sizeof(UboData));
 
 	m_stagingManager.update();
 }
@@ -305,21 +347,19 @@ void RendererVK::recordCommandBuffers()
 		constexpr static std::array<vk::ClearValue, 2> clearValues = getClearValues();
 
 		const vk::Extent2D extent = m_swapChain.getLayout().extent;
-		const vk::Viewport viewport{
-			.x = 0.0f,
-			.y = 0.0f,
-			.width = (float)extent.width,
-			.height = (float)extent.height,
-			.minDepth = 0.0f,
-			.maxDepth = 1.0f
-		};
-		const vk::Rect2D scissor{
-			.offset = vk::Offset2D{ 0, 0 },
-			.extent = extent
+		const vk::Viewport viewport{ .x = 0.0f, .y = 0.0f, .width = (float)extent.width, .height = (float)extent.height, .minDepth = 0.0f, .maxDepth = 1.0f };
+		const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+
+		const vk::RenderPassBeginInfo renderPassBeginInfo{
+			.renderPass = m_renderPass.getRenderPass(),
+			.framebuffer = m_framebuffers.getFramebuffer(i),
+			.renderArea = vk::Rect2D { .offset = vk::Offset2D { 0, 0 }, .extent = extent },
+			.clearValueCount = (uint32)clearValues.size(),
+			.pClearValues = clearValues.data(),
 		};
 
 		PerFrameData& frameData = m_perFrameData[i];
-		std::array<DescriptorSetUpdateInfo, 2> descriptorSetUpdateInfos
+		std::array<DescriptorSetUpdateInfo, 2> graphicsDescriptorSetUpdateInfos
 		{
 			DescriptorSetUpdateInfo{
 				.binding = 1,
@@ -342,7 +382,7 @@ void RendererVK::recordCommandBuffers()
 		std::array<DescriptorSetUpdateInfo, 5> computeDescriptorSetUpdateInfos
 		{
 			DescriptorSetUpdateInfo{
-				.binding = 5,
+				.binding = 0,
 				.type = vk::DescriptorType::eUniformBuffer,
 				.info = vk::DescriptorBufferInfo {
 					.buffer = frameData.uniformBuffer.getBuffer(),
@@ -350,31 +390,31 @@ void RendererVK::recordCommandBuffers()
 				}
 			},
 			DescriptorSetUpdateInfo{
+				.binding = 4,
+				.type = vk::DescriptorType::eStorageBuffer,
+				.info = vk::DescriptorBufferInfo {
+					.buffer = m_perFrameData[i].computeMeshInstanceBuffer.getBuffer(),
+					.range = MAX_INSTANCE_DATA * sizeof(MeshInstance),
+				}
+			},
+			DescriptorSetUpdateInfo{
+				.binding = 5,
+				.type = vk::DescriptorType::eStorageBuffer,
+				.info = vk::DescriptorBufferInfo {
+					.buffer = m_perFrameData[i].computeMeshInfoBuffer.getBuffer(),
+					.range = MAX_INDIRECT_COMMANDS * sizeof(MeshInfo),
+				}
+			},
+			DescriptorSetUpdateInfo{
 				.binding = 6,
 				.type = vk::DescriptorType::eStorageBuffer,
 				.info = vk::DescriptorBufferInfo {
-					.buffer = m_perFrameData[i].computeInstanceDataBuffer.getBuffer(),
-					.range = MAX_INSTANCE_DATA * sizeof(InstanceData),
+					.buffer = m_perFrameData[i].instanceDataBuffer.getBuffer(),
+					.range = MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout),
 				}
 			},
 			DescriptorSetUpdateInfo{
 				.binding = 7,
-				.type = vk::DescriptorType::eStorageBuffer,
-				.info = vk::DescriptorBufferInfo {
-					.buffer = m_perFrameData[i].computeIndirectCommandBuffer.getBuffer(),
-					.range = MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
-				}
-			},
-			DescriptorSetUpdateInfo{
-				.binding = 8,
-				.type = vk::DescriptorType::eStorageBuffer,
-				.info = vk::DescriptorBufferInfo {
-					.buffer = m_perFrameData[i].instanceDataBuffer.getBuffer(),
-					.range = MAX_INSTANCE_DATA * sizeof(InstanceData),
-				}
-			},
-			DescriptorSetUpdateInfo{
-				.binding = 9,
 				.type = vk::DescriptorType::eStorageBuffer,
 				.info = vk::DescriptorBufferInfo {
 					.buffer = m_perFrameData[i].indirectCommandBuffer.getBuffer(),
@@ -383,34 +423,22 @@ void RendererVK::recordCommandBuffers()
 			}
 		};
 
-		const vk::RenderPassBeginInfo renderPassBeginInfo{
-			.renderPass = m_renderPass.getRenderPass(),
-			.framebuffer = m_framebuffers.getFramebuffer(i),
-			.renderArea = vk::Rect2D {
-				.offset = vk::Offset2D { 0, 0 },
-				.extent = extent,
-			},
-			.clearValueCount = (uint32)clearValues.size(),
-			.pClearValues = clearValues.data(),
-		};
-
 		CommandBuffer& commandBuffer = m_swapChain.getCommandBuffer(i);
 		vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
-		commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), computeDescriptorSetUpdateInfos);
+
 		vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
-		vkCommandBuffer.fillBuffer(frameData.computeIndirectCommandBuffer.getBuffer(), 0, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand), 0);
-		vkCommandBuffer.fillBuffer(frameData.computeInstanceDataBuffer.getBuffer(), 0, MAX_INSTANCE_DATA * sizeof(InstanceData), 0);
-		vk::MemoryBarrier memoryBarrier{
-			.srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-			.dstAccessMask = vk::AccessFlagBits::eShaderRead,
-		};
+		commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
+
+		vkCommandBuffer.fillBuffer(frameData.instanceDataBuffer.getBuffer(), 0, MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout), 0);
+		vkCommandBuffer.fillBuffer(frameData.indirectCommandBuffer.getBuffer(), 0, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand), 0);
+		vk::MemoryBarrier memoryBarrier{ .srcAccessMask = vk::AccessFlagBits::eTransferWrite, .dstAccessMask = vk::AccessFlagBits::eShaderRead };
 		vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), { memoryBarrier }, {}, {});
 
-		vkCommandBuffer.dispatch(1, 1, 1);
+		vkCommandBuffer.dispatch(1, MAX_INSTANCE_DATA, 1);
 
 		vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
-		commandBuffer.cmdUpdateDescriptorSets(m_pipeline.getPipelineLayout(), descriptorSetUpdateInfos);
-		vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline.getPipeline());
+		commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, graphicsDescriptorSetUpdateInfos);
+		vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
 		vkCommandBuffer.setViewport(0, { viewport });
 		vkCommandBuffer.setScissor(0, { scissor });
 		vkCommandBuffer.bindVertexBuffers(0, { m_meshDataManager.getVertexBuffer().getBuffer() }, { 0 });
@@ -429,6 +457,15 @@ void RendererVK::render()
 	m_swapChain.present();
 }
 
+void RendererVK::updateMeshSet(std::vector<Mesh>& meshData)
+{
+	m_pMeshSet = &meshData;
+	for (uint32 i = 0; i < meshData.size(); ++i)
+	{
+	}
+	recordCommandBuffers();
+}
+
 const char* RendererVK::getDebugText()
 {
 	float memoryUsageMB = VK::getAllocatedSize() / 1024.0f / 1024.0f;
@@ -437,10 +474,4 @@ const char* RendererVK::getDebugText()
 	static char buffer[256];
 	snprintf(buffer, sizeof(buffer), "Memory Usage: %0.1f MB, Vertex Capacity: %0.1f%%, Index Capacity: %0.1f%%", memoryUsageMB, vertexDataPercent, indexDataPercent);
 	return buffer;
-}
-
-void RendererVK::updateMeshSet(std::vector<Mesh>& meshData)
-{
-	m_pMeshSet = &meshData;
-	recordCommandBuffers();
 }

@@ -2,19 +2,18 @@ export module RendererVK.Mesh;
 
 import Core;
 import RendererVK;
-import RendererVK.VK;
-import RendererVK.Buffer;
 import RendererVK.GraphicsPipeline;
 import File.MeshData;
 
-export class MeshDataManager;
 export class MeshInstance;
 
-export struct InstanceData
+export struct MeshInfo
 {
-	glm::vec3 pos;
-	float scale;
-	glm::quat rot;
+	float radius = 5.0f;
+	uint32 indexCount;
+	uint32 firstIndex;
+	int32  vertexOffset;
+	uint32 firstInstance;
 };
 
 export class Mesh final
@@ -35,28 +34,22 @@ public:
 	Mesh(Mesh&& copy);
 	Mesh(const Mesh&) = delete;
 
-	bool initialize(MeshData& meshData);
+	bool initialize(MeshData& meshData, uint32 meshIdx);
 
 	static VertexLayoutInfo getVertexLayoutInfo();
-	uint32 getNumIndices() const { return m_numIndices; }
-	uint32 getVertexOffset() const { return m_vertexOffset; }
-	uint32 getIndexOffset() const { return m_indexOffset; }
+	uint32 getNumIndices() const { return m_info.indexCount; }
+	uint32 getVertexOffset() const { return m_info.vertexOffset; }
+	uint32 getIndexOffset() const { return m_info.firstIndex; }
+	uint32 getMeshIdx() const { return m_meshIdx; }
+	float getRadius() const { return m_info.radius; }
 
-	void setInstanceCapacity(uint32 capacity);
 	void addInstance(MeshInstance* pInstance);
 	void removeInstance(MeshInstance* pInstance);
 
-	void setInstanceData(uint32 instanceIdx, InstanceData* pInstanceData);
-
 private:
-	
-	uint32 m_numIndices;
-	uint32 m_vertexOffset = 0;
-	uint32 m_indexOffset = 0;
-
 	friend class RendererVK;
-	uint32 m_indirectCommandIdx = 0;
 
-	std::vector<InstanceData> m_instanceData;
-	std::vector<MeshInstance*> m_instances;
+	MeshInfo m_info;
+	uint32 m_meshIdx = 0;
+	uint32 m_numInstances = 0;
 };

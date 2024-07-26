@@ -15,8 +15,6 @@ export struct GraphicsPipelineLayout
 {
 	std::string fragmentShaderText;
 	std::string vertexShaderText;
-	uint32 numUniformBuffers;
-	uint32 numSamplers;
 	VertexLayoutInfo vertexLayoutInfo;
 	std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
 };

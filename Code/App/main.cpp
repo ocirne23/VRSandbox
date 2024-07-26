@@ -17,7 +17,7 @@ int main()
 	FileSystem::initialize();
 
 	Window window;
-	window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(800, 600));
+	window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(1920, 1080));
 
 	Input input;
 	input.initialize();
@@ -36,42 +36,34 @@ int main()
 	{
 		SceneData scene;
 		scene.initialize("baseshapes.fbx");
-		meshSet.emplace_back().initialize(*scene.getMesh("Boat"));
-		meshSet.emplace_back().initialize(*scene.getMesh("BoatCollider"));
-		meshSet.emplace_back().initialize(*scene.getMesh("Cube"));
+		meshSet.emplace_back().initialize(*scene.getMesh("Boat"), 0);
+		meshSet.emplace_back().initialize(*scene.getMesh("BoatCollider"), 1);
+		//meshSet.emplace_back().initialize(*scene.getMesh("Cube"));
 	}
 	renderer.updateMeshSet(meshSet);
 
-	std::vector<Entity> entities(10);
-	std::vector<MeshInstance> meshInstances(10);
-	entities.reserve(100);
-	meshInstances.reserve(100);
-	for (int i = 0; i < entities.size(); ++i)
+	std::vector<MeshInstance> meshInstances(100);
+	for (int i = 0; i < meshInstances.size(); ++i)
 	{
-		entities[i].position = glm::vec3(i * 5.0f, 0.0f, 0.0f);
-		if (i < 5)
+		meshInstances[i].transform.pos = glm::vec3(i * 5.0f, i % 2 == 0 ? 5.0f : 0.0f, 0.0f);
+
+		if (i % 2 == 0)
 			meshSet[0].addInstance(&meshInstances[i]);
 		else
 			meshSet[1].addInstance(&meshInstances[i]);
 	}
 
-	for (int i = 0; i < entities.size(); ++i)
-	{
-		meshInstances[i].setInstanceData((InstanceData*)&entities[i]);
-	}
-
+	/*
 	KeyboardListener* keyboardListener = input.addKeyboardListener();
 	keyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& e)
 		{
 			if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_1)
 			{
-				Entity& entity = entities.emplace_back();
 				entity.position = cameraController.getPosition() + cameraController.getDirection();
 				entity.scale = 0.3f;
 				entity.orientation = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
 				MeshInstance& meshInstance = meshInstances.emplace_back();
 				meshSet[0].addInstance(&meshInstance);
-				meshInstance.setInstanceData((InstanceData*)&entity);
 			}
 			else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_2 && !meshInstances.empty())
 			{
@@ -79,7 +71,7 @@ int main()
 				meshInstances.pop_back();
 			}
 		};
-
+		*/
 	auto startTime = std::chrono::high_resolution_clock::now();
 	double timeAccum = 0.0;
 	uint32 frameCount = 0;
@@ -94,7 +86,7 @@ int main()
 		input.update(deltaSec);
 		cameraController.update(deltaSec);
 
-		renderer.update(deltaSec, cameraController.getViewMatrix());
+		renderer.update(deltaSec, cameraController.getViewMatrix(), meshInstances);
 		renderer.render();
 		frameCount++;
 

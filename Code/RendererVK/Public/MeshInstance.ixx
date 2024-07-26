@@ -1,24 +1,22 @@
 export module RendererVK.MeshInstance;
 
 import Core;
-import RendererVK.Mesh;
+import Entity;
 
-export class MeshInstance final
+export class alignas(16) MeshInstance final
 {
 public:
 
-	void setInstanceData(InstanceData* pInstanceData) 
-	{ 
-		m_pMesh->setInstanceData(m_instanceDataIdx, pInstanceData); 
-	}
-
-	void remove()
+	struct alignas(16) RenderLayout
 	{
-		m_pMesh->removeInstance(this);
-	}
+		glm::vec3 pos;
+		float scale = 1.0f;
+		glm::quat rot;
+	};
+	RenderLayout transform;
 
 private:
+
 	friend class Mesh;
-	Mesh* m_pMesh = nullptr;
-	uint32 m_instanceDataIdx;
+	uint32 meshIdx;
 };

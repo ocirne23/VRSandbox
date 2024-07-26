@@ -54,7 +54,7 @@ void CommandBuffer::submitGraphics(vk::Fence fence)
 	m_waitStage = vk::PipelineStageFlagBits2::eNone;
 }
 
-void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, const std::span<DescriptorSetUpdateInfo>& updateInfo)
+void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, vk::PipelineBindPoint bindPoint, const std::span<DescriptorSetUpdateInfo>& updateInfo)
 {
 	vk::WriteDescriptorSet* descriptorWrites = (vk::WriteDescriptorSet*)_alloca(sizeof(vk::WriteDescriptorSet) * updateInfo.size());
 	for (uint32 i = 0; i < updateInfo.size(); i++)
@@ -69,8 +69,7 @@ void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, c
 			.pBufferInfo = std::get_if<vk::DescriptorBufferInfo>(&updateInfo[i].info),
 		};
 	}
-	//VK::g_dev.getDevice().updateDescriptorSets((uint32)updateInfo.size(), descriptorWrites, 0, nullptr);
-	m_commandBuffer.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, (uint32)updateInfo.size(), descriptorWrites);
+	m_commandBuffer.pushDescriptorSetKHR(bindPoint, pipelineLayout, 0, (uint32)updateInfo.size(), descriptorWrites);
 }
 
 vk::CommandBuffer CommandBuffer::begin(bool once)

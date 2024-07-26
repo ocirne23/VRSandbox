@@ -19,10 +19,10 @@ import RendererVK.StagingManager;
 import RendererVK.MeshDataManager;
 
 export class Mesh;
+export struct MeshInfo;
+export class MeshInstance;
 export class Window;
 export class MeshData;
-
-export struct InstanceData;
 
 export class RendererVK final
 {
@@ -35,7 +35,7 @@ public:
 	RendererVK(const RendererVK&) = delete;
 
 	bool initialize(Window& window, bool enableValidationLayers);
-	void update(double deltaSec, const glm::mat4& mvpMatrix);
+	void update(double deltaSec, const glm::mat4& mvpMatrix, std::span<MeshInstance> instances);
 	void render();
 	void updateMeshSet(std::vector<Mesh>& meshData);
 
@@ -53,7 +53,7 @@ private:
 	SwapChain m_swapChain;
 	RenderPass m_renderPass;
 	Framebuffers m_framebuffers;
-	GraphicsPipeline m_pipeline;
+	GraphicsPipeline m_graphicsPipeline;
 	ComputePipeline m_computePipeline;
 	Texture m_texture;
 	Sampler m_sampler;
@@ -70,14 +70,16 @@ private:
 		Buffer indirectCommandBuffer;
 		Buffer instanceDataBuffer;
 
-		Buffer computeIndirectCommandBuffer;
-		Buffer computeInstanceDataBuffer;
+		Buffer computeMeshInfoBuffer;
+		Buffer computeMeshInstanceBuffer;
 
 		void* mappedUniformBuffer = nullptr;
-		vk::DrawIndexedIndirectCommand* mappedIndirectCommands = nullptr;
-		InstanceData* mappedInstanceData = nullptr;
+		MeshInfo* mappedMeshInfo = nullptr;
+		MeshInstance* mappedMeshInstances = nullptr;
 	};
 	std::array<PerFrameData, NUM_FRAMES_IN_FLIGHT> m_perFrameData;
+
+	uint32 m_instanceCounter = 0;
 };
 
 export namespace VK

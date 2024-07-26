@@ -31,7 +31,7 @@ public:
 	const std::vector<vk::Semaphore>& getWaitSemaphores() const { return m_waitSemaphores; }
 	const std::vector<vk::Semaphore>& getSignalSemaphores() const { return m_signalSemaphores; }
 	void setWaitStage(vk::PipelineStageFlags2 stage) { m_waitStage = stage; }
-	void cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, const std::span<DescriptorSetUpdateInfo>& updateInfo);
+	void cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, vk::PipelineBindPoint bindPoint, const std::span<DescriptorSetUpdateInfo>& updateInfo);
 
 private:
 

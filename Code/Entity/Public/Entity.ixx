@@ -28,11 +28,11 @@ export struct EntityID
 	}
 };
 
-export struct alignas(32) Entity
+export struct Entity
 {
-	glm::vec3 position;
+	glm::vec3 pos;
 	float scale = 1.0f;
-	glm::quat orientation;
+	glm::quat rot;
 };
 
 Entity* EntityID::getEntity() const

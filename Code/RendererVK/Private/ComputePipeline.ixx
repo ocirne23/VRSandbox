@@ -6,7 +6,6 @@ import RendererVK.VK;
 export struct ComputePipelineLayout
 {
 	std::string computeShaderText;
-	uint32 numUniformBuffers;
 	std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
 };
 
