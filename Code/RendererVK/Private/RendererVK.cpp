@@ -421,7 +421,7 @@ void RendererVK::recordCommandBuffers()
         CommandBuffer& commandBuffer = m_swapChain.getCommandBuffer(i);
         vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
 
-        {	// Compute shader frustum cull and indirect command buffer generation
+        {   // Compute shader frustum cull and indirect command buffer generation
             vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
             commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
             vkCommandBuffer.fillBuffer(frameData.instanceDataBuffer.getBuffer(), 0, MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout), 0);
@@ -432,7 +432,7 @@ void RendererVK::recordCommandBuffers()
             vk::MemoryBarrier memoryBarrier2{ .srcAccessMask = vk::AccessFlagBits::eShaderWrite, .dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead };
             vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlags::Flags(0), { memoryBarrier2 }, {}, {});
         }
-        {	// Graphics pipeline draw
+        {   // Graphics pipeline draw
             vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
             commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, graphicsDescriptorSetUpdateInfos);
             vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
