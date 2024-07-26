@@ -86,7 +86,7 @@ layout (binding = 4, std430) readonly buffer InMeshInstances
 
 struct InMeshInfo
 {
-	float radius;
+    float radius;
     uint indexCount;
     uint firstIndex;
     int  vertexOffset;
@@ -211,13 +211,13 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 			.descriptorType = vk::DescriptorType::eUniformBuffer,
 			.descriptorCount = 1,
 			.stageFlags = vk::ShaderStageFlagBits::eVertex
-			});
+		});
 		graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
 			.binding = 1,
 			.descriptorType = vk::DescriptorType::eCombinedImageSampler,
 			.descriptorCount = 1,
 			.stageFlags = vk::ShaderStageFlagBits::eFragment
-			});
+		});
 		m_graphicsPipeline.initialize(m_renderPass, graphicsPipelineLayout);
 	}
 
@@ -229,31 +229,31 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 			.descriptorType = vk::DescriptorType::eUniformBuffer,
 			.descriptorCount = 1,
 			.stageFlags = vk::ShaderStageFlagBits::eCompute
-			});
+		});
 		computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
 			.binding = 4,
 			.descriptorType = vk::DescriptorType::eStorageBuffer,
 			.descriptorCount = 1,
 			.stageFlags = vk::ShaderStageFlagBits::eCompute
-			});
+		});
 		computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
 			.binding = 5,
 			.descriptorType = vk::DescriptorType::eStorageBuffer,
 			.descriptorCount = 1,
 			.stageFlags = vk::ShaderStageFlagBits::eCompute
-			});
+		});
 		computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
 			.binding = 6,
 			.descriptorType = vk::DescriptorType::eStorageBuffer,
 			.descriptorCount = 1,
 			.stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
-			});
+		});
 		computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
 			.binding = 7,
 			.descriptorType = vk::DescriptorType::eStorageBuffer,
 			.descriptorCount = 1,
 			.stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
-			});
+		});
 		m_computePipeline.initialize(computePipelineLayout);
 	}
 
