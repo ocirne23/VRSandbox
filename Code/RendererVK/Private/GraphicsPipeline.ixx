@@ -2,20 +2,15 @@ export module RendererVK.GraphicsPipeline;
 
 import Core;
 import RendererVK.VK;
+import RendererVK.Layout;
 
 export class RenderPass;
-
-export struct VertexLayoutInfo
-{
-    std::vector<vk::VertexInputBindingDescription> bindingDescriptions;
-    std::vector<vk::VertexInputAttributeDescription> attributeDescriptions;
-};
 
 export struct GraphicsPipelineLayout
 {
     std::string fragmentShaderText;
     std::string vertexShaderText;
-    VertexLayoutInfo vertexLayoutInfo;
+    RendererVKLayout::VertexLayoutInfo vertexLayoutInfo;
     std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
 };
 

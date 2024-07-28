@@ -5,6 +5,7 @@ import RendererVK.VK;
 import RendererVK.glslang;
 import RendererVK.Mesh;
 import RendererVK.MeshInstance;
+import RendererVK.Layout;
 import Core.Window;
 import Core.Frustum;
 import File.SceneData;
@@ -161,8 +162,8 @@ constexpr static float CAMERA_FAR = 1000.0f;
 constexpr static uint32 MAX_INDIRECT_COMMANDS = 10;
 constexpr static uint32 MAX_INSTANCE_DATA = 512;
 
-constexpr static size_t VERTEX_DATA_SIZE = 3 * 1024 * sizeof(Mesh::VertexLayout);
-constexpr static size_t INDEX_DATA_SIZE = 5 * 1024 * sizeof(Mesh::IndexLayout);
+constexpr static size_t VERTEX_DATA_SIZE = 3 * 1024 * sizeof(RendererVKLayout::MeshVertex);
+constexpr static size_t INDEX_DATA_SIZE = 5 * 1024 * sizeof(RendererVKLayout::MeshIndex);
 
 struct alignas(16) UboData
 {
@@ -209,7 +210,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
         GraphicsPipelineLayout graphicsPipelineLayout;
         graphicsPipelineLayout.vertexShaderText = vertexShaderText;
         graphicsPipelineLayout.fragmentShaderText = fragmentShaderText;
-        graphicsPipelineLayout.vertexLayoutInfo = Mesh::getVertexLayoutInfo();
+        graphicsPipelineLayout.vertexLayoutInfo = RendererVKLayout::getVertexLayoutInfo();
         graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
             .binding = 0,
             .descriptorType = vk::DescriptorType::eUniformBuffer,
@@ -270,26 +271,26 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         perFrame.mappedDispatchBuffer = (vk::DispatchIndirectCommand*)perFrame.indirectDispatchBuffer.mapMemory().data();
 
-        perFrame.uniformBuffer.initialize(sizeof(UboData),
+        perFrame.uniformBuffer.initialize(sizeof(RendererVKLayout::Ubo),
             vk::BufferUsageFlagBits::eUniformBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-        perFrame.mappedUniformBuffer = (UboData*)perFrame.uniformBuffer.mapMemory().data();
+        perFrame.mappedUniformBuffer = (RendererVKLayout::Ubo*)perFrame.uniformBuffer.mapMemory().data();
 
-        perFrame.computeMeshInfoBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(MeshInfo),
+        perFrame.computeMeshInfoBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(RendererVKLayout::MeshInfo),
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-        perFrame.mappedMeshInfo = (MeshInfo*)perFrame.computeMeshInfoBuffer.mapMemory().data();
+        perFrame.mappedMeshInfo = (RendererVKLayout::MeshInfo*)perFrame.computeMeshInfoBuffer.mapMemory().data();
 
-        perFrame.computeMeshInstanceBuffer.initialize(MAX_INSTANCE_DATA * sizeof(MeshInstance),
+        perFrame.computeMeshInstanceBuffer.initialize(MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshInstance),
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-        perFrame.mappedMeshInstances = (MeshInstance*)perFrame.computeMeshInstanceBuffer.mapMemory().data();
+        perFrame.mappedMeshInstances = (RendererVKLayout::MeshInstance*)perFrame.computeMeshInstanceBuffer.mapMemory().data();
 
         perFrame.indirectCommandBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
             vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout),
+        perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshTransform),
             vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
     }
@@ -310,10 +311,10 @@ void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix, std::span<
         mesh.m_info.firstInstance = instanceCounter;
         instanceCounter += mesh.m_numInstances;
         assert(instanceCounter <= MAX_INSTANCE_DATA);
-        memcpy(&frameData.mappedMeshInfo[i], &mesh.m_info, sizeof(MeshInfo));
+        memcpy(&frameData.mappedMeshInfo[i], &mesh.m_info, sizeof(RendererVKLayout::MeshInfo));
     }
     m_instanceCounter = instanceCounter;
-    memcpy(frameData.mappedMeshInstances, instances.data(), instances.size() * sizeof(MeshInstance));
+    memcpy(frameData.mappedMeshInstances, instances.data(), instances.size() * sizeof(RendererVKLayout::MeshInstance));
     frameData.mappedUniformBuffer[0].mvp = projection * viewMatrix;
     frameData.mappedUniformBuffer[0].frustum.fromMatrix(frameData.mappedUniformBuffer[0].mvp);
     frameData.mappedDispatchBuffer[0] = vk::DispatchIndirectCommand{ .x = instanceCounter, .y = 1, .z = 1 };
@@ -376,7 +377,7 @@ void RendererVK::recordCommandBuffers()
                 .type = vk::DescriptorType::eStorageBuffer,
                 .info = vk::DescriptorBufferInfo {
                     .buffer = frameData.computeMeshInstanceBuffer.getBuffer(),
-                    .range = MAX_INSTANCE_DATA * sizeof(MeshInstance),
+                    .range = MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshInstance),
                 }
             },
             DescriptorSetUpdateInfo{
@@ -384,7 +385,7 @@ void RendererVK::recordCommandBuffers()
                 .type = vk::DescriptorType::eStorageBuffer,
                 .info = vk::DescriptorBufferInfo {
                     .buffer = frameData.computeMeshInfoBuffer.getBuffer(),
-                    .range = MAX_INDIRECT_COMMANDS * sizeof(MeshInfo),
+                    .range = MAX_INDIRECT_COMMANDS * sizeof(RendererVKLayout::MeshInfo),
                 }
             },
             DescriptorSetUpdateInfo{
@@ -392,7 +393,7 @@ void RendererVK::recordCommandBuffers()
                 .type = vk::DescriptorType::eStorageBuffer,
                 .info = vk::DescriptorBufferInfo {
                     .buffer = frameData.instanceDataBuffer.getBuffer(),
-                    .range = MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout),
+                    .range = MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshTransform),
                 }
             },
             DescriptorSetUpdateInfo{
@@ -411,7 +412,7 @@ void RendererVK::recordCommandBuffers()
         {   // Compute shader frustum cull and indirect command buffer generation
             vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
             commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
-            vkCommandBuffer.fillBuffer(frameData.instanceDataBuffer.getBuffer(), 0, MAX_INSTANCE_DATA * sizeof(MeshInstance::RenderLayout), 0);
+            vkCommandBuffer.fillBuffer(frameData.instanceDataBuffer.getBuffer(), 0, MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshTransform), 0);
             vkCommandBuffer.fillBuffer(frameData.indirectCommandBuffer.getBuffer(), 0, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand), 0);
             vk::MemoryBarrier memoryBarrier{ .srcAccessMask = vk::AccessFlagBits::eTransferWrite, .dstAccessMask = vk::AccessFlagBits::eShaderRead };
             vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), { memoryBarrier }, {}, {});
@@ -450,10 +451,9 @@ void RendererVK::updateMeshSet(std::vector<Mesh>& meshData)
 
 const char* RendererVK::getDebugText()
 {
-    float memoryUsageMB = VK::getAllocatedSize() / 1024.0f / 1024.0f;
     float vertexDataPercent = (float)(m_meshDataManager.getVertexBufUsed() / (float)m_meshDataManager.getVertexBufSize() * 100.0f);
     float indexDataPercent = (float)(m_meshDataManager.getIndexBufUsed() / (float)m_meshDataManager.getIndexBufSize()) * 100.0f;
     static char buffer[256];
-    snprintf(buffer, sizeof(buffer), "Memory Usage: %0.1f MB, Vertex Capacity: %0.1f%%, Index Capacity: %0.1f%%", memoryUsageMB, vertexDataPercent, indexDataPercent);
+    snprintf(buffer, sizeof(buffer), "Vertex Capacity: %0.1f%%, Index Capacity: %0.1f%%", vertexDataPercent, indexDataPercent);
     return buffer;
 }

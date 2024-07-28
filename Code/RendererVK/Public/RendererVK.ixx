@@ -18,9 +18,14 @@ import RendererVK.Sampler;
 import RendererVK.StagingManager;
 import RendererVK.MeshDataManager;
 
+namespace RendererVKLayout
+{
+    export struct Ubo;
+    export struct MeshInfo;
+    export struct MeshInstance;
+}
 export class Mesh;
-export struct MeshInfo;
-export struct UboData;
+
 export class MeshInstance;
 export class Window;
 export class MeshData;
@@ -76,9 +81,9 @@ private:
         Buffer computeMeshInstanceBuffer;
 
         vk::DispatchIndirectCommand* mappedDispatchBuffer = nullptr;
-        UboData* mappedUniformBuffer = nullptr;
-        MeshInfo* mappedMeshInfo = nullptr;
-        MeshInstance* mappedMeshInstances = nullptr;
+        RendererVKLayout::Ubo* mappedUniformBuffer = nullptr;
+        RendererVKLayout::MeshInfo* mappedMeshInfo = nullptr;
+        RendererVKLayout::MeshInstance* mappedMeshInstances = nullptr;
     };
     std::array<PerFrameData, NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 

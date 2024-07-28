@@ -45,7 +45,7 @@ int main()
     for (int i = 0; i < meshInstances.size(); ++i)
     {
         meshInstances[i].transform.pos = glm::vec3(i * 5.0f, i % 2 == 0 ? 5.0f : 0.0f, 0.0f);
-
+        meshInstances[i].transform.scale = 1.0f;
         if (i % 2 == 0)
             meshSet[0].addInstance(&meshInstances[i]);
         else
@@ -61,7 +61,7 @@ int main()
                 MeshInstance& meshInstance = meshInstances.emplace_back();
                 meshInstance.transform.pos = cameraController.getPosition() + cameraController.getDirection();
                 meshInstance.transform.scale = 0.3f;
-                meshInstance.transform.rot = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
+                meshInstance.transform.quat = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
                 meshSet[0].addInstance(&meshInstance);
             }
             else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_2)
@@ -69,7 +69,7 @@ int main()
                 MeshInstance& meshInstance = meshInstances.emplace_back();
                 meshInstance.transform.pos = cameraController.getPosition() + cameraController.getDirection();
                 meshInstance.transform.scale = 0.3f;
-                meshInstance.transform.rot = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
+                meshInstance.transform.quat = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
                 meshSet[1].addInstance(&meshInstance);
             }
             else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_3 && !meshInstances.empty())

@@ -1,24 +1,20 @@
 export module RendererVK.MeshInstance;
 
 import Core;
-import Entity;
+import RendererVK.Layout;
 
-export class alignas(16) MeshInstance final
+export class MeshInstance final : private RendererVKLayout::MeshInstance
 {
 public:
 
-    struct alignas(16) RenderLayout
-    {
-        glm::vec3 pos;
-        float scale = 1.0f;
-        glm::quat rot;
-    };
-    RenderLayout transform;
+    using RendererVKLayout::MeshInstance::transform;
 
-    uint32 getMeshIdx() const { return meshIdx; }
+    uint32 getMeshIdx() const { return meshInfoIdx; }
 
 private:
 
     friend class Mesh;
-    uint32 meshIdx;
+    using RendererVKLayout::MeshInstance::meshInfoIdx;
 };
+
+static_assert(sizeof(MeshInstance) == sizeof(RendererVKLayout::MeshInstance));
