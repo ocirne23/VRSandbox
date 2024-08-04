@@ -303,7 +303,7 @@ namespace dds
 		unsigned miscFlags2;
 	} DDS_HEADER_DXT10;
 
-	static constexpr unsigned fourcc(char a, char b, char c, char d)
+	constexpr unsigned fourcc(char a, char b, char c, char d)
 	{
 		return (((unsigned)(d) << 24) | ((unsigned)(c) << 16) | ((unsigned)(b) << 8) | (unsigned)(a));
 	}

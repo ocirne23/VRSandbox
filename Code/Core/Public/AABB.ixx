@@ -1,6 +1,7 @@
 export module Core.AABB;
 
 import Core;
+import Core.glm;
 
 export struct AABB final
 {

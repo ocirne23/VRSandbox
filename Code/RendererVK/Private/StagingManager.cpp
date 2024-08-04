@@ -7,7 +7,7 @@ import RendererVK.Buffer;
 import RendererVK.CommandBuffer;
 import RendererVK.SwapChain;
 
-static constexpr size_t STAGING_BUFFER_SIZE = 1024 * 1024;
+static constexpr size_t STAGING_BUFFER_SIZE = 5 * 1024 * 1024;
 
 StagingManager::StagingManager()
 {
@@ -60,7 +60,7 @@ vk::Semaphore StagingManager::upload(vk::Buffer dstBuffer, vk::DeviceSize dataSi
     return m_semaphores[m_currentBuffer];
 }
 
-vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset)
+vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, uint32 mipLevel, vk::DeviceSize dstOffset)
 {
     assert(dataSize <= STAGING_BUFFER_SIZE);
     if (m_currentBufferOffset + dataSize > STAGING_BUFFER_SIZE)
@@ -70,7 +70,7 @@ vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth,
         .bufferOffset = m_currentBufferOffset,
         .imageSubresource = {
             .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .mipLevel = 0,
+            .mipLevel = mipLevel,
             .baseArrayLayer = 0,
             .layerCount = 1
         },
@@ -105,7 +105,7 @@ void StagingManager::update()
     for (const auto& copyRegion : m_bufferCopyRegions)
         vkCommandBuffer.copyBuffer(m_stagingBuffers[m_currentBuffer].getBuffer(), copyRegion.first, 1, &copyRegion.second);
 
-    for (const auto& copyRegion : m_imageCopyRegions)
+    for (const auto& [image, copyRegion] : m_imageCopyRegions)
     {
         vk::ImageMemoryBarrier2 preCopyBarrier{
             .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
@@ -114,18 +114,18 @@ void StagingManager::update()
             .newLayout = vk::ImageLayout::eTransferDstOptimal,
             .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
             .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
-            .image = copyRegion.first,
+            .image = image,
             .subresourceRange = vk::ImageSubresourceRange
             {
                 .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel = 0,
-                .levelCount = 1,
+                .baseMipLevel = copyRegion.imageSubresource.mipLevel,
+                .levelCount = vk::RemainingMipLevels,
                 .baseArrayLayer = 0,
                 .layerCount = 1
             }
         };
         vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &preCopyBarrier });
-        vkCommandBuffer.copyBufferToImage(m_stagingBuffers[m_currentBuffer].getBuffer(), copyRegion.first, vk::ImageLayout::eTransferDstOptimal, copyRegion.second);
+        vkCommandBuffer.copyBufferToImage(m_stagingBuffers[m_currentBuffer].getBuffer(), image, vk::ImageLayout::eTransferDstOptimal, copyRegion);
         vk::ImageMemoryBarrier2 postCopyBarrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
             .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
@@ -133,12 +133,12 @@ void StagingManager::update()
             .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
             .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
             .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
-            .image = copyRegion.first,
+            .image = image,
             .subresourceRange = vk::ImageSubresourceRange
             {
                 .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel = 0,
-                .levelCount = 1,
+                .baseMipLevel = copyRegion.imageSubresource.mipLevel,
+                .levelCount = vk::RemainingMipLevels,
                 .baseArrayLayer = 0,
                 .layerCount = 1
             }

@@ -1,9 +1,11 @@
 
 import Core;
+import Core.glm;
 
 int main()
 {
 	std::vector<int> vec;
+
 	vec.push_back(1);
 	std::array<glm::vec3, 3> arr;
 	arr[0] = glm::vec3(1.0f, 2.0f, 3.0f);

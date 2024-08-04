@@ -5,6 +5,7 @@ import RendererVK.VK;
 import RendererVK.Buffer;
 import RendererVK.StagingManager;
 import RendererVK.stb_image;
+import RendererVK.DDS;
 
 Texture::Texture()
 {
@@ -29,22 +30,58 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
     vk::SemaphoreTypeCreateInfo semaphoreTypeCreateInfo = { .semaphoreType = vk::SemaphoreType::eBinary };
     m_imageReadySemaphore = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{ .pNext = &semaphoreTypeCreateInfo });
 
+    std::filesystem::path path(pFilePath);
+    std::vector<uint8> fileData;
+    std::vector<std::span<uint8>> imgData; // pixel data per mip level
+
+    if (path.extension() == ".dds")
+    {
+        FILE* pFile;
+        fopen_s(&pFile, pFilePath, "rb");
+        std::unique_ptr<FILE, void(*)(FILE*)> file(pFile, [](FILE* p) { if (p) fclose(p); });
+        if (!file)
+        {
+            assert(false && "Failed to open file");
+            return false;
+        }
+        const size_t size = std::filesystem::file_size(pFilePath);
+        fileData.resize(size);
+        if (fread(fileData.data(), 1, size, file.get()) != size)
+        {
+            assert(false && "Failed to read file");
+            return false;
+        }
+
+        dds::Header header = dds::read_header(fileData.data(), size);
+        dds::DXGI_FORMAT format = header.format();
+
+        m_width = header.width();
+        m_height = header.height();
+        m_numMipLevels = header.mip_levels();
+        m_format = vk::Format::eBc1RgbSrgbBlock;
+
+        for (uint32 i = 0; i < m_numMipLevels; i++)
+        {
+            imgData.push_back(std::span(fileData.data() + header.mip_offset(i), header.mip_size(i)));
+        }
+    }
+    /*
     std::unique_ptr<uint8, void(*)(uint8*)> pData(
         stbi_load(pFilePath, (int*)&m_width, (int*)&m_height, (int*)&m_numChannels, 4),
         [](uint8* p) { if (p) stbi_image_free(p); });
-
+       
     const vk::DeviceSize imageSize = m_width * m_height * 4;
     if (!pData)
     {
         assert(false && "Failed to load image");
         return false;
-    }
+    } */
 
     vk::ImageCreateInfo imageCreateInfo{
         .imageType = vk::ImageType::e2D,
-        .format = vk::Format::eR8G8B8A8Unorm,
+        .format = m_format,
         .extent = { m_width, m_height, 1 },
-        .mipLevels = 1,
+        .mipLevels = m_numMipLevels,
         .arrayLayers = 1,
         .samples = vk::SampleCountFlagBits::e1,
         .tiling = vk::ImageTiling::eOptimal,
@@ -80,7 +117,7 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
         .subresourceRange = {
             .aspectMask = vk::ImageAspectFlagBits::eColor,
             .baseMipLevel = 0,
-            .levelCount = imageCreateInfo.mipLevels,
+            .levelCount = vk::RemainingMipLevels,
             .baseArrayLayer = 0,
             .layerCount = imageCreateInfo.arrayLayers
         }
@@ -91,6 +128,16 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
         assert(false && "Failed to create image view");
         return false;
     }
-    stagingManager.uploadImage(m_image, m_width, m_height, imageSize, pData.get());
+#if 1
+    for (uint32 i = 0; i < m_numMipLevels; i++)
+    {
+        stagingManager.uploadImage(m_image, m_width >> i, m_height >> i, imgData[i].size(), imgData[i].data(), i);
+    }
+#else
+    for (uint32 i = m_numMipLevels - 1; i > 0; i--)
+    {
+        stagingManager.uploadImage(m_image, m_width >> i, m_height >> i, imgData[i].size(), imgData[i].data(), i);
+    }
+#endif
     return true;
 }

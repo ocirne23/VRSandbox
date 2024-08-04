@@ -24,6 +24,8 @@ private:
     uint32 m_width = 0;
     uint32 m_height = 0;
     uint32 m_numChannels = 0;
+    uint32 m_numMipLevels = 0;
+    vk::Format m_format;
     vk::Image m_image;
     vk::DeviceMemory m_imageMemory;
     vk::ImageView m_imageView;

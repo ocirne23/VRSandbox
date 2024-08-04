@@ -28,7 +28,7 @@ bool Sampler::initialize()
         .compareEnable = vk::False,
         .compareOp = vk::CompareOp::eNever,
         .minLod = 0.0f,
-        .maxLod = 0.0f,
+        .maxLod = vk::LodClampNone,
         .borderColor = vk::BorderColor::eFloatOpaqueBlack,
         .unnormalizedCoordinates = vk::False
     };

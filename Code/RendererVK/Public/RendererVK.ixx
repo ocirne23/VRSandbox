@@ -1,6 +1,7 @@
 export module RendererVK;
 
 import Core;
+import Core.glm;
 
 import RendererVK.VK;
 import RendererVK.Instance;

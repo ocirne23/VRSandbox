@@ -1,6 +1,7 @@
 export module Entity.Zone;
 
 import Core;
+import Core.glm;
 import Entity;
 
 export struct EntityHash

@@ -1,6 +1,7 @@
 export module Entity;
 
 import Core;
+import Core.glm;
 
 export struct Entity;
 

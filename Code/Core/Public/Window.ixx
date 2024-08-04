@@ -1,6 +1,7 @@
 export module Core.Window;
 
 import Core;
+import Core.glm;
 
 export class Window final
 {

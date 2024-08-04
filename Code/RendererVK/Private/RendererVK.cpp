@@ -262,7 +262,10 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     }
 
     m_sampler.initialize();
-    m_texture.initialize(m_stagingManager, "Textures/grid.png");
+    m_texture.initialize(m_stagingManager, "Textures/boat/color.dds");
+
+    //Texture awa;
+    //awa.initialize(m_stagingManager, "Textures/boat/color.dds");
 
     for (PerFrameData& perFrame : m_perFrameData)
     {

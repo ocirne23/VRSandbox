@@ -1,6 +1,7 @@
 export module RendererVK.Layout;
 
 import Core;
+import Core.glm;
 import Core.Frustum;
 import RendererVK.VK;
 

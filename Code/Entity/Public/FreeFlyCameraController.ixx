@@ -1,6 +1,7 @@
 export module Entity.FreeFlyCameraController;
 
 import Core;
+import Core.glm;
 
 export class Input;
 export class MouseListener;

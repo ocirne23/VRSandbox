@@ -1,6 +1,7 @@
 export module File.MeshData;
 
 import Core;
+import Core.glm;
 import Core.AABB;
 
 export struct aiMesh;

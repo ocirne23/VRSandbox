@@ -50,7 +50,7 @@ int main()
     std::vector<MeshInstance> meshInstances(numX * numY);
     for (int x = 0; x < numX; ++x)
     {
-        for (int y = 0; y < 8; ++y)
+        for (int y = 0; y < numY; ++y)
         {
             meshInstances[x * numX + y].transform.pos = glm::vec3(x * 3.0f, y * 3.0f, 0.0f);
             meshInstances[x * numX + y].transform.scale = 1.0f;

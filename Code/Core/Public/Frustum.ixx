@@ -1,6 +1,7 @@
 export module Core.Frustum;
 
 import Core;
+import Core.glm;
 
 export struct Frustum
 {
