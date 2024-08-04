@@ -35,23 +35,28 @@ int main()
     std::vector<Mesh> meshSet;
     {
         SceneData scene;
-        scene.initialize("baseshapes.fbx");
-        meshSet.emplace_back().initialize(*scene.getMesh("Boat"), 0);
-        meshSet.emplace_back().initialize(*scene.getMesh("BoatCollider"), 1);
+        scene.initialize("Models/baseshapes.fbx");
+        std::vector<MeshData>& sceneMeshes = scene.getMeshes();
+        meshSet.reserve(sceneMeshes.size());
+        for (int i = 0; i < sceneMeshes.size(); ++i)
+        {
+            meshSet.emplace_back().initialize(sceneMeshes[i], i);
+        }
     }
     renderer.updateMeshSet(meshSet);
 
-    std::vector<MeshInstance> meshInstances(10);
-    for (int i = 0; i < meshInstances.size(); ++i)
+    const uint32 numX = 8;
+    const uint32 numY = 8;
+    std::vector<MeshInstance> meshInstances(numX * numY);
+    for (int x = 0; x < numX; ++x)
     {
-        meshInstances[i].transform.pos = glm::vec3(i * 5.0f, i % 2 == 0 ? 5.0f : 0.0f, 0.0f);
-        meshInstances[i].transform.scale = 1.0f;
-        if (i % 2 == 0)
-            meshSet[0].addInstance(&meshInstances[i]);
-        else
-            meshSet[1].addInstance(&meshInstances[i]);
+        for (int y = 0; y < 8; ++y)
+        {
+            meshInstances[x * numX + y].transform.pos = glm::vec3(x * 3.0f, y * 3.0f, 0.0f);
+            meshInstances[x * numX + y].transform.scale = 1.0f;
+            meshSet[(x * numX + y) % meshSet.size()].addInstance(&meshInstances[x * numX + y]);
+        }
     }
-
     
     KeyboardListener* keyboardListener = input.addKeyboardListener();
     keyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& e)

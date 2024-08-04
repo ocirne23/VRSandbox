@@ -156,14 +156,14 @@ void main()
 
 constexpr static float CAMERA_FOV_DEG = 45.0f;
 constexpr static float CAMERA_NEAR = 0.1f;
-constexpr static float CAMERA_FAR = 1000.0f;
+constexpr static float CAMERA_FAR = 5000.0f;
 
 // TODO make these dynamic
-constexpr static uint32 MAX_INDIRECT_COMMANDS = 10;
-constexpr static uint32 MAX_INSTANCE_DATA = 512;
+constexpr static uint32 MAX_INDIRECT_COMMANDS = 100;
+constexpr static uint32 MAX_INSTANCE_DATA = 1024 * 1024;
 
-constexpr static size_t VERTEX_DATA_SIZE = 3 * 1024 * sizeof(RendererVKLayout::MeshVertex);
-constexpr static size_t INDEX_DATA_SIZE = 5 * 1024 * sizeof(RendererVKLayout::MeshIndex);
+constexpr static size_t VERTEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshVertex);
+constexpr static size_t INDEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
 
 struct alignas(16) UboData
 {
@@ -304,21 +304,26 @@ void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix, std::span<
     const glm::mat4x4 projection = glm::perspective(glm::radians(CAMERA_FOV_DEG), (float)extent.width / (float)extent.height, CAMERA_NEAR, CAMERA_FAR);
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-    uint32 instanceCounter = 0;
-    for (uint32 i = 0, num = (uint32)m_pMeshSet->size(); i < num; ++i)
-    {
-        Mesh& mesh = (*m_pMeshSet)[i];
-        mesh.m_info.firstInstance = instanceCounter;
-        instanceCounter += mesh.m_numInstances;
-        assert(instanceCounter <= MAX_INSTANCE_DATA);
-        memcpy(&frameData.mappedMeshInfo[i], &mesh.m_info, sizeof(RendererVKLayout::MeshInfo));
-    }
-    m_instanceCounter = instanceCounter;
-    memcpy(frameData.mappedMeshInstances, instances.data(), instances.size() * sizeof(RendererVKLayout::MeshInstance));
     frameData.mappedUniformBuffer[0].mvp = projection * viewMatrix;
     frameData.mappedUniformBuffer[0].frustum.fromMatrix(frameData.mappedUniformBuffer[0].mvp);
-    frameData.mappedDispatchBuffer[0] = vk::DispatchIndirectCommand{ .x = instanceCounter, .y = 1, .z = 1 };
 
+    if (!frameData.updated)
+    {    
+        uint32 instanceCounter = 0;
+        for (uint32 i = 0, num = (uint32)m_pMeshSet->size(); i < num; ++i)
+        {
+            Mesh& mesh = (*m_pMeshSet)[i];
+            mesh.m_info.firstInstance = instanceCounter;
+            instanceCounter += mesh.m_numInstances;
+            assert(instanceCounter <= MAX_INSTANCE_DATA);
+            memcpy(&frameData.mappedMeshInfo[i], &mesh.m_info, sizeof(RendererVKLayout::MeshInfo));
+        }
+        m_instanceCounter = instanceCounter;
+        memcpy(frameData.mappedMeshInstances, instances.data(), instances.size() * sizeof(RendererVKLayout::MeshInstance));
+        frameData.mappedDispatchBuffer[0] = vk::DispatchIndirectCommand{ .x = instanceCounter, .y = 1, .z = 1 };
+
+        frameData.updated = true;
+    }
     m_stagingManager.update();
 }
 

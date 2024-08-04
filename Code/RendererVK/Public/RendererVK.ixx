@@ -72,6 +72,8 @@ private:
 
     struct PerFrameData
     {
+        bool updated = false;
+
         Buffer uniformBuffer;
         Buffer indirectCommandBuffer;
         Buffer instanceDataBuffer;
