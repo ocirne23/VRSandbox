@@ -1,7 +1,3 @@
-module;
-
-#include <cstddef>
-
 export module Core.LockFreeList;
 
 import Core;

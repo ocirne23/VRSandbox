@@ -1,13 +1,10 @@
-module;
-
-#include <stb/stb_image.h>
-
 module RendererVK.Texture;
 
 import Core;
 import RendererVK.VK;
 import RendererVK.Buffer;
 import RendererVK.StagingManager;
+import RendererVK.stb_image;
 
 Texture::Texture()
 {

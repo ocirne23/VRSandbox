@@ -1,8 +1,3 @@
-module;
-
-#include <cstdint>
-#include <intrin.h>
-
 export module Entity.Zone;
 
 import Core;

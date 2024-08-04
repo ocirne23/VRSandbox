@@ -1,7 +1,3 @@
-module;
-
-#include <cstddef> // offsetof
-
 export module RendererVK.Layout;
 
 import Core;

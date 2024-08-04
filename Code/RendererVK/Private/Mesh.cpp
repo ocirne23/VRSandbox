@@ -1,7 +1,3 @@
-module;
-
-#include <cstddef>
-
 module RendererVK.Mesh;
 
 import Core;

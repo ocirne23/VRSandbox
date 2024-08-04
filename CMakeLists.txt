@@ -12,6 +12,8 @@ set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "_Build")
 list(APPEND COMPILE_OPTIONS "/std:c++latest" "/experimental:module" "/Zc:__cplusplus" "/fp:fast" "/arch:AVX2" "$<$<NOT:$<CONFIG:DEBUG>>:/GL>" "/Oi" "/Ot")
 list(APPEND LINK_OPTIONS "$<$<NOT:$<CONFIG:DEBUG>>:/LTCG>" "$<$<NOT:$<CONFIG:DEBUG>>:/INCREMENTAL:NO>")
 
-add_definitions(/FI"cassert" /wd5260 /wd5105)
+add_definitions(/FI"${ROOT_DIR}/Code/Core/Private/forceinclude.h" /wd5260 /wd5105)
 
 add_subdirectory(Code)
+
+set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT "App")

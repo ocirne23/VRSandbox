@@ -1,7 +1,4 @@
-module;
-
-#include <intrin.h>
-#include <cstdlib>
+export module Core.Allocator;
 
 #if 0 //defined(_DEBUG)
 #define CHECK_BOUNDS
@@ -18,8 +15,6 @@ module;
 #if 0 //defined(_DEBUG)
 #define CHECK_DIFFERENT_THREAD_ACCESS_FOR_NON_THREADSAFE
 #endif
-
-export module Core.Allocator;
 
 import Core;
 
