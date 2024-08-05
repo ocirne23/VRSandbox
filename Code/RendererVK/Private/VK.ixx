@@ -1,6 +1,7 @@
 export module RendererVK.VK;
 
 export import <vulkan/vulkan.hpp>;
+export import <vma/vk_mem_alloc_modules_compat.h>;
 
 import Core;
 
