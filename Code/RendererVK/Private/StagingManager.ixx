@@ -19,6 +19,7 @@ public:
 
     vk::Semaphore upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
     vk::Semaphore uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, uint32 mipLevel, vk::DeviceSize dstOffset = 0);
+    void transitionImage(vk::ImageMemoryBarrier2 barrier) { m_imageTransitions.push_back(barrier); }
     void update();
 
 private:
@@ -35,5 +36,6 @@ private:
     vk::DeviceSize m_currentBufferOffset = 0;
     std::vector<std::pair<vk::Buffer, vk::BufferCopy>> m_bufferCopyRegions;
     std::vector<std::pair<vk::Image, vk::BufferImageCopy>> m_imageCopyRegions;
+    std::vector<vk::ImageMemoryBarrier2> m_imageTransitions;
     uint8* m_mappedMemory = nullptr;
 };

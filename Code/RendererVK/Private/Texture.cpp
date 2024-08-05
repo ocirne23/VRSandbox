@@ -65,17 +65,22 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
             imgData.push_back(std::span(fileData.data() + header.mip_offset(i), header.mip_size(i)));
         }
     }
-    /*
-    std::unique_ptr<uint8, void(*)(uint8*)> pData(
-        stbi_load(pFilePath, (int*)&m_width, (int*)&m_height, (int*)&m_numChannels, 4),
-        [](uint8* p) { if (p) stbi_image_free(p); });
-       
-    const vk::DeviceSize imageSize = m_width * m_height * 4;
-    if (!pData)
+    else
     {
-        assert(false && "Failed to load image");
-        return false;
-    } */
+        assert(false && "reimplement non dds loading");
+        /*
+        std::unique_ptr<uint8, void(*)(uint8*)> pData(
+            stbi_load(pFilePath, (int*)&m_width, (int*)&m_height, (int*)&m_numChannels, 4),
+            [](uint8* p) { if (p) stbi_image_free(p); });
+
+        const vk::DeviceSize imageSize = m_width * m_height * 4;
+        if (!pData)
+        {
+            assert(false && "Failed to load image");
+            return false;
+        } 
+        */
+    }
 
     vk::ImageCreateInfo imageCreateInfo{
         .imageType = vk::ImageType::e2D,
@@ -128,13 +133,32 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
         assert(false && "Failed to create image view");
         return false;
     }
+
+    stagingManager.transitionImage(vk::ImageMemoryBarrier2{
+            .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .oldLayout = vk::ImageLayout::eUndefined,
+            .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+            .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
+            .image = m_image,
+            .subresourceRange = vk::ImageSubresourceRange
+            {
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .baseMipLevel = 0,
+                .levelCount = m_numMipLevels,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        });
+
 #if 1
     for (uint32 i = 0; i < m_numMipLevels; i++)
     {
         stagingManager.uploadImage(m_image, m_width >> i, m_height >> i, imgData[i].size(), imgData[i].data(), i);
     }
 #else
-    for (uint32 i = m_numMipLevels - 1; i > 0; i--)
+    for (uint32 i = m_numMipLevels - 1; i > 5 - 2; i--)
     {
         stagingManager.uploadImage(m_image, m_width >> i, m_height >> i, imgData[i].size(), imgData[i].data(), i);
     }

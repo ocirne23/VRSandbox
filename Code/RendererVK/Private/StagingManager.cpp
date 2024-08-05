@@ -105,6 +105,9 @@ void StagingManager::update()
     for (const auto& copyRegion : m_bufferCopyRegions)
         vkCommandBuffer.copyBuffer(m_stagingBuffers[m_currentBuffer].getBuffer(), copyRegion.first, 1, &copyRegion.second);
 
+    if (!m_imageTransitions.empty())
+        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = (uint32)m_imageTransitions.size(), .pImageMemoryBarriers = m_imageTransitions.data() });
+
     for (const auto& [image, copyRegion] : m_imageCopyRegions)
     {
         vk::ImageMemoryBarrier2 preCopyBarrier{
@@ -119,7 +122,7 @@ void StagingManager::update()
             {
                 .aspectMask = vk::ImageAspectFlagBits::eColor,
                 .baseMipLevel = copyRegion.imageSubresource.mipLevel,
-                .levelCount = vk::RemainingMipLevels,
+                .levelCount = 1,
                 .baseArrayLayer = 0,
                 .layerCount = 1
             }
@@ -138,7 +141,7 @@ void StagingManager::update()
             {
                 .aspectMask = vk::ImageAspectFlagBits::eColor,
                 .baseMipLevel = copyRegion.imageSubresource.mipLevel,
-                .levelCount = vk::RemainingMipLevels,
+                .levelCount = 1,
                 .baseArrayLayer = 0,
                 .layerCount = 1
             }
