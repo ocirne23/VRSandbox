@@ -1,7 +1,6 @@
 export module RendererVK;
 
 import Core;
-import Core.glm;
 
 import RendererVK.VK;
 import RendererVK.Instance;
@@ -30,6 +29,7 @@ export class Mesh;
 export class MeshInstance;
 export class Window;
 export class MeshData;
+export class FreeFlyCameraController;
 
 export class RendererVK final
 {
@@ -42,7 +42,7 @@ public:
     RendererVK(const RendererVK&) = delete;
 
     bool initialize(Window& window, bool enableValidationLayers);
-    void update(double deltaSec, const glm::mat4& mvpMatrix, std::span<MeshInstance> instances);
+    void update(double deltaSec, const FreeFlyCameraController& camera, std::span<MeshInstance> instances);
     void render();
     void updateMeshSet(std::vector<Mesh>& meshData);
 
@@ -62,7 +62,9 @@ private:
     Framebuffers m_framebuffers;
     GraphicsPipeline m_graphicsPipeline;
     ComputePipeline m_computePipeline;
-    Texture m_texture;
+    Texture m_colorTex;
+    Texture m_normalTex;
+    Texture m_rmhTex;
     Sampler m_sampler;
     StagingManager m_stagingManager;
 

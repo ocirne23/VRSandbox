@@ -16,9 +16,9 @@ Sampler::~Sampler()
 bool Sampler::initialize()
 {
     vk::SamplerCreateInfo samplerInfo = {
-        .magFilter = vk::Filter::eNearest,
+        .magFilter = vk::Filter::eLinear,
         .minFilter = vk::Filter::eLinear,
-        .mipmapMode = vk::SamplerMipmapMode::eNearest,
+        .mipmapMode = vk::SamplerMipmapMode::eLinear,
         .addressModeU = vk::SamplerAddressMode::eRepeat,
         .addressModeV = vk::SamplerAddressMode::eRepeat,
         .addressModeW = vk::SamplerAddressMode::eRepeat,

@@ -24,7 +24,7 @@ Texture::~Texture()
         vkDevice.destroySemaphore(m_imageReadySemaphore);
 }
 
-bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
+bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath, bool sRGB)
 {
     vk::Device vkDevice = VK::g_dev.getDevice();
     vk::SemaphoreTypeCreateInfo semaphoreTypeCreateInfo = { .semaphoreType = vk::SemaphoreType::eBinary };
@@ -58,7 +58,7 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath)
         m_width = header.width();
         m_height = header.height();
         m_numMipLevels = header.mip_levels();
-        m_format = vk::Format::eBc1RgbSrgbBlock;
+        m_format = sRGB ? vk::Format::eBc1RgbSrgbBlock : vk::Format::eBc1RgbUnormBlock;
 
         for (uint32 i = 0; i < m_numMipLevels; i++)
         {

@@ -15,7 +15,7 @@ SceneData::~SceneData()
 
 bool SceneData::initialize(const char* fileName)
 {
-    m_pScene = m_importer.ReadFile(fileName, aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_MakeLeftHanded | aiProcess_GenBoundingBoxes);
+    m_pScene = m_importer.ReadFile(fileName, aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_FlipUVs | aiProcess_MakeLeftHanded | aiProcess_GenBoundingBoxes);
     for (uint32 i = 0; i < m_pScene->mNumMeshes; i++)
     {
         MeshData& mesh = m_meshes.emplace_back();

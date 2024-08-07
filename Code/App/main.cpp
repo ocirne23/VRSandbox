@@ -35,13 +35,15 @@ int main()
     std::vector<Mesh> meshSet;
     {
         SceneData scene;
-        scene.initialize("Models/baseshapes.fbx");
+        scene.initialize("Models/boat.fbx");
+        meshSet.emplace_back().initialize(*scene.getMesh("Boat.001"), 0);
+        /*
         std::vector<MeshData>& sceneMeshes = scene.getMeshes();
         meshSet.reserve(sceneMeshes.size());
         for (int i = 0; i < sceneMeshes.size(); ++i)
         {
             meshSet.emplace_back().initialize(sceneMeshes[i], i);
-        }
+        }*/
     }
     renderer.updateMeshSet(meshSet);
 
@@ -52,8 +54,8 @@ int main()
     {
         for (int y = 0; y < numY; ++y)
         {
-            meshInstances[x * numX + y].transform.pos = glm::vec3(x * 3.0f, y * 3.0f, 0.0f);
-            meshInstances[x * numX + y].transform.scale = 1.0f;
+            meshInstances[x * numX + y].transform.pos = glm::vec3(x * 3.0f, y * 4.0f, 0.0f);
+            meshInstances[x * numX + y].transform.scale = 0.3f;
             meshSet[(x * numX + y) % meshSet.size()].addInstance(&meshInstances[x * numX + y]);
         }
     }
@@ -99,7 +101,7 @@ int main()
         input.update(deltaSec);
         cameraController.update(deltaSec);
 
-        renderer.update(deltaSec, cameraController.getViewMatrix(), meshInstances);
+        renderer.update(deltaSec, cameraController, meshInstances);
         renderer.render();
         frameCount++;
 

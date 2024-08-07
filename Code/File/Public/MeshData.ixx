@@ -17,6 +17,8 @@ public:
     bool initialize(const aiMesh* pMesh);
     glm::vec3* getVertices();
     glm::vec3* getNormals();
+    glm::vec3* getTangents();
+    glm::vec3* getBitangents();
     glm::vec3* getTexCoords();
     uint32* getIndices();
     uint32 getNumVertices();

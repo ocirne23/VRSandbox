@@ -36,6 +36,16 @@ glm::vec3* MeshData::getNormals()
     return reinterpret_cast<glm::vec3*>(m_pMesh->mNormals);
 }
 
+glm::vec3* MeshData::getTangents()
+{
+    return reinterpret_cast<glm::vec3*>(m_pMesh->mTangents);
+}
+
+glm::vec3* MeshData::getBitangents()
+{
+    return reinterpret_cast<glm::vec3*>(m_pMesh->mBitangents);
+}
+
 glm::vec3* MeshData::getTexCoords()
 {
     return reinterpret_cast<glm::vec3*>(m_pMesh->mTextureCoords[0]);

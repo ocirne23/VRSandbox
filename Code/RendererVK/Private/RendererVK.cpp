@@ -1,6 +1,7 @@
 module RendererVK;
 
 import Core;
+import Entity.FreeFlyCameraController;
 import RendererVK.VK;
 import RendererVK.glslang;
 import RendererVK.Mesh;
@@ -10,152 +11,10 @@ import Core.Window;
 import Core.Frustum;
 import File.SceneData;
 import File.MeshData;
-
-const char* vertexShaderText = R"(
-#version 400
-
-#extension GL_ARB_separate_shader_objects : enable
-#extension GL_ARB_shading_language_420pack : enable
-
-layout (std140, binding = 0) uniform buffer
-{
-    mat4 u_mvp;
-    vec4 u_frustumPlanes[6];
-};
-
-layout (location = 0) in vec3 in_pos;
-layout (location = 1) in vec3 in_normal;
-layout (location = 2) in vec2 in_uv;
-
-// Instanced attributes
-layout (location = 3) in vec3 inst_pos;
-layout (location = 4) in float inst_scale;
-layout (location = 5) in vec4 inst_quat;
-
-layout (location = 0) out vec2 out_uv;
-
-vec3 quat_transform( vec3 v, vec4 q)
-{
-    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
-}
-
-void main()
-{
-    out_uv = in_uv;
-    vec3 pos = quat_transform(in_pos * inst_scale, inst_quat);
-    gl_Position = u_mvp * vec4(pos + inst_pos, 1.0);
-}
-)";
-
-const char* fragmentShaderText = R"(
-#version 400
-
-#extension GL_ARB_separate_shader_objects : enable
-#extension GL_ARB_shading_language_420pack : enable
-
-layout (binding = 1) uniform sampler2D u_tex;
-layout (location = 0) in vec2 in_uv;
-layout (location = 0) out vec3 out_color;
-
-void main()
-{
-    out_color = texture(u_tex, in_uv).xyz;
-}
-)";
-
-const char* computeShaderText = R"(
-#version 450
-
-layout (std140, binding = 0) uniform UBO
-{
-    mat4 u_mvp;
-    vec4 u_frustumPlanes[6];
-};
-
-struct InMeshInstance
-{
-    vec4 posScale;
-    vec4 quat;
-    uint meshIdx;
-};
-layout (binding = 2, std430) readonly buffer InMeshInstances
-{
-    InMeshInstance in_instances[];
-};
-
-struct InMeshInfo
-{
-    float radius;
-    uint indexCount;
-    uint firstIndex;
-    int  vertexOffset;
-    uint firstInstance;
-};
-layout (binding = 3, std430) readonly buffer InMeshInfoBuffer
-{
-    InMeshInfo in_meshInfo[];
-};
-
-struct OutMeshRenderLayout
-{
-    vec4 posScale;
-    vec4 quat;
-};
-layout (binding = 4, std430) writeonly buffer OutRenderData
-{
-    OutMeshRenderLayout out_renderData[];
-};
-
-struct OutInstancedIndirectCommand
-{
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    int  vertexOffset;
-    uint firstInstance;
-};
-layout (binding = 5, std430) writeonly buffer OutIndirectCommandBufer
-{
-    OutInstancedIndirectCommand out_indirectCommands[];
-};
-
-bool frustumCheck(vec4 pos, float radius)
-{
-    // Check sphere against frustum planes
-    for (int i = 0; i < 6; i++) 
-    {
-        if (dot(pos, u_frustumPlanes[i]) + radius < 0.0)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-void main()
-{
-    const uint instanceIdx   = gl_GlobalInvocationID.x;
-    const uint meshIdx       = in_instances[instanceIdx].meshIdx;
-    const uint firstInstance = in_meshInfo[meshIdx].firstInstance;
-
-    out_indirectCommands[meshIdx].indexCount    = in_meshInfo[meshIdx].indexCount;
-    out_indirectCommands[meshIdx].firstIndex    = in_meshInfo[meshIdx].firstIndex;
-    out_indirectCommands[meshIdx].vertexOffset  = in_meshInfo[meshIdx].vertexOffset;
-    out_indirectCommands[meshIdx].firstInstance = in_meshInfo[meshIdx].firstInstance;
-
-    const vec4 instancePos = vec4(in_instances[instanceIdx].posScale.xyz, 1.0);
-    const float radius = in_meshInfo[meshIdx].radius * in_instances[instanceIdx].posScale.w;
-    if (frustumCheck(instancePos, radius))
-    {
-        const uint idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
-        out_renderData[firstInstance + idx].posScale = in_instances[instanceIdx].posScale;
-        out_renderData[firstInstance + idx].quat     = in_instances[instanceIdx].quat;
-    }
-}
-)";
+import File.FileSystem;
 
 constexpr static float CAMERA_FOV_DEG = 45.0f;
-constexpr static float CAMERA_NEAR = 0.1f;
+constexpr static float CAMERA_NEAR = 0.01f;
 constexpr static float CAMERA_FAR = 5000.0f;
 
 // TODO make these dynamic
@@ -164,12 +23,6 @@ constexpr static uint32 MAX_INSTANCE_DATA = 1024 * 1024;
 
 constexpr static size_t VERTEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshVertex);
 constexpr static size_t INDEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
-
-struct alignas(16) UboData
-{
-    glm::mat4 mvp;
-    Frustum frustum;
-};
 
 constexpr std::array<vk::ClearValue, 2> getClearValues()
 {
@@ -208,17 +61,29 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 
     {
         GraphicsPipelineLayout graphicsPipelineLayout;
-        graphicsPipelineLayout.vertexShaderText = vertexShaderText;
-        graphicsPipelineLayout.fragmentShaderText = fragmentShaderText;
+        graphicsPipelineLayout.vertexShaderText = std::move(FileSystem::readFileStr("Shaders/instanced_indirect.vs.glsl"));
+        graphicsPipelineLayout.fragmentShaderText = std::move(FileSystem::readFileStr("Shaders/instanced_indirect.fs.glsl"));
         graphicsPipelineLayout.vertexLayoutInfo = RendererVKLayout::getVertexLayoutInfo();
         graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
             .binding = 0,
             .descriptorType = vk::DescriptorType::eUniformBuffer,
             .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eVertex
+            .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment
         });
         graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
             .binding = 1,
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment
+        });
+        graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+            .binding = 2,
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment
+        });
+        graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+            .binding = 3,
             .descriptorType = vk::DescriptorType::eCombinedImageSampler,
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eFragment
@@ -227,7 +92,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     }
     {
         ComputePipelineLayout computePipelineLayout;
-        computePipelineLayout.computeShaderText = computeShaderText;
+        computePipelineLayout.computeShaderText = std::move(FileSystem::readFileStr("Shaders/instanced_indirect.cs.glsl"));
         computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
             .binding = 0,
             .descriptorType = vk::DescriptorType::eUniformBuffer,
@@ -262,7 +127,9 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     }
 
     m_sampler.initialize();
-    m_texture.initialize(m_stagingManager, "Textures/boat/color.dds");
+    m_colorTex.initialize(m_stagingManager, "Textures/boat/color.dds", true);
+    m_normalTex.initialize(m_stagingManager, "Textures/boat/normal.dds", false);
+    m_rmhTex.initialize(m_stagingManager, "Textures/boat/roughness_metallic_height.dds", false);
 
     //Texture awa;
     //awa.initialize(m_stagingManager, "Textures/boat/color.dds");
@@ -301,14 +168,16 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     return true;
 }
 
-void RendererVK::update(double deltaSec, const glm::mat4& viewMatrix, std::span<MeshInstance> instances)
+void RendererVK::update(double deltaSec, const FreeFlyCameraController& camera, std::span<MeshInstance> instances)
 {
     const vk::Extent2D extent = m_swapChain.getLayout().extent;
     const glm::mat4x4 projection = glm::perspective(glm::radians(CAMERA_FOV_DEG), (float)extent.width / (float)extent.height, CAMERA_NEAR, CAMERA_FAR);
+    glm::mat4 viewMatrix = camera.getViewMatrix();
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
     frameData.mappedUniformBuffer[0].mvp = projection * viewMatrix;
     frameData.mappedUniformBuffer[0].frustum.fromMatrix(frameData.mappedUniformBuffer[0].mvp);
+    frameData.mappedUniformBuffer[0].viewPos = camera.getPosition();
 
     if (!frameData.updated)
     {    
@@ -350,23 +219,41 @@ void RendererVK::recordCommandBuffers()
         };
 
         PerFrameData& frameData = m_perFrameData[i];
-        std::array<DescriptorSetUpdateInfo, 2> graphicsDescriptorSetUpdateInfos
+        std::array<DescriptorSetUpdateInfo, 4> graphicsDescriptorSetUpdateInfos
         {
-            DescriptorSetUpdateInfo{
-                .binding = 1,
-                .type = vk::DescriptorType::eCombinedImageSampler,
-                .info = vk::DescriptorImageInfo {
-                    .sampler = m_sampler.getSampler(),
-                    .imageView = m_texture.getImageView(),
-                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-                }
-            },
             DescriptorSetUpdateInfo{
                 .binding = 0,
                 .type = vk::DescriptorType::eUniformBuffer,
                 .info = vk::DescriptorBufferInfo {
                     .buffer = frameData.uniformBuffer.getBuffer(),
-                    .range = sizeof(UboData),
+                    .range = sizeof(RendererVKLayout::Ubo),
+                }
+            },
+            DescriptorSetUpdateInfo{
+                .binding = 1,
+                .type = vk::DescriptorType::eCombinedImageSampler,
+                .info = vk::DescriptorImageInfo {
+                    .sampler = m_sampler.getSampler(),
+                    .imageView = m_colorTex.getImageView(),
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                }
+            },
+            DescriptorSetUpdateInfo{
+                .binding = 2,
+                .type = vk::DescriptorType::eCombinedImageSampler,
+                .info = vk::DescriptorImageInfo {
+                    .sampler = m_sampler.getSampler(),
+                    .imageView = m_normalTex.getImageView(),
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                }
+            },
+            DescriptorSetUpdateInfo{
+                .binding = 3,
+                .type = vk::DescriptorType::eCombinedImageSampler,
+                .info = vk::DescriptorImageInfo {
+                    .sampler = m_sampler.getSampler(),
+                    .imageView = m_rmhTex.getImageView(),
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
                 }
             }
         };
@@ -377,7 +264,7 @@ void RendererVK::recordCommandBuffers()
                 .type = vk::DescriptorType::eUniformBuffer,
                 .info = vk::DescriptorBufferInfo {
                     .buffer = frameData.uniformBuffer.getBuffer(),
-                    .range = sizeof(UboData),
+                    .range = sizeof(RendererVKLayout::Ubo),
                 }
             },
             DescriptorSetUpdateInfo{

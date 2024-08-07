@@ -29,12 +29,16 @@ bool Mesh::initialize(MeshData& meshData, uint32 meshIdx)
     glm::vec3* pVertices = meshData.getVertices();
     glm::vec3* pNormals = meshData.getNormals();
     glm::vec3* pTexCoords = meshData.getTexCoords();
+    glm::vec3* pTangents = meshData.getTangents();
+    glm::vec3* pBitangents = meshData.getBitangents();
 
     for (uint32 i = 0; i < meshData.getNumVertices(); i++)
     {
         RendererVKLayout::MeshVertex& vertex = vertices.emplace_back();
         vertex.position = pVertices[i];
         vertex.normal = pNormals[i];
+        const float handedness = glm::dot(pNormals[i], glm::cross(pTangents[i], pBitangents[i])) >= 0.0f ? 1.0f : -1.0f;
+        vertex.tangent = glm::vec4(pTangents[i], handedness);
         vertex.texCoord = glm::vec2(pTexCoords[i]);
     }
     std::vector<uint32> indices;

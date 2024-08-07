@@ -13,7 +13,7 @@ public:
     ~Texture();
     Texture(const Texture&) = delete;
 
-    bool initialize(StagingManager& stagingManager, const char* pFilePath);
+    bool initialize(StagingManager& stagingManager, const char* pFilePath, bool sRGB);
 
     vk::ImageView getImageView() const { return m_imageView; }
     vk::Image getImage() const { return m_image; }

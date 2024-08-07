@@ -7,7 +7,7 @@ import RendererVK.Buffer;
 import RendererVK.CommandBuffer;
 import RendererVK.SwapChain;
 
-static constexpr size_t STAGING_BUFFER_SIZE = 5 * 1024 * 1024;
+static constexpr size_t STAGING_BUFFER_SIZE = 20 * 1024 * 1024;
 
 StagingManager::StagingManager()
 {

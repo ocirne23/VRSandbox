@@ -82,6 +82,7 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
 
     const char* shaderStrings[1] = { source.data() };
     shader.setStrings(shaderStrings, 1);
+    shader.setDebugInfo(true);
 
     // Enable SPIR-V and Vulkan rules when parsing GLSL
     EShMessages messages = (EShMessages)(EShMsgSpvRules | EShMsgVulkanRules);
@@ -102,6 +103,10 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
         return false;
     }
 
-    glslang::GlslangToSpv(*program.getIntermediate(stage), spirv);
+    glslang::SpvOptions spvOptions;
+    spvOptions.generateDebugInfo = true;
+    spvOptions.emitNonSemanticShaderDebugInfo = true;
+    spvOptions.emitNonSemanticShaderDebugSource = true;
+    glslang::GlslangToSpv(*program.getIntermediate(stage), spirv, &spvOptions);
     return true;
 }

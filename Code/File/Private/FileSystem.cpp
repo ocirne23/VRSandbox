@@ -13,3 +13,17 @@ bool FileSystem::initialize()
     AddDllDirectory(dllDir.wstring().c_str());
     return true;
 }
+
+std::string FileSystem::readFileStr(const std::string& path)
+{
+    std::ifstream file(path, std::ios::in | std::ios::binary | std::ios::ate);
+
+    if (!file.is_open())
+        return std::string();
+
+    std::ifstream::pos_type fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+    std::string fileContent(fileSize, '\0');
+    file.read(fileContent.data(), fileSize);
+    return fileContent;
+}
