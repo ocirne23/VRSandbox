@@ -2,7 +2,6 @@ export module RendererVK;
 
 import Core;
 
-import RendererVK.VK;
 import RendererVK.Instance;
 import RendererVK.Device;
 import RendererVK.Surface;
@@ -80,10 +79,10 @@ private:
         Buffer uniformBuffer;
         Buffer indirectCommandBuffer;
         Buffer instanceDataBuffer;
+        Buffer instanceIdxBuffer;
 
         Buffer indirectDispatchBuffer;
         Buffer computeMeshInfoBuffer;
-        Buffer computeMeshInstanceBuffer;
 
         vk::DispatchIndirectCommand* mappedDispatchBuffer = nullptr;
         RendererVKLayout::Ubo* mappedUniformBuffer = nullptr;

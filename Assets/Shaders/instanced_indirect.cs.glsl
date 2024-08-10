@@ -1,21 +1,10 @@
 #version 450
 
-layout (std140, binding = 0) uniform UBO
-{
-    mat4 u_mvp;
-    vec4 u_frustumPlanes[6];
-    vec3 u_viewPos;
-};
-
 struct InMeshInstance
 {
     vec4 posScale;
     vec4 quat;
     uint meshIdx;
-};
-layout (binding = 2, std430) readonly buffer InMeshInstances
-{
-    InMeshInstance in_instances[];
 };
 
 struct InMeshInfo
@@ -26,21 +15,6 @@ struct InMeshInfo
     int  vertexOffset;
     uint firstInstance;
 };
-layout (binding = 3, std430) readonly buffer InMeshInfoBuffer
-{
-    InMeshInfo in_meshInfo[];
-};
-
-struct OutMeshRenderLayout
-{
-    vec4 posScale;
-    vec4 quat;
-};
-layout (binding = 4, std430) writeonly buffer OutRenderData
-{
-    OutMeshRenderLayout out_renderData[];
-};
-
 struct OutInstancedIndirectCommand
 {
     uint indexCount;
@@ -49,7 +23,26 @@ struct OutInstancedIndirectCommand
     int  vertexOffset;
     uint firstInstance;
 };
-layout (binding = 5, std430) writeonly buffer OutIndirectCommandBufer
+
+layout (binding = 0, std140) uniform UBO
+{
+    mat4 u_mvp;
+    vec4 u_frustumPlanes[6];
+    vec3 u_viewPos;
+};
+layout (binding = 1, std430) readonly buffer InMeshInstances
+{
+    InMeshInstance in_instances[];
+};
+layout (binding = 2, std430) readonly buffer InMeshInfoBuffer
+{
+    InMeshInfo in_meshInfo[];
+};
+layout (binding = 3, std430) writeonly buffer OutMeshInstanceIndexes
+{
+    uint out_meshInstanceIndexes[];
+};
+layout (binding = 4, std430) writeonly buffer OutIndirectCommandBufer
 {
     OutInstancedIndirectCommand out_indirectCommands[];
 };
@@ -83,7 +76,6 @@ void main()
     if (frustumCheck(instancePos, radius))
     {
         const uint idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
-        out_renderData[firstInstance + idx].posScale = in_instances[instanceIdx].posScale;
-        out_renderData[firstInstance + idx].quat     = in_instances[instanceIdx].quat;
+        out_meshInstanceIndexes[firstInstance + idx] = instanceIdx;
     }
 }

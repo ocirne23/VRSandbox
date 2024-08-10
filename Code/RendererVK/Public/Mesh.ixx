@@ -15,7 +15,7 @@ public:
     Mesh(Mesh&& copy);
     Mesh(const Mesh&) = delete;
 
-    bool initialize(MeshData& meshData, uint32 meshIdx);
+    bool initialize(MeshData& meshData);
 
     float getRadius() const { return m_info.radius; }
     uint32 getNumIndices() const { return m_info.indexCount; }
@@ -26,10 +26,12 @@ public:
     void addInstance(MeshInstance* pInstance);
     void removeInstance(MeshInstance* pInstance);
 
+    constexpr static uint32 INVALID_MESH_IDX = ~(0u);
+
 private:
     friend class RendererVK;
 
     RendererVKLayout::MeshInfo m_info;
-    uint32 m_meshIdx = 0;
+    uint32 m_meshIdx = 0;//INVALID_MESH_IDX;
     uint32 m_numInstances = 0;
 };

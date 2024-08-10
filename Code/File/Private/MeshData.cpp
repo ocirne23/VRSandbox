@@ -17,6 +17,7 @@ bool MeshData::initialize(const aiMesh* pMesh)
 {
     m_pMesh = pMesh;
     m_pName = pMesh->mName.C_Str();
+    pMesh->mMaterialIndex;
 
     m_indices.resize(pMesh->mNumFaces * 3);
     for (uint32 i = 0; i < pMesh->mNumFaces; i++)

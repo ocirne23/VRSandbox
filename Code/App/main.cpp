@@ -32,11 +32,16 @@ int main()
     RendererVK& renderer = VK::g_renderer;
     renderer.initialize(window, true);
 
+    {
+        SceneData scene;
+        scene.initialize("D:/KenneyGameAssets/3D assets/Pirate Kit/Models/FBX format/ship_dark.fbx");
+    }
+
     std::vector<Mesh> meshSet;
     {
         SceneData scene;
         scene.initialize("Models/boat.fbx");
-        meshSet.emplace_back().initialize(*scene.getMesh("Boat.001"), 0);
+        meshSet.emplace_back().initialize(*scene.getMesh("Boat.001"));
         /*
         std::vector<MeshData>& sceneMeshes = scene.getMeshes();
         meshSet.reserve(sceneMeshes.size());
@@ -54,8 +59,8 @@ int main()
     {
         for (int y = 0; y < numY; ++y)
         {
-            meshInstances[x * numX + y].transform.pos = glm::vec3(x * 3.0f, y * 4.0f, 0.0f);
-            meshInstances[x * numX + y].transform.scale = 0.3f;
+            meshInstances[x * numX + y].pos = glm::vec3(x * 3.0f, y * 4.0f, 0.0f);
+            meshInstances[x * numX + y].scale = 0.3f;
             meshSet[(x * numX + y) % meshSet.size()].addInstance(&meshInstances[x * numX + y]);
         }
     }
@@ -66,17 +71,17 @@ int main()
             if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_1)
             {
                 MeshInstance& meshInstance = meshInstances.emplace_back();
-                meshInstance.transform.pos = cameraController.getPosition() + cameraController.getDirection();
-                meshInstance.transform.scale = 0.3f;
-                meshInstance.transform.quat = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
+                meshInstance.pos = cameraController.getPosition() + cameraController.getDirection();
+                meshInstance.scale = 0.3f;
+                meshInstance.quat = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
                 meshSet[0].addInstance(&meshInstance);
             }
             else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_2)
             {
                 MeshInstance& meshInstance = meshInstances.emplace_back();
-                meshInstance.transform.pos = cameraController.getPosition() + cameraController.getDirection();
-                meshInstance.transform.scale = 0.3f;
-                meshInstance.transform.quat = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
+                meshInstance.pos = cameraController.getPosition() + cameraController.getDirection();
+                meshInstance.scale = 0.3f;
+                meshInstance.quat = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
                 meshSet[1].addInstance(&meshInstance);
             }
             else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_3 && !meshInstances.empty())

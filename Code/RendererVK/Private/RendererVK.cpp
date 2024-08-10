@@ -59,31 +59,87 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     m_renderPass.initialize(m_swapChain);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
 
+    m_sampler.initialize();
+    m_colorTex.initialize(m_stagingManager, "Textures/boat/color.dds", true);
+    m_normalTex.initialize(m_stagingManager, "Textures/boat/normal.dds", false);
+    m_rmhTex.initialize(m_stagingManager, "Textures/boat/roughness_metallic_height.dds", false);
+
     {
         GraphicsPipelineLayout graphicsPipelineLayout;
         graphicsPipelineLayout.vertexShaderText = std::move(FileSystem::readFileStr("Shaders/instanced_indirect.vs.glsl"));
         graphicsPipelineLayout.fragmentShaderText = std::move(FileSystem::readFileStr("Shaders/instanced_indirect.fs.glsl"));
-        graphicsPipelineLayout.vertexLayoutInfo = RendererVKLayout::getVertexLayoutInfo();
-        graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+
+        auto& bindingDescriptions = graphicsPipelineLayout.vertexLayoutInfo.bindingDescriptions;
+        bindingDescriptions.push_back(vk::VertexInputBindingDescription{
+            .binding = 0,
+            .stride = sizeof(RendererVKLayout::MeshVertex),
+            .inputRate = vk::VertexInputRate::eVertex,
+        });
+        bindingDescriptions.push_back(vk::VertexInputBindingDescription{
+            .binding = 2,
+            .stride = sizeof(uint32),
+            .inputRate = vk::VertexInputRate::eInstance,
+        });
+
+        auto& attributeDescriptions = graphicsPipelineLayout.vertexLayoutInfo.attributeDescriptions;
+        attributeDescriptions.push_back(vk::VertexInputAttributeDescription{ // position
+            .location = 0,
+            .binding = 0,
+            .format = vk::Format::eR32G32B32Sfloat,
+            .offset = offsetof(RendererVKLayout::MeshVertex, position),
+        });
+        attributeDescriptions.push_back(vk::VertexInputAttributeDescription{ // normals
+            .location = 1,
+            .binding = 0,
+            .format = vk::Format::eR32G32B32Sfloat,
+            .offset = offsetof(RendererVKLayout::MeshVertex, normal),
+        });
+        attributeDescriptions.push_back(vk::VertexInputAttributeDescription{ // tangents
+            .location = 2,
+            .binding = 0,
+            .format = vk::Format::eR32G32B32A32Sfloat,
+            .offset = offsetof(RendererVKLayout::MeshVertex, tangent),
+        });
+        attributeDescriptions.push_back(vk::VertexInputAttributeDescription{ // texcoords
+            .location = 3,
+            .binding = 0,
+            .format = vk::Format::eR32G32Sfloat,
+            .offset = offsetof(RendererVKLayout::MeshVertex, texCoord),
+        });
+        attributeDescriptions.push_back(vk::VertexInputAttributeDescription{ // inst_idx
+            .location = 4,
+            .binding = 2,
+            .format = vk::Format::eR32Uint,
+            .offset = 0,
+        });
+
+        auto& descriptorSetBindings = graphicsPipelineLayout.descriptorSetLayoutBindings;
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // UBO
             .binding = 0,
             .descriptorType = vk::DescriptorType::eUniformBuffer,
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment
         });
-        graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InMeshInstances
             .binding = 1,
-            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+            .descriptorType = vk::DescriptorType::eStorageBuffer,
             .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eFragment
-        });
-        graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+            .stageFlags = vk::ShaderStageFlagBits::eVertex
+         });
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_color
             .binding = 2,
             .descriptorType = vk::DescriptorType::eCombinedImageSampler,
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eFragment
         });
-        graphicsPipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_normal
             .binding = 3,
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment
+        });
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_roughness_metallic_height
+            .binding = 4,
             .descriptorType = vk::DescriptorType::eCombinedImageSampler,
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eFragment
@@ -93,46 +149,39 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     {
         ComputePipelineLayout computePipelineLayout;
         computePipelineLayout.computeShaderText = std::move(FileSystem::readFileStr("Shaders/instanced_indirect.cs.glsl"));
-        computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+        auto& descriptorSetBindings = computePipelineLayout.descriptorSetLayoutBindings;
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // UBO
             .binding = 0,
             .descriptorType = vk::DescriptorType::eUniformBuffer,
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eCompute
         });
-        computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InMeshInstances
+            .binding = 1,
+            .descriptorType = vk::DescriptorType::eStorageBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eCompute
+        });
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InMeshInfoBuffer
             .binding = 2,
             .descriptorType = vk::DescriptorType::eStorageBuffer,
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eCompute
          });
-        computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // OutMeshInstanceIndexes
             .binding = 3,
             .descriptorType = vk::DescriptorType::eStorageBuffer,
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eCompute
          });
-        computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // OutIndirectCommandBufer
             .binding = 4,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
-         });
-        computePipelineLayout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-            .binding = 5,
             .descriptorType = vk::DescriptorType::eStorageBuffer,
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eCompute | vk::ShaderStageFlagBits::eVertex
          });
         m_computePipeline.initialize(computePipelineLayout);
     }
-
-    m_sampler.initialize();
-    m_colorTex.initialize(m_stagingManager, "Textures/boat/color.dds", true);
-    m_normalTex.initialize(m_stagingManager, "Textures/boat/normal.dds", false);
-    m_rmhTex.initialize(m_stagingManager, "Textures/boat/roughness_metallic_height.dds", false);
-
-    //Texture awa;
-    //awa.initialize(m_stagingManager, "Textures/boat/color.dds");
 
     for (PerFrameData& perFrame : m_perFrameData)
     {
@@ -151,16 +200,16 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         perFrame.mappedMeshInfo = (RendererVKLayout::MeshInfo*)perFrame.computeMeshInfoBuffer.mapMemory().data();
 
-        perFrame.computeMeshInstanceBuffer.initialize(MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshInstance),
+        perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshInstance),
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-        perFrame.mappedMeshInstances = (RendererVKLayout::MeshInstance*)perFrame.computeMeshInstanceBuffer.mapMemory().data();
+        perFrame.mappedMeshInstances = (RendererVKLayout::MeshInstance*)perFrame.instanceDataBuffer.mapMemory().data();
 
         perFrame.indirectCommandBuffer.initialize(MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand),
             vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshTransform),
+        perFrame.instanceIdxBuffer.initialize(MAX_INSTANCE_DATA * sizeof(uint32),
             vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
     }
@@ -219,7 +268,7 @@ void RendererVK::recordCommandBuffers()
         };
 
         PerFrameData& frameData = m_perFrameData[i];
-        std::array<DescriptorSetUpdateInfo, 4> graphicsDescriptorSetUpdateInfos
+        std::array<DescriptorSetUpdateInfo, 5> graphicsDescriptorSetUpdateInfos
         {
             DescriptorSetUpdateInfo{
                 .binding = 0,
@@ -231,6 +280,14 @@ void RendererVK::recordCommandBuffers()
             },
             DescriptorSetUpdateInfo{
                 .binding = 1,
+                .type = vk::DescriptorType::eStorageBuffer,
+                .info = vk::DescriptorBufferInfo {
+                    .buffer = frameData.instanceDataBuffer.getBuffer(),
+                    .range = MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshInstance),
+                }
+            },
+            DescriptorSetUpdateInfo{
+                .binding = 2,
                 .type = vk::DescriptorType::eCombinedImageSampler,
                 .info = vk::DescriptorImageInfo {
                     .sampler = m_sampler.getSampler(),
@@ -239,7 +296,7 @@ void RendererVK::recordCommandBuffers()
                 }
             },
             DescriptorSetUpdateInfo{
-                .binding = 2,
+                .binding = 3,
                 .type = vk::DescriptorType::eCombinedImageSampler,
                 .info = vk::DescriptorImageInfo {
                     .sampler = m_sampler.getSampler(),
@@ -248,7 +305,7 @@ void RendererVK::recordCommandBuffers()
                 }
             },
             DescriptorSetUpdateInfo{
-                .binding = 3,
+                .binding = 4,
                 .type = vk::DescriptorType::eCombinedImageSampler,
                 .info = vk::DescriptorImageInfo {
                     .sampler = m_sampler.getSampler(),
@@ -259,7 +316,7 @@ void RendererVK::recordCommandBuffers()
         };
         std::array<DescriptorSetUpdateInfo, 5> computeDescriptorSetUpdateInfos
         {
-            DescriptorSetUpdateInfo{
+            DescriptorSetUpdateInfo{ // UBO
                 .binding = 0,
                 .type = vk::DescriptorType::eUniformBuffer,
                 .info = vk::DescriptorBufferInfo {
@@ -267,32 +324,32 @@ void RendererVK::recordCommandBuffers()
                     .range = sizeof(RendererVKLayout::Ubo),
                 }
             },
-            DescriptorSetUpdateInfo{
-                .binding = 2,
+            DescriptorSetUpdateInfo{ // InMeshInstances
+                .binding = 1,
                 .type = vk::DescriptorType::eStorageBuffer,
                 .info = vk::DescriptorBufferInfo {
-                    .buffer = frameData.computeMeshInstanceBuffer.getBuffer(),
+                    .buffer = frameData.instanceDataBuffer.getBuffer(),
                     .range = MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshInstance),
                 }
             },
-            DescriptorSetUpdateInfo{
-                .binding = 3,
+            DescriptorSetUpdateInfo{ // InMeshInfoBuffer
+                .binding = 2,
                 .type = vk::DescriptorType::eStorageBuffer,
                 .info = vk::DescriptorBufferInfo {
                     .buffer = frameData.computeMeshInfoBuffer.getBuffer(),
                     .range = MAX_INDIRECT_COMMANDS * sizeof(RendererVKLayout::MeshInfo),
                 }
             },
-            DescriptorSetUpdateInfo{
-                .binding = 4,
+            DescriptorSetUpdateInfo{ // OutMeshInstanceIndexes
+                .binding = 3,
                 .type = vk::DescriptorType::eStorageBuffer,
                 .info = vk::DescriptorBufferInfo {
-                    .buffer = frameData.instanceDataBuffer.getBuffer(),
-                    .range = MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshTransform),
+                    .buffer = frameData.instanceIdxBuffer.getBuffer(),
+                    .range = MAX_INSTANCE_DATA * sizeof(uint32),
                 }
             },
-            DescriptorSetUpdateInfo{
-                .binding = 5,
+            DescriptorSetUpdateInfo{ // OutIndirectCommandBufer
+                .binding = 4,
                 .type = vk::DescriptorType::eStorageBuffer,
                 .info = vk::DescriptorBufferInfo {
                     .buffer = frameData.indirectCommandBuffer.getBuffer(),
@@ -307,7 +364,6 @@ void RendererVK::recordCommandBuffers()
         {   // Compute shader frustum cull and indirect command buffer generation
             vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
             commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
-            vkCommandBuffer.fillBuffer(frameData.instanceDataBuffer.getBuffer(), 0, MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshTransform), 0);
             vkCommandBuffer.fillBuffer(frameData.indirectCommandBuffer.getBuffer(), 0, MAX_INDIRECT_COMMANDS * sizeof(vk::DrawIndexedIndirectCommand), 0);
             vk::MemoryBarrier memoryBarrier{ .srcAccessMask = vk::AccessFlagBits::eTransferWrite, .dstAccessMask = vk::AccessFlagBits::eShaderRead };
             vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), { memoryBarrier }, {}, {});
@@ -322,7 +378,7 @@ void RendererVK::recordCommandBuffers()
             vkCommandBuffer.setViewport(0, { viewport });
             vkCommandBuffer.setScissor(0, { scissor });
             vkCommandBuffer.bindVertexBuffers(0, { m_meshDataManager.getVertexBuffer().getBuffer() }, { 0 });
-            vkCommandBuffer.bindVertexBuffers(1, { frameData.instanceDataBuffer.getBuffer() }, { 0 });
+            vkCommandBuffer.bindVertexBuffers(2, { frameData.instanceIdxBuffer.getBuffer() }, { 0 });
             vkCommandBuffer.bindIndexBuffer(m_meshDataManager.getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
             vkCommandBuffer.drawIndexedIndirect(frameData.indirectCommandBuffer.getBuffer(), 0, (uint32)m_pMeshSet->size(), sizeof(vk::DrawIndexedIndirectCommand));
             vkCommandBuffer.endRenderPass();

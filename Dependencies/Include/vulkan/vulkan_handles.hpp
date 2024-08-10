@@ -1660,6 +1660,11 @@ namespace VULKAN_HPP_NAMESPACE
   struct PipelineCreateFlags2CreateInfoKHR;
   struct BufferUsageFlags2CreateInfoKHR;
 
+  //=== VK_AMD_anti_lag ===
+  struct PhysicalDeviceAntiLagFeaturesAMD;
+  struct AntiLagDataAMD;
+  struct AntiLagPresentationInfoAMD;
+
   //=== VK_KHR_ray_tracing_position_fetch ===
   struct PhysicalDeviceRayTracingPositionFetchFeaturesKHR;
 
@@ -1694,6 +1699,10 @@ namespace VULKAN_HPP_NAMESPACE
   using MutableDescriptorTypeListVALVE = MutableDescriptorTypeListEXT;
   struct MutableDescriptorTypeCreateInfoEXT;
   using MutableDescriptorTypeCreateInfoVALVE = MutableDescriptorTypeCreateInfoEXT;
+
+  //=== VK_EXT_legacy_vertex_attributes ===
+  struct PhysicalDeviceLegacyVertexAttributesFeaturesEXT;
+  struct PhysicalDeviceLegacyVertexAttributesPropertiesEXT;
 
   //=== VK_EXT_layer_settings ===
   struct LayerSettingsCreateInfoEXT;
@@ -1823,11 +1832,29 @@ namespace VULKAN_HPP_NAMESPACE
   //=== VK_NV_raw_access_chains ===
   struct PhysicalDeviceRawAccessChainsFeaturesNV;
 
+  //=== VK_KHR_shader_relaxed_extended_instruction ===
+  struct PhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR;
+
+  //=== VK_KHR_maintenance7 ===
+  struct PhysicalDeviceMaintenance7FeaturesKHR;
+  struct PhysicalDeviceMaintenance7PropertiesKHR;
+  struct PhysicalDeviceLayeredApiPropertiesListKHR;
+  struct PhysicalDeviceLayeredApiPropertiesKHR;
+  struct PhysicalDeviceLayeredApiVulkanPropertiesKHR;
+
   //=== VK_NV_shader_atomic_float16_vector ===
   struct PhysicalDeviceShaderAtomicFloat16VectorFeaturesNV;
 
+  //=== VK_EXT_shader_replicated_composites ===
+  struct PhysicalDeviceShaderReplicatedCompositesFeaturesEXT;
+
   //=== VK_NV_ray_tracing_validation ===
   struct PhysicalDeviceRayTracingValidationFeaturesNV;
+
+  //=== VK_MESA_image_alignment_control ===
+  struct PhysicalDeviceImageAlignmentControlFeaturesMESA;
+  struct PhysicalDeviceImageAlignmentControlPropertiesMESA;
+  struct ImageAlignmentControlCreateInfoMESA;
 
   //===================================
   //=== HANDLE forward declarations ===
@@ -2407,13 +2434,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eSurfaceKHR;
 
   public:
-    VULKAN_HPP_CONSTEXPR SurfaceKHR() = default;
+    SurfaceKHR() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    SurfaceKHR( SurfaceKHR const & rhs )             = default;
+    SurfaceKHR & operator=( SurfaceKHR const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    SurfaceKHR( SurfaceKHR && rhs )             = default;
+    SurfaceKHR & operator=( SurfaceKHR && rhs ) = default;
+#else
+    SurfaceKHR( SurfaceKHR && rhs ) VULKAN_HPP_NOEXCEPT : m_surfaceKHR( VULKAN_HPP_NAMESPACE::exchange( rhs.m_surfaceKHR, {} ) ) {}
+
+    SurfaceKHR & operator=( SurfaceKHR && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_surfaceKHR = VULKAN_HPP_NAMESPACE::exchange( rhs.m_surfaceKHR, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR SurfaceKHR( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT SurfaceKHR( VkSurfaceKHR surfaceKHR ) VULKAN_HPP_NOEXCEPT : m_surfaceKHR( surfaceKHR ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     SurfaceKHR & operator=( VkSurfaceKHR surfaceKHR ) VULKAN_HPP_NOEXCEPT
     {
       m_surfaceKHR = surfaceKHR;
@@ -2477,6 +2519,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::SurfaceKHR;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkSurfaceKHR, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::SurfaceKHR;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::SurfaceKHR>
   {
@@ -2494,7 +2544,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eDebugReportCallbackEXT;
 
   public:
-    VULKAN_HPP_CONSTEXPR DebugReportCallbackEXT() = default;
+    DebugReportCallbackEXT() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DebugReportCallbackEXT( DebugReportCallbackEXT const & rhs )             = default;
+    DebugReportCallbackEXT & operator=( DebugReportCallbackEXT const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DebugReportCallbackEXT( DebugReportCallbackEXT && rhs )             = default;
+    DebugReportCallbackEXT & operator=( DebugReportCallbackEXT && rhs ) = default;
+#else
+    DebugReportCallbackEXT( DebugReportCallbackEXT && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_debugReportCallbackEXT( VULKAN_HPP_NAMESPACE::exchange( rhs.m_debugReportCallbackEXT, {} ) )
+    {
+    }
+
+    DebugReportCallbackEXT & operator=( DebugReportCallbackEXT && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_debugReportCallbackEXT = VULKAN_HPP_NAMESPACE::exchange( rhs.m_debugReportCallbackEXT, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DebugReportCallbackEXT( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -2503,7 +2571,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DebugReportCallbackEXT & operator=( VkDebugReportCallbackEXT debugReportCallbackEXT ) VULKAN_HPP_NOEXCEPT
     {
       m_debugReportCallbackEXT = debugReportCallbackEXT;
@@ -2567,6 +2635,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DebugReportCallbackEXT;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDebugReportCallbackEXT, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DebugReportCallbackEXT;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DebugReportCallbackEXT>
   {
@@ -2584,7 +2660,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR DebugUtilsMessengerEXT() = default;
+    DebugUtilsMessengerEXT() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DebugUtilsMessengerEXT( DebugUtilsMessengerEXT const & rhs )             = default;
+    DebugUtilsMessengerEXT & operator=( DebugUtilsMessengerEXT const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DebugUtilsMessengerEXT( DebugUtilsMessengerEXT && rhs )             = default;
+    DebugUtilsMessengerEXT & operator=( DebugUtilsMessengerEXT && rhs ) = default;
+#else
+    DebugUtilsMessengerEXT( DebugUtilsMessengerEXT && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_debugUtilsMessengerEXT( VULKAN_HPP_NAMESPACE::exchange( rhs.m_debugUtilsMessengerEXT, {} ) )
+    {
+    }
+
+    DebugUtilsMessengerEXT & operator=( DebugUtilsMessengerEXT && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_debugUtilsMessengerEXT = VULKAN_HPP_NAMESPACE::exchange( rhs.m_debugUtilsMessengerEXT, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DebugUtilsMessengerEXT( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -2593,7 +2687,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DebugUtilsMessengerEXT & operator=( VkDebugUtilsMessengerEXT debugUtilsMessengerEXT ) VULKAN_HPP_NOEXCEPT
     {
       m_debugUtilsMessengerEXT = debugUtilsMessengerEXT;
@@ -2651,6 +2745,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DebugUtilsMessengerEXT;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDebugUtilsMessengerEXT, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DebugUtilsMessengerEXT;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DebugUtilsMessengerEXT>
   {
@@ -2668,13 +2770,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eDisplayKHR;
 
   public:
-    VULKAN_HPP_CONSTEXPR DisplayKHR() = default;
+    DisplayKHR() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DisplayKHR( DisplayKHR const & rhs )             = default;
+    DisplayKHR & operator=( DisplayKHR const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DisplayKHR( DisplayKHR && rhs )             = default;
+    DisplayKHR & operator=( DisplayKHR && rhs ) = default;
+#else
+    DisplayKHR( DisplayKHR && rhs ) VULKAN_HPP_NOEXCEPT : m_displayKHR( VULKAN_HPP_NAMESPACE::exchange( rhs.m_displayKHR, {} ) ) {}
+
+    DisplayKHR & operator=( DisplayKHR && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_displayKHR = VULKAN_HPP_NAMESPACE::exchange( rhs.m_displayKHR, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DisplayKHR( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT DisplayKHR( VkDisplayKHR displayKHR ) VULKAN_HPP_NOEXCEPT : m_displayKHR( displayKHR ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DisplayKHR & operator=( VkDisplayKHR displayKHR ) VULKAN_HPP_NOEXCEPT
     {
       m_displayKHR = displayKHR;
@@ -2738,6 +2855,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DisplayKHR;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDisplayKHR, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DisplayKHR;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DisplayKHR>
   {
@@ -2755,13 +2880,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eSwapchainKHR;
 
   public:
-    VULKAN_HPP_CONSTEXPR SwapchainKHR() = default;
+    SwapchainKHR() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    SwapchainKHR( SwapchainKHR const & rhs )             = default;
+    SwapchainKHR & operator=( SwapchainKHR const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    SwapchainKHR( SwapchainKHR && rhs )             = default;
+    SwapchainKHR & operator=( SwapchainKHR && rhs ) = default;
+#else
+    SwapchainKHR( SwapchainKHR && rhs ) VULKAN_HPP_NOEXCEPT : m_swapchainKHR( VULKAN_HPP_NAMESPACE::exchange( rhs.m_swapchainKHR, {} ) ) {}
+
+    SwapchainKHR & operator=( SwapchainKHR && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_swapchainKHR = VULKAN_HPP_NAMESPACE::exchange( rhs.m_swapchainKHR, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR SwapchainKHR( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT SwapchainKHR( VkSwapchainKHR swapchainKHR ) VULKAN_HPP_NOEXCEPT : m_swapchainKHR( swapchainKHR ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     SwapchainKHR & operator=( VkSwapchainKHR swapchainKHR ) VULKAN_HPP_NOEXCEPT
     {
       m_swapchainKHR = swapchainKHR;
@@ -2825,6 +2965,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::SwapchainKHR;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkSwapchainKHR, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::SwapchainKHR;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::SwapchainKHR>
   {
@@ -2842,13 +2990,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eSemaphore;
 
   public:
-    VULKAN_HPP_CONSTEXPR Semaphore() = default;
+    Semaphore() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Semaphore( Semaphore const & rhs )             = default;
+    Semaphore & operator=( Semaphore const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Semaphore( Semaphore && rhs )             = default;
+    Semaphore & operator=( Semaphore && rhs ) = default;
+#else
+    Semaphore( Semaphore && rhs ) VULKAN_HPP_NOEXCEPT : m_semaphore( VULKAN_HPP_NAMESPACE::exchange( rhs.m_semaphore, {} ) ) {}
+
+    Semaphore & operator=( Semaphore && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_semaphore = VULKAN_HPP_NAMESPACE::exchange( rhs.m_semaphore, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Semaphore( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT Semaphore( VkSemaphore semaphore ) VULKAN_HPP_NOEXCEPT : m_semaphore( semaphore ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     Semaphore & operator=( VkSemaphore semaphore ) VULKAN_HPP_NOEXCEPT
     {
       m_semaphore = semaphore;
@@ -2912,6 +3075,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Semaphore;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkSemaphore, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Semaphore;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Semaphore>
   {
@@ -2929,13 +3100,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eFence;
 
   public:
-    VULKAN_HPP_CONSTEXPR Fence() = default;
+    Fence() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Fence( Fence const & rhs )             = default;
+    Fence & operator=( Fence const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Fence( Fence && rhs )             = default;
+    Fence & operator=( Fence && rhs ) = default;
+#else
+    Fence( Fence && rhs ) VULKAN_HPP_NOEXCEPT : m_fence( VULKAN_HPP_NAMESPACE::exchange( rhs.m_fence, {} ) ) {}
+
+    Fence & operator=( Fence && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_fence = VULKAN_HPP_NAMESPACE::exchange( rhs.m_fence, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Fence( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT Fence( VkFence fence ) VULKAN_HPP_NOEXCEPT : m_fence( fence ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     Fence & operator=( VkFence fence ) VULKAN_HPP_NOEXCEPT
     {
       m_fence = fence;
@@ -2999,6 +3185,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Fence;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkFence, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Fence;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Fence>
   {
@@ -3016,7 +3210,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR PerformanceConfigurationINTEL() = default;
+    PerformanceConfigurationINTEL() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    PerformanceConfigurationINTEL( PerformanceConfigurationINTEL const & rhs )             = default;
+    PerformanceConfigurationINTEL & operator=( PerformanceConfigurationINTEL const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    PerformanceConfigurationINTEL( PerformanceConfigurationINTEL && rhs )             = default;
+    PerformanceConfigurationINTEL & operator=( PerformanceConfigurationINTEL && rhs ) = default;
+#else
+    PerformanceConfigurationINTEL( PerformanceConfigurationINTEL && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_performanceConfigurationINTEL( VULKAN_HPP_NAMESPACE::exchange( rhs.m_performanceConfigurationINTEL, {} ) )
+    {
+    }
+
+    PerformanceConfigurationINTEL & operator=( PerformanceConfigurationINTEL && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_performanceConfigurationINTEL = VULKAN_HPP_NAMESPACE::exchange( rhs.m_performanceConfigurationINTEL, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR PerformanceConfigurationINTEL( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -3025,7 +3237,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     PerformanceConfigurationINTEL & operator=( VkPerformanceConfigurationINTEL performanceConfigurationINTEL ) VULKAN_HPP_NOEXCEPT
     {
       m_performanceConfigurationINTEL = performanceConfigurationINTEL;
@@ -3083,6 +3295,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::PerformanceConfigurationINTEL;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkPerformanceConfigurationINTEL, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::PerformanceConfigurationINTEL;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::PerformanceConfigurationINTEL>
   {
@@ -3100,13 +3320,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eQueryPool;
 
   public:
-    VULKAN_HPP_CONSTEXPR QueryPool() = default;
+    QueryPool() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    QueryPool( QueryPool const & rhs )             = default;
+    QueryPool & operator=( QueryPool const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    QueryPool( QueryPool && rhs )             = default;
+    QueryPool & operator=( QueryPool && rhs ) = default;
+#else
+    QueryPool( QueryPool && rhs ) VULKAN_HPP_NOEXCEPT : m_queryPool( VULKAN_HPP_NAMESPACE::exchange( rhs.m_queryPool, {} ) ) {}
+
+    QueryPool & operator=( QueryPool && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_queryPool = VULKAN_HPP_NAMESPACE::exchange( rhs.m_queryPool, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR QueryPool( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT QueryPool( VkQueryPool queryPool ) VULKAN_HPP_NOEXCEPT : m_queryPool( queryPool ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     QueryPool & operator=( VkQueryPool queryPool ) VULKAN_HPP_NOEXCEPT
     {
       m_queryPool = queryPool;
@@ -3170,6 +3405,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::QueryPool;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkQueryPool, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::QueryPool;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::QueryPool>
   {
@@ -3187,13 +3430,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eBuffer;
 
   public:
-    VULKAN_HPP_CONSTEXPR Buffer() = default;
+    Buffer() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Buffer( Buffer const & rhs )             = default;
+    Buffer & operator=( Buffer const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Buffer( Buffer && rhs )             = default;
+    Buffer & operator=( Buffer && rhs ) = default;
+#else
+    Buffer( Buffer && rhs ) VULKAN_HPP_NOEXCEPT : m_buffer( VULKAN_HPP_NAMESPACE::exchange( rhs.m_buffer, {} ) ) {}
+
+    Buffer & operator=( Buffer && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_buffer = VULKAN_HPP_NAMESPACE::exchange( rhs.m_buffer, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Buffer( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT Buffer( VkBuffer buffer ) VULKAN_HPP_NOEXCEPT : m_buffer( buffer ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     Buffer & operator=( VkBuffer buffer ) VULKAN_HPP_NOEXCEPT
     {
       m_buffer = buffer;
@@ -3257,6 +3515,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Buffer;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkBuffer, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Buffer;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Buffer>
   {
@@ -3274,13 +3540,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::ePipelineLayout;
 
   public:
-    VULKAN_HPP_CONSTEXPR PipelineLayout() = default;
+    PipelineLayout() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    PipelineLayout( PipelineLayout const & rhs )             = default;
+    PipelineLayout & operator=( PipelineLayout const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    PipelineLayout( PipelineLayout && rhs )             = default;
+    PipelineLayout & operator=( PipelineLayout && rhs ) = default;
+#else
+    PipelineLayout( PipelineLayout && rhs ) VULKAN_HPP_NOEXCEPT : m_pipelineLayout( VULKAN_HPP_NAMESPACE::exchange( rhs.m_pipelineLayout, {} ) ) {}
+
+    PipelineLayout & operator=( PipelineLayout && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_pipelineLayout = VULKAN_HPP_NAMESPACE::exchange( rhs.m_pipelineLayout, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR PipelineLayout( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT PipelineLayout( VkPipelineLayout pipelineLayout ) VULKAN_HPP_NOEXCEPT : m_pipelineLayout( pipelineLayout ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     PipelineLayout & operator=( VkPipelineLayout pipelineLayout ) VULKAN_HPP_NOEXCEPT
     {
       m_pipelineLayout = pipelineLayout;
@@ -3344,6 +3625,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::PipelineLayout;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkPipelineLayout, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::PipelineLayout;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::PipelineLayout>
   {
@@ -3361,13 +3650,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eDescriptorSet;
 
   public:
-    VULKAN_HPP_CONSTEXPR DescriptorSet() = default;
+    DescriptorSet() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DescriptorSet( DescriptorSet const & rhs )             = default;
+    DescriptorSet & operator=( DescriptorSet const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DescriptorSet( DescriptorSet && rhs )             = default;
+    DescriptorSet & operator=( DescriptorSet && rhs ) = default;
+#else
+    DescriptorSet( DescriptorSet && rhs ) VULKAN_HPP_NOEXCEPT : m_descriptorSet( VULKAN_HPP_NAMESPACE::exchange( rhs.m_descriptorSet, {} ) ) {}
+
+    DescriptorSet & operator=( DescriptorSet && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_descriptorSet = VULKAN_HPP_NAMESPACE::exchange( rhs.m_descriptorSet, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DescriptorSet( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT DescriptorSet( VkDescriptorSet descriptorSet ) VULKAN_HPP_NOEXCEPT : m_descriptorSet( descriptorSet ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DescriptorSet & operator=( VkDescriptorSet descriptorSet ) VULKAN_HPP_NOEXCEPT
     {
       m_descriptorSet = descriptorSet;
@@ -3431,6 +3735,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DescriptorSet;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDescriptorSet, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DescriptorSet;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DescriptorSet>
   {
@@ -3448,13 +3760,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eImageView;
 
   public:
-    VULKAN_HPP_CONSTEXPR ImageView() = default;
+    ImageView() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    ImageView( ImageView const & rhs )             = default;
+    ImageView & operator=( ImageView const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    ImageView( ImageView && rhs )             = default;
+    ImageView & operator=( ImageView && rhs ) = default;
+#else
+    ImageView( ImageView && rhs ) VULKAN_HPP_NOEXCEPT : m_imageView( VULKAN_HPP_NAMESPACE::exchange( rhs.m_imageView, {} ) ) {}
+
+    ImageView & operator=( ImageView && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_imageView = VULKAN_HPP_NAMESPACE::exchange( rhs.m_imageView, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR ImageView( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT ImageView( VkImageView imageView ) VULKAN_HPP_NOEXCEPT : m_imageView( imageView ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     ImageView & operator=( VkImageView imageView ) VULKAN_HPP_NOEXCEPT
     {
       m_imageView = imageView;
@@ -3518,6 +3845,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::ImageView;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkImageView, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::ImageView;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::ImageView>
   {
@@ -3535,13 +3870,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::ePipeline;
 
   public:
-    VULKAN_HPP_CONSTEXPR Pipeline() = default;
+    Pipeline() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Pipeline( Pipeline const & rhs )             = default;
+    Pipeline & operator=( Pipeline const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Pipeline( Pipeline && rhs )             = default;
+    Pipeline & operator=( Pipeline && rhs ) = default;
+#else
+    Pipeline( Pipeline && rhs ) VULKAN_HPP_NOEXCEPT : m_pipeline( VULKAN_HPP_NAMESPACE::exchange( rhs.m_pipeline, {} ) ) {}
+
+    Pipeline & operator=( Pipeline && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_pipeline = VULKAN_HPP_NAMESPACE::exchange( rhs.m_pipeline, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Pipeline( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT Pipeline( VkPipeline pipeline ) VULKAN_HPP_NOEXCEPT : m_pipeline( pipeline ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     Pipeline & operator=( VkPipeline pipeline ) VULKAN_HPP_NOEXCEPT
     {
       m_pipeline = pipeline;
@@ -3605,6 +3955,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Pipeline;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkPipeline, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Pipeline;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Pipeline>
   {
@@ -3622,13 +3980,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR ShaderEXT() = default;
+    ShaderEXT() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    ShaderEXT( ShaderEXT const & rhs )             = default;
+    ShaderEXT & operator=( ShaderEXT const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    ShaderEXT( ShaderEXT && rhs )             = default;
+    ShaderEXT & operator=( ShaderEXT && rhs ) = default;
+#else
+    ShaderEXT( ShaderEXT && rhs ) VULKAN_HPP_NOEXCEPT : m_shaderEXT( VULKAN_HPP_NAMESPACE::exchange( rhs.m_shaderEXT, {} ) ) {}
+
+    ShaderEXT & operator=( ShaderEXT && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_shaderEXT = VULKAN_HPP_NAMESPACE::exchange( rhs.m_shaderEXT, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR ShaderEXT( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT ShaderEXT( VkShaderEXT shaderEXT ) VULKAN_HPP_NOEXCEPT : m_shaderEXT( shaderEXT ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     ShaderEXT & operator=( VkShaderEXT shaderEXT ) VULKAN_HPP_NOEXCEPT
     {
       m_shaderEXT = shaderEXT;
@@ -3686,6 +4059,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::ShaderEXT;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkShaderEXT, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::ShaderEXT;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::ShaderEXT>
   {
@@ -3703,13 +4084,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eImage;
 
   public:
-    VULKAN_HPP_CONSTEXPR Image() = default;
+    Image() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Image( Image const & rhs )             = default;
+    Image & operator=( Image const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Image( Image && rhs )             = default;
+    Image & operator=( Image && rhs ) = default;
+#else
+    Image( Image && rhs ) VULKAN_HPP_NOEXCEPT : m_image( VULKAN_HPP_NAMESPACE::exchange( rhs.m_image, {} ) ) {}
+
+    Image & operator=( Image && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_image = VULKAN_HPP_NAMESPACE::exchange( rhs.m_image, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Image( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT Image( VkImage image ) VULKAN_HPP_NOEXCEPT : m_image( image ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     Image & operator=( VkImage image ) VULKAN_HPP_NOEXCEPT
     {
       m_image = image;
@@ -3773,6 +4169,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Image;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkImage, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Image;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Image>
   {
@@ -3790,7 +4194,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eAccelerationStructureNV;
 
   public:
-    VULKAN_HPP_CONSTEXPR AccelerationStructureNV() = default;
+    AccelerationStructureNV() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    AccelerationStructureNV( AccelerationStructureNV const & rhs )             = default;
+    AccelerationStructureNV & operator=( AccelerationStructureNV const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    AccelerationStructureNV( AccelerationStructureNV && rhs )             = default;
+    AccelerationStructureNV & operator=( AccelerationStructureNV && rhs ) = default;
+#else
+    AccelerationStructureNV( AccelerationStructureNV && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_accelerationStructureNV( VULKAN_HPP_NAMESPACE::exchange( rhs.m_accelerationStructureNV, {} ) )
+    {
+    }
+
+    AccelerationStructureNV & operator=( AccelerationStructureNV && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_accelerationStructureNV = VULKAN_HPP_NAMESPACE::exchange( rhs.m_accelerationStructureNV, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR AccelerationStructureNV( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -3799,7 +4221,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     AccelerationStructureNV & operator=( VkAccelerationStructureNV accelerationStructureNV ) VULKAN_HPP_NOEXCEPT
     {
       m_accelerationStructureNV = accelerationStructureNV;
@@ -3863,6 +4285,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::AccelerationStructureNV;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkAccelerationStructureNV, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::AccelerationStructureNV;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::AccelerationStructureNV>
   {
@@ -3880,7 +4310,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR OpticalFlowSessionNV() = default;
+    OpticalFlowSessionNV() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    OpticalFlowSessionNV( OpticalFlowSessionNV const & rhs )             = default;
+    OpticalFlowSessionNV & operator=( OpticalFlowSessionNV const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    OpticalFlowSessionNV( OpticalFlowSessionNV && rhs )             = default;
+    OpticalFlowSessionNV & operator=( OpticalFlowSessionNV && rhs ) = default;
+#else
+    OpticalFlowSessionNV( OpticalFlowSessionNV && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_opticalFlowSessionNV( VULKAN_HPP_NAMESPACE::exchange( rhs.m_opticalFlowSessionNV, {} ) )
+    {
+    }
+
+    OpticalFlowSessionNV & operator=( OpticalFlowSessionNV && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_opticalFlowSessionNV = VULKAN_HPP_NAMESPACE::exchange( rhs.m_opticalFlowSessionNV, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR OpticalFlowSessionNV( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -3889,7 +4337,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     OpticalFlowSessionNV & operator=( VkOpticalFlowSessionNV opticalFlowSessionNV ) VULKAN_HPP_NOEXCEPT
     {
       m_opticalFlowSessionNV = opticalFlowSessionNV;
@@ -3947,6 +4395,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::OpticalFlowSessionNV;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkOpticalFlowSessionNV, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::OpticalFlowSessionNV;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::OpticalFlowSessionNV>
   {
@@ -3964,7 +4420,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eDescriptorUpdateTemplate;
 
   public:
-    VULKAN_HPP_CONSTEXPR DescriptorUpdateTemplate() = default;
+    DescriptorUpdateTemplate() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DescriptorUpdateTemplate( DescriptorUpdateTemplate const & rhs )             = default;
+    DescriptorUpdateTemplate & operator=( DescriptorUpdateTemplate const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DescriptorUpdateTemplate( DescriptorUpdateTemplate && rhs )             = default;
+    DescriptorUpdateTemplate & operator=( DescriptorUpdateTemplate && rhs ) = default;
+#else
+    DescriptorUpdateTemplate( DescriptorUpdateTemplate && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_descriptorUpdateTemplate( VULKAN_HPP_NAMESPACE::exchange( rhs.m_descriptorUpdateTemplate, {} ) )
+    {
+    }
+
+    DescriptorUpdateTemplate & operator=( DescriptorUpdateTemplate && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_descriptorUpdateTemplate = VULKAN_HPP_NAMESPACE::exchange( rhs.m_descriptorUpdateTemplate, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DescriptorUpdateTemplate( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -3973,7 +4447,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DescriptorUpdateTemplate & operator=( VkDescriptorUpdateTemplate descriptorUpdateTemplate ) VULKAN_HPP_NOEXCEPT
     {
       m_descriptorUpdateTemplate = descriptorUpdateTemplate;
@@ -4037,6 +4511,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DescriptorUpdateTemplate;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDescriptorUpdateTemplate, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DescriptorUpdateTemplate;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DescriptorUpdateTemplate>
   {
@@ -4056,13 +4538,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eEvent;
 
   public:
-    VULKAN_HPP_CONSTEXPR Event() = default;
+    Event() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Event( Event const & rhs )             = default;
+    Event & operator=( Event const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Event( Event && rhs )             = default;
+    Event & operator=( Event && rhs ) = default;
+#else
+    Event( Event && rhs ) VULKAN_HPP_NOEXCEPT : m_event( VULKAN_HPP_NAMESPACE::exchange( rhs.m_event, {} ) ) {}
+
+    Event & operator=( Event && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_event = VULKAN_HPP_NAMESPACE::exchange( rhs.m_event, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Event( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT Event( VkEvent event ) VULKAN_HPP_NOEXCEPT : m_event( event ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     Event & operator=( VkEvent event ) VULKAN_HPP_NOEXCEPT
     {
       m_event = event;
@@ -4126,6 +4623,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Event;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkEvent, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Event;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Event>
   {
@@ -4143,7 +4648,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eAccelerationStructureKHR;
 
   public:
-    VULKAN_HPP_CONSTEXPR AccelerationStructureKHR() = default;
+    AccelerationStructureKHR() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    AccelerationStructureKHR( AccelerationStructureKHR const & rhs )             = default;
+    AccelerationStructureKHR & operator=( AccelerationStructureKHR const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    AccelerationStructureKHR( AccelerationStructureKHR && rhs )             = default;
+    AccelerationStructureKHR & operator=( AccelerationStructureKHR && rhs ) = default;
+#else
+    AccelerationStructureKHR( AccelerationStructureKHR && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_accelerationStructureKHR( VULKAN_HPP_NAMESPACE::exchange( rhs.m_accelerationStructureKHR, {} ) )
+    {
+    }
+
+    AccelerationStructureKHR & operator=( AccelerationStructureKHR && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_accelerationStructureKHR = VULKAN_HPP_NAMESPACE::exchange( rhs.m_accelerationStructureKHR, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR AccelerationStructureKHR( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -4152,7 +4675,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     AccelerationStructureKHR & operator=( VkAccelerationStructureKHR accelerationStructureKHR ) VULKAN_HPP_NOEXCEPT
     {
       m_accelerationStructureKHR = accelerationStructureKHR;
@@ -4216,6 +4739,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::AccelerationStructureKHR;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkAccelerationStructureKHR, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::AccelerationStructureKHR;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::AccelerationStructureKHR>
   {
@@ -4233,13 +4764,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR MicromapEXT() = default;
+    MicromapEXT() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    MicromapEXT( MicromapEXT const & rhs )             = default;
+    MicromapEXT & operator=( MicromapEXT const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    MicromapEXT( MicromapEXT && rhs )             = default;
+    MicromapEXT & operator=( MicromapEXT && rhs ) = default;
+#else
+    MicromapEXT( MicromapEXT && rhs ) VULKAN_HPP_NOEXCEPT : m_micromapEXT( VULKAN_HPP_NAMESPACE::exchange( rhs.m_micromapEXT, {} ) ) {}
+
+    MicromapEXT & operator=( MicromapEXT && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_micromapEXT = VULKAN_HPP_NAMESPACE::exchange( rhs.m_micromapEXT, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR MicromapEXT( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT MicromapEXT( VkMicromapEXT micromapEXT ) VULKAN_HPP_NOEXCEPT : m_micromapEXT( micromapEXT ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     MicromapEXT & operator=( VkMicromapEXT micromapEXT ) VULKAN_HPP_NOEXCEPT
     {
       m_micromapEXT = micromapEXT;
@@ -4297,6 +4843,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::MicromapEXT;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkMicromapEXT, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::MicromapEXT;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::MicromapEXT>
   {
@@ -4314,7 +4868,22 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eCommandBuffer;
 
   public:
-    VULKAN_HPP_CONSTEXPR CommandBuffer() = default;
+    CommandBuffer() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    CommandBuffer( CommandBuffer const & rhs )             = default;
+    CommandBuffer & operator=( CommandBuffer const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    CommandBuffer( CommandBuffer && rhs )             = default;
+    CommandBuffer & operator=( CommandBuffer && rhs ) = default;
+#else
+    CommandBuffer( CommandBuffer && rhs ) VULKAN_HPP_NOEXCEPT : m_commandBuffer( VULKAN_HPP_NAMESPACE::exchange( rhs.m_commandBuffer, {} ) ) {}
+
+    CommandBuffer & operator=( CommandBuffer && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_commandBuffer = VULKAN_HPP_NAMESPACE::exchange( rhs.m_commandBuffer, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR CommandBuffer( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -5818,11 +6387,11 @@ namespace VULKAN_HPP_NAMESPACE
 #endif /* VULKAN_HPP_DISABLE_ENHANCED_MODE */
 
     template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
-    void setRenderingInputAttachmentIndicesKHR( const VULKAN_HPP_NAMESPACE::RenderingInputAttachmentIndexInfoKHR * pLocationInfo,
+    void setRenderingInputAttachmentIndicesKHR( const VULKAN_HPP_NAMESPACE::RenderingInputAttachmentIndexInfoKHR * pInputAttachmentIndexInfo,
                                                 Dispatch const & d VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
 #ifndef VULKAN_HPP_DISABLE_ENHANCED_MODE
     template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
-    void setRenderingInputAttachmentIndicesKHR( const VULKAN_HPP_NAMESPACE::RenderingInputAttachmentIndexInfoKHR & locationInfo,
+    void setRenderingInputAttachmentIndicesKHR( const VULKAN_HPP_NAMESPACE::RenderingInputAttachmentIndexInfoKHR & inputAttachmentIndexInfo,
                                                 Dispatch const & d VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
 #endif /* VULKAN_HPP_DISABLE_ENHANCED_MODE */
 
@@ -6685,6 +7254,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::CommandBuffer;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkCommandBuffer, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::CommandBuffer;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::CommandBuffer>
   {
@@ -6702,13 +7279,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eDeviceMemory;
 
   public:
-    VULKAN_HPP_CONSTEXPR DeviceMemory() = default;
+    DeviceMemory() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DeviceMemory( DeviceMemory const & rhs )             = default;
+    DeviceMemory & operator=( DeviceMemory const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DeviceMemory( DeviceMemory && rhs )             = default;
+    DeviceMemory & operator=( DeviceMemory && rhs ) = default;
+#else
+    DeviceMemory( DeviceMemory && rhs ) VULKAN_HPP_NOEXCEPT : m_deviceMemory( VULKAN_HPP_NAMESPACE::exchange( rhs.m_deviceMemory, {} ) ) {}
+
+    DeviceMemory & operator=( DeviceMemory && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_deviceMemory = VULKAN_HPP_NAMESPACE::exchange( rhs.m_deviceMemory, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DeviceMemory( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT DeviceMemory( VkDeviceMemory deviceMemory ) VULKAN_HPP_NOEXCEPT : m_deviceMemory( deviceMemory ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DeviceMemory & operator=( VkDeviceMemory deviceMemory ) VULKAN_HPP_NOEXCEPT
     {
       m_deviceMemory = deviceMemory;
@@ -6725,7 +7317,7 @@ namespace VULKAN_HPP_NAMESPACE
 #if defined( VULKAN_HPP_HAS_SPACESHIP_OPERATOR )
     auto operator<=>( DeviceMemory const & ) const = default;
 #else
-    bool                                 operator==( DeviceMemory const & rhs ) const VULKAN_HPP_NOEXCEPT
+    bool operator==( DeviceMemory const & rhs ) const VULKAN_HPP_NOEXCEPT
     {
       return m_deviceMemory == rhs.m_deviceMemory;
     }
@@ -6772,6 +7364,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DeviceMemory;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDeviceMemory, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DeviceMemory;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DeviceMemory>
   {
@@ -6789,13 +7389,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR VideoSessionKHR() = default;
+    VideoSessionKHR() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    VideoSessionKHR( VideoSessionKHR const & rhs )             = default;
+    VideoSessionKHR & operator=( VideoSessionKHR const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    VideoSessionKHR( VideoSessionKHR && rhs )             = default;
+    VideoSessionKHR & operator=( VideoSessionKHR && rhs ) = default;
+#else
+    VideoSessionKHR( VideoSessionKHR && rhs ) VULKAN_HPP_NOEXCEPT : m_videoSessionKHR( VULKAN_HPP_NAMESPACE::exchange( rhs.m_videoSessionKHR, {} ) ) {}
+
+    VideoSessionKHR & operator=( VideoSessionKHR && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_videoSessionKHR = VULKAN_HPP_NAMESPACE::exchange( rhs.m_videoSessionKHR, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR VideoSessionKHR( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT VideoSessionKHR( VkVideoSessionKHR videoSessionKHR ) VULKAN_HPP_NOEXCEPT : m_videoSessionKHR( videoSessionKHR ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     VideoSessionKHR & operator=( VkVideoSessionKHR videoSessionKHR ) VULKAN_HPP_NOEXCEPT
     {
       m_videoSessionKHR = videoSessionKHR;
@@ -6853,6 +7468,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::VideoSessionKHR;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkVideoSessionKHR, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::VideoSessionKHR;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::VideoSessionKHR>
   {
@@ -6870,7 +7493,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR DeferredOperationKHR() = default;
+    DeferredOperationKHR() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DeferredOperationKHR( DeferredOperationKHR const & rhs )             = default;
+    DeferredOperationKHR & operator=( DeferredOperationKHR const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DeferredOperationKHR( DeferredOperationKHR && rhs )             = default;
+    DeferredOperationKHR & operator=( DeferredOperationKHR && rhs ) = default;
+#else
+    DeferredOperationKHR( DeferredOperationKHR && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_deferredOperationKHR( VULKAN_HPP_NAMESPACE::exchange( rhs.m_deferredOperationKHR, {} ) )
+    {
+    }
+
+    DeferredOperationKHR & operator=( DeferredOperationKHR && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_deferredOperationKHR = VULKAN_HPP_NAMESPACE::exchange( rhs.m_deferredOperationKHR, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DeferredOperationKHR( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -6879,7 +7520,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DeferredOperationKHR & operator=( VkDeferredOperationKHR deferredOperationKHR ) VULKAN_HPP_NOEXCEPT
     {
       m_deferredOperationKHR = deferredOperationKHR;
@@ -6937,6 +7578,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DeferredOperationKHR;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDeferredOperationKHR, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DeferredOperationKHR;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DeferredOperationKHR>
   {
@@ -6955,7 +7604,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eBufferCollectionFUCHSIA;
 
   public:
-    VULKAN_HPP_CONSTEXPR BufferCollectionFUCHSIA() = default;
+    BufferCollectionFUCHSIA() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    BufferCollectionFUCHSIA( BufferCollectionFUCHSIA const & rhs )             = default;
+    BufferCollectionFUCHSIA & operator=( BufferCollectionFUCHSIA const & rhs ) = default;
+
+#  if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    BufferCollectionFUCHSIA( BufferCollectionFUCHSIA && rhs )             = default;
+    BufferCollectionFUCHSIA & operator=( BufferCollectionFUCHSIA && rhs ) = default;
+#  else
+    BufferCollectionFUCHSIA( BufferCollectionFUCHSIA && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_bufferCollectionFUCHSIA( VULKAN_HPP_NAMESPACE::exchange( rhs.m_bufferCollectionFUCHSIA, {} ) )
+    {
+    }
+
+    BufferCollectionFUCHSIA & operator=( BufferCollectionFUCHSIA && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_bufferCollectionFUCHSIA = VULKAN_HPP_NAMESPACE::exchange( rhs.m_bufferCollectionFUCHSIA, {} );
+      return *this;
+    }
+#  endif
 
     VULKAN_HPP_CONSTEXPR BufferCollectionFUCHSIA( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -6964,7 +7631,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#  if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#  if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     BufferCollectionFUCHSIA & operator=( VkBufferCollectionFUCHSIA bufferCollectionFUCHSIA ) VULKAN_HPP_NOEXCEPT
     {
       m_bufferCollectionFUCHSIA = bufferCollectionFUCHSIA;
@@ -7028,6 +7695,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::BufferCollectionFUCHSIA;
   };
 
+#  if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkBufferCollectionFUCHSIA, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::BufferCollectionFUCHSIA;
+  };
+#  endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::BufferCollectionFUCHSIA>
   {
@@ -7046,13 +7721,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eBufferView;
 
   public:
-    VULKAN_HPP_CONSTEXPR BufferView() = default;
+    BufferView() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    BufferView( BufferView const & rhs )             = default;
+    BufferView & operator=( BufferView const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    BufferView( BufferView && rhs )             = default;
+    BufferView & operator=( BufferView && rhs ) = default;
+#else
+    BufferView( BufferView && rhs ) VULKAN_HPP_NOEXCEPT : m_bufferView( VULKAN_HPP_NAMESPACE::exchange( rhs.m_bufferView, {} ) ) {}
+
+    BufferView & operator=( BufferView && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_bufferView = VULKAN_HPP_NAMESPACE::exchange( rhs.m_bufferView, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR BufferView( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT BufferView( VkBufferView bufferView ) VULKAN_HPP_NOEXCEPT : m_bufferView( bufferView ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     BufferView & operator=( VkBufferView bufferView ) VULKAN_HPP_NOEXCEPT
     {
       m_bufferView = bufferView;
@@ -7116,6 +7806,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::BufferView;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkBufferView, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::BufferView;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::BufferView>
   {
@@ -7133,13 +7831,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eCommandPool;
 
   public:
-    VULKAN_HPP_CONSTEXPR CommandPool() = default;
+    CommandPool() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    CommandPool( CommandPool const & rhs )             = default;
+    CommandPool & operator=( CommandPool const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    CommandPool( CommandPool && rhs )             = default;
+    CommandPool & operator=( CommandPool && rhs ) = default;
+#else
+    CommandPool( CommandPool && rhs ) VULKAN_HPP_NOEXCEPT : m_commandPool( VULKAN_HPP_NAMESPACE::exchange( rhs.m_commandPool, {} ) ) {}
+
+    CommandPool & operator=( CommandPool && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_commandPool = VULKAN_HPP_NAMESPACE::exchange( rhs.m_commandPool, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR CommandPool( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT CommandPool( VkCommandPool commandPool ) VULKAN_HPP_NOEXCEPT : m_commandPool( commandPool ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     CommandPool & operator=( VkCommandPool commandPool ) VULKAN_HPP_NOEXCEPT
     {
       m_commandPool = commandPool;
@@ -7203,6 +7916,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::CommandPool;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkCommandPool, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::CommandPool;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::CommandPool>
   {
@@ -7220,13 +7941,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::ePipelineCache;
 
   public:
-    VULKAN_HPP_CONSTEXPR PipelineCache() = default;
+    PipelineCache() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    PipelineCache( PipelineCache const & rhs )             = default;
+    PipelineCache & operator=( PipelineCache const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    PipelineCache( PipelineCache && rhs )             = default;
+    PipelineCache & operator=( PipelineCache && rhs ) = default;
+#else
+    PipelineCache( PipelineCache && rhs ) VULKAN_HPP_NOEXCEPT : m_pipelineCache( VULKAN_HPP_NAMESPACE::exchange( rhs.m_pipelineCache, {} ) ) {}
+
+    PipelineCache & operator=( PipelineCache && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_pipelineCache = VULKAN_HPP_NAMESPACE::exchange( rhs.m_pipelineCache, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR PipelineCache( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT PipelineCache( VkPipelineCache pipelineCache ) VULKAN_HPP_NOEXCEPT : m_pipelineCache( pipelineCache ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     PipelineCache & operator=( VkPipelineCache pipelineCache ) VULKAN_HPP_NOEXCEPT
     {
       m_pipelineCache = pipelineCache;
@@ -7290,6 +8026,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::PipelineCache;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkPipelineCache, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::PipelineCache;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::PipelineCache>
   {
@@ -7307,13 +8051,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eCuFunctionNVX;
 
   public:
-    VULKAN_HPP_CONSTEXPR CuFunctionNVX() = default;
+    CuFunctionNVX() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    CuFunctionNVX( CuFunctionNVX const & rhs )             = default;
+    CuFunctionNVX & operator=( CuFunctionNVX const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    CuFunctionNVX( CuFunctionNVX && rhs )             = default;
+    CuFunctionNVX & operator=( CuFunctionNVX && rhs ) = default;
+#else
+    CuFunctionNVX( CuFunctionNVX && rhs ) VULKAN_HPP_NOEXCEPT : m_cuFunctionNVX( VULKAN_HPP_NAMESPACE::exchange( rhs.m_cuFunctionNVX, {} ) ) {}
+
+    CuFunctionNVX & operator=( CuFunctionNVX && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_cuFunctionNVX = VULKAN_HPP_NAMESPACE::exchange( rhs.m_cuFunctionNVX, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR CuFunctionNVX( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT CuFunctionNVX( VkCuFunctionNVX cuFunctionNVX ) VULKAN_HPP_NOEXCEPT : m_cuFunctionNVX( cuFunctionNVX ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     CuFunctionNVX & operator=( VkCuFunctionNVX cuFunctionNVX ) VULKAN_HPP_NOEXCEPT
     {
       m_cuFunctionNVX = cuFunctionNVX;
@@ -7377,6 +8136,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::CuFunctionNVX;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkCuFunctionNVX, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::CuFunctionNVX;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::CuFunctionNVX>
   {
@@ -7394,13 +8161,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eCuModuleNVX;
 
   public:
-    VULKAN_HPP_CONSTEXPR CuModuleNVX() = default;
+    CuModuleNVX() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    CuModuleNVX( CuModuleNVX const & rhs )             = default;
+    CuModuleNVX & operator=( CuModuleNVX const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    CuModuleNVX( CuModuleNVX && rhs )             = default;
+    CuModuleNVX & operator=( CuModuleNVX && rhs ) = default;
+#else
+    CuModuleNVX( CuModuleNVX && rhs ) VULKAN_HPP_NOEXCEPT : m_cuModuleNVX( VULKAN_HPP_NAMESPACE::exchange( rhs.m_cuModuleNVX, {} ) ) {}
+
+    CuModuleNVX & operator=( CuModuleNVX && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_cuModuleNVX = VULKAN_HPP_NAMESPACE::exchange( rhs.m_cuModuleNVX, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR CuModuleNVX( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT CuModuleNVX( VkCuModuleNVX cuModuleNVX ) VULKAN_HPP_NOEXCEPT : m_cuModuleNVX( cuModuleNVX ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     CuModuleNVX & operator=( VkCuModuleNVX cuModuleNVX ) VULKAN_HPP_NOEXCEPT
     {
       m_cuModuleNVX = cuModuleNVX;
@@ -7464,6 +8246,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::CuModuleNVX;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkCuModuleNVX, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::CuModuleNVX;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::CuModuleNVX>
   {
@@ -7482,13 +8272,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eCudaFunctionNV;
 
   public:
-    VULKAN_HPP_CONSTEXPR CudaFunctionNV() = default;
+    CudaFunctionNV() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    CudaFunctionNV( CudaFunctionNV const & rhs )             = default;
+    CudaFunctionNV & operator=( CudaFunctionNV const & rhs ) = default;
+
+#  if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    CudaFunctionNV( CudaFunctionNV && rhs )             = default;
+    CudaFunctionNV & operator=( CudaFunctionNV && rhs ) = default;
+#  else
+    CudaFunctionNV( CudaFunctionNV && rhs ) VULKAN_HPP_NOEXCEPT : m_cudaFunctionNV( VULKAN_HPP_NAMESPACE::exchange( rhs.m_cudaFunctionNV, {} ) ) {}
+
+    CudaFunctionNV & operator=( CudaFunctionNV && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_cudaFunctionNV = VULKAN_HPP_NAMESPACE::exchange( rhs.m_cudaFunctionNV, {} );
+      return *this;
+    }
+#  endif
 
     VULKAN_HPP_CONSTEXPR CudaFunctionNV( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT CudaFunctionNV( VkCudaFunctionNV cudaFunctionNV ) VULKAN_HPP_NOEXCEPT : m_cudaFunctionNV( cudaFunctionNV ) {}
 
-#  if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#  if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     CudaFunctionNV & operator=( VkCudaFunctionNV cudaFunctionNV ) VULKAN_HPP_NOEXCEPT
     {
       m_cudaFunctionNV = cudaFunctionNV;
@@ -7552,6 +8357,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::CudaFunctionNV;
   };
 
+#  if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkCudaFunctionNV, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::CudaFunctionNV;
+  };
+#  endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::CudaFunctionNV>
   {
@@ -7571,13 +8384,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eCudaModuleNV;
 
   public:
-    VULKAN_HPP_CONSTEXPR CudaModuleNV() = default;
+    CudaModuleNV() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    CudaModuleNV( CudaModuleNV const & rhs )             = default;
+    CudaModuleNV & operator=( CudaModuleNV const & rhs ) = default;
+
+#  if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    CudaModuleNV( CudaModuleNV && rhs )             = default;
+    CudaModuleNV & operator=( CudaModuleNV && rhs ) = default;
+#  else
+    CudaModuleNV( CudaModuleNV && rhs ) VULKAN_HPP_NOEXCEPT : m_cudaModuleNV( VULKAN_HPP_NAMESPACE::exchange( rhs.m_cudaModuleNV, {} ) ) {}
+
+    CudaModuleNV & operator=( CudaModuleNV && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_cudaModuleNV = VULKAN_HPP_NAMESPACE::exchange( rhs.m_cudaModuleNV, {} );
+      return *this;
+    }
+#  endif
 
     VULKAN_HPP_CONSTEXPR CudaModuleNV( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT CudaModuleNV( VkCudaModuleNV cudaModuleNV ) VULKAN_HPP_NOEXCEPT : m_cudaModuleNV( cudaModuleNV ) {}
 
-#  if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#  if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     CudaModuleNV & operator=( VkCudaModuleNV cudaModuleNV ) VULKAN_HPP_NOEXCEPT
     {
       m_cudaModuleNV = cudaModuleNV;
@@ -7641,6 +8469,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::CudaModuleNV;
   };
 
+#  if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkCudaModuleNV, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::CudaModuleNV;
+  };
+#  endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::CudaModuleNV>
   {
@@ -7659,13 +8495,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eDescriptorPool;
 
   public:
-    VULKAN_HPP_CONSTEXPR DescriptorPool() = default;
+    DescriptorPool() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DescriptorPool( DescriptorPool const & rhs )             = default;
+    DescriptorPool & operator=( DescriptorPool const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DescriptorPool( DescriptorPool && rhs )             = default;
+    DescriptorPool & operator=( DescriptorPool && rhs ) = default;
+#else
+    DescriptorPool( DescriptorPool && rhs ) VULKAN_HPP_NOEXCEPT : m_descriptorPool( VULKAN_HPP_NAMESPACE::exchange( rhs.m_descriptorPool, {} ) ) {}
+
+    DescriptorPool & operator=( DescriptorPool && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_descriptorPool = VULKAN_HPP_NAMESPACE::exchange( rhs.m_descriptorPool, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DescriptorPool( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT DescriptorPool( VkDescriptorPool descriptorPool ) VULKAN_HPP_NOEXCEPT : m_descriptorPool( descriptorPool ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DescriptorPool & operator=( VkDescriptorPool descriptorPool ) VULKAN_HPP_NOEXCEPT
     {
       m_descriptorPool = descriptorPool;
@@ -7729,6 +8580,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DescriptorPool;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDescriptorPool, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DescriptorPool;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DescriptorPool>
   {
@@ -7746,7 +8605,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eDescriptorSetLayout;
 
   public:
-    VULKAN_HPP_CONSTEXPR DescriptorSetLayout() = default;
+    DescriptorSetLayout() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DescriptorSetLayout( DescriptorSetLayout const & rhs )             = default;
+    DescriptorSetLayout & operator=( DescriptorSetLayout const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DescriptorSetLayout( DescriptorSetLayout && rhs )             = default;
+    DescriptorSetLayout & operator=( DescriptorSetLayout && rhs ) = default;
+#else
+    DescriptorSetLayout( DescriptorSetLayout && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_descriptorSetLayout( VULKAN_HPP_NAMESPACE::exchange( rhs.m_descriptorSetLayout, {} ) )
+    {
+    }
+
+    DescriptorSetLayout & operator=( DescriptorSetLayout && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_descriptorSetLayout = VULKAN_HPP_NAMESPACE::exchange( rhs.m_descriptorSetLayout, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DescriptorSetLayout( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -7755,7 +8632,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DescriptorSetLayout & operator=( VkDescriptorSetLayout descriptorSetLayout ) VULKAN_HPP_NOEXCEPT
     {
       m_descriptorSetLayout = descriptorSetLayout;
@@ -7819,6 +8696,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DescriptorSetLayout;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDescriptorSetLayout, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DescriptorSetLayout;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DescriptorSetLayout>
   {
@@ -7836,13 +8721,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eFramebuffer;
 
   public:
-    VULKAN_HPP_CONSTEXPR Framebuffer() = default;
+    Framebuffer() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Framebuffer( Framebuffer const & rhs )             = default;
+    Framebuffer & operator=( Framebuffer const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Framebuffer( Framebuffer && rhs )             = default;
+    Framebuffer & operator=( Framebuffer && rhs ) = default;
+#else
+    Framebuffer( Framebuffer && rhs ) VULKAN_HPP_NOEXCEPT : m_framebuffer( VULKAN_HPP_NAMESPACE::exchange( rhs.m_framebuffer, {} ) ) {}
+
+    Framebuffer & operator=( Framebuffer && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_framebuffer = VULKAN_HPP_NAMESPACE::exchange( rhs.m_framebuffer, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Framebuffer( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT Framebuffer( VkFramebuffer framebuffer ) VULKAN_HPP_NOEXCEPT : m_framebuffer( framebuffer ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     Framebuffer & operator=( VkFramebuffer framebuffer ) VULKAN_HPP_NOEXCEPT
     {
       m_framebuffer = framebuffer;
@@ -7906,6 +8806,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Framebuffer;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkFramebuffer, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Framebuffer;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Framebuffer>
   {
@@ -7923,7 +8831,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR IndirectCommandsLayoutNV() = default;
+    IndirectCommandsLayoutNV() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    IndirectCommandsLayoutNV( IndirectCommandsLayoutNV const & rhs )             = default;
+    IndirectCommandsLayoutNV & operator=( IndirectCommandsLayoutNV const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    IndirectCommandsLayoutNV( IndirectCommandsLayoutNV && rhs )             = default;
+    IndirectCommandsLayoutNV & operator=( IndirectCommandsLayoutNV && rhs ) = default;
+#else
+    IndirectCommandsLayoutNV( IndirectCommandsLayoutNV && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_indirectCommandsLayoutNV( VULKAN_HPP_NAMESPACE::exchange( rhs.m_indirectCommandsLayoutNV, {} ) )
+    {
+    }
+
+    IndirectCommandsLayoutNV & operator=( IndirectCommandsLayoutNV && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_indirectCommandsLayoutNV = VULKAN_HPP_NAMESPACE::exchange( rhs.m_indirectCommandsLayoutNV, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR IndirectCommandsLayoutNV( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -7932,7 +8858,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     IndirectCommandsLayoutNV & operator=( VkIndirectCommandsLayoutNV indirectCommandsLayoutNV ) VULKAN_HPP_NOEXCEPT
     {
       m_indirectCommandsLayoutNV = indirectCommandsLayoutNV;
@@ -7990,6 +8916,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::IndirectCommandsLayoutNV;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkIndirectCommandsLayoutNV, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::IndirectCommandsLayoutNV;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::IndirectCommandsLayoutNV>
   {
@@ -8007,13 +8941,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR PrivateDataSlot() = default;
+    PrivateDataSlot() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    PrivateDataSlot( PrivateDataSlot const & rhs )             = default;
+    PrivateDataSlot & operator=( PrivateDataSlot const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    PrivateDataSlot( PrivateDataSlot && rhs )             = default;
+    PrivateDataSlot & operator=( PrivateDataSlot && rhs ) = default;
+#else
+    PrivateDataSlot( PrivateDataSlot && rhs ) VULKAN_HPP_NOEXCEPT : m_privateDataSlot( VULKAN_HPP_NAMESPACE::exchange( rhs.m_privateDataSlot, {} ) ) {}
+
+    PrivateDataSlot & operator=( PrivateDataSlot && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_privateDataSlot = VULKAN_HPP_NAMESPACE::exchange( rhs.m_privateDataSlot, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR PrivateDataSlot( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT PrivateDataSlot( VkPrivateDataSlot privateDataSlot ) VULKAN_HPP_NOEXCEPT : m_privateDataSlot( privateDataSlot ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     PrivateDataSlot & operator=( VkPrivateDataSlot privateDataSlot ) VULKAN_HPP_NOEXCEPT
     {
       m_privateDataSlot = privateDataSlot;
@@ -8071,6 +9020,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::PrivateDataSlot;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkPrivateDataSlot, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::PrivateDataSlot;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::PrivateDataSlot>
   {
@@ -8090,13 +9047,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eRenderPass;
 
   public:
-    VULKAN_HPP_CONSTEXPR RenderPass() = default;
+    RenderPass() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    RenderPass( RenderPass const & rhs )             = default;
+    RenderPass & operator=( RenderPass const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    RenderPass( RenderPass && rhs )             = default;
+    RenderPass & operator=( RenderPass && rhs ) = default;
+#else
+    RenderPass( RenderPass && rhs ) VULKAN_HPP_NOEXCEPT : m_renderPass( VULKAN_HPP_NAMESPACE::exchange( rhs.m_renderPass, {} ) ) {}
+
+    RenderPass & operator=( RenderPass && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_renderPass = VULKAN_HPP_NAMESPACE::exchange( rhs.m_renderPass, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR RenderPass( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT RenderPass( VkRenderPass renderPass ) VULKAN_HPP_NOEXCEPT : m_renderPass( renderPass ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     RenderPass & operator=( VkRenderPass renderPass ) VULKAN_HPP_NOEXCEPT
     {
       m_renderPass = renderPass;
@@ -8160,6 +9132,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::RenderPass;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkRenderPass, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::RenderPass;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::RenderPass>
   {
@@ -8177,13 +9157,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eSampler;
 
   public:
-    VULKAN_HPP_CONSTEXPR Sampler() = default;
+    Sampler() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Sampler( Sampler const & rhs )             = default;
+    Sampler & operator=( Sampler const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Sampler( Sampler && rhs )             = default;
+    Sampler & operator=( Sampler && rhs ) = default;
+#else
+    Sampler( Sampler && rhs ) VULKAN_HPP_NOEXCEPT : m_sampler( VULKAN_HPP_NAMESPACE::exchange( rhs.m_sampler, {} ) ) {}
+
+    Sampler & operator=( Sampler && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_sampler = VULKAN_HPP_NAMESPACE::exchange( rhs.m_sampler, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Sampler( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT Sampler( VkSampler sampler ) VULKAN_HPP_NOEXCEPT : m_sampler( sampler ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     Sampler & operator=( VkSampler sampler ) VULKAN_HPP_NOEXCEPT
     {
       m_sampler = sampler;
@@ -8247,6 +9242,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Sampler;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkSampler, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Sampler;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Sampler>
   {
@@ -8264,7 +9267,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eSamplerYcbcrConversion;
 
   public:
-    VULKAN_HPP_CONSTEXPR SamplerYcbcrConversion() = default;
+    SamplerYcbcrConversion() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    SamplerYcbcrConversion( SamplerYcbcrConversion const & rhs )             = default;
+    SamplerYcbcrConversion & operator=( SamplerYcbcrConversion const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    SamplerYcbcrConversion( SamplerYcbcrConversion && rhs )             = default;
+    SamplerYcbcrConversion & operator=( SamplerYcbcrConversion && rhs ) = default;
+#else
+    SamplerYcbcrConversion( SamplerYcbcrConversion && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_samplerYcbcrConversion( VULKAN_HPP_NAMESPACE::exchange( rhs.m_samplerYcbcrConversion, {} ) )
+    {
+    }
+
+    SamplerYcbcrConversion & operator=( SamplerYcbcrConversion && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_samplerYcbcrConversion = VULKAN_HPP_NAMESPACE::exchange( rhs.m_samplerYcbcrConversion, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR SamplerYcbcrConversion( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -8273,7 +9294,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     SamplerYcbcrConversion & operator=( VkSamplerYcbcrConversion samplerYcbcrConversion ) VULKAN_HPP_NOEXCEPT
     {
       m_samplerYcbcrConversion = samplerYcbcrConversion;
@@ -8337,6 +9358,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::SamplerYcbcrConversion;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkSamplerYcbcrConversion, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::SamplerYcbcrConversion;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::SamplerYcbcrConversion>
   {
@@ -8356,13 +9385,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eShaderModule;
 
   public:
-    VULKAN_HPP_CONSTEXPR ShaderModule() = default;
+    ShaderModule() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    ShaderModule( ShaderModule const & rhs )             = default;
+    ShaderModule & operator=( ShaderModule const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    ShaderModule( ShaderModule && rhs )             = default;
+    ShaderModule & operator=( ShaderModule && rhs ) = default;
+#else
+    ShaderModule( ShaderModule && rhs ) VULKAN_HPP_NOEXCEPT : m_shaderModule( VULKAN_HPP_NAMESPACE::exchange( rhs.m_shaderModule, {} ) ) {}
+
+    ShaderModule & operator=( ShaderModule && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_shaderModule = VULKAN_HPP_NAMESPACE::exchange( rhs.m_shaderModule, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR ShaderModule( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT ShaderModule( VkShaderModule shaderModule ) VULKAN_HPP_NOEXCEPT : m_shaderModule( shaderModule ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     ShaderModule & operator=( VkShaderModule shaderModule ) VULKAN_HPP_NOEXCEPT
     {
       m_shaderModule = shaderModule;
@@ -8426,6 +9470,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::ShaderModule;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkShaderModule, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::ShaderModule;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::ShaderModule>
   {
@@ -8443,7 +9495,24 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eValidationCacheEXT;
 
   public:
-    VULKAN_HPP_CONSTEXPR ValidationCacheEXT() = default;
+    ValidationCacheEXT() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    ValidationCacheEXT( ValidationCacheEXT const & rhs )             = default;
+    ValidationCacheEXT & operator=( ValidationCacheEXT const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    ValidationCacheEXT( ValidationCacheEXT && rhs )             = default;
+    ValidationCacheEXT & operator=( ValidationCacheEXT && rhs ) = default;
+#else
+    ValidationCacheEXT( ValidationCacheEXT && rhs ) VULKAN_HPP_NOEXCEPT : m_validationCacheEXT( VULKAN_HPP_NAMESPACE::exchange( rhs.m_validationCacheEXT, {} ) )
+    {
+    }
+
+    ValidationCacheEXT & operator=( ValidationCacheEXT && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_validationCacheEXT = VULKAN_HPP_NAMESPACE::exchange( rhs.m_validationCacheEXT, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR ValidationCacheEXT( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -8451,7 +9520,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     ValidationCacheEXT & operator=( VkValidationCacheEXT validationCacheEXT ) VULKAN_HPP_NOEXCEPT
     {
       m_validationCacheEXT = validationCacheEXT;
@@ -8515,6 +9584,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::ValidationCacheEXT;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkValidationCacheEXT, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::ValidationCacheEXT;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::ValidationCacheEXT>
   {
@@ -8532,7 +9609,25 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eUnknown;
 
   public:
-    VULKAN_HPP_CONSTEXPR VideoSessionParametersKHR() = default;
+    VideoSessionParametersKHR() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    VideoSessionParametersKHR( VideoSessionParametersKHR const & rhs )             = default;
+    VideoSessionParametersKHR & operator=( VideoSessionParametersKHR const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    VideoSessionParametersKHR( VideoSessionParametersKHR && rhs )             = default;
+    VideoSessionParametersKHR & operator=( VideoSessionParametersKHR && rhs ) = default;
+#else
+    VideoSessionParametersKHR( VideoSessionParametersKHR && rhs ) VULKAN_HPP_NOEXCEPT
+      : m_videoSessionParametersKHR( VULKAN_HPP_NAMESPACE::exchange( rhs.m_videoSessionParametersKHR, {} ) )
+    {
+    }
+
+    VideoSessionParametersKHR & operator=( VideoSessionParametersKHR && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_videoSessionParametersKHR = VULKAN_HPP_NAMESPACE::exchange( rhs.m_videoSessionParametersKHR, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR VideoSessionParametersKHR( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -8541,7 +9636,7 @@ namespace VULKAN_HPP_NAMESPACE
     {
     }
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     VideoSessionParametersKHR & operator=( VkVideoSessionParametersKHR videoSessionParametersKHR ) VULKAN_HPP_NOEXCEPT
     {
       m_videoSessionParametersKHR = videoSessionParametersKHR;
@@ -8599,6 +9694,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::VideoSessionParametersKHR;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkVideoSessionParametersKHR, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::VideoSessionParametersKHR;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::VideoSessionParametersKHR>
   {
@@ -8616,7 +9719,22 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eQueue;
 
   public:
-    VULKAN_HPP_CONSTEXPR Queue() = default;
+    Queue() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Queue( Queue const & rhs )             = default;
+    Queue & operator=( Queue const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Queue( Queue && rhs )             = default;
+    Queue & operator=( Queue && rhs ) = default;
+#else
+    Queue( Queue && rhs ) VULKAN_HPP_NOEXCEPT : m_queue( VULKAN_HPP_NAMESPACE::exchange( rhs.m_queue, {} ) ) {}
+
+    Queue & operator=( Queue && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_queue = VULKAN_HPP_NAMESPACE::exchange( rhs.m_queue, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Queue( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -8766,8 +9884,8 @@ namespace VULKAN_HPP_NAMESPACE
 #else
     template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
     VULKAN_HPP_NODISCARD_WHEN_NO_EXCEPTIONS typename ResultValueType<void>::type
-         setPerformanceConfigurationINTEL( VULKAN_HPP_NAMESPACE::PerformanceConfigurationINTEL configuration,
-                                           Dispatch const & d                                  VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const;
+      setPerformanceConfigurationINTEL( VULKAN_HPP_NAMESPACE::PerformanceConfigurationINTEL configuration,
+                                        Dispatch const & d                                  VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const;
 #endif /*VULKAN_HPP_DISABLE_ENHANCED_MODE*/
 
     //=== VK_KHR_synchronization2 ===
@@ -8844,6 +9962,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Queue;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkQueue, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Queue;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Queue>
   {
@@ -8861,7 +9987,22 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eDevice;
 
   public:
-    VULKAN_HPP_CONSTEXPR Device() = default;
+    Device() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Device( Device const & rhs )             = default;
+    Device & operator=( Device const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Device( Device && rhs )             = default;
+    Device & operator=( Device && rhs ) = default;
+#else
+    Device( Device && rhs ) VULKAN_HPP_NOEXCEPT : m_device( VULKAN_HPP_NAMESPACE::exchange( rhs.m_device, {} ) ) {}
+
+    Device & operator=( Device && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_device = VULKAN_HPP_NAMESPACE::exchange( rhs.m_device, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Device( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -13687,11 +14828,11 @@ namespace VULKAN_HPP_NAMESPACE
 #else
     template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
     VULKAN_HPP_NODISCARD_WHEN_NO_EXCEPTIONS typename ResultValueType<void>::type
-         bindOpticalFlowSessionImageNV( VULKAN_HPP_NAMESPACE::OpticalFlowSessionNV             session,
-                                        VULKAN_HPP_NAMESPACE::OpticalFlowSessionBindingPointNV bindingPoint,
-                                        VULKAN_HPP_NAMESPACE::ImageView                        view,
-                                        VULKAN_HPP_NAMESPACE::ImageLayout                      layout,
-                                        Dispatch const & d                                     VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const;
+      bindOpticalFlowSessionImageNV( VULKAN_HPP_NAMESPACE::OpticalFlowSessionNV             session,
+                                     VULKAN_HPP_NAMESPACE::OpticalFlowSessionBindingPointNV bindingPoint,
+                                     VULKAN_HPP_NAMESPACE::ImageView                        view,
+                                     VULKAN_HPP_NAMESPACE::ImageLayout                      layout,
+                                     Dispatch const & d                                     VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const;
 #endif /*VULKAN_HPP_DISABLE_ENHANCED_MODE*/
 
     //=== VK_KHR_maintenance5 ===
@@ -13738,6 +14879,17 @@ namespace VULKAN_HPP_NAMESPACE
                          getImageSubresourceLayout2KHR( VULKAN_HPP_NAMESPACE::Image                        image,
                                                         const VULKAN_HPP_NAMESPACE::ImageSubresource2KHR & subresource,
                                                         Dispatch const & d                                 VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
+#endif /* VULKAN_HPP_DISABLE_ENHANCED_MODE */
+
+    //=== VK_AMD_anti_lag ===
+
+    template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+    void antiLagUpdateAMD( const VULKAN_HPP_NAMESPACE::AntiLagDataAMD * pData,
+                           Dispatch const & d                           VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
+#ifndef VULKAN_HPP_DISABLE_ENHANCED_MODE
+    template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+    void antiLagUpdateAMD( const VULKAN_HPP_NAMESPACE::AntiLagDataAMD & data,
+                           Dispatch const & d                           VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
 #endif /* VULKAN_HPP_DISABLE_ENHANCED_MODE */
 
     //=== VK_EXT_shader_object ===
@@ -13876,14 +15028,14 @@ namespace VULKAN_HPP_NAMESPACE
 #endif /* VULKAN_HPP_DISABLE_ENHANCED_MODE */
 
     template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
-    VULKAN_HPP_NODISCARD Result latencySleepNV( VULKAN_HPP_NAMESPACE::SwapchainKHR               swapchain,
-                                                const VULKAN_HPP_NAMESPACE::LatencySleepInfoNV * pSleepInfo,
-                                                Dispatch const & d VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
+    Result latencySleepNV( VULKAN_HPP_NAMESPACE::SwapchainKHR               swapchain,
+                           const VULKAN_HPP_NAMESPACE::LatencySleepInfoNV * pSleepInfo,
+                           Dispatch const & d                               VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
 #ifndef VULKAN_HPP_DISABLE_ENHANCED_MODE
     template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
-    typename ResultValueType<void>::type latencySleepNV( VULKAN_HPP_NAMESPACE::SwapchainKHR               swapchain,
-                                                         const VULKAN_HPP_NAMESPACE::LatencySleepInfoNV & sleepInfo,
-                                                         Dispatch const & d                               VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const;
+    void latencySleepNV( VULKAN_HPP_NAMESPACE::SwapchainKHR               swapchain,
+                         const VULKAN_HPP_NAMESPACE::LatencySleepInfoNV & sleepInfo,
+                         Dispatch const & d                               VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
 #endif /* VULKAN_HPP_DISABLE_ENHANCED_MODE */
 
     template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
@@ -13902,10 +15054,19 @@ namespace VULKAN_HPP_NAMESPACE
                               VULKAN_HPP_NAMESPACE::GetLatencyMarkerInfoNV * pLatencyMarkerInfo,
                               Dispatch const & d                             VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
 #ifndef VULKAN_HPP_DISABLE_ENHANCED_MODE
-    template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
-    VULKAN_HPP_NODISCARD VULKAN_HPP_NAMESPACE::GetLatencyMarkerInfoNV
-                         getLatencyTimingsNV( VULKAN_HPP_NAMESPACE::SwapchainKHR swapchain,
-                                              Dispatch const & d                 VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const VULKAN_HPP_NOEXCEPT;
+    template <typename LatencyTimingsFrameReportNVAllocator = std::allocator<VULKAN_HPP_NAMESPACE::LatencyTimingsFrameReportNV>,
+              typename Dispatch                             = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+    VULKAN_HPP_NODISCARD std::vector<VULKAN_HPP_NAMESPACE::LatencyTimingsFrameReportNV, LatencyTimingsFrameReportNVAllocator>
+                         getLatencyTimingsNV( VULKAN_HPP_NAMESPACE::SwapchainKHR swapchain, Dispatch const & d VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const;
+    template <
+      typename LatencyTimingsFrameReportNVAllocator = std::allocator<VULKAN_HPP_NAMESPACE::LatencyTimingsFrameReportNV>,
+      typename Dispatch                             = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE,
+      typename std::enable_if<std::is_same<typename LatencyTimingsFrameReportNVAllocator::value_type, VULKAN_HPP_NAMESPACE::LatencyTimingsFrameReportNV>::value,
+                              int>::type            = 0>
+    VULKAN_HPP_NODISCARD std::vector<VULKAN_HPP_NAMESPACE::LatencyTimingsFrameReportNV, LatencyTimingsFrameReportNVAllocator>
+                         getLatencyTimingsNV( VULKAN_HPP_NAMESPACE::SwapchainKHR     swapchain,
+                                              LatencyTimingsFrameReportNVAllocator & latencyTimingsFrameReportNVAllocator,
+                                              Dispatch const & d                     VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const;
 #endif /* VULKAN_HPP_DISABLE_ENHANCED_MODE */
 
 #if defined( VK_USE_PLATFORM_SCREEN_QNX )
@@ -13982,6 +15143,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::Device;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDevice, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Device;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Device>
   {
@@ -13999,13 +15168,28 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eDisplayModeKHR;
 
   public:
-    VULKAN_HPP_CONSTEXPR DisplayModeKHR() = default;
+    DisplayModeKHR() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    DisplayModeKHR( DisplayModeKHR const & rhs )             = default;
+    DisplayModeKHR & operator=( DisplayModeKHR const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    DisplayModeKHR( DisplayModeKHR && rhs )             = default;
+    DisplayModeKHR & operator=( DisplayModeKHR && rhs ) = default;
+#else
+    DisplayModeKHR( DisplayModeKHR && rhs ) VULKAN_HPP_NOEXCEPT : m_displayModeKHR( VULKAN_HPP_NAMESPACE::exchange( rhs.m_displayModeKHR, {} ) ) {}
+
+    DisplayModeKHR & operator=( DisplayModeKHR && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_displayModeKHR = VULKAN_HPP_NAMESPACE::exchange( rhs.m_displayModeKHR, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR DisplayModeKHR( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
     VULKAN_HPP_TYPESAFE_EXPLICIT DisplayModeKHR( VkDisplayModeKHR displayModeKHR ) VULKAN_HPP_NOEXCEPT : m_displayModeKHR( displayModeKHR ) {}
 
-#if defined( VULKAN_HPP_TYPESAFE_CONVERSION )
+#if ( VULKAN_HPP_TYPESAFE_CONVERSION == 1 )
     DisplayModeKHR & operator=( VkDisplayModeKHR displayModeKHR ) VULKAN_HPP_NOEXCEPT
     {
       m_displayModeKHR = displayModeKHR;
@@ -14069,6 +15253,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::DisplayModeKHR;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkDisplayModeKHR, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::DisplayModeKHR;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::DisplayModeKHR>
   {
@@ -14086,7 +15278,22 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::ePhysicalDevice;
 
   public:
-    VULKAN_HPP_CONSTEXPR PhysicalDevice() = default;
+    PhysicalDevice() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    PhysicalDevice( PhysicalDevice const & rhs )             = default;
+    PhysicalDevice & operator=( PhysicalDevice const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    PhysicalDevice( PhysicalDevice && rhs )             = default;
+    PhysicalDevice & operator=( PhysicalDevice && rhs ) = default;
+#else
+    PhysicalDevice( PhysicalDevice && rhs ) VULKAN_HPP_NOEXCEPT : m_physicalDevice( VULKAN_HPP_NAMESPACE::exchange( rhs.m_physicalDevice, {} ) ) {}
+
+    PhysicalDevice & operator=( PhysicalDevice && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_physicalDevice = VULKAN_HPP_NAMESPACE::exchange( rhs.m_physicalDevice, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR PhysicalDevice( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -15298,7 +16505,7 @@ namespace VULKAN_HPP_NAMESPACE
 #else
     template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
     typename ResultValueType<void>::type
-         acquireDrmDisplayEXT( int32_t drmFd, VULKAN_HPP_NAMESPACE::DisplayKHR display, Dispatch const & d VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const;
+      acquireDrmDisplayEXT( int32_t drmFd, VULKAN_HPP_NAMESPACE::DisplayKHR display, Dispatch const & d VULKAN_HPP_DEFAULT_DISPATCHER_ASSIGNMENT ) const;
 #endif /*VULKAN_HPP_DISABLE_ENHANCED_MODE*/
 
     template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
@@ -15491,6 +16698,14 @@ namespace VULKAN_HPP_NAMESPACE
     using Type = VULKAN_HPP_NAMESPACE::PhysicalDevice;
   };
 
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkPhysicalDevice, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::PhysicalDevice;
+  };
+#endif
+
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::PhysicalDevice>
   {
@@ -15508,7 +16723,22 @@ namespace VULKAN_HPP_NAMESPACE
       VULKAN_HPP_NAMESPACE::DebugReportObjectTypeEXT::eInstance;
 
   public:
-    VULKAN_HPP_CONSTEXPR Instance() = default;
+    Instance() VULKAN_HPP_NOEXCEPT{};  // = default - try to workaround a compiler issue
+    Instance( Instance const & rhs )             = default;
+    Instance & operator=( Instance const & rhs ) = default;
+
+#if !defined( VULKAN_HPP_HANDLES_MOVE_EXCHANGE )
+    Instance( Instance && rhs )             = default;
+    Instance & operator=( Instance && rhs ) = default;
+#else
+    Instance( Instance && rhs ) VULKAN_HPP_NOEXCEPT : m_instance( VULKAN_HPP_NAMESPACE::exchange( rhs.m_instance, {} ) ) {}
+
+    Instance & operator=( Instance && rhs ) VULKAN_HPP_NOEXCEPT
+    {
+      m_instance = VULKAN_HPP_NAMESPACE::exchange( rhs.m_instance, {} );
+      return *this;
+    }
+#endif
 
     VULKAN_HPP_CONSTEXPR Instance( std::nullptr_t ) VULKAN_HPP_NOEXCEPT {}
 
@@ -16156,6 +17386,14 @@ namespace VULKAN_HPP_NAMESPACE
   {
     using Type = VULKAN_HPP_NAMESPACE::Instance;
   };
+
+#if ( VK_USE_64_BIT_PTR_DEFINES == 1 )
+  template <>
+  struct CppType<VkInstance, VK_NULL_HANDLE>
+  {
+    using Type = VULKAN_HPP_NAMESPACE::Instance;
+  };
+#endif
 
   template <>
   struct isVulkanHandleType<VULKAN_HPP_NAMESPACE::Instance>
