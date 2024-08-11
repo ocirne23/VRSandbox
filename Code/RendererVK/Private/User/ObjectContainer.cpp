@@ -56,7 +56,6 @@ bool ObjectContainer::initialize(const char* filePath)
     }
 
     initializeNodes(sceneData.getRootNode());
-    m_worldSpacePositions.resize(m_initialStateNodes.size());
 
     return true;
 }
@@ -71,30 +70,37 @@ uint32 ObjectContainer::addMeshInstance(uint32 meshIdx)
 
 void ObjectContainer::updateInstancePositions()
 {
-    if (m_worldSpacePositions.empty())
+    if (m_initialStateNodes.empty())
         return;
 
-    memcpy(m_worldSpacePositions.data(), m_initialStateNodes.data(), m_initialStateNodes.size() * sizeof(RenderNode));
+    WorldSpaceNode* parentNode = &m_worldSpaceNodes[0];
 
-    RenderNode* parentNode = &m_worldSpacePositions[0];
-    MeshInstance& meshInstance = m_meshInstances[parentNode->m_meshInfoIdx][parentNode->m_meshInstanceIdx];
-    meshInstance.pos = parentNode->m_pos;
-    meshInstance.scale = parentNode->m_scale;
-    meshInstance.quat = parentNode->m_quat;
-
-    for (uint32 i = 1; i < m_worldSpacePositions.size(); i++)
-    {
-        RenderNode& node = m_worldSpacePositions[i];
-        parentNode = &m_worldSpacePositions[node.m_parentIdx];
-        node.m_pos = parentNode->m_pos + parentNode->m_quat * (node.m_pos * parentNode->m_scale);
-        node.m_quat = parentNode->m_quat * node.m_quat;
-        node.m_scale *= parentNode->m_scale;
+    {   // Update root node and its mesh instance if any
+        const RenderNode& node = m_initialStateNodes[0];
+        memcpy(&m_worldSpaceNodes[0], &m_initialStateNodes[0], sizeof(WorldSpaceNode));
         if (node.m_meshInstanceIdx != USHRT_MAX)
         {
             MeshInstance& meshInstance = m_meshInstances[node.m_meshInfoIdx][node.m_meshInstanceIdx];
             meshInstance.pos = node.m_pos;
             meshInstance.scale = node.m_scale;
             meshInstance.quat = node.m_quat;
+        }
+    }
+
+    for (uint32 i = 1; i < m_worldSpaceNodes.size(); i++)
+    {
+        const RenderNode& node = m_initialStateNodes[i];
+        parentNode = &m_worldSpaceNodes[node.m_parentIdx];
+        WorldSpaceNode& nodeWS = m_worldSpaceNodes[i];
+        nodeWS.pos   = parentNode->pos + parentNode->quat * (node.m_pos * parentNode->scale);
+        nodeWS.quat  = parentNode->quat * node.m_quat;
+        nodeWS.scale = parentNode->scale * node.m_scale;
+        if (node.m_meshInstanceIdx != USHRT_MAX)
+        {
+            MeshInstance& meshInstance = m_meshInstances[node.m_meshInfoIdx][node.m_meshInstanceIdx];
+            meshInstance.pos   = nodeWS.pos;
+            meshInstance.scale = nodeWS.scale;
+            meshInstance.quat  = nodeWS.quat;
         }
     }
 }
@@ -160,4 +166,5 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
             nodeDataParentIdxStack.push_back({ pAiNode->mChildren[i], nodeIdx});
         }
     }
+    m_worldSpaceNodes.resize(m_initialStateNodes.size());
 }

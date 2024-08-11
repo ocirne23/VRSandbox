@@ -69,9 +69,9 @@ void FreeFlyCameraController::update(double deltaTime)
         if (m_input->isKeyDown(SDL_SCANCODE_LCTRL))
             m_position -= m_up * m_speed * deltaSec * boost;
         if (m_input->isKeyDown(SDL_SCANCODE_Q))
-            m_up = glm::normalize(glm::vec3(glm::rotate(glm::mat4(1.0f), -1.0f * deltaSec * boost, m_direction) * glm::vec4(m_up, 0.0f)));
+            m_up = glm::normalize(glm::vec3(glm::rotate(glm::mat4(1.0f), -1.0f * deltaSec, m_direction) * glm::vec4(m_up, 0.0f)));
         if (m_input->isKeyDown(SDL_SCANCODE_E))
-            m_up = glm::normalize(glm::vec3(glm::rotate(glm::mat4(1.0f), 1.0f * deltaSec * boost, m_direction) * glm::vec4(m_up, 0.0f)));
+            m_up = glm::normalize(glm::vec3(glm::rotate(glm::mat4(1.0f), 1.0f * deltaSec, m_direction) * glm::vec4(m_up, 0.0f)));
     }
 
     m_viewMatrix = glm::lookAt(m_position, m_position + m_direction, m_up);

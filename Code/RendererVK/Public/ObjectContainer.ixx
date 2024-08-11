@@ -1,6 +1,7 @@
 export module RendererVK.ObjectContainer;
 
 import Core;
+import Core.glm;
 import RendererVK.MeshInstance;
 import RendererVK.RenderNode;
 import RendererVK.Layout;
@@ -36,6 +37,13 @@ private:
     std::vector<RendererVKLayout::MeshInfo> m_meshInfos;
     std::vector<std::vector<MeshInstance>> m_meshInstances;
 
+    struct WorldSpaceNode
+    {
+        glm::vec3 pos;
+        float scale;
+        glm::quat quat;
+    };
+
     std::vector<RenderNode> m_initialStateNodes;
-    std::vector<RenderNode> m_worldSpacePositions;
+    std::vector<WorldSpaceNode> m_worldSpaceNodes;
 };
