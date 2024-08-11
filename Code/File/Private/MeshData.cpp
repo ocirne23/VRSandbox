@@ -27,47 +27,47 @@ bool MeshData::initialize(const aiMesh* pMesh)
     return true;
 }
 
-glm::vec3* MeshData::getVertices()
+const glm::vec3* MeshData::getVertices() const
 {
     return reinterpret_cast<glm::vec3*>(m_pMesh->mVertices);
 }
 
-glm::vec3* MeshData::getNormals()
+const glm::vec3* MeshData::getNormals() const
 {
     return reinterpret_cast<glm::vec3*>(m_pMesh->mNormals);
 }
 
-glm::vec3* MeshData::getTangents()
+const glm::vec3* MeshData::getTangents() const
 {
     return reinterpret_cast<glm::vec3*>(m_pMesh->mTangents);
 }
 
-glm::vec3* MeshData::getBitangents()
+const glm::vec3* MeshData::getBitangents() const
 {
     return reinterpret_cast<glm::vec3*>(m_pMesh->mBitangents);
 }
 
-glm::vec3* MeshData::getTexCoords()
+const glm::vec3* MeshData::getTexCoords() const
 {
     return reinterpret_cast<glm::vec3*>(m_pMesh->mTextureCoords[0]);
 }
 
-uint32 MeshData::getNumVertices()
+uint32 MeshData::getNumVertices() const
 {
     return m_pMesh->mNumVertices;
 }
 
-uint32* MeshData::getIndices()
+const uint32* MeshData::getIndices() const
 {
     return m_indices.data();
 }
 
-uint32 MeshData::getNumIndices()
+uint32 MeshData::getNumIndices() const
 {
     return (uint32)m_indices.size();
 }
 
-void MeshData::getIndices(std::vector<uint32>& indices)
+void MeshData::getIndices(std::vector<uint32>& indices) const
 {
     assert(indices.empty());
     indices.resize(m_pMesh->mNumFaces * 3);
@@ -77,12 +77,12 @@ void MeshData::getIndices(std::vector<uint32>& indices)
     }
 }
 
-uint32 MeshData::getMaterialIndex()
+uint32 MeshData::getMaterialIndex() const
 {
     return m_pMesh->mMaterialIndex;
 }
 
-AABB MeshData::getAABB()
+AABB MeshData::getAABB() const
 {
     AABB aabb;
     aabb.min = glm::vec3(m_pMesh->mAABB.mMin.x, m_pMesh->mAABB.mMin.y, m_pMesh->mAABB.mMin.z);

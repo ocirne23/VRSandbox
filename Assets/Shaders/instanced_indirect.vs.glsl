@@ -51,7 +51,7 @@ void main()
     out_pos = quat_transform(in_pos * inst_scale, inst_quat) + inst_pos;
     out_tbn = (mat3(T, B, N));
     out_uv  = in_uv;
-    out_meshIdx = 0;// in_instances[inst_idx].meshIdx;
+    out_meshIdx = in_instances[inst_idx].meshIdx;
 
     gl_Position = u_mvp * vec4(out_pos, 1.0);
 }

@@ -9,7 +9,7 @@ import Input;
 import Core.SDL;
 
 import RendererVK;
-import RendererVK.Mesh;
+import RendererVK.ObjectContainer;
 import RendererVK.MeshInstance;
 
 int main()
@@ -32,66 +32,10 @@ int main()
     RendererVK& renderer = VK::g_renderer;
     renderer.initialize(window, true);
 
-    {
-        SceneData scene;
-        scene.initialize("D:/KenneyGameAssets/3D assets/Pirate Kit/Models/FBX format/ship_dark.fbx");
-    }
+    ObjectContainer objectContainer;
+    objectContainer.initialize("Models/ship_dark.gltf");
+    objectContainer.updateInstancePositions();
 
-    std::vector<Mesh> meshSet;
-    {
-        SceneData scene;
-        scene.initialize("Models/boat.fbx");
-        meshSet.emplace_back().initialize(*scene.getMesh("Boat.001"));
-        /*
-        std::vector<MeshData>& sceneMeshes = scene.getMeshes();
-        meshSet.reserve(sceneMeshes.size());
-        for (int i = 0; i < sceneMeshes.size(); ++i)
-        {
-            meshSet.emplace_back().initialize(sceneMeshes[i], i);
-        }*/
-    }
-    renderer.updateMeshSet(meshSet);
-
-    const uint32 numX = 8;
-    const uint32 numY = 8;
-    std::vector<MeshInstance> meshInstances(numX * numY);
-    for (int x = 0; x < numX; ++x)
-    {
-        for (int y = 0; y < numY; ++y)
-        {
-            meshInstances[x * numX + y].pos = glm::vec3(x * 3.0f, y * 4.0f, 0.0f);
-            meshInstances[x * numX + y].scale = 0.3f;
-            meshSet[(x * numX + y) % meshSet.size()].addInstance(&meshInstances[x * numX + y]);
-        }
-    }
-    
-    KeyboardListener* keyboardListener = input.addKeyboardListener();
-    keyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& e)
-        {
-            if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_1)
-            {
-                MeshInstance& meshInstance = meshInstances.emplace_back();
-                meshInstance.pos = cameraController.getPosition() + cameraController.getDirection();
-                meshInstance.scale = 0.3f;
-                meshInstance.quat = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
-                meshSet[0].addInstance(&meshInstance);
-            }
-            else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_2)
-            {
-                MeshInstance& meshInstance = meshInstances.emplace_back();
-                meshInstance.pos = cameraController.getPosition() + cameraController.getDirection();
-                meshInstance.scale = 0.3f;
-                meshInstance.quat = glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp());
-                meshSet[1].addInstance(&meshInstance);
-            }
-            else if (e.type == SDL_EVENT_KEY_DOWN && e.keysym.scancode == SDL_SCANCODE_3 && !meshInstances.empty())
-            {
-                MeshInstance& meshInstance = meshInstances.back();
-                meshSet[meshInstance.getMeshIdx()].removeInstance(&meshInstance);
-                meshInstances.pop_back();
-            }
-        };
-    
     auto startTime = std::chrono::high_resolution_clock::now();
     double timeAccum = 0.0;
     uint32 frameCount = 0;
@@ -106,7 +50,7 @@ int main()
         input.update(deltaSec);
         cameraController.update(deltaSec);
 
-        renderer.update(deltaSec, cameraController, meshInstances);
+        renderer.update(deltaSec, cameraController);
         renderer.render();
         frameCount++;
 

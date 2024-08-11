@@ -1,10 +1,11 @@
 export module RendererVK.MeshDataManager;
 
 import Core;
-
+import RendererVK.Layout;
 import RendererVK.Buffer;
 
 export class StagingManager;
+export class MeshData;
 
 export class MeshDataManager final
 {
@@ -15,8 +16,6 @@ public:
     MeshDataManager(const MeshDataManager&) = delete;
 
     bool initialize(StagingManager& stagingManager, size_t vertexBufSize, size_t indexBufSize);
-    size_t uploadVertexData(const void* pData, size_t size);
-    size_t uploadIndexData(const void* pData, size_t size);
 
     Buffer& getVertexBuffer() { return m_vertexBuffer; }
     Buffer& getIndexBuffer() { return m_indexBuffer; }
@@ -26,6 +25,12 @@ public:
 
     size_t getVertexBufUsed() const { return m_vertexBufOffset; }
     size_t getIndexBufUsed() const { return m_indexBufOffset; }
+
+private:
+
+    friend class ObjectContainer;
+    size_t uploadVertexData(const void* pData, size_t size);
+    size_t uploadIndexData(const void* pData, size_t size);
 
 private:
 

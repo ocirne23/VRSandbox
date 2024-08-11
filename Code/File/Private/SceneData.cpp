@@ -37,12 +37,15 @@ bool SceneData::initialize(const char* filePath)
         MaterialData& material = m_materials.emplace_back();
         material.initialize(m_pScene->mMaterials[i]);
     }
+    const aiNode* pRootNode = m_pScene->mRootNode;
+    m_rootNode.initialize(pRootNode);
+
     return m_pScene != nullptr;
 }
 
-MeshData* SceneData::getMesh(const char* pMeshName)
+const MeshData* SceneData::getMesh(const char* pMeshName) const
 {
-    for (MeshData& mesh : m_meshes)
+    for (const MeshData& mesh : m_meshes)
     {
         if (std::string(mesh.getName()) == pMeshName)
         {
@@ -52,7 +55,7 @@ MeshData* SceneData::getMesh(const char* pMeshName)
     return nullptr;
 }
 
-MaterialData& SceneData::getMaterial(uint32 materialIdx)
+const MaterialData& SceneData::getMaterial(uint32 materialIdx) const
 {
     assert(materialIdx < (uint32)m_materials.size());
     return m_materials[materialIdx];

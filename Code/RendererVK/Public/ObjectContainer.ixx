@@ -1,21 +1,41 @@
 export module RendererVK.ObjectContainer;
 
 import Core;
-import RendererVK.Mesh;
+import RendererVK.MeshInstance;
+import RendererVK.RenderNode;
+import RendererVK.Layout;
 
 export class SceneData;
+export class NodeData;
 
 export class ObjectContainer final
 {
 public:
 
+    friend class RendererVK;
+
     ObjectContainer() {}
     ~ObjectContainer() {}
     ObjectContainer(const ObjectContainer&) = delete;
 
-    bool initialize(SceneData& sceneData);
+    bool initialize(const char* filePath);
+
+    void updateInstancePositions();
 
 private:
 
-    std::vector<Mesh> m_meshes;
+    void initializeNodes(const NodeData& rootNodeData);
+    uint32 addMeshInstance(uint32 meshIdx);
+
+private:
+
+    std::string m_filePath;
+    std::vector<std::string> m_meshNames;
+
+    uint32 m_baseMeshInfoIdx = 0;
+    std::vector<RendererVKLayout::MeshInfo> m_meshInfos;
+    std::vector<std::vector<MeshInstance>> m_meshInstances;
+
+    std::vector<RenderNode> m_initialStateNodes;
+    std::vector<RenderNode> m_worldSpacePositions;
 };

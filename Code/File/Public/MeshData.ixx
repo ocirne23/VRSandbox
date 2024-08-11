@@ -15,17 +15,17 @@ public:
     MeshData(MeshData&&) = default;
 
     bool initialize(const aiMesh* pMesh);
-    glm::vec3* getVertices();
-    glm::vec3* getNormals();
-    glm::vec3* getTangents();
-    glm::vec3* getBitangents();
-    glm::vec3* getTexCoords();
-    uint32* getIndices();
-    uint32 getNumVertices();
-    uint32 getNumIndices();
-    uint32 getMaterialIndex();
-    AABB getAABB();
-    void getIndices(std::vector<uint32>& indices);
+    const glm::vec3* getVertices() const;
+    const glm::vec3* getNormals() const;
+    const glm::vec3* getTangents() const;
+    const glm::vec3* getBitangents() const;
+    const glm::vec3* getTexCoords() const;
+    const uint32* getIndices() const;
+    uint32 getNumVertices() const;
+    uint32 getNumIndices() const;
+    uint32 getMaterialIndex() const;
+    AABB getAABB() const;
+    void getIndices(std::vector<uint32>& indices) const;
     const char* getName() const { return m_pName; }
 
 private:

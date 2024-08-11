@@ -23,12 +23,12 @@ namespace RendererVKLayout
     export struct MeshInfo;
     export struct MeshInstance;
 }
-export class Mesh;
 
 export class MeshInstance;
 export class Window;
 export class MeshData;
 export class FreeFlyCameraController;
+export class ObjectContainer;
 
 export class RendererVK final
 {
@@ -41,15 +41,17 @@ public:
     RendererVK(const RendererVK&) = delete;
 
     bool initialize(Window& window, bool enableValidationLayers);
-    void update(double deltaSec, const FreeFlyCameraController& camera, std::span<MeshInstance> instances);
+    void update(double deltaSec, const FreeFlyCameraController& camera);
     void render();
-    void updateMeshSet(std::vector<Mesh>& meshData);
 
     const char* getDebugText();
 
 private:
 
     void recordCommandBuffers();
+
+    friend class ObjectContainer;
+    uint32 registerObjectContainer(ObjectContainer* pObjectContainer, uint32 meshInfoCount);
 
 private:
 
@@ -67,10 +69,12 @@ private:
     Sampler m_sampler;
     StagingManager m_stagingManager;
 
-    friend class Mesh;
+    friend class ObjectContainer;
     MeshDataManager m_meshDataManager;
 
-    std::vector<Mesh>* m_pMeshSet = nullptr;
+    std::vector<ObjectContainer*> m_objectContainers;
+
+    uint32 m_meshInfoCounter = 0;
 
     struct PerFrameData
     {

@@ -76,7 +76,7 @@ void main()
 	vec3 V = normalize(u_viewPos - in_pos);
 	vec3 L = normalize(lightVec);
 	vec3 H = normalize(L + V);
-	vec3 N = normalize(vec3(0,0,1));
+	vec3 N = normalize(texture(u_normal[in_meshIdx], in_uv).xyz * 2.0 - 1.0);
 	N = normalize(in_tbn * N);
 
 	float NdotH = clamp(dot(N, H), 0.0, 1.0);
@@ -85,8 +85,8 @@ void main()
 	float NdotV = dot(N, V);//clamp(dot(N, V), 0.0, 1.0);
 	float VdotH = dot(V, H);//clamp(dot(V, H), 0.0, 1.0);
 
-	vec3 materialColor = vec3(((in_meshIdx) % 20) * 0.05, ((in_meshIdx + 7) % 20) * 0.05, ((in_meshIdx + 14) % 20) * 0.05);   //texture(u_color[in_meshIdx], in_uv).xyz;
-	float roughness    = 0.5;//texture(u_roughness_metallic_height[in_meshIdx], in_uv).x;
+	vec3 materialColor = texture(u_color[in_meshIdx], in_uv).xyz;
+	float roughness    = texture(u_roughness_metallic_height[in_meshIdx], in_uv).x;
 
 	float specular = NdotL > 0.0 ? specularBRDF(NdotH, LdotH, roughness) : 0.0;
 	float env      = environmentContrib(roughness, NdotV);

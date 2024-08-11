@@ -21,8 +21,9 @@ export namespace RendererVKLayout
         uint32 meshInfoIdx;
     };
 
-    export struct MeshInfo
+    export struct alignas(16) MeshInfo
     {
+        glm::vec3 center;
         float radius = 1.0f;
         uint32 indexCount;
         uint32 firstIndex;

@@ -5,6 +5,7 @@ import File.Assimp;
 import File.MeshData;
 import File.TextureData;
 import File.MaterialData;
+import File.NodeData;
 
 export struct aiScene;
 
@@ -19,9 +20,11 @@ public:
     bool initialize(const char* filePath);
 
     const std::string& getFilePath() const { return m_filePath; }
-    std::vector<MeshData>& getMeshes() { return m_meshes; }
-    MeshData* getMesh(const char* pMeshName);
-    MaterialData& getMaterial(uint32 materialIdx);
+    const std::vector<MeshData>& getMeshes() const { return m_meshes; }
+    const MeshData* getMesh(const char* pMeshName) const;
+    const NodeData& getRootNode() const { return m_rootNode; }
+
+    const MaterialData& getMaterial(uint32 materialIdx) const;
 
 private:
 
@@ -31,4 +34,5 @@ private:
     std::vector<MeshData> m_meshes;
     std::vector<TextureData> m_textures;
     std::vector<MaterialData> m_materials;
+    NodeData m_rootNode;
 };

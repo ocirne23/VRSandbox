@@ -9,6 +9,7 @@ struct InMeshInstance
 
 struct InMeshInfo
 {
+    vec3 center;
     float radius;
     uint indexCount;
     uint firstIndex;
@@ -71,7 +72,7 @@ void main()
     out_indirectCommands[meshIdx].vertexOffset  = in_meshInfo[meshIdx].vertexOffset;
     out_indirectCommands[meshIdx].firstInstance = in_meshInfo[meshIdx].firstInstance;
 
-    const vec4 instancePos = vec4(in_instances[instanceIdx].posScale.xyz, 1.0);
+    const vec4 instancePos = vec4(in_instances[instanceIdx].posScale.xyz + in_meshInfo[meshIdx].center, 1.0);
     const float radius = in_meshInfo[meshIdx].radius * in_instances[instanceIdx].posScale.w;
     if (frustumCheck(instancePos, radius))
     {

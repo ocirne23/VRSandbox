@@ -4,9 +4,9 @@ import Core;
 import Entity.FreeFlyCameraController;
 import RendererVK.VK;
 import RendererVK.glslang;
-import RendererVK.Mesh;
 import RendererVK.MeshInstance;
 import RendererVK.Layout;
+import RendererVK.ObjectContainer;
 import Core.Window;
 import Core.Frustum;
 import File.SceneData;
@@ -217,7 +217,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     return true;
 }
 
-void RendererVK::update(double deltaSec, const FreeFlyCameraController& camera, std::span<MeshInstance> instances)
+void RendererVK::update(double deltaSec, const FreeFlyCameraController& camera)
 {
     const vk::Extent2D extent = m_swapChain.getLayout().extent;
     const glm::mat4x4 projection = glm::perspective(glm::radians(CAMERA_FOV_DEG), (float)extent.width / (float)extent.height, CAMERA_NEAR, CAMERA_FAR);
@@ -227,20 +227,29 @@ void RendererVK::update(double deltaSec, const FreeFlyCameraController& camera, 
     frameData.mappedUniformBuffer[0].mvp = projection * viewMatrix;
     frameData.mappedUniformBuffer[0].frustum.fromMatrix(frameData.mappedUniformBuffer[0].mvp);
     frameData.mappedUniformBuffer[0].viewPos = camera.getPosition();
-
+    
     if (!frameData.updated)
-    {    
+    {
         uint32 instanceCounter = 0;
-        for (uint32 i = 0, num = (uint32)m_pMeshSet->size(); i < num; ++i)
+
+        for (ObjectContainer* pObjectContainer : m_objectContainers)
         {
-            Mesh& mesh = (*m_pMeshSet)[i];
-            mesh.m_info.firstInstance = instanceCounter;
-            instanceCounter += mesh.m_numInstances;
-            assert(instanceCounter <= MAX_INSTANCE_DATA);
-            memcpy(&frameData.mappedMeshInfo[i], &mesh.m_info, sizeof(RendererVKLayout::MeshInfo));
+            std::vector<RendererVKLayout::MeshInfo>& meshInfos = pObjectContainer->m_meshInfos;
+            const uint32 numMeshInfos = (uint32)meshInfos.size();
+
+            for (uint32 i = 0; i < numMeshInfos; ++i)
+            {
+                meshInfos[i].firstInstance = instanceCounter;
+                assert(instanceCounter <= MAX_INSTANCE_DATA);
+
+                const std::vector<MeshInstance>& meshInstances = pObjectContainer->m_meshInstances[i];
+                memcpy(&frameData.mappedMeshInstances[instanceCounter], meshInstances.data(), meshInstances.size() * sizeof(RendererVKLayout::MeshInstance));
+                instanceCounter += (uint32)meshInstances.size();
+            }
+            memcpy(&frameData.mappedMeshInfo[pObjectContainer->m_baseMeshInfoIdx], meshInfos.data(), sizeof(RendererVKLayout::MeshInfo) * numMeshInfos);
         }
+
         m_instanceCounter = instanceCounter;
-        memcpy(frameData.mappedMeshInstances, instances.data(), instances.size() * sizeof(RendererVKLayout::MeshInstance));
         frameData.mappedDispatchBuffer[0] = vk::DispatchIndirectCommand{ .x = instanceCounter, .y = 1, .z = 1 };
 
         frameData.updated = true;
@@ -248,11 +257,17 @@ void RendererVK::update(double deltaSec, const FreeFlyCameraController& camera, 
     m_stagingManager.update();
 }
 
+uint32 RendererVK::registerObjectContainer(ObjectContainer* pObjectContainer, uint32 meshInfoCount)
+{
+    m_objectContainers.push_back(pObjectContainer);
+    uint32 baseMeshInfoIdx = m_meshInfoCounter;
+    m_meshInfoCounter += meshInfoCount;
+    recordCommandBuffers();
+    return baseMeshInfoIdx;
+}
+
 void RendererVK::recordCommandBuffers()
 {
-    if (!m_pMeshSet)
-        return;
-
     for (uint32 i = 0; i < NUM_FRAMES_IN_FLIGHT; ++i)
     {
         const vk::Extent2D extent = m_swapChain.getLayout().extent;
@@ -380,7 +395,7 @@ void RendererVK::recordCommandBuffers()
             vkCommandBuffer.bindVertexBuffers(0, { m_meshDataManager.getVertexBuffer().getBuffer() }, { 0 });
             vkCommandBuffer.bindVertexBuffers(2, { frameData.instanceIdxBuffer.getBuffer() }, { 0 });
             vkCommandBuffer.bindIndexBuffer(m_meshDataManager.getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
-            vkCommandBuffer.drawIndexedIndirect(frameData.indirectCommandBuffer.getBuffer(), 0, (uint32)m_pMeshSet->size(), sizeof(vk::DrawIndexedIndirectCommand));
+            vkCommandBuffer.drawIndexedIndirect(frameData.indirectCommandBuffer.getBuffer(), 0, m_meshInfoCounter, sizeof(vk::DrawIndexedIndirectCommand));
             vkCommandBuffer.endRenderPass();
         }
         commandBuffer.end();
@@ -391,13 +406,6 @@ void RendererVK::render()
 {
     m_swapChain.acquireNextImage();
     m_swapChain.present();
-}
-
-void RendererVK::updateMeshSet(std::vector<Mesh>& meshData)
-{
-    assert(meshData.size() <= MAX_INDIRECT_COMMANDS);
-    m_pMeshSet = &meshData;
-    recordCommandBuffers();
 }
 
 const char* RendererVK::getDebugText()

@@ -12,4 +12,9 @@ export struct AABB final
     {
         return glm::length(max - min) * 0.5f;
     }
+
+    glm::vec3 getCenter() const     
+    {
+        return (min + max) * 0.5f;
+    }
 };

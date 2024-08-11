@@ -15,7 +15,7 @@ public:
 
 private:
 
-    friend class Mesh;
+    friend class ObjectContainer;
     using RendererVKLayout::MeshInstance::meshInfoIdx;
 };
 
