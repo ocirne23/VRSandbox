@@ -48,6 +48,11 @@ layout (binding = 4, std430) writeonly buffer OutIndirectCommandBufer
     OutInstancedIndirectCommand out_indirectCommands[];
 };
 
+vec3 quat_transform( vec3 v, vec4 q)
+{
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
 bool frustumCheck(vec4 pos, float radius)
 {
     // Check sphere against frustum planes
@@ -72,8 +77,9 @@ void main()
     out_indirectCommands[meshIdx].vertexOffset  = in_meshInfo[meshIdx].vertexOffset;
     out_indirectCommands[meshIdx].firstInstance = in_meshInfo[meshIdx].firstInstance;
 
-    const vec4 instancePos = vec4(in_instances[instanceIdx].posScale.xyz + in_meshInfo[meshIdx].center, 1.0);
-    const float radius = in_meshInfo[meshIdx].radius * in_instances[instanceIdx].posScale.w;
+    const vec3 centerPos   = quat_transform(in_meshInfo[meshIdx].center, in_instances[instanceIdx].quat);
+    const vec4 instancePos = vec4(in_instances[instanceIdx].posScale.xyz + centerPos, 1.0);
+    const float radius     = in_meshInfo[meshIdx].radius * in_instances[instanceIdx].posScale.w;
     if (frustumCheck(instancePos, radius))
     {
         const uint idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);

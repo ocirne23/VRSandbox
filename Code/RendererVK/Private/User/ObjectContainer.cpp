@@ -28,6 +28,7 @@ bool ObjectContainer::initialize(const char* filePath)
     for (const MeshData& meshData : meshDataList)
     {
         RendererVKLayout::MeshInfo& meshInfo = m_meshInfos.emplace_back();
+        m_meshNames.push_back(meshData.getName());
 
         std::vector<RendererVKLayout::MeshVertex> vertices;
         vertices.resize(meshData.getNumVertices());
@@ -63,6 +64,7 @@ bool ObjectContainer::initialize(const char* filePath)
 uint32 ObjectContainer::addMeshInstance(uint32 meshIdx)
 {
     const uint32 meshInstanceIdx = (uint32)m_meshInstances[meshIdx].size();
+    assert(meshInstanceIdx < USHRT_MAX && "Too many mesh instances for this mesh type");
     MeshInstance& meshInstance = m_meshInstances[meshIdx].emplace_back();
     meshInstance.meshInfoIdx = m_baseMeshInfoIdx + meshIdx;
     return meshInstanceIdx;
@@ -77,7 +79,7 @@ void ObjectContainer::updateInstancePositions()
     for (uint32 i = 0; i < m_renderNodes.size(); i++)
     {
         const RenderNode& node = m_renderNodes[i];
-        const WorldSpaceNode* parentNode = node.m_parentIdx != USHRT_MAX ? &m_worldSpaceNodes[node.m_parentIdx] : nullptr;
+        const WorldSpaceNode* parentNode = node.m_parentOffset != 0 ? &m_worldSpaceNodes[i - node.m_parentOffset] : nullptr;
         WorldSpaceNode& nodeWS = m_worldSpaceNodes[i];
         nodeWS.pos   = parentNode ? parentNode->pos + parentNode->quat * (node.m_pos * parentNode->scale) : node.m_pos;
         nodeWS.quat  = parentNode ? parentNode->quat * node.m_quat : node.m_quat;
@@ -108,8 +110,6 @@ uint32 ObjectContainer::createNewRootInstance(glm::vec3 pos, float scale, glm::q
     for (size_t i = startIdx; i < startIdx + numNodes; ++i)
     {
         RenderNode& node = m_renderNodes[i];
-        if (node.m_parentIdx != USHRT_MAX)
-            node.m_parentIdx += (uint32)startIdx;
         if (node.m_meshInfoIdx != USHRT_MAX)
             node.m_meshInstanceIdx = addMeshInstance(node.m_meshInfoIdx);
     }
@@ -120,7 +120,7 @@ uint32 ObjectContainer::createNewRootInstance(glm::vec3 pos, float scale, glm::q
 void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
 {
     std::list<std::pair<const aiNode*, uint32>> nodeDataParentIdxStack;
-    nodeDataParentIdxStack.push_back({ rootNodeData.getAiNode(), USHRT_MAX });
+    nodeDataParentIdxStack.push_back({ rootNodeData.getAiNode(), 0 });
 
     while (!nodeDataParentIdxStack.empty())
     {
@@ -135,15 +135,15 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
         const float nonUniformScaleAmount = glm::max(glm::distance(scale.x, scale.y), glm::distance(scale.x, scale.z));
         assert(nonUniformScaleAmount < 0.0001f && "Non-uniform scaling is not supported");
 
-        const uint32 numChildren = pAiNode->mNumChildren;
-        const uint32 nodeIdx     = (uint32)m_initialStateNodes.size();
+        const uint32 numChildren  = pAiNode->mNumChildren;
+        const uint32 nodeIdx      = (uint32)m_initialStateNodes.size();
 
-        RenderNode& renderNode   = m_initialStateNodes.emplace_back();
-        renderNode.m_pos         = glm::vec3(pos.x, pos.y, pos.z);
-        renderNode.m_scale       = scale.x;
-        renderNode.m_quat        = glm::quat(rot.w, rot.x, rot.y, rot.z);
-        renderNode.m_numChildren = (uint16)numChildren;
-        renderNode.m_parentIdx   = (uint16)parentIdx;
+        RenderNode& renderNode    = m_initialStateNodes.emplace_back();
+        renderNode.m_pos          = glm::vec3(pos.x, pos.y, pos.z);
+        renderNode.m_scale        = scale.x;
+        renderNode.m_quat         = glm::quat(rot.w, rot.x, rot.y, rot.z);
+        renderNode.m_numChildren  = (uint16)numChildren;
+        renderNode.m_parentOffset = (uint16)(nodeIdx - parentIdx);
 
         // If the node has more than 1 mesh, add the remaining meshes as children of the current node
         if (pAiNode->mNumMeshes > 0)
@@ -156,19 +156,18 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
             }
             for (uint32 i = 1; i < pAiNode->mNumMeshes; i++)
             {
-                RenderNode& childNode = m_initialStateNodes.emplace_back();
-                childNode.m_pos = glm::vec3(0.0f);
-                childNode.m_scale = 1.0f;
-                childNode.m_quat = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-                childNode.m_parentIdx = (uint16)nodeIdx;
-                childNode.m_numChildren = 0;
-                childNode.m_meshInfoIdx = pAiNode->mMeshes[i];
+                RenderNode& childNode    = m_initialStateNodes.emplace_back();
+                childNode.m_pos          = glm::vec3(0.0f);
+                childNode.m_scale        = 1.0f;
+                childNode.m_quat         = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                childNode.m_parentOffset = (uint16)(nodeIdx - parentIdx);
+                childNode.m_numChildren  = 0;
+                childNode.m_meshInfoIdx  = pAiNode->mMeshes[i];
             }
         }
         else
         {
             renderNode.m_meshInfoIdx = USHRT_MAX;
-            renderNode.m_meshInstanceIdx = USHRT_MAX;
         }
 
         for (uint32 i = 0; i < numChildren; i++)

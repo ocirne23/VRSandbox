@@ -22,7 +22,8 @@ public:
     bool initialize(const char* filePath);
     uint32 createNewRootInstance(glm::vec3 pos, float scale, glm::quat quat);
 
-    void updateInstancePositions();
+    void updateInstancePositions(uint32 nodeIdx);
+    void updateAllInstancePositions();
 
 private:
 
