@@ -17,7 +17,7 @@ int main()
     FileSystem::initialize();
 
     Window window;
-    window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(1920, 1080));
+    window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(2560, 1440));//glm::ivec2(1920, 1080));
 
     Input input;
     input.initialize();
@@ -34,6 +34,15 @@ int main()
 
     ObjectContainer objectContainer;
     objectContainer.initialize("Models/ship_dark.gltf");
+    const uint32 numX = 128;
+    const uint32 numY = 64;
+    for (int x = 0; x < numX; ++x)
+    {
+        for (int y = 0; y < numY; ++y)
+        {
+            objectContainer.createNewRootInstance(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
+        }
+    }
     objectContainer.updateInstancePositions();
 
     auto startTime = std::chrono::high_resolution_clock::now();

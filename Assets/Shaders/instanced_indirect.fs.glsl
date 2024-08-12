@@ -67,11 +67,11 @@ float environmentContrib(float roughness, float NdotV)
 
 void main()
 {
-	vec3 lightPos  = vec3(12, 3, -2);
+	vec3 lightPos  = vec3(160, 800, 256);
 	vec3 lightVec  = lightPos - in_pos;
 	float distance = length(lightVec);
-	float falloff  = inverseSquareFalloff(distance, 30);
-	float intensity = 65.0;
+	float falloff  = inverseSquareFalloff(distance, 50000);
+	float intensity = 500000.0;
 
 	vec3 V = normalize(u_viewPos - in_pos);
 	vec3 L = normalize(lightVec);

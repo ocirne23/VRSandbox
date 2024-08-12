@@ -70,31 +70,18 @@ uint32 ObjectContainer::addMeshInstance(uint32 meshIdx)
 
 void ObjectContainer::updateInstancePositions()
 {
-    if (m_initialStateNodes.empty())
+    if (m_renderNodes.empty())
         return;
+    m_worldSpaceNodes.resize(m_renderNodes.size());
 
-    WorldSpaceNode* parentNode = &m_worldSpaceNodes[0];
-
-    {   // Update root node and its mesh instance if any
-        const RenderNode& node = m_initialStateNodes[0];
-        memcpy(&m_worldSpaceNodes[0], &m_initialStateNodes[0], sizeof(WorldSpaceNode));
-        if (node.m_meshInstanceIdx != USHRT_MAX)
-        {
-            MeshInstance& meshInstance = m_meshInstances[node.m_meshInfoIdx][node.m_meshInstanceIdx];
-            meshInstance.pos = node.m_pos;
-            meshInstance.scale = node.m_scale;
-            meshInstance.quat = node.m_quat;
-        }
-    }
-
-    for (uint32 i = 1; i < m_worldSpaceNodes.size(); i++)
+    for (uint32 i = 0; i < m_renderNodes.size(); i++)
     {
-        const RenderNode& node = m_initialStateNodes[i];
-        parentNode = &m_worldSpaceNodes[node.m_parentIdx];
+        const RenderNode& node = m_renderNodes[i];
+        const WorldSpaceNode* parentNode = node.m_parentIdx != USHRT_MAX ? &m_worldSpaceNodes[node.m_parentIdx] : nullptr;
         WorldSpaceNode& nodeWS = m_worldSpaceNodes[i];
-        nodeWS.pos   = parentNode->pos + parentNode->quat * (node.m_pos * parentNode->scale);
-        nodeWS.quat  = parentNode->quat * node.m_quat;
-        nodeWS.scale = parentNode->scale * node.m_scale;
+        nodeWS.pos   = parentNode ? parentNode->pos + parentNode->quat * (node.m_pos * parentNode->scale) : node.m_pos;
+        nodeWS.quat  = parentNode ? parentNode->quat * node.m_quat : node.m_quat;
+        nodeWS.scale = parentNode ? parentNode->scale * node.m_scale : node.m_scale;
         if (node.m_meshInstanceIdx != USHRT_MAX)
         {
             MeshInstance& meshInstance = m_meshInstances[node.m_meshInfoIdx][node.m_meshInstanceIdx];
@@ -105,10 +92,35 @@ void ObjectContainer::updateInstancePositions()
     }
 }
 
+uint32 ObjectContainer::createNewRootInstance(glm::vec3 pos, float scale, glm::quat quat)
+{
+    assert(!m_initialStateNodes.empty());
+    const size_t startIdx = m_renderNodes.size();
+    const size_t numNodes = m_initialStateNodes.size();
+    m_renderNodes.resize(startIdx + numNodes);
+
+    memcpy(&m_renderNodes[startIdx], m_initialStateNodes.data(), numNodes * sizeof(m_initialStateNodes[0]));
+
+    m_renderNodes[startIdx].m_pos = pos;
+    m_renderNodes[startIdx].m_scale = scale;
+    m_renderNodes[startIdx].m_quat = quat;
+    
+    for (size_t i = startIdx; i < startIdx + numNodes; ++i)
+    {
+        RenderNode& node = m_renderNodes[i];
+        if (node.m_parentIdx != USHRT_MAX)
+            node.m_parentIdx += (uint32)startIdx;
+        if (node.m_meshInfoIdx != USHRT_MAX)
+            node.m_meshInstanceIdx = addMeshInstance(node.m_meshInfoIdx);
+    }
+
+    return (uint32)startIdx;
+}
+
 void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
 {
     std::list<std::pair<const aiNode*, uint32>> nodeDataParentIdxStack;
-    nodeDataParentIdxStack.push_back({ rootNodeData.getAiNode(), 0});
+    nodeDataParentIdxStack.push_back({ rootNodeData.getAiNode(), USHRT_MAX });
 
     while (!nodeDataParentIdxStack.empty())
     {
@@ -137,7 +149,6 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
         if (pAiNode->mNumMeshes > 0)
         {
             renderNode.m_meshInfoIdx = pAiNode->mMeshes[0];
-            renderNode.m_meshInstanceIdx = addMeshInstance(pAiNode->mMeshes[0]);
 
             if (pAiNode->mNumMeshes > 1)
             {
@@ -152,7 +163,6 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
                 childNode.m_parentIdx = (uint16)nodeIdx;
                 childNode.m_numChildren = 0;
                 childNode.m_meshInfoIdx = pAiNode->mMeshes[i];
-                childNode.m_meshInstanceIdx = addMeshInstance(pAiNode->mMeshes[i]);
             }
         }
         else
@@ -166,5 +176,4 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
             nodeDataParentIdxStack.push_back({ pAiNode->mChildren[i], nodeIdx});
         }
     }
-    m_worldSpaceNodes.resize(m_initialStateNodes.size());
 }

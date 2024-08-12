@@ -20,6 +20,7 @@ public:
     ObjectContainer(const ObjectContainer&) = delete;
 
     bool initialize(const char* filePath);
+    uint32 createNewRootInstance(glm::vec3 pos, float scale, glm::quat quat);
 
     void updateInstancePositions();
 
@@ -44,6 +45,7 @@ private:
         glm::quat quat;
     };
 
+    std::vector<RenderNode> m_renderNodes;
     std::vector<RenderNode> m_initialStateNodes;
     std::vector<WorldSpaceNode> m_worldSpaceNodes;
 };
