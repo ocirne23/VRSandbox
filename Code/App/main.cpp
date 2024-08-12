@@ -10,7 +10,7 @@ import Core.SDL;
 
 import RendererVK;
 import RendererVK.ObjectContainer;
-import RendererVK.MeshInstance;
+import RendererVK.RenderNode;
 
 int main()
 {
@@ -34,16 +34,16 @@ int main()
 
     ObjectContainer objectContainer;
     objectContainer.initialize("Models/ship_dark.gltf");
-    const uint32 numX = 64;
-    const uint32 numY = 64;
+    const uint32 numX = 5;
+    const uint32 numY = 1;
     for (int x = 0; x < numX; ++x)
     {
         for (int y = 0; y < numY; ++y)
         {
-            objectContainer.createNewRootInstance(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
+            RenderNode node = objectContainer.createNewRootInstance(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
+            objectContainer.updateInstancePositions(node);
         }
     }
-    objectContainer.updateInstancePositions();
 
     auto startTime = std::chrono::high_resolution_clock::now();
     double timeAccum = 0.0;

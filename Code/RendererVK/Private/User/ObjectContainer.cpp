@@ -70,51 +70,50 @@ uint32 ObjectContainer::addMeshInstance(uint32 meshIdx)
     return meshInstanceIdx;
 }
 
-void ObjectContainer::updateInstancePositions()
+void ObjectContainer::updateInstancePositions(RenderNode& renderNode)
 {
-    if (m_renderNodes.empty())
-        return;
-    m_worldSpaceNodes.resize(m_renderNodes.size());
-
-    for (uint32 i = 0; i < m_renderNodes.size(); i++)
+    const uint32 numNodes = (uint32)renderNode.m_numNodes;
+    const uint32 startIdx = renderNode.m_nodeIdx;
+    for (uint32 i = 0; i < numNodes; ++i)
     {
-        const RenderNode& node = m_renderNodes[i];
-        const WorldSpaceNode* parentNode = node.m_parentOffset != 0 ? &m_worldSpaceNodes[i - node.m_parentOffset] : nullptr;
+        const LocalSpaceNode& node = m_renderNodes[startIdx + i];
+        const WorldSpaceNode* parentNode = (node.parentOffset != 0) ? &m_worldSpaceNodes[i - node.parentOffset] : nullptr;
         WorldSpaceNode& nodeWS = m_worldSpaceNodes[i];
-        nodeWS.pos   = parentNode ? parentNode->pos + parentNode->quat * (node.m_pos * parentNode->scale) : node.m_pos;
-        nodeWS.quat  = parentNode ? parentNode->quat * node.m_quat : node.m_quat;
-        nodeWS.scale = parentNode ? parentNode->scale * node.m_scale : node.m_scale;
-        if (node.m_meshInstanceIdx != USHRT_MAX)
+        nodeWS.pos   = parentNode ? parentNode->pos + parentNode->quat * (node.pos * parentNode->scale) : node.pos;
+        nodeWS.quat  = parentNode ? parentNode->quat * node.quat : node.quat;
+        nodeWS.scale = parentNode ? parentNode->scale * node.scale : node.scale;
+        if (node.meshInfoIdx != USHRT_MAX)
         {
-            MeshInstance& meshInstance = m_meshInstances[node.m_meshInfoIdx][node.m_meshInstanceIdx];
-            meshInstance.pos   = nodeWS.pos;
+            MeshInstance& meshInstance = m_meshInstances[node.meshInfoIdx][node.meshInstanceIdx];
+            meshInstance.pos = nodeWS.pos;
             meshInstance.scale = nodeWS.scale;
-            meshInstance.quat  = nodeWS.quat;
+            meshInstance.quat = nodeWS.quat;
         }
     }
 }
 
-uint32 ObjectContainer::createNewRootInstance(glm::vec3 pos, float scale, glm::quat quat)
+RenderNode ObjectContainer::createNewRootInstance(glm::vec3 pos, float scale, glm::quat quat)
 {
     assert(!m_initialStateNodes.empty());
     const size_t startIdx = m_renderNodes.size();
     const size_t numNodes = m_initialStateNodes.size();
     m_renderNodes.resize(startIdx + numNodes);
+    m_worldSpaceNodes.resize(numNodes);
 
     memcpy(&m_renderNodes[startIdx], m_initialStateNodes.data(), numNodes * sizeof(m_initialStateNodes[0]));
 
-    m_renderNodes[startIdx].m_pos = pos;
-    m_renderNodes[startIdx].m_scale = scale;
-    m_renderNodes[startIdx].m_quat = quat;
+    m_renderNodes[startIdx].pos = pos;
+    m_renderNodes[startIdx].scale = scale;
+    m_renderNodes[startIdx].quat = quat;
     
     for (size_t i = startIdx; i < startIdx + numNodes; ++i)
     {
-        RenderNode& node = m_renderNodes[i];
-        if (node.m_meshInfoIdx != USHRT_MAX)
-            node.m_meshInstanceIdx = addMeshInstance(node.m_meshInfoIdx);
+        LocalSpaceNode& node = m_renderNodes[i];
+        if (node.meshInfoIdx != USHRT_MAX)
+            node.meshInstanceIdx = addMeshInstance(node.meshInfoIdx);
     }
 
-    return (uint32)startIdx;
+    return RenderNode(this, (uint32)startIdx, (uint16)numNodes);
 }
 
 void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
@@ -138,39 +137,39 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
         const uint32 numChildren  = pAiNode->mNumChildren;
         const uint32 nodeIdx      = (uint32)m_initialStateNodes.size();
 
-        RenderNode& renderNode    = m_initialStateNodes.emplace_back();
-        renderNode.m_pos          = glm::vec3(pos.x, pos.y, pos.z);
-        renderNode.m_scale        = scale.x;
-        renderNode.m_quat         = glm::quat(rot.w, rot.x, rot.y, rot.z);
-        renderNode.m_numChildren  = (uint16)numChildren;
-        renderNode.m_parentOffset = (uint16)(nodeIdx - parentIdx);
+        LocalSpaceNode& node = m_initialStateNodes.emplace_back();
+        node.pos          = glm::vec3(pos.x, pos.y, pos.z);
+        node.scale        = scale.x;
+        node.quat         = glm::quat(rot.w, rot.x, rot.y, rot.z);
+        node.numChildren  = (uint16)numChildren;
+        node.parentOffset = (uint16)(nodeIdx - parentIdx);
 
-        // If the node has more than 1 mesh, add the remaining meshes as children of the current node
         if (pAiNode->mNumMeshes > 0)
         {
-            renderNode.m_meshInfoIdx = pAiNode->mMeshes[0];
+            node.meshInfoIdx = pAiNode->mMeshes[0];
 
+            // If the node has more than 1 mesh, add the remaining meshes as children of the current node
             if (pAiNode->mNumMeshes > 1)
+                node.numChildren += (uint16)(pAiNode->mNumMeshes - 1);
+
+            for (uint32 i = 1; i < pAiNode->mNumMeshes; ++i)
             {
-                renderNode.m_numChildren += (uint16)(pAiNode->mNumMeshes - 1);
-            }
-            for (uint32 i = 1; i < pAiNode->mNumMeshes; i++)
-            {
-                RenderNode& childNode    = m_initialStateNodes.emplace_back();
-                childNode.m_pos          = glm::vec3(0.0f);
-                childNode.m_scale        = 1.0f;
-                childNode.m_quat         = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-                childNode.m_parentOffset = (uint16)(nodeIdx - parentIdx);
-                childNode.m_numChildren  = 0;
-                childNode.m_meshInfoIdx  = pAiNode->mMeshes[i];
+                const uint32 childNodeIdx = (uint32)m_initialStateNodes.size();
+                LocalSpaceNode& childNode = m_initialStateNodes.emplace_back();
+                childNode.pos          = glm::vec3(0.0f);
+                childNode.scale        = 1.0f;
+                childNode.quat         = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                childNode.parentOffset = (uint16)(childNodeIdx - nodeIdx);
+                childNode.numChildren  = 0;
+                childNode.meshInfoIdx  = pAiNode->mMeshes[i];
             }
         }
         else
         {
-            renderNode.m_meshInfoIdx = USHRT_MAX;
+            node.meshInfoIdx = USHRT_MAX;
         }
 
-        for (uint32 i = 0; i < numChildren; i++)
+        for (uint32 i = 0; i < numChildren; ++i)
         {
             nodeDataParentIdxStack.push_back({ pAiNode->mChildren[i], nodeIdx});
         }

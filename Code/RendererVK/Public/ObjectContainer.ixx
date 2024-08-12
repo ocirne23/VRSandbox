@@ -3,10 +3,9 @@ export module RendererVK.ObjectContainer;
 import Core;
 import Core.glm;
 import RendererVK.MeshInstance;
-import RendererVK.RenderNode;
 import RendererVK.Layout;
 
-export class SceneData;
+export class RenderNode;
 export class NodeData;
 
 export class ObjectContainer final
@@ -20,10 +19,9 @@ public:
     ObjectContainer(const ObjectContainer&) = delete;
 
     bool initialize(const char* filePath);
-    uint32 createNewRootInstance(glm::vec3 pos, float scale, glm::quat quat);
 
-    void updateInstancePositions(uint32 nodeIdx);
-    void updateAllInstancePositions();
+    RenderNode createNewRootInstance(glm::vec3 pos, float scale, glm::quat quat);
+    void updateInstancePositions(RenderNode& node);
 
 private:
 
@@ -46,7 +44,18 @@ private:
         glm::quat quat;
     };
 
-    std::vector<RenderNode> m_renderNodes;
-    std::vector<RenderNode> m_initialStateNodes;
+    struct LocalSpaceNode
+    {
+        glm::vec3 pos;
+        float scale;
+        glm::quat quat;
+
+        uint16 meshInfoIdx = USHRT_MAX;
+        uint16 meshInstanceIdx = USHRT_MAX;
+        uint16 numChildren = 0;
+        uint16 parentOffset = 0;
+    };
+    std::vector<LocalSpaceNode> m_renderNodes;
+    std::vector<LocalSpaceNode> m_initialStateNodes;
     std::vector<WorldSpaceNode> m_worldSpaceNodes;
 };

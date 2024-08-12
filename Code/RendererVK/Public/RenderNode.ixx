@@ -3,20 +3,30 @@ export module RendererVK.RenderNode;
 import Core;
 import Core.glm;
 
+export class ObjectContainer;
+
 export class RenderNode final
 {
 public:
 
-    glm::vec3 m_pos;
-    float m_scale;
-    glm::quat m_quat;
+    RenderNode(const RenderNode& copy) = default;
+    RenderNode(RenderNode&& move)
+    {
+        m_pObjectContainer = move.m_pObjectContainer;
+        m_nodeIdx = move.m_nodeIdx;
+    }
 
 private:
 
     friend class ObjectContainer;
 
-    uint16 m_meshInfoIdx     = USHRT_MAX;
-    uint16 m_meshInstanceIdx = USHRT_MAX;
-    uint16 m_numChildren     = 0;
-    uint16 m_parentOffset    = 0;
+    RenderNode(ObjectContainer* pObjectContainer, uint32 nodeIdx, uint16 numNodes)
+        : m_pObjectContainer(pObjectContainer), m_nodeIdx(nodeIdx), m_numNodes(numNodes)
+    {
+    }
+
+    uint16 m_flags = 0;
+    uint16 m_numNodes = 0;
+    uint32 m_nodeIdx = 0;
+    ObjectContainer* m_pObjectContainer = nullptr;
 };
