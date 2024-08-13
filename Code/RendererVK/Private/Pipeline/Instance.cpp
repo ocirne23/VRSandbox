@@ -217,15 +217,10 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
         .pUserData = &m_breakOnValidationLayerError,
     };
 
-    //static const char* SYNCHRONIZATION_2_LAYER_NAME = "VK_LAYER_KHRONOS_synchronization2";
-    //if (supportsLayer(SYNCHRONIZATION_2_LAYER_NAME))
-    //	m_enabledLayers.push_back(SYNCHRONIZATION_2_LAYER_NAME);
-
     if (enableValidationLayers)
     {
-        static const char* VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
-        if (supportsLayer(VALIDATION_LAYER_NAME))
-            m_enabledLayers.push_back(VALIDATION_LAYER_NAME);
+        if (supportsLayer(VK_VALIDATION_LAYER_NAME))
+            m_enabledLayers.push_back(VK_VALIDATION_LAYER_NAME);
         if (supportsExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         if (supportsExtension(VK_EXT_DEBUG_REPORT_EXTENSION_NAME))

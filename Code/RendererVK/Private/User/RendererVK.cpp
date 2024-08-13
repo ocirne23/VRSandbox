@@ -205,12 +205,12 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
         perFrame.mappedUniformBuffer = (RendererVKLayout::Ubo*)perFrame.uniformBuffer.mapMemory().data();
 
         perFrame.computeMeshInfoBuffer.initialize(MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::MeshInfo),
-            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
+            vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         perFrame.mappedMeshInfo = (RendererVKLayout::MeshInfo*)perFrame.computeMeshInfoBuffer.mapMemory().data();
 
         perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshInstance),
-            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
+            vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         perFrame.mappedMeshInstances = (RendererVKLayout::MeshInstance*)perFrame.instanceDataBuffer.mapMemory().data();
 
@@ -416,14 +416,21 @@ void RendererVK::recordCommandBuffers()
         vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
 
         {   // Compute shader frustum cull and indirect command buffer generation
+            //vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eDrawIndirect, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags::Flags(0), {
+            //    vk::MemoryBarrier{.srcAccessMask = vk::AccessFlagBits::eIndirectCommandRead, .dstAccessMask = vk::AccessFlagBits::eTransferWrite } }, {}, {});
+
+            vkCommandBuffer.fillBuffer(frameData.indirectCommandBuffer.getBuffer(), 0, m_meshInfoCounter * sizeof(vk::DrawIndexedIndirectCommand), 0);
+
+            vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), { 
+                vk::MemoryBarrier{ .srcAccessMask = vk::AccessFlagBits::eTransferWrite, .dstAccessMask = vk::AccessFlagBits::eShaderRead } }, {}, {});
+
+
             vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
             commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
-            vkCommandBuffer.fillBuffer(frameData.indirectCommandBuffer.getBuffer(), 0, MAX_UNIQUE_MESHES * sizeof(vk::DrawIndexedIndirectCommand), 0);
-            vk::MemoryBarrier memoryBarrier{ .srcAccessMask = vk::AccessFlagBits::eTransferWrite, .dstAccessMask = vk::AccessFlagBits::eShaderRead };
-            vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), { memoryBarrier }, {}, {});
             vkCommandBuffer.dispatchIndirect(frameData.indirectDispatchBuffer.getBuffer(), 0);
-            vk::MemoryBarrier memoryBarrier2{ .srcAccessMask = vk::AccessFlagBits::eShaderWrite, .dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead };
-            vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlags::Flags(0), { memoryBarrier2 }, {}, {});
+            
+            vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlags::Flags(0), {
+                vk::MemoryBarrier{.srcAccessMask = vk::AccessFlagBits::eShaderWrite, .dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead } }, {}, {});
         }
         {   // Graphics pipeline draw
             vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);

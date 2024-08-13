@@ -32,7 +32,7 @@ private:
 
     bool m_isMouseDown = false;
     bool m_mousePosUpdated = false;
-    float m_boostMultiplier = 20.0f;
+    float m_boostMultiplier = 10.0f;
     float m_speed = 5.0f;
     float m_sensitivity = 0.01f;
     glm::vec2 m_lastMousePos;

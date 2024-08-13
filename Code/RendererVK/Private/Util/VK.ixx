@@ -3,10 +3,12 @@ export module RendererVK.VK;
 export import vulkan_hpp;
 
 import Core;
-import "VK.h";
+import <vulkan/vulkan.hpp>;
 
 #undef VK_NULL_HANDLE
 export nullptr_t VK_NULL_HANDLE = nullptr;
+
+export const char* VK_VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
 
 #undef VK_KHR_SWAPCHAIN_EXTENSION_NAME
 export const char* VK_KHR_SWAPCHAIN_EXTENSION_NAME = "VK_KHR_swapchain";

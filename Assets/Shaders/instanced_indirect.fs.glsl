@@ -86,9 +86,9 @@ void main()
 {
 	vec3 lightPos  = vec3(160, 800, 256);
 	vec3 lightVec  = lightPos - in_pos;
-	float distance = length(lightVec);
-	float falloff  = inverseSquareFalloff(distance, 50000);
-	float intensity = 500000.0;
+	float distance = 1.0f;//length(lightVec);
+	float falloff  = 1.0f;//inverseSquareFalloff(distance, 50000);
+	float intensity = 1.0;
 
 	vec3 V = normalize(u_viewPos - in_pos);
 	vec3 L = normalize(lightVec);
@@ -109,7 +109,7 @@ void main()
 	float specular = NdotL > 0.0 ? specularBRDF(NdotH, LdotH, roughness) : 0.0;
 	float env      = environmentContrib(roughness, NdotV);
 
-	vec3 diffuse = diffuseBurley(materialColor, roughness, NdotV, NdotL, VdotH);
+	vec3 diffuse = diffuseOrenNayar(materialColor, roughness, NdotV, NdotL, VdotH);
 	vec3 color = (diffuse + (specular + env) * materialColor) * falloff * intensity;
 	out_color = color;
 }
