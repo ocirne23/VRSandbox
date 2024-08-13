@@ -7,8 +7,7 @@ struct InMeshInstance
 {
     vec4 posScale;
     vec4 quat;
-    uint16_t meshIdx;
-    uint16_t materialIdx;
+    uint meshIdxMaterialIdx;
 };
 
 struct InMeshInfo
@@ -73,7 +72,7 @@ bool frustumCheck(vec4 pos, float radius)
 void main()
 {
     const uint instanceIdx   = gl_GlobalInvocationID.x;
-    const uint16_t meshIdx   = in_instances[instanceIdx].meshIdx;
+    const uint16_t meshIdx   = uint16_t(in_instances[instanceIdx].meshIdxMaterialIdx & 0x0000FFFF);
     const uint firstInstance = in_meshInfo[meshIdx].firstInstance;
 
     out_indirectCommands[meshIdx].indexCount    = in_meshInfo[meshIdx].indexCount;

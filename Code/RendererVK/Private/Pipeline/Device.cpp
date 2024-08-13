@@ -63,25 +63,21 @@ bool Device::initialize()
     std::array<vk::DeviceQueueCreateInfo, 1> deviceQueueCreateInfos{
         vk::DeviceQueueCreateInfo {.queueFamilyIndex = m_graphicsQueueIndex, .queueCount = 1, .pQueuePriorities = queuePriorities }
     };
+    const std::vector<const char*>& enabledLayers = VK::g_inst.getEnabledLayers();
 
+    vk::PhysicalDeviceFeatures2 deviceFeatures;
+    m_physicalDevice.getFeatures2(&deviceFeatures);
+    deviceFeatures.features.samplerAnisotropy = vk::True;
     vk::PhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures{
+        .pNext = &deviceFeatures,
         .runtimeDescriptorArray = vk::True,
     };
     vk::PhysicalDeviceSynchronization2Features syncFeatures{
         .pNext = &descriptorIndexingFeatures,
         .synchronization2 = vk::True,
     };
-    vk::PhysicalDeviceFeatures2 deviceFeatures{
-        .pNext = &syncFeatures,
-        .features = vk::PhysicalDeviceFeatures {
-            .samplerAnisotropy = vk::True,
-        },
-    };
-    m_physicalDevice.getFeatures2(&deviceFeatures);
-
-    const std::vector<const char*>& enabledLayers = VK::g_inst.getEnabledLayers();
     vk::DeviceCreateInfo deviceCreateInfo{
-        .pNext = &deviceFeatures,
+        .pNext = &syncFeatures,
         .queueCreateInfoCount = (uint32)deviceQueueCreateInfos.size(),
         .pQueueCreateInfos = deviceQueueCreateInfos.data(),
         .enabledLayerCount = (uint32)enabledLayers.size(),

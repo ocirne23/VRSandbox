@@ -34,8 +34,8 @@ layout (binding = 5) uniform sampler2D u_roughness_metallic_height[];
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
 layout (location = 4) in vec2 in_uv;
-layout (location = 5) in flat uint16_t in_meshIdx;
-layout (location = 6) in flat uint16_t in_materialIdx;
+layout (location = 5) in flat uint in_meshIdxMaterialIdx;
+
 
 layout (location = 0) out vec3 out_color;
 
@@ -102,8 +102,9 @@ void main()
 	float NdotV = dot(N, V);//clamp(dot(N, V), 0.0, 1.0);
 	float VdotH = dot(V, H);//clamp(dot(V, H), 0.0, 1.0);
 
-	vec3 materialColor = in_materialInfos[in_materialIdx].baseColor;
-	float roughness    = in_materialInfos[in_materialIdx].roughness;
+	uint16_t materialIdx = uint16_t((in_meshIdxMaterialIdx & 0xFFFF0000) >> 16);
+	vec3 materialColor = in_materialInfos[materialIdx].baseColor;
+	float roughness    = in_materialInfos[materialIdx].roughness;
 
 	float specular = NdotL > 0.0 ? specularBRDF(NdotH, LdotH, roughness) : 0.0;
 	float env      = environmentContrib(roughness, NdotV);
