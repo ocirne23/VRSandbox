@@ -416,14 +416,11 @@ void RendererVK::recordCommandBuffers()
         vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
 
         {   // Compute shader frustum cull and indirect command buffer generation
-            //vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eDrawIndirect, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags::Flags(0), {
-            //    vk::MemoryBarrier{.srcAccessMask = vk::AccessFlagBits::eIndirectCommandRead, .dstAccessMask = vk::AccessFlagBits::eTransferWrite } }, {}, {});
-
+            // There's some synchronization issue here...
             vkCommandBuffer.fillBuffer(frameData.indirectCommandBuffer.getBuffer(), 0, m_meshInfoCounter * sizeof(vk::DrawIndexedIndirectCommand), 0);
 
             vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), { 
                 vk::MemoryBarrier{ .srcAccessMask = vk::AccessFlagBits::eTransferWrite, .dstAccessMask = vk::AccessFlagBits::eShaderRead } }, {}, {});
-
 
             vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
             commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
