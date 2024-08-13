@@ -16,7 +16,7 @@ SceneData::~SceneData()
 bool SceneData::initialize(const char* filePath)
 {
     uint32 optimizationFlags = 0;
-    optimizationFlags |= aiProcess_OptimizeGraph;
+    //optimizationFlags |= aiProcess_OptimizeGraph;
     optimizationFlags |= aiProcess_FindInstances;
     optimizationFlags |= aiProcess_OptimizeMeshes;
     optimizationFlags |= aiProcess_ImproveCacheLocality;

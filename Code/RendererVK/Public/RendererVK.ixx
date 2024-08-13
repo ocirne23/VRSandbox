@@ -21,6 +21,7 @@ namespace RendererVKLayout
 {
     export struct Ubo;
     export struct MeshInfo;
+    export struct MaterialInfo;
     export struct MeshInstance;
 }
 
@@ -44,14 +45,17 @@ public:
     void update(double deltaSec, const FreeFlyCameraController& camera);
     void render();
 
+    void recordCommandBuffers();
+
     const char* getDebugText();
 
 private:
 
-    void recordCommandBuffers();
 
     friend class ObjectContainer;
-    uint32 registerObjectContainer(ObjectContainer* pObjectContainer, uint32 meshInfoCount);
+    void addObjectContainer(ObjectContainer* pObjectContainer);
+    uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos);
+    uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
 
 private:
 
@@ -75,12 +79,16 @@ private:
     std::vector<ObjectContainer*> m_objectContainers;
 
     uint32 m_meshInfoCounter = 0;
+    uint32 m_materialInfoCounter = 0;
+
+    Buffer m_materialInfoBuffer;
 
     struct PerFrameData
     {
         bool updated = false;
 
         Buffer uniformBuffer;
+
         Buffer indirectCommandBuffer;
         Buffer instanceDataBuffer;
         Buffer instanceIdxBuffer;
@@ -91,6 +99,7 @@ private:
         vk::DispatchIndirectCommand* mappedDispatchBuffer = nullptr;
         RendererVKLayout::Ubo* mappedUniformBuffer = nullptr;
         RendererVKLayout::MeshInfo* mappedMeshInfo = nullptr;
+        RendererVKLayout::MaterialInfo* mappedMaterialInfo = nullptr;
         RendererVKLayout::MeshInstance* mappedMeshInstances = nullptr;
     };
     std::array<PerFrameData, NUM_FRAMES_IN_FLIGHT> m_perFrameData;

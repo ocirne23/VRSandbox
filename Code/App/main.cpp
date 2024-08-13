@@ -34,16 +34,23 @@ int main()
 
     ObjectContainer objectContainer;
     objectContainer.initialize("Models/ship_dark.gltf");
+
+    ObjectContainer objectContainer2;
+    objectContainer2.initialize("Models/ship_dark.gltf");
     const uint32 numX = 5;
     const uint32 numY = 1;
     for (int x = 0; x < numX; ++x)
     {
-        for (int y = 0; y < numY; ++y)
-        {
-            RenderNode node = objectContainer.createNewRootInstance(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
-            objectContainer.updateInstancePositions(node);
-        }
+        RenderNode node = objectContainer.createNewRootNode(glm::vec3(x * 5.0f, 0, 0), 1.0f, glm::quat(1, 0, 0, 0));
+        node.updateRenderTransform();
+
+        RenderNode cloneNode = node.cloneNode(glm::vec3(x * 5.0f, 0, 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
+        cloneNode.updateRenderTransform();
+
+        RenderNode node2 = objectContainer2.createNewRootNode(glm::vec3(x * 5.0f, 0, 16.0f), 1.0f, glm::quat(1, 0, 0, 0));
+        node2.updateRenderTransform();
     }
+    renderer.recordCommandBuffers();
 
     auto startTime = std::chrono::high_resolution_clock::now();
     double timeAccum = 0.0;

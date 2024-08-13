@@ -12,9 +12,14 @@ public:
     RenderNode(const RenderNode& copy) = default;
     RenderNode(RenderNode&& move)
     {
+        m_flags    = move.m_flags;
+        m_numNodes = move.m_numNodes;
+        m_nodeIdx  = move.m_nodeIdx;
         m_pObjectContainer = move.m_pObjectContainer;
-        m_nodeIdx = move.m_nodeIdx;
     }
+
+    RenderNode cloneNode(glm::vec3 pos, float scale, glm::quat quat);
+    void updateRenderTransform();
 
 private:
 
@@ -25,8 +30,8 @@ private:
     {
     }
 
-    uint16 m_flags = 0;
+    uint16 m_flags    = 0;
     uint16 m_numNodes = 0;
-    uint32 m_nodeIdx = 0;
+    uint32 m_nodeIdx  = 0;
     ObjectContainer* m_pObjectContainer = nullptr;
 };

@@ -2,10 +2,11 @@ export module RendererVK.ObjectContainer;
 
 import Core;
 import Core.glm;
-import RendererVK.MeshInstance;
 import RendererVK.Layout;
 
 export class RenderNode;
+export class MeshData;
+export class MaterialData;
 export class NodeData;
 
 export class ObjectContainer final
@@ -20,22 +21,26 @@ public:
 
     bool initialize(const char* filePath);
 
-    RenderNode createNewRootInstance(glm::vec3 pos, float scale, glm::quat quat);
-    void updateInstancePositions(RenderNode& node);
+    RenderNode createNewRootNode(glm::vec3 pos, float scale, glm::quat quat);
+    RenderNode cloneNode(RenderNode& node, glm::vec3 pos, float scale, glm::quat quat);
+    void updateRenderTransform(RenderNode& node);
 
 private:
 
+    void initializeMeshes(const std::vector<MeshData>& meshData);
+    void initializeMaterials(const std::vector<MaterialData>& materialData);
     void initializeNodes(const NodeData& rootNodeData);
     uint32 addMeshInstance(uint32 meshIdx);
 
 private:
 
-    std::string m_filePath;
-    std::vector<std::string> m_meshNames;
+    std::vector<RendererVKLayout::MeshInfo> m_meshInfos;
+    std::vector<std::vector<RendererVKLayout::MeshInstance>> m_meshInstances;
+    std::vector<RendererVKLayout::MaterialInfo> m_materialInfos;
+    std::vector<uint16> m_materialIdxForMeshIdx;
 
     uint32 m_baseMeshInfoIdx = 0;
-    std::vector<RendererVKLayout::MeshInfo> m_meshInfos;
-    std::vector<std::vector<MeshInstance>> m_meshInstances;
+    uint32 m_baseMaterialInfoIdx = 0;
 
     struct WorldSpaceNode
     {
@@ -58,4 +63,9 @@ private:
     std::vector<LocalSpaceNode> m_renderNodes;
     std::vector<LocalSpaceNode> m_initialStateNodes;
     std::vector<WorldSpaceNode> m_worldSpaceNodes;
+
+    std::vector<std::string> m_meshNames;
+    std::vector<std::string> m_nodeNames;
+    std::vector<std::string> m_materialNames;
+    std::string m_filePath;
 };

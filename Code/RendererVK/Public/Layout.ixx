@@ -18,7 +18,8 @@ export namespace RendererVKLayout
         glm::vec3 pos;
         float scale = 1.0f;
         glm::quat quat;
-        uint32 meshInfoIdx;
+        uint16 meshInfoIdx;
+        uint16 materialInfoIdx;
     };
 
     export struct alignas(16) MeshInfo
@@ -29,6 +30,16 @@ export namespace RendererVKLayout
         uint32 firstIndex;
         int32  vertexOffset;
         uint32 firstInstance;
+    };
+
+    export struct alignas(16) MaterialInfo
+    {
+        glm::vec3 baseColor;
+        float roughness;
+        glm::vec3 specularColor;
+        float metalness;
+        glm::vec3 emissiveColor;
+        uint32 flags;
     };
 
     export struct MeshVertex

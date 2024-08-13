@@ -1,10 +1,14 @@
 #version 450
 
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
+#extension GL_EXT_shader_16bit_storage : enable
+
 struct InMeshInstance
 {
     vec4 posScale;
     vec4 quat;
-    uint meshIdx;
+    uint16_t meshIdx;
+    uint16_t materialIdx;
 };
 
 struct InMeshInfo
@@ -69,7 +73,7 @@ bool frustumCheck(vec4 pos, float radius)
 void main()
 {
     const uint instanceIdx   = gl_GlobalInvocationID.x;
-    const uint meshIdx       = in_instances[instanceIdx].meshIdx;
+    const uint16_t meshIdx   = in_instances[instanceIdx].meshIdx;
     const uint firstInstance = in_meshInfo[meshIdx].firstInstance;
 
     out_indirectCommands[meshIdx].indexCount    = in_meshInfo[meshIdx].indexCount;

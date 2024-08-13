@@ -1,5 +1,7 @@
 #version 450
 
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
+#extension GL_EXT_shader_16bit_storage : enable
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 #extension GL_EXT_nonuniform_qualifier : enable
@@ -11,14 +13,29 @@ layout (binding = 0, std140) uniform UBO
     vec3 u_viewPos;
 };
 
-layout (binding = 2) uniform sampler2D u_color[];
-layout (binding = 3) uniform sampler2D u_normal[];
-layout (binding = 4) uniform sampler2D u_roughness_metallic_height[];
+struct MaterialInfo
+{
+    vec3 baseColor;
+    float roughness;
+    vec3 specularColor;
+    float metalness;
+    vec3 emissiveColor;
+    uint flags;
+};
+layout (binding = 2, std430) buffer InMaterialInfos
+{
+	MaterialInfo in_materialInfos[];
+};
+
+layout (binding = 3) uniform sampler2D u_color[];
+layout (binding = 4) uniform sampler2D u_normal[];
+layout (binding = 5) uniform sampler2D u_roughness_metallic_height[];
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
 layout (location = 4) in vec2 in_uv;
-layout (location = 5) in flat uint in_meshIdx;
+layout (location = 5) in flat uint16_t in_meshIdx;
+layout (location = 6) in flat uint16_t in_materialIdx;
 
 layout (location = 0) out vec3 out_color;
 
@@ -85,8 +102,8 @@ void main()
 	float NdotV = dot(N, V);//clamp(dot(N, V), 0.0, 1.0);
 	float VdotH = dot(V, H);//clamp(dot(V, H), 0.0, 1.0);
 
-	vec3 materialColor = vec3(((in_meshIdx) % 20) * 0.05, ((in_meshIdx + 7) % 20) * 0.05, ((in_meshIdx + 14) % 20) * 0.05);   //texture(u_color[in_meshIdx], in_uv).xyz;
-	float roughness    = 0.5;//texture(u_roughness_metallic_height[in_meshIdx], in_uv).x;
+	vec3 materialColor = in_materialInfos[in_materialIdx].baseColor;
+	float roughness    = in_materialInfos[in_materialIdx].roughness;
 
 	float specular = NdotL > 0.0 ? specularBRDF(NdotH, LdotH, roughness) : 0.0;
 	float env      = environmentContrib(roughness, NdotV);

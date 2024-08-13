@@ -10,25 +10,33 @@ bool ObjectContainer::initialize(const char* filePath)
 {
     SceneData sceneData;
     if (!sceneData.initialize(filePath))
-    {
         return false;
-    }
 
     m_filePath = filePath;
 
-    MeshDataManager& meshDataManager = VK::g_renderer.m_meshDataManager;
+    VK::g_renderer.addObjectContainer(this);
 
-    const auto& meshDataList = sceneData.getMeshes();
-    const uint32 numMeshes = (uint32)meshDataList.size();
-    m_baseMeshInfoIdx = VK::g_renderer.registerObjectContainer(this, numMeshes);
+    initializeMaterials(sceneData.getMaterials());
+    initializeMeshes(sceneData.getMeshes());
+    initializeNodes(sceneData.getRootNode());
 
-    m_meshInstances.resize(meshDataList.size());
+    return true;
+}
+
+void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList)
+{
+    const size_t numMeshes = meshDataList.size();
+
+    m_meshInstances.resize(numMeshes);
     m_meshInfos.reserve(numMeshes);
+
+    MeshDataManager& meshDataManager = VK::g_renderer.m_meshDataManager;
 
     for (const MeshData& meshData : meshDataList)
     {
         RendererVKLayout::MeshInfo& meshInfo = m_meshInfos.emplace_back();
         m_meshNames.push_back(meshData.getName());
+        m_materialIdxForMeshIdx.push_back(meshData.getMaterialIndex());
 
         std::vector<RendererVKLayout::MeshVertex> vertices;
         vertices.resize(meshData.getNumVertices());
@@ -40,11 +48,11 @@ bool ObjectContainer::initialize(const char* filePath)
 
         for (uint32 i = 0; i < meshData.getNumVertices(); i++)
         {
-            vertices[i].position = pVertices[i];
-            vertices[i].normal = pNormals[i];
+            vertices[i].position   = pVertices[i];
+            vertices[i].normal     = pNormals[i];
             const float handedness = glm::dot(pNormals[i], glm::cross(pTangents[i], pBitangents[i])) >= 0.0f ? 1.0f : -1.0f;
-            vertices[i].tangent = glm::vec4(pTangents[i], handedness);
-            vertices[i].texCoord = glm::vec2(pTexCoords[i]);
+            vertices[i].tangent    = glm::vec4(pTangents[i], handedness);
+            vertices[i].texCoord   = glm::vec2(pTexCoords[i]);
         }
 
         std::vector<uint32> indices;
@@ -56,64 +64,46 @@ bool ObjectContainer::initialize(const char* filePath)
         meshInfo.center       = meshData.getAABB().getCenter();
     }
 
-    initializeNodes(sceneData.getRootNode());
-
-    return true;
+    m_baseMeshInfoIdx = VK::g_renderer.addMeshInfos(m_meshInfos);
 }
 
-uint32 ObjectContainer::addMeshInstance(uint32 meshIdx)
+union MaterialFlags
 {
-    const uint32 meshInstanceIdx = (uint32)m_meshInstances[meshIdx].size();
-    assert(meshInstanceIdx < USHRT_MAX && "Too many mesh instances for this mesh type");
-    MeshInstance& meshInstance = m_meshInstances[meshIdx].emplace_back();
-    meshInstance.meshInfoIdx = m_baseMeshInfoIdx + meshIdx;
-    return meshInstanceIdx;
-}
+    struct {
+        uint32 baseColorTex    : 1;
+        uint32 hasNormalTex    : 1;
+        uint32 hasRoughnessTex : 1;
+        uint32 hasMetalnessTex : 1;
+        uint32 hasOcclusionTex : 1;
+        uint32 hasEmissiveTex  : 1;
+        uint32 hasOpacityTex   : 1;
+        uint32 hasSpecularTex  : 1;
+        uint32 remainder       : 24;
+    } bits;
+    uint32 flags;
+};
 
-void ObjectContainer::updateInstancePositions(RenderNode& renderNode)
+void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& materialDataList)
 {
-    const uint32 numNodes = (uint32)renderNode.m_numNodes;
-    const uint32 startIdx = renderNode.m_nodeIdx;
-    for (uint32 i = 0; i < numNodes; ++i)
+    const size_t numMaterials = materialDataList.size();
+    m_materialInfos.reserve(numMaterials);
+    m_materialNames.reserve(numMaterials);
+
+    for (const MaterialData& materialData : materialDataList)
     {
-        const LocalSpaceNode& node = m_renderNodes[startIdx + i];
-        const WorldSpaceNode* parentNode = (node.parentOffset != 0) ? &m_worldSpaceNodes[i - node.parentOffset] : nullptr;
-        WorldSpaceNode& nodeWS = m_worldSpaceNodes[i];
-        nodeWS.pos   = parentNode ? parentNode->pos + parentNode->quat * (node.pos * parentNode->scale) : node.pos;
-        nodeWS.quat  = parentNode ? parentNode->quat * node.quat : node.quat;
-        nodeWS.scale = parentNode ? parentNode->scale * node.scale : node.scale;
-        if (node.meshInfoIdx != USHRT_MAX)
-        {
-            MeshInstance& meshInstance = m_meshInstances[node.meshInfoIdx][node.meshInstanceIdx];
-            meshInstance.pos = nodeWS.pos;
-            meshInstance.scale = nodeWS.scale;
-            meshInstance.quat = nodeWS.quat;
-        }
-    }
-}
+        RendererVKLayout::MaterialInfo& material = m_materialInfos.emplace_back();
 
-RenderNode ObjectContainer::createNewRootInstance(glm::vec3 pos, float scale, glm::quat quat)
-{
-    assert(!m_initialStateNodes.empty());
-    const size_t startIdx = m_renderNodes.size();
-    const size_t numNodes = m_initialStateNodes.size();
-    m_renderNodes.resize(startIdx + numNodes);
-    m_worldSpaceNodes.resize(numNodes);
+        material.baseColor     = materialData.getBaseColor();
+        material.roughness     = materialData.getRoughnessFactor();
+        material.specularColor = materialData.getSpecularColor();
+        material.metalness     = materialData.getMetalnessFactor();
+        material.emissiveColor = materialData.getEmissiveColor() * materialData.getEmissiveIntensity();
+        material.flags         = 0;
 
-    memcpy(&m_renderNodes[startIdx], m_initialStateNodes.data(), numNodes * sizeof(m_initialStateNodes[0]));
-
-    m_renderNodes[startIdx].pos = pos;
-    m_renderNodes[startIdx].scale = scale;
-    m_renderNodes[startIdx].quat = quat;
-    
-    for (size_t i = startIdx; i < startIdx + numNodes; ++i)
-    {
-        LocalSpaceNode& node = m_renderNodes[i];
-        if (node.meshInfoIdx != USHRT_MAX)
-            node.meshInstanceIdx = addMeshInstance(node.meshInfoIdx);
+        m_materialNames.push_back(materialData.getName());
     }
 
-    return RenderNode(this, (uint32)startIdx, (uint16)numNodes);
+    m_baseMaterialInfoIdx = VK::g_renderer.addMaterialInfos(m_materialInfos);
 }
 
 void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
@@ -126,16 +116,15 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
         auto [pAiNode, parentIdx] = nodeDataParentIdxStack.front();
         nodeDataParentIdxStack.pop_front();
 
-        aiVector3f pos;
-        aiVector3f scale;
+        aiVector3f pos, scale;
         aiQuaternion rot;
         pAiNode->mTransformation.Decompose(scale, rot, pos);
 
         const float nonUniformScaleAmount = glm::max(glm::distance(scale.x, scale.y), glm::distance(scale.x, scale.z));
         assert(nonUniformScaleAmount < 0.0001f && "Non-uniform scaling is not supported");
 
-        const uint32 numChildren  = pAiNode->mNumChildren;
-        const uint32 nodeIdx      = (uint32)m_initialStateNodes.size();
+        const uint32 numChildren = pAiNode->mNumChildren;
+        const uint32 nodeIdx     = (uint32)m_initialStateNodes.size();
 
         LocalSpaceNode& node = m_initialStateNodes.emplace_back();
         node.pos          = glm::vec3(pos.x, pos.y, pos.z);
@@ -143,6 +132,7 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
         node.quat         = glm::quat(rot.w, rot.x, rot.y, rot.z);
         node.numChildren  = (uint16)numChildren;
         node.parentOffset = (uint16)(nodeIdx - parentIdx);
+        m_nodeNames.push_back(pAiNode->mName.C_Str());
 
         if (pAiNode->mNumMeshes > 0)
         {
@@ -162,6 +152,7 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
                 childNode.parentOffset = (uint16)(childNodeIdx - nodeIdx);
                 childNode.numChildren  = 0;
                 childNode.meshInfoIdx  = pAiNode->mMeshes[i];
+                m_nodeNames.push_back(m_meshNames[pAiNode->mMeshes[i]]);
             }
         }
         else
@@ -175,3 +166,90 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
         }
     }
 }
+
+uint32 ObjectContainer::addMeshInstance(uint32 meshIdx)
+{
+    const uint32 meshInstanceIdx = (uint32)m_meshInstances[meshIdx].size();
+    assert(meshInstanceIdx < USHRT_MAX && "Too many mesh instances for this mesh type");
+    RendererVKLayout::MeshInstance& meshInstance = m_meshInstances[meshIdx].emplace_back();
+    meshInstance.meshInfoIdx = m_baseMeshInfoIdx + meshIdx;
+    meshInstance.materialInfoIdx = m_baseMaterialInfoIdx + m_materialIdxForMeshIdx[meshIdx];
+    return meshInstanceIdx;
+}
+
+void ObjectContainer::updateRenderTransform(RenderNode& renderNode)
+{
+    const uint32 numNodes = (uint32)renderNode.m_numNodes;
+    const uint32 startIdx = renderNode.m_nodeIdx;
+    for (uint32 i = 0; i < numNodes; ++i)
+    {
+        const LocalSpaceNode& node       = m_renderNodes[startIdx + i];
+        const WorldSpaceNode* parentNode = (node.parentOffset != 0) ? &m_worldSpaceNodes[i - node.parentOffset] : nullptr;
+        WorldSpaceNode& nodeWS           = m_worldSpaceNodes[i];
+        nodeWS.pos   = parentNode ? parentNode->pos + parentNode->quat * (node.pos * parentNode->scale) : node.pos;
+        nodeWS.quat  = parentNode ? parentNode->quat * node.quat : node.quat;
+        nodeWS.scale = parentNode ? parentNode->scale * node.scale : node.scale;
+        if (node.meshInfoIdx != USHRT_MAX)
+        {
+            RendererVKLayout::MeshInstance& meshInstance = m_meshInstances[node.meshInfoIdx][node.meshInstanceIdx];
+            meshInstance.pos   = nodeWS.pos;
+            meshInstance.scale = nodeWS.scale;
+            meshInstance.quat  = nodeWS.quat;
+        }
+    }
+}
+
+RenderNode ObjectContainer::cloneNode(RenderNode& node, glm::vec3 pos, float scale, glm::quat quat)
+{
+    assert(!m_initialStateNodes.empty());
+    const size_t copyIdx  = node.m_nodeIdx;
+    const size_t numNodes = node.m_numNodes;
+    const size_t startIdx = m_renderNodes.size();
+    m_renderNodes.resize(startIdx + numNodes);
+
+    memcpy(&m_renderNodes[startIdx], &m_renderNodes[copyIdx], numNodes * sizeof(m_renderNodes[0]));
+
+    m_renderNodes[startIdx].pos   = pos;
+    m_renderNodes[startIdx].scale = scale;
+    m_renderNodes[startIdx].quat  = quat;
+
+    for (size_t i = startIdx; i < startIdx + numNodes; ++i)
+    {
+        LocalSpaceNode& node = m_renderNodes[i];
+        if (node.meshInfoIdx != USHRT_MAX)
+            node.meshInstanceIdx = addMeshInstance(node.meshInfoIdx);
+    }
+
+    return RenderNode(this, (uint32)startIdx, (uint16)numNodes);
+}
+
+RenderNode ObjectContainer::createNewRootNode(glm::vec3 pos, float scale, glm::quat quat)
+{
+    assert(!m_initialStateNodes.empty());
+    const size_t startIdx = m_renderNodes.size();
+    const size_t numNodes = m_initialStateNodes.size();
+    m_renderNodes.resize(startIdx + numNodes);
+    m_worldSpaceNodes.resize(numNodes);
+
+    memcpy(&m_renderNodes[startIdx], m_initialStateNodes.data(), numNodes * sizeof(m_initialStateNodes[0]));
+
+    m_renderNodes[startIdx].pos   = pos;
+    m_renderNodes[startIdx].scale = scale;
+    m_renderNodes[startIdx].quat  = quat;
+    
+    for (size_t i = startIdx; i < startIdx + numNodes; ++i)
+    {
+        LocalSpaceNode& node = m_renderNodes[i];
+        if (node.meshInfoIdx != USHRT_MAX)
+            node.meshInstanceIdx = addMeshInstance(node.meshInfoIdx);
+    }
+
+    return RenderNode(this, (uint32)startIdx, (uint16)numNodes);
+}
+
+/*
+RenderNode ObjectContainer::createNewRootFromChildNode(const char* path, const glm::vec3 pos, float scale, glm::quat quat)
+{
+
+}*/
+

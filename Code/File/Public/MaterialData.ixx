@@ -19,17 +19,17 @@ public:
     bool initialize(const aiMaterial* pMaterial);
 
     const char* getName() const;
-    const glm::vec3 getDiffuseColor() const;
-    const glm::vec3 getSpecularColor() const;
-    const glm::vec3 getAmbientColor() const;
-    const glm::vec3 getEmissiveColor() const;
-    const glm::vec3 getTransparentColor() const;
-    const glm::vec3 getReflectiveColor() const;
+    
+    glm::vec3 getBaseColor() const;
+    glm::vec3 getEmissiveColor() const;
+    glm::vec3 getSpecularColor() const;
+    float getRoughnessFactor() const;
+    float getMetalnessFactor() const;
     float getOpacity() const;
-    float getShininess() const;
-    float getShininessStrength() const;
+    float getEmissiveIntensity() const;
     float getRefractiveIndex() const;
-    const std::string getTexturePath(TextureType type) const;
+
+    std::string getTexturePath(TextureType type) const;
 
 private:
 
