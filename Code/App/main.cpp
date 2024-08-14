@@ -31,13 +31,13 @@ int main()
     renderer.initialize(window, true);
 
     ObjectContainer objectContainer;
-    objectContainer.initialize("Models/ship_dark.gltf", false);
+    objectContainer.initialize("Models/ship_dark.glb", true);
 
     ObjectContainer objectContainer2;
-    objectContainer2.initialize("Models/tower.gltf", false);
+    objectContainer2.initialize("Models/tower.glb", true);
 
-    const uint32 numX = 1;
-    const uint32 numY = 1;
+    const uint32 numX = 50;
+    const uint32 numY = 50;
     for (int x = 0; x < numX; ++x)
     {
         for (int y = 0; y < numY; ++y)

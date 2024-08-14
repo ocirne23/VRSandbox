@@ -127,9 +127,10 @@ void ObjectContainer::initializeNodes(const NodeData& rootNodeData)
         const uint32 nodeIdx     = (uint32)m_initialStateNodes.size();
 
         LocalSpaceNode& node = m_initialStateNodes.emplace_back();
-        node.pos          = glm::vec3(pos.x, pos.y, pos.z);
-        node.scale        = scale.x;
-        node.quat         = glm::quat(rot.w, rot.x, rot.y, rot.z);
+        // Ensure roots have no transform
+        node.pos          = parentIdx != 0 ? glm::vec3(pos.x, pos.y, pos.z) : glm::vec3(0);
+        node.scale        = parentIdx != 0 ? scale.x : 1.0f;
+        node.quat         = parentIdx != 0 ? glm::quat(rot.w, rot.x, rot.y, rot.z) : glm::quat(1, 0, 0, 0);
         node.numChildren  = (uint16)numChildren;
         node.parentOffset = (uint16)(nodeIdx - parentIdx);
         m_nodeNames.push_back(pAiNode->mName.C_Str());
