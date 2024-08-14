@@ -49,9 +49,9 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 
     glslang::InitializeProcess();
 
-    VK::g_inst.initialize(window, enableValidationLayers);
-    VK::g_inst.setBreakOnValidationLayerError(enableValidationLayers);
-    VK::g_dev.initialize();
+    Globals::instance.initialize(window, enableValidationLayers);
+    Globals::instance.setBreakOnValidationLayerError(enableValidationLayers);
+    Globals::device.initialize();
     m_surface.initialize(window);
     assert(m_surface.deviceSupportsSurface());
 
@@ -196,22 +196,22 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     {
         perFrame.indirectDispatchBuffer.initialize(sizeof(vk::DispatchIndirectCommand),
             vk::BufferUsageFlagBits::eIndirectBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedDispatchBuffer = (vk::DispatchIndirectCommand*)perFrame.indirectDispatchBuffer.mapMemory().data();
 
         perFrame.uniformBuffer.initialize(sizeof(RendererVKLayout::Ubo),
             vk::BufferUsageFlagBits::eUniformBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedUniformBuffer = (RendererVKLayout::Ubo*)perFrame.uniformBuffer.mapMemory().data();
 
         perFrame.computeMeshInfoBuffer.initialize(MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::MeshInfo),
             vk::BufferUsageFlagBits::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedMeshInfo = (RendererVKLayout::MeshInfo*)perFrame.computeMeshInfoBuffer.mapMemory().data();
 
         perFrame.instanceDataBuffer.initialize(MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshInstance),
             vk::BufferUsageFlagBits::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedMeshInstances = (RendererVKLayout::MeshInstance*)perFrame.instanceDataBuffer.mapMemory().data();
 
         perFrame.indirectCommandBuffer.initialize(MAX_UNIQUE_MESHES * sizeof(vk::DrawIndexedIndirectCommand),
@@ -238,19 +238,27 @@ void RendererVK::update(double deltaSec, const FreeFlyCameraController& camera)
     glm::mat4 viewMatrix = camera.getViewMatrix();
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
+
     frameData.mappedUniformBuffer[0].mvp = projection * viewMatrix;
     frameData.mappedUniformBuffer[0].frustum.fromMatrix(frameData.mappedUniformBuffer[0].mvp);
     frameData.mappedUniformBuffer[0].viewPos = camera.getPosition();
+
+    Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+        .memory = frameData.uniformBuffer.getMemory(), .offset = 0, .size = vk::WholeSize
+    }});
     
     if (!frameData.updated)
     {
+        const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
+
         uint32 instanceCounter = 0;
+        uint32 meshInfoCounter = 0;
 
         for (ObjectContainer* pObjectContainer : m_objectContainers)
         {
             std::vector<RendererVKLayout::MeshInfo>& meshInfos = pObjectContainer->m_meshInfos;
             const uint32 numMeshInfos = (uint32)meshInfos.size();
-
+            meshInfoCounter += numMeshInfos;
             for (uint32 i = 0; i < numMeshInfos; ++i)
             {
                 meshInfos[i].firstInstance = instanceCounter;
@@ -262,9 +270,28 @@ void RendererVK::update(double deltaSec, const FreeFlyCameraController& camera)
             }
             memcpy(&frameData.mappedMeshInfo[pObjectContainer->m_baseMeshInfoIdx], meshInfos.data(), sizeof(RendererVKLayout::MeshInfo) * numMeshInfos);
         }
+        frameData.mappedDispatchBuffer[0] = vk::DispatchIndirectCommand{ .x = instanceCounter, .y = 1, .z = 1 };
+
+        {   // flush instance data buffer
+            vk::DeviceSize size = instanceCounter * sizeof(RendererVKLayout::MeshInstance);
+            size = (size + atomSize - 1) & ~(atomSize - 1);
+            Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+                .memory = frameData.instanceDataBuffer.getMemory(), .offset = 0, .size = size
+            } });
+        }
+        {   // flush meshinfo buffer
+            vk::DeviceSize size = meshInfoCounter * sizeof(RendererVKLayout::MeshInfo);
+            size = (size + atomSize - 1) & ~(atomSize - 1);
+            Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+                .memory = frameData.computeMeshInfoBuffer.getMemory(), .offset = 0, .size = size
+            }});
+        }
+        Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+            .memory = frameData.indirectDispatchBuffer.getMemory(), .offset = 0, .size = vk::WholeSize
+        }});
 
         m_instanceCounter = instanceCounter;
-        frameData.mappedDispatchBuffer[0] = vk::DispatchIndirectCommand{ .x = instanceCounter, .y = 1, .z = 1 };
+        m_meshInfoCounter = meshInfoCounter;
 
         frameData.updated = true;
     }
@@ -414,7 +441,6 @@ void RendererVK::recordCommandBuffers()
 
         CommandBuffer& commandBuffer = m_swapChain.getCommandBuffer(i);
         vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
-
         {   // Compute shader frustum cull and indirect command buffer generation
             // There's some synchronization issue here...
             vkCommandBuffer.fillBuffer(frameData.indirectCommandBuffer.getBuffer(), 0, m_meshInfoCounter * sizeof(vk::DrawIndexedIndirectCommand), 0);

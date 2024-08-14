@@ -7,18 +7,18 @@ CommandBuffer::CommandBuffer() {}
 CommandBuffer::~CommandBuffer()
 {
     if (m_commandBuffer)
-        VK::g_dev.getDevice().freeCommandBuffers(VK::g_dev.getCommandPool(), m_commandBuffer);
+        Globals::device.getDevice().freeCommandBuffers(Globals::device.getCommandPool(), m_commandBuffer);
 }
 
 bool CommandBuffer::initialize()
 {
     vk::CommandBufferAllocateInfo allocInfo
     {
-        .commandPool = VK::g_dev.getCommandPool(),
+        .commandPool = Globals::device.getCommandPool(),
         .level = vk::CommandBufferLevel::ePrimary,
         .commandBufferCount = 1,
     };
-    m_commandBuffer = VK::g_dev.getDevice().allocateCommandBuffers(allocInfo)[0];
+    m_commandBuffer = Globals::device.getDevice().allocateCommandBuffers(allocInfo)[0];
     if (!m_commandBuffer)
     {
         assert(false && "Failed to allocate command buffer");
@@ -46,7 +46,7 @@ void CommandBuffer::submitGraphics(vk::Fence fence)
         .signalSemaphoreCount = (uint32)m_signalSemaphores.size(),
         .pSignalSemaphores = m_signalSemaphores.data(),
     };
-    VK::g_dev.getGraphicsQueue().submit(submitInfo, fence);
+    Globals::device.getGraphicsQueue().submit(submitInfo, fence);
 
     m_waitSemaphores.clear();
     m_waitStages.clear();

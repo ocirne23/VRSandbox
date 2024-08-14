@@ -157,7 +157,7 @@ void GpuCrashDumpCallback(const void* pGpuCrashDump, const uint32_t gpuCrashDump
 Instance::Instance() {}
 Instance::~Instance()
 {
-    VK::g_dev.destroy();
+    Globals::device.destroy();
     destroy();
 }
 

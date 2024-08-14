@@ -48,6 +48,9 @@ public:
     void recordCommandBuffers();
 
     const char* getDebugText();
+    uint32 getNumMeshInstances() const { return m_instanceCounter; }
+    uint32 getNumMeshTypes() const { return m_meshInfoCounter; }
+    uint32 getNumMaterials() const { return m_materialInfoCounter; }
 
 private:
 
@@ -78,11 +81,11 @@ private:
 
     std::vector<ObjectContainer*> m_objectContainers;
 
+    uint32 m_instanceCounter = 0;
     uint32 m_meshInfoCounter = 0;
     uint32 m_materialInfoCounter = 0;
 
     Buffer m_materialInfoBuffer;
-
     struct PerFrameData
     {
         bool updated = false;
@@ -103,14 +106,12 @@ private:
         RendererVKLayout::MeshInstance* mappedMeshInstances = nullptr;
     };
     std::array<PerFrameData, NUM_FRAMES_IN_FLIGHT> m_perFrameData;
-
-    uint32 m_instanceCounter = 0;
 };
 
-export namespace VK
+export namespace Globals
 {
 #pragma warning(disable: 4075)
 #pragma init_seg(".CRT$XCU3")
-    RendererVK g_renderer;
+    RendererVK rendererVK;
 #pragma warning(default: 4075)
 }

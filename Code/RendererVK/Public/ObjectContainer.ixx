@@ -19,7 +19,7 @@ public:
     ~ObjectContainer() {}
     ObjectContainer(const ObjectContainer&) = delete;
 
-    bool initialize(const char* filePath);
+    bool initialize(const char* filePath, bool preTransformVertices);
 
     RenderNode createNewRootNode(glm::vec3 pos, float scale, glm::quat quat);
     RenderNode cloneNode(RenderNode& node, glm::vec3 pos, float scale, glm::quat quat);
@@ -37,6 +37,8 @@ private:
     std::vector<RendererVKLayout::MeshInfo> m_meshInfos;
     std::vector<std::vector<RendererVKLayout::MeshInstance>> m_meshInstances;
     std::vector<RendererVKLayout::MaterialInfo> m_materialInfos;
+
+
     std::vector<uint16> m_materialIdxForMeshIdx;
 
     uint32 m_baseMeshInfoIdx = 0;

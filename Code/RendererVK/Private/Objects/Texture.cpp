@@ -13,7 +13,7 @@ Texture::Texture()
 
 Texture::~Texture()
 {
-    vk::Device vkDevice = VK::g_dev.getDevice();
+    vk::Device vkDevice = Globals::device.getDevice();
     if (m_imageView)
         vkDevice.destroyImageView(m_imageView);
     if (m_imageMemory)
@@ -26,7 +26,7 @@ Texture::~Texture()
 
 bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath, bool sRGB)
 {
-    vk::Device vkDevice = VK::g_dev.getDevice();
+    vk::Device vkDevice = Globals::device.getDevice();
     vk::SemaphoreTypeCreateInfo semaphoreTypeCreateInfo = { .semaphoreType = vk::SemaphoreType::eBinary };
     m_imageReadySemaphore = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{ .pNext = &semaphoreTypeCreateInfo });
 
@@ -105,7 +105,7 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath, 
     vk::MemoryRequirements memoryRequirements = vkDevice.getImageMemoryRequirements(m_image);
     vk::MemoryAllocateInfo memoryAllocateInfo = {
         .allocationSize = memoryRequirements.size,
-        .memoryTypeIndex = VK::g_dev.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
+        .memoryTypeIndex = Globals::device.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
     };
     m_imageMemory = vkDevice.allocateMemory(memoryAllocateInfo);
     if (!m_imageMemory)

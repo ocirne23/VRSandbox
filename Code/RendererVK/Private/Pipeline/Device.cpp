@@ -11,7 +11,7 @@ Device::~Device()
 
 bool Device::initialize()
 {
-    vk::Instance instance = VK::g_inst.getInstance();
+    vk::Instance instance = Globals::instance.getInstance();
     // try to find the discrete GPU with the most memory
     for (vk::PhysicalDevice physDevice : instance.enumeratePhysicalDevices())
     {
@@ -25,6 +25,7 @@ bool Device::initialize()
         }
     }
     printf("Device: %s\n", m_physicalDevice.getProperties().deviceName.data());
+    m_nonCoherentAtomSize = m_physicalDevice.getProperties().limits.nonCoherentAtomSize;
 
     std::vector<const char*> deviceExtensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME };
     if (!supportsExtensions(deviceExtensions))
@@ -63,7 +64,7 @@ bool Device::initialize()
     std::array<vk::DeviceQueueCreateInfo, 1> deviceQueueCreateInfos{
         vk::DeviceQueueCreateInfo {.queueFamilyIndex = m_graphicsQueueIndex, .queueCount = 1, .pQueuePriorities = queuePriorities }
     };
-    const std::vector<const char*>& enabledLayers = VK::g_inst.getEnabledLayers();
+    const std::vector<const char*>& enabledLayers = Globals::instance.getEnabledLayers();
 
     vk::PhysicalDeviceFeatures2 deviceFeatures;
     m_physicalDevice.getFeatures2(&deviceFeatures);

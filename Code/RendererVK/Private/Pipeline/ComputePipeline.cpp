@@ -5,7 +5,7 @@ import RendererVK.Shader;
 
 bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
 {
-    vk::Device vkDevice = VK::g_dev.getDevice();
+    vk::Device vkDevice = Globals::device.getDevice();
 
     vk::DescriptorSetLayoutCreateInfo layoutInfo
     {
@@ -20,8 +20,8 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
         .flags = {},
         .setLayoutCount = 1,
         .pSetLayouts = &m_descriptorSetLayout,
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = nullptr,
+        .pushConstantRangeCount = (uint32)layout.pushConstantRanges.size(),
+        .pPushConstantRanges = layout.pushConstantRanges.data(),
     };
     m_pipelineLayout = vkDevice.createPipelineLayout(pipelineLayoutCreateInfo);
 
@@ -51,7 +51,7 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
     };
 
     m_pipelineCache = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
-    m_pipeline = VK::g_dev.getDevice().createComputePipeline(m_pipelineCache, pipelineCreateInfo).value;
+    m_pipeline = Globals::device.getDevice().createComputePipeline(m_pipelineCache, pipelineCreateInfo).value;
 
     return true;
 }

@@ -32,10 +32,10 @@ private:
     VkDebugUtilsMessengerEXT m_debugMessenger;
 };
 
-export namespace VK
+export namespace Globals
 {
 #pragma warning(disable: 4075)
 #pragma init_seg(".CRT$XCU1")
-    Instance g_inst;
+    Instance instance;
 #pragma warning(default: 4075)
 }

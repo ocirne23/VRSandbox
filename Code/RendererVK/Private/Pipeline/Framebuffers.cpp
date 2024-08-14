@@ -8,7 +8,7 @@ import RendererVK.SwapChain;
 Framebuffers::Framebuffers() {}
 Framebuffers::~Framebuffers()
 {
-    vk::Device vkDevice = VK::g_dev.getDevice();
+    vk::Device vkDevice = Globals::device.getDevice();
 
     if (m_depthImageView)
         vkDevice.destroyImageView(m_depthImageView);
@@ -24,7 +24,7 @@ Framebuffers::~Framebuffers()
 
 bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swapChain)
 {
-    vk::Device vkDevice = VK::g_dev.getDevice();
+    vk::Device vkDevice = Globals::device.getDevice();
     std::vector<vk::Image> images = vkDevice.getSwapchainImagesKHR(swapChain.getSwapChain());
     m_imageViews.reserve(images.size());
     for (const vk::Image& image : images)
@@ -75,9 +75,9 @@ bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swa
         return false;
     }
 
-    vk::PhysicalDeviceMemoryProperties memoryProperties = VK::g_dev.getPhysicalDevice().getMemoryProperties();
+    vk::PhysicalDeviceMemoryProperties memoryProperties = Globals::device.getPhysicalDevice().getMemoryProperties();
     vk::MemoryRequirements memoryRequirements = vkDevice.getImageMemoryRequirements(m_depthImage);
-    const uint32 typeIndex = VK::g_dev.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    const uint32 typeIndex = Globals::device.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
     vk::MemoryAllocateInfo depthImageAllocInfo{
         .allocationSize = memoryRequirements.size,
         .memoryTypeIndex = typeIndex

@@ -9,7 +9,7 @@ Shader::Shader() {}
 Shader::~Shader()
 {
     if (m_shaderModule)
-        VK::g_dev.getDevice().destroyShaderModule(m_shaderModule);
+        Globals::device.getDevice().destroyShaderModule(m_shaderModule);
 }
 
 bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath)
@@ -43,7 +43,7 @@ bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shader
     createInfo.codeSize = spirv.size() * sizeof(unsigned int);
     createInfo.pCode = spirv.data();
 
-    m_shaderModule = VK::g_dev.getDevice().createShaderModule(createInfo);
+    m_shaderModule = Globals::device.getDevice().createShaderModule(createInfo);
     if (!m_shaderModule)
     {
         assert(false && "Failed to create shader module");

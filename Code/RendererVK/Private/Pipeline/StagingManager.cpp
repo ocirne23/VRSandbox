@@ -15,10 +15,10 @@ StagingManager::StagingManager()
 
 StagingManager::~StagingManager()
 {
-    vk::Device vkDevice = VK::g_dev.getDevice();
-    m_stagingBuffers[m_currentBuffer].unmapMemory();
+    vk::Device vkDevice = Globals::device.getDevice();
     for (int i = 0; i < NUM_STAGING_BUFFERS; i++)
     {
+        m_stagingBuffers[m_currentBuffer].unmapMemory();
         vkDevice.destroyFence(m_fences[i]);
         vkDevice.destroySemaphore(m_semaphores[i]);
     }
@@ -28,21 +28,18 @@ bool StagingManager::initialize(SwapChain& swapChain)
 {
     m_swapChain = &swapChain;
 
-    vk::Device vkDevice = VK::g_dev.getDevice();
+    vk::Device vkDevice = Globals::device.getDevice();
     for (int i = 0; i < NUM_STAGING_BUFFERS; i++)
     {
-        if (!m_stagingBuffers[i].initialize(STAGING_BUFFER_SIZE, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent))
+        if (!m_stagingBuffers[i].initialize(STAGING_BUFFER_SIZE, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached))
             return false;
 
         m_commandBuffers[i].initialize();
-
-        vk::FenceCreateInfo fenceCreateInfo = { .flags = vk::FenceCreateFlagBits::eSignaled };
-        m_fences[i] = vkDevice.createFence(fenceCreateInfo);
-
-        vk::SemaphoreCreateInfo semaphoreCreateInfo = {};
-        m_semaphores[i] = vkDevice.createSemaphore(semaphoreCreateInfo);
+        m_fences[i] = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
+        m_semaphores[i] = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
+        m_mappedStagingBuffers[i] = m_stagingBuffers[i].mapMemory().data();
     }
-    m_mappedMemory = m_stagingBuffers[m_currentBuffer].mapMemory().data();
+    m_mappedMemory = m_mappedStagingBuffers[m_currentBuffer];
 
     return true;
 }
@@ -87,16 +84,20 @@ void StagingManager::update()
 {
     if (m_bufferCopyRegions.empty() && m_imageCopyRegions.empty())
         return;
+    vk::Device vkDevice = Globals::device.getDevice();
 
-    m_stagingBuffers[m_currentBuffer].unmapMemory();
-
-    vk::Device vkDevice = VK::g_dev.getDevice();
     vk::Result result = vkDevice.waitForFences(1, &m_fences[m_currentBuffer], vk::True, UINT64_MAX);
     if (result != vk::Result::eSuccess)
         assert(false && "Failed to wait for fence");
     result = vkDevice.resetFences(1, &m_fences[m_currentBuffer]);
     if (result != vk::Result::eSuccess)
         assert(false && "Failed to reset fence");
+
+    const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
+    vk::DeviceSize size = (m_currentBufferOffset + atomSize - 1) & ~(atomSize - 1);
+    vkDevice.flushMappedMemoryRanges({ vk::MappedMemoryRange{
+        .memory = m_stagingBuffers[m_currentBuffer].getMemory(), .offset = 0, .size = size
+    } });
 
     CommandBuffer& commandBuffer = m_commandBuffers[m_currentBuffer];
     commandBuffer.addSignalSemaphore(m_semaphores[m_currentBuffer]);
@@ -151,12 +152,11 @@ void StagingManager::update()
 
     commandBuffer.end();
     commandBuffer.submitGraphics(m_fences[m_currentBuffer]);
-
     m_swapChain->getCurrentCommandBuffer().addWaitSemaphore(m_semaphores[m_currentBuffer], vk::PipelineStageFlagBits::eVertexInput);
 
     m_currentBuffer = (m_currentBuffer + 1) % NUM_STAGING_BUFFERS;
     m_currentBufferOffset = 0;
     m_bufferCopyRegions.clear();
     m_imageCopyRegions.clear();
-    m_mappedMemory = m_stagingBuffers[m_currentBuffer].mapMemory().data();
+    m_mappedMemory = m_mappedStagingBuffers[m_currentBuffer];
 }

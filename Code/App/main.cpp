@@ -27,17 +27,17 @@ int main()
     FreeFlyCameraController cameraController;
     cameraController.initialize(input, glm::vec3(10.0f, 0.0f, -10.0f), glm::vec3(0.0f, 0.0f, 0.0f));
 
-    RendererVK& renderer = VK::g_renderer;
+    RendererVK& renderer = Globals::rendererVK;
     renderer.initialize(window, true);
 
     ObjectContainer objectContainer;
-    objectContainer.initialize("Models/ship_dark.gltf");
+    objectContainer.initialize("Models/ship_dark.gltf", false);
 
     ObjectContainer objectContainer2;
-    objectContainer2.initialize("Models/tower.gltf");
+    objectContainer2.initialize("Models/tower.gltf", false);
 
-    const uint32 numX = 50;
-    const uint32 numY = 50;
+    const uint32 numX = 1;
+    const uint32 numY = 1;
     for (int x = 0; x < numX; ++x)
     {
         for (int y = 0; y < numY; ++y)
@@ -72,7 +72,9 @@ int main()
         timeAccum += deltaSec;
         if (timeAccum > 1.0f)
         {
-            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i Used Mem: %f mb", frameCount, (double)(g_heapAllocator.getUsedSize() + getAlignedAllocatedSize()) / 1024.0 / 1024.0);
+            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i mem: %.2fmb instances: %i meshtypes: %i materials: %i", 
+                frameCount, (double)(g_heapAllocator.getUsedSize() + getAlignedAllocatedSize()) / 1024.0 / 1024.0, 
+                renderer.getNumMeshInstances(), renderer.getNumMeshTypes(), renderer.getNumMaterials());
             window.setTitle(windowTitleBuf);
             frameCount = 0;
             timeAccum = 0.0;

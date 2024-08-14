@@ -6,15 +6,15 @@ import RendererVK;
 import RendererVK.MeshDataManager;
 import RendererVK.RenderNode;
 
-bool ObjectContainer::initialize(const char* filePath)
+bool ObjectContainer::initialize(const char* filePath, bool preTransformVertices)
 {
     SceneData sceneData;
-    if (!sceneData.initialize(filePath))
+    if (!sceneData.initialize(filePath, preTransformVertices))
         return false;
 
     m_filePath = filePath;
 
-    VK::g_renderer.addObjectContainer(this);
+    Globals::rendererVK.addObjectContainer(this);
 
     initializeMaterials(sceneData.getMaterials());
     initializeMeshes(sceneData.getMeshes());
@@ -30,7 +30,7 @@ void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList
     m_meshInstances.resize(numMeshes);
     m_meshInfos.reserve(numMeshes);
 
-    MeshDataManager& meshDataManager = VK::g_renderer.m_meshDataManager;
+    MeshDataManager& meshDataManager = Globals::rendererVK.m_meshDataManager;
 
     for (const MeshData& meshData : meshDataList)
     {
@@ -64,7 +64,7 @@ void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList
         meshInfo.center       = meshData.getAABB().getCenter();
     }
 
-    m_baseMeshInfoIdx = VK::g_renderer.addMeshInfos(m_meshInfos);
+    m_baseMeshInfoIdx = Globals::rendererVK.addMeshInfos(m_meshInfos);
 }
 
 union MaterialFlags
@@ -103,7 +103,7 @@ void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& mater
         m_materialNames.push_back(materialData.getName());
     }
 
-    m_baseMaterialInfoIdx = VK::g_renderer.addMaterialInfos(m_materialInfos);
+    m_baseMaterialInfoIdx = Globals::rendererVK.addMaterialInfos(m_materialInfos);
 }
 
 void ObjectContainer::initializeNodes(const NodeData& rootNodeData)

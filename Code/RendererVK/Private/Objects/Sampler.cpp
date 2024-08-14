@@ -10,7 +10,7 @@ Sampler::Sampler()
 Sampler::~Sampler()
 {
     if (m_sampler)
-        VK::g_dev.getDevice().destroySampler(m_sampler);
+        Globals::device.getDevice().destroySampler(m_sampler);
 }
 
 bool Sampler::initialize()
@@ -32,7 +32,7 @@ bool Sampler::initialize()
         .borderColor = vk::BorderColor::eFloatOpaqueBlack,
         .unnormalizedCoordinates = vk::False
     };
-    m_sampler = VK::g_dev.getDevice().createSampler(samplerInfo);
+    m_sampler = Globals::device.getDevice().createSampler(samplerInfo);
     if (!m_sampler)
     {
         assert(false && "Failed to create sampler");

@@ -28,6 +28,7 @@ private:
 
     static constexpr int NUM_STAGING_BUFFERS = 2;
     Buffer m_stagingBuffers[NUM_STAGING_BUFFERS];
+    uint8* m_mappedStagingBuffers[NUM_STAGING_BUFFERS];
     vk::Fence m_fences[NUM_STAGING_BUFFERS];
     vk::Semaphore m_semaphores[NUM_STAGING_BUFFERS];
     CommandBuffer m_commandBuffers[NUM_STAGING_BUFFERS];

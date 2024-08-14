@@ -21,6 +21,7 @@ public:
     uint32 getGraphicsQueueIndex() const { return m_graphicsQueueIndex; }
     vk::Queue getGraphicsQueue() const { return m_graphicsQueue; }
     bool supportsExtensions(std::vector<const char*> extensions);
+    vk::DeviceSize getNonCoherentAtomSize() const { return m_nonCoherentAtomSize; }
 
 private:
 
@@ -29,12 +30,13 @@ private:
     vk::CommandPool m_commandPool;
     uint32 m_graphicsQueueIndex;
     vk::Queue m_graphicsQueue;
+    vk::DeviceSize m_nonCoherentAtomSize;
 };
 
-export namespace VK
+export namespace Globals
 {
 #pragma warning(disable: 4075)
 #pragma init_seg(".CRT$XCU2")
-    Device g_dev;
+    Device device;
 #pragma warning(default: 4075)
 }

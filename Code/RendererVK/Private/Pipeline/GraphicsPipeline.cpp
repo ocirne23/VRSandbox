@@ -9,7 +9,7 @@ import RendererVK.RenderPass;
 GraphicsPipeline::GraphicsPipeline() {}
 GraphicsPipeline::~GraphicsPipeline()
 {
-    vk::Device vkDevice = VK::g_dev.getDevice();
+    vk::Device vkDevice = Globals::device.getDevice();
     if (m_pipeline)
         vkDevice.destroyPipeline(m_pipeline);
     if (m_pipelineCache)
@@ -22,7 +22,7 @@ GraphicsPipeline::~GraphicsPipeline()
 
 bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipelineLayout& layout)
 {
-    vk::Device vkDevice = VK::g_dev.getDevice();
+    vk::Device vkDevice = Globals::device.getDevice();
     vk::DescriptorSetLayoutCreateInfo layoutInfo
     {
         .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
@@ -40,8 +40,8 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         .flags = {},
         .setLayoutCount = 1,
         .pSetLayouts = &m_descriptorSetLayout,
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = nullptr,
+        .pushConstantRangeCount = (uint32)layout.pushConstantRanges.size(),
+        .pPushConstantRanges = layout.pushConstantRanges.data(),
     };
     m_pipelineLayout = vkDevice.createPipelineLayout(pipelineLayoutCreateInfo);
     if (!m_pipelineLayout)

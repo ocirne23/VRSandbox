@@ -8,7 +8,7 @@ RenderPass::RenderPass() {}
 RenderPass::~RenderPass()
 {
     if (m_renderPass)
-        VK::g_dev.getDevice().destroyRenderPass(m_renderPass);
+        Globals::device.getDevice().destroyRenderPass(m_renderPass);
 }
 
 bool RenderPass::initialize(const SwapChain& swapChain)
@@ -67,7 +67,7 @@ bool RenderPass::initialize(const SwapChain& swapChain)
         .pDependencies = dependencies.data(),
     };
 
-    m_renderPass = VK::g_dev.getDevice().createRenderPass(renderPassInfo);
+    m_renderPass = Globals::device.getDevice().createRenderPass(renderPassInfo);
     if (!m_renderPass)
     {
         assert(false && "Failed to create renderpass\n");

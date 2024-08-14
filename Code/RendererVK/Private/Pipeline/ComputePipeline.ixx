@@ -7,6 +7,7 @@ export struct ComputePipelineLayout
 {
     std::string computeShaderText;
     std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
+    std::vector<vk::PushConstantRange> pushConstantRanges;
 };
 
 export class ComputePipeline final
