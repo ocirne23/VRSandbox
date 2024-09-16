@@ -49,7 +49,6 @@ int main()
             node2.updateRenderTransform();
         }
     }
-    renderer.recordCommandBuffers();
 
     auto startTime = std::chrono::high_resolution_clock::now();
     double timeAccum = 0.0;

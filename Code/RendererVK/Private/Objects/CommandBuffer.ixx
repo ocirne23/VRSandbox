@@ -26,6 +26,7 @@ public:
     void end();
     bool hasRecorded() { return m_hasRecorded; }
     void reset();
+    vk::CommandBuffer getCommandBuffer() { return m_commandBuffer; }
 
     void submitGraphics(vk::Fence fence = VK_NULL_HANDLE);
     void addWaitSemaphore(vk::Semaphore semaphore, vk::PipelineStageFlags waitStageFlags) { m_waitSemaphores.push_back(semaphore); m_waitStages.push_back(waitStageFlags); }

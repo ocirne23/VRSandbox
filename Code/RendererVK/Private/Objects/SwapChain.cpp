@@ -100,6 +100,16 @@ void SwapChain::acquireNextImage()
     m_currentImageIdx = imageIdx.value;
 }
 
+void SwapChain::waitForCurrentCommandBuffer()
+{
+    vk::Device vkDevice = Globals::device.getDevice();
+    SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
+
+    vk::Result result = vkDevice.waitForFences(1, &syncObjects.inFlight, vk::True, UINT64_MAX);
+    if (result != vk::Result::eSuccess)
+        assert(false && "Failed to wait for fence");
+}
+
 bool SwapChain::present()
 {
     vk::Device vkDevice = Globals::device.getDevice();

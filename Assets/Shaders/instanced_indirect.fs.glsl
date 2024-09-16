@@ -27,9 +27,9 @@ layout (binding = 2, std430) buffer InMaterialInfos
 	MaterialInfo in_materialInfos[];
 };
 
-layout (binding = 3) uniform sampler2D u_color[];
-layout (binding = 4) uniform sampler2D u_normal[];
-layout (binding = 5) uniform sampler2D u_roughness_metallic_height[];
+//layout (binding = 3) uniform sampler2D u_color[];
+//layout (binding = 4) uniform sampler2D u_normal[];
+//layout (binding = 5) uniform sampler2D u_roughness_metallic_height[];
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;

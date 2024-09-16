@@ -14,6 +14,7 @@ export class ObjectContainer final
 public:
 
     friend class RendererVK;
+    friend class IndirectCullComputePipeline;
 
     ObjectContainer() {}
     ~ObjectContainer() {}

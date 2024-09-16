@@ -6,6 +6,16 @@ import Core.Frustum;
 
 export namespace RendererVKLayout
 {
+    export constexpr uint32 NUM_FRAMES_IN_FLIGHT = 2;
+
+    // TODO make these dynamic
+    export constexpr uint32 MAX_UNIQUE_MESHES = 100;
+    export constexpr uint32 MAX_INSTANCE_DATA = 1024 * 1024;
+    export constexpr uint32 MAX_UNIQUE_MATERIALS = 100;
+
+    static_assert(MAX_UNIQUE_MESHES < USHRT_MAX);
+    static_assert(MAX_UNIQUE_MATERIALS < USHRT_MAX);
+
     export struct alignas(16) Ubo
     {
         glm::mat4 mvp;
