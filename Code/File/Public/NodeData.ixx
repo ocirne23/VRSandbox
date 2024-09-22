@@ -14,6 +14,8 @@ public:
     NodeData(NodeData&&) = default;
 
     bool initialize(const aiNode* pNode);
+    operator bool() const { return m_pNode != nullptr; }
+    bool isValid() const { return m_pNode != nullptr; }
 
     const char* getName() const;
     uint32 numChildren() const;
@@ -25,6 +27,9 @@ public:
     const aiNode* getAiNode() const { return m_pNode; }
 
     uint32 getNumChildrenRecursive() const;
+
+    NodeData findChild(std::initializer_list<const char*> hierarchy) const;
+    std::vector<std::string> getChildrenNames() const;
 
 private:
 

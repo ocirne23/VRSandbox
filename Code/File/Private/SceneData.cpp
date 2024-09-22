@@ -13,16 +13,19 @@ SceneData::~SceneData()
 {
 }
 
-bool SceneData::initialize(const char* filePath, bool preTransformVertices)
+bool SceneData::initialize(const char* filePath, bool mergeNodes, bool preTransformVertices)
 {
-    uint32 optimizationFlags = 0;
-    if (!preTransformVertices)
-        optimizationFlags |= aiProcess_OptimizeGraph;
-    optimizationFlags |= aiProcess_FindInstances;
-    optimizationFlags |= aiProcess_OptimizeMeshes;
-    optimizationFlags |= aiProcess_ImproveCacheLocality;
+    uint32 optimizationFlags = aiProcess_ImproveCacheLocality | aiProcess_RemoveRedundantMaterials | aiProcess_SortByPType;
+    if (mergeNodes)
+    {
+        optimizationFlags |= aiProcess_FindInstances;
+        optimizationFlags |= aiProcess_OptimizeMeshes;
+        if (!preTransformVertices)
+            optimizationFlags |= aiProcess_OptimizeGraph;
+    }
     if (preTransformVertices)
         optimizationFlags |= aiProcess_PreTransformVertices;
+
     m_pScene = m_importer.ReadFile(filePath, aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_FlipUVs | aiProcess_MakeLeftHanded | aiProcess_GenBoundingBoxes | aiProcess_CalcTangentSpace | optimizationFlags);
     if (!m_pScene)
     {

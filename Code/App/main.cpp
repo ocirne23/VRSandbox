@@ -4,10 +4,12 @@ import Core.Window;
 import Entity;
 import Entity.FreeFlyCameraController;
 import File.FileSystem;
+import File.SceneData;
 import Input;
 
 import RendererVK;
 import RendererVK.ObjectContainer;
+import RendererVK.ObjectSpawner;
 import RendererVK.RenderNode;
 
 int main()
@@ -30,11 +32,28 @@ int main()
     RendererVK& renderer = Globals::rendererVK;
     renderer.initialize(window, true);
 
-    ObjectContainer objectContainer;
-    objectContainer.initialize("Models/ship_dark.glb", true);
+    ObjectContainer baseShapeContainer;
+    const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
+    ObjectSpawner baseShapeSpawners[std::size(objectNames)];
+    {
+        SceneData sceneData;
+        sceneData.initialize("Models/baseshapes.fbx", false, false);
+        baseShapeContainer.initialize(sceneData);
 
-    ObjectContainer objectContainer2;
-    objectContainer2.initialize("Models/tower.glb", true);
+        for (int i = 0; i < std::size(objectNames); ++i)
+        {
+            baseShapeSpawners[i].initialize(baseShapeContainer, sceneData.getRootNode().findChild({ objectNames[i] }));
+        }
+    }
+
+    ObjectContainer boatContainer;
+    ObjectSpawner boatSpawner;
+    {
+        SceneData sceneData;
+        sceneData.initialize("Models/ship_dark.glb", true, true);
+        boatContainer.initialize(sceneData);
+        boatSpawner.initialize(boatContainer, sceneData.getRootNode());
+    }
 
     const uint32 numX = 50;
     const uint32 numY = 50;
@@ -42,10 +61,10 @@ int main()
     {
         for (int y = 0; y < numY; ++y)
         {
-            RenderNode node = objectContainer.createNewRootNode(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
+            RenderNode node = boatSpawner.spawn(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
             node.updateRenderTransform();
 
-            RenderNode node2 = objectContainer2.createNewRootNode(glm::vec3(x * 5.0f, 10, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
+            RenderNode node2 = baseShapeSpawners[(x + y) % std::size(objectNames)].spawn(glm::vec3(x * 5.0f, 10.0f, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
             node2.updateRenderTransform();
         }
     }

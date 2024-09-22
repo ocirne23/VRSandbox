@@ -96,7 +96,7 @@ void RendererVK::update(double deltaSec, const FreeFlyCameraController& camera)
     }});
     
     m_indirectCullComputePipeline.update(frameIdx, m_objectContainers);
-
+    m_instanceCounter = m_indirectCullComputePipeline.getInstanceCounter(frameIdx);
     m_stagingManager.update();
 
     recordCommandBuffers();

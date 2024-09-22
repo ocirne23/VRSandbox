@@ -25,6 +25,7 @@ public:
     vk::Buffer getInstanceIdxBuffer(uint32 idx)     { return m_perFrameData[idx].instanceIdxBuffer.getBuffer(); }
     vk::Buffer getInstanceDataBuffer(uint32 idx)    { return m_perFrameData[idx].instanceDataBuffer.getBuffer(); }
     uint32 getMeshInfoCounter(uint32 idx)           { return m_perFrameData[idx].meshInfoCounter; }
+    uint32 getInstanceCounter(uint32 idx)           { return m_perFrameData[idx].instanceCounter; }
 
 private:
 

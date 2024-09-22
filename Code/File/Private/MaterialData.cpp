@@ -36,7 +36,13 @@ glm::vec3 MaterialData::getBaseColor() const
     if (res == aiReturn_SUCCESS)
         return glm::vec3(color.r, color.g, color.b);
     else
-        return glm::vec3(1);
+    {
+        aiReturn res2 = aiGetMaterialColor(m_pMaterial, AI_MATKEY_COLOR_DIFFUSE, &color);
+        if (res2 == aiReturn_SUCCESS)
+            return glm::vec3(color.r, color.g, color.b);
+        else
+            return glm::vec3(1);
+    }
 }
 
 glm::vec3 MaterialData::getEmissiveColor() const

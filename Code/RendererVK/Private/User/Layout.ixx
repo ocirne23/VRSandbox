@@ -61,4 +61,16 @@ export namespace RendererVKLayout
     };
 
     using MeshIndex = uint32;
+
+    struct LocalSpaceNode
+    {
+        glm::vec3 pos;
+        float scale;
+        glm::quat quat;
+
+        uint16 meshInfoIdx = USHRT_MAX;
+        uint16 meshInstanceIdx = USHRT_MAX;
+        uint16 numChildren = 0;
+        uint16 parentOffset = 0;
+    };
 }

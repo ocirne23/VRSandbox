@@ -41,3 +41,4 @@ export import <coroutine>;
 export import <atomic>;
 export import <type_traits>;
 export import <chrono>;
+export import <initializer_list>;

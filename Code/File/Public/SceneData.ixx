@@ -17,7 +17,8 @@ public:
     SceneData(const SceneData&) = delete;
     SceneData(SceneData&&) = default;
 
-    bool initialize(const char* filePath, bool preTransformVertices);
+    bool initialize(const char* filePath, bool mergeNodes, bool preTransformVertices);
+    bool isValid() const { return m_pScene != nullptr; }
 
     const std::string& getFilePath() const { return m_filePath; }
     const std::vector<MeshData>& getMeshes() const { return m_meshes; }
