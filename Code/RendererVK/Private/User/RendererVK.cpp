@@ -134,33 +134,33 @@ void RendererVK::recordCommandBuffers()
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    const vk::Extent2D extent = m_swapChain.getLayout().extent;
-    const vk::Viewport viewport{ .x = 0.0f, .y = (float)extent.height, .width = (float)extent.width, .height = -((float)extent.height), .minDepth = 0.0f, .maxDepth = 1.0f };
-    const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
-
-    const vk::RenderPassBeginInfo renderPassBeginInfo{
-        .renderPass = m_renderPass.getRenderPass(),
-        .framebuffer = m_framebuffers.getFramebuffer(frameIdx),
-        .renderArea = vk::Rect2D {.offset = vk::Offset2D { 0, 0 }, .extent = extent },
-        .clearValueCount = (uint32)s_clearValues.size(),
-        .pClearValues = s_clearValues.data(),
-    };
-
     CommandBuffer& commandBuffer = m_swapChain.getCommandBuffer(frameIdx);
     if (!frameData.updated)
     {
+        const vk::Extent2D extent = m_swapChain.getLayout().extent;
+        const vk::Viewport viewport{ .x = 0.0f, .y = (float)extent.height, .width = (float)extent.width, .height = -((float)extent.height), .minDepth = 0.0f, .maxDepth = 1.0f };
+        const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+
+        const vk::RenderPassBeginInfo renderPassBeginInfo{
+            .renderPass = m_renderPass.getRenderPass(),
+            .framebuffer = m_framebuffers.getFramebuffer(frameIdx),
+            .renderArea = vk::Rect2D {.offset = vk::Offset2D { 0, 0 }, .extent = extent },
+            .clearValueCount = (uint32)s_clearValues.size(),
+            .pClearValues = s_clearValues.data(),
+        };
+
         m_swapChain.waitForCurrentCommandBuffer();
 
         vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
 
         m_indirectCullComputePipeline.record(commandBuffer, frameIdx, frameData.uniformBuffer);
+
         vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
         vkCommandBuffer.setViewport(0, { viewport });
         vkCommandBuffer.setScissor(0, { scissor });
-
         m_staticMeshGraphicsPipeline.record(commandBuffer, frameIdx, frameData.uniformBuffer, m_materialInfoBuffer, m_indirectCullComputePipeline, m_meshDataManager);
-
         vkCommandBuffer.endRenderPass();
+
         commandBuffer.end();
 
         frameData.updated = true;
