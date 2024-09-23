@@ -3,13 +3,13 @@ export module RendererVK.ObjectContainer;
 import Core;
 import Core.glm;
 import RendererVK.Layout;
-import RendererVK.ObjectSpawner;
 
 export class SceneData;
-export class RenderNode;
 export class MeshData;
 export class MaterialData;
 export class NodeData;
+export class RenderNode;
+export struct Transform;
 
 export class ObjectContainer final
 {
@@ -17,6 +17,7 @@ public:
 
     friend class RendererVK;
     friend class ObjectSpawner;
+    friend class RenderNode;
     friend class IndirectCullComputePipeline;
 
     ObjectContainer() {}
@@ -26,8 +27,7 @@ public:
     bool initialize(const SceneData& sceneData);
     bool isValid() const { return !m_meshInfos.empty(); }
 
-    RenderNode createNewRootNode(glm::vec3 pos, float scale, glm::quat quat);
-    RenderNode cloneNode(RenderNode& node, glm::vec3 pos, float scale, glm::quat quat);
+    Transform& getTransform(RenderNode& node);
     void updateRenderTransform(RenderNode& node);
 
 private:

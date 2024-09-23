@@ -24,7 +24,7 @@ bool MaterialData::initialize(const aiMaterial* pMaterial)
 
 const char* MaterialData::getName() const
 {
-    aiString name;
+    static thread_local aiString name;
     m_pMaterial->Get(AI_MATKEY_NAME, name);
     return name.C_Str();
 }

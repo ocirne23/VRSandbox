@@ -2,14 +2,16 @@ export module RendererVK.RenderNode;
 
 import Core;
 import Core.glm;
-
-export class ObjectContainer;
+import RendererVK.Transform;
+import RendererVK.ObjectContainer;
 
 export class RenderNode final
 {
 public:
 
-    RenderNode(const RenderNode& copy) = default;
+    RenderNode() = default;
+    RenderNode(const RenderNode& copy) = delete;
+    
     RenderNode(RenderNode&& move)
     {
         m_flags    = move.m_flags;
@@ -18,8 +20,24 @@ public:
         m_pObjectContainer = move.m_pObjectContainer;
     }
 
-    RenderNode cloneNode(glm::vec3 pos, float scale, glm::quat quat);
-    void updateRenderTransform();
+    RenderNode& operator=(RenderNode&& move)
+    {
+        m_flags = move.m_flags;
+        m_numNodes = move.m_numNodes;
+        m_nodeIdx = move.m_nodeIdx;
+        m_pObjectContainer = move.m_pObjectContainer;
+        return *this;
+    }
+
+    inline Transform& getTransform()
+    {
+        return m_pObjectContainer->m_renderNodes[m_nodeIdx].transform;
+    }
+
+    inline void updateTransform()
+    {
+        m_pObjectContainer->updateRenderTransform(*this);
+    }
 
 private:
 

@@ -32,9 +32,9 @@ bool ObjectSpawner::initialize(ObjectContainer& container, const NodeData& nodeD
         const uint32 nodeIdx = (uint32)m_initialStateNodes.size();
 
         RendererVKLayout::LocalSpaceNode& node = m_initialStateNodes.emplace_back();
-        node.pos   = isRoot ? glm::vec3(0) : glm::vec3(pos.x, pos.y, pos.z);
-        node.scale = isRoot ? 1.0f : scale.x;
-        node.quat  = isRoot ? glm::quat(1, 0, 0, 0) : glm::quat(rot.w, rot.x, rot.y, rot.z);
+        node.transform.pos   = isRoot ? glm::vec3(0) : glm::vec3(pos.x, pos.y, pos.z);
+        node.transform.scale = isRoot ? 1.0f : scale.x;
+        node.transform.quat  = isRoot ? glm::quat(1, 0, 0, 0) : glm::quat(rot.w, rot.x, rot.y, rot.z);
         node.numChildren = (uint16)numChildren;
         node.parentOffset = (uint16)(nodeIdx - parentIdx);
         //m_nodeNames.push_back(pAiNode->mName.C_Str());
@@ -50,9 +50,9 @@ bool ObjectSpawner::initialize(ObjectContainer& container, const NodeData& nodeD
             {
                 const uint32 childNodeIdx = (uint32)m_initialStateNodes.size();
                 RendererVKLayout::LocalSpaceNode& childNode = m_initialStateNodes.emplace_back();
-                childNode.pos = glm::vec3(0.0f);
-                childNode.scale = 1.0f;
-                childNode.quat = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                childNode.transform.pos = glm::vec3(0.0f);
+                childNode.transform.scale = 1.0f;
+                childNode.transform.quat = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
                 childNode.parentOffset = (uint16)(childNodeIdx - nodeIdx);
                 childNode.numChildren = 0;
                 childNode.meshInfoIdx = pAiNode->mMeshes[i];

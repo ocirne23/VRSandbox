@@ -57,19 +57,18 @@ int main()
 
     const uint32 numX = 50;
     const uint32 numY = 50;
+    std::array<std::array<RenderNode, numY>, numX> renderNodes;
     for (int x = 0; x < numX; ++x)
     {
         for (int y = 0; y < numY; ++y)
         {
-            RenderNode node = boatSpawner.spawn(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
-            node.updateRenderTransform();
-
-            RenderNode node2 = baseShapeSpawners[(x + y) % std::size(objectNames)].spawn(glm::vec3(x * 5.0f, 10.0f, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
-            node2.updateRenderTransform();
+            renderNodes[x][y] = boatSpawner.spawn(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
+            renderNodes[x][y].updateTransform();
         }
     }
 
     auto startTime = std::chrono::high_resolution_clock::now();
+    auto titleUpdateTime = std::chrono::high_resolution_clock::now();
     double timeAccum = 0.0;
     uint32 frameCount = 0;
 
@@ -82,20 +81,29 @@ int main()
 
         input.update(deltaSec);
         cameraController.update(deltaSec);
+        for (int x = 0; x < numX; ++x)
+        {
+            for (int y = 0; y < numY; ++y)
+            {
+                Transform& transform = renderNodes[x][y].getTransform();
+                transform.pos.y = glm::sin((float)timeAccum + x * 0.2f + y * 0.2f);
+                renderNodes[x][y].updateTransform();
+            }
+        }
 
         renderer.update(deltaSec, cameraController);
         renderer.render();
         frameCount++;
-
         timeAccum += deltaSec;
-        if (timeAccum > 1.0f)
+
+        if (std::chrono::duration<double>(now - titleUpdateTime).count() > 1.0)
         {
-            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i mem: %.2fmb instances: %i meshtypes: %i materials: %i", 
-                frameCount, (double)(g_heapAllocator.getUsedSize() + getAlignedAllocatedSize()) / 1024.0 / 1024.0, 
+            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i mem: %.2fmb instances: %i meshtypes: %i materials: %i",
+                frameCount, (double)(g_heapAllocator.getUsedSize() + getAlignedAllocatedSize()) / 1024.0 / 1024.0,
                 renderer.getNumMeshInstances(), renderer.getNumMeshTypes(), renderer.getNumMaterials());
             window.setTitle(windowTitleBuf);
             frameCount = 0;
-            timeAccum = 0.0;
+            titleUpdateTime = now;
         }
     }
 
