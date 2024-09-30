@@ -1,14 +1,69 @@
 
 import Core;
 import Core.glm;
+import Core.BitRangeAllocator;
 
 int main()
 {
 	std::vector<int> vec;
 
-	vec.push_back(1);
-	std::array<glm::vec3, 3> arr;
-	arr[0] = glm::vec3(1.0f, 2.0f, 3.0f);
+	BitRangeAllocator<false> allocator(100);
+    int idx = allocator.acquireRange(10);
+    assert(idx == 0);
+    idx = allocator.acquireRange(10);
+    assert(idx == 10);
+    idx = allocator.acquireRange(10);
+    assert(idx == 20);
+    idx = allocator.acquireRange(10);
+    assert(idx == 30);
+    idx = allocator.acquireRange(10);
+    assert(idx == 40);
+    idx = allocator.acquireRange(10);
+    assert(idx == 50);
+    idx = allocator.acquireRange(10);
+    assert(idx == 60);
+    idx = allocator.acquireRange(10);
+    assert(idx == 70);
+    idx = allocator.acquireRange(10);
+    assert(idx == 80);
+    idx = allocator.acquireRange(10);
+    assert(idx == 90);
+    idx = allocator.acquireRange(10);
+    assert(idx == 100);
+    idx = allocator.acquireRange(10);
+    assert(idx == 110);
+    idx = allocator.acquireRange(10);
+	assert(idx == -1);
+    allocator.releaseRange(10, 10);
+    idx = allocator.acquireRange(10);
+    assert(idx == 10);
+	allocator.releaseRange(10, 10);
+    idx = allocator.acquireRange(1);
+    assert(idx == 10);
+    idx = allocator.acquireOne();
+    assert(idx == 11);
+	idx = allocator.acquireRange(4);
+    assert(idx == 12);
+    idx = allocator.acquireRange(4);
+	assert(idx == 16);
+	allocator.releaseRange(16, 4);
+    idx = allocator.acquireOne();
+    assert(idx == 16);
+    idx = allocator.acquireOne();
+    assert(idx == 17);
+    idx = allocator.acquireOne();
+    assert(idx == 18);
+    idx = allocator.acquireOne();
+    assert(idx == 19);
+    idx = allocator.acquireRange(4);
+    assert(idx == 120);
+	idx = allocator.acquireRange(4);
+	assert(idx == 124);
+	allocator.releaseOne(11);
+	idx = allocator.acquireOne();
+    assert(idx == 11);
+	idx = allocator.acquireRange(4);
+	assert(idx == -1);
 	return 0;
 }
 
