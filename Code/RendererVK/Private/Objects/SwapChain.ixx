@@ -36,10 +36,10 @@ public:
     bool present();
     vk::SwapchainKHR getSwapChain() const { return m_swapChain; }
     const Layout& getLayout() const { return m_layout; }
-    CommandBuffer& getCurrentCommandBuffer() { return m_commandBuffers[m_currentFrame]; }
+    CommandBuffer& getCurrentCommandBuffer() { return m_commandBuffers[m_currentImageIdx]; }
     void waitForCurrentCommandBuffer();
     CommandBuffer& getCommandBuffer(uint32 frameIdx) { return m_commandBuffers[frameIdx]; }
-    uint32 getCurrentFrameIndex() const { return m_currentFrame; }
+    uint32 getCurrentFrameIndex() const { return m_currentImageIdx; }
 
 private:
 

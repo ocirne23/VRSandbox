@@ -17,6 +17,7 @@ int main()
     FileSystem::initialize();
 
     Window window;
+    //window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(2560, 1440));
     window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(1920, 1080));
 
     Input input;
@@ -55,15 +56,15 @@ int main()
         boatSpawner.initialize(boatContainer, sceneData.getRootNode());
     }
 
-    const uint32 numX = 50;
-    const uint32 numY = 50;
-    std::array<std::array<RenderNode, numY>, numX> renderNodes;
+    const uint32 numX = 200;
+    const uint32 numY = 200;
+    std::vector<std::vector<RenderNode>> renderNodes;
     for (int x = 0; x < numX; ++x)
     {
+        renderNodes.emplace_back();
         for (int y = 0; y < numY; ++y)
         {
-            renderNodes[x][y] = boatSpawner.spawn(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
-            renderNodes[x][y].updateTransform();
+            renderNodes[x].emplace_back(boatSpawner.spawn(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0)));
         }
     }
 
