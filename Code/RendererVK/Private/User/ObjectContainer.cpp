@@ -107,11 +107,6 @@ uint32 ObjectContainer::addMeshInstance(uint32 meshIdx)
     return meshInstanceIdx;
 }
 
-Transform& ObjectContainer::getTransform(RenderNode& node)
-{
-    return m_renderNodes[node.m_nodeIdx].transform;
-}
-
 void ObjectContainer::updateRenderTransform(RenderNode& renderNode)
 {
     updateRenderTransforms(renderNode.m_nodeIdx, (uint32)renderNode.m_numNodes);
