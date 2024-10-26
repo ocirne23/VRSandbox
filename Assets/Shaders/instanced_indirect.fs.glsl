@@ -93,8 +93,7 @@ void main()
 	vec3 V = normalize(u_viewPos - in_pos);
 	vec3 L = normalize(lightVec);
 	vec3 H = normalize(L + V);
-	vec3 N = normalize(vec3(0,0,1));
-	N = normalize(in_tbn * N);
+	vec3 N = normalize(in_tbn * vec3(0,0,1));
 
 	float NdotH = clamp(dot(N, H), 0.0, 1.0);
 	float NdotL = clamp(dot(N, L), 0.0, 1.0);

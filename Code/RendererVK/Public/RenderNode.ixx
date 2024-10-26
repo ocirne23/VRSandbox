@@ -34,11 +34,6 @@ public:
         return m_pObjectContainer->m_renderNodes[m_nodeIdx].transform;
     }
 
-    inline void updateTransform()
-    {
-        m_pObjectContainer->updateRenderTransform(*this);
-    }
-
 private:
 
     friend class ObjectContainer;

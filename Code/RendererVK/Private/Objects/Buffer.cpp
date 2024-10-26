@@ -58,10 +58,3 @@ void Buffer::unmapMemory()
 {
     Globals::device.getDevice().unmapMemory(m_memory);
 }
-
-void Buffer::mapMemory(void* pData, vk::DeviceSize size)
-{
-    assert(size <= m_size);
-    memcpy(mapMemory().data(), pData, size);
-    unmapMemory();
-}

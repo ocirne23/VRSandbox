@@ -39,6 +39,7 @@ public:
     uint32 getNumMeshInstances() const { return m_instanceCounter; }
     uint32 getNumMeshTypes() const { return m_meshInfoCounter; }
     uint32 getNumMaterials() const { return m_materialInfoCounter; }
+    uint32 getCurrentFrameIndex() const { return m_swapChain.getCurrentFrameIndex(); }
 
 private:
 

@@ -63,7 +63,6 @@ int main()
         for (int y = 0; y < numY; ++y)
         {
             renderNodes[x][y] = boatSpawner.spawn(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
-            renderNodes[x][y].updateTransform();
         }
     }
 
@@ -87,7 +86,6 @@ int main()
             {
                 Transform& transform = renderNodes[x][y].getTransform();
                 transform.pos.y = glm::sin((float)timeAccum + x * 0.2f + y * 0.2f);
-                renderNodes[x][y].updateTransform();
             }
         }
 

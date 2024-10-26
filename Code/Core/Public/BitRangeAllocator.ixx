@@ -12,10 +12,22 @@ public:
         const uint32 numInts = (size + 63) / 64;
         m_size = numInts * 64;
         m_pBits = std::make_unique<uint64[]>(numInts);
-        //memset(m_pBits.get(), 0, numInts * sizeof(uint64));
     }
     ~BitRangeAllocator() {};
     BitRangeAllocator(const BitRangeAllocator&) = delete;
+
+    void resize(uint32 size)
+    {
+        const uint32 numInts = (size + 63) / 64;
+        const uint32 newSize = numInts * 64;
+        if (m_size <= newSize)
+        {
+            m_size = newSize;
+            auto newBits = std::make_unique<uint64[]>(numInts);
+            memcpy(newBits.get(), m_pBits.get(), numInts * sizeof(uint64));
+            m_pBits = std::move(newBits);
+        }
+    }
 
     int acquireOne()
     {

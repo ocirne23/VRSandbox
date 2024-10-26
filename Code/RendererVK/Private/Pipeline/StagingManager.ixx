@@ -28,7 +28,7 @@ private:
 
     static constexpr int NUM_STAGING_BUFFERS = 2;
     Buffer m_stagingBuffers[NUM_STAGING_BUFFERS];
-    uint8* m_mappedStagingBuffers[NUM_STAGING_BUFFERS];
+    std::span<uint8> m_mappedStagingBuffers[NUM_STAGING_BUFFERS];
     vk::Fence m_fences[NUM_STAGING_BUFFERS];
     vk::Semaphore m_semaphores[NUM_STAGING_BUFFERS];
     CommandBuffer m_commandBuffers[NUM_STAGING_BUFFERS];
@@ -38,5 +38,5 @@ private:
     std::vector<std::pair<vk::Buffer, vk::BufferCopy>> m_bufferCopyRegions;
     std::vector<std::pair<vk::Image, vk::BufferImageCopy>> m_imageCopyRegions;
     std::vector<vk::ImageMemoryBarrier2> m_imageTransitions;
-    uint8* m_mappedMemory = nullptr;
+    std::span<uint8> m_mappedMemory;
 };

@@ -20,8 +20,9 @@ void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList
 {
     const size_t numMeshes = meshDataList.size();
 
-    m_meshInstances.resize(numMeshes);
     m_meshInfos.reserve(numMeshes);
+    m_meshInstancesForInfo.resize(numMeshes);
+    m_numMeshInstancesForInfo.resize(numMeshes);
 
     MeshDataManager& meshDataManager = Globals::rendererVK.m_meshDataManager;
 
@@ -101,11 +102,8 @@ void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& mater
 
 uint32 ObjectContainer::addMeshInstance(uint32 meshIdx)
 {
-    const uint32 meshInstanceIdx = (uint32)m_meshInstances[meshIdx].size();
+    const uint32 meshInstanceIdx = m_numMeshInstancesForInfo[meshIdx]++;
     assert(meshInstanceIdx < USHRT_MAX && "Too many mesh instances for this mesh type");
-    RendererVKLayout::MeshInstance& meshInstance = m_meshInstances[meshIdx].emplace_back();
-    meshInstance.meshInfoIdx = m_baseMeshInfoIdx + meshIdx;
-    meshInstance.materialInfoIdx = m_baseMaterialInfoIdx + m_materialIdxForMeshIdx[meshIdx];
     return meshInstanceIdx;
 }
 
@@ -116,25 +114,35 @@ Transform& ObjectContainer::getTransform(RenderNode& node)
 
 void ObjectContainer::updateRenderTransform(RenderNode& renderNode)
 {
-    const uint32 numNodes = (uint32)renderNode.m_numNodes;
-    const uint32 startIdx = renderNode.m_nodeIdx;
+    updateRenderTransforms(renderNode.m_nodeIdx, (uint32)renderNode.m_numNodes);
+}
+
+void ObjectContainer::updateAllRenderTransforms()
+{
+    updateRenderTransforms(0, (uint32)m_renderNodes.size());
+}
+
+void ObjectContainer::updateRenderTransforms(uint32 startIdx, uint32 numNodes)
+{
     static thread_local std::vector<Transform> worldSpaceNodes;
     worldSpaceNodes.resize(numNodes);
 
     for (uint32 i = 0; i < numNodes; ++i)
     {
         const RendererVKLayout::LocalSpaceNode& node = m_renderNodes[startIdx + i];
-        const Transform parentNode                   = (node.parentOffset != 0) ? worldSpaceNodes[i - node.parentOffset] : Transform();
-        Transform& nodeWS                            = worldSpaceNodes[i];
+        const Transform parentNode = (node.parentOffset != 0) ? worldSpaceNodes[i - node.parentOffset] : Transform();
+        Transform& nodeWS          = worldSpaceNodes[i];
         nodeWS.pos   = parentNode.pos + parentNode.quat * (node.transform.pos * parentNode.scale);
         nodeWS.quat  = parentNode.quat * node.transform.quat;
         nodeWS.scale = parentNode.scale * node.transform.scale;
         if (node.meshInfoIdx != USHRT_MAX)
         {
-            RendererVKLayout::MeshInstance& meshInstance = m_meshInstances[node.meshInfoIdx][node.meshInstanceIdx];
+            RendererVKLayout::MeshInstance& meshInstance = m_meshInstancesForInfo[node.meshInfoIdx][node.meshInstanceIdx];
             meshInstance.transform.pos   = nodeWS.pos;
             meshInstance.transform.scale = nodeWS.scale;
             meshInstance.transform.quat  = nodeWS.quat;
+            meshInstance.meshInfoIdx     = m_baseMeshInfoIdx + node.meshInfoIdx;
+            meshInstance.materialInfoIdx = m_baseMaterialInfoIdx + m_materialIdxForMeshIdx[node.meshInfoIdx];
         }
     }
 }
@@ -158,10 +166,4 @@ RenderNode ObjectContainer::addNodes(const std::vector<RendererVKLayout::LocalSp
 
     return RenderNode(this, (uint32)startIdx, (uint16)numNodes);
 }
-
-/*
-RenderNode ObjectContainer::createNewRootFromChildNode(const char* path, const glm::vec3 pos, float scale, glm::quat quat)
-{
-
-}*/
 

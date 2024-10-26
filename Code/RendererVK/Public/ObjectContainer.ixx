@@ -27,10 +27,11 @@ public:
     bool initialize(const SceneData& sceneData);
     bool isValid() const { return !m_meshInfos.empty(); }
 
-    Transform& getTransform(RenderNode& node);
-    void updateRenderTransform(RenderNode& node);
-
 private:
+
+    void updateRenderTransform(RenderNode& node);
+    void updateAllRenderTransforms();
+    void updateRenderTransforms(uint32 startIdx, uint32 numNodes);
 
     void initializeMeshes(const std::vector<MeshData>& meshData);
     void initializeMaterials(const std::vector<MaterialData>& materialData);
@@ -40,10 +41,12 @@ private:
 private:
 
     std::vector<RendererVKLayout::LocalSpaceNode> m_renderNodes;
-    std::vector<std::vector<RendererVKLayout::MeshInstance>> m_meshInstances;
     std::vector<RendererVKLayout::MeshInfo> m_meshInfos;
     std::vector<RendererVKLayout::MaterialInfo> m_materialInfos;
     std::vector<uint16> m_materialIdxForMeshIdx;
+
+    std::vector<uint16> m_numMeshInstancesForInfo;
+    std::vector<std::span<RendererVKLayout::MeshInstance>> m_meshInstancesForInfo;
 
     uint32 m_baseMeshInfoIdx = 0;
     uint32 m_baseMaterialInfoIdx = 0;

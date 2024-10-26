@@ -42,9 +42,9 @@ private:
         Buffer indirectDispatchBuffer;
         Buffer computeMeshInfoBuffer;
 
-        vk::DispatchIndirectCommand* mappedDispatchBuffer = nullptr;
-        RendererVKLayout::MeshInfo* mappedMeshInfo = nullptr;
-        RendererVKLayout::MeshInstance* mappedMeshInstances = nullptr;
+        std::span<vk::DispatchIndirectCommand> mappedDispatchBuffer;
+        std::span<RendererVKLayout::MeshInfo> mappedMeshInfo;
+        std::span<RendererVKLayout::MeshInstance> mappedMeshInstances;
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 };

@@ -37,7 +37,7 @@ bool StagingManager::initialize(SwapChain& swapChain)
         m_commandBuffers[i].initialize();
         m_fences[i] = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
         m_semaphores[i] = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
-        m_mappedStagingBuffers[i] = m_stagingBuffers[i].mapMemory().data();
+        m_mappedStagingBuffers[i] = m_stagingBuffers[i].mapMemory();
     }
     m_mappedMemory = m_mappedStagingBuffers[m_currentBuffer];
 
@@ -46,11 +46,12 @@ bool StagingManager::initialize(SwapChain& swapChain)
 
 vk::Semaphore StagingManager::upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset)
 {
-    assert(dataSize <= STAGING_BUFFER_SIZE);
-    if (m_currentBufferOffset + dataSize > STAGING_BUFFER_SIZE)
+    assert(dataSize <= m_mappedMemory.size());
+    if (m_currentBufferOffset + dataSize > m_mappedMemory.size())
         update();
 
-    memcpy(m_mappedMemory + m_currentBufferOffset, data, dataSize);
+    assert(m_currentBufferOffset + dataSize <= m_mappedMemory.size());
+    memcpy(m_mappedMemory.data() + m_currentBufferOffset, data, dataSize);
     m_bufferCopyRegions.emplace_back(std::pair<vk::Buffer, vk::BufferCopy>{ dstBuffer, vk::BufferCopy{ .srcOffset = m_currentBufferOffset, .dstOffset = dstOffset, .size = dataSize } });
     m_currentBufferOffset += dataSize;
 
@@ -59,8 +60,8 @@ vk::Semaphore StagingManager::upload(vk::Buffer dstBuffer, vk::DeviceSize dataSi
 
 vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, uint32 mipLevel, vk::DeviceSize dstOffset)
 {
-    assert(dataSize <= STAGING_BUFFER_SIZE);
-    if (m_currentBufferOffset + dataSize > STAGING_BUFFER_SIZE)
+    assert(dataSize <= m_mappedMemory.size());
+    if (m_currentBufferOffset + dataSize > m_mappedMemory.size())
         update();
 
     vk::BufferImageCopy bufferImageCopy{
@@ -73,7 +74,9 @@ vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth,
         },
         .imageExtent = { imageWidth, imageHeight, 1 }
     };
-    memcpy(m_mappedMemory + m_currentBufferOffset, data, dataSize);
+
+    assert(m_currentBufferOffset + dataSize <= m_mappedMemory.size());
+    memcpy(m_mappedMemory.data() + m_currentBufferOffset, data, dataSize);
     m_imageCopyRegions.emplace_back(std::pair<vk::Image, vk::BufferImageCopy>{ dstImage, bufferImageCopy });
     m_currentBufferOffset += dataSize;
 
