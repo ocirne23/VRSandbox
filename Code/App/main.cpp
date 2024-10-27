@@ -1,6 +1,7 @@
 import Core;
 import Core.Allocator;
 import Core.Window;
+import Core.SDL;
 import Entity;
 import Entity.FreeFlyCameraController;
 import File.FileSystem;
@@ -71,6 +72,12 @@ int main()
     double timeAccum = 0.0;
     uint32 frameCount = 0;
 
+    KeyboardListener* pKeyboardListener = input.addKeyboardListener();
+    pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {
+        if (evt.keysym.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            boatSpawner.spawn(cameraController.getPosition(), 1.0f, glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp()));
+    };
+
     char windowTitleBuf[256];
     while (running)
     {
@@ -104,6 +111,7 @@ int main()
             titleUpdateTime = now;
         }
     }
+    input.removeKeyboardListener(pKeyboardListener);
 
     return 0;
 }
