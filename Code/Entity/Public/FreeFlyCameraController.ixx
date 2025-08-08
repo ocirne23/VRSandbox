@@ -3,6 +3,8 @@ export module Entity.FreeFlyCameraController;
 import Core;
 import Core.glm;
 
+import RendererVK.Camera;
+
 export class Input;
 export class MouseListener;
 export class KeyboardListener;
@@ -24,6 +26,14 @@ public:
     glm::vec3 getDirection() const { return m_direction; }
     glm::vec3 getUp() const { return m_up; }
     glm::mat4 getViewMatrix() const { return m_viewMatrix; }
+
+    Camera getCamera()
+    {
+        Camera camera;
+        camera.position = m_position;
+        camera.viewMatrix = m_viewMatrix;
+        return camera;
+    }
 
 private:
 

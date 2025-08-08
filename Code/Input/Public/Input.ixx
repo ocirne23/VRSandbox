@@ -19,7 +19,7 @@ export struct SDL_JoyHatEvent;
 
 export struct SDL_WindowEvent;
 
-export enum SDL_Scancode;
+export enum SDL_Scancode : int;
 
 export class MouseListener
 {

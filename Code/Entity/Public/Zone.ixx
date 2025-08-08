@@ -11,6 +11,7 @@ export struct EntityHash
     uint64 hash;
 
     constexpr static int numPosBits = 57;
+    constexpr static uint64 posBits    = 0b00000001'11111111'11111111'11111111'11111111'11111111'11111111'11111111;
     constexpr static uint64 xPosMort   = 0b00000000'00001001'00100100'10010010'01001001'00100100'10010010'01001001;
     constexpr static uint64 yPosMort   = 0b00000000'00010010'01001001'00100100'10010010'01001001'00100100'10010010;
     constexpr static uint64 zPosMort   = 0b00000000'00100100'10010010'01001001'00100100'10010010'01001001'00100100;
@@ -45,7 +46,7 @@ export struct EntityHash
         hash |= (*(int*)&positionRadius.x) & 0x80000000 ? xSign : 0; // insert sign bits into hash
         hash |= (*(int*)&positionRadius.y) & 0x80000000 ? ySign : 0;
         hash |= (*(int*)&positionRadius.z) & 0x80000000 ? zSign : 0;
-        hash |= getRadiusMask(positionRadius.w) << (numPosBits * 3);
+        hash |= getRadiusMask(positionRadius.w) << numPosBits;
     }
 
     __declspec(noinline) glm::vec4 decodeMorton()
@@ -56,7 +57,7 @@ export struct EntityHash
         const float x = (float)(hash & xSign ? -xi : xi);
         const float y = (float)(hash & ySign ? -yi : yi);
         const float z = (float)(hash & zSign ? -zi : zi);
-        const float radius = getRadiusFromMask(hash >> (numPosBits * 3));
+        const float radius = getRadiusFromMask(hash >> numPosBits);
         return glm::vec4(x, y, z, radius);
     }
 };
@@ -102,9 +103,9 @@ export struct EntityHash128
         hash1 |= (*(uint64*)&positionRadius.x) & 0x80000000'00000000 ? xSign : 0; // insert sign bits into hash
         hash1 |= (*(uint64*)&positionRadius.y) & 0x80000000'00000000 ? ySign : 0;
         hash1 |= (*(uint64*)&positionRadius.z) & 0x80000000'00000000 ? zSign : 0;
-        const uint64 radiusBits = getRadiusMask(positionRadius.w);
-        hash0 |= (radiusBits) << numPosBits;
-        hash1 |= (radiusBits & 0xF0) << (numPosBits - 4);
+        const uint64 radiusMask = getRadiusMask((float)positionRadius.w);
+        hash0 |= (radiusMask) << numPosBits;
+        hash1 |= (radiusMask & 0xF0) << (numPosBits - 4);
     }
 
     __declspec(noinline) glm::dvec4 decodeMorton()
@@ -124,50 +125,50 @@ export struct EntityHash128
 
 constexpr static int NUM_CONTAINERS = 255;
 
+class ZoneTree;
+
 export class Zone final
 {
 public:
+    ZoneTree* m_pParent = nullptr;
+    std::unique_ptr<std::array<Zone, 8>> m_pChildren = nullptr;
+
     EntityHash m_zoneHash = 0;
     uint16_t m_numChildren = 0;
-    uint16_t m_depth = 0;
+    uint8 m_depth = 0;
     int parentIndex = 0;
 
     EntityHash m_childHashes[NUM_CONTAINERS] = {};
-    EntityID m_childIds[NUM_CONTAINERS] = {};
-
-    EntityHash insertEntity(Entity* pEntity)
-    {
-
-        for (int i = 0; i < NUM_CONTAINERS; ++i)
-        {
-            EntityHash hash = m_childHashes[i];
-        }
-    }
+    //EntityPtr m_childIds[NUM_CONTAINERS] = {};
 };
+
+export class ZoneTree final
+{
+public:
+    std::array<Zone, 8> m_zones;
+};
+
+constexpr int numStaticZoneBits = 20;
+constexpr uint64 staticZoneSize = 1 << numStaticZoneBits;
 
 export class ZoneSystem
 {
+public:
     ZoneSystem()
     {
-        m_zones.reserve(1);
-        m_zones.shrink_to_fit();
-        m_zones.push_back(Zone());
+
     }
 
     void insertEntity(Entity* pEntity)
     {
-        m_zones[0].insertEntity(pEntity);
     }
 
-    std::vector<EntityHash> getEntitiesInArea(const glm::dvec3& pos, float radius)
+    Zone* getZoneForHash(EntityHash hash)
     {
-
+        return nullptr;
     }
 
-    Zone* getZone(uint16_t zoneIdx)
-    {
-        return &m_zones[zoneIdx];
-    }
+private:
 
-    std::vector<Zone> m_zones;
+    Zone m_root;
 };

@@ -15,7 +15,7 @@ source_group("Private/Shaders" FILES ${PROJECT_SHADER_FILES})
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Private")
 target_include_directories(${PROJECT_NAME} PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/Public")
 
-target_link_libraries(${PROJECT_NAME} PUBLIC Core File Input Entity vulkan-1
+target_link_libraries(${PROJECT_NAME} PUBLIC Core File Input vulkan-1
 	glslang$<$<CONFIG:Debug>:d> 
 	MachineIndependent$<$<CONFIG:Debug>:d>
 	OSDependent$<$<CONFIG:Debug>:d>

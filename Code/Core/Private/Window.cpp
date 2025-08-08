@@ -3,6 +3,8 @@ module Core.Window;
 import Core;
 import Core.SDL;
 
+//import <EASTL/vector.h>;
+
 bool Window::initialize(std::string_view windowTitle, glm::ivec2 pos, glm::ivec2 size)
 {
     // initialize sdl and create a window

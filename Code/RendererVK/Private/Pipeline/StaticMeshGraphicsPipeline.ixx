@@ -7,8 +7,6 @@ import RendererVK.GraphicsPipeline;
 //import RendererVK.Sampler;
 
 export class ObjectContainer;
-export class IndirectCullComputePipeline;
-export class MeshDataManager;
 export class StagingManager;
 export class Buffer;
 export class CommandBuffer;
@@ -20,8 +18,19 @@ public:
     ~StaticMeshGraphicsPipeline();
     StaticMeshGraphicsPipeline(const StaticMeshGraphicsPipeline&) = delete;
 
+    struct RecordParams
+    {
+        Buffer& ubo;
+        Buffer& vertexBuffer;
+        Buffer& indexBuffer;
+        Buffer& materialInfoBuffer;
+        Buffer& instanceIdxBuffer;
+        Buffer& meshInstanceBuffer;
+        Buffer& indirectCommandBuffer;
+    };
+
     bool initialize(RenderPass& renderPass, StagingManager& stagingManager);
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, Buffer& inUbo, Buffer& materialInfo, IndirectCullComputePipeline& indirectCullPipeline, MeshDataManager& meshDataManager);
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
 
 private:

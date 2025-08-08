@@ -5,22 +5,21 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 
-struct InMeshInstance
-{
-    vec4 posScale;
-    vec4 quat;
-    uint meshIdxMaterialIdx;
-};
-
 layout (binding = 0, std140) uniform UBO
 {
     mat4 u_mvp;
     vec4 u_frustumPlanes[6];
     vec3 u_viewPos;
 };
-layout (binding = 1, std430) buffer InMeshInstances
+struct InMeshInstancesData
 {
-    InMeshInstance in_instances[];
+    vec4 posScale;
+    vec4 quat;
+    uint meshIdxMaterialIdx;
+};
+layout (binding = 1, std430) readonly buffer InMeshInstances
+{
+    InMeshInstancesData in_instances[];
 };
 
 layout (location = 0) in vec3 in_pos;
@@ -35,7 +34,7 @@ layout (location = 1) out mat3 out_tbn;
 layout (location = 4) out vec2 out_uv;
 layout (location = 5) out flat uint out_meshIdxMaterialIdx;
 
-vec3 quat_transform( vec3 v, vec4 q)
+vec3 quat_transform(vec3 v, vec4 q)
 {
     return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
 }

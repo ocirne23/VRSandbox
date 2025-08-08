@@ -76,18 +76,26 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass, StagingManag
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment
     });
+
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InRenderNodeTransforms
+        .binding = 3,
+        .descriptorType = vk::DescriptorType::eStorageBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eVertex
+    });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InMeshInstances
         .binding = 1,
         .descriptorType = vk::DescriptorType::eStorageBuffer,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eVertex
-        });
+    });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InMaterialInfos
         .binding = 2,
         .descriptorType = vk::DescriptorType::eStorageBuffer,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
+
     //descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_color
     //    .binding = 3,
     //    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
@@ -111,7 +119,7 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass, StagingManag
     return true;
 }
 
-void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, Buffer& inUbo, Buffer& materialInfo, IndirectCullComputePipeline& indirectCullPipeline, MeshDataManager& meshDataManager)
+void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
     std::array<DescriptorSetUpdateInfo, 3> graphicsDescriptorSetUpdateInfos
     {
@@ -119,7 +127,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .binding = 0,
             .type = vk::DescriptorType::eUniformBuffer,
             .info = vk::DescriptorBufferInfo {
-                .buffer = inUbo.getBuffer(),
+                .buffer = params.ubo.getBuffer(),
                 .range = sizeof(RendererVKLayout::Ubo),
             }
         },
@@ -127,15 +135,15 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .binding = 1,
             .type = vk::DescriptorType::eStorageBuffer,
             .info = vk::DescriptorBufferInfo {
-                .buffer = indirectCullPipeline.getInstanceDataBuffer(frameIdx),
-                .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::MeshInstance),
+                .buffer = params.meshInstanceBuffer.getBuffer(),
+                .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutMeshInstance),
             }
         },
         DescriptorSetUpdateInfo{
             .binding = 2,
             .type = vk::DescriptorType::eStorageBuffer,
             .info = vk::DescriptorBufferInfo {
-                .buffer = materialInfo.getBuffer(),
+                .buffer = params.materialInfoBuffer.getBuffer(),
                 .range = RendererVKLayout::MAX_UNIQUE_MATERIALS * sizeof(RendererVKLayout::MaterialInfo),
             }
         }//,
@@ -171,10 +179,10 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
     commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, graphicsDescriptorSetUpdateInfos);
     vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
-    vkCommandBuffer.bindVertexBuffers(0, { meshDataManager.getVertexBuffer().getBuffer() }, { 0 });
-    vkCommandBuffer.bindVertexBuffers(2, { indirectCullPipeline.getInstanceIdxBuffer(frameIdx) }, { 0 });
-    vkCommandBuffer.bindIndexBuffer(meshDataManager.getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
-    vkCommandBuffer.drawIndexedIndirect(indirectCullPipeline.getIndirectCommandBuffer(frameIdx), 0, indirectCullPipeline.getMeshInfoCounter(frameIdx), sizeof(vk::DrawIndexedIndirectCommand));
+    vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
+    vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, {0});
+    vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
+    vkCommandBuffer.drawIndexedIndirect(params.indirectCommandBuffer.getBuffer(), 0, numMeshes, sizeof(vk::DrawIndexedIndirectCommand));
 }
 
 void StaticMeshGraphicsPipeline::update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers)

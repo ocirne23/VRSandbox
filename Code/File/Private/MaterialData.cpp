@@ -117,8 +117,7 @@ float MaterialData::getRefractiveIndex() const
 
 std::string MaterialData::getTexturePath(TextureType type) const
 {
-    const uint32 count = m_pMaterial->GetTextureCount(type);
-    assert(count <= 1 && "Only one texture per type supported");
+    assert(m_pMaterial->GetTextureCount(type) <= 1 && "Only one texture per type supported");
 
     aiString path;
     m_pMaterial->GetTexture(type, 0, &path);

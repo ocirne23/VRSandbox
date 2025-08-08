@@ -53,7 +53,7 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath, 
         }
 
         dds::Header header = dds::read_header(fileData.data(), size);
-        dds::DXGI_FORMAT format = header.format();
+        //dds::DXGI_FORMAT format = header.format();
 
         m_width = header.width();
         m_height = header.height();

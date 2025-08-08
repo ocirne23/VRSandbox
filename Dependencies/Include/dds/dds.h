@@ -787,7 +787,7 @@ namespace dds
 		constexpr unsigned long long mip_offset(unsigned mip, unsigned slice = 0) const
 		{
 			unsigned long long offset = slice_offset(slice);
-			const unsigned mips = mip_levels();
+			//const unsigned mips = mip_levels();
 			for (unsigned i = 0; i < mip; ++i)
 			{
 				offset += mip_size(i);

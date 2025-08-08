@@ -10,7 +10,6 @@ import Input;
 
 import RendererVK;
 import RendererVK.ObjectContainer;
-import RendererVK.ObjectSpawner;
 import RendererVK.RenderNode;
 
 int main()
@@ -28,32 +27,26 @@ int main()
     systemEventListener->onQuit = [&]() { running = false; };
 
     FreeFlyCameraController cameraController;
-    cameraController.initialize(input, glm::vec3(10.0f, 0.0f, -10.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+    cameraController.initialize(input, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
     RendererVK& renderer = Globals::rendererVK;
     renderer.initialize(window, true);
 
     ObjectContainer baseShapeContainer;
     const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
-    ObjectSpawner baseShapeSpawners[std::size(objectNames)];
     {
         SceneData sceneData;
         sceneData.initialize("Models/baseshapes.fbx", false, false);
         baseShapeContainer.initialize(sceneData);
-
-        for (int i = 0; i < std::size(objectNames); ++i)
-        {
-            baseShapeSpawners[i].initialize(baseShapeContainer, sceneData.getRootNode().findChild({ objectNames[i] }));
-        }
     }
 
     ObjectContainer boatContainer;
-    ObjectSpawner boatSpawner;
     {
         SceneData sceneData;
-        sceneData.initialize("Models/ship_dark.glb", true, true);
+        sceneData.initialize("Models/ship_dark.glb", false, false);
+        //sceneData.initialize("Models/baseshapes.glb", false, false);
+        //sceneData.initialize("Models/test1.glb", false, false);
         boatContainer.initialize(sceneData);
-        boatSpawner.initialize(boatContainer, sceneData.getRootNode());
     }
 
     const uint32 numX = 50;
@@ -63,20 +56,24 @@ int main()
     {
         for (int y = 0; y < numY; ++y)
         {
-            renderNodes[x][y] = boatSpawner.spawn(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0));
+           renderNodes[x][y] = boatContainer.spawnRootNode(Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1,0,0,0)));
         }
     }
-
-    auto startTime = std::chrono::high_resolution_clock::now();
-    auto titleUpdateTime = std::chrono::high_resolution_clock::now();
-    double timeAccum = 0.0;
-    uint32 frameCount = 0;
 
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {
         if (evt.keysym.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            boatSpawner.spawn(cameraController.getPosition(), 1.0f, glm::quatLookAt(-cameraController.getDirection(), cameraController.getUp()));
+        {
+            boatContainer.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp()))));
+        }
     };
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto titleUpdateTime = std::chrono::high_resolution_clock::now();
+    auto fpsUpdateTime = std::chrono::high_resolution_clock::now();
+    double timeAccum = 0.0;
+    uint32 frameCount = 0;
+    uint32 fps = 0;
 
     char windowTitleBuf[256];
     while (running)
@@ -96,18 +93,26 @@ int main()
             }
         }
 
-        renderer.update(deltaSec, cameraController);
+        renderer.update(deltaSec, cameraController.getCamera());
         renderer.render();
         frameCount++;
         timeAccum += deltaSec;
 
-        if (std::chrono::duration<double>(now - titleUpdateTime).count() > 1.0)
+        if (std::chrono::duration<double>(now - fpsUpdateTime).count() >= 1.0)
         {
-            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i mem: %.2fmb instances: %i meshtypes: %i materials: %i",
-                frameCount, (double)(g_heapAllocator.getUsedSize() + getAlignedAllocatedSize()) / 1024.0 / 1024.0,
-                renderer.getNumMeshInstances(), renderer.getNumMeshTypes(), renderer.getNumMaterials());
-            window.setTitle(windowTitleBuf);
+            fps = frameCount;
             frameCount = 0;
+            fpsUpdateTime = now;
+        }
+
+        if (std::chrono::duration<double>(now - titleUpdateTime).count() > 0.016)
+        {
+            glm::vec3 pos = cameraController.getPosition();
+            glm::vec3 dir = cameraController.getDirection();
+            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i mem: %.2fmb instances: %i meshtypes: %i materials: %i, pos: %.1f, %.1f, %.1f, dir: %.1f, %.1f, %.1f",
+                fps, (double)(g_heapAllocator.getUsedSize() + getAlignedAllocatedSize()) / 1024.0 / 1024.0,
+                renderer.getNumMeshInstances(), renderer.getNumMeshTypes(), renderer.getNumMaterials(), pos.x, pos.y, pos.z, dir.x, dir.y, dir.z);
+            window.setTitle(windowTitleBuf);
             titleUpdateTime = now;
         }
     }

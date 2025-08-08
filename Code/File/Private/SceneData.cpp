@@ -25,8 +25,8 @@ bool SceneData::initialize(const char* filePath, bool mergeNodes, bool preTransf
     }
     if (preTransformVertices)
         optimizationFlags |= aiProcess_PreTransformVertices;
-
-    m_pScene = m_importer.ReadFile(filePath, aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_FlipUVs | aiProcess_MakeLeftHanded | aiProcess_GenBoundingBoxes | aiProcess_CalcTangentSpace | optimizationFlags);
+    //aiProcess_MakeLeftHanded
+    m_pScene = m_importer.ReadFile(filePath, aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_FlipUVs | aiProcess_GenBoundingBoxes | aiProcess_CalcTangentSpace | optimizationFlags);
     if (!m_pScene)
     {
         assert(false && "Failed to load scene");
@@ -49,6 +49,7 @@ bool SceneData::initialize(const char* filePath, bool mergeNodes, bool preTransf
         material.initialize(m_pScene->mMaterials[i]);
     }
     const aiNode* pRootNode = m_pScene->mRootNode;
+
     m_rootNode.initialize(pRootNode);
 
     return m_pScene != nullptr;

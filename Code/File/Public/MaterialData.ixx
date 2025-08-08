@@ -4,7 +4,7 @@ import Core;
 import Core.glm;
 
 export struct aiMaterial;
-export enum aiTextureType;
+export enum aiTextureType : int;
 
 export class MaterialData final
 {

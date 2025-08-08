@@ -10,7 +10,9 @@ export namespace RendererVKLayout
     constexpr uint32 NUM_FRAMES_IN_FLIGHT = 2;
 
     // TODO make these dynamic
+    constexpr uint32 MAX_RENDER_NODES = 1024 * 32;
     constexpr uint32 MAX_UNIQUE_MESHES = 100;
+    constexpr uint32 MAX_INSTANCE_OFFSETS = 1024;
     constexpr uint32 MAX_INSTANCE_DATA = 1024 * 1024;
     constexpr uint32 MAX_UNIQUE_MATERIALS = 100;
 
@@ -22,13 +24,31 @@ export namespace RendererVKLayout
         glm::mat4 mvp;
         Frustum frustum;
         glm::vec3 viewPos;
+    private:
+        uint32 _padding;
     };
 
-    struct alignas(16) MeshInstance
+    struct alignas(16) RenderNodeTransform : Transform {};
+    struct alignas(16) MeshInstanceOffset {
+        Transform transform;
+    };
+
+    struct alignas(16) InMeshInstance
+    {
+        uint32 renderNodeIdx;
+        uint32 instanceOffsetIdx;
+        uint16 meshIdx;
+        uint16 materialIdx;
+    private:
+        uint32 _padding;
+    };
+
+    struct alignas(16) OutMeshInstance
     {
         Transform transform;
-        uint16 meshInfoIdx;
-        uint16 materialInfoIdx;
+        uint32 meshIdxMaterialIdx;
+    private:
+        uint32 _padding[3];
     };
 
     struct alignas(16) MeshInfo
@@ -60,13 +80,4 @@ export namespace RendererVKLayout
     };
 
     using MeshIndex = uint32;
-
-    struct LocalSpaceNode
-    {
-        Transform transform;
-        uint16 meshInfoIdx = USHRT_MAX;
-        uint16 meshInstanceIdx = USHRT_MAX;
-        uint16 numChildren = 0;
-        uint16 parentOffset = 0;
-    };
 }

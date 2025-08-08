@@ -34,7 +34,7 @@ bool Device::initialize()
         return false;
     }
 
-    m_graphicsQueueIndex = -1;
+    m_graphicsQueueIndex = UINT32_MAX;
     std::vector<vk::QueueFamilyProperties> queueFamilyProperties = m_physicalDevice.getQueueFamilyProperties();
     for (uint32 i = 0; i < queueFamilyProperties.size(); i++)
     {
@@ -54,7 +54,7 @@ bool Device::initialize()
             break;
         }
     }
-    if (m_graphicsQueueIndex == -1)
+    if (m_graphicsQueueIndex == UINT32_MAX)
     {
         assert(false && "Could not find a graphicsQueue family index\n");
         return false;

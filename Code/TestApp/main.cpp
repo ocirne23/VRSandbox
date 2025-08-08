@@ -1,23 +1,4 @@
-
-import Core;
-import Core.glm;
-import Entity.Zone;
-
-int main()
-{
-	EntityHash128 hash;
-	glm::dvec4 encode(
-		153550050.0, 
-		-212022521.5, 
-		-101151623.0, 
-		5521.0f);
-
-	hash.encodeMorton(encode);
-	glm::dvec4 decoded = hash.decodeMorton();
-
-	return (int)(decoded.x + decoded.y + decoded.z);
-}
-
+int main() { return 0; }
 //printf("Encoded: %f %f %f %f\n", encode.x, encode.y, encode.z, encode.w);
 //printf("Hash: %llu\n", hash.hash);
 //printf("Decoded: %f %f %f %f\n", decoded5.x, decoded5.y, decoded5.z, decoded5.w);
