@@ -102,9 +102,9 @@ export struct EntityHash128
         hash1 |= (*(uint64*)&positionRadius.x) & 0x80000000'00000000 ? xSign : 0; // insert sign bits into hash
         hash1 |= (*(uint64*)&positionRadius.y) & 0x80000000'00000000 ? ySign : 0;
         hash1 |= (*(uint64*)&positionRadius.z) & 0x80000000'00000000 ? zSign : 0;
-        const uint64 radiusBits = getRadiusMask((float)positionRadius.w);
-        hash0 |= (radiusBits) << numPosBits;
-        hash1 |= (radiusBits & 0xF0) << (numPosBits - 4);
+        const uint64 radiusBitsMask = getRadiusMask((float)positionRadius.w);
+        hash0 |= (radiusBitsMask) << numPosBits;
+        hash1 |= (radiusBitsMask & 0xF0) << (numPosBits - 4);
     }
 
     __declspec(noinline) glm::dvec4 decodeMorton()
