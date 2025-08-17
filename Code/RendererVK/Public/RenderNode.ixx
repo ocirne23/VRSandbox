@@ -3,6 +3,7 @@ export module RendererVK.RenderNode;
 import Core;
 import Core.glm;
 import RendererVK;
+import RendererVK.Layout;
 import RendererVK.Transform;
 import RendererVK.ObjectContainer;
 
@@ -15,16 +16,16 @@ public:
     
     RenderNode(RenderNode&& move)
     {
-        m_spawnIdx = move.m_spawnIdx;
         m_transformIdx = move.m_transformIdx;
-        m_pObjectContainer = move.m_pObjectContainer;
+        m_meshInstances = std::move(move.m_meshInstances);
+        m_numInstancesPerMesh = std::move(move.m_numInstancesPerMesh);
     }
 
     RenderNode& operator=(RenderNode&& move)
     {
-        m_spawnIdx = move.m_spawnIdx;
         m_transformIdx = move.m_transformIdx;
-        m_pObjectContainer = move.m_pObjectContainer;
+        m_meshInstances = std::move(move.m_meshInstances);
+        m_numInstancesPerMesh = std::move(move.m_numInstancesPerMesh);
         return *this;
     }
 
@@ -36,13 +37,9 @@ public:
 private:
 
     friend class ObjectContainer;
+    friend class RendererVK;
 
-    RenderNode(ObjectContainer* pObjectContainer, NodeSpawnIdx spawnIdx, uint32 transformIdx)
-        : m_pObjectContainer(pObjectContainer), m_spawnIdx(spawnIdx), m_transformIdx(transformIdx)
-    {
-    }
-
-    uint32 m_transformIdx = 0;
-    ObjectContainer* m_pObjectContainer = nullptr;
-    NodeSpawnIdx m_spawnIdx = NodeSpawnIdx_INVALID;
+    uint32 m_transformIdx = UINT32_MAX;
+    std::vector<RendererVKLayout::InMeshInstance> m_meshInstances;
+    std::vector<std::pair<uint16, uint16>> m_numInstancesPerMesh;
 };

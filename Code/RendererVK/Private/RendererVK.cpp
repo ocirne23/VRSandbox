@@ -9,6 +9,7 @@ import File.SceneData;
 import File.MeshData;
 import File.FileSystem;
 
+import RendererVK.RenderNode;
 import RendererVK.VK;
 import RendererVK.glslang;
 import RendererVK.Layout;
@@ -96,8 +97,11 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     return true;
 }
 
-void RendererVK::update(double deltaSec, const Camera& camera)
+const Frustum& RendererVK::beginFrame(const Camera& camera)
 {
+    m_meshInstanceCounter = 0;
+    memset(m_numInstancesPerMesh.data(), 0, m_numInstancesPerMesh.size() * sizeof(m_numInstancesPerMesh[0]));
+
     const vk::Extent2D extent = m_swapChain.getLayout().extent;
     const glm::mat4x4 projection = glm::perspective(glm::radians(camera.fovDeg), (float)extent.width / (float)extent.height, camera.near, camera.far);
     glm::mat4 viewMatrix = camera.viewMatrix;
@@ -105,29 +109,44 @@ void RendererVK::update(double deltaSec, const Camera& camera)
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    //frameData.mappedUniformBuffer->mvp = projection * viewMatrix;
-    //frameData.mappedUniformBuffer->frustum.fromMatrix(frameData.mappedUniformBuffer->mvp);
-    //frameData.mappedUniformBuffer->viewPos = camera.position;
+    frameData.mappedUniformBuffer->mvp = projection * viewMatrix;
+    frameData.mappedUniformBuffer->frustum.fromMatrix(frameData.mappedUniformBuffer->mvp);
+    frameData.mappedUniformBuffer->viewPos = camera.position;
 
-    frameData.mappedUniformBuffer[0].mvp = projection * viewMatrix;
-    frameData.mappedUniformBuffer[0].frustum.fromMatrix(frameData.mappedUniformBuffer[0].mvp);
-    frameData.mappedUniformBuffer[0].viewPos = camera.position;
+    return frameData.mappedUniformBuffer->frustum;
+}
+
+void RendererVK::renderNode(const RenderNode& node)
+{
+    const uint32 numInstances = (uint32)node.m_meshInstances.size();
+    assert(m_meshInstanceCounter + numInstances <= RendererVKLayout::MAX_INSTANCE_DATA);
+
+    for (auto& pair : node.m_numInstancesPerMesh)
+        m_numInstancesPerMesh[pair.first] += pair.second;
+
+    PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
+    memcpy(frameData.mappedMeshInstances.data() + m_meshInstanceCounter, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
+
+    m_meshInstanceCounter += numInstances;
+}
+
+void RendererVK::present(const Camera& camera)
+{
+    const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
+    PerFrameData& frameData = m_perFrameData[frameIdx];
 
     assert(frameData.mappedRenderNodeTransforms.size() >= m_renderNodeTransforms.size());
     assert(frameData.mappedMeshInstances.size() >= m_meshInstanceCounter);
     assert(frameData.mappedFirstInstances.size() >= m_meshInfoCounter);
 
     memcpy(frameData.mappedRenderNodeTransforms.data(), m_renderNodeTransforms.data(), m_renderNodeTransforms.size() * sizeof(m_renderNodeTransforms[0]));
-    //memcpy(frameData.mappedMeshInstances.data(), m_meshInstances.data(), m_meshInstances.size() * sizeof(m_meshInstances[0]));
 
-    const uint32 numMeshInfos = (uint32)m_meshInstancesForInfo.size();
     uint32 instanceCounter = 0;
+    const uint32 numMeshInfos = (uint32)m_numInstancesPerMesh.size();
     for (uint32 meshIdx = 0; meshIdx < numMeshInfos; ++meshIdx)
     {
         frameData.mappedFirstInstances[meshIdx] = instanceCounter;
-        uint32 numInstancesForMesh = (uint32)m_meshInstancesForInfo[meshIdx].size();
-        memcpy(frameData.mappedMeshInstances.data() + instanceCounter, m_meshInstancesForInfo[meshIdx].data(), numInstancesForMesh * sizeof(RendererVKLayout::InMeshInstance));
-        instanceCounter += numInstancesForMesh;
+        instanceCounter += m_numInstancesPerMesh[meshIdx];
     }
 
     const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
@@ -136,28 +155,31 @@ void RendererVK::update(double deltaSec, const Camera& camera)
 
     Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = frameData.inRenderNodeTransformsBuffer.getMemory(), .offset = 0, .size = flushSize
-    }});
+    } });
 
     flushSize = m_meshInstanceCounter * sizeof(RendererVKLayout::InMeshInstance);
     flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
     Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = frameData.inMeshInstancesBuffer.getMemory(), .offset = 0, .size = flushSize
-    }});
+    } });
 
     flushSize = numMeshInfos * sizeof(uint32);
     flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
     Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = frameData.inFirstInstancesBuffer.getMemory(), .offset = 0, .size = flushSize
-    }});
+    } });
 
     Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = frameData.ubo.getMemory(), .offset = 0, .size = vk::WholeSize
-    }});
-    
+    } });
+
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_stagingManager.update();
 
     recordCommandBuffers();
+
+    m_swapChain.acquireNextImage();
+    m_swapChain.present();
 }
 
 void RendererVK::addObjectContainer(ObjectContainer* pObjectContainer)
@@ -169,7 +191,7 @@ uint32 RendererVK::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& m
 {
     const uint32 baseMeshInfoIdx = m_meshInfoCounter;
     m_meshInfoCounter += (uint32)meshInfos.size();
-    m_meshInstancesForInfo.resize(m_meshInfoCounter);
+    m_numInstancesPerMesh.resize(m_meshInfoCounter);
 
     assert(m_meshInfoCounter < USHRT_MAX);
     assert(m_meshInfoCounter < RendererVKLayout::MAX_UNIQUE_MESHES);
@@ -213,18 +235,6 @@ uint32 RendererVK::addRenderNodeTransform(const Transform& transform)
     const uint32 renderNodeIdx = (uint32)m_renderNodeTransforms.size();
     m_renderNodeTransforms.emplace_back(transform);
     return renderNodeIdx;
-}
-
-void RendererVK::addMeshInstances(const std::vector<RendererVKLayout::InMeshInstance>& meshInstances)
-{
-    const uint32 numInstances = (uint32)meshInstances.size();
-    for (uint32 i = 0; i < numInstances; ++i)
-    {
-        const RendererVKLayout::InMeshInstance& inst = meshInstances[i];
-        m_meshInstancesForInfo[inst.meshIdx].emplace_back(inst);
-    }
-
-    m_meshInstanceCounter += numInstances;
 }
 
 void RendererVK::recordCommandBuffers()
@@ -284,12 +294,6 @@ void RendererVK::recordCommandBuffers()
 
         frameData.updated = true;
     }
-}
-
-void RendererVK::render()
-{
-    m_swapChain.acquireNextImage();
-    m_swapChain.present();
 }
 
 void RendererVK::setHaveToRecordCommandBuffers()

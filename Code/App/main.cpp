@@ -2,6 +2,8 @@ import Core;
 import Core.Allocator;
 import Core.Window;
 import Core.SDL;
+import Core.Frustum;
+
 import Entity;
 import Entity.FreeFlyCameraController;
 import File.FileSystem;
@@ -84,17 +86,24 @@ int main()
 
         input.update(deltaSec);
         cameraController.update(deltaSec);
+
+        const Frustum& frustum = renderer.beginFrame(cameraController.getCamera());
+        (void)frustum;
         for (int x = 0; x < numX; ++x)
         {
             for (int y = 0; y < numY; ++y)
             {
                 Transform& transform = renderNodes[x][y].getTransform();
                 transform.pos.y = glm::sin((float)timeAccum + x * 0.2f + y * 0.2f);
+
+                //if (frustum.pointInFrustum(transform.pos))
+                {
+                    renderer.renderNode(renderNodes[x][y]);
+                }
             }
         }
 
-        renderer.update(deltaSec, cameraController.getCamera());
-        renderer.render();
+        renderer.present(cameraController.getCamera());
         frameCount++;
         timeAccum += deltaSec;
 

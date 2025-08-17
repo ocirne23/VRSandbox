@@ -60,6 +60,7 @@ export struct EntityPtr
     EntityPtr(Entity* pEntity)
     {
         uint16 oldRefCount = std::atomic_ref<uint16>(pEntity->refCount).fetch_add(1);
+        (void)oldRefCount;
         assert(oldRefCount != 0);
     }
 

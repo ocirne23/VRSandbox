@@ -6,7 +6,7 @@ import Core.glm;
 export struct Frustum
 {
     glm::vec4 planes[6];
-    enum side { LEFT = 0, RIGHT = 1, TOP = 2, BOTTOM = 3, BACK = 4, FRONT = 5 };
+    enum ESide { LEFT = 0, RIGHT = 1, TOP = 2, BOTTOM = 3, BACK = 4, FRONT = 5 };
 
     Frustum() = default;
     Frustum(const glm::mat4& matrix) { fromMatrix(matrix); }
@@ -43,10 +43,26 @@ export struct Frustum
         planes[FRONT].z = matrix[2].w - matrix[2].z;
         planes[FRONT].w = matrix[3].w - matrix[3].z;
 
-        for (auto i = 0; i < 6; i++)
+        for (uint32 i = 0; i < 6; ++i)
         {
             float length = sqrtf(planes[i].x * planes[i].x + planes[i].y * planes[i].y + planes[i].z * planes[i].z);
             planes[i] /= length;
         }
+    }
+
+    inline bool sphereInFrustum(const glm::vec3& pos, float radius) const
+    {
+        for (uint32 i = 0; i < 6; ++i)
+            if (glm::dot(glm::vec3(planes[i]), pos) + planes[i].w < -radius)
+                return false;
+        return true;
+    }
+
+    inline bool pointInFrustum(const glm::vec3& pos) const
+    {
+        for (uint32 i = 0; i < 6; ++i)
+            if (glm::dot(glm::vec3(planes[i]), pos) + planes[i].w < 0.0f)
+                return false;
+        return true;
     }
 };

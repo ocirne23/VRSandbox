@@ -240,27 +240,34 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
 {
     const NodeMeshRange& range = m_nodeMeshRanges[idx];
 
-    const uint32 transformIdx = Globals::rendererVK.addRenderNodeTransform(transform);
-
-    std::vector<RendererVKLayout::InMeshInstance> meshInstances;
-    meshInstances.resize(range.numNodes);
+    RenderNode node;
+    node.m_transformIdx = Globals::rendererVK.addRenderNodeTransform(transform);
+    node.m_meshInstances.resize(range.numNodes);
     for (uint32 i = 0; i < range.numNodes; ++i)
     {
-        meshInstances[i].renderNodeIdx = transformIdx;
-        meshInstances[i].instanceOffsetIdx = m_baseMeshInstanceOffsetsIdx + range.startIdx + i;
-        meshInstances[i].meshIdx = m_baseMeshInfoIdx + m_nodeInfos[range.startIdx + i].meshInfoIdx;
-        meshInstances[i].materialIdx = m_baseMaterialInfoIdx + m_nodeInfos[range.startIdx + i].materialInfoIdx;
+        node.m_meshInstances[i].renderNodeIdx = node.m_transformIdx;
+        node.m_meshInstances[i].instanceOffsetIdx = m_baseMeshInstanceOffsetsIdx + range.startIdx + i;
+        node.m_meshInstances[i].meshIdx = m_baseMeshInfoIdx + m_nodeInfos[range.startIdx + i].meshInfoIdx;
+        node.m_meshInstances[i].materialIdx = m_baseMaterialInfoIdx + m_nodeInfos[range.startIdx + i].materialInfoIdx;
     }
 
-    Globals::rendererVK.addMeshInstances(meshInstances);
+    std::map<uint16, uint16> instancesPerMesh;
+    for (uint32 i = 0; i < range.numNodes; ++i)
+    {
+        instancesPerMesh[node.m_meshInstances[i].meshIdx] += 1;
+    }
+    node.m_numInstancesPerMesh.reserve(instancesPerMesh.size());
+    for (auto& pair : instancesPerMesh)
+    {
+        node.m_numInstancesPerMesh.emplace_back(pair);
+    }
 
-    Transform& rootTransform = Globals::rendererVK.getRenderNodeTransform(transformIdx);
+    Transform& rootTransform = Globals::rendererVK.getRenderNodeTransform(node.m_transformIdx);
     const Transform& instanceTransform = m_meshInstanceOffsets[range.startIdx].transform;
     rootTransform.pos -= instanceTransform.pos;
-    //rootTransform.quat *= glm::quat(-instanceTransform.quat.x, -instanceTransform.quat.y, -instanceTransform.quat.z, instanceTransform.quat.w);
     rootTransform.scale /= instanceTransform.scale;
 
-    return RenderNode(this, idx, transformIdx);
+    return node;
 }
 
 NodeSpawnIdx ObjectContainer::getSpawnIdxForPath(const std::string& nodePath) const

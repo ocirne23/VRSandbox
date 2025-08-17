@@ -26,6 +26,8 @@ export import <span>;
 export import <vector>;
 export import <array>;
 export import <list>;
+export import <map>;
+export import <unordered_map>;
 export import <string>;
 export import <string_view>;
 export import <variant>;

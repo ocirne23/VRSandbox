@@ -23,7 +23,9 @@ export class MeshInstance;
 export class Window;
 export class MeshData;
 export class ObjectContainer;
+export class RenderNode;
 export struct Camera;
+export struct Frustum;
 
 export class RendererVK final
 {
@@ -34,8 +36,10 @@ public:
     RendererVK(const RendererVK&) = delete;
 
     bool initialize(Window& window, bool enableValidationLayers);
-    void update(double deltaSec, const Camera& camera);
-    void render();
+
+    const Frustum& beginFrame(const Camera& camera);
+    void renderNode(const RenderNode& node);
+    void present(const Camera& camera);
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
     uint32 getNumRenderNodes() const { return (uint32)m_renderNodeTransforms.size(); }
@@ -52,7 +56,6 @@ private:
     void addObjectContainer(ObjectContainer* pObjectContainer);
 
     uint32 addRenderNodeTransform(const Transform& transform);
-    void addMeshInstances(const std::vector<RendererVKLayout::InMeshInstance>& meshInstances);
     uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos);
     uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
@@ -78,7 +81,10 @@ private:
 
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform> m_renderNodeTransforms;
-    std::vector<std::vector<RendererVKLayout::InMeshInstance>> m_meshInstancesForInfo;
+    std::vector<uint32> m_numInstancesPerMesh;
+    std::vector<RendererVKLayout::InMeshInstance> m_meshInstances;
+
+    std::vector<uint32> m_freeRenderNodeIndexes;
 
     uint32 m_meshInfoCounter = 0;
     uint32 m_materialInfoCounter = 0;
