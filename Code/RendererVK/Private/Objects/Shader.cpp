@@ -90,6 +90,7 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
     {
         puts(shader.getInfoLog());
         puts(shader.getInfoDebugLog());
+        std::cout.flush();
         return false;  // something didn't work
     }
 
@@ -97,16 +98,22 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
     program.addShader(&shader);
     if (!program.link(messages))
     {
-        puts(shader.getInfoLog());
-        puts(shader.getInfoDebugLog());
+        puts(program.getInfoLog());
+        puts(program.getInfoDebugLog());
         std::cout.flush();
         return false;
     }
 
     glslang::SpvOptions spvOptions;
     spvOptions.generateDebugInfo = true;
+    spvOptions.stripDebugInfo = false;
+    spvOptions.disableOptimizer = false;
+    spvOptions.optimizeSize = false;
+    spvOptions.disassemble = false;
+    spvOptions.validate = true;
     spvOptions.emitNonSemanticShaderDebugInfo = true;
     spvOptions.emitNonSemanticShaderDebugSource = true;
+    spvOptions.compileOnly = false;
     glslang::GlslangToSpv(*program.getIntermediate(stage), spirv, &spvOptions);
     return true;
 }
