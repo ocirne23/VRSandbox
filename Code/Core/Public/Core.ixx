@@ -21,6 +21,8 @@ export constexpr uint8  UINT8_MAX  = 0xffui8;
 export constexpr uint16 UINT16_MAX = 0xffffui16;
 export constexpr uint32 UINT32_MAX = 0xffffffffui32;
 export constexpr uint64 UINT64_MAX = 0xffffffffffffffffui64;
+export constexpr float FLT_MIN = 1.175494e-38f;
+export constexpr float FLT_MAX = 3.402823e+38f;
 
 export import <span>;
 export import <vector>;

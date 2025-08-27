@@ -2,6 +2,7 @@ export module RendererVK.ObjectContainer;
 
 import Core;
 import Core.glm;
+import Core.Sphere;
 import RendererVK.Layout;
 import RendererVK.Transform;
 import RendererVK.Buffer;
@@ -51,12 +52,14 @@ private:
     {
         uint16 meshInfoIdx = UINT16_MAX;
         uint16 materialInfoIdx = UINT16_MAX;
+        std::string path;
     };
 
     struct NodeMeshRange
     {
         uint16 startIdx = UINT16_MAX;
         uint16 numNodes = UINT16_MAX;
+        std::string path;
     };
 
     std::vector<NodeInfo> m_nodeInfos;
@@ -65,6 +68,8 @@ private:
 
     std::vector<uint16> m_materialIdxForMeshIdx;
     std::vector<RendererVKLayout::MeshInstanceOffset> m_meshInstanceOffsets;
+    std::vector<Sphere> m_meshInstanceBounds;
+    std::vector<Sphere> m_boundsForMeshIdx;
 
     uint32 m_baseMeshInstanceOffsetsIdx = 0;
     uint16 m_baseMeshInfoIdx = 0;

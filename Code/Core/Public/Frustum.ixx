@@ -2,6 +2,7 @@ export module Core.Frustum;
 
 import Core;
 import Core.glm;
+import Core.Sphere;
 
 export struct Frustum
 {
@@ -56,6 +57,11 @@ export struct Frustum
             if (glm::dot(glm::vec3(planes[i]), pos) + planes[i].w < -radius)
                 return false;
         return true;
+    }
+
+    inline bool sphereInFrustum(const Sphere& sphere) const
+    {
+        return sphereInFrustum(sphere.pos, sphere.radius);
     }
 
     inline bool pointInFrustum(const glm::vec3& pos) const

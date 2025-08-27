@@ -38,9 +38,10 @@ int main()
     const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
     {
         SceneData sceneData;
-        sceneData.initialize("Models/baseshapes.fbx", false, false);
+        sceneData.initialize("Models/baseshapes.glb", false, false);
         baseShapeContainer.initialize(sceneData);
     }
+    //RenderNode sphereNode = baseShapeContainer.spawnNodeForPath("ROOT/Sphere", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1, 0, 0, 0)));
 
     ObjectContainer boatContainer;
     {
@@ -54,19 +55,25 @@ int main()
     const uint32 numX = 50;
     const uint32 numY = 50;
     std::array<std::array<RenderNode, numY>, numX> renderNodes;
+    //NodeSpawnIdx idx = boatContainer.getSpawnIdxForPath("ship_dark_8angles/cannon_right"); // NodeSpawnIdx_ROOT;
+    NodeSpawnIdx idx = NodeSpawnIdx_ROOT;
     for (int x = 0; x < numX; ++x)
     {
         for (int y = 0; y < numY; ++y)
         {
-           renderNodes[x][y] = boatContainer.spawnRootNode(Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1,0,0,0)));
+           renderNodes[x][y] = boatContainer.spawnNodeForIdx(idx, Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1,0,0,0)));
         }
     }
+
+    std::vector<RenderNode> spawnedNodes;
 
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {
         if (evt.keysym.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
-            boatContainer.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp()))));
+            spawnedNodes.push_back(
+                boatContainer.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp()))))
+            );
         }
     };
 
@@ -88,7 +95,6 @@ int main()
         cameraController.update(deltaSec);
 
         const Frustum& frustum = renderer.beginFrame(cameraController.getCamera());
-        (void)frustum;
         for (int x = 0; x < numX; ++x)
         {
             for (int y = 0; y < numY; ++y)
@@ -96,10 +102,18 @@ int main()
                 Transform& transform = renderNodes[x][y].getTransform();
                 transform.pos.y = glm::sin((float)timeAccum + x * 0.2f + y * 0.2f);
 
-                //if (frustum.pointInFrustum(transform.pos))
+                if (frustum.sphereInFrustum(renderNodes[x][y].getWorldBounds()))
                 {
                     renderer.renderNode(renderNodes[x][y]);
                 }
+            }
+        }
+
+        for (RenderNode& node : spawnedNodes)
+        {
+            if (frustum.sphereInFrustum(node.getWorldBounds()))
+            {
+                renderer.renderNode(node);
             }
         }
 

@@ -53,13 +53,19 @@ void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList
             vertices[i].texCoord   = glm::vec2(pTexCoords[i]);
         }
 
+        Sphere sphereBounds;
+        const AABB bounds = meshData.getAABB();
+        sphereBounds.pos = bounds.getCenter();
+        sphereBounds.radius = bounds.getRadius();
+        m_boundsForMeshIdx.push_back(sphereBounds);
+
         std::vector<uint32> indices;
         meshData.getIndices(indices);
         meshInfo.indexCount   = (uint32)indices.size();
         meshInfo.vertexOffset = (int32)(meshDataManager.uploadVertexData(vertices.data(), vertices.size() * sizeof(RendererVKLayout::MeshVertex)) / sizeof(RendererVKLayout::MeshVertex));
         meshInfo.firstIndex   = (uint32)(meshDataManager.uploadIndexData(indices.data(), indices.size() * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
-        meshInfo.radius       = meshData.getAABB().getRadius();
-        meshInfo.center       = meshData.getAABB().getCenter();
+        meshInfo.radius       = sphereBounds.radius;
+        meshInfo.center       = sphereBounds.pos;
         meshInfo.firstInstance = meshInfoIdx * 20;
     }
 
@@ -204,8 +210,16 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData)
         nodeWS.pos = parentTransform.pos + parentTransform.quat * (node.transform.pos * parentTransform.scale);
         nodeWS.quat = parentTransform.quat * node.transform.quat;
         nodeWS.scale = parentTransform.scale * node.transform.scale;
+        m_nodeMeshRanges[i].path = node.path;
         if (node.meshInfoIdx != UINT16_MAX)
         {
+            Sphere meshBounds = m_boundsForMeshIdx[node.meshInfoIdx];
+            meshBounds.pos *= nodeWS.scale;
+            meshBounds.radius *= nodeWS.scale;
+            meshBounds.pos = meshBounds.pos * nodeWS.quat;
+            meshBounds.pos += nodeWS.pos;
+            m_meshInstanceBounds.emplace_back(meshBounds);
+
             if (m_nodeMeshRanges[i].startIdx == UINT16_MAX)
             {
                 m_nodeMeshRanges[i].startIdx = (uint16)m_meshInstanceOffsets.size();
@@ -220,16 +234,19 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData)
                     m_nodeMeshRanges[parentIdx].numNodes = 0;
                 }
                 m_nodeMeshRanges[parentIdx].numNodes++;
+                Sphere& parentBounds = m_meshInstanceBounds[parentIdx];
+                parentBounds.combineSphere(meshBounds);
+
                 parentIdx = (initialStateNodes[parentIdx].parentOffset != 0) ? parentIdx - initialStateNodes[parentIdx].parentOffset : UINT16_MAX;
             }
 
-            m_nodePathIdxLookup.emplace(node.path, (uint16)m_nodeInfos.size());
-            m_nodeInfos.emplace_back((uint16)node.meshInfoIdx, node.materialInfoIdx);
+            m_nodePathIdxLookup.emplace(node.path, (uint16)i);
+            m_nodeInfos.emplace_back((uint16)node.meshInfoIdx, node.materialInfoIdx, node.path);
             m_meshInstanceOffsets.emplace_back(nodeWS);
         }
         else if (i == 0)
         {
-            m_nodePathIdxLookup.emplace(node.path, (uint16)m_nodeInfos.size());
+            m_nodePathIdxLookup.emplace(node.path, (uint16)i);
         }
     }
 
@@ -242,6 +259,7 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
 
     RenderNode node;
     node.m_transformIdx = Globals::rendererVK.addRenderNodeTransform(transform);
+    node.m_bounds = m_meshInstanceBounds[idx];
     node.m_meshInstances.resize(range.numNodes);
     for (uint32 i = 0; i < range.numNodes; ++i)
     {
