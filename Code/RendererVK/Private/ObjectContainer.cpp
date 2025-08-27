@@ -210,7 +210,7 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData)
         nodeWS.pos = parentTransform.pos + parentTransform.quat * (node.transform.pos * parentTransform.scale);
         nodeWS.quat = parentTransform.quat * node.transform.quat;
         nodeWS.scale = parentTransform.scale * node.transform.scale;
-        m_nodeMeshRanges[i].path = node.path;
+
         if (node.meshInfoIdx != UINT16_MAX)
         {
             Sphere meshBounds = m_boundsForMeshIdx[node.meshInfoIdx];
@@ -241,7 +241,7 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData)
             }
 
             m_nodePathIdxLookup.emplace(node.path, (uint16)i);
-            m_nodeInfos.emplace_back((uint16)node.meshInfoIdx, node.materialInfoIdx, node.path);
+            m_nodeInfos.emplace_back((uint16)node.meshInfoIdx, node.materialInfoIdx);
             m_meshInstanceOffsets.emplace_back(nodeWS);
         }
         else if (i == 0)

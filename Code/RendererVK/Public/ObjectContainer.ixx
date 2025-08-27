@@ -52,14 +52,12 @@ private:
     {
         uint16 meshInfoIdx = UINT16_MAX;
         uint16 materialInfoIdx = UINT16_MAX;
-        std::string path;
     };
 
     struct NodeMeshRange
     {
         uint16 startIdx = UINT16_MAX;
         uint16 numNodes = UINT16_MAX;
-        std::string path;
     };
 
     std::vector<NodeInfo> m_nodeInfos;
