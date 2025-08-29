@@ -33,7 +33,7 @@ bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swa
         {
             .image = image,
             .viewType = vk::ImageViewType::e2D,
-            .format = swapChain.getLayout().format,
+            .format = swapChain.getLayout().surfaceFormat.format,
             .components = {},
             .subresourceRange =
             {

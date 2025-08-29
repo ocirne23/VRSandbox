@@ -14,9 +14,9 @@ public:
     struct Layout
     {
         uint32 numImages;
-        vk::Format format;
-        vk::ColorSpaceKHR colorSpace;
+        vk::SurfaceFormatKHR surfaceFormat;
         vk::Extent2D extent;
+        vk::PresentModeKHR presentMode;
     };
 
     struct SyncObjects
@@ -24,6 +24,7 @@ public:
         vk::Semaphore imageAvailable;
         vk::Semaphore renderFinished;
         vk::Fence inFlight;
+        bool isInFlight = false;
     };
 
     SwapChain();
@@ -32,14 +33,14 @@ public:
 
     bool initialize(const Surface& surface, uint32 swapChainSize);
 
-    void acquireNextImage();
-    bool present();
     vk::SwapchainKHR getSwapChain() const { return m_swapChain; }
     const Layout& getLayout() const { return m_layout; }
-    CommandBuffer& getCurrentCommandBuffer() { return m_commandBuffers[m_currentFrame]; }
-    void waitForCurrentCommandBuffer();
-    CommandBuffer& getCommandBuffer(uint32 frameIdx) { return m_commandBuffers[frameIdx]; }
     uint32 getCurrentFrameIndex() const { return m_currentFrame; }
+
+    void acquireNextImage();
+    bool present();
+    void waitForFrame(uint32 frameIdx);
+    void submitCommandBuffer(CommandBuffer& commandBuffer);
 
 private:
 
@@ -48,6 +49,5 @@ private:
 
     uint32 m_currentFrame = 0;
     uint32 m_currentImageIdx = 0;
-    std::vector<CommandBuffer> m_commandBuffers;
     std::vector<SyncObjects> m_syncObjects;
 };

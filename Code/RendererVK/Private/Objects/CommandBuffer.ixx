@@ -20,9 +20,9 @@ public:
     CommandBuffer(const CommandBuffer&) = delete;
     CommandBuffer(CommandBuffer&&) = default;
 
-    bool initialize();
+    bool initialize(bool isPrimary = true);
 
-    vk::CommandBuffer begin(bool once = false);
+    vk::CommandBuffer begin(bool once = false, vk::CommandBufferInheritanceInfo* pInheritanceInfo = nullptr);
     void end();
     bool hasRecorded() { return m_hasRecorded; }
     void reset();

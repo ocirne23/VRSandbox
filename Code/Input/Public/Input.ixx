@@ -118,7 +118,7 @@ public:
 
 private:
 
-    const uint8* m_pKeyStates = nullptr;
+    const bool* m_pKeyStates = nullptr;
     std::vector<std::unique_ptr<MouseListener>>    m_mouseListeners;
     std::vector<std::unique_ptr<KeyboardListener>> m_keyboardListeners;
     std::vector<std::unique_ptr<SystemEventListener>> m_systemEventListeners;

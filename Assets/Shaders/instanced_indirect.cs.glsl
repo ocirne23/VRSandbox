@@ -126,20 +126,6 @@ vec4 quat_multiply(vec4 q, vec4 p)
 //    return vec4(-q.xyz, q.w);
 //}
 
-float3x4 convert_dq_to_mat(float4 nq, float4 dq)
-{
-    float3  t = (nq.w * dq.xyz - dq.w * nq.xyz + cross(nq.xyz, dq.xyz));
-    float3 v2 = nq.xyz + nq.xyz;
-    float xx = 1 - v2.x * nq.x; float yy = v2.y * nq.y; float xw = v2.x * nq.w;
-    float xy = v2.y * nq.x;   float yz = v2.z * nq.y; float yw = v2.y * nq.w;
-    float xz = v2.z * nq.x;   float zz = v2.z * nq.z; float zw = v2.z * nq.w;
-    float3x4 r;
-    r._m00 = 1 - yy - zz; r._m01 = xy - zw; r._m02 = xz + yw; r._m03 = t.x + t.x;
-    r._m10 = xy + zw;   r._m11 = xx - zz; r._m12 = yz - xw; r._m13 = t.y + t.y;
-    r._m20 = xz - yw;   r._m21 = yz + xw; r._m22 = xx - yy; r._m23 = t.z + t.z;
-    return r;
-}
-
 //float4 mat_to_quat(float3x3 m)
 //{
 //	float4 q;

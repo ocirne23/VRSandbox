@@ -39,13 +39,15 @@ public:
 
     const Frustum& beginFrame(const Camera& camera);
     void renderNode(const RenderNode& node);
-    void present(const Camera& camera);
+    void present();
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
     uint32 getNumRenderNodes() const { return (uint32)m_renderNodeTransforms.size(); }
     uint32 getNumMeshTypes() const { return m_meshInfoCounter; }
     uint32 getNumMaterials() const { return m_materialInfoCounter; }
     uint32 getCurrentFrameIndex() const { return m_swapChain.getCurrentFrameIndex(); }
+
+    CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 
 private:
 
@@ -97,6 +99,11 @@ private:
 
     struct PerFrameData
     {
+        CommandBuffer primaryCommandBuffer;
+        CommandBuffer indirectCullCommandBuffer;
+        CommandBuffer staticMeshRenderCommandBuffer;
+        CommandBuffer imguiCommandBuffer;
+
         bool updated = false;
         Buffer ubo;
         Buffer inRenderNodeTransformsBuffer;

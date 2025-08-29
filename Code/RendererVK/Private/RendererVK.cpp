@@ -4,6 +4,7 @@ import Core;
 import Core.glm;
 import Core.Window;
 import Core.Frustum;
+import Core.imgui;
 
 import File.SceneData;
 import File.MeshData;
@@ -48,7 +49,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     assert(m_surface.deviceSupportsSurface());
 
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT);
-    m_stagingManager.initialize(m_swapChain);
+    m_stagingManager.initialize();
     m_meshDataManager.initialize(m_stagingManager, VERTEX_DATA_SIZE, INDEX_DATA_SIZE);
 
     m_renderPass.initialize(m_swapChain);
@@ -61,6 +62,11 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 
     for (PerFrameData& perFrame : m_perFrameData)
     {
+        perFrame.primaryCommandBuffer.initialize(true);
+        perFrame.indirectCullCommandBuffer.initialize(false);
+        perFrame.staticMeshRenderCommandBuffer.initialize(false);
+        perFrame.imguiCommandBuffer.initialize(false);
+
         perFrame.ubo.initialize(sizeof(RendererVKLayout::Ubo),
             vk::BufferUsageFlagBits::eUniformBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
@@ -93,6 +99,31 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     m_instanceOffsetsBuffer.initialize(RendererVKLayout::MAX_INSTANCE_OFFSETS * sizeof(RendererVKLayout::MeshInstanceOffset),
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+
+    ImGui_ImplSDL3_InitForVulkan((SDL_Window*)window.getWindowHandle());
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.ApiVersion = Globals::instance.getApiVersion();
+    init_info.Instance = Globals::instance.getInstance();
+    init_info.PhysicalDevice = Globals::device.getPhysicalDevice();
+    init_info.Device = Globals::device.getDevice();
+    init_info.QueueFamily = Globals::device.getGraphicsQueueIndex();
+    init_info.Queue = Globals::device.getGraphicsQueue();
+    init_info.PipelineCache = nullptr;
+    init_info.RenderPass = m_renderPass.getRenderPass();
+    init_info.DescriptorPool = nullptr;
+    init_info.DescriptorPoolSize = 10;
+    init_info.Subpass = 0;
+    init_info.MinImageCount = 2;
+    init_info.ImageCount = 2;
+    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.Allocator = nullptr;
+    init_info.CheckVkResultFn = imgui_check_vk_result;
+    ImGui_ImplVulkan_Init(&init_info);
 
     return true;
 }
@@ -130,8 +161,17 @@ void RendererVK::renderNode(const RenderNode& node)
     m_meshInstanceCounter += numInstances;
 }
 
-void RendererVK::present(const Camera& camera)
+void RendererVK::present()
 {
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+
+    bool open = true;
+    ImGui::ShowDemoWindow(&open);
+
+    ImGui::Render();
+
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
@@ -179,7 +219,112 @@ void RendererVK::present(const Camera& camera)
     recordCommandBuffers();
 
     m_swapChain.acquireNextImage();
+    m_swapChain.submitCommandBuffer(getCurrentCommandBuffer());
     m_swapChain.present();
+}
+
+uint32 RendererVK::addRenderNodeTransform(const Transform& transform)
+{
+    const uint32 renderNodeIdx = (uint32)m_renderNodeTransforms.size();
+    m_renderNodeTransforms.emplace_back(transform);
+    return renderNodeIdx;
+}
+
+void RendererVK::recordCommandBuffers()
+{
+    const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+
+    vk::CommandBufferInheritanceInfo inheritanceInfo
+    {
+        .renderPass = m_renderPass.getRenderPass(),
+        .subpass = 0,
+        .framebuffer = m_framebuffers.getFramebuffer(frameIdx),
+        .occlusionQueryEnable = false,
+        .queryFlags = {},
+        .pipelineStatistics = {}
+    };
+
+    if (frameData.primaryCommandBuffer.hasRecorded())
+        m_swapChain.waitForFrame(frameIdx);
+
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    if (!frameData.updated)
+    {
+        {
+            CommandBuffer& indirectCullCommandBuffer = frameData.indirectCullCommandBuffer;
+            vk::CommandBufferInheritanceInfo indirectInheritanceInfo;
+            indirectCullCommandBuffer.begin(false, &indirectInheritanceInfo);
+            IndirectCullComputePipeline::RecordParams cullParams
+            {
+                .ubo = frameData.ubo,
+                .inRenderNodeTransformsBuffer = frameData.inRenderNodeTransformsBuffer,
+                .inMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
+                .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
+                .inMeshInfoBuffer = m_meshInfosBuffer,
+                .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer
+            };
+            m_indirectCullComputePipeline.record(indirectCullCommandBuffer, frameIdx, m_meshInfoCounter, cullParams);
+            indirectCullCommandBuffer.end();
+        }
+
+        {
+            CommandBuffer& staticMeshCommandBuffer = frameData.staticMeshRenderCommandBuffer;
+            vk::CommandBuffer vkStaticMeshCommandBuffer = staticMeshCommandBuffer.begin(false, &inheritanceInfo);
+            const vk::Viewport viewport{ .x = 0.0f, .y = (float)extent.height, .width = (float)extent.width, .height = -((float)extent.height), .minDepth = 0.0f, .maxDepth = 1.0f };
+            const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+
+            vkStaticMeshCommandBuffer.setViewport(0, { viewport });
+            vkStaticMeshCommandBuffer.setScissor(0, { scissor });
+            StaticMeshGraphicsPipeline::RecordParams drawParams
+            {
+                .ubo = frameData.ubo,
+                .vertexBuffer = m_meshDataManager.getVertexBuffer(),
+                .indexBuffer = m_meshDataManager.getIndexBuffer(),
+                .materialInfoBuffer = m_materialInfosBuffer,
+                .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
+                .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
+                .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx)
+            };
+            m_staticMeshGraphicsPipeline.record(staticMeshCommandBuffer, frameIdx, m_meshInfoCounter, drawParams);
+            staticMeshCommandBuffer.end();
+        }
+
+        frameData.updated = true;
+    }
+
+    {
+        CommandBuffer& imguiCommandBuffer = frameData.imguiCommandBuffer;
+        vk::CommandBuffer vkImguiCommandBuffer = imguiCommandBuffer.begin(false, &inheritanceInfo);
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkImguiCommandBuffer);
+        imguiCommandBuffer.end();
+    }
+
+    const vk::RenderPassBeginInfo renderPassBeginInfo{
+        .renderPass = m_renderPass.getRenderPass(),
+        .framebuffer = m_framebuffers.getFramebuffer(frameIdx),
+        .renderArea = vk::Rect2D {.offset = vk::Offset2D { 0, 0 }, .extent = extent },
+        .clearValueCount = (uint32)s_clearValues.size(),
+        .pClearValues = s_clearValues.data(),
+    };
+
+    std::array<vk::CommandBuffer, 2> secondaryCommandBuffers = 
+        { frameData.staticMeshRenderCommandBuffer.getCommandBuffer(), frameData.imguiCommandBuffer.getCommandBuffer() };
+
+    CommandBuffer& commandBuffer = frameData.primaryCommandBuffer;
+    vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
+    vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
+    vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
+    vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eSecondaryCommandBuffers);
+    vkCommandBuffer.executeCommands((uint32)secondaryCommandBuffers.size(), secondaryCommandBuffers.data());
+    vkCommandBuffer.endRenderPass();
+    commandBuffer.end();
+}
+
+void RendererVK::setHaveToRecordCommandBuffers()
+{
+    for (PerFrameData& perFrame : m_perFrameData)
+        perFrame.updated = false;
 }
 
 void RendererVK::addObjectContainer(ObjectContainer* pObjectContainer)
@@ -228,76 +373,4 @@ uint32 RendererVK::addMeshInstanceOffsets(const std::vector<RendererVKLayout::Me
 
     setHaveToRecordCommandBuffers();
     return baseInstanceOffsetIdx;
-}
-
-uint32 RendererVK::addRenderNodeTransform(const Transform& transform)
-{
-    const uint32 renderNodeIdx = (uint32)m_renderNodeTransforms.size();
-    m_renderNodeTransforms.emplace_back(transform);
-    return renderNodeIdx;
-}
-
-void RendererVK::recordCommandBuffers()
-{
-    const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
-    PerFrameData& frameData = m_perFrameData[frameIdx];
-
-    CommandBuffer& commandBuffer = m_swapChain.getCommandBuffer(frameIdx);
-    if (!frameData.updated)
-    {
-        const vk::Extent2D extent = m_swapChain.getLayout().extent;
-        const vk::Viewport viewport{ .x = 0.0f, .y = (float)extent.height, .width = (float)extent.width, .height = -((float)extent.height), .minDepth = 0.0f, .maxDepth = 1.0f };
-        const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
-
-        const vk::RenderPassBeginInfo renderPassBeginInfo{
-            .renderPass = m_renderPass.getRenderPass(),
-            .framebuffer = m_framebuffers.getFramebuffer(frameIdx),
-            .renderArea = vk::Rect2D {.offset = vk::Offset2D { 0, 0 }, .extent = extent },
-            .clearValueCount = (uint32)s_clearValues.size(),
-            .pClearValues = s_clearValues.data(),
-        };
-
-        m_swapChain.waitForCurrentCommandBuffer();
-
-        vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
-
-        IndirectCullComputePipeline::RecordParams cullParams
-        {
-            .ubo = frameData.ubo,
-            .inRenderNodeTransformsBuffer = frameData.inRenderNodeTransformsBuffer,
-            .inMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
-            .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
-            .inMeshInfoBuffer = m_meshInfosBuffer,
-            .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer
-        };
-        m_indirectCullComputePipeline.record(commandBuffer, frameIdx, m_meshInfoCounter, cullParams);
-
-        vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
-        vkCommandBuffer.setViewport(0, { viewport });
-        vkCommandBuffer.setScissor(0, { scissor });
-
-        StaticMeshGraphicsPipeline::RecordParams drawParams
-        {
-            .ubo = frameData.ubo,
-            .vertexBuffer = m_meshDataManager.getVertexBuffer(),
-            .indexBuffer = m_meshDataManager.getIndexBuffer(),
-            .materialInfoBuffer = m_materialInfosBuffer,
-            .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
-            .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
-            .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx)
-        };
-
-        m_staticMeshGraphicsPipeline.record(commandBuffer, frameIdx, m_meshInfoCounter, drawParams);
-        vkCommandBuffer.endRenderPass();
-
-        commandBuffer.end();
-
-        frameData.updated = true;
-    }
-}
-
-void RendererVK::setHaveToRecordCommandBuffers()
-{
-    for (PerFrameData& perFrame : m_perFrameData)
-        perFrame.updated = false;
 }

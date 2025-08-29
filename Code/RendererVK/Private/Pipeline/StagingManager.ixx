@@ -15,7 +15,7 @@ public:
     ~StagingManager();
     StagingManager(const StagingManager&) = delete;
 
-    bool initialize(SwapChain& swapChain);
+    bool initialize();
 
     vk::Semaphore upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
     vk::Semaphore uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, uint32 mipLevel, vk::DeviceSize dstOffset = 0);

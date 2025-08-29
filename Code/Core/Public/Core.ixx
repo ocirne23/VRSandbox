@@ -47,3 +47,6 @@ export import <atomic>;
 export import <type_traits>;
 export import <chrono>;
 export import <initializer_list>;
+
+export template<typename T, size_t N>
+constexpr size_t ARRAY_SIZE(const T(&)[N]) { return N; }

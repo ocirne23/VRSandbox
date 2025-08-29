@@ -13,16 +13,7 @@ bool Window::initialize(std::string_view windowTitle, glm::ivec2 pos, glm::ivec2
         printf("SDL_Init Error: %s\n", SDL_GetError());
     }
 
-    SDL_PropertiesID props = SDL_CreateProperties();
-    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, windowTitle.data());
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, pos.x);
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, pos.y);
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, size.x);
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, size.y);
-    SDL_SetNumberProperty(props, "flags", SDL_WINDOW_VULKAN);
-    m_windowHandle = SDL_CreateWindowWithProperties(props);
-
-    //m_windowHandle = SDL_CreateWindow(windowTitle.data(), size.x, size.y, SDL_WINDOW_VULKAN);
+    m_windowHandle = SDL_CreateWindow(windowTitle.data(), size.x, size.y, SDL_WINDOW_VULKAN);
     if (m_windowHandle == nullptr)
     {
         printf("SDL_CreateWindow Error: %s\n", SDL_GetError());

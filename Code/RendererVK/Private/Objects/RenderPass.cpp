@@ -16,7 +16,7 @@ bool RenderPass::initialize(const SwapChain& swapChain)
     std::array<vk::AttachmentDescription, 2> attachments;
     attachments[0] = {
         .flags = vk::AttachmentDescriptionFlags(),
-        .format = swapChain.getLayout().format,
+        .format = swapChain.getLayout().surfaceFormat.format,
         .samples = vk::SampleCountFlagBits::e1,
         .loadOp = vk::AttachmentLoadOp::eClear,
         .storeOp = vk::AttachmentStoreOp::eStore,

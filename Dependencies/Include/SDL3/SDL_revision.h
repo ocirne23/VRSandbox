@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2024 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -19,10 +19,12 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
-/**
- *  \file SDL_revision.h
- *
- *  Header file containing the SDL revision
+/* WIKI CATEGORY: Version */
+
+/*
+ * SDL_revision.h contains the SDL revision, which might be defined on the
+ * compiler command line, or generated right into the header itself by the
+ * build system.
  */
 
 #ifndef SDL_revision_h_
@@ -42,7 +44,7 @@
  * clue in debugging forensics and not something the app will parse in any
  * way.
  *
- * \since This macro is available since SDL 3.0.0.
+ * \since This macro is available since SDL 3.2.0.
  */
 #define SDL_REVISION "Some arbitrary string decided at SDL build time"
 #elif defined(SDL_VENDOR_INFO)

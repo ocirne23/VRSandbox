@@ -40,17 +40,14 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
     vk::CompositeAlphaFlagBitsKHR compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
 
     const uint32 imageCount = std::max(capabilities.minImageCount, std::min(swapChainSize, capabilities.maxImageCount));
-    m_commandBuffers.resize(imageCount);
-    m_commandBuffers.shrink_to_fit();
     m_syncObjects.resize(imageCount);
     m_syncObjects.shrink_to_fit();
 
     for (uint32 i = 0; i < imageCount; i++)
     {
-        m_commandBuffers[i].initialize();
         m_syncObjects[i].imageAvailable = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
         m_syncObjects[i].renderFinished = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
-        m_syncObjects[i].inFlight = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
+        m_syncObjects[i].inFlight = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled});
     }
 
     vk::SwapchainCreateInfoKHR createInfo{
@@ -69,9 +66,9 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
     };
 
     m_layout.numImages = imageCount;
-    m_layout.format = surfaceFormat.format;
-    m_layout.colorSpace = surfaceFormat.colorSpace;
+    m_layout.surfaceFormat = surfaceFormat;
     m_layout.extent = capabilities.currentExtent;
+    m_layout.presentMode = createInfo.presentMode;
 
     m_swapChain = vkDevice.createSwapchainKHR(createInfo);
     if (!m_swapChain)
@@ -100,28 +97,30 @@ void SwapChain::acquireNextImage()
     m_currentImageIdx = imageIdx.value;
 }
 
-void SwapChain::waitForCurrentCommandBuffer()
+void SwapChain::waitForFrame(uint32 frameIdx)
 {
     vk::Device vkDevice = Globals::device.getDevice();
-    SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
+    SyncObjects& syncObjects = m_syncObjects[frameIdx];
 
     vk::Result result = vkDevice.waitForFences(1, &syncObjects.inFlight, vk::True, UINT64_MAX);
     if (result != vk::Result::eSuccess)
         assert(false && "Failed to wait for fence");
 }
 
-bool SwapChain::present()
+void SwapChain::submitCommandBuffer(CommandBuffer& commandBuffer)
 {
-    vk::Device vkDevice = Globals::device.getDevice();
-
-    vk::PipelineStageFlags2 waitStage = { vk::PipelineStageFlagBits2::eColorAttachmentOutput };
     SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
-
-    CommandBuffer& commandBuffer = m_commandBuffers[m_currentFrame];
+    vk::PipelineStageFlags2 waitStage = { vk::PipelineStageFlagBits2::eColorAttachmentOutput };
     commandBuffer.setWaitStage(waitStage);
     commandBuffer.addWaitSemaphore(syncObjects.imageAvailable, vk::PipelineStageFlagBits::eColorAttachmentOutput);
     commandBuffer.addSignalSemaphore(syncObjects.renderFinished);
     commandBuffer.submitGraphics(syncObjects.inFlight);
+}
+
+bool SwapChain::present()
+{
+    vk::PipelineStageFlags2 waitStage = { vk::PipelineStageFlagBits2::eColorAttachmentOutput };
+    SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
     vk::PresentInfoKHR presentInfo{
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &syncObjects.renderFinished,
@@ -129,6 +128,7 @@ bool SwapChain::present()
         .pSwapchains = &m_swapChain,
         .pImageIndices = &m_currentImageIdx,
     };
+
     vk::Result result = Globals::device.getGraphicsQueue().presentKHR(presentInfo);
     switch (result)
     {

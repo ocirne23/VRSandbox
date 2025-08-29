@@ -10,12 +10,12 @@ CommandBuffer::~CommandBuffer()
         Globals::device.getDevice().freeCommandBuffers(Globals::device.getCommandPool(), m_commandBuffer);
 }
 
-bool CommandBuffer::initialize()
+bool CommandBuffer::initialize(bool isPrimary)
 {
     vk::CommandBufferAllocateInfo allocInfo
     {
         .commandPool = Globals::device.getCommandPool(),
-        .level = vk::CommandBufferLevel::ePrimary,
+        .level = isPrimary ? vk::CommandBufferLevel::ePrimary : vk::CommandBufferLevel::eSecondary,
         .commandBufferCount = 1,
     };
     m_commandBuffer = Globals::device.getDevice().allocateCommandBuffers(allocInfo)[0];
@@ -72,11 +72,20 @@ void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, v
     m_commandBuffer.pushDescriptorSetKHR(bindPoint, pipelineLayout, 0, (uint32)updateInfo.size(), descriptorWrites);
 }
 
-vk::CommandBuffer CommandBuffer::begin(bool once)
+vk::CommandBuffer CommandBuffer::begin(bool once, vk::CommandBufferInheritanceInfo* pInheritanceInfo)
 {
     if (m_hasRecorded)
         m_commandBuffer.reset(vk::CommandBufferResetFlagBits::eReleaseResources);
-    m_commandBuffer.begin({ .flags = once ? vk::CommandBufferUsageFlagBits::eOneTimeSubmit : (vk::CommandBufferUsageFlagBits)0 });
+    vk::CommandBufferBeginInfo beginInfo{
+        .flags = once ? vk::CommandBufferUsageFlagBits::eOneTimeSubmit : (vk::CommandBufferUsageFlagBits)0,
+        .pInheritanceInfo = pInheritanceInfo,
+    };
+    if (pInheritanceInfo && pInheritanceInfo->renderPass != VK_NULL_HANDLE)
+    {
+        beginInfo.flags |= vk::CommandBufferUsageFlagBits::eRenderPassContinue;
+        beginInfo.flags |= vk::CommandBufferUsageFlagBits::eSimultaneousUse;
+    }
+    m_commandBuffer.begin(beginInfo);
     m_hasRecorded = true;
 
     return m_commandBuffer;

@@ -1,6 +1,7 @@
 module Input;
 
 import Core.SDL;
+import Core.imgui;
 
 Input::Input() {}
 Input::~Input() {}
@@ -18,9 +19,17 @@ void Input::update_MT(double deltaSec)
 
 void Input::update(double deltaSec)
 {
+    ImGuiIO& imguiIO = ImGui::GetIO();
+
     SDL_Event evt;
     while (SDL_PollEvent(&evt))
     {
+        ImGui_ImplSDL3_ProcessEvent(&evt);
+        if (evt.type >= SDL_EVENT_KEY_DOWN && evt.type <= SDL_EVENT_TEXT_INPUT && (imguiIO.WantCaptureKeyboard || imguiIO.WantTextInput))
+            continue;
+        if (evt.type >= SDL_EVENT_MOUSE_MOTION && evt.type <= SDL_EVENT_MOUSE_WHEEL && imguiIO.WantCaptureMouse)
+            continue;
+
         switch (evt.type)
         {
         case SDL_EVENT_WINDOW_FOCUS_GAINED:

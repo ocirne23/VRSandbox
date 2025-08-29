@@ -1,6 +1,7 @@
 module RendererVK.StagingManager;
 
 import Core;
+import RendererVK;
 import RendererVK.VK;
 import RendererVK.Device;
 import RendererVK.Buffer;
@@ -24,10 +25,8 @@ StagingManager::~StagingManager()
     }
 }
 
-bool StagingManager::initialize(SwapChain& swapChain)
+bool StagingManager::initialize()
 {
-    m_swapChain = &swapChain;
-
     vk::Device vkDevice = Globals::device.getDevice();
     for (int i = 0; i < NUM_STAGING_BUFFERS; i++)
     {
@@ -155,7 +154,7 @@ void StagingManager::update()
 
     commandBuffer.end();
     commandBuffer.submitGraphics(m_fences[m_currentBuffer]);
-    m_swapChain->getCurrentCommandBuffer().addWaitSemaphore(m_semaphores[m_currentBuffer], vk::PipelineStageFlagBits::eVertexInput);
+    Globals::rendererVK.getCurrentCommandBuffer().addWaitSemaphore(m_semaphores[m_currentBuffer], vk::PipelineStageFlagBits::eVertexInput);
 
     m_currentBuffer = (m_currentBuffer + 1) % NUM_STAGING_BUFFERS;
     m_currentBufferOffset = 0;

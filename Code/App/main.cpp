@@ -69,7 +69,7 @@ int main()
 
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {
-        if (evt.keysym.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
             spawnedNodes.push_back(
                 boatContainer.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp()))))
@@ -117,7 +117,7 @@ int main()
             }
         }
 
-        renderer.present(cameraController.getCamera());
+        renderer.present();
         frameCount++;
         timeAccum += deltaSec;
 

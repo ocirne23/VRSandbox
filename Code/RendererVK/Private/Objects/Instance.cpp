@@ -198,6 +198,7 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
 
     m_supportedExtensions = vk::enumerateInstanceExtensionProperties();
     m_supportedLayers = vk::enumerateInstanceLayerProperties();
+    m_apiVersion = VK_MAKE_API_VERSION(0, 1, 3, 0);
 
     uint32 numExtensions = 0;
     const char* const* ppExtensions = SDL_Vulkan_GetInstanceExtensions(&numExtensions);
@@ -207,7 +208,7 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
         if (ppExtensions[i] && supportsExtension(ppExtensions[i]))
             extensions.push_back(ppExtensions[i]);
 
-    vk::ApplicationInfo appInfo{ .pApplicationName = "App", .applicationVersion = VK_MAKE_VERSION(1, 0, 0), .pEngineName = "VRSandbox", .engineVersion = VK_MAKE_VERSION(1, 0, 0), .apiVersion = VK_MAKE_API_VERSION(0, 1, 3, 0) };
+    vk::ApplicationInfo appInfo{ .pApplicationName = "App", .applicationVersion = VK_MAKE_VERSION(1, 0, 0), .pEngineName = "VRSandbox", .engineVersion = VK_MAKE_VERSION(1, 0, 0), .apiVersion = m_apiVersion };
     vk::InstanceCreateInfo createInfo{ .pApplicationInfo = &appInfo };
 
     vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo{
