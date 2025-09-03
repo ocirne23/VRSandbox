@@ -22,6 +22,7 @@ struct MaterialInfo
     vec3 emissiveColor;
     uint flags;
 };
+
 layout (binding = 2, std430) buffer InMaterialInfos
 {
 	MaterialInfo in_materialInfos[];
@@ -36,27 +37,9 @@ layout (location = 1) in mat3 in_tbn;
 layout (location = 4) in vec2 in_uv;
 layout (location = 5) in flat uint in_meshIdxMaterialIdx;
 
-
 layout (location = 0) out vec3 out_color;
 
 const float PI = 3.14159265359;
-
-//float GetLuminance(vec3 color)
-//{
-//    return dot(color, vec3(0.2126, 0.7152, 0.0722));
-//}
-//
-//// Apply sRGB gamma curve to linear values
-//vec3 ToSRGB(vec3 col)
-//{
-//    return select(col.xyz < 0.0031308, 12.92 * col.xyz, 1.055 * pow(col.xyz, 1.0 / 2.4) - vec3(0.055, 0.055, 0.055));
-//}
-//
-//// Inverse sRGB gamma curve to get from sRGB to linear values
-//vec3 ToLinear(vec3 col)
-//{
-//    return select(col.xyz < 0.04045, col.xyz / 12.92, pow((col.xyz + vec3(0.055, 0.055, 0.055)) / 1.055, 2.4));
-//}
 
 float inverseSquareFalloff(float lightDistance, float lightRange)
 {

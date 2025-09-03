@@ -32,7 +32,8 @@ bool IndirectCullComputePipeline::initialize()
     }
 
     ComputePipelineLayout computePipelineLayout;
-    computePipelineLayout.computeShaderText = std::move(FileSystem::readFileStr("Shaders/instanced_indirect.cs.glsl"));
+    computePipelineLayout.computeShaderDebugFilePath = "Shaders/instanced_indirect.cs.glsl";
+    computePipelineLayout.computeShaderText = FileSystem::readFileStr(computePipelineLayout.computeShaderDebugFilePath);
     auto& descriptorSetBindings = computePipelineLayout.descriptorSetLayoutBindings;
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // UBO
         .binding = 0,

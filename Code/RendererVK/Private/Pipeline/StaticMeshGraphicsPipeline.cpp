@@ -22,8 +22,11 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass, StagingManag
     //m_rmhTex.initialize(stagingManager, "Textures/boat/roughness_metallic_height.dds", false);
 
     GraphicsPipelineLayout graphicsPipelineLayout;
-    graphicsPipelineLayout.vertexShaderText = std::move(FileSystem::readFileStr("Shaders/instanced_indirect.vs.glsl"));
-    graphicsPipelineLayout.fragmentShaderText = std::move(FileSystem::readFileStr("Shaders/instanced_indirect.fs.glsl"));
+    graphicsPipelineLayout.vertexShaderDebugFilePath = "Shaders/instanced_indirect.vs.glsl";
+    graphicsPipelineLayout.fragmentShaderDebugFilePath = "Shaders/instanced_indirect.fs.glsl";
+
+    graphicsPipelineLayout.vertexShaderText = FileSystem::readFileStr(graphicsPipelineLayout.vertexShaderDebugFilePath);
+    graphicsPipelineLayout.fragmentShaderText = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShaderDebugFilePath);
 
     auto& bindingDescriptions = graphicsPipelineLayout.vertexLayoutInfo.bindingDescriptions;
     bindingDescriptions.push_back(vk::VertexInputBindingDescription{

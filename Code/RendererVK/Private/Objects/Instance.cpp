@@ -161,21 +161,25 @@ Instance::~Instance()
     destroy();
 }
 
-static VkBool32 __stdcall debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType,
-    const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
+static vk::Bool32 debugCallback(
+    vk::DebugUtilsMessageSeverityFlagBitsEXT       messageSeverity,
+    vk::DebugUtilsMessageTypeFlagsEXT              messageTypes,
+    const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
+    void* pUserData)
 {
     const char* severity = "UNKNOWN";
-    if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+    
+    if (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)
         severity = "ERROR";
-    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    else if (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning)
         severity = "WARNING";
-    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+    else if (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo)
         severity = "INFO";
-    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT)
+    else if (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose)
         severity = "VERBOSE";
     printf("Validation layer %s: %s\n", severity, pCallbackData->pMessage);
     bool* pBreakOnValidationLayerError = reinterpret_cast<bool*>(pUserData);
-    if (*pBreakOnValidationLayerError && (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT))
+    if (*pBreakOnValidationLayerError && (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError))
     {
         __debugbreak();
     }
@@ -244,8 +248,9 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
     if (enableValidationLayers)
     {
         VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo2 = debugCreateInfo;
-        auto createMessengerFunc = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(m_instance, "vkCreateDebugUtilsMessengerEXT");
-        createMessengerFunc(m_instance, &debugCreateInfo2, nullptr, &m_debugMessenger);
+        VkDebugUtilsMessengerEXT debugMessenger = m_debugMessenger;
+        auto createMessengerFunc = (PFN_vkCreateDebugUtilsMessengerEXT)m_instance.getProcAddr("vkCreateDebugUtilsMessengerEXT");
+        createMessengerFunc(m_instance, &debugCreateInfo2, nullptr, &debugMessenger);
     }
 
     return true;
@@ -255,7 +260,7 @@ void Instance::destroy()
 {
     if (m_instance)
     {
-        auto destroyMessengerFunc = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(m_instance, "vkDestroyDebugUtilsMessengerEXT");
+        auto destroyMessengerFunc = (PFN_vkDestroyDebugUtilsMessengerEXT)m_instance.getProcAddr("vkDestroyDebugUtilsMessengerEXT");
         destroyMessengerFunc(m_instance, m_debugMessenger, nullptr);
         m_instance.destroy();
     }

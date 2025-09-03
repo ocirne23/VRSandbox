@@ -26,7 +26,7 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
     m_pipelineLayout = vkDevice.createPipelineLayout(pipelineLayoutCreateInfo);
 
     Shader computeShader;
-    computeShader.initialize(vk::ShaderStageFlagBits::eCompute, layout.computeShaderText);
+    computeShader.initialize(vk::ShaderStageFlagBits::eCompute, layout.computeShaderText, layout.computeShaderDebugFilePath);
 
     vk::SpecializationInfo specializationInfo
     {

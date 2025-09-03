@@ -51,8 +51,8 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     }
 
     Shader vertexShader, fragmentShader;
-    vertexShader.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShaderText);
-    fragmentShader.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShaderText);
+    vertexShader.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShaderText, layout.vertexShaderDebugFilePath);
+    fragmentShader.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShaderText, layout.fragmentShaderDebugFilePath);
     std::array<vk::PipelineShaderStageCreateInfo, 2> pipelineShaderStageCreateInfos =
     {
         vk::PipelineShaderStageCreateInfo

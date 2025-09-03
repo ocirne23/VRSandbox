@@ -6,6 +6,7 @@ import RendererVK.VK;
 export struct ComputePipelineLayout
 {
     std::string computeShaderText;
+    std::string computeShaderDebugFilePath;
     std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
     std::vector<vk::PushConstantRange> pushConstantRanges;
 };

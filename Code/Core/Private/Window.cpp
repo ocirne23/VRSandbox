@@ -8,7 +8,7 @@ import Core.SDL;
 bool Window::initialize(std::string_view windowTitle, glm::ivec2 pos, glm::ivec2 size)
 {
     // initialize sdl and create a window
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0)
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
     {
         printf("SDL_Init Error: %s\n", SDL_GetError());
     }

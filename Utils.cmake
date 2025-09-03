@@ -46,6 +46,7 @@ function(apply_compile_settings target)
     target_link_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/Dependencies/Lib/")
     target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/Dependencies/Include/")
 
+	target_compile_features(${target} PRIVATE cxx_std_20)
 	target_compile_options(${target} PRIVATE ${COMPILE_OPTIONS})
 	target_link_options(${target} PRIVATE ${LINK_OPTIONS})
 

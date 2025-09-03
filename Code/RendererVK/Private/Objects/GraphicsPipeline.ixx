@@ -15,7 +15,9 @@ export struct VertexLayoutInfo
 export struct GraphicsPipelineLayout
 {
     std::string fragmentShaderText;
+    std::string fragmentShaderDebugFilePath;
     std::string vertexShaderText;
+    std::string vertexShaderDebugFilePath;
     VertexLayoutInfo vertexLayoutInfo;
     std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
     std::vector<vk::PushConstantRange> pushConstantRanges;

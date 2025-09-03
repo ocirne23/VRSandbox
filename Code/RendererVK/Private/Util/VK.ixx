@@ -1,9 +1,11 @@
+module;
+
+#include <vulkan/vulkan_core.h> // for vkCmdPushDescriptorSetKHR
+
 export module RendererVK.VK;
 
 export import vulkan_hpp;
-
 import Core;
-import <vulkan/vulkan.hpp>;
 
 #undef VK_NULL_HANDLE
 export nullptr_t VK_NULL_HANDLE = nullptr;

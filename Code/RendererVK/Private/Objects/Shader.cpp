@@ -1,6 +1,7 @@
 module RendererVK.Shader;
 
 import Core;
+import File.FileSystem;
 import RendererVK.VK;
 import RendererVK.Device;
 import RendererVK.glslang;
@@ -14,26 +15,20 @@ Shader::~Shader()
 
 bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath)
 {
-    std::ifstream file(filePath, std::ios::ate | std::ios::binary);
-    if (!file.is_open())
+    const std::string fileContent = FileSystem::readFileStr(filePath);
+    if (fileContent.empty())
     {
         assert(false && "Failed to open shader file");
         return false;
     }
 
-    size_t fileSize = (size_t)file.tellg();
-    std::string fileStr(fileSize, ' ');
-    file.seekg(0);
-    file.read(fileStr.data(), fileSize);
-    file.close();
-
-    return initialize(stage, fileStr);
+    return initialize(stage, fileContent, filePath);
 }
 
-bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr)
+bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr, const std::string& debugFilePath)
 {
     std::vector<unsigned int> spirv;
-    if (!GLSLtoSPV(stage, shaderStr, spirv))
+    if (!GLSLtoSPV(stage, shaderStr, spirv, debugFilePath))
     {
         assert(false && "Failed to compile shader SPIRV");
         return false;
@@ -75,13 +70,15 @@ EShLanguage translateShaderStage(vk::ShaderStageFlagBits stage)
     }
 }
 
-bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& source, std::vector<unsigned int>& spirv)
+bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& source, std::vector<unsigned int>& spirv, const std::string& debugFilePath)
 {
     EShLanguage stage = translateShaderStage(type);
     glslang::TShader shader(stage);
 
     const char* shaderStrings[1] = { source.data() };
     shader.setStrings(shaderStrings, 1);
+    shader.addSourceText(source.c_str(), source.length());
+    shader.setSourceFile(debugFilePath.c_str());
     shader.setDebugInfo(true);
 
     // Enable SPIR-V and Vulkan rules when parsing GLSL
