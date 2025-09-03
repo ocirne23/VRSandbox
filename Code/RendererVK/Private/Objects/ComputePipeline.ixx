@@ -15,7 +15,7 @@ export class ComputePipeline final
 {
 public:
     ComputePipeline() {};
-    ~ComputePipeline() {};
+    ~ComputePipeline();
     ComputePipeline(const ComputePipeline&) = delete;
 
     bool initialize(const ComputePipelineLayout& layout);

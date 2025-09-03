@@ -3,6 +3,19 @@ module RendererVK.ComputePipeline;
 import RendererVK.Device;
 import RendererVK.Shader;
 
+ComputePipeline::~ComputePipeline()
+{
+    vk::Device vkDevice = Globals::device.getDevice();
+    if (m_pipeline)
+        vkDevice.destroyPipeline(m_pipeline);
+    if (m_pipelineCache)
+        vkDevice.destroyPipelineCache(m_pipelineCache);
+    if (m_pipelineLayout)
+        vkDevice.destroyPipelineLayout(m_pipelineLayout);
+    if (m_descriptorSetLayout)
+        vkDevice.destroyDescriptorSetLayout(m_descriptorSetLayout);
+}
+
 bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
 {
     vk::Device vkDevice = Globals::device.getDevice();
@@ -51,7 +64,6 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
     };
 
     m_pipelineCache = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
-    m_pipeline = Globals::device.getDevice().createComputePipeline(m_pipelineCache, pipelineCreateInfo).value;
-
+    m_pipeline = vkDevice.createComputePipeline(m_pipelineCache, pipelineCreateInfo).value;
     return true;
 }

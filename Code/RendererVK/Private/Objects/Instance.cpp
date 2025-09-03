@@ -248,9 +248,10 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
     if (enableValidationLayers)
     {
         VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo2 = debugCreateInfo;
-        VkDebugUtilsMessengerEXT debugMessenger = m_debugMessenger;
+        VkDebugUtilsMessengerEXT debugMessenger;
         auto createMessengerFunc = (PFN_vkCreateDebugUtilsMessengerEXT)m_instance.getProcAddr("vkCreateDebugUtilsMessengerEXT");
         createMessengerFunc(m_instance, &debugCreateInfo2, nullptr, &debugMessenger);
+        m_debugMessenger = debugMessenger;
     }
 
     return true;

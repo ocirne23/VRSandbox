@@ -30,7 +30,11 @@ constexpr std::array<vk::ClearValue, 2> getClearValues()
 constexpr static std::array<vk::ClearValue, 2> s_clearValues = getClearValues();
 
 RendererVK::RendererVK() {}
-RendererVK::~RendererVK() {}
+RendererVK::~RendererVK() 
+{
+    Globals::device.getGraphicsQueue().waitIdle();
+    ImGui_ImplVulkan_Shutdown();
+}
 
 bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 {

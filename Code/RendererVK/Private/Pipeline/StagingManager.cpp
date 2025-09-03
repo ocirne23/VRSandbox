@@ -19,7 +19,7 @@ StagingManager::~StagingManager()
     vk::Device vkDevice = Globals::device.getDevice();
     for (int i = 0; i < NUM_STAGING_BUFFERS; i++)
     {
-        m_stagingBuffers[m_currentBuffer].unmapMemory();
+        //m_stagingBuffers[m_currentBuffer].unmapMemory();
         vkDevice.destroyFence(m_fences[i]);
         vkDevice.destroySemaphore(m_semaphores[i]);
     }

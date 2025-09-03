@@ -5,12 +5,27 @@ import Core.Windows;
 
 bool FileSystem::initialize()
 {
-    std::filesystem::path currDir = std::filesystem::current_path();
-    std::filesystem::path rootDir = currDir.parent_path().parent_path().parent_path();
-    std::filesystem::path assetsDir = std::filesystem::path(rootDir.string() + "/Assets/");
+    constexpr const char* ASSETS_DIR = "/Assets/";
+    constexpr const char* DLL_DIR = "/Dependencies/Dll/";
+
+    const std::filesystem::path currDir = std::filesystem::current_path();
+    std::filesystem::path rootDir = currDir;
+    while (!std::filesystem::exists(std::filesystem::path(rootDir.string() + ASSETS_DIR)))
+    {
+        if (!rootDir.has_parent_path())
+        {
+            assert(false && "Could not find project root directory");
+            return false;
+        }
+        rootDir = rootDir.parent_path();
+    }
+    std::filesystem::path assetsDir = std::filesystem::path(rootDir.string() + ASSETS_DIR);
     std::filesystem::current_path(assetsDir);
-    std::filesystem::path dllDir = std::filesystem::path(rootDir.string() + "/Dependencies/Dll/");
-    AddDllDirectory(dllDir.wstring().c_str());
+    std::filesystem::path dllDir = std::filesystem::path(rootDir.string() + DLL_DIR);
+    if (std::filesystem::exists(dllDir))
+    {
+        AddDllDirectory(dllDir.wstring().c_str());
+    }
     return true;
 }
 
