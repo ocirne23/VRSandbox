@@ -530,24 +530,27 @@ while (!m_usedBits[i].compare_exchange_weak(expected, expected | bitMasks[i], st
 #pragma warning(disable: 4075)
 #pragma init_seg(".CRT$XCA")
 
+export namespace Globals
+{
 #if 1
-export Allocator g_heapAllocator;
+    Allocator allocator;
 #else
-constexpr size_t stackSize = 1024 * 48;
-export StackAllocator<stackSize, 32, false> g_heapAllocator;
+    constexpr size_t stackSize = 1024 * 48;
+    StackAllocator<stackSize, 32, false> allocator;
 #endif
+}
 
 #pragma warning(default: 4075)
 
 void* operator new(std::size_t n)
 {
-    return g_heapAllocator.allocate(n);
+    return Globals::allocator.allocate(n);
 }
 
 void* operator new(std::size_t n, std::align_val_t align)
 {
     if ((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
-        return g_heapAllocator.allocate(n);
+        return Globals::allocator.allocate(n);
     else
     {
         g_alignedAllocMemory += n;
@@ -557,13 +560,13 @@ void* operator new(std::size_t n, std::align_val_t align)
 
 void* operator new[](std::size_t n)
 {
-    return g_heapAllocator.allocate(n);
+    return Globals::allocator.allocate(n);
 }
 
 void* operator new[](std::size_t n, std::align_val_t align)
 {
     if ((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
-        return g_heapAllocator.allocate(n);
+        return Globals::allocator.allocate(n);
     else
     {
         g_alignedAllocMemory += n;
@@ -574,7 +577,7 @@ void* operator new[](std::size_t n, std::align_val_t align)
 void operator delete(void* p)
 {
     if (p)
-        g_heapAllocator.deallocate(p);
+        Globals::allocator.deallocate(p);
 }
 
 void operator delete(void* p, std::align_val_t align)
@@ -582,7 +585,7 @@ void operator delete(void* p, std::align_val_t align)
     if (p)
     {
         if ((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
-            return g_heapAllocator.deallocate(p);
+            return Globals::allocator.deallocate(p);
         else
         {
             g_alignedAllocMemory -= _aligned_msize(p, (size_t)align, 0);
@@ -594,7 +597,7 @@ void operator delete(void* p, std::align_val_t align)
 void operator delete[](void* p)
 {
     if (p)
-        g_heapAllocator.deallocate(p);
+        Globals::allocator.deallocate(p);
 }
 
 void operator delete[](void* p, std::align_val_t align)
@@ -602,7 +605,7 @@ void operator delete[](void* p, std::align_val_t align)
     if (p)
     {
         if ((size_t)align <= __STDCPP_DEFAULT_NEW_ALIGNMENT__)
-            return g_heapAllocator.deallocate(p);
+            return Globals::allocator.deallocate(p);
         else
         {
             g_alignedAllocMemory -= _aligned_msize(p, (size_t)align, 0);

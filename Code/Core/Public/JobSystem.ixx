@@ -39,8 +39,8 @@ struct promise_type : LockFreeList<promise_type>::Entry
     std::mutex m_mutex;
     std::list<promise_type*, Allocator::toStd<promise_type*>> m_dependantJobs;
 
-    promise_type(const char*& pName, Allocator& alloc = g_heapAllocator) : m_pName(pName), m_dependantJobs(alloc) {}
-    promise_type(const auto& self, const char*& pName, Allocator& alloc = g_heapAllocator) : m_pName(pName), m_dependantJobs(alloc) {}
+    promise_type(const char*& pName, Allocator& alloc = Globals::allocator) : m_pName(pName), m_dependantJobs(alloc) {}
+    promise_type(const auto& self, const char*& pName, Allocator& alloc = Globals::allocator) : m_pName(pName), m_dependantJobs(alloc) {}
     promise_type(const promise_type& copy) = delete;
 
     Job get_return_object() { std::unique_lock lock(m_mutex); return Job(this); }

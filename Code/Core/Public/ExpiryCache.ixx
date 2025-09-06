@@ -1,4 +1,4 @@
-module;
+/*module;
 
 #pragma warning( push )
 #pragma warning(disable: 5260) // warning C5260: the constant variable has internal linkage in an included header file context, but external linkage in imported header unit context
@@ -56,4 +56,4 @@ export float foo()
     IntrusiveLinkedListNode awa;
     cache.insert(0.2f, &awa);
     return 0.0f;
-}
+}*/
