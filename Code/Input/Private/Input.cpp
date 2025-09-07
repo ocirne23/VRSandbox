@@ -26,8 +26,9 @@ void Input::update(double deltaSec)
         ImGui_ImplSDL3_ProcessEvent(&evt);
         if (evt.type >= SDL_EVENT_KEY_DOWN && evt.type <= SDL_EVENT_TEXT_INPUT && (imguiIO.WantCaptureKeyboard || imguiIO.WantTextInput) && !Globals::ui.hasViewportFocused())
             continue;
-        if (evt.type >= SDL_EVENT_MOUSE_MOTION && evt.type <= SDL_EVENT_MOUSE_WHEEL && (imguiIO.WantCaptureMouse && !Globals::ui.hasViewportFocused()))
-            continue;
+        if (!(evt.type == SDL_EVENT_MOUSE_BUTTON_UP && evt.button.button == 1 && Globals::ui.isViewportGrabbed())) // pass through mouse button up when viewport is grabbed to prevent stuck mouse
+            if (evt.type >= SDL_EVENT_MOUSE_MOTION && evt.type <= SDL_EVENT_MOUSE_WHEEL && (imguiIO.WantCaptureMouse && (!Globals::ui.hasViewportFocused() || Globals::ui.isViewportGrabbed())))
+                continue;
 
         switch (evt.type)
         {

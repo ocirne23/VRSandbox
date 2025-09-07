@@ -15,6 +15,7 @@ public:
     void update(double deltaSec);
     void render();
 
+    bool isViewportGrabbed() const { return m_isViewportGrabbed; }
     bool hasViewportFocused() const { return m_hasViewportFocused; }
     bool hasViewportGainedFocused() const { return m_hasViewportGainedFocus; }
     glm::ivec2 getViewportPos() const { return m_viewportPos; }
@@ -22,6 +23,7 @@ public:
 
 private:
 
+    bool m_isViewportGrabbed = false;
     bool m_hasViewportFocused = false;
     bool m_hasViewportGainedFocus = false;
     glm::ivec2 m_viewportPos = glm::ivec2(0);

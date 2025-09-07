@@ -108,6 +108,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigWindowsMoveFromTitleBarOnly = true;
 
     ImGui_ImplSDL3_InitForVulkan((SDL_Window*)window.getWindowHandle());
     ImGui_ImplVulkan_InitInfo init_info = {};

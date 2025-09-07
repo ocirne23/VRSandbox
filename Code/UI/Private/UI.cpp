@@ -62,9 +62,17 @@ void UI::update(double deltaSec)
         const ImVec2 viewportPos = ImGui::GetCursorScreenPos();
         m_viewportSize = glm::ivec2(size.x, size.y);
         m_viewportPos = glm::ivec2(viewportPos.x, viewportPos.y);
-        bool isViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_DockHierarchy);
+
+        ImGuiContext* ctx = ImGui::GetCurrentContext();
+        const bool isViewportGrabbed = (ctx->MovingWindow == ctx->CurrentWindow);
+        const bool wasViewportGrabbed = m_isViewportGrabbed && !isViewportGrabbed;
+        m_isViewportGrabbed = isViewportGrabbed;
+        const bool isViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_DockHierarchy) && !m_isViewportGrabbed && !wasViewportGrabbed;
         m_hasViewportGainedFocus = isViewportFocused && !m_hasViewportFocused;
         m_hasViewportFocused = isViewportFocused;
+        ImGui::Button("Button 1");
+        ImGui::Button("Button 2");
+        ImGui::Button("Button 3");
 
         ImGui::End();
         ImGui::PopStyleVar(1);
@@ -72,6 +80,7 @@ void UI::update(double deltaSec)
 
     {
         ImGui::Begin("Sidebar");
+        ImGui::Text("m_isViewportGrabbed: %i", (int)m_isViewportGrabbed);
         ImGui::Text("m_hasViewportFocused: %i", (int)m_hasViewportFocused);
         ImGui::Text("m_hasViewportGainedFocus: %i", (int)m_hasViewportGainedFocus);
         ImGui::Text("m_viewportSize(%i, %i)", m_viewportSize.x, m_viewportSize.y);
