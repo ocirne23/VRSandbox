@@ -16,7 +16,8 @@ source_group("Private/Util" FILES ${EXTRA_MODULE_FILES})
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Private")
 target_include_directories(${PROJECT_NAME} PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/Public")
 
-target_compile_definitions(${PROJECT_NAME} PRIVATE VULKAN_HPP_NO_SPACESHIP_OPERATOR VULKAN_HPP_NO_STRUCT_CONSTRUCTORS)
+target_compile_definitions(${PROJECT_NAME} PRIVATE VULKAN_HPP_NO_SPACESHIP_OPERATOR VULKAN_HPP_NO_STRUCT_CONSTRUCTORS VULKAN_HPP_NO_EXCEPTIONS)
+target_compile_definitions(${PROJECT_NAME} PRIVATE "VULKAN_HPP_ASSERT_ON_RESULT=__noop")
 
 target_link_libraries(${PROJECT_NAME} PUBLIC Core File UI vulkan-1
 	glslang$<$<CONFIG:Debug>:d> 

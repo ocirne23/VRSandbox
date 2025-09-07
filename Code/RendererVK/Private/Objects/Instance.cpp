@@ -200,8 +200,20 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
         nullptr));                                                        // Set the GpuCrashTracker object as user data for the above callbacks.
 #endif
 
-    m_supportedExtensions = vk::enumerateInstanceExtensionProperties();
-    m_supportedLayers = vk::enumerateInstanceLayerProperties();
+    auto enumerateExtensionsResult = vk::enumerateInstanceExtensionProperties();
+    if (enumerateExtensionsResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to enumerate instance extension properties");
+        return false;
+    }
+    m_supportedExtensions = enumerateExtensionsResult.value;
+    auto enumerateLayersResult = vk::enumerateInstanceLayerProperties();
+    if (enumerateLayersResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to enumerate instance layer properties");
+        return false;
+    }
+    m_supportedLayers = enumerateLayersResult.value;
     m_apiVersion = VK_MAKE_API_VERSION(0, 1, 3, 0);
 
     uint32 numExtensions = 0;
@@ -238,12 +250,13 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
     createInfo.enabledExtensionCount = static_cast<uint32>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
 
-    m_instance = vk::createInstance(createInfo);
-    if (!m_instance)
+    auto createInstanceResult = vk::createInstance(createInfo);
+    if (createInstanceResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create instance");
         return false;
     }
+    m_instance = createInstanceResult.value;
 
     if (enableValidationLayers)
     {

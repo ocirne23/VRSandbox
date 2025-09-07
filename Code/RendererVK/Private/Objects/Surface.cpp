@@ -18,6 +18,10 @@ Surface::~Surface()
 
 bool Surface::initialize(const Window& window)
 {
+    if (m_surface)
+    {
+        Globals::instance.getInstance().destroySurfaceKHR(m_surface);
+    }
     VkSurfaceKHR vkSurface = nullptr;
     if (SDL_Vulkan_CreateSurface((SDL_Window*)window.getWindowHandle(), Globals::instance.getInstance(), nullptr, &vkSurface) != 1
         || vkSurface == nullptr)
@@ -34,7 +38,7 @@ bool Surface::deviceSupportsSurface() const
 {
     vk::PhysicalDevice physicalDevice = Globals::device.getPhysicalDevice();
     std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
-    if (!physicalDevice.getSurfaceSupportKHR(Globals::device.getGraphicsQueueIndex(), m_surface))
+    if (physicalDevice.getSurfaceSupportKHR(Globals::device.getGraphicsQueueIndex(), m_surface).result != vk::Result::eSuccess)
     {
         assert(false && "Separate present queue not supported!");
         return false;

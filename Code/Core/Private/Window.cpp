@@ -13,13 +13,14 @@ bool Window::initialize(std::string_view windowTitle, glm::ivec2 pos, glm::ivec2
         printf("SDL_Init Error: %s\n", SDL_GetError());
     }
 
-    m_windowHandle = SDL_CreateWindow(windowTitle.data(), size.x, size.y, SDL_WINDOW_VULKAN);
+    m_windowHandle = SDL_CreateWindow(windowTitle.data(), size.x, size.y, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (m_windowHandle == nullptr)
     {
         printf("SDL_CreateWindow Error: %s\n", SDL_GetError());
         assert(false);
         return false;
     }
+    SDL_SetWindowMinimumSize((SDL_Window*)m_windowHandle, 480, 360);
     return true;
 }
 

@@ -28,7 +28,13 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath, 
 {
     vk::Device vkDevice = Globals::device.getDevice();
     vk::SemaphoreTypeCreateInfo semaphoreTypeCreateInfo = { .semaphoreType = vk::SemaphoreType::eBinary };
-    m_imageReadySemaphore = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{ .pNext = &semaphoreTypeCreateInfo });
+    auto createSemaphoreResult = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{ .pNext = &semaphoreTypeCreateInfo });
+    if (createSemaphoreResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to create semaphore");
+        return false;
+    }
+    m_imageReadySemaphore = createSemaphoreResult.value;
 
     std::filesystem::path path(pFilePath);
     std::vector<uint8> fileData;
@@ -95,25 +101,33 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath, 
         .initialLayout = vk::ImageLayout::eUndefined
     };
 
-    m_image = vkDevice.createImage(imageCreateInfo);
-    if (!m_image)
+    auto createImageResult = vkDevice.createImage(imageCreateInfo);
+    if (createImageResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create image");
         return false;
     }
+    m_image = createImageResult.value;
 
     vk::MemoryRequirements memoryRequirements = vkDevice.getImageMemoryRequirements(m_image);
     vk::MemoryAllocateInfo memoryAllocateInfo = {
         .allocationSize = memoryRequirements.size,
         .memoryTypeIndex = Globals::device.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
     };
-    m_imageMemory = vkDevice.allocateMemory(memoryAllocateInfo);
-    if (!m_imageMemory)
+    auto allocateMemoryResult = vkDevice.allocateMemory(memoryAllocateInfo);
+    if (allocateMemoryResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to allocate memory");
         return false;
     }
-    vkDevice.bindImageMemory(m_image, m_imageMemory, 0);
+    m_imageMemory = allocateMemoryResult.value;
+
+    auto bindResult = vkDevice.bindImageMemory(m_image, m_imageMemory, 0);
+    if (bindResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to bind image memory");
+        return false;
+    }
 
     vk::ImageViewCreateInfo imageViewInfo{
         .image = m_image,
@@ -127,12 +141,14 @@ bool Texture::initialize(StagingManager& stagingManager, const char* pFilePath, 
             .layerCount = imageCreateInfo.arrayLayers
         }
     };
-    m_imageView = vkDevice.createImageView(imageViewInfo);
-    if (!m_imageView)
+
+    auto createImageViewResult = vkDevice.createImageView(imageViewInfo);
+    if (createImageViewResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create image view");
         return false;
     }
+    m_imageView = createImageViewResult.value;
 
     stagingManager.transitionImage(vk::ImageMemoryBarrier2{
             .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,

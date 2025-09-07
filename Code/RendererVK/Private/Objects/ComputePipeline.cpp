@@ -26,7 +26,13 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
         .bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
         .pBindings = layout.descriptorSetLayoutBindings.data(),
     };
-    m_descriptorSetLayout = vkDevice.createDescriptorSetLayout(layoutInfo);
+    auto layoutResult = vkDevice.createDescriptorSetLayout(layoutInfo);
+    if (layoutResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to create descriptor set layout");
+        return false;
+    }
+    m_descriptorSetLayout = layoutResult.value;
 
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo
     {
@@ -36,7 +42,13 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
         .pushConstantRangeCount = (uint32)layout.pushConstantRanges.size(),
         .pPushConstantRanges = layout.pushConstantRanges.data(),
     };
-    m_pipelineLayout = vkDevice.createPipelineLayout(pipelineLayoutCreateInfo);
+    auto pipelineLayoutResult = vkDevice.createPipelineLayout(pipelineLayoutCreateInfo);
+    if (pipelineLayoutResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to create pipeline layout");
+        return false;
+    }
+    m_pipelineLayout = pipelineLayoutResult.value;
 
     Shader computeShader;
     computeShader.initialize(vk::ShaderStageFlagBits::eCompute, layout.computeShaderText, layout.computeShaderDebugFilePath);
@@ -62,8 +74,20 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
         .basePipelineHandle = nullptr,
         .basePipelineIndex = -1,
     };
+    auto pipelineCacheResult = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
+    if (pipelineCacheResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to create pipeline cache");
+        return false;
+    }
+    m_pipelineCache = pipelineCacheResult.value;
 
-    m_pipelineCache = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
-    m_pipeline = vkDevice.createComputePipeline(m_pipelineCache, pipelineCreateInfo).value;
+    auto pipelineResult = vkDevice.createComputePipeline(m_pipelineCache, pipelineCreateInfo);
+    if (pipelineResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to create compute pipeline");
+        return false;
+    }
+    m_pipeline = pipelineResult.value;
     return true;
 }

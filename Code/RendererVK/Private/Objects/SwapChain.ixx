@@ -32,13 +32,15 @@ public:
     SwapChain(const SwapChain&) = delete;
 
     bool initialize(const Surface& surface, uint32 swapChainSize);
+    void destroy();
 
     vk::SwapchainKHR getSwapChain() const { return m_swapChain; }
     const Layout& getLayout() const { return m_layout; }
     uint32 getCurrentFrameIndex() const { return m_currentFrame; }
 
-    void acquireNextImage();
+    bool acquireNextImage();
     bool present();
+
     void waitForFrame(uint32 frameIdx);
     void submitCommandBuffer(CommandBuffer& commandBuffer);
 

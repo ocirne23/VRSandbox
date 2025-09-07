@@ -31,7 +31,11 @@ constexpr static std::array<vk::ClearValue, 2> s_clearValues = getClearValues();
 
 RendererVK::~RendererVK() 
 {
-    Globals::device.getGraphicsQueue().waitIdle();
+    auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    if (waitResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to wait for device idle in RendererVK destructor");
+    }
     ImGui_ImplVulkan_Shutdown();
 }
 
@@ -48,6 +52,8 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     Globals::instance.initialize(window, enableValidationLayers);
     Globals::instance.setBreakOnValidationLayerError(enableValidationLayers);
     Globals::device.initialize();
+
+    window.getWindowSize(m_windowSize);
     m_surface.initialize(window);
     assert(m_surface.deviceSupportsSurface());
 
@@ -130,9 +136,52 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     init_info.CheckVkResultFn = imgui_check_vk_result;
     ImGui_ImplVulkan_Init(&init_info);
 
+    ImGui_ImplVulkan_MainPipelineCreateInfo pipeline_create;
+    pipeline_create.RenderPass = m_renderPass.getRenderPass();
+    pipeline_create.Subpass = 0;
+    pipeline_create.MSAASamples = {};
+    ImGui_ImplVulkan_CreateMainPipeline(pipeline_create);
+
     m_viewportSize = glm::ivec2(m_swapChain.getLayout().extent.width, m_swapChain.getLayout().extent.height);
 
     return true;
+}
+
+void RendererVK::recreateWindowSurface(Window& window)
+{
+    auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    if (waitResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to wait for device idle in RendererVK::recreateWindowSurface");
+    }
+
+    window.getWindowSize(m_windowSize);
+    m_swapChain.destroy();
+    m_surface.initialize(window);
+    m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT);
+    m_framebuffers.initialize(m_renderPass, m_swapChain);
+    auto waitResult2 = Globals::device.getGraphicsQueue().waitIdle();
+    if (waitResult2 != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to wait for device idle in RendererVK::recreateWindowSurface");
+    }
+}
+
+void RendererVK::recreateSwapchain()
+{
+    auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    if (waitResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to wait for device idle in RendererVK::recreateSwapchain");
+    }
+
+    m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT);
+    m_framebuffers.initialize(m_renderPass, m_swapChain);
+}
+
+void RendererVK::setWindowMinimized(bool minimized)
+{
+    m_windowMinimized = minimized;
 }
 
 const Frustum& RendererVK::beginFrame(const Camera& camera)
@@ -169,6 +218,9 @@ void RendererVK::renderNode(const RenderNode& node)
 
 void RendererVK::present()
 {
+    if(m_windowMinimized)
+        return;
+
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
@@ -190,34 +242,48 @@ void RendererVK::present()
     vk::DeviceSize flushSize = m_renderNodeTransforms.size() * sizeof(m_renderNodeTransforms[0]);
     flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
 
-    Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+    auto flushRenderNodeTransformsResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = frameData.inRenderNodeTransformsBuffer.getMemory(), .offset = 0, .size = flushSize
     } });
+    assert(flushRenderNodeTransformsResult == vk::Result::eSuccess && "Failed to flush render node transforms memory range");
 
     flushSize = m_meshInstanceCounter * sizeof(RendererVKLayout::InMeshInstance);
     flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
-    Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+    auto flushMeshInstancesResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = frameData.inMeshInstancesBuffer.getMemory(), .offset = 0, .size = flushSize
     } });
+    assert(flushMeshInstancesResult == vk::Result::eSuccess && "Failed to flush mesh instances memory range");
 
     flushSize = numMeshInfos * sizeof(uint32);
     flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
-    Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+    auto flushFirstInstancesResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = frameData.inFirstInstancesBuffer.getMemory(), .offset = 0, .size = flushSize
     } });
+    assert(flushFirstInstancesResult == vk::Result::eSuccess && "Failed to flush first instances memory range");
 
-    Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+    auto flushUBOResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = frameData.ubo.getMemory(), .offset = 0, .size = vk::WholeSize
     } });
+    assert(flushUBOResult == vk::Result::eSuccess && "Failed to flush UBO memory range");
+
+    (void)flushRenderNodeTransformsResult; (void)flushMeshInstancesResult; (void)flushFirstInstancesResult; (void)flushUBOResult;
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_stagingManager.update();
 
     recordCommandBuffers();
 
-    m_swapChain.acquireNextImage();
+    if (!m_swapChain.acquireNextImage())
+    {
+        recreateSwapchain();
+        return;
+    }
+
     m_swapChain.submitCommandBuffer(getCurrentCommandBuffer());
-    m_swapChain.present();
+    if (!m_swapChain.present())
+    {
+        recreateSwapchain();
+    }
 }
 
 uint32 RendererVK::addRenderNodeTransform(const Transform& transform)
@@ -298,7 +364,8 @@ void RendererVK::recordCommandBuffers()
     {
         CommandBuffer& imguiCommandBuffer = frameData.imguiCommandBuffer;
         vk::CommandBuffer vkImguiCommandBuffer = imguiCommandBuffer.begin(false, &inheritanceInfo);
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkImguiCommandBuffer);
+        
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkImguiCommandBuffer, nullptr);
         imguiCommandBuffer.end();
     }
 

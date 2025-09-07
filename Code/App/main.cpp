@@ -38,6 +38,13 @@ int main()
     bool running = true;
     SystemEventListener* pSystemEventListener = input.addSystemEventListener();
     pSystemEventListener->onQuit = [&]() { running = false; };
+    pSystemEventListener->onWindowEvent = [&](const SDL_WindowEvent& evt) 
+        {
+            if (evt.type == SDL_EVENT_WINDOW_RESIZED)   renderer.recreateWindowSurface(window);
+            if (evt.type == SDL_EVENT_WINDOW_MINIMIZED) renderer.setWindowMinimized(true);
+            if (evt.type == SDL_EVENT_WINDOW_MAXIMIZED) renderer.setWindowMinimized(false);
+            if (evt.type == SDL_EVENT_WINDOW_RESTORED)  renderer.setWindowMinimized(false);
+        };
 
     ObjectContainer boatContainer;
     {

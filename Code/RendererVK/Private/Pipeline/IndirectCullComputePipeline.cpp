@@ -101,9 +101,13 @@ void IndirectCullComputePipeline::update(uint32 frameIdx, uint32 numMeshInstance
    
     frameData.mappedIndirectCommands[0] = vk::DispatchIndirectCommand{ .x = numMeshInstances, .y = 1, .z = 1 };
 
-    Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+    auto flushResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = frameData.inIndirectCommandBuffer.getMemory(), .offset = 0, .size = vk::WholeSize
     }});
+    if (flushResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to flush indirect command buffer memory");
+    }
 }
 
 void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& recordParams)

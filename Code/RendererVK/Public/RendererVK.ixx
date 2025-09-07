@@ -48,6 +48,8 @@ public:
     uint32 getNumMaterials() const { return m_materialInfoCounter; }
     uint32 getCurrentFrameIndex() const { return m_swapChain.getCurrentFrameIndex(); }
 
+    void setWindowMinimized(bool minimized);
+    void recreateWindowSurface(Window& window);
     void setViewportSize(const glm::ivec2& size) { m_viewportSize = size; setHaveToRecordCommandBuffers(); }
     void setViewportPos(const glm::ivec2& pos) { m_viewportPos = pos; setHaveToRecordCommandBuffers(); }
 
@@ -57,6 +59,8 @@ private:
 
     void recordCommandBuffers();
     void setHaveToRecordCommandBuffers();
+
+    void recreateSwapchain();
 
     friend class ObjectContainer;
     void addObjectContainer(ObjectContainer* pObjectContainer);
@@ -121,8 +125,10 @@ private:
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 
+    glm::ivec2 m_windowSize;
     glm::ivec2 m_viewportSize;
     glm::ivec2 m_viewportPos = glm::ivec2(0, 0);
+    bool m_windowMinimized = false;
 };
 
 export namespace Globals

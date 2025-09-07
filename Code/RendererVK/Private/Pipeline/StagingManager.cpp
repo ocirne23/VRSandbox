@@ -34,8 +34,21 @@ bool StagingManager::initialize()
             return false;
 
         m_commandBuffers[i].initialize();
-        m_fences[i] = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
-        m_semaphores[i] = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
+        auto createFenceResult = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
+        if (createFenceResult.result != vk::Result::eSuccess)
+        {
+            assert(false && "Failed to create fence");
+            return false;
+        }
+        m_fences[i] = createFenceResult.value;
+
+        auto createSemaphoreResult = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
+        if (createSemaphoreResult.result != vk::Result::eSuccess)
+        {
+            assert(false && "Failed to create semaphore");
+            return false;
+        }
+        m_semaphores[i] = createSemaphoreResult.value;
         m_mappedStagingBuffers[i] = m_stagingBuffers[i].mapMemory();
     }
     m_mappedMemory = m_mappedStagingBuffers[m_currentBuffer];
@@ -97,10 +110,13 @@ void StagingManager::update()
 
     const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
     vk::DeviceSize size = (m_currentBufferOffset + atomSize - 1) & ~(atomSize - 1);
-    vkDevice.flushMappedMemoryRanges({ vk::MappedMemoryRange{
+    auto flushResult = vkDevice.flushMappedMemoryRanges({ vk::MappedMemoryRange{
         .memory = m_stagingBuffers[m_currentBuffer].getMemory(), .offset = 0, .size = size
     } });
-
+    if (flushResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to flush memory");
+    }
     CommandBuffer& commandBuffer = m_commandBuffers[m_currentBuffer];
     commandBuffer.addSignalSemaphore(m_semaphores[m_currentBuffer]);
     vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);

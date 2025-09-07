@@ -67,12 +67,13 @@ bool RenderPass::initialize(const SwapChain& swapChain)
         .pDependencies = dependencies.data(),
     };
 
-    m_renderPass = Globals::device.getDevice().createRenderPass(renderPassInfo);
-    if (!m_renderPass)
+    auto createResult = Globals::device.getDevice().createRenderPass(renderPassInfo);
+    if (createResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create renderpass\n");
         return false;
     }
+    m_renderPass = createResult.value;
 
     return true;
 }

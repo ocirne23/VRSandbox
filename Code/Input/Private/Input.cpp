@@ -30,6 +30,12 @@ void Input::update(double deltaSec)
             if (evt.type >= SDL_EVENT_MOUSE_MOTION && evt.type <= SDL_EVENT_MOUSE_WHEEL && (imguiIO.WantCaptureMouse && (!Globals::ui.isViewportFocused() || Globals::ui.isViewportGrabbed())))
                 continue;
 
+        if (evt.type >= SDL_EVENT_WINDOW_FIRST && evt.type <= SDL_EVENT_WINDOW_LAST)
+        {
+            for (auto& listener : m_systemEventListeners)
+                if (listener->onWindowEvent) listener->onWindowEvent(evt.window);
+        }
+
         switch (evt.type)
         {
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
@@ -38,11 +44,6 @@ void Input::update(double deltaSec)
         case SDL_EVENT_WINDOW_FOCUS_LOST:
             m_windowHasFocus = false;
             break;
-            /*
-        case SDL_EVENT_WINDOWEVENT:
-            for (auto& listener : m_systemEventListeners)
-                if (listener->onWindowEvent) listener->onWindowEvent(evt.window);
-            break;*/
         case SDL_EVENT_QUIT:
             for (auto& listener : m_systemEventListeners)
                 if (listener->onQuit) listener->onQuit();

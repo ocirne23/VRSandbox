@@ -18,7 +18,13 @@ bool CommandBuffer::initialize(bool isPrimary)
         .level = isPrimary ? vk::CommandBufferLevel::ePrimary : vk::CommandBufferLevel::eSecondary,
         .commandBufferCount = 1,
     };
-    m_commandBuffer = Globals::device.getDevice().allocateCommandBuffers(allocInfo)[0];
+    auto result = Globals::device.getDevice().allocateCommandBuffers(allocInfo);
+    if (result.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to allocate command buffer");
+        return false;
+    }
+    m_commandBuffer = result.value[0];
     if (!m_commandBuffer)
     {
         assert(false && "Failed to allocate command buffer");
@@ -46,7 +52,11 @@ void CommandBuffer::submitGraphics(vk::Fence fence)
         .signalSemaphoreCount = (uint32)m_signalSemaphores.size(),
         .pSignalSemaphores = m_signalSemaphores.data(),
     };
-    Globals::device.getGraphicsQueue().submit(submitInfo, fence);
+    auto result = Globals::device.getGraphicsQueue().submit(submitInfo, fence);
+    if (result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to submit command buffer");
+    }
 
     m_waitSemaphores.clear();
     m_waitStages.clear();
@@ -85,7 +95,12 @@ vk::CommandBuffer CommandBuffer::begin(bool once, vk::CommandBufferInheritanceIn
         beginInfo.flags |= vk::CommandBufferUsageFlagBits::eRenderPassContinue;
         beginInfo.flags |= vk::CommandBufferUsageFlagBits::eSimultaneousUse;
     }
-    m_commandBuffer.begin(beginInfo);
+    auto result = m_commandBuffer.begin(beginInfo);
+    if (result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to begin command buffer");
+        return nullptr;
+    }
     m_hasRecorded = true;
 
     return m_commandBuffer;
@@ -93,7 +108,11 @@ vk::CommandBuffer CommandBuffer::begin(bool once, vk::CommandBufferInheritanceIn
 
 void CommandBuffer::end()
 {
-    m_commandBuffer.end();
+    auto result = m_commandBuffer.end();
+    if (result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to end command buffer");
+    }
 }
 
 void CommandBuffer::reset()

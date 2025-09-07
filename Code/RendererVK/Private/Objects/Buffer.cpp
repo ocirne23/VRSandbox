@@ -28,30 +28,44 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Mem
     bufferInfo.size = size;
     bufferInfo.usage = usage;
     bufferInfo.sharingMode = vk::SharingMode::eExclusive;
-    m_buffer = vkDevice.createBuffer(bufferInfo);
-    if (!m_buffer)
+    vk::ResultValue<vk::Buffer> bufResult = vkDevice.createBuffer(bufferInfo);
+    if (bufResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create buffer");
         return false;
     }
+    m_buffer = bufResult.value;
 
     vk::MemoryRequirements memRequirements = vkDevice.getBufferMemoryRequirements(m_buffer);
     vk::MemoryAllocateInfo allocInfo = {};
     allocInfo.allocationSize = memRequirements.size;
     allocInfo.memoryTypeIndex = Globals::device.findMemoryType(memRequirements.memoryTypeBits, properties);
-    m_memory = vkDevice.allocateMemory(allocInfo);
-    if (!m_memory)
+    vk::ResultValue<vk::DeviceMemory> memResult = vkDevice.allocateMemory(allocInfo);
+    if (memResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to allocate buffer memory");
         return false;
     }
-    vkDevice.bindBufferMemory(m_buffer, m_memory, 0);
+    m_memory = memResult.value;
+    auto bindResult = vkDevice.bindBufferMemory(m_buffer, m_memory, 0);
+    if (bindResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to bind buffer memory");
+        return false;
+    }
     return true;
 }
 
 std::span<uint8> Buffer::mapMemory()
 {
-    return std::span<uint8>((uint8*)Globals::device.getDevice().mapMemory(m_memory, 0, vk::WholeSize), (size_t)m_size);
+    vk::ResultValue<void*> result = Globals::device.getDevice().mapMemory(m_memory, 0, vk::WholeSize);
+    if (result.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to map buffer memory");
+        return {};
+    }
+    return std::span<uint8>((uint8*)result.value, (size_t)m_size);
+
 }
 
 void Buffer::unmapMemory()

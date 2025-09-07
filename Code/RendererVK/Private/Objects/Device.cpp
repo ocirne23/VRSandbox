@@ -13,7 +13,13 @@ bool Device::initialize()
 {
     vk::Instance instance = Globals::instance.getInstance();
     // try to find the discrete GPU with the most memory
-    for (vk::PhysicalDevice physDevice : instance.enumeratePhysicalDevices())
+    auto enumResult = instance.enumeratePhysicalDevices();
+    if (enumResult.result != vk::Result::eSuccess || enumResult.value.size() == 0)
+    {
+        assert(false && "Could not find any physical devices\n");
+        return false;
+    }
+    for (vk::PhysicalDevice physDevice : enumResult.value)
     {
         if (!m_physicalDevice)
             m_physicalDevice = physDevice;
@@ -86,22 +92,25 @@ bool Device::initialize()
         .enabledExtensionCount = (uint32)deviceExtensions.size(),
         .ppEnabledExtensionNames = deviceExtensions.data(),
     };
-    m_device = m_physicalDevice.createDevice(deviceCreateInfo);
-    if (!m_device)
+    auto createResult = m_physicalDevice.createDevice(deviceCreateInfo);
+    if (createResult.result != vk::Result::eSuccess)
     {
         assert(false && "Could not create a device\n");
         return false;
     }
+    m_device = createResult.value;
+
     vk::CommandPoolCreateInfo poolCreateInfo{
         .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
         .queueFamilyIndex = m_graphicsQueueIndex,
     };
-    m_commandPool = m_device.createCommandPool(poolCreateInfo);
-    if (!m_commandPool)
+    auto commandPoolResult = m_device.createCommandPool(poolCreateInfo);
+    if (commandPoolResult.result != vk::Result::eSuccess)
     {
         assert(false && "Could not create a command pool\n");
         return false;
     }
+    m_commandPool = commandPoolResult.value;
 
     pfVkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)m_device.getProcAddr("vkCmdPushDescriptorSetKHR");
 
@@ -118,7 +127,11 @@ void Device::destroy()
 {
     if (m_device)
     {
-        m_device.waitIdle();
+        auto waitResult = m_device.waitIdle();
+        if (waitResult != vk::Result::eSuccess)
+        {
+            assert(false && "Failed to wait for device idle");
+        }
         m_device.destroyCommandPool(m_commandPool);
         m_device.destroy();
     }
@@ -127,7 +140,13 @@ void Device::destroy()
 
 bool Device::supportsExtensions(std::vector<const char*> extensions)
 {
-    std::vector<vk::ExtensionProperties> extensionProperties = m_physicalDevice.enumerateDeviceExtensionProperties();
+    auto enumResult = m_physicalDevice.enumerateDeviceExtensionProperties();
+    if (enumResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Could not enumerate device extension properties\n");
+        return false;
+    }
+    std::vector<vk::ExtensionProperties> extensionProperties = enumResult.value;
     for (const char* deviceExtension : extensions)
     {
         bool found = false;

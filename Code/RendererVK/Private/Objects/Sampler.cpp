@@ -32,12 +32,13 @@ bool Sampler::initialize()
         .borderColor = vk::BorderColor::eFloatOpaqueBlack,
         .unnormalizedCoordinates = vk::False
     };
-    m_sampler = Globals::device.getDevice().createSampler(samplerInfo);
-    if (!m_sampler)
+    auto createResult = Globals::device.getDevice().createSampler(samplerInfo);
+    if (createResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create sampler");
         return false;
     }
+    m_sampler = createResult.value;
 
     return true;
 }

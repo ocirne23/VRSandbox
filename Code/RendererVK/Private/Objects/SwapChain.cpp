@@ -8,25 +8,58 @@ import RendererVK.CommandBuffer;
 SwapChain::SwapChain() {}
 SwapChain::~SwapChain()
 {
-    vk::Device vkDevice = Globals::device.getDevice();
-    for (SyncObjects& syncObjects : m_syncObjects)
+    destroy();
+}
+
+void SwapChain::destroy()
+{
+    if (m_swapChain)
     {
-        vkDevice.destroySemaphore(syncObjects.imageAvailable);
-        vkDevice.destroySemaphore(syncObjects.renderFinished);
-        vkDevice.destroyFence(syncObjects.inFlight);
+        vk::Device vkDevice = Globals::device.getDevice();
+        for (SyncObjects& syncObjects : m_syncObjects)
+        {
+            vkDevice.destroySemaphore(syncObjects.imageAvailable);
+            vkDevice.destroySemaphore(syncObjects.renderFinished);
+            vkDevice.destroyFence(syncObjects.inFlight);
+        }
+        vkDevice.destroySwapchainKHR(m_swapChain);
+        m_swapChain = VK_NULL_HANDLE;
+        m_currentFrame = 0;
+        m_currentImageIdx = 0;
     }
-    vkDevice.destroySwapchainKHR(m_swapChain);
 }
 
 bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
 {
     vk::Device vkDevice = Globals::device.getDevice();
+    if (m_swapChain)
+    {
+        destroy();
+    }
     vk::PhysicalDevice vkPhysicalDevice = Globals::device.getPhysicalDevice();
     vk::SurfaceKHR vkSurface = surface.getSurface();
 
-    vk::SurfaceCapabilitiesKHR capabilities = vkPhysicalDevice.getSurfaceCapabilitiesKHR(vkSurface);
-    std::vector<vk::PresentModeKHR> presentModes = vkPhysicalDevice.getSurfacePresentModesKHR(vkSurface);
-    std::vector<vk::SurfaceFormatKHR> surfaceFormats = vkPhysicalDevice.getSurfaceFormatsKHR(vkSurface);
+    auto surfaceCapResult = vkPhysicalDevice.getSurfaceCapabilitiesKHR(vkSurface);
+    if (surfaceCapResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to get surface capabilities");
+        return false;
+    }
+    vk::SurfaceCapabilitiesKHR capabilities = surfaceCapResult.value;
+    auto presentModesResult = vkPhysicalDevice.getSurfacePresentModesKHR(vkSurface);
+    if (presentModesResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to get surface present modes");
+        return false;
+    }
+    std::vector<vk::PresentModeKHR> presentModes = presentModesResult.value;
+    auto surfaceFormatsResult = vkPhysicalDevice.getSurfaceFormatsKHR(vkSurface);
+    if (surfaceFormatsResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to get surface formats");
+        return false;
+    }
+    std::vector<vk::SurfaceFormatKHR> surfaceFormats = surfaceFormatsResult.value;
 
     vk::SurfaceFormatKHR surfaceFormat = surfaceFormats[0];
     for (const auto& availableFormat : surfaceFormats)
@@ -45,11 +78,31 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
 
     for (uint32 i = 0; i < imageCount; i++)
     {
-        m_syncObjects[i].imageAvailable = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
-        m_syncObjects[i].renderFinished = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
-        m_syncObjects[i].inFlight = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled});
-    }
+        auto imageAvailableCreateSemaphoreResult = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
+        if (imageAvailableCreateSemaphoreResult.result != vk::Result::eSuccess)
+        {
+            assert(false && "Failed to create semaphore");
+            return false;
+        }
+        m_syncObjects[i].imageAvailable = imageAvailableCreateSemaphoreResult.value;
 
+        auto renderFinishedCreateSemaphoreResult = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
+        if (renderFinishedCreateSemaphoreResult.result != vk::Result::eSuccess)
+        {
+            assert(false && "Failed to create semaphore");
+            return false;
+        }
+        m_syncObjects[i].renderFinished = renderFinishedCreateSemaphoreResult.value;
+
+        auto inFlightCreateFenceResult = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
+        if (inFlightCreateFenceResult.result != vk::Result::eSuccess)
+        {
+            assert(false && "Failed to create fence");
+            return false;
+        }
+        m_syncObjects[i].inFlight = inFlightCreateFenceResult.value;
+    }
+    
     vk::SwapchainCreateInfoKHR createInfo{
         .surface = vkSurface,
         .minImageCount = imageCount,
@@ -70,17 +123,18 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
     m_layout.extent = capabilities.currentExtent;
     m_layout.presentMode = createInfo.presentMode;
 
-    m_swapChain = vkDevice.createSwapchainKHR(createInfo);
-    if (!m_swapChain)
+    auto createSwapChainResult = vkDevice.createSwapchainKHR(createInfo);
+    if (createSwapChainResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create swap chain");
         return false;
     }
-
+    m_swapChain = createSwapChainResult.value;
+    
     return true;
 }
 
-void SwapChain::acquireNextImage()
+bool SwapChain::acquireNextImage()
 {
     vk::Device vkDevice = Globals::device.getDevice();
     SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
@@ -92,9 +146,24 @@ void SwapChain::acquireNextImage()
     if (result != vk::Result::eSuccess)
         assert(false && "Failed to reset fence");
 
-    vk::ResultValue<uint32> imageIdx = vkDevice.acquireNextImageKHR(m_swapChain, UINT64_MAX, syncObjects.imageAvailable);
-    assert(imageIdx.result == vk::Result::eSuccess);
-    m_currentImageIdx = imageIdx.value;
+    constexpr std::chrono::nanoseconds timeout = std::chrono::seconds(10);
+    auto imageResult = vkDevice.acquireNextImageKHR(m_swapChain, timeout.count(), syncObjects.imageAvailable);
+    switch (imageResult.result)
+    {
+    case vk::Result::eSuccess:
+        break;
+    case vk::Result::eSuboptimalKHR:
+        //assert(false && "SwapChain::acquireNextImage eSuboptimalKHR");
+        return false;
+    case vk::Result::eErrorOutOfDateKHR:
+        //assert(false && "SwapChain::acquireNextImage eErrorOutOfDateKHR");
+        return false;
+    default:
+        assert(false && "Failed to acquire next image");
+        return false;
+    }
+    m_currentImageIdx = imageResult.value;
+    return true;
 }
 
 void SwapChain::waitForFrame(uint32 frameIdx)
@@ -134,6 +203,12 @@ bool SwapChain::present()
     {
     case vk::Result::eSuccess:
         break;
+    case vk::Result::eSuboptimalKHR:
+        //assert(false && "SwapChain::present eSuboptimalKHR");
+        return false;
+    case vk::Result::eErrorOutOfDateKHR:
+        //assert(false && "SwapChain::present eErrorOutOfDateKHR");
+        return false;
     default:
         assert(false && "Failed to present image");
         return false;

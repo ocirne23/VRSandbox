@@ -25,7 +25,30 @@ Framebuffers::~Framebuffers()
 bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swapChain)
 {
     vk::Device vkDevice = Globals::device.getDevice();
-    std::vector<vk::Image> images = vkDevice.getSwapchainImagesKHR(swapChain.getSwapChain());
+
+    if (!m_framebuffers.empty())
+    {
+        if (m_depthImageView)
+            vkDevice.destroyImageView(m_depthImageView);
+        if (m_depthImage)
+            vkDevice.destroyImage(m_depthImage);
+        if (m_depthImageMemory)
+            vkDevice.freeMemory(m_depthImageMemory);
+        for (vk::ImageView imageView : m_imageViews)
+            vkDevice.destroyImageView(imageView);
+        m_imageViews.clear();
+        for (vk::Framebuffer framebuffer : m_framebuffers)
+            vkDevice.destroyFramebuffer(framebuffer);
+        m_framebuffers.clear();
+    }
+
+    auto swapchainImagesResult = vkDevice.getSwapchainImagesKHR(swapChain.getSwapChain());
+    if (swapchainImagesResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to get swapchain images");
+        return false;
+    }
+    std::vector<vk::Image> images = swapchainImagesResult.value;
     m_imageViews.reserve(images.size());
     for (const vk::Image& image : images)
     {
@@ -45,13 +68,13 @@ bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swa
             }
         };
 
-        vk::ImageView imageView = vkDevice.createImageView(viewInfo);
-        if (!imageView)
+        auto createViewResult = vkDevice.createImageView(viewInfo);
+        if (createViewResult.result != vk::Result::eSuccess)
         {
             assert(false && "Could not create an image view\n");
             return false;
         }
-        m_imageViews.push_back(imageView);
+        m_imageViews.push_back(createViewResult.value);
     }
     const vk::Extent2D size = swapChain.getLayout().extent;
 
@@ -68,12 +91,13 @@ bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swa
         .sharingMode = vk::SharingMode::eExclusive,
         .initialLayout = vk::ImageLayout::eUndefined,
     };
-    m_depthImage = vkDevice.createImage(depthImageInfo);
-    if (!m_depthImage)
+    auto createImageResult = vkDevice.createImage(depthImageInfo);
+    if (createImageResult.result != vk::Result::eSuccess)
     {
         assert(false && "Could not create a depth image\n");
         return false;
     }
+    m_depthImage = createImageResult.value;
 
     vk::PhysicalDeviceMemoryProperties memoryProperties = Globals::device.getPhysicalDevice().getMemoryProperties();
     vk::MemoryRequirements memoryRequirements = vkDevice.getImageMemoryRequirements(m_depthImage);
@@ -82,8 +106,21 @@ bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swa
         .allocationSize = memoryRequirements.size,
         .memoryTypeIndex = typeIndex
     };
-    m_depthImageMemory = vkDevice.allocateMemory(depthImageAllocInfo);
-    vkDevice.bindImageMemory(m_depthImage, m_depthImageMemory, 0);
+
+    auto allocateMemoryResult = vkDevice.allocateMemory(depthImageAllocInfo);
+    if (allocateMemoryResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Could not allocate memory for depth image\n");
+        return false;
+    }
+    m_depthImageMemory = allocateMemoryResult.value;
+
+    auto bindResult = vkDevice.bindImageMemory(m_depthImage, m_depthImageMemory, 0);
+    if (bindResult != vk::Result::eSuccess)
+    {
+        assert(false && "Could not bind memory to depth image\n");
+        return false;
+    }
     vk::ImageViewCreateInfo depthImageViewInfo{
         .image = m_depthImage,
         .viewType = vk::ImageViewType::e2D,
@@ -98,15 +135,15 @@ bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swa
             .layerCount = 1
         }
     };
-    m_depthImageView = vkDevice.createImageView(depthImageViewInfo);
-    if (!m_depthImageView)
+    auto createDepthImageViewResult = vkDevice.createImageView(depthImageViewInfo);
+    if (createDepthImageViewResult.result != vk::Result::eSuccess)
     {
         assert(false && "Could not create a depth image view\n");
         return false;
     }
-
+    m_depthImageView = createDepthImageViewResult.value;
     std::array<vk::ImageView, 2> attachments;
-    attachments[1] = m_depthImageView;
+    attachments[1] = createDepthImageViewResult.value;
     m_framebuffers.reserve(m_imageViews.size());
     for (size_t i = 0; i < m_imageViews.size(); i++)
     {
@@ -120,13 +157,13 @@ bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swa
             .height = size.height,
             .layers = 1
         };
-        vk::Framebuffer framebuffer = vkDevice.createFramebuffer(framebufferInfo);
-        if (!framebuffer)
+        auto createFramebufferResult = vkDevice.createFramebuffer(framebufferInfo);
+        if (createFramebufferResult.result != vk::Result::eSuccess)
         {
             assert(false && "Could not create a framebuffer\n");
             return false;
         }
-        m_framebuffers.push_back(framebuffer);
+        m_framebuffers.push_back(createFramebufferResult.value);
     }
 
     return true;

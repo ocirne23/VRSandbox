@@ -29,12 +29,14 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         .bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
         .pBindings = layout.descriptorSetLayoutBindings.data(),
     };
-    m_descriptorSetLayout = vkDevice.createDescriptorSetLayout(layoutInfo);
-    if (!m_descriptorSetLayout)
+    auto createLayoutResult = vkDevice.createDescriptorSetLayout(layoutInfo);
+    if (createLayoutResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create descriptor set layout");
         return false;
     }
+    m_descriptorSetLayout = createLayoutResult.value;
+
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo
     {
         .flags = {},
@@ -43,12 +45,13 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         .pushConstantRangeCount = (uint32)layout.pushConstantRanges.size(),
         .pPushConstantRanges = layout.pushConstantRanges.data(),
     };
-    m_pipelineLayout = vkDevice.createPipelineLayout(pipelineLayoutCreateInfo);
-    if (!m_pipelineLayout)
+    auto createPipelineLayoutResult = vkDevice.createPipelineLayout(pipelineLayoutCreateInfo);
+    if (createPipelineLayoutResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create pipeline layout");
         return false;
     }
+    m_pipelineLayout = createPipelineLayoutResult.value;
 
     Shader vertexShader, fragmentShader;
     vertexShader.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShaderText, layout.vertexShaderDebugFilePath);
@@ -189,7 +192,13 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         .basePipelineIndex = 0,
     };
 
-    m_pipelineCache = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
+    auto createPipelineCacheResult = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
+    if (createPipelineCacheResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to create pipeline cache");
+        return false;
+    }
+    m_pipelineCache = createPipelineCacheResult.value;
 
     vk::Result   result;
     vk::Pipeline pipeline;

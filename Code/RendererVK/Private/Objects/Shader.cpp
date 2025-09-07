@@ -38,12 +38,13 @@ bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shader
     createInfo.codeSize = spirv.size() * sizeof(unsigned int);
     createInfo.pCode = spirv.data();
 
-    m_shaderModule = Globals::device.getDevice().createShaderModule(createInfo);
-    if (!m_shaderModule)
+    auto createResult = Globals::device.getDevice().createShaderModule(createInfo);
+    if (createResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create shader module");
         return false;
     }
+    m_shaderModule = createResult.value;
 
     return true;
 }
