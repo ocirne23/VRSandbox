@@ -1,6 +1,7 @@
 export module RendererVK;
 
 import Core;
+import Core.glm;
 
 import RendererVK.Transform;
 import RendererVK.Layout;
@@ -31,7 +32,7 @@ export class RendererVK final
 {
 public:
 
-    RendererVK();
+    RendererVK() {}
     ~RendererVK();
     RendererVK(const RendererVK&) = delete;
 
@@ -46,6 +47,9 @@ public:
     uint32 getNumMeshTypes() const { return m_meshInfoCounter; }
     uint32 getNumMaterials() const { return m_materialInfoCounter; }
     uint32 getCurrentFrameIndex() const { return m_swapChain.getCurrentFrameIndex(); }
+
+    void setViewportSize(const glm::ivec2& size) { m_viewportSize = size; setHaveToRecordCommandBuffers(); }
+    void setViewportPos(const glm::ivec2& pos) { m_viewportPos = pos; setHaveToRecordCommandBuffers(); }
 
     CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 
@@ -116,6 +120,9 @@ private:
         std::span<uint32> mappedFirstInstances;
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
+
+    glm::ivec2 m_viewportSize;
+    glm::ivec2 m_viewportPos = glm::ivec2(0, 0);
 };
 
 export namespace Globals

@@ -29,7 +29,6 @@ constexpr std::array<vk::ClearValue, 2> getClearValues()
 }
 constexpr static std::array<vk::ClearValue, 2> s_clearValues = getClearValues();
 
-RendererVK::RendererVK() {}
 RendererVK::~RendererVK() 
 {
     Globals::device.getGraphicsQueue().waitIdle();
@@ -108,6 +107,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     ImGui_ImplSDL3_InitForVulkan((SDL_Window*)window.getWindowHandle());
     ImGui_ImplVulkan_InitInfo init_info = {};
@@ -129,6 +129,8 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     init_info.CheckVkResultFn = imgui_check_vk_result;
     ImGui_ImplVulkan_Init(&init_info);
 
+    m_viewportSize = glm::ivec2(m_swapChain.getLayout().extent.width, m_swapChain.getLayout().extent.height);
+
     return true;
 }
 
@@ -137,8 +139,7 @@ const Frustum& RendererVK::beginFrame(const Camera& camera)
     m_meshInstanceCounter = 0;
     memset(m_numInstancesPerMesh.data(), 0, m_numInstancesPerMesh.size() * sizeof(m_numInstancesPerMesh[0]));
 
-    const vk::Extent2D extent = m_swapChain.getLayout().extent;
-    const glm::mat4x4 projection = glm::perspective(glm::radians(camera.fovDeg), (float)extent.width / (float)extent.height, camera.near, camera.far);
+    const glm::mat4x4 projection = glm::perspective(glm::radians(camera.fovDeg), (float)m_viewportSize.x / (float)m_viewportSize.y, camera.near, camera.far);
     glm::mat4 viewMatrix = camera.viewMatrix;
 
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
@@ -167,15 +168,6 @@ void RendererVK::renderNode(const RenderNode& node)
 
 void RendererVK::present()
 {
-    ImGui_ImplVulkan_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-
-    bool open = true;
-    ImGui::ShowDemoWindow(&open);
-
-    ImGui::Render();
-
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
@@ -275,7 +267,13 @@ void RendererVK::recordCommandBuffers()
         {
             CommandBuffer& staticMeshCommandBuffer = frameData.staticMeshRenderCommandBuffer;
             vk::CommandBuffer vkStaticMeshCommandBuffer = staticMeshCommandBuffer.begin(false, &inheritanceInfo);
-            const vk::Viewport viewport{ .x = 0.0f, .y = (float)extent.height, .width = (float)extent.width, .height = -((float)extent.height), .minDepth = 0.0f, .maxDepth = 1.0f };
+            const vk::Viewport viewport{ 
+                .x = (float)m_viewportPos.x, 
+                .y = (float)m_viewportPos.y + (float)m_viewportSize.y,
+                .width = (float)m_viewportSize.x,
+                .height = -((float)m_viewportSize.y),
+                .minDepth = 0.0f,
+                .maxDepth = 1.0f };
             const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
 
             vkStaticMeshCommandBuffer.setViewport(0, { viewport });
@@ -296,7 +294,6 @@ void RendererVK::recordCommandBuffers()
 
         frameData.updated = true;
     }
-
     {
         CommandBuffer& imguiCommandBuffer = frameData.imguiCommandBuffer;
         vk::CommandBuffer vkImguiCommandBuffer = imguiCommandBuffer.begin(false, &inheritanceInfo);

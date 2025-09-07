@@ -3,8 +3,7 @@ module Input;
 import Core.SDL;
 import Core.imgui;
 
-Input::Input() {}
-Input::~Input() {}
+import UI;
 
 bool Input::initialize()
 {
@@ -25,9 +24,9 @@ void Input::update(double deltaSec)
     while (SDL_PollEvent(&evt))
     {
         ImGui_ImplSDL3_ProcessEvent(&evt);
-        if (evt.type >= SDL_EVENT_KEY_DOWN && evt.type <= SDL_EVENT_TEXT_INPUT && (imguiIO.WantCaptureKeyboard || imguiIO.WantTextInput))
+        if (evt.type >= SDL_EVENT_KEY_DOWN && evt.type <= SDL_EVENT_TEXT_INPUT && (imguiIO.WantCaptureKeyboard || imguiIO.WantTextInput) && !Globals::ui.hasViewportFocused())
             continue;
-        if (evt.type >= SDL_EVENT_MOUSE_MOTION && evt.type <= SDL_EVENT_MOUSE_WHEEL && imguiIO.WantCaptureMouse)
+        if (evt.type >= SDL_EVENT_MOUSE_MOTION && evt.type <= SDL_EVENT_MOUSE_WHEEL && (imguiIO.WantCaptureMouse && !Globals::ui.hasViewportFocused()))
             continue;
 
         switch (evt.type)

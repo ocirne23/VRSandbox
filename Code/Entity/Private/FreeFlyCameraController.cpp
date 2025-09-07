@@ -3,16 +3,22 @@ module Entity.FreeFlyCameraController;
 import Core;
 import Input;
 import Core.SDL;
+import UI;
 
-void FreeFlyCameraController::initialize(Input& input, glm::vec3 position, glm::vec3 lookAt, glm::vec3 up)
+FreeFlyCameraController::~FreeFlyCameraController()
 {
-    m_input = &input;
+    if (m_mouseListener)
+        Globals::input.removeMouseListener(m_mouseListener);
+}
+
+void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, glm::vec3 up)
+{
     m_position = position;
     m_direction = glm::normalize(lookAt - position);
     m_up = up;
     m_viewMatrix = glm::lookAt(position, lookAt, up);
 
-    m_mouseListener = m_input->addMouseListener();
+    m_mouseListener = Globals::input.addMouseListener();
     m_mouseListener->onMousePressed = [this](const SDL_MouseButtonEvent& evt)
         {
             if (evt.button == 1)
@@ -30,9 +36,9 @@ void FreeFlyCameraController::initialize(Input& input, glm::vec3 position, glm::
         };
     m_mouseListener->onMouseMoved = [this](const SDL_MouseMotionEvent& evt)
         {
-            if (!m_input->isWindowHasFocus() || !m_isMouseDown)
+            if (!Globals::input.isWindowHasFocus() || !m_isMouseDown || !Globals::ui.hasViewportFocused())
                 return;
-            if (!m_mousePosUpdated)
+            if (!m_mousePosUpdated || Globals::ui.hasViewportGainedFocused())
             {
                 m_lastMousePos = glm::vec2(evt.x, evt.y);
                 m_mousePosUpdated = true;
@@ -52,25 +58,26 @@ void FreeFlyCameraController::initialize(Input& input, glm::vec3 position, glm::
 void FreeFlyCameraController::update(double deltaTime)
 {
     const float deltaSec = static_cast<float>(deltaTime);
-    if (m_input->isWindowHasFocus())
+    Input& input = Globals::input;
+    if (input.isWindowHasFocus() && Globals::ui.hasViewportFocused())
     {
-        const float boost = m_input->isKeyDown(SDL_SCANCODE_LSHIFT) ? m_boostMultiplier : 1.0f;
+        const float boost = input.isKeyDown(SDL_SCANCODE_LSHIFT) ? m_boostMultiplier : 1.0f;
 
-        if (m_input->isKeyDown(SDL_SCANCODE_W))
+        if (input.isKeyDown(SDL_SCANCODE_W))
             m_position += m_direction * m_speed * deltaSec * boost;
-        if (m_input->isKeyDown(SDL_SCANCODE_S))
+        if (input.isKeyDown(SDL_SCANCODE_S))
             m_position -= m_direction * m_speed * deltaSec * boost;
-        if (m_input->isKeyDown(SDL_SCANCODE_A))
+        if (input.isKeyDown(SDL_SCANCODE_A))
             m_position -= glm::normalize(glm::cross(m_direction, m_up)) * m_speed * deltaSec * boost;
-        if (m_input->isKeyDown(SDL_SCANCODE_D))
+        if (input.isKeyDown(SDL_SCANCODE_D))
             m_position += glm::normalize(glm::cross(m_direction, m_up)) * m_speed * deltaSec * boost;
-        if (m_input->isKeyDown(SDL_SCANCODE_SPACE))
+        if (input.isKeyDown(SDL_SCANCODE_SPACE))
             m_position += m_up * m_speed * deltaSec * boost;
-        if (m_input->isKeyDown(SDL_SCANCODE_LCTRL))
+        if (input.isKeyDown(SDL_SCANCODE_LCTRL))
             m_position -= m_up * m_speed * deltaSec * boost;
-        if (m_input->isKeyDown(SDL_SCANCODE_Q))
+        if (input.isKeyDown(SDL_SCANCODE_Q))
             m_up = glm::normalize(glm::vec3(glm::rotate(glm::mat4(1.0f), -1.0f * deltaSec, m_direction) * glm::vec4(m_up, 0.0f)));
-        if (m_input->isKeyDown(SDL_SCANCODE_E))
+        if (input.isKeyDown(SDL_SCANCODE_E))
             m_up = glm::normalize(glm::vec3(glm::rotate(glm::mat4(1.0f), 1.0f * deltaSec, m_direction) * glm::vec4(m_up, 0.0f)));
     }
 

@@ -14,10 +14,10 @@ export class FreeFlyCameraController final
 public:
 
     FreeFlyCameraController() {}
-    ~FreeFlyCameraController() {}
+    ~FreeFlyCameraController();
     FreeFlyCameraController(const FreeFlyCameraController&) = delete;
 
-    void initialize(Input& input, glm::vec3 position, glm::vec3 lookAt, glm::vec3 up = glm::vec3(0, 1, 0));
+    void initialize(glm::vec3 position, glm::vec3 lookAt, glm::vec3 up = glm::vec3(0, 1, 0));
     void update(double deltaTime);
     void setSpeed(float speed) { m_speed = speed; }
     void setSensitivity(float sensitivity) { m_sensitivity = sensitivity; }
@@ -37,8 +37,7 @@ public:
 
 private:
 
-    Input* m_input;
-    MouseListener* m_mouseListener;
+    MouseListener* m_mouseListener = nullptr;
 
     bool m_isMouseDown = false;
     bool m_mousePosUpdated = false;

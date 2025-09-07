@@ -3,6 +3,7 @@ export module Core.imgui;
 import Core;
 
 export import <imgui/imgui.h>;
+export import <imgui/imgui_internal.h>;
 export import <imgui/imgui_impl_sdl3.h>;
 export import <imgui/imgui_impl_vulkan.h>;
 

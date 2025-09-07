@@ -7,6 +7,6 @@ add_executable(${PROJECT_NAME} ${PROJECT_PRIVATE_FILES})
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER Apps)
 set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "/ignore:4099")
 
-target_link_libraries(${PROJECT_NAME} PRIVATE Core RendererVK Entity File Input)
+target_link_libraries(${PROJECT_NAME} PRIVATE Core RendererVK UI Entity File Input)
 
 apply_compile_settings(${PROJECT_NAME})

@@ -10,6 +10,7 @@ import Entity.FreeFlyCameraController;
 import File.FileSystem;
 import File.SceneData;
 import Input;
+import UI;
 
 import RendererVK;
 import RendererVK.ObjectContainer;
@@ -22,27 +23,21 @@ int main()
     Window window;
     window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(1920, 1080));
 
-    Input input;
+    Input& input = Globals::input;
     input.initialize();
 
-    bool running = true;
-    SystemEventListener* systemEventListener = input.addSystemEventListener();
-    systemEventListener->onQuit = [&]() { running = false; };
-
     FreeFlyCameraController cameraController;
-    cameraController.initialize(input, glm::vec3(0.0f, 0.0f, -10.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    cameraController.initialize(glm::vec3(0.0f, 0.0f, -10.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
     RendererVK& renderer = Globals::rendererVK;
     renderer.initialize(window, true);
 
-    //ObjectContainer baseShapeContainer;
-    //const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
-    //{
-    //    SceneData sceneData;
-    //    sceneData.initialize("Models/baseshapes.glb", false, false);
-    //    baseShapeContainer.initialize(sceneData);
-    //}
-    //RenderNode sphereNode = baseShapeContainer.spawnNodeForPath("ROOT/Sphere", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1, 0, 0, 0)));
+    UI& ui = Globals::ui;
+    ui.initialize();
+
+    bool running = true;
+    SystemEventListener* pSystemEventListener = input.addSystemEventListener();
+    pSystemEventListener->onQuit = [&]() { running = false; };
 
     ObjectContainer boatContainer;
     {
@@ -88,6 +83,9 @@ int main()
         const double deltaSec = Globals::time.getDeltaSec();
         input.update(deltaSec);
         cameraController.update(deltaSec);
+        ui.update(deltaSec);
+        renderer.setViewportPos(ui.getViewportPos());
+        renderer.setViewportSize(ui.getViewportSize());
 
         const Frustum& frustum = renderer.beginFrame(cameraController.getCamera());
         for (RenderNode& node : spawnedNodes)
@@ -100,10 +98,20 @@ int main()
             }
         }
 
+        ui.render();
         renderer.present();
         frameCount++;
     }
     input.removeKeyboardListener(pKeyboardListener);
-
+    input.removeSystemEventListener(pSystemEventListener);
     return 0;
 }
+
+//ObjectContainer baseShapeContainer;
+//const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
+//{
+//    SceneData sceneData;
+//    sceneData.initialize("Models/baseshapes.glb", false, false);
+//    baseShapeContainer.initialize(sceneData);
+//}
+//RenderNode sphereNode = baseShapeContainer.spawnNodeForPath("ROOT/Sphere", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1, 0, 0, 0)));

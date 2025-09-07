@@ -58,8 +58,9 @@ public:
 export class Input final
 {
 public:
-    Input();
-    ~Input();
+
+    Input() {}
+    ~Input() {}
     Input(const Input&) = delete;
 
     bool initialize();
@@ -128,3 +129,8 @@ private:
     bool m_wantMousieGrab = false;
     bool m_wantMouseVisible = true;
 };
+
+export namespace Globals
+{
+    Input input;
+}
