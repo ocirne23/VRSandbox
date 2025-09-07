@@ -63,13 +63,13 @@ void UI::update(double deltaSec)
         m_viewportSize = glm::ivec2(size.x, size.y);
         m_viewportPos = glm::ivec2(viewportPos.x, viewportPos.y);
 
-        ImGuiContext* ctx = ImGui::GetCurrentContext();
+        const ImGuiContext* ctx = ImGui::GetCurrentContext();
         const bool isViewportGrabbed = (ctx->MovingWindow == ctx->CurrentWindow);
         const bool wasViewportGrabbed = m_isViewportGrabbed && !isViewportGrabbed;
         m_isViewportGrabbed = isViewportGrabbed;
         const bool isViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_DockHierarchy) && !m_isViewportGrabbed && !wasViewportGrabbed;
-        m_hasViewportGainedFocus = isViewportFocused && !m_hasViewportFocused;
-        m_hasViewportFocused = isViewportFocused;
+        m_hasViewportGainedFocus = isViewportFocused && !m_isViewportFocused;
+        m_isViewportFocused = isViewportFocused;
         ImGui::Button("Button 1");
         ImGui::Button("Button 2");
         ImGui::Button("Button 3");
@@ -81,7 +81,7 @@ void UI::update(double deltaSec)
     {
         ImGui::Begin("Sidebar");
         ImGui::Text("m_isViewportGrabbed: %i", (int)m_isViewportGrabbed);
-        ImGui::Text("m_hasViewportFocused: %i", (int)m_hasViewportFocused);
+        ImGui::Text("m_isViewportFocused: %i", (int)m_isViewportFocused);
         ImGui::Text("m_hasViewportGainedFocus: %i", (int)m_hasViewportGainedFocus);
         ImGui::Text("m_viewportSize(%i, %i)", m_viewportSize.x, m_viewportSize.y);
         ImGui::Text("m_viewportPos(%i, %i)", m_viewportPos.x, m_viewportPos.y);
@@ -102,3 +102,10 @@ void UI::render()
 {
     ImGui::Render();
 }
+
+/*
+        ctx->CurrentWindow->DrawList->AddLine(
+            ImVec2(viewportPos.x + size.x * 0.5f - 10.0f, viewportPos.y + size.y * 0.5f - 10.0f),
+            ImVec2(viewportPos.x + size.x * 0.5f + 10.0f, viewportPos.y + size.y * 0.5f + 10.0f),
+            ImColor(255, 255, 255, 200), 2.0f);
+*/

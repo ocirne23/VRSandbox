@@ -9,8 +9,8 @@ include(Utils.cmake)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "_Build")
 
-list(APPEND COMPILE_OPTIONS "/std:c++latest" "/Zc:__cplusplus" "/fp:fast" "/arch:AVX2" "$<$<NOT:$<CONFIG:DEBUG>>:/GL>" "/Oi" "/Ot" "/W4" "$<$<NOT:$<CONFIG:DEBUG>>:/Ob2>")
-list(APPEND LINK_OPTIONS "$<$<NOT:$<CONFIG:DEBUG>>:/LTCG>" "$<$<NOT:$<CONFIG:DEBUG>>:/INCREMENTAL:NO>")
+list(APPEND COMPILE_OPTIONS "/std:c++latest" "/Zc:__cplusplus" "/fp:fast" "/arch:AVX2" "$<$<NOT:$<CONFIG:DEBUG>>:/GL>" "/Oi" "/Ot" "/W4" "$<$<NOT:$<CONFIG:DEBUG>>:/Ob2>" "$<$<CONFIG:DEBUG>:/JMC>" "$<$<CONFIG:Debug>:/ZI>")
+list(APPEND LINK_OPTIONS "$<$<NOT:$<CONFIG:DEBUG>>:/LTCG>" "$<$<NOT:$<CONFIG:DEBUG>>:/INCREMENTAL:NO>" "$<$<CONFIG:Debug>:/INCREMENTAL>")
 
 add_definitions(/FI"${ROOT_DIR}/Code/Core/Private/forceinclude.h"  
 	/wd4100 # unreferenced formal parameter

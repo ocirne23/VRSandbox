@@ -36,7 +36,7 @@ void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, g
         };
     m_mouseListener->onMouseMoved = [this](const SDL_MouseMotionEvent& evt)
         {
-            if (!Globals::input.isWindowHasFocus() || !m_isMouseDown || !Globals::ui.hasViewportFocused())
+            if (!Globals::input.isWindowHasFocus() || !m_isMouseDown || !Globals::ui.isViewportFocused())
                 return;
             if (!m_mousePosUpdated || Globals::ui.hasViewportGainedFocused())
             {
@@ -59,7 +59,7 @@ void FreeFlyCameraController::update(double deltaTime)
 {
     const float deltaSec = static_cast<float>(deltaTime);
     Input& input = Globals::input;
-    if (input.isWindowHasFocus() && Globals::ui.hasViewportFocused())
+    if (input.isWindowHasFocus() && Globals::ui.isViewportFocused())
     {
         const float boost = input.isKeyDown(SDL_SCANCODE_LSHIFT) ? m_boostMultiplier : 1.0f;
 
