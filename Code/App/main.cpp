@@ -53,10 +53,10 @@ int main()
         boatContainer.initialize(sceneData);
     }
 
-    std::vector<RenderNode> spawnedNodes;
-    for (int x = 0; x < 50; ++x)
-        for (int y = 0; y < 50; ++y)
-            spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0))));
+   std::vector<RenderNode> spawnedNodes;
+   for (int x = 0; x < 50; ++x)
+       for (int y = 0; y < 50; ++y)
+           spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0))));
 
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {
@@ -84,6 +84,16 @@ int main()
             return Timer::REPEAT;
         });
 
+
+   ObjectContainer baseShapeContainer;
+   const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
+   {
+       SceneData sceneData;
+       sceneData.initialize("Models/baseshapes.glb", false, false);
+       baseShapeContainer.initialize(sceneData);
+   }
+   RenderNode sphereNode = baseShapeContainer.spawnNodeForPath("ROOT/Sphere", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1, 0, 0, 0)));
+
     while (running)
     {
         Globals::time.update();
@@ -91,8 +101,7 @@ int main()
         input.update(deltaSec);
         cameraController.update(deltaSec);
         ui.update(deltaSec);
-        renderer.setViewportPos(ui.getViewportPos());
-        renderer.setViewportSize(ui.getViewportSize());
+        renderer.setViewportRect(ui.getViewportRect());
 
         const Frustum& frustum = renderer.beginFrame(cameraController.getCamera());
         for (RenderNode& node : spawnedNodes)

@@ -46,7 +46,7 @@ public:
     inline Sphere getWorldBounds() const 
     {
         const Transform& transform = getTransform();
-        return Sphere(m_bounds.pos * transform.scale * glm::inverse(transform.quat) + transform.pos, m_bounds.radius * transform.scale);
+        return Sphere(transform.quat * m_bounds.pos * transform.scale + transform.pos, m_bounds.radius * transform.scale);
     };
 
 private:

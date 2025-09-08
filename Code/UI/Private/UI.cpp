@@ -60,8 +60,7 @@ void UI::update(double deltaSec)
 
         const ImVec2 size = ImGui::GetContentRegionAvail();
         const ImVec2 viewportPos = ImGui::GetCursorScreenPos();
-        m_viewportSize = glm::ivec2(size.x, size.y);
-        m_viewportPos = glm::ivec2(viewportPos.x, viewportPos.y);
+        m_viewportRect = Rect(glm::ivec2(viewportPos.x, viewportPos.y), glm::ivec2(viewportPos.x + size.x, viewportPos.y + size.y));
 
         const ImGuiContext* ctx = ImGui::GetCurrentContext();
         const bool isViewportGrabbed = (ctx->MovingWindow == ctx->CurrentWindow);
@@ -83,8 +82,7 @@ void UI::update(double deltaSec)
         ImGui::Text("m_isViewportGrabbed: %i", (int)m_isViewportGrabbed);
         ImGui::Text("m_isViewportFocused: %i", (int)m_isViewportFocused);
         ImGui::Text("m_hasViewportGainedFocus: %i", (int)m_hasViewportGainedFocus);
-        ImGui::Text("m_viewportSize(%i, %i)", m_viewportSize.x, m_viewportSize.y);
-        ImGui::Text("m_viewportPos(%i, %i)", m_viewportPos.x, m_viewportPos.y);
+        ImGui::Text("m_viewportRect: %i,%i:%i,%i", m_viewportRect.min.x, m_viewportRect.min.y, m_viewportRect.max.x, m_viewportRect.max.y);
         ImGui::End();
     }
 

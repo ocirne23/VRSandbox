@@ -2,6 +2,7 @@ export module UI;
 
 import Core;
 import Core.glm;
+import Core.Rect;
 
 export class UI final
 {
@@ -18,16 +19,14 @@ public:
     bool isViewportGrabbed() const { return m_isViewportGrabbed; }
     bool isViewportFocused() const { return m_isViewportFocused; }
     bool hasViewportGainedFocused() const { return m_hasViewportGainedFocus; }
-    glm::ivec2 getViewportPos() const { return m_viewportPos; }
-    glm::ivec2 getViewportSize() const { return m_viewportSize; }
+    const Rect& getViewportRect() const { return m_viewportRect; }
 
 private:
 
     bool m_isViewportGrabbed = false;
     bool m_isViewportFocused = false;
     bool m_hasViewportGainedFocus = false;
-    glm::ivec2 m_viewportPos = glm::ivec2(0);
-    glm::ivec2 m_viewportSize = glm::ivec2(0);
+    Rect m_viewportRect = Rect();
 };
 
 export namespace Globals

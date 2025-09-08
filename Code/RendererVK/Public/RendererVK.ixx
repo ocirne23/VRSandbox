@@ -2,6 +2,7 @@ export module RendererVK;
 
 import Core;
 import Core.glm;
+import Core.Rect;
 
 import RendererVK.Transform;
 import RendererVK.Layout;
@@ -50,8 +51,7 @@ public:
 
     void setWindowMinimized(bool minimized);
     void recreateWindowSurface(Window& window);
-    void setViewportSize(const glm::ivec2& size) { m_viewportSize = size; setHaveToRecordCommandBuffers(); }
-    void setViewportPos(const glm::ivec2& pos) { m_viewportPos = pos; setHaveToRecordCommandBuffers(); }
+    void setViewportRect(const Rect& rect) { if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } }
 
     CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 
@@ -126,8 +126,7 @@ private:
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 
     glm::ivec2 m_windowSize;
-    glm::ivec2 m_viewportSize;
-    glm::ivec2 m_viewportPos = glm::ivec2(0, 0);
+    Rect m_viewportRect = Rect();
     bool m_windowMinimized = false;
 };
 
