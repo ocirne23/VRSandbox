@@ -20,7 +20,7 @@ public:
     CommandBuffer(const CommandBuffer&) = delete;
     CommandBuffer(CommandBuffer&&) = default;
 
-    bool initialize(bool isPrimary = true);
+    bool initialize(vk::CommandBufferLevel level);
 
     vk::CommandBuffer begin(bool once = false, vk::CommandBufferInheritanceInfo* pInheritanceInfo = nullptr);
     void end();

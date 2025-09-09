@@ -84,11 +84,11 @@ float environmentContrib(float roughness, float NdotV)
 
 void main()
 {
-	vec3 lightPos  = vec3(160, 800, 256);
+	vec3 lightPos  = vec3(75, 20, 75);
 	vec3 lightVec  = lightPos - in_pos;
-	float distance = 1.0f;//length(lightVec);
-	float falloff  = 1.0f;//inverseSquareFalloff(distance, 50000);
-	float intensity = 1.0;
+	float distance = length(lightVec);
+	float falloff  = inverseSquareFalloff(distance, 5000);
+	float intensity = 2500.0;
 
 	vec3 V = normalize(u_viewPos - in_pos);
 	vec3 L = normalize(lightVec);
@@ -110,5 +110,6 @@ void main()
 
 	vec3 diffuse = diffuseOrenNayar(materialColor, roughness, NdotV, NdotL, VdotH);
 	vec3 color = (diffuse + (specular + env) * materialColor) * falloff * intensity;
+	color += materialColor * 0.025;
 	out_color = color;
 }

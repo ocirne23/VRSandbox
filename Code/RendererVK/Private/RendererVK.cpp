@@ -71,10 +71,10 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
 
     for (PerFrameData& perFrame : m_perFrameData)
     {
-        perFrame.primaryCommandBuffer.initialize(true);
-        perFrame.indirectCullCommandBuffer.initialize(false);
-        perFrame.staticMeshRenderCommandBuffer.initialize(false);
-        perFrame.imguiCommandBuffer.initialize(false);
+        perFrame.primaryCommandBuffer.initialize(vk::CommandBufferLevel::ePrimary);
+        perFrame.indirectCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.staticMeshRenderCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.imguiCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
 
         perFrame.ubo.initialize(sizeof(RendererVKLayout::Ubo),
             vk::BufferUsageFlagBits::eUniformBuffer,
@@ -395,27 +395,7 @@ void RendererVK::recordCommandBuffers()
         { frameData.staticMeshRenderCommandBuffer.getCommandBuffer(), frameData.imguiCommandBuffer.getCommandBuffer() };
 
     CommandBuffer& commandBuffer = frameData.primaryCommandBuffer;
-    vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
-
-    { // Wait for empty queue at beginning of frame to shut up synchronization validator
-        vk::MemoryBarrier2 memoryBarrier{
-            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-            .srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
-            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-            .dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
-        };
-        vk::DependencyInfo dependencyInfo{
-            .dependencyFlags = vk::DependencyFlagBits(0),
-            .memoryBarrierCount = 1,
-            .pMemoryBarriers = &memoryBarrier,
-            .bufferMemoryBarrierCount = 0,
-            .pBufferMemoryBarriers = nullptr,
-            .imageMemoryBarrierCount = 0,
-            .pImageMemoryBarriers = nullptr
-        };
-        vkCommandBuffer.pipelineBarrier2(dependencyInfo);
-    }
-
+    vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);
 
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
     vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);

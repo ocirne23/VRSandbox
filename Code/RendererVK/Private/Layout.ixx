@@ -13,7 +13,7 @@ export namespace RendererVKLayout
     constexpr uint32 MAX_RENDER_NODES = 1024 * 512;
     constexpr uint32 MAX_UNIQUE_MESHES = 100;
     constexpr uint32 MAX_INSTANCE_OFFSETS = 1024;
-    constexpr uint32 MAX_INSTANCE_DATA = 1024 * 1024;
+    constexpr uint32 MAX_INSTANCE_DATA = 1024 * 2024;
     constexpr uint32 MAX_UNIQUE_MATERIALS = 100;
 
     static_assert(MAX_UNIQUE_MESHES < USHRT_MAX);

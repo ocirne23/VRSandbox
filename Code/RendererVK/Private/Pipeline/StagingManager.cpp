@@ -33,7 +33,7 @@ bool StagingManager::initialize()
         if (!m_stagingBuffers[i].initialize(STAGING_BUFFER_SIZE, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached))
             return false;
 
-        m_commandBuffers[i].initialize();
+        m_commandBuffers[i].initialize(vk::CommandBufferLevel::ePrimary);
         auto createFenceResult = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
         if (createFenceResult.result != vk::Result::eSuccess)
         {

@@ -10,12 +10,12 @@ CommandBuffer::~CommandBuffer()
         Globals::device.getDevice().freeCommandBuffers(Globals::device.getCommandPool(), m_commandBuffer);
 }
 
-bool CommandBuffer::initialize(bool isPrimary)
+bool CommandBuffer::initialize(vk::CommandBufferLevel level)
 {
     vk::CommandBufferAllocateInfo allocInfo
     {
         .commandPool = Globals::device.getCommandPool(),
-        .level = isPrimary ? vk::CommandBufferLevel::ePrimary : vk::CommandBufferLevel::eSecondary,
+        .level = level,
         .commandBufferCount = 1,
     };
     auto result = Globals::device.getDevice().allocateCommandBuffers(allocInfo);
@@ -93,7 +93,7 @@ vk::CommandBuffer CommandBuffer::begin(bool once, vk::CommandBufferInheritanceIn
     if (pInheritanceInfo && pInheritanceInfo->renderPass != VK_NULL_HANDLE)
     {
         beginInfo.flags |= vk::CommandBufferUsageFlagBits::eRenderPassContinue;
-        beginInfo.flags |= vk::CommandBufferUsageFlagBits::eSimultaneousUse;
+        //beginInfo.flags |= vk::CommandBufferUsageFlagBits::eSimultaneousUse;
     }
     auto result = m_commandBuffer.begin(beginInfo);
     if (result != vk::Result::eSuccess)

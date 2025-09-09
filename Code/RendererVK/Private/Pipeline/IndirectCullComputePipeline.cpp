@@ -194,7 +194,6 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
     // Compute shader frustum cull and indirect command buffer generation
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
     {
-        // There's some synchronization issue here...
         vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
         commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
 
@@ -202,21 +201,12 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
         
         {
             vk::MemoryBarrier2 memoryBarrier{
-                .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+                .srcStageMask = vk::PipelineStageFlagBits2::eClear,
                 .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
                 .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
                 .dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
             };
-            vk::DependencyInfo dependencyInfo{
-                .dependencyFlags = vk::DependencyFlagBits(0),// vk::DependencyFlagBits::eByRegion,
-                .memoryBarrierCount = 1,
-                .pMemoryBarriers = &memoryBarrier,
-                .bufferMemoryBarrierCount = 0,
-                .pBufferMemoryBarriers = nullptr,
-                .imageMemoryBarrierCount = 0,
-                .pImageMemoryBarriers = nullptr
-            };
-            vkCommandBuffer.pipelineBarrier2(dependencyInfo);
+            vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
         }
 
         vkCommandBuffer.dispatchIndirect(frameData.inIndirectCommandBuffer.getBuffer(), 0);
@@ -228,16 +218,17 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
                 .dstStageMask = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader,
                 .dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead,
             };
-            vk::DependencyInfo dependencyInfo{
-                .dependencyFlags = vk::DependencyFlagBits(0),// vk::DependencyFlagBits::eByRegion,
-                .memoryBarrierCount = 1,
-                .pMemoryBarriers = &memoryBarrier,
-                .bufferMemoryBarrierCount = 0,
-                .pBufferMemoryBarriers = nullptr,
-                .imageMemoryBarrierCount = 0,
-                .pImageMemoryBarriers = nullptr
+            vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
+        }
+
+        {
+            vk::MemoryBarrier2 memoryBarrier{
+                .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+                .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+                .dstStageMask = vk::PipelineStageFlagBits2::eClear | vk::PipelineStageFlagBits2::eComputeShader,
+                .dstAccessMask = vk::AccessFlagBits2::eTransferWrite | vk::AccessFlagBits2::eShaderStorageWrite,
             };
-            vkCommandBuffer.pipelineBarrier2(dependencyInfo);
+            vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
         }
     }
 }

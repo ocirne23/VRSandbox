@@ -64,7 +64,7 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize, bool vs
     vk::SurfaceFormatKHR surfaceFormat = surfaceFormats[0];
     for (const auto& availableFormat : surfaceFormats)
     {
-        if (availableFormat.format == vk::Format::eB8G8R8A8Srgb && availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear)
+        if (availableFormat.format == vk::Format::eB8G8R8A8Unorm)// && availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear)
         {
             surfaceFormat = availableFormat;
             break;
