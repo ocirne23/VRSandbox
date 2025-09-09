@@ -10,7 +10,7 @@ export namespace RendererVKLayout
     constexpr uint32 NUM_FRAMES_IN_FLIGHT = 2;
 
     // TODO make these dynamic
-    constexpr uint32 MAX_RENDER_NODES = 1024 * 32;
+    constexpr uint32 MAX_RENDER_NODES = 1024 * 512;
     constexpr uint32 MAX_UNIQUE_MESHES = 100;
     constexpr uint32 MAX_INSTANCE_OFFSETS = 1024;
     constexpr uint32 MAX_INSTANCE_DATA = 1024 * 1024;

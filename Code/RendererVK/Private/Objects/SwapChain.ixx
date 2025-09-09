@@ -31,12 +31,13 @@ public:
     ~SwapChain();
     SwapChain(const SwapChain&) = delete;
 
-    bool initialize(const Surface& surface, uint32 swapChainSize);
+    bool initialize(const Surface& surface, uint32 swapChainSize, bool vsync);
     void destroy();
 
     vk::SwapchainKHR getSwapChain() const { return m_swapChain; }
     const Layout& getLayout() const { return m_layout; }
     uint32 getCurrentFrameIndex() const { return m_currentFrame; }
+    uint32 getCurrentImageIdx() const { return m_currentImageIdx; }
 
     bool acquireNextImage();
     bool present();

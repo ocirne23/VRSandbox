@@ -18,15 +18,15 @@ bool IndirectCullComputePipeline::initialize()
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedIndirectCommands = perFrame.inIndirectCommandBuffer.mapMemory<vk::DispatchIndirectCommand>();
 
-        perFrame.outMeshInstancesBuffer.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutMeshInstance), // 5
+        perFrame.outMeshInstancesBuffer.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutMeshInstance), // 6
             vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        perFrame.outMeshInstanceIndexesBuffer.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(uint32), // 6
+        perFrame.outMeshInstanceIndexesBuffer.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(uint32), // 7
             vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        perFrame.outIndirectCommandBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(vk::DrawIndexedIndirectCommand), // 7
+        perFrame.outIndirectCommandBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(vk::DrawIndexedIndirectCommand), // 8
             vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
     }
@@ -191,19 +191,53 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
         }
     };
 
+    // Compute shader frustum cull and indirect command buffer generation
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
-    {   // Compute shader frustum cull and indirect command buffer generation
+    {
         // There's some synchronization issue here...
-        vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * sizeof(vk::DrawIndexedIndirectCommand), 0);
-
-        vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags::Flags(0), {
-            vk::MemoryBarrier{.srcAccessMask = vk::AccessFlagBits::eTransferWrite, .dstAccessMask = vk::AccessFlagBits::eShaderRead } }, {}, {});
-
         vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
         commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
+
+        vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * sizeof(vk::DrawIndexedIndirectCommand), 0);
+        
+        {
+            vk::MemoryBarrier2 memoryBarrier{
+                .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+                .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+                .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+                .dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+            };
+            vk::DependencyInfo dependencyInfo{
+                .dependencyFlags = vk::DependencyFlagBits(0),// vk::DependencyFlagBits::eByRegion,
+                .memoryBarrierCount = 1,
+                .pMemoryBarriers = &memoryBarrier,
+                .bufferMemoryBarrierCount = 0,
+                .pBufferMemoryBarriers = nullptr,
+                .imageMemoryBarrierCount = 0,
+                .pImageMemoryBarriers = nullptr
+            };
+            vkCommandBuffer.pipelineBarrier2(dependencyInfo);
+        }
+
         vkCommandBuffer.dispatchIndirect(frameData.inIndirectCommandBuffer.getBuffer(), 0);
 
-        vkCommandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlags::Flags(0), {
-            vk::MemoryBarrier{.srcAccessMask = vk::AccessFlagBits::eShaderWrite, .dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead } }, {}, {});
+        {
+            vk::MemoryBarrier2 memoryBarrier{
+                .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+                .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+                .dstStageMask = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader,
+                .dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead,
+            };
+            vk::DependencyInfo dependencyInfo{
+                .dependencyFlags = vk::DependencyFlagBits(0),// vk::DependencyFlagBits::eByRegion,
+                .memoryBarrierCount = 1,
+                .pMemoryBarriers = &memoryBarrier,
+                .bufferMemoryBarrierCount = 0,
+                .pBufferMemoryBarriers = nullptr,
+                .imageMemoryBarrierCount = 0,
+                .pImageMemoryBarriers = nullptr
+            };
+            vkCommandBuffer.pipelineBarrier2(dependencyInfo);
+        }
     }
 }

@@ -57,7 +57,7 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     m_surface.initialize(window);
     assert(m_surface.deviceSupportsSurface());
 
-    m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT);
+    m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_stagingManager.initialize();
     m_meshDataManager.initialize(m_stagingManager, VERTEX_DATA_SIZE, INDEX_DATA_SIZE);
 
@@ -158,7 +158,7 @@ void RendererVK::recreateWindowSurface(Window& window)
     window.getWindowSize(m_windowSize);
     m_swapChain.destroy();
     m_surface.initialize(window);
-    m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT);
+    m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
     auto waitResult2 = Globals::device.getGraphicsQueue().waitIdle();
     if (waitResult2 != vk::Result::eSuccess)
@@ -174,8 +174,8 @@ void RendererVK::recreateSwapchain()
     {
         assert(false && "Failed to wait for device idle in RendererVK::recreateSwapchain");
     }
-
-    m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT);
+    printf("recreateSwapchain()\n");
+    m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
 }
 
@@ -203,18 +203,31 @@ const Frustum& RendererVK::beginFrame(const Camera& camera)
     return frameData.mappedUniformBuffer->frustum;
 }
 
+void RendererVK::renderNodeThreadSafe(const RenderNode& node)
+{
+    const uint32 numInstances = (uint32)node.m_meshInstances.size();
+    const uint32 startIdx = std::atomic_ref<uint32>(m_meshInstanceCounter).fetch_add(numInstances);
+    assert(startIdx + numInstances <= RendererVKLayout::MAX_INSTANCE_DATA);
+
+    for (auto& pair : node.m_numInstancesPerMesh)
+        std::atomic_ref<uint32>(m_numInstancesPerMesh[pair.first]) += pair.second;
+
+    PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
+    memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
+}
+
 void RendererVK::renderNode(const RenderNode& node)
 {
     const uint32 numInstances = (uint32)node.m_meshInstances.size();
-    assert(m_meshInstanceCounter + numInstances <= RendererVKLayout::MAX_INSTANCE_DATA);
+    const uint32 startIdx = m_meshInstanceCounter;
+    m_meshInstanceCounter += numInstances;
+    assert(m_meshInstanceCounter <= RendererVKLayout::MAX_INSTANCE_DATA);
 
     for (auto& pair : node.m_numInstancesPerMesh)
         m_numInstancesPerMesh[pair.first] += pair.second;
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-    memcpy(frameData.mappedMeshInstances.data() + m_meshInstanceCounter, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
-
-    m_meshInstanceCounter += numInstances;
+    memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
 }
 
 void RendererVK::present()
@@ -272,13 +285,12 @@ void RendererVK::present()
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_stagingManager.update();
 
-    recordCommandBuffers();
-
     if (!m_swapChain.acquireNextImage())
     {
         recreateSwapchain();
         return;
     }
+    recordCommandBuffers();
 
     m_swapChain.submitCommandBuffer(getCurrentCommandBuffer());
     if (!m_swapChain.present())
@@ -303,14 +315,14 @@ void RendererVK::recordCommandBuffers()
     {
         .renderPass = m_renderPass.getRenderPass(),
         .subpass = 0,
-        .framebuffer = m_framebuffers.getFramebuffer(frameIdx),
+        .framebuffer = VK_NULL_HANDLE,// m_framebuffers.getFramebuffer(m_swapChain.getCurrentImageIdx()),
         .occlusionQueryEnable = false,
         .queryFlags = {},
         .pipelineStatistics = {}
     };
 
-    if (frameData.primaryCommandBuffer.hasRecorded())
-        m_swapChain.waitForFrame(frameIdx);
+    //if (frameData.primaryCommandBuffer.hasRecorded())
+    //   m_swapChain.waitForFrame(frameIdx);
 
     const vk::Extent2D extent = m_swapChain.getLayout().extent;
     if (!frameData.updated)
@@ -335,6 +347,7 @@ void RendererVK::recordCommandBuffers()
         {
             CommandBuffer& staticMeshCommandBuffer = frameData.staticMeshRenderCommandBuffer;
             vk::CommandBuffer vkStaticMeshCommandBuffer = staticMeshCommandBuffer.begin(false, &inheritanceInfo);
+
             const glm::ivec2 viewportSize = m_viewportRect.getSize();
             const vk::Viewport viewport{ 
                 .x = (float)m_viewportRect.min.x,
@@ -366,14 +379,13 @@ void RendererVK::recordCommandBuffers()
     {
         CommandBuffer& imguiCommandBuffer = frameData.imguiCommandBuffer;
         vk::CommandBuffer vkImguiCommandBuffer = imguiCommandBuffer.begin(false, &inheritanceInfo);
-        
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkImguiCommandBuffer, nullptr);
         imguiCommandBuffer.end();
     }
 
     const vk::RenderPassBeginInfo renderPassBeginInfo{
         .renderPass = m_renderPass.getRenderPass(),
-        .framebuffer = m_framebuffers.getFramebuffer(frameIdx),
+        .framebuffer = m_framebuffers.getFramebuffer(m_swapChain.getCurrentImageIdx()),
         .renderArea = vk::Rect2D {.offset = vk::Offset2D { 0, 0 }, .extent = extent },
         .clearValueCount = (uint32)s_clearValues.size(),
         .pClearValues = s_clearValues.data(),
@@ -384,11 +396,33 @@ void RendererVK::recordCommandBuffers()
 
     CommandBuffer& commandBuffer = frameData.primaryCommandBuffer;
     vk::CommandBuffer vkCommandBuffer = commandBuffer.begin();
+
+    { // Wait for empty queue at beginning of frame to shut up synchronization validator
+        vk::MemoryBarrier2 memoryBarrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+        };
+        vk::DependencyInfo dependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits(0),
+            .memoryBarrierCount = 1,
+            .pMemoryBarriers = &memoryBarrier,
+            .bufferMemoryBarrierCount = 0,
+            .pBufferMemoryBarriers = nullptr,
+            .imageMemoryBarrierCount = 0,
+            .pImageMemoryBarriers = nullptr
+        };
+        vkCommandBuffer.pipelineBarrier2(dependencyInfo);
+    }
+
+
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
     vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
     vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eSecondaryCommandBuffers);
     vkCommandBuffer.executeCommands((uint32)secondaryCommandBuffers.size(), secondaryCommandBuffers.data());
     vkCommandBuffer.endRenderPass();
+
     commandBuffer.end();
 }
 

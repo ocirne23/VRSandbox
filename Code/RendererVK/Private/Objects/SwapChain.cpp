@@ -29,7 +29,7 @@ void SwapChain::destroy()
     }
 }
 
-bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
+bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize, bool vsync)
 {
     vk::Device vkDevice = Globals::device.getDevice();
     if (m_swapChain)
@@ -114,7 +114,7 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize)
         .imageSharingMode = vk::SharingMode::eExclusive,
         .preTransform = capabilities.currentTransform,
         .compositeAlpha = compositeAlpha,
-        .presentMode = vk::PresentModeKHR::eImmediate,
+        .presentMode = vsync ? vk::PresentModeKHR::eFifo : vk::PresentModeKHR::eImmediate,
         .clipped = vk::True,
     };
 

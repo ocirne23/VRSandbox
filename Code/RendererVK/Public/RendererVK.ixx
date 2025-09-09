@@ -40,6 +40,7 @@ public:
     bool initialize(Window& window, bool enableValidationLayers);
 
     const Frustum& beginFrame(const Camera& camera);
+    void renderNodeThreadSafe(const RenderNode& node);
     void renderNode(const RenderNode& node);
     void present();
 
@@ -128,6 +129,7 @@ private:
     glm::ivec2 m_windowSize;
     Rect m_viewportRect = Rect();
     bool m_windowMinimized = false;
+    bool m_vsyncEnabled = true;
 };
 
 export namespace Globals

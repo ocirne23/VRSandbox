@@ -10,6 +10,11 @@ import Core;
 #undef VK_NULL_HANDLE
 export nullptr_t VK_NULL_HANDLE = nullptr;
 
+#undef VK_QUEUE_FAMILY_IGNORED
+export constexpr uint32 VK_QUEUE_FAMILY_IGNORED = (~0u);
+#undef VK_WHOLE_SIZE
+export constexpr uint64 VK_WHOLE_SIZE = (~0ULL);
+
 export const char* VK_VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
 
 #undef VK_KHR_SWAPCHAIN_EXTENSION_NAME

@@ -54,8 +54,8 @@ int main()
     }
 
    std::vector<RenderNode> spawnedNodes;
-   for (int x = 0; x < 50; ++x)
-       for (int y = 0; y < 50; ++y)
+   for (int x = 0; x < 250; ++x)
+       for (int y = 0; y < 250; ++y)
            spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0))));
 
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
@@ -123,11 +123,23 @@ int main()
     return 0;
 }
 
-//ObjectContainer baseShapeContainer;
-//const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
-//{
-//    SceneData sceneData;
-//    sceneData.initialize("Models/baseshapes.glb", false, false);
-//    baseShapeContainer.initialize(sceneData);
-//}
-//RenderNode sphereNode = baseShapeContainer.spawnNodeForPath("ROOT/Sphere", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1, 0, 0, 0)));
+/*
+    ObjectContainer baseShapeContainer;
+    const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
+    {
+        SceneData sceneData;
+        sceneData.initialize("Models/baseshapes.glb", false, false);
+        baseShapeContainer.initialize(sceneData);
+    }
+    RenderNode sphereNode = baseShapeContainer.spawnNodeForPath("ROOT/Sphere", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1, 0, 0, 0)));
+
+        std::for_each(std::execution::par_unseq, std::begin(spawnedNodes), std::end(spawnedNodes), [&](RenderNode& node)
+        {
+            Transform& transform = node.getTransform();
+            transform.pos.y = glm::sin((float)Globals::time.getElapsedSec() + transform.pos.x * 0.1f + transform.pos.z * 0.1f);
+            if (frustum.sphereInFrustum(node.getWorldBounds()))
+            {
+                renderer.renderNodeThreadSafe(node);
+            }
+        });
+*/
