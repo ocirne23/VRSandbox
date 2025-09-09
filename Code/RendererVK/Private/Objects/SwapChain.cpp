@@ -18,8 +18,8 @@ void SwapChain::destroy()
         vk::Device vkDevice = Globals::device.getDevice();
         for (SyncObjects& syncObjects : m_syncObjects)
         {
-            vkDevice.destroySemaphore(syncObjects.imageAvailable);
-            vkDevice.destroySemaphore(syncObjects.renderFinished);
+            vkDevice.destroySemaphore(syncObjects.presentComplete);
+            vkDevice.destroySemaphore(syncObjects.renderComplete);
             vkDevice.destroyFence(syncObjects.inFlight);
         }
         vkDevice.destroySwapchainKHR(m_swapChain);
@@ -78,21 +78,21 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize, bool vs
 
     for (uint32 i = 0; i < imageCount; i++)
     {
-        auto imageAvailableCreateSemaphoreResult = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
-        if (imageAvailableCreateSemaphoreResult.result != vk::Result::eSuccess)
+        auto createSemaphore1 = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
+        if (createSemaphore1.result != vk::Result::eSuccess)
         {
             assert(false && "Failed to create semaphore");
             return false;
         }
-        m_syncObjects[i].imageAvailable = imageAvailableCreateSemaphoreResult.value;
+        m_syncObjects[i].presentComplete = createSemaphore1.value;
 
-        auto renderFinishedCreateSemaphoreResult = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
-        if (renderFinishedCreateSemaphoreResult.result != vk::Result::eSuccess)
+        auto createSemaphore2 = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{});
+        if (createSemaphore2.result != vk::Result::eSuccess)
         {
             assert(false && "Failed to create semaphore");
             return false;
         }
-        m_syncObjects[i].renderFinished = renderFinishedCreateSemaphoreResult.value;
+        m_syncObjects[i].renderComplete = createSemaphore2.value;
 
         auto inFlightCreateFenceResult = vkDevice.createFence(vk::FenceCreateInfo{ .flags = vk::FenceCreateFlagBits::eSignaled });
         if (inFlightCreateFenceResult.result != vk::Result::eSuccess)
@@ -147,16 +147,14 @@ bool SwapChain::acquireNextImage()
         assert(false && "Failed to reset fence");
 
     constexpr std::chrono::nanoseconds timeout = std::chrono::seconds(10);
-    auto imageResult = vkDevice.acquireNextImageKHR(m_swapChain, timeout.count(), syncObjects.imageAvailable);
+    auto imageResult = vkDevice.acquireNextImageKHR(m_swapChain, timeout.count(), syncObjects.presentComplete);
     switch (imageResult.result)
     {
     case vk::Result::eSuccess:
         break;
     case vk::Result::eSuboptimalKHR:
-        //assert(false && "SwapChain::acquireNextImage eSuboptimalKHR");
         return false;
     case vk::Result::eErrorOutOfDateKHR:
-        //assert(false && "SwapChain::acquireNextImage eErrorOutOfDateKHR");
         return false;
     default:
         assert(false && "Failed to acquire next image");
@@ -181,18 +179,17 @@ void SwapChain::submitCommandBuffer(CommandBuffer& commandBuffer)
     SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
     vk::PipelineStageFlags2 waitStage = { vk::PipelineStageFlagBits2::eColorAttachmentOutput };
     commandBuffer.setWaitStage(waitStage);
-    commandBuffer.addWaitSemaphore(syncObjects.imageAvailable, vk::PipelineStageFlagBits::eColorAttachmentOutput);
-    commandBuffer.addSignalSemaphore(syncObjects.renderFinished);
+    commandBuffer.addWaitSemaphore(syncObjects.presentComplete, vk::PipelineStageFlagBits::eColorAttachmentOutput);
+    commandBuffer.addSignalSemaphore(m_syncObjects[m_currentImageIdx].renderComplete);
     commandBuffer.submitGraphics(syncObjects.inFlight);
 }
 
 bool SwapChain::present()
 {
     vk::PipelineStageFlags2 waitStage = { vk::PipelineStageFlagBits2::eColorAttachmentOutput };
-    SyncObjects& syncObjects = m_syncObjects[m_currentFrame];
     vk::PresentInfoKHR presentInfo{
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &syncObjects.renderFinished,
+        .pWaitSemaphores = &m_syncObjects[m_currentImageIdx].renderComplete,
         .swapchainCount = 1,
         .pSwapchains = &m_swapChain,
         .pImageIndices = &m_currentImageIdx,
@@ -204,10 +201,8 @@ bool SwapChain::present()
     case vk::Result::eSuccess:
         break;
     case vk::Result::eSuboptimalKHR:
-        //assert(false && "SwapChain::present eSuboptimalKHR");
         return false;
     case vk::Result::eErrorOutOfDateKHR:
-        //assert(false && "SwapChain::present eErrorOutOfDateKHR");
         return false;
     default:
         assert(false && "Failed to present image");

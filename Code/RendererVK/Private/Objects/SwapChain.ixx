@@ -21,8 +21,8 @@ public:
 
     struct SyncObjects
     {
-        vk::Semaphore imageAvailable;
-        vk::Semaphore renderFinished;
+        vk::Semaphore presentComplete;
+        vk::Semaphore renderComplete;
         vk::Fence inFlight;
         bool isInFlight = false;
     };
@@ -51,6 +51,6 @@ private:
     Layout m_layout;
 
     uint32 m_currentFrame = 0;
-    uint32 m_currentImageIdx = 0;
+    uint32 m_currentImageIdx = (~0u);
     std::vector<SyncObjects> m_syncObjects;
 };
