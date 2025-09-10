@@ -96,7 +96,6 @@ private:
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform> m_renderNodeTransforms;
     std::vector<uint32> m_numInstancesPerMesh;
-    std::vector<RendererVKLayout::InMeshInstance> m_meshInstances;
 
     std::vector<uint32> m_freeRenderNodeIndexes;
 

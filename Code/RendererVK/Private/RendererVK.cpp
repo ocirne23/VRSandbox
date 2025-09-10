@@ -78,9 +78,9 @@ bool RendererVK::initialize(Window& window, EValidation validation, EVSync vsync
         perFrame.imguiCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
 
         perFrame.ubo.initialize(sizeof(RendererVKLayout::Ubo),
-            vk::BufferUsageFlagBits::eUniformBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
-        perFrame.mappedUniformBuffer = (RendererVKLayout::Ubo*)perFrame.ubo.mapMemory().data();
+            vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
+        //perFrame.mappedUniformBuffer = (RendererVKLayout::Ubo*)perFrame.ubo.mapMemory().data();
 
         perFrame.inRenderNodeTransformsBuffer.initialize(RendererVKLayout::MAX_RENDER_NODES * sizeof(RendererVKLayout::RenderNodeTransform),
             vk::BufferUsageFlagBits::eStorageBuffer,
@@ -197,11 +197,17 @@ const Frustum& RendererVK::beginFrame(const Camera& camera)
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    frameData.mappedUniformBuffer->mvp = projection * viewMatrix;
-    frameData.mappedUniformBuffer->frustum.fromMatrix(frameData.mappedUniformBuffer->mvp);
-    frameData.mappedUniformBuffer->viewPos = camera.position;
+    static RendererVKLayout::Ubo ubo;
+    ubo.mvp = projection * viewMatrix;
+    ubo.frustum.fromMatrix(ubo.mvp);
+    ubo.viewPos = camera.position; 
+    m_stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
-    return frameData.mappedUniformBuffer->frustum;
+    //frameData.mappedUniformBuffer->mvp = projection * viewMatrix;
+    //frameData.mappedUniformBuffer->frustum.fromMatrix(frameData.mappedUniformBuffer->mvp);
+    //frameData.mappedUniformBuffer->viewPos = camera.position;
+
+    return ubo.frustum;
 }
 
 void RendererVK::renderNodeThreadSafe(const RenderNode& node)
@@ -228,6 +234,7 @@ void RendererVK::renderNode(const RenderNode& node)
         m_numInstancesPerMesh[pair.first] += pair.second;
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
+    //m_stagingManager.upload(frameData.inMeshInstancesBuffer.getBuffer(), )
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
 }
 
@@ -276,12 +283,12 @@ void RendererVK::present()
     } });
     assert(flushFirstInstancesResult == vk::Result::eSuccess && "Failed to flush first instances memory range");
 
-    auto flushUBOResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
-        .memory = frameData.ubo.getMemory(), .offset = 0, .size = vk::WholeSize
-    } });
-    assert(flushUBOResult == vk::Result::eSuccess && "Failed to flush UBO memory range");
+    //auto flushUBOResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
+    //    .memory = frameData.ubo.getMemory(), .offset = 0, .size = vk::WholeSize
+    //} });
+    //assert(flushUBOResult == vk::Result::eSuccess && "Failed to flush UBO memory range");
 
-    (void)flushRenderNodeTransformsResult; (void)flushMeshInstancesResult; (void)flushFirstInstancesResult; (void)flushUBOResult;
+    (void)flushRenderNodeTransformsResult; (void)flushMeshInstancesResult; (void)flushFirstInstancesResult; //(void)flushUBOResult;
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_stagingManager.update();

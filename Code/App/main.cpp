@@ -55,9 +55,9 @@ int main()
     }
 
    std::vector<RenderNode> spawnedNodes;
-   for (int x = 0; x < 25; ++x)
-       for (int y = 0; y < 25; ++y)
-           spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::normalize(glm::quat(0.7, 0.3, 0.5, 0)))));
+   for (int x = 0; x < 50; ++x)
+       for (int y = 0; y < 50; ++y)
+           spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
 
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {

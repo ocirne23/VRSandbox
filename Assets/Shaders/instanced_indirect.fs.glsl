@@ -82,15 +82,26 @@ float environmentContrib(float roughness, float NdotV)
 	return a * a * a;
 }
 
+vec3 applyFog(vec3 rgb, float distance, vec3 rayOri, vec3 rayDir)
+{
+	float c = 0.3;
+	float b = 0.02;
+	vec3 fogColor = vec3(0.5, 0.6, 0.7);
+	float fogAmount = clamp(c * exp(-rayOri.y * b) * (1.0 - exp(-distance * rayDir.y * b)) / rayDir.y, 0.0, 1.0);
+	return mix(rgb, fogColor, fogAmount);
+}
+
 void main()
 {
+    const float ambient = 0.05f;
 	vec3 lightPos  = vec3(75, 20, 75);
 	vec3 lightVec  = lightPos - in_pos;
 	float distance = length(lightVec);
 	float falloff  = inverseSquareFalloff(distance, 5000);
 	float intensity = 2500.0;
 
-	vec3 V = normalize(u_viewPos - in_pos);
+	vec3 eyeVec = u_viewPos - in_pos;
+	vec3 V = normalize(eyeVec);
 	vec3 L = normalize(lightVec);
 	vec3 H = normalize(L + V);
 	vec3 N = normalize(in_tbn * vec3(0,0,1));
@@ -103,13 +114,15 @@ void main()
 
 	uint16_t materialIdx = uint16_t((in_meshIdxMaterialIdx & 0xFFFF0000) >> 16);
 	vec3 materialColor = in_materialInfos[materialIdx].baseColor;
-	float roughness    = in_materialInfos[materialIdx].roughness;
+	//vec3 specularColor = in_materialInfos[materialIdx].specularColor;
+	vec3 specularColor = mix(vec3(0.04), materialColor, in_materialInfos[materialIdx].metalness);
+	float roughness = in_materialInfos[materialIdx].roughness;
 
 	float specular = NdotL > 0.0 ? specularBRDF(NdotH, LdotH, roughness) : 0.0;
 	float env      = environmentContrib(roughness, NdotV);
 
 	vec3 diffuse = diffuseOrenNayar(materialColor, roughness, NdotV, NdotL, VdotH);
-	vec3 color = (diffuse + (specular + env) * materialColor) * falloff * intensity;
-	color += materialColor * 0.025;
-	out_color = color;
+	vec3 color = (diffuse + (specular + env) * specularColor) * falloff * intensity;
+	color += materialColor * ambient;
+	out_color = color;// applyFog(color, length(eyeVec), u_viewPos, V);
 }
