@@ -29,6 +29,9 @@ export class RenderNode;
 export struct Camera;
 export struct Frustum;
 
+export enum class EValidation { ENABLED, DISABLED };
+export enum class EVSync { ENABLED, DISABLED };
+
 export class RendererVK final
 {
 public:
@@ -37,7 +40,7 @@ public:
     ~RendererVK();
     RendererVK(const RendererVK&) = delete;
 
-    bool initialize(Window& window, bool enableValidationLayers);
+    bool initialize(Window& window, EValidation validation, EVSync vsync);
 
     const Frustum& beginFrame(const Camera& camera);
     void renderNodeThreadSafe(const RenderNode& node);

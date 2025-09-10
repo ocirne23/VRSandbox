@@ -43,12 +43,12 @@ export namespace RendererVKLayout
         uint32 _padding;
     };
 
-    struct alignas(16) OutMeshInstance
+    struct OutMeshInstance
     {
-        Transform transform;
+        glm::vec3 translation;
+        float scale;
+        glm::vec4 quat;
         uint32 meshIdxMaterialIdx;
-    private:
-        uint32 _padding[3];
     };
 
     struct alignas(16) MeshInfo

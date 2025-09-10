@@ -39,7 +39,7 @@ RendererVK::~RendererVK()
     ImGui_ImplVulkan_Shutdown();
 }
 
-bool RendererVK::initialize(Window& window, bool enableValidationLayers)
+bool RendererVK::initialize(Window& window, EValidation validation, EVSync vsync)
 {
     // Disable layers we don't care about for now to eliminate potential issues
     _putenv("DISABLE_LAYER_NV_OPTIMUS_1=True");
@@ -48,7 +48,8 @@ bool RendererVK::initialize(Window& window, bool enableValidationLayers)
     _putenv("DISABLE_VULKAN_OBS_CAPTURE=True");
 
     glslang::InitializeProcess();
-
+    const bool enableValidationLayers = (validation == EValidation::ENABLED);
+    m_vsyncEnabled = (vsync == EVSync::ENABLED);
     Globals::instance.initialize(window, enableValidationLayers);
     Globals::instance.setBreakOnValidationLayerError(enableValidationLayers);
     Globals::device.initialize();
@@ -396,6 +397,16 @@ void RendererVK::recordCommandBuffers()
 
     CommandBuffer& commandBuffer = frameData.primaryCommandBuffer;
     vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);
+    /*
+    {
+        vk::MemoryBarrier2 memoryBarrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eHost,
+            .srcAccessMask = vk::AccessFlagBits2::eHostWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader | vk::PipelineStageFlagBits2::eFragmentShader,
+            .dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead,
+        };
+        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
+    }*/
 
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
     vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);

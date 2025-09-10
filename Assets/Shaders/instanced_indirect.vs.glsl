@@ -55,3 +55,15 @@ void main()
 
     gl_Position = u_mvp * vec4(out_pos, 1.0);
 }
+
+/*mat3 version
+void main()
+{
+    out_pos = in_instances[inst_idx].rotation * (in_pos * in_instances[inst_idx].scale) + in_instances[inst_idx].translation;
+    out_tbn = in_instances[inst_idx].rotation * mat3(in_tangent.xyz, cross(in_normal, in_tangent.xyz) * in_tangent.w, in_normal);
+    out_uv  = in_uv;
+    out_meshIdxMaterialIdx = in_instances[inst_idx].meshIdxMaterialIdx;
+
+    gl_Position = u_mvp * vec4(out_pos, 1.0);
+}
+*/

@@ -141,3 +141,56 @@ void main()
         out_meshInstances[instanceIdx].meshIdxMaterialIdx = in_instances[instanceIdx].meshIdxMaterialIdx;
     }
 }
+
+/*
+mat3 quat_to_mat3(vec4 q)
+{
+    vec3 q2   = q.xyz + q.xyz;
+    vec3 xyz2 = q.xyz * q2;
+    vec3 wq2  = q.w * q2;
+    float xy2 = q.x * q2.y;
+    float xz2 = q.x * q2.z;
+    float yz2 = q.y * q2.z;
+
+    return mat3(
+        1.0 - (xyz2.y + xyz2.z), xy2 + wq2.z,             xz2 - wq2.y,
+        xy2 - wq2.z,             1.0 - (xyz2.x + xyz2.z), yz2 + wq2.x,
+        xz2 + wq2.y,             yz2 - wq2.x,             1.0 - (xyz2.x + xyz2.y)
+    );
+}
+
+//mat3 version
+void main()
+{
+    const uint instanceIdx   = gl_GlobalInvocationID.x;
+    const uint16_t meshIdx   = uint16_t(in_instances[instanceIdx].meshIdxMaterialIdx & 0x0000FFFF);
+    const uint renderNodeIdx = in_instances[instanceIdx].renderNodeIdx;
+    const uint offsetIdx     = in_instances[instanceIdx].instanceOffsetIdx;
+
+    out_indirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
+    out_indirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
+    out_indirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
+    out_indirectCommands[meshIdx].firstInstance = in_firstInstances[meshIdx];
+
+    const mat3 renderNodeRotMat = quat_to_mat3(in_renderNodeTransforms[renderNodeIdx].quat);
+    const mat3 instOffsetRotMat = quat_to_mat3(in_instanceOffsets[offsetIdx].quat);
+    const mat3 instanceRotMat   = renderNodeRotMat * instOffsetRotMat;
+
+    const vec3 instancePos      = in_renderNodeTransforms[renderNodeIdx].posScale.xyz + ((renderNodeRotMat * in_instanceOffsets[offsetIdx].posScale.xyz) * in_renderNodeTransforms[renderNodeIdx].posScale.w);
+    const float instanceScale   = in_renderNodeTransforms[renderNodeIdx].posScale.w * in_instanceOffsets[offsetIdx].posScale.w;
+
+    const vec3 centerPos        = instanceRotMat * in_meshInfos[meshIdx].center * instanceScale;
+    const float radius          = in_meshInfos[meshIdx].radius * instanceScale;
+
+    if (frustumCheck(instancePos + centerPos, radius))
+    {
+        const uint idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
+        out_meshInstanceIndexes[in_firstInstances[meshIdx] + idx] = instanceIdx;
+        out_meshInstances[instanceIdx].translation = instancePos;
+        out_meshInstances[instanceIdx].scale       = instanceScale;
+        out_meshInstances[instanceIdx].rotation    = instanceRotMat;
+        out_meshInstances[instanceIdx].meshIdxMaterialIdx = in_instances[instanceIdx].meshIdxMaterialIdx;
+    }
+}
+
+*/

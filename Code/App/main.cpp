@@ -27,10 +27,10 @@ int main()
     input.initialize();
 
     FreeFlyCameraController cameraController;
-    cameraController.initialize(glm::vec3(0.0f, 0.0f, -10.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    cameraController.initialize(glm::vec3(-90.0f, 90.0f, -90.0f), glm::vec3(100.0f, 20.0f, 120.0f));
 
     RendererVK& renderer = Globals::rendererVK;
-    renderer.initialize(window, true);
+    renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
 
     UI& ui = Globals::ui;
     ui.initialize();
@@ -49,6 +49,7 @@ int main()
     ObjectContainer boatContainer;
     {
         SceneData sceneData;
+        //sceneData.initialize("Models/dragon.glb", true, true);
         sceneData.initialize("Models/ship_dark.glb", true, true);
         boatContainer.initialize(sceneData);
     }
@@ -56,7 +57,7 @@ int main()
    std::vector<RenderNode> spawnedNodes;
    for (int x = 0; x < 25; ++x)
        for (int y = 0; y < 25; ++y)
-           spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::quat(1, 0, 0, 0))));
+           spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::normalize(glm::quat(0.7, 0.3, 0.5, 0)))));
 
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {
@@ -72,8 +73,7 @@ int main()
             return Timer::REPEAT;
         });
     
-    Timer titleUpdateTimer(std::chrono::milliseconds(100), [&](Timer& timer)
-        {
+    Timer titleUpdateTimer(std::chrono::milliseconds(100), [&](Timer& timer) {
             glm::vec3 pos = cameraController.getPosition();
             glm::vec3 dir = cameraController.getDirection();
             char windowTitleBuf[256];
@@ -83,16 +83,6 @@ int main()
             window.setTitle(windowTitleBuf);
             return Timer::REPEAT;
         });
-
-
-   ObjectContainer baseShapeContainer;
-   const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
-   {
-       SceneData sceneData;
-       sceneData.initialize("Models/baseshapes.glb", false, false);
-       baseShapeContainer.initialize(sceneData);
-   }
-   RenderNode sphereNode = baseShapeContainer.spawnNodeForPath("ROOT/Sphere", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1, 0, 0, 0)));
 
     while (running)
     {
