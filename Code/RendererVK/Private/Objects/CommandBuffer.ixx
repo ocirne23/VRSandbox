@@ -7,9 +7,10 @@ export struct DescriptorSetUpdateInfo
 {
     uint32 binding;
     uint32 startIdx = 0;
-    uint32 count = 1;
     vk::DescriptorType type;
-    std::variant<vk::DescriptorBufferInfo, vk::DescriptorImageInfo> info;
+    std::vector<vk::DescriptorBufferInfo> bufferInfos;
+    std::vector<vk::DescriptorImageInfo> imageInfos;
+    //std::variant<vk::DescriptorBufferInfo, vk::DescriptorImageInfo> info;
 };
 
 export class CommandBuffer final
@@ -34,7 +35,7 @@ public:
     const std::vector<vk::Semaphore>& getWaitSemaphores() const { return m_waitSemaphores; }
     const std::vector<vk::Semaphore>& getSignalSemaphores() const { return m_signalSemaphores; }
     void setWaitStage(vk::PipelineStageFlags2 stage) { m_waitStage = stage; }
-    void cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, vk::PipelineBindPoint bindPoint, const std::span<DescriptorSetUpdateInfo>& updateInfo);
+    void cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, vk::PipelineBindPoint bindPoint, vk::DescriptorSet descriptorSet, const std::span<DescriptorSetUpdateInfo>& updateInfo);
 
 private:
 

@@ -68,7 +68,8 @@ export namespace RendererVKLayout
         glm::vec3 specularColor;
         float metalness;
         glm::vec3 emissiveColor;
-        uint32 flags;
+        uint16 diffuseTexIdx;
+        uint16 normalTexIdx;
     };
 
     struct MeshVertex

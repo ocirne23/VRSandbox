@@ -60,7 +60,7 @@ vk::Semaphore StagingManager::upload(vk::Buffer dstBuffer, vk::DeviceSize dataSi
 {
     assert(dataSize <= m_mappedMemory.size());
     if (m_currentBufferOffset + dataSize > m_mappedMemory.size())
-        update();
+        m_nextUpdateSemaphore = update();
 
     assert(m_currentBufferOffset + dataSize <= m_mappedMemory.size());
     memcpy(m_mappedMemory.data() + m_currentBufferOffset, data, dataSize);
@@ -74,7 +74,7 @@ vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth,
 {
     assert(dataSize <= m_mappedMemory.size());
     if (m_currentBufferOffset + dataSize > m_mappedMemory.size())
-        update();
+        m_nextUpdateSemaphore = update();
 
     vk::BufferImageCopy bufferImageCopy{
         .bufferOffset = m_currentBufferOffset,
@@ -87,6 +87,8 @@ vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth,
         .imageExtent = { imageWidth, imageHeight, 1 }
     };
 
+    uint8* pixels = (uint8*)data;
+    assert(pixels[69] > 0 || pixels[69] == 0);
     assert(m_currentBufferOffset + dataSize <= m_mappedMemory.size());
     memcpy(m_mappedMemory.data() + m_currentBufferOffset, data, dataSize);
     m_imageCopyRegions.emplace_back(std::pair<vk::Image, vk::BufferImageCopy>{ dstImage, bufferImageCopy });
@@ -95,10 +97,14 @@ vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth,
     return m_semaphores[m_currentBuffer];
 }
 
-void StagingManager::update()
+vk::Semaphore StagingManager::update()
 {
     if (m_bufferCopyRegions.empty() && m_imageCopyRegions.empty())
-        return;
+    {
+        vk::Semaphore semaphore = m_nextUpdateSemaphore;
+        m_nextUpdateSemaphore = VK_NULL_HANDLE;
+		return semaphore;
+    }
     vk::Device vkDevice = Globals::device.getDevice();
 
     vk::Result result = vkDevice.waitForFences(1, &m_fences[m_currentBuffer], vk::True, UINT64_MAX);
@@ -118,6 +124,8 @@ void StagingManager::update()
         assert(false && "Failed to flush memory");
     }
     CommandBuffer& commandBuffer = m_commandBuffers[m_currentBuffer];
+    if (m_nextUpdateSemaphore)
+		commandBuffer.addWaitSemaphore(m_nextUpdateSemaphore, vk::PipelineStageFlagBits::eTransfer);
     commandBuffer.addSignalSemaphore(m_semaphores[m_currentBuffer]);
     vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);
 
@@ -170,11 +178,14 @@ void StagingManager::update()
 
     commandBuffer.end();
     commandBuffer.submitGraphics(m_fences[m_currentBuffer]);
-    Globals::rendererVK.getCurrentCommandBuffer().addWaitSemaphore(m_semaphores[m_currentBuffer], vk::PipelineStageFlagBits::eVertexInput);
+
+    vk::Semaphore semaphore = m_semaphores[m_currentBuffer];
+    m_nextUpdateSemaphore = VK_NULL_HANDLE;
 
     m_currentBuffer = (m_currentBuffer + 1) % NUM_STAGING_BUFFERS;
     m_currentBufferOffset = 0;
     m_bufferCopyRegions.clear();
     m_imageCopyRegions.clear();
     m_mappedMemory = m_mappedStagingBuffers[m_currentBuffer];
+    return semaphore;
 }

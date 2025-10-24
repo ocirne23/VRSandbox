@@ -23,6 +23,7 @@ public:
     const std::string& getFilePath() const { return m_filePath; }
     const std::vector<MeshData>& getMeshes() const { return m_meshes; }
     const std::vector<MaterialData>& getMaterials() const { return m_materials; }
+	const std::vector<TextureData>& getTextures() const { return m_textures; }
     const NodeData& getRootNode() const { return m_rootNode; }
 
     const MeshData* getMesh(const char* pMeshName) const;

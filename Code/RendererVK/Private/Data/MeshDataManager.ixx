@@ -4,7 +4,6 @@ import Core;
 import RendererVK.Layout;
 import RendererVK.Buffer;
 
-export class StagingManager;
 export class MeshData;
 
 export class MeshDataManager final
@@ -15,7 +14,7 @@ public:
     ~MeshDataManager();
     MeshDataManager(const MeshDataManager&) = delete;
 
-    bool initialize(StagingManager& stagingManager, size_t vertexBufSize, size_t indexBufSize);
+    bool initialize(size_t vertexBufSize, size_t indexBufSize);
 
     Buffer& getVertexBuffer() { return m_vertexBuffer; }
     Buffer& getIndexBuffer() { return m_indexBuffer; }
@@ -34,8 +33,6 @@ private:
 
 private:
 
-    StagingManager* m_stagingManager = nullptr;
-
     Buffer m_vertexBuffer;
     Buffer m_indexBuffer;
 
@@ -45,3 +42,8 @@ private:
     size_t m_vertexBufOffset = 0;
     size_t m_indexBufOffset = 0;
 };
+
+export namespace Globals
+{
+    MeshDataManager meshDataManager;
+}

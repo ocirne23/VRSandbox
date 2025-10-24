@@ -6,8 +6,10 @@ import Core.Sphere;
 import RendererVK.Layout;
 import RendererVK.Transform;
 import RendererVK.Buffer;
+import RendererVK.Texture;
 
 export class SceneData;
+export class TextureData;
 export class MeshData;
 export class MaterialData;
 export class NodeData;
@@ -42,6 +44,7 @@ public:
 
 private:
 
+    void initializeTextures(const std::vector<TextureData>& textureData);
     void initializeMeshes(const std::vector<MeshData>& meshData);
     void initializeMaterials(const std::vector<MaterialData>& materialData);
     void initializeNodes(const NodeData& nodeData);
@@ -72,6 +75,9 @@ private:
     uint32 m_baseMeshInstanceOffsetsIdx = 0;
     uint16 m_baseMeshInfoIdx = 0;
     uint16 m_baseMaterialInfoIdx = 0;
+
+    uint16 m_baseTextureIdx = 0;
+    uint16 m_numTextures = 0;
 
     std::vector<std::string> m_meshNames;
     std::vector<std::string> m_materialNames;

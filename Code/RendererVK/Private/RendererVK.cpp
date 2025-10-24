@@ -12,6 +12,7 @@ import File.FileSystem;
 
 import RendererVK.RenderNode;
 import RendererVK.VK;
+import RendererVK.StagingManager;
 import RendererVK.glslang;
 import RendererVK.Layout;
 import RendererVK.ObjectContainer;
@@ -59,19 +60,22 @@ bool RendererVK::initialize(Window& window, EValidation validation, EVSync vsync
     assert(m_surface.deviceSupportsSurface());
 
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
-    m_stagingManager.initialize();
-    m_meshDataManager.initialize(m_stagingManager, VERTEX_DATA_SIZE, INDEX_DATA_SIZE);
+    Globals::stagingManager.initialize();
+    Globals::meshDataManager.initialize(VERTEX_DATA_SIZE, INDEX_DATA_SIZE);
 
     m_renderPass.initialize(m_swapChain);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
 
-    m_staticMeshGraphicsPipeline.initialize(m_renderPass, m_stagingManager);
+    m_staticMeshGraphicsPipeline.initialize(m_renderPass);
     m_indirectCullComputePipeline.initialize();
 
     vk::Device vkDevice = Globals::device.getDevice();
 
     for (PerFrameData& perFrame : m_perFrameData)
     {
+        perFrame.indirectCullPipelineDescriptorSet.initialize(m_indirectCullComputePipeline.getDescriptorSetLayout());
+        perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout());
+
         perFrame.primaryCommandBuffer.initialize(vk::CommandBufferLevel::ePrimary);
         perFrame.indirectCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.staticMeshRenderCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -201,11 +205,7 @@ const Frustum& RendererVK::beginFrame(const Camera& camera)
     ubo.mvp = projection * viewMatrix;
     ubo.frustum.fromMatrix(ubo.mvp);
     ubo.viewPos = camera.position; 
-    m_stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
-
-    //frameData.mappedUniformBuffer->mvp = projection * viewMatrix;
-    //frameData.mappedUniformBuffer->frustum.fromMatrix(frameData.mappedUniformBuffer->mvp);
-    //frameData.mappedUniformBuffer->viewPos = camera.position;
+    Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
     return ubo.frustum;
 }
@@ -234,7 +234,6 @@ void RendererVK::renderNode(const RenderNode& node)
         m_numInstancesPerMesh[pair.first] += pair.second;
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-    //m_stagingManager.upload(frameData.inMeshInstancesBuffer.getBuffer(), )
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
 }
 
@@ -283,15 +282,14 @@ void RendererVK::present()
     } });
     assert(flushFirstInstancesResult == vk::Result::eSuccess && "Failed to flush first instances memory range");
 
-    //auto flushUBOResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
-    //    .memory = frameData.ubo.getMemory(), .offset = 0, .size = vk::WholeSize
-    //} });
-    //assert(flushUBOResult == vk::Result::eSuccess && "Failed to flush UBO memory range");
-
     (void)flushRenderNodeTransformsResult; (void)flushMeshInstancesResult; (void)flushFirstInstancesResult; //(void)flushUBOResult;
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
-    m_stagingManager.update();
+    vk::Semaphore waitSemaphore = Globals::stagingManager.update();
+    if (waitSemaphore != VK_NULL_HANDLE)
+    {
+		frameData.primaryCommandBuffer.addWaitSemaphore(waitSemaphore, vk::PipelineStageFlagBits::eTransfer);
+    }
 
     if (!m_swapChain.acquireNextImage())
     {
@@ -341,6 +339,7 @@ void RendererVK::recordCommandBuffers()
             indirectCullCommandBuffer.begin(false, &indirectInheritanceInfo);
             IndirectCullComputePipeline::RecordParams cullParams
             {
+                .descriptorSet = frameData.indirectCullPipelineDescriptorSet,
                 .ubo = frameData.ubo,
                 .inRenderNodeTransformsBuffer = frameData.inRenderNodeTransformsBuffer,
                 .inMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
@@ -370,9 +369,10 @@ void RendererVK::recordCommandBuffers()
             vkStaticMeshCommandBuffer.setScissor(0, { scissor });
             StaticMeshGraphicsPipeline::RecordParams drawParams
             {
+                .descriptorSet = frameData.staticMeshPipelineDescriptorSet,
                 .ubo = frameData.ubo,
-                .vertexBuffer = m_meshDataManager.getVertexBuffer(),
-                .indexBuffer = m_meshDataManager.getIndexBuffer(),
+                .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+                .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
                 .materialInfoBuffer = m_materialInfosBuffer,
                 .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
                 .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
@@ -444,7 +444,7 @@ uint32 RendererVK::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& m
     assert(m_meshInfoCounter < USHRT_MAX);
     assert(m_meshInfoCounter < RendererVKLayout::MAX_UNIQUE_MESHES);
 
-    m_stagingManager.upload(m_meshInfosBuffer.getBuffer(), meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
+    Globals::stagingManager.upload(m_meshInfosBuffer.getBuffer(), meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
         meshInfos.data(), baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
 
     setHaveToRecordCommandBuffers();
@@ -458,7 +458,7 @@ uint32 RendererVK::addMaterialInfos(const std::vector<RendererVKLayout::Material
     assert(m_materialInfoCounter < USHRT_MAX);
     assert(m_materialInfoCounter < RendererVKLayout::MAX_UNIQUE_MATERIALS);
 
-    m_stagingManager.upload(m_materialInfosBuffer.getBuffer(), materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
+    Globals::stagingManager.upload(m_materialInfosBuffer.getBuffer(), materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
         materialInfos.data(), baseMaterialInfoIdx * sizeof(RendererVKLayout::MaterialInfo));
 
     setHaveToRecordCommandBuffers();
@@ -471,7 +471,7 @@ uint32 RendererVK::addMeshInstanceOffsets(const std::vector<RendererVKLayout::Me
     m_instanceOffsetCounter += (uint32)meshInstanceOffsets.size();
     assert(m_instanceOffsetCounter < RendererVKLayout::MAX_INSTANCE_OFFSETS);
 
-    m_stagingManager.upload(m_instanceOffsetsBuffer.getBuffer(), meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
+    Globals::stagingManager.upload(m_instanceOffsetsBuffer.getBuffer(), meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
         meshInstanceOffsets.data(), baseInstanceOffsetIdx * sizeof(RendererVKLayout::MeshInstanceOffset));
 
     setHaveToRecordCommandBuffers();

@@ -119,74 +119,92 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
         DescriptorSetUpdateInfo{ // UBO
             .binding = 0,
             .type = vk::DescriptorType::eUniformBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = recordParams.ubo.getBuffer(),
-                .range = sizeof(RendererVKLayout::Ubo),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.ubo.getBuffer(),
+                    .range = sizeof(RendererVKLayout::Ubo),
+                }
             }
         },
         DescriptorSetUpdateInfo{ // InRenderNodeTransformsBuffer
             .binding = 1,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = recordParams.inRenderNodeTransformsBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_RENDER_NODES * sizeof(RendererVKLayout::RenderNodeTransform),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inRenderNodeTransformsBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_RENDER_NODES * sizeof(RendererVKLayout::RenderNodeTransform),
+                }
             }
         },
         DescriptorSetUpdateInfo{ // InMeshInstancesBuffer
             .binding = 2,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = recordParams.inMeshInstancesBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::InMeshInstance),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inMeshInstancesBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::InMeshInstance),
+                }
             }
         },
         DescriptorSetUpdateInfo{ // InMeshInstanceOffsetsBuffer
             .binding = 3,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = recordParams.inMeshInstanceOffsetsBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_INSTANCE_OFFSETS * sizeof(RendererVKLayout::MeshInstanceOffset),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inMeshInstanceOffsetsBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_INSTANCE_OFFSETS * sizeof(RendererVKLayout::MeshInstanceOffset),
+                }
             }
         },
         DescriptorSetUpdateInfo{ // InMeshInfoBuffer
             .binding = 4,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = recordParams.inMeshInfoBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::MeshInfo),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inMeshInfoBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::MeshInfo),
+                }
             }
         },
         DescriptorSetUpdateInfo{ // InFirstInstancesBuffer
             .binding = 5,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = recordParams.inFirstInstancesBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(uint32),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inFirstInstancesBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(uint32),
+                }
             }
         },
 
         DescriptorSetUpdateInfo{ // OutMeshInstancesBuffer
             .binding = 6,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = frameData.outMeshInstancesBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutMeshInstance),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = frameData.outMeshInstancesBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutMeshInstance),
+                }
             }
         },
         DescriptorSetUpdateInfo{ // OutMeshInstanceIndexesBuffer
             .binding = 7,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = frameData.outMeshInstanceIndexesBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(uint32),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = frameData.outMeshInstanceIndexesBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(uint32),
+                }
             }
         },
         DescriptorSetUpdateInfo{ // OutIndirectCommandBuffer
             .binding = 8,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = frameData.outIndirectCommandBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(vk::DrawIndexedIndirectCommand),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = frameData.outIndirectCommandBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(vk::DrawIndexedIndirectCommand),
+                }
             }
         }
     };
@@ -194,9 +212,10 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
     // Compute shader frustum cull and indirect command buffer generation
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
     {
+        vk::DescriptorSet descriptorSet = recordParams.descriptorSet.getDescriptorSet();
         vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
-        commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, computeDescriptorSetUpdateInfos);
-
+        commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, descriptorSet, computeDescriptorSetUpdateInfos);
+        vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
         vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * sizeof(vk::DrawIndexedIndirectCommand), 0);
         
         {

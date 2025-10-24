@@ -16,32 +16,55 @@ GraphicsPipeline::~GraphicsPipeline()
         vkDevice.destroyPipelineCache(m_pipelineCache);
     if (m_pipelineLayout)
         vkDevice.destroyPipelineLayout(m_pipelineLayout);
-    if (m_descriptorSetLayout)
-        vkDevice.destroyDescriptorSetLayout(m_descriptorSetLayout);
+    if (m_pushDescriptorSetLayout)
+        vkDevice.destroyDescriptorSetLayout(m_pushDescriptorSetLayout);
 }
 
 bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipelineLayout& layout)
 {
     vk::Device vkDevice = Globals::device.getDevice();
+    //uint32 bindingCount = 0;
+    //for (vk::DescriptorSetLayoutBinding binding : layout.descriptorSetLayoutBindings)
+    //{
+    //    bindingCount += binding.descriptorCount;
+    //}   
+    std::vector<vk::DescriptorBindingFlags> layoutBindingFlags;
+    layoutBindingFlags.reserve(layout.descriptorSetLayoutBindings.size());
+    for (const auto& binding : layout.descriptorSetLayoutBindings)
+    {
+        (void)binding;
+        vk::DescriptorBindingFlags flags = {};
+        //if (layoutBindingFlags.size() + 1 == layout.descriptorSetLayoutBindings.size())
+        //    flags |= vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+        layoutBindingFlags.push_back(flags);
+    }
+    vk::DescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo
+    {
+        .bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
+        .pBindingFlags = layoutBindingFlags.data(),
+    };
+
     vk::DescriptorSetLayoutCreateInfo layoutInfo
     {
-        .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+        .pNext = &bindingFlagsInfo,
+        //.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
         .bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
         .pBindings = layout.descriptorSetLayoutBindings.data(),
     };
+
     auto createLayoutResult = vkDevice.createDescriptorSetLayout(layoutInfo);
     if (createLayoutResult.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to create descriptor set layout");
         return false;
     }
-    m_descriptorSetLayout = createLayoutResult.value;
+    m_pushDescriptorSetLayout = createLayoutResult.value;
 
     vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo
     {
         .flags = {},
         .setLayoutCount = 1,
-        .pSetLayouts = &m_descriptorSetLayout,
+        .pSetLayouts = &m_pushDescriptorSetLayout,
         .pushConstantRangeCount = (uint32)layout.pushConstantRanges.size(),
         .pPushConstantRanges = layout.pushConstantRanges.data(),
     };

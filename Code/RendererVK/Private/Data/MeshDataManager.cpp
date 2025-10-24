@@ -13,9 +13,8 @@ MeshDataManager::~MeshDataManager()
 {
 }
 
-bool MeshDataManager::initialize(StagingManager& stagingManager, size_t vertexBufSize, size_t indexBufSize)
+bool MeshDataManager::initialize(size_t vertexBufSize, size_t indexBufSize)
 {
-    m_stagingManager = &stagingManager;
     m_vertexBufSize = vertexBufSize;
     m_indexBufSize = indexBufSize;
 
@@ -29,7 +28,7 @@ size_t MeshDataManager::uploadVertexData(const void* pData, size_t size)
 {
     assert(m_vertexBufOffset + size <= m_vertexBufSize);
     const size_t offset = m_vertexBufOffset;
-    m_stagingManager->upload(m_vertexBuffer.getBuffer(), size, pData, m_vertexBufOffset);
+    Globals::stagingManager.upload(m_vertexBuffer.getBuffer(), size, pData, m_vertexBufOffset);
     m_vertexBufOffset += size;
     assert(m_vertexBufOffset <= m_vertexBufSize);
     return offset;
@@ -39,7 +38,7 @@ size_t MeshDataManager::uploadIndexData(const void* pData, size_t size)
 {
     assert(m_indexBufOffset + size <= m_indexBufSize);
     const size_t offset = m_indexBufOffset;
-    m_stagingManager->upload(m_indexBuffer.getBuffer(), size, pData, m_indexBufOffset);
+    Globals::stagingManager.upload(m_indexBuffer.getBuffer(), size, pData, m_indexBufOffset);
     m_indexBufOffset += size;
     assert(m_indexBufOffset <= m_indexBufSize);
     return offset;

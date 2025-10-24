@@ -50,14 +50,15 @@ int main()
     {
         SceneData sceneData;
         //sceneData.initialize("Models/dragon.glb", true, true);
-        sceneData.initialize("Models/ship_dark.glb", true, true);
+        //sceneData.initialize("Models/ship_dark.glb", true, true);
+        sceneData.initialize("Models/sponza.glb", true, true);
         boatContainer.initialize(sceneData);
     }
 
    std::vector<RenderNode> spawnedNodes;
-   for (int x = 0; x < 50; ++x)
-       for (int y = 0; y < 50; ++y)
-           spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 5.0f, 0, y * 8.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+   for (int x = 0; x < 10; ++x)
+       for (int y = 0; y < 10; ++y)
+           spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
 
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {

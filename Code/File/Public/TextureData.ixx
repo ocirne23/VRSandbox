@@ -16,12 +16,13 @@ public:
 
     struct Pixel
     {
-        char b, g, r, a;
+        char a, r, g, b;
     };
 
-    const Pixel* getPixels();
-    uint32 getWidth();
-    uint32 getHeight();
+    const Pixel* getPixels() const;
+    uint32 getWidth() const;
+    uint32 getHeight() const;
+    const char* getFormatInfo() const;
 
 private:
 

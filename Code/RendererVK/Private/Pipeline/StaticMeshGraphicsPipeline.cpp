@@ -8,16 +8,16 @@ import RendererVK.Buffer;
 import RendererVK.CommandBuffer;
 import RendererVK.Layout;
 import RendererVK.StagingManager;
-import RendererVK.MeshDataManager;
 import RendererVK.IndirectCullComputePipeline;
+import RendererVK.TextureManager;
 
 StaticMeshGraphicsPipeline::StaticMeshGraphicsPipeline() {}
 StaticMeshGraphicsPipeline::~StaticMeshGraphicsPipeline() {}
 
-bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass, StagingManager& stagingManager)
+bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
 {
-    //m_sampler.initialize();
-    //m_colorTex.initialize(stagingManager, "Textures/boat/color.dds", true);
+    m_sampler.initialize();
+    m_colorTex.initialize("Textures/boat/color.dds");
     //m_normalTex.initialize(stagingManager, "Textures/boat/normal.dds", false);
     //m_rmhTex.initialize(stagingManager, "Textures/boat/roughness_metallic_height.dds", false);
 
@@ -99,12 +99,12 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass, StagingManag
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
 
-    //descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_color
-    //    .binding = 3,
-    //    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-    //    .descriptorCount = 1,
-    //    .stageFlags = vk::ShaderStageFlagBits::eFragment
-    //});
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_color
+        .binding = 4,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = 1024,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
     //descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_normal
     //    .binding = 4,
     //    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
@@ -124,41 +124,42 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass, StagingManag
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
-    std::array<DescriptorSetUpdateInfo, 3> graphicsDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 4> graphicsDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo{
             .binding = 0,
             .type = vk::DescriptorType::eUniformBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = params.ubo.getBuffer(),
-                .range = sizeof(RendererVKLayout::Ubo),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = params.ubo.getBuffer(),
+                    .range = sizeof(RendererVKLayout::Ubo),
+                }
             }
         },
         DescriptorSetUpdateInfo{
             .binding = 1,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = params.meshInstanceBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutMeshInstance),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = params.meshInstanceBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutMeshInstance),
+                }
             }
         },
         DescriptorSetUpdateInfo{
             .binding = 2,
             .type = vk::DescriptorType::eStorageBuffer,
-            .info = vk::DescriptorBufferInfo {
-                .buffer = params.materialInfoBuffer.getBuffer(),
-                .range = RendererVKLayout::MAX_UNIQUE_MATERIALS * sizeof(RendererVKLayout::MaterialInfo),
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = params.materialInfoBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_UNIQUE_MATERIALS * sizeof(RendererVKLayout::MaterialInfo),
+                }
             }
-        }//,
-        //DescriptorSetUpdateInfo{
-        //    .binding = 3,
-        //    .type = vk::DescriptorType::eCombinedImageSampler,
-        //    .info = vk::DescriptorImageInfo {
-        //        .sampler = m_sampler.getSampler(),
-        //        .imageView = m_colorTex.getImageView(),
-        //        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-        //    }
-        //},
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 4,
+            .type = vk::DescriptorType::eCombinedImageSampler,
+        },
         //DescriptorSetUpdateInfo{
         //    .binding = 4,
         //    .type = vk::DescriptorType::eCombinedImageSampler,
@@ -179,9 +180,24 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
         //}
     };
 
+    const std::vector<Texture>& textures = Globals::textureManager.getTextures();
+    for (const Texture& tex : textures)
+    {
+        graphicsDescriptorSetUpdateInfos[3].imageInfos.push_back(
+            vk::DescriptorImageInfo{
+                .sampler = m_sampler.getSampler(),
+                .imageView = tex.getImageView(),
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            }
+        );
+    }
+    
+
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
-    commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, graphicsDescriptorSetUpdateInfos);
+    vk::DescriptorSet descriptorSet = params.descriptorSet.getDescriptorSet();
+    commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, descriptorSet, graphicsDescriptorSetUpdateInfos);
     vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
+    vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
     vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, {0});
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);

@@ -6,6 +6,7 @@ import RendererVK;
 import RendererVK.Transform;
 import RendererVK.MeshDataManager;
 import RendererVK.RenderNode;
+import RendererVK.TextureManager;
 
 constexpr char NODE_PATH_SEPARATOR = '/';
 constexpr char NODE_CHILD_SEPARATOR = ':';
@@ -15,10 +16,17 @@ bool ObjectContainer::initialize(const SceneData& sceneData)
     if (!sceneData.isValid())
         return false;
     Globals::rendererVK.addObjectContainer(this);
+    initializeTextures(sceneData.getTextures());
     initializeMaterials(sceneData.getMaterials());
     initializeMeshes(sceneData.getMeshes());
     initializeNodes(sceneData.getRootNode());
     return true;
+}
+
+void ObjectContainer::initializeTextures(const std::vector<TextureData>& textureData)
+{
+    m_baseTextureIdx = Globals::textureManager.upload(textureData);
+    m_numTextures = (uint16)textureData.size();
 }
 
 void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList)
@@ -28,10 +36,9 @@ void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList
     std::vector<RendererVKLayout::MeshInfo> meshInfos;
     meshInfos.reserve(numMeshes);
 
-    MeshDataManager& meshDataManager = Globals::rendererVK.m_meshDataManager;
+    MeshDataManager& meshDataManager = Globals::meshDataManager;
     for (const MeshData& meshData : meshDataList)
     {
-        uint32 meshInfoIdx = (uint32)meshInfos.size();
         RendererVKLayout::MeshInfo& meshInfo = meshInfos.emplace_back();
         m_meshNames.push_back(meshData.getName());
         m_materialIdxForMeshIdx.push_back((uint16)meshData.getMaterialIndex());
@@ -66,7 +73,7 @@ void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList
         meshInfo.firstIndex   = (uint32)(meshDataManager.uploadIndexData(indices.data(), indices.size() * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
         meshInfo.radius       = sphereBounds.radius;
         meshInfo.center       = sphereBounds.pos;
-        meshInfo.firstInstance = meshInfoIdx * 20;
+        meshInfo.firstInstance = 0;
     }
 
     m_baseMeshInfoIdx = (uint16)Globals::rendererVK.addMeshInfos(meshInfos);
@@ -104,7 +111,17 @@ void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& mater
         material.specularColor = materialData.getSpecularColor();
         material.metalness     = materialData.getMetalnessFactor();
         material.emissiveColor = materialData.getEmissiveColor() * materialData.getEmissiveIntensity();
-        material.flags         = 0;
+        const uint32 diffuseTexIdx = materialData.getDiffuseTexIdx();
+        if (diffuseTexIdx == UINT32_MAX || diffuseTexIdx >= UINT16_MAX)
+            material.diffuseTexIdx = 0; // todo fallback texture
+        else
+            material.diffuseTexIdx = (uint16)diffuseTexIdx;
+
+        const uint32 normalTexIdx = materialData.getNormalTexIdx();
+        if (normalTexIdx == UINT32_MAX || normalTexIdx >= UINT16_MAX)
+            material.normalTexIdx = 0; // todo fallback texture
+        else
+            material.normalTexIdx = (uint16)normalTexIdx;
 
         m_materialNames.push_back(materialData.getName());
     }

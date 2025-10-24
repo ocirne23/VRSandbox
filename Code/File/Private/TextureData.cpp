@@ -19,17 +19,22 @@ bool TextureData::initialize(const aiTexture* pTexture)
     return true;
 }
 
-const TextureData::Pixel* TextureData::getPixels()
+const TextureData::Pixel* TextureData::getPixels() const
 {
     return reinterpret_cast<const Pixel*>(m_pTexture->pcData);
 }
 
-uint32 TextureData::getWidth()
+uint32 TextureData::getWidth() const
 {
     return m_pTexture->mWidth;
 }
 
-uint32 TextureData::getHeight()
+uint32 TextureData::getHeight() const
 {
     return m_pTexture->mHeight;
+}
+
+const char* TextureData::getFormatInfo() const
+{
+    return m_pTexture->achFormatHint;
 }

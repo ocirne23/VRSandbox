@@ -31,6 +31,9 @@ public:
 
     std::string getTexturePath(TextureType type) const;
 
+    uint32 getDiffuseTexIdx() const;
+    uint32 getNormalTexIdx() const;
+
 private:
 
     const aiMaterial* m_pMaterial = nullptr;

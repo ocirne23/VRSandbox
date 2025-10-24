@@ -14,9 +14,8 @@ import RendererVK.RenderPass;
 import RendererVK.Framebuffers;
 import RendererVK.CommandBuffer;
 import RendererVK.Buffer;
-
-import RendererVK.StagingManager;
 import RendererVK.MeshDataManager;
+import RendererVK.DescriptorSet;
 
 import RendererVK.IndirectCullComputePipeline;
 import RendererVK.StaticMeshGraphicsPipeline;
@@ -85,10 +84,6 @@ private:
     SwapChain m_swapChain;
     RenderPass m_renderPass;
     Framebuffers m_framebuffers;
-    StagingManager m_stagingManager;
-
-    friend class ObjectContainer;
-    MeshDataManager m_meshDataManager;
 
     IndirectCullComputePipeline m_indirectCullComputePipeline;
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
@@ -110,6 +105,9 @@ private:
 
     struct PerFrameData
     {
+        DescriptorSet staticMeshPipelineDescriptorSet;
+        DescriptorSet indirectCullPipelineDescriptorSet;
+
         CommandBuffer primaryCommandBuffer;
         CommandBuffer indirectCullCommandBuffer;
         CommandBuffer staticMeshRenderCommandBuffer;

@@ -18,6 +18,7 @@ public:
     vk::PhysicalDevice getPhysicalDevice() const { return m_physicalDevice; }
     vk::Device getDevice() const { return m_device; }
     vk::CommandPool getCommandPool() const { return m_commandPool; }
+    vk::DescriptorPool getDescriptorPool() const { return m_descriptorPool; }
     uint32 getGraphicsQueueIndex() const { return m_graphicsQueueIndex; }
     vk::Queue getGraphicsQueue() const { return m_graphicsQueue; }
     bool supportsExtensions(std::vector<const char*> extensions);
@@ -28,9 +29,12 @@ private:
     vk::PhysicalDevice m_physicalDevice;
     vk::Device m_device;
     vk::CommandPool m_commandPool;
+    vk::DescriptorPool m_descriptorPool;
     uint32 m_graphicsQueueIndex;
     vk::Queue m_graphicsQueue;
     vk::DeviceSize m_nonCoherentAtomSize;
+
+    std::vector<vk::Format> m_supported2DOptimalFormats;
 };
 
 export namespace Globals

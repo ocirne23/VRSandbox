@@ -129,7 +129,7 @@ void main()
     const vec4 instanceOffsetPosScale = in_instanceOffsets[offsetIdx].posScale;
     const vec4 instancePosScale       = vec4(renderNodePosScale.xyz + quat_transform(instanceOffsetPosScale.xyz, in_renderNodeTransforms[renderNodeIdx].quat),
                                             renderNodePosScale.w * instanceOffsetPosScale.w);
-    const vec3 centerPos              = quat_transform(in_meshInfos[meshIdx].center, quat);
+    const vec3 centerPos              = quat_transform(in_meshInfos[meshIdx].center * instancePosScale.w, quat);
     const float radius                = in_meshInfos[meshIdx].radius * instancePosScale.w;
 
     if (frustumCheck(instancePosScale.xyz + centerPos, radius))

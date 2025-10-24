@@ -2,9 +2,11 @@ export module RendererVK.StaticMeshGraphicsPipeline;
 
 import Core;
 
+import RendererVK.VK;
 import RendererVK.GraphicsPipeline;
-//import RendererVK.Texture;
-//import RendererVK.Sampler;
+import RendererVK.DescriptorSet;
+import RendererVK.Texture;
+import RendererVK.Sampler;
 
 export class ObjectContainer;
 export class StagingManager;
@@ -20,6 +22,7 @@ public:
 
     struct RecordParams
     {
+        DescriptorSet& descriptorSet;
         Buffer& ubo;
         Buffer& vertexBuffer;
         Buffer& indexBuffer;
@@ -29,16 +32,17 @@ public:
         Buffer& indirectCommandBuffer;
     };
 
-    bool initialize(RenderPass& renderPass, StagingManager& stagingManager);
+    bool initialize(RenderPass& renderPass);
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
+    vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
 
 private:
 
     GraphicsPipeline m_graphicsPipeline;
 
-    //Texture m_colorTex;
+    Texture m_colorTex;
     //Texture m_normalTex;
     //Texture m_rmhTex;
-    //Sampler m_sampler;
+    Sampler m_sampler;
 };

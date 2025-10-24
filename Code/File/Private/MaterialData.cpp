@@ -22,6 +22,52 @@ bool MaterialData::initialize(const aiMaterial* pMaterial)
     return true;
 }
 
+uint32 MaterialData::getDiffuseTexIdx() const
+{
+    aiString path;
+    aiReturn ret = aiGetMaterialString(m_pMaterial, AI_MATKEY_TEXTURE_DIFFUSE(0), &path);
+    if (ret != aiReturn_SUCCESS)
+    {
+        return UINT32_MAX;
+    }
+    if (path.length < 2)
+    {
+        assert(false && "Failed to find diffuse texture path");
+        return UINT32_MAX;
+    }
+    const bool isEmbedded = path.C_Str()[0] == '*';
+    uint32 diffuseTexIdx = UINT32_MAX;
+    if (isEmbedded)
+    {
+        diffuseTexIdx = atoi(path.C_Str() + 1);
+    }
+    assert(isEmbedded && "Implement non embedded textures");
+    return diffuseTexIdx;
+}
+
+uint32 MaterialData::getNormalTexIdx() const
+{
+    aiString path;
+    aiReturn ret = aiGetMaterialString(m_pMaterial, AI_MATKEY_TEXTURE_NORMALS(0), &path);
+    if (ret != aiReturn_SUCCESS)
+    {
+        return UINT32_MAX;
+    }
+    if (path.length < 2)
+    {
+        assert(false && "Failed to find normal texture path");
+        return UINT32_MAX;
+    }
+    const bool isEmbedded = path.C_Str()[0] == '*';
+    uint32 normalTexIdx = UINT32_MAX;
+    if (isEmbedded)
+    {
+        normalTexIdx = atoi(path.C_Str() + 1);
+    }
+    assert(isEmbedded && "Implement non embedded textures");
+    return normalTexIdx;
+}
+
 const char* MaterialData::getName() const
 {
     static thread_local aiString name;

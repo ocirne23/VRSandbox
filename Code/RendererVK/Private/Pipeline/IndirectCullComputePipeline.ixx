@@ -8,6 +8,7 @@ import RendererVK.CommandBuffer;
 import RendererVK.ComputePipeline;
 import RendererVK.Layout;
 import RendererVK.Transform;
+import RendererVK.DescriptorSet;
 
 export class ObjectContainer;
 
@@ -20,6 +21,7 @@ public:
 
     struct RecordParams
     {
+        DescriptorSet& descriptorSet;
         Buffer& ubo;                          // 0
         Buffer& inRenderNodeTransformsBuffer; // 1
         Buffer& inMeshInstancesBuffer;        // 2
@@ -35,6 +37,8 @@ public:
     Buffer& getIndirectCommandBuffer(uint32 idx)  { return m_perFrameData[idx].outIndirectCommandBuffer; }
     Buffer& getInstanceIdxBuffer(uint32 idx)      { return m_perFrameData[idx].outMeshInstanceIndexesBuffer; }
     Buffer& getOutMeshInstancesBuffer(uint32 idx) { return m_perFrameData[idx].outMeshInstancesBuffer; }
+    
+    vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_computePipeline.getDescriptorSetLayout(); }
 
 private:
 

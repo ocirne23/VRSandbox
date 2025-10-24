@@ -20,7 +20,7 @@ public:
     vk::Semaphore upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
     vk::Semaphore uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, uint32 mipLevel, vk::DeviceSize dstOffset = 0);
     void transitionImage(vk::ImageMemoryBarrier2 barrier) { m_imageTransitions.push_back(barrier); }
-    void update();
+    vk::Semaphore update();
 
 private:
 
@@ -33,6 +33,8 @@ private:
     vk::Semaphore m_semaphores[NUM_STAGING_BUFFERS];
     CommandBuffer m_commandBuffers[NUM_STAGING_BUFFERS];
 
+    vk::Semaphore m_nextUpdateSemaphore = VK_NULL_HANDLE;
+
     int m_currentBuffer = 0;
     vk::DeviceSize m_currentBufferOffset = 0;
     std::vector<std::pair<vk::Buffer, vk::BufferCopy>> m_bufferCopyRegions;
@@ -40,3 +42,8 @@ private:
     std::vector<vk::ImageMemoryBarrier2> m_imageTransitions;
     std::span<uint8> m_mappedMemory;
 };
+
+export namespace Globals
+{
+    StagingManager stagingManager;
+}

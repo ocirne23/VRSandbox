@@ -64,22 +64,25 @@ void CommandBuffer::submitGraphics(vk::Fence fence)
     m_waitStage = vk::PipelineStageFlagBits2::eNone;
 }
 
-void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, vk::PipelineBindPoint bindPoint, const std::span<DescriptorSetUpdateInfo>& updateInfo)
+void CommandBuffer::cmdUpdateDescriptorSets(vk::PipelineLayout pipelineLayout, vk::PipelineBindPoint bindPoint, vk::DescriptorSet descriptorSet, const std::span<DescriptorSetUpdateInfo>& updateInfo)
 {
     vk::WriteDescriptorSet* descriptorWrites = (vk::WriteDescriptorSet*)_alloca(sizeof(vk::WriteDescriptorSet) * updateInfo.size());
     for (uint32 i = 0; i < updateInfo.size(); i++)
     {
         descriptorWrites[i] =
         {
+            .dstSet = descriptorSet,
             .dstBinding = updateInfo[i].binding,
             .dstArrayElement = updateInfo[i].startIdx,
-            .descriptorCount = updateInfo[i].count,
+            .descriptorCount = (uint32)std::max(updateInfo[i].imageInfos.size(), updateInfo[i].bufferInfos.size()),
             .descriptorType = updateInfo[i].type,
-            .pImageInfo = std::get_if<vk::DescriptorImageInfo>(&updateInfo[i].info),
-            .pBufferInfo = std::get_if<vk::DescriptorBufferInfo>(&updateInfo[i].info),
+            .pImageInfo = updateInfo[i].imageInfos.size() ? updateInfo[i].imageInfos.data() : nullptr,
+            .pBufferInfo = updateInfo[i].bufferInfos.size() ? updateInfo[i].bufferInfos.data() : nullptr,
         };
     }
-    m_commandBuffer.pushDescriptorSetKHR(bindPoint, pipelineLayout, 0, (uint32)updateInfo.size(), descriptorWrites);
+    //m_commandBuffer.pushDescriptorSetKHR(bindPoint, pipelineLayout, 0, (uint32)updateInfo.size(), descriptorWrites);
+    vk::Device device = Globals::device.getDevice();
+    device.updateDescriptorSets((uint32)updateInfo.size(), descriptorWrites, 0, nullptr);
 }
 
 vk::CommandBuffer CommandBuffer::begin(bool once, vk::CommandBufferInheritanceInfo* pInheritanceInfo)
