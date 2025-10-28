@@ -87,8 +87,6 @@ vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth,
         .imageExtent = { imageWidth, imageHeight, 1 }
     };
 
-    uint8* pixels = (uint8*)data;
-    assert(pixels[69] > 0 || pixels[69] == 0);
     assert(m_currentBufferOffset + dataSize <= m_mappedMemory.size());
     memcpy(m_mappedMemory.data() + m_currentBufferOffset, data, dataSize);
     m_imageCopyRegions.emplace_back(std::pair<vk::Image, vk::BufferImageCopy>{ dstImage, bufferImageCopy });

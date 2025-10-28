@@ -126,8 +126,6 @@ bool Texture::initialize(const TextureData& textureData)
             if (desiredComponents == 3)
 				desiredComponents = 4; // force 4 component for rgb pngs
             stbi_uc* pixelData = stbi_load_from_memory((stbi_uc*)textureData.getPixels(), bufferSize, &width, &height, &numComponents, desiredComponents);
-            stbi_uc lastPixel = pixelData[(width * height * desiredComponents) - 1];
-            assert(lastPixel >= 0);
             if (!pixelData)
             {
                 assert(false && "Failed to load png image");

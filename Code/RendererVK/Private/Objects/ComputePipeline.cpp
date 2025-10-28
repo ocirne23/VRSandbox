@@ -19,30 +19,11 @@ ComputePipeline::~ComputePipeline()
 bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
 {
     vk::Device vkDevice = Globals::device.getDevice();
-
-    std::vector<vk::DescriptorBindingFlags> layoutBindingFlags;
-    layoutBindingFlags.reserve(layout.descriptorSetLayoutBindings.size());
-    for (const auto& binding : layout.descriptorSetLayoutBindings)
-    {
-        vk::DescriptorBindingFlags flags = {};
-        //if (layoutBindingFlags.size() + 1 == layout.descriptorSetLayoutBindings.size())
-        //    flags |= vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
-        layoutBindingFlags.push_back(flags);
-    }
-    vk::DescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo
-    {
-        .bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
-        .pBindingFlags = layoutBindingFlags.data(),
-    };
-
     vk::DescriptorSetLayoutCreateInfo layoutInfo
     {
-        .pNext = &bindingFlagsInfo,
-        //.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
         .bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
         .pBindings = layout.descriptorSetLayoutBindings.data(),
     };
-
     auto layoutResult = vkDevice.createDescriptorSetLayout(layoutInfo);
     if (layoutResult.result != vk::Result::eSuccess)
     {

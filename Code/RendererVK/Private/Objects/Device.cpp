@@ -131,7 +131,7 @@ bool Device::initialize()
     }
     m_commandPool = commandPoolResult.value;
 
-    const uint32 poolSize = 1000;
+    const uint32 poolSize = 1024;
     vk::DescriptorPoolSize poolSizes[] =
     {
         { vk::DescriptorType::eSampler, poolSize },
@@ -379,6 +379,7 @@ void Device::destroy()
             assert(false && "Failed to wait for device idle");
         }
         m_device.destroyCommandPool(m_commandPool);
+        m_device.destroyDescriptorPool(m_descriptorPool);
         m_device.destroy();
     }
     m_device = nullptr;

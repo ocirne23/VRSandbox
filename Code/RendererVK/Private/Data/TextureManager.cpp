@@ -1,5 +1,16 @@
 module RendererVK.TextureManager;
 
+import RendererVK.Device;
+
+TextureManager::~TextureManager()
+{
+    auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    if (waitResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to wait for device idle in TextureManager::~TextureManager");
+    }
+}
+
 uint16 TextureManager::upload(const std::vector<TextureData>& textureData)
 {
     if (m_textures.size() + textureData.size() > UINT16_MAX)

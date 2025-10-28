@@ -4,6 +4,7 @@ import Core;
 import File.MeshData;
 import RendererVK.StagingManager;
 import RendererVK.Buffer;
+import RendererVK.Device;
 
 MeshDataManager::MeshDataManager()
 {
@@ -11,6 +12,11 @@ MeshDataManager::MeshDataManager()
 
 MeshDataManager::~MeshDataManager()
 {
+    auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    if (waitResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to wait for device idle in MeshDataManager::~MeshDataManager");
+    }
 }
 
 bool MeshDataManager::initialize(size_t vertexBufSize, size_t indexBufSize)

@@ -27,7 +27,7 @@ int main()
     input.initialize();
 
     FreeFlyCameraController cameraController;
-    cameraController.initialize(glm::vec3(-90.0f, 90.0f, -90.0f), glm::vec3(100.0f, 20.0f, 120.0f));
+    cameraController.initialize(glm::vec3(-20.0f, 20.0f, -20.0f), glm::vec3(50.0f, 0.0f, 50.0f));
 
     RendererVK& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
@@ -97,8 +97,8 @@ int main()
         const Frustum& frustum = renderer.beginFrame(cameraController.getCamera());
         for (RenderNode& node : spawnedNodes)
         {
-            Transform& transform = node.getTransform();
-            transform.pos.y = glm::sin((float)Globals::time.getElapsedSec() + transform.pos.x * 0.1f + transform.pos.z * 0.1f);
+            //Transform& transform = node.getTransform();
+            //transform.pos.y = glm::sin((float)Globals::time.getElapsedSec() + transform.pos.x * 0.1f + transform.pos.z * 0.1f);
             if (frustum.sphereInFrustum(node.getWorldBounds()))
             {
                 renderer.renderNode(node);

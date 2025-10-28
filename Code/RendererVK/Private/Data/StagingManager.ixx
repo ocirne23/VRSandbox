@@ -45,5 +45,8 @@ private:
 
 export namespace Globals
 {
+#pragma warning(disable: 4075)
+#pragma init_seg(".CRT$XCU4")
     StagingManager stagingManager;
+#pragma warning(default: 4075)
 }

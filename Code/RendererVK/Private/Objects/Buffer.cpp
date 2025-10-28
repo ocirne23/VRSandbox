@@ -12,9 +12,15 @@ Buffer::~Buffer()
 void Buffer::destroy()
 {
     if (m_buffer)
+    {
         Globals::device.getDevice().destroyBuffer(m_buffer);
+        m_buffer = VK_NULL_HANDLE;
+    }
     if (m_memory)
+    {
         Globals::device.getDevice().freeMemory(m_memory);
+        m_memory = VK_NULL_HANDLE;
+    }
 }
 
 bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties)

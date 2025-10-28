@@ -29,8 +29,6 @@ layout (binding = 2, std430) buffer InMaterialInfos
 };
 
 layout (binding = 4) uniform sampler2D u_color[];
-//layout (binding = 4) uniform sampler2D u_normal[];
-//layout (binding = 5) uniform sampler2D u_roughness_metallic_height[];
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
@@ -76,6 +74,32 @@ float specularBRDF(float NdotH, float LdotH, float roughness)
 	return roughness4 / dot(PIdot4, B);
 }
 
+// a2: pow(roughness, 2)
+float DistributionGGX(const vec3 N, const vec3 H, const float a2)
+{
+	float NdotH = max(dot(N, H), 0.0);
+	float denom = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
+	return a2 / (PI * denom * denom);
+}
+
+// k: (roughness + 1)^2 / 8.0
+float GeometrySmith(const float NdotL, const float NdotV, const float k)
+{
+	float ggx1 = NdotV / (NdotV * (1.0 - k) + k);
+	float ggx2 = NdotL / (NdotL * (1.0 - k) + k);
+	return ggx1 * ggx2;
+}
+
+vec3 Fresnel(float HdotV, vec3 F0)
+{
+	return F0 + (1.0 - F0) * pow(1.0 - HdotV, 5.0);
+}
+
+vec3 FresnelSchlickRoughness(float HdotV, vec3 F0, float roughness)
+{
+	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - HdotV, 5.0);
+}
+
 float environmentContrib(float roughness, float NdotV)
 {
 	float a = 1.0 - max(roughness, NdotV);
@@ -97,18 +121,26 @@ void main()
 	MaterialInfo material = in_materialInfos[materialIdx];
 	uint16_t diffuseTexIdx = uint16_t(material.diffuseNormalTexIdx & 0x0000FFFF);
 	uint16_t normalTexIdx  = uint16_t((material.diffuseNormalTexIdx & 0xFFFF0000) >> 16);
-
+	
+	float roughness = 0.4;//max(material.roughness, 0.01);
+	float metalness = 0.0;//material.metalness;
+	
 	vec3 materialColor = texture(u_color[diffuseTexIdx], in_uv).xyz;
 	vec3 materialNormal = texture(u_color[normalTexIdx], in_uv).xyz;
 	materialNormal = normalize(materialNormal * 2.0 - 1.0);
-	vec3 specularColor = mix(vec3(0.04), materialColor, material.metalness);
-
-    const float ambient = 0.05f;
-	vec3 lightPos  = vec3(100, 2, 90);
+	vec3 specularColor = mix(vec3(0.04), materialColor, metalness);
+	
+	float a2 = roughness * roughness;
+	float r = roughness + 1.0;
+	float k = (r * r) / 8.0;
+	
+	const float ambient = 0.05f;
+	vec3 lightColor = vec3(1.0, 1.0, 1.0);
+	vec3 lightPos  = vec3(0, 3, 0);
 	vec3 lightVec  = lightPos - in_pos;
 	float distance = length(lightVec);
 	float falloff  = inverseSquareFalloff(distance, 5000);
-	float intensity = 150.0;
+	float intensity = 100.0;
 
 	vec3 eyeVec = u_viewPos - in_pos;
 	vec3 V = normalize(eyeVec);
@@ -116,17 +148,21 @@ void main()
 	vec3 H = normalize(L + V);
 	vec3 N = in_tbn * materialNormal;
 
-	float NdotH = clamp(dot(N, H), 0.0, 1.0);
 	float NdotL = clamp(dot(N, L), 0.0, 1.0);
-	float LdotH = clamp(dot(L, H), 0.0, 1.0);
 	float NdotV = clamp(dot(N, V), 0.0, 1.0);
-	float VdotH = clamp(dot(V, H), 0.0, 1.0);
-
-	float roughness = material.roughness;
-	float specular = NdotL > 0.0 ? specularBRDF(NdotH, LdotH, roughness) + environmentContrib(roughness, NdotV): 0.0;
-
-	vec3 diffuse = diffuseOrenNayar(materialColor, roughness, NdotV, NdotL, VdotH);
-	vec3 color = (diffuse + specular * specularColor) * falloff * intensity;
+	float HdotV = clamp(dot(H, V), 0.0, 1.0);
+	
+	float NDF = DistributionGGX(N, H, a2);
+	float G = GeometrySmith(NdotL, NdotV, k);
+	vec3 F = FresnelSchlickRoughness(HdotV, specularColor, roughness);
+	
+	vec3 numerator = NDF * G * F;
+	float denom = max(4.0 * NdotV * NdotL, 0.0001);
+	vec3 specular = numerator / denom;
+	vec3 kD = (1.0 - F) * (1.0 - metalness);
+	vec3 radiance = lightColor * falloff * intensity;
+	
+	vec3 color = (kD * (materialColor / PI) + specular) * radiance * NdotL;
 	color += materialColor * ambient;
 	out_color = color;// applyFog(color, length(eyeVec), u_viewPos, V);
 }

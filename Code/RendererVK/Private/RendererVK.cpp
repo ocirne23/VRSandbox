@@ -35,7 +35,7 @@ RendererVK::~RendererVK()
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
     if (waitResult != vk::Result::eSuccess)
     {
-        assert(false && "Failed to wait for device idle in RendererVK destructor");
+        assert(false && "Failed to wait for device idle in RendererVK::~RendererVK");
     }
     ImGui_ImplVulkan_Shutdown();
 }
