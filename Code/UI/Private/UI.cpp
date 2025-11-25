@@ -2,6 +2,15 @@ module UI;
 
 import Core.imgui;
 
+UI::~UI()
+{
+    if (m_nodeEditorContext != nullptr)
+    {
+        ed::DestroyEditor(m_nodeEditorContext);
+        m_nodeEditorContext = nullptr;
+    }
+}
+
 void UI::initialize()
 {
     ImGuiContext* context = ImGui::GetCurrentContext();
@@ -9,7 +18,35 @@ void UI::initialize()
     (void)context;
 
     ImGui::GetStyle().Colors[ImGuiCol_DockingEmptyBg] = ImVec4(0.0, 0.0, 0.0, 0.0);
+
+    m_scene.initialize();
 }
+
+struct LinkInfo
+{
+    ed::LinkId Id;
+    ed::PinId  InputId;
+    ed::PinId  OutputId;
+};
+void ImGuiEx_BeginColumn()
+{
+    ImGui::BeginGroup();
+}
+
+void ImGuiEx_NextColumn()
+{
+    ImGui::EndGroup();
+    ImGui::SameLine();
+    ImGui::BeginGroup();
+}
+
+void ImGuiEx_EndColumn()
+{
+    ImGui::EndGroup();
+}
+bool                 m_FirstFrame = true;    // Flag set for first frame only, some action need to be executed once.
+ImVector<LinkInfo>   m_Links;                // List of live links. It is dynamic unless you want to create read-only view over nodes.
+int                  m_NextLinkId = 100;
 
 void UI::update(double deltaSec)
 {
@@ -33,10 +70,20 @@ void UI::update(double deltaSec)
 
         ImGuiID dockspace_id = ImGui::GetID("Root");
         ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
-        static auto first_time = true;
+
+        static bool second_time = false;
+        if (second_time)
+        {
+            second_time = false;
+            //ImGui::SetWindowFocus("Viewport");
+            ImGui::SetWindowFocus("Script");
+        }
+
+        static bool first_time = true;
         if (first_time)
         {
             first_time = false;
+            second_time = true;
 
             ImGui::DockBuilderRemoveNode(dockspace_id);
             ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
@@ -48,9 +95,11 @@ void UI::update(double deltaSec)
 
             ImGui::DockBuilderDockWindow("Sidebar", dock_id_left);
             ImGui::DockBuilderDockWindow("Content", dock_id_down);
+            ImGui::DockBuilderDockWindow("Script", dock_id_up);
             ImGui::DockBuilderDockWindow("Viewport", dock_id_up);
             ImGui::DockBuilderFinish(dockspace_id);
         }
+
         ImGui::End();
     }
 
@@ -94,16 +143,20 @@ void UI::update(double deltaSec)
         ImGui::End();
     }
 
+    {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+
+
+        ImGui::Begin("Script");
+        if (ImGui::IsWindowFocused())
+            m_scene.update(deltaSec);
+        ImGui::End();
+
+        ImGui::PopStyleVar(1);
+    }
 }
 
 void UI::render()
 {
     ImGui::Render();
 }
-
-/*
-        ctx->CurrentWindow->DrawList->AddLine(
-            ImVec2(viewportPos.x + size.x * 0.5f - 10.0f, viewportPos.y + size.y * 0.5f - 10.0f),
-            ImVec2(viewportPos.x + size.x * 0.5f + 10.0f, viewportPos.y + size.y * 0.5f + 10.0f),
-            ImColor(255, 255, 255, 200), 2.0f);
-*/

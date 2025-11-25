@@ -3,13 +3,16 @@ export module UI;
 import Core;
 import Core.glm;
 import Core.Rect;
+import UI.node_editor;
+
+import UI.NodeEditor.Scene;
 
 export class UI final
 {
 public:
 
     UI() {}
-    ~UI() {}
+    ~UI();
     UI(const UI&) = delete;
 
     void initialize();
@@ -27,6 +30,10 @@ private:
     bool m_isViewportFocused = false;
     bool m_hasViewportGainedFocus = false;
     Rect m_viewportRect = Rect();
+
+    ed::EditorContext* m_nodeEditorContext = nullptr;
+
+    NodeEditor::Scene m_scene;
 };
 
 export namespace Globals

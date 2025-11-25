@@ -11,6 +11,7 @@ import File.FileSystem;
 import File.SceneData;
 import Input;
 import UI;
+import Script;
 
 import RendererVK;
 import RendererVK.ObjectContainer;
@@ -27,13 +28,17 @@ int main()
     input.initialize();
 
     FreeFlyCameraController cameraController;
-    cameraController.initialize(glm::vec3(-20.0f, 20.0f, -20.0f), glm::vec3(50.0f, 0.0f, 50.0f));
+    //cameraController.initialize(glm::vec3(-90.0f, 90.0f, -90.0f), glm::vec3(100.0f, 20.0f, 120.0f));
+    cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f));
 
     RendererVK& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
+    renderer.initialize(window, EValidation::ENABLED, EVSync::ENABLED);
 
     UI& ui = Globals::ui;
     ui.initialize();
+
+    Script& script = Globals::script;
+    script.initialize();
 
     bool running = true;
     SystemEventListener* pSystemEventListener = input.addSystemEventListener();
@@ -45,25 +50,24 @@ int main()
             if (evt.type == SDL_EVENT_WINDOW_MAXIMIZED) renderer.setWindowMinimized(false);
             if (evt.type == SDL_EVENT_WINDOW_RESTORED)  renderer.setWindowMinimized(false);
         };
-
-    ObjectContainer boatContainer;
+    /*
+    ObjectContainer container;
     {
         SceneData sceneData;
-        //sceneData.initialize("Models/dragon.glb", true, true);
-        //sceneData.initialize("Models/ship_dark.glb", true, true);
         sceneData.initialize("Models/sponza.glb", true, true);
-        boatContainer.initialize(sceneData);
+        container.initialize(sceneData);
     }
-
+    */
    std::vector<RenderNode> spawnedNodes;
-   for (int x = 0; x < 10; ++x)
-       for (int y = 0; y < 10; ++y)
-           spawnedNodes.push_back(boatContainer.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
 
+   //for (int x = 0; x < 1; ++x)
+   //    for (int y = 0; y < 1; ++y)
+   //        spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+    
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {
-        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            spawnedNodes.push_back(boatContainer.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp())))));
+        //if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        //    spawnedNodes.push_back(container.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp())))));
     };
 
     uint32 frameCount = 0;
@@ -91,6 +95,7 @@ int main()
         const double deltaSec = Globals::time.getDeltaSec();
         input.update(deltaSec);
         cameraController.update(deltaSec);
+        script.update(deltaSec);
         ui.update(deltaSec);
         renderer.setViewportRect(ui.getViewportRect());
 

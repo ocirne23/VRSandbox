@@ -41,6 +41,7 @@ public:
     RenderNode spawnNodeForPath(const std::string& nodePath, const Transform& transform);
     RenderNode spawnRootNode(const Transform& transform);
     RenderNode spawnNodeForIdx(NodeSpawnIdx idx, const Transform& transform);
+    void getRootTransformForIdx(NodeSpawnIdx idx, Transform& transform);
 
 private:
 

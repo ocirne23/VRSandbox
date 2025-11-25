@@ -331,7 +331,7 @@ void RendererVK::recordCommandBuffers()
     //   m_swapChain.waitForFrame(frameIdx);
 
     const vk::Extent2D extent = m_swapChain.getLayout().extent;
-    if (!frameData.updated)
+    if (!frameData.updated && m_meshInfoCounter > 0)
     {
         {
             CommandBuffer& indirectCullCommandBuffer = frameData.indirectCullCommandBuffer;
@@ -404,21 +404,16 @@ void RendererVK::recordCommandBuffers()
 
     CommandBuffer& commandBuffer = frameData.primaryCommandBuffer;
     vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);
-    /*
-    {
-        vk::MemoryBarrier2 memoryBarrier{
-            .srcStageMask = vk::PipelineStageFlagBits2::eHost,
-            .srcAccessMask = vk::AccessFlagBits2::eHostWrite,
-            .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader | vk::PipelineStageFlagBits2::eFragmentShader,
-            .dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead,
-        };
-        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
-    }*/
-
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
-    vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
+    vk::CommandBuffer vkStaticMeshRenderCommandBuffer = frameData.staticMeshRenderCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkImguiCommandBuffer = frameData.imguiCommandBuffer.getCommandBuffer();
+
+    if (frameData.updated)
+        vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
     vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eSecondaryCommandBuffers);
-    vkCommandBuffer.executeCommands((uint32)secondaryCommandBuffers.size(), secondaryCommandBuffers.data());
+    if (frameData.updated)
+        vkCommandBuffer.executeCommands(1, &vkStaticMeshRenderCommandBuffer);
+    vkCommandBuffer.executeCommands(1, &vkImguiCommandBuffer);
     vkCommandBuffer.endRenderPass();
 
     commandBuffer.end();

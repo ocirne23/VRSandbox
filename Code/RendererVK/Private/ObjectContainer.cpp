@@ -166,10 +166,6 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData)
         const uint32 nodeIdx = (uint32)initialStateNodes.size();
 
         LocalSpaceNode& node = initialStateNodes.emplace_back();
-        //node.transform.pos = isRoot ? glm::vec3(0) : glm::vec3(pos.x, pos.y, pos.z);
-        //node.transform.scale = isRoot ? 1.0f : scale.x;
-        //node.transform.quat = isRoot ? glm::quat(1, 0, 0, 0) : glm::quat(rot.w, rot.x, rot.y, rot.z);
-
         node.transform.pos = glm::vec3(pos.x, pos.y, pos.z);
         node.transform.scale = scale.x;
         node.transform.quat = glm::quat(rot.w, rot.x, rot.y, rot.z);
@@ -297,12 +293,12 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
         node.m_numInstancesPerMesh.emplace_back(pair);
     }
 
-    Transform& rootTransform = Globals::rendererVK.getRenderNodeTransform(node.m_transformIdx);
-    const Transform& instanceTransform = m_meshInstanceOffsets[range.startIdx].transform;
-    rootTransform.pos -= instanceTransform.pos;
-    rootTransform.scale /= instanceTransform.scale;
-
     return node;
+}
+
+void ObjectContainer::getRootTransformForIdx(NodeSpawnIdx idx, Transform& transform)
+{
+    transform = m_meshInstanceOffsets[m_nodeMeshRanges[idx].startIdx].transform;
 }
 
 NodeSpawnIdx ObjectContainer::getSpawnIdxForPath(const std::string& nodePath) const
