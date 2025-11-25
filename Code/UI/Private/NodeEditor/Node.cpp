@@ -20,22 +20,37 @@ void Node::update(double deltaSec, bool firstFrame)
     if (firstFrame)
         ed::SetNodePosition(m_id, m_initialPos);
 
-    ImGui::SetNextWindowContentSize(ImVec2(500.0f, 500.0f));
     ed::BeginNode(m_id);
 
-    auto nodeSize = ed::GetNodeSize(m_id);
+    const auto nodePos = ed::GetNodePosition(m_id);
+    const auto nodeSize = ed::GetNodeSize(m_id);
     const char* title = m_name.c_str();
-    ImVec2 titleSize = ImGui::CalcTextSize(title);
-    float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const ImVec2 titleSize = ImGui::CalcTextSize(title);
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float pinSize = ImGui::CalcTextSize("  ").x;
 
+    if (firstFrame) // initialize node size
+    {
+        float maxInputSize = 0.0f;
+        float maxOutputSize = 0.0f;
+        for (Pin& inputPin : m_inputPins)
+            maxInputSize = fmax(maxInputSize, ImGui::CalcTextSize(inputPin.name.c_str()).x + pinSize + 1.0f);
+        for (Pin& outputPin : m_outputPins)
+            maxOutputSize = fmax(maxOutputSize, ImGui::CalcTextSize(outputPin.name.c_str()).x + pinSize + 1.0f);
+        const float pinsSize = maxInputSize + maxOutputSize;
+        const float titlebarSize = titleSize.x + pinSize * 2 + spacing * 2;
+        ImGui::SameLine(fmax(titlebarSize, pinsSize), 0.0f);
+        ImGui::Dummy(ImVec2(0,0));
+        ed::EndNode();
+        return;
+    }
 
-    float pinSize = ImGui::CalcTextSize("  ").x;
     {
         ed::BeginPin(m_entryPin, ed::PinKind::Input);
         ImGui::Text("  ");
-        auto min = ImGui::GetItemRectMin();
-        auto max = ImGui::GetItemRectMax();
-        auto size = ImGui::GetItemRectSize();
+        const auto min = ImGui::GetItemRectMin();
+        const auto max = ImGui::GetItemRectMax();
+        const auto size = ImGui::GetItemRectSize();
         ImVec2 centerPos = ImVec2(min.x + size.x / 2.0f, min.y + size.y / 2.0f);
         ed::PinRect(min, max);
         draw_list->AddTriangleFilled(
@@ -45,30 +60,26 @@ void Node::update(double deltaSec, bool firstFrame)
         ed::EndPin();
     }
     {
-        auto pos = ed::GetNodePosition(m_id);
-        ImGui::SameLine(fmax(nodeSize.x * 0.5f - pinSize * 2.0f - titleSize.x * 0.5f - spacing * 2.0f, 0.0f));
-        //ImGui::SameLine(0.0f);
-        //ImGui::SetCursorPosX(ImGui::GetCursorPosX() + );
+        ImGui::SameLine(0.0f, -1.0f);
+        const float cursorMove = nodePos.x + nodeSize.x * 0.5f - titleSize.x * 0.5f;
+        if (cursorMove > ImGui::GetCursorPosX())
+            ImGui::SetCursorPosX(cursorMove);
         ImGui::Text(title);
-        auto min = ImGui::GetItemRectMin();
-        auto max = ImGui::GetItemRectMax();
-        draw_list->AddLine(ImVec2(pos.x + 2.0f, max.y + 1.0f), ImVec2(pos.x + nodeSize.x - 2.0f, max.y + 1.0f), ImColor(255, 255, 255), 1.0f);
+        const auto max = ImGui::GetItemRectMax();
+        draw_list->AddLine(ImVec2(nodePos.x + 2.0f, max.y + 1.0f), ImVec2(nodePos.x + nodeSize.x - 2.0f, max.y + 1.0f), ImColor(255, 255, 255), 1.0f);
     }
-    
+   
     {
-        //ImGui::SameLine(0.0f);
-
-       // auto posX = (nodeSize.x - ImGui::GetCursorPosX() + nodeSize.x - pinSize);
-       // if (posX > ImGui::GetCursorPosX())
-       //     ImGui::SetCursorPosX(posX);
-
-        ImGui::SameLine(fmax(nodeSize.x * 0.5f - pinSize * 2.0f - titleSize.x * 0.5f - spacing * 2.0f, 0.0f));
+        ImGui::SameLine(0.0f, -1.0f);
+        const float cursorMove = nodePos.x + nodeSize.x - pinSize - spacing;
+        if (cursorMove > ImGui::GetCursorPosX())
+            ImGui::SetCursorPosX(cursorMove);
 
         ed::BeginPin(m_exitPin, ed::PinKind::Output);
         ImGui::Text("  ");
-        auto min = ImGui::GetItemRectMin();
-        auto max = ImGui::GetItemRectMax();
-        auto size = ImGui::GetItemRectSize();
+        const auto min = ImGui::GetItemRectMin();
+        const auto max = ImGui::GetItemRectMax();
+        const auto size = ImGui::GetItemRectSize();
         ImVec2 centerPos = ImVec2(min.x + size.x / 2.0f, min.y + size.y / 2.0f);
         ed::PinRect(min, max);
         draw_list->AddTriangleFilled(
@@ -84,11 +95,11 @@ void Node::update(double deltaSec, bool firstFrame)
         ed::BeginPin(inputPin.id, ed::PinKind::Input);
         {
             ImGui::Text("  ");
-            auto min = ImGui::GetItemRectMin();
-            auto max = ImGui::GetItemRectMax();
-            auto size = ImGui::GetItemRectSize();
-            ImVec2 circlePos = ImVec2(min.x + size.x / 2.0f, min.y + size.y / 2.0f);
-            ImGui::SameLine(size.x);
+            const auto min = ImGui::GetItemRectMin();
+            const auto max = ImGui::GetItemRectMax();
+            const auto size = ImGui::GetItemRectSize();
+            const ImVec2 circlePos = ImVec2(min.x + size.x / 2.0f, min.y + size.y / 2.0f);
+            ImGui::SameLine(0.0f, 1.0f);
             ImGui::Text(inputPin.name.c_str());
             ed::PinRect(min, max);
             draw_list->AddCircle(circlePos, 5.0f, inputPin.color, 12);
@@ -96,39 +107,29 @@ void Node::update(double deltaSec, bool firstFrame)
         ed::EndPin();
     }
     ImGui::EndGroup();
-
-    auto firstColumnSize = ImGui::GetItemRectSize();
     ImGui::SameLine(0.0f);
     ImGui::BeginGroup();
-
-    float nodeWidth = ed::GetNodeSize(m_id).x;
-
-   // for (const Pin& outputPin : m_outputPins)
-   // {
-   //     ed::BeginPin(outputPin.id, ed::PinKind::Output);
-   //     {
-   //         const char* text = outputPin.name.c_str();
-   //         float textSize = ImGui::CalcTextSize(text).x;
-   //         float contentSize = spacing + textSize + pinSize + 1.0f;
-   //
-   //         auto posX = (ImGui::GetCursorPosX() + nodeWidth - contentSize - firstColumnSize.x - spacing * 2.0f + 8.0f);
-   //         if (posX > ImGui::GetCursorPosX())
-   //             ImGui::SetCursorPosX(posX);
-   //
-   //         //ImGui::SameLine(fmax(nodeWidth - contentSize - firstColumnSize.x - spacing + 7.0f, 0.0f), -1.0f);
-   //         ImGui::Text(text);
-   //         ImGui::SameLine(0.0f, 1.0f);
-   //         ImGui::Text("  ");
-   //         auto min = ImGui::GetItemRectMin();
-   //         auto max = ImGui::GetItemRectMax();
-   //         auto size = ImGui::GetItemRectSize();
-   //         ImVec2 circlePos = ImVec2(min.x + size.x / 2.0f, min.y + size.y / 2.0f);
-   //         ed::PinRect(min, max);
-   //         draw_list->AddCircle(circlePos, 5.0f, outputPin.color, 12);
-   //     }
-   //     ed::EndPin();
-   // }
+    for (const Pin& outputPin : m_outputPins)
+    {
+        ed::BeginPin(outputPin.id, ed::PinKind::Output);
+        {
+            const char* text = outputPin.name.c_str();
+            const float cursorMove = nodePos.x + nodeSize.x - ImGui::CalcTextSize(text).x - pinSize - spacing - 1.0f;
+            if (cursorMove > ImGui::GetCursorPosX())
+                ImGui::SetCursorPosX(cursorMove);
+            ImGui::Text(text);
+            ImGui::SameLine(0.0f, 1.0f);
+            ImGui::Text("  ");
+            const auto min = ImGui::GetItemRectMin();
+            const auto max = ImGui::GetItemRectMax();
+            const auto size = ImGui::GetItemRectSize();
+            const ImVec2 circlePos = ImVec2(min.x + size.x / 2.0f, min.y + size.y / 2.0f);
+            ed::PinRect(min, max);
+            draw_list->AddCircle(circlePos, 5.0f, outputPin.color, 12);
+        }
+        ed::EndPin();
+    }
     ImGui::EndGroup();
-
+    
     ed::EndNode();
 }
