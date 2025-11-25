@@ -129,8 +129,13 @@ void main()
 	vec3 materialNormal = texture(u_color[normalTexIdx], in_uv).xyz;
 	materialNormal = normalize(materialNormal * 2.0 - 1.0);
 	vec3 specularColor = mix(vec3(0.04), materialColor, material.metalness);
-
-    const float ambient = 0.05f;
+	
+	float a2 = roughness * roughness;
+	float r = roughness + 1.0;
+	float k = (r * r) / 8.0;
+	
+	const float ambient = 0.05f;
+	vec3 lightColor = vec3(1.0, 1.0, 1.0);
 	vec3 lightPos  = vec3(0, 4, 0);
 	vec3 lightVec  = lightPos - in_pos;
 	float distance = length(lightVec);
