@@ -15,6 +15,9 @@ public:
     ed::LinkId getId() const { return ed::LinkId(this); }
     operator ed::LinkId() const { return ed::LinkId(this); }
 
+    ed::PinId getInputId() const { return m_inputId; }
+    ed::PinId getOutputId() const { return m_outputId; }
+
 private:
 
     ed::PinId m_inputId;

@@ -107,9 +107,9 @@ void Node::update(double deltaSec, bool firstFrame)
         return;
     }
 
-    // Draw first input pin
+    
     if (m_style != ENodeStyle_Full && !m_inputPins.empty())
-    {
+    {   // Draw first input pin
         const Pin& inputPin = *m_inputPins[0];
         if (inputPin.shape != EPinShape_None)
         {
@@ -117,16 +117,12 @@ void Node::update(double deltaSec, bool firstFrame)
             drawPin(inputPin);
             ed::EndPin();
         }
-        if (!inputPin.name.empty())
-        {
-            if (inputPin.shape != EPinShape_None)
-                ImGui::SameLine(0.0f, 1.0f);
-            ImGui::Text(inputPin.name.c_str());
-        }
+        if (inputPin.shape != EPinShape_None)
+            ImGui::SameLine(0.0f, 1.0f);
+        ImGui::Text(inputPin.name.c_str());
         ImGui::SameLine(0.0f, -1.0f);
     }
-    // Draw title
-    {
+    {   // Draw title
         float align = 0.5f;
         if (m_style != ENodeStyle_Full)
         {
@@ -145,9 +141,9 @@ void Node::update(double deltaSec, bool firstFrame)
             draw_list->AddLine(ImVec2(nodePos.x + 2.0f, max.y + 1.0f), ImVec2(nodePos.x + nodeSize.x - 2.0f, max.y + 1.0f), ImColor(255, 255, 255), 1.0f);
         }
     }
-    // Draw first output pin
+
     if (m_style != ENodeStyle_Full && !m_outputPins.empty())
-    {
+    {   // Draw first output pin
         const Pin& outputPin = *m_outputPins[0];
         ImGui::SameLine(0.0f, -1.0f);
 
@@ -155,15 +151,10 @@ void Node::update(double deltaSec, bool firstFrame)
         if (cursorMove > ImGui::GetCursorPosX())
             ImGui::SetCursorPosX(cursorMove);
 
-        if (!outputPin.name.empty())
-        {
-            ImGui::Text(outputPin.name.c_str());
-        }
-
+        ImGui::Text(outputPin.name.c_str());
         if (outputPin.shape != EPinShape_None)
         {
-            if (!outputPin.name.empty())
-                ImGui::SameLine(0.0f, 1.0f);
+            ImGui::SameLine(0.0f, 1.0f);
             ed::BeginPin(outputPin, ed::PinKind::Output);
             drawPin(outputPin);
             ed::EndPin();
@@ -172,7 +163,7 @@ void Node::update(double deltaSec, bool firstFrame)
 
     bool hasInputGroup = false;    
     for (int i = (m_style != ENodeStyle_Full ? 1 : 0); i < m_inputPins.size(); ++i)
-    {
+    {   // Draw input pins
         if (!hasInputGroup)
         {
             ImGui::BeginGroup();
@@ -185,17 +176,13 @@ void Node::update(double deltaSec, bool firstFrame)
             drawPin(inputPin);
             ed::EndPin();
         }
-        if (!inputPin.name.empty())
-        {
-            if (inputPin.shape != EPinShape_None)
-                ImGui::SameLine(0.0f, 1.0f);
-            ImGui::Text(inputPin.name.c_str());
-        }
+        ImGui::SameLine(0.0f, 1.0f);
+        ImGui::Text(inputPin.name.c_str());
     }
 
     bool hasOutputGroup = false;
     for (int i = (m_style != ENodeStyle_Full ? 1 : 0); i < m_outputPins.size(); ++i)
-    {
+    {   // Draw output pins
         if (hasInputGroup)
         {
             ImGui::EndGroup();
@@ -212,14 +199,10 @@ void Node::update(double deltaSec, bool firstFrame)
         if (cursorMove > ImGui::GetCursorPosX())
             ImGui::SetCursorPosX(cursorMove);
 
-        if (!outputPin.name.empty())
-        {
-            ImGui::Text(outputPin.name.c_str());
-        }
+        ImGui::Text(outputPin.name.c_str());
         if (outputPin.shape != EPinShape_None)
         {
-            if (!outputPin.name.empty())
-                ImGui::SameLine(0.0f, 1.0f);
+            ImGui::SameLine(0.0f, 1.0f);
             ed::BeginPin(outputPin, ed::PinKind::Output);
             drawPin(outputPin);
             ed::EndPin();

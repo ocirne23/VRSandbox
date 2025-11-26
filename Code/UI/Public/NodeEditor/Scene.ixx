@@ -19,6 +19,8 @@ public:
 
     void processInteractions();
 
+    Node& createNode();
+
 private:
 
     ed::EditorContext* m_nodeEditorContext = nullptr;

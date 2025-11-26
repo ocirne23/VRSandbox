@@ -31,13 +31,14 @@ export enum ENodeStyle : uint8
 
 class Node;
 
-struct Pin
+export struct Pin
 {
     std::string name;
     Node* node = nullptr;
     EPinType type;
     EPinShape shape;
     uint32 color;
+    uint8 numConnections = 0;
 
     operator ed::PinId() const { return ed::PinId(this); }
 };
