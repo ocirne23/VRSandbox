@@ -3,7 +3,15 @@ module Core.Window;
 import Core;
 import Core.SDL;
 
-//import <EASTL/vector.h>;
+Window::~Window()
+{
+    if (m_windowHandle != nullptr)
+    {
+        SDL_DestroyWindow((SDL_Window*)m_windowHandle);
+        m_windowHandle = nullptr;
+    }
+    //SDL_Quit();
+}
 
 bool Window::initialize(std::string_view windowTitle, glm::ivec2 pos, glm::ivec2 size)
 {
@@ -32,12 +40,4 @@ void Window::setTitle(std::string_view title)
 void Window::getWindowSize(glm::ivec2& size) const
 {
     SDL_GetWindowSizeInPixels((SDL_Window*)m_windowHandle, &size.x, &size.y);
-}
-
-Window::Window()
-{
-}
-
-Window::~Window()
-{
 }

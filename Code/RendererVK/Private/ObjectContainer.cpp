@@ -23,6 +23,12 @@ bool ObjectContainer::initialize(const SceneData& sceneData)
     return true;
 }
 
+ObjectContainer::~ObjectContainer()
+{
+    // TODO: cleanup
+    // Globals::rendererVK.removeObjectContainer(this);
+}
+
 void ObjectContainer::initializeTextures(const std::vector<TextureData>& textureData)
 {
     m_baseTextureIdx = Globals::textureManager.upload(textureData);

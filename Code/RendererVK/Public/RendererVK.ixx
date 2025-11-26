@@ -38,6 +38,9 @@ public:
     RendererVK() {}
     ~RendererVK();
     RendererVK(const RendererVK&) = delete;
+    RendererVK(const RendererVK&&) = delete;
+    RendererVK& operator=(const RendererVK&) = delete;
+    RendererVK& operator=(const RendererVK&&) = delete;
 
     bool initialize(Window& window, EValidation validation, EVSync vsync);
 

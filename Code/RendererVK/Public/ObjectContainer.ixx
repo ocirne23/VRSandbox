@@ -30,9 +30,12 @@ public:
     friend class RenderNode;
     friend class IndirectCullComputePipeline;
 
-    ObjectContainer() {}
-    ~ObjectContainer() {}
+    ObjectContainer() = default;
+    ~ObjectContainer();
     ObjectContainer(const ObjectContainer&) = delete;
+    ObjectContainer(const ObjectContainer&&) = delete;
+    ObjectContainer& operator=(const ObjectContainer&) = delete;
+    ObjectContainer& operator=(const ObjectContainer&&) = delete;
 
     bool initialize(const SceneData& sceneData);
     bool isValid() const { return !m_nodeInfos.empty(); }
@@ -42,6 +45,8 @@ public:
     RenderNode spawnRootNode(const Transform& transform);
     RenderNode spawnNodeForIdx(NodeSpawnIdx idx, const Transform& transform);
     void getRootTransformForIdx(NodeSpawnIdx idx, Transform& transform);
+
+    // TODO RenderNode cleanup
 
 private:
 

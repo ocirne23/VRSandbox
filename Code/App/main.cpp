@@ -50,25 +50,28 @@ int main()
             if (evt.type == SDL_EVENT_WINDOW_MAXIMIZED) renderer.setWindowMinimized(false);
             if (evt.type == SDL_EVENT_WINDOW_RESTORED)  renderer.setWindowMinimized(false);
         };
-    /*
+    
+    KeyboardListener* pKeyboardListener = input.addKeyboardListener();
+
+    std::vector<RenderNode> spawnedNodes;
+
+#if 0
     ObjectContainer container;
     {
         SceneData sceneData;
         sceneData.initialize("Models/sponza.glb", true, true);
         container.initialize(sceneData);
+        for (int x = 0; x < 1; ++x)
+            for (int y = 0; y < 1; ++y)
+                spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
-    */
-   std::vector<RenderNode> spawnedNodes;
 
-   //for (int x = 0; x < 1; ++x)
-   //    for (int y = 0; y < 1; ++y)
-   //        spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
-    
-    KeyboardListener* pKeyboardListener = input.addKeyboardListener();
-    pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt) {
-        //if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-        //    spawnedNodes.push_back(container.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp())))));
-    };
+    pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
+        {
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+                spawnedNodes.push_back(container.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp())))));
+        };
+#endif
 
     uint32 frameCount = 0;
     uint32 fps = 0;

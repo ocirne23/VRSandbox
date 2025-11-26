@@ -12,129 +12,84 @@ void Scene::initialize()
     ed::Config config;
     config.SettingsFile = nullptr;
     m_nodeEditorContext = ed::CreateEditor(&config);
-    
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(100, 100), "Node 1aaaaaaaaaaaaaaaaaa", Node::ENodeStyle_Minimal, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "Input A", 0xFFAA3333 },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "Input B", 0xFF33AA33 }
-        },
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "Output A", 0xFF3333AA },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "Output B", 0xFF3333AA }
-        }
-    );
 
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(100, 200), "Node 2", Node::ENodeStyle_Minimal, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-        },
-        std::vector<Node::Pin>{}
-    );
+    m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(100, 100), "Node 1", ENodeStyle_Minimal, 0xFF444444)
+        .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))
+        .addInputPin(EPinShape_Circle, "Input B", ImColor(255, 0, 0))
+        .addOutputPin(EPinShape_Circle, "Output A", ImColor(0, 255, 0))
+        .addOutputPin(EPinShape_Circle, "Output B", ImColor(0, 0, 255));
 
+    m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(100, 200), "Node 2", ENodeStyle_Minimal, 0xFF444444)
+        .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))
+        .addOutputPin(EPinShape_Flow, "Output A", ImColor(255, 255, 255));
 
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(100, 300), "Node 3", Node::ENodeStyle_Minimal, 0xFF444444,
-        std::vector<Node::Pin>{},
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-        }
-    );
-    
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(100, 400), "Node 4", Node::ENodeStyle_Minimal, 0xFF444444,
-        std::vector<Node::Pin>{},
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "", 0xFFAA3333 },
-        }
-    );
+    m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(100, 300), "Node 3", ENodeStyle_Minimal, 0xFF444444)
+        .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))
+        .addOutputPin(EPinShape_Flow, "Output A", ImColor(255, 255, 255))
+        .addOutputPin(EPinShape_Circle, "Output B", ImColor(0, 255, 0))
+        .addOutputPin(EPinShape_Circle, "Output C", ImColor(0, 0, 255));
 
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(100, 500), "Node 5", Node::ENodeStyle_Minimal, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "", 0xFFAA3333 },
-        },
-        std::vector<Node::Pin>{}
-    );
+    m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(100, 400), "Node 4", ENodeStyle_Minimal, 0xFF444444)
+        .addInputPin(EPinShape_Flow, "", ImColor(255, 255, 255))
+        .addInputPin(EPinShape_Circle, "Input Aaaaaaaaaaaaaaaaaaaaaaaa", ImColor(0, 255, 0))
+        .addOutputPin(EPinShape_Flow, "", ImColor(255, 255, 255));
 
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(100, 600), "Node 6", Node::ENodeStyle_Minimal, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-        },
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-        }
-    );
-    
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(100, 700), "Node 7", Node::ENodeStyle_Minimal, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "Input Caaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0xFFAA3333 }
-        },
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "Output B", 0xFF33AA33 },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "Output C", 0xFF3333AA }
-        }
-    );
-    //////////////////////////////////////////////////////////////////
+    m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(100, 500), "Node 5", ENodeStyle_Minimal, 0xFF444444)
+        .addOutputPin(EPinShape_Flow, "", ImColor(255, 255, 255))
+        .addOutputPin(EPinShape_Circle, "Output A", ImColor(0, 255, 0))
+        .addOutputPin(EPinShape_Circle, "Output B", ImColor(0, 0, 255));
 
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(500, 100), "Node 1aaaaaaaaaaaaaaaaaa", Node::ENodeStyle_Full, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "Input A", 0xFFAA3333 },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "Input B", 0xFF33AA33 }
-        },
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "Output A", 0xFF3333AA },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "Output B", 0xFF3333AA }
-        }
-    );
+    m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(500, 100), "Node 1", ENodeStyle_Full, 0xFF444444)
+        .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))
+        .addInputPin(EPinShape_Circle, "Input B", ImColor(255, 0, 0))
+        .addOutputPin(EPinShape_Circle, "Output A", ImColor(0, 255, 0))
+        .addOutputPin(EPinShape_Circle, "Output B", ImColor(0, 0, 255));
 
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(500, 200), "Node 2", Node::ENodeStyle_Full, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-        },
-        std::vector<Node::Pin>{}
-    );
+     m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(500, 200), "Node 2", ENodeStyle_Full, 0xFF444444)
+        .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))
+         .addOutputPin(EPinShape_Flow, "Output A", ImColor(255, 255, 255));
 
+     m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(500, 300), "Node 3", ENodeStyle_Full, 0xFF444444)
+         .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))
+         .addOutputPin(EPinShape_Flow, "Output A", ImColor(255, 255, 255))
+         .addOutputPin(EPinShape_Circle, "Output B", ImColor(0, 255, 0))
+         .addOutputPin(EPinShape_Circle, "Output C", ImColor(0, 0, 255));
 
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(500, 300), "Node 3", Node::ENodeStyle_Full, 0xFF444444,
-        std::vector<Node::Pin>{},
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-        }
-    );
-    
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(500, 400), "Node 4", Node::ENodeStyle_Full, 0xFF444444,
-        std::vector<Node::Pin>{},
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "", 0xFFAA3333 },
-        }
-    );
+     m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(500, 400), "Node 4", ENodeStyle_Full, 0xFF444444)
+         .addInputPin(EPinShape_Flow, "", ImColor(255, 255, 255))
+         .addInputPin(EPinShape_Circle, "Input Aaaaaaaaaaaaaaaaaaaaaaaa", ImColor(0, 255, 0))
+         .addOutputPin(EPinShape_Flow, "", ImColor(255, 255, 255));
 
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(500, 500), "Node 5", Node::ENodeStyle_Full, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "", 0xFFAA3333 },
-        },
-        std::vector<Node::Pin>{}
-    );
+     m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(500, 500), "Node 5", ENodeStyle_Full, 0xFF444444)
+         .addOutputPin(EPinShape_Flow, "", ImColor(255, 255, 255))
+         .addOutputPin(EPinShape_Circle, "Output A", ImColor(0, 255, 0))
+         .addOutputPin(EPinShape_Circle, "Output B", ImColor(0, 0, 255));
 
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(500, 600), "Node 6", Node::ENodeStyle_Full, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-        },
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "", 0xFFAA3333 },
-        }
-    );
-    
-    m_nodes.emplace_back().initialize(ed::NodeId(m_idCounter++), ImVec2(500, 700), "Node 7", Node::ENodeStyle_Full, 0xFF444444,
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "Input Caaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0xFFAA3333 }
-        },
-        std::vector<Node::Pin>{
-            { ed::PinId(m_idCounter++), Node::EPinShape_Flow, "Output B", 0xFF33AA33 },
-            { ed::PinId(m_idCounter++), Node::EPinShape_Circle, "Output C", 0xFF3333AA }
-        }
-    );
+     m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(900, 100), "Node 1", ENodeStyle_MinSeparator, 0xFF444444)
+         .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))
+         .addInputPin(EPinShape_Circle, "Input B", ImColor(255, 0, 0))
+         .addOutputPin(EPinShape_Circle, "Output A", ImColor(0, 255, 0))
+         .addOutputPin(EPinShape_Circle, "Output B", ImColor(0, 0, 255));
+
+     m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(900, 200), "Node 2", ENodeStyle_MinSeparator, 0xFF444444)
+         .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))
+         .addOutputPin(EPinShape_Flow, "Output A", ImColor(255, 255, 255));
+
+     m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(900, 300), "Node 3", ENodeStyle_MinSeparator, 0xFF444444)
+         .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))
+         .addOutputPin(EPinShape_Flow, "Output A", ImColor(255, 255, 255))
+         .addOutputPin(EPinShape_Circle, "Output B", ImColor(0, 255, 0))
+         .addOutputPin(EPinShape_Circle, "Output C", ImColor(0, 0, 255));
+
+     m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(900, 400), "Node 4", ENodeStyle_MinSeparator, 0xFF444444)
+         .addInputPin(EPinShape_Flow, "", ImColor(255, 255, 255))
+         .addInputPin(EPinShape_Circle, "Input Aaaaaaaaaaaaaaaaaaaaaaaa", ImColor(0, 255, 0))
+         .addOutputPin(EPinShape_Flow, "", ImColor(255, 255, 255));
+
+     m_nodes.emplace_back(std::make_unique<Node>())->initialize(this, ImVec2(900, 500), "Node 5", ENodeStyle_MinSeparator, 0xFF444444)
+         .addOutputPin(EPinShape_Flow, "", ImColor(255, 255, 255))
+         .addOutputPin(EPinShape_Circle, "Output A", ImColor(0, 255, 0))
+         .addOutputPin(EPinShape_Circle, "Output B", ImColor(0, 0, 255));
 }
 
 void Scene::update(double deltaSec)
@@ -143,16 +98,16 @@ void Scene::update(double deltaSec)
     ed::Begin("My Editor", ImVec2(0.0, 0.0f));
     ed::GetStyle().NodePadding = ImVec4(8, 8, 8, 8);
 
-    for (Node& node : m_nodes)
+    for (auto& node : m_nodes)
     {
-        node.update(deltaSec, m_firstFrame);
+        node->update(deltaSec, m_firstFrame);
     }
 
     processInteractions();
 
-    for (Link& link : m_links)
+    for (auto& link : m_links)
     {
-        link.update(deltaSec, m_firstFrame);
+        link->update(deltaSec, m_firstFrame);
     }
 
     if (m_firstFrame)
@@ -174,7 +129,7 @@ void Scene::processInteractions()
             {
                 if (ed::AcceptNewItem())
                 {
-                    m_links.emplace_back().initialize(ed::LinkId(m_idCounter++), inputPinId, outputPinId);
+                    m_links.emplace_back(std::make_unique<Link>())->initialize(inputPinId, outputPinId);
                 }
             }
         }
@@ -190,7 +145,7 @@ void Scene::processInteractions()
             {
                 for (auto it = m_links.begin(); it != m_links.end(); ++it)
                 {
-                    if (it->getId() == deletedLinkId)
+                    if ((*it)->getId() == deletedLinkId)
                     {
                         m_links.erase(it);
                         break;

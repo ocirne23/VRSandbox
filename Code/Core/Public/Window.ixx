@@ -6,9 +6,13 @@ import Core.glm;
 export class Window final
 {
 public:
-    Window();
+
+    Window() = default;
     ~Window();
     Window(const Window&) = delete;
+    Window(const Window&&) = delete;
+    Window& operator=(const Window&) = delete;
+    Window& operator=(const Window&&) = delete;
 
     bool initialize(std::string_view windowTitle, glm::ivec2 pos, glm::ivec2 size);
 

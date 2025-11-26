@@ -23,8 +23,8 @@ private:
 
     ed::EditorContext* m_nodeEditorContext = nullptr;
 
-    std::vector<Node> m_nodes;
-    std::vector<Link> m_links;
+    std::vector<std::unique_ptr<Node>> m_nodes;
+    std::vector<std::unique_ptr<Link>> m_links;
 
     bool m_firstFrame = true;
     uint64_t m_idCounter = 1;

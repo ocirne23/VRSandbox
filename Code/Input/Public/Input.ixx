@@ -59,9 +59,12 @@ export class Input final
 {
 public:
 
-    Input() {}
-    ~Input() {}
+    Input() = default;
+    ~Input() = default;
     Input(const Input&) = delete;
+    Input(const Input&&) = delete;
+    Input& operator=(const Input&) = delete;
+    Input& operator=(const Input&&) = delete;
 
     bool initialize();
 
