@@ -146,7 +146,6 @@ void UI::update(double deltaSec)
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
-
         ImGui::Begin("Script");
         if (ImGui::IsWindowFocused())
             m_scene.update(deltaSec);

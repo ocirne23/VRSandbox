@@ -4,7 +4,6 @@ using namespace NodeEditor;
 
 Scene::~Scene()
 {
-
 }
 
 void Scene::initialize()
@@ -170,7 +169,7 @@ void Scene::processInteractions()
         ed::PinId pin1Id, pin2Id;
         if (ed::QueryNewLink(&pin1Id, &pin2Id))
         {
-            if (pin1Id && pin2Id && pin1Id != pin2Id) // both are valid, let's accept link
+            if (pin1Id && pin2Id && pin1Id != pin2Id)
             {
                 Pin* pin1 = pin1Id.AsPointer<Pin>();
                 Pin* pin2 = pin2Id.AsPointer<Pin>();
@@ -189,7 +188,7 @@ void Scene::processInteractions()
             }
         }
     }
-    ed::EndCreate(); // Wraps up object creation action handling.
+    ed::EndCreate();
 
     if (ed::BeginDelete())
     {

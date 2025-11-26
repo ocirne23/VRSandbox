@@ -84,7 +84,6 @@ bool RendererVK::initialize(Window& window, EValidation validation, EVSync vsync
         perFrame.ubo.initialize(sizeof(RendererVKLayout::Ubo),
             vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
-        //perFrame.mappedUniformBuffer = (RendererVKLayout::Ubo*)perFrame.ubo.mapMemory().data();
 
         perFrame.inRenderNodeTransformsBuffer.initialize(RendererVKLayout::MAX_RENDER_NODES * sizeof(RendererVKLayout::RenderNodeTransform),
             vk::BufferUsageFlagBits::eStorageBuffer,
@@ -321,14 +320,11 @@ void RendererVK::recordCommandBuffers()
     {
         .renderPass = m_renderPass.getRenderPass(),
         .subpass = 0,
-        .framebuffer = VK_NULL_HANDLE,// m_framebuffers.getFramebuffer(m_swapChain.getCurrentImageIdx()),
+        .framebuffer = VK_NULL_HANDLE,
         .occlusionQueryEnable = false,
         .queryFlags = {},
         .pipelineStatistics = {}
     };
-
-    //if (frameData.primaryCommandBuffer.hasRecorded())
-    //   m_swapChain.waitForFrame(frameIdx);
 
     const vk::Extent2D extent = m_swapChain.getLayout().extent;
     if (!frameData.updated && m_meshInfoCounter > 0)

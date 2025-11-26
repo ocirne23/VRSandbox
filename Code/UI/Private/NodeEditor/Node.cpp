@@ -116,9 +116,8 @@ void Node::update(double deltaSec, bool firstFrame)
             ed::BeginPin(inputPin, ed::PinKind::Input);
             drawPin(inputPin);
             ed::EndPin();
-        }
-        if (inputPin.shape != EPinShape_None)
             ImGui::SameLine(0.0f, 1.0f);
+        }
         ImGui::Text(inputPin.name.c_str());
         ImGui::SameLine(0.0f, -1.0f);
     }
