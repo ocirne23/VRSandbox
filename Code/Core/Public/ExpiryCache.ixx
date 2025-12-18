@@ -45,7 +45,7 @@ public:
                 right = mid;
             }
         }
-        // insert the new entry at the found position
+        // insert the entry at the found position
         return 0;
     }
 };

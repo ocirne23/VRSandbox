@@ -42,6 +42,7 @@ export import <filesystem>;
 export import <functional>;
 export import <memory>;
 export import <mutex>;
+export import <shared_mutex>;
 export import <thread>;
 export import <bitset>;
 export import <coroutine>;

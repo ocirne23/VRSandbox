@@ -2,65 +2,145 @@ export module Core.CheckedPtr;
 
 import Core;
 
-export class RefCheckable;
+constexpr static size_t MAX_ITEMS_PER_BUCKET = 20;
 
-struct RefCheckableHasher
+export template<size_t Size>
+class RefCountTracker
 {
-	size_t operator()(const RefCheckable* obj) const
+private:
+
+	struct Bucket
 	{
-		return std::hash<std::size_t>()(reinterpret_cast<std::size_t>(obj) & 0x0000'FFFF'FFFF'FFFF);
+		std::shared_mutex mutex;
+		std::vector<uint64> data;
+	};
+	Bucket m_buckets[Size];
+
+public:
+
+	void incrementRefCount(const void* obj)
+	{
+		const size_t key = reinterpret_cast<size_t>(obj) & 0x0000'FFFF'FFFF'FFFF;
+		const size_t h = std::hash<size_t>{}(key);
+		const size_t bucketIdx = h % Size;
+		Bucket& bucket = m_buckets[bucketIdx];
+		std::shared_lock readLock(bucket.mutex);
+		for (uint64& item : bucket.data)
+		{
+			if ((item & 0x0000'FFFF'FFFF'FFFF) == key)
+			{
+				assert(item < 0xFFFF'0000'0000'0000 && "RefCheckable reference count overflow!");
+				item += 0x0001'0000'0000'0000;
+				return;
+			}
+		}
+		assert(false && "RefCheckable object not registered!");
+	}
+
+	void decrementRefCount(const void* obj)
+	{
+		const size_t key = reinterpret_cast<size_t>(obj) & 0x0000'FFFF'FFFF'FFFF;
+		const size_t h = std::hash<size_t>{}(key);
+		const size_t bucketIdx = h % Size;
+		Bucket& bucket = m_buckets[bucketIdx];
+		std::shared_lock readLock(bucket.mutex);
+		for (uint64& item : bucket.data)
+		{
+			if ((item & 0x0000'FFFF'FFFF'FFFF) == key)
+			{
+				assert(item >= 0x0001'0000'0000'0000 && "RefCheckable reference count overflow!");
+				item -= 0x0001'0000'0000'0000;
+				return;
+			}
+		}
+		assert(false && "RefCheckable object not registered!");
+	}
+
+	void insert(const void* obj)
+	{
+		const size_t key = reinterpret_cast<size_t>(obj) & 0x0000'FFFF'FFFF'FFFF;
+		const size_t h = std::hash<size_t>{}(key);
+		const size_t bucketIdx = h % Size;
+		Bucket& bucket = m_buckets[bucketIdx];
+		{
+			std::lock_guard writeLock(bucket.mutex);
+			bucket.data.emplace_back(key);
+			// maybe assert for unique
+		}
+		assert(bucket.data.size() < MAX_ITEMS_PER_BUCKET && "Too many items in bucket, consider increasing num buckets");
+	}
+
+	void remove(const void* obj)
+	{
+		const size_t key = reinterpret_cast<size_t>(obj) & 0x0000'FFFF'FFFF'FFFF;
+		const size_t h = std::hash<size_t>{}(key);
+		const size_t bucketIdx = h % Size;
+		Bucket& bucket = m_buckets[bucketIdx];
+		{
+			std::lock_guard writeLock(bucket.mutex);
+			const int size = (int)bucket.data.size();
+			for (int i = 0; i < size; ++i)
+			{
+				const uint64 item = bucket.data[i];
+				if ((item & 0x0000'FFFF'FFFF'FFFF) == key)
+				{
+					assert(item <= 0x0000'FFFF'FFFF'FFFF && "RefCheckable object destroyed while still having references!");
+					if (i != size - 1)
+						bucket.data[i] = bucket.data[size - 1];
+					bucket.data.pop_back();
+					return;
+				}
+			}
+			assert(false && "RefCheckable object has already been destroyed!");
+		}
+	}
+
+	uint16 getRefCount(const void* obj)
+	{
+		const size_t key = reinterpret_cast<size_t>(obj) & 0x0000'FFFF'FFFF'FFFF;
+		const size_t h = std::hash<size_t>{}(key);
+		const size_t bucketIdx = h % Size;
+		Bucket& bucket = m_buckets[bucketIdx];
+		std::shared_lock readLock(bucket.mutex);
+		for (uint64& item : bucket.data)
+		{
+			if ((item & 0x0000'FFFF'FFFF'FFFF) == key)
+			{
+				return uint16((item & 0xFFFF'0000'0000'0000) >> 48);
+			}
+		}
+		assert(false && "RefCheckable object not registered!");
+		return uint16(0);
 	}
 };
 
-struct RefCheckableEqual
-{
-	bool operator()(const RefCheckable* a, const RefCheckable* b) const
-	{
-		return (reinterpret_cast<size_t>(a) & 0x0000'FFFF'FFFF'FFFF) == (reinterpret_cast<size_t>(b) & 0x0000'FFFF'FFFF'FFFF);
-	}
-};
+// Fit to 4k page
+alignas(4096) RefCountTracker<102> g_refCounter;
+static_assert(sizeof(g_refCounter) <= 4096);
 
-static std::unordered_set<const RefCheckable*, RefCheckableHasher, RefCheckableEqual> g_refCheckableSet;
-
-static inline void registerRefCheckable(const RefCheckable* obj)
+inline void registerRefCheckable(const void* obj)
 {
-	auto ret = g_refCheckableSet.insert(obj);
-	assert(ret.second && "RefCheckable object already registered!");
+	g_refCounter.insert(obj);
 }
 
-static inline void unregisterRefCheckable(const RefCheckable* obj)
+inline void unregisterRefCheckable(const void* obj)
 {
-	auto it = g_refCheckableSet.find(obj);
-	assert(it != g_refCheckableSet.end() && "RefCheckable object not registered!");
-	uint64 r = reinterpret_cast<uint64>(*it);
-	assert(r <= 0x0000'FFFF'FFFF'FFFF && "RefCheckable object destroyed while still having references!");
-	g_refCheckableSet.erase(it);
+	g_refCounter.remove(obj);
 }
 
-static inline void addRefCount(const RefCheckable* obj)
+inline void addRefCount(const void* obj)
 {
-	auto it = g_refCheckableSet.find(obj);
-	assert(it != g_refCheckableSet.end() && "RefCheckable object has already been destroyed!");
-	uint64& r = reinterpret_cast<uint64&>(const_cast<const RefCheckable*&>(*it));
-	assert(r < 0xFFFF'0000'0000'0000 && "RefCheckable reference count overflow!");
-	r += 0x0001'0000'0000'0000;
+	g_refCounter.incrementRefCount(obj);
 }
 
-static inline void removeRefCount(const RefCheckable* obj)
+inline void removeRefCount(const void* obj)
 {
-	auto it = g_refCheckableSet.find(obj);
-	assert(it != g_refCheckableSet.end() && "RefCheckable object has already been destroyed!");
-	uint64& r = reinterpret_cast<uint64&>(const_cast<const RefCheckable*&>(*it));
-	assert(r >= 0x0001'0000'0000'0000 && "RefCheckable reference count underflow!");
-	r -= 0x0001'0000'0000'0000;
+	g_refCounter.decrementRefCount(obj);
 }
 
-static inline uint16 getRefCount(const RefCheckable* obj)
+inline uint16 getRefCount(const void* obj)
 {
-	auto it = g_refCheckableSet.find(obj);
-	assert(it != g_refCheckableSet.end() && "RefCheckable object has already been destroyed!");
-	uint64 r = reinterpret_cast<const uint64&>(const_cast<const RefCheckable*&>(*it));
-	return uint16((r & 0xFFFF'0000'0000'0000) >> 48);
+	return g_refCounter.getRefCount(obj);
 }
 
 export class RefCheckable
@@ -119,7 +199,7 @@ public:
 private:
 	T* m_ref;
 };
-/*
+
 struct Test : RefCheckable
 {
 	int foo = 0;
@@ -137,13 +217,14 @@ export void testCheckedPtr()
 			assert(getRefCount(&t1) == 2);
 		}
 		Test t2 = t1;
-		CheckedPtr<Test> ref2(t2);
-		assert(getRefCount(&t2) == 1);
 		{
-			CheckedPtr<Test> ref3(t2);
-			assert(getRefCount(&t2) == 2);
+			CheckedPtr<Test> ref2(t2);
+			assert(getRefCount(&t2) == 1);
+			{
+				CheckedPtr<Test> ref3(t2);
+				assert(getRefCount(&t2) == 2);
+			}
 		}
-
 		{
 			Test t3 = std::move(t2);
 			{
@@ -155,10 +236,10 @@ export void testCheckedPtr()
 			assert(getRefCount(&t3) == 0);
 		}
 
-		//CheckedPtr<Test> ref4;
-		//{
-		//	Test t4;
-		//	ref4 = t4;
-		//}
+		CheckedPtr<Test> ref4;
+		{
+			Test t4;
+			ref4 = t4;
+		}
 	}
-}*/
+}
