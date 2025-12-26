@@ -55,7 +55,7 @@ int main()
 
     std::vector<RenderNode> spawnedNodes;
 
-#if 0
+#if 1
     ObjectContainer container;
     {
         SceneData sceneData;

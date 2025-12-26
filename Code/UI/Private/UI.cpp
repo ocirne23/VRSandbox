@@ -75,8 +75,8 @@ void UI::update(double deltaSec)
         if (second_time)
         {
             second_time = false;
-            //ImGui::SetWindowFocus("Viewport");
-            ImGui::SetWindowFocus("Script");
+            ImGui::SetWindowFocus("Viewport");
+            //ImGui::SetWindowFocus("Script");
         }
 
         static bool first_time = true;

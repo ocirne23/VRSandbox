@@ -17,7 +17,7 @@ StaticMeshGraphicsPipeline::~StaticMeshGraphicsPipeline() {}
 bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
 {
     m_sampler.initialize();
-    m_colorTex.initialize("Textures/boat/color.dds");
+    //m_colorTex.initialize("Textures/boat/color.dds", false);
     //m_normalTex.initialize(stagingManager, "Textures/boat/normal.dds", false);
     //m_rmhTex.initialize(stagingManager, "Textures/boat/roughness_metallic_height.dds", false);
 

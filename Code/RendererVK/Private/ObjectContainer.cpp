@@ -31,7 +31,7 @@ ObjectContainer::~ObjectContainer()
 
 void ObjectContainer::initializeTextures(const std::vector<TextureData>& textureData)
 {
-    m_baseTextureIdx = Globals::textureManager.upload(textureData);
+    m_baseTextureIdx = Globals::textureManager.upload(textureData, true);
     m_numTextures = (uint16)textureData.size();
 }
 

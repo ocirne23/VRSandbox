@@ -41,7 +41,7 @@ Texture::Texture(Texture&& move)
     move.m_imageReadySemaphore = VK_NULL_HANDLE;
 }
 
-bool Texture::initialize(const char* filePath)
+bool Texture::initialize(const char* filePath, bool generateMips)
 {
     std::filesystem::path path(filePath);
     std::vector<uint8> fileData;
@@ -101,10 +101,10 @@ bool Texture::initialize(const char* filePath)
         */
     }
 
-	return initialize(width, height, format, imgData);
+	return initialize(width, height, format, imgData, generateMips);
 }
 
-bool Texture::initialize(const TextureData& textureData)
+bool Texture::initialize(const TextureData& textureData, bool generateMips)
 {
     const bool sRGB = false;
     std::string formatInfo = textureData.getFormatInfo();
@@ -154,10 +154,12 @@ bool Texture::initialize(const TextureData& textureData)
         else if (formatInfo.compare("jpg") == 0)
         {
             assert(false && "implement jpg loading");
+            return false;
         }
         else
         {
             assert(false && "unsupported compressed texture format");
+            return false;
         }
     }
     else
@@ -174,13 +176,13 @@ bool Texture::initialize(const TextureData& textureData)
         {
             assert(false && "unsupported uncompressed texture format");
         }
-		//imgData.push_back(std::span((uint8*)pixels, width * height * 4));
+        return false;
     }
-    
-    return initialize(width, height, format, imgData);
+
+    return initialize(width, height, format, imgData, generateMips);
 }
 
-bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const std::vector<std::span<uint8>>& imageDataMips)
+bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const std::vector<std::span<uint8>>& imageDataMips, bool generateMips)
 {
     vk::Device vkDevice = Globals::device.getDevice();
     vk::SemaphoreTypeCreateInfo semaphoreTypeCreateInfo = { .semaphoreType = vk::SemaphoreType::eBinary };
@@ -194,7 +196,7 @@ bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const s
 	m_width = width;
 	m_height = height;
 	m_format = format;
-	m_numMipLevels = (uint32)imageDataMips.size();
+    m_numMipLevels = generateMips ? m_numMipLevels = (uint32)(std::floor(std::log2(std::max(width, height)))) + 1 : (uint32)imageDataMips.size();
 
     vk::ImageCreateInfo imageCreateInfo{
         .imageType = vk::ImageType::e2D,
@@ -204,8 +206,7 @@ bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const s
         .arrayLayers = 1,
         .samples = vk::SampleCountFlagBits::e1,
         .tiling = vk::ImageTiling::eOptimal,
-        //.tiling = vk::ImageTiling::eLinear,
-        .usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+        .usage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
         .sharingMode = vk::SharingMode::eExclusive,
         .initialLayout = vk::ImageLayout::eUndefined
     };
@@ -267,34 +268,17 @@ bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const s
     }
     m_imageView = createImageViewResult.value;
 
-    Globals::stagingManager.transitionImage(vk::ImageMemoryBarrier2{
-            .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-            .oldLayout = vk::ImageLayout::eUndefined,
-            .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-            .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
-            .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
-            .image = m_image,
-            .subresourceRange = vk::ImageSubresourceRange
-            {
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel = 0,
-                .levelCount = m_numMipLevels,
-                .baseArrayLayer = 0,
-                .layerCount = 1
-            }
-        });
+    if (generateMips && imageDataMips.size() == 1)
+    {
+        Globals::stagingManager.uploadImageAndGenerateMipMaps(m_image, m_width, m_height, m_numMipLevels, imageDataMips[0].size(), imageDataMips[0].data());
+    }
+    else
+    {
+        for (uint32 i = 0; i < m_numMipLevels; i++)
+        {
+            Globals::stagingManager.uploadImage(m_image, m_width >> i, m_height >> i, imageDataMips[i].size(), imageDataMips[i].data(), i);
+        }
+    }
 
-#if 1
-    for (uint32 i = 0; i < m_numMipLevels; i++)
-    {
-        Globals::stagingManager.uploadImage(m_image, m_width >> i, m_height >> i, imageDataMips[i].size(), imageDataMips[i].data(), i);
-    }
-#else
-    for (uint32 i = m_numMipLevels - 1; i > 5 - 2; i--)
-    {
-        stagingManager.uploadImage(m_image, m_width >> i, m_height >> i, imageDataMips[i].size(), imageDataMips[i].data(), i);
-    }
-#endif
     return true;
 }

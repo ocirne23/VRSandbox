@@ -11,7 +11,7 @@ TextureManager::~TextureManager()
     }
 }
 
-uint16 TextureManager::upload(const std::vector<TextureData>& textureData)
+uint16 TextureManager::upload(const std::vector<TextureData>& textureData, bool generateMips)
 {
     if (m_textures.size() + textureData.size() > UINT16_MAX)
     {
@@ -24,7 +24,7 @@ uint16 TextureManager::upload(const std::vector<TextureData>& textureData)
     for (uint32 i = 0; i < textureData.size(); ++i)
     {
         m_textures.emplace_back();
-        if (!m_textures[startIdx + i].initialize(textureData[i]))
+        if (!m_textures[startIdx + i].initialize(textureData[i], generateMips))
         {
             assert(false && "Failed to initialize texture");
             m_textures.resize(startIdx);

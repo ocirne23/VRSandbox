@@ -9,7 +9,7 @@ export class TextureManager final
 public:
 
     ~TextureManager();
-    uint16 upload(const std::vector<TextureData>& textureData);
+    uint16 upload(const std::vector<TextureData>& textureData, bool generateMips);
     const Texture& getTexture(uint16 idx) const { assert(idx < m_textures.size()); return m_textures[idx]; }
     const std::vector<Texture>& getTextures() const { return m_textures; }
 
