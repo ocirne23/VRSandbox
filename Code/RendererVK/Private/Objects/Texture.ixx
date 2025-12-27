@@ -21,7 +21,6 @@ public:
 
     vk::ImageView getImageView() const { return m_imageView; }
     vk::Image getImage() const { return m_image; }
-    vk::Semaphore getImageReadySemaphore() const { return m_imageReadySemaphore; }
 
 private:
 
@@ -32,5 +31,4 @@ private:
     vk::Image m_image;
     vk::DeviceMemory m_imageMemory;
     vk::ImageView m_imageView;
-    vk::Semaphore m_imageReadySemaphore;
 };

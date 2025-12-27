@@ -21,8 +21,6 @@ Texture::~Texture()
         vkDevice.freeMemory(m_imageMemory);
     if (m_image)
         vkDevice.destroyImage(m_image);
-    if (m_imageReadySemaphore)
-        vkDevice.destroySemaphore(m_imageReadySemaphore);
 }
 
 Texture::Texture(Texture&& move)
@@ -34,11 +32,9 @@ Texture::Texture(Texture&& move)
     m_image = move.m_image;
     m_imageMemory = move.m_imageMemory;
     m_imageView = move.m_imageView;
-    m_imageReadySemaphore = move.m_imageReadySemaphore;
     move.m_image = VK_NULL_HANDLE;
     move.m_imageMemory = VK_NULL_HANDLE;
     move.m_imageView = VK_NULL_HANDLE;
-    move.m_imageReadySemaphore = VK_NULL_HANDLE;
 }
 
 bool Texture::initialize(const char* filePath, bool generateMips)
@@ -185,14 +181,6 @@ bool Texture::initialize(const TextureData& textureData, bool generateMips)
 bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const std::vector<std::span<uint8>>& imageDataMips, bool generateMips)
 {
     vk::Device vkDevice = Globals::device.getDevice();
-    vk::SemaphoreTypeCreateInfo semaphoreTypeCreateInfo = { .semaphoreType = vk::SemaphoreType::eBinary };
-    auto createSemaphoreResult = vkDevice.createSemaphore(vk::SemaphoreCreateInfo{ .pNext = &semaphoreTypeCreateInfo });
-    if (createSemaphoreResult.result != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to create semaphore");
-        return false;
-    }
-    m_imageReadySemaphore = createSemaphoreResult.value;
 	m_width = width;
 	m_height = height;
 	m_format = format;

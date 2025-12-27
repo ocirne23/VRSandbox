@@ -19,8 +19,6 @@ public:
 
     vk::Semaphore upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
     vk::Semaphore uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, uint32 mipLevel, vk::DeviceSize dstOffset = 0);
-    void transitionImage(vk::ImageMemoryBarrier2 barrier) { m_imageTransitions.push_back(barrier); }
-    vk::Semaphore generateMipMaps(vk::Image image, uint32 imageWidth, uint32 imageHeight, uint32 numMipLevels);
     vk::Semaphore uploadImageAndGenerateMipMaps(vk::Image image, uint32 imageWidth, uint32 imageHeight, uint32 numMipLevels, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
     vk::Semaphore update();
 
@@ -48,7 +46,6 @@ private:
         uint32 width, height, numMips;
     };
     std::vector<UploadAndMip> m_imageCopyAndMipList;
-    std::vector<vk::ImageMemoryBarrier2> m_imageTransitions;
     std::span<uint8> m_mappedMemory;
 };
 
