@@ -81,4 +81,12 @@ export namespace RendererVKLayout
     };
 
     using MeshIndex = uint32;
+
+    struct alignas(16) LightInfo
+    {
+        glm::vec3 position;
+        float range;
+        glm::vec3 color;
+        float intensity;
+    };
 }

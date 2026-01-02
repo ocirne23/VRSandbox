@@ -17,10 +17,6 @@ StaticMeshGraphicsPipeline::~StaticMeshGraphicsPipeline() {}
 bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
 {
     m_sampler.initialize();
-    //m_colorTex.initialize("Textures/boat/color.dds", false);
-    //m_normalTex.initialize(stagingManager, "Textures/boat/normal.dds", false);
-    //m_rmhTex.initialize(stagingManager, "Textures/boat/roughness_metallic_height.dds", false);
-
     GraphicsPipelineLayout graphicsPipelineLayout;
     graphicsPipelineLayout.vertexShaderDebugFilePath = "Shaders/instanced_indirect.vs.glsl";
     graphicsPipelineLayout.fragmentShaderDebugFilePath = "Shaders/instanced_indirect.fs.glsl";
@@ -105,18 +101,6 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
         .descriptorCount = 1024,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
-    //descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_normal
-    //    .binding = 4,
-    //    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-    //    .descriptorCount = 1,
-    //    .stageFlags = vk::ShaderStageFlagBits::eFragment
-    //});
-    //descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_roughness_metallic_height
-    //    .binding = 5,
-    //    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-    //    .descriptorCount = 1,
-    //    .stageFlags = vk::ShaderStageFlagBits::eFragment
-    //});
     m_graphicsPipeline.initialize(renderPass, graphicsPipelineLayout);
 
     return true;
@@ -160,30 +144,12 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .binding = 4,
             .type = vk::DescriptorType::eCombinedImageSampler,
         },
-        //DescriptorSetUpdateInfo{
-        //    .binding = 4,
-        //    .type = vk::DescriptorType::eCombinedImageSampler,
-        //    .info = vk::DescriptorImageInfo {
-        //        .sampler = m_sampler.getSampler(),
-        //        .imageView = m_normalTex.getImageView(),
-        //        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-        //    }
-        //},
-        //DescriptorSetUpdateInfo{
-        //    .binding = 5,
-        //    .type = vk::DescriptorType::eCombinedImageSampler,
-        //    .info = vk::DescriptorImageInfo {
-        //        .sampler = m_sampler.getSampler(),
-        //        .imageView = m_rmhTex.getImageView(),
-        //        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-        //    }
-        //}
     };
 
     const std::vector<Texture>& textures = Globals::textureManager.getTextures();
     for (const Texture& tex : textures)
     {
-        graphicsDescriptorSetUpdateInfos[3].imageInfos.push_back(
+        graphicsDescriptorSetUpdateInfos.back().imageInfos.push_back(
             vk::DescriptorImageInfo{
                 .sampler = m_sampler.getSampler(),
                 .imageView = tex.getImageView(),
@@ -191,7 +157,6 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             }
         );
     }
-    
 
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
     vk::DescriptorSet descriptorSet = params.descriptorSet.getDescriptorSet();

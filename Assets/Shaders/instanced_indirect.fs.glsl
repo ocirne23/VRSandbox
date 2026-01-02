@@ -22,13 +22,12 @@ struct MaterialInfo
     vec3 emissiveColor;
     uint diffuseNormalTexIdx;
 };
-
 layout (binding = 2, std430) buffer InMaterialInfos
 {
 	MaterialInfo in_materialInfos[];
 };
 
-layout (binding = 4) uniform sampler2D u_color[];
+layout (binding = 4) uniform sampler2D u_textures[];
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
@@ -125,14 +124,10 @@ void main()
 	float roughness = 0.4;//max(material.roughness, 0.01);
 	float metalness = 0.0;//material.metalness;
 	
-	vec3 materialColor = texture(u_color[diffuseTexIdx], in_uv).xyz;
-	vec3 materialNormal = texture(u_color[normalTexIdx], in_uv).xyz;
+	vec3 materialColor = texture(u_textures[diffuseTexIdx], in_uv).xyz;
+	vec3 materialNormal = texture(u_textures[normalTexIdx], in_uv).xyz;
 	materialNormal = normalize(materialNormal * 2.0 - 1.0);
 	vec3 specularColor = mix(vec3(0.04), materialColor, material.metalness);
-	
-	float a2 = roughness * roughness;
-	float r = roughness + 1.0;
-	float k = (r * r) / 8.0;
 	
 	const float ambient = 0.05f;
 	vec3 lightColor = vec3(1.0, 1.0, 1.0);
@@ -151,7 +146,11 @@ void main()
 	float NdotL = clamp(dot(N, L), 0.0, 1.0);
 	float NdotV = clamp(dot(N, V), 0.0, 1.0);
 	float HdotV = clamp(dot(H, V), 0.0, 1.0);
-	
+
+	float r = roughness + 1.0;
+	float k = (r * r) / 8.0;
+	float a2 = roughness * roughness;
+
 	float NDF = DistributionGGX(N, H, a2);
 	float G = GeometrySmith(NdotL, NdotV, k);
 	vec3 F = FresnelSchlickRoughness(HdotV, specularColor, roughness);

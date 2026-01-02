@@ -40,9 +40,5 @@ public:
 private:
 
     GraphicsPipeline m_graphicsPipeline;
-
-    Texture m_colorTex;
-    //Texture m_normalTex;
-    //Texture m_rmhTex;
     Sampler m_sampler;
 };
