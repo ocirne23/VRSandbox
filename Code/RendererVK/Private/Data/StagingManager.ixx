@@ -1,10 +1,9 @@
-export module RendererVK.StagingManager;
-extern "C++" {
+export module RendererVK:StagingManager;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
+import :VK;
+import :Buffer;
+import :CommandBuffer;
 
 export class SwapChain;
 
@@ -57,4 +56,3 @@ export namespace Globals
     StagingManager stagingManager;
 #pragma warning(default: 4075)
 }
-} // extern "C++"

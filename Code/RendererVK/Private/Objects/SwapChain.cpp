@@ -1,9 +1,9 @@
-module RendererVK.SwapChain;
+module RendererVK:SwapChain;
 
-import RendererVK.VK;
-import RendererVK.Device;
-import RendererVK.Surface;
-import RendererVK.CommandBuffer;
+import :VK;
+import :Device;
+import :Surface;
+import :CommandBuffer;
 
 SwapChain::SwapChain() {}
 SwapChain::~SwapChain()

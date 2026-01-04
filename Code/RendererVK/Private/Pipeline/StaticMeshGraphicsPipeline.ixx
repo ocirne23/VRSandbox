@@ -1,13 +1,12 @@
-export module RendererVK.StaticMeshGraphicsPipeline;
-extern "C++" {
+export module RendererVK:StaticMeshGraphicsPipeline;
 
 import Core;
 
-import RendererVK.VK;
-import RendererVK.GraphicsPipeline;
-import RendererVK.DescriptorSet;
-import RendererVK.Texture;
-import RendererVK.Sampler;
+import :VK;
+import :GraphicsPipeline;
+import :DescriptorSet;
+import :Texture;
+import :Sampler;
 
 export class ObjectContainer;
 export class StagingManager;
@@ -44,4 +43,3 @@ private:
     GraphicsPipeline m_graphicsPipeline;
     Sampler m_sampler;
 };
-} // extern "C++"

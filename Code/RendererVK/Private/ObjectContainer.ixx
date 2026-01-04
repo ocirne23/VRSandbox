@@ -1,13 +1,12 @@
-export module RendererVK.ObjectContainer;
-extern "C++" {
+export module RendererVK:ObjectContainer;
 
 import Core;
 import Core.glm;
 import Core.Sphere;
-import RendererVK.Layout;
-import RendererVK.Transform;
-import RendererVK.Buffer;
-import RendererVK.Texture;
+
+import :Layout;
+import :Buffer;
+import :Texture;
 
 export class SceneData;
 export class TextureData;
@@ -89,4 +88,3 @@ private:
     std::vector<std::string> m_meshNames;
     std::vector<std::string> m_materialNames;
 };
-} // extern "C++"

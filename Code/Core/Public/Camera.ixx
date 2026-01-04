@@ -1,7 +1,5 @@
-export module RendererVK.Camera;
-extern "C++" {
+export module Core.Camera;
 
-import Core;
 import Core.glm;
 
 export struct Camera
@@ -14,4 +12,3 @@ public:
     float near = 0.1f;
     float far = 5000.0f;
 };
-} // extern "C++"

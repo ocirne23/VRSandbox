@@ -1,9 +1,8 @@
-export module RendererVK.Texture;
-extern "C++" {
+export module RendererVK:Texture;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Device;
+import :VK;
+import :Device;
 
 export class StagingManager;
 export class TextureData;
@@ -33,4 +32,3 @@ private:
     vk::DeviceMemory m_imageMemory;
     vk::ImageView m_imageView;
 };
-} // extern "C++"

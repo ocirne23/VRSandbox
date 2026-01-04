@@ -11,11 +11,8 @@ import File.FileSystem;
 import File.SceneData;
 import Input;
 import UI;
-import Script;
 
 import RendererVK;
-import RendererVK.ObjectContainer;
-import RendererVK.RenderNode;
 
 int main()
 {
@@ -31,14 +28,11 @@ int main()
     //cameraController.initialize(glm::vec3(-90.0f, 90.0f, -90.0f), glm::vec3(100.0f, 20.0f, 120.0f));
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f));
 
-    RendererVK& renderer = Globals::rendererVK;
+    Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::ENABLED);
 
     UI& ui = Globals::ui;
     ui.initialize();
-
-    Script& script = Globals::script;
-    script.initialize();
 
     bool running = true;
     SystemEventListener* pSystemEventListener = input.addSystemEventListener();
@@ -99,7 +93,6 @@ int main()
         const double deltaSec = Globals::time.getDeltaSec();
         input.update(deltaSec);
         cameraController.update(deltaSec);
-        script.update(deltaSec);
         ui.update(deltaSec);
         renderer.setViewportRect(ui.getViewportRect());
 

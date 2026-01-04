@@ -1,8 +1,7 @@
-export module RendererVK.Device;
-extern "C++" {
+export module RendererVK:Device;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 export class Device final
 {
@@ -45,4 +44,3 @@ export namespace Globals
     Device device;
 #pragma warning(default: 4075)
 }
-} // extern "C++"

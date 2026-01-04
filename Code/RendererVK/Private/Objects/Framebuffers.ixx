@@ -1,8 +1,7 @@
-export module RendererVK.Framebuffers;
-extern "C++" {
+export module RendererVK:Framebuffers;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 export class RenderPass;
 export class SwapChain;
@@ -28,4 +27,3 @@ private:
     vk::Image m_depthImage;
     vk::ImageView m_depthImageView;
 };
-} // extern "C++"

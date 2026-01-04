@@ -1,10 +1,10 @@
-module RendererVK.IndirectCullComputePipeline;
+module RendererVK:IndirectCullComputePipeline;
 
 import Core;
 import File.FileSystem;
-import RendererVK.Device;
-import RendererVK.Layout;
-import RendererVK.ObjectContainer;
+import :Device;
+import :Layout;
+import :ObjectContainer;
 
 IndirectCullComputePipeline::IndirectCullComputePipeline() {}
 IndirectCullComputePipeline::~IndirectCullComputePipeline() {}

@@ -4,7 +4,7 @@ extern "C++" {
 import Entity;
 import Core;
 import Core.glm;
-import RendererVK.RenderNode;
+import RendererVK;
 
 constexpr int MaxInlineComponentTypes = 3;
 enum EComponentID : uint16

@@ -1,11 +1,11 @@
-module RendererVK.Texture;
+module RendererVK:Texture;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.StagingManager;
-import RendererVK.stb_image;
-import RendererVK.DDS;
+import :VK;
+import :Buffer;
+import :StagingManager;
+import :stb_image;
+import :DDS;
 import File.TextureData;
 
 Texture::Texture()

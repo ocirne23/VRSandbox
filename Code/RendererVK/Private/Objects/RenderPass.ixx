@@ -1,7 +1,6 @@
-export module RendererVK.RenderPass;
-extern "C++" {
+export module RendererVK:RenderPass;
 
-import RendererVK.VK;
+import :VK;
 
 export class SwapChain;
 
@@ -20,4 +19,3 @@ private:
 
     vk::RenderPass m_renderPass;
 };
-} // extern "C++"

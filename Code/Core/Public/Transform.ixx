@@ -1,4 +1,4 @@
-export module RendererVK.Transform;
+export module Core.Transform;
 extern "C++" {
 
 import Core.glm;
@@ -11,5 +11,4 @@ export struct Transform
     float scale;
     glm::quat quat;
 };
-
 } // extern "C++"

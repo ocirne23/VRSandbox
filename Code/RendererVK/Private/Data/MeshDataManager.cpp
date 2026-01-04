@@ -1,10 +1,10 @@
-module RendererVK.MeshDataManager;
+module RendererVK:MeshDataManager;
 
 import Core;
 import File.MeshData;
-import RendererVK.StagingManager;
-import RendererVK.Buffer;
-import RendererVK.Device;
+import :StagingManager;
+import :Buffer;
+import :Device;
 
 MeshDataManager::MeshDataManager()
 {

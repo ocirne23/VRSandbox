@@ -1,9 +1,8 @@
-export module RendererVK.MeshDataManager;
-extern "C++" {
+export module RendererVK:MeshDataManager;
 
 import Core;
-import RendererVK.Layout;
-import RendererVK.Buffer;
+import :Layout;
+import :Buffer;
 
 export class MeshData;
 
@@ -51,4 +50,3 @@ export namespace Globals
     MeshDataManager meshDataManager;
 #pragma warning(default: 4075)
 }
-} // extern "C++"

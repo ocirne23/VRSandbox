@@ -1,7 +1,7 @@
-module RendererVK.ComputePipeline;
+module RendererVK:ComputePipeline;
 
-import RendererVK.Device;
-import RendererVK.Shader;
+import :Device;
+import :Shader;
 
 ComputePipeline::~ComputePipeline()
 {

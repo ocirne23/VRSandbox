@@ -1,8 +1,7 @@
-export module RendererVK.ComputePipeline;
-extern "C++" {
+export module RendererVK:ComputePipeline;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 export struct ComputePipelineLayout
 {
@@ -32,4 +31,3 @@ private:
     vk::PipelineLayout m_pipelineLayout;
     vk::DescriptorSetLayout m_descriptorSetLayout;
 };
-} // extern "C++"

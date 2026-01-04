@@ -1,10 +1,9 @@
-export module RendererVK.Layout;
-extern "C++" {
+export module RendererVK:Layout;
 
 import Core;
 import Core.glm;
 import Core.Frustum;
-import RendererVK.Transform;
+import Core.Transform;
 
 export namespace RendererVKLayout
 {
@@ -91,4 +90,3 @@ export namespace RendererVKLayout
         float intensity;
     };
 }
-} // extern "C++"

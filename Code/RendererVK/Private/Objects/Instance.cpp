@@ -1,14 +1,14 @@
-module RendererVK.Instance;
+module RendererVK:Instance;
 
 import Core;
 import Core.SDL;
 import Core.Window;
 
-import RendererVK.VK;
-import RendererVK.Device;
+import :VK;
+import :Device;
 
 #ifdef USE_AFTERMATH
-import RendererVK.Aftermath;
+import :Aftermath;
 import Core.Windows;
 #endif
 

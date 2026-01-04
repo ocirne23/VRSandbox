@@ -1,13 +1,13 @@
-export module RendererVK.RenderNode;
-extern "C++" {
+export module RendererVK:RenderNode;
 
 import Core;
 import Core.glm;
 import Core.Sphere;
-import RendererVK;
-import RendererVK.Layout;
-import RendererVK.Transform;
-import RendererVK.ObjectContainer;
+import Core.Transform;
+
+import :Renderer;
+import :Layout;
+import :ObjectContainer;
 
 export class RenderNode final
 {
@@ -33,11 +33,10 @@ public:
 private:
 
     friend class ObjectContainer;
-    friend class RendererVK;
+    friend class Renderer;
 
     uint32 m_transformIdx = UINT32_MAX;
     Sphere m_bounds;
     std::vector<RendererVKLayout::InMeshInstance> m_meshInstances;
     std::vector<std::pair<uint16, uint16>> m_numInstancesPerMesh;
 };
-} // extern "C++"

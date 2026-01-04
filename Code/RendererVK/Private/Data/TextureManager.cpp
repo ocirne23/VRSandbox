@@ -1,6 +1,6 @@
-module RendererVK.TextureManager;
+module RendererVK:TextureManager;
 
-import RendererVK.Device;
+import :Device;
 
 TextureManager::~TextureManager()
 {

@@ -1,22 +1,22 @@
-module RendererVK;
+module RendererVK:Renderer;
 
 import Core;
 import Core.glm;
 import Core.Window;
 import Core.Frustum;
 import Core.imgui;
+import Core.Camera;
 
 import File.SceneData;
 import File.MeshData;
 import File.FileSystem;
 
-import RendererVK.RenderNode;
-import RendererVK.VK;
-import RendererVK.StagingManager;
-import RendererVK.glslang;
-import RendererVK.Layout;
-import RendererVK.ObjectContainer;
-import RendererVK.Camera;
+import :RenderNode;
+import :VK;
+import :StagingManager;
+import :glslang;
+import :Layout;
+import :ObjectContainer;
 
 constexpr static size_t VERTEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshVertex);
 constexpr static size_t INDEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
@@ -30,7 +30,7 @@ constexpr std::array<vk::ClearValue, 2> getClearValues()
 }
 constexpr static std::array<vk::ClearValue, 2> s_clearValues = getClearValues();
 
-RendererVK::~RendererVK() 
+Renderer::~Renderer()
 {
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
     if (waitResult != vk::Result::eSuccess)
@@ -40,7 +40,7 @@ RendererVK::~RendererVK()
     ImGui_ImplVulkan_Shutdown();
 }
 
-bool RendererVK::initialize(Window& window, EValidation validation, EVSync vsync)
+bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 {
     // Disable layers we don't care about for now to eliminate potential issues
     _putenv("DISABLE_LAYER_NV_OPTIMUS_1=True");
@@ -151,7 +151,7 @@ bool RendererVK::initialize(Window& window, EValidation validation, EVSync vsync
     return true;
 }
 
-void RendererVK::recreateWindowSurface(Window& window)
+void Renderer::recreateWindowSurface(Window& window)
 {
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
     if (waitResult != vk::Result::eSuccess)
@@ -171,7 +171,7 @@ void RendererVK::recreateWindowSurface(Window& window)
     }
 }
 
-void RendererVK::recreateSwapchain()
+void Renderer::recreateSwapchain()
 {
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
     if (waitResult != vk::Result::eSuccess)
@@ -183,12 +183,12 @@ void RendererVK::recreateSwapchain()
     m_framebuffers.initialize(m_renderPass, m_swapChain);
 }
 
-void RendererVK::setWindowMinimized(bool minimized)
+void Renderer::setWindowMinimized(bool minimized)
 {
     m_windowMinimized = minimized;
 }
 
-const Frustum& RendererVK::beginFrame(const Camera& camera)
+const Frustum& Renderer::beginFrame(const Camera& camera)
 {
     m_meshInstanceCounter = 0;
     memset(m_numInstancesPerMesh.data(), 0, m_numInstancesPerMesh.size() * sizeof(m_numInstancesPerMesh[0]));
@@ -209,7 +209,7 @@ const Frustum& RendererVK::beginFrame(const Camera& camera)
     return ubo.frustum;
 }
 
-void RendererVK::renderNodeThreadSafe(const RenderNode& node)
+void Renderer::renderNodeThreadSafe(const RenderNode& node)
 {
     const uint32 numInstances = (uint32)node.m_meshInstances.size();
     const uint32 startIdx = std::atomic_ref<uint32>(m_meshInstanceCounter).fetch_add(numInstances);
@@ -222,7 +222,7 @@ void RendererVK::renderNodeThreadSafe(const RenderNode& node)
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
 }
 
-void RendererVK::renderNode(const RenderNode& node)
+void Renderer::renderNode(const RenderNode& node)
 {
     const uint32 numInstances = (uint32)node.m_meshInstances.size();
     const uint32 startIdx = m_meshInstanceCounter;
@@ -236,7 +236,7 @@ void RendererVK::renderNode(const RenderNode& node)
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
 }
 
-void RendererVK::present()
+void Renderer::present()
 {
     if(m_windowMinimized)
         return;
@@ -304,14 +304,14 @@ void RendererVK::present()
     }
 }
 
-uint32 RendererVK::addRenderNodeTransform(const Transform& transform)
+uint32 Renderer::addRenderNodeTransform(const Transform& transform)
 {
     const uint32 renderNodeIdx = (uint32)m_renderNodeTransforms.size();
     m_renderNodeTransforms.emplace_back(transform);
     return renderNodeIdx;
 }
 
-void RendererVK::recordCommandBuffers()
+void Renderer::recordCommandBuffers()
 {
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -415,18 +415,18 @@ void RendererVK::recordCommandBuffers()
     commandBuffer.end();
 }
 
-void RendererVK::setHaveToRecordCommandBuffers()
+void Renderer::setHaveToRecordCommandBuffers()
 {
     for (PerFrameData& perFrame : m_perFrameData)
         perFrame.updated = false;
 }
 
-void RendererVK::addObjectContainer(ObjectContainer* pObjectContainer)
+void Renderer::addObjectContainer(ObjectContainer* pObjectContainer)
 {
     m_objectContainers.push_back(pObjectContainer);
 }
 
-uint32 RendererVK::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos)
+uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos)
 {
     const uint32 baseMeshInfoIdx = m_meshInfoCounter;
     m_meshInfoCounter += (uint32)meshInfos.size();
@@ -442,7 +442,7 @@ uint32 RendererVK::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& m
     return baseMeshInfoIdx;
 }
 
-uint32 RendererVK::addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos)
+uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos)
 {
     const uint32 baseMaterialInfoIdx = m_materialInfoCounter;
     m_materialInfoCounter += (uint32)materialInfos.size();
@@ -456,7 +456,7 @@ uint32 RendererVK::addMaterialInfos(const std::vector<RendererVKLayout::Material
     return baseMaterialInfoIdx;
 }
 
-uint32 RendererVK::addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets)
+uint32 Renderer::addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets)
 {
     const uint32 baseInstanceOffsetIdx = m_instanceOffsetCounter;
     m_instanceOffsetCounter += (uint32)meshInstanceOffsets.size();

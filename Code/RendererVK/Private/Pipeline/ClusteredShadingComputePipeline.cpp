@@ -1,1 +1,1 @@
-module RendererVK.ClusteredShadingComputePipeline;
+module RendererVK:ClusteredShadingComputePipeline;

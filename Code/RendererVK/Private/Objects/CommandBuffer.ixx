@@ -1,8 +1,7 @@
-export module RendererVK.CommandBuffer;
-extern "C++" {
+export module RendererVK:CommandBuffer;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 export struct DescriptorSetUpdateInfo
 {
@@ -47,4 +46,3 @@ private:
     std::vector<vk::PipelineStageFlags> m_waitStages;
     vk::PipelineStageFlags2 m_waitStage = vk::PipelineStageFlagBits2::eNone;
 };
-} // extern "C++"

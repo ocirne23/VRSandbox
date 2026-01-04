@@ -1,6 +1,3 @@
-export module RendererVK.DDS;
-extern "C++" {
+export module RendererVK:DDS;
 
 export import <dds/dds.h>;
-
-} // extern "C++"

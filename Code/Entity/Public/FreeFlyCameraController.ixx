@@ -3,11 +3,10 @@ extern "C++" {
 
 import Core;
 import Core.glm;
+import Core.Camera;
 
-import RendererVK.Camera;
-
-export extern "C++" class Input;
-export extern "C++" class MouseListener;
+export class Input;
+export class MouseListener;
 
 export class FreeFlyCameraController final
 {

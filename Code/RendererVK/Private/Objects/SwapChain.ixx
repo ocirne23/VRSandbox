@@ -1,9 +1,8 @@
-export module RendererVK.SwapChain;
-extern "C++" {
+export module RendererVK:SwapChain;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.CommandBuffer;
+import :VK;
+import :CommandBuffer;
 
 export class Device;
 export class Surface;
@@ -55,4 +54,3 @@ private:
     uint32 m_currentImageIdx = (~0u);
     std::vector<SyncObjects> m_syncObjects;
 };
-} // extern "C++"

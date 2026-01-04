@@ -1,7 +1,7 @@
-module RendererVK.Device;
+module RendererVK:Device;
 
-import RendererVK.VK;
-import RendererVK.Instance;
+import :VK;
+import :Instance;
 
 Device::Device() {}
 Device::~Device()

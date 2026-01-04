@@ -1,8 +1,7 @@
-export module RendererVK.Buffer;
-extern "C++" {
+export module RendererVK:Buffer;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 export class Buffer final
 {
@@ -41,4 +40,3 @@ private:
     vk::Buffer m_buffer;
     vk::DeviceMemory m_memory;
 };
-} // extern "C++"

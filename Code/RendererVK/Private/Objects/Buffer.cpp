@@ -1,7 +1,7 @@
-module RendererVK.Buffer;
+module RendererVK:Buffer;
 
-import RendererVK.VK;
-import RendererVK.Device;
+import :VK;
+import :Device;
 
 Buffer::Buffer() {}
 Buffer::~Buffer()

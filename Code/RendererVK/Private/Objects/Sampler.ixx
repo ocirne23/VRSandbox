@@ -1,7 +1,6 @@
-export module RendererVK.Sampler;
-extern "C++" {
+export module RendererVK:Sampler;
 
-import RendererVK.VK;
+import :VK;
 
 export class Sampler final
 {
@@ -18,4 +17,3 @@ private:
 
     vk::Sampler m_sampler;
 };
-} // extern "C++"

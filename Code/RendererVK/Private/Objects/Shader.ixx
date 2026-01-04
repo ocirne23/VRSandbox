@@ -1,8 +1,7 @@
-export module RendererVK.Shader;
-extern "C++" {
+export module RendererVK:Shader;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 export class Shader final
 {
@@ -22,4 +21,3 @@ private:
 
     vk::ShaderModule m_shaderModule;
 };
-} // extern "C++"

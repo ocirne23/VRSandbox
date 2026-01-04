@@ -1,15 +1,14 @@
-export module RendererVK.IndirectCullComputePipeline;
-extern "C++" {
+export module RendererVK:IndirectCullComputePipeline;
 
 import Core;
+import Core.Transform;
 
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.ComputePipeline;
-import RendererVK.Layout;
-import RendererVK.Transform;
-import RendererVK.DescriptorSet;
+import :VK;
+import :Buffer;
+import :CommandBuffer;
+import :ComputePipeline;
+import :Layout;
+import :DescriptorSet;
 
 export class ObjectContainer;
 
@@ -56,4 +55,3 @@ private:
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 };
-} // extern "C++"

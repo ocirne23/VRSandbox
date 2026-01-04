@@ -1,15 +1,15 @@
-module RendererVK.StaticMeshGraphicsPipeline;
+module RendererVK:StaticMeshGraphicsPipeline;
 
 import Core;
 
 import File.FileSystem;
 
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.Layout;
-import RendererVK.StagingManager;
-import RendererVK.IndirectCullComputePipeline;
-import RendererVK.TextureManager;
+import :Buffer;
+import :CommandBuffer;
+import :Layout;
+import :StagingManager;
+import :IndirectCullComputePipeline;
+import :TextureManager;
 
 StaticMeshGraphicsPipeline::StaticMeshGraphicsPipeline() {}
 StaticMeshGraphicsPipeline::~StaticMeshGraphicsPipeline() {}

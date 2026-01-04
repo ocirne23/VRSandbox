@@ -1,6 +1,3 @@
-export module RendererVK.stb_image;
-extern "C++" {
+export module RendererVK:stb_image;
 
 export import <stb/stb_image.h>;
-
-} // extern "C++"
