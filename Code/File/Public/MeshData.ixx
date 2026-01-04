@@ -1,4 +1,5 @@
 export module File.MeshData;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -34,3 +35,4 @@ private:
     const aiMesh* m_pMesh = nullptr;
     std::vector<uint32> m_indices;
 };
+} // extern "C++"

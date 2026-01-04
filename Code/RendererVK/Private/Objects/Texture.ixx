@@ -1,4 +1,5 @@
 export module RendererVK.Texture;
+extern "C++" {
 
 import Core;
 import RendererVK.VK;
@@ -32,3 +33,4 @@ private:
     vk::DeviceMemory m_imageMemory;
     vk::ImageView m_imageView;
 };
+} // extern "C++"

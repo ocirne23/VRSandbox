@@ -1,4 +1,5 @@
 export module RendererVK.TextureManager;
+extern "C++" {
 
 import Core;
 import File.TextureData;
@@ -25,3 +26,4 @@ export namespace Globals
     TextureManager textureManager;
 #pragma warning(default: 4075)
 }
+} // extern "C++"

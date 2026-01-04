@@ -1,4 +1,5 @@
 export module UI;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -40,3 +41,4 @@ export namespace Globals
 {
     UI ui;
 }
+} // extern "C++"

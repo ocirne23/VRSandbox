@@ -1,4 +1,5 @@
 export module Core.Rect;
+extern "C++" {
 
 import Core.glm;
 
@@ -20,3 +21,4 @@ export struct Rect
     glm::ivec2 min = glm::ivec2(0);
     glm::ivec2 max = glm::ivec2(0);
 };
+} // extern "C++"

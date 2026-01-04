@@ -1,4 +1,5 @@
 export module RendererVK.GraphicsPipeline;
+extern "C++" {
 
 import Core;
 import RendererVK.VK;
@@ -43,3 +44,4 @@ private:
     vk::PipelineLayout m_pipelineLayout;
     vk::DescriptorSetLayout m_descriptorSetLayout;
 };
+} // extern "C++"

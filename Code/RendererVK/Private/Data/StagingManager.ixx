@@ -1,4 +1,5 @@
 export module RendererVK.StagingManager;
+extern "C++" {
 
 import Core;
 import RendererVK.VK;
@@ -56,3 +57,4 @@ export namespace Globals
     StagingManager stagingManager;
 #pragma warning(default: 4075)
 }
+} // extern "C++"

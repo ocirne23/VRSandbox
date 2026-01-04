@@ -1,4 +1,5 @@
 export module Script;
+extern "C++" {
 
 export class Script final
 {
@@ -22,4 +23,5 @@ export namespace Globals
 #pragma init_seg(".CRT$XCU5")
     Script script;
 #pragma warning(default: 4075)
-}
+} // namespace Globals
+} // extern "C++"

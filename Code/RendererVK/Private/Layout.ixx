@@ -1,4 +1,5 @@
 export module RendererVK.Layout;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -90,3 +91,4 @@ export namespace RendererVKLayout
         float intensity;
     };
 }
+} // extern "C++"

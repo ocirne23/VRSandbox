@@ -1,4 +1,5 @@
 export module Core;
+extern "C++" {
 
 export typedef signed char        int8;
 export typedef short              int16;
@@ -58,3 +59,4 @@ constexpr size_t ARRAY_SIZE(const T(&)[N]) { return N; }
 export using Clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady,
     std::chrono::high_resolution_clock,
     std::chrono::steady_clock>;
+} // extern "C++"

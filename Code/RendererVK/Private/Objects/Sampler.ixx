@@ -1,4 +1,5 @@
 export module RendererVK.Sampler;
+extern "C++" {
 
 import RendererVK.VK;
 
@@ -17,3 +18,4 @@ private:
 
     vk::Sampler m_sampler;
 };
+} // extern "C++"

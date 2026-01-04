@@ -1,4 +1,5 @@
 export module Core.Window;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -23,3 +24,4 @@ public:
 private:
     void* m_windowHandle = nullptr;
 };
+} // extern "C++"

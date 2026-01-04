@@ -1,4 +1,5 @@
 export module RendererVK.Surface;
+extern "C++" {
 
 import RendererVK.VK;
 
@@ -23,3 +24,4 @@ private:
     vk::SurfaceKHR m_surface;
     vk::Instance m_instance;
 };
+} // extern "C++"

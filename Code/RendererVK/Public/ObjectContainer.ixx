@@ -1,4 +1,5 @@
 export module RendererVK.ObjectContainer;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -15,7 +16,7 @@ export class MaterialData;
 export class NodeData;
 export class RenderNode;
 export struct Transform;
-
+       
 export enum NodeSpawnIdx : uint16
 {
     NodeSpawnIdx_ROOT = 0,
@@ -88,3 +89,4 @@ private:
     std::vector<std::string> m_meshNames;
     std::vector<std::string> m_materialNames;
 };
+} // extern "C++"

@@ -1,4 +1,5 @@
 export module RendererVK.Camera;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -13,3 +14,4 @@ public:
     float near = 0.1f;
     float far = 5000.0f;
 };
+} // extern "C++"

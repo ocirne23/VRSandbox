@@ -1,4 +1,5 @@
 export module RendererVK.StaticMeshGraphicsPipeline;
+extern "C++" {
 
 import Core;
 
@@ -12,6 +13,7 @@ export class ObjectContainer;
 export class StagingManager;
 export class Buffer;
 export class CommandBuffer;
+export class RenderPass;
 
 export class StaticMeshGraphicsPipeline final
 {
@@ -42,3 +44,4 @@ private:
     GraphicsPipeline m_graphicsPipeline;
     Sampler m_sampler;
 };
+} // extern "C++"

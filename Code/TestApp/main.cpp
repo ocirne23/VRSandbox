@@ -1,4 +1,31 @@
-int main() { return 0; }
+import Core;
+import Core.Window;
+import Core.SDL;
+
+import File.FileSystem;
+import Input;
+import UI;
+
+int main() 
+{
+	FileSystem::initialize();
+
+	Window window;
+	window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(1920, 1080));
+
+	Input& input = Globals::input;
+	input.initialize();
+
+	UI& ui = Globals::ui;
+	ui.initialize();
+
+	KeyboardListener* pKeyboardListener = input.addKeyboardListener();
+	pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
+		{
+			printf("%i", (int)evt.key);
+		};
+	return 0; 
+}
 //printf("Encoded: %f %f %f %f\n", encode.x, encode.y, encode.z, encode.w);
 //printf("Hash: %llu\n", hash.hash);
 //printf("Decoded: %f %f %f %f\n", decoded5.x, decoded5.y, decoded5.z, decoded5.w);

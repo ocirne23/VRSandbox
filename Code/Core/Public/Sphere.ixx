@@ -1,4 +1,5 @@
 export module Core.Sphere;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -26,3 +27,4 @@ export struct Sphere
         pos += centerOffset * k;
     }
 };
+} // extern "C++"

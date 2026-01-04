@@ -1,13 +1,13 @@
 export module Entity.FreeFlyCameraController;
+extern "C++" {
 
 import Core;
 import Core.glm;
 
 import RendererVK.Camera;
 
-export class Input;
-export class MouseListener;
-export class KeyboardListener;
+export extern "C++" class Input;
+export extern "C++" class MouseListener;
 
 export class FreeFlyCameraController final
 {
@@ -50,3 +50,4 @@ private:
     glm::vec3 m_up;
     glm::mat4 m_viewMatrix;
 };
+} // extern "C++"

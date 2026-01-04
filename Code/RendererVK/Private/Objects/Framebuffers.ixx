@@ -1,4 +1,5 @@
 export module RendererVK.Framebuffers;
+extern "C++" {
 
 import Core;
 import RendererVK.VK;
@@ -27,3 +28,4 @@ private:
     vk::Image m_depthImage;
     vk::ImageView m_depthImageView;
 };
+} // extern "C++"

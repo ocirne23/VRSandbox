@@ -3,6 +3,7 @@ module;
 #include <vulkan/vulkan_core.h> // for vkCmdPushDescriptorSetKHR
 
 export module RendererVK.VK;
+extern "C++" {
 
 export import vulkan_hpp;
 import Core;
@@ -42,7 +43,8 @@ export constexpr uint32 VK_MAKE_VERSION(uint32 major, uint32 minor, uint32 patch
 }
 
 export PFN_vkCmdPushDescriptorSetKHR pfVkCmdPushDescriptorSetKHR = nullptr;
-export void vkCmdPushDescriptorSetKHR(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipelineLayout layout, uint32_t set, uint32_t descriptorWriteCount, const VkWriteDescriptorSet* pDescriptorWrites)
+export extern "C" void vkCmdPushDescriptorSetKHR(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipelineLayout layout, uint32_t set, uint32_t descriptorWriteCount, const VkWriteDescriptorSet* pDescriptorWrites)
 {
     pfVkCmdPushDescriptorSetKHR(commandBuffer, pipelineBindPoint, layout, set, descriptorWriteCount, pDescriptorWrites);
 }
+} // extern "C++"

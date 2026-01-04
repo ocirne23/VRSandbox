@@ -1,4 +1,5 @@
 export module RendererVK;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -141,4 +142,5 @@ export namespace Globals
 #pragma init_seg(".CRT$XCU3")
     RendererVK rendererVK;
 #pragma warning(default: 4075)
-}
+} // namespace Globals
+} // extern "C++"

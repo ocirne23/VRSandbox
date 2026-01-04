@@ -1,4 +1,5 @@
 export module RendererVK.MeshDataManager;
+extern "C++" {
 
 import Core;
 import RendererVK.Layout;
@@ -50,3 +51,4 @@ export namespace Globals
     MeshDataManager meshDataManager;
 #pragma warning(default: 4075)
 }
+} // extern "C++"

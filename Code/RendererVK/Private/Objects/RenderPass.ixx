@@ -1,4 +1,5 @@
 export module RendererVK.RenderPass;
+extern "C++" {
 
 import RendererVK.VK;
 
@@ -19,3 +20,4 @@ private:
 
     vk::RenderPass m_renderPass;
 };
+} // extern "C++"

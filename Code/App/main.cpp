@@ -43,6 +43,7 @@ int main()
     bool running = true;
     SystemEventListener* pSystemEventListener = input.addSystemEventListener();
     pSystemEventListener->onQuit = [&]() { running = false; };
+    
     pSystemEventListener->onWindowEvent = [&](const SDL_WindowEvent& evt) 
         {
             if (evt.type == SDL_EVENT_WINDOW_RESIZED)   renderer.recreateWindowSurface(window);
@@ -52,7 +53,7 @@ int main()
         };
     
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
-
+    
     std::vector<RenderNode> spawnedNodes;
 
 #if 1

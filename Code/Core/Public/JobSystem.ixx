@@ -1,4 +1,5 @@
 export module Core.JobSystem;
+extern "C++" {
 
 import Core;
 import Core.LockFreeList;
@@ -164,3 +165,4 @@ void Job::await_suspend(std::coroutine_handle<Job::promise_type> h) noexcept
     std::unique_lock lock(prom.m_mutex);
     pScheduler->add(prom, depProm);
 }
+} // extern "C++"

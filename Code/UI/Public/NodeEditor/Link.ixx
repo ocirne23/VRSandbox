@@ -1,4 +1,5 @@
 export module UI.NodeEditor.Link;
+extern "C++" {
 
 import UI.node_editor;
 
@@ -24,5 +25,6 @@ private:
     ed::PinId m_outputId;
 };
 
-}
+} // namespace NodeEditor
+} // extern "C++"
 

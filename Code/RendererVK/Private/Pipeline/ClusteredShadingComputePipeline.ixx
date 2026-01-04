@@ -1,4 +1,5 @@
 export module RendererVK.ClusteredShadingComputePipeline;
+extern "C++" {
 
 import Core;
 
@@ -25,3 +26,4 @@ private:
 
 	ComputePipeline m_computePipeline;
 };
+} // extern "C++"

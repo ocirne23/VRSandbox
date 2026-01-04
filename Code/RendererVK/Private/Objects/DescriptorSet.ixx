@@ -1,4 +1,5 @@
 export module RendererVK.DescriptorSet;
+extern "C++" {
 
 import Core;
 import RendererVK.VK;
@@ -19,3 +20,4 @@ private:
 
     vk::DescriptorSet m_descriptorSet;
 };
+} // extern "C++"

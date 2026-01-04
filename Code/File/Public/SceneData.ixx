@@ -1,4 +1,5 @@
 export module File.SceneData;
+extern "C++" {
 
 import Core;
 import File.Assimp;
@@ -39,3 +40,4 @@ private:
     std::vector<MaterialData> m_materials;
     NodeData m_rootNode;
 };
+} // extern "C++"

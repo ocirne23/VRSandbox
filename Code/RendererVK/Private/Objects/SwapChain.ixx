@@ -1,4 +1,5 @@
 export module RendererVK.SwapChain;
+extern "C++" {
 
 import Core;
 import RendererVK.VK;
@@ -54,3 +55,4 @@ private:
     uint32 m_currentImageIdx = (~0u);
     std::vector<SyncObjects> m_syncObjects;
 };
+} // extern "C++"

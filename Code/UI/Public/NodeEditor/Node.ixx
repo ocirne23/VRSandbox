@@ -1,4 +1,5 @@
 export module UI.NodeEditor.Node;
+extern "C++" {
 
 import Core;
 import UI.node_editor;
@@ -67,5 +68,6 @@ private:
     std::vector<std::unique_ptr<Pin>> m_outputPins;
 };
 
-}
+} // namespace NodeEditor
+} // extern "C++"
 

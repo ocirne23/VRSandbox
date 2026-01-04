@@ -1,4 +1,5 @@
 export module RendererVK.Instance;
+extern "C++" {
 
 import Core;
 import RendererVK.VK;
@@ -41,3 +42,4 @@ export namespace Globals
     Instance instance;
 #pragma warning(default: 4075)
 }
+} // extern "C++"

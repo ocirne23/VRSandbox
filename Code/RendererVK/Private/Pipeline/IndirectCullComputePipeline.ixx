@@ -1,4 +1,5 @@
 export module RendererVK.IndirectCullComputePipeline;
+extern "C++" {
 
 import Core;
 
@@ -55,3 +56,4 @@ private:
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 };
+} // extern "C++"

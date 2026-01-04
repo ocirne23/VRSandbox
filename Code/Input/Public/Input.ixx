@@ -1,9 +1,7 @@
 export module Input;
+extern "C++" {
 
 import Core;
-
-export class GraphicsSystem;
-export class World;
 
 export struct SDL_MouseWheelEvent;
 export struct SDL_MouseMotionEvent;
@@ -76,17 +74,17 @@ public:
     void setWantMouseGrab(bool wantGrab) { m_wantMousieGrab = wantGrab; }
     void setWantMouseVisible(bool wantVisible) { m_wantMouseVisible = wantVisible; }
 
-    bool isKeyDown(SDL_Scancode key) const { return m_pKeyStates[key]; }
+    inline bool isKeyDown(SDL_Scancode key) const { return m_pKeyStates[key]; }
     bool isMouseInWindow() const { return m_mouseInWindow; }
     bool isWindowHasFocus() const { return m_windowHasFocus; }
     bool wantMouseGrab() const { return m_wantMousieGrab; }
     bool wantMouseVisible() const { return m_wantMouseVisible; }
 
-    MouseListener* addMouseListener() { return m_mouseListeners.emplace_back(std::make_unique<MouseListener>()).get(); }
-    KeyboardListener* addKeyboardListener() { return m_keyboardListeners.emplace_back(std::make_unique<KeyboardListener>()).get(); }
-    SystemEventListener* addSystemEventListener() { return m_systemEventListeners.emplace_back(std::make_unique<SystemEventListener>()).get(); }
+    inline MouseListener* addMouseListener() { return m_mouseListeners.emplace_back(std::make_unique<MouseListener>()).get(); }
+    inline KeyboardListener* addKeyboardListener() { return m_keyboardListeners.emplace_back(std::make_unique<KeyboardListener>()).get(); }
+    inline SystemEventListener* addSystemEventListener() { return m_systemEventListeners.emplace_back(std::make_unique<SystemEventListener>()).get(); }
 
-    void removeMouseListener(const MouseListener* listener)
+    inline void removeMouseListener(const MouseListener* listener)
     {
         for (auto it = m_mouseListeners.begin(); it != m_mouseListeners.end(); ++it)
         {
@@ -97,7 +95,7 @@ public:
             }
         }
     }
-    void removeKeyboardListener(const KeyboardListener* listener)
+    inline void removeKeyboardListener(const KeyboardListener* listener)
     {
         for (auto it = m_keyboardListeners.begin(); it != m_keyboardListeners.end(); ++it)
         {
@@ -108,7 +106,7 @@ public:
             }
         }
     }
-    void removeSystemEventListener(const SystemEventListener* listener)
+    inline void removeSystemEventListener(const SystemEventListener* listener)
     {
         for (auto it = m_systemEventListeners.begin(); it != m_systemEventListeners.end(); ++it)
         {
@@ -137,3 +135,4 @@ export namespace Globals
 {
     Input input;
 }
+} // extern "C++"

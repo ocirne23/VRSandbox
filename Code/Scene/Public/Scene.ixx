@@ -1,4 +1,5 @@
 export module Scene.Scene;
+extern "C++" {
 
 export class Scene final
 {
@@ -9,3 +10,4 @@ public:
 
     bool initialize();
 };
+} // extern "C++"

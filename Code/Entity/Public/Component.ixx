@@ -1,4 +1,5 @@
 export module Entity.Component;
+extern "C++" {
 
 import Entity;
 import Core;
@@ -109,3 +110,4 @@ void foo()
     ZoneComponent* pZ = e.getComponent<ZoneComponent>();
     GameLogicComponent* pG = e.getComponent<GameLogicComponent>();
 }*/
+} // extern "C++"

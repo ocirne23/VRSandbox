@@ -1,4 +1,5 @@
 export module Core.Frustum;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -72,3 +73,4 @@ export struct Frustum
         return true;
     }
 };
+} // extern "C++"

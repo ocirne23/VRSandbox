@@ -1,4 +1,5 @@
 export module Core.SDL;
+extern "C++" {
 
 import Core;
 
@@ -143,3 +144,4 @@ export constexpr uint32 SDL_INIT_GAMEPAD    = 0x00002000u; /**< `SDL_INIT_GAMEPA
 export constexpr uint32 SDL_INIT_EVENTS     = 0x00004000u;
 export constexpr uint32 SDL_INIT_SENSOR     = 0x00008000u; /**< `SDL_INIT_SENSOR` implies `SDL_INIT_EVENTS` */
 export constexpr uint32 SDL_INIT_CAMERA     = 0x00010000u; /**< `SDL_INIT_CAMERA` implies `SDL_INIT_EVENTS` */
+} // extern "C++"

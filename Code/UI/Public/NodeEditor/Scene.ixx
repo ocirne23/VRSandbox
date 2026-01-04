@@ -1,4 +1,5 @@
 export module UI.NodeEditor.Scene;
+extern "C++" {
 
 import Core;
 
@@ -32,4 +33,5 @@ private:
     uint64_t m_idCounter = 1;
 };
 
-}
+} // namespace NodeEditor
+} // extern "C++"

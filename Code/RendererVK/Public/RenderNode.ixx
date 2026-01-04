@@ -1,4 +1,5 @@
 export module RendererVK.RenderNode;
+extern "C++" {
 
 import Core;
 import Core.glm;
@@ -39,3 +40,4 @@ private:
     std::vector<RendererVKLayout::InMeshInstance> m_meshInstances;
     std::vector<std::pair<uint16, uint16>> m_numInstancesPerMesh;
 };
+} // extern "C++"
