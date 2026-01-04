@@ -1,5 +1,4 @@
 export module Core.imgui;
-extern "C++" {
 
 import Core;
 
@@ -16,4 +15,3 @@ export void imgui_check_vk_result(VkResult err)
     if (err < 0)
         __debugbreak();
 }
-} // extern "C++"

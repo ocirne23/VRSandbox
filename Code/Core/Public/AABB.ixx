@@ -1,5 +1,4 @@
 export module Core.AABB;
-extern "C++" {
 
 import Core;
 import Core.glm;
@@ -22,4 +21,3 @@ export struct AABB final
         return (min + max) * 0.5f;
     }
 };
-} // extern "C++"

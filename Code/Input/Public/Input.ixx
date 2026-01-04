@@ -1,5 +1,4 @@
 export module Input;
-extern "C++" {
 
 import Core;
 
@@ -69,22 +68,22 @@ public:
     void update_MT(double deltaSec);
     void update(double deltaSec);
 
-    void setMouseInWindow(bool inWindow) { m_mouseInWindow = inWindow; }
-    void setWindowHasFocus(bool hasFocus) { m_windowHasFocus = hasFocus; }
-    void setWantMouseGrab(bool wantGrab) { m_wantMousieGrab = wantGrab; }
+    void setMouseInWindow(bool inWindow)       { m_mouseInWindow = inWindow; }
+    void setWindowHasFocus(bool hasFocus)      { m_windowHasFocus = hasFocus; }
+    void setWantMouseGrab(bool wantGrab)       { m_wantMousieGrab = wantGrab; }
     void setWantMouseVisible(bool wantVisible) { m_wantMouseVisible = wantVisible; }
 
-    inline bool isKeyDown(SDL_Scancode key) const { return m_pKeyStates[key]; }
-    bool isMouseInWindow() const { return m_mouseInWindow; }
-    bool isWindowHasFocus() const { return m_windowHasFocus; }
-    bool wantMouseGrab() const { return m_wantMousieGrab; }
-    bool wantMouseVisible() const { return m_wantMouseVisible; }
+    bool isKeyDown(SDL_Scancode key) const { return m_pKeyStates[key]; }
+    bool isMouseInWindow() const           { return m_mouseInWindow; }
+    bool isWindowHasFocus() const          { return m_windowHasFocus; }
+    bool wantMouseGrab() const             { return m_wantMousieGrab; }
+    bool wantMouseVisible() const          { return m_wantMouseVisible; }
 
-    inline MouseListener* addMouseListener() { return m_mouseListeners.emplace_back(std::make_unique<MouseListener>()).get(); }
-    inline KeyboardListener* addKeyboardListener() { return m_keyboardListeners.emplace_back(std::make_unique<KeyboardListener>()).get(); }
-    inline SystemEventListener* addSystemEventListener() { return m_systemEventListeners.emplace_back(std::make_unique<SystemEventListener>()).get(); }
+    MouseListener* addMouseListener()             { return m_mouseListeners.emplace_back(std::make_unique<MouseListener>()).get(); }
+    KeyboardListener* addKeyboardListener()       { return m_keyboardListeners.emplace_back(std::make_unique<KeyboardListener>()).get(); }
+    SystemEventListener* addSystemEventListener() { return m_systemEventListeners.emplace_back(std::make_unique<SystemEventListener>()).get(); }
 
-    inline void removeMouseListener(const MouseListener* listener)
+    void removeMouseListener(const MouseListener* listener)
     {
         for (auto it = m_mouseListeners.begin(); it != m_mouseListeners.end(); ++it)
         {
@@ -95,7 +94,7 @@ public:
             }
         }
     }
-    inline void removeKeyboardListener(const KeyboardListener* listener)
+    void removeKeyboardListener(const KeyboardListener* listener)
     {
         for (auto it = m_keyboardListeners.begin(); it != m_keyboardListeners.end(); ++it)
         {
@@ -106,7 +105,7 @@ public:
             }
         }
     }
-    inline void removeSystemEventListener(const SystemEventListener* listener)
+    void removeSystemEventListener(const SystemEventListener* listener)
     {
         for (auto it = m_systemEventListeners.begin(); it != m_systemEventListeners.end(); ++it)
         {
@@ -135,4 +134,3 @@ export namespace Globals
 {
     Input input;
 }
-} // extern "C++"

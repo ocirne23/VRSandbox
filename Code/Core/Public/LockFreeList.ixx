@@ -1,5 +1,4 @@
 export module Core.LockFreeList;
-extern "C++" {
 
 import Core;
 import Core.Allocator;
@@ -275,4 +274,3 @@ public:
         return interlockedPopWholeList(m_listHead);
     }
 };
-} // extern "C++"

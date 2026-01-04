@@ -20,8 +20,9 @@ import :DescriptorSet;
 import :IndirectCullComputePipeline;
 import :StaticMeshGraphicsPipeline;
 
+export import Core.fwd;
+
 export class MeshInstance;
-export class Window;
 export class MeshData;
 export class ObjectContainer;
 export class RenderNode;

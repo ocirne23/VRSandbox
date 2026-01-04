@@ -1,6 +1,7 @@
 module RendererVK:Renderer;
 
 import Core;
+import Core.fwd;
 import Core.glm;
 import Core.Window;
 import Core.Frustum;

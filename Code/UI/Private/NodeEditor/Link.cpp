@@ -1,4 +1,4 @@
-module UI.NodeEditor.Link;
+module UI.NodeEditor:Link;
 
 using namespace NodeEditor;
 

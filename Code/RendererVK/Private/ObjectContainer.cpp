@@ -1,9 +1,14 @@
 module RendererVK:ObjectContainer;
 
+import Core;
 import Core.Transform;
 
 import File.SceneData;
 import File.NodeData;
+import File.MeshData;
+import File.MaterialData;
+import File.TextureData;
+
 import :Renderer;
 import :MeshDataManager;
 import :RenderNode;

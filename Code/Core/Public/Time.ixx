@@ -1,5 +1,4 @@
 export module Core.Time;
-extern "C++" {
 
 import <queue>;
 
@@ -103,4 +102,3 @@ private:
     std::function<OnTrigger(Timer&)> m_onTimer;
     bool m_hasTriggered = false;
 };
-} // extern "C++"

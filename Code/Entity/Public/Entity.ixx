@@ -1,5 +1,4 @@
 export module Entity;
-extern "C++" {
 
 import Core;
 import Core.glm;
@@ -76,4 +75,3 @@ export struct EntityPtr
         }
     }
 };
-} // extern "C++"

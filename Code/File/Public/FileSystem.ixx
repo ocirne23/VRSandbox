@@ -1,5 +1,4 @@
 export module File.FileSystem;
-extern "C++" {
 
 import Core;
 
@@ -15,4 +14,3 @@ private:
     FileSystem() {};
     ~FileSystem() {};
 };
-} // extern "C++"

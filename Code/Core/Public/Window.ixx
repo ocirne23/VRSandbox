@@ -1,10 +1,11 @@
 export module Core.Window;
-extern "C++" {
 
 import Core;
 import Core.glm;
 
-export class Window final
+export import Core.fwd;
+
+export class Window
 {
 public:
 
@@ -24,4 +25,3 @@ public:
 private:
     void* m_windowHandle = nullptr;
 };
-} // extern "C++"

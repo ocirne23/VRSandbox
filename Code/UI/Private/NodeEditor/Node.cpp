@@ -1,4 +1,4 @@
-module UI.NodeEditor.Node;
+module UI.NodeEditor:Node;
 
 using namespace NodeEditor;
 

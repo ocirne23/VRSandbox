@@ -1,14 +1,12 @@
-export module UI.NodeEditor.Node;
-extern "C++" {
+export module UI.NodeEditor:Node;
 
 import Core;
-import UI.node_editor;
+import Core.imgui;
+import UI.imgui_node_editor;
+import UI.fwd;
 
 namespace NodeEditor
 {
-
-export class Scene;
-
 export enum EPinShape : uint8
 {
     EPinShape_Flow,
@@ -29,8 +27,6 @@ export enum ENodeStyle : uint8
     ENodeStyle_MinSeparator, // First input & output pins will be on title line the rest underneath with separator
     ENodeStyle_Full,         // All pins underneath title with separator  
 };
-
-class Node;
 
 export struct Pin
 {
@@ -69,5 +65,3 @@ private:
 };
 
 } // namespace NodeEditor
-} // extern "C++"
-

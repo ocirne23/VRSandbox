@@ -3,18 +3,15 @@ export module RendererVK:ObjectContainer;
 import Core;
 import Core.glm;
 import Core.Sphere;
+import Core.fwd;
+
+import File.fwd;
 
 import :Layout;
 import :Buffer;
 import :Texture;
 
-export class SceneData;
-export class TextureData;
-export class MeshData;
-export class MaterialData;
-export class NodeData;
 export class RenderNode;
-export struct Transform;
        
 export enum NodeSpawnIdx : uint16
 {

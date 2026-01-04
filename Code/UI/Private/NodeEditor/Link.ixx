@@ -1,7 +1,6 @@
-export module UI.NodeEditor.Link;
-extern "C++" {
+export module UI.NodeEditor:Link;
 
-import UI.node_editor;
+import UI.imgui_node_editor;
 
 namespace NodeEditor
 {
@@ -26,5 +25,4 @@ private:
 };
 
 } // namespace NodeEditor
-} // extern "C++"
 

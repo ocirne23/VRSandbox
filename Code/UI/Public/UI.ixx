@@ -1,12 +1,11 @@
 export module UI;
-extern "C++" {
 
 import Core;
-import Core.glm;
 import Core.Rect;
-import UI.node_editor;
 
-import UI.NodeEditor.Scene;
+import UI.fwd;
+import UI.imgui_node_editor;
+import UI.NodeEditor;
 
 export class UI final
 {
@@ -41,4 +40,3 @@ export namespace Globals
 {
     UI ui;
 }
-} // extern "C++"

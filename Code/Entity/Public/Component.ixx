@@ -1,5 +1,4 @@
 export module Entity.Component;
-extern "C++" {
 
 import Entity;
 import Core;
@@ -103,11 +102,3 @@ constexpr uint32 Entity::getComponentOffset(uint16 compTypeBits, EComponentID id
     }
     return offset;
 }
-/*
-void foo()
-{
-    Entity e;
-    ZoneComponent* pZ = e.getComponent<ZoneComponent>();
-    GameLogicComponent* pG = e.getComponent<GameLogicComponent>();
-}*/
-} // extern "C++"

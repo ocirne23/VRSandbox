@@ -1,11 +1,12 @@
 export module RendererVK:Texture;
 
 import Core;
+import File.fwd;
+
 import :VK;
 import :Device;
 
 export class StagingManager;
-export class TextureData;
 
 export class Texture final
 {

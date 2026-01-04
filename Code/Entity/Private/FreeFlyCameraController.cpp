@@ -5,10 +5,17 @@ import Input;
 import Core.SDL;
 import UI;
 
+import RendererVK;
+
 FreeFlyCameraController::~FreeFlyCameraController()
 {
     if (m_mouseListener)
         Globals::input.removeMouseListener(m_mouseListener);
+}
+
+void FreeFlyCameraController::testStuff(Renderer& renderer)
+{
+    renderer.present();
 }
 
 void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, glm::vec3 up)

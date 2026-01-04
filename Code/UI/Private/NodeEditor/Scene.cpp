@@ -1,4 +1,7 @@
-module UI.NodeEditor.Scene;
+module UI.NodeEditor:Scene;
+
+import :Node;
+import :Link;
 
 using namespace NodeEditor;
 
@@ -199,7 +202,7 @@ void Scene::processInteractions()
             {
                 for (auto it = m_links.begin(); it != m_links.end(); ++it)
                 {
-                    std::unique_ptr<Link>& link = *it;
+                    auto& link = *it;
                     if (link->getId() == deletedLinkId)
                     {
                         Pin* pin1 = link->getInputId().AsPointer<Pin>();

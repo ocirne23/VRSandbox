@@ -1,5 +1,4 @@
 export module Entity.Zone;
-extern "C++" {
 
 import Core;
 import Core.glm;
@@ -122,4 +121,3 @@ export struct EntityHash128
         return glm::dvec4(x, y, z, radius);
     }
 };
-} // extern "C++"

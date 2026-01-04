@@ -1,5 +1,4 @@
 export module Core.Allocator;
-extern "C++" {
 
 #if 0 //defined(_DEBUG)
 #define CHECK_BOUNDS
@@ -614,4 +613,3 @@ void operator delete[](void* p, std::align_val_t align)
         }
     }
 }
-} // extern "C++"

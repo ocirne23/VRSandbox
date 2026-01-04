@@ -1,14 +1,14 @@
 export module File.SceneData;
-extern "C++" {
 
 import Core;
+
+import File.fwd;
+
 import File.Assimp;
 import File.MeshData;
 import File.TextureData;
 import File.MaterialData;
 import File.NodeData;
-
-export struct aiScene;
 
 export class SceneData final
 {
@@ -40,4 +40,3 @@ private:
     std::vector<MaterialData> m_materials;
     NodeData m_rootNode;
 };
-} // extern "C++"

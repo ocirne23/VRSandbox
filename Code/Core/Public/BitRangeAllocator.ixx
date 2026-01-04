@@ -1,5 +1,4 @@
 export module Core.BitRangeAllocator;
-extern "C++" {
 
 import Core;
 
@@ -286,4 +285,3 @@ private:
     uint32 m_size = 0;
     uint32 m_lastAcquiredIdx = 0;
 };
-} // extern "C++"

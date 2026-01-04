@@ -1,13 +1,7 @@
 export module Scene.Scene;
-extern "C++" {
 
-export class Scene final
+export class Scene
 {
 public:
-
-    Scene();
-    ~Scene();
-
-    bool initialize();
+	bool initialize();
 };
-} // extern "C++"

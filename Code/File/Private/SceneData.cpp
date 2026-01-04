@@ -1,8 +1,5 @@
 module File.SceneData;
 
-import File.Assimp;
-import File.MeshData;
-
 using namespace Assimp;
 
 SceneData::SceneData()

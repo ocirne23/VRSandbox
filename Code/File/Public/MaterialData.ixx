@@ -1,5 +1,4 @@
 export module File.MaterialData;
-extern "C++" {
 
 import Core;
 import Core.glm;
@@ -39,4 +38,3 @@ private:
 
     const aiMaterial* m_pMaterial = nullptr;
 };
-} // extern "C++"

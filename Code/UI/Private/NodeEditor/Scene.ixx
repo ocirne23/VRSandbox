@@ -1,11 +1,9 @@
-export module UI.NodeEditor.Scene;
-extern "C++" {
+export module UI.NodeEditor:Scene;
 
 import Core;
 
-import UI.node_editor;
-import UI.NodeEditor.Node;
-import UI.NodeEditor.Link;
+import UI.imgui_node_editor;
+import UI.fwd;
 
 namespace NodeEditor
 {
@@ -19,7 +17,6 @@ public:
     void update(double deltaSec);
 
     void processInteractions();
-
     Node& createNode();
 
 private:
@@ -34,4 +31,3 @@ private:
 };
 
 } // namespace NodeEditor
-} // extern "C++"

@@ -1,11 +1,12 @@
 export module Entity.FreeFlyCameraController;
-extern "C++" {
 
 import Core;
 import Core.glm;
 import Core.Camera;
 
-export class Input;
+import RendererVK.fwd;
+import Input.fwd;
+
 export class MouseListener;
 
 export class FreeFlyCameraController final
@@ -20,6 +21,8 @@ public:
     void update(double deltaTime);
     void setSpeed(float speed) { m_speed = speed; }
     void setSensitivity(float sensitivity) { m_sensitivity = sensitivity; }
+
+    void testStuff(Renderer& renderer);
 
     glm::vec3 getPosition() const { return m_position; }
     glm::vec3 getDirection() const { return m_direction; }
@@ -49,4 +52,3 @@ private:
     glm::vec3 m_up;
     glm::mat4 m_viewMatrix;
 };
-} // extern "C++"

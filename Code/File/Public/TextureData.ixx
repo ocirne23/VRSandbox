@@ -1,11 +1,10 @@
 export module File.TextureData;
-extern "C++" {
 
 import Core;
 
-export extern "C++" struct aiTexture;
+export struct aiTexture;
 
-export extern "C++" class TextureData final
+export class TextureData final
 {
 public:
     TextureData();
@@ -30,4 +29,3 @@ private:
     const char* m_pFileName = nullptr;
     const aiTexture* m_pTexture = nullptr;
 };
-} // extern "C++"

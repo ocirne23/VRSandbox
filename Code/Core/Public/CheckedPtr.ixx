@@ -1,5 +1,4 @@
 export module Core.CheckedPtr;
-extern "C++" {
 
 import Core;
 
@@ -244,4 +243,3 @@ export void testCheckedPtr()
 		}
 	}
 }
-} // extern "C++"

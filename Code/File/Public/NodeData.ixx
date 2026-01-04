@@ -1,5 +1,4 @@
 export module File.NodeData;
-extern "C++" {
 
 import Core;
 import Core.glm;
@@ -36,4 +35,3 @@ private:
 
     const aiNode* m_pNode = nullptr;
 };
-} // extern "C++"
