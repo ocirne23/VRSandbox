@@ -22,15 +22,6 @@ import :ObjectContainer;
 constexpr static size_t VERTEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshVertex);
 constexpr static size_t INDEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
 
-constexpr std::array<vk::ClearValue, 2> getClearValues()
-{
-    std::array<vk::ClearValue, 2> clearValues{};
-    clearValues[0].color = vk::ClearColorValue{ std::array<float, 4> { 0.2f, 0.0f, 0.0f, 1.0f } };
-    clearValues[1].depthStencil = vk::ClearDepthStencilValue{ 1.0f, 0 };
-    return clearValues;
-}
-constexpr static std::array<vk::ClearValue, 2> s_clearValues = getClearValues();
-
 Renderer::~Renderer()
 {
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
@@ -61,16 +52,19 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     assert(m_surface.deviceSupportsSurface());
 
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
+    m_viewportRect.max = glm::ivec2(m_swapChain.getLayout().extent.width, m_swapChain.getLayout().extent.height);
+
     Globals::stagingManager.initialize();
     Globals::meshDataManager.initialize(VERTEX_DATA_SIZE, INDEX_DATA_SIZE);
 
     m_renderPass.initialize(m_swapChain);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
 
+    initImgui(window);
+
     m_staticMeshGraphicsPipeline.initialize(m_renderPass);
     m_indirectCullComputePipeline.initialize();
 
-	m_lights.reserve(RendererVKLayout::MAX_LIGHTS);
 	m_pLightGrid = std::make_unique<LightGridT>();
 
     vk::Device vkDevice = Globals::device.getDevice();
@@ -126,41 +120,6 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     m_instanceOffsetsBuffer.initialize(RendererVKLayout::MAX_INSTANCE_OFFSETS * sizeof(RendererVKLayout::MeshInstanceOffset),
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigWindowsMoveFromTitleBarOnly = true;
-
-    ImGui_ImplSDL3_InitForVulkan((SDL_Window*)window.getWindowHandle());
-    ImGui_ImplVulkan_InitInfo init_info = {};
-    init_info.ApiVersion = Globals::instance.getApiVersion();
-    init_info.Instance = Globals::instance.getInstance();
-    init_info.PhysicalDevice = Globals::device.getPhysicalDevice();
-    init_info.Device = Globals::device.getDevice();
-    init_info.QueueFamily = Globals::device.getGraphicsQueueIndex();
-    init_info.Queue = Globals::device.getGraphicsQueue();
-    init_info.PipelineCache = nullptr;
-    init_info.RenderPass = m_renderPass.getRenderPass();
-    init_info.DescriptorPool = nullptr;
-    init_info.DescriptorPoolSize = 10;
-    init_info.Subpass = 0;
-    init_info.MinImageCount = 2;
-    init_info.ImageCount = 2;
-    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-    init_info.Allocator = nullptr;
-    init_info.CheckVkResultFn = imgui_check_vk_result;
-    ImGui_ImplVulkan_Init(&init_info);
-
-    ImGui_ImplVulkan_MainPipelineCreateInfo pipeline_create;
-    pipeline_create.RenderPass = m_renderPass.getRenderPass();
-    pipeline_create.Subpass = 0;
-    pipeline_create.MSAASamples = {};
-    ImGui_ImplVulkan_CreateMainPipeline(pipeline_create);
-
-    m_viewportRect.max = glm::ivec2(m_swapChain.getLayout().extent.width, m_swapChain.getLayout().extent.height);
 
     return true;
 }
@@ -309,8 +268,6 @@ void Renderer::present()
     } });
     assert(flushFirstInstancesResult == vk::Result::eSuccess && "Failed to flush first instances memory range");
 
-	memcpy(frameData.mappedLightInfo.data(), m_lights.data(), m_lights.size() * sizeof(RendererVKLayout::LightInfo));
-
     flushSize = m_lightCounter * sizeof(RendererVKLayout::LightInfo);
     flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
     [[maybe_unused]] auto flushLightInfoResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
@@ -431,12 +388,17 @@ void Renderer::recordCommandBuffers()
         imguiCommandBuffer.end();
     }
 
+    constexpr std::array<vk::ClearValue, 2> clearValues 
+    {
+        vk::ClearColorValue{ std::array<float, 4> { 0.2f, 0.0f, 0.0f, 1.0f }},
+        vk::ClearDepthStencilValue{ 1.0f, 0 }
+    };
     const vk::RenderPassBeginInfo renderPassBeginInfo{
         .renderPass = m_renderPass.getRenderPass(),
         .framebuffer = m_framebuffers.getFramebuffer(m_swapChain.getCurrentImageIdx()),
         .renderArea = vk::Rect2D {.offset = vk::Offset2D { 0, 0 }, .extent = extent },
-        .clearValueCount = (uint32)s_clearValues.size(),
-        .pClearValues = s_clearValues.data(),
+        .clearValueCount = (uint32)clearValues.size(),
+        .pClearValues = clearValues.data(),
     };
 
     std::array<vk::CommandBuffer, 2> secondaryCommandBuffers = 
@@ -511,4 +473,39 @@ uint32 Renderer::addMeshInstanceOffsets(const std::vector<RendererVKLayout::Mesh
 
     setHaveToRecordCommandBuffers();
     return baseInstanceOffsetIdx;
+}
+
+void Renderer::initImgui(Window& window)
+{
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigWindowsMoveFromTitleBarOnly = true;
+
+    ImGui_ImplSDL3_InitForVulkan((SDL_Window*)window.getWindowHandle());
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.ApiVersion = Globals::instance.getApiVersion();
+    init_info.Instance = Globals::instance.getInstance();
+    init_info.PhysicalDevice = Globals::device.getPhysicalDevice();
+    init_info.Device = Globals::device.getDevice();
+    init_info.QueueFamily = Globals::device.getGraphicsQueueIndex();
+    init_info.Queue = Globals::device.getGraphicsQueue();
+    init_info.PipelineCache = nullptr;
+    init_info.RenderPass = m_renderPass.getRenderPass();
+    init_info.DescriptorPool = nullptr;
+    init_info.DescriptorPoolSize = 10;
+    init_info.Subpass = 0;
+    init_info.MinImageCount = 2;
+    init_info.ImageCount = 2;
+    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.Allocator = nullptr;
+    init_info.CheckVkResultFn = imgui_check_vk_result;
+    ImGui_ImplVulkan_Init(&init_info);
+
+    ImGui_ImplVulkan_MainPipelineCreateInfo pipeline_create;
+    pipeline_create.RenderPass = m_renderPass.getRenderPass();
+    pipeline_create.Subpass = 0;
+    pipeline_create.MSAASamples = {};
+    ImGui_ImplVulkan_CreateMainPipeline(pipeline_create);
 }

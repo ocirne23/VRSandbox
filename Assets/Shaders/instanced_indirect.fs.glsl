@@ -41,8 +41,8 @@ layout (binding = 4) buffer InLightInfos
 
 struct LightCell
 {
-	int numLights;
-	int lightIds[7];
+	uint16_t numLights;
+	uint16_t lightIds[7];
 };
 layout (binding = 5) buffer InLightGrid
 {
@@ -155,7 +155,6 @@ void main()
 	materialNormal = normalize(materialNormal * 2.0 - 1.0);
 	vec3 specularColor = mix(vec3(0.04), materialColor, material.metalness);
 	
-	const float ambient = 0.05f;
 	vec3 eyeVec = u_viewPos - in_pos;
 	vec3 V = normalize(eyeVec);
 	vec3 N = in_tbn * materialNormal;
@@ -164,6 +163,7 @@ void main()
 	float k = (r * r) / 8.0;
 	float a2 = roughness * roughness;
 
+	const float ambient = 0.10f;
 	vec3 color = materialColor * ambient;
 
 	ivec3 cellIdx = ivec3(floor((in_pos - vec3(in_gridMin)) / in_cellSize));
@@ -202,6 +202,5 @@ void main()
 		}
 	}
 	
-	color += materialColor * ambient;
 	out_color = color;// applyFog(color, length(eyeVec), u_viewPos, V);
 }

@@ -75,35 +75,27 @@ bool Device::initialize()
     vk::PhysicalDeviceFeatures2 deviceFeatures;
     m_physicalDevice.getFeatures2(&deviceFeatures);
     deviceFeatures.features.samplerAnisotropy = vk::True;
-    vk::PhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures{
+    vk::PhysicalDeviceSynchronization2Features syncFeatures{
         .pNext = &deviceFeatures,
-        //.shaderInputAttachmentArrayDynamicIndexing = vk::True,
-        //.shaderUniformTexelBufferArrayDynamicIndexing = vk::True,
-        //.shaderStorageTexelBufferArrayDynamicIndexing = vk::True,
-        //.shaderUniformBufferArrayNonUniformIndexing = vk::True,
+        .synchronization2 = vk::True,
+    };
+    vk::PhysicalDeviceVulkan11Features vk11Features
+    {
+        .pNext = &syncFeatures,
+        .storageBuffer16BitAccess = vk::True,
+        .uniformAndStorageBuffer16BitAccess = vk::True,
+        //.storageInputOutput16 = vk::True, // Not supported on NVIDIA!
+    };
+    vk::PhysicalDeviceVulkan12Features vk12Features
+    {
+        .pNext = &vk11Features,
+        .shaderFloat16 = vk::True,
         .shaderSampledImageArrayNonUniformIndexing = vk::True,
-        //.shaderStorageBufferArrayNonUniformIndexing = vk::True,
-        //.shaderStorageImageArrayNonUniformIndexing = vk::True,
-        //.shaderInputAttachmentArrayNonUniformIndexing = vk::True,
-        //.shaderUniformTexelBufferArrayNonUniformIndexing = vk::True,
-        //.shaderStorageTexelBufferArrayNonUniformIndexing = vk::True,
-        //.descriptorBindingUniformBufferUpdateAfterBind = vk::True,
-        //.descriptorBindingSampledImageUpdateAfterBind = vk::True,
-        //.descriptorBindingStorageImageUpdateAfterBind = vk::True,
-        //.descriptorBindingStorageBufferUpdateAfterBind = vk::True,
-        //.descriptorBindingUniformTexelBufferUpdateAfterBind = vk::True,
-        //.descriptorBindingStorageTexelBufferUpdateAfterBind = vk::True,
-        //.descriptorBindingUpdateUnusedWhilePending = vk::True,
-        //.descriptorBindingPartiallyBound = vk::True,
         .descriptorBindingVariableDescriptorCount = vk::True,
         .runtimeDescriptorArray = vk::True,
     };
-    vk::PhysicalDeviceSynchronization2Features syncFeatures{
-        .pNext = &descriptorIndexingFeatures,
-        .synchronization2 = vk::True,
-    };
     vk::DeviceCreateInfo deviceCreateInfo{
-        .pNext = &syncFeatures,
+        .pNext = &vk12Features,
         .queueCreateInfoCount = (uint32)deviceQueueCreateInfos.size(),
         .pQueueCreateInfos = deviceQueueCreateInfos.data(),
         .enabledLayerCount = (uint32)enabledLayers.size(),

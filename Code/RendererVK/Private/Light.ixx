@@ -72,7 +72,7 @@ struct alignas(16) LightGrid
 					RendererVKLayout::LightCell& cell = m_cells[x + y * m_gridSize.x + z * m_gridSize.x * m_gridSize.y];
 					if (cell.numLights < 7)
 					{
-						cell.lightIds[cell.numLights] = lightIdx;
+						cell.lightIds[cell.numLights] = (uint16)lightIdx;
 						cell.numLights++;
 					}
 				}

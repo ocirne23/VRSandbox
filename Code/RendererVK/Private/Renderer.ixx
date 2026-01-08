@@ -68,6 +68,7 @@ private:
     void recordCommandBuffers();
     void setHaveToRecordCommandBuffers();
     void recreateSwapchain();
+    void initImgui(Window& window);
 
     friend class ObjectContainer;
     void addObjectContainer(ObjectContainer* pObjectContainer);
@@ -95,7 +96,6 @@ private:
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform> m_renderNodeTransforms;
     std::vector<uint32> m_numInstancesPerMesh;
-
     std::vector<uint32> m_freeRenderNodeIndexes;
 
     uint32 m_meshInfoCounter = 0;
@@ -104,11 +104,12 @@ private:
     uint32 m_meshInstanceCounter = 0;
     uint32 m_lightCounter = 0;
 
+    using LightGridT = LightGrid<32, 32, 32>;
+    std::unique_ptr<LightGridT> m_pLightGrid;
+
     Buffer m_meshInfosBuffer;
     Buffer m_materialInfosBuffer;
     Buffer m_instanceOffsetsBuffer;
-
-	using LightGridT = LightGrid<32, 32, 32>;
 
     struct PerFrameData
     {
@@ -143,9 +144,6 @@ private:
     Rect m_viewportRect = Rect();
     bool m_windowMinimized = false;
     bool m_vsyncEnabled = true;
-
-    std::vector<Light> m_lights;
-    std::unique_ptr<LightGridT> m_pLightGrid;
 };
 
 export namespace Globals

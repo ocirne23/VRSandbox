@@ -95,8 +95,8 @@ export namespace RendererVKLayout
 
     struct alignas(16) LightCell
     {
-        int numLights;
-        int lightIds[MAX_LIGHTS_PER_CELL];
+        uint16 numLights;
+        uint16 lightIds[MAX_LIGHTS_PER_CELL];
     };
     struct alignas(16) LightGridInfo
     {
