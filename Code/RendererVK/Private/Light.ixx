@@ -53,22 +53,22 @@ struct alignas(16) LightGrid
 
 	void addLight(const Light& light, uint32 lightIdx)
 	{
-		const glm::ivec3 minCell = glm::ivec3(
+		glm::ivec3 minCell = glm::ivec3(
 			glm::floor((light.pos.x - light.radius - m_gridMin.x) / m_cellSize),
 			glm::floor((light.pos.y - light.radius - m_gridMin.y) / m_cellSize),
 			glm::floor((light.pos.z - light.radius - m_gridMin.z) / m_cellSize));
-		const glm::ivec3 maxCell = glm::ivec3(
+		glm::ivec3 maxCell = glm::ivec3(
 			glm::floor((light.pos.x + light.radius - m_gridMin.x) / m_cellSize),
 			glm::floor((light.pos.y + light.radius - m_gridMin.y) / m_cellSize),
 			glm::floor((light.pos.z + light.radius - m_gridMin.z) / m_cellSize));
-		for (int z = minCell.z; z <= maxCell.z; ++z)
+		minCell = glm::max(minCell, glm::ivec3(0));
+		maxCell = glm::min(maxCell, m_gridSize);
+		for (int z = minCell.z; z < maxCell.z; ++z)
 		{
-			for (int y = minCell.y; y <= maxCell.y; ++y)
+			for (int y = minCell.y; y < maxCell.y; ++y)
 			{
-				for (int x = minCell.x; x <= maxCell.x; ++x)
+				for (int x = minCell.x; x < maxCell.x; ++x)
 				{
-					if (x < 0 || x >= m_gridSize.x || y < 0 || y >= m_gridSize.y || z < 0 || z >= m_gridSize.z)
-						continue;
 					RendererVKLayout::LightCell& cell = m_cells[x + y * m_gridSize.x + z * m_gridSize.x * m_gridSize.y];
 					if (cell.numLights < 7)
 					{

@@ -162,6 +162,7 @@ void main()
 	float r = roughness + 1.0;
 	float k = (r * r) / 8.0;
 	float a2 = roughness * roughness;
+	vec3 mcPi = materialColor / PI;
 
 	const float ambient = 0.10f;
 	vec3 color = materialColor * ambient;
@@ -186,19 +187,18 @@ void main()
 			float intensity = light.intensity;
 			vec3 L = normalize(lightVec);
 			vec3 H = normalize(L + V);
-			float NdotL = clamp(dot(N, L), 0.0, 1.0);
-			float NdotV = clamp(dot(N, V), 0.0, 1.0);
-			float HdotV = clamp(dot(H, V), 0.0, 1.0);
+			float NdotL = max(dot(N, L), 0.0);
+			float NdotV = max(dot(N, V), 0.0);
+			float HdotV = max(dot(H, V), 0.0);
+
 			float NDF = DistributionGGX(N, H, a2);
 			float G = GeometrySmith(NdotL, NdotV, k);
 			vec3 F = FresnelSchlickRoughness(HdotV, specularColor, roughness);
-			
-			vec3 numerator = NDF * G * F;
-			float denom = max(4.0 * NdotV * NdotL, 0.0001);
-			vec3 specularContrib = numerator / denom;
-			vec3 kD = (1.0 - F) * (1.0 - metalness);
+			vec3 specularContrib = NDF * G * F / max(4.0 * NdotV * NdotL, 0.0001);
 			vec3 radianceContrib = light.color * falloff * intensity;
-			color += (kD * (materialColor / PI) + specularContrib) * radianceContrib * NdotL;
+
+			vec3 kD = (1.0 - F) * (1.0 - metalness);
+			color += (kD * mcPi + specularContrib) * radianceContrib * NdotL;
 		}
 	}
 	
