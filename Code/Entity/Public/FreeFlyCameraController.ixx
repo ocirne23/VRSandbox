@@ -4,7 +4,6 @@ import Core;
 import Core.glm;
 import Core.Camera;
 
-import RendererVK.fwd;
 import Input.fwd;
 
 export class MouseListener;
@@ -21,8 +20,6 @@ public:
     void update(double deltaTime);
     void setSpeed(float speed) { m_speed = speed; }
     void setSensitivity(float sensitivity) { m_sensitivity = sensitivity; }
-
-    void testStuff(Renderer& renderer);
 
     glm::vec3 getPosition() const { return m_position; }
     glm::vec3 getDirection() const { return m_direction; }

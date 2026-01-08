@@ -3,7 +3,6 @@ export module Entity.Component;
 import Entity;
 import Core;
 import Core.glm;
-import RendererVK;
 
 constexpr int MaxInlineComponentTypes = 3;
 enum EComponentID : uint16
@@ -33,7 +32,6 @@ struct CullingComponent
 struct RenderComponent
 {
     static constexpr EComponentID getId() { return EComponentID_Render; };
-    std::vector<RenderNode> renderNodes;
 };
 
 struct GameLogicComponent

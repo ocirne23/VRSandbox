@@ -19,6 +19,9 @@ export namespace RendererVKLayout
     static_assert(MAX_UNIQUE_MESHES < USHRT_MAX);
     static_assert(MAX_UNIQUE_MATERIALS < USHRT_MAX);
 
+    constexpr size_t MAX_LIGHTS_PER_CELL = 7;
+    constexpr size_t MAX_LIGHTS = 512;
+
     struct alignas(16) Ubo
     {
         glm::mat4 mvp;
@@ -84,9 +87,22 @@ export namespace RendererVKLayout
 
     struct alignas(16) LightInfo
     {
-        glm::vec3 position;
-        float range;
+        glm::vec3 pos;
+        float radius;
         glm::vec3 color;
         float intensity;
     };
+
+    struct alignas(16) LightCell
+    {
+        int numLights;
+        int lightIds[MAX_LIGHTS_PER_CELL];
+    };
+    struct alignas(16) LightGridInfo
+    {
+        glm::ivec3 gridMin;
+        float _padding;
+        glm::ivec3 gridSize;
+        float cellSize;
+	};
 }

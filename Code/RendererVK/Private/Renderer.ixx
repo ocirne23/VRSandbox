@@ -19,6 +19,7 @@ import :MeshDataManager;
 import :DescriptorSet;
 import :IndirectCullComputePipeline;
 import :StaticMeshGraphicsPipeline;
+import :Light;
 
 export import Core.fwd;
 
@@ -47,6 +48,7 @@ public:
     const Frustum& beginFrame(const Camera& camera);
     void renderNodeThreadSafe(const RenderNode& node);
     void renderNode(const RenderNode& node);
+    void addLight(const Light& light);
     void present();
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
@@ -59,13 +61,12 @@ public:
     void recreateWindowSurface(Window& window);
     void setViewportRect(const Rect& rect) { if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } }
 
-    CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
-
 private:
+
+    CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 
     void recordCommandBuffers();
     void setHaveToRecordCommandBuffers();
-
     void recreateSwapchain();
 
     friend class ObjectContainer;
@@ -101,10 +102,13 @@ private:
     uint32 m_materialInfoCounter = 0;
     uint32 m_instanceOffsetCounter = 0;
     uint32 m_meshInstanceCounter = 0;
+    uint32 m_lightCounter = 0;
 
     Buffer m_meshInfosBuffer;
     Buffer m_materialInfosBuffer;
     Buffer m_instanceOffsetsBuffer;
+
+	using LightGridT = LightGrid<32, 32, 32>;
 
     struct PerFrameData
     {
@@ -122,10 +126,16 @@ private:
         Buffer inMeshInstancesBuffer;
         Buffer inFirstInstancesBuffer;
 
+        Buffer lightInfoBuffer;
+        Buffer lightGridBuffer;
+
         RendererVKLayout::Ubo* mappedUniformBuffer = nullptr;
         std::span<RendererVKLayout::RenderNodeTransform> mappedRenderNodeTransforms;
         std::span<RendererVKLayout::InMeshInstance> mappedMeshInstances;
         std::span<uint32> mappedFirstInstances;
+
+        std::span<RendererVKLayout::LightInfo> mappedLightInfo;
+        std::span<LightGridT> mappedLightGrid;
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 
@@ -133,6 +143,9 @@ private:
     Rect m_viewportRect = Rect();
     bool m_windowMinimized = false;
     bool m_vsyncEnabled = true;
+
+    std::vector<Light> m_lights;
+    std::unique_ptr<LightGridT> m_pLightGrid;
 };
 
 export namespace Globals

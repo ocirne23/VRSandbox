@@ -27,7 +27,33 @@ layout (binding = 2, std430) buffer InMaterialInfos
 	MaterialInfo in_materialInfos[];
 };
 
-layout (binding = 4) uniform sampler2D u_textures[];
+struct LightInfo
+{
+	vec3 pos;
+	float range;
+	vec3 color;
+	float intensity;
+};
+layout (binding = 4) buffer InLightInfos
+{
+	LightInfo in_lightInfos[];
+};
+
+struct LightCell
+{
+	int numLights;
+	int lightIds[7];
+};
+layout (binding = 5) buffer InLightGrid
+{
+	ivec3 in_gridMin;
+	float _paddingInLightGrid;
+	ivec3 in_gridSize;
+	float in_cellSize;
+	LightCell in_lightGrid[];
+};
+
+layout (binding = 6) uniform sampler2D u_textures[];
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
@@ -130,38 +156,52 @@ void main()
 	vec3 specularColor = mix(vec3(0.04), materialColor, material.metalness);
 	
 	const float ambient = 0.05f;
-	vec3 lightColor = vec3(1.0, 1.0, 1.0);
-	vec3 lightPos  = vec3(0, 4, 0);
-	vec3 lightVec  = lightPos - in_pos;
-	float distance = length(lightVec);
-	float falloff  = inverseSquareFalloff(distance, 100);
-	float intensity = 100.0;
-
 	vec3 eyeVec = u_viewPos - in_pos;
 	vec3 V = normalize(eyeVec);
-	vec3 L = normalize(lightVec);
-	vec3 H = normalize(L + V);
 	vec3 N = in_tbn * materialNormal;
-
-	float NdotL = clamp(dot(N, L), 0.0, 1.0);
-	float NdotV = clamp(dot(N, V), 0.0, 1.0);
-	float HdotV = clamp(dot(H, V), 0.0, 1.0);
 
 	float r = roughness + 1.0;
 	float k = (r * r) / 8.0;
 	float a2 = roughness * roughness;
 
-	float NDF = DistributionGGX(N, H, a2);
-	float G = GeometrySmith(NdotL, NdotV, k);
-	vec3 F = FresnelSchlickRoughness(HdotV, specularColor, roughness);
+	vec3 color = materialColor * ambient;
+
+	ivec3 cellIdx = ivec3(floor((in_pos - vec3(in_gridMin)) / in_cellSize));
+	if (cellIdx.x >= 0 && 
+		cellIdx.y >= 0 && 
+		cellIdx.z >= 0 &&
+		cellIdx.x < in_gridSize.x && 
+		cellIdx.y < in_gridSize.y && 
+		cellIdx.z < in_gridSize.z)
+	{
+		int flatCellIdx = cellIdx.x + cellIdx.y * in_gridSize.x + cellIdx.z * in_gridSize.x * in_gridSize.y;
+		LightCell cell = in_lightGrid[flatCellIdx];
+		for (int i = 0; i < cell.numLights; ++i)
+		{
+			int lightIdx = cell.lightIds[i];
+			LightInfo light = in_lightInfos[lightIdx];
+			vec3 lightVec = light.pos - in_pos;
+			float distance = length(lightVec);
+			float falloff  = inverseSquareFalloff(distance, light.range);
+			float intensity = light.intensity;
+			vec3 L = normalize(lightVec);
+			vec3 H = normalize(L + V);
+			float NdotL = clamp(dot(N, L), 0.0, 1.0);
+			float NdotV = clamp(dot(N, V), 0.0, 1.0);
+			float HdotV = clamp(dot(H, V), 0.0, 1.0);
+			float NDF = DistributionGGX(N, H, a2);
+			float G = GeometrySmith(NdotL, NdotV, k);
+			vec3 F = FresnelSchlickRoughness(HdotV, specularColor, roughness);
+			
+			vec3 numerator = NDF * G * F;
+			float denom = max(4.0 * NdotV * NdotL, 0.0001);
+			vec3 specularContrib = numerator / denom;
+			vec3 kD = (1.0 - F) * (1.0 - metalness);
+			vec3 radianceContrib = light.color * falloff * intensity;
+			color += (kD * (materialColor / PI) + specularContrib) * radianceContrib * NdotL;
+		}
+	}
 	
-	vec3 numerator = NDF * G * F;
-	float denom = max(4.0 * NdotV * NdotL, 0.0001);
-	vec3 specular = numerator / denom;
-	vec3 kD = (1.0 - F) * (1.0 - metalness);
-	vec3 radiance = lightColor * falloff * intensity;
-	
-	vec3 color = (kD * (materialColor / PI) + specular) * radiance * NdotL;
 	color += materialColor * ambient;
 	out_color = color;// applyFog(color, length(eyeVec), u_viewPos, V);
 }

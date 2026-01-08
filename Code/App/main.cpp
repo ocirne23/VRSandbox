@@ -4,6 +4,7 @@ import Core.Window;
 import Core.SDL;
 import Core.Frustum;
 import Core.Time;
+import Core.glm;
 
 import Entity;
 import Entity.FreeFlyCameraController;
@@ -49,6 +50,7 @@ int main()
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
     
     std::vector<RenderNode> spawnedNodes;
+    std::vector<Light> spawnedLights;
 
 #if 1
     ObjectContainer container;
@@ -61,10 +63,16 @@ int main()
                 spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
 
+    spawnedLights.push_back({ glm::vec3(0, 4, 0), 10.0f, glm::vec3(1.0, 1.0, 1.0), 10.0f});
+
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedNodes.push_back(container.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp())))));
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+				spawnedLights.push_back({ cameraController.getPosition(), 3.0f, glm::abs(glm::sphericalRand(1.0f)), 3.0f});
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+                spawnedLights.resize(1);
         };
 #endif
 
@@ -99,13 +107,16 @@ int main()
         const Frustum& frustum = renderer.beginFrame(cameraController.getCamera());
         for (RenderNode& node : spawnedNodes)
         {
-            //Transform& transform = node.getTransform();
-            //transform.pos.y = glm::sin((float)Globals::time.getElapsedSec() + transform.pos.x * 0.1f + transform.pos.z * 0.1f);
             if (frustum.sphereInFrustum(node.getWorldBounds()))
             {
                 renderer.renderNode(node);
             }
         }
+
+		for (Light& light : spawnedLights)
+		{
+			renderer.addLight(light);
+		}
 
         ui.render();
         renderer.present();

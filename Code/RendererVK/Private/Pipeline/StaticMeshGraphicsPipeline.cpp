@@ -94,9 +94,20 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
-
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_color
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InLightInfos
         .binding = 4,
+        .descriptorType = vk::DescriptorType::eStorageBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InLightGrid
+        .binding = 5,
+        .descriptorType = vk::DescriptorType::eStorageBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_color
+        .binding = 6,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
         .descriptorCount = 1024,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
@@ -108,7 +119,7 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
-    std::array<DescriptorSetUpdateInfo, 4> graphicsDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 6> graphicsDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo{
             .binding = 0,
@@ -142,6 +153,27 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
         },
         DescriptorSetUpdateInfo{
             .binding = 4,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = params.lightInfoBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_LIGHTS * sizeof(RendererVKLayout::LightInfo),
+                }
+            }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 5,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = params.lightGridBuffer.getBuffer(),
+                    .range = params.lightGridByteSize,
+                }
+            }
+        },
+
+        DescriptorSetUpdateInfo{
+            .binding = 6,
             .type = vk::DescriptorType::eCombinedImageSampler,
         },
     };
