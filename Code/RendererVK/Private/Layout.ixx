@@ -21,10 +21,10 @@ export namespace RendererVKLayout
     static_assert(MAX_UNIQUE_MATERIALS < USHRT_MAX);
 
     constexpr size_t MAX_LIGHTS_PER_CELL = 7;
-    constexpr size_t MAX_LIGHTS = 512;
-    constexpr size_t LIGHT_GRID_SIZE = 32;
-    constexpr size_t MAX_LIGHT_GRIDS = 64;
-    constexpr size_t LIGHT_TABLE_SIZE = 63;
+    constexpr size_t MAX_LIGHTS = 1024;
+    constexpr size_t LIGHT_GRID_SIZE = 16;
+    constexpr size_t MAX_LIGHT_GRIDS = 256;
+    constexpr size_t LIGHT_TABLE_SIZE = 127;
 
     struct alignas(16) Ubo
     {

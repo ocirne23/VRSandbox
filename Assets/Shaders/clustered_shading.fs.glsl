@@ -37,7 +37,7 @@ layout (binding = 4) buffer InLightInfos
 {
 	LightInfo in_lightInfos[];
 };
-#define GRID_SIZE 32
+#define GRID_SIZE 16
 struct LightCell
 {
 	uint16_t numLights;
@@ -54,17 +54,17 @@ layout (binding = 5) buffer InLightGrid
     LightGrid in_lightGrids[];
 };
 
-//#define NUM_TABLE_ENTRY_INDEXES 8
-//struct LightGridHashTableEntry
-//{
-//    uint16_t gridIndexes[NUM_TABLE_ENTRY_INDEXES];
-//};
-//layout (binding = 6) buffer InGridTable
-//{
-//	ivec3 in_gridSize;
-//    int in_tableSize;
-//    LightGridHashTableEntry in_gridTable[];
-//};
+#define NUM_TABLE_ENTRY_INDEXES 8
+struct LightGridHashTableEntry
+{
+    uint16_t gridIndexes[NUM_TABLE_ENTRY_INDEXES];
+};
+layout (binding = 6) buffer InGridTable
+{
+    ivec3 in_gridSize;
+    int in_tableSize;
+    LightGridHashTableEntry in_gridTable[];
+};
 
 layout (binding = 7) uniform sampler2D u_textures[];
 
@@ -153,43 +153,22 @@ vec3 applyFog(vec3 rgb, float distance, vec3 rayOri, vec3 rayDir)
 	return mix(rgb, fogColor, fogAmount);
 }
 
-//uint16_t getHashTableIdx(ivec3 signedVec) {
-//	uvec3 src = (signedVec << 1) + (signedVec >> 31);
-//    const uint M = 0x5bd1e995u;
-//    uint h = 1190494759u;
-//    src *= M; 
-//	src.x ^= src.x >> 24u; src *= M;
-//    h *= M; h ^= src.x; h *= M; h ^= src.y; h *= M; h ^= src.z;
-//    h ^= h>>13u; h *= M; h ^= h>>15u;
-//	return uint16_t(h % in_tableSize);
-//}
+uint16_t getHashTableIdx(ivec3 p) {
+    uvec3 q = uvec3(p);
+    q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
+    uint n = q.x ^ q.y ^ q.z;
+    n = (n ^ 61u) ^ (n >> 16u);
+    n *= 9u;
+    n = n ^ (n >> 4u);
+    n *= 0x27d4eb2du;
+    n = n ^ (n >> 15u);
+    return uint16_t(n % in_tableSize);
+}
 
-//uint16_t getHashTableIdx(ivec3 signedVec) {
-//	return uint16_t(signedVec.x % in_tableSize);
-//}
-//
-//ivec3 getGridPos(vec3 pos)
-//{
-//    return ivec3(floor(pos)) / GRID_SIZE;
-//}
-
-//bool getGrid(vec3 pos, out LightGrid grid)
-//{
-//    ivec3 gridPos = getGridPos(pos);
-//    uint16_t tableIdx = getHashTableIdx(gridPos);
-//    LightGridHashTableEntry tableEntry = in_gridTable[tableIdx];
-//    for (int i = 0; i < NUM_TABLE_ENTRY_INDEXES; ++i)
-//    {
-//        uint16_t gridIdx = tableEntry.gridIndexes[i];
-//        if (gridIdx != 0xFFFF && in_lightGrids[gridIdx].gridMin == gridPos)
-//        {
-//            grid = in_lightGrids[gridIdx];
-//            return true;
-//        }
-//    }
-//    return false;
-//}
-
+ivec3 getGridPos(vec3 pos)
+{
+    return ivec3(floor(pos / GRID_SIZE));
+}
 
 void main()
 {
@@ -218,16 +197,15 @@ void main()
 	const float ambient = 0.10f;
 	vec3 color = materialColor * ambient;
 
-	//ivec3 gridPos = getGridPos(in_pos);
-    //uint16_t tableIdx = getHashTableIdx(gridPos);
-    //LightGridHashTableEntry tableEntry = in_gridTable[tableIdx];
-    //for (int i = 0; i < NUM_TABLE_ENTRY_INDEXES; ++i)
-    //{
-    //    uint16_t gridIdx = tableEntry.gridIndexes[0];
-    //    if (gridIdx != 0xFFFF && in_lightGrids[gridIdx].gridMin == gridPos)
-    //    {
-            LightGrid grid = in_lightGrids[0];
-			ivec3 cellIdx = ivec3(floor(in_pos)) - grid.gridMin;
+	const ivec3 gridPos = getGridPos(in_pos);
+    const uint16_t tableIdx = getHashTableIdx(gridPos);
+    for (int entry = 0; entry < NUM_TABLE_ENTRY_INDEXES; ++entry)
+    {
+        const uint16_t gridIdx = in_gridTable[tableIdx].gridIndexes[entry];
+        if (gridIdx != 0xFFFF && in_lightGrids[gridIdx].gridMin == gridPos)
+        {
+            color += vec3(0.0, 0.0, 0.1);
+			const ivec3 cellIdx = ivec3(floor(in_pos)) - in_lightGrids[gridIdx].gridMin * GRID_SIZE;
 			if (cellIdx.x >= 0 && 
 				cellIdx.y >= 0 && 
 				cellIdx.z >= 0 &&
@@ -235,11 +213,11 @@ void main()
 				cellIdx.y < GRID_SIZE && 
 				cellIdx.z < GRID_SIZE)
 			{
-				int flatCellIdx = cellIdx.x + cellIdx.y * GRID_SIZE + cellIdx.z * GRID_SIZE * GRID_SIZE;
-				LightCell cell = grid.lightCells[flatCellIdx];
-				for (int i = 0; i < cell.numLights; ++i)
+				const int flatCellIdx = cellIdx.x + cellIdx.y * GRID_SIZE + cellIdx.z * GRID_SIZE * GRID_SIZE;
+                const uint16_t numLights = in_lightGrids[gridIdx].lightCells[flatCellIdx].numLights; 
+				for (int i = 0; i < numLights; ++i)
 				{
-					int lightIdx = cell.lightIds[i];
+					uint16_t lightIdx = in_lightGrids[gridIdx].lightCells[flatCellIdx].lightIds[i];
 					LightInfo light = in_lightInfos[lightIdx];
 					vec3 lightVec = light.pos - in_pos;
 					float distance = length(lightVec);
@@ -259,10 +237,11 @@ void main()
 
 					vec3 kD = (1.0 - F) * (1.0 - metalness);
 					color += (kD * mcPi + specularContrib) * radianceContrib * NdotL;
+                    //color += vec3(0.0, 0.1, 0.0);
 				}
 			}
-       // }
-    //}
+        }
+    }
 
 	out_color = color;// applyFog(color, length(eyeVec), u_viewPos, V);
 }

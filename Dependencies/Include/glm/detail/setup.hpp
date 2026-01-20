@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 
+#define GLM_FORCE_XYZW_ONLY 1
 #define GLM_VERSION_MAJOR 1
 #define GLM_VERSION_MINOR 0
 #define GLM_VERSION_PATCH 1

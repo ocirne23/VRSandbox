@@ -39,24 +39,32 @@ export struct LightGridTable
 
 	void addLight(const Light& light, uint16 lightIdx)
 	{
-		const glm::ivec3 lightPosMin = glm::ivec3(light.pos - glm::vec3(light.radius));
-		const glm::ivec3 lightPosMax = glm::ivec3(light.pos + glm::vec3(light.radius));
+		const glm::vec3 lightPosMin = glm::vec3(light.pos - glm::vec3(light.radius));
+		const glm::vec3 lightPosMax = glm::vec3(light.pos + glm::vec3(light.radius));
 
-		const glm::ivec3 gridPosMin = lightPosMin / glm::ivec3(RendererVKLayout::LIGHT_GRID_SIZE);
-		const glm::ivec3 gridPosMax = lightPosMax / glm::ivec3(RendererVKLayout::LIGHT_GRID_SIZE);
+		const glm::ivec3 gridPosMin = glm::ivec3(
+			glm::floor(lightPosMin.x / RendererVKLayout::LIGHT_GRID_SIZE),
+			glm::floor(lightPosMin.y / RendererVKLayout::LIGHT_GRID_SIZE),
+			glm::floor(lightPosMin.z / RendererVKLayout::LIGHT_GRID_SIZE)
+		);
+
+		const glm::ivec3 gridPosMax = glm::ivec3(
+			glm::floor(lightPosMax.x / RendererVKLayout::LIGHT_GRID_SIZE),
+			glm::floor(lightPosMax.y / RendererVKLayout::LIGHT_GRID_SIZE),
+			glm::floor(lightPosMax.z / RendererVKLayout::LIGHT_GRID_SIZE)
+		);		
 		for (int gridX = gridPosMin.x; gridX <= gridPosMax.x; ++gridX)
 		{
 			for (int gridY = gridPosMin.y; gridY <= gridPosMax.y; ++gridY)
 			{
 				for (int gridZ = gridPosMin.z; gridZ <= gridPosMax.z; ++gridZ)
 				{
-					const glm::ivec3 gridPos = glm::ivec3(gridX, gridY, gridZ);
-					RendererVKLayout::LightGrid* pGrid = getOrAddGrid(gridPos);
+					RendererVKLayout::LightGrid* pGrid = getOrAddGrid(glm::ivec3(gridX, gridY, gridZ));
 					if (!pGrid)
 						continue;
 
-					const glm::ivec3 minCell = glm::max(lightPosMin - pGrid->gridMin, glm::ivec3(0));
-					const glm::ivec3 maxCell = glm::min(lightPosMax - pGrid->gridMin, glm::ivec3(RendererVKLayout::LIGHT_GRID_SIZE - 1));
+					const glm::ivec3 minCell = glm::max(glm::ivec3(glm::floor(lightPosMin)) - pGrid->gridMin * glm::ivec3(RendererVKLayout::LIGHT_GRID_SIZE), glm::ivec3(0));
+					const glm::ivec3 maxCell = glm::min(glm::ivec3(glm::floor(lightPosMax)) - pGrid->gridMin * glm::ivec3(RendererVKLayout::LIGHT_GRID_SIZE), glm::ivec3(RendererVKLayout::LIGHT_GRID_SIZE - 1));
 					for (int cellX = minCell.x; cellX <= maxCell.x; ++cellX)
 					{
 						for (int cellY = minCell.y; cellY <= maxCell.y; ++cellY)
@@ -77,24 +85,23 @@ export struct LightGridTable
 		}
 	}
 
-	uint16 getHashTableIdx(glm::ivec3 signedVec) {
-		glm::uvec3 src = (signedVec << 1) + (signedVec >> 31);
-		const uint32 M = 0x5bd1e995u;
-		uint32 h = 1190494759u;
-		src *= M; src ^= src >> 24u; src *= M;
-		h *= M; h ^= src.x; h *= M; h ^= src.y; h *= M; h ^= src.z;
-		h ^= h >> 13u; h *= M; h ^= h >> 15u;
-		return static_cast<uint16>(h % table.size());
+	uint16 getHashTableIdx(glm::ivec3 p) {
+		uint32 qx = static_cast<uint32>(p.x);
+		uint32 qy = static_cast<uint32>(p.y);
+		uint32 qz = static_cast<uint32>(p.z);
+		qx *= 1597334673u;
+		qy *= 3812015801u;
+		qz *= 2798796415u;
+
+		uint32 n = qx ^ qy ^ qz;
+		n = (n ^ 61u) ^ (n >> 16u);
+		n *= 9u;
+		n = n ^ (n >> 4u);
+		n *= 0x27d4eb2du;
+		n = n ^ (n >> 15u);
+
+		return static_cast<uint16>(n % table.size());
 	}
-	/*
-	uint16 getHashTableIdx(glm::ivec3 pos)
-	{
-		uint64 hash = (static_cast<uint64>(pos.x) + 6151) << 32 | (static_cast<uint64>(pos.y) + 12289) << 16 | (static_cast<uint64>(pos.z) + 24593);
-		hash ^= hash >> 21;
-		hash *= 0x9e3779b97f4a7c15ULL; // Golden ratio
-		hash ^= hash >> 35;
-		return static_cast<uint16>(hash % table.size());
-	}*/
 
 	RendererVKLayout::LightGrid* getOrAddGrid(glm::ivec3 pos)
 	{
@@ -111,7 +118,9 @@ export struct LightGridTable
 			else
 			{
 				gridIdx = (uint16)grids.size();
+				assert(gridIdx < RendererVKLayout::MAX_LIGHT_GRIDS);
 				RendererVKLayout::LightGrid* pGrid = &grids.emplace_back();
+				memset(pGrid->cells->lightIds, 0xFF, sizeof(pGrid->cells->lightIds));
 				pGrid->gridMin = pos;
 				return pGrid;
 			}
