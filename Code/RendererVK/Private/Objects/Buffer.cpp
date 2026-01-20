@@ -78,3 +78,16 @@ void Buffer::unmapMemory()
 {
     Globals::device.getDevice().unmapMemory(m_memory);
 }
+
+void Buffer::flushMappedMemory(size_t size, size_t offset)
+{
+    const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
+    size = (size + atomSize - 1) & ~(atomSize - 1);
+    [[maybe_unused]] auto flushResult = Globals::device.getDevice().flushMappedMemoryRanges({ 
+        vk::MappedMemoryRange{
+            .memory = m_memory, 
+            .offset = offset, 
+            .size = size
+        }});
+    assert(flushResult == vk::Result::eSuccess);
+}

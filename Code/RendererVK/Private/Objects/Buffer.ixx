@@ -30,6 +30,7 @@ public:
         return std::span<T>((T*)spanBytes.data(), spanBytes.size() / sizeof(T));
     }
     void unmapMemory();
+    void flushMappedMemory(size_t size, size_t offset = 0);
 
     vk::Buffer getBuffer() const { return m_buffer; }
     vk::DeviceMemory getMemory() const { return m_memory; }

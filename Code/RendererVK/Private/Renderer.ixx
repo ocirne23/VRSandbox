@@ -104,8 +104,7 @@ private:
     uint32 m_meshInstanceCounter = 0;
     uint32 m_lightCounter = 0;
 
-    using LightGridT = LightGrid<32, 32, 32>;
-    std::unique_ptr<LightGridT> m_pLightGrid;
+    LightGridTable m_lightGridTable;
 
     Buffer m_meshInfosBuffer;
     Buffer m_materialInfosBuffer;
@@ -127,16 +126,18 @@ private:
         Buffer inMeshInstancesBuffer;
         Buffer inFirstInstancesBuffer;
 
-        Buffer lightInfoBuffer;
-        Buffer lightGridBuffer;
+        Buffer lightInfosBuffer;
+        Buffer lightGridsBuffer;
+        Buffer lightTableBuffer;
 
         RendererVKLayout::Ubo* mappedUniformBuffer = nullptr;
         std::span<RendererVKLayout::RenderNodeTransform> mappedRenderNodeTransforms;
         std::span<RendererVKLayout::InMeshInstance> mappedMeshInstances;
         std::span<uint32> mappedFirstInstances;
 
-        std::span<RendererVKLayout::LightInfo> mappedLightInfo;
-        std::span<LightGridT> mappedLightGrid;
+        std::span<RendererVKLayout::LightInfo> mappedLightInfos;
+        std::span<RendererVKLayout::LightGrid> mappedLightGrids;
+        std::span<RendererVKLayout::LightTableInfo> mappedLightTable;
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 

@@ -65,7 +65,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     m_staticMeshGraphicsPipeline.initialize(m_renderPass);
     m_indirectCullComputePipeline.initialize();
 
-	m_pLightGrid = std::make_unique<LightGridT>();
+    m_lightGridTable.initialize(RendererVKLayout::LIGHT_TABLE_SIZE);
 
     vk::Device vkDevice = Globals::device.getDevice();
 
@@ -98,15 +98,20 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedFirstInstances = perFrame.inFirstInstancesBuffer.mapMemory<uint32>();
 
-        perFrame.lightInfoBuffer.initialize(sizeof(RendererVKLayout::LightInfo) * RendererVKLayout::MAX_LIGHTS,
+        perFrame.lightInfosBuffer.initialize(sizeof(RendererVKLayout::LightInfo) * RendererVKLayout::MAX_LIGHTS,
             vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
-        perFrame.mappedLightInfo = perFrame.lightInfoBuffer.mapMemory<RendererVKLayout::LightInfo>();
+        perFrame.mappedLightInfos = perFrame.lightInfosBuffer.mapMemory<RendererVKLayout::LightInfo>();
 
-        perFrame.lightGridBuffer.initialize(m_pLightGrid->getTotalByteSize(),
+        perFrame.lightGridsBuffer.initialize(sizeof(RendererVKLayout::LightGrid) * RendererVKLayout::MAX_LIGHT_GRIDS,
             vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
-        perFrame.mappedLightGrid = perFrame.lightGridBuffer.mapMemory<LightGridT>();
+        perFrame.mappedLightGrids = perFrame.lightGridsBuffer.mapMemory<RendererVKLayout::LightGrid>();
+
+        perFrame.lightTableBuffer.initialize(sizeof(RendererVKLayout::LightTableInfo) + sizeof(RendererVKLayout::LightGridTableEntry) * RendererVKLayout::LIGHT_TABLE_SIZE,
+            vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+        perFrame.mappedLightTable = perFrame.lightTableBuffer.mapMemory<RendererVKLayout::LightTableInfo>();
     }
 
     m_meshInfosBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::MeshInfo),
@@ -179,10 +184,11 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.viewPos = camera.position; 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
+    m_lightGridTable.clear();
     m_lightCounter = 0;
-	glm::vec3 viewDir = glm::normalize(glm::vec3(viewMatrix[0].z, viewMatrix[1].z, viewMatrix[2].z));
-	glm::vec3 offset = viewDir * float(m_pLightGrid->m_gridSize.x) * -0.49f * m_pLightGrid->m_cellSize;
-	m_pLightGrid->setupGrid(glm::vec3(camera.position + offset), 1.0f);
+	//glm::vec3 viewDir = glm::normalize(glm::vec3(viewMatrix[0].z, viewMatrix[1].z, viewMatrix[2].z));
+	//glm::vec3 offset = viewDir * float(m_pLightGrid->m_gridSize.x) * -0.49f * m_pLightGrid->m_cellSize;
+	//m_pLightGrid->setupGrid(glm::vec3(camera.position + offset), 1.0f);
 
     return ubo.frustum;
 }
@@ -218,8 +224,8 @@ void Renderer::addLight(const Light& light)
 {
     assert(m_lightCounter < RendererVKLayout::MAX_LIGHTS);
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-	frameData.mappedLightInfo[m_lightCounter] = light;
-	m_pLightGrid->addLight(light, m_lightCounter);
+	frameData.mappedLightInfos[m_lightCounter] = light;
+    m_lightGridTable.addLight(light, (uint16)m_lightCounter);
     m_lightCounter++;
 }
 
@@ -236,6 +242,11 @@ void Renderer::present()
     assert(frameData.mappedFirstInstances.size() >= m_meshInfoCounter);
 
     memcpy(frameData.mappedRenderNodeTransforms.data(), m_renderNodeTransforms.data(), m_renderNodeTransforms.size() * sizeof(m_renderNodeTransforms[0]));
+    memcpy(frameData.mappedLightGrids.data(), m_lightGridTable.grids.data(), m_lightGridTable.grids.size() * sizeof(m_lightGridTable.grids[0]));
+    frameData.mappedLightTable[0].in_gridSize = glm::ivec3(RendererVKLayout::LIGHT_GRID_SIZE);
+    frameData.mappedLightTable[0].in_tableSize = RendererVKLayout::LIGHT_TABLE_SIZE;
+    RendererVKLayout::LightGridTableEntry* pEntries = reinterpret_cast<RendererVKLayout::LightGridTableEntry*>(&frameData.mappedLightTable[1]);
+    memcpy(pEntries, m_lightGridTable.table.data(), m_lightGridTable.table.size() * sizeof(m_lightGridTable.table[0]));
 
     uint32 instanceCounter = 0;
     const uint32 numMeshInfos = (uint32)m_numInstancesPerMesh.size();
@@ -245,41 +256,13 @@ void Renderer::present()
         instanceCounter += m_numInstancesPerMesh[meshIdx];
     }
 
-    const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
-    vk::DeviceSize flushSize = m_renderNodeTransforms.size() * sizeof(m_renderNodeTransforms[0]);
-    flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
+    frameData.inRenderNodeTransformsBuffer.flushMappedMemory(m_renderNodeTransforms.size() * sizeof(m_renderNodeTransforms[0]));
+    frameData.inMeshInstancesBuffer.flushMappedMemory(m_meshInstanceCounter * sizeof(RendererVKLayout::InMeshInstance));
+    frameData.inFirstInstancesBuffer.flushMappedMemory(numMeshInfos * sizeof(uint32));
 
-    [[maybe_unused]] auto flushRenderNodeTransformsResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
-        .memory = frameData.inRenderNodeTransformsBuffer.getMemory(), .offset = 0, .size = flushSize
-    } });
-    assert(flushRenderNodeTransformsResult == vk::Result::eSuccess && "Failed to flush render node transforms memory range");
-
-    flushSize = m_meshInstanceCounter * sizeof(RendererVKLayout::InMeshInstance);
-    flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
-    [[maybe_unused]] auto flushMeshInstancesResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
-        .memory = frameData.inMeshInstancesBuffer.getMemory(), .offset = 0, .size = flushSize
-    } });
-    assert(flushMeshInstancesResult == vk::Result::eSuccess && "Failed to flush mesh instances memory range");
-
-    flushSize = numMeshInfos * sizeof(uint32);
-    flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
-    [[maybe_unused]] auto flushFirstInstancesResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
-        .memory = frameData.inFirstInstancesBuffer.getMemory(), .offset = 0, .size = flushSize
-    } });
-    assert(flushFirstInstancesResult == vk::Result::eSuccess && "Failed to flush first instances memory range");
-
-    flushSize = m_lightCounter * sizeof(RendererVKLayout::LightInfo);
-    flushSize = (flushSize + atomSize - 1) & ~(atomSize - 1);
-    [[maybe_unused]] auto flushLightInfoResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
-        .memory = frameData.lightInfoBuffer.getMemory(), .offset = 0, .size = flushSize
-    } });
-	assert(flushLightInfoResult == vk::Result::eSuccess && "Failed to flush light info memory range");
-
-    memcpy(frameData.mappedLightGrid.data(), m_pLightGrid.get(), m_pLightGrid->getTotalByteSize());
-    [[maybe_unused]] auto flushLightGridResult = Globals::device.getDevice().flushMappedMemoryRanges({ vk::MappedMemoryRange{
-        .memory = frameData.lightGridBuffer.getMemory(), .offset = 0, .size = vk::WholeSize
-	} });
-	assert(flushLightGridResult == vk::Result::eSuccess && "Failed to flush light grid memory range");
+    frameData.lightInfosBuffer.flushMappedMemory(m_lightCounter * sizeof(RendererVKLayout::LightInfo));
+    frameData.lightGridsBuffer.flushMappedMemory(m_lightGridTable.grids.size() * sizeof(RendererVKLayout::LightGrid));
+    frameData.lightTableBuffer.flushMappedMemory(sizeof(RendererVKLayout::LightTableInfo) + m_lightGridTable.table.size() * sizeof(RendererVKLayout::LightGridTableEntry));
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     vk::Semaphore waitSemaphore = Globals::stagingManager.update();
@@ -371,9 +354,10 @@ void Renderer::recordCommandBuffers()
                 .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
                 .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
                 .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
-				.lightInfoBuffer = frameData.lightInfoBuffer,
-				.lightGridBuffer = frameData.lightGridBuffer,
-				.lightGridByteSize = m_pLightGrid->getTotalByteSize()
+                .lightInfosBuffer = frameData.lightInfosBuffer,
+                .lightGridsBuffer = frameData.lightGridsBuffer,
+                .lightTableBuffer = frameData.lightTableBuffer,
+                .lightTableSize = sizeof(RendererVKLayout::LightTableInfo) + m_lightGridTable.table.size() * sizeof(RendererVKLayout::LightGridTableEntry)
             };
             m_staticMeshGraphicsPipeline.record(staticMeshCommandBuffer, frameIdx, m_meshInfoCounter, drawParams);
             staticMeshCommandBuffer.end();

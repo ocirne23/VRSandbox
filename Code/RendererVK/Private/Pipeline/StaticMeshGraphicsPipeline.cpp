@@ -19,7 +19,8 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
     m_sampler.initialize();
     GraphicsPipelineLayout graphicsPipelineLayout;
     graphicsPipelineLayout.vertexShaderDebugFilePath = "Shaders/instanced_indirect.vs.glsl";
-    graphicsPipelineLayout.fragmentShaderDebugFilePath = "Shaders/instanced_indirect.fs.glsl";
+    //graphicsPipelineLayout.fragmentShaderDebugFilePath = "Shaders/instanced_indirect.fs.glsl";
+    graphicsPipelineLayout.fragmentShaderDebugFilePath = "Shaders/clustered_shading.fs.glsl";
 
     graphicsPipelineLayout.vertexShaderText = FileSystem::readFileStr(graphicsPipelineLayout.vertexShaderDebugFilePath);
     graphicsPipelineLayout.fragmentShaderText = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShaderDebugFilePath);
@@ -106,10 +107,16 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_color
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InGridTable
         .binding = 6,
+        .descriptorType = vk::DescriptorType::eStorageBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_textures
+        .binding = 7,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-        .descriptorCount = 1024,
+        .descriptorCount = RendererVKLayout::MAX_TEXTURES,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
     m_graphicsPipeline.initialize(renderPass, graphicsPipelineLayout);
@@ -119,7 +126,7 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
-    std::array<DescriptorSetUpdateInfo, 6> graphicsDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 7> graphicsDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo{
             .binding = 0,
@@ -156,7 +163,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = {
                 vk::DescriptorBufferInfo {
-                    .buffer = params.lightInfoBuffer.getBuffer(),
+                    .buffer = params.lightInfosBuffer.getBuffer(),
                     .range = RendererVKLayout::MAX_LIGHTS * sizeof(RendererVKLayout::LightInfo),
                 }
             }
@@ -166,14 +173,24 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = {
                 vk::DescriptorBufferInfo {
-                    .buffer = params.lightGridBuffer.getBuffer(),
-                    .range = params.lightGridByteSize,
+                    .buffer = params.lightGridsBuffer.getBuffer(),
+                    .range = RendererVKLayout::MAX_LIGHT_GRIDS * sizeof(RendererVKLayout::LightGrid),
+                }
+            }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 6,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = params.lightTableBuffer.getBuffer(),
+                    .range = params.lightTableSize,
                 }
             }
         },
 
         DescriptorSetUpdateInfo{
-            .binding = 6,
+            .binding = 7,
             .type = vk::DescriptorType::eCombinedImageSampler,
         },
     };

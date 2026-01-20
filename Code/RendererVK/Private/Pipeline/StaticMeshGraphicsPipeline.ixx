@@ -32,9 +32,10 @@ public:
         Buffer& meshInstanceBuffer;
         Buffer& indirectCommandBuffer;
 
-        Buffer& lightInfoBuffer;
-		Buffer& lightGridBuffer;
-        size_t lightGridByteSize;
+        Buffer& lightInfosBuffer;
+		Buffer& lightGridsBuffer;
+		Buffer& lightTableBuffer;
+        size_t lightTableSize;
     };
 
     bool initialize(RenderPass& renderPass);
