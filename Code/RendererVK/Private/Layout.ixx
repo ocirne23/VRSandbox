@@ -25,6 +25,7 @@ export namespace RendererVKLayout
     constexpr size_t LIGHT_GRID_SIZE = 16;
     constexpr size_t MAX_LIGHT_GRIDS = 256;
     constexpr size_t LIGHT_TABLE_SIZE = 127;
+    constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 8;
 
     struct alignas(16) Ubo
     {
@@ -112,7 +113,7 @@ export namespace RendererVKLayout
 
     struct alignas(16) LightGridTableEntry
     {
-        uint16 entries[8];
+        uint16 entries[LIGHT_TABLE_NUM_ENTRIES];
     };
 
     struct alignas(16) LightTableInfo
