@@ -98,11 +98,11 @@ vec4 quat_multiply(vec4 q, vec4 p)
     r.xyz = (q * p.w + r).xyz;
     return r;
 }
-#define MAX_RENDERNODE_ENTRIES 7
+#define MAX_ENTRY_INDEXES 7
 struct HashTableEntry
 {
-    uint16_t numObjects;
-    uint16_t renderNodeIndexes[MAX_RENDERNODE_ENTRIES];
+    uint numEntries;
+    uint entries[MAX_ENTRY_INDEXES];
 };
 layout (binding = 5, std430) buffer OutObjectBounds
 {
@@ -115,6 +115,22 @@ layout (binding = 6, std430) buffer InGridTable
     HashTableEntry in_gridTable[];
 };
 
+uint16_t getHashTableIdx(ivec3 p) {
+    uvec3 q = uvec3(p);
+    q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
+    uint n = q.x ^ q.y ^ q.z;
+    n = (n ^ 61u) ^ (n >> 16u);
+    n *= 9u;
+    n = n ^ (n >> 4u);
+    n *= 0x27d4eb2du;
+    n = n ^ (n >> 15u);
+    return uint16_t(n % in_tableSize);
+}
+
+ivec3 getGridPos(vec3 pos)
+{
+    return ivec3(floor(pos / GRID_SIZE));
+}
 
 void main()
 {
@@ -131,6 +147,8 @@ void main()
     const vec3 centerPos              = quat_transform(in_meshInfos[meshIdx].center * instancePosScale.w, quat);
     const float radius                = in_meshInfos[meshIdx].radius * instancePosScale.w;
 
+    out_objectBounds[instanceIdx] = vec4(centerPos, radius);
+
     const vec3 minPos = centerPos - vec3(radius);
     const vec3 maxPos = centerPos + vec3(radius);
 
@@ -138,7 +156,17 @@ void main()
     const ivec3 maxGrid = ivec3(floor(maxPos / GRID_SIZE));
     for (int x = minGrid.x; x <= maxGrid.x; ++x)
     {
-        //...
-
+        for (int y = minGrid.y; y <= maxGrid.y; ++y)
+        {
+            for (int z = minGrid.z; z <= maxGrid.z; ++z)
+            {
+                const uint16_t gridIdx = getHashTableIdx(ivec3(x, y, z));
+                uint16 entryIdx = atomicAdd(n_gridTable[gridIdx].numEntries);
+                if (entryIdx < MAX_ENTRY_INDEXES)
+                {
+                    n_gridTable[gridIdx].entries[entryIdx] = instanceIdx;
+                }
+            }
+        }
     }
 }
