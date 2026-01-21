@@ -19,8 +19,7 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
     m_sampler.initialize();
     GraphicsPipelineLayout graphicsPipelineLayout;
     graphicsPipelineLayout.vertexShaderDebugFilePath = "Shaders/instanced_indirect.vs.glsl";
-    //graphicsPipelineLayout.fragmentShaderDebugFilePath = "Shaders/instanced_indirect.fs.glsl";
-    graphicsPipelineLayout.fragmentShaderDebugFilePath = "Shaders/clustered_shading.fs.glsl";
+    graphicsPipelineLayout.fragmentShaderDebugFilePath = "Shaders/instanced_indirect.fs.glsl";
 
     graphicsPipelineLayout.vertexShaderText = FileSystem::readFileStr(graphicsPipelineLayout.vertexShaderDebugFilePath);
     graphicsPipelineLayout.fragmentShaderText = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShaderDebugFilePath);

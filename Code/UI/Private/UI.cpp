@@ -91,7 +91,7 @@ void UI::update(double deltaSec)
 
             ImGuiID dock_id_right, dock_id_up, dock_id_left, dock_id_down;
             ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.2f, &dock_id_left, &dock_id_right);
-            ImGui::DockBuilderSplitNode(dock_id_right, ImGuiDir_Up, 0.8f, &dock_id_up, &dock_id_down);
+            ImGui::DockBuilderSplitNode(dock_id_right, ImGuiDir_Up, 0.9f, &dock_id_up, &dock_id_down);
 
             ImGui::DockBuilderDockWindow("Sidebar", dock_id_left);
             ImGui::DockBuilderDockWindow("Content", dock_id_down);

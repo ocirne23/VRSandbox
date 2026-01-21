@@ -25,6 +25,11 @@ export struct LightGridTable
 		return sizeof(RendererVKLayout::LightGridTableEntry) * table.size();
 	}
 
+	size_t getNumGrids() const
+	{
+		return grids.size();
+	}
+
 	void initialize(uint16 tableSize)
 	{
 		table.resize(tableSize);
@@ -72,7 +77,7 @@ export struct LightGridTable
 							for (int cellZ = minCell.z; cellZ <= maxCell.z; ++cellZ)
 							{
 								RendererVKLayout::LightCell& cell = pGrid->cells[cellX + cellY * RendererVKLayout::LIGHT_GRID_SIZE + cellZ * RendererVKLayout::LIGHT_GRID_SIZE * RendererVKLayout::LIGHT_GRID_SIZE];
-								if (cell.numLights < 7)
+								if (cell.numLights < RendererVKLayout::MAX_LIGHTS_PER_CELL)
 								{
 									cell.lightIds[cell.numLights] = lightIdx;
 									cell.numLights++;
@@ -115,17 +120,16 @@ export struct LightGridTable
 				if (grid.gridMin == pos)
 					return &grid;
 			}
-			else
+			else if (grids.size() < RendererVKLayout::MAX_LIGHT_GRIDS)
 			{
 				gridIdx = (uint16)grids.size();
-				assert(gridIdx < RendererVKLayout::MAX_LIGHT_GRIDS);
 				RendererVKLayout::LightGrid* pGrid = &grids.emplace_back();
 				memset(pGrid->cells->lightIds, 0xFF, sizeof(pGrid->cells->lightIds));
 				pGrid->gridMin = pos;
 				return pGrid;
 			}
 		}
-		assert(false && "Could not add lightgrid due to too many hash collisions! consider changing hash or size");
+		//assert(false && "Could not add lightgrid due to too many hash collisions! consider changing hash or size");
 		return nullptr;
 	}
 
