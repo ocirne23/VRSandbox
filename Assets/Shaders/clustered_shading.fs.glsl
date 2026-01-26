@@ -98,24 +98,45 @@ vec4 quat_multiply(vec4 q, vec4 p)
     r.xyz = (q * p.w + r).xyz;
     return r;
 }
-#define MAX_ENTRY_INDEXES 7
-struct HashTableEntry
+
+bool frustumCheck(vec3 pos, float radius)
 {
-    uint numEntries;
-    uint entries[MAX_ENTRY_INDEXES];
-};
-layout (binding = 5, std430) buffer OutObjectBounds
+    // Check sphere against frustum planes
+    for (int i = 0; i < 6; i++) 
+    {
+        if (dot(vec4(pos, 1.0), u_frustumPlanes[i]) + radius < 0.0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+#define EMPTY_ENTRY = 0xFFFFFFFFu;
+#define GRID_SIZE 16
+
+layout (binding = 9, std430) readwrite buffer InOutTable
 {
-    vec4 out_objectBounds[];
-};
-layout (binding = 6, std430) buffer InGridTable
-{
-    ivec3 in_gridSize;
-    int in_tableSize;
-    HashTableEntry in_gridTable[];
+    uint inout_tableSize;
+    uint inout_table[];
 };
 
-uint16_t getHashTableIdx(ivec3 p) {
+layout (binding = 9, std430) writeonly buffer OutTableValues
+{
+    ivec4 out_values[];
+};
+
+void insert(ivec3 pos, uint id)
+{
+    uint idx = getHashTableIdx(pos, inout_tableSize);
+    while (atomicCompSwap(inout_table[idx], EMPTY_ENTRY, id) != EMPTY_ENTRY)
+    {
+        idx = (idx + 1) % inout_tableSize;
+    }
+    out_values[idx] = ivec4(pos, id);
+}
+
+uint getHashTableIdx(ivec3 p, uint tableSize) {
     uvec3 q = uvec3(p);
     q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
     uint n = q.x ^ q.y ^ q.z;
@@ -124,7 +145,7 @@ uint16_t getHashTableIdx(ivec3 p) {
     n = n ^ (n >> 4u);
     n *= 0x27d4eb2du;
     n = n ^ (n >> 15u);
-    return uint16_t(n % in_tableSize);
+    return uint(n % tableSize);
 }
 
 ivec3 getGridPos(vec3 pos)
@@ -139,6 +160,11 @@ void main()
     const uint renderNodeIdx = in_instances[instanceIdx].renderNodeIdx;
     const uint offsetIdx     = in_instances[instanceIdx].instanceOffsetIdx;
 
+    out_indirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
+    out_indirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
+    out_indirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
+    out_indirectCommands[meshIdx].firstInstance = in_firstInstances[meshIdx];
+
     const vec4 quat                   = quat_multiply(in_renderNodeTransforms[renderNodeIdx].quat, in_instanceOffsets[offsetIdx].quat);
     const vec4 renderNodePosScale     = in_renderNodeTransforms[renderNodeIdx].posScale;
     const vec4 instanceOffsetPosScale = in_instanceOffsets[offsetIdx].posScale;
@@ -147,26 +173,78 @@ void main()
     const vec3 centerPos              = quat_transform(in_meshInfos[meshIdx].center * instancePosScale.w, quat);
     const float radius                = in_meshInfos[meshIdx].radius * instancePosScale.w;
 
-    out_objectBounds[instanceIdx] = vec4(centerPos, radius);
-
-    const vec3 minPos = centerPos - vec3(radius);
-    const vec3 maxPos = centerPos + vec3(radius);
-
-    const ivec3 minGrid = ivec3(floor(minPos / GRID_SIZE));
-    const ivec3 maxGrid = ivec3(floor(maxPos / GRID_SIZE));
-    for (int x = minGrid.x; x <= maxGrid.x; ++x)
+    if (frustumCheck(instancePosScale.xyz + centerPos, radius))
     {
-        for (int y = minGrid.y; y <= maxGrid.y; ++y)
+        const uint idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
+        out_meshInstanceIndexes[in_firstInstances[meshIdx] + idx] = instanceIdx;
+        out_meshInstances[instanceIdx].posScale           = instancePosScale;
+        out_meshInstances[instanceIdx].quat               = quat;
+        out_meshInstances[instanceIdx].meshIdxMaterialIdx = in_instances[instanceIdx].meshIdxMaterialIdx;
+
+        ivec3 gridMin = getGridPos(centerPos - vec3(radius));
+        ivec3 gridMax = getGridPos(centerPos + vec3(radius));
+        for (int x = gridMin.x; x < gridMax.x; ++x)
         {
-            for (int z = minGrid.z; z <= maxGrid.z; ++z)
+            for (int y = gridMin.y; y < gridMax.y; ++y)
             {
-                const uint16_t gridIdx = getHashTableIdx(ivec3(x, y, z));
-                uint16 entryIdx = atomicAdd(n_gridTable[gridIdx].numEntries);
-                if (entryIdx < MAX_ENTRY_INDEXES)
+                for (int z = gridMin.z; x < gridMax.z; ++x)
                 {
-                    n_gridTable[gridIdx].entries[entryIdx] = instanceIdx;
+                    insert(ivec3(x, y, z), instanceIdx);
                 }
             }
         }
     }
 }
+
+/*
+mat3 quat_to_mat3(vec4 q)
+{
+    vec3 q2   = q.xyz + q.xyz;
+    vec3 xyz2 = q.xyz * q2;
+    vec3 wq2  = q.w * q2;
+    float xy2 = q.x * q2.y;
+    float xz2 = q.x * q2.z;
+    float yz2 = q.y * q2.z;
+
+    return mat3(
+        1.0 - (xyz2.y + xyz2.z), xy2 + wq2.z,             xz2 - wq2.y,
+        xy2 - wq2.z,             1.0 - (xyz2.x + xyz2.z), yz2 + wq2.x,
+        xz2 + wq2.y,             yz2 - wq2.x,             1.0 - (xyz2.x + xyz2.y)
+    );
+}
+
+//mat3 version
+void main()
+{
+    const uint instanceIdx   = gl_GlobalInvocationID.x;
+    const uint16_t meshIdx   = uint16_t(in_instances[instanceIdx].meshIdxMaterialIdx & 0x0000FFFF);
+    const uint renderNodeIdx = in_instances[instanceIdx].renderNodeIdx;
+    const uint offsetIdx     = in_instances[instanceIdx].instanceOffsetIdx;
+
+    out_indirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
+    out_indirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
+    out_indirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
+    out_indirectCommands[meshIdx].firstInstance = in_firstInstances[meshIdx];
+
+    const mat3 renderNodeRotMat = quat_to_mat3(in_renderNodeTransforms[renderNodeIdx].quat);
+    const mat3 instOffsetRotMat = quat_to_mat3(in_instanceOffsets[offsetIdx].quat);
+    const mat3 instanceRotMat   = renderNodeRotMat * instOffsetRotMat;
+
+    const vec3 instancePos      = in_renderNodeTransforms[renderNodeIdx].posScale.xyz + ((renderNodeRotMat * in_instanceOffsets[offsetIdx].posScale.xyz) * in_renderNodeTransforms[renderNodeIdx].posScale.w);
+    const float instanceScale   = in_renderNodeTransforms[renderNodeIdx].posScale.w * in_instanceOffsets[offsetIdx].posScale.w;
+
+    const vec3 centerPos        = instanceRotMat * in_meshInfos[meshIdx].center * instanceScale;
+    const float radius          = in_meshInfos[meshIdx].radius * instanceScale;
+
+    if (frustumCheck(instancePos + centerPos, radius))
+    {
+        const uint idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
+        out_meshInstanceIndexes[in_firstInstances[meshIdx] + idx] = instanceIdx;
+        out_meshInstances[instanceIdx].translation = instancePos;
+        out_meshInstances[instanceIdx].scale       = instanceScale;
+        out_meshInstances[instanceIdx].rotation    = instanceRotMat;
+        out_meshInstances[instanceIdx].meshIdxMaterialIdx = in_instances[instanceIdx].meshIdxMaterialIdx;
+    }
+}
+
+*/
