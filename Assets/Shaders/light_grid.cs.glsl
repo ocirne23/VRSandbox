@@ -42,10 +42,11 @@ layout (binding = 3, std430) buffer InOutTable
     uint inout_table[];
 };
 
-bool hasGeometryGrid(ivec3 gridPos)
+layout (binding = 4, std430) buffer InInstanceTableBuffer
 {
-    return true;
-}
+    uint in_instanceTableSize;
+    uint in_instanceTable[];
+};
 
 uint getHashTableIdx(ivec3 p, uint tableSize) {
     uvec3 q = uvec3(p);
@@ -57,6 +58,20 @@ uint getHashTableIdx(ivec3 p, uint tableSize) {
     n *= 0x27d4eb2du;
     n = n ^ (n >> 15u);
     return uint(n % tableSize);
+}
+
+bool hasGeometryGrid(ivec3 gridPos)
+{
+    uint id = getHashTableIdx(gridPos, in_instanceTableSize);
+    uint idx = id;
+    while (in_instanceTable[idx] != EMPTY_ENTRY)
+    {
+        if (idx == id)
+            return true;
+        else
+            idx = (idx + 1) % in_instanceTableSize;
+    }
+    return false;
 }
 
 uint getOrInsertGrid(ivec3 gridPos)

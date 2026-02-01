@@ -5,6 +5,7 @@ import File.FileSystem;
 import :Device;
 import :Layout;
 import :ObjectContainer;
+import :StagingManager;
 
 IndirectCullComputePipeline::IndirectCullComputePipeline() {}
 IndirectCullComputePipeline::~IndirectCullComputePipeline() {}
@@ -29,11 +30,13 @@ void IndirectCullComputePipeline::initialize()
         perFrame.outIndirectCommandBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(vk::DrawIndexedIndirectCommand), // 8
             vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
-        /*
-        perFrame.inOutInstanceTable.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(uint32) , // 6
+
+        const uint32 tableSize = (uint32)RendererVKLayout::MAX_INSTANCE_DATA * 2;
+        perFrame.outInstanceTableBuffer.initialize(tableSize * sizeof(uint32), // 9
             vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
-        */
+
+        Globals::stagingManager.upload(perFrame.outInstanceTableBuffer.getBuffer(), sizeof(uint32), &tableSize, 0);
     }
 
     ComputePipelineLayout computePipelineLayout;
@@ -94,19 +97,12 @@ void IndirectCullComputePipeline::initialize()
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
     });
-    /*
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InOutInstanceTable
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // OutInstanceTableBuffer
         .binding = 9,
         .descriptorType = vk::DescriptorType::eStorageBuffer,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
     });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // OutInstanceTableValues
-        .binding = 10,
-        .descriptorType = vk::DescriptorType::eStorageBuffer,
-        .descriptorCount = 1,
-        .stageFlags = vk::ShaderStageFlagBits::eCompute
-    });*/
 
     m_computePipeline.initialize(computePipelineLayout);
 }
@@ -130,7 +126,7 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    std::array<DescriptorSetUpdateInfo, 9> computeDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 10> computeDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo { // UBO
             .binding = 0,
@@ -223,27 +219,16 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
                 }
             }
         },
-        /*
-        DescriptorSetUpdateInfo { // InOutInstanceTable
+        DescriptorSetUpdateInfo { // OutInstanceTableBuffer
             .binding = 9,
             .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = {
                 vk::DescriptorBufferInfo {
-                    .buffer = frameData.inOutInstanceTable.getBuffer(),
-                    .range = frameData.inOutInstanceTable.getSize(),
+                    .buffer = frameData.outInstanceTableBuffer.getBuffer(),
+                    .range = frameData.outInstanceTableBuffer.getSize(),
                 }
             }
-        },
-        DescriptorSetUpdateInfo { // OutInstanceTableValues
-            .binding = 10,
-            .type = vk::DescriptorType::eStorageBuffer,
-            .bufferInfos = {
-                vk::DescriptorBufferInfo {
-                    .buffer = frameData.outInstanceTableValues.getBuffer(),
-                    .range = frameData.outInstanceTableValues.getSize(),
-                }
-            }
-        }*/
+        }
     };
 
     // Compute shader frustum cull and indirect command buffer generation
@@ -254,6 +239,7 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
         commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, descriptorSet, computeDescriptorSetUpdateInfos);
         vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
         vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * sizeof(vk::DrawIndexedIndirectCommand), 0);
+        vkCommandBuffer.fillBuffer(frameData.outInstanceTableBuffer.getBuffer(), 4, vk::WholeSize, 0xFFFFFFFF);
         
         {
             vk::MemoryBarrier2 memoryBarrier{

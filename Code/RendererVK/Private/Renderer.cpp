@@ -330,6 +330,7 @@ void Renderer::recordCommandBuffers()
                 .inLightInfoBuffer = frameData.lightInfosBuffer,
                 .outLightGridBuffer = frameData.lightGridsBuffer,
                 .outLightTableBuffer = frameData.lightTableBuffer,
+                .inInstanceTableBuffer = m_indirectCullComputePipeline.getOutInstanceTableBuffer(frameIdx)
             };
 			m_lightGridComputePipeline.record(frameData.lightGridCommandBuffer, frameIdx, lightGridParams);
 			lightGridCommandBuffer.end();

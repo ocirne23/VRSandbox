@@ -186,6 +186,6 @@ void main()
 		}
 		tableIdx = (tableIdx + 1) % in_tableSize;
 	}
-	
+	//color += vec3(0.0, 0.0, 0.05 * in_numGrids);
 	out_color = color;
 }

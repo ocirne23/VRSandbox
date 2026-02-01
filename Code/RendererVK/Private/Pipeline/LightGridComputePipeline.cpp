@@ -37,6 +37,12 @@ void LightGridComputePipeline::initialize()
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
     });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
+        .binding = 4,
+        .descriptorType = vk::DescriptorType::eStorageBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eCompute
+    });
     m_computePipeline.initialize(computePipelineLayout);
 }
 
@@ -50,7 +56,7 @@ void LightGridComputePipeline::update(uint32 frameIdx, uint32 numLights)
 
 void LightGridComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& recordParams)
 {
-    std::array<DescriptorSetUpdateInfo, 3> computeDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 4> computeDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo {
             .binding = 1,
@@ -79,6 +85,16 @@ void LightGridComputePipeline::record(CommandBuffer& commandBuffer, uint32 frame
                 vk::DescriptorBufferInfo {
                     .buffer = recordParams.outLightTableBuffer.getBuffer(),
                     .range = recordParams.outLightTableBuffer.getSize(),
+                }
+            }
+        },
+        DescriptorSetUpdateInfo {
+            .binding = 4,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inInstanceTableBuffer.getBuffer(),
+                    .range = recordParams.inInstanceTableBuffer.getSize(),
                 }
             }
         },
