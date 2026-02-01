@@ -14,7 +14,7 @@ import :TextureManager;
 StaticMeshGraphicsPipeline::StaticMeshGraphicsPipeline() {}
 StaticMeshGraphicsPipeline::~StaticMeshGraphicsPipeline() {}
 
-bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
+void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
 {
     m_sampler.initialize();
     GraphicsPipelineLayout graphicsPipelineLayout;
@@ -119,8 +119,6 @@ bool StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
     m_graphicsPipeline.initialize(renderPass, graphicsPipelineLayout);
-
-    return true;
 }
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
@@ -143,7 +141,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .bufferInfos = {
                 vk::DescriptorBufferInfo {
                     .buffer = params.meshInstanceBuffer.getBuffer(),
-                    .range = RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutMeshInstance),
+                    .range = params.meshInstanceBuffer.getSize(),
                 }
             }
         },
@@ -153,7 +151,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .bufferInfos = {
                 vk::DescriptorBufferInfo {
                     .buffer = params.materialInfoBuffer.getBuffer(),
-                    .range = RendererVKLayout::MAX_UNIQUE_MATERIALS * sizeof(RendererVKLayout::MaterialInfo),
+                    .range = params.materialInfoBuffer.getSize(),
                 }
             }
         },
@@ -163,7 +161,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .bufferInfos = {
                 vk::DescriptorBufferInfo {
                     .buffer = params.lightInfosBuffer.getBuffer(),
-                    .range = RendererVKLayout::MAX_LIGHTS * sizeof(RendererVKLayout::LightInfo),
+                    .range = params.lightInfosBuffer.getSize(),
                 }
             }
         },
@@ -173,7 +171,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .bufferInfos = {
                 vk::DescriptorBufferInfo {
                     .buffer = params.lightGridsBuffer.getBuffer(),
-                    .range = RendererVKLayout::MAX_LIGHT_GRIDS * sizeof(RendererVKLayout::LightGrid),
+                    .range = params.lightGridsBuffer.getSize(),
                 }
             }
         },
@@ -183,7 +181,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .bufferInfos = {
                 vk::DescriptorBufferInfo {
                     .buffer = params.lightTableBuffer.getBuffer(),
-                    .range = params.lightTableSize,
+                    .range = params.lightTableBuffer.getSize(),
                 }
             }
         },

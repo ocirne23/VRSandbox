@@ -19,6 +19,7 @@ import :MeshDataManager;
 import :DescriptorSet;
 import :IndirectCullComputePipeline;
 import :StaticMeshGraphicsPipeline;
+import :LightGridComputePipeline;
 import :Light;
 
 export import Core.fwd;
@@ -91,6 +92,7 @@ private:
     Framebuffers m_framebuffers;
 
     IndirectCullComputePipeline m_indirectCullComputePipeline;
+    LightGridComputePipeline m_lightGridComputePipeline;
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
 
     std::vector<ObjectContainer*> m_objectContainers;
@@ -104,8 +106,6 @@ private:
     uint32 m_meshInstanceCounter = 0;
     uint32 m_lightCounter = 0;
 
-    LightGridTable m_lightGridTable;
-
     Buffer m_meshInfosBuffer;
     Buffer m_materialInfosBuffer;
     Buffer m_instanceOffsetsBuffer;
@@ -114,9 +114,11 @@ private:
     {
         DescriptorSet staticMeshPipelineDescriptorSet;
         DescriptorSet indirectCullPipelineDescriptorSet;
+        DescriptorSet lightGridPipelineDescriptorSet;
 
         CommandBuffer primaryCommandBuffer;
         CommandBuffer indirectCullCommandBuffer;
+        CommandBuffer lightGridCommandBuffer;
         CommandBuffer staticMeshRenderCommandBuffer;
         CommandBuffer imguiCommandBuffer;
 
@@ -136,8 +138,6 @@ private:
         std::span<uint32> mappedFirstInstances;
 
         std::span<RendererVKLayout::LightInfo> mappedLightInfos;
-        std::span<RendererVKLayout::LightGrid> mappedLightGrids;
-        std::span<RendererVKLayout::LightTableInfo> mappedLightTable;
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 

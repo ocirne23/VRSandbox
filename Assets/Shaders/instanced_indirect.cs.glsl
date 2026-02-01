@@ -3,6 +3,9 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : enable
 #extension GL_EXT_shader_16bit_storage : enable
 
+const uint EMPTY_ENTRY = 0xFFFFFFFFu;
+#define GRID_SIZE 16
+
 struct RenderNodeTransform
 {
     vec4 posScale;
@@ -70,7 +73,6 @@ layout (binding = 5, std430) readonly buffer InFirstInstancesBuffer
 {
     uint in_firstInstances[];
 };
-
 layout (binding = 6, std430) writeonly buffer OutMeshInstancesBuffer
 {
     OutMeshInstance out_meshInstances[];
@@ -83,7 +85,17 @@ layout (binding = 8, std430) writeonly buffer OutIndirectCommandBuffer
 {
     OutIndirectCommand out_indirectCommands[];
 };
-
+/*
+layout (binding = 9, std430) buffer InOutInstanceTable
+{
+    uint in_tableSize;
+    uint out_table[];
+};
+layout (binding = 10, std430) buffer OutInstanceTableValues
+{
+    ivec4 out_values[];
+};
+*/
 vec3 quat_transform(vec3 v, vec4 q)
 {
     return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
@@ -110,6 +122,33 @@ bool frustumCheck(vec3 pos, float radius)
         }
     }
     return true;
+}
+
+uint getHashTableIdx(ivec3 p, uint tableSize) {
+    uvec3 q = uvec3(p);
+    q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
+    uint n = q.x ^ q.y ^ q.z;
+    n = (n ^ 61u) ^ (n >> 16u);
+    n *= 9u;
+    n = n ^ (n >> 4u);
+    n *= 0x27d4eb2du;
+    n = n ^ (n >> 15u);
+    return uint(n % tableSize);
+}
+/*
+void insertInstance(ivec3 pos, uint id)
+{
+    uint idx = getHashTableIdx(pos, in_tableSize);
+    while (atomicCompSwap(out_table[idx], EMPTY_ENTRY, id) != EMPTY_ENTRY)
+    {
+        idx = (idx + 1) % in_tableSize;
+    }
+    out_values[idx] = ivec4(pos, id);
+}
+*/
+ivec3 getGridPos(vec3 pos)
+{
+    return ivec3(floor(pos / GRID_SIZE));
 }
 
 void main()
@@ -139,6 +178,20 @@ void main()
         out_meshInstances[instanceIdx].posScale           = instancePosScale;
         out_meshInstances[instanceIdx].quat               = quat;
         out_meshInstances[instanceIdx].meshIdxMaterialIdx = in_instances[instanceIdx].meshIdxMaterialIdx;
+        /*
+        ivec3 gridMin = getGridPos(centerPos - vec3(radius));
+        ivec3 gridMax = getGridPos(centerPos + vec3(radius));
+        for (int x = gridMin.x; x <= gridMax.x; ++x)
+        {
+            for (int y = gridMin.y; y <= gridMax.y; ++y)
+            {
+                for (int z = gridMin.z; x <= gridMax.z; ++x)
+                {
+                    insertInstance(ivec3(x, y, z), instanceIdx);
+                }
+            }
+        }
+        */
     }
 }
 

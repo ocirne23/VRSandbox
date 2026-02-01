@@ -35,10 +35,9 @@ public:
         Buffer& lightInfosBuffer;
 		Buffer& lightGridsBuffer;
 		Buffer& lightTableBuffer;
-        size_t lightTableSize;
     };
 
-    bool initialize(RenderPass& renderPass);
+    void initialize(RenderPass& renderPass);
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }

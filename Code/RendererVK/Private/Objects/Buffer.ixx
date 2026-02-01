@@ -32,8 +32,9 @@ public:
     void unmapMemory();
     void flushMappedMemory(size_t size, size_t offset = 0);
 
-    vk::Buffer getBuffer() const { return m_buffer; }
+    vk::Buffer getBuffer() const       { return m_buffer; }
     vk::DeviceMemory getMemory() const { return m_memory; }
+	size_t getSize() const             { return (size_t)m_size; }
 
 private:
 

@@ -9,7 +9,7 @@ export struct Light : RendererVKLayout::LightInfo
 {
 
 };
-
+/*
 export struct LightGridTable
 {
 	std::vector<RendererVKLayout::LightGrid> grids;
@@ -164,3 +164,4 @@ export struct LightGridTable
 		return UINT16_MAX;
 	}
 };
+*/

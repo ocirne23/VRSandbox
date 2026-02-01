@@ -167,6 +167,12 @@ static vk::Bool32 debugCallback(
     const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
     void* pUserData)
 {
+    if (pCallbackData->messageIdNumber == 0x76589099)
+    {
+        printf(pCallbackData->pMessage + 94);
+        return vk::False;
+    }
+
     const char* severity = "UNKNOWN";
     
     if (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)
@@ -232,7 +238,13 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
         .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
         .pfnUserCallback = debugCallback,
         .pUserData = &m_breakOnValidationLayerError,
-    };
+    };    
+    std::vector<vk::ValidationFeatureEnableEXT> validationFeaturesList = { vk::ValidationFeatureEnableEXT::eDebugPrintf };
+    vk::ValidationFeaturesEXT validationFeatures{
+        .pNext = &debugCreateInfo,
+        .enabledValidationFeatureCount = (uint32)validationFeaturesList.size(),
+        .pEnabledValidationFeatures = validationFeaturesList.data(),
+	};
 
     if (enableValidationLayers)
     {
@@ -242,7 +254,7 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         if (supportsExtension(VK_EXT_DEBUG_REPORT_EXTENSION_NAME))
             extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
-        createInfo.pNext = &debugCreateInfo;
+        createInfo.pNext = &validationFeatures;
     }
     createInfo.enabledLayerCount = (uint32)m_enabledLayers.size();
     createInfo.ppEnabledLayerNames = m_enabledLayers.data();

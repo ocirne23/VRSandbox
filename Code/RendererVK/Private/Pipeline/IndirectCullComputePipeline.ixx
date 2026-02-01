@@ -30,7 +30,7 @@ public:
         Buffer& inFirstInstancesBuffer;       // 5
     };
 
-    bool initialize();
+    void initialize();
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& recordParams);
     void update(uint32 frameIdx, uint32 numMeshInstances);
 
@@ -47,9 +47,11 @@ private:
     struct PerFrameData
     {
         Buffer inIndirectCommandBuffer;
-        Buffer outMeshInstancesBuffer;
-        Buffer outMeshInstanceIndexesBuffer;
-        Buffer outIndirectCommandBuffer;
+        Buffer outMeshInstancesBuffer;       // 6
+        Buffer outMeshInstanceIndexesBuffer; // 7
+        Buffer outIndirectCommandBuffer;     // 8
+        //Buffer inOutInstanceTable;           // 9
+        //Buffer outInstanceTableValues;       // 10
 
         std::span<vk::DispatchIndirectCommand> mappedIndirectCommands;
     };

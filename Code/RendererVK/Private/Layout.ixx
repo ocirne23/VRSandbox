@@ -20,12 +20,11 @@ export namespace RendererVKLayout
     static_assert(MAX_UNIQUE_MESHES < USHRT_MAX);
     static_assert(MAX_UNIQUE_MATERIALS < USHRT_MAX);
 
-    constexpr size_t MAX_LIGHTS_PER_CELL = 7; // match shader
+    constexpr size_t MAX_LIGHTS_PER_CELL = 6; // match shader
     constexpr size_t MAX_LIGHTS = 2048;
     constexpr size_t LIGHT_GRID_SIZE = 16; // match shader
     constexpr size_t MAX_LIGHT_GRIDS = 512;
-    constexpr size_t LIGHT_TABLE_SIZE = 255;
-    constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 8; // match shader
+    constexpr size_t LIGHT_TABLE_SIZE = 1024;
 
     struct alignas(16) Ubo
     {
@@ -100,7 +99,7 @@ export namespace RendererVKLayout
 
     struct alignas(16) LightCell
     {
-        uint16 numLights;
+        uint32 numLights;
         uint16 lightIds[MAX_LIGHTS_PER_CELL];
     };
 
@@ -110,16 +109,11 @@ export namespace RendererVKLayout
         float _padding;
         LightCell cells[LIGHT_GRID_SIZE * LIGHT_GRID_SIZE * LIGHT_GRID_SIZE];
     };
-
-    struct alignas(16) LightGridTableEntry
-    {
-        uint16 entries[LIGHT_TABLE_NUM_ENTRIES];
-    };
-
+    /*
     struct alignas(16) LightTableInfo
     {
-        glm::ivec3 in_gridSize;
-        int in_tableSize;
-        // + GridHashTableEntry table[in_tableSize] in memory
-    };
+        uint32 in_numGrids;
+        uint32 in_tableSize;
+		uint32 padding[2]; // uint32 table[in_tableSize] in memory
+    };*/
 }
