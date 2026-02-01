@@ -63,7 +63,7 @@ int main()
                 spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
 
-    //spawnedLights.push_back({ glm::vec3(0, 2, 0), 10.0f, glm::vec3(1.0, 1.0, 1.0), 30.0f });    
+    spawnedLights.push_back({ glm::vec3(0, 2, 0), 10.0f, glm::vec3(1.0, 1.0, 1.0), 30.0f });    
     //spawnedLights.push_back({ glm::vec3(-8, 6, -8), 10.0f, glm::vec3(1.0, 1.0, 1.0), 2.0f});
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)

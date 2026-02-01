@@ -48,7 +48,7 @@ layout (binding = 4, std430) buffer InInstanceTableBuffer
     uint in_instanceTable[];
 };
 
-uint getHashTableIdx(ivec3 p, uint tableSize) {
+uint getPositionHash(ivec3 p) {
     uvec3 q = uvec3(p);
     q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
     uint n = q.x ^ q.y ^ q.z;
@@ -57,12 +57,12 @@ uint getHashTableIdx(ivec3 p, uint tableSize) {
     n = n ^ (n >> 4u);
     n *= 0x27d4eb2du;
     n = n ^ (n >> 15u);
-    return uint(n % tableSize);
+    return n;
 }
 
-bool hasGeometryGrid(ivec3 gridPos)
+bool hasGeometryGrid(ivec3 gridPos, uint gridPosHash)
 {
-    uint id = getHashTableIdx(gridPos, in_instanceTableSize);
+    uint id = gridPosHash % in_instanceTableSize;
     uint idx = id;
     while (in_instanceTable[idx] != EMPTY_ENTRY)
     {
@@ -74,9 +74,9 @@ bool hasGeometryGrid(ivec3 gridPos)
     return false;
 }
 
-uint getOrInsertGrid(ivec3 gridPos)
+uint getOrInsertGrid(ivec3 gridPos, uint gridPosHash)
 {
-    uint idx = getHashTableIdx(gridPos, inout_tableSize);
+    uint idx = gridPosHash % inout_tableSize;
     while (true)
     {
         const uint entry = inout_table[idx];
@@ -142,9 +142,10 @@ void main()
             for (int z = gridMin.z; z <= gridMax.z; ++z)
             {
                 const ivec3 gridPos = ivec3(x, y, z);
-                if (hasGeometryGrid(gridPos))
+                const uint hash = getPositionHash(gridPos);
+                if (hasGeometryGrid(gridPos, hash))
                 {
-                    const uint gridIdx = getOrInsertGrid(gridPos);
+                    const uint gridIdx = getOrInsertGrid(gridPos, hash);
                     addLightToGrid(gridIdx, lightIdx, lightMin, lightMax);
                 }
             }
