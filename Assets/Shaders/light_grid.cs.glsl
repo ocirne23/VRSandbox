@@ -22,15 +22,15 @@ layout (binding = 0, std140) uniform UBO
     vec4 u_frustumPlanes[6];
     vec3 u_viewPos;
 };
-layout (binding = 1, std430) buffer InLightInfos
+layout (binding = 1, std430) readonly buffer InLightInfos
 {
 	LightInfo in_lightInfos[];
 };
-layout (binding = 2, std430) buffer OutLightGrids
+layout (binding = 2, std430) coherent buffer OutLightGrids
 {
     uint in_gridData[];
 };
-layout (binding = 3, std430) buffer InOutTable
+layout (binding = 3, std430) coherent buffer InOutTable
 {
     uint inout_gridDataCounter;
     uint inout_tableSize;
@@ -118,8 +118,9 @@ uint getOrInsertGrid(ivec3 gridPos, uint gridPosHash, uint cellSize)
     uint idx = gridPosHash % inout_tableSize;
     while (true)
     {
-        const uint gridIdx = inout_table[idx];
-        if (gridIdx < INITIALIZING_ENTRY)
+        memoryBarrierBuffer();
+        uint gridIdx = inout_table[idx];
+        if (gridIdx < INITIALIZING_ENTRY && gridIdx < inout_gridDataCounter)
         {
             if (getGridMin(gridIdx) == gridPos)
             {
@@ -134,6 +135,7 @@ uint getOrInsertGrid(ivec3 gridPos, uint gridPosHash, uint cellSize)
             setGridMin(newGridIdx, gridPos);
             setCellSize(newGridIdx, cellSize);
             inout_table[idx] = newGridIdx;
+            memoryBarrierBuffer();
             return newGridIdx;
         }
     }
@@ -164,6 +166,8 @@ void addLightToGrid(uint gridIdx, uint lightId, vec3 lightMin, vec3 lightMax)
         }
     }
 }
+
+//layout(local_size_x=1024, local_size_y=1, local_size_z=1) in;
 
 void main()
 {

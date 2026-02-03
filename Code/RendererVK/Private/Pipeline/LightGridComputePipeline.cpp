@@ -113,10 +113,10 @@ void LightGridComputePipeline::record(CommandBuffer& commandBuffer, uint32 frame
 
         {
             vk::MemoryBarrier2 memoryBarrier{
-                .srcStageMask = vk::PipelineStageFlagBits2::eClear,
+                .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
                 .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
                 .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-                .dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite,
+                .dstAccessMask = vk::AccessFlagBits2::eUniformRead | vk::AccessFlagBits2::eShaderStorageWrite,
             };
             vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
         }

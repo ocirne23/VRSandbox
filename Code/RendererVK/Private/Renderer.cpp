@@ -394,6 +394,17 @@ void Renderer::recordCommandBuffers()
 
     CommandBuffer& commandBuffer = frameData.primaryCommandBuffer;
     vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);
+
+    { // Sync for ubo copy
+        vk::MemoryBarrier2 memoryBarrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eVertexShader | vk::PipelineStageFlagBits2::eFragmentShader,
+            .dstAccessMask = vk::AccessFlagBits2::eUniformRead,
+        };
+        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
+    }
+
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
 	vk::CommandBuffer vkLightGridCommandBuffer = frameData.lightGridCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkStaticMeshRenderCommandBuffer = frameData.staticMeshRenderCommandBuffer.getCommandBuffer();
