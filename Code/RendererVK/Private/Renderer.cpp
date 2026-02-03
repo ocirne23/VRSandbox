@@ -110,11 +110,11 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedLightInfos = perFrame.lightInfosBuffer.mapMemory<RendererVKLayout::LightInfo>();
 
-        perFrame.lightGridsBuffer.initialize(sizeof(RendererVKLayout::LightGrid) * RendererVKLayout::MAX_LIGHT_GRIDS,
+        perFrame.lightGridsBuffer.initialize(RendererVKLayout::LIGHT_GRID_BUFFER_SIZE,
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        perFrame.lightTableBuffer.initialize(2 * sizeof(uint32) + sizeof(uint32) * RendererVKLayout::LIGHT_TABLE_SIZE,
+        perFrame.lightTableBuffer.initialize(2 * sizeof(uint32) + sizeof(uint32) * RendererVKLayout::LIGHT_TABLE_NUM_ENTRIES,
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
     }
@@ -327,10 +327,10 @@ void Renderer::recordCommandBuffers()
             LightGridComputePipeline::RecordParams lightGridParams
             {
                 .descriptorSet = frameData.lightGridPipelineDescriptorSet,
+                .ubo = frameData.ubo,
                 .inLightInfoBuffer = frameData.lightInfosBuffer,
                 .outLightGridBuffer = frameData.lightGridsBuffer,
                 .outLightTableBuffer = frameData.lightTableBuffer,
-                .inInstanceTableBuffer = m_indirectCullComputePipeline.getOutInstanceTableBuffer(frameIdx)
             };
 			m_lightGridComputePipeline.record(frameData.lightGridCommandBuffer, frameIdx, lightGridParams);
 			lightGridCommandBuffer.end();

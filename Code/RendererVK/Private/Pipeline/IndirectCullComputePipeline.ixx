@@ -37,7 +37,6 @@ public:
     Buffer& getIndirectCommandBuffer(uint32 idx)  { return m_perFrameData[idx].outIndirectCommandBuffer; }
     Buffer& getInstanceIdxBuffer(uint32 idx)      { return m_perFrameData[idx].outMeshInstanceIndexesBuffer; }
     Buffer& getOutMeshInstancesBuffer(uint32 idx) { return m_perFrameData[idx].outMeshInstancesBuffer; }
-    Buffer& getOutInstanceTableBuffer(uint32 idx) { return m_perFrameData[idx].outInstanceTableBuffer; }
     
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_computePipeline.getDescriptorSetLayout(); }
 
@@ -51,7 +50,6 @@ private:
         Buffer outMeshInstancesBuffer;       // 6
         Buffer outMeshInstanceIndexesBuffer; // 7
         Buffer outIndirectCommandBuffer;     // 8
-        Buffer outInstanceTableBuffer;       // 9
 
         std::span<vk::DispatchIndirectCommand> mappedIndirectCommands;
     };

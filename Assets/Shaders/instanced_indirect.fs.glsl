@@ -5,10 +5,10 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 #extension GL_EXT_nonuniform_qualifier : enable
-//#extension GL_EXT_debug_printf : enable
+#extension GL_EXT_debug_printf : enable
 
-#define GRID_SIZE 16
-#define MAX_LIGHTCELL_LIGHTS 6
+#define GRID_SIZE 32
+#define MAX_LIGHTCELL_LIGHTS 12
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 
 struct MaterialInfo
@@ -27,17 +27,6 @@ struct LightInfo
 	vec3 color;
 	float intensity;
 };
-struct LightCell
-{
-	uint numLights;
-	uint16_t lightIds[MAX_LIGHTCELL_LIGHTS];
-};
-struct LightGrid
-{
-	ivec3 gridMin;
-	uint _padding;
-	LightCell lightCells[GRID_SIZE * GRID_SIZE * GRID_SIZE];
-};
 layout (binding = 0, std140) uniform UBO
 {
     mat4 u_mvp;
@@ -54,7 +43,7 @@ layout (binding = 4, std430) readonly buffer InLightInfos
 };
 layout (binding = 5, std430) readonly buffer InLightGrid
 {
-    LightGrid in_lightGrids[];
+    uint in_gridData[];
 };
 layout (binding = 6, std430) readonly buffer InGridTable
 {
@@ -86,11 +75,30 @@ uint getHashTableIdx(ivec3 p, uint tableSize) {
     return uint(n % tableSize);
 }
 
+ivec3 getGridMin(uint gridIdx) 
+{ 
+    return ivec3(in_gridData[gridIdx + 0], in_gridData[gridIdx + 1], in_gridData[gridIdx + 2]); 
+}
+uint getCellSize(uint gridIdx) 
+{ 
+    return in_gridData[gridIdx + 3]; 
+}
+uint getCellOffset(uint gridIdx, uint cellIdx)
+{
+    return gridIdx + 4 + cellIdx * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
+}
 ivec3 getGridPos(vec3 pos)
 {
     return ivec3(floor(pos / GRID_SIZE));
 }
-
+uint16_t getLightId(uint cellOffset, uint lightIdx)
+{
+    const uint packed = in_gridData[cellOffset + 1 + lightIdx / 2];
+    if (lightIdx % 2 == 0)
+        return uint16_t(packed & 0x0000FFFF);
+    else
+        return uint16_t(packed >> 16);
+}
 float inverseSquareFalloff(float lightDistance, float lightRange)
 {
 	return pow(max(1.0 - pow((lightDistance / lightRange), 4), 0), 2) / (pow(lightDistance, 2) + 1);
@@ -165,22 +173,27 @@ void main()
 
 	const ivec3 gridPos = getGridPos(in_pos);
     uint tableIdx = getHashTableIdx(gridPos, in_tableSize);
+
 	while (true)
 	{
 		const uint gridIdx = in_gridTable[tableIdx];
 		if (gridIdx == EMPTY_ENTRY)
 			break;
-		if (in_lightGrids[gridIdx].gridMin == gridPos)
-		{
-			const ivec3 cellIdx = ivec3(floor(in_pos)) - in_lightGrids[gridIdx].gridMin * GRID_SIZE;
-			const int flatCellIdx = cellIdx.x + cellIdx.y * GRID_SIZE + cellIdx.z * GRID_SIZE * GRID_SIZE;
-            const uint numLights = in_lightGrids[gridIdx].lightCells[flatCellIdx].numLights; 
-			for (uint i = 0; i < numLights; ++i)
+		const ivec3 gridMin = getGridMin(gridIdx);
+		if (gridMin == gridPos)
+		{			
+			const uint cellSize = getCellSize(gridIdx);
+			const uint numCells = GRID_SIZE / cellSize;
+			const ivec3 cellPos = (ivec3(floor(in_pos)) - gridMin * GRID_SIZE) / int(cellSize);
+			const uint cellIdx = cellPos.x + cellPos.y * numCells + cellPos.z * numCells * numCells;
+			const uint cellOffset = getCellOffset(gridIdx, cellIdx);
+			const uint numLights = in_gridData[cellOffset];
+			for (uint i = 0; i < min(numLights, MAX_LIGHTCELL_LIGHTS); ++i)
 			{
-				const uint16_t lightIdx = in_lightGrids[gridIdx].lightCells[flatCellIdx].lightIds[i];
-				const LightInfo light = in_lightInfos[lightIdx];
+				const uint16_t lightId = getLightId(cellOffset, i);
+				const LightInfo light = in_lightInfos[lightId];
 				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, 
-					                roughness, roughness1, roughness1sqOver8, roughnessSq);
+									roughness, roughness1, roughness1sqOver8, roughnessSq);
 			}
 			break;
 		}
@@ -189,3 +202,5 @@ void main()
 	//color += vec3(0.0, 0.0, 0.05 * in_numGrids);
 	out_color = color;
 }
+
+//	if (cellPos.x >= 0.0 && cellPos.y >= 0.0 && cellPos.z >= 0.0 && cellPos.x < numCells && cellPos.y < numCells && cellPos.z < numCells)

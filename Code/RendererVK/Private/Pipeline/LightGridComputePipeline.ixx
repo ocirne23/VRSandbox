@@ -17,10 +17,10 @@ public:
 	struct RecordParams
 	{
 		DescriptorSet& descriptorSet;
+		Buffer& ubo;
 		Buffer& inLightInfoBuffer;
 		Buffer& outLightGridBuffer;
 		Buffer& outLightTableBuffer;
-		Buffer& inInstanceTableBuffer;
 	};
 	void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& recordParams);
 	void update(uint32 frameIdx, uint32 numLights);

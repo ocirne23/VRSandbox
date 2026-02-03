@@ -19,6 +19,12 @@ void LightGridComputePipeline::initialize()
     computePipelineLayout.computeShaderDebugFilePath = "Shaders/light_grid.cs.glsl";
     computePipelineLayout.computeShaderText = FileSystem::readFileStr(computePipelineLayout.computeShaderDebugFilePath);
     auto& descriptorSetBindings = computePipelineLayout.descriptorSetLayoutBindings;
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // UBO
+        .binding = 0,
+        .descriptorType = vk::DescriptorType::eUniformBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eCompute
+    });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
         .binding = 1,
         .descriptorType = vk::DescriptorType::eStorageBuffer,
@@ -33,12 +39,6 @@ void LightGridComputePipeline::initialize()
     });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
         .binding = 3,
-        .descriptorType = vk::DescriptorType::eStorageBuffer,
-        .descriptorCount = 1,
-        .stageFlags = vk::ShaderStageFlagBits::eCompute
-    });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
-        .binding = 4,
         .descriptorType = vk::DescriptorType::eStorageBuffer,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
@@ -58,6 +58,16 @@ void LightGridComputePipeline::record(CommandBuffer& commandBuffer, uint32 frame
 {
     std::array<DescriptorSetUpdateInfo, 4> computeDescriptorSetUpdateInfos
     {
+        DescriptorSetUpdateInfo { // UBO
+            .binding = 0,
+            .type = vk::DescriptorType::eUniformBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.ubo.getBuffer(),
+                    .range = recordParams.ubo.getSize(),
+                }
+            }
+        },
         DescriptorSetUpdateInfo {
             .binding = 1,
             .type = vk::DescriptorType::eStorageBuffer,
@@ -87,17 +97,7 @@ void LightGridComputePipeline::record(CommandBuffer& commandBuffer, uint32 frame
                     .range = recordParams.outLightTableBuffer.getSize(),
                 }
             }
-        },
-        DescriptorSetUpdateInfo {
-            .binding = 4,
-            .type = vk::DescriptorType::eStorageBuffer,
-            .bufferInfos = {
-                vk::DescriptorBufferInfo {
-                    .buffer = recordParams.inInstanceTableBuffer.getBuffer(),
-                    .range = recordParams.inInstanceTableBuffer.getSize(),
-                }
-            }
-        },
+        }
     };
 
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
@@ -116,7 +116,7 @@ void LightGridComputePipeline::record(CommandBuffer& commandBuffer, uint32 frame
                 .srcStageMask = vk::PipelineStageFlagBits2::eClear,
                 .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
                 .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-                .dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+                .dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite,
             };
             vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
         }
@@ -127,8 +127,8 @@ void LightGridComputePipeline::record(CommandBuffer& commandBuffer, uint32 frame
             vk::MemoryBarrier2 memoryBarrier{
                 .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
                 .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-                .dstStageMask = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader,
-                .dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead,
+                .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+                .dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead,
             };
             vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
         }

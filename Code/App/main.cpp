@@ -60,10 +60,10 @@ int main()
         container.initialize(sceneData);
         for (int x = 0; x < 1; ++x)
             for (int y = 0; y < 1; ++y)
-                spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+                spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 50.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
 
-    spawnedLights.push_back({ glm::vec3(0, 2, 0), 10.0f, glm::vec3(1.0, 1.0, 1.0), 30.0f });    
+    spawnedLights.push_back({ glm::vec3(0, 2, 0), 2.0f, glm::vec3(1.0, 1.0, 1.0), 5.0f });    
     //spawnedLights.push_back({ glm::vec3(-8, 6, -8), 10.0f, glm::vec3(1.0, 1.0, 1.0), 2.0f});
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
@@ -71,13 +71,24 @@ int main()
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedNodes.push_back(container.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp())))));
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-				spawnedLights.push_back({ cameraController.getPosition(), 2.0f, glm::abs(glm::sphericalRand(1.0f)), 5.0f});
+				spawnedLights.push_back({ cameraController.getPosition(), 1.0f, glm::abs(glm::sphericalRand(1.0f)), 5.0f});
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedLights.resize(0);
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedNodes.resize(1);
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+                for (int i = 0; i < 50; ++i)
+                {
+                    spawnedLights.push_back({ glm::vec3(glm::linearRand(-560.0f, 560.0f), glm::linearRand(-0.6f, 0.6f), glm::linearRand(-250.0f, 250.0f)),
+                        glm::linearRand(1.0f, 3.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(4.0f, 10.0f) });
+                }
         };
 #endif
+
+
+
+
+
 
     uint32 frameCount = 0;
     uint32 fps = 0;
@@ -91,9 +102,9 @@ int main()
             glm::vec3 pos = cameraController.getPosition();
             glm::vec3 dir = cameraController.getDirection();
             char windowTitleBuf[256];
-            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i mem: %.2fmb instances: %i meshtypes: %i materials: %i, pos: %.1f, %.1f, %.1f, dir: %.1f, %.1f, %.1f",
+            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i mem: %.2fmb instances: %i meshtypes: %i materials: %i lights: %i, pos: %.1f, %.1f, %.1f, dir: %.1f, %.1f, %.1f",
                 fps, (double)(Globals::allocator.getUsedSize() + getAlignedAllocatedSize()) / 1024.0 / 1024.0,
-                renderer.getNumMeshInstances(), renderer.getNumMeshTypes(), renderer.getNumMaterials(), pos.x, pos.y, pos.z, dir.x, dir.y, dir.z);
+                renderer.getNumMeshInstances(), renderer.getNumMeshTypes(), renderer.getNumMaterials(), (int)spawnedLights.size(), pos.x, pos.y, pos.z, dir.x, dir.y, dir.z);
             window.setTitle(windowTitleBuf);
             return Timer::REPEAT;
         });
