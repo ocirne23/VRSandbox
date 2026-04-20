@@ -228,7 +228,7 @@ public:
         while (pEntry != nullptr)
         {
             assert(pEntry->pNext == nullptr);
-            interlockedPushEntry(&m_listHead, *(Entry*)(((char*)pEntry) + offsetof(T, pNext)));
+            interlockedPushEntry(m_listHead, *(Entry*)(((char*)pEntry) + offsetof(T, pNext)));
             pEntry = pEntry->Next;
         }
     }

@@ -542,6 +542,9 @@ export namespace Globals
 
 #pragma warning(default: 4075)
 
+extern "C++"
+{
+
 void* operator new(std::size_t n)
 {
     return Globals::allocator.allocate(n);
@@ -612,4 +615,6 @@ void operator delete[](void* p, std::align_val_t align)
             return _aligned_free(p);
         }
     }
+}
+
 }
