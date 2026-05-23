@@ -222,7 +222,7 @@ void Renderer::renderNode(const RenderNode& node)
 
 void Renderer::addLight(const Light& light)
 {
-    assert(m_lightCounter < RendererVKLayout::MAX_LIGHTS);
+    assert(m_lightCounter < RendererVKLayout::MAX_LIGHTS - 100);
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
 	frameData.mappedLightInfos[m_lightCounter] = light;
     m_lightCounter++;

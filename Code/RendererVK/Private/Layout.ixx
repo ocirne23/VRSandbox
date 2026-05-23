@@ -23,7 +23,7 @@ export namespace RendererVKLayout
     constexpr size_t MAX_LIGHTS = 16384;
     constexpr size_t INSTANCE_GRID_SIZE = 64;
     constexpr size_t INSTANCE_TABLE_SIZE = 1024 * 1024;
-    constexpr size_t LIGHT_GRID_BUFFER_SIZE = 5 * 1024 * 1024;
+    constexpr size_t LIGHT_GRID_BUFFER_SIZE = 50 * 1024 * 1024;
     constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 16300;
 
     struct alignas(16) Ubo

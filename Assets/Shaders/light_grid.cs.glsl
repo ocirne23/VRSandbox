@@ -91,7 +91,7 @@ void addLightToCell(uint gridIdx, uint cellIdx, uint lightId)
     const uint lightIdx = atomicAdd(in_gridData[cellOffset], uint(1));
     if (lightIdx < MAX_LIGHTCELL_LIGHTS)
     {
-        atomicAdd(in_gridData[cellOffset + 1 + lightIdx / 2], lightId << ((lightIdx % 2 == 0) ? 0 : 16));
+        atomicOr(in_gridData[cellOffset + 1 + lightIdx / 2], uint(lightId) << ((lightIdx % 2 == 0) ? 0 : 16));
     }
 }
 uint getGridMemoryUsage(uint cellSize)
@@ -134,8 +134,8 @@ uint getOrInsertGrid(ivec3 gridPos, uint gridPosHash, uint cellSize)
             const uint newGridIdx = atomicAdd(inout_gridDataCounter, memSize);
             setGridMin(newGridIdx, gridPos);
             setCellSize(newGridIdx, cellSize);
-            inout_table[idx] = newGridIdx;
             memoryBarrierBuffer();
+            atomicExchange(inout_table[idx], newGridIdx);
             return newGridIdx;
         }
     }
@@ -167,8 +167,6 @@ void addLightToGrid(uint gridIdx, uint lightId, vec3 lightMin, vec3 lightMax)
     }
 }
 
-//layout(local_size_x=1024, local_size_y=1, local_size_z=1) in;
-
 void main()
 {
     const uint lightIdx = gl_GlobalInvocationID.x;
@@ -187,34 +185,13 @@ void main()
             {
                 const ivec3 gridPos = ivec3(x, y, z);
                 const uint hash = getPositionHash(gridPos);
-                //if (hasGeometryGrid(gridPos, hash))
-                {
-                    float viewDist = distance(vec3(x, y, z) * GRID_SIZE + GRID_SIZE / 2 , u_viewPos);
-                    uint cellSize = 1 << int(mix(0, 8, sqrt(viewDist) / 32.0));
-                    if (cellSize > GRID_SIZE / 2)
-                        cellSize = GRID_SIZE;
-                    const uint gridIdx = getOrInsertGrid(gridPos, hash, cellSize);
-                    addLightToGrid(gridIdx, lightIdx, lightMin, lightMax);
-                }
+                float viewDist = distance(vec3(x, y, z) * GRID_SIZE + GRID_SIZE / 2 , u_viewPos);
+                uint cellSize = 1 << int(mix(0, 8, sqrt(viewDist) / 32.0));
+                if (cellSize > GRID_SIZE / 2)
+                    cellSize = GRID_SIZE;
+                const uint gridIdx = getOrInsertGrid(gridPos, hash, cellSize);
+                addLightToGrid(gridIdx, lightIdx, lightMin, lightMax);
             }
         }
     }
 }
-
-/*
-bool hasGeometryGrid(ivec3 gridPos, uint gridPosHash)
-{
-    const uint id = gridPosHash % in_instanceTableSize;
-    uint idx = id;
-    while (true)
-    {
-        const uint entry = in_instanceTable[idx];
-        if (entry == EMPTY_ENTRY)
-            return false;
-        else if (entry == id)
-            return true;
-        else
-            idx = (idx + 1) % in_instanceTableSize;
-    }
-}
-*/

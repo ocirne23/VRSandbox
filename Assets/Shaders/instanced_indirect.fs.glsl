@@ -173,7 +173,7 @@ void main()
 
 	const ivec3 gridPos = getGridPos(in_pos);
     uint tableIdx = getHashTableIdx(gridPos, in_tableSize);
-
+	
 	while (true)
 	{
 		const uint gridIdx = in_gridTable[tableIdx];
@@ -194,12 +194,13 @@ void main()
 				const LightInfo light = in_lightInfos[lightId];
 				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, 
 									roughness, roughness1, roughness1sqOver8, roughnessSq);
+				//color += vec3(0.0, 0.0, 0.05);
 			}
 			break;
 		}
 		tableIdx = (tableIdx + 1) % in_tableSize;
 	}
-	//color += vec3(0.0, 0.0, 0.05 * in_numGrids);
+	
 	out_color = color;
 }
 
