@@ -15,12 +15,11 @@ import File.FileSystem;
 import :RenderNode;
 import :VK;
 import :StagingManager;
+import :TextureManager;
+import :MeshDataManager;
 import :glslang;
 import :Layout;
 import :ObjectContainer;
-
-constexpr static size_t VERTEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshVertex);
-constexpr static size_t INDEX_DATA_SIZE = 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
 
 Renderer::~Renderer()
 {
@@ -61,7 +60,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     m_viewportRect.max = glm::ivec2(m_swapChain.getLayout().extent.width, m_swapChain.getLayout().extent.height);
 
     Globals::stagingManager.initialize();
-    Globals::meshDataManager.initialize(VERTEX_DATA_SIZE, INDEX_DATA_SIZE);
+    Globals::meshDataManager.initialize(RendererVKLayout::MAX_VERTEX_DATA, RendererVKLayout::MAX_INDEX_DATA);
 
     m_renderPass.initialize(m_swapChain);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
@@ -114,9 +113,9 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        perFrame.lightTableBuffer.initialize(2 * sizeof(uint32) + sizeof(uint32) * RendererVKLayout::LIGHT_TABLE_NUM_ENTRIES,
+        perFrame.lightTableBuffer.initialize(3 * sizeof(uint32) + sizeof(uint32) * RendererVKLayout::LIGHT_TABLE_NUM_ENTRIES,
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
+            vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostVisible);
     }
 
     m_meshInfosBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::MeshInfo),
@@ -222,10 +221,12 @@ void Renderer::renderNode(const RenderNode& node)
 
 void Renderer::addLight(const Light& light)
 {
-    assert(m_lightCounter < RendererVKLayout::MAX_LIGHTS - 100);
-    PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-	frameData.mappedLightInfos[m_lightCounter] = light;
-    m_lightCounter++;
+    if (m_lightCounter < RendererVKLayout::MAX_LIGHTS)
+    {
+        PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
+        frameData.mappedLightInfos[m_lightCounter] = light;
+        m_lightCounter++;
+    }
 }
 
 void Renderer::present()
@@ -511,4 +512,61 @@ void Renderer::initImgui(Window& window)
     pipeline_create.Subpass = 0;
     pipeline_create.MSAASamples = {};
     ImGui_ImplVulkan_CreateMainPipeline(pipeline_create);
+}
+
+Renderer::Stats Renderer::getStats()
+{
+    Stats stats;
+
+    stats.numLights = m_lightCounter;
+    stats.maxLights = RendererVKLayout::MAX_LIGHTS;
+
+    stats.numMeshInstances = m_meshInstanceCounter;
+    stats.maxMeshInstances = RendererVKLayout::MAX_INSTANCE_DATA;
+
+    stats.numInstanceOffsets = m_instanceOffsetCounter;
+    stats.maxInstanceOffsets = RendererVKLayout::MAX_INSTANCE_OFFSETS;
+
+    stats.numMeshTypes = m_meshInfoCounter;
+    stats.maxMeshTypes = RendererVKLayout::MAX_UNIQUE_MESHES;
+
+    stats.numMaterials = m_materialInfoCounter;
+    stats.maxMaterials = RendererVKLayout::MAX_UNIQUE_MATERIALS;
+
+    stats.numRenderNodes = (uint32)m_renderNodeTransforms.size();
+    stats.maxRenderNodes = RendererVKLayout::MAX_RENDER_NODES;
+
+    stats.numTextures = (uint32)Globals::textureManager.getNumTextures();
+	stats.maxTextures = RendererVKLayout::MAX_TEXTURES;
+
+	stats.vertexDataUsedBytes = Globals::meshDataManager.getVertexBufUsed();
+	stats.maxVertexDataBytes = Globals::meshDataManager.getVertexBufSize();
+
+	stats.indexDataUsedBytes = Globals::meshDataManager.getIndexBufUsed();
+	stats.maxIndexDataBytes = Globals::meshDataManager.getIndexBufSize();
+
+    stats.numObjectContainers = (uint32)m_objectContainers.size();
+
+    const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
+    PerFrameData& lastFrameData = m_perFrameData[(frameIdx - 1) % m_perFrameData.size()];
+
+    struct LightGridInfo
+    {
+        uint32 inout_numGrids;
+        uint32 inout_gridDataCounter;
+        uint32 inout_lightCounter;
+    } info;
+    std::span<LightGridInfo> infoSpan = lastFrameData.lightTableBuffer.mapMemory<LightGridInfo>(0, sizeof(LightGridInfo));
+    lastFrameData.lightTableBuffer.flushMappedMemory(sizeof(LightGridInfo));
+    info = *infoSpan.data();
+    lastFrameData.lightTableBuffer.unmapMemory();
+
+	stats.numLightGrids = info.inout_numGrids;
+    stats.maxLightGrids = RendererVKLayout::LIGHT_TABLE_NUM_ENTRIES / 2; // We don't want to go over 50% because of hash table collisions
+    stats.lightGridMemUsageBytes = info.inout_gridDataCounter * sizeof(uint32);
+    stats.maxLightGridMemUsageBytes = RendererVKLayout::LIGHT_GRID_BUFFER_SIZE;
+
+    stats.lightCounter = info.inout_lightCounter;
+
+    return stats;
 }

@@ -10,21 +10,31 @@ export namespace RendererVKLayout
     constexpr uint32 NUM_FRAMES_IN_FLIGHT = 2;
 
     // TODO make these dynamic
-    constexpr uint32 MAX_RENDER_NODES = 1024 * 512;
-    constexpr uint32 MAX_UNIQUE_MESHES = 100;
+    constexpr uint32 MAX_RENDER_NODES = 1024 * 4;
+    constexpr uint32 MAX_UNIQUE_MESHES = 1024;
+    constexpr uint32 MAX_UNIQUE_MATERIALS = 1024;
     constexpr uint32 MAX_INSTANCE_OFFSETS = 1024;
     constexpr uint32 MAX_INSTANCE_DATA = 1024 * 2024;
-    constexpr uint32 MAX_UNIQUE_MATERIALS = 100;
     constexpr uint32 MAX_TEXTURES = 1024;
 
     static_assert(MAX_UNIQUE_MESHES < USHRT_MAX);
     static_assert(MAX_UNIQUE_MATERIALS < USHRT_MAX);
 
-    constexpr size_t MAX_LIGHTS = 16384;
-    constexpr size_t INSTANCE_GRID_SIZE = 64;
-    constexpr size_t INSTANCE_TABLE_SIZE = 1024 * 1024;
-    constexpr size_t LIGHT_GRID_BUFFER_SIZE = 50 * 1024 * 1024;
-    constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 16300;
+    constexpr size_t MAX_LIGHTS = USHRT_MAX;
+    constexpr size_t LIGHT_GRID_BUFFER_SIZE = 10 * 1024 * 1024;
+    constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 4096;
+
+    struct MeshVertex
+    {
+        glm::vec3 position;
+        glm::vec3 normal;
+        glm::vec4 tangent;
+        glm::vec2 texCoord;
+    };
+    using MeshIndex = uint32;
+
+    constexpr size_t MAX_VERTEX_DATA = 1024 * 1024 * sizeof(RendererVKLayout::MeshVertex);
+    constexpr size_t MAX_INDEX_DATA = 4 * 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
 
     struct alignas(16) Ubo
     {
@@ -78,16 +88,6 @@ export namespace RendererVKLayout
         uint16 diffuseTexIdx;
         uint16 normalTexIdx;
     };
-
-    struct MeshVertex
-    {
-        glm::vec3 position;
-        glm::vec3 normal;
-        glm::vec4 tangent;
-        glm::vec2 texCoord;
-    };
-
-    using MeshIndex = uint32;
 
     struct alignas(16) LightInfo
     {

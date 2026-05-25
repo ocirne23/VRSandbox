@@ -62,6 +62,47 @@ public:
     void recreateWindowSurface(Window& window);
     void setViewportRect(const Rect& rect) { if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } }
 
+    struct Stats
+    {
+        uint32 numLights;
+        uint32 maxLights;
+
+		uint32 numMeshInstances;
+		uint32 maxMeshInstances;
+
+        uint32 numInstanceOffsets;
+		uint32 maxInstanceOffsets;
+
+        uint32 numMeshTypes;
+		uint32 maxMeshTypes;
+
+        uint32 numMaterials;
+        uint32 maxMaterials;
+
+		uint32 numRenderNodes;
+        uint32 maxRenderNodes;
+
+        uint32 numTextures;
+        uint32 maxTextures;
+
+        uint64 vertexDataUsedBytes;
+		uint64 maxVertexDataBytes;
+
+		uint64 indexDataUsedBytes;
+		uint64 maxIndexDataBytes;
+
+        uint32 numObjectContainers;
+
+        uint32 numLightGrids;
+		uint32 maxLightGrids;
+
+		uint64 lightGridMemUsageBytes;
+		uint64 maxLightGridMemUsageBytes;
+
+        uint32 lightCounter;
+    };
+    Stats getStats();
+
 private:
 
     CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }

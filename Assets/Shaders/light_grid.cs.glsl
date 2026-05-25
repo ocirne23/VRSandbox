@@ -32,7 +32,9 @@ layout (binding = 2, std430) coherent buffer OutLightGrids
 };
 layout (binding = 3, std430) coherent buffer InOutTable
 {
+    uint inout_numGrids;
     uint inout_gridDataCounter;
+    uint inout_lightCounter;
     uint inout_tableSize;
     uint inout_table[];
 };
@@ -42,6 +44,8 @@ struct GRID DATA MEMORY LAYOUT
 {
     ivec3 gridMin;
     uint gridSize;
+    uint numLargeLights;
+    uint16_t largeLightIds[6];
     struct 
     {
         uint numLights;
@@ -71,7 +75,7 @@ void setCellSize(uint gridIdx, uint cellSize)
 }
 uint getCellOffset(uint gridIdx, uint cellIdx)
 {
-    return gridIdx + 4 + cellIdx * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
+    return gridIdx + 8 + cellIdx * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
 }
 uint getNumLightsForCell(uint cellOffset)
 {
@@ -87,17 +91,26 @@ uint16_t getLightId(uint cellOffset, uint lightIdx)
 }
 void addLightToCell(uint gridIdx, uint cellIdx, uint lightId)
 {
-    const uint cellOffset = gridIdx + 4 + cellIdx * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
+    const uint cellOffset = getCellOffset(gridIdx, cellIdx);
     const uint lightIdx = atomicAdd(in_gridData[cellOffset], uint(1));
     if (lightIdx < MAX_LIGHTCELL_LIGHTS)
     {
         atomicOr(in_gridData[cellOffset + 1 + lightIdx / 2], uint(lightId) << ((lightIdx % 2 == 0) ? 0 : 16));
     }
 }
+void addLargeLight(uint gridIdx, uint lightId)
+{
+    const uint numLargeLightsOffset = gridIdx + 4;
+    const uint largeLightIdx = atomicAdd(in_gridData[numLargeLightsOffset], uint(1));
+    if (largeLightIdx < 6)
+    {
+        atomicOr(in_gridData[numLargeLightsOffset + 1 + largeLightIdx / 2], uint(lightId) << ((largeLightIdx % 2 == 0) ? 0 : 16));
+    }
+}
 uint getGridMemoryUsage(uint cellSize)
 {
     const uint numCells = GRID_SIZE / cellSize;
-    return 4 + numCells * numCells * numCells * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
+    return 8 + numCells * numCells * numCells * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
 }
 
 uint getPositionHash(ivec3 p) 
@@ -113,8 +126,9 @@ uint getPositionHash(ivec3 p)
     return n;
 }
 
-uint getOrInsertGrid(ivec3 gridPos, uint gridPosHash, uint cellSize)
+uint getOrInsertGrid(ivec3 gridPos, uint cellSize)
 {
+    const uint gridPosHash = getPositionHash(gridPos);
     uint idx = gridPosHash % inout_tableSize;
     while (true)
     {
@@ -136,6 +150,7 @@ uint getOrInsertGrid(ivec3 gridPos, uint gridPosHash, uint cellSize)
             setCellSize(newGridIdx, cellSize);
             memoryBarrierBuffer();
             atomicExchange(inout_table[idx], newGridIdx);
+            atomicAdd(inout_numGrids, uint(1));
             return newGridIdx;
         }
     }
@@ -167,31 +182,48 @@ void addLightToGrid(uint gridIdx, uint lightId, vec3 lightMin, vec3 lightMax)
     }
 }
 
+layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
+
 void main()
 {
     const uint lightIdx = gl_GlobalInvocationID.x;
-    const vec3 lightPos = in_lightInfos[lightIdx].pos;
-    const float radius = in_lightInfos[lightIdx].range;
-    const vec3 lightMin = lightPos - vec3(radius);
-    const vec3 lightMax = lightPos + vec3(radius);
-    const ivec3 gridMin = getGridPos(lightMin);
-    const ivec3 gridMax = getGridPos(lightMax);
-
-    for (int x = gridMin.x; x <= gridMax.x; ++x)
+    if (lightIdx < in_lightInfos.length())
     {
-        for (int y = gridMin.y; y <= gridMax.y; ++y)
+        const vec3 lightPos = in_lightInfos[lightIdx].pos;
+        const float radius = in_lightInfos[lightIdx].range;
+        const vec3 lightMin = lightPos - vec3(radius);
+        const vec3 lightMax = lightPos + vec3(radius);
+        const ivec3 gridMin = getGridPos(lightMin);
+        const ivec3 gridMax = getGridPos(lightMax);
+
+        const uint numGrids = (gridMax.x - gridMin.x + 1) * (gridMax.y - gridMin.y + 1) * (gridMax.z - gridMin.z + 1);
+        if (numGrids > 8)
+            atomicExchange(inout_lightCounter, uint(1));
+
+        for (int x = gridMin.x; x <= gridMax.x; ++x)
         {
-            for (int z = gridMin.z; z <= gridMax.z; ++z)
+            for (int y = gridMin.y; y <= gridMax.y; ++y)
             {
-                const ivec3 gridPos = ivec3(x, y, z);
-                const uint hash = getPositionHash(gridPos);
-                float viewDist = distance(vec3(x, y, z) * GRID_SIZE + GRID_SIZE / 2 , u_viewPos);
-                uint cellSize = 1 << int(mix(0, 8, sqrt(viewDist) / 32.0));
-                if (cellSize > GRID_SIZE / 2)
-                    cellSize = GRID_SIZE;
-                const uint gridIdx = getOrInsertGrid(gridPos, hash, cellSize);
-                addLightToGrid(gridIdx, lightIdx, lightMin, lightMax);
+                for (int z = gridMin.z; z <= gridMax.z; ++z)
+                {
+                    const ivec3 gridPos = ivec3(x, y, z);
+                    float viewDist = distance(vec3(x, y, z) * GRID_SIZE + GRID_SIZE / 2 , u_viewPos);
+                    uint cellSize = 1 << int(mix(0, 8, sqrt(viewDist) / float(GRID_SIZE)));
+                    if (cellSize > GRID_SIZE / 2)
+                        cellSize = GRID_SIZE;
+                    const uint gridIdx = getOrInsertGrid(gridPos, cellSize);
+                    if (numGrids <= 8)
+                    {
+                        addLightToGrid(gridIdx, lightIdx, lightMin, lightMax);
+                    }
+                    else
+                    {
+                        addLargeLight(gridIdx, lightIdx);
+                    }
+                }
             }
         }
     }
+
+    //atomicAdd(inout_lightCounter, uint(1));
 }

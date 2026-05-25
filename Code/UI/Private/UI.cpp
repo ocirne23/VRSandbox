@@ -93,7 +93,7 @@ void UI::update(double deltaSec)
             ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.2f, &dock_id_left, &dock_id_right);
             ImGui::DockBuilderSplitNode(dock_id_right, ImGuiDir_Up, 0.9f, &dock_id_up, &dock_id_down);
 
-            ImGui::DockBuilderDockWindow("Sidebar", dock_id_left);
+            ImGui::DockBuilderDockWindow("Stats", dock_id_left);
             ImGui::DockBuilderDockWindow("Content", dock_id_down);
             ImGui::DockBuilderDockWindow("Script", dock_id_up);
             ImGui::DockBuilderDockWindow("Viewport", dock_id_up);
@@ -127,11 +127,20 @@ void UI::update(double deltaSec)
     }
 
     {
-        ImGui::Begin("Sidebar");
-        ImGui::Text("m_isViewportGrabbed: %i", (int)m_isViewportGrabbed);
-        ImGui::Text("m_isViewportFocused: %i", (int)m_isViewportFocused);
-        ImGui::Text("m_hasViewportGainedFocus: %i", (int)m_hasViewportGainedFocus);
-        ImGui::Text("m_viewportRect: %i,%i:%i,%i", m_viewportRect.min.x, m_viewportRect.min.y, m_viewportRect.max.x, m_viewportRect.max.y);
+        ImGui::Begin("Stats");
+        ImGui::Text("numLights: %i (%.1f%%)", m_renderStats.numLights, (float)m_renderStats.numLights / m_renderStats.maxLights * 100.0f);
+        ImGui::Text("numMeshInstances: %i (%.1f%%)", m_renderStats.numMeshInstances, (float)m_renderStats.numMeshInstances / m_renderStats.maxMeshInstances * 100.0f);
+        ImGui::Text("numInstanceOffsets: %i (%.1f%%)", m_renderStats.numInstanceOffsets, (float)m_renderStats.numInstanceOffsets / m_renderStats.maxInstanceOffsets * 100.0f);
+        ImGui::Text("numMeshTypes: %i (%.1f%%)", m_renderStats.numMeshTypes, (float)m_renderStats.numMeshTypes / m_renderStats.maxMeshTypes * 100.0f);
+        ImGui::Text("numMaterials: %i (%.1f%%)", m_renderStats.numMaterials, (float)m_renderStats.numMaterials / m_renderStats.maxMaterials * 100.0f);
+        ImGui::Text("numRenderNodes: %i (%.1f%%)", m_renderStats.numRenderNodes, (float)m_renderStats.numRenderNodes / m_renderStats.maxRenderNodes * 100.0f);
+		ImGui::Text("numTextures: %i (%.1f%%)", m_renderStats.numTextures, (float)m_renderStats.numTextures / m_renderStats.maxTextures * 100.0f);
+        ImGui::Text("numObjectContainers: %i", m_renderStats.numObjectContainers);
+        ImGui::Text("numLightGrids: %i (%.1f%%)", m_renderStats.numLightGrids, (float)m_renderStats.numLightGrids / m_renderStats.maxLightGrids * 100.0f);
+        ImGui::Text("lightGridMemUsageBytes: %llu (%.1f%%)", m_renderStats.lightGridMemUsageBytes, (float)m_renderStats.lightGridMemUsageBytes / m_renderStats.maxLightGridMemUsageBytes * 100.0f);
+		ImGui::Text("vertexDataUsedBytes: %llu (%.1f%%)", m_renderStats.vertexDataUsedBytes, (float)m_renderStats.vertexDataUsedBytes / m_renderStats.maxVertexDataBytes * 100.0f);
+		ImGui::Text("indexDataUsedBytes: %llu (%.1f%%)", m_renderStats.indexDataUsedBytes, (float)m_renderStats.indexDataUsedBytes / m_renderStats.maxIndexDataBytes * 100.0f);
+        ImGui::Text("lightCounter: %i", m_renderStats.lightCounter);
         ImGui::End();
     }
 

@@ -62,16 +62,15 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Mem
     return true;
 }
 
-std::span<uint8> Buffer::mapMemory()
+std::span<uint8> Buffer::mapMemory(uint64 offset, uint64 size)
 {
-    vk::ResultValue<void*> result = Globals::device.getDevice().mapMemory(m_memory, 0, vk::WholeSize);
+    vk::ResultValue<void*> result = Globals::device.getDevice().mapMemory(m_memory, offset, size);
     if (result.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to map buffer memory");
         return {};
     }
-    return std::span<uint8>((uint8*)result.value, (size_t)m_size);
-
+    return std::span<uint8>((uint8*)result.value, (size_t)std::min(size, m_size - offset));
 }
 
 void Buffer::unmapMemory()

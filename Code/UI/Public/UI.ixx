@@ -7,6 +7,8 @@ import UI.fwd;
 import UI.imgui_node_editor;
 import UI.NodeEditor;
 
+import RendererVK;
+
 export class UI final
 {
 public:
@@ -18,6 +20,7 @@ public:
     void initialize();
     void update(double deltaSec);
     void render();
+	void setRenderStats(const Renderer::Stats& stats) { m_renderStats = stats; }
 
     bool isViewportGrabbed() const { return m_isViewportGrabbed; }
     bool isViewportFocused() const { return m_isViewportFocused; }
@@ -34,6 +37,7 @@ private:
     ed::EditorContext* m_nodeEditorContext = nullptr;
 
     NodeEditor::Scene m_scene;
+	Renderer::Stats m_renderStats;
 };
 
 export namespace Globals

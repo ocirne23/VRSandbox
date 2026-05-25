@@ -22,11 +22,11 @@ public:
     bool initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
     void destroy();
 
-    std::span<uint8> mapMemory();
+    std::span<uint8> mapMemory(uint64 offset = 0, uint64 size = vk::WholeSize);
     template<typename T>
-    std::span<T> mapMemory()
+    std::span<T> mapMemory(uint64 offsetBytes = 0, uint64 sizeBytes = vk::WholeSize)
     {
-        std::span<uint8> spanBytes = mapMemory();
+        std::span<uint8> spanBytes = mapMemory(offsetBytes, sizeBytes);
         return std::span<T>((T*)spanBytes.data(), spanBytes.size() / sizeof(T));
     }
     void unmapMemory();

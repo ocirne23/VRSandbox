@@ -48,6 +48,8 @@ layout (binding = 5, std430) readonly buffer InLightGrid
 layout (binding = 6, std430) readonly buffer InGridTable
 {
 	uint in_numGrids;
+	uint in_gridDataCounter;
+	uint in_lightCounter;
     uint in_tableSize;
     uint in_gridTable[];
 };
@@ -85,7 +87,7 @@ uint getCellSize(uint gridIdx)
 }
 uint getCellOffset(uint gridIdx, uint cellIdx)
 {
-    return gridIdx + 4 + cellIdx * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
+    return gridIdx + 8 + cellIdx * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
 }
 ivec3 getGridPos(vec3 pos)
 {
@@ -98,6 +100,27 @@ uint16_t getLightId(uint cellOffset, uint lightIdx)
         return uint16_t(packed & 0x0000FFFF);
     else
         return uint16_t(packed >> 16);
+}
+uint getLargeLightCount(uint gridIdx)
+{
+	return in_gridData[gridIdx + 4];
+}
+uint16_t getLargeLightId(uint gridIdx, uint lightIdx)
+{
+	const uint packed = in_gridData[gridIdx + 5 + lightIdx / 2];
+	if (lightIdx % 2 == 0)
+		return uint16_t(packed & 0x0000FFFF);
+	else
+		return uint16_t(packed >> 16);
+}
+
+float squareFalloff(float dist, float lightRadius) 
+{
+	//lightRadius *= 2;
+    float attenuation = 1.0 / (dist * dist + 1.0);
+    float falloff = clamp(1.0 - pow(dist / lightRadius, 4.0), 0.0, 1.0);
+    falloff *= falloff;
+    return attenuation * falloff;
 }
 float inverseSquareFalloff(float lightDistance, float lightRange)
 {
@@ -130,7 +153,7 @@ vec3 doLight(
 	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
 {
 	vec3 lightVec = light.pos - pos;
-	float falloff = inverseSquareFalloff(length(lightVec), light.range);
+	float falloff = squareFalloff(length(lightVec), light.range);
 	vec3 L = normalize(lightVec);
 	vec3 H = normalize(L + V);
 	float NdotL = max(dot(N, L), 0.0);
@@ -144,6 +167,17 @@ vec3 doLight(
 	vec3 radianceContrib = light.color * falloff * light.intensity;
 	vec3 kD = (1.0 - F) * (1.0 - metalness);
 	return (kD * matColOverPi + specularContrib) * radianceContrib * NdotL;
+}
+
+vec3 randomColor(uint seed) 
+{
+    seed ^= seed >> 16;
+    seed *= 0x7feb352du;
+    seed ^= seed >> 15;
+    seed *= 0x846ca68bu;
+    seed ^= seed >> 16;
+    vec3 bits = vec3(float(seed & 255u), float((seed >> 8) & 255u), float((seed >> 16) & 255u));
+    return bits / 255.0;
 }
 
 void main()
@@ -181,7 +215,22 @@ void main()
 			break;
 		const ivec3 gridMin = getGridMin(gridIdx);
 		if (gridMin == gridPos)
-		{			
+		{
+			//color += randomColor(gridIdx) * 0.2;
+			const uint numLargeLights = getLargeLightCount(gridIdx);
+			for (uint i = 0; i < min(numLargeLights, 6); ++i)
+			{
+				const uint16_t lightId = getLargeLightId(gridIdx, i);
+				const LightInfo light = in_lightInfos[lightId];
+				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, 
+									roughness, roughness1, roughness1sqOver8, roughnessSq);
+				//if (distance(in_pos, light.pos) < light.range)
+				//{
+				//	color += vec3(0.15, 0.0, 0.0);
+				//}
+				//color += vec3(0.15, 0.0, 0.0);
+			}
+			
 			const uint cellSize = getCellSize(gridIdx);
 			const uint numCells = GRID_SIZE / cellSize;
 			const ivec3 cellPos = (ivec3(floor(in_pos)) - gridMin * GRID_SIZE) / int(cellSize);
@@ -195,6 +244,10 @@ void main()
 				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, 
 									roughness, roughness1, roughness1sqOver8, roughnessSq);
 				//color += vec3(0.0, 0.0, 0.05);
+				//if (distance(in_pos, light.pos) < light.range)
+				//{
+				//	color += vec3(0.0, 0.0, 0.05);
+				//}
 			}
 			break;
 		}

@@ -58,37 +58,36 @@ int main()
         SceneData sceneData;
         sceneData.initialize("Models/sponza.glb", true, true);
         container.initialize(sceneData);
-        for (int x = 0; x < 1; ++x)
-            for (int y = 0; y < 1; ++y)
-                spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 50.0f, 0, y * 30.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+        for (int x = 0; x < 20; ++x)
+            for (int y = 0; y < 20; ++y)
+                spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 0, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
-
-    spawnedLights.push_back({ glm::vec3(0, 2, 0), 2.0f, glm::vec3(1.0, 1.0, 1.0), 5.0f });    
-    //spawnedLights.push_back({ glm::vec3(-8, 6, -8), 10.0f, glm::vec3(1.0, 1.0, 1.0), 2.0f});
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedNodes.push_back(container.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp())))));
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-				spawnedLights.push_back({ cameraController.getPosition(), 1.0f, glm::abs(glm::sphericalRand(1.0f)), 5.0f});
+				spawnedLights.push_back({ cameraController.getPosition(), 50.0f, glm::abs(glm::sphericalRand(1.0f)), 500.0f});
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                spawnedLights.resize(0);
+                spawnedLights.push_back({ cameraController.getPosition(), 5.0f, glm::abs(glm::sphericalRand(1.0f)), 5.0f });
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                spawnedNodes.resize(1);
+                spawnedLights.resize(0);
+            //if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            //    spawnedNodes.resize(1);
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                for (int i = 0; i < 50; ++i)
-                {
-                    spawnedLights.push_back({ glm::vec3(glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), glm::linearRand(-5.0f, 4.5f)),
-                        glm::linearRand(1.0f, 3.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(4.0f, 10.0f) });
-                }
+            {
+                for (int x = 0; x < 20; ++x)
+                    for (int y = 0; y < 20; ++y)
+                        for (int i = 0; i < 50; ++i)
+                        {
+                            spawnedLights.push_back({ glm::vec3( x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f)),
+                                glm::linearRand(1.0f, 3.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(4.0f, 10.0f) });
+                        }
+            }
+
         };
 #endif
-
-
-
-
-
 
     uint32 frameCount = 0;
     uint32 fps = 0;
@@ -108,6 +107,11 @@ int main()
             window.setTitle(windowTitleBuf);
             return Timer::REPEAT;
         });
+
+    Timer renderStatsUpdateTimer(std::chrono::seconds(1), [&](Timer& timer) {
+		ui.setRenderStats(renderer.getStats());
+        return Timer::REPEAT;
+    });
 
     while (running)
     {
