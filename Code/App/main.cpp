@@ -73,15 +73,19 @@ int main()
                 spawnedLights.push_back({ cameraController.getPosition(), 5.0f, glm::abs(glm::sphericalRand(1.0f)), 5.0f });
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedLights.resize(0);
-            //if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            //    spawnedNodes.resize(1);
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+                for (int i = 0; i < 100; ++i)
+                {
+                    int x = 0; int y = 0;
+                    spawnedLights.push_back({ glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f)),
+                        glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
+                }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
                 for (int x = 0; x < 20; ++x)
                     for (int y = 0; y < 20; ++y)
                         for (int i = 0; i < 75; ++i)
                         {
-
                             spawnedLights.push_back({ glm::vec3( x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f)),
                                 glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
                         }

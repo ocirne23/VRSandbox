@@ -548,19 +548,18 @@ Renderer::Stats Renderer::getStats()
     stats.numObjectContainers = (uint32)m_objectContainers.size();
 
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
-    PerFrameData& lastFrameData = m_perFrameData[(frameIdx - 1) % m_perFrameData.size()];
 
+    PerFrameData& lastFrameData = m_perFrameData[(frameIdx - 1) % m_perFrameData.size()];
     struct LightGridInfo
     {
         uint32 inout_numGrids;
         uint32 inout_gridDataCounter;
     } info;
     std::span<LightGridInfo> infoSpan = lastFrameData.lightTableBuffer.mapMemory<LightGridInfo>(0, sizeof(LightGridInfo));
-    lastFrameData.lightTableBuffer.flushMappedMemory(sizeof(LightGridInfo));
+    //lastFrameData.lightTableBuffer.flushMappedMemory(sizeof(LightGridInfo));
     info = *infoSpan.data();
     lastFrameData.lightTableBuffer.unmapMemory();
-
-	stats.numLightGrids = info.inout_numGrids;
+    stats.numLightGrids = info.inout_numGrids;
     stats.maxLightGrids = RendererVKLayout::LIGHT_TABLE_NUM_ENTRIES / 2; // We don't want to go over 50% because of hash table collisions
     stats.lightGridMemUsageBytes = info.inout_gridDataCounter * sizeof(uint32);
     stats.maxLightGridMemUsageBytes = RendererVKLayout::LIGHT_GRID_BUFFER_SIZE;
