@@ -49,7 +49,6 @@ layout (binding = 6, std430) readonly buffer InGridTable
 {
 	uint in_numGrids;
 	uint in_gridDataCounter;
-	uint in_lightCounter;
     uint in_tableSize;
     uint in_gridTable[];
 };
@@ -116,7 +115,6 @@ uint16_t getLargeLightId(uint gridIdx, uint lightIdx)
 
 float squareFalloff(float dist, float lightRadius) 
 {
-	//lightRadius *= 2;
     float attenuation = 1.0 / (dist * dist + 1.0);
     float falloff = clamp(1.0 - pow(dist / lightRadius, 4.0), 0.0, 1.0);
     falloff *= falloff;
@@ -148,13 +146,9 @@ vec3 FresnelSchlickRoughness(float HdotV, vec3 F0, float roughness)
 	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - HdotV, 5.0);
 }
 
-vec3 doLight(
-	LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, 
+vec3 doLight(vec3 pos, vec3 lightRadiance, vec3 L, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, 
 	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
 {
-	vec3 lightVec = light.pos - pos;
-	float falloff = squareFalloff(length(lightVec), light.range);
-	vec3 L = normalize(lightVec);
 	vec3 H = normalize(L + V);
 	float NdotL = max(dot(N, L), 0.0);
 	float NdotV = max(dot(N, V), 0.0);
@@ -164,9 +158,28 @@ vec3 doLight(
 	float G = GeometrySmith(NdotL, NdotV, roughness1sqOver8);
 	vec3 F = FresnelSchlickRoughness(HdotV, specularCol, roughness);
 	vec3 specularContrib = NDF * G * F / max(4.0 * NdotV * NdotL, 0.0001);
-	vec3 radianceContrib = light.color * falloff * light.intensity;
 	vec3 kD = (1.0 - F) * (1.0 - metalness);
-	return (kD * matColOverPi + specularContrib) * radianceContrib * NdotL;
+	return (kD * matColOverPi + specularContrib) * lightRadiance * NdotL;
+}
+
+vec3 doPointLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, 
+	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
+{
+	vec3 lightVec = light.pos - pos;
+	float falloff = squareFalloff(length(lightVec), light.range);
+	vec3 lightRadiance = light.color * falloff * light.intensity;
+	vec3 L = normalize(lightVec);
+	return doLight(pos, lightRadiance, L, V, N, specularCol, matColOverPi, 
+		metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
+}
+
+vec3 doSunLight(vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, 
+	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
+{
+	vec3 L = normalize(vec3(0.5, 1.0, 0.5));
+	vec3 lightRadiance = vec3(1.0, 1.0, 1.0) * 2.5f;
+	return doLight(pos, lightRadiance, L, V, N, specularCol, matColOverPi, 
+		metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 }
 
 vec3 randomColor(uint seed) 
@@ -202,8 +215,10 @@ void main()
 	const float roughnessSq = roughness * roughness;
 	const vec3 matColOverPi = materialColor / PI;
 	
-	const float ambient = 0.10f;
+	const float ambient = 0.05f;
 	vec3 color = materialColor * ambient;
+
+	//color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 
 	const ivec3 gridPos = getGridPos(in_pos);
     uint tableIdx = getHashTableIdx(gridPos, in_tableSize);
@@ -222,8 +237,7 @@ void main()
 			{
 				const uint16_t lightId = getLargeLightId(gridIdx, i);
 				const LightInfo light = in_lightInfos[lightId];
-				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, 
-									roughness, roughness1, roughness1sqOver8, roughnessSq);
+				color += doPointLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 				//if (distance(in_pos, light.pos) < light.range)
 				//{
 				//	color += vec3(0.15, 0.0, 0.0);
@@ -241,7 +255,7 @@ void main()
 			{
 				const uint16_t lightId = getLightId(cellOffset, i);
 				const LightInfo light = in_lightInfos[lightId];
-				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, 
+				color += doPointLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, 
 									roughness, roughness1, roughness1sqOver8, roughnessSq);
 				//color += vec3(0.0, 0.0, 0.05);
 				//if (distance(in_pos, light.pos) < light.range)

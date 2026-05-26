@@ -20,7 +20,7 @@ export namespace RendererVKLayout
     static_assert(MAX_UNIQUE_MESHES < USHRT_MAX);
     static_assert(MAX_UNIQUE_MATERIALS < USHRT_MAX);
 
-    constexpr size_t MAX_LIGHTS = USHRT_MAX;
+    constexpr size_t MAX_LIGHTS = USHRT_MAX - 1;
     constexpr size_t LIGHT_GRID_BUFFER_SIZE = 10 * 1024 * 1024;
     constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 4096;
 

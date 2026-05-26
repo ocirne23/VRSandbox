@@ -98,8 +98,6 @@ public:
 
 		uint64 lightGridMemUsageBytes;
 		uint64 maxLightGridMemUsageBytes;
-
-        uint32 lightCounter;
     };
     Stats getStats();
 

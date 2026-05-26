@@ -34,7 +34,6 @@ layout (binding = 3, std430) coherent buffer InOutTable
 {
     uint inout_numGrids;
     uint inout_gridDataCounter;
-    uint inout_lightCounter;
     uint inout_tableSize;
     uint inout_table[];
 };
@@ -197,9 +196,6 @@ void main()
         const ivec3 gridMax = getGridPos(lightMax);
 
         const uint numGrids = (gridMax.x - gridMin.x + 1) * (gridMax.y - gridMin.y + 1) * (gridMax.z - gridMin.z + 1);
-        if (numGrids > 8)
-            atomicExchange(inout_lightCounter, uint(1));
-
         for (int x = gridMin.x; x <= gridMax.x; ++x)
         {
             for (int y = gridMin.y; y <= gridMax.y; ++y)
@@ -224,6 +220,4 @@ void main()
             }
         }
     }
-
-    //atomicAdd(inout_lightCounter, uint(1));
 }

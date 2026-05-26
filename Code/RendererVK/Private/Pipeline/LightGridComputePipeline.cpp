@@ -106,9 +106,9 @@ void LightGridComputePipeline::record(CommandBuffer& commandBuffer, uint32 frame
         vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
         commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, descriptorSet, computeDescriptorSetUpdateInfos);
         vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
-        vkCommandBuffer.fillBuffer(recordParams.outLightTableBuffer.getBuffer(), 0, 12, 0);
-        vkCommandBuffer.fillBuffer(recordParams.outLightTableBuffer.getBuffer(), 12, 4, RendererVKLayout::LIGHT_TABLE_NUM_ENTRIES);
-        vkCommandBuffer.fillBuffer(recordParams.outLightTableBuffer.getBuffer(), 16, vk::WholeSize, 0xFFFFFFFF);
+        vkCommandBuffer.fillBuffer(recordParams.outLightTableBuffer.getBuffer(), 0, 8, 0);
+        vkCommandBuffer.fillBuffer(recordParams.outLightTableBuffer.getBuffer(), 8, 4, RendererVKLayout::LIGHT_TABLE_NUM_ENTRIES);
+        vkCommandBuffer.fillBuffer(recordParams.outLightTableBuffer.getBuffer(), 12, vk::WholeSize, 0xFFFFFFFF);
         vkCommandBuffer.fillBuffer(recordParams.outLightGridBuffer.getBuffer(), 0, vk::WholeSize, 0);
 
         {
