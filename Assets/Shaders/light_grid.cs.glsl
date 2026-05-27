@@ -6,7 +6,8 @@
 
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 const uint INITIALIZING_ENTRY = 0xEFFFFFFFu;
-#define MAX_LIGHTCELL_LIGHTS 12
+#define MAX_LARGE_LIGHTS_PER_GRID 6 // Must be even
+#define MAX_LIGHTCELL_LIGHTS 12     // Must be even
 #define GRID_SIZE 32
 
 struct LightInfo
@@ -44,7 +45,7 @@ struct GRID DATA MEMORY LAYOUT
     ivec3 gridMin;
     uint gridSize;
     uint numLargeLights;
-    uint16_t largeLightIds[6];
+    uint16_t largeLightIds[MAX_LARGE_LIGHTS_PER_GRID];
     struct 
     {
         uint numLights;
@@ -101,7 +102,7 @@ void addLargeLight(uint gridIdx, uint lightId)
 {
     const uint numLargeLightsOffset = gridIdx + 4;
     const uint largeLightIdx = atomicAdd(in_gridData[numLargeLightsOffset], uint(1));
-    if (largeLightIdx < 6)
+    if (largeLightIdx < MAX_LARGE_LIGHTS_PER_GRID)
     {
         atomicOr(in_gridData[numLargeLightsOffset + 1 + largeLightIdx / 2], uint(lightId) << ((largeLightIdx % 2 == 0) ? 0 : 16));
     }
@@ -109,7 +110,7 @@ void addLargeLight(uint gridIdx, uint lightId)
 uint getGridMemoryUsage(uint cellSize)
 {
     const uint numCells = GRID_SIZE / cellSize;
-    return 8 + numCells * numCells * numCells * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
+    return 4 + (MAX_LARGE_LIGHTS_PER_GRID / 2 + 1) + numCells * numCells * numCells * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
 }
 
 uint getPositionHash(ivec3 p) 

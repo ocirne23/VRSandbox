@@ -7,8 +7,9 @@
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_debug_printf : enable
 
-#define GRID_SIZE 32
+#define MAX_LARGE_LIGHTS_PER_GRID 6
 #define MAX_LIGHTCELL_LIGHTS 12
+#define GRID_SIZE 32
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 
 struct MaterialInfo
@@ -64,6 +65,22 @@ layout (location = 0) out vec3 out_color;
 
 const float PI = 3.14159265359;
 
+vec3 randomColor(uint seed) 
+{
+    seed ^= seed >> 16;
+    seed *= 0x7feb352du;
+    seed ^= seed >> 15;
+    seed *= 0x846ca68bu;
+    seed ^= seed >> 16;
+    vec3 bits = vec3(float(seed & 255u), float((seed >> 8) & 255u), float((seed >> 16) & 255u));
+    return bits / 255.0;
+}
+vec3 randomColor(ivec3 seed) 
+{
+    uvec3 u = uvec3(seed);
+    uint hash = u.x * 1597334673u + u.y * 3812015801u + u.z * 2798796415u;
+	return randomColor(hash);
+}
 uint getHashTableIdx(ivec3 p, uint tableSize) {
     uvec3 q = uvec3(p);
     q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
@@ -75,7 +92,6 @@ uint getHashTableIdx(ivec3 p, uint tableSize) {
     n = n ^ (n >> 15u);
     return uint(n % tableSize);
 }
-
 ivec3 getGridMin(uint gridIdx) 
 { 
     return ivec3(in_gridData[gridIdx + 0], in_gridData[gridIdx + 1], in_gridData[gridIdx + 2]); 
@@ -92,27 +108,26 @@ ivec3 getGridPos(vec3 pos)
 {
     return ivec3(floor(pos / GRID_SIZE));
 }
-uint16_t getLightId(uint cellOffset, uint lightIdx)
+uint getLightId(uint cellOffset, uint lightIdx) // return as uint instead of uint16 to avoid driver bug (treating uint16_t as signed)
 {
     const uint packed = in_gridData[cellOffset + 1 + lightIdx / 2];
     if (lightIdx % 2 == 0)
-        return uint16_t(packed & 0x0000FFFF);
+        return uint(packed & 0x0000FFFF);
     else
-        return uint16_t(packed >> 16);
+        return uint(packed >> 16);
 }
 uint getLargeLightCount(uint gridIdx)
 {
 	return in_gridData[gridIdx + 4];
 }
-uint16_t getLargeLightId(uint gridIdx, uint lightIdx)
+uint getLargeLightId(uint gridIdx, uint lightIdx)
 {
 	const uint packed = in_gridData[gridIdx + 5 + lightIdx / 2];
 	if (lightIdx % 2 == 0)
-		return uint16_t(packed & 0x0000FFFF);
+		return uint(packed & 0x0000FFFF);
 	else
-		return uint16_t(packed >> 16);
+		return uint(packed >> 16);
 }
-
 float squareFalloff(float dist, float lightRadius) 
 {
     float attenuation = 1.0 / (dist * dist + 1.0);
@@ -120,11 +135,6 @@ float squareFalloff(float dist, float lightRadius)
     falloff *= falloff;
     return attenuation * falloff;
 }
-float inverseSquareFalloff(float lightDistance, float lightRange)
-{
-	return pow(max(1.0 - pow((lightDistance / lightRange), 4), 0), 2) / (pow(lightDistance, 2) + 1);
-}
-
 // a2: pow(roughness, 2)
 float DistributionGGX(const vec3 N, const vec3 H, const float a2)
 {
@@ -132,7 +142,6 @@ float DistributionGGX(const vec3 N, const vec3 H, const float a2)
 	float denom = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
 	return a2 / (PI * denom * denom);
 }
-
 // k: (roughness + 1)^2 / 8.0
 float GeometrySmith(const float NdotL, const float NdotV, const float k)
 {
@@ -140,7 +149,6 @@ float GeometrySmith(const float NdotL, const float NdotV, const float k)
 	float ggx2 = NdotL / (NdotL * (1.0 - k) + k);
 	return ggx1 * ggx2;
 }
-
 vec3 FresnelSchlickRoughness(float HdotV, vec3 F0, float roughness)
 {
 	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - HdotV, 5.0);
@@ -182,17 +190,6 @@ vec3 doSunLight(vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
 		metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 }
 
-vec3 randomColor(uint seed) 
-{
-    seed ^= seed >> 16;
-    seed *= 0x7feb352du;
-    seed ^= seed >> 15;
-    seed *= 0x846ca68bu;
-    seed ^= seed >> 16;
-    vec3 bits = vec3(float(seed & 255u), float((seed >> 8) & 255u), float((seed >> 16) & 255u));
-    return bits / 255.0;
-}
-
 void main()
 {
 	const uint16_t materialIdx = uint16_t((in_meshIdxMaterialIdx & 0xFFFF0000) >> 16);
@@ -231,18 +228,12 @@ void main()
 		const ivec3 gridMin = getGridMin(gridIdx);
 		if (gridMin == gridPos)
 		{
-			//color += randomColor(gridIdx) * 0.2;
 			const uint numLargeLights = getLargeLightCount(gridIdx);
-			for (uint i = 0; i < min(numLargeLights, 6); ++i)
+			for (uint i = 0; i < min(numLargeLights, MAX_LARGE_LIGHTS_PER_GRID); ++i)
 			{
-				const uint16_t lightId = getLargeLightId(gridIdx, i);
+				const uint lightId = getLargeLightId(gridIdx, i);
 				const LightInfo light = in_lightInfos[lightId];
 				color += doPointLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
-				//if (distance(in_pos, light.pos) < light.range)
-				//{
-				//	color += vec3(0.15, 0.0, 0.0);
-				//}
-				//color += vec3(0.15, 0.0, 0.0);
 			}
 			
 			const uint cellSize = getCellSize(gridIdx);
@@ -253,15 +244,10 @@ void main()
 			const uint numLights = in_gridData[cellOffset];
 			for (uint i = 0; i < min(numLights, MAX_LIGHTCELL_LIGHTS); ++i)
 			{
-				const uint16_t lightId = getLightId(cellOffset, i);
+				const uint lightId = getLightId(cellOffset, i);
 				const LightInfo light = in_lightInfos[lightId];
 				color += doPointLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, 
 									roughness, roughness1, roughness1sqOver8, roughnessSq);
-				//color += vec3(0.0, 0.0, 0.05);
-				//if (distance(in_pos, light.pos) < light.range)
-				//{
-				//	color += vec3(0.0, 0.0, 0.05);
-				//}
 			}
 			break;
 		}
@@ -271,4 +257,12 @@ void main()
 	out_color = color;
 }
 
-//	if (cellPos.x >= 0.0 && cellPos.y >= 0.0 && cellPos.z >= 0.0 && cellPos.x < numCells && cellPos.y < numCells && cellPos.z < numCells)
+// Visualize grids
+// color += randomColor(gridMin) * 0.2;
+
+// Visualize light
+// color += vec3(0.0, 0.0, 0.05);
+// if (distance(in_pos, light.pos) < light.range)
+// {
+// 	color += vec3(0.0, 0.0, 0.05);
+// }
