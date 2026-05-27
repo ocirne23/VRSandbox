@@ -81,7 +81,6 @@ int main()
                     for (int y = 0; y < 20; ++y)
                         for (int i = 0; i < 75; ++i)
                         {
-
                             spawnedLights.push_back({ glm::vec3( x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f)),
                                 glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
                         }

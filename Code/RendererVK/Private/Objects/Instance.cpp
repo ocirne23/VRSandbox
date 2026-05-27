@@ -286,8 +286,11 @@ void Instance::destroy()
 {
     if (m_instance)
     {
-        auto destroyMessengerFunc = (PFN_vkDestroyDebugUtilsMessengerEXT)m_instance.getProcAddr("vkDestroyDebugUtilsMessengerEXT");
-        destroyMessengerFunc(m_instance, m_debugMessenger, nullptr);
+        if (m_debugMessenger)
+        {
+            auto destroyMessengerFunc = (PFN_vkDestroyDebugUtilsMessengerEXT)m_instance.getProcAddr("vkDestroyDebugUtilsMessengerEXT");
+            destroyMessengerFunc(m_instance, m_debugMessenger, nullptr);
+        }
         m_instance.destroy();
     }
     m_instance = nullptr;

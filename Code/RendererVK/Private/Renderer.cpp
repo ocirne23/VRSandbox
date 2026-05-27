@@ -496,22 +496,19 @@ void Renderer::initImgui(Window& window)
     init_info.QueueFamily = Globals::device.getGraphicsQueueIndex();
     init_info.Queue = Globals::device.getGraphicsQueue();
     init_info.PipelineCache = nullptr;
-    init_info.RenderPass = m_renderPass.getRenderPass();
     init_info.DescriptorPool = nullptr;
     init_info.DescriptorPoolSize = 10;
-    init_info.Subpass = 0;
     init_info.MinImageCount = 2;
     init_info.ImageCount = 2;
-    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     init_info.Allocator = nullptr;
     init_info.CheckVkResultFn = imgui_check_vk_result;
     ImGui_ImplVulkan_Init(&init_info);
 
-    ImGui_ImplVulkan_MainPipelineCreateInfo pipeline_create;
+    ImGui_ImplVulkan_PipelineInfo pipeline_create;
     pipeline_create.RenderPass = m_renderPass.getRenderPass();
     pipeline_create.Subpass = 0;
     pipeline_create.MSAASamples = {};
-    ImGui_ImplVulkan_CreateMainPipeline(pipeline_create);
+    ImGui_ImplVulkan_CreateMainPipeline(&pipeline_create);
 }
 
 Renderer::Stats Renderer::getStats()
