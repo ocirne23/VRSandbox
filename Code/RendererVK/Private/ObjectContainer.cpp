@@ -123,6 +123,9 @@ void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& mater
         material.specularColor = materialData.getSpecularColor();
         material.metalness     = materialData.getMetalnessFactor();
         material.emissiveColor = materialData.getEmissiveColor() * materialData.getEmissiveIntensity();
+        //material.shaderVariant = materialInfos.size() % 2 == 0 ? 0 : 1;
+        material.shaderVariant = 0;
+
         const uint32 diffuseTexIdx = materialData.getDiffuseTexIdx();
         if (diffuseTexIdx == UINT32_MAX || diffuseTexIdx >= UINT16_MAX)
             material.diffuseTexIdx = 0; // todo fallback texture

@@ -6,6 +6,7 @@ import File.FileSystem;
 
 import :Buffer;
 import :CommandBuffer;
+import :Device;
 import :Layout;
 import :StagingManager;
 import :IndirectCullComputePipeline;
@@ -23,6 +24,20 @@ void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
 
     graphicsPipelineLayout.vertexShaderText = FileSystem::readFileStr(graphicsPipelineLayout.vertexShaderDebugFilePath);
     graphicsPipelineLayout.fragmentShaderText = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShaderDebugFilePath);
+
+    // When device-generated commands are available, build additional fragment-shader variants that
+    // share this pipeline layout. These become the per-draw selectable pipelines of the Indirect
+    // Execution Set; the compute cull pass will pick a variant per draw in a later phase.
+    const bool dgcSupported = Globals::device.supportsDeviceGeneratedCommands();
+    if (dgcSupported)
+    {
+        graphicsPipelineLayout.indirectBindable = true;
+        const std::string unlitVariantPath = "Shaders/instanced_indirect_unlit.fs.glsl";
+        graphicsPipelineLayout.fragmentShaderVariants.push_back(ShaderVariant{
+            .text = FileSystem::readFileStr(unlitVariantPath),
+            .debugFilePath = unlitVariantPath,
+        });
+    }
 
     auto& bindingDescriptions = graphicsPipelineLayout.vertexLayoutInfo.bindingDescriptions;
     bindingDescriptions.push_back(vk::VertexInputBindingDescription{
@@ -119,6 +134,33 @@ void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
     m_graphicsPipeline.initialize(renderPass, graphicsPipelineLayout);
+
+    m_useDeviceGeneratedCommands = dgcSupported;
+    if (m_useDeviceGeneratedCommands)
+    {
+        m_indirectExecutionSet.initialize(m_graphicsPipeline);
+        m_indirectCommandsLayout.initialize(m_graphicsPipeline.getPipelineLayout(),
+            vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
+
+        // Size the preprocess scratch buffer for the worst case (one sequence per unique mesh).
+        vk::GeneratedCommandsMemoryRequirementsInfoEXT memReqInfo{
+            .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
+            .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
+            .maxSequenceCount = RendererVKLayout::MAX_UNIQUE_MESHES,
+            .maxDrawCount = RendererVKLayout::MAX_UNIQUE_MESHES,
+        };
+        vk::MemoryRequirements2 memReq;
+        Globals::device.getDevice().getGeneratedCommandsMemoryRequirementsEXT(&memReqInfo, &memReq);
+        m_preprocessSize = memReq.memoryRequirements.size;
+        if (m_preprocessSize > 0)
+        {
+            for (Buffer& preprocessBuffer : m_preprocessBuffers)
+                preprocessBuffer.initialize(m_preprocessSize,
+                    {}, // all usage bits supplied via usage2 below
+                    vk::MemoryPropertyFlagBits::eDeviceLocal,
+                    vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress);
+        }
+    }
 }
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
@@ -212,7 +254,34 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
     vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, {0});
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
-    vkCommandBuffer.drawIndexedIndirect(params.indirectCommandBuffer.getBuffer(), 0, numMeshes, sizeof(vk::DrawIndexedIndirectCommand));
+    // The cull pass writes a buffer of RendererVKLayout::IndirectDrawSequence (pipelineIndex + draw
+    // command), one per unique mesh.
+    if (m_useDeviceGeneratedCommands)
+    {
+        // Each sequence's EXECUTION_SET token selects a fragment-shader pipeline variant from the
+        // execution set; the bound pipeline above is the set's initial pipeline (state template).
+        vk::GeneratedCommandsInfoEXT generatedCommandsInfo{
+            .shaderStages = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+            .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
+            .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
+            .indirectAddress = params.indirectCommandBuffer.getDeviceAddress(),
+            .indirectAddressSize = numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence),
+            .preprocessAddress = m_preprocessSize > 0 ? m_preprocessBuffers[frameIdx].getDeviceAddress() : 0,
+            .preprocessSize = m_preprocessSize,
+            .maxSequenceCount = numMeshes,
+            .sequenceCountAddress = 0, // exactly maxSequenceCount sequences; empty meshes are no-op draws
+            .maxDrawCount = numMeshes,
+        };
+        vkCommandBuffer.executeGeneratedCommandsEXT(vk::False, generatedCommandsInfo);
+    }
+    else
+    {
+        // Fallback: draw the embedded VkDrawIndexedIndirectCommand directly, skipping the leading
+        // pipelineIndex (offset 4), stride = the sequence size.
+        vkCommandBuffer.drawIndexedIndirect(params.indirectCommandBuffer.getBuffer(),
+            offsetof(RendererVKLayout::IndirectDrawSequence, indexCount), numMeshes,
+            sizeof(RendererVKLayout::IndirectDrawSequence));
+    }
 }
 
 void StaticMeshGraphicsPipeline::update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers)

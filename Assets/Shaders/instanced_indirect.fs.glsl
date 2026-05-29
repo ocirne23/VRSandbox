@@ -20,6 +20,7 @@ struct MaterialInfo
     float metalness;
     vec3 emissiveColor;
     uint diffuseNormalTexIdx;
+    uint shaderVariant;
 };
 struct LightInfo
 {

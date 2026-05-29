@@ -315,7 +315,8 @@ void Renderer::recordCommandBuffers()
                 .inMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
                 .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
                 .inMeshInfoBuffer = m_meshInfosBuffer,
-                .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer
+                .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
+                .inMaterialInfosBuffer = m_materialInfosBuffer
             };
             m_indirectCullComputePipeline.record(indirectCullCommandBuffer, frameIdx, m_meshInfoCounter, cullParams);
             indirectCullCommandBuffer.end();

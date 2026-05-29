@@ -40,6 +40,19 @@ bool Device::initialize()
         return false;
     }
 
+    // VK_EXT_device_generated_commands is optional: enable it (and its maintenance5 dependency)
+    // only when supported, so the renderer still runs on hardware/drivers that lack it.
+    m_deviceGeneratedCommandsSupported = supportsExtensions({ VK_KHR_MAINTENANCE_5_EXTENSION_NAME, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME });
+    if (m_deviceGeneratedCommandsSupported)
+    {
+        deviceExtensions.push_back(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
+        deviceExtensions.push_back(VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME);
+    }
+    else
+    {
+        printf("VK_EXT_device_generated_commands not supported, falling back to indirect draws\n");
+    }
+
     m_graphicsQueueIndex = UINT32_MAX;
     std::vector<vk::QueueFamilyProperties> queueFamilyProperties = m_physicalDevice.getQueueFamilyProperties();
     for (uint32 i = 0; i < queueFamilyProperties.size(); i++)
@@ -93,9 +106,20 @@ bool Device::initialize()
         .shaderSampledImageArrayNonUniformIndexing = vk::True,
         .descriptorBindingVariableDescriptorCount = vk::True,
         .runtimeDescriptorArray = vk::True,
+        .bufferDeviceAddress = vk::True, // required by VK_EXT_device_generated_commands (indirect/preprocess buffers are referenced by device address)
     };
+    // Chain head; extended below with the DGC feature structs when the extension is available.
+    void* featureChainHead = &vk12Features;
+    vk::PhysicalDeviceMaintenance5Features maintenance5Features{ .maintenance5 = vk::True };
+    vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT dgcFeatures{ .deviceGeneratedCommands = vk::True };
+    if (m_deviceGeneratedCommandsSupported)
+    {
+        maintenance5Features.pNext = featureChainHead;
+        dgcFeatures.pNext = &maintenance5Features;
+        featureChainHead = &dgcFeatures;
+    }
     vk::DeviceCreateInfo deviceCreateInfo{
-        .pNext = &vk12Features,
+        .pNext = featureChainHead,
         .queueCreateInfoCount = (uint32)deviceQueueCreateInfos.size(),
         .pQueueCreateInfos = deviceQueueCreateInfos.data(),
         .enabledLayerCount = (uint32)enabledLayers.size(),
@@ -153,6 +177,21 @@ bool Device::initialize()
     m_descriptorPool = descriptorPoolResult.value;
 
     pfVkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)m_device.getProcAddr("vkCmdPushDescriptorSetKHR");
+
+    if (m_deviceGeneratedCommandsSupported)
+    {
+        vk::PhysicalDeviceProperties2 deviceProperties2{ .pNext = &m_deviceGeneratedCommandsProperties };
+        m_physicalDevice.getProperties2(&deviceProperties2);
+
+        pfVkGetGeneratedCommandsMemoryRequirementsEXT = (PFN_vkGetGeneratedCommandsMemoryRequirementsEXT)m_device.getProcAddr("vkGetGeneratedCommandsMemoryRequirementsEXT");
+        pfVkCmdPreprocessGeneratedCommandsEXT = (PFN_vkCmdPreprocessGeneratedCommandsEXT)m_device.getProcAddr("vkCmdPreprocessGeneratedCommandsEXT");
+        pfVkCmdExecuteGeneratedCommandsEXT = (PFN_vkCmdExecuteGeneratedCommandsEXT)m_device.getProcAddr("vkCmdExecuteGeneratedCommandsEXT");
+        pfVkCreateIndirectCommandsLayoutEXT = (PFN_vkCreateIndirectCommandsLayoutEXT)m_device.getProcAddr("vkCreateIndirectCommandsLayoutEXT");
+        pfVkDestroyIndirectCommandsLayoutEXT = (PFN_vkDestroyIndirectCommandsLayoutEXT)m_device.getProcAddr("vkDestroyIndirectCommandsLayoutEXT");
+        pfVkCreateIndirectExecutionSetEXT = (PFN_vkCreateIndirectExecutionSetEXT)m_device.getProcAddr("vkCreateIndirectExecutionSetEXT");
+        pfVkDestroyIndirectExecutionSetEXT = (PFN_vkDestroyIndirectExecutionSetEXT)m_device.getProcAddr("vkDestroyIndirectExecutionSetEXT");
+        pfVkUpdateIndirectExecutionSetPipelineEXT = (PFN_vkUpdateIndirectExecutionSetPipelineEXT)m_device.getProcAddr("vkUpdateIndirectExecutionSetPipelineEXT");
+    }
 
     m_graphicsQueue = m_device.getQueue(m_graphicsQueueIndex, 0);
     if (!m_graphicsQueue)

@@ -10,8 +10,8 @@ GraphicsPipeline::GraphicsPipeline() {}
 GraphicsPipeline::~GraphicsPipeline()
 {
     vk::Device vkDevice = Globals::device.getDevice();
-    if (m_pipeline)
-        vkDevice.destroyPipeline(m_pipeline);
+    for (vk::Pipeline pipeline : m_pipelines)
+        vkDevice.destroyPipeline(pipeline);
     if (m_pipelineCache)
         vkDevice.destroyPipelineCache(m_pipelineCache);
     if (m_pipelineLayout)
@@ -52,9 +52,22 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     }
     m_pipelineLayout = createPipelineLayoutResult.value;
 
-    Shader vertexShader, fragmentShader;
+    // Variant 0 is fragmentShaderText; any fragmentShaderVariants follow. All variants share this
+    // pipeline layout and differ only in the fragment stage, so a device-generated-commands
+    // Indirect Execution Set can select between them per draw.
+    std::vector<const ShaderVariant*> fragmentVariants;
+    ShaderVariant defaultVariant{ .text = layout.fragmentShaderText, .debugFilePath = layout.fragmentShaderDebugFilePath };
+    fragmentVariants.push_back(&defaultVariant);
+    for (const ShaderVariant& variant : layout.fragmentShaderVariants)
+        fragmentVariants.push_back(&variant);
+
+    Shader vertexShader;
     vertexShader.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShaderText, layout.vertexShaderDebugFilePath);
-    fragmentShader.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShaderText, layout.fragmentShaderDebugFilePath);
+
+    std::vector<Shader> fragmentShaders(fragmentVariants.size());
+    for (size_t i = 0; i < fragmentVariants.size(); i++)
+        fragmentShaders[i].initialize(vk::ShaderStageFlagBits::eFragment, fragmentVariants[i]->text, fragmentVariants[i]->debugFilePath);
+
     std::array<vk::PipelineShaderStageCreateInfo, 2> pipelineShaderStageCreateInfos =
     {
         vk::PipelineShaderStageCreateInfo
@@ -68,7 +81,7 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         {
             .flags = {},
             .stage = vk::ShaderStageFlagBits::eFragment,
-            .module = fragmentShader.getModule(),
+            .module = nullptr, // set per-variant below
             .pName = "main",
         },
     };
@@ -170,8 +183,12 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         .dynamicStateCount = static_cast<uint32>(dynamicStates.size()),
         .pDynamicStates = dynamicStates.data(),
     };
+    // When the pipelines must be bindable from device-generated commands, the bindable flag is
+    // supplied through PipelineCreateFlags2CreateInfo (maintenance5), which overrides .flags.
+    vk::PipelineCreateFlags2CreateInfo pipelineFlags2{ .flags = vk::PipelineCreateFlagBits2::eIndirectBindableEXT };
     vk::GraphicsPipelineCreateInfo graphicsPipelineCreateInfo
     {
+        .pNext = layout.indirectBindable ? &pipelineFlags2 : nullptr,
         .flags = {},
         .stageCount = static_cast<uint32>(pipelineShaderStageCreateInfos.size()),
         .pStages = pipelineShaderStageCreateInfos.data(),
@@ -199,17 +216,23 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     }
     m_pipelineCache = createPipelineCacheResult.value;
 
-    vk::Result   result;
-    vk::Pipeline pipeline;
-    std::tie(result, pipeline) = vkDevice.createGraphicsPipeline(m_pipelineCache, graphicsPipelineCreateInfo);
-    switch (result)
+    m_pipelines.reserve(fragmentShaders.size());
+    for (const Shader& fragmentShader : fragmentShaders)
     {
-    case vk::Result::eSuccess:
-        break;
-    default:
-        assert(false && "Failed to create graphics pipeline");
-        return false;
+        pipelineShaderStageCreateInfos[1].module = fragmentShader.getModule();
+
+        vk::Result   result;
+        vk::Pipeline pipeline;
+        std::tie(result, pipeline) = vkDevice.createGraphicsPipeline(m_pipelineCache, graphicsPipelineCreateInfo);
+        switch (result)
+        {
+        case vk::Result::eSuccess:
+            break;
+        default:
+            assert(false && "Failed to create graphics pipeline");
+            return false;
+        }
+        m_pipelines.push_back(pipeline);
     }
-    m_pipeline = pipeline;
     return true;
 }

@@ -23,16 +23,25 @@ void Buffer::destroy()
     }
 }
 
-bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties)
+bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::BufferUsageFlags2 usage2)
 {
     if (m_buffer)
         destroy();
 
     m_size = size;
     vk::Device vkDevice = Globals::device.getDevice();
+    vk::BufferUsageFlags2CreateInfo usage2Info{ .usage = usage2 };
     vk::BufferCreateInfo bufferInfo = {};
     bufferInfo.size = size;
-    bufferInfo.usage = usage;
+    if (usage2)
+    {
+        // When flags2 are used the legacy usage field must be 0; the caller passes all bits in usage2.
+        bufferInfo.pNext = &usage2Info;
+    }
+    else
+    {
+        bufferInfo.usage = usage;
+    }
     bufferInfo.sharingMode = vk::SharingMode::eExclusive;
     vk::ResultValue<vk::Buffer> bufResult = vkDevice.createBuffer(bufferInfo);
     if (bufResult.result != vk::Result::eSuccess)
@@ -42,8 +51,14 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Mem
     }
     m_buffer = bufResult.value;
 
+    const bool needsDeviceAddress = (bool)(usage & vk::BufferUsageFlagBits::eShaderDeviceAddress)
+        || (bool)(usage2 & vk::BufferUsageFlagBits2::eShaderDeviceAddress);
+
     vk::MemoryRequirements memRequirements = vkDevice.getBufferMemoryRequirements(m_buffer);
+    vk::MemoryAllocateFlagsInfo allocFlagsInfo{ .flags = vk::MemoryAllocateFlagBits::eDeviceAddress };
     vk::MemoryAllocateInfo allocInfo = {};
+    if (needsDeviceAddress)
+        allocInfo.pNext = &allocFlagsInfo;
     allocInfo.allocationSize = memRequirements.size;
     allocInfo.memoryTypeIndex = Globals::device.findMemoryType(memRequirements.memoryTypeBits, properties);
     vk::ResultValue<vk::DeviceMemory> memResult = vkDevice.allocateMemory(allocInfo);
@@ -60,6 +75,11 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Mem
         return false;
     }
     return true;
+}
+
+vk::DeviceAddress Buffer::getDeviceAddress() const
+{
+    return Globals::device.getDevice().getBufferAddress(vk::BufferDeviceAddressInfo{ .buffer = m_buffer });
 }
 
 std::span<uint8> Buffer::mapMemory(uint64 offset, uint64 size)

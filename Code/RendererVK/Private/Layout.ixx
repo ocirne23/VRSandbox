@@ -68,6 +68,21 @@ export namespace RendererVKLayout
         uint32 meshIdxMaterialIdx;
     };
 
+    // One sequence in the device-generated-commands indirect buffer. Mirrors the token layout of
+    // the IndirectCommandsLayout: an EXECUTION_SET token (pipelineIndex, offset 0) followed by a
+    // DRAW_INDEXED token (a VkDrawIndexedIndirectCommand, offset 4). Written by the cull compute
+    // shader and consumed by vkCmdExecuteGeneratedCommandsEXT; sizeof is the indirect stride.
+    struct IndirectDrawSequence
+    {
+        uint32 pipelineIndex;
+        uint32 indexCount;
+        uint32 instanceCount;
+        uint32 firstIndex;
+        int32  vertexOffset;
+        uint32 firstInstance;
+    };
+    static_assert(sizeof(IndirectDrawSequence) == 24);
+
     struct alignas(16) MeshInfo
     {
         glm::vec3 center;
@@ -87,7 +102,13 @@ export namespace RendererVKLayout
         glm::vec3 emissiveColor;
         uint16 diffuseTexIdx;
         uint16 normalTexIdx;
+        // Selects which pipeline variant (fragment shader) of the Indirect Execution Set draws this
+        // material; written as the EXECUTION_SET pipelineIndex of each draw sequence. 0 = default.
+        uint32 shaderVariant;
+    private:
+        uint32 _padding[3]; // pad to 64 bytes to match the std430 array stride on the GPU
     };
+    static_assert(sizeof(MaterialInfo) == 64);
 
     struct alignas(16) LightInfo
     {

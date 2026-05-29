@@ -38,8 +38,21 @@ struct OutMeshInstance
     vec4 quat;
     uint meshIdxMaterialIdx;
 };
+struct MaterialInfo
+{
+    vec3 baseColor;
+    float roughness;
+    vec3 specularColor;
+    float metalness;
+    vec3 emissiveColor;
+    uint diffuseNormalTexIdx;
+    uint shaderVariant;
+};
+// Matches RendererVKLayout::IndirectDrawSequence: an EXECUTION_SET pipelineIndex followed by a
+// VkDrawIndexedIndirectCommand. Consumed by vkCmdExecuteGeneratedCommandsEXT.
 struct OutIndirectCommand
 {
+    uint pipelineIndex;
     uint indexCount;
     uint instanceCount;
     uint firstIndex;
@@ -85,6 +98,10 @@ layout (binding = 8, std430) writeonly buffer OutIndirectCommandBuffer
 {
     OutIndirectCommand out_indirectCommands[];
 };
+layout (binding = 9, std430) readonly buffer InMaterialInfos
+{
+    MaterialInfo in_materialInfos[];
+};
 
 vec3 quat_transform(vec3 v, vec4 q)
 {
@@ -118,9 +135,13 @@ void main()
 {
     const uint instanceIdx   = gl_GlobalInvocationID.x;
     const uint16_t meshIdx   = uint16_t(in_instances[instanceIdx].meshIdxMaterialIdx & 0x0000FFFF);
+    const uint16_t materialIdx = uint16_t((in_instances[instanceIdx].meshIdxMaterialIdx & 0xFFFF0000) >> 16);
     const uint renderNodeIdx = in_instances[instanceIdx].renderNodeIdx;
     const uint offsetIdx     = in_instances[instanceIdx].instanceOffsetIdx;
 
+    // All instances of a mesh share its material (assigned 1:1 in the asset pipeline), so the
+    // per-mesh draw sequence is shader-homogeneous and this pipelineIndex is consistent.
+    out_indirectCommands[meshIdx].pipelineIndex = in_materialInfos[materialIdx].shaderVariant;
     out_indirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
     out_indirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
     out_indirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
