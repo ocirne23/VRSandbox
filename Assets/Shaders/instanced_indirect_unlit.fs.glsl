@@ -17,9 +17,8 @@ struct MaterialInfo
     float metalness;
     vec3 emissiveColor;
     uint diffuseNormalTexIdx;
-    uint shaderVariant;
-    uint alphaMode;
     float opacity;
+    uint16_t alphaMode;
 };
 
 layout (binding = 2, std430) readonly buffer InMaterialInfos

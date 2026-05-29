@@ -36,9 +36,6 @@ export struct GraphicsPipelineLayout
     // pipeline layout. Combined with fragmentShaderText (variant 0), these are the pipelines
     // selectable per-draw through a device-generated-commands Indirect Execution Set.
     std::vector<ShaderVariant> fragmentShaderVariants;
-    // Creates the pipelines with VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT so they can be
-    // bound from device-generated commands. Requires VK_EXT_device_generated_commands.
-    bool indirectBindable = false;
 };
 
 export class GraphicsPipeline final

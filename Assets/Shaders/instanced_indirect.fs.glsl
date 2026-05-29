@@ -12,6 +12,10 @@
 #define GRID_SIZE 32
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 
+#define ALPHA_MODE_OPAQUE 0u
+#define ALPHA_MODE_MASK 1u
+#define ALPHA_MODE_BLEND 2u
+
 struct MaterialInfo
 {
     vec3 baseColor;
@@ -20,9 +24,8 @@ struct MaterialInfo
     float metalness;
     vec3 emissiveColor;
     uint diffuseNormalTexIdx;
-    uint shaderVariant;
-    uint alphaMode;
-    float opacity;
+	float opacity;
+    uint16_t alphaMode;
 };
 struct LightInfo
 {
@@ -204,8 +207,7 @@ void main()
 	const float metalness = 0.0;//material.metalness;
 	
 	const vec4 diffuseSample = texture(u_textures[diffuseTexIdx], in_uv);
-	// Alpha mask (alphaMode 1): discard fragments below the cutoff (stored in material.opacity).
-	if (material.alphaMode == 1u && diffuseSample.a < material.opacity)
+	if (material.alphaMode == ALPHA_MODE_MASK && diffuseSample.a < material.opacity)
 		discard;
 	const vec3 materialColor = diffuseSample.xyz;
 	const vec3 materialNormal = texture(u_textures[normalTexIdx], in_uv).xyz;
@@ -261,8 +263,7 @@ void main()
 		tableIdx = (tableIdx + 1) % in_tableSize;
 	}
 	
-	// Alpha is ignored by opaque variants (blending disabled); transparent variants blend with it.
-	out_color = vec4(color, material.alphaMode == 1u ? diffuseSample.a : material.opacity);
+	out_color = vec4(color, min(diffuseSample.a, material.opacity));
 }
 
 // Visualize grids

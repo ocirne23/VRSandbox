@@ -56,9 +56,10 @@ export namespace RendererVKLayout
         uint32 instanceOffsetIdx;
         uint16 meshIdx;
         uint16 materialIdx;
-    private:
-        uint32 _padding;
+        uint16 pipelineIndex; // can use less bits probably
+        uint16 alphaMode;     // can use less bits probably
     };
+	static_assert(sizeof(InMeshInstance) == 16);
 
     struct OutMeshInstance
     {
@@ -93,25 +94,19 @@ export namespace RendererVKLayout
         uint32 firstInstance;
     };
 
-    enum class AlphaMode : uint32
+    enum class EAlphaMode : uint16
     {
         Opaque = 0,
-        Mask   = 1, // alpha-tested: fragment discarded when sampled alpha < cutoff (stored in opacity); opaque pass
-        Blend  = 2, // alpha-blended; routed to the transparent draw bucket / pass
+        Mask   = 1,
+        Blend  = 2,
     };
 
-    // Pipeline variant indices in the static-mesh Indirect Execution Set. Must match the
-    // registration order in StaticMeshGraphicsPipeline::initialize. Written as a draw sequence's
-    // EXECUTION_SET pipelineIndex (= material.shaderVariant).
-    namespace MeshShaderVariant
+    enum class EPipelineIndex : uint16
     {
-        enum : uint32
-        {
-            LitOpaque      = 0,
-            Unlit          = 1,
-            LitTransparent = 2,
-        };
-    }
+        LitOpaque      = 0,
+        Unlit          = 1,
+        LitTransparent = 2,
+    };
 
     struct alignas(16) MaterialInfo
     {
@@ -122,13 +117,10 @@ export namespace RendererVKLayout
         glm::vec3 emissiveColor;
         uint16 diffuseTexIdx;
         uint16 normalTexIdx;
-        // Selects which pipeline variant (fragment shader) of the Indirect Execution Set draws this
-        // material; written as the EXECUTION_SET pipelineIndex of each draw sequence. 0 = default.
-        uint32 shaderVariant;
-        uint32 alphaMode;   // RendererVKLayout::AlphaMode
-        float  opacity;     // [0,1] surface opacity, used by transparent (Blend) materials
+		float  opacity;   // opacity or alpha cutoff depending on alpha mode
+        uint16 alphaMode;
     private:
-        uint32 _padding; // pad to 64 bytes to match the std430 array stride on the GPU
+        uint16 _padding[5];
     };
     static_assert(sizeof(MaterialInfo) == 64);
 

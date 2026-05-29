@@ -28,7 +28,6 @@ public:
         Buffer& inMeshInstanceOffsetsBuffer;  // 3
         Buffer& inMeshInfoBuffer;             // 4
         Buffer& inFirstInstancesBuffer;       // 5
-        Buffer& inMaterialInfosBuffer;        // 9
     };
 
     void initialize();

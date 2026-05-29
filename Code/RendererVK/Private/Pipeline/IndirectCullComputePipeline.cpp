@@ -96,14 +96,8 @@ void IndirectCullComputePipeline::initialize()
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
     });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InMaterialInfos
-        .binding = 9,
-        .descriptorType = vk::DescriptorType::eStorageBuffer,
-        .descriptorCount = 1,
-        .stageFlags = vk::ShaderStageFlagBits::eCompute
-    });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // OutTransparentIndirectCommandBuffer
-        .binding = 10,
+        .binding = 9,
         .descriptorType = vk::DescriptorType::eStorageBuffer,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
@@ -131,7 +125,7 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    std::array<DescriptorSetUpdateInfo, 11> computeDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 10> computeDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo { // UBO
             .binding = 0,
@@ -224,18 +218,8 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
                 }
             }
         },
-        DescriptorSetUpdateInfo { // InMaterialInfos
-            .binding = 9,
-            .type = vk::DescriptorType::eStorageBuffer,
-            .bufferInfos = {
-                vk::DescriptorBufferInfo {
-                    .buffer = recordParams.inMaterialInfosBuffer.getBuffer(),
-                    .range = recordParams.inMaterialInfosBuffer.getSize(),
-                }
-            }
-        },
         DescriptorSetUpdateInfo { // OutTransparentIndirectCommandBuffer
-            .binding = 10,
+            .binding = 9,
             .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = {
                 vk::DescriptorBufferInfo {
@@ -268,15 +252,8 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
         vkCommandBuffer.dispatchIndirect(frameData.inIndirectCommandBuffer.getBuffer(), 0);
 
         {
-            // The generated command buffer is consumed either by classic indirect draws or, with
-            // device-generated commands, by the command-preprocess stage of vkCmdExecuteGeneratedCommandsEXT.
-            vk::PipelineStageFlags2 dstStageMask = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader;
-            vk::AccessFlags2 dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead;
-            if (Globals::device.supportsDeviceGeneratedCommands())
-            {
-                dstStageMask |= vk::PipelineStageFlagBits2::eCommandPreprocessEXT;
-                dstAccessMask |= vk::AccessFlagBits2::eCommandPreprocessReadEXT;
-            }
+            vk::PipelineStageFlags2 dstStageMask = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader | vk::PipelineStageFlagBits2::eCommandPreprocessEXT;
+            vk::AccessFlags2 dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eCommandPreprocessReadEXT;
             vk::MemoryBarrier2 memoryBarrier{
                 .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
                 .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,

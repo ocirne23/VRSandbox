@@ -6,6 +6,10 @@
 const uint EMPTY_ENTRY = 0xFFFFFFFFu;
 #define GRID_SIZE 16
 
+#define ALPHA_MODE_OPAQUE 0u
+#define ALPHA_MODE_MASK 1u
+#define ALPHA_MODE_BLEND 2u
+
 struct RenderNodeTransform
 {
     vec4 posScale;
@@ -16,7 +20,7 @@ struct InMeshInstance
     uint renderNodeIdx;
     uint instanceOffsetIdx;
     uint meshIdxMaterialIdx;
-    uint _padding;
+    uint pipelineIdxAlphaMode;
 };
 struct InMeshInstanceOffset
 {
@@ -37,18 +41,6 @@ struct OutMeshInstance
     vec4 posScale;
     vec4 quat;
     uint meshIdxMaterialIdx;
-};
-struct MaterialInfo
-{
-    vec3 baseColor;
-    float roughness;
-    vec3 specularColor;
-    float metalness;
-    vec3 emissiveColor;
-    uint diffuseNormalTexIdx;
-    uint shaderVariant;
-    uint alphaMode;
-    float opacity;
 };
 // Matches RendererVKLayout::IndirectDrawSequence: an EXECUTION_SET pipelineIndex followed by a
 // VkDrawIndexedIndirectCommand. Consumed by vkCmdExecuteGeneratedCommandsEXT.
@@ -100,11 +92,7 @@ layout (binding = 8, std430) writeonly buffer OutIndirectCommandBuffer
 {
     OutIndirectCommand out_indirectCommands[];
 };
-layout (binding = 9, std430) readonly buffer InMaterialInfos
-{
-    MaterialInfo in_materialInfos[];
-};
-layout (binding = 10, std430) writeonly buffer OutTransparentIndirectCommandBuffer
+layout (binding = 9, std430) writeonly buffer OutTransparentIndirectCommandBuffer
 {
     OutIndirectCommand out_transparentIndirectCommands[];
 };
@@ -139,16 +127,14 @@ bool frustumCheck(vec3 pos, float radius)
 
 void main()
 {
-    const uint instanceIdx   = gl_GlobalInvocationID.x;
-    const uint16_t meshIdx   = uint16_t(in_instances[instanceIdx].meshIdxMaterialIdx & 0x0000FFFF);
+    const uint instanceIdx     = gl_GlobalInvocationID.x;
+    const uint16_t meshIdx     = uint16_t(in_instances[instanceIdx].meshIdxMaterialIdx & 0x0000FFFF);
     const uint16_t materialIdx = uint16_t((in_instances[instanceIdx].meshIdxMaterialIdx & 0xFFFF0000) >> 16);
-    const uint renderNodeIdx = in_instances[instanceIdx].renderNodeIdx;
-    const uint offsetIdx     = in_instances[instanceIdx].instanceOffsetIdx;
-
-    const MaterialInfo material = in_materialInfos[materialIdx];
-    // alphaMode: 0=Opaque, 1=Mask, 2=Blend. Only Blend goes to the transparent bucket; Mask is
-    // alpha-tested in the opaque pass.
-    const bool isTransparent    = material.alphaMode == 2u;
+    const uint renderNodeIdx   = in_instances[instanceIdx].renderNodeIdx;
+    const uint offsetIdx       = in_instances[instanceIdx].instanceOffsetIdx;
+    const uint16_t pipelineIdx = uint16_t(in_instances[instanceIdx].pipelineIdxAlphaMode & 0x0000FFFF);
+    const uint16_t alphaMode   = uint16_t((in_instances[instanceIdx].pipelineIdxAlphaMode & 0xFFFF0000) >> 16);
+    const bool isTransparent   = alphaMode == ALPHA_MODE_BLEND;
 
     const vec4 quat                   = quat_multiply(in_renderNodeTransforms[renderNodeIdx].quat, in_instanceOffsets[offsetIdx].quat);
     const vec4 renderNodePosScale     = in_renderNodeTransforms[renderNodeIdx].posScale;
@@ -165,7 +151,7 @@ void main()
     // one bucket and its per-mesh firstInstance region is used exclusively by that bucket.
     if (!isTransparent)
     {
-        out_indirectCommands[meshIdx].pipelineIndex = material.shaderVariant;
+        out_indirectCommands[meshIdx].pipelineIndex = pipelineIdx;
         out_indirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
         out_indirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
         out_indirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
@@ -173,7 +159,7 @@ void main()
     }
     else
     {
-        out_transparentIndirectCommands[meshIdx].pipelineIndex = material.shaderVariant;
+        out_transparentIndirectCommands[meshIdx].pipelineIndex = pipelineIdx;
         out_transparentIndirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
         out_transparentIndirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
         out_transparentIndirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;

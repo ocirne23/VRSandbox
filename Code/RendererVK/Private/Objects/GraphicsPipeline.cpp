@@ -183,12 +183,10 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         .dynamicStateCount = static_cast<uint32>(dynamicStates.size()),
         .pDynamicStates = dynamicStates.data(),
     };
-    // When the pipelines must be bindable from device-generated commands, the bindable flag is
-    // supplied through PipelineCreateFlags2CreateInfo (maintenance5), which overrides .flags.
     vk::PipelineCreateFlags2CreateInfo pipelineFlags2{ .flags = vk::PipelineCreateFlagBits2::eIndirectBindableEXT };
     vk::GraphicsPipelineCreateInfo graphicsPipelineCreateInfo
     {
-        .pNext = layout.indirectBindable ? &pipelineFlags2 : nullptr,
+        .pNext = &pipelineFlags2,
         .flags = {},
         .stageCount = static_cast<uint32>(pipelineShaderStageCreateInfos.size()),
         .pStages = pipelineShaderStageCreateInfos.data(),

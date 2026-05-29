@@ -3,10 +3,6 @@ export module RendererVK:IndirectCommandsLayout;
 import Core;
 import :VK;
 
-// Wraps a VK_EXT_device_generated_commands VkIndirectCommandsLayoutEXT describing one draw
-// sequence: an EXECUTION_SET token (selects a pipeline variant from the Indirect Execution Set)
-// followed by a DRAW_INDEXED token. The per-sequence buffer layout matches
-// RendererVKLayout::IndirectDrawSequence.
 export class IndirectCommandsLayout final
 {
 public:

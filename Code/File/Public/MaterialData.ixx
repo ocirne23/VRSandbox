@@ -11,7 +11,7 @@ export class MaterialData final
 public:
     using TextureType = aiTextureType;
 
-    enum class AlphaMode
+    enum class EAlphaMode
     {
         Opaque, // fully opaque
         Mask,   // alpha-tested against the cutoff (rendered opaque)
@@ -33,7 +33,7 @@ public:
     float getRoughnessFactor() const;
     float getMetalnessFactor() const;
     float getOpacity() const;
-    AlphaMode getAlphaMode() const;
+    EAlphaMode getAlphaMode() const;
     float getAlphaCutoff() const;
     float getEmissiveIntensity() const;
     float getRefractiveIndex() const;

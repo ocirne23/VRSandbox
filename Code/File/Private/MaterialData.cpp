@@ -166,7 +166,7 @@ float MaterialData::getOpacity() const
         return 1.0f;
 }
 
-MaterialData::AlphaMode MaterialData::getAlphaMode() const
+MaterialData::EAlphaMode MaterialData::getAlphaMode() const
 {
     // glTF stores the alpha mode explicitly as "OPAQUE" / "MASK" / "BLEND".
     aiString mode;
@@ -174,13 +174,13 @@ MaterialData::AlphaMode MaterialData::getAlphaMode() const
     if (res == aiReturn_SUCCESS)
     {
         if (strcmp(mode.C_Str(), "BLEND") == 0)
-            return AlphaMode::Blend;
+            return EAlphaMode::Blend;
         if (strcmp(mode.C_Str(), "MASK") == 0)
-            return AlphaMode::Mask;
-        return AlphaMode::Opaque;
+            return EAlphaMode::Mask;
+        return EAlphaMode::Opaque;
     }
     // Non-glTF assets don't expose an alpha mode; fall back to inferring blend from opacity.
-    return getOpacity() < 1.0f ? AlphaMode::Blend : AlphaMode::Opaque;
+    return getOpacity() < 1.0f ? EAlphaMode::Blend : EAlphaMode::Opaque;
 }
 
 float MaterialData::getAlphaCutoff() const

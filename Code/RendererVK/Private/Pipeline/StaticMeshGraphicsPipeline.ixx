@@ -55,8 +55,6 @@ private:
     IndirectCommandsLayout m_indirectCommandsLayout;
     Sampler m_sampler;
 
-    // Device-generated-commands execute path (built only when the extension is supported).
-    bool m_useDeviceGeneratedCommands = false;
     vk::DeviceSize m_preprocessSize = 0;
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;            // opaque pass
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_transparentPreprocessBuffers; // transparent pass

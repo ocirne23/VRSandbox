@@ -33,19 +33,19 @@ bool SceneData::initialize(const char* filePath, bool mergeNodes, bool preTransf
     for (uint32 i = 0; i < m_pScene->mNumMeshes; i++)
     {
         MeshData& mesh = m_meshes.emplace_back();
-        bool res = mesh.initialize(m_pScene->mMeshes[i]);
+        [[maybe_unused]] bool res = mesh.initialize(m_pScene->mMeshes[i]);
         assert(res && "Failed to initialize MeshData");
     }
     for (uint32 i = 0; i < m_pScene->mNumTextures; i++)
     {
         TextureData& texture = m_textures.emplace_back();
-        bool res = texture.initialize(m_pScene->mTextures[i]);
+        [[maybe_unused]] bool res = texture.initialize(m_pScene->mTextures[i]);
         assert(res && "Failed to initialize TextureData");
     }
     for (uint32 i = 0; i < m_pScene->mNumMaterials; i++)
     {
         MaterialData& material = m_materials.emplace_back();
-        bool res = material.initialize(m_pScene->mMaterials[i]);
+        [[maybe_unused]] bool res = material.initialize(m_pScene->mMaterials[i]);
         assert(res && "Failed to initialize MaterialData");
     }
     const aiNode* pRootNode = m_pScene->mRootNode;

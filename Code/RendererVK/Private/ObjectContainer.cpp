@@ -23,9 +23,11 @@ bool ObjectContainer::initialize(const SceneData& sceneData)
         return false;
     Globals::rendererVK.addObjectContainer(this);
     initializeTextures(sceneData.getTextures());
-    initializeMaterials(sceneData.getMaterials());
+
+    std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>> pipelineAlphaForMaterialIdx;
+    initializeMaterials(sceneData.getMaterials(), pipelineAlphaForMaterialIdx);
     initializeMeshes(sceneData.getMeshes());
-    initializeNodes(sceneData.getRootNode());
+    initializeNodes(sceneData.getRootNode(), pipelineAlphaForMaterialIdx);
     return true;
 }
 
@@ -107,7 +109,7 @@ union MaterialFlags
     uint32 flags;
 };
 
-void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& materialDataList)
+void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& materialDataList, std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>>& pipelineAlphaForMaterialIdx)
 {
     const size_t numMaterials = materialDataList.size();
     std::vector<RendererVKLayout::MaterialInfo> materialInfos;
@@ -123,29 +125,28 @@ void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& mater
         material.specularColor = materialData.getSpecularColor();
         material.metalness     = materialData.getMetalnessFactor();
         material.emissiveColor = materialData.getEmissiveColor() * materialData.getEmissiveIntensity();
-        // MASK is alpha-tested and still rendered in the opaque pass; only BLEND is alpha-blended.
-        const MaterialData::AlphaMode alphaMode = materialData.getAlphaMode();
+        const MaterialData::EAlphaMode alphaMode = materialData.getAlphaMode();
         const float opacity    = materialData.getOpacity();
-        // Treat sub-1 opacity as blended even if the asset didn't tag an alpha mode.
-        const bool isBlend     = alphaMode == MaterialData::AlphaMode::Blend || (alphaMode == MaterialData::AlphaMode::Opaque && opacity < 1.0f);
+		//const float opacity    = materialInfos.size() % 2 == 0 ? 0.5f : 1.0f; // testing blend mode by forcing every other material to be blended
+        const bool isBlend     = alphaMode == MaterialData::EAlphaMode::Blend || (alphaMode == MaterialData::EAlphaMode::Opaque && opacity < 1.0f);
 
         if (isBlend)
         {
-            material.alphaMode = (uint32)RendererVKLayout::AlphaMode::Blend;
+            material.alphaMode = (uint32)RendererVKLayout::EAlphaMode::Blend;
             material.opacity = opacity;
-            material.shaderVariant = RendererVKLayout::MeshShaderVariant::LitTransparent; // blend-enabled variant
+            pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitTransparent, RendererVKLayout::EAlphaMode::Blend);
         }
-        else if (alphaMode == MaterialData::AlphaMode::Mask)
+        else if (alphaMode == MaterialData::EAlphaMode::Mask)
         {
-            material.alphaMode = (uint32)RendererVKLayout::AlphaMode::Mask;
+            material.alphaMode = (uint32)RendererVKLayout::EAlphaMode::Mask;
             material.opacity = materialData.getAlphaCutoff(); // cutoff stored in opacity for masked materials
-            material.shaderVariant = RendererVKLayout::MeshShaderVariant::LitOpaque;
+			pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitOpaque, RendererVKLayout::EAlphaMode::Mask);
         }
         else
         {
-            material.alphaMode = (uint32)RendererVKLayout::AlphaMode::Opaque;
+            material.alphaMode = (uint32)RendererVKLayout::EAlphaMode::Opaque;
             material.opacity = opacity;
-            material.shaderVariant = RendererVKLayout::MeshShaderVariant::LitOpaque;
+			pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitOpaque, RendererVKLayout::EAlphaMode::Opaque);
         }
 
         const uint32 diffuseTexIdx = materialData.getDiffuseTexIdx();
@@ -166,7 +167,7 @@ void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& mater
     m_baseMaterialInfoIdx = (uint16)Globals::rendererVK.addMaterialInfos(materialInfos);
 }
 
-void ObjectContainer::initializeNodes(const NodeData& nodeData)
+void ObjectContainer::initializeNodes(const NodeData& nodeData, std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>>& pipelineAlphaForMaterialIdx)
 {
     std::list<std::pair<const aiNode*, int>> nodeDataParentIdxStack;
     std::vector<Transform> localSpaceNodes;
@@ -291,7 +292,13 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData)
             }
 
             m_nodePathIdxLookup.emplace(node.path, (uint16)i);
-            m_nodeInfos.emplace_back((uint16)node.meshInfoIdx, node.materialInfoIdx);
+			NodeInfo nodeInfo{ 
+                .meshInfoIdx = node.meshInfoIdx,
+				.materialInfoIdx = node.materialInfoIdx,
+				.pipelineIdx = (uint16)pipelineAlphaForMaterialIdx[node.materialInfoIdx].first,
+				.alphaMode = (uint16)pipelineAlphaForMaterialIdx[node.materialInfoIdx].second
+			};
+            m_nodeInfos.emplace_back(nodeInfo);
             m_meshInstanceOffsets.emplace_back(nodeWS);
         }
         else if (i == 0)
@@ -315,8 +322,12 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
     {
         node.m_meshInstances[i].renderNodeIdx = node.m_transformIdx;
         node.m_meshInstances[i].instanceOffsetIdx = m_baseMeshInstanceOffsetsIdx + range.startIdx + i;
-        node.m_meshInstances[i].meshIdx = m_baseMeshInfoIdx + m_nodeInfos[range.startIdx + i].meshInfoIdx;
-        node.m_meshInstances[i].materialIdx = m_baseMaterialInfoIdx + m_nodeInfos[range.startIdx + i].materialInfoIdx;
+
+		const NodeInfo& nodeInfo = m_nodeInfos[range.startIdx + i];
+        node.m_meshInstances[i].meshIdx = m_baseMeshInfoIdx + nodeInfo.meshInfoIdx;
+        node.m_meshInstances[i].materialIdx = m_baseMaterialInfoIdx + nodeInfo.materialInfoIdx;
+		node.m_meshInstances[i].pipelineIndex = nodeInfo.pipelineIdx;
+		node.m_meshInstances[i].alphaMode = nodeInfo.alphaMode;
     }
 
     std::map<uint16, uint16> instancesPerMesh;

@@ -49,8 +49,8 @@ private:
 
     void initializeTextures(const std::vector<TextureData>& textureData);
     void initializeMeshes(const std::vector<MeshData>& meshData);
-    void initializeMaterials(const std::vector<MaterialData>& materialData);
-    void initializeNodes(const NodeData& nodeData);
+    void initializeMaterials(const std::vector<MaterialData>& materialData, std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>>& pipelineAlphaForMaterialIdx);
+    void initializeNodes(const NodeData& nodeData, std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>>& pipelineAlphaForMaterialIdx);
 
 private:
 
@@ -58,6 +58,8 @@ private:
     {
         uint16 meshInfoIdx = UINT16_MAX;
         uint16 materialInfoIdx = UINT16_MAX;
+        uint16 pipelineIdx = 0;
+        uint16 alphaMode = 0;
     };
 
     struct NodeMeshRange
