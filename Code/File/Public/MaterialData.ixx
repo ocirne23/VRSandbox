@@ -11,6 +11,13 @@ export class MaterialData final
 public:
     using TextureType = aiTextureType;
 
+    enum class AlphaMode
+    {
+        Opaque, // fully opaque
+        Mask,   // alpha-tested against the cutoff (rendered opaque)
+        Blend,  // alpha-blended
+    };
+
     MaterialData();
     ~MaterialData();
     MaterialData(const MaterialData&) = delete;
@@ -26,6 +33,8 @@ public:
     float getRoughnessFactor() const;
     float getMetalnessFactor() const;
     float getOpacity() const;
+    AlphaMode getAlphaMode() const;
+    float getAlphaCutoff() const;
     float getEmissiveIntensity() const;
     float getRefractiveIndex() const;
 
@@ -33,6 +42,7 @@ public:
 
     uint32 getDiffuseTexIdx() const;
     uint32 getNormalTexIdx() const;
+    uint32 getOpacityTexIdx() const;
 
 private:
 

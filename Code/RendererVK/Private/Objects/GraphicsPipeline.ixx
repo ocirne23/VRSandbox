@@ -16,6 +16,10 @@ export struct ShaderVariant
 {
     std::string text;
     std::string debugFilePath;
+    // Per-variant pipeline state. Transparent variants enable alpha blending and disable depth
+    // writes; opaque variants (the default) keep blending off and depth writes on.
+    bool blendEnable = false;
+    bool depthWrite = true;
 };
 
 export struct GraphicsPipelineLayout

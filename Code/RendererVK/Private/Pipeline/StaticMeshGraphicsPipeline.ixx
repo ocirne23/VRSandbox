@@ -34,6 +34,7 @@ public:
         Buffer& instanceIdxBuffer;
         Buffer& meshInstanceBuffer;
         Buffer& indirectCommandBuffer;
+        Buffer& transparentIndirectCommandBuffer;
 
         Buffer& lightInfosBuffer;
 		Buffer& lightGridsBuffer;
@@ -57,5 +58,9 @@ private:
     // Device-generated-commands execute path (built only when the extension is supported).
     bool m_useDeviceGeneratedCommands = false;
     vk::DeviceSize m_preprocessSize = 0;
-    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;            // opaque pass
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_transparentPreprocessBuffers; // transparent pass
+
+    // Issues one vkCmdExecuteGeneratedCommandsEXT over the given indirect/preprocess buffers.
+    void recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes);
 };

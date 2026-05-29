@@ -123,8 +123,30 @@ void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& mater
         material.specularColor = materialData.getSpecularColor();
         material.metalness     = materialData.getMetalnessFactor();
         material.emissiveColor = materialData.getEmissiveColor() * materialData.getEmissiveIntensity();
-        //material.shaderVariant = materialInfos.size() % 2 == 0 ? 0 : 1;
-        material.shaderVariant = 0;
+        // MASK is alpha-tested and still rendered in the opaque pass; only BLEND is alpha-blended.
+        const MaterialData::AlphaMode alphaMode = materialData.getAlphaMode();
+        const float opacity    = materialData.getOpacity();
+        // Treat sub-1 opacity as blended even if the asset didn't tag an alpha mode.
+        const bool isBlend     = alphaMode == MaterialData::AlphaMode::Blend || (alphaMode == MaterialData::AlphaMode::Opaque && opacity < 1.0f);
+
+        if (isBlend)
+        {
+            material.alphaMode = (uint32)RendererVKLayout::AlphaMode::Blend;
+            material.opacity = opacity;
+            material.shaderVariant = RendererVKLayout::MeshShaderVariant::LitTransparent; // blend-enabled variant
+        }
+        else if (alphaMode == MaterialData::AlphaMode::Mask)
+        {
+            material.alphaMode = (uint32)RendererVKLayout::AlphaMode::Mask;
+            material.opacity = materialData.getAlphaCutoff(); // cutoff stored in opacity for masked materials
+            material.shaderVariant = RendererVKLayout::MeshShaderVariant::LitOpaque;
+        }
+        else
+        {
+            material.alphaMode = (uint32)RendererVKLayout::AlphaMode::Opaque;
+            material.opacity = opacity;
+            material.shaderVariant = RendererVKLayout::MeshShaderVariant::LitOpaque;
+        }
 
         const uint32 diffuseTexIdx = materialData.getDiffuseTexIdx();
         if (diffuseTexIdx == UINT32_MAX || diffuseTexIdx >= UINT16_MAX)

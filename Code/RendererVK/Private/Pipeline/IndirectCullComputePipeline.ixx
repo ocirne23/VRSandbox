@@ -35,7 +35,8 @@ public:
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& recordParams);
     void update(uint32 frameIdx, uint32 numMeshInstances);
 
-    Buffer& getIndirectCommandBuffer(uint32 idx)  { return m_perFrameData[idx].outIndirectCommandBuffer; }
+    Buffer& getIndirectCommandBuffer(uint32 idx)            { return m_perFrameData[idx].outIndirectCommandBuffer; }
+    Buffer& getTransparentIndirectCommandBuffer(uint32 idx) { return m_perFrameData[idx].outTransparentIndirectCommandBuffer; }
     Buffer& getInstanceIdxBuffer(uint32 idx)      { return m_perFrameData[idx].outMeshInstanceIndexesBuffer; }
     Buffer& getOutMeshInstancesBuffer(uint32 idx) { return m_perFrameData[idx].outMeshInstancesBuffer; }
     
@@ -51,6 +52,7 @@ private:
         Buffer outMeshInstancesBuffer;       // 6
         Buffer outMeshInstanceIndexesBuffer; // 7
         Buffer outIndirectCommandBuffer;     // 8
+        Buffer outTransparentIndirectCommandBuffer; // 10
 
         std::span<vk::DispatchIndirectCommand> mappedIndirectCommands;
     };

@@ -217,9 +217,24 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     m_pipelineCache = createPipelineCacheResult.value;
 
     m_pipelines.reserve(fragmentShaders.size());
-    for (const Shader& fragmentShader : fragmentShaders)
+    for (size_t i = 0; i < fragmentShaders.size(); i++)
     {
-        pipelineShaderStageCreateInfos[1].module = fragmentShader.getModule();
+        const ShaderVariant& variant = *fragmentVariants[i];
+        pipelineShaderStageCreateInfos[1].module = fragmentShaders[i].getModule();
+
+        // Per-variant blend/depth state (mutated in place; the create info points at these structs).
+        pipelineDepthStencilStateCreateInfo.depthWriteEnable = variant.depthWrite ? vk::True : vk::False;
+        pipelineColorBlendAttachmentState.blendEnable = variant.blendEnable ? vk::True : vk::False;
+        if (variant.blendEnable)
+        {
+            // Standard "over" alpha blending: src.rgb*src.a + dst.rgb*(1-src.a), keep dst alpha.
+            pipelineColorBlendAttachmentState.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
+            pipelineColorBlendAttachmentState.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+            pipelineColorBlendAttachmentState.colorBlendOp = vk::BlendOp::eAdd;
+            pipelineColorBlendAttachmentState.srcAlphaBlendFactor = vk::BlendFactor::eOne;
+            pipelineColorBlendAttachmentState.dstAlphaBlendFactor = vk::BlendFactor::eZero;
+            pipelineColorBlendAttachmentState.alphaBlendOp = vk::BlendOp::eAdd;
+        }
 
         vk::Result   result;
         vk::Pipeline pipeline;

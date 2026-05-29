@@ -18,6 +18,8 @@ struct MaterialInfo
     vec3 emissiveColor;
     uint diffuseNormalTexIdx;
     uint shaderVariant;
+    uint alphaMode;
+    float opacity;
 };
 
 layout (binding = 2, std430) readonly buffer InMaterialInfos
@@ -40,6 +42,9 @@ void main()
     const MaterialInfo material = in_materialInfos[materialIdx];
     const uint16_t diffuseTexIdx = uint16_t(material.diffuseNormalTexIdx & 0x0000FFFF);
 
-    const vec3 diffuse = texture(u_textures[diffuseTexIdx], in_uv).xyz;
-    out_color = diffuse * material.baseColor;
+    const vec4 diffuseSample = texture(u_textures[diffuseTexIdx], in_uv);
+    // Alpha mask (alphaMode 1): discard fragments below the cutoff (stored in material.opacity).
+    if (material.alphaMode == 1u && diffuseSample.a < material.opacity)
+        discard;
+    out_color = diffuseSample.xyz * material.baseColor;
 }

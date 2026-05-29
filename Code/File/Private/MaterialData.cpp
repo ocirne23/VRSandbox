@@ -1,6 +1,8 @@
 module;
 
 #include <assimp/material.h>
+#include <assimp/GltfMaterial.h>
+#include <cstring>
 
 module File.MaterialData;
 
@@ -66,6 +68,29 @@ uint32 MaterialData::getNormalTexIdx() const
     }
     assert(isEmbedded && "Implement non embedded textures");
     return normalTexIdx;
+}
+
+uint32 MaterialData::getOpacityTexIdx() const
+{
+    aiString path;
+    aiReturn ret = aiGetMaterialString(m_pMaterial, AI_MATKEY_TEXTURE_OPACITY(0), &path);
+    if (ret != aiReturn_SUCCESS)
+    {
+        return UINT32_MAX;
+    }
+    if (path.length < 2)
+    {
+        assert(false && "Failed to find opacity texture path");
+        return UINT32_MAX;
+    }
+    const bool isEmbedded = path.C_Str()[0] == '*';
+    uint32 opacityTexIdx = UINT32_MAX;
+    if (isEmbedded)
+    {
+        opacityTexIdx = atoi(path.C_Str() + 1);
+    }
+    assert(isEmbedded && "Implement non embedded textures");
+    return opacityTexIdx;
 }
 
 const char* MaterialData::getName() const
@@ -139,6 +164,33 @@ float MaterialData::getOpacity() const
         return f;
     else
         return 1.0f;
+}
+
+MaterialData::AlphaMode MaterialData::getAlphaMode() const
+{
+    // glTF stores the alpha mode explicitly as "OPAQUE" / "MASK" / "BLEND".
+    aiString mode;
+    aiReturn res = aiGetMaterialString(m_pMaterial, AI_MATKEY_GLTF_ALPHAMODE, &mode);
+    if (res == aiReturn_SUCCESS)
+    {
+        if (strcmp(mode.C_Str(), "BLEND") == 0)
+            return AlphaMode::Blend;
+        if (strcmp(mode.C_Str(), "MASK") == 0)
+            return AlphaMode::Mask;
+        return AlphaMode::Opaque;
+    }
+    // Non-glTF assets don't expose an alpha mode; fall back to inferring blend from opacity.
+    return getOpacity() < 1.0f ? AlphaMode::Blend : AlphaMode::Opaque;
+}
+
+float MaterialData::getAlphaCutoff() const
+{
+    float f;
+    aiReturn res = aiGetMaterialFloat(m_pMaterial, AI_MATKEY_GLTF_ALPHACUTOFF, &f);
+    if (res == aiReturn_SUCCESS)
+        return f;
+    else
+        return 0.5f; // glTF default
 }
 
 float MaterialData::getEmissiveIntensity() const

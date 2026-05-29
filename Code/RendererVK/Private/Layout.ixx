@@ -93,6 +93,26 @@ export namespace RendererVKLayout
         uint32 firstInstance;
     };
 
+    enum class AlphaMode : uint32
+    {
+        Opaque = 0,
+        Mask   = 1, // alpha-tested: fragment discarded when sampled alpha < cutoff (stored in opacity); opaque pass
+        Blend  = 2, // alpha-blended; routed to the transparent draw bucket / pass
+    };
+
+    // Pipeline variant indices in the static-mesh Indirect Execution Set. Must match the
+    // registration order in StaticMeshGraphicsPipeline::initialize. Written as a draw sequence's
+    // EXECUTION_SET pipelineIndex (= material.shaderVariant).
+    namespace MeshShaderVariant
+    {
+        enum : uint32
+        {
+            LitOpaque      = 0,
+            Unlit          = 1,
+            LitTransparent = 2,
+        };
+    }
+
     struct alignas(16) MaterialInfo
     {
         glm::vec3 baseColor;
@@ -105,8 +125,10 @@ export namespace RendererVKLayout
         // Selects which pipeline variant (fragment shader) of the Indirect Execution Set draws this
         // material; written as the EXECUTION_SET pipelineIndex of each draw sequence. 0 = default.
         uint32 shaderVariant;
+        uint32 alphaMode;   // RendererVKLayout::AlphaMode
+        float  opacity;     // [0,1] surface opacity, used by transparent (Blend) materials
     private:
-        uint32 _padding[3]; // pad to 64 bytes to match the std430 array stride on the GPU
+        uint32 _padding; // pad to 64 bytes to match the std430 array stride on the GPU
     };
     static_assert(sizeof(MaterialInfo) == 64);
 

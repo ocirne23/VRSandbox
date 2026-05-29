@@ -47,6 +47,8 @@ struct MaterialInfo
     vec3 emissiveColor;
     uint diffuseNormalTexIdx;
     uint shaderVariant;
+    uint alphaMode;
+    float opacity;
 };
 // Matches RendererVKLayout::IndirectDrawSequence: an EXECUTION_SET pipelineIndex followed by a
 // VkDrawIndexedIndirectCommand. Consumed by vkCmdExecuteGeneratedCommandsEXT.
@@ -102,6 +104,10 @@ layout (binding = 9, std430) readonly buffer InMaterialInfos
 {
     MaterialInfo in_materialInfos[];
 };
+layout (binding = 10, std430) writeonly buffer OutTransparentIndirectCommandBuffer
+{
+    OutIndirectCommand out_transparentIndirectCommands[];
+};
 
 vec3 quat_transform(vec3 v, vec4 q)
 {
@@ -139,13 +145,10 @@ void main()
     const uint renderNodeIdx = in_instances[instanceIdx].renderNodeIdx;
     const uint offsetIdx     = in_instances[instanceIdx].instanceOffsetIdx;
 
-    // All instances of a mesh share its material (assigned 1:1 in the asset pipeline), so the
-    // per-mesh draw sequence is shader-homogeneous and this pipelineIndex is consistent.
-    out_indirectCommands[meshIdx].pipelineIndex = in_materialInfos[materialIdx].shaderVariant;
-    out_indirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
-    out_indirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
-    out_indirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
-    out_indirectCommands[meshIdx].firstInstance = in_firstInstances[meshIdx];
+    const MaterialInfo material = in_materialInfos[materialIdx];
+    // alphaMode: 0=Opaque, 1=Mask, 2=Blend. Only Blend goes to the transparent bucket; Mask is
+    // alpha-tested in the opaque pass.
+    const bool isTransparent    = material.alphaMode == 2u;
 
     const vec4 quat                   = quat_multiply(in_renderNodeTransforms[renderNodeIdx].quat, in_instanceOffsets[offsetIdx].quat);
     const vec4 renderNodePosScale     = in_renderNodeTransforms[renderNodeIdx].posScale;
@@ -157,9 +160,33 @@ void main()
 
     const vec3 centerPos = instancePosScale.xyz + centerOffset;
 
+    // Route this mesh's draw to the opaque or transparent command buffer by alpha mode. All
+    // instances of a mesh share its material (1:1 in the asset pipeline), so a mesh lands in exactly
+    // one bucket and its per-mesh firstInstance region is used exclusively by that bucket.
+    if (!isTransparent)
+    {
+        out_indirectCommands[meshIdx].pipelineIndex = material.shaderVariant;
+        out_indirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
+        out_indirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
+        out_indirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
+        out_indirectCommands[meshIdx].firstInstance = in_firstInstances[meshIdx];
+    }
+    else
+    {
+        out_transparentIndirectCommands[meshIdx].pipelineIndex = material.shaderVariant;
+        out_transparentIndirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
+        out_transparentIndirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
+        out_transparentIndirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
+        out_transparentIndirectCommands[meshIdx].firstInstance = in_firstInstances[meshIdx];
+    }
+
     if (frustumCheck(centerPos, radius))
     {
-        const uint idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
+        uint idx;
+        if (!isTransparent)
+            idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
+        else
+            idx = atomicAdd(out_transparentIndirectCommands[meshIdx].instanceCount, 1);
         out_meshInstanceIndexes[in_firstInstances[meshIdx] + idx] = instanceIdx;
         out_meshInstances[instanceIdx].posScale           = instancePosScale;
         out_meshInstances[instanceIdx].quat               = quat;
