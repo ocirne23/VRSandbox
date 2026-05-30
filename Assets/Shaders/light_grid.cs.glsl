@@ -187,36 +187,31 @@ layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
 void main()
 {
     const uint lightIdx = gl_GlobalInvocationID.x;
-    if (lightIdx < in_lightInfos.length())
-    {
-        const vec3 lightPos = in_lightInfos[lightIdx].pos;
-        const float radius = in_lightInfos[lightIdx].range;
-        const vec3 lightMin = lightPos - vec3(radius);
-        const vec3 lightMax = lightPos + vec3(radius);
-        const ivec3 gridMin = getGridPos(lightMin);
-        const ivec3 gridMax = getGridPos(lightMax);
+    const vec3 lightPos = in_lightInfos[lightIdx].pos;
+    const float radius = in_lightInfos[lightIdx].range;
+    const vec3 lightMin = lightPos - vec3(radius);
+    const vec3 lightMax = lightPos + vec3(radius);
+    const ivec3 gridMin = getGridPos(lightMin);
+    const ivec3 gridMax = getGridPos(lightMax);
 
-        const uint numGrids = (gridMax.x - gridMin.x + 1) * (gridMax.y - gridMin.y + 1) * (gridMax.z - gridMin.z + 1);
-        for (int x = gridMin.x; x <= gridMax.x; ++x)
+    for (int x = gridMin.x; x <= gridMax.x; ++x)
+    {
+        for (int y = gridMin.y; y <= gridMax.y; ++y)
         {
-            for (int y = gridMin.y; y <= gridMax.y; ++y)
+            for (int z = gridMin.z; z <= gridMax.z; ++z)
             {
-                for (int z = gridMin.z; z <= gridMax.z; ++z)
+                float viewDist = distance(vec3(x, y, z) * GRID_SIZE + GRID_SIZE / 2 , u_viewPos);
+                uint cellSize = 1 << int(mix(0, 8, sqrt(viewDist) / float(GRID_SIZE)));
+                if (cellSize > GRID_SIZE / 2)
+                    cellSize = GRID_SIZE;
+                const uint gridIdx = getOrInsertGrid(ivec3(x, y, z), cellSize);
+                if (radius <= float(GRID_SIZE / 2))
                 {
-                    const ivec3 gridPos = ivec3(x, y, z);
-                    float viewDist = distance(vec3(x, y, z) * GRID_SIZE + GRID_SIZE / 2 , u_viewPos);
-                    uint cellSize = 1 << int(mix(0, 8, sqrt(viewDist) / float(GRID_SIZE)));
-                    if (cellSize > GRID_SIZE / 2)
-                        cellSize = GRID_SIZE;
-                    const uint gridIdx = getOrInsertGrid(gridPos, cellSize);
-                    if (numGrids <= 8)
-                    {
-                        addLightToGrid(gridIdx, lightIdx, lightMin, lightMax);
-                    }
-                    else
-                    {
-                        addLargeLight(gridIdx, lightIdx);
-                    }
+                    addLightToGrid(gridIdx, lightIdx, lightMin, lightMax);
+                }
+                else
+                {
+                    addLargeLight(gridIdx, lightIdx);
                 }
             }
         }

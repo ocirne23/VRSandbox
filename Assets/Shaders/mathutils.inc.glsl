@@ -44,7 +44,22 @@ vec4 quat_multiply(vec4 q, vec4 p)
 //vec4 quat_invert(vec4 q) {
 //    return vec4(-q.xyz, q.w);
 //}
-
+//mat3 quat_to_mat3(vec4 q)
+//{
+//    vec3 q2   = q.xyz + q.xyz;
+//    vec3 xyz2 = q.xyz * q2;
+//    vec3 wq2  = q.w * q2;
+//    float xy2 = q.x * q2.y;
+//    float xz2 = q.x * q2.z;
+//    float yz2 = q.y * q2.z;
+//
+//    return mat3(
+//        1.0 - (xyz2.y + xyz2.z), xy2 + wq2.z,             xz2 - wq2.y,
+//        xy2 - wq2.z,             1.0 - (xyz2.x + xyz2.z), yz2 + wq2.x,
+//        xz2 + wq2.y,             yz2 - wq2.x,             1.0 - (xyz2.x + xyz2.y)
+//    );
+//}
+//
 //float4 mat_to_quat(float3x3 m)
 //{
 //	float4 q;

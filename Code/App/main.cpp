@@ -68,9 +68,9 @@ int main()
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedNodes.push_back(container.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp())))));
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-				spawnedLights.push_back({ cameraController.getPosition(), 50.0f, glm::abs(glm::sphericalRand(1.0f)), 500.0f});
+				spawnedLights.push_back({ cameraController.getPosition(), 50.0f, glm::abs(glm::sphericalRand(1.0f)), 250.0f});
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                spawnedLights.push_back({ cameraController.getPosition(), 5.0f, glm::abs(glm::sphericalRand(1.0f)), 5.0f });
+                spawnedLights.push_back({ cameraController.getPosition(), 15.0f + glm::linearRand(0.5f, 1.5f), glm::abs(glm::sphericalRand(1.0f)), 160.0f });
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedLights.resize(0);
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)

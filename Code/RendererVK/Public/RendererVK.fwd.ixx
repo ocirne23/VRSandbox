@@ -5,4 +5,5 @@ export extern "C++"
 	class Renderer;
 	class ObjectContainer;
 	class RenderNode;
+	struct Light;
 }

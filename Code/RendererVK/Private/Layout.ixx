@@ -69,10 +69,6 @@ export namespace RendererVKLayout
         uint32 meshIdxMaterialIdx;
     };
 
-    // One sequence in the device-generated-commands indirect buffer. Mirrors the token layout of
-    // the IndirectCommandsLayout: an EXECUTION_SET token (pipelineIndex, offset 0) followed by a
-    // DRAW_INDEXED token (a VkDrawIndexedIndirectCommand, offset 4). Written by the cull compute
-    // shader and consumed by vkCmdExecuteGeneratedCommandsEXT; sizeof is the indirect stride.
     struct IndirectDrawSequence
     {
         uint32 pipelineIndex;
