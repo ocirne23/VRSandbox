@@ -1,0 +1,69 @@
+export module Core.Log;
+
+import Core;
+
+export namespace Log
+{
+	enum class Level : uint8
+	{
+		Verbose = 0,
+		Info    = 1,
+		Warning = 2,
+		Error   = 3,
+	};
+
+	struct Message
+	{
+		Level       level;
+		std::string text;
+	};
+
+	constexpr uint32 MaxMessages = 4096;
+
+	// ---- storage ------------------------------------------------------------
+
+	namespace detail
+	{
+		inline std::mutex              g_mutex;
+		inline std::deque<Message>     g_messages;
+		inline uint32                  g_revision = 0;   // incremented on every add
+	}
+
+	// ---- write API ----------------------------------------------------------
+
+	inline void log(Level level, std::string_view text)
+	{
+		std::lock_guard lock(detail::g_mutex);
+		if (detail::g_messages.size() >= MaxMessages)
+			detail::g_messages.pop_front();
+		detail::g_messages.push_back({ level, std::string(text) });
+		++detail::g_revision;
+	}
+
+	inline void verbose(std::string_view text) { log(Level::Verbose, text); }
+	inline void info   (std::string_view text) { log(Level::Info,    text); }
+	inline void warning(std::string_view text) { log(Level::Warning, text); }
+	inline void error  (std::string_view text) { log(Level::Error,   text); }
+
+	// ---- read API (call from UI thread only) --------------------------------
+
+	// Returns a snapshot copy and the current revision number.
+	inline uint32 getRevision()
+	{
+		std::lock_guard lock(detail::g_mutex);
+		return detail::g_revision;
+	}
+
+	inline std::vector<Message> getMessages()
+	{
+		std::lock_guard lock(detail::g_mutex);
+		return { detail::g_messages.begin(), detail::g_messages.end() };
+	}
+
+	inline void clear()
+	{
+		std::lock_guard lock(detail::g_mutex);
+		detail::g_messages.clear();
+		++detail::g_revision;
+	}
+}

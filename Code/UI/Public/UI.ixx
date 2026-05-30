@@ -7,6 +7,9 @@ import UI.fwd;
 import UI.imgui_node_editor;
 import UI.NodeEditor;
 import UI.AssetBrowser;
+import UI.SceneView;
+import UI.PropertiesPanel;
+import UI.OutputLog;
 
 import RendererVK;
 
@@ -39,7 +42,10 @@ private:
 
 	NodeEditor::Scene m_scene;
 	Renderer::Stats m_renderStats;
-	AssetBrowser m_assetBrowser;
+	AssetBrowser    m_assetBrowser;
+	SceneView       m_sceneView;
+	PropertiesPanel m_propertiesPanel;
+	OutputLog       m_outputLog;
 };
 
 export namespace Globals

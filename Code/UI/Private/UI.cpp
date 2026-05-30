@@ -1,6 +1,7 @@
 module UI;
 
 import Core.imgui;
+import Core.Log;
 
 UI::~UI()
 {
@@ -21,6 +22,19 @@ void UI::initialize()
 
     m_scene.initialize();
     m_assetBrowser.initialize();
+
+    Log::info("UI initialized");
+    Log::verbose("Demo scene hierarchy seeded");
+
+    // Seed demo scene hierarchy
+    SceneNode* world  = m_sceneView.addNode(nullptr, "World");
+    SceneNode* lights = m_sceneView.addNode(world,   "Lights");
+                        m_sceneView.addNode(lights,  "DirectionalLight");
+                        m_sceneView.addNode(lights,  "PointLight");
+    SceneNode* geo    = m_sceneView.addNode(world,   "Geometry");
+                        m_sceneView.addNode(geo,     "StaticMesh_0");
+                        m_sceneView.addNode(geo,     "StaticMesh_1");
+                        m_sceneView.addNode(nullptr, "Camera");
 }
 
 struct LinkInfo
@@ -72,32 +86,31 @@ void UI::update(double deltaSec)
         ImGuiID dockspace_id = ImGui::GetID("Root");
         ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 
-        static bool second_time = false;
-        if (second_time)
-        {
-            second_time = false;
-            ImGui::SetWindowFocus("Viewport");
-            //ImGui::SetWindowFocus("Script");
-        }
-
         static bool first_time = true;
         if (first_time)
         {
             first_time = false;
-            second_time = true;
 
             ImGui::DockBuilderRemoveNode(dockspace_id);
             ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
             ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->Size);
 
             ImGuiID dock_id_right, dock_id_up, dock_id_left, dock_id_down;
-            ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.2f, &dock_id_left, &dock_id_right);
-            ImGui::DockBuilderSplitNode(dock_id_right, ImGuiDir_Up, 0.9f, &dock_id_up, &dock_id_down);
+            ImGuiID dock_id_left_top, dock_id_left_bottom;
+            ImGuiID dock_id_scene, dock_id_properties;
 
-            ImGui::DockBuilderDockWindow("Stats", dock_id_left);
-            ImGui::DockBuilderDockWindow("Content", dock_id_down);
-            ImGui::DockBuilderDockWindow("Script", dock_id_up);
-            ImGui::DockBuilderDockWindow("Viewport", dock_id_up);
+            ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.3f, &dock_id_left, &dock_id_right);
+            ImGui::DockBuilderSplitNode(dock_id_right, ImGuiDir_Up, 0.8f, &dock_id_up, &dock_id_down);
+            ImGui::DockBuilderSplitNode(dock_id_left,  ImGuiDir_Up, 0.8f, &dock_id_left_top, &dock_id_left_bottom);
+            ImGui::DockBuilderSplitNode(dock_id_left_top, ImGuiDir_Right, 0.5f, &dock_id_properties, &dock_id_scene);
+
+            ImGui::DockBuilderDockWindow("Scene",      dock_id_scene);
+            ImGui::DockBuilderDockWindow("Properties", dock_id_properties);
+            ImGui::DockBuilderDockWindow("Stats",      dock_id_left_bottom);
+            ImGui::DockBuilderDockWindow("Log",        dock_id_left_bottom);
+            ImGui::DockBuilderDockWindow("Content",    dock_id_down);
+            ImGui::DockBuilderDockWindow("Script",     dock_id_up);
+            ImGui::DockBuilderDockWindow("Viewport",   dock_id_up);
             ImGui::DockBuilderFinish(dockspace_id);
         }
 
@@ -119,17 +132,42 @@ void UI::update(double deltaSec)
         const bool isViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_DockHierarchy) && !m_isViewportGrabbed && !wasViewportGrabbed;
         m_hasViewportGainedFocus = isViewportFocused && !m_isViewportFocused;
         m_isViewportFocused = isViewportFocused;
-        ImGui::Button("Button 1");
-        ImGui::Button("Button 2");
-        ImGui::Button("Button 3");
 
         ImGui::End();
         ImGui::PopStyleVar(1);
     }
 
     {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+
+        ImGui::Begin("Script");
+        if (ImGui::IsWindowFocused())
+            m_scene.update(deltaSec);
+        ImGui::End();
+
+        ImGui::PopStyleVar(1);
+    }
+
+    {
+        ImGui::Begin("Scene");
+        m_sceneView.render();
+        ImGui::End();
+    }
+
+    {
+        ImGui::Begin("Properties");
+        m_propertiesPanel.render(m_sceneView.getSelected());
+        ImGui::End();
+    }
+
+    {
+        ImGui::Begin("Log");
+        m_outputLog.render();
+        ImGui::End();
+    }
+
+    {
         ImGui::Begin("Stats");
-        ImGui::Text("numLights: %i (%.1f%%)", m_renderStats.numLights, (float)m_renderStats.numLights / m_renderStats.maxLights * 100.0f);
         ImGui::Text("numMeshInstances: %i (%.1f%%)", m_renderStats.numMeshInstances, (float)m_renderStats.numMeshInstances / m_renderStats.maxMeshInstances * 100.0f);
         ImGui::Text("numInstanceOffsets: %i (%.1f%%)", m_renderStats.numInstanceOffsets, (float)m_renderStats.numInstanceOffsets / m_renderStats.maxInstanceOffsets * 100.0f);
         ImGui::Text("numMeshTypes: %i (%.1f%%)", m_renderStats.numMeshTypes, (float)m_renderStats.numMeshTypes / m_renderStats.maxMeshTypes * 100.0f);
@@ -144,21 +182,12 @@ void UI::update(double deltaSec)
         ImGui::End();
     }
 
+
+
     {
         ImGui::Begin("Content");
         m_assetBrowser.render();
         ImGui::End();
-    }
-
-    {
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-
-        ImGui::Begin("Script");
-        if (ImGui::IsWindowFocused())
-            m_scene.update(deltaSec);
-        ImGui::End();
-
-        ImGui::PopStyleVar(1);
     }
 }
 
