@@ -20,6 +20,7 @@ void UI::initialize()
     ImGui::GetStyle().Colors[ImGuiCol_DockingEmptyBg] = ImVec4(0.0, 0.0, 0.0, 0.0);
 
     m_scene.initialize();
+    m_assetBrowser.initialize();
 }
 
 struct LinkInfo
@@ -145,9 +146,7 @@ void UI::update(double deltaSec)
 
     {
         ImGui::Begin("Content");
-        ImGui::Button("Button 1");
-        ImGui::Button("Button 2");
-        ImGui::Button("Button 3");
+        m_assetBrowser.render();
         ImGui::End();
     }
 

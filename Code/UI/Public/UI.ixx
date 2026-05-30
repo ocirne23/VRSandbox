@@ -6,6 +6,7 @@ import Core.Rect;
 import UI.fwd;
 import UI.imgui_node_editor;
 import UI.NodeEditor;
+import UI.AssetBrowser;
 
 import RendererVK;
 
@@ -36,8 +37,9 @@ private:
 
     ed::EditorContext* m_nodeEditorContext = nullptr;
 
-    NodeEditor::Scene m_scene;
+	NodeEditor::Scene m_scene;
 	Renderer::Stats m_renderStats;
+	AssetBrowser m_assetBrowser;
 };
 
 export namespace Globals
