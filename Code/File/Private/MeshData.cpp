@@ -11,80 +11,57 @@ MeshData::MeshData()
 
 MeshData::~MeshData()
 {
+    destroy();
+}
+
+void MeshData::destroy()
+{
+	if (!m_ownsData)
+	{
+		m_vertices.release();
+		m_normals.release();
+		m_tangents.release();
+		m_bitangents.release();
+		m_texCoords.release();
+	}
+	m_name.clear();
+	m_indices.clear();
+	m_materialIdx = UINT32_MAX;
+	m_ownsData = false;
 }
 
 bool MeshData::initialize(const aiMesh* pMesh)
 {
-    m_pMesh = pMesh;
-    m_pName = pMesh->mName.C_Str();
+    if (!m_indices.empty())
+        destroy();
+
+    m_ownsData = false;
+	m_name = pMesh->mName.C_Str();
+
+    m_aabb.min = glm::vec3(pMesh->mAABB.mMin.x, pMesh->mAABB.mMin.y, pMesh->mAABB.mMin.z);
+    m_aabb.max = glm::vec3(pMesh->mAABB.mMax.x, pMesh->mAABB.mMax.y, pMesh->mAABB.mMax.z);
 
     m_indices.resize(pMesh->mNumFaces * 3);
     for (uint32 i = 0; i < pMesh->mNumFaces; i++)
     {
         memcpy(&m_indices[i * 3], pMesh->mFaces[i].mIndices, 3 * sizeof(uint32));
     }
-    return true;
-}
 
-const glm::vec3* MeshData::getVertices() const
-{
-    return reinterpret_cast<glm::vec3*>(m_pMesh->mVertices);
-}
-
-const glm::vec3* MeshData::getNormals() const
-{
-    return reinterpret_cast<glm::vec3*>(m_pMesh->mNormals);
-}
-
-const glm::vec3* MeshData::getTangents() const
-{
-    return reinterpret_cast<glm::vec3*>(m_pMesh->mTangents);
-}
-
-const glm::vec3* MeshData::getBitangents() const
-{
-    return reinterpret_cast<glm::vec3*>(m_pMesh->mBitangents);
-}
-
-const glm::vec3* MeshData::getTexCoords() const
-{
-    return reinterpret_cast<glm::vec3*>(m_pMesh->mTextureCoords[0]);
-}
-
-uint32 MeshData::getNumVertices() const
-{
-    return m_pMesh->mNumVertices;
-}
-
-const uint32* MeshData::getIndices() const
-{
-    return m_indices.data();
-}
-
-uint32 MeshData::getNumIndices() const
-{
-    return (uint32)m_indices.size();
-}
-
-void MeshData::getIndices(std::vector<uint32>& indices) const
-{
-    assert(indices.empty());
-    indices.resize(m_pMesh->mNumFaces * 3);
-    for (uint32 i = 0; i < m_pMesh->mNumFaces; i++)
+	m_numVertices = pMesh->mNumVertices;
+	if (pMesh->mVertices)
+	    m_vertices.reset(reinterpret_cast<glm::vec3*>(pMesh->mVertices));
+	if (pMesh->HasNormals())
+		m_normals.reset(reinterpret_cast<glm::vec3*>(pMesh->mNormals));
+    if (pMesh->HasTangentsAndBitangents())
     {
-        memcpy(&indices[i * 3], m_pMesh->mFaces[i].mIndices, 3 * sizeof(uint32));
+		m_tangents.reset(reinterpret_cast<glm::vec3*>(pMesh->mTangents));
+		m_bitangents.reset(reinterpret_cast<glm::vec3*>(pMesh->mBitangents));
     }
-}
-
-uint32 MeshData::getMaterialIndex() const
-{
-    return m_pMesh->mMaterialIndex;
-}
-
-AABB MeshData::getAABB() const
-{
-    AABB aabb;
-    aabb.min = glm::vec3(m_pMesh->mAABB.mMin.x, m_pMesh->mAABB.mMin.y, m_pMesh->mAABB.mMin.z);
-    aabb.max = glm::vec3(m_pMesh->mAABB.mMax.x, m_pMesh->mAABB.mMax.y, m_pMesh->mAABB.mMax.z);
-    return aabb;
+	if (pMesh->HasTextureCoords(0))
+	{
+		m_texCoords.reset(reinterpret_cast<glm::vec3*>(pMesh->mTextureCoords[0]));
+	}
+	m_materialIdx = pMesh->mMaterialIndex;
+    
+    return true;
 }

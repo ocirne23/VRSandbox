@@ -9,7 +9,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/
 target_include_directories(${PROJECT_NAME} PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/Public")
 
 target_link_libraries(${PROJECT_NAME} PRIVATE 
-	vulkan-1 
 	SDL3-static$<$<CONFIG:Debug>:d> 
 	imgui$<$<CONFIG:Debug>:d>
 	ntdll 
@@ -17,7 +16,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 	Setupapi 
 	Cfgmgr32 
 	Version 
-	Imm32)
+	Imm32
+)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER Engine)
 

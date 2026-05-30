@@ -1,6 +1,7 @@
 module File.NodeData;
 
 import Core;
+import File.Assimp;
 
 bool NodeData::initialize(const aiNode* pNode)
 {
@@ -13,13 +14,30 @@ const char* NodeData::getName() const
     return m_pNode->mName.C_Str();
 }
 
-uint32 NodeData::numChildren() const
+uint32 NodeData::getNumChildren() const
 {
     return m_pNode->mNumChildren;
 }
-const aiNode* NodeData::getChild(uint32 idx) const
+NodeData NodeData::getChild(uint32 idx) const
 {
-    return m_pNode->mChildren[idx];
+	assert(idx < m_pNode->mNumChildren);
+    return NodeData(m_pNode->mChildren[idx]);
+}
+
+uint32 NodeData::getNumMeshes() const
+{
+	return m_pNode->mNumMeshes;
+}
+
+uint32 NodeData::getMeshIndex(uint32 meshIdx) const
+{
+	assert(meshIdx < m_pNode->mNumMeshes);
+	return m_pNode->mMeshes[meshIdx];
+}
+
+void NodeData::getTransform(glm::vec3& pos, glm::vec3& scale, glm::quat& rot) const
+{
+    m_pNode->mTransformation.Decompose(reinterpret_cast<aiVector3D&>(scale), reinterpret_cast<aiQuaternion&>(rot), reinterpret_cast<aiVector3D&>(pos));
 }
 
 const glm::vec3 NodeData::getPosition() const
