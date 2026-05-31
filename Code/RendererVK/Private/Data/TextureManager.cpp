@@ -1,5 +1,7 @@
 module RendererVK:TextureManager;
 
+import File.fwd;
+
 import :Device;
 
 TextureManager::~TextureManager()
@@ -11,7 +13,8 @@ TextureManager::~TextureManager()
     }
 }
 
-uint16 TextureManager::upload(const std::vector<TextureData>& textureData, bool generateMips)
+/*
+uint16 TextureManager::upload(const std::vector<ITextureData*>& textureData, bool generateMips)
 {
     if (m_textures.size() + textureData.size() > UINT16_MAX)
     {
@@ -24,7 +27,7 @@ uint16 TextureManager::upload(const std::vector<TextureData>& textureData, bool 
     for (uint32 i = 0; i < textureData.size(); ++i)
     {
         m_textures.emplace_back();
-        if (!m_textures[startIdx + i].initialize(textureData[i], generateMips))
+        if (!m_textures[startIdx + i].initialize(*textureData[i], generateMips))
         {
             assert(false && "Failed to initialize texture");
             m_textures.resize(startIdx);
@@ -33,4 +36,18 @@ uint16 TextureManager::upload(const std::vector<TextureData>& textureData, bool 
     }
 
     return startIdx;
+}*/
+
+uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips)
+{
+	assert(m_textures.size() < UINT16_MAX && "Too many textures");
+	const uint16 idx = (uint16)m_textures.size();
+	m_textures.emplace_back();
+	if (!m_textures[idx].initialize(textureData, generateMips))
+	{
+		assert(false && "Failed to initialize texture");
+		m_textures.pop_back();
+		return UINT16_MAX;
+	}
+	return idx;
 }

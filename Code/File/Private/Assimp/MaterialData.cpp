@@ -166,7 +166,7 @@ float MaterialData::getOpacity() const
         return 1.0f;
 }
 
-MaterialData::EAlphaMode MaterialData::getAlphaMode() const
+IMaterialData::EAlphaMode MaterialData::getAlphaMode() const
 {
     // glTF stores the alpha mode explicitly as "OPAQUE" / "MASK" / "BLEND".
     aiString mode;
@@ -213,12 +213,13 @@ float MaterialData::getRefractiveIndex() const
         return 0.04f;
 }
 
-std::string MaterialData::getTexturePath(TextureType type) const
+std::string MaterialData::getTexturePath(ETextureType type) const
 {
-    assert(m_pMaterial->GetTextureCount(type) <= 1 && "Only one texture per type supported");
+    const aiTextureType aiType = static_cast<aiTextureType>(type);
+    assert(m_pMaterial->GetTextureCount(aiType) <= 1 && "Only one texture per type supported");
 
     aiString path;
-    m_pMaterial->GetTexture(type, 0, &path);
+    m_pMaterial->GetTexture(aiType, 0, &path);
     if (!path.length)
         return "";
     else

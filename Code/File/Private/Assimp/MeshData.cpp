@@ -66,16 +66,6 @@ uint32 MeshData::getNumIndices() const
     return (uint32)m_indices.size();
 }
 
-void MeshData::getIndices(std::vector<uint32>& indices) const
-{
-    assert(indices.empty());
-    indices.resize(m_pMesh->mNumFaces * 3);
-    for (uint32 i = 0; i < m_pMesh->mNumFaces; i++)
-    {
-        memcpy(&indices[i * 3], m_pMesh->mFaces[i].mIndices, 3 * sizeof(uint32));
-    }
-}
-
 uint32 MeshData::getMaterialIndex() const
 {
     return m_pMesh->mMaterialIndex;

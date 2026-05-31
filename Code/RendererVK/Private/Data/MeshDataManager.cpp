@@ -1,7 +1,6 @@
 module RendererVK:MeshDataManager;
 
 import Core;
-import File.MeshData;
 import :StagingManager;
 import :Buffer;
 import :Device;

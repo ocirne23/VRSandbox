@@ -12,7 +12,7 @@ import :Buffer;
 import :Texture;
 
 export class RenderNode;
-       
+
 export enum NodeSpawnIdx : uint16
 {
     NodeSpawnIdx_ROOT = 0,
@@ -34,7 +34,7 @@ public:
     ObjectContainer& operator=(const ObjectContainer&) = delete;
     ObjectContainer& operator=(const ObjectContainer&&) = delete;
 
-    bool initialize(const SceneData& sceneData);
+    bool initialize(const ISceneData& sceneData);
     bool isValid() const { return !m_nodeInfos.empty(); }
 
     NodeSpawnIdx getSpawnIdxForPath(const std::string& nodePath) const;
@@ -47,10 +47,10 @@ public:
 
 private:
 
-    void initializeTextures(const std::vector<TextureData>& textureData);
-    void initializeMeshes(const std::vector<MeshData>& meshData);
-    void initializeMaterials(const std::vector<MaterialData>& materialData, std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>>& pipelineAlphaForMaterialIdx);
-    void initializeNodes(const NodeData& nodeData, std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>>& pipelineAlphaForMaterialIdx);
+    struct TempInitData;
+    void initializeMeshes(const ISceneData& sceneData, TempInitData& temp);
+    void initializeMaterials(const ISceneData& sceneData, TempInitData& temp);
+    void initializeNodes(const ISceneData& sceneData, TempInitData& temp);
 
 private:
 
@@ -72,7 +72,6 @@ private:
     std::vector<NodeMeshRange> m_nodeMeshRanges;
     std::unordered_map<std::string, uint16> m_nodePathIdxLookup;
 
-    std::vector<uint16> m_materialIdxForMeshIdx;
     std::vector<RendererVKLayout::MeshInstanceOffset> m_meshInstanceOffsets;
     std::vector<Sphere> m_meshInstanceBounds;
     std::vector<Sphere> m_boundsForMeshIdx;
@@ -80,9 +79,6 @@ private:
     uint32 m_baseMeshInstanceOffsetsIdx = 0;
     uint16 m_baseMeshInfoIdx = 0;
     uint16 m_baseMaterialInfoIdx = 0;
-
-    uint16 m_baseTextureIdx = 0;
-    uint16 m_numTextures = 0;
 
     std::vector<std::string> m_meshNames;
     std::vector<std::string> m_materialNames;

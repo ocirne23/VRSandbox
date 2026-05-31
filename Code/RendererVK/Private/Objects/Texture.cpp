@@ -1,12 +1,13 @@
 module RendererVK:Texture;
 
 import Core;
+import File.ITextureData;
+
 import :VK;
 import :Buffer;
 import :StagingManager;
 import :stb_image;
 import :DDS;
-import File.TextureData;
 
 Texture::Texture()
 {
@@ -100,7 +101,7 @@ bool Texture::initialize(const char* filePath, bool generateMips)
 	return initialize(width, height, format, imgData, generateMips);
 }
 
-bool Texture::initialize(const TextureData& textureData, bool generateMips)
+bool Texture::initialize(const ITextureData& textureData, bool generateMips)
 {
     const bool sRGB = false;
     std::string formatInfo = textureData.getFormatInfo();

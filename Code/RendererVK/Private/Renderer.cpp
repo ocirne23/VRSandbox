@@ -8,8 +8,6 @@ import Core.Frustum;
 import Core.imgui;
 import Core.Camera;
 
-import File.SceneData;
-import File.MeshData;
 import File.FileSystem;
 
 import :RenderNode;

@@ -1,7 +1,8 @@
 export module RendererVK:TextureManager;
 
 import Core;
-import File.TextureData;
+import File.fwd;
+
 import :Texture;
 
 export class TextureManager final
@@ -9,7 +10,8 @@ export class TextureManager final
 public:
 
     ~TextureManager();
-    uint16 upload(const std::vector<TextureData>& textureData, bool generateMips);
+    //uint16 upload(const std::vector<ITextureData*>& textureData, bool generateMips);
+    uint16 upload(const ITextureData& textureData, bool generateMips);
     const Texture& getTexture(uint16 idx) const { assert(idx < m_textures.size()); return m_textures[idx]; }
     const std::vector<Texture>& getTextures() const { return m_textures; }
 	size_t getNumTextures() const { return m_textures.size(); }

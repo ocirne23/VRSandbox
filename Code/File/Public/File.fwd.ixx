@@ -3,9 +3,9 @@ export module File.fwd;
 export extern "C++"
 {
 	class FileSystem;
-	class MaterialData;
-	class MeshData;
-	class NodeData;
-	class SceneData;
-	class TextureData;
+	class IMaterialData;
+	class IMeshData;
+	class INodeData;
+	class ISceneData;
+	class ITextureData;
 }

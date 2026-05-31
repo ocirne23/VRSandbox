@@ -48,14 +48,13 @@ bool SceneData::initialize(const char* filePath, bool mergeNodes, bool preTransf
         [[maybe_unused]] bool res = material.initialize(m_pScene->mMaterials[i]);
         assert(res && "Failed to initialize MaterialData");
     }
-    const aiNode* pRootNode = m_pScene->mRootNode;
 
-    m_rootNode.initialize(pRootNode);
+    m_rootNode.initialize(m_pScene->mRootNode);
 
     return m_pScene != nullptr;
 }
 
-const MeshData* SceneData::getMesh(const char* pMeshName) const
+const IMeshData* SceneData::getMesh(const char* pMeshName) const
 {
     for (const MeshData& mesh : m_meshes)
     {
@@ -65,10 +64,4 @@ const MeshData* SceneData::getMesh(const char* pMeshName) const
         }
     }
     return nullptr;
-}
-
-const MaterialData& SceneData::getMaterial(uint32 materialIdx) const
-{
-    assert(materialIdx < (uint32)m_materials.size());
-    return m_materials[materialIdx];
 }

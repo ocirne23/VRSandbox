@@ -17,7 +17,7 @@ public:
     Texture(Texture&& move);
 
     bool initialize(const char* filePath, bool generateMips);
-    bool initialize(const TextureData& textureData, bool generateMips);
+    bool initialize(const ITextureData& textureData, bool generateMips);
     bool initialize(uint32 width, uint32 height, vk::Format format, const std::vector<std::span<uint8>>& imageDataMips, bool generateMips);
 
     vk::ImageView getImageView() const { return m_imageView; }

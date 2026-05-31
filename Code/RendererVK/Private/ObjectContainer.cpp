@@ -3,11 +3,11 @@ module RendererVK:ObjectContainer;
 import Core;
 import Core.Transform;
 
-import File.SceneData;
-import File.NodeData;
-import File.MeshData;
-import File.MaterialData;
-import File.TextureData;
+import File.ISceneData;
+import File.INodeData;
+import File.IMeshData;
+import File.IMaterialData;
+import File.ITextureData;
 
 import :Renderer;
 import :MeshDataManager;
@@ -17,17 +17,23 @@ import :TextureManager;
 constexpr char NODE_PATH_SEPARATOR = '/';
 constexpr char NODE_CHILD_SEPARATOR = ':';
 
-bool ObjectContainer::initialize(const SceneData& sceneData)
+struct ObjectContainer::TempInitData
+{
+	std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>> pipelineAlphaForMaterialIdx;
+    std::vector<uint16> materialIdxForMeshIdx;
+    std::vector<uint16> textureIdxForMaterialTex;
+};
+
+bool ObjectContainer::initialize(const ISceneData& sceneData)
 {
     if (!sceneData.isValid())
         return false;
     Globals::rendererVK.addObjectContainer(this);
-    initializeTextures(sceneData.getTextures());
 
-    std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>> pipelineAlphaForMaterialIdx;
-    initializeMaterials(sceneData.getMaterials(), pipelineAlphaForMaterialIdx);
-    initializeMeshes(sceneData.getMeshes());
-    initializeNodes(sceneData.getRootNode(), pipelineAlphaForMaterialIdx);
+    TempInitData temp;
+    initializeMaterials(sceneData, temp);
+    initializeMeshes(sceneData, temp);
+    initializeNodes(sceneData, temp);
     return true;
 }
 
@@ -37,25 +43,20 @@ ObjectContainer::~ObjectContainer()
     // Globals::rendererVK.removeObjectContainer(this);
 }
 
-void ObjectContainer::initializeTextures(const std::vector<TextureData>& textureData)
+void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData& temp)
 {
-    m_baseTextureIdx = Globals::textureManager.upload(textureData, true);
-    m_numTextures = (uint16)textureData.size();
-}
-
-void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList)
-{
-    const size_t numMeshes = meshDataList.size();
+    const size_t numMeshes = sceneData.getNumMeshes();
 
     std::vector<RendererVKLayout::MeshInfo> meshInfos;
     meshInfos.reserve(numMeshes);
 
     MeshDataManager& meshDataManager = Globals::meshDataManager;
-    for (const MeshData& meshData : meshDataList)
-    {
+	for (uint32 meshIdx = 0; meshIdx < numMeshes; meshIdx++)
+	{
+		const IMeshData& meshData = *sceneData.getMesh(meshIdx);
         RendererVKLayout::MeshInfo& meshInfo = meshInfos.emplace_back();
         m_meshNames.push_back(meshData.getName());
-        m_materialIdxForMeshIdx.push_back((uint16)meshData.getMaterialIndex());
+        temp.materialIdxForMeshIdx.push_back((uint16)meshData.getMaterialIndex());
 
         std::vector<RendererVKLayout::MeshVertex> vertices;
         vertices.resize(meshData.getNumVertices());
@@ -80,11 +81,11 @@ void ObjectContainer::initializeMeshes(const std::vector<MeshData>& meshDataList
         sphereBounds.radius = bounds.getRadius();
         m_boundsForMeshIdx.push_back(sphereBounds);
 
-        std::vector<uint32> indices;
-        meshData.getIndices(indices);
-        meshInfo.indexCount   = (uint32)indices.size();
+		const uint32 numIndices = meshData.getNumIndices();
+        const uint32* pIndices = meshData.getIndices();
+        meshInfo.indexCount   = numIndices;
         meshInfo.vertexOffset = (int32)(meshDataManager.uploadVertexData(vertices.data(), vertices.size() * sizeof(RendererVKLayout::MeshVertex)) / sizeof(RendererVKLayout::MeshVertex));
-        meshInfo.firstIndex   = (uint32)(meshDataManager.uploadIndexData(indices.data(), indices.size() * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
+        meshInfo.firstIndex   = (uint32)(meshDataManager.uploadIndexData(pIndices, numIndices * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
         meshInfo.radius       = sphereBounds.radius;
         meshInfo.center       = sphereBounds.pos;
         meshInfo.firstInstance = 0;
@@ -109,15 +110,17 @@ union MaterialFlags
     uint32 flags;
 };
 
-void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& materialDataList, std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>>& pipelineAlphaForMaterialIdx)
+void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitData& temp)
 {
-    const size_t numMaterials = materialDataList.size();
+    const size_t numMaterials = sceneData.getNumMaterials();
     std::vector<RendererVKLayout::MaterialInfo> materialInfos;
+	temp.textureIdxForMaterialTex.resize(sceneData.getNumTextures(), UINT16_MAX);
     materialInfos.reserve(numMaterials);
     m_materialNames.reserve(numMaterials);
 
-    for (const MaterialData& materialData : materialDataList)
+    for (uint32 materialIdx = 0; materialIdx < numMaterials; materialIdx++)
     {
+        const IMaterialData& materialData = *sceneData.getMaterial(materialIdx);
         RendererVKLayout::MaterialInfo& material = materialInfos.emplace_back();
 
         material.baseColor     = materialData.getBaseColor();
@@ -125,41 +128,50 @@ void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& mater
         material.specularColor = materialData.getSpecularColor();
         material.metalness     = materialData.getMetalnessFactor();
         material.emissiveColor = materialData.getEmissiveColor() * materialData.getEmissiveIntensity();
-        const MaterialData::EAlphaMode alphaMode = materialData.getAlphaMode();
-        const float opacity    = materialData.getOpacity();
-		//const float opacity    = materialInfos.size() % 2 == 0 ? 0.5f : 1.0f; // testing blend mode by forcing every other material to be blended
-        const bool isBlend     = alphaMode == MaterialData::EAlphaMode::Blend || (alphaMode == MaterialData::EAlphaMode::Opaque && opacity < 1.0f);
+        material.diffuseTexIdx = 0;
+		material.normalTexIdx  = 0;
 
-        if (isBlend)
-        {
-            material.alphaMode = (uint32)RendererVKLayout::EAlphaMode::Blend;
-            material.opacity = opacity;
-            pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitTransparent, RendererVKLayout::EAlphaMode::Blend);
-        }
-        else if (alphaMode == MaterialData::EAlphaMode::Mask)
+		const IMaterialData::EAlphaMode alphaMode = materialData.getAlphaMode();
+		const float opacity    = materialData.getOpacity();
+		//const float opacity    = materialInfos.size() % 2 == 0 ? 0.5f : 1.0f; // testing blend mode by forcing every other material to be blended
+		const bool isBlend     = alphaMode == IMaterialData::EAlphaMode::Blend || (alphaMode == IMaterialData::EAlphaMode::Opaque && opacity < 1.0f);
+
+		if (isBlend)
+		{
+			material.alphaMode = (uint32)RendererVKLayout::EAlphaMode::Blend;
+			material.opacity = opacity;
+			temp.pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitTransparent, RendererVKLayout::EAlphaMode::Blend);
+		}
+		else if (alphaMode == IMaterialData::EAlphaMode::Mask)
         {
             material.alphaMode = (uint32)RendererVKLayout::EAlphaMode::Mask;
             material.opacity = materialData.getAlphaCutoff(); // cutoff stored in opacity for masked materials
-			pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitOpaque, RendererVKLayout::EAlphaMode::Mask);
+			temp.pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitOpaque, RendererVKLayout::EAlphaMode::Mask);
         }
         else
         {
             material.alphaMode = (uint32)RendererVKLayout::EAlphaMode::Opaque;
             material.opacity = opacity;
-			pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitOpaque, RendererVKLayout::EAlphaMode::Opaque);
+			temp.pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitOpaque, RendererVKLayout::EAlphaMode::Opaque);
         }
 
         const uint32 diffuseTexIdx = materialData.getDiffuseTexIdx();
-        if (diffuseTexIdx == UINT32_MAX || diffuseTexIdx >= UINT16_MAX)
-            material.diffuseTexIdx = 0; // todo fallback texture
-        else
-            material.diffuseTexIdx = (uint16)diffuseTexIdx;
+		if (diffuseTexIdx != UINT32_MAX)
+		{
+            uint16& idx = temp.textureIdxForMaterialTex[diffuseTexIdx];
+            if (idx == UINT16_MAX)
+				idx = Globals::textureManager.upload(*sceneData.getTexture(diffuseTexIdx), true);
+            material.diffuseTexIdx = idx;
+		}
 
         const uint32 normalTexIdx = materialData.getNormalTexIdx();
-        if (normalTexIdx == UINT32_MAX || normalTexIdx >= UINT16_MAX)
-            material.normalTexIdx = 0; // todo fallback texture
-        else
-            material.normalTexIdx = (uint16)normalTexIdx;
+        if (normalTexIdx != UINT32_MAX)
+        {
+            uint16& idx = temp.textureIdxForMaterialTex[normalTexIdx];
+            if (idx == UINT16_MAX)
+                idx = Globals::textureManager.upload(*sceneData.getTexture(normalTexIdx), true);
+            material.normalTexIdx = idx;
+        }
 
         m_materialNames.push_back(materialData.getName());
     }
@@ -167,12 +179,12 @@ void ObjectContainer::initializeMaterials(const std::vector<MaterialData>& mater
     m_baseMaterialInfoIdx = (uint16)Globals::rendererVK.addMaterialInfos(materialInfos);
 }
 
-void ObjectContainer::initializeNodes(const NodeData& nodeData, std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>>& pipelineAlphaForMaterialIdx)
+void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData& temp)
 {
-    std::list<std::pair<const aiNode*, int>> nodeDataParentIdxStack;
+    std::list<std::pair<std::unique_ptr<INodeData>, int>> nodeDataParentIdxStack;
     std::vector<Transform> localSpaceNodes;
 
-    nodeDataParentIdxStack.push_back({ nodeData.getAiNode(), 0 });
+    nodeDataParentIdxStack.emplace_back(sceneData.getRootNode().clone(), 0);
 
     struct LocalSpaceNode
     {
@@ -188,19 +200,22 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData, std::vector<std:
 
     while (!nodeDataParentIdxStack.empty())
     {
-        auto [pAiNode, parentIdx] = nodeDataParentIdxStack.front();
+		std::pair<std::unique_ptr<INodeData>, int>& front = nodeDataParentIdxStack.front();
+        std::unique_ptr<INodeData> pStackNode = std::move(front.first);
+		int parentIdx = front.second;
         nodeDataParentIdxStack.pop_front();
-        bool isRoot = nodeData.getAiNode() == pAiNode;
 
-        aiVector3f pos, scale;
-        aiQuaternion rot;
-        pAiNode->mTransformation.Decompose(scale, rot, pos);
+        bool isRoot = parentIdx == 0;
+
+        glm::vec3 pos, scale;
+        glm::quat rot;
+        pStackNode->getTransform(pos, scale, rot);
 
         const float nonUniformScaleAmount = glm::max(glm::distance(scale.x, scale.y), glm::distance(scale.x, scale.z));
         assert(nonUniformScaleAmount < 0.0001f && "Non-uniform scaling is not supported");
         (void)(nonUniformScaleAmount);
 
-        const uint32 numChildren = pAiNode->mNumChildren;
+        const uint32 numChildren = pStackNode->getNumChildren();
         const uint32 nodeIdx = (uint32)initialStateNodes.size();
 
         LocalSpaceNode& node = initialStateNodes.emplace_back();
@@ -210,18 +225,18 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData, std::vector<std:
 
         node.numChildren = (uint16)numChildren;
         node.parentOffset = (uint16)(nodeIdx - parentIdx);
-        node.path = isRoot ? pAiNode->mName.C_Str() : initialStateNodes[parentIdx].path + NODE_PATH_SEPARATOR + pAiNode->mName.C_Str();
+        node.path = isRoot ? pStackNode->getName() : initialStateNodes[parentIdx].path + NODE_PATH_SEPARATOR + pStackNode->getName();
 
-        if (pAiNode->mNumMeshes > 0)
+        if (pStackNode->getNumMeshes() > 0)
         {
-            node.meshInfoIdx = (uint16)pAiNode->mMeshes[0];
-            node.materialInfoIdx = m_materialIdxForMeshIdx[node.meshInfoIdx];
+            node.meshInfoIdx = (uint16)pStackNode->getMeshIndex(0);
+            node.materialInfoIdx = temp.materialIdxForMeshIdx[node.meshInfoIdx];
 
             // If the node has more than 1 mesh, add the remaining meshes as children of the current node
-            if (pAiNode->mNumMeshes > 1)
-                node.numChildren += (uint16)(pAiNode->mNumMeshes - 1);
+            if (pStackNode->getNumMeshes() > 1)
+                node.numChildren += (uint16)(pStackNode->getNumMeshes() - 1);
 
-            for (uint32 i = 1; i < pAiNode->mNumMeshes; ++i)
+            for (uint32 i = 1; i < pStackNode->getNumMeshes(); ++i)
             {
                 const uint32 childNodeIdx = (uint32)initialStateNodes.size();
                 LocalSpaceNode& childNode = initialStateNodes.emplace_back();
@@ -230,8 +245,8 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData, std::vector<std:
                 childNode.transform.quat = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
                 childNode.parentOffset = (uint16)(childNodeIdx - nodeIdx);
                 childNode.numChildren = 0;
-                childNode.meshInfoIdx = (uint16)pAiNode->mMeshes[i];
-                childNode.materialInfoIdx = m_materialIdxForMeshIdx[childNode.meshInfoIdx];
+				childNode.meshInfoIdx = (uint16)pStackNode->getMeshIndex(i);
+                childNode.materialInfoIdx = temp.materialIdxForMeshIdx[childNode.meshInfoIdx];
                 childNode.path = initialStateNodes[nodeIdx].path + NODE_CHILD_SEPARATOR + std::to_string(i);
             }
         }
@@ -242,7 +257,7 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData, std::vector<std:
 
         for (uint32 i = 0; i < numChildren; ++i)
         {
-            nodeDataParentIdxStack.push_front({ pAiNode->mChildren[i], nodeIdx });
+            nodeDataParentIdxStack.emplace_front(pStackNode->getChild(i), nodeIdx);
         }
     }
 
@@ -295,8 +310,8 @@ void ObjectContainer::initializeNodes(const NodeData& nodeData, std::vector<std:
 			NodeInfo nodeInfo{ 
                 .meshInfoIdx = node.meshInfoIdx,
 				.materialInfoIdx = node.materialInfoIdx,
-				.pipelineIdx = (uint16)pipelineAlphaForMaterialIdx[node.materialInfoIdx].first,
-				.alphaMode = (uint16)pipelineAlphaForMaterialIdx[node.materialInfoIdx].second
+				.pipelineIdx = (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].first,
+				.alphaMode = (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].second
 			};
             m_nodeInfos.emplace_back(nodeInfo);
             m_meshInstanceOffsets.emplace_back(nodeWS);
