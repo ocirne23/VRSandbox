@@ -1,0 +1,30 @@
+module File.ProceduralNodeData;
+
+import Core;
+
+bool ProceduralNodeData::initialize(const char* name, std::vector<uint32> meshIndices)
+{
+	m_name        = name ? name : "ProceduralNode";
+	m_meshIndices = std::move(meshIndices);
+	return true;
+}
+
+std::unique_ptr<INodeData> ProceduralNodeData::clone() const
+{
+	auto node = std::make_unique<ProceduralNodeData>();
+	node->initialize(m_name.c_str(), m_meshIndices);
+	return node;
+}
+
+uint32 ProceduralNodeData::getMeshIndex(uint32 meshIdx) const
+{
+	assert(meshIdx < m_meshIndices.size());
+	return m_meshIndices[meshIdx];
+}
+
+void ProceduralNodeData::getTransform(glm::vec3& pos, glm::vec3& scale, glm::quat& rot) const
+{
+	pos   = glm::vec3(0.0f);
+	scale = glm::vec3(1.0f);
+	rot   = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+}

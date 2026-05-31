@@ -10,7 +10,7 @@ public:
 
     struct Pixel
     {
-        char a, r, g, b;
+        uint8 r, g, b, a;
     };
 
     virtual const char* getFileName() const = 0;

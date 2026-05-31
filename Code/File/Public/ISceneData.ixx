@@ -8,6 +8,7 @@ export class ISceneData
 public:
 
 	static std::unique_ptr<ISceneData> createAssimpLoader();
+	static std::unique_ptr<ISceneData> createProceduralLoader();
 
 	virtual ~ISceneData() = default;
 

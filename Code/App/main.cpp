@@ -53,6 +53,7 @@ int main()
     std::vector<Light> spawnedLights;
 
     ObjectContainer container;
+    ObjectContainer container2;
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
         sceneData->initialize("Models/sponza.glb", true, true);
@@ -60,6 +61,13 @@ int main()
         for (int x = 0; x < 20; ++x)
             for (int y = 0; y < 20; ++y)
                 spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 0, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+
+        std::unique_ptr<ISceneData> sceneData2 = ISceneData::createProceduralLoader();
+        sceneData2->initialize("sphere", true, true);
+        container2.initialize(*sceneData2);
+        for (int x = 0; x < 20; ++x)
+            for (int y = 0; y < 20; ++y)
+                spawnedNodes.push_back(container2.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 2.0f, y * 20.0f), 2.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)

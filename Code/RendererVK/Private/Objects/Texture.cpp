@@ -161,19 +161,17 @@ bool Texture::initialize(const ITextureData& textureData, bool generateMips)
     }
     else
     {
-        if (formatInfo.compare("argb8888") == 0)
-        {
-			assert(false && "implement argb8888 loading");
-        }
-        else if (formatInfo.compare("rgba8888") == 0)
-        {
-            assert(false && "implement rgba8888 loading");
-        }
-        else
-        {
-            assert(false && "unsupported uncompressed texture format");
-        }
-        return false;
+        if (formatInfo.compare("rgba8888") == 0)
+		{
+			const size_t dataSize = (size_t)width * height * sizeof(ITextureData::Pixel);
+			imgData.push_back(std::span((uint8*)textureData.getPixels(), dataSize));
+			format = vk::Format::eR8G8B8A8Unorm;
+		}
+		else
+		{
+			assert(false && "unsupported uncompressed texture format");
+			return false;
+		}
     }
 
     return initialize(width, height, format, imgData, generateMips);
