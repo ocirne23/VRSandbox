@@ -124,55 +124,56 @@ bool frustumCheck(vec3 pos, float radius)
 
 void main()
 {
-    const uint instanceIdx     = gl_GlobalInvocationID.x;
-    const uint16_t meshIdx     = uint16_t(in_instances[instanceIdx].meshIdxMaterialIdx & 0x0000FFFF);
-    const uint16_t materialIdx = uint16_t((in_instances[instanceIdx].meshIdxMaterialIdx & 0xFFFF0000) >> 16);
-    const uint renderNodeIdx   = in_instances[instanceIdx].renderNodeIdx;
-    const uint offsetIdx       = in_instances[instanceIdx].instanceOffsetIdx;
-    const uint16_t pipelineIdx = uint16_t(in_instances[instanceIdx].pipelineIdxAlphaMode & 0x0000FFFF);
-    const uint16_t alphaMode   = uint16_t((in_instances[instanceIdx].pipelineIdxAlphaMode & 0xFFFF0000) >> 16);
-    const bool isTransparent   = alphaMode == ALPHA_MODE_BLEND;
+    const uint instanceIdx        = gl_GlobalInvocationID.x;
+    const InMeshInstance instance = in_instances[instanceIdx];
+    const uint16_t meshIdx        = uint16_t(instance.meshIdxMaterialIdx & 0x0000FFFF);
+    const InMeshInfo meshInfo     = in_meshInfos[meshIdx];
 
-    const vec4 quat                   = quat_multiply(in_renderNodeTransforms[renderNodeIdx].quat, in_instanceOffsets[offsetIdx].quat);
-    const vec4 renderNodePosScale     = in_renderNodeTransforms[renderNodeIdx].posScale;
-    const vec4 instanceOffsetPosScale = in_instanceOffsets[offsetIdx].posScale;
-    const vec4 instancePosScale       = vec4(renderNodePosScale.xyz + quat_transform(instanceOffsetPosScale.xyz, in_renderNodeTransforms[renderNodeIdx].quat),
+    const vec4 quat                   = quat_multiply(in_renderNodeTransforms[instance.renderNodeIdx].quat, in_instanceOffsets[instance.instanceOffsetIdx].quat);
+    const vec4 renderNodePosScale     = in_renderNodeTransforms[instance.renderNodeIdx].posScale;
+    const vec4 instanceOffsetPosScale = in_instanceOffsets[instance.instanceOffsetIdx].posScale;
+    const vec4 instancePosScale       = vec4(renderNodePosScale.xyz + quat_transform(instanceOffsetPosScale.xyz, in_renderNodeTransforms[instance.renderNodeIdx].quat),
                                             renderNodePosScale.w * instanceOffsetPosScale.w);
-    const vec3 centerOffset           = quat_transform(in_meshInfos[meshIdx].center * instancePosScale.w, quat);
-    const float radius                = in_meshInfos[meshIdx].radius * instancePosScale.w;
-
-    const vec3 centerPos = instancePosScale.xyz + centerOffset;
-
-    // Route this mesh's draw to the opaque or transparent command buffer by alpha mode. All
-    // instances of a mesh share its material (1:1 in the asset pipeline), so a mesh lands in exactly
-    // one bucket and its per-mesh firstInstance region is used exclusively by that bucket.
-    if (!isTransparent)
-    {
-        out_indirectCommands[meshIdx].pipelineIndex = pipelineIdx;
-        out_indirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
-        out_indirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
-        out_indirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
-        out_indirectCommands[meshIdx].firstInstance = in_firstInstances[meshIdx];
-    }
-    else
-    {
-        out_transparentIndirectCommands[meshIdx].pipelineIndex = pipelineIdx;
-        out_transparentIndirectCommands[meshIdx].indexCount    = in_meshInfos[meshIdx].indexCount;
-        out_transparentIndirectCommands[meshIdx].firstIndex    = in_meshInfos[meshIdx].firstIndex;
-        out_transparentIndirectCommands[meshIdx].vertexOffset  = in_meshInfos[meshIdx].vertexOffset;
-        out_transparentIndirectCommands[meshIdx].firstInstance = in_firstInstances[meshIdx];
-    }
+    const vec3 centerOffset           = quat_transform(meshInfo.center * instancePosScale.w, quat);
+    const float radius                = meshInfo.radius * instancePosScale.w;
+    const vec3 centerPos              = instancePosScale.xyz + centerOffset;
 
     if (frustumCheck(centerPos, radius))
     {
+        const uint firstInstance      = in_firstInstances[meshIdx];
+        const uint16_t pipelineIdx    = uint16_t(instance.pipelineIdxAlphaMode & 0x0000FFFF);
+        const uint16_t alphaMode      = uint16_t((instance.pipelineIdxAlphaMode & 0xFFFF0000) >> 16);
+        const bool isTransparent      = alphaMode == ALPHA_MODE_BLEND;
+
         uint idx;
         if (!isTransparent)
             idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
         else
             idx = atomicAdd(out_transparentIndirectCommands[meshIdx].instanceCount, 1);
-        out_meshInstanceIndexes[in_firstInstances[meshIdx] + idx] = instanceIdx;
+
+        if (idx == 0)
+        {
+            if (!isTransparent)
+            {
+                out_indirectCommands[meshIdx].pipelineIndex = pipelineIdx;
+                out_indirectCommands[meshIdx].indexCount    = meshInfo.indexCount;
+                out_indirectCommands[meshIdx].firstIndex    = meshInfo.firstIndex;
+                out_indirectCommands[meshIdx].vertexOffset  = meshInfo.vertexOffset;
+                out_indirectCommands[meshIdx].firstInstance = firstInstance;
+            }
+            else
+            {
+                out_transparentIndirectCommands[meshIdx].pipelineIndex = pipelineIdx;
+                out_transparentIndirectCommands[meshIdx].indexCount    = meshInfo.indexCount;
+                out_transparentIndirectCommands[meshIdx].firstIndex    = meshInfo.firstIndex;
+                out_transparentIndirectCommands[meshIdx].vertexOffset  = meshInfo.vertexOffset;
+                out_transparentIndirectCommands[meshIdx].firstInstance = firstInstance;
+            }
+        }
+
+        out_meshInstanceIndexes[firstInstance + idx]      = instanceIdx;
         out_meshInstances[instanceIdx].posScale           = instancePosScale;
         out_meshInstances[instanceIdx].quat               = quat;
-        out_meshInstances[instanceIdx].meshIdxMaterialIdx = in_instances[instanceIdx].meshIdxMaterialIdx;
+        out_meshInstances[instanceIdx].meshIdxMaterialIdx = instance.meshIdxMaterialIdx;
     }
 }

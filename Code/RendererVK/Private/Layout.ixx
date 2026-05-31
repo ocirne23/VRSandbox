@@ -22,7 +22,7 @@ export namespace RendererVKLayout
 
     constexpr size_t MAX_LIGHTS = USHRT_MAX - 1;
     constexpr size_t LIGHT_GRID_BUFFER_SIZE = 10 * 1024 * 1024;
-    constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 4096;
+	constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 1024 * 8; // should be power of 2 for hashing
 
     struct MeshVertex
     {

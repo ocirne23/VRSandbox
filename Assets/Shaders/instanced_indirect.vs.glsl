@@ -40,9 +40,10 @@ vec3 quat_transform(vec3 v, vec4 q)
 
 void main()
 {
-    vec3  inst_pos   = in_instances[inst_idx].posScale.xyz;
-    float inst_scale = in_instances[inst_idx].posScale.w;
-    vec4  inst_quat  = in_instances[inst_idx].quat;
+    const InMeshInstancesData inst = in_instances[inst_idx];
+    vec3  inst_pos   = inst.posScale.xyz;
+    float inst_scale = inst.posScale.w;
+    vec4  inst_quat  = inst.quat;
 
     vec3 N = quat_transform(in_normal, inst_quat);
     vec3 T = quat_transform(in_tangent.xyz, inst_quat);
@@ -51,7 +52,7 @@ void main()
     out_pos = quat_transform(in_pos * inst_scale, inst_quat) + inst_pos;
     out_tbn = mat3(T, B, N);
     out_uv  = in_uv;
-    out_meshIdxMaterialIdx = in_instances[inst_idx].meshIdxMaterialIdx;
+    out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
 
     gl_Position = u_mvp * vec4(out_pos, 1.0);
 }

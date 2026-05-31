@@ -93,7 +93,10 @@ ivec3 getGridPos(vec3 pos)
 
 float inverseSquareFalloff(float lightDistance, float lightRange)
 {
-	return pow(max(1.0 - pow((lightDistance / lightRange), 4), 0), 2) / (pow(lightDistance, 2) + 1);
+	float dr = lightDistance / lightRange;
+	float dr2 = dr * dr;
+	float top = max(1.0 - dr2 * dr2, 0.0);
+	return (top * top) / (lightDistance * lightDistance + 1.0);
 }
 
 // a2: pow(roughness, 2)
@@ -114,7 +117,9 @@ float GeometrySmith(const float NdotL, const float NdotV, const float k)
 
 vec3 FresnelSchlickRoughness(float HdotV, vec3 F0, float roughness)
 {
-	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - HdotV, 5.0);
+	float x = 1.0 - HdotV;
+	float x2 = x * x;
+	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * (x2 * x2 * x);
 }
 
 vec3 doLight(

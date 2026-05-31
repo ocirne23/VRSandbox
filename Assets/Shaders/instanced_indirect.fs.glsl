@@ -117,7 +117,7 @@ ivec3 getGridPos(vec3 pos)
 uint getLightId(uint cellOffset, uint lightIdx) // return as uint instead of uint16 to avoid driver bug (treating uint16_t as signed)
 {
     const uint packed = in_gridData[cellOffset + 1 + lightIdx / 2];
-    if (lightIdx % 2 == 0)
+    if ((lightIdx & 1u) == 0u)
         return uint(packed & 0x0000FFFF);
     else
         return uint(packed >> 16);
@@ -129,7 +129,7 @@ uint getLargeLightCount(uint gridIdx)
 uint getLargeLightId(uint gridIdx, uint lightIdx)
 {
 	const uint packed = in_gridData[gridIdx + 5 + lightIdx / 2];
-	if (lightIdx % 2 == 0)
+	if ((lightIdx & 1u) == 0u)
 		return uint(packed & 0x0000FFFF);
 	else
 		return uint(packed >> 16);
@@ -137,7 +137,9 @@ uint getLargeLightId(uint gridIdx, uint lightIdx)
 float squareFalloff(float dist, float lightRadius) 
 {
     float attenuation = 1.0 / (dist * dist + 1.0);
-    float falloff = clamp(1.0 - pow(dist / lightRadius, 4.0), 0.0, 1.0);
+    float dr = dist / lightRadius;
+    float dr2 = dr * dr;
+    float falloff = clamp(1.0 - dr2 * dr2, 0.0, 1.0);
     falloff *= falloff;
     return attenuation * falloff;
 }
@@ -157,7 +159,9 @@ float GeometrySmith(const float NdotL, const float NdotV, const float k)
 }
 vec3 FresnelSchlickRoughness(float HdotV, vec3 F0, float roughness)
 {
-	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - HdotV, 5.0);
+	float x = 1.0 - HdotV;
+	float x2 = x * x;
+	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * (x2 * x2 * x);
 }
 
 vec3 doLight(vec3 pos, vec3 lightRadiance, vec3 L, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, 
@@ -180,9 +184,10 @@ vec3 doPointLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, v
 	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
 {
 	vec3 lightVec = light.pos - pos;
-	float falloff = squareFalloff(length(lightVec), light.range);
+	float dist = length(lightVec);
+	vec3 L = lightVec / dist;
+	float falloff = squareFalloff(dist, light.range);
 	vec3 lightRadiance = light.color * falloff * light.intensity;
-	vec3 L = normalize(lightVec);
 	return doLight(pos, lightRadiance, L, V, N, specularCol, matColOverPi, 
 		metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 }
@@ -248,7 +253,8 @@ void main()
 			const uint cellSize = getCellSize(gridIdx);
 			const uint numCells = GRID_SIZE / cellSize;
 			const ivec3 cellPos = (ivec3(floor(in_pos)) - gridMin * GRID_SIZE) / int(cellSize);
-			const uint cellIdx = cellPos.x + cellPos.y * numCells + cellPos.z * numCells * numCells;
+			const uint numCellsSq = numCells * numCells;
+			const uint cellIdx = cellPos.x + cellPos.y * numCells + cellPos.z * numCellsSq;
 			const uint cellOffset = getCellOffset(gridIdx, cellIdx);
 			const uint numLights = in_gridData[cellOffset];
 			for (uint i = 0; i < min(numLights, MAX_LIGHTCELL_LIGHTS); ++i)
@@ -260,7 +266,7 @@ void main()
 			}
 			break;
 		}
-		tableIdx = (tableIdx + 1) % in_tableSize;
+		tableIdx = (tableIdx + 1) & (in_tableSize - 1);
 	}
 	
 	out_color = vec4(color, min(diffuseSample.a, material.opacity));
