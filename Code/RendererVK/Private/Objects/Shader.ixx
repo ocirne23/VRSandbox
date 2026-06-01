@@ -3,6 +3,12 @@ export module RendererVK:Shader;
 import Core;
 import :VK;
 
+export struct ShaderDefine
+{
+    std::string name;
+    std::string value;
+};
+
 export class Shader final
 {
 public:
@@ -10,10 +16,10 @@ public:
     ~Shader();
     Shader(const Shader&) = delete;
 
-    bool initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath);
-    bool initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr, const std::string& debugFilePath);
+    bool initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath, const std::vector<ShaderDefine>& defines = {});
+    bool initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr, const std::string& debugFilePath, const std::vector<ShaderDefine>& defines = {});
 
-    static bool GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& source, std::vector<unsigned int>& spirv, const std::string& debugFilePath);
+    static bool GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& source, std::vector<unsigned int>& spirv, const std::string& debugFilePath, const std::vector<ShaderDefine>& defines = {});
 
     vk::ShaderModule getModule() const { return m_shaderModule; }
 

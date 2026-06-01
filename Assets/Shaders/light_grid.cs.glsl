@@ -4,11 +4,7 @@
 #extension GL_EXT_shader_16bit_storage : enable
 #extension GL_EXT_debug_printf : enable
 
-const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
-const uint INITIALIZING_ENTRY = 0xEFFFFFFFu;
-#define MAX_LARGE_LIGHTS_PER_GRID 6 // Must be even
-#define MAX_LIGHTCELL_LIGHTS 12     // Must be even
-#define GRID_SIZE 32
+#include "shared_constants.inc.glsl"
 
 struct LightInfo
 {

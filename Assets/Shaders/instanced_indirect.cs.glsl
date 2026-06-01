@@ -3,10 +3,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : enable
 #extension GL_EXT_shader_16bit_storage : enable
 
-#define MAX_UNIQUE_MESHES 1024u // matches RendererVKLayout::MAX_UNIQUE_MESHES
-#define ALPHA_MODE_OPAQUE 0u
-#define ALPHA_MODE_MASK 1u
-#define ALPHA_MODE_BLEND 2u
+#include "shared_constants.inc.glsl"
 
 struct RenderNodeTransform
 {

@@ -36,6 +36,7 @@ void IndirectCullComputePipeline::initialize()
     ComputePipelineLayout computePipelineLayout;
     computePipelineLayout.computeShaderDebugFilePath = "Shaders/instanced_indirect.cs.glsl";
     computePipelineLayout.computeShaderText = FileSystem::readFileStr(computePipelineLayout.computeShaderDebugFilePath);
+    computePipelineLayout.defines.push_back({ "MAX_UNIQUE_MESHES", std::to_string(RendererVKLayout::MAX_UNIQUE_MESHES) + "u" });
     auto& descriptorSetBindings = computePipelineLayout.descriptorSetLayoutBindings;
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // UBO
         .binding = 0,

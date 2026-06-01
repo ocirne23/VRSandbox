@@ -186,8 +186,8 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     m_pipelineCache = createPipelineCacheResult.value;
 
     Shader defaultVS, defaultFS;
-    defaultVS.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShader.text, layout.vertexShader.debugFilePath);
-    defaultFS.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShader.text, layout.fragmentShader.debugFilePath);
+    defaultVS.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShader.text, layout.vertexShader.debugFilePath, layout.vertexShader.defines);
+    defaultFS.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShader.text, layout.fragmentShader.debugFilePath, layout.fragmentShader.defines);
 
     // Compile per-variant shader overrides; entries with no override keep a null module.
     const size_t additionalCount = layout.additionalVariants.size();
@@ -197,9 +197,9 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     {
         const PipelineVariant& v = layout.additionalVariants[i];
         if (!v.vertexShader.text.empty())
-            overrideVS[i].initialize(vk::ShaderStageFlagBits::eVertex, v.vertexShader.text, v.vertexShader.debugFilePath);
+            overrideVS[i].initialize(vk::ShaderStageFlagBits::eVertex, v.vertexShader.text, v.vertexShader.debugFilePath, v.vertexShader.defines);
         if (!v.fragmentShader.text.empty())
-            overrideFS[i].initialize(vk::ShaderStageFlagBits::eFragment, v.fragmentShader.text, v.fragmentShader.debugFilePath);
+            overrideFS[i].initialize(vk::ShaderStageFlagBits::eFragment, v.fragmentShader.text, v.fragmentShader.debugFilePath, v.fragmentShader.defines);
     }
 
     // Variant 0: both defaults, no blending, depth write on.

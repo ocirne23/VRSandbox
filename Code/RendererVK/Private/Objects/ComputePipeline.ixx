@@ -2,11 +2,13 @@ export module RendererVK:ComputePipeline;
 
 import Core;
 import :VK;
+import :Shader;
 
 export struct ComputePipelineLayout
 {
     std::string computeShaderText;
     std::string computeShaderDebugFilePath;
+    std::vector<ShaderDefine> defines;
     std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
     std::vector<vk::PushConstantRange> pushConstantRanges;
 };

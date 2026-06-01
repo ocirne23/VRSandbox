@@ -3,6 +3,7 @@ export module RendererVK:GraphicsPipeline;
 import Core;
 import :VK;
 import :Layout;
+import :Shader;
 
 export class RenderPass;
 
@@ -16,6 +17,7 @@ export struct ShaderSource
 {
     std::string text;
     std::string debugFilePath;
+    std::vector<ShaderDefine> defines;
 };
 
 export struct PipelineVariant

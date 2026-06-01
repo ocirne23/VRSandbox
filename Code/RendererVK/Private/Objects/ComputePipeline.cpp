@@ -49,7 +49,7 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
     m_pipelineLayout = pipelineLayoutResult.value;
 
     Shader computeShader;
-    computeShader.initialize(vk::ShaderStageFlagBits::eCompute, layout.computeShaderText, layout.computeShaderDebugFilePath);
+    computeShader.initialize(vk::ShaderStageFlagBits::eCompute, layout.computeShaderText, layout.computeShaderDebugFilePath, layout.defines);
 
     vk::SpecializationInfo specializationInfo
     {

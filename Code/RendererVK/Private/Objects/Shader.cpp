@@ -13,7 +13,7 @@ Shader::~Shader()
         Globals::device.getDevice().destroyShaderModule(m_shaderModule);
 }
 
-bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath)
+bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath, const std::vector<ShaderDefine>& defines)
 {
     const std::string fileContent = FileSystem::readFileStr(filePath);
     if (fileContent.empty())
@@ -22,13 +22,13 @@ bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string
         return false;
     }
 
-    return initialize(stage, fileContent, filePath);
+    return initialize(stage, fileContent, filePath, defines);
 }
 
-bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr, const std::string& debugFilePath)
+bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr, const std::string& debugFilePath, const std::vector<ShaderDefine>& defines)
 {
     std::vector<unsigned int> spirv;
-    if (!GLSLtoSPV(stage, shaderStr, spirv, debugFilePath))
+    if (!GLSLtoSPV(stage, shaderStr, spirv, debugFilePath, defines))
     {
         assert(false && "Failed to compile shader SPIRV");
         return false;
@@ -71,7 +71,71 @@ EShLanguage translateShaderStage(vk::ShaderStageFlagBits stage)
     }
 }
 
-bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& source, std::vector<unsigned int>& spirv, const std::string& debugFilePath)
+class ShaderIncluder final : public glslang::TShader::Includer
+{
+public:
+    explicit ShaderIncluder(const std::string& rootFilePath)
+    {
+        m_rootDir = std::filesystem::path(rootFilePath).parent_path();
+    }
+
+    IncludeResult* includeLocal(const char* headerName, const char* includerName, size_t /*depth*/) override
+    {
+        return resolve(headerName, includerName);
+    }
+
+    IncludeResult* includeSystem(const char* headerName, const char* includerName, size_t /*depth*/) override
+    {
+        return resolve(headerName, includerName);
+    }
+
+    void releaseInclude(IncludeResult* /*result*/) override {}
+
+private:
+    IncludeResult* resolve(const char* headerName, const char* includerName)
+    {
+        std::vector<std::filesystem::path> candidates;
+        if (includerName != nullptr && includerName[0] != '\0')
+        {
+            const std::filesystem::path includerDir = std::filesystem::path(includerName).parent_path();
+            if (!includerDir.empty())
+                candidates.push_back(includerDir / headerName);
+        }
+        candidates.push_back(m_rootDir / headerName);
+
+        for (const std::filesystem::path& candidate : candidates)
+        {
+            const std::string resolvedPath = candidate.lexically_normal().generic_string();
+            std::string content = FileSystem::readFileStr(resolvedPath);
+            if (content.empty())
+                continue;
+
+            const std::string& stored = *m_contents.emplace_back(std::make_unique<std::string>(std::move(content)));
+            m_results.push_back(std::make_unique<IncludeResult>(resolvedPath, stored.data(), stored.size(), nullptr));
+            return m_results.back().get();
+        }
+        return nullptr;
+    }
+
+    std::filesystem::path m_rootDir;
+    std::vector<std::unique_ptr<std::string>> m_contents;
+    std::vector<std::unique_ptr<IncludeResult>> m_results;
+};
+
+static std::string buildPreamble(const std::vector<ShaderDefine>& defines)
+{
+    std::string preamble = "#extension GL_ARB_shading_language_include : require\n";
+    for (const ShaderDefine& define : defines)
+    {
+        preamble += "#define " + define.name;
+        if (!define.value.empty())
+            preamble += " " + define.value;
+        preamble += "\n";
+    }
+    return preamble;
+}
+
+bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& source, std::vector<unsigned int>& spirv, const std::string& debugFilePath, const std::vector<ShaderDefine>& defines)
 {
     EShLanguage stage = translateShaderStage(type);
     glslang::TShader shader(stage);
@@ -82,9 +146,15 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
     shader.setSourceFile(debugFilePath.c_str());
     shader.setDebugInfo(true);
 
+    const std::string preamble = buildPreamble(defines);
+    if (!preamble.empty())
+        shader.setPreamble(preamble.c_str());
+
+    ShaderIncluder includer(debugFilePath);
+
     // Enable SPIR-V and Vulkan rules when parsing GLSL
     EShMessages messages = (EShMessages)(EShMsgSpvRules | EShMsgVulkanRules);
-    if (!shader.parse(GetDefaultResources(), 100, false, messages))
+    if (!shader.parse(GetDefaultResources(), 100, ENoProfile, false, false, messages, includer))
     {
         puts(shader.getInfoLog());
         puts(shader.getInfoDebugLog());

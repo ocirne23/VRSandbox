@@ -7,14 +7,7 @@
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_debug_printf : enable
 
-#define MAX_LARGE_LIGHTS_PER_GRID 6
-#define MAX_LIGHTCELL_LIGHTS 12
-#define GRID_SIZE 32
-const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
-
-#define ALPHA_MODE_OPAQUE 0u
-#define ALPHA_MODE_MASK 1u
-#define ALPHA_MODE_BLEND 2u
+#include "shared_constants.inc.glsl"
 
 struct MaterialInfo
 {
