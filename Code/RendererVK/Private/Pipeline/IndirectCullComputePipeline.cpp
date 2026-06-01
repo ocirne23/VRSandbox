@@ -216,7 +216,9 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
         vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
         commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, descriptorSet, computeDescriptorSetUpdateInfos);
         vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
-        vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, 2 * numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence), 0);
+        const vk::DeviceSize stride = sizeof(RendererVKLayout::IndirectDrawSequence);
+        vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * stride, 0); // opaque region
+        vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), RendererVKLayout::MAX_UNIQUE_MESHES * stride, numMeshes * stride, 0); // transparent region
         {
             vk::MemoryBarrier2 memoryBarrier{
                 .srcStageMask = vk::PipelineStageFlagBits2::eClear,
