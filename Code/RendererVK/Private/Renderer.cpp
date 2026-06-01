@@ -361,7 +361,6 @@ void Renderer::recordCommandBuffers()
                 .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
                 .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
                 .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
-                .transparentIndirectCommandBuffer = m_indirectCullComputePipeline.getTransparentIndirectCommandBuffer(frameIdx),
                 .lightInfosBuffer = frameData.lightInfosBuffer,
                 .lightGridsBuffer = frameData.lightGridsBuffer,
                 .lightTableBuffer = frameData.lightTableBuffer,

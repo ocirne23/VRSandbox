@@ -27,14 +27,9 @@ void IndirectCullComputePipeline::initialize()
             vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        perFrame.outIndirectCommandBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::IndirectDrawSequence), // 8
+        perFrame.outIndirectCommandBuffer.initialize(2 * RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::IndirectDrawSequence), // 8: [0..MAX) opaque, [MAX..2*MAX) transparent
             vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst
             | vk::BufferUsageFlagBits::eShaderDeviceAddress, // device address consumed by vkCmdExecuteGeneratedCommandsEXT
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-        perFrame.outTransparentIndirectCommandBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::IndirectDrawSequence), // 10
-            vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst
-            | vk::BufferUsageFlagBits::eShaderDeviceAddress,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
     }
 
@@ -96,12 +91,6 @@ void IndirectCullComputePipeline::initialize()
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
     });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // OutTransparentIndirectCommandBuffer
-        .binding = 9,
-        .descriptorType = vk::DescriptorType::eStorageBuffer,
-        .descriptorCount = 1,
-        .stageFlags = vk::ShaderStageFlagBits::eCompute
-    });
 
     m_computePipeline.initialize(computePipelineLayout);
 }
@@ -125,7 +114,7 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    std::array<DescriptorSetUpdateInfo, 10> computeDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 9> computeDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo { // UBO
             .binding = 0,
@@ -217,16 +206,6 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
                     .range = frameData.outIndirectCommandBuffer.getSize(),
                 }
             }
-        },
-        DescriptorSetUpdateInfo { // OutTransparentIndirectCommandBuffer
-            .binding = 9,
-            .type = vk::DescriptorType::eStorageBuffer,
-            .bufferInfos = {
-                vk::DescriptorBufferInfo {
-                    .buffer = frameData.outTransparentIndirectCommandBuffer.getBuffer(),
-                    .range = frameData.outTransparentIndirectCommandBuffer.getSize(),
-                }
-            }
         }
     };
 
@@ -237,8 +216,7 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
         vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
         commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, descriptorSet, computeDescriptorSetUpdateInfos);
         vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
-        vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence), 0);
-        vkCommandBuffer.fillBuffer(frameData.outTransparentIndirectCommandBuffer.getBuffer(), 0, numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence), 0);
+        vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, 2 * numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence), 0);
         {
             vk::MemoryBarrier2 memoryBarrier{
                 .srcStageMask = vk::PipelineStageFlagBits2::eClear,

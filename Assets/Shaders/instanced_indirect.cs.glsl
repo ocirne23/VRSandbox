@@ -3,6 +3,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : enable
 #extension GL_EXT_shader_16bit_storage : enable
 
+#define MAX_UNIQUE_MESHES 1024u // matches RendererVKLayout::MAX_UNIQUE_MESHES
 #define ALPHA_MODE_OPAQUE 0u
 #define ALPHA_MODE_MASK 1u
 #define ALPHA_MODE_BLEND 2u
@@ -85,13 +86,10 @@ layout (binding = 7, std430) writeonly buffer OutMeshInstanceIndexesBuffer
 {
     uint out_meshInstanceIndexes[];
 };
+
 layout (binding = 8, std430) writeonly buffer OutIndirectCommandBuffer
 {
-    OutIndirectCommand out_indirectCommands[];
-};
-layout (binding = 9, std430) writeonly buffer OutTransparentIndirectCommandBuffer
-{
-    OutIndirectCommand out_transparentIndirectCommands[];
+    OutIndirectCommand out_indirectCommands[]; // [0..MAX) opaque, [MAX..2*MAX) transparent
 };
 
 vec3 quat_transform(vec3 v, vec4 q)
@@ -145,30 +143,16 @@ void main()
         const uint16_t alphaMode      = uint16_t((instance.pipelineIdxAlphaMode & 0xFFFF0000) >> 16);
         const bool isTransparent      = alphaMode == ALPHA_MODE_BLEND;
 
-        uint idx;
-        if (!isTransparent)
-            idx = atomicAdd(out_indirectCommands[meshIdx].instanceCount, 1);
-        else
-            idx = atomicAdd(out_transparentIndirectCommands[meshIdx].instanceCount, 1);
+        const uint cmdIdx = isTransparent ? MAX_UNIQUE_MESHES + meshIdx : meshIdx;
+        const uint idx = atomicAdd(out_indirectCommands[cmdIdx].instanceCount, 1);
 
         if (idx == 0)
         {
-            if (!isTransparent)
-            {
-                out_indirectCommands[meshIdx].pipelineIndex = pipelineIdx;
-                out_indirectCommands[meshIdx].indexCount    = meshInfo.indexCount;
-                out_indirectCommands[meshIdx].firstIndex    = meshInfo.firstIndex;
-                out_indirectCommands[meshIdx].vertexOffset  = meshInfo.vertexOffset;
-                out_indirectCommands[meshIdx].firstInstance = firstInstance;
-            }
-            else
-            {
-                out_transparentIndirectCommands[meshIdx].pipelineIndex = pipelineIdx;
-                out_transparentIndirectCommands[meshIdx].indexCount    = meshInfo.indexCount;
-                out_transparentIndirectCommands[meshIdx].firstIndex    = meshInfo.firstIndex;
-                out_transparentIndirectCommands[meshIdx].vertexOffset  = meshInfo.vertexOffset;
-                out_transparentIndirectCommands[meshIdx].firstInstance = firstInstance;
-            }
+            out_indirectCommands[cmdIdx].pipelineIndex = pipelineIdx;
+            out_indirectCommands[cmdIdx].indexCount    = meshInfo.indexCount;
+            out_indirectCommands[cmdIdx].firstIndex    = meshInfo.firstIndex;
+            out_indirectCommands[cmdIdx].vertexOffset  = meshInfo.vertexOffset;
+            out_indirectCommands[cmdIdx].firstInstance = firstInstance;
         }
 
         out_meshInstanceIndexes[firstInstance + idx]      = instanceIdx;

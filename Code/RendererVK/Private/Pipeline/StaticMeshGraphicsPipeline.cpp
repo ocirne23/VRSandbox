@@ -262,16 +262,17 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, {0});
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
     recordExecuteGeneratedCommands(vkCommandBuffer, params.indirectCommandBuffer, m_preprocessBuffers[frameIdx], numMeshes);
-    recordExecuteGeneratedCommands(vkCommandBuffer, params.transparentIndirectCommandBuffer, m_transparentPreprocessBuffers[frameIdx], numMeshes);
+    recordExecuteGeneratedCommands(vkCommandBuffer, params.indirectCommandBuffer, m_transparentPreprocessBuffers[frameIdx], numMeshes,
+        RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::IndirectDrawSequence));
 }
 
-void StaticMeshGraphicsPipeline::recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes)
+void StaticMeshGraphicsPipeline::recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes, vk::DeviceSize indirectOffset)
 {
     vk::GeneratedCommandsInfoEXT generatedCommandsInfo{
         .shaderStages = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
         .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
         .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
-        .indirectAddress = indirectCommandBuffer.getDeviceAddress(),
+        .indirectAddress = indirectCommandBuffer.getDeviceAddress() + indirectOffset,
         .indirectAddressSize = numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence),
         .preprocessAddress = m_preprocessSize > 0 ? preprocessBuffer.getDeviceAddress() : 0,
         .preprocessSize = m_preprocessSize,

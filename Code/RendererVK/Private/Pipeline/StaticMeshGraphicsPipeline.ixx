@@ -34,7 +34,6 @@ public:
         Buffer& instanceIdxBuffer;
         Buffer& meshInstanceBuffer;
         Buffer& indirectCommandBuffer;
-        Buffer& transparentIndirectCommandBuffer;
 
         Buffer& lightInfosBuffer;
 		Buffer& lightGridsBuffer;
@@ -60,5 +59,5 @@ private:
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_transparentPreprocessBuffers; // transparent pass
 
     // Issues one vkCmdExecuteGeneratedCommandsEXT over the given indirect/preprocess buffers.
-    void recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes);
+    void recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes, vk::DeviceSize indirectOffset = 0);
 };
