@@ -222,7 +222,7 @@ void main()
 	const float ambient = 0.05f;
 	vec3 color = materialColor * ambient;
 
-	//color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
+	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 
 	const ivec3 gridPos = getGridPos(in_pos);
     uint tableIdx = getHashTableIdx(gridPos, in_tableSize);

@@ -58,12 +58,12 @@ int main()
     
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createProceduralLoader();
-        sceneData->initialize("cube", true, true);
+        sceneData->initialize("terrain", true, true);
         container2.initialize(*sceneData);
         
         for (int x = 0; x < 1; ++x)
             for (int y = 0; y < 1; ++y)
-                spawnedNodes.push_back(container2.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 2.0f, y * 20.0f), 2.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+                spawnedNodes.push_back(container2.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, -5.0f, y * 20.0f), 100.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();

@@ -119,6 +119,149 @@ void ProceduralMeshData::buildPlane()
 	m_indices    = { 0,1,2, 0,2,3 };
 }
 
+bool ProceduralMeshData::initializeTerrain(const TerrainParams& params, const char* name)
+{
+	m_name = name ? name : "Terrain";
+	buildTerrain(params);
+
+	m_aabb.min = glm::vec3(std::numeric_limits<float>::max());
+	m_aabb.max = glm::vec3(std::numeric_limits<float>::lowest());
+	for (const glm::vec3& v : m_vertices)
+	{
+		m_aabb.min = glm::min(m_aabb.min, v);
+		m_aabb.max = glm::max(m_aabb.max, v);
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Terrain helpers: seeded value noise + fractional Brownian motion
+// ---------------------------------------------------------------------------
+namespace
+{
+	// Hash a 2D integer coordinate + seed into a float in [-1, 1]
+	float valueNoise2D(int32_t ix, int32_t iy, uint32_t seed)
+	{
+		uint32_t h = (uint32_t)(ix * 1619 + iy * 31337) ^ (seed * 6971u);
+		h ^= h >> 13;
+		h  = h * (h * h * 15731u + 789221u) + 1376312589u;
+		return (float)(h & 0xffffu) / 32767.5f - 1.0f; // [-1, 1]
+	}
+
+	// Bilinear noise with quintic smoothstep interpolation
+	float smoothNoise2D(float x, float y, uint32_t seed)
+	{
+		const int32_t ix = (int32_t)std::floor(x);
+		const int32_t iy = (int32_t)std::floor(y);
+		const float   fx = x - (float)ix;
+		const float   fy = y - (float)iy;
+		// Quintic fade
+		const float ux = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
+		const float uy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
+
+		const float v00 = valueNoise2D(ix,     iy,     seed);
+		const float v10 = valueNoise2D(ix + 1, iy,     seed);
+		const float v01 = valueNoise2D(ix,     iy + 1, seed);
+		const float v11 = valueNoise2D(ix + 1, iy + 1, seed);
+
+		return glm::mix(glm::mix(v00, v10, ux), glm::mix(v01, v11, ux), uy);
+	}
+
+	// Fractional Brownian motion: accumulate octaves of noise
+	float fbm(float x, float y, uint32_t octaves, float persistence, float lacunarity, uint32_t seed)
+	{
+		float value    = 0.0f;
+		float amplitude = 1.0f;
+		float freq     = 1.0f;
+		float maxValue = 0.0f;
+		for (uint32_t o = 0; o < octaves; o++)
+		{
+			value    += smoothNoise2D(x * freq, y * freq, seed + o * 1973u) * amplitude;
+			maxValue += amplitude;
+			amplitude *= persistence;
+			freq      *= lacunarity;
+		}
+		return maxValue > 0.0f ? (value / maxValue) : 0.0f; // normalize to ~[-1, 1]
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Terrain: subdivided plane in XZ with fBm height displacement on Y
+// ---------------------------------------------------------------------------
+void ProceduralMeshData::buildTerrain(const TerrainParams& params)
+{
+	const uint32 N    = glm::max(params.subdivisions, 1u);
+	const float  invN = 1.0f / (float)N;
+
+	// Helper lambda: sample terrain height for a normalised (u,v) in [0,1]
+	auto sampleHeight = [&](float u, float v) -> float
+	{
+		const float sx = (u - 0.5f) * params.frequency;
+		const float sz = (v - 0.5f) * params.frequency;
+		return fbm(sx, sz, params.octaves, params.persistence, params.lacunarity, params.seed)
+			   * params.amplitude;
+	};
+
+	// Build vertex grid
+	m_vertices.reserve((N + 1) * (N + 1));
+	m_normals.reserve((N + 1) * (N + 1));
+	m_tangents.reserve((N + 1) * (N + 1));
+	m_bitangents.reserve((N + 1) * (N + 1));
+	m_texCoords.reserve((N + 1) * (N + 1));
+
+	const float eps = invN * 0.5f; // finite-difference step (half a cell)
+
+	for (uint32 row = 0; row <= N; row++)
+	{
+		for (uint32 col = 0; col <= N; col++)
+		{
+			const float u = (float)col * invN; // [0,1]
+			const float v = (float)row * invN; // [0,1]
+
+			const float x = u - 0.5f; // [-0.5, 0.5]
+			const float z = v - 0.5f; // [-0.5, 0.5]
+			const float y = sampleHeight(u, v);
+
+			m_vertices.push_back({ x, y, z });
+			m_texCoords.push_back({ u, v, 0.0f });
+
+			// Central-difference normal: sample neighbors to get surface tangent vectors
+			const float hL = sampleHeight(u - eps, v);
+			const float hR = sampleHeight(u + eps, v);
+			const float hD = sampleHeight(u, v - eps);
+			const float hU = sampleHeight(u, v + eps);
+
+			// dP/du and dP/dv in world space (spacing = eps in u/v = eps in x/z)
+			const glm::vec3 dpdu(2.0f * eps, hR - hL, 0.0f);
+			const glm::vec3 dpdv(0.0f,       hU - hD, 2.0f * eps);
+
+			const glm::vec3 normal    = -glm::normalize(glm::cross(dpdu, dpdv));
+			const glm::vec3 tangent   = glm::normalize(dpdu);
+			const glm::vec3 bitangent = glm::normalize(dpdv);
+
+			m_normals.push_back(normal);
+			m_tangents.push_back(tangent);
+			m_bitangents.push_back(bitangent);
+		}
+	}
+
+	// Build index buffer (two CCW triangles per quad)
+	m_indices.reserve(N * N * 6);
+	for (uint32 row = 0; row < N; row++)
+	{
+		for (uint32 col = 0; col < N; col++)
+		{
+			const uint32 a = row       * (N + 1) + col;
+				const uint32 b = row       * (N + 1) + col + 1;
+				const uint32 c = (row + 1) * (N + 1) + col;
+				const uint32 d = (row + 1) * (N + 1) + col + 1;
+
+				m_indices.push_back(a); m_indices.push_back(c); m_indices.push_back(b);
+				m_indices.push_back(b); m_indices.push_back(c); m_indices.push_back(d);
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // UV Sphere: unit sphere (diameter 1), stacks = latitude bands, slices = longitude bands
 // ---------------------------------------------------------------------------

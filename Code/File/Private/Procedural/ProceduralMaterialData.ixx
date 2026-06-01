@@ -44,7 +44,7 @@ private:
 	glm::vec3   m_specularColor     = { 0.0f, 0.0f, 0.0f };
 	float       m_roughness         = 1.0f;
 	float       m_metalness         = 0.0f;
-	float       m_opacity           = 0.5;
+	float       m_opacity           = 1.0;
 	float       m_alphaCutoff       = 0.0f;
 	float       m_emissiveIntensity = 1.0f;
 	float       m_refractiveIndex   = 1.5f;

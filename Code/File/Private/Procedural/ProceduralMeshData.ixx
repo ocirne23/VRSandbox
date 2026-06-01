@@ -10,6 +10,19 @@ export enum class EProceduralShape
 	Cube,
 	Plane,
 	Sphere,
+	Terrain,
+};
+
+// Parameters for procedural terrain generation.
+export struct TerrainParams
+{
+	uint32 subdivisions = 64;   // number of quads per side (total verts = (subdivisions+1)^2)
+	float  amplitude    = 0.1f; // peak-to-peak height range
+	uint32 octaves      = 6;    // fBm octave count
+	float  frequency    = 3.0f; // base spatial frequency
+	float  persistence  = 0.5f; // amplitude scale per octave
+	float  lacunarity   = 2.0f; // frequency scale per octave
+	uint32 seed         = 0;
 };
 
 export class ProceduralMeshData final : public IMeshData
@@ -21,6 +34,7 @@ public:
 	ProceduralMeshData(ProceduralMeshData&&) = default;
 
 	bool initialize(EProceduralShape shape, const char* name = nullptr);
+	bool initializeTerrain(const TerrainParams& params, const char* name = nullptr);
 
 	const glm::vec3* getVertices() const override;
 	const glm::vec3* getNormals() const override;
@@ -38,6 +52,7 @@ private:
 	void buildCube();
 	void buildPlane();
 	void buildSphere(uint32 stacks = 16, uint32 slices = 32);
+	void buildTerrain(const TerrainParams& params);
 
 	std::string              m_name;
 	std::vector<glm::vec3>   m_vertices;
