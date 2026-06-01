@@ -52,40 +52,6 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     }
     m_pipelineLayout = createPipelineLayoutResult.value;
 
-    // Variant 0 is fragmentShaderText; any fragmentShaderVariants follow. All variants share this
-    // pipeline layout and differ only in the fragment stage, so a device-generated-commands
-    // Indirect Execution Set can select between them per draw.
-    std::vector<const ShaderVariant*> fragmentVariants;
-    ShaderVariant defaultVariant{ .text = layout.fragmentShaderText, .debugFilePath = layout.fragmentShaderDebugFilePath };
-    fragmentVariants.push_back(&defaultVariant);
-    for (const ShaderVariant& variant : layout.fragmentShaderVariants)
-        fragmentVariants.push_back(&variant);
-
-    Shader vertexShader;
-    vertexShader.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShaderText, layout.vertexShaderDebugFilePath);
-
-    std::vector<Shader> fragmentShaders(fragmentVariants.size());
-    for (size_t i = 0; i < fragmentVariants.size(); i++)
-        fragmentShaders[i].initialize(vk::ShaderStageFlagBits::eFragment, fragmentVariants[i]->text, fragmentVariants[i]->debugFilePath);
-
-    std::array<vk::PipelineShaderStageCreateInfo, 2> pipelineShaderStageCreateInfos =
-    {
-        vk::PipelineShaderStageCreateInfo
-        {
-            .flags = {},
-            .stage = vk::ShaderStageFlagBits::eVertex,
-            .module = vertexShader.getModule(),
-            .pName = "main",
-        },
-        vk::PipelineShaderStageCreateInfo
-        {
-            .flags = {},
-            .stage = vk::ShaderStageFlagBits::eFragment,
-            .module = nullptr, // set per-variant below
-            .pName = "main",
-        },
-    };
-
     vk::PipelineVertexInputStateCreateInfo pipelineVertexInputStateCreateInfo
     {
         .flags = {},
@@ -183,6 +149,11 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         .dynamicStateCount = static_cast<uint32>(dynamicStates.size()),
         .pDynamicStates = dynamicStates.data(),
     };
+    std::array<vk::PipelineShaderStageCreateInfo, 2> pipelineShaderStageCreateInfos =
+    {
+        vk::PipelineShaderStageCreateInfo {.stage = vk::ShaderStageFlagBits::eVertex,   .pName = "main", },
+        vk::PipelineShaderStageCreateInfo {.stage = vk::ShaderStageFlagBits::eFragment, .pName = "main", },
+    };
     vk::PipelineCreateFlags2CreateInfo pipelineFlags2{ .flags = vk::PipelineCreateFlagBits2::eIndirectBindableEXT };
     vk::GraphicsPipelineCreateInfo graphicsPipelineCreateInfo
     {
@@ -214,11 +185,44 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     }
     m_pipelineCache = createPipelineCacheResult.value;
 
-    m_pipelines.reserve(fragmentShaders.size());
-    for (size_t i = 0; i < fragmentShaders.size(); i++)
+    Shader defaultVS, defaultFS;
+    defaultVS.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShader.text, layout.vertexShader.debugFilePath);
+    defaultFS.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShader.text, layout.fragmentShader.debugFilePath);
+
+    // Compile per-variant shader overrides; entries with no override keep a null module.
+    const size_t additionalCount = layout.additionalVariants.size();
+    std::vector<Shader> overrideVS(additionalCount);
+    std::vector<Shader> overrideFS(additionalCount);
+    for (size_t i = 0; i < additionalCount; i++)
     {
-        const ShaderVariant& variant = *fragmentVariants[i];
-        pipelineShaderStageCreateInfos[1].module = fragmentShaders[i].getModule();
+        const PipelineVariant& v = layout.additionalVariants[i];
+        if (!v.vertexShader.text.empty())
+            overrideVS[i].initialize(vk::ShaderStageFlagBits::eVertex, v.vertexShader.text, v.vertexShader.debugFilePath);
+        if (!v.fragmentShader.text.empty())
+            overrideFS[i].initialize(vk::ShaderStageFlagBits::eFragment, v.fragmentShader.text, v.fragmentShader.debugFilePath);
+    }
+
+    // Variant 0: both defaults, no blending, depth write on.
+    m_pipelines.reserve(1 + additionalCount);
+    pipelineShaderStageCreateInfos[0].module = defaultVS.getModule();
+    pipelineShaderStageCreateInfos[1].module = defaultFS.getModule();
+    {
+        vk::Result   result;
+        vk::Pipeline pipeline;
+        std::tie(result, pipeline) = vkDevice.createGraphicsPipeline(m_pipelineCache, graphicsPipelineCreateInfo);
+        if (result != vk::Result::eSuccess)
+        {
+            assert(false && "Failed to create graphics pipeline");
+            return false;
+        }
+        m_pipelines.push_back(pipeline);
+    }
+
+    for (size_t i = 0; i < additionalCount; i++)
+    {
+        const PipelineVariant& variant = layout.additionalVariants[i];
+        pipelineShaderStageCreateInfos[0].module = overrideVS[i].getModule() ? overrideVS[i].getModule() : defaultVS.getModule();
+        pipelineShaderStageCreateInfos[1].module = overrideFS[i].getModule() ? overrideFS[i].getModule() : defaultFS.getModule();
 
         // Per-variant blend/depth state (mutated in place; the create info points at these structs).
         pipelineDepthStencilStateCreateInfo.depthWriteEnable = variant.depthWrite ? vk::True : vk::False;
@@ -237,11 +241,8 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         vk::Result   result;
         vk::Pipeline pipeline;
         std::tie(result, pipeline) = vkDevice.createGraphicsPipeline(m_pipelineCache, graphicsPipelineCreateInfo);
-        switch (result)
+        if (result != vk::Result::eSuccess)
         {
-        case vk::Result::eSuccess:
-            break;
-        default:
             assert(false && "Failed to create graphics pipeline");
             return false;
         }

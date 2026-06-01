@@ -12,10 +12,17 @@ export struct VertexLayoutInfo
     std::vector<vk::VertexInputAttributeDescription> attributeDescriptions;
 };
 
-export struct ShaderVariant
+export struct ShaderSource
 {
     std::string text;
     std::string debugFilePath;
+};
+
+export struct PipelineVariant
+{
+    // Per-variant shader overrides; an empty text field falls back to the layout default.
+    ShaderSource vertexShader;
+    ShaderSource fragmentShader;
     // Per-variant pipeline state. Transparent variants enable alpha blending and disable depth
     // writes; opaque variants (the default) keep blending off and depth writes on.
     bool blendEnable = false;
@@ -24,18 +31,15 @@ export struct ShaderVariant
 
 export struct GraphicsPipelineLayout
 {
-    std::string fragmentShaderText;
-    std::string fragmentShaderDebugFilePath;
-    std::string vertexShaderText;
-    std::string vertexShaderDebugFilePath;
+    ShaderSource vertexShader;
+    ShaderSource fragmentShader;
     VertexLayoutInfo vertexLayoutInfo;
     std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
     std::vector<vk::PushConstantRange> pushConstantRanges;
 
-    // Additional fragment shaders that produce extra pipeline variants sharing this exact
-    // pipeline layout. Combined with fragmentShaderText (variant 0), these are the pipelines
-    // selectable per-draw through a device-generated-commands Indirect Execution Set.
-    std::vector<ShaderVariant> fragmentShaderVariants;
+    // Additional pipeline variants for DGC Indirect Execution Set selection. Variant 0 always
+    // uses both layout defaults; each extra entry can independently override either shader stage.
+    std::vector<PipelineVariant> additionalVariants;
 };
 
 export class GraphicsPipeline final

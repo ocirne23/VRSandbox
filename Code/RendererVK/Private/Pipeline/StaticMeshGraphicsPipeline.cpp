@@ -19,22 +19,26 @@ void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
 {
     m_sampler.initialize();
     GraphicsPipelineLayout graphicsPipelineLayout;
-    graphicsPipelineLayout.vertexShaderDebugFilePath = "Shaders/instanced_indirect.vs.glsl";
-    graphicsPipelineLayout.fragmentShaderDebugFilePath = "Shaders/instanced_indirect.fs.glsl";
+    graphicsPipelineLayout.vertexShader.debugFilePath = "Shaders/instanced_indirect.vs.glsl";
+    graphicsPipelineLayout.fragmentShader.debugFilePath = "Shaders/instanced_indirect.fs.glsl";
 
-    graphicsPipelineLayout.vertexShaderText = FileSystem::readFileStr(graphicsPipelineLayout.vertexShaderDebugFilePath);
-    graphicsPipelineLayout.fragmentShaderText = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShaderDebugFilePath);
+    graphicsPipelineLayout.vertexShader.text = FileSystem::readFileStr(graphicsPipelineLayout.vertexShader.debugFilePath);
+    graphicsPipelineLayout.fragmentShader.text = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShader.debugFilePath);
 
     // Variant 1 (MeshShaderVariant::Unlit): unlit opaque.
     const std::string unlitVariantPath = "Shaders/instanced_indirect_unlit.fs.glsl";
-    graphicsPipelineLayout.fragmentShaderVariants.push_back(ShaderVariant{
-        .text = FileSystem::readFileStr(unlitVariantPath),
-        .debugFilePath = unlitVariantPath,
+    graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+        .fragmentShader = ShaderSource{
+            .text = FileSystem::readFileStr(unlitVariantPath),
+            .debugFilePath = unlitVariantPath,
+        },
     });
     // Variant 2 (MeshShaderVariant::LitTransparent): same lit shader, alpha-blended, no depth write.
-    graphicsPipelineLayout.fragmentShaderVariants.push_back(ShaderVariant{
-        .text = graphicsPipelineLayout.fragmentShaderText,
-        .debugFilePath = graphicsPipelineLayout.fragmentShaderDebugFilePath,
+    graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+        .fragmentShader = ShaderSource{
+            .text = graphicsPipelineLayout.fragmentShader.text,
+            .debugFilePath = graphicsPipelineLayout.fragmentShader.debugFilePath,
+        },
         .blendEnable = true,
         .depthWrite = false,
     });
