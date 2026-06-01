@@ -73,7 +73,7 @@ private:
     std::unordered_map<std::string, uint16> m_nodePathIdxLookup;
 
     std::vector<RendererVKLayout::MeshInstanceOffset> m_meshInstanceOffsets;
-    std::vector<Sphere> m_meshInstanceBounds;
+    std::vector<Sphere> m_nodeBounds;
     std::vector<Sphere> m_boundsForMeshIdx;
 
     uint32 m_baseMeshInstanceOffsetsIdx = 0;

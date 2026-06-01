@@ -9,6 +9,7 @@ import Core.imgui;
 import Core.Camera;
 
 import File.FileSystem;
+import File.ITextureData;
 
 import :RenderNode;
 import :VK;
@@ -128,6 +129,9 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal);
 
+	Globals::textureManager.upload(*ITextureData::createFallbackDiffuseTexture(), false);
+	Globals::textureManager.upload(*ITextureData::createFallbackNormalTexture(), false);
+
     return true;
 }
 
@@ -238,6 +242,7 @@ void Renderer::present()
     assert(frameData.mappedRenderNodeTransforms.size() >= m_renderNodeTransforms.size());
     assert(frameData.mappedMeshInstances.size() >= m_meshInstanceCounter);
     assert(frameData.mappedFirstInstances.size() >= m_meshInfoCounter);
+    assert(m_renderNodeTransforms.size() == 0 || Globals::textureManager.getNumTextures() > 0 && "Attempting to render object without any textures loaded!");
 
     memcpy(frameData.mappedRenderNodeTransforms.data(), m_renderNodeTransforms.data(), m_renderNodeTransforms.size() * sizeof(m_renderNodeTransforms[0]));
     uint32 instanceCounter = 0;

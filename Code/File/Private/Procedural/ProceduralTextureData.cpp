@@ -27,11 +27,11 @@ bool ProceduralTextureData::initialize(EProceduralTextureType type, uint32 width
 			for (uint32 x = 0; x < width; x++)
 			{
 				const bool isLight = ((x / tileSize) + (y / tileSize)) % 2 == 0;
-				const char v = isLight ? (uint8)0xFF : (uint8)0x00;
+				const char v = isLight ? (uint8)0x00 : (uint8)0xFF;
 				Pixel& p = m_pixels[y * width + x];
-				p.r = v;
+				p.r = (uint8)0xFF;
 				p.g = v;
-				p.b = v;
+				p.b = (uint8)0xFF;
 				p.a = (uint8)0xFF;
 			}
 		}
@@ -74,3 +74,17 @@ const ProceduralTextureData::Pixel* ProceduralTextureData::getPixels() const { r
 uint32       ProceduralTextureData::getWidth()      const { return m_width; }
 uint32       ProceduralTextureData::getHeight()     const { return m_height; }
 const char*  ProceduralTextureData::getFormatInfo() const { return "rgba8888"; }
+
+std::unique_ptr<ITextureData> ITextureData::createFallbackDiffuseTexture()
+{
+	auto pTex = std::make_unique<ProceduralTextureData>();
+	pTex->initialize(EProceduralTextureType::Checkerboard, 8, 8);
+	return pTex;
+}
+
+std::unique_ptr<ITextureData> ITextureData::createFallbackNormalTexture()
+{
+	auto pTex = std::make_unique<ProceduralTextureData>();
+	pTex->initialize(EProceduralTextureType::FlatNormal, 8, 8);
+	return pTex;
+}

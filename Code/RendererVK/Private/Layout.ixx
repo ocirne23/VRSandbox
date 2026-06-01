@@ -8,6 +8,8 @@ import Core.Transform;
 export namespace RendererVKLayout
 {
     constexpr uint32 NUM_FRAMES_IN_FLIGHT = 2;
+    constexpr uint16 FALLBACK_DIFFUSE_TEX_IDX = 0;
+	constexpr uint16 FALLBACK_NORMAL_TEX_IDX = 1;
 
     // TODO make these dynamic
     constexpr uint32 MAX_RENDER_NODES = 1024 * 4;

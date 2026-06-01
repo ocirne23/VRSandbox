@@ -39,7 +39,7 @@ bool ProceduralSceneData::initialize(const char* shapeName, bool /*mergeNodes*/,
 
 	// Textures: index 0 = checkerboard (diffuse), index 1 = flat normal map
 	ProceduralTextureData& diffuseTex = m_textures.emplace_back();
-	[[maybe_unused]] bool diffuseOk = diffuseTex.initialize(EProceduralTextureType::White, 64, 64);
+	[[maybe_unused]] bool diffuseOk = diffuseTex.initialize(EProceduralTextureType::Checkerboard, 64, 64);
 	assert(diffuseOk && "Failed to initialize diffuse ProceduralTextureData");
 
 	ProceduralTextureData& normalTex = m_textures.emplace_back();

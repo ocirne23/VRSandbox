@@ -128,8 +128,8 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
         material.specularColor = materialData.getSpecularColor();
         material.metalness     = materialData.getMetalnessFactor();
         material.emissiveColor = materialData.getEmissiveColor() * materialData.getEmissiveIntensity();
-        material.diffuseTexIdx = 0;
-		material.normalTexIdx  = 0;
+        material.diffuseTexIdx = RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX;
+		material.normalTexIdx  = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
 
 		const IMaterialData::EAlphaMode alphaMode = materialData.getAlphaMode();
 		const float opacity    = materialData.getOpacity();
@@ -277,18 +277,19 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
         nodeWS.quat = parentTransform.quat * node.transform.quat;
         nodeWS.scale = parentTransform.scale * node.transform.scale;
 
+		Sphere meshBounds{ glm::vec3(0.0f), 0.0f };
+
         if (node.meshInfoIdx != UINT16_MAX)
         {
-            Sphere meshBounds = m_boundsForMeshIdx[node.meshInfoIdx];
+            meshBounds = m_boundsForMeshIdx[node.meshInfoIdx];
             meshBounds.pos *= nodeWS.scale;
             meshBounds.radius *= nodeWS.scale;
             meshBounds.pos = meshBounds.pos * nodeWS.quat;
             meshBounds.pos += nodeWS.pos;
-            m_meshInstanceBounds.emplace_back(meshBounds);
 
             if (m_nodeMeshRanges[i].startIdx == UINT16_MAX)
             {
-                m_nodeMeshRanges[i].startIdx = (uint16)m_meshInstanceOffsets.size();
+                m_nodeMeshRanges[i].startIdx = (uint16)m_nodeBounds.size();
                 m_nodeMeshRanges[i].numNodes = 1;
             }
             uint32 parentIdx = (node.parentOffset != 0) ? i - node.parentOffset : UINT16_MAX;
@@ -296,30 +297,32 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
             {
                 if (m_nodeMeshRanges[parentIdx].startIdx == UINT16_MAX)
                 {
-                    m_nodeMeshRanges[parentIdx].startIdx = (uint16)m_meshInstanceOffsets.size();
+                    m_nodeMeshRanges[parentIdx].startIdx = (uint16)m_nodeBounds.size();
                     m_nodeMeshRanges[parentIdx].numNodes = 0;
                 }
                 m_nodeMeshRanges[parentIdx].numNodes++;
-                Sphere& parentBounds = m_meshInstanceBounds[parentIdx];
+                Sphere& parentBounds = m_nodeBounds[parentIdx];
                 parentBounds.combineSphere(meshBounds);
 
                 parentIdx = (initialStateNodes[parentIdx].parentOffset != 0) ? parentIdx - initialStateNodes[parentIdx].parentOffset : UINT16_MAX;
             }
 
             m_nodePathIdxLookup.emplace(node.path, (uint16)i);
-			NodeInfo nodeInfo{ 
-                .meshInfoIdx = node.meshInfoIdx,
-				.materialInfoIdx = node.materialInfoIdx,
-				.pipelineIdx = (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].first,
-				.alphaMode = (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].second
-			};
-            m_nodeInfos.emplace_back(nodeInfo);
             m_meshInstanceOffsets.emplace_back(nodeWS);
         }
         else if (i == 0)
         {
             m_nodePathIdxLookup.emplace(node.path, (uint16)i);
         }
+        m_nodeBounds.emplace_back(meshBounds);
+
+        NodeInfo nodeInfo{
+            .meshInfoIdx = node.meshInfoIdx,
+            .materialInfoIdx = node.materialInfoIdx,
+            .pipelineIdx = node.materialInfoIdx != UINT16_MAX ? (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].first : UINT16_MAX,
+            .alphaMode = node.materialInfoIdx != UINT16_MAX ? (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].second : UINT16_MAX
+        };
+        m_nodeInfos.emplace_back(nodeInfo);
     }
 
     m_baseMeshInstanceOffsetsIdx = Globals::rendererVK.addMeshInstanceOffsets(m_meshInstanceOffsets);
@@ -331,14 +334,15 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
 
     RenderNode node;
     node.m_transformIdx = Globals::rendererVK.addRenderNodeTransform(transform);
-    node.m_bounds = m_meshInstanceBounds[idx];
+    node.m_bounds = m_nodeBounds[idx];
     node.m_meshInstances.resize(range.numNodes);
     for (uint32 i = 0; i < range.numNodes; ++i)
     {
-        node.m_meshInstances[i].renderNodeIdx = node.m_transformIdx;
-        node.m_meshInstances[i].instanceOffsetIdx = m_baseMeshInstanceOffsetsIdx + range.startIdx + i;
+        const NodeInfo& nodeInfo = m_nodeInfos[range.startIdx + i];
 
-		const NodeInfo& nodeInfo = m_nodeInfos[range.startIdx + i];
+        node.m_meshInstances[i].renderNodeIdx = node.m_transformIdx;
+        node.m_meshInstances[i].instanceOffsetIdx = m_baseMeshInstanceOffsetsIdx + nodeInfo.meshInfoIdx;
+
         node.m_meshInstances[i].meshIdx = m_baseMeshInfoIdx + nodeInfo.meshInfoIdx;
         node.m_meshInstances[i].materialIdx = m_baseMaterialInfoIdx + nodeInfo.materialInfoIdx;
 		node.m_meshInstances[i].pipelineIndex = nodeInfo.pipelineIdx;

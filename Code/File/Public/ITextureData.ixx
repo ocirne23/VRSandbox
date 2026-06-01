@@ -18,4 +18,7 @@ public:
 	virtual uint32 getWidth() const = 0;
     virtual uint32 getHeight() const = 0; // if 0, pixels is a raw data buffer of size width
     virtual const char* getFormatInfo() const = 0;
+
+    static std::unique_ptr<ITextureData> createFallbackDiffuseTexture();
+    static std::unique_ptr<ITextureData> createFallbackNormalTexture();
 };

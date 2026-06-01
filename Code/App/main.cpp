@@ -38,36 +38,48 @@ int main()
     bool running = true;
     SystemEventListener* pSystemEventListener = input.addSystemEventListener();
     pSystemEventListener->onQuit = [&]() { running = false; };
-    
-    pSystemEventListener->onWindowEvent = [&](const SDL_WindowEvent& evt) 
+
+    pSystemEventListener->onWindowEvent = [&](const SDL_WindowEvent& evt)
         {
             if (evt.type == SDL_EVENT_WINDOW_RESIZED)   renderer.recreateWindowSurface(window);
             if (evt.type == SDL_EVENT_WINDOW_MINIMIZED) renderer.setWindowMinimized(true);
             if (evt.type == SDL_EVENT_WINDOW_MAXIMIZED) renderer.setWindowMinimized(false);
             if (evt.type == SDL_EVENT_WINDOW_RESTORED)  renderer.setWindowMinimized(false);
         };
-    
+
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
-    
+
     std::vector<RenderNode> spawnedNodes;
     std::vector<Light> spawnedLights;
 
     ObjectContainer container;
     ObjectContainer container2;
+    ObjectContainer container3;
+    
+    {
+        std::unique_ptr<ISceneData> sceneData = ISceneData::createProceduralLoader();
+        sceneData->initialize("cube", true, true);
+        container2.initialize(*sceneData);
+        
+        for (int x = 0; x < 1; ++x)
+            for (int y = 0; y < 1; ++y)
+                spawnedNodes.push_back(container2.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 2.0f, y * 20.0f), 2.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+    }
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
         sceneData->initialize("Models/sponza.glb", true, true);
         container.initialize(*sceneData);
-        for (int x = 0; x < 20; ++x)
-            for (int y = 0; y < 20; ++y)
+        for (int x = 0; x < 1; ++x)
+            for (int y = 0; y < 1; ++y)
                 spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 0, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
-
-        std::unique_ptr<ISceneData> sceneData2 = ISceneData::createProceduralLoader();
-        sceneData2->initialize("sphere", true, true);
-        container2.initialize(*sceneData2);
-        for (int x = 0; x < 20; ++x)
-            for (int y = 0; y < 20; ++y)
-                spawnedNodes.push_back(container2.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 2.0f, y * 20.0f), 2.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+    }
+    {
+        std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
+        sceneData->initialize("Models/dragon.glb", false, false);
+        container3.initialize(*sceneData);
+        for (int x = 0; x < 1; ++x)
+            for (int y = 0; y < 1; ++y)
+                spawnedNodes.push_back(container3.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 2.0f, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
@@ -75,9 +87,9 @@ int main()
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedNodes.push_back(container.spawnRootNode(Transform(cameraController.getPosition(), 1.0f, glm::normalize(glm::quatLookAt(cameraController.getDirection(), cameraController.getUp())))));
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-				spawnedLights.push_back({ cameraController.getPosition(), 50.0f, glm::abs(glm::sphericalRand(1.0f)), 250.0f});
+				spawnedLights.push_back({ cameraController.getPosition(), 50.0f, glm::abs(glm::sphericalRand(1.0f)), 100.0f});
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                spawnedLights.push_back({ cameraController.getPosition(), 15.0f + glm::linearRand(0.5f, 1.5f), glm::abs(glm::sphericalRand(1.0f)), 160.0f });
+                spawnedLights.push_back({ cameraController.getPosition(), 15.0f + glm::linearRand(0.5f, 1.5f), glm::abs(glm::sphericalRand(1.0f)), 30.0f });
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedLights.resize(0);
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
