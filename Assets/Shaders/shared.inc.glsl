@@ -12,4 +12,16 @@
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 const uint INITIALIZING_ENTRY = 0xEFFFFFFFu;
 
+uint getPositionHash(ivec3 p) 
+{
+    uvec3 q = uvec3(p);
+    q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
+    uint n = q.x ^ q.y ^ q.z;
+	// pcg hash
+	n = n * 747796405u + 2891336453u;
+	n = ((n >> ((n >> 28u) + 4u)) ^ n) * 277803737u;
+	n = (n >> 22u) ^ n;
+    return n;
+}
+
 #endif

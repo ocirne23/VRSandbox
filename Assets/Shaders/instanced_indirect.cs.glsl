@@ -3,7 +3,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : enable
 #extension GL_EXT_shader_16bit_storage : enable
 
-#include "shared_constants.inc.glsl"
+#include "shared.inc.glsl"
 
 struct RenderNodeTransform
 {

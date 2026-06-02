@@ -26,7 +26,6 @@ int main()
     input.initialize();
 
     FreeFlyCameraController cameraController;
-    //cameraController.initialize(glm::vec3(-90.0f, 90.0f, -90.0f), glm::vec3(100.0f, 20.0f, 120.0f));
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
@@ -55,32 +54,36 @@ int main()
     ObjectContainer container;
     ObjectContainer container2;
     ObjectContainer container3;
-    
+    const int spawnCountX = 1;
+    const int spawnCountY = 1;
+    /*
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createProceduralLoader();
         sceneData->initialize("terrain", true, true);
         container2.initialize(*sceneData);
         
-        for (int x = 0; x < 1; ++x)
-            for (int y = 0; y < 1; ++y)
+        for (int x = 0; x < spawnCountX; ++x)
+            for (int y = 0; y < spawnCountY; ++y)
                 spawnedNodes.push_back(container2.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, -5.0f, y * 20.0f), 100.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
+    */
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
         sceneData->initialize("Models/sponza.glb", true, true);
         container.initialize(*sceneData);
-        for (int x = 0; x < 1; ++x)
-            for (int y = 0; y < 1; ++y)
+        for (int x = 0; x < spawnCountX; ++x)
+            for (int y = 0; y < spawnCountY; ++y)
                 spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 0, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
+    /*
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
         sceneData->initialize("Models/dragon.glb", false, false);
         container3.initialize(*sceneData);
-        for (int x = 0; x < 1; ++x)
-            for (int y = 0; y < 1; ++y)
+        for (int x = 0; x < spawnCountX; ++x)
+            for (int y = 0; y < spawnCountY; ++y)
                 spawnedNodes.push_back(container3.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 2.0f, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
-    }
+    }*/
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
@@ -93,8 +96,8 @@ int main()
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 spawnedLights.resize(0);
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                for (int x = 0; x < 20; ++x)
-                    for (int y = 0; y < 20; ++y)
+                for (int x = 0; x < spawnCountX; ++x)
+                    for (int y = 0; y < spawnCountY; ++y)
                         for (int i = 0; i < 75; ++i)
                         {
                             spawnedLights.push_back({ glm::vec3( x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f)),
@@ -165,24 +168,3 @@ int main()
     input.removeSystemEventListener(pSystemEventListener);
     return 0;
 }
-
-/*
-    ObjectContainer baseShapeContainer;
-    const char* objectNames[] = { "Cube", "Capsule", "Cone", "Plane", "Ramp", "Sphere", "Wedge" };
-    {
-        std::unique_ptr<ISceneData> baseShapeSceneData = createAssimpLoader();
-        baseShapeSceneData->initialize("Models/baseshapes.glb", false, false);
-        baseShapeContainer.initialize(*baseShapeSceneData);
-    }
-    RenderNode sphereNode = baseShapeContainer.spawnNodeForPath("ROOT/Sphere", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1, 0, 0, 0)));
-
-        std::for_each(std::execution::par_unseq, std::begin(spawnedNodes), std::end(spawnedNodes), [&](RenderNode& node)
-        {
-            Transform& transform = node.getTransform();
-            transform.pos.y = glm::sin((float)Globals::time.getElapsedSec() + transform.pos.x * 0.1f + transform.pos.z * 0.1f);
-            if (frustum.sphereInFrustum(node.getWorldBounds()))
-            {
-                renderer.renderNodeThreadSafe(node);
-            }
-        });
-*/

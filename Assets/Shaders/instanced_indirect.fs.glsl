@@ -7,7 +7,7 @@
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_debug_printf : enable
 
-#include "shared_constants.inc.glsl"
+#include "shared.inc.glsl"
 
 struct MaterialInfo
 {
@@ -79,17 +79,6 @@ vec3 randomColor(ivec3 seed)
     uvec3 u = uvec3(seed);
     uint hash = u.x * 1597334673u + u.y * 3812015801u + u.z * 2798796415u;
 	return randomColor(hash);
-}
-uint getHashTableIdx(ivec3 p, uint tableSize) {
-    uvec3 q = uvec3(p);
-    q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
-    uint n = q.x ^ q.y ^ q.z;
-    n = (n ^ 61u) ^ (n >> 16u);
-    n *= 9u;
-    n = n ^ (n >> 4u);
-    n *= 0x27d4eb2du;
-    n = n ^ (n >> 15u);
-    return uint(n % tableSize);
 }
 ivec3 getGridMin(uint gridIdx) 
 { 
@@ -225,7 +214,7 @@ void main()
 	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 
 	const ivec3 gridPos = getGridPos(in_pos);
-    uint tableIdx = getHashTableIdx(gridPos, in_tableSize);
+    uint tableIdx = getPositionHash(gridPos) % in_tableSize;
 	
 	while (true)
 	{

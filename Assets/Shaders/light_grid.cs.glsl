@@ -4,7 +4,7 @@
 #extension GL_EXT_shader_16bit_storage : enable
 #extension GL_EXT_debug_printf : enable
 
-#include "shared_constants.inc.glsl"
+#include "shared.inc.glsl"
 
 struct LightInfo
 {
@@ -107,19 +107,6 @@ uint getGridMemoryUsage(uint cellSize)
 {
     const uint numCells = GRID_SIZE / cellSize;
     return 4 + (MAX_LARGE_LIGHTS_PER_GRID / 2 + 1) + numCells * numCells * numCells * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
-}
-
-uint getPositionHash(ivec3 p) 
-{
-    uvec3 q = uvec3(p);
-    q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
-    uint n = q.x ^ q.y ^ q.z;
-    n = (n ^ 61u) ^ (n >> 16u);
-    n *= 9u;
-    n = n ^ (n >> 4u);
-    n *= 0x27d4eb2du;
-    n = n ^ (n >> 15u);
-    return n;
 }
 
 uint getOrInsertGrid(ivec3 gridPos, uint cellSize)
