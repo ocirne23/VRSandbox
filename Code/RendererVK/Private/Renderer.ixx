@@ -49,7 +49,10 @@ public:
     const Frustum& beginFrame(const Camera& camera);
     void renderNodeThreadSafe(const RenderNode& node);
     void renderNode(const RenderNode& node);
-    void addLight(const Light& light);
+    void addLightInfo(const RendererVKLayout::LightInfo& light);
+    void addPointLight(const PointLight& light);
+    void addAreaLight(const AreaLight& areaLight);
+    void addSpotLight(const SpotLight& spotLight);
     void present();
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }

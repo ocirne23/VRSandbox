@@ -221,7 +221,7 @@ void Renderer::renderNode(const RenderNode& node)
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
 }
 
-void Renderer::addLight(const Light& light)
+void Renderer::addLightInfo(const RendererVKLayout::LightInfo& light)
 {
     if (m_lightCounter < RendererVKLayout::MAX_LIGHTS)
     {
@@ -230,6 +230,10 @@ void Renderer::addLight(const Light& light)
         m_lightCounter++;
     }
 }
+
+void Renderer::addPointLight(const PointLight& light)   { addLightInfo(light); }
+void Renderer::addAreaLight(const AreaLight& areaLight) { addLightInfo(areaLight); }
+void Renderer::addSpotLight(const SpotLight& spotLight) { addLightInfo(spotLight); }
 
 void Renderer::present()
 {

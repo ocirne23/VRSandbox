@@ -25,7 +25,9 @@ struct LightInfo
 	vec3 pos;
 	float range;
 	vec3 color;
-	float intensity;
+	float width;     // 0 = point light, > 0 = rectangular area light
+	vec3 direction;  // area light: up-axis, magnitude = height
+	float rotation;  // area light: rotation of the quad around direction
 };
 layout (binding = 0, std140) uniform UBO
 {
@@ -169,18 +171,121 @@ vec3 doPointLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, v
 	float dist = length(lightVec);
 	vec3 L = lightVec / dist;
 	float falloff = squareFalloff(dist, light.range);
-	vec3 lightRadiance = light.color * falloff * light.intensity;
-	return doLight(pos, lightRadiance, L, V, N, specularCol, matColOverPi, 
+	vec3 lightRadiance = light.color * falloff;
+	return doLight(pos, lightRadiance, L, V, N, specularCol, matColOverPi,
 		metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 }
 
-vec3 doSunLight(vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, 
+vec3 doSpotLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
+	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
+{
+	vec3 lightVec = light.pos - pos;
+	float dist = length(lightVec);
+	vec3 L = lightVec / dist;
+	float falloff = squareFalloff(dist, light.range);
+
+	// rotation holds the cone half-angle; direction's length is the edge softness (small = sharp).
+	float softness = length(light.direction);
+	float cosAngle = dot(-L, light.direction / softness);
+	float cosOuter = cos(light.rotation);
+	float cosInner = mix(cosOuter, 1.0, softness);
+	float spot = smoothstep(cosOuter, cosInner, cosAngle);
+
+	vec3 lightRadiance = light.color * falloff * spot;
+	return doLight(pos, lightRadiance, L, V, N, specularCol, matColOverPi,
+		metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
+}
+
+vec3 doSunLight(vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
 	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
 {
 	vec3 L = normalize(vec3(0.5, 1.0, 0.5));
 	vec3 lightRadiance = vec3(1.0, 1.0, 1.0) * 2.5f;
-	return doLight(pos, lightRadiance, L, V, N, specularCol, matColOverPi, 
+	return doLight(pos, lightRadiance, L, V, N, specularCol, matColOverPi,
 		metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
+}
+
+vec3 closestPointOnRect(vec3 p, vec3 center, vec3 right, vec3 up, float halfWidth, float halfHeight)
+{
+	vec3 d = p - center;
+	float x = clamp(dot(d, right), -halfWidth, halfWidth);
+	float y = clamp(dot(d, up), -halfHeight, halfHeight);
+	return center + right * x + up * y;
+}
+
+vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
+	float metalness, float roughness, float roughness1sqOver8, float roughnessSq)
+{
+	float height = length(light.direction);
+	if (height < 1e-5 || light.width < 1e-5)
+		return vec3(0.0);
+
+	// direction is the quad's "up" axis (its length is the height); the quad is rotated around
+	// that axis by light.rotation, giving an orthonormal right/up/normal frame.
+	vec3 up = light.direction / height;
+	vec3 ref = abs(up.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+	vec3 right0 = normalize(cross(up, ref));
+	float cs = cos(light.rotation);
+	float sn = sin(light.rotation);
+	vec3 right = right0 * cs + cross(up, right0) * sn; // Rodrigues rotation around up (up . right0 == 0)
+	vec3 normal = cross(up, right);
+	float halfWidth = light.width * 0.5;
+	float halfHeight = height * 0.5;
+	vec3 center = light.pos;
+
+	// One-sided emission: only light fragments in front of the quad (along +normal).
+	if (dot(pos - center, normal) <= 0.0)
+		return vec3(0.0);
+
+	// Diffuse: closest point on the rectangle as a representative point.
+	vec3 closest = closestPointOnRect(pos, center, right, up, halfWidth, halfHeight);
+	vec3 Ldiff = closest - pos;
+	float distDiff = length(Ldiff);
+	Ldiff /= max(distDiff, 1e-5);
+
+	// Specular: reflection ray intersected with the quad plane, clamped to the rectangle.
+	vec3 R = reflect(-V, N);
+	vec3 specPoint = closest;
+	float denom = dot(R, normal);
+	if (denom < 0.0)
+	{
+		float t = dot(center - pos, normal) / denom;
+		if (t > 0.0)
+			specPoint = closestPointOnRect(pos + R * t, center, right, up, halfWidth, halfHeight);
+	}
+	vec3 Lspec = specPoint - pos;
+	float distSpec = length(Lspec);
+	Lspec /= max(distSpec, 1e-5);
+
+	float facing = max(dot(normal, -Ldiff), 0.0);
+	vec3 radianceDiff = light.color * squareFalloff(distDiff, light.range) * facing;
+	vec3 radianceSpec = light.color * squareFalloff(distSpec, light.range) * facing;
+
+	vec3 Hs = normalize(Lspec + V);
+	float NdotLs = max(dot(N, Lspec), 0.0);
+	float NdotV  = max(dot(N, V), 0.0);
+	float HdotV  = max(dot(Hs, V), 0.0);
+	float NDF = DistributionGGX(N, Hs, roughnessSq);
+	float G   = GeometrySmith(NdotLs, NdotV, roughness1sqOver8);
+	vec3  F   = FresnelSchlickRoughness(HdotV, specularCol, roughness);
+	vec3 specular = (NDF * G * F / max(4.0 * NdotV * NdotLs, 0.0001)) * radianceSpec * NdotLs;
+
+	float NdotLd = max(dot(N, Ldiff), 0.0);
+	vec3 kD = (1.0 - F) * (1.0 - metalness);
+	vec3 diffuse = kD * matColOverPi * radianceDiff * NdotLd;
+
+	return diffuse + specular;
+}
+
+// Dispatches a unified light by its width discriminant: > 0 area, < 0 spot, == 0 point.
+vec3 doLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
+	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
+{
+	if (light.width > 0.0)
+		return doAreaLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1sqOver8, roughnessSq);
+	if (light.width < 0.0)
+		return doSpotLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
+	return doPointLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 }
 
 void main()
@@ -211,7 +316,7 @@ void main()
 	const float ambient = 0.05f;
 	vec3 color = materialColor * ambient;
 
-	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
+	//color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 
 	const ivec3 gridPos = getGridPos(in_pos);
     uint tableIdx = getPositionHash(gridPos) % in_tableSize;
@@ -229,7 +334,7 @@ void main()
 			{
 				const uint lightId = getLargeLightId(gridIdx, i);
 				const LightInfo light = in_lightInfos[lightId];
-				color += doPointLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
+				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 			}
 			
 			const uint cellSize = getCellSize(gridIdx);
@@ -243,14 +348,13 @@ void main()
 			{
 				const uint lightId = getLightId(cellOffset, i);
 				const LightInfo light = in_lightInfos[lightId];
-				color += doPointLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, 
-									roughness, roughness1, roughness1sqOver8, roughnessSq);
+				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 			}
 			break;
 		}
 		tableIdx = (tableIdx + 1) & (in_tableSize - 1);
 	}
-	
+
 	out_color = vec4(color, min(diffuseSample.a, material.opacity));
 }
 

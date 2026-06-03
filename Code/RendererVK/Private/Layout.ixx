@@ -122,11 +122,17 @@ export namespace RendererVKLayout
     };
     static_assert(sizeof(MaterialInfo) == 64);
 
+    // Unified light record for both point and rectangular area lights. width == 0 marks a point
+    // light (direction/rotation unused); width > 0 marks an area light whose quad height is encoded
+    // in the length of direction and which is rotated by rotation around that direction.
     struct alignas(16) LightInfo
     {
         glm::vec3 pos;
         float radius;
-        glm::vec3 color;
-        float intensity;
+        glm::vec3 color; // above 1.0f for higher intensity light
+        float width;
+        glm::vec3 direction;
+        float rotation;
     };
+    static_assert(sizeof(LightInfo) == 48);
 }

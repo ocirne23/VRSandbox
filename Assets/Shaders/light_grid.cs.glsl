@@ -11,7 +11,9 @@ struct LightInfo
 	vec3 pos;
 	float range;
 	vec3 color;
-	float intensity;
+	float width;     // 0 = point light, > 0 = rectangular area light
+	vec3 direction;  // area light: up-axis, magnitude = height
+	float rotation;
 };
 layout (binding = 0, std140) uniform UBO
 {
@@ -172,10 +174,44 @@ void main()
 {
     const uint lightIdx   = gl_GlobalInvocationID.x;
     const LightInfo light = in_lightInfos[lightIdx];
-    const vec3 lightMin   = light.pos - vec3(light.range);
-    const vec3 lightMax   = light.pos + vec3(light.range);
-    const ivec3 gridMin   = getGridPos(lightMin);
-    const ivec3 gridMax   = getGridPos(lightMax);
+
+    float reach = light.range;
+    vec3 lightMin = light.pos - vec3(reach);
+    vec3 lightMax = light.pos + vec3(reach);
+    if (light.width > 0.0)
+    {
+        // Area light: bound the front-facing influence box. The quad only emits along +normal, so
+        // the box spans [0, range] on the normal axis (dropping the always-culled back half) and
+        // half-extent + range on the in-plane axes. Build the same right/up/normal frame as shading.
+        const float height = length(light.direction);
+        const vec3 up = light.direction / height;
+        const vec3 ref = abs(up.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        const vec3 right0 = normalize(cross(up, ref));
+        const vec3 right = right0 * cos(light.rotation) + cross(up, right0) * sin(light.rotation);
+        const vec3 normal = cross(up, right);
+        reach += 0.5 * sqrt(light.width * light.width + height * height); // keep the per-cell/large-light threshold conservative
+        const float heRight  = light.width * 0.5 + light.range;
+        const float heUp     = height * 0.5 + light.range;
+        const vec3 boxCenter = light.pos + normal * (light.range * 0.5);
+        const vec3 extent = heRight * abs(right) + heUp * abs(up) + (light.range * 0.5) * abs(normal);
+        lightMin = boxCenter - extent;
+        lightMax = boxCenter + extent;
+    }
+    else if (light.width < 0.0)
+    {
+        // Spot light: tighten to the cone's spherical sector (apex + base disk + axial cap tip),
+        // which is far smaller than the full range sphere for narrow cones. rotation is the
+        // half-angle (<= 90 deg); at 90 deg this collapses to the front-hemisphere box.
+        const vec3 axis = normalize(light.direction);
+        const vec3 tip  = light.pos + axis * light.range;
+        const vec3 c    = light.pos + axis * (light.range * cos(light.rotation));
+        const vec3 e    = (light.range * sin(light.rotation)) * sqrt(max(vec3(1.0) - axis * axis, vec3(0.0)));
+        lightMin = min(light.pos, min(tip, c - e));
+        lightMax = max(light.pos, max(tip, c + e));
+    }
+
+    const ivec3 gridMin = getGridPos(lightMin);
+    const ivec3 gridMax = getGridPos(lightMax);
 
     for (int x = gridMin.x; x <= gridMax.x; ++x)
     {
@@ -188,7 +224,7 @@ void main()
                 if (cellSize > GRID_SIZE / 2)
                     cellSize = GRID_SIZE;
                 const uint gridIdx = getOrInsertGrid(ivec3(x, y, z), cellSize);
-                if (light.range <= float(GRID_SIZE / 2))
+                if (reach <= float(GRID_SIZE / 2))
                 {
                     addLightToGrid(gridIdx, lightIdx, lightMin, lightMax);
                 }
