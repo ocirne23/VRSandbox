@@ -123,14 +123,6 @@ float squareFalloff(float dist, float lightRadius)
     falloff *= falloff;
     return attenuation * falloff;
 }
-// a2: pow(roughness, 2), ap2: pow(alphaPrime, 2) — area-light NDF correction (Drobot).
-// alphaPrime widens the lobe for large/nearby lights; alpha2 preserves energy in the numerator.
-float DistributionGGXRect(const vec3 N, const vec3 H, const float a2, const float ap2)
-{
-	float NdotH = max(dot(N, H), 0.0);
-	float denom = (NdotH * NdotH) * (ap2 - 1.0) + 1.0;
-	return (a2 * ap2) / (PI * denom * denom);
-}
 // a2: pow(roughness, 2)
 float DistributionGGX(const vec3 N, const vec3 H, const float a2)
 {
@@ -238,6 +230,26 @@ vec3 closestPointOnRect(vec3 p, vec3 center, vec3 right, vec3 up, float halfWidt
 	return center + right * x + up * y;
 }
 
+// Specular for an extended (area/tube) source via the representative-point approximation.
+// Shades a single direction Lspec at distance distSpec, but widens the GGX lobe by the source's
+// apparent size (alphaPrime) and renormalizes by (alpha/alphaPrime)^2 to conserve energy (Karis 2014).
+vec3 evalAreaSpecular(vec3 specRadiance, vec3 Lspec, vec3 V, vec3 N, vec3 specularCol,
+	float lightSize, float distSpec, float roughness, float roughness1sqOver8, float roughnessSq)
+{
+	float alphaPrime = clamp(roughness + lightSize / (2.0 * distSpec), 0.0, 1.0);
+	float ap2        = alphaPrime * alphaPrime;
+	float sphereNorm = roughnessSq / max(ap2, 1e-5);
+
+	vec3  H      = normalize(Lspec + V);
+	float NdotL  = max(dot(N, Lspec), 0.0);
+	float NdotV  = max(dot(N, V), 0.0);
+	float HdotV  = max(dot(H, V), 0.0);
+	float NDF = DistributionGGX(N, H, ap2) * sphereNorm;
+	float G   = GeometrySmith(NdotL, NdotV, roughness1sqOver8);
+	vec3  F   = FresnelSchlickRoughness(HdotV, specularCol, roughness);
+	return (NDF * G * F / max(4.0 * NdotV * NdotL, 0.0001)) * specRadiance * NdotL;
+}
+
 vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
 	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
 {
@@ -254,11 +266,14 @@ vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 	vec3 quadNormal = cross(up, right);
 	float halfWidth = light.width * 0.5;
 	float halfHeight = height * 0.5;
+	float lightSize = (halfWidth + halfHeight) * 0.5;
 	vec3 center = light.pos;
 
+	// One-sided emitter: ignore fragments behind the quad.
 	if (dot(pos - center, quadNormal) <= 0.0)
 		return vec3(0.0);
 
+	// ---- Diffuse -------------------------------------------------------------
 	vec3 closest = closestPointOnRect(pos, center, right, up, halfWidth, halfHeight);
 	vec3 LdiffVec = closest - pos;
 	float distDiff = length(LdiffVec);
@@ -267,14 +282,18 @@ vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 
 	// Horizon clamp: smoothstep the center N.L over the quad's angular half-extent.
 	// As the quad clips below the horizon it fades out proportionally to its apparent size.
-	float lightSize = (halfWidth + halfHeight) * 0.5;
 	float NdotLcenter = dot(N, normalize(center - pos));
 	float halfExtent = lightSize / max(distDiff, 1e-5);
 	float horizonVis = smoothstep(-halfExtent, halfExtent, NdotLcenter);
 
-	vec3 radiance = light.color * squareFalloff(distDiff, light.range) * facingDiff;
+	vec3 diffRadiance = light.color * squareFalloff(distDiff, light.range) * facingDiff;
+	vec3 Hdiff = normalize(Ldiff + V);
+	vec3 Fdiff = FresnelSchlickRoughness(max(dot(Hdiff, V), 0.0), specularCol, roughness);
+	vec3 diffuse = doLightDiffuseOnly(diffRadiance, Fdiff, matColOverPi, metalness, horizonVis);
 
-	// Specular representative point: reflection ray clamped to rect, skipped for rough surfaces.
+	// ---- Specular (representative point) -------------------------------------
+	// Intersect the mirror ray with the quad plane and clamp to the rectangle, then shade from
+	// that point with its own distance and facing (skipped for rough surfaces: lobe is broad).
 	vec3 specPoint = closest;
 	if (roughness < 0.6)
 	{
@@ -288,11 +307,16 @@ vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 		}
 	}
 	vec3 LspecVec = specPoint - pos;
-	vec3 Lspec = LspecVec / max(length(LspecVec), 1e-5);
-	vec3 Hdiff = normalize(Ldiff + V);
-	vec3 Fdiff = FresnelSchlickRoughness(max(dot(Hdiff, V), 0.0), specularCol, roughness);
-	vec3 specular = doLightSpecularOnly(radiance * horizonVis, Lspec, V, N, specularCol, roughness, roughness1sqOver8, roughnessSq);
-	vec3 diffuse  = doLightDiffuseOnly(radiance, Fdiff, matColOverPi, metalness, horizonVis);
+	float distSpec = max(length(LspecVec), 1e-4);
+	vec3 Lspec = LspecVec / distSpec;
+	float facingSpec = max(dot(quadNormal, -Lspec), 0.0);
+	vec3 specRadiance = light.color * squareFalloff(distSpec, light.range) * facingSpec;
+	// Effective specular size 0: closestPointOnRect already integrates the rect's full 2D extent,
+	// so (unlike the tube's radius) there is no residual cross-section left to widen the lobe by.
+	// This keeps a near-mirror reflection at the source radiance instead of dimming it by quad size.
+	vec3 specular = evalAreaSpecular(specRadiance, Lspec, V, N, specularCol, 0.0, distSpec,
+		roughness, roughness1sqOver8, roughnessSq);
+
 	return diffuse + specular;
 }
 
@@ -310,50 +334,55 @@ vec3 doTubeLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 	vec3 pa   = light.pos - axis * halfLen;
 	vec3 pb   = light.pos + axis * halfLen;
 
-	// Vectors from fragment to each endpoint (sample code convention).
+	// ---- Diffuse -------------------------------------------------------------
+	// Closest point on the core segment drives distance falloff and the horizon fade.
+	vec3 closest   = closestPointOnSegment(pos, pa, pb);
+	vec3 LdiffVec  = closest - pos;
+	float coreDist = length(LdiffVec);
+	vec3 Ldiff     = LdiffVec / max(coreDist, 1e-5);
+	float distDiff = max(coreDist - radius, 1e-4); // shade from the tube surface, not its core
+
+	// Horizon clamp: fade as the tube sinks below the tangent plane, scaled by its apparent size.
+	float NdotLcenter = dot(N, normalize(light.pos - pos));
+	float halfExtent  = (halfLen + radius) / max(coreDist, 1e-5);
+	float horizonVis  = smoothstep(-halfExtent, halfExtent, NdotLcenter);
+
+	vec3 diffRadiance = light.color * squareFalloff(distDiff, absRange);
+	vec3 Hdiff = normalize(Ldiff + V);
+	vec3 Fdiff = FresnelSchlickRoughness(max(dot(Hdiff, V), 0.0), specularCol, roughness);
+	vec3 diffuse = doLightDiffuseOnly(diffRadiance, Fdiff, matColOverPi, metalness, horizonVis);
+
+	// ---- Specular (representative point) -------------------------------------
+	// Find the point on the tube surface most aligned with the mirror ray R, then shade it as a
+	// punctual light *from that point* (its own distance/direction) with a size-widened lobe.
 	vec3 l0 = pa - pos;
 	vec3 l1 = pb - pos;
-	float lenL0 = length(l0);
-	float lenL1 = length(l1);
-
-	// Diffuse NdotL: integrate the tube as a line source (Karis 2014).
-	float NdotL0 = dot(N, l0) / (2.0 * lenL0);
-	float NdotL1 = dot(N, l1) / (2.0 * lenL1);
-	float NdotL  = clamp(NdotL0 + NdotL1, 0.0, 1.0) * 2.0 / (lenL0 * lenL1 + dot(l0, l1) + 2.0);
-
-	// Diffuse: closest point on segment for radiance falloff and horizonVis.
-	vec3 closest  = closestPointOnSegment(pos, pa, pb);
-	float distDiff = length(closest - pos);
-	vec3 Ldiff    = (closest - pos) / max(distDiff, 1e-5);
-
-	// Horizon clamp: use distDiff (closest point) for halfExtent, consistent with area light.
-	float NdotLcenter = dot(N, normalize(light.pos - pos));
-	float halfExtent  = halfLen / max(distDiff, 1e-5);
-	float horizonVis  = smoothstep(-halfExtent, halfExtent, NdotLcenter);
-	vec3 radiance = light.color * squareFalloff(distDiff, absRange);
-
-	// Specular representative point: skip the solve for rough surfaces, reuse closest.
-	vec3 specVec = closest - pos;
+	vec3 specVec;
 	if (roughness < 0.6)
 	{
 		vec3 R        = reflect(-V, N);
 		vec3 ld       = l1 - l0;
-		float RdotL0  = dot(R, l0);
 		float RdotLd  = dot(R, ld);
-		float L0dotLd = dot(l0, ld);
 		float ldLen2  = dot(ld, ld);
 		float denom   = ldLen2 - RdotLd * RdotLd;
-		float t = (abs(denom) > 1e-6) ? clamp((RdotL0 * RdotLd - L0dotLd) / denom, 0.0, 1.0) : 0.5;
-		vec3 closestLine = l0 + ld * t;
+		float t = (abs(denom) > 1e-6) ? clamp((dot(R, l0) * RdotLd - dot(l0, ld)) / denom, 0.0, 1.0) : 0.5;
+		vec3 closestLine = l0 + ld * t;                     // closest core point to the reflection ray
 		vec3 centerToRay = dot(closestLine, R) * R - closestLine;
-		float ctrLen = length(centerToRay);
+		float ctrLen     = length(centerToRay);
 		specVec = closestLine + centerToRay * clamp(radius / max(ctrLen, 1e-5), 0.0, 1.0);
 	}
-	vec3 Lspec = normalize(specVec);
-	vec3 Hdiff = normalize(Ldiff + V);
-	vec3 Fdiff = FresnelSchlickRoughness(max(dot(Hdiff, V), 0.0), specularCol, roughness);
-	vec3 specular = doLightSpecularOnly(radiance * horizonVis, Lspec, V, N, specularCol, roughness, roughness1sqOver8, roughnessSq);
-	vec3 diffuse = doLightDiffuseOnly(radiance, Fdiff, matColOverPi, metalness, horizonVis);
+	else
+	{
+		specVec = LdiffVec; // broad lobe: the representative point barely matters, reuse closest
+	}
+	float specLen  = length(specVec);
+	float distSpec = max(specLen - radius, 1e-4);           // falloff at the actual specular distance
+	vec3  Lspec    = specVec / max(specLen, 1e-5);
+	vec3  specRadiance = light.color * squareFalloff(distSpec, absRange);
+	// lightSize = tube radius; widens the GGX lobe by the source's apparent size and renormalizes.
+	vec3 specular = evalAreaSpecular(specRadiance, Lspec, V, N, specularCol, radius, distSpec,
+		roughness, roughness1sqOver8, roughnessSq);
+
 	return diffuse + specular;
 }
 
@@ -413,7 +442,7 @@ void main()
 	//color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 
 	const ivec3 gridPos = getGridPos(in_pos);
-    uint tableIdx = getPositionHash(gridPos) % in_tableSize;
+    uint tableIdx = getPositionHash(gridPos) & (in_tableSize - 1); // tableSize is a power of two
 	
 	while (true)
 	{
