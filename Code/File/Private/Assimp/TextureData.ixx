@@ -13,7 +13,8 @@ public:
 	TextureData(const TextureData&) = delete;
 	TextureData(TextureData&&) = default;
 
-	bool initialize(const aiTexture* pTexture);
+	bool initialize(const char* filePath);
+	bool initialize(const aiTexture* pEmbeddedTexture);
 
 	const char* getFileName() const override;
 	const Pixel* getPixels() const override;
@@ -23,6 +24,6 @@ public:
 
 private:
 
-	const char* m_pFileName = nullptr;
-	const aiTexture* m_pTexture = nullptr;
+	std::string      m_filePath;            // always set: embedded filename or loose file path
+	const aiTexture* m_pTexture = nullptr;  // non-null only for embedded textures
 };

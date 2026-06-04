@@ -33,10 +33,21 @@ public:
     std::string getTexturePath(ETextureType type) const override;
 
     uint32 getDiffuseTexIdx() const override;
-    uint32 getNormalTexIdx() const override;
+    uint32 getNormalTexIdx()  const override;
     uint32 getOpacityTexIdx() const override;
+    uint32 getMetalRoughnessTexIdx() const override;
+
+    // Called by SceneData after it resolves the unified texture registry.
+    void setDiffuseTexIdx(uint32 idx)          { m_diffuseTexIdx          = idx; }
+    void setNormalTexIdx(uint32 idx)           { m_normalTexIdx           = idx; }
+    void setOpacityTexIdx(uint32 idx)          { m_opacityTexIdx          = idx; }
+    void setMetalRoughnessTexIdx(uint32 idx)   { m_metalRoughnessTexIdx   = idx; }
 
 private:
 
-    const aiMaterial* m_pMaterial = nullptr;
+    const aiMaterial* m_pMaterial       = nullptr;
+    uint32 m_diffuseTexIdx              = UINT32_MAX;
+    uint32 m_normalTexIdx               = UINT32_MAX;
+    uint32 m_opacityTexIdx              = UINT32_MAX;
+    uint32 m_metalRoughnessTexIdx       = UINT32_MAX;
 };

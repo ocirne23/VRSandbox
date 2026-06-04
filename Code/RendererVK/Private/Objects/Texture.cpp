@@ -120,8 +120,6 @@ bool Texture::initialize(const ITextureData& textureData, bool generateMips)
             int numComponents = 0;
             int desiredComponents = 1;
 			stbi_info_from_memory((stbi_uc*)textureData.getPixels(), bufferSize, &width, &height, &desiredComponents);
-            if (desiredComponents == 3)
-				desiredComponents = 4; // force 4 component for rgb pngs
             stbi_uc* pixelData = stbi_load_from_memory((stbi_uc*)textureData.getPixels(), bufferSize, &width, &height, &numComponents, desiredComponents);
             if (!pixelData)
             {
@@ -132,7 +130,7 @@ bool Texture::initialize(const ITextureData& textureData, bool generateMips)
             switch (desiredComponents)
             {
             case 1:
-                format = sRGB ? vk::Format::eR8G8B8Snorm : vk::Format::eR8Unorm;
+                format = sRGB ? vk::Format::eR8Snorm : vk::Format::eR8Unorm;
                 break;
             case 2:
 				format = sRGB ? vk::Format::eR8G8Snorm : vk::Format::eR8G8Unorm;

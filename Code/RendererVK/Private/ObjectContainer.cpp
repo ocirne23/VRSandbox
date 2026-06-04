@@ -123,13 +123,14 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
         const IMaterialData& materialData = *sceneData.getMaterial(materialIdx);
         RendererVKLayout::MaterialInfo& material = materialInfos.emplace_back();
 
-        material.baseColor     = materialData.getBaseColor();
-        material.roughness     = materialData.getRoughnessFactor();
-        material.specularColor = materialData.getSpecularColor();
-        material.metalness     = materialData.getMetalnessFactor();
-        material.emissiveColor = materialData.getEmissiveColor() * materialData.getEmissiveIntensity();
+        //material.baseColor     = materialData.getBaseColor();
+        //material.roughness     = materialData.getRoughnessFactor();
+        //material.specularColor = materialData.getSpecularColor();
+        //material.metalness     = materialData.getMetalnessFactor();
+        //material.emissiveColor = materialData.getEmissiveColor() * materialData.getEmissiveIntensity();
         material.diffuseTexIdx = RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX;
 		material.normalTexIdx  = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
+        material.metalRoughnessTexIdx = UINT16_MAX;
 
 		const IMaterialData::EAlphaMode alphaMode = materialData.getAlphaMode();
 		const float opacity    = materialData.getOpacity();
@@ -154,7 +155,19 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             material.opacity = opacity;
 			temp.pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitOpaque, RendererVKLayout::EAlphaMode::Opaque);
         }
-
+        /*
+		const std::string diffuseTexPath = materialData.getTexturePath(IMaterialData::ETextureType::DIFFUSE);
+		if (!diffuseTexPath.empty())
+		{
+			const ITextureData* pTex = sceneData.getTexture(diffuseTexPath.c_str());
+			if (pTex)
+			{
+				uint16& idx = temp.textureIdxForMaterialTex[pTex->getIndex()];
+				if (idx == UINT16_MAX)
+					idx = Globals::textureManager.upload(*pTex, true);
+				material.diffuseTexIdx = idx;
+			}
+		}*/
         const uint32 diffuseTexIdx = materialData.getDiffuseTexIdx();
 		if (diffuseTexIdx != UINT32_MAX)
 		{
@@ -171,6 +184,15 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             if (idx == UINT16_MAX)
                 idx = Globals::textureManager.upload(*sceneData.getTexture(normalTexIdx), true);
             material.normalTexIdx = idx;
+        }
+
+        const uint32 metalRoughnessTexIdx = materialData.getMetalRoughnessTexIdx();
+        if (metalRoughnessTexIdx != UINT32_MAX)
+        {
+            uint16& idx = temp.textureIdxForMaterialTex[metalRoughnessTexIdx];
+            if (idx == UINT16_MAX)
+                idx = Globals::textureManager.upload(*sceneData.getTexture(metalRoughnessTexIdx), false);
+            material.metalRoughnessTexIdx = idx;
         }
 
         m_materialNames.push_back(materialData.getName());

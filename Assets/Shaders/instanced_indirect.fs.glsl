@@ -11,14 +11,10 @@
 
 struct MaterialInfo
 {
-    vec3 baseColor;
-    float roughness;
-    vec3 specularColor;
-    float metalness;
-    vec3 emissiveColor;
+	uint flags;
+    float opacity;
     uint diffuseNormalTexIdx;
-	float opacity;
-    uint16_t alphaMode;
+	uint metalRoughnessTexIdxAlphaMode;
 };
 struct LightInfo
 {
@@ -127,6 +123,14 @@ float squareFalloff(float dist, float lightRadius)
     falloff *= falloff;
     return attenuation * falloff;
 }
+// a2: pow(roughness, 2), ap2: pow(alphaPrime, 2) — area-light NDF correction (Drobot).
+// alphaPrime widens the lobe for large/nearby lights; alpha2 preserves energy in the numerator.
+float DistributionGGXRect(const vec3 N, const vec3 H, const float a2, const float ap2)
+{
+	float NdotH = max(dot(N, H), 0.0);
+	float denom = (NdotH * NdotH) * (ap2 - 1.0) + 1.0;
+	return (a2 * ap2) / (PI * denom * denom);
+}
 // a2: pow(roughness, 2)
 float DistributionGGX(const vec3 N, const vec3 H, const float a2)
 {
@@ -148,20 +152,34 @@ vec3 FresnelSchlickRoughness(float HdotV, vec3 F0, float roughness)
 	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * (x2 * x2 * x);
 }
 
-vec3 doLight(vec3 pos, vec3 lightRadiance, vec3 L, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, 
-	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
+vec3 doLightSpecularOnly(vec3 lightRadiance, vec3 L, vec3 V, vec3 N, vec3 specularCol,
+	float roughness, float roughness1sqOver8, float roughnessSq)
 {
 	vec3 H = normalize(L + V);
 	float NdotL = max(dot(N, L), 0.0);
 	float NdotV = max(dot(N, V), 0.0);
 	float HdotV = max(dot(H, V), 0.0);
-
 	float NDF = DistributionGGX(N, H, roughnessSq);
 	float G = GeometrySmith(NdotL, NdotV, roughness1sqOver8);
 	vec3 F = FresnelSchlickRoughness(HdotV, specularCol, roughness);
-	vec3 specularContrib = NDF * G * F / max(4.0 * NdotV * NdotL, 0.0001);
+	return (NDF * G * F / max(4.0 * NdotV * NdotL, 0.0001)) * lightRadiance * NdotL;
+}
+
+vec3 doLightDiffuseOnly(vec3 lightRadiance, vec3 F, vec3 matColOverPi, float metalness, float NdotL)
+{
 	vec3 kD = (1.0 - F) * (1.0 - metalness);
-	return (kD * matColOverPi + specularContrib) * lightRadiance * NdotL;
+	return kD * matColOverPi * lightRadiance * NdotL;
+}
+
+vec3 doLight(vec3 pos, vec3 lightRadiance, vec3 L, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
+	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
+{
+	vec3 H = normalize(L + V);
+	float NdotL = max(dot(N, L), 0.0);
+	float HdotV = max(dot(H, V), 0.0);
+	vec3 F = FresnelSchlickRoughness(HdotV, specularCol, roughness);
+	vec3 specular = doLightSpecularOnly(lightRadiance, L, V, N, specularCol, roughness, roughness1sqOver8, roughnessSq);
+	return specular + doLightDiffuseOnly(lightRadiance, F, matColOverPi, metalness, NdotL);
 }
 
 vec3 doPointLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, 
@@ -214,66 +232,60 @@ vec3 closestPointOnRect(vec3 p, vec3 center, vec3 right, vec3 up, float halfWidt
 }
 
 vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
-	float metalness, float roughness, float roughness1sqOver8, float roughnessSq)
+	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
 {
 	float height = length(light.direction);
 	if (height < 1e-5 || light.width < 1e-5)
 		return vec3(0.0);
 
-	// direction is the quad's "up" axis (its length is the height); the quad is rotated around
-	// that axis by light.rotation, giving an orthonormal right/up/normal frame.
 	vec3 up = light.direction / height;
 	vec3 ref = abs(up.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
 	vec3 right0 = normalize(cross(up, ref));
 	float cs = cos(light.rotation);
 	float sn = sin(light.rotation);
-	vec3 right = right0 * cs + cross(up, right0) * sn; // Rodrigues rotation around up (up . right0 == 0)
-	vec3 normal = cross(up, right);
+	vec3 right = right0 * cs + cross(up, right0) * sn;
+	vec3 quadNormal = cross(up, right);
 	float halfWidth = light.width * 0.5;
 	float halfHeight = height * 0.5;
 	vec3 center = light.pos;
 
-	// One-sided emission: only light fragments in front of the quad (along +normal).
-	if (dot(pos - center, normal) <= 0.0)
+	if (dot(pos - center, quadNormal) <= 0.0)
 		return vec3(0.0);
 
-	// Diffuse: closest point on the rectangle as a representative point.
 	vec3 closest = closestPointOnRect(pos, center, right, up, halfWidth, halfHeight);
-	vec3 Ldiff = closest - pos;
-	float distDiff = length(Ldiff);
-	Ldiff /= max(distDiff, 1e-5);
+	vec3 LdiffVec = closest - pos;
+	float distDiff = length(LdiffVec);
+	vec3 Ldiff = LdiffVec / max(distDiff, 1e-5);
+	float facingDiff = max(dot(quadNormal, -Ldiff), 0.0);
 
-	// Specular: reflection ray intersected with the quad plane, clamped to the rectangle.
-	vec3 R = reflect(-V, N);
+	// Horizon clamp: smoothstep the center N.L over the quad's angular half-extent.
+	// As the quad clips below the horizon it fades out proportionally to its apparent size.
+	float lightSize = (halfWidth + halfHeight) * 0.5;
+	float NdotLcenter = dot(N, normalize(center - pos));
+	float halfExtent = lightSize / max(distDiff, 1e-5);
+	float horizonVis = smoothstep(-halfExtent, halfExtent, NdotLcenter);
+
+	vec3 radiance = light.color * squareFalloff(distDiff, light.range) * facingDiff;
+
+	// Specular representative point: reflection ray clamped to rect, skipped for rough surfaces.
 	vec3 specPoint = closest;
-	float denom = dot(R, normal);
-	if (denom < 0.0)
+	if (roughness < 0.6)
 	{
-		float t = dot(center - pos, normal) / denom;
-		if (t > 0.0)
-			specPoint = closestPointOnRect(pos + R * t, center, right, up, halfWidth, halfHeight);
+		vec3 R = reflect(-V, N);
+		float d = dot(R, quadNormal);
+		if (d < 0.0)
+		{
+			float t = dot(center - pos, quadNormal) / d;
+			if (t > 0.0)
+				specPoint = closestPointOnRect(pos + R * t, center, right, up, halfWidth, halfHeight);
+		}
 	}
-	vec3 Lspec = specPoint - pos;
-	float distSpec = length(Lspec);
-	Lspec /= max(distSpec, 1e-5);
-
-	float facing = max(dot(normal, -Ldiff), 0.0);
-	vec3 radianceDiff = light.color * squareFalloff(distDiff, light.range) * facing;
-	vec3 radianceSpec = light.color * squareFalloff(distSpec, light.range) * facing;
-
-	vec3 Hs = normalize(Lspec + V);
-	float NdotLs = max(dot(N, Lspec), 0.0);
-	float NdotV  = max(dot(N, V), 0.0);
-	float HdotV  = max(dot(Hs, V), 0.0);
-	float NDF = DistributionGGX(N, Hs, roughnessSq);
-	float G   = GeometrySmith(NdotLs, NdotV, roughness1sqOver8);
-	vec3  F   = FresnelSchlickRoughness(HdotV, specularCol, roughness);
-	vec3 specular = (NDF * G * F / max(4.0 * NdotV * NdotLs, 0.0001)) * radianceSpec * NdotLs;
-
-	float NdotLd = max(dot(N, Ldiff), 0.0);
-	vec3 kD = (1.0 - F) * (1.0 - metalness);
-	vec3 diffuse = kD * matColOverPi * radianceDiff * NdotLd;
-
+	vec3 LspecVec = specPoint - pos;
+	vec3 Lspec = LspecVec / max(length(LspecVec), 1e-5);
+	vec3 Hdiff = normalize(Ldiff + V);
+	vec3 Fdiff = FresnelSchlickRoughness(max(dot(Hdiff, V), 0.0), specularCol, roughness);
+	vec3 specular = doLightSpecularOnly(radiance * horizonVis, Lspec, V, N, specularCol, roughness, roughness1sqOver8, roughnessSq);
+	vec3 diffuse  = doLightDiffuseOnly(radiance, Fdiff, matColOverPi, metalness, horizonVis);
 	return diffuse + specular;
 }
 
@@ -282,7 +294,7 @@ vec3 doLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 m
 	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
 {
 	if (light.width > 0.0)
-		return doAreaLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1sqOver8, roughnessSq);
+		return doAreaLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 	if (light.width < 0.0)
 		return doSpotLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 	return doPointLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
@@ -294,18 +306,28 @@ void main()
 	const MaterialInfo material = in_materialInfos[materialIdx];
 	const uint16_t diffuseTexIdx = uint16_t(material.diffuseNormalTexIdx & 0x0000FFFF);
 	const uint16_t normalTexIdx  = uint16_t((material.diffuseNormalTexIdx & 0xFFFF0000) >> 16);
-	
-	const float roughness = 0.4;//max(material.roughness, 0.01);
-	const float metalness = 0.0;//material.metalness;
-	
-	const vec4 diffuseSample = texture(u_textures[diffuseTexIdx], in_uv);
-	if (material.alphaMode == ALPHA_MODE_MASK && diffuseSample.a < material.opacity)
+	const uint16_t metalRoughnessTexIdx = uint16_t(material.metalRoughnessTexIdxAlphaMode & 0x0000FFFF);
+	const uint16_t alphaMode = uint16_t((material.metalRoughnessTexIdxAlphaMode & 0xFFFF0000) >> 16);
+
+	float roughness = 1.0;
+	float metalness = 0.0;
+	if (metalRoughnessTexIdx != uint16_t(0xFFFF))
+	{
+		const vec2 metalRoughness = texture(u_textures[metalRoughnessTexIdx], in_uv).bg;
+		metalness = metalRoughness.x;
+		roughness = max(metalRoughness.y, 0.01);
+	}
+
+	const vec3 V  = normalize(u_viewPos - in_pos);
+	const vec2 uv = in_uv; //spomDisplaceUV(uint(normalTexIdx), V);
+
+	const vec4 diffuseSample = texture(u_textures[diffuseTexIdx], uv);
+	if (alphaMode == ALPHA_MODE_MASK && diffuseSample.a < material.opacity)
 		discard;
 	const vec3 materialColor = diffuseSample.xyz;
-	const vec3 materialNormal = texture(u_textures[normalTexIdx], in_uv).xyz;
-	const vec3 specularColor = mix(vec3(0.04), materialColor, material.metalness);
-	
-	const vec3 V = normalize(u_viewPos - in_pos);
+	const vec3 materialNormal = texture(u_textures[normalTexIdx], uv).xyz;
+	const vec3 specularColor = mix(vec3(0.04), materialColor, metalness);
+
 	const vec3 N = in_tbn * normalize(materialNormal * 2.0 - 1.0);
 
 	const float roughness1 = roughness + 1.0;

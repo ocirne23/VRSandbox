@@ -38,6 +38,7 @@ std::string ProceduralMaterialData::getTexturePath(ETextureType /*type*/) const
 	return {};
 }
 
-uint32 ProceduralMaterialData::getDiffuseTexIdx() const { return m_diffuseTexIdx; }
-uint32 ProceduralMaterialData::getNormalTexIdx()  const { return m_normalTexIdx; }
-uint32 ProceduralMaterialData::getOpacityTexIdx() const { return UINT32_MAX; }
+uint32 ProceduralMaterialData::getDiffuseTexIdx()          const { return m_diffuseTexIdx; }
+uint32 ProceduralMaterialData::getNormalTexIdx()            const { return m_normalTexIdx; }
+uint32 ProceduralMaterialData::getOpacityTexIdx()           const { return UINT32_MAX; }
+uint32 ProceduralMaterialData::getMetalRoughnessTexIdx()    const { return m_metalRoughnessTexIdx; }

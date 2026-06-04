@@ -28,10 +28,10 @@ public:
         METALNESS = 15,
         DIFFUSE_ROUGHNESS = 16,
         AMBIENT_OCCLUSION = 17,
-        aiTextureType_SHEEN = 19,
-        aiTextureType_CLEARCOAT = 20,
-        aiTextureType_TRANSMISSION = 21,
-        aiTextureType_UNKNOWN = 18,
+        UNKNOWN = 18,
+        SHEEN = 19,
+        CLEARCOAT = 20,
+        TRANSMISSION = 21,
     };
 
     enum class EAlphaMode
@@ -59,4 +59,5 @@ public:
     virtual uint32 getDiffuseTexIdx() const = 0;
     virtual uint32 getNormalTexIdx() const = 0;
     virtual uint32 getOpacityTexIdx() const = 0;
+    virtual uint32 getMetalRoughnessTexIdx() const = 0;
 };

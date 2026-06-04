@@ -108,19 +108,13 @@ export namespace RendererVKLayout
 
     struct alignas(16) MaterialInfo
     {
-        glm::vec3 baseColor;
-        float roughness;
-        glm::vec3 specularColor;
-        float metalness;
-        glm::vec3 emissiveColor;
+		uint32 flags;
+        float opacity;
         uint16 diffuseTexIdx;
         uint16 normalTexIdx;
-		float  opacity;   // opacity or alpha cutoff depending on alpha mode
+        uint16 metalRoughnessTexIdx;
         uint16 alphaMode;
-    private:
-        uint16 _padding[5];
     };
-    static_assert(sizeof(MaterialInfo) == 64);
 
     // Unified light record for both point and rectangular area lights. width == 0 marks a point
     // light (direction/rotation unused); width > 0 marks an area light whose quad height is encoded

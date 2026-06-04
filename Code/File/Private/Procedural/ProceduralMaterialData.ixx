@@ -32,10 +32,12 @@ public:
 	uint32 getDiffuseTexIdx() const override;
 	uint32 getNormalTexIdx()  const override;
 	uint32 getOpacityTexIdx() const override;
+	uint32 getMetalRoughnessTexIdx() const override;
 
 	// Setters used by ProceduralSceneData to wire up texture indices
-	void setDiffuseTexIdx(uint32 idx) { m_diffuseTexIdx = idx; }
-	void setNormalTexIdx(uint32 idx)  { m_normalTexIdx  = idx; }
+	void setDiffuseTexIdx(uint32 idx)        { m_diffuseTexIdx        = idx; }
+	void setNormalTexIdx(uint32 idx)         { m_normalTexIdx         = idx; }
+	void setMetalRoughnessTexIdx(uint32 idx) { m_metalRoughnessTexIdx = idx; }
 
 private:
 	std::string m_name;
@@ -48,6 +50,7 @@ private:
 	float       m_alphaCutoff       = 0.0f;
 	float       m_emissiveIntensity = 1.0f;
 	float       m_refractiveIndex   = 1.5f;
-	uint32      m_diffuseTexIdx     = UINT32_MAX;
-	uint32      m_normalTexIdx      = UINT32_MAX;
+	uint32      m_diffuseTexIdx          = UINT32_MAX;
+	uint32      m_normalTexIdx           = UINT32_MAX;
+	uint32      m_metalRoughnessTexIdx   = UINT32_MAX;
 };

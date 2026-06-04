@@ -21,76 +21,49 @@ MaterialData::~MaterialData()
 bool MaterialData::initialize(const aiMaterial* pMaterial)
 {
     m_pMaterial = pMaterial;
+
+	printf("Material: %s\n", getName());
+	for (uint32 i = aiTextureType_DIFFUSE; i < AI_TEXTURE_TYPE_MAX; i++)
+	{
+		// print texture paths for debugging
+		for (uint32 j = 0; j < m_pMaterial->GetTextureCount(static_cast<aiTextureType>(i)); j++)
+		{
+			aiString path;
+			m_pMaterial->GetTexture(static_cast<aiTextureType>(i), j, &path);
+            const bool isEmbedded = path.C_Str()[0] == '*';
+			if (isEmbedded)
+			{
+				const int embeddedTexIdx = atoi(path.C_Str() + 1);
+				printf("Embedded texture type: %s, index: %d\n", aiTextureTypeToString(static_cast<aiTextureType>(i)), embeddedTexIdx);
+				assert(embeddedTexIdx >= 0 && "Invalid embedded texture index");
+			}
+            else
+            {
+				printf("Texture type: %s, path: %s\n", aiTextureTypeToString(static_cast<aiTextureType>(i)), path.C_Str());
+            }
+		}
+	}
     return true;
 }
 
 uint32 MaterialData::getDiffuseTexIdx() const
 {
-    aiString path;
-    aiReturn ret = aiGetMaterialString(m_pMaterial, AI_MATKEY_TEXTURE_DIFFUSE(0), &path);
-    if (ret != aiReturn_SUCCESS)
-    {
-        return UINT32_MAX;
-    }
-    if (path.length < 2)
-    {
-        assert(false && "Failed to find diffuse texture path");
-        return UINT32_MAX;
-    }
-    const bool isEmbedded = path.C_Str()[0] == '*';
-    uint32 diffuseTexIdx = UINT32_MAX;
-    if (isEmbedded)
-    {
-        diffuseTexIdx = atoi(path.C_Str() + 1);
-    }
-    assert(isEmbedded && "Implement non embedded textures");
-    return diffuseTexIdx;
+    return m_diffuseTexIdx;
 }
 
 uint32 MaterialData::getNormalTexIdx() const
 {
-    aiString path;
-    aiReturn ret = aiGetMaterialString(m_pMaterial, AI_MATKEY_TEXTURE_NORMALS(0), &path);
-    if (ret != aiReturn_SUCCESS)
-    {
-        return UINT32_MAX;
-    }
-    if (path.length < 2)
-    {
-        assert(false && "Failed to find normal texture path");
-        return UINT32_MAX;
-    }
-    const bool isEmbedded = path.C_Str()[0] == '*';
-    uint32 normalTexIdx = UINT32_MAX;
-    if (isEmbedded)
-    {
-        normalTexIdx = atoi(path.C_Str() + 1);
-    }
-    assert(isEmbedded && "Implement non embedded textures");
-    return normalTexIdx;
+    return m_normalTexIdx;
 }
 
 uint32 MaterialData::getOpacityTexIdx() const
 {
-    aiString path;
-    aiReturn ret = aiGetMaterialString(m_pMaterial, AI_MATKEY_TEXTURE_OPACITY(0), &path);
-    if (ret != aiReturn_SUCCESS)
-    {
-        return UINT32_MAX;
-    }
-    if (path.length < 2)
-    {
-        assert(false && "Failed to find opacity texture path");
-        return UINT32_MAX;
-    }
-    const bool isEmbedded = path.C_Str()[0] == '*';
-    uint32 opacityTexIdx = UINT32_MAX;
-    if (isEmbedded)
-    {
-        opacityTexIdx = atoi(path.C_Str() + 1);
-    }
-    assert(isEmbedded && "Implement non embedded textures");
-    return opacityTexIdx;
+    return m_opacityTexIdx;
+}
+
+uint32 MaterialData::getMetalRoughnessTexIdx() const
+{
+    return m_metalRoughnessTexIdx;
 }
 
 const char* MaterialData::getName() const
@@ -222,6 +195,12 @@ std::string MaterialData::getTexturePath(ETextureType type) const
     m_pMaterial->GetTexture(aiType, 0, &path);
     if (!path.length)
         return "";
+
+    const bool isEmbedded = path.C_Str()[0] == '*';
+	if (isEmbedded)
+	{
+		return path.C_Str();
+	}
     else
         return std::filesystem::path(path.C_Str()).lexically_proximate(std::filesystem::current_path()).string();
 }
