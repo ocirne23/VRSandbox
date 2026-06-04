@@ -33,6 +33,20 @@ export struct AreaLight : RendererVKLayout::LightInfo
     }
 };
 
+export struct TubeLight : RendererVKLayout::LightInfo
+{
+	TubeLight() = default;
+	TubeLight(const glm::vec3& pos, float lightRange, const glm::vec3& color, float intensity, const glm::vec3& direction, float tubeRadius, float length, float rotation = 0.0f)
+	{
+		this->pos = pos;
+		this->radius = -lightRange;
+		this->color = color * intensity;
+		this->width = tubeRadius;
+		this->direction = glm::normalize(direction) * length * 0.5f; // length encoded in the direction's magnitude
+		this->rotation = rotation;
+	}
+};
+
 export struct SpotLight : RendererVKLayout::LightInfo
 {
     SpotLight() = default;

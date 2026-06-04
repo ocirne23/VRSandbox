@@ -175,10 +175,25 @@ void main()
     const uint lightIdx   = gl_GlobalInvocationID.x;
     const LightInfo light = in_lightInfos[lightIdx];
 
-    float reach = light.range;
+    float reach = abs(light.range);
     vec3 lightMin = light.pos - vec3(reach);
     vec3 lightMax = light.pos + vec3(reach);
-    if (light.width > 0.0)
+    if (light.width > 0.0 && light.range < 0.0)
+    {
+        // Tube light: capsule along the axis. Bound as the two end-cap spheres of radius + absRange.
+        const float height   = length(light.direction);
+        const float halfLen  = height * 0.5;
+        const vec3  axis     = light.direction / height;
+        const float absRange = -light.range;
+        const float radius   = light.width;
+        const float pad      = radius + absRange;
+        reach = halfLen + pad; // conservative radius for large-light threshold
+        const vec3 pa = light.pos - axis * halfLen;
+        const vec3 pb = light.pos + axis * halfLen;
+        lightMin = min(pa, pb) - vec3(pad);
+        lightMax = max(pa, pb) + vec3(pad);
+    }
+    else if (light.width > 0.0)
     {
         // Area light: bound the front-facing influence box. The quad only emits along +normal, so
         // the box spans [0, range] on the normal axis (dropping the always-culled back half) and

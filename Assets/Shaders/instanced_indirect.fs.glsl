@@ -223,6 +223,13 @@ vec3 doSunLight(vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
 		metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 }
 
+vec3 closestPointOnSegment(vec3 p, vec3 a, vec3 b)
+{
+	vec3 ab = b - a;
+	float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+	return a + ab * t;
+}
+
 vec3 closestPointOnRect(vec3 p, vec3 center, vec3 right, vec3 up, float halfWidth, float halfHeight)
 {
 	vec3 d = p - center;
@@ -289,12 +296,77 @@ vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 	return diffuse + specular;
 }
 
+vec3 doTubeLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
+	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
+{
+	float height  = length(light.direction);
+	float halfLen = height * 0.5;
+	float radius  = abs(light.width);
+	float absRange = abs(light.range);
+	if (halfLen < 1e-5 || absRange < 1e-5)
+		return vec3(0.0);
+
+	vec3 axis = light.direction / height;
+	vec3 pa   = light.pos - axis * halfLen;
+	vec3 pb   = light.pos + axis * halfLen;
+
+	// Vectors from fragment to each endpoint (sample code convention).
+	vec3 l0 = pa - pos;
+	vec3 l1 = pb - pos;
+	float lenL0 = length(l0);
+	float lenL1 = length(l1);
+
+	// Diffuse NdotL: integrate the tube as a line source (Karis 2014).
+	float NdotL0 = dot(N, l0) / (2.0 * lenL0);
+	float NdotL1 = dot(N, l1) / (2.0 * lenL1);
+	float NdotL  = clamp(NdotL0 + NdotL1, 0.0, 1.0) * 2.0 / (lenL0 * lenL1 + dot(l0, l1) + 2.0);
+
+	// Diffuse: closest point on segment for radiance falloff and horizonVis.
+	vec3 closest  = closestPointOnSegment(pos, pa, pb);
+	float distDiff = length(closest - pos);
+	vec3 Ldiff    = (closest - pos) / max(distDiff, 1e-5);
+
+	// Horizon clamp: use distDiff (closest point) for halfExtent, consistent with area light.
+	float NdotLcenter = dot(N, normalize(light.pos - pos));
+	float halfExtent  = halfLen / max(distDiff, 1e-5);
+	float horizonVis  = smoothstep(-halfExtent, halfExtent, NdotLcenter);
+	vec3 radiance = light.color * squareFalloff(distDiff, absRange);
+
+	// Specular representative point: skip the solve for rough surfaces, reuse closest.
+	vec3 specVec = closest - pos;
+	if (roughness < 0.6)
+	{
+		vec3 R        = reflect(-V, N);
+		vec3 ld       = l1 - l0;
+		float RdotL0  = dot(R, l0);
+		float RdotLd  = dot(R, ld);
+		float L0dotLd = dot(l0, ld);
+		float ldLen2  = dot(ld, ld);
+		float denom   = ldLen2 - RdotLd * RdotLd;
+		float t = (abs(denom) > 1e-6) ? clamp((RdotL0 * RdotLd - L0dotLd) / denom, 0.0, 1.0) : 0.5;
+		vec3 closestLine = l0 + ld * t;
+		vec3 centerToRay = dot(closestLine, R) * R - closestLine;
+		float ctrLen = length(centerToRay);
+		specVec = closestLine + centerToRay * clamp(radius / max(ctrLen, 1e-5), 0.0, 1.0);
+	}
+	vec3 Lspec = normalize(specVec);
+	vec3 Hdiff = normalize(Ldiff + V);
+	vec3 Fdiff = FresnelSchlickRoughness(max(dot(Hdiff, V), 0.0), specularCol, roughness);
+	vec3 specular = doLightSpecularOnly(radiance * horizonVis, Lspec, V, N, specularCol, roughness, roughness1sqOver8, roughnessSq);
+	vec3 diffuse = doLightDiffuseOnly(radiance, Fdiff, matColOverPi, metalness, horizonVis);
+	return diffuse + specular;
+}
+
 // Dispatches a unified light by its width discriminant: > 0 area, < 0 spot, == 0 point.
 vec3 doLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi,
 	float metalness, float roughness, float roughness1, float roughness1sqOver8, float roughnessSq)
 {
 	if (light.width > 0.0)
+	{
+		if (light.range < 0.0)
+			return doTubeLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 		return doAreaLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
+	}
 	if (light.width < 0.0)
 		return doSpotLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
 	return doPointLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughness1, roughness1sqOver8, roughnessSq);
@@ -317,7 +389,7 @@ void main()
 		metalness = metalRoughness.x;
 		roughness = max(metalRoughness.y, 0.01);
 	}
-
+	roughness = 0.08;
 	const vec3 V  = normalize(u_viewPos - in_pos);
 	const vec2 uv = in_uv; //spomDisplaceUV(uint(normalTexIdx), V);
 

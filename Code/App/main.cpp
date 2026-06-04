@@ -110,16 +110,30 @@ int main()
                 const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
                 const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
                 const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-                spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 20.0f, glm::vec3(1.0f, 0.9f, 0.7f), 20.0f, camUp, 1.0f, 1.0f, rotation });
+                spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 10.0f, camUp, 1.0f, 1.0f, rotation });
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            {
+                const glm::vec3 dir = cameraController.getDirection();
+                const glm::vec3 camUp = cameraController.getUp();
+                // The quad's up-axis is the camera up; align its right-axis with the camera right so
+                // the emission normal (cross(up, right)) points along the camera's forward direction.
+                const glm::vec3 up = glm::normalize(camUp);
+                const glm::vec3 ref = glm::abs(up.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+                const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
+                const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
+                const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
+                spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 10.0f, camUp, 0.2f, 2.0f, rotation });
+            }
+
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 for (int i = 0; i < 100; ++i)
                 {
                     int x = 0; int y = 0;
                     spawnedLights.push_back(PointLight{ glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f)),
                         glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
                 }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_8 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 for (int x = 0; x < spawnCountX; ++x)
                     for (int y = 0; y < spawnCountY; ++y)
                         for (int i = 0; i < 75; ++i)
