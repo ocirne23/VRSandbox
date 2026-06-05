@@ -50,12 +50,10 @@ int main()
 
     std::vector<RenderNode> spawnedNodes;
     std::vector<RendererVKLayout::LightInfo> spawnedLights;
-    /*
-    std::vector<PointLight> spawnedPointLights;
-    std::vector<AreaLight> spawnedAreaLights;
-    std::vector<SpotLight> spawnedSpotLights;*/
+    std::vector<RenderNode> spawnedLightGeom;
 
     ObjectContainer container;
+    ObjectContainer baseShapes;
     ObjectContainer container2;
     ObjectContainer container3;
     const int spawnCountX = 10;
@@ -88,19 +86,45 @@ int main()
             for (int y = 0; y < spawnCountY; ++y)
                 spawnedNodes.push_back(container3.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 2.0f, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }*/
+    {
+        std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
+        sceneData->initialize("Models/baseshapes.glb", false, false);
+        ObjectContainer::MaterialOverrides overrides;
+        overrides.diffuseTexIdx = RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX;
+        overrides.normalTexIdx = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
+        overrides.metalRoughnessTexIdx = UINT16_MAX;
+        overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
+        baseShapes.initialize(*sceneData, &overrides);
+    }
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            {
                 spawnedLights.resize(0);
+                spawnedLightGeom.resize(0);
+            }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-				spawnedLights.push_back(PointLight{ cameraController.getPosition(), 50.0f, glm::abs(glm::sphericalRand(1.0f)), 100.0f });
+            {
+                spawnedLights.push_back(PointLight{ cameraController.getPosition(), 50.0f, glm::abs(glm::sphericalRand(1.0f)), 100.0f });
+                spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+            }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            {
                 spawnedLights.push_back(PointLight{ cameraController.getPosition(), 15.0f + glm::linearRand(0.5f, 1.5f), glm::abs(glm::sphericalRand(1.0f)), 30.0f });
+                spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+            }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            {
                 spawnedLights.push_back(SpotLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.95f, 0.8f), 40.0f, cameraController.getDirection(), glm::radians(25.0f), 0.25f });
+				glm::quat orientation = cameraController.getOrientation();
+				const glm::vec3 camUp = cameraController.getUp();
+				const glm::vec3 camRight = glm::normalize(glm::cross(cameraController.getDirection(), camUp));
+				orientation = glm::angleAxis(glm::radians(90.0f), camRight) * orientation;
+                spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Cone"), Transform(cameraController.getPosition(), 0.1f, orientation)));
+            }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
                 const glm::vec3 dir = cameraController.getDirection();
@@ -112,7 +136,12 @@ int main()
                 const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
                 const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
                 const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-                spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 5.0f, camUp, 1.0f, 1.0f, rotation });
+                spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 1.0f, 1.0f), 1.0f, camUp, 1.0f, 1.0f, rotation });
+
+				// spawn a plane to visualize the area light geometry; orient it to match the light's emission direction
+				glm::quat orientation = cameraController.getOrientation();
+				orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * orientation;
+				spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Plane"), Transform(cameraController.getPosition(), 0.5f, orientation)));
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
@@ -125,7 +154,7 @@ int main()
                 const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
                 const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
                 const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-                spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 5.0f, camUp, 0.1f, 1.0f, rotation });
+                spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 3.0f, camUp, 0.1f, 1.0f, rotation });
             }
 
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
@@ -191,6 +220,14 @@ int main()
 		{
 			renderer.addLightInfo(light);
 		}
+
+        for (RenderNode& node : spawnedLightGeom)
+        {
+            if (frustum.sphereInFrustum(node.getWorldBounds()))
+            {
+                renderer.renderNode(node);
+            }
+        }
 
         ui.render();
         renderer.present();

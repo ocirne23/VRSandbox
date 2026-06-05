@@ -129,8 +129,10 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-	Globals::textureManager.upload(*ITextureData::createFallbackDiffuseTexture(), false);
-	Globals::textureManager.upload(*ITextureData::createFallbackNormalTexture(), false);
+	uint16 diffuseIdx = Globals::textureManager.upload(*ITextureData::createFallbackWhiteTexture(), false);
+	assert(diffuseIdx == RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX);
+	uint16 normalIdx = Globals::textureManager.upload(*ITextureData::createFallbackNormalTexture(), false);
+	assert(normalIdx == RendererVKLayout::FALLBACK_NORMAL_TEX_IDX);
 
     return true;
 }

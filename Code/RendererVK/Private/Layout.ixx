@@ -102,8 +102,9 @@ export namespace RendererVKLayout
     enum class EPipelineIndex : uint16
     {
         LitOpaque      = 0,
-        Unlit          = 1,
-        LitTransparent = 2,
+        LitTransparent = 1,
+        UnlitOpaque    = 2,
+        UnlitTransparent = 3,
     };
 
     struct alignas(16) MaterialInfo

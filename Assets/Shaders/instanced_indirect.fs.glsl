@@ -443,8 +443,7 @@ void main()
 		metalness = metalRoughness.x;
 		roughness = max(metalRoughness.y, 0.01);
 	}
-	//roughness = 0.70;
-
+	roughness = 0.07;
 	const vec3 V  = normalize(u_viewPos - in_pos);
 	const vec2 uv = in_uv; //spomDisplaceUV(uint(normalTexIdx), V);
 

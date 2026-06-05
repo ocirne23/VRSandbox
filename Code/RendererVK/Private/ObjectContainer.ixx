@@ -34,7 +34,17 @@ public:
     ObjectContainer& operator=(const ObjectContainer&) = delete;
     ObjectContainer& operator=(const ObjectContainer&&) = delete;
 
-    bool initialize(const ISceneData& sceneData);
+    // When passed to initialize(), every material uses these texture indices instead of its own
+    // scene textures, and is forced onto the given pipeline.
+    struct MaterialOverrides
+    {
+        uint16 diffuseTexIdx = RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX;
+        uint16 normalTexIdx = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
+        uint16 metalRoughnessTexIdx = UINT16_MAX;
+        RendererVKLayout::EPipelineIndex pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
+    };
+
+    bool initialize(const ISceneData& sceneData, const MaterialOverrides* pOverrides = nullptr);
     bool isValid() const { return !m_nodeInfos.empty(); }
 
     NodeSpawnIdx getSpawnIdxForPath(const std::string& nodePath) const;
@@ -49,7 +59,7 @@ private:
 
     struct TempInitData;
     void initializeMeshes(const ISceneData& sceneData, TempInitData& temp);
-    void initializeMaterials(const ISceneData& sceneData, TempInitData& temp);
+    void initializeMaterials(const ISceneData& sceneData, TempInitData& temp, const MaterialOverrides* pOverrides);
     void initializeNodes(const ISceneData& sceneData, TempInitData& temp);
 
 private:

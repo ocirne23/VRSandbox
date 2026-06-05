@@ -82,6 +82,13 @@ std::unique_ptr<ITextureData> ITextureData::createFallbackDiffuseTexture()
 	return pTex;
 }
 
+std::unique_ptr<ITextureData> ITextureData::createFallbackWhiteTexture()
+{
+	auto pTex = std::make_unique<ProceduralTextureData>();
+	pTex->initialize(EProceduralTextureType::White, 8, 8);
+	return pTex;
+}
+
 std::unique_ptr<ITextureData> ITextureData::createFallbackNormalTexture()
 {
 	auto pTex = std::make_unique<ProceduralTextureData>();

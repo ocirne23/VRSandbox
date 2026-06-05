@@ -23,15 +23,7 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
     graphicsPipelineLayout.vertexShader.text = FileSystem::readFileStr(graphicsPipelineLayout.vertexShader.debugFilePath);
     graphicsPipelineLayout.fragmentShader.text = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShader.debugFilePath);
 
-    // Variant 1 (MeshShaderVariant::Unlit): unlit opaque.
-    const std::string unlitVariantPath = "Shaders/instanced_indirect_unlit.fs.glsl";
-    graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
-        .fragmentShader = ShaderSource{
-            .text = FileSystem::readFileStr(unlitVariantPath),
-            .debugFilePath = unlitVariantPath,
-        },
-    });
-    // Variant 2 (MeshShaderVariant::LitTransparent): same lit shader, alpha-blended, no depth write.
+    // Variant 1 (MeshShaderVariant::LitTransparent): same lit shader, alpha-blended, no depth write.
     graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
         .fragmentShader = ShaderSource{
             .text = graphicsPipelineLayout.fragmentShader.text,
@@ -40,6 +32,23 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .blendEnable = true,
         .depthWrite = false,
     });
+    // Variant 2 (MeshShaderVariant::UnlitOpaque): unlit opaque.
+    const std::string unlitVariantPath = "Shaders/instanced_indirect_unlit.fs.glsl";
+    graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+        .fragmentShader = ShaderSource{
+            .text = FileSystem::readFileStr(unlitVariantPath),
+            .debugFilePath = unlitVariantPath,
+        },
+    });
+	// Variant 3 (MeshShaderVariant::UnlitTransparent): same unlit shader, alpha-blended, no depth write.
+	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+		.fragmentShader = ShaderSource{
+			.text = graphicsPipelineLayout.additionalVariants[0].fragmentShader.text,
+			.debugFilePath = graphicsPipelineLayout.additionalVariants[0].fragmentShader.debugFilePath,
+		},
+		.blendEnable = true,
+		.depthWrite = false,
+	});
 
     auto& bindingDescriptions = graphicsPipelineLayout.vertexLayoutInfo.bindingDescriptions;
     bindingDescriptions.push_back(vk::VertexInputBindingDescription{

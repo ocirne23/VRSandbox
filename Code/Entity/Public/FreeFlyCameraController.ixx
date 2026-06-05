@@ -25,6 +25,7 @@ public:
     glm::vec3 getDirection() const { return m_direction; }
     glm::vec3 getUp() const { return m_up; }
     glm::mat4 getViewMatrix() const { return m_viewMatrix; }
+	glm::quat getOrientation() const { return glm::quat_cast(glm::inverse(m_viewMatrix)); }
 
     Camera getCamera()
     {

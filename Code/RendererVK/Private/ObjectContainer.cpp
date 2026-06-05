@@ -24,14 +24,14 @@ struct ObjectContainer::TempInitData
     std::vector<uint16> textureIdxForMaterialTex;
 };
 
-bool ObjectContainer::initialize(const ISceneData& sceneData)
+bool ObjectContainer::initialize(const ISceneData& sceneData, const MaterialOverrides* pOverrides)
 {
     if (!sceneData.isValid())
         return false;
     Globals::rendererVK.addObjectContainer(this);
 
     TempInitData temp;
-    initializeMaterials(sceneData, temp);
+    initializeMaterials(sceneData, temp, pOverrides);
     initializeMeshes(sceneData, temp);
     initializeNodes(sceneData, temp);
     return true;
@@ -110,7 +110,7 @@ union MaterialFlags
     uint32 flags;
 };
 
-void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitData& temp)
+void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitData& temp, const MaterialOverrides* pOverrides)
 {
     const size_t numMaterials = sceneData.getNumMaterials();
     std::vector<RendererVKLayout::MaterialInfo> materialInfos;
@@ -155,44 +155,42 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             material.opacity = opacity;
 			temp.pipelineAlphaForMaterialIdx.emplace_back(RendererVKLayout::EPipelineIndex::LitOpaque, RendererVKLayout::EAlphaMode::Opaque);
         }
-        /*
-		const std::string diffuseTexPath = materialData.getTexturePath(IMaterialData::ETextureType::DIFFUSE);
-		if (!diffuseTexPath.empty())
-		{
-			const ITextureData* pTex = sceneData.getTexture(diffuseTexPath.c_str());
-			if (pTex)
-			{
-				uint16& idx = temp.textureIdxForMaterialTex[pTex->getIndex()];
-				if (idx == UINT16_MAX)
-					idx = Globals::textureManager.upload(*pTex, true);
-				material.diffuseTexIdx = idx;
-			}
-		}*/
-        const uint32 diffuseTexIdx = materialData.getDiffuseTexIdx();
-		if (diffuseTexIdx != UINT32_MAX)
-		{
-            uint16& idx = temp.textureIdxForMaterialTex[diffuseTexIdx];
-            if (idx == UINT16_MAX)
-				idx = Globals::textureManager.upload(*sceneData.getTexture(diffuseTexIdx), true);
-            material.diffuseTexIdx = idx;
-		}
 
-        const uint32 normalTexIdx = materialData.getNormalTexIdx();
-        if (normalTexIdx != UINT32_MAX)
+        if (pOverrides)
         {
-            uint16& idx = temp.textureIdxForMaterialTex[normalTexIdx];
-            if (idx == UINT16_MAX)
-                idx = Globals::textureManager.upload(*sceneData.getTexture(normalTexIdx), true);
-            material.normalTexIdx = idx;
+            material.diffuseTexIdx = pOverrides->diffuseTexIdx;
+            material.normalTexIdx = pOverrides->normalTexIdx;
+            material.metalRoughnessTexIdx = pOverrides->metalRoughnessTexIdx;
+            temp.pipelineAlphaForMaterialIdx.back().first = pOverrides->pipelineIdx;
         }
-
-        const uint32 metalRoughnessTexIdx = materialData.getMetalRoughnessTexIdx();
-        if (metalRoughnessTexIdx != UINT32_MAX)
+        else
         {
-            uint16& idx = temp.textureIdxForMaterialTex[metalRoughnessTexIdx];
-            if (idx == UINT16_MAX)
-                idx = Globals::textureManager.upload(*sceneData.getTexture(metalRoughnessTexIdx), false);
-            material.metalRoughnessTexIdx = idx;
+            const uint32 diffuseTexIdx = materialData.getDiffuseTexIdx();
+            if (diffuseTexIdx != UINT32_MAX)
+            {
+                uint16& idx = temp.textureIdxForMaterialTex[diffuseTexIdx];
+                if (idx == UINT16_MAX)
+                    idx = Globals::textureManager.upload(*sceneData.getTexture(diffuseTexIdx), true);
+                material.diffuseTexIdx = idx;
+            }
+
+            const uint32 normalTexIdx = materialData.getNormalTexIdx();
+            if (normalTexIdx != UINT32_MAX)
+            {
+                uint16& idx = temp.textureIdxForMaterialTex[normalTexIdx];
+                if (idx == UINT16_MAX)
+                    idx = Globals::textureManager.upload(*sceneData.getTexture(normalTexIdx), true);
+                material.normalTexIdx = idx;
+            }
+
+            const uint32 metalRoughnessTexIdx = materialData.getMetalRoughnessTexIdx();
+            if (metalRoughnessTexIdx != UINT32_MAX)
+            {
+                uint16& idx = temp.textureIdxForMaterialTex[metalRoughnessTexIdx];
+                if (idx == UINT16_MAX)
+                    idx = Globals::textureManager.upload(*sceneData.getTexture(metalRoughnessTexIdx), false);
+                material.metalRoughnessTexIdx = idx;
+            }
         }
 
         m_materialNames.push_back(materialData.getName());
@@ -352,6 +350,7 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
 
 RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& transform)
 {
+    assert(idx < m_nodeMeshRanges.size() && "Invalid NodeSpawnIdx");
     const NodeMeshRange& range = m_nodeMeshRanges[idx];
 
     RenderNode node;

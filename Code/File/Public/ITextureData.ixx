@@ -20,5 +20,6 @@ public:
     virtual const char* getFormatInfo() const = 0;
 
     static std::unique_ptr<ITextureData> createFallbackDiffuseTexture();
+    static std::unique_ptr<ITextureData> createFallbackWhiteTexture();
     static std::unique_ptr<ITextureData> createFallbackNormalTexture();
 };
