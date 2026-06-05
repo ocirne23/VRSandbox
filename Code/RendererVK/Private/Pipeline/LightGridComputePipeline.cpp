@@ -16,6 +16,20 @@ void LightGridComputePipeline::initialize()
     }
 
     ComputePipelineLayout computePipelineLayout;
+    buildComputeLayout(computePipelineLayout);
+    m_computePipeline.initialize(computePipelineLayout);
+}
+
+void LightGridComputePipeline::reloadShaders()
+{
+    ComputePipelineLayout computePipelineLayout;
+    buildComputeLayout(computePipelineLayout);
+    if (!m_computePipeline.reloadShaders(computePipelineLayout))
+        printf("LightGridComputePipeline: shader reload failed, keeping previous pipeline\n");
+}
+
+void LightGridComputePipeline::buildComputeLayout(ComputePipelineLayout& computePipelineLayout)
+{
     computePipelineLayout.computeShaderDebugFilePath = "Shaders/light_grid.cs.glsl";
     computePipelineLayout.computeShaderText = FileSystem::readFileStr(computePipelineLayout.computeShaderDebugFilePath);
     auto& descriptorSetBindings = computePipelineLayout.descriptorSetLayoutBindings;
@@ -43,7 +57,6 @@ void LightGridComputePipeline::initialize()
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
     });
-    m_computePipeline.initialize(computePipelineLayout);
 }
 
 void LightGridComputePipeline::update(uint32 frameIdx, uint32 numLights)

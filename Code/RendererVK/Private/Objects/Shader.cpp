@@ -13,24 +13,24 @@ Shader::~Shader()
         Globals::device.getDevice().destroyShaderModule(m_shaderModule);
 }
 
-bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath, const std::vector<ShaderDefine>& defines)
+bool Shader::initializeFromFile(vk::ShaderStageFlagBits stage, const std::string& filePath, const std::vector<ShaderDefine>& defines, bool assertOnFailure)
 {
     const std::string fileContent = FileSystem::readFileStr(filePath);
     if (fileContent.empty())
     {
-        assert(false && "Failed to open shader file");
+        assert((!assertOnFailure) && "Failed to open shader file");
         return false;
     }
 
-    return initialize(stage, fileContent, filePath, defines);
+    return initialize(stage, fileContent, filePath, defines, assertOnFailure);
 }
 
-bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr, const std::string& debugFilePath, const std::vector<ShaderDefine>& defines)
+bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shaderStr, const std::string& debugFilePath, const std::vector<ShaderDefine>& defines, bool assertOnFailure)
 {
     std::vector<unsigned int> spirv;
     if (!GLSLtoSPV(stage, shaderStr, spirv, debugFilePath, defines))
     {
-        assert(false && "Failed to compile shader SPIRV");
+        assert((!assertOnFailure) && "Failed to compile shader SPIRV");
         return false;
     }
 
@@ -41,7 +41,7 @@ bool Shader::initialize(vk::ShaderStageFlagBits stage, const std::string& shader
     auto createResult = Globals::device.getDevice().createShaderModule(createInfo);
     if (createResult.result != vk::Result::eSuccess)
     {
-        assert(false && "Failed to create shader module");
+        assert((!assertOnFailure) && "Failed to create shader module");
         return false;
     }
     m_shaderModule = createResult.value;

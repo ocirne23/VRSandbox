@@ -52,6 +52,7 @@ public:
     GraphicsPipeline(const GraphicsPipeline&) = delete;
 
     bool initialize(const RenderPass& renderPass, GraphicsPipelineLayout& layout);
+    bool reloadShaders(const RenderPass& renderPass, GraphicsPipelineLayout& layout);
 
     vk::Pipeline getPipeline() const { return m_pipelines[0]; }
     vk::Pipeline getPipelineVariant(uint32 variantIdx) const { return m_pipelines[variantIdx]; }
@@ -60,6 +61,8 @@ public:
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
 
 private:
+
+    bool createPipelines(const RenderPass& renderPass, GraphicsPipelineLayout& layout, std::vector<vk::Pipeline>& outPipelines, bool assertOnFailure);
 
     std::vector<vk::Pipeline> m_pipelines;
     vk::PipelineCache m_pipelineCache;

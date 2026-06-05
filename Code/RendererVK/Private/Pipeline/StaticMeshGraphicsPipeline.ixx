@@ -41,6 +41,7 @@ public:
     };
 
     void initialize(RenderPass& renderPass);
+    void reloadShaders();
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
@@ -49,10 +50,13 @@ public:
 
 private:
 
+    void buildPipelineLayout(GraphicsPipelineLayout& layout);
+
     GraphicsPipeline m_graphicsPipeline;
     IndirectExecutionSet m_indirectExecutionSet;
     IndirectCommandsLayout m_indirectCommandsLayout;
     Sampler m_sampler;
+    RenderPass* m_pRenderPass = nullptr;
 
     vk::DeviceSize m_preprocessSize = 0;
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;            // opaque pass

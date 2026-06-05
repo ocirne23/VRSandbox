@@ -167,6 +167,23 @@ void Renderer::recreateSwapchain()
     m_framebuffers.initialize(m_renderPass, m_swapChain);
 }
 
+void Renderer::reloadShaders()
+{
+    auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    if (waitResult != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to wait for device idle in RendererVK::reloadShaders");
+        return;
+    }
+
+    m_staticMeshGraphicsPipeline.reloadShaders();
+    m_indirectCullComputePipeline.reloadShaders();
+    m_lightGridComputePipeline.reloadShaders();
+
+    setHaveToRecordCommandBuffers();
+    printf("Reloaded shaders\n");
+}
+
 void Renderer::setWindowMinimized(bool minimized)
 {
     m_windowMinimized = minimized;

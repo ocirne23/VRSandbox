@@ -61,6 +61,8 @@ public:
     uint32 getNumMaterials() const { return m_materialInfoCounter; }
     uint32 getCurrentFrameIndex() const { return m_swapChain.getCurrentFrameIndex(); }
 
+    void reloadShaders();
+
     void setWindowMinimized(bool minimized);
     void recreateWindowSurface(Window& window);
     void setViewportRect(const Rect& rect) { if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } }

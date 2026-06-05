@@ -31,6 +31,7 @@ public:
     };
 
     void initialize();
+    void reloadShaders();
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& recordParams);
     void update(uint32 frameIdx, uint32 numMeshInstances);
 
@@ -41,6 +42,8 @@ public:
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_computePipeline.getDescriptorSetLayout(); }
 
 private:
+
+    void buildComputeLayout(ComputePipelineLayout& layout);
 
     ComputePipeline m_computePipeline;
 

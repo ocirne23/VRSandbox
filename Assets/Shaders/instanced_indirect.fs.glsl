@@ -302,9 +302,13 @@ vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 	// ---- Specular (representative point) -------------------------------------
 	// Intersect the mirror ray with the quad plane and clamp to the rectangle, then shade from
 	// that point with its own distance and facing (skipped for rough surfaces: lobe is broad).
-	vec3 specPoint = closest;
+
+	vec3 Fspec;
+	vec3 Lspec;
+	vec3 specRadiance;
 	if (roughness < 0.6)
 	{
+		vec3 specPoint = closest;
 		vec3 R = reflect(-V, N);
 		float d = dot(R, quadNormal);
 		if (d < 0.0)
@@ -313,19 +317,29 @@ vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 			if (t > 0.0)
 				specPoint = closestPointOnRect(pos + R * t, center, right, up, halfWidth, halfHeight);
 		}
+
+		vec3 LspecVec = specPoint - pos;
+		float distSpec = max(length(LspecVec), 1e-4);
+		Lspec = LspecVec / distSpec;
+
+		float facingSpec = max(dot(quadNormal, -Lspec), 0.0);
+		specRadiance = light.color * squareFalloff(distSpec, light.range) * facingSpec;
+
+		vec3 Hspec = normalize(Lspec + V);
+		float HdotVspec = max(dot(Hspec, V), 0.0);
+		Fspec = FresnelSchlick(HdotVspec, specularCol);
 	}
-	vec3 LspecVec = specPoint - pos;
-	float distSpec = max(length(LspecVec), 1e-4);
-	vec3 Lspec = LspecVec / distSpec;
-	float facingSpec = max(dot(quadNormal, -Lspec), 0.0);
-	vec3 specRadiance = light.color * squareFalloff(distSpec, light.range) * facingSpec;
+	else
+	{
+		Lspec = Ldiff;
+		specRadiance = diffRadiance;
+		Fspec = Fdiff;
+	}
 
 	vec3 Hspec = normalize(Lspec + V);
-	float NdotLspec = max(dot(N, Lspec), 0.0);
 	float NdotVspec = max(dot(N, V), 0.0);
-	float HdotVspec = max(dot(Hspec, V), 0.0);
+	float NdotLspec = max(dot(N, Lspec), 0.0);
 	float NdotHspec = max(dot(N, Hspec), 0.0);
-	vec3 Fspec = FresnelSchlick(HdotVspec, specularCol);
 	vec3 specular = doPointLightSpecular(specRadiance, Fspec, NdotLspec, NdotVspec, NdotHspec, roughness, roughnessSq);
 
 	return diffuse + specular;
@@ -366,33 +380,33 @@ vec3 doTubeLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 	// ---- Specular (representative point) -------------------------------------
 	// Find the point on the tube surface most aligned with the mirror ray R, then shade it as a
 	// punctual light *from that point* (its own distance/direction) with a size-widened lobe.
-	vec3 l0 = pa - pos;
-	vec3 l1 = pb - pos;
-	vec3 specVec;
+	vec3  Lspec;
+	float distSpec;
 	if (roughness < 0.6)
 	{
-		vec3 R        = reflect(-V, N);
-		vec3 ld       = l1 - l0;
-		float RdotLd  = dot(R, ld);
-		float ldLen2  = dot(ld, ld);
-		float denom   = ldLen2 - RdotLd * RdotLd;
+		vec3 l0      = pa - pos;
+		vec3 l1      = pb - pos;
+		vec3 R       = reflect(-V, N);
+		vec3 ld      = l1 - l0;
+		float RdotLd = dot(R, ld);
+		float ldLen2 = dot(ld, ld);
+		float denom  = ldLen2 - RdotLd * RdotLd;
 		float t = (abs(denom) > 1e-6) ? clamp((dot(R, l0) * RdotLd - dot(l0, ld)) / denom, 0.0, 1.0) : 0.5;
 		vec3 closestLine = l0 + ld * t;                     // closest core point to the reflection ray
 		vec3 centerToRay = dot(closestLine, R) * R - closestLine;
 		float ctrLen     = length(centerToRay);
-		specVec = closestLine + centerToRay * clamp(radius / max(ctrLen, 1e-5), 0.0, 1.0);
+		vec3 specVec     = closestLine + centerToRay * clamp(radius / max(ctrLen, 1e-5), 0.0, 1.0);\
+		float specLen    = length(specVec);
+		distSpec = max(specLen - radius, 1e-4);           // falloff at the actual specular distance
+		Lspec    = specVec / max(specLen, 1e-5);
 	}
 	else
-	{
-		specVec = LdiffVec; // broad lobe: the representative point barely matters, reuse closest
+	{   // broad lobe: the representative point barely matters, reuse closest
+		distSpec = coreDist;
+		Lspec    = Ldiff;
 	}
-	float specLen  = length(specVec);
-	float distSpec = max(specLen - radius, 1e-4);           // falloff at the actual specular distance
-	vec3  Lspec    = specVec / max(specLen, 1e-5);
-	vec3  specRadiance = light.color * squareFalloff(distSpec, absRange);
-	// lightSize = tube radius; widens the GGX lobe by the source's apparent size and renormalizes.
-	vec3 specular = doAreaLightSpecular(specRadiance, Lspec, V, N, specularCol, radius, distSpec,
-		roughness, roughnessSq);
+	vec3 specRadiance = light.color * squareFalloff(distSpec, absRange);
+	vec3 specular = doAreaLightSpecular(specRadiance, Lspec, V, N, specularCol, radius, distSpec, roughness, roughnessSq);
 
 	return diffuse + specular;
 }
@@ -429,7 +443,7 @@ void main()
 		metalness = metalRoughness.x;
 		roughness = max(metalRoughness.y, 0.01);
 	}
-	//roughness = 0.07;
+	//roughness = 0.70;
 
 	const vec3 V  = normalize(u_viewPos - in_pos);
 	const vec2 uv = in_uv; //spomDisplaceUV(uint(normalTexIdx), V);

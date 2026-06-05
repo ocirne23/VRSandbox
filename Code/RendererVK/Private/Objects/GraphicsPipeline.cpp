@@ -52,6 +52,40 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     }
     m_pipelineLayout = createPipelineLayoutResult.value;
 
+    auto createPipelineCacheResult = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
+    if (createPipelineCacheResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to create pipeline cache");
+        return false;
+    }
+    m_pipelineCache = createPipelineCacheResult.value;
+
+    return createPipelines(renderPass, layout, m_pipelines, true);
+}
+
+bool GraphicsPipeline::reloadShaders(const RenderPass& renderPass, GraphicsPipelineLayout& layout)
+{
+    vk::Device vkDevice = Globals::device.getDevice();
+
+    std::vector<vk::Pipeline> newPipelines;
+    if (!createPipelines(renderPass, layout, newPipelines, false))
+    {
+        for (vk::Pipeline pipeline : newPipelines)
+            if (pipeline)
+                vkDevice.destroyPipeline(pipeline);
+        return false;
+    }
+
+    for (vk::Pipeline pipeline : m_pipelines)
+        vkDevice.destroyPipeline(pipeline);
+    m_pipelines = std::move(newPipelines);
+    return true;
+}
+
+bool GraphicsPipeline::createPipelines(const RenderPass& renderPass, GraphicsPipelineLayout& layout, std::vector<vk::Pipeline>& outPipelines, bool assertOnFailure)
+{
+    vk::Device vkDevice = Globals::device.getDevice();
+
     vk::PipelineVertexInputStateCreateInfo pipelineVertexInputStateCreateInfo
     {
         .flags = {},
@@ -177,17 +211,10 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         .basePipelineIndex = 0,
     };
 
-    auto createPipelineCacheResult = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
-    if (createPipelineCacheResult.result != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to create pipeline cache");
-        return false;
-    }
-    m_pipelineCache = createPipelineCacheResult.value;
-
     Shader defaultVS, defaultFS;
-    defaultVS.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShader.text, layout.vertexShader.debugFilePath, layout.vertexShader.defines);
-    defaultFS.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShader.text, layout.fragmentShader.debugFilePath, layout.fragmentShader.defines);
+    if (!defaultVS.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShader.text, layout.vertexShader.debugFilePath, layout.vertexShader.defines, assertOnFailure) ||
+        !defaultFS.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShader.text, layout.fragmentShader.debugFilePath, layout.fragmentShader.defines, assertOnFailure))
+        return false;
 
     // Compile per-variant shader overrides; entries with no override keep a null module.
     const size_t additionalCount = layout.additionalVariants.size();
@@ -197,13 +224,15 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     {
         const PipelineVariant& v = layout.additionalVariants[i];
         if (!v.vertexShader.text.empty())
-            overrideVS[i].initialize(vk::ShaderStageFlagBits::eVertex, v.vertexShader.text, v.vertexShader.debugFilePath, v.vertexShader.defines);
+            if (!overrideVS[i].initialize(vk::ShaderStageFlagBits::eVertex, v.vertexShader.text, v.vertexShader.debugFilePath, v.vertexShader.defines, assertOnFailure))
+                return false;
         if (!v.fragmentShader.text.empty())
-            overrideFS[i].initialize(vk::ShaderStageFlagBits::eFragment, v.fragmentShader.text, v.fragmentShader.debugFilePath, v.fragmentShader.defines);
+            if (!overrideFS[i].initialize(vk::ShaderStageFlagBits::eFragment, v.fragmentShader.text, v.fragmentShader.debugFilePath, v.fragmentShader.defines, assertOnFailure))
+                return false;
     }
 
     // Variant 0: both defaults, no blending, depth write on.
-    m_pipelines.reserve(1 + additionalCount);
+    outPipelines.reserve(1 + additionalCount);
     pipelineShaderStageCreateInfos[0].module = defaultVS.getModule();
     pipelineShaderStageCreateInfos[1].module = defaultFS.getModule();
     {
@@ -212,10 +241,10 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         std::tie(result, pipeline) = vkDevice.createGraphicsPipeline(m_pipelineCache, graphicsPipelineCreateInfo);
         if (result != vk::Result::eSuccess)
         {
-            assert(false && "Failed to create graphics pipeline");
+            assert((!assertOnFailure) && "Failed to create graphics pipeline");
             return false;
         }
-        m_pipelines.push_back(pipeline);
+        outPipelines.push_back(pipeline);
     }
 
     for (size_t i = 0; i < additionalCount; i++)
@@ -243,10 +272,10 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
         std::tie(result, pipeline) = vkDevice.createGraphicsPipeline(m_pipelineCache, graphicsPipelineCreateInfo);
         if (result != vk::Result::eSuccess)
         {
-            assert(false && "Failed to create graphics pipeline");
+            assert((!assertOnFailure) && "Failed to create graphics pipeline");
             return false;
         }
-        m_pipelines.push_back(pipeline);
+        outPipelines.push_back(pipeline);
     }
     return true;
 }

@@ -48,8 +48,36 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
     }
     m_pipelineLayout = pipelineLayoutResult.value;
 
+    auto pipelineCacheResult = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
+    if (pipelineCacheResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to create pipeline cache");
+        return false;
+    }
+    m_pipelineCache = pipelineCacheResult.value;
+
+    return createPipeline(layout, m_pipeline, true);
+}
+
+bool ComputePipeline::reloadShaders(const ComputePipelineLayout& layout)
+{
+    vk::Pipeline newPipeline;
+    if (!createPipeline(layout, newPipeline, false))
+        return false;
+
+    if (m_pipeline)
+        Globals::device.getDevice().destroyPipeline(m_pipeline);
+    m_pipeline = newPipeline;
+    return true;
+}
+
+bool ComputePipeline::createPipeline(const ComputePipelineLayout& layout, vk::Pipeline& outPipeline, bool assertOnFailure)
+{
+    vk::Device vkDevice = Globals::device.getDevice();
+
     Shader computeShader;
-    computeShader.initialize(vk::ShaderStageFlagBits::eCompute, layout.computeShaderText, layout.computeShaderDebugFilePath, layout.defines);
+    if (!computeShader.initialize(vk::ShaderStageFlagBits::eCompute, layout.computeShaderText, layout.computeShaderDebugFilePath, layout.defines, assertOnFailure))
+        return false;
 
     vk::SpecializationInfo specializationInfo
     {
@@ -72,20 +100,12 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
         .basePipelineHandle = nullptr,
         .basePipelineIndex = -1,
     };
-    auto pipelineCacheResult = vkDevice.createPipelineCache(vk::PipelineCacheCreateInfo());
-    if (pipelineCacheResult.result != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to create pipeline cache");
-        return false;
-    }
-    m_pipelineCache = pipelineCacheResult.value;
-
     auto pipelineResult = vkDevice.createComputePipeline(m_pipelineCache, pipelineCreateInfo);
     if (pipelineResult.result != vk::Result::eSuccess)
     {
-        assert(false && "Failed to create compute pipeline");
+        assert((!assertOnFailure) && "Failed to create compute pipeline");
         return false;
     }
-    m_pipeline = pipelineResult.value;
+    outPipeline = pipelineResult.value;
     return true;
 }

@@ -15,10 +15,8 @@ import :TextureManager;
 StaticMeshGraphicsPipeline::StaticMeshGraphicsPipeline() {}
 StaticMeshGraphicsPipeline::~StaticMeshGraphicsPipeline() {}
 
-void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
+void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& graphicsPipelineLayout)
 {
-    m_sampler.initialize();
-    GraphicsPipelineLayout graphicsPipelineLayout;
     graphicsPipelineLayout.vertexShader.debugFilePath = "Shaders/instanced_indirect.vs.glsl";
     graphicsPipelineLayout.fragmentShader.debugFilePath = "Shaders/instanced_indirect.fs.glsl";
 
@@ -137,6 +135,15 @@ void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
         .descriptorCount = RendererVKLayout::MAX_TEXTURES,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
+}
+
+void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
+{
+    m_pRenderPass = &renderPass;
+    m_sampler.initialize();
+
+    GraphicsPipelineLayout graphicsPipelineLayout;
+    buildPipelineLayout(graphicsPipelineLayout);
     m_graphicsPipeline.initialize(renderPass, graphicsPipelineLayout);
 
     m_indirectExecutionSet.initialize(m_graphicsPipeline);
@@ -168,6 +175,23 @@ void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
                 vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress);
         }
     }
+}
+
+void StaticMeshGraphicsPipeline::reloadShaders()
+{
+    if (!m_pRenderPass)
+        return;
+
+    GraphicsPipelineLayout graphicsPipelineLayout;
+    buildPipelineLayout(graphicsPipelineLayout);
+    if (!m_graphicsPipeline.reloadShaders(*m_pRenderPass, graphicsPipelineLayout))
+    {
+        printf("StaticMeshGraphicsPipeline: shader reload failed, keeping previous pipeline\n");
+        return;
+    }
+
+    m_indirectExecutionSet.destroy();
+    m_indirectExecutionSet.initialize(m_graphicsPipeline);
 }
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)

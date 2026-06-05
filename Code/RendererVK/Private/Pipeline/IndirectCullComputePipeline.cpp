@@ -34,6 +34,20 @@ void IndirectCullComputePipeline::initialize()
     }
 
     ComputePipelineLayout computePipelineLayout;
+    buildComputeLayout(computePipelineLayout);
+    m_computePipeline.initialize(computePipelineLayout);
+}
+
+void IndirectCullComputePipeline::reloadShaders()
+{
+    ComputePipelineLayout computePipelineLayout;
+    buildComputeLayout(computePipelineLayout);
+    if (!m_computePipeline.reloadShaders(computePipelineLayout))
+        printf("IndirectCullComputePipeline: shader reload failed, keeping previous pipeline\n");
+}
+
+void IndirectCullComputePipeline::buildComputeLayout(ComputePipelineLayout& computePipelineLayout)
+{
     computePipelineLayout.computeShaderDebugFilePath = "Shaders/instanced_indirect.cs.glsl";
     computePipelineLayout.computeShaderText = FileSystem::readFileStr(computePipelineLayout.computeShaderDebugFilePath);
     computePipelineLayout.defines.push_back({ "MAX_UNIQUE_MESHES", std::to_string(RendererVKLayout::MAX_UNIQUE_MESHES) + "u" });
@@ -92,8 +106,6 @@ void IndirectCullComputePipeline::initialize()
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
     });
-
-    m_computePipeline.initialize(computePipelineLayout);
 }
 
 void IndirectCullComputePipeline::update(uint32 frameIdx, uint32 numMeshInstances)
