@@ -12,7 +12,7 @@ export namespace RendererVKLayout
 	constexpr uint16 FALLBACK_NORMAL_TEX_IDX = 1;
 
     // TODO make these dynamic
-    constexpr uint32 MAX_RENDER_NODES = 1024 * 4;
+    constexpr uint32 MAX_RENDER_NODES = 1024 * 64;
     constexpr uint32 MAX_UNIQUE_MESHES = 1024; // match instanced_indirect.cs.glsl
     constexpr uint32 MAX_UNIQUE_MATERIALS = 1024;
     constexpr uint32 MAX_INSTANCE_OFFSETS = 1024;

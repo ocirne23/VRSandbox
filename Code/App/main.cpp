@@ -56,8 +56,8 @@ int main()
     ObjectContainer baseShapes;
     ObjectContainer container2;
     ObjectContainer container3;
-    const int spawnCountX = 10;
-    const int spawnCountY = 10;
+    const int spawnCountX = 1;
+    const int spawnCountY = 1;
     /*
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createProceduralLoader();
@@ -136,7 +136,7 @@ int main()
                 const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
                 const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
                 const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-                spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 1.0f, 1.0f), 1.0f, camUp, 1.0f, 1.0f, rotation });
+                spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 1.0f, 1.0f), 10.0f, camUp, 1.0f, 1.0f, rotation });
 
 				// spawn a plane to visualize the area light geometry; orient it to match the light's emission direction
 				glm::quat orientation = cameraController.getOrientation();
@@ -154,23 +154,27 @@ int main()
                 const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
                 const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
                 const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-                spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 3.0f, camUp, 0.1f, 1.0f, rotation });
+                spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 10.0f, camUp, 0.1f, 1.0f, rotation });
             }
 
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 for (int i = 0; i < 100; ++i)
                 {
                     int x = 0; int y = 0;
-                    spawnedLights.push_back(PointLight{ glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f)),
+					glm::vec3 position = glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f));
+                    spawnedLights.push_back(PointLight{ position,
                         glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
+                    spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(position, 0.05f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
                 }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_8 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 for (int x = 0; x < spawnCountX; ++x)
                     for (int y = 0; y < spawnCountY; ++y)
                         for (int i = 0; i < 75; ++i)
                         {
-                            spawnedLights.push_back(PointLight{ glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f)),
+							glm::vec3 position = glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f));
+                            spawnedLights.push_back(PointLight{ position,
                                 glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
+                            spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(position, 0.05f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
                         }
         };
 

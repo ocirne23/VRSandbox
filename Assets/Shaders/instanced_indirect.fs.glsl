@@ -303,8 +303,8 @@ vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 	// Intersect the mirror ray with the quad plane and clamp to the rectangle, then shade from
 	// that point with its own distance and facing (skipped for rough surfaces: lobe is broad).
 
-	vec3 Fspec;
 	vec3 Lspec;
+	float distSpec;
 	vec3 specRadiance;
 	if (roughness < 0.6)
 	{
@@ -319,28 +319,22 @@ vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 		}
 
 		vec3 LspecVec = specPoint - pos;
-		float distSpec = max(length(LspecVec), 1e-4);
+		distSpec = max(length(LspecVec), 1e-4);
 		Lspec = LspecVec / distSpec;
 
 		float facingSpec = max(dot(quadNormal, -Lspec), 0.0);
 		specRadiance = light.color * squareFalloff(distSpec, light.range) * facingSpec;
-
-		vec3 Hspec = normalize(Lspec + V);
-		float HdotVspec = max(dot(Hspec, V), 0.0);
-		Fspec = FresnelSchlick(HdotVspec, specularCol);
 	}
 	else
 	{
 		Lspec = Ldiff;
+		distSpec = distDiff;
 		specRadiance = diffRadiance;
-		Fspec = Fdiff;
 	}
 
-	vec3 Hspec = normalize(Lspec + V);
-	float NdotVspec = max(dot(N, V), 0.0);
-	float NdotLspec = max(dot(N, Lspec), 0.0);
-	float NdotHspec = max(dot(N, Hspec), 0.0);
-	vec3 specular = doPointLightSpecular(specRadiance, Fspec, NdotLspec, NdotVspec, NdotHspec, roughness, roughnessSq);
+	// Widen and renormalize the lobe by the quad's apparent size (lightSize) so the highlight spreads
+	// out and dims as the light gets close to the surface, instead of staying a tiny punctual spike.
+	vec3 specular = doAreaLightSpecular(specRadiance, Lspec, V, N, specularCol, lightSize, distSpec, roughness, roughnessSq);
 
 	return diffuse + specular;
 }
