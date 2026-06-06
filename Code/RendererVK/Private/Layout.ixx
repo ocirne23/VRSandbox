@@ -27,7 +27,7 @@ export namespace RendererVKLayout
 	constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 1024 * 8; // should be power of 2 for hashing
 
     // Sun shadow cascaded shadow maps. NUM_SHADOW_CASCADES must match the count in shared.inc.glsl.
-    constexpr uint32 NUM_SHADOW_CASCADES = 4;
+    constexpr uint32 NUM_SHADOW_CASCADES = 6;
     constexpr uint32 SHADOW_MAP_RESOLUTION = 2048;
 
     struct MeshVertex
@@ -52,9 +52,11 @@ export namespace RendererVKLayout
         // declare a shorter UBO block and simply ignore these trailing fields).
         glm::vec4 sunDirection;  // xyz = normalized direction towards the sun, w unused
         glm::vec4 sunColor;      // rgb = color * intensity
+        // Each cascadeViewProj has a structurally-zero bottom row ([0,0,0,1] for ortho*lookAt), so the
+        // per-cascade far distance is stashed in m[0][3] and the world texel size in m[1][3]. Readers
+        // restore the bottom row to [0,0,0,1] before using the matrix (see the shaders' cascadeMatrix).
         glm::mat4 cascadeViewProj[NUM_SHADOW_CASCADES];
-        glm::vec4 cascadeSplits; // per-cascade far distance (world units) from the camera
-        glm::vec4 shadowParams;  // x = depth bias, y = normal bias, z = 1/resolution, w = pcf radius
+        glm::vec4 shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution, w = pcf radius
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};
@@ -80,6 +82,22 @@ export namespace RendererVKLayout
         glm::vec4 quat;
         uint32 meshIdxMaterialIdx;
     };
+
+    // Shadow cull output: like OutMeshInstance but its trailing uint packs the alpha-mask texture index
+    // (high 16 bits, 0xFFFF = opaque/no mask) and the cascade overlap bitmask (low 16 bits). Resolving
+    // the material in the cull keeps the material buffer out of the depth vertex/fragment shaders.
+    // Padded to the std430 array stride (48) so the GPU-side stride matches this allocation size.
+    struct alignas(16) OutShadowMeshInstance
+    {
+        glm::vec3 translation;
+        float scale;
+        glm::vec4 quat;
+        uint32 alphaTexIdxCascadeMask;
+        uint32 _pad0;
+        uint32 _pad1;
+        uint32 _pad2;
+    };
+    static_assert(sizeof(OutShadowMeshInstance) == 48);
 
     struct IndirectDrawSequence
     {

@@ -8,7 +8,7 @@
 #define MAX_LARGE_LIGHTS_PER_GRID 6 // Must be even
 #define MAX_LIGHTCELL_LIGHTS 16     // Must be even
 #define GRID_SIZE 32
-#define NUM_SHADOW_CASCADES 4       // Must match RendererVKLayout::NUM_SHADOW_CASCADES
+#define NUM_SHADOW_CASCADES 6       // Must match RendererVKLayout::NUM_SHADOW_CASCADES
 
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 const uint INITIALIZING_ENTRY = 0xEFFFFFFFu;
@@ -40,6 +40,15 @@ vec3 randomColor(ivec3 seed)
     uvec3 u = uvec3(seed);
     uint hash = u.x * 1597334673u + u.y * 3812015801u + u.z * 2798796415u;
 	return randomColor(hash);
+}
+vec3 cascadeDebugColor(int cascade)
+{
+	if (cascade == 0) return vec3(1.0, 0.0, 0.0);
+	if (cascade == 1) return vec3(0.0, 1.0, 0.0);
+	if (cascade == 2) return vec3(0.0, 0.0, 1.0);
+    if (cascade == 3) return vec3(1.0, 0.0, 1.0);
+    if (cascade == 4) return vec3(0.0, 1.0, 1.0);
+	return vec3(1.0, 1.0, 0.0);
 }
 
 #endif

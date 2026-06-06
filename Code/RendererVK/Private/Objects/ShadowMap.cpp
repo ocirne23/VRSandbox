@@ -14,13 +14,14 @@ ShadowMap::~ShadowMap()
 void ShadowMap::destroy()
 {
     vk::Device vkDevice = Globals::device.getDevice();
+    if (m_depthSampler) vkDevice.destroySampler(m_depthSampler);
     if (m_sampler)      vkDevice.destroySampler(m_sampler);
     if (m_framebuffer)  vkDevice.destroyFramebuffer(m_framebuffer);
     if (m_renderPass)   vkDevice.destroyRenderPass(m_renderPass);
     if (m_sampleView)   vkDevice.destroyImageView(m_sampleView);
     if (m_image)        vkDevice.destroyImage(m_image);
     if (m_imageMemory)  vkDevice.freeMemory(m_imageMemory);
-    m_sampler = nullptr; m_framebuffer = nullptr; m_renderPass = nullptr; m_sampleView = nullptr; m_image = nullptr; m_imageMemory = nullptr;
+    m_sampler = nullptr; m_depthSampler = nullptr; m_framebuffer = nullptr; m_renderPass = nullptr; m_sampleView = nullptr; m_image = nullptr; m_imageMemory = nullptr;
 }
 
 bool ShadowMap::initialize(uint32 resolution, uint32 numCascades)
@@ -149,6 +150,25 @@ bool ShadowMap::initialize(uint32 resolution, uint32 numCascades)
     auto samplerResult = vkDevice.createSampler(samplerInfo);
     if (samplerResult.result != vk::Result::eSuccess) { assert(false && "shadow sampler"); return false; }
     m_sampler = samplerResult.value;
+
+    // ---- Non-comparison sampler (raw depth reads for the PCSS blocker search) ----------
+    vk::SamplerCreateInfo depthSamplerInfo{
+        .magFilter = vk::Filter::eNearest,
+        .minFilter = vk::Filter::eNearest,
+        .mipmapMode = vk::SamplerMipmapMode::eNearest,
+        .addressModeU = vk::SamplerAddressMode::eClampToBorder,
+        .addressModeV = vk::SamplerAddressMode::eClampToBorder,
+        .addressModeW = vk::SamplerAddressMode::eClampToBorder,
+        .anisotropyEnable = vk::False,
+        .compareEnable = vk::False,
+        .minLod = 0.0f,
+        .maxLod = 0.0f,
+        .borderColor = vk::BorderColor::eFloatOpaqueWhite, // outside the map => far depth (no blocker)
+        .unnormalizedCoordinates = vk::False,
+    };
+    auto depthSamplerResult = vkDevice.createSampler(depthSamplerInfo);
+    if (depthSamplerResult.result != vk::Result::eSuccess) { assert(false && "shadow depth sampler"); return false; }
+    m_depthSampler = depthSamplerResult.value;
 
     return true;
 }

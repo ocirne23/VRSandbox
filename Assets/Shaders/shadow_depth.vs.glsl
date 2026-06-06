@@ -19,15 +19,13 @@ layout (binding = 0, std140) uniform UBO
     vec3 u_viewPos;
     vec4 u_sunDirection;
     vec4 u_sunColor;
-    mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES];
-    vec4 u_cascadeSplits;
-    vec4 u_shadowParams;
+    mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES]; // trailing UBO fields (shadowParams/splits/texel sizes) unused here
 };
 struct InMeshInstancesData
 {
     vec4 posScale;
     vec4 quat;
-    uint cascadeMask; // bit c set if this caster overlaps cascade c
+    uint alphaTexIdxCascadeMask; // high 16 = alpha-mask tex idx (0xFFFF = opaque), low 16 = cascade mask
 };
 layout (binding = 1, std430) readonly buffer InMeshInstances
 {
@@ -35,7 +33,11 @@ layout (binding = 1, std430) readonly buffer InMeshInstances
 };
 
 layout (location = 0) in vec3 in_pos;
+layout (location = 3) in vec2 in_uv;
 layout (location = 4) in uint inst_idx;
+
+layout (location = 0) out vec2 out_uv;
+layout (location = 1) out flat uint out_alphaTexIdx; // 0xFFFF = opaque (fragment skips the mask test)
 
 vec3 quat_transform(vec3 v, vec4 q)
 {
@@ -45,11 +47,17 @@ vec3 quat_transform(vec3 v, vec4 q)
 void main()
 {
     const InMeshInstancesData inst = in_instances[inst_idx];
-    if ((inst.cascadeMask & (1u << gl_ViewIndex)) == 0u)
+    const uint cascadeMask = inst.alphaTexIdxCascadeMask & 0x0000FFFFu;
+    out_uv = in_uv;
+    out_alphaTexIdx = inst.alphaTexIdxCascadeMask >> 16;
+    if ((cascadeMask & (1u << gl_ViewIndex)) == 0u)
     {
         gl_Position = vec4(0.0, 0.0, 0.0, 1.0); // not in this cascade: degenerate -> discarded
         return;
     }
     vec3 worldPos = quat_transform(in_pos * inst.posScale.w, inst.quat) + inst.posScale.xyz;
-    gl_Position = u_cascadeViewProj[gl_ViewIndex] * vec4(worldPos, 1.0);
+    // Restore the canonical [0,0,0,1] bottom row (its slots carry packed per-cascade scalars).
+    mat4 m = u_cascadeViewProj[gl_ViewIndex];
+    m[0][3] = 0.0; m[1][3] = 0.0; m[2][3] = 0.0; m[3][3] = 1.0;
+    gl_Position = m * vec4(worldPos, 1.0);
 }

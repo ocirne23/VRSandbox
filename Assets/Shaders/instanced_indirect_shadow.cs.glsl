@@ -15,7 +15,10 @@ struct RenderNodeTransform  { vec4 posScale; vec4 quat; };
 struct InMeshInstance       { uint renderNodeIdx; uint instanceOffsetIdx; uint meshIdxMaterialIdx; uint pipelineIdxAlphaMode; };
 struct InMeshInstanceOffset { vec4 posScale; vec4 quat; };
 struct InMeshInfo           { vec3 center; float radius; uint indexCount; uint firstIndex; int vertexOffset; uint _padding; };
-struct OutMeshInstance      { vec4 posScale; vec4 quat; uint cascadeMask; }; // cascadeMask reuses the meshIdxMaterialIdx slot
+struct MaterialInfo         { uint flags; float opacity; uint diffuseNormalTexIdx; uint metalRoughnessTexIdxAlphaMode; };
+// alphaTexIdxCascadeMask: high 16 = alpha-mask texture index (0xFFFF when the material has no mask),
+// low 16 = cascade overlap bitmask. Matches RendererVKLayout::OutShadowMeshInstance.
+struct OutMeshInstance      { vec4 posScale; vec4 quat; uint alphaTexIdxCascadeMask; };
 struct OutIndirectCommand   { uint pipelineIndex; uint indexCount; uint instanceCount; uint firstIndex; int vertexOffset; uint firstInstance; };
 
 layout (binding = 0, std140) uniform UBO
@@ -25,9 +28,7 @@ layout (binding = 0, std140) uniform UBO
     vec3 u_viewPos;
     vec4 u_sunDirection;
     vec4 u_sunColor;
-    mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES];
-    vec4 u_cascadeSplits;
-    vec4 u_shadowParams;
+    mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES]; // trailing UBO fields (shadowParams/splits/texel sizes) unused here
 };
 layout (binding = 1, std430) readonly buffer InRenderNodeTransformsBuffer  { RenderNodeTransform  in_renderNodeTransforms[]; };
 layout (binding = 2, std430) readonly buffer InMeshInstancesBuffer         { InMeshInstance       in_instances[]; };
@@ -37,6 +38,7 @@ layout (binding = 5, std430) readonly buffer InFirstInstancesBuffer        { uin
 layout (binding = 6, std430) writeonly buffer OutMeshInstancesBuffer       { OutMeshInstance      out_meshInstances[]; };
 layout (binding = 7, std430) writeonly buffer OutMeshInstanceIndexesBuffer { uint                 out_meshInstanceIndexes[]; };
 layout (binding = 8, std430) writeonly buffer OutIndirectCommandBuffer     { OutIndirectCommand   out_indirectCommands[]; };
+layout (binding = 9, std430) readonly buffer InMaterialInfos               { MaterialInfo         in_materialInfos[]; };
 
 vec3 quat_transform(vec3 v, vec4 q) { return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); }
 vec4 quat_multiply(vec4 q, vec4 p)
@@ -61,7 +63,7 @@ uint cascadeOverlapMask(vec3 center, float radius)
         vec4 rx = vec4(m[0][0], m[1][0], m[2][0], m[3][0]);
         vec4 ry = vec4(m[0][1], m[1][1], m[2][1], m[3][1]);
         vec4 rz = vec4(m[0][2], m[1][2], m[2][2], m[3][2]);
-        vec4 rw = vec4(m[0][3], m[1][3], m[2][3], m[3][3]);
+        vec4 rw = vec4(0.0, 0.0, 0.0, 1.0); // true bottom row; the matrix slots hold packed per-cascade scalars
         vec4 planes[6] = vec4[6](rw + rx, rw - rx, rw + ry, rw - ry, rz, rw - rz); // last two are ZO near/far
         bool inside = true;
         for (uint p = 0; p < 6; ++p)
@@ -100,6 +102,14 @@ void main()
     if (cascadeMask == 0u)
         return; // casts no shadow in any cascade
 
+    // Resolve the alpha-mask texture once here (0xFFFF = opaque) so the depth pass can discard cutout
+    // fragments without touching the material buffer.
+    const uint materialIdx = (instance.meshIdxMaterialIdx & 0xFFFF0000u) >> 16;
+    const MaterialInfo material = in_materialInfos[materialIdx];
+    const uint alphaMode = (material.metalRoughnessTexIdxAlphaMode & 0xFFFF0000u) >> 16;
+    const uint alphaTexIdx = (alphaMode == ALPHA_MODE_MASK) ? (material.diffuseNormalTexIdx & 0x0000FFFFu) : 0xFFFFu;
+    const uint packed = (alphaTexIdx << 16) | (cascadeMask & 0x0000FFFFu);
+
     const uint firstInstance = in_firstInstances[meshIdx];
     const uint cmdIdx = meshIdx; // single opaque region
     const uint idx = atomicAdd(out_indirectCommands[cmdIdx].instanceCount, 1);
@@ -112,8 +122,8 @@ void main()
         out_indirectCommands[cmdIdx].firstInstance = firstInstance;
     }
 
-    out_meshInstanceIndexes[firstInstance + idx] = instanceIdx;
-    out_meshInstances[instanceIdx].posScale      = instancePosScale;
-    out_meshInstances[instanceIdx].quat          = quat;
-    out_meshInstances[instanceIdx].cascadeMask   = cascadeMask;
+    out_meshInstanceIndexes[firstInstance + idx]           = instanceIdx;
+    out_meshInstances[instanceIdx].posScale                = instancePosScale;
+    out_meshInstances[instanceIdx].quat                    = quat;
+    out_meshInstances[instanceIdx].alphaTexIdxCascadeMask  = packed;
 }

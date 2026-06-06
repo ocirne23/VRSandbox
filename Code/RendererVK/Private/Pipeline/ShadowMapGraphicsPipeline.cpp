@@ -6,6 +6,8 @@ import File.FileSystem;
 import :CommandBuffer;
 import :Device;
 import :Layout;
+import :Texture;
+import :TextureManager;
 
 ShadowMapGraphicsPipeline::ShadowMapGraphicsPipeline() {}
 ShadowMapGraphicsPipeline::~ShadowMapGraphicsPipeline() {}
@@ -14,12 +16,15 @@ void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layo
 {
     layout.vertexShader.debugFilePath = "Shaders/shadow_depth.vs.glsl";
     layout.vertexShader.text = FileSystem::readFileStr(layout.vertexShader.debugFilePath);
+    // Fragment stage discards alpha-masked (cutout) fragments so foliage casts correct shadows.
+    layout.fragmentShader.debugFilePath = "Shaders/shadow_depth.fs.glsl";
+    layout.fragmentShader.text = FileSystem::readFileStr(layout.fragmentShader.debugFilePath);
 
     layout.depthOnly = true;
     layout.depthBiasEnable = true;
     layout.depthBiasConstantFactor = 1.25f; // slope-scaled bias fights shadow acne on lit slopes
     layout.depthBiasSlopeFactor = 2.5f;
-    layout.cullMode = vk::CullModeFlagBits::eBack;
+    layout.cullMode = vk::CullModeFlagBits::eFront;
 
     auto& bindings = layout.vertexLayoutInfo.bindingDescriptions;
     bindings.push_back(vk::VertexInputBindingDescription{ .binding = 0, .stride = sizeof(RendererVKLayout::MeshVertex), .inputRate = vk::VertexInputRate::eVertex });
@@ -27,6 +32,7 @@ void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layo
 
     auto& attributes = layout.vertexLayoutInfo.attributeDescriptions;
     attributes.push_back(vk::VertexInputAttributeDescription{ .location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(RendererVKLayout::MeshVertex, position) });
+    attributes.push_back(vk::VertexInputAttributeDescription{ .location = 3, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(RendererVKLayout::MeshVertex, texCoord) });
     attributes.push_back(vk::VertexInputAttributeDescription{ .location = 4, .binding = 2, .format = vk::Format::eR32Uint, .offset = 0 });
 
     auto& descriptorSetBindings = layout.descriptorSetLayoutBindings;
@@ -34,6 +40,8 @@ void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layo
         .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // shared transformed instances
         .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // diffuse texture array (alpha-mask discard)
+        .binding = 7, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = RendererVKLayout::MAX_TEXTURES, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     // The cascade is selected per multiview view via gl_ViewIndex, so no push constant is needed.
 }
 
@@ -62,6 +70,7 @@ void ShadowMapGraphicsPipeline::buildIndirectState()
 void ShadowMapGraphicsPipeline::initialize(ShadowMap& shadowMap)
 {
     m_renderPass = shadowMap.getRenderPass();
+    m_sampler.initialize();
     GraphicsPipelineLayout layout;
     buildPipelineLayout(layout);
     m_graphicsPipeline.initialize(m_renderPass, layout);
@@ -85,12 +94,22 @@ void ShadowMapGraphicsPipeline::reloadShaders()
 
 void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
-    std::array<DescriptorSetUpdateInfo, 2> updates{
+    std::array<DescriptorSetUpdateInfo, 3> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = params.ubo.getSize() } } },
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.meshInstanceBuffer.getBuffer(), .range = params.meshInstanceBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 7, .type = vk::DescriptorType::eCombinedImageSampler },
     };
+    const std::vector<Texture>& textures = Globals::textureManager.getTextures();
+    for (const Texture& tex : textures)
+    {
+        updates[2].imageInfos.push_back(vk::DescriptorImageInfo{
+            .sampler = m_sampler.getSampler(),
+            .imageView = tex.getImageView(),
+            .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+        });
+    }
 
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
     vk::DescriptorSet descriptorSet = params.descriptorSet.getDescriptorSet();

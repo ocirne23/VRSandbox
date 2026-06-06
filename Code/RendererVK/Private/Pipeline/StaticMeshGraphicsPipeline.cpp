@@ -144,8 +144,14 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = RendererVKLayout::MAX_TEXTURES,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_shadowMap (sun CSM)
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_shadowMap (sun CSM, comparison)
         .binding = 8,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_shadowMapDepth (raw depth, PCSS blocker search)
+        .binding = 9,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
@@ -211,7 +217,7 @@ void StaticMeshGraphicsPipeline::reloadShaders()
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
-    std::array<DescriptorSetUpdateInfo, 8> graphicsDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 9> graphicsDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo{
             .binding = 0,
@@ -280,6 +286,17 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .imageInfos = {
                 vk::DescriptorImageInfo {
                     .sampler = params.shadowMapSampler,
+                    .imageView = params.shadowMapView,
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                }
+            }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 9,
+            .type = vk::DescriptorType::eCombinedImageSampler,
+            .imageInfos = {
+                vk::DescriptorImageInfo {
+                    .sampler = params.shadowMapDepthSampler,
                     .imageView = params.shadowMapView,
                     .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
                 }

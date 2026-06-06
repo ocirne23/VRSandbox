@@ -20,7 +20,8 @@ public:
     vk::RenderPass getRenderPass() const { return m_renderPass; }
     vk::Framebuffer getFramebuffer() const { return m_framebuffer; } // single layered framebuffer (multiview)
     vk::ImageView getSampleView() const  { return m_sampleView; }
-    vk::Sampler getSampler() const       { return m_sampler; }
+    vk::Sampler getSampler() const       { return m_sampler; }      // comparison sampler (hardware PCF)
+    vk::Sampler getDepthSampler() const  { return m_depthSampler; } // non-comparison (raw depth for PCSS blocker search)
     vk::Image getImage() const           { return m_image; }
     uint32 getResolution() const         { return m_resolution; }
     uint32 getNumCascades() const        { return m_numCascades; }
@@ -36,5 +37,6 @@ private:
     vk::ImageView m_sampleView; // e2DArray over all cascades; used both as the render target and for sampling
     vk::Framebuffer m_framebuffer;
     vk::RenderPass m_renderPass;
-    vk::Sampler m_sampler;
+    vk::Sampler m_sampler;      // comparison sampler for hardware PCF
+    vk::Sampler m_depthSampler; // non-comparison sampler for raw-depth blocker search
 };

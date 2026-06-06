@@ -9,6 +9,7 @@ import :GraphicsPipeline;
 import :IndirectExecutionSet;
 import :IndirectCommandsLayout;
 import :DescriptorSet;
+import :Sampler;
 import :ShadowMap;
 
 export class CommandBuffer;
@@ -27,8 +28,8 @@ public:
     struct RecordParams
     {
         DescriptorSet& descriptorSet;
-        Buffer& ubo;                   // 0 - main UBO (holds cascadeViewProj[]; cascade chosen by push constant)
-        Buffer& meshInstanceBuffer;    // 1 - shadow cull's transformed instances
+        Buffer& ubo;                   // 0 - main UBO (holds cascadeViewProj[]; cascade chosen by gl_ViewIndex)
+        Buffer& meshInstanceBuffer;    // 1 - shadow cull's transformed instances (carry the alpha-mask tex idx)
         Buffer& vertexBuffer;
         Buffer& indexBuffer;
         Buffer& instanceIdxBuffer;     // vertex binding 2 - shadow cull's compacted instance indices
@@ -49,6 +50,7 @@ private:
     GraphicsPipeline m_graphicsPipeline;
     IndirectExecutionSet m_indirectExecutionSet;
     IndirectCommandsLayout m_indirectCommandsLayout;
+    Sampler m_sampler; // for the diffuse texture array used by the alpha-mask discard
     vk::RenderPass m_renderPass;
 
     vk::DeviceSize m_preprocessSize = 0;

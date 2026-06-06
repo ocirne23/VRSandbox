@@ -173,9 +173,6 @@ private:
         DescriptorSet staticMeshPipelineDescriptorSet;
         DescriptorSet indirectCullPipelineDescriptorSet;
         DescriptorSet lightGridPipelineDescriptorSet;
-
-        // The shadow caster list is built once per frame; all cascades share one draw descriptor set
-        // (same buffers) and select their view-projection from the main UBO via a push constant.
         DescriptorSet shadowCullDescriptorSet;
         DescriptorSet shadowDrawDescriptorSet;
 

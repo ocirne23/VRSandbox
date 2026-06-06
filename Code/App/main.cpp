@@ -30,7 +30,10 @@ int main()
 
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
-    renderer.setSunLight(glm::vec3(0.5f, 1.0f, 0.2f), glm::vec3(1.0f), 5.0f);
+    glm::vec3 sunDir = normalize(glm::vec3(0.5f, 1.0f, 0.1f));
+    float sunSize = 250.0f;
+	float sunDistance = 5000.0f;
+    renderer.setSunLight(sunDir, glm::vec3(1.0f), 5.0f);
 
     UI& ui = Globals::ui;
     ui.initialize();
@@ -57,19 +60,16 @@ int main()
     ObjectContainer baseShapes;
     ObjectContainer container2;
     ObjectContainer container3;
-    const int spawnCountX = 20;
-    const int spawnCountY = 20;
-    /*
+    const int spawnCountX = 1;
+    const int spawnCountY = 1;
+    RenderNode sunLightNode;
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createProceduralLoader();
         sceneData->initialize("terrain", true, true);
         container2.initialize(*sceneData);
-        
-        for (int x = 0; x < spawnCountX; ++x)
-            for (int y = 0; y < spawnCountY; ++y)
-                spawnedNodes.push_back(container2.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, -5.0f, y * 20.0f), 100.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+        spawnedNodes.push_back(container2.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(0.0f, -5.0f, 0.0f), 100.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }
-    */
+    
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
         sceneData->initialize("Models/sponza.glb", true, true);
@@ -96,6 +96,8 @@ int main()
         overrides.metalRoughnessTexIdx = UINT16_MAX;
         overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
         baseShapes.initialize(*sceneData, &overrides);
+        // spawn a big sun sphere to visualize the sun light
+        sunLightNode = baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(sunDir * sunDistance, sunSize, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0))));
     }
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
@@ -103,7 +105,10 @@ int main()
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_L && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            {
                 renderer.setSunLight(-cameraController.getDirection(), glm::vec3(1.0f), 5.0f); // aim the sun along the camera forward
+				sunLightNode.getTransform() = Transform(-cameraController.getDirection() * sunDistance, sunSize, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)));
+            }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
                 spawnedLights.resize(0);
@@ -144,7 +149,7 @@ int main()
 				// spawn a plane to visualize the area light geometry; orient it to match the light's emission direction
 				glm::quat orientation = cameraController.getOrientation();
 				orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * orientation;
-				//spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Plane"), Transform(cameraController.getPosition(), 0.5f, orientation)));
+				spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Plane"), Transform(cameraController.getPosition(), 0.5f, orientation)));
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
@@ -217,7 +222,7 @@ int main()
         const Frustum& frustum = renderer.beginFrame(cameraController.getCamera());
         for (RenderNode& node : spawnedNodes)
         {
-            if (frustum.sphereInFrustum(node.getWorldBounds()))
+            //if (frustum.sphereInFrustum(node.getWorldBounds()))
             {
                 renderer.renderNode(node);
             }
@@ -235,6 +240,7 @@ int main()
                 renderer.renderNode(node);
             }
         }
+        renderer.renderNode(sunLightNode);
 
         ui.render();
         renderer.present();

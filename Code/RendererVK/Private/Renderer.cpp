@@ -27,11 +27,17 @@ import :ObjectContainer;
 namespace
 {
     void computeSunCascades(const Camera& camera, float aspect, const glm::vec3& sunDir,
-        glm::mat4(&outViewProj)[RendererVKLayout::NUM_SHADOW_CASCADES], glm::vec4& outSplits)
+        glm::mat4(&outViewProj)[RendererVKLayout::NUM_SHADOW_CASCADES])
     {
         constexpr uint32 N = RendererVKLayout::NUM_SHADOW_CASCADES;
         const float shadowNear = camera.near;
-        const float shadowFar = 500.0f; // sun shadows are capped well short of the camera far plane
+        // --- Cascade distribution knobs --------------------------------------------------------
+        // shadowFar:    max distance from the camera that receives sun shadows. Lower = every cascade
+        //               covers less ground = higher resolution everywhere (at the cost of range).
+        // splitLambda:  0 = evenly spaced splits (uniform), 1 = logarithmic (splits bunch up close to
+        //               the camera). Higher = more shadow-map resolution near the camera.
+        const float shadowFar = 250.0f;
+        const float splitLambda = 0.80f;
         const float res = (float)RendererVKLayout::SHADOW_MAP_RESOLUTION;
 
         const glm::mat4 invView = glm::inverse(camera.viewMatrix);
@@ -48,7 +54,7 @@ namespace
             const float p = (float)i / (float)N;
             const float logd = shadowNear * powf(shadowFar / shadowNear, p);
             const float lind = shadowNear + (shadowFar - shadowNear) * p;
-            splits[i] = glm::mix(lind, logd, 0.7f); // practical split scheme
+            splits[i] = glm::mix(lind, logd, splitLambda); // practical split scheme
         }
 
         const glm::vec3 L = glm::normalize(sunDir);
@@ -77,7 +83,12 @@ namespace
             for (int k = 0; k < 8; ++k) radius = glm::max(radius, glm::length(corners[k] - center));
             radius = ceilf(radius * 16.0f) / 16.0f;
 
-            const float zPad = 100.0f; // include casters between the light and the cascade volume
+            // How far up-sun a caster can be above this cascade and still be captured. Extends only the
+            // near side of the depth slab (the far plane stays tight to the bounding sphere), so the only
+            // cost is depth precision over a longer range (fine for D32). It must exceed the tallest
+            // caster's height above the cascade; too small and casters get clipped out of the depth map,
+            // making their shadows pop/disappear as the cascade slab slides with camera motion.
+            const float zPad = 250.0f;
             // L points towards the sun, so the light sits up-sun of the scene looking back along -L.
             const glm::vec3 eye = center + L * (radius + zPad);
             const glm::mat4 lightView = glm::lookAtRH(eye, center, upRef);
@@ -92,8 +103,13 @@ namespace
             lightProj[3][0] += off.x;
             lightProj[3][1] += off.y;
 
-            outViewProj[c] = lightProj * lightView;
-            outSplits[c] = dists[1];
+            glm::mat4 viewProj = lightProj * lightView;
+            // Stash per-cascade scalars in the matrix's structurally-zero bottom row: far distance in
+            // m[0][3], world texel size (ortho width / resolution) in m[1][3]. Shaders mask these back
+            // to the canonical [0,0,0,1] bottom row before using the matrix.
+            viewProj[0][3] = dists[1];
+            viewProj[1][3] = (2.0f * radius) / res;
+            outViewProj[c] = viewProj;
         }
     }
 }
@@ -299,15 +315,14 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     // Sun + cascaded shadow maps.
     const float aspect = (float)viewportSize.x / (float)viewportSize.y;
     glm::mat4 cascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
-    glm::vec4 cascadeSplits(0.0f);
-    computeSunCascades(camera, aspect, m_sunDirection, cascadeViewProj, cascadeSplits);
+    computeSunCascades(camera, aspect, m_sunDirection, cascadeViewProj);
 
     ubo.sunDirection = glm::vec4(m_sunDirection, 0.0f);
     ubo.sunColor = glm::vec4(m_sunColor, 0.0f);
     for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
         ubo.cascadeViewProj[c] = cascadeViewProj[c];
-    ubo.cascadeSplits = cascadeSplits;
-    ubo.shadowParams = glm::vec4(0.0015f, 0.25f, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION, 1.0f);
+    // x = constant depth bias, y = normal-offset bias in *texels*, z = 1/resolution, w = pcf radius.
+    ubo.shadowParams = glm::vec4(0.0015f, 2.0f, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION, 1.0f);
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
@@ -502,6 +517,7 @@ void Renderer::recordCommandBuffers()
                 .lightTableBuffer = frameData.lightTableBuffer,
                 .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
                 .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
+                .shadowMapDepthSampler = m_shadowMaps[frameIdx].getDepthSampler(),
             };
             m_staticMeshGraphicsPipeline.record(staticMeshCommandBuffer, frameIdx, m_meshInfoCounter, drawParams);
             staticMeshCommandBuffer.end();
@@ -569,6 +585,7 @@ void Renderer::recordCommandBuffers()
             .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
             .inMeshInfoBuffer = m_meshInfosBuffer,
             .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
+            .inMaterialInfoBuffer = m_materialInfosBuffer,
         };
         m_shadowCullComputePipeline.record(frameData.primaryCommandBuffer, frameIdx, m_meshInfoCounter, cullParams);
 

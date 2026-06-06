@@ -21,7 +21,7 @@ MaterialData::~MaterialData()
 bool MaterialData::initialize(const aiMaterial* pMaterial)
 {
     m_pMaterial = pMaterial;
-
+    /*
 	printf("Material: %s\n", getName());
 	for (uint32 i = aiTextureType_DIFFUSE; i < AI_TEXTURE_TYPE_MAX; i++)
 	{
@@ -43,6 +43,7 @@ bool MaterialData::initialize(const aiMaterial* pMaterial)
             }
 		}
 	}
+    */
     return true;
 }
 

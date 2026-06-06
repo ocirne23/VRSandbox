@@ -9,11 +9,6 @@ import :ComputePipeline;
 import :Layout;
 import :DescriptorSet;
 
-// Builds the shadow caster draw list once per frame. Reuses instanced_indirect.cs.glsl with the
-// SHADOW_PASS define, which skips the camera frustum cull (every caster is considered) and forces
-// pipelineIndex 0. The output is in the same Device-Generated-Commands format as the camera cull, so
-// the depth pass renders it through vkCmdExecuteGeneratedCommandsEXT just like the main pass. The
-// list is cascade-independent; each cascade only differs by the view-projection used at draw time.
 export class ShadowCullComputePipeline final
 {
 public:
@@ -31,6 +26,7 @@ public:
         Buffer& inMeshInstanceOffsetsBuffer;  // 3
         Buffer& inMeshInfoBuffer;             // 4
         Buffer& inFirstInstancesBuffer;       // 5
+        Buffer& inMaterialInfoBuffer;         // 9 - resolves the alpha-mask texture per caster
     };
 
     void initialize();

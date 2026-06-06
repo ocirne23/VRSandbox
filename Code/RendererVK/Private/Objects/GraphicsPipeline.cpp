@@ -203,7 +203,9 @@ bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipeli
     {
         .pNext = &pipelineFlags2,
         .flags = {},
-        .stageCount = layout.depthOnly ? 1u : static_cast<uint32>(pipelineShaderStageCreateInfos.size()),
+        // Depth-only passes may still carry a fragment shader (e.g. alpha-masked shadow discard); they
+        // simply write no color attachments.
+        .stageCount = (!layout.depthOnly || !layout.fragmentShader.text.empty()) ? 2u : 1u,
         .pStages = pipelineShaderStageCreateInfos.data(),
         .pVertexInputState = &pipelineVertexInputStateCreateInfo,
         .pInputAssemblyState = &pipelineInputAssemblyStateCreateInfo,
@@ -224,7 +226,7 @@ bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipeli
     Shader defaultVS, defaultFS;
     if (!defaultVS.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShader.text, layout.vertexShader.debugFilePath, layout.vertexShader.defines, assertOnFailure))
         return false;
-    if (!layout.depthOnly &&
+    if ((!layout.depthOnly || !layout.fragmentShader.text.empty()) &&
         !defaultFS.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShader.text, layout.fragmentShader.debugFilePath, layout.fragmentShader.defines, assertOnFailure))
         return false;
 
