@@ -27,146 +27,23 @@ layout (binding = 1, std430) readonly buffer InLightInfos
 };
 layout (binding = 2, std430) coherent buffer OutLightGrids
 {
-    uint in_gridData[];
+    uint inout_gridData[];
 };
 layout (binding = 3, std430) coherent buffer InOutTable
 {
     uint inout_numGrids;
     uint inout_gridDataCounter;
     uint inout_tableSize;
-    uint inout_table[];
+    uint inout_gridTable[];
 };
 
-/****************************************
-struct GRID DATA MEMORY LAYOUT
-{
-    ivec3 gridMin;
-    uint gridSize;
-    uint numLargeLights;
-    uint16_t largeLightIds[MAX_LARGE_LIGHTS_PER_GRID];
-    struct 
-    {
-        uint numLights;
-        uint16_t lightIds[MAX_LIGHTCELL_LIGHTS];
-    } cells[gridSize];
-};
-*/
-
-ivec3 getGridMin(uint gridIdx) 
-{ 
-    return ivec3(in_gridData[gridIdx + 0], in_gridData[gridIdx + 1], in_gridData[gridIdx + 2]); 
-}
-void setGridMin(uint gridIdx, ivec3 gridMin)
-{
-    in_gridData[gridIdx + 0] = gridMin.x;
-    in_gridData[gridIdx + 1] = gridMin.y;
-    in_gridData[gridIdx + 2] = gridMin.z;
-}
-
-uint getCellSize(uint gridIdx) 
-{ 
-    return in_gridData[gridIdx + 3]; 
-}
-void setCellSize(uint gridIdx, uint cellSize)
-{
-    in_gridData[gridIdx + 3] = cellSize;
-}
-uint getCellOffset(uint gridIdx, uint cellIdx)
-{
-    return gridIdx + 8 + cellIdx * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
-}
-uint getNumLightsForCell(uint cellOffset)
-{
-    return in_gridData[cellOffset];
-}
-uint16_t getLightId(uint cellOffset, uint lightIdx)
-{
-    const uint packed = in_gridData[cellOffset + 1 + lightIdx / 2];
-    if ((lightIdx & 1u) == 0u)
-        return uint16_t(packed & 0x0000FFFF);
-    else
-        return uint16_t(packed >> 16);
-}
-void addLightToCell(uint gridIdx, uint cellIdx, uint lightId)
-{
-    const uint cellOffset = getCellOffset(gridIdx, cellIdx);
-    const uint lightIdx = atomicAdd(in_gridData[cellOffset], uint(1));
-    if (lightIdx < MAX_LIGHTCELL_LIGHTS)
-    {
-        atomicOr(in_gridData[cellOffset + 1 + lightIdx / 2], uint(lightId) << ((lightIdx & 1u) == 0u ? 0 : 16));
-    }
-}
-void addLargeLight(uint gridIdx, uint lightId)
-{
-    const uint numLargeLightsOffset = gridIdx + 4;
-    const uint largeLightIdx = atomicAdd(in_gridData[numLargeLightsOffset], uint(1));
-    if (largeLightIdx < MAX_LARGE_LIGHTS_PER_GRID)
-    {
-        atomicOr(in_gridData[numLargeLightsOffset + 1 + largeLightIdx / 2], uint(lightId) << ((largeLightIdx & 1u) == 0u ? 0 : 16));
-    }
-}
-uint getGridMemoryUsage(uint cellSize)
-{
-    const uint numCells = GRID_SIZE / cellSize;
-    return 4 + (MAX_LARGE_LIGHTS_PER_GRID / 2 + 1) + numCells * numCells * numCells * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
-}
-
-uint getOrInsertGrid(ivec3 gridPos, uint cellSize)
-{
-    const uint gridPosHash = getPositionHash(gridPos);
-    uint idx = gridPosHash % inout_tableSize;
-    while (true)
-    {
-        memoryBarrierBuffer();
-        uint gridIdx = inout_table[idx];
-        if (gridIdx < INITIALIZING_ENTRY && gridIdx < inout_gridDataCounter)
-        {
-            if (getGridMin(gridIdx) == gridPos)
-            {
-                return gridIdx;
-            }
-            idx = (idx + 1) % inout_tableSize;
-        }
-        else if (atomicCompSwap(inout_table[idx], EMPTY_ENTRY, INITIALIZING_ENTRY) == EMPTY_ENTRY)
-        {
-            const uint memSize = getGridMemoryUsage(cellSize);
-            const uint newGridIdx = atomicAdd(inout_gridDataCounter, memSize);
-            setGridMin(newGridIdx, gridPos);
-            setCellSize(newGridIdx, cellSize);
-            memoryBarrierBuffer();
-            atomicExchange(inout_table[idx], newGridIdx);
-            atomicAdd(inout_numGrids, uint(1));
-            return newGridIdx;
-        }
-    }
-}
-
-ivec3 getGridPos(vec3 pos)
-{
-    return ivec3(floor(pos / GRID_SIZE));
-}
-
-void addLightToGrid(uint gridIdx, uint lightId, vec3 lightMin, vec3 lightMax)
-{
-    const ivec3 gridMin = getGridMin(gridIdx) * GRID_SIZE;
-    const uint cellSize = getCellSize(gridIdx); 
-
-    const uint numCells = GRID_SIZE / cellSize;
-    const uint numCellsSq = numCells * numCells;
-    const ivec3 minCell = max(ivec3(floor(lightMin)) - gridMin, ivec3(0)) / ivec3(cellSize);
-    const ivec3 maxCell = min(ivec3(floor(lightMax)) - gridMin, ivec3(GRID_SIZE - 1)) / ivec3(cellSize);
-    for (uint x = minCell.x; x <= maxCell.x; ++x)
-    {
-        for (uint y = minCell.y; y <= maxCell.y; ++y)
-        {
-            for (uint z = minCell.z; z <= maxCell.z; ++z)
-            {
-                const uint cellIdx = x + y * numCells + z * numCellsSq;
-                addLightToCell(gridIdx, cellIdx, lightId);
-            }
-        }
-    }
-}
+#define GRID_DATA_WRITE
+#define GRID_DATA_NAME         inout_gridData
+#define NUM_GRIDS_NAME         inout_numGrids
+#define GRID_DATA_COUNTER_NAME inout_gridDataCounter
+#define TABLE_SIZE_NAME        inout_tableSize
+#define GRID_TABLE_NAME        inout_gridTable
+#include "light_grid.inc.glsl"
 
 layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
 

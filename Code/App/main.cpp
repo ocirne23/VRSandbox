@@ -30,7 +30,7 @@ int main()
 
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
-    glm::vec3 sunDir = normalize(glm::vec3(0.5f, 1.0f, 0.1f));
+    glm::vec3 sunDir = normalize(glm::vec3(-0.5f, 1.0f, 0.1f));
     float sunSize = 250.0f;
 	float sunDistance = 5000.0f;
     renderer.setSunLight(sunDir, glm::vec3(1.0f), 5.0f);
