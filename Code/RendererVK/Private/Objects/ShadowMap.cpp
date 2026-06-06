@@ -15,15 +15,12 @@ void ShadowMap::destroy()
 {
     vk::Device vkDevice = Globals::device.getDevice();
     if (m_sampler)      vkDevice.destroySampler(m_sampler);
-    for (vk::Framebuffer fb : m_framebuffers) vkDevice.destroyFramebuffer(fb);
-    m_framebuffers.clear();
+    if (m_framebuffer)  vkDevice.destroyFramebuffer(m_framebuffer);
     if (m_renderPass)   vkDevice.destroyRenderPass(m_renderPass);
-    for (vk::ImageView v : m_layerViews) vkDevice.destroyImageView(v);
-    m_layerViews.clear();
     if (m_sampleView)   vkDevice.destroyImageView(m_sampleView);
     if (m_image)        vkDevice.destroyImage(m_image);
     if (m_imageMemory)  vkDevice.freeMemory(m_imageMemory);
-    m_sampler = nullptr; m_renderPass = nullptr; m_sampleView = nullptr; m_image = nullptr; m_imageMemory = nullptr;
+    m_sampler = nullptr; m_framebuffer = nullptr; m_renderPass = nullptr; m_sampleView = nullptr; m_image = nullptr; m_imageMemory = nullptr;
 }
 
 bool ShadowMap::initialize(uint32 resolution, uint32 numCascades)
@@ -70,21 +67,7 @@ bool ShadowMap::initialize(uint32 resolution, uint32 numCascades)
     if (sampleViewResult.result != vk::Result::eSuccess) { assert(false && "shadow sample view"); return false; }
     m_sampleView = sampleViewResult.value;
 
-    m_layerViews.reserve(numCascades);
-    for (uint32 i = 0; i < numCascades; i++)
-    {
-        vk::ImageViewCreateInfo layerViewInfo{
-            .image = m_image,
-            .viewType = vk::ImageViewType::e2D,
-            .format = SHADOW_DEPTH_FORMAT,
-            .subresourceRange = { .aspectMask = vk::ImageAspectFlagBits::eDepth, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = i, .layerCount = 1 },
-        };
-        auto r = vkDevice.createImageView(layerViewInfo);
-        if (r.result != vk::Result::eSuccess) { assert(false && "shadow layer view"); return false; }
-        m_layerViews.push_back(r.value);
-    }
-
-    // ---- Depth-only render pass -------------------------------------------
+    // ---- Depth-only multiview render pass (one view per cascade) ----------
     vk::AttachmentDescription2 depthAttachment{
         .format = SHADOW_DEPTH_FORMAT,
         .samples = vk::SampleCountFlagBits::e1,
@@ -94,8 +77,10 @@ bool ShadowMap::initialize(uint32 resolution, uint32 numCascades)
         .finalLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
     };
     vk::AttachmentReference2 depthRef{ .attachment = 0, .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal };
+    const uint32 viewMask = (numCascades >= 32) ? 0xFFFFFFFFu : ((1u << numCascades) - 1u);
     vk::SubpassDescription2 subpass{
         .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+        .viewMask = viewMask, // multiview: broadcast the subpass to one layer per cascade
         .colorAttachmentCount = 0,
         .pDepthStencilAttachment = &depthRef,
     };
@@ -131,22 +116,19 @@ bool ShadowMap::initialize(uint32 resolution, uint32 numCascades)
     if (rpResult.result != vk::Result::eSuccess) { assert(false && "shadow renderpass"); return false; }
     m_renderPass = rpResult.value;
 
-    // ---- One framebuffer per cascade layer --------------------------------
-    m_framebuffers.reserve(numCascades);
-    for (uint32 i = 0; i < numCascades; i++)
-    {
-        vk::FramebufferCreateInfo fbInfo{
-            .renderPass = m_renderPass,
-            .attachmentCount = 1,
-            .pAttachments = &m_layerViews[i],
-            .width = resolution,
-            .height = resolution,
-            .layers = 1,
-        };
-        auto r = vkDevice.createFramebuffer(fbInfo);
-        if (r.result != vk::Result::eSuccess) { assert(false && "shadow framebuffer"); return false; }
-        m_framebuffers.push_back(r.value);
-    }
+    // ---- Single layered framebuffer (multiview targets the array view) ----
+    // With multiview the framebuffer has layers = 1; the array view supplies one layer per view.
+    vk::FramebufferCreateInfo fbInfo{
+        .renderPass = m_renderPass,
+        .attachmentCount = 1,
+        .pAttachments = &m_sampleView,
+        .width = resolution,
+        .height = resolution,
+        .layers = 1,
+    };
+    auto fbResult = vkDevice.createFramebuffer(fbInfo);
+    if (fbResult.result != vk::Result::eSuccess) { assert(false && "shadow framebuffer"); return false; }
+    m_framebuffer = fbResult.value;
 
     // ---- Comparison sampler (hardware PCF) --------------------------------
     vk::SamplerCreateInfo samplerInfo{

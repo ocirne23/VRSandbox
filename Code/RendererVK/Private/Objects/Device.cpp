@@ -85,6 +85,7 @@ bool Device::initialize()
         .storageBuffer16BitAccess = vk::True,
         .uniformAndStorageBuffer16BitAccess = vk::True,
         //.storageInputOutput16 = vk::True, // Not supported on NVIDIA!
+        .multiview = vk::True, // sun shadow cascades render in a single multiview pass
     };
     vk::PhysicalDeviceVulkan12Features vk12Features
     {

@@ -20,7 +20,7 @@ void ShadowCullComputePipeline::initialize()
             vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        perFrame.outIndirectCommandBuffer.initialize(2 * RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::IndirectDrawSequence), // 8
+        perFrame.outIndirectCommandBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::IndirectDrawSequence), // 8 (single opaque region)
             vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst
             | vk::BufferUsageFlagBits::eShaderDeviceAddress,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
@@ -41,10 +41,8 @@ void ShadowCullComputePipeline::reloadShaders()
 
 void ShadowCullComputePipeline::buildComputeLayout(ComputePipelineLayout& computePipelineLayout)
 {
-    computePipelineLayout.computeShaderDebugFilePath = "Shaders/instanced_indirect.cs.glsl";
+    computePipelineLayout.computeShaderDebugFilePath = "Shaders/instanced_indirect_shadow.cs.glsl";
     computePipelineLayout.computeShaderText = FileSystem::readFileStr(computePipelineLayout.computeShaderDebugFilePath);
-    computePipelineLayout.defines.push_back({ "MAX_UNIQUE_MESHES", std::to_string(RendererVKLayout::MAX_UNIQUE_MESHES) + "u" });
-    computePipelineLayout.defines.push_back({ "SHADOW_PASS", "1" });
 
     auto& b = computePipelineLayout.descriptorSetLayoutBindings;
     for (uint32 i = 0; i <= 8; i++)
@@ -90,8 +88,7 @@ void ShadowCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fram
     vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
 
     const vk::DeviceSize stride = sizeof(RendererVKLayout::IndirectDrawSequence);
-    vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * stride, 0); // opaque region
-    vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), RendererVKLayout::MAX_UNIQUE_MESHES * stride, numMeshes * stride, 0); // transparent region
+    vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * stride, 0); // clear per-mesh instance counts
     {
         vk::MemoryBarrier2 memoryBarrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eClear,

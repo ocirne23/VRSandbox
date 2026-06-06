@@ -572,6 +572,7 @@ void Renderer::recordCommandBuffers()
         };
         m_shadowCullComputePipeline.record(frameData.primaryCommandBuffer, frameIdx, m_meshInfoCounter, cullParams);
 
+        // All cascades render in a single multiview render pass; gl_ViewIndex selects the layer.
         ShadowMap& shadowMap = m_shadowMaps[frameIdx];
         const float shadowRes = (float)shadowMap.getResolution();
         const vk::Extent2D shadowExtent{ shadowMap.getResolution(), shadowMap.getResolution() };
@@ -579,30 +580,28 @@ void Renderer::recordCommandBuffers()
         const vk::Rect2D shadowScissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = shadowExtent };
         vk::ClearValue shadowClear;
         shadowClear.depthStencil = vk::ClearDepthStencilValue{ .depth = 1.0f, .stencil = 0 };
-        for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
-        {
-            const vk::RenderPassBeginInfo shadowRpBegin{
-                .renderPass = shadowMap.getRenderPass(),
-                .framebuffer = shadowMap.getFramebuffer(c),
-                .renderArea = vk::Rect2D{ .offset = vk::Offset2D{ 0, 0 }, .extent = shadowExtent },
-                .clearValueCount = 1,
-                .pClearValues = &shadowClear,
-            };
-            vkCommandBuffer.beginRenderPass(shadowRpBegin, vk::SubpassContents::eInline);
-            vkCommandBuffer.setViewport(0, { shadowViewport });
-            vkCommandBuffer.setScissor(0, { shadowScissor });
-            ShadowMapGraphicsPipeline::RecordParams shadowDrawParams{
-                .descriptorSet = frameData.shadowDrawDescriptorSet,
-                .ubo = frameData.ubo,
-                .meshInstanceBuffer = m_shadowCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
-                .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
-                .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
-                .instanceIdxBuffer = m_shadowCullComputePipeline.getInstanceIdxBuffer(frameIdx),
-                .indirectCommandBuffer = m_shadowCullComputePipeline.getIndirectCommandBuffer(frameIdx),
-            };
-            m_shadowMapGraphicsPipeline.record(frameData.primaryCommandBuffer, frameIdx, c, m_meshInfoCounter, shadowDrawParams);
-            vkCommandBuffer.endRenderPass();
-        }
+
+        const vk::RenderPassBeginInfo shadowRpBegin{
+            .renderPass = shadowMap.getRenderPass(),
+            .framebuffer = shadowMap.getFramebuffer(),
+            .renderArea = vk::Rect2D{ .offset = vk::Offset2D{ 0, 0 }, .extent = shadowExtent },
+            .clearValueCount = 1,
+            .pClearValues = &shadowClear,
+        };
+        vkCommandBuffer.beginRenderPass(shadowRpBegin, vk::SubpassContents::eInline);
+        vkCommandBuffer.setViewport(0, { shadowViewport });
+        vkCommandBuffer.setScissor(0, { shadowScissor });
+        ShadowMapGraphicsPipeline::RecordParams shadowDrawParams{
+            .descriptorSet = frameData.shadowDrawDescriptorSet,
+            .ubo = frameData.ubo,
+            .meshInstanceBuffer = m_shadowCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
+            .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+            .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
+            .instanceIdxBuffer = m_shadowCullComputePipeline.getInstanceIdxBuffer(frameIdx),
+            .indirectCommandBuffer = m_shadowCullComputePipeline.getIndirectCommandBuffer(frameIdx),
+        };
+        m_shadowMapGraphicsPipeline.record(frameData.primaryCommandBuffer, frameIdx, m_meshInfoCounter, shadowDrawParams);
+        vkCommandBuffer.endRenderPass();
     }
 
     vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eSecondaryCommandBuffers);

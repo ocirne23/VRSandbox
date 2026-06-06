@@ -37,7 +37,7 @@ public:
 
     void initialize(ShadowMap& shadowMap);
     void reloadShaders();
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 cascadeIdx, uint32 numMeshes, RecordParams& params);
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
 
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
 
@@ -52,6 +52,6 @@ private:
     vk::RenderPass m_renderPass;
 
     vk::DeviceSize m_preprocessSize = 0;
-    // Separate preprocess scratch per cascade per frame so the sequential cascade executes don't alias.
-    std::array<std::array<Buffer, RendererVKLayout::NUM_SHADOW_CASCADES>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;
+    // One preprocess scratch per frame in flight (a single multiview execute renders all cascades).
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;
 };

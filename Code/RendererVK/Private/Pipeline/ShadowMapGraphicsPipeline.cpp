@@ -34,10 +34,7 @@ void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layo
         .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // shared transformed instances
         .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
-
-    // Push constant selects which cascade this draw renders, avoiding a per-cascade uniform buffer.
-    layout.pushConstantRanges.push_back(vk::PushConstantRange{
-        .stageFlags = vk::ShaderStageFlagBits::eVertex, .offset = 0, .size = sizeof(uint32) });
+    // The cascade is selected per multiview view via gl_ViewIndex, so no push constant is needed.
 }
 
 void ShadowMapGraphicsPipeline::buildIndirectState()
@@ -56,10 +53,9 @@ void ShadowMapGraphicsPipeline::buildIndirectState()
     m_preprocessSize = memReq.memoryRequirements.size;
     if (m_preprocessSize > 0)
     {
-        for (auto& frame : m_preprocessBuffers)
-            for (Buffer& preprocess : frame)
-                preprocess.initialize(m_preprocessSize, {}, vk::MemoryPropertyFlagBits::eDeviceLocal,
-                    vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress);
+        for (Buffer& preprocess : m_preprocessBuffers)
+            preprocess.initialize(m_preprocessSize, {}, vk::MemoryPropertyFlagBits::eDeviceLocal,
+                vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress);
     }
 }
 
@@ -87,7 +83,7 @@ void ShadowMapGraphicsPipeline::reloadShaders()
     m_indirectExecutionSet.initialize(m_graphicsPipeline);
 }
 
-void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 cascadeIdx, uint32 numMeshes, RecordParams& params)
+void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
     std::array<DescriptorSetUpdateInfo, 2> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
@@ -101,19 +97,18 @@ void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fram
     commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, descriptorSet, updates);
     vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
     vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
-    vkCommandBuffer.pushConstants(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(uint32), &cascadeIdx);
     vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
 
-    // Render the opaque caster region (transparent shadow casters are deferred).
+    // One multiview execute renders all cascades (gl_ViewIndex selects the layer/matrix).
     vk::GeneratedCommandsInfoEXT generatedCommandsInfo{
         .shaderStages = vk::ShaderStageFlagBits::eVertex,
         .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
         .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
         .indirectAddress = params.indirectCommandBuffer.getDeviceAddress(),
         .indirectAddressSize = numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence),
-        .preprocessAddress = m_preprocessSize > 0 ? m_preprocessBuffers[frameIdx][cascadeIdx].getDeviceAddress() : 0,
+        .preprocessAddress = m_preprocessSize > 0 ? m_preprocessBuffers[frameIdx].getDeviceAddress() : 0,
         .preprocessSize = m_preprocessSize,
         .maxSequenceCount = numMeshes,
         .sequenceCountAddress = 0,

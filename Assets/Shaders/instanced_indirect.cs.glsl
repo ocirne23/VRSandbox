@@ -133,11 +133,7 @@ void main()
     const float radius                = meshInfo.radius * instancePosScale.w;
     const vec3 centerPos              = instancePosScale.xyz + centerOffset;
 
-    // The shadow depth pass renders every caster into each cascade and relies on the cascade's
-    // orthographic projection to clip; only the camera pass culls against its view frustum here.
-#ifndef SHADOW_PASS
     if (frustumCheck(centerPos, radius))
-#endif
     {
         const uint firstInstance      = in_firstInstances[meshIdx];
         const uint16_t pipelineIdx    = uint16_t(instance.pipelineIdxAlphaMode & 0x0000FFFF);
@@ -149,11 +145,7 @@ void main()
 
         if (idx == 0)
         {
-#ifdef SHADOW_PASS
-            out_indirectCommands[cmdIdx].pipelineIndex = 0u; // shadow execution set has a single pipeline
-#else
             out_indirectCommands[cmdIdx].pipelineIndex = pipelineIdx;
-#endif
             out_indirectCommands[cmdIdx].indexCount    = meshInfo.indexCount;
             out_indirectCommands[cmdIdx].firstIndex    = meshInfo.firstIndex;
             out_indirectCommands[cmdIdx].vertexOffset  = meshInfo.vertexOffset;
