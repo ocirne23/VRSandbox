@@ -24,4 +24,21 @@ uint getPositionHash(ivec3 p)
     return n;
 }
 
+vec3 randomColor(uint seed) 
+{
+    seed ^= seed >> 16;
+    seed *= 0x7feb352du;
+    seed ^= seed >> 15;
+    seed *= 0x846ca68bu;
+    seed ^= seed >> 16;
+    vec3 bits = vec3(float(seed & 255u), float((seed >> 8) & 255u), float((seed >> 16) & 255u));
+    return bits / 255.0;
+}
+vec3 randomColor(ivec3 seed) 
+{
+    uvec3 u = uvec3(seed);
+    uint hash = u.x * 1597334673u + u.y * 3812015801u + u.z * 2798796415u;
+	return randomColor(hash);
+}
+
 #endif

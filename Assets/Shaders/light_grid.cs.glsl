@@ -9,10 +9,10 @@
 struct LightInfo
 {
 	vec3 pos;
-	float range;
+	float range;     // negative = tube light 
 	vec3 color;
-	float width;     // 0 = point light, > 0 = rectangular area light
-	vec3 direction;  // area light: up-axis, magnitude = height
+	float width;     // negative = spotlight angle, 0 = point light, > 0 = area/tube light width
+	vec3 direction;  // magnitude = height
 	float rotation;
 };
 layout (binding = 0, std140) uniform UBO
