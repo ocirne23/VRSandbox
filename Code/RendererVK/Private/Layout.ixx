@@ -26,6 +26,10 @@ export namespace RendererVKLayout
     constexpr size_t LIGHT_GRID_BUFFER_SIZE = 10 * 1024 * 1024;
 	constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 1024 * 8; // should be power of 2 for hashing
 
+    // Sun shadow cascaded shadow maps. NUM_SHADOW_CASCADES must match the count in shared.inc.glsl.
+    constexpr uint32 NUM_SHADOW_CASCADES = 4;
+    constexpr uint32 SHADOW_MAP_RESOLUTION = 2048;
+
     struct MeshVertex
     {
         glm::vec3 position;
@@ -43,8 +47,14 @@ export namespace RendererVKLayout
         glm::mat4 mvp;
         Frustum frustum;
         glm::vec3 viewPos;
-    private:
         uint32 _padding;
+        // Sun + cascaded shadow map data (consumed by the fragment shader; the vertex/cull shaders
+        // declare a shorter UBO block and simply ignore these trailing fields).
+        glm::vec4 sunDirection;  // xyz = normalized direction towards the sun, w unused
+        glm::vec4 sunColor;      // rgb = color * intensity
+        glm::mat4 cascadeViewProj[NUM_SHADOW_CASCADES];
+        glm::vec4 cascadeSplits; // per-cascade far distance (world units) from the camera
+        glm::vec4 shadowParams;  // x = depth bias, y = normal bias, z = 1/resolution, w = pcf radius
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

@@ -38,6 +38,9 @@ public:
         Buffer& lightInfosBuffer;
 		Buffer& lightGridsBuffer;
 		Buffer& lightTableBuffer;
+
+		vk::ImageView shadowMapView;  // sun cascaded shadow map (e2DArray depth)
+		vk::Sampler shadowMapSampler; // comparison sampler for PCF
     };
 
     void initialize(RenderPass& renderPass);

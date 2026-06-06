@@ -1,0 +1,57 @@
+export module RendererVK:ShadowMapGraphicsPipeline;
+
+import Core;
+
+import :VK;
+import :Buffer;
+import :Layout;
+import :GraphicsPipeline;
+import :IndirectExecutionSet;
+import :IndirectCommandsLayout;
+import :DescriptorSet;
+import :ShadowMap;
+
+export class CommandBuffer;
+
+// Depth-only pipeline that renders the shadow caster list into one cascade of the sun ShadowMap.
+// Mirrors StaticMeshGraphicsPipeline: it consumes the cull's IndirectDrawSequence buffer through
+// vkCmdExecuteGeneratedCommandsEXT so the draw path matches the main pass. The execution set holds a
+// single (depth-only) pipeline; cascades differ only by the view-projection bound at record time.
+export class ShadowMapGraphicsPipeline final
+{
+public:
+    ShadowMapGraphicsPipeline();
+    ~ShadowMapGraphicsPipeline();
+    ShadowMapGraphicsPipeline(const ShadowMapGraphicsPipeline&) = delete;
+
+    struct RecordParams
+    {
+        DescriptorSet& descriptorSet;
+        Buffer& ubo;                   // 0 - main UBO (holds cascadeViewProj[]; cascade chosen by push constant)
+        Buffer& meshInstanceBuffer;    // 1 - shadow cull's transformed instances
+        Buffer& vertexBuffer;
+        Buffer& indexBuffer;
+        Buffer& instanceIdxBuffer;     // vertex binding 2 - shadow cull's compacted instance indices
+        Buffer& indirectCommandBuffer; // shadow cull's IndirectDrawSequence buffer (opaque region)
+    };
+
+    void initialize(ShadowMap& shadowMap);
+    void reloadShaders();
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 cascadeIdx, uint32 numMeshes, RecordParams& params);
+
+    vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
+
+private:
+
+    void buildPipelineLayout(GraphicsPipelineLayout& layout);
+    void buildIndirectState();
+
+    GraphicsPipeline m_graphicsPipeline;
+    IndirectExecutionSet m_indirectExecutionSet;
+    IndirectCommandsLayout m_indirectCommandsLayout;
+    vk::RenderPass m_renderPass;
+
+    vk::DeviceSize m_preprocessSize = 0;
+    // Separate preprocess scratch per cascade per frame so the sequential cascade executes don't alias.
+    std::array<std::array<Buffer, RendererVKLayout::NUM_SHADOW_CASCADES>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;
+};

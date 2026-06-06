@@ -20,6 +20,9 @@ import :DescriptorSet;
 import :IndirectCullComputePipeline;
 import :StaticMeshGraphicsPipeline;
 import :LightGridComputePipeline;
+import :ShadowMap;
+import :ShadowCullComputePipeline;
+import :ShadowMapGraphicsPipeline;
 import :Light;
 
 export import Core.fwd;
@@ -53,6 +56,8 @@ public:
     void addPointLight(const PointLight& light);
     void addAreaLight(const AreaLight& areaLight);
     void addSpotLight(const SpotLight& spotLight);
+    // Direction points towards the sun (will be normalized). color * intensity is the radiance.
+    void setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity);
     void present();
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
@@ -139,6 +144,15 @@ private:
     LightGridComputePipeline m_lightGridComputePipeline;
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
 
+    // One shadow map per frame-in-flight: it is written early and sampled later in the same frame,
+    // so a single shared image would race across the 2 frames in flight (guarded only by the
+    // per-frame fence). Indexing by frameIdx makes it safe like the other per-frame resources.
+    std::array<ShadowMap, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_shadowMaps;
+    ShadowCullComputePipeline m_shadowCullComputePipeline;
+    ShadowMapGraphicsPipeline m_shadowMapGraphicsPipeline;
+    glm::vec3 m_sunDirection = glm::normalize(glm::vec3(0.5f, 1.0f, 0.5f));
+    glm::vec3 m_sunColor = glm::vec3(5.0f);
+
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform> m_renderNodeTransforms;
     std::vector<uint32> m_numInstancesPerMesh;
@@ -159,6 +173,11 @@ private:
         DescriptorSet staticMeshPipelineDescriptorSet;
         DescriptorSet indirectCullPipelineDescriptorSet;
         DescriptorSet lightGridPipelineDescriptorSet;
+
+        // The shadow caster list is built once per frame; all cascades share one draw descriptor set
+        // (same buffers) and select their view-projection from the main UBO via a push constant.
+        DescriptorSet shadowCullDescriptorSet;
+        DescriptorSet shadowDrawDescriptorSet;
 
         CommandBuffer primaryCommandBuffer;
         CommandBuffer indirectCullCommandBuffer;

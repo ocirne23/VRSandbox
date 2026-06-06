@@ -22,6 +22,16 @@ GraphicsPipeline::~GraphicsPipeline()
 
 bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipelineLayout& layout)
 {
+    return initialize(renderPass.getRenderPass(), layout);
+}
+
+bool GraphicsPipeline::reloadShaders(const RenderPass& renderPass, GraphicsPipelineLayout& layout)
+{
+    return reloadShaders(renderPass.getRenderPass(), layout);
+}
+
+bool GraphicsPipeline::initialize(vk::RenderPass renderPass, GraphicsPipelineLayout& layout)
+{
     vk::Device vkDevice = Globals::device.getDevice();
     vk::DescriptorSetLayoutCreateInfo layoutInfo
     {
@@ -63,7 +73,7 @@ bool GraphicsPipeline::initialize(const RenderPass& renderPass, GraphicsPipeline
     return createPipelines(renderPass, layout, m_pipelines, true);
 }
 
-bool GraphicsPipeline::reloadShaders(const RenderPass& renderPass, GraphicsPipelineLayout& layout)
+bool GraphicsPipeline::reloadShaders(vk::RenderPass renderPass, GraphicsPipelineLayout& layout)
 {
     vk::Device vkDevice = Globals::device.getDevice();
 
@@ -82,7 +92,7 @@ bool GraphicsPipeline::reloadShaders(const RenderPass& renderPass, GraphicsPipel
     return true;
 }
 
-bool GraphicsPipeline::createPipelines(const RenderPass& renderPass, GraphicsPipelineLayout& layout, std::vector<vk::Pipeline>& outPipelines, bool assertOnFailure)
+bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipelineLayout& layout, std::vector<vk::Pipeline>& outPipelines, bool assertOnFailure)
 {
     vk::Device vkDevice = Globals::device.getDevice();
 
@@ -114,12 +124,12 @@ bool GraphicsPipeline::createPipelines(const RenderPass& renderPass, GraphicsPip
         .depthClampEnable = vk::False,
         .rasterizerDiscardEnable = vk::False,
         .polygonMode = vk::PolygonMode::eFill,
-        .cullMode = vk::CullModeFlagBits::eBack,
+        .cullMode = layout.cullMode,
         .frontFace = vk::FrontFace::eCounterClockwise,
-        .depthBiasEnable = vk::False,
-        .depthBiasConstantFactor = 0.0f,
+        .depthBiasEnable = layout.depthBiasEnable ? vk::True : vk::False,
+        .depthBiasConstantFactor = layout.depthBiasConstantFactor,
         .depthBiasClamp = 0.0f,
-        .depthBiasSlopeFactor = 0.0f,
+        .depthBiasSlopeFactor = layout.depthBiasSlopeFactor,
         .lineWidth = 1.0f,
     };
     vk::PipelineMultisampleStateCreateInfo pipelineMultisampleStateCreateInfo
@@ -172,8 +182,8 @@ bool GraphicsPipeline::createPipelines(const RenderPass& renderPass, GraphicsPip
         .flags = {},
         .logicOpEnable = vk::False,
         .logicOp = vk::LogicOp::eCopy,
-        .attachmentCount = 1,
-        .pAttachments = &pipelineColorBlendAttachmentState,
+        .attachmentCount = layout.depthOnly ? 0u : 1u,
+        .pAttachments = layout.depthOnly ? nullptr : &pipelineColorBlendAttachmentState,
         .blendConstants = { { 1.0f, 1.0f, 1.0f, 1.0f } },
     };
     std::array<vk::DynamicState, 2> dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
@@ -193,7 +203,7 @@ bool GraphicsPipeline::createPipelines(const RenderPass& renderPass, GraphicsPip
     {
         .pNext = &pipelineFlags2,
         .flags = {},
-        .stageCount = static_cast<uint32>(pipelineShaderStageCreateInfos.size()),
+        .stageCount = layout.depthOnly ? 1u : static_cast<uint32>(pipelineShaderStageCreateInfos.size()),
         .pStages = pipelineShaderStageCreateInfos.data(),
         .pVertexInputState = &pipelineVertexInputStateCreateInfo,
         .pInputAssemblyState = &pipelineInputAssemblyStateCreateInfo,
@@ -205,14 +215,16 @@ bool GraphicsPipeline::createPipelines(const RenderPass& renderPass, GraphicsPip
         .pColorBlendState = &pipelineColorBlendStateCreateInfo,
         .pDynamicState = &pipelineDynamicStateCreateInfo,
         .layout = m_pipelineLayout,
-        .renderPass = renderPass.getRenderPass(),
+        .renderPass = renderPass,
         .subpass = 0,
         .basePipelineHandle = nullptr,
         .basePipelineIndex = 0,
     };
 
     Shader defaultVS, defaultFS;
-    if (!defaultVS.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShader.text, layout.vertexShader.debugFilePath, layout.vertexShader.defines, assertOnFailure) ||
+    if (!defaultVS.initialize(vk::ShaderStageFlagBits::eVertex, layout.vertexShader.text, layout.vertexShader.debugFilePath, layout.vertexShader.defines, assertOnFailure))
+        return false;
+    if (!layout.depthOnly &&
         !defaultFS.initialize(vk::ShaderStageFlagBits::eFragment, layout.fragmentShader.text, layout.fragmentShader.debugFilePath, layout.fragmentShader.defines, assertOnFailure))
         return false;
 

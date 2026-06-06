@@ -8,6 +8,7 @@
 #define MAX_LARGE_LIGHTS_PER_GRID 6 // Must be even
 #define MAX_LIGHTCELL_LIGHTS 16     // Must be even
 #define GRID_SIZE 32
+#define NUM_SHADOW_CASCADES 4       // Must match RendererVKLayout::NUM_SHADOW_CASCADES
 
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 const uint INITIALIZING_ENTRY = 0xEFFFFFFFu;

@@ -1,0 +1,123 @@
+module RendererVK:ShadowMapGraphicsPipeline;
+
+import Core;
+import File.FileSystem;
+
+import :CommandBuffer;
+import :Device;
+import :Layout;
+
+ShadowMapGraphicsPipeline::ShadowMapGraphicsPipeline() {}
+ShadowMapGraphicsPipeline::~ShadowMapGraphicsPipeline() {}
+
+void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout)
+{
+    layout.vertexShader.debugFilePath = "Shaders/shadow_depth.vs.glsl";
+    layout.vertexShader.text = FileSystem::readFileStr(layout.vertexShader.debugFilePath);
+
+    layout.depthOnly = true;
+    layout.depthBiasEnable = true;
+    layout.depthBiasConstantFactor = 1.25f; // slope-scaled bias fights shadow acne on lit slopes
+    layout.depthBiasSlopeFactor = 2.5f;
+    layout.cullMode = vk::CullModeFlagBits::eBack;
+
+    auto& bindings = layout.vertexLayoutInfo.bindingDescriptions;
+    bindings.push_back(vk::VertexInputBindingDescription{ .binding = 0, .stride = sizeof(RendererVKLayout::MeshVertex), .inputRate = vk::VertexInputRate::eVertex });
+    bindings.push_back(vk::VertexInputBindingDescription{ .binding = 2, .stride = sizeof(uint32), .inputRate = vk::VertexInputRate::eInstance });
+
+    auto& attributes = layout.vertexLayoutInfo.attributeDescriptions;
+    attributes.push_back(vk::VertexInputAttributeDescription{ .location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(RendererVKLayout::MeshVertex, position) });
+    attributes.push_back(vk::VertexInputAttributeDescription{ .location = 4, .binding = 2, .format = vk::Format::eR32Uint, .offset = 0 });
+
+    auto& descriptorSetBindings = layout.descriptorSetLayoutBindings;
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // main UBO (cascade view-projs)
+        .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // shared transformed instances
+        .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
+
+    // Push constant selects which cascade this draw renders, avoiding a per-cascade uniform buffer.
+    layout.pushConstantRanges.push_back(vk::PushConstantRange{
+        .stageFlags = vk::ShaderStageFlagBits::eVertex, .offset = 0, .size = sizeof(uint32) });
+}
+
+void ShadowMapGraphicsPipeline::buildIndirectState()
+{
+    m_indirectExecutionSet.initialize(m_graphicsPipeline);
+    m_indirectCommandsLayout.initialize(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex);
+
+    vk::GeneratedCommandsMemoryRequirementsInfoEXT memReqInfo{
+        .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
+        .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
+        .maxSequenceCount = RendererVKLayout::MAX_UNIQUE_MESHES,
+        .maxDrawCount = RendererVKLayout::MAX_UNIQUE_MESHES,
+    };
+    vk::MemoryRequirements2 memReq;
+    Globals::device.getDevice().getGeneratedCommandsMemoryRequirementsEXT(&memReqInfo, &memReq);
+    m_preprocessSize = memReq.memoryRequirements.size;
+    if (m_preprocessSize > 0)
+    {
+        for (auto& frame : m_preprocessBuffers)
+            for (Buffer& preprocess : frame)
+                preprocess.initialize(m_preprocessSize, {}, vk::MemoryPropertyFlagBits::eDeviceLocal,
+                    vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress);
+    }
+}
+
+void ShadowMapGraphicsPipeline::initialize(ShadowMap& shadowMap)
+{
+    m_renderPass = shadowMap.getRenderPass();
+    GraphicsPipelineLayout layout;
+    buildPipelineLayout(layout);
+    m_graphicsPipeline.initialize(m_renderPass, layout);
+    buildIndirectState();
+}
+
+void ShadowMapGraphicsPipeline::reloadShaders()
+{
+    if (!m_renderPass)
+        return;
+    GraphicsPipelineLayout layout;
+    buildPipelineLayout(layout);
+    if (!m_graphicsPipeline.reloadShaders(m_renderPass, layout))
+    {
+        printf("ShadowMapGraphicsPipeline: shader reload failed, keeping previous pipeline\n");
+        return;
+    }
+    m_indirectExecutionSet.destroy();
+    m_indirectExecutionSet.initialize(m_graphicsPipeline);
+}
+
+void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 cascadeIdx, uint32 numMeshes, RecordParams& params)
+{
+    std::array<DescriptorSetUpdateInfo, 2> updates{
+        DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = params.ubo.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.meshInstanceBuffer.getBuffer(), .range = params.meshInstanceBuffer.getSize() } } },
+    };
+
+    vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
+    vk::DescriptorSet descriptorSet = params.descriptorSet.getDescriptorSet();
+    commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, descriptorSet, updates);
+    vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
+    vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
+    vkCommandBuffer.pushConstants(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(uint32), &cascadeIdx);
+    vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
+    vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, { 0 });
+    vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
+
+    // Render the opaque caster region (transparent shadow casters are deferred).
+    vk::GeneratedCommandsInfoEXT generatedCommandsInfo{
+        .shaderStages = vk::ShaderStageFlagBits::eVertex,
+        .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
+        .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
+        .indirectAddress = params.indirectCommandBuffer.getDeviceAddress(),
+        .indirectAddressSize = numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence),
+        .preprocessAddress = m_preprocessSize > 0 ? m_preprocessBuffers[frameIdx][cascadeIdx].getDeviceAddress() : 0,
+        .preprocessSize = m_preprocessSize,
+        .maxSequenceCount = numMeshes,
+        .sequenceCountAddress = 0,
+        .maxDrawCount = numMeshes,
+    };
+    vkCommandBuffer.executeGeneratedCommandsEXT(vk::False, generatedCommandsInfo);
+}

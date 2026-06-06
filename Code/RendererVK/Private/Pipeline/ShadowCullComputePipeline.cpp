@@ -1,0 +1,118 @@
+module RendererVK:ShadowCullComputePipeline;
+
+import Core;
+import File.FileSystem;
+import :Device;
+import :Layout;
+
+ShadowCullComputePipeline::ShadowCullComputePipeline() {}
+ShadowCullComputePipeline::~ShadowCullComputePipeline() {}
+
+void ShadowCullComputePipeline::initialize()
+{
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        perFrame.outMeshInstancesBuffer.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutMeshInstance), // 6
+            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+        perFrame.outMeshInstanceIndexesBuffer.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(uint32), // 7
+            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+        perFrame.outIndirectCommandBuffer.initialize(2 * RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::IndirectDrawSequence), // 8
+            vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst
+            | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
+    }
+
+    ComputePipelineLayout computePipelineLayout;
+    buildComputeLayout(computePipelineLayout);
+    m_computePipeline.initialize(computePipelineLayout);
+}
+
+void ShadowCullComputePipeline::reloadShaders()
+{
+    ComputePipelineLayout computePipelineLayout;
+    buildComputeLayout(computePipelineLayout);
+    if (!m_computePipeline.reloadShaders(computePipelineLayout))
+        printf("ShadowCullComputePipeline: shader reload failed, keeping previous pipeline\n");
+}
+
+void ShadowCullComputePipeline::buildComputeLayout(ComputePipelineLayout& computePipelineLayout)
+{
+    computePipelineLayout.computeShaderDebugFilePath = "Shaders/instanced_indirect.cs.glsl";
+    computePipelineLayout.computeShaderText = FileSystem::readFileStr(computePipelineLayout.computeShaderDebugFilePath);
+    computePipelineLayout.defines.push_back({ "MAX_UNIQUE_MESHES", std::to_string(RendererVKLayout::MAX_UNIQUE_MESHES) + "u" });
+    computePipelineLayout.defines.push_back({ "SHADOW_PASS", "1" });
+
+    auto& b = computePipelineLayout.descriptorSetLayoutBindings;
+    for (uint32 i = 0; i <= 8; i++)
+    {
+        b.push_back(vk::DescriptorSetLayoutBinding{
+            .binding = i,
+            .descriptorType = (i == 0) ? vk::DescriptorType::eUniformBuffer : vk::DescriptorType::eStorageBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eCompute,
+        });
+    }
+}
+
+void ShadowCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+
+    std::array<DescriptorSetUpdateInfo, 9> updates{
+        DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = params.ubo.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inRenderNodeTransformsBuffer.getBuffer(), .range = params.inRenderNodeTransformsBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inMeshInstancesBuffer.getBuffer(), .range = params.inMeshInstancesBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inMeshInstanceOffsetsBuffer.getBuffer(), .range = params.inMeshInstanceOffsetsBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inMeshInfoBuffer.getBuffer(), .range = params.inMeshInfoBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inFirstInstancesBuffer.getBuffer(), .range = params.inFirstInstancesBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 6, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = frameData.outMeshInstancesBuffer.getBuffer(), .range = frameData.outMeshInstancesBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 7, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = frameData.outMeshInstanceIndexesBuffer.getBuffer(), .range = frameData.outMeshInstanceIndexesBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 8, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = frameData.outIndirectCommandBuffer.getBuffer(), .range = frameData.outIndirectCommandBuffer.getSize() } } },
+    };
+
+    vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
+    vk::DescriptorSet descriptorSet = params.descriptorSet.getDescriptorSet();
+    vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
+    commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, descriptorSet, updates);
+    vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
+
+    const vk::DeviceSize stride = sizeof(RendererVKLayout::IndirectDrawSequence);
+    vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * stride, 0); // opaque region
+    vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), RendererVKLayout::MAX_UNIQUE_MESHES * stride, numMeshes * stride, 0); // transparent region
+    {
+        vk::MemoryBarrier2 memoryBarrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eClear,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+            .dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+        };
+        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
+    }
+
+    vkCommandBuffer.dispatchIndirect(params.dispatchIndirectBuffer.getBuffer(), 0);
+
+    {
+        vk::PipelineStageFlags2 dstStageMask = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader | vk::PipelineStageFlagBits2::eCommandPreprocessEXT;
+        vk::AccessFlags2 dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eCommandPreprocessReadEXT;
+        vk::MemoryBarrier2 memoryBarrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+            .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+            .dstStageMask = dstStageMask,
+            .dstAccessMask = dstAccessMask,
+        };
+        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
+    }
+}

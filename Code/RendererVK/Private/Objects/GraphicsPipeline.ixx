@@ -39,6 +39,15 @@ export struct GraphicsPipelineLayout
     std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
     std::vector<vk::PushConstantRange> pushConstantRanges;
 
+    // Depth-only passes (e.g. shadow maps) bind no fragment shader and write to a render pass with
+    // no color attachments. depthBias is slope-scaled to fight shadow acne, and a configurable cull
+    // mode lets shadow passes cull front faces to reduce peter-panning.
+    bool depthOnly = false;
+    bool depthBiasEnable = false;
+    float depthBiasConstantFactor = 0.0f;
+    float depthBiasSlopeFactor = 0.0f;
+    vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
+
     // Additional pipeline variants for DGC Indirect Execution Set selection. Variant 0 always
     // uses both layout defaults; each extra entry can independently override either shader stage.
     std::vector<PipelineVariant> additionalVariants;
@@ -53,6 +62,9 @@ public:
 
     bool initialize(const RenderPass& renderPass, GraphicsPipelineLayout& layout);
     bool reloadShaders(const RenderPass& renderPass, GraphicsPipelineLayout& layout);
+    // Overloads for passes that own a raw vk::RenderPass (e.g. the depth-only shadow pass).
+    bool initialize(vk::RenderPass renderPass, GraphicsPipelineLayout& layout);
+    bool reloadShaders(vk::RenderPass renderPass, GraphicsPipelineLayout& layout);
 
     vk::Pipeline getPipeline() const { return m_pipelines[0]; }
     vk::Pipeline getPipelineVariant(uint32 variantIdx) const { return m_pipelines[variantIdx]; }
@@ -62,7 +74,7 @@ public:
 
 private:
 
-    bool createPipelines(const RenderPass& renderPass, GraphicsPipelineLayout& layout, std::vector<vk::Pipeline>& outPipelines, bool assertOnFailure);
+    bool createPipelines(vk::RenderPass renderPass, GraphicsPipelineLayout& layout, std::vector<vk::Pipeline>& outPipelines, bool assertOnFailure);
 
     std::vector<vk::Pipeline> m_pipelines;
     vk::PipelineCache m_pipelineCache;

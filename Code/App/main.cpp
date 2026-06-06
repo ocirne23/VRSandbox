@@ -30,6 +30,7 @@ int main()
 
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
+    renderer.setSunLight(glm::vec3(0.5f, 1.0f, 0.2f), glm::vec3(1.0f), 5.0f);
 
     UI& ui = Globals::ui;
     ui.initialize();
@@ -56,8 +57,8 @@ int main()
     ObjectContainer baseShapes;
     ObjectContainer container2;
     ObjectContainer container3;
-    const int spawnCountX = 1;
-    const int spawnCountY = 1;
+    const int spawnCountX = 20;
+    const int spawnCountY = 20;
     /*
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createProceduralLoader();
@@ -101,6 +102,8 @@ int main()
         {
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_L && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+                renderer.setSunLight(-cameraController.getDirection(), glm::vec3(1.0f), 5.0f); // aim the sun along the camera forward
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
                 spawnedLights.resize(0);
@@ -141,7 +144,7 @@ int main()
 				// spawn a plane to visualize the area light geometry; orient it to match the light's emission direction
 				glm::quat orientation = cameraController.getOrientation();
 				orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * orientation;
-				spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Plane"), Transform(cameraController.getPosition(), 0.5f, orientation)));
+				//spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Plane"), Transform(cameraController.getPosition(), 0.5f, orientation)));
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {

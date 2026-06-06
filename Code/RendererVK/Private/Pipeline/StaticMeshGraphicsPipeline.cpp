@@ -144,6 +144,12 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = RendererVKLayout::MAX_TEXTURES,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_shadowMap (sun CSM)
+        .binding = 8,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
 }
 
 void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
@@ -205,7 +211,7 @@ void StaticMeshGraphicsPipeline::reloadShaders()
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
-    std::array<DescriptorSetUpdateInfo, 7> graphicsDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 8> graphicsDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo{
             .binding = 0,
@@ -264,6 +270,18 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
                 vk::DescriptorBufferInfo {
                     .buffer = params.lightTableBuffer.getBuffer(),
                     .range = params.lightTableBuffer.getSize(),
+                }
+            }
+        },
+
+        DescriptorSetUpdateInfo{
+            .binding = 8,
+            .type = vk::DescriptorType::eCombinedImageSampler,
+            .imageInfos = {
+                vk::DescriptorImageInfo {
+                    .sampler = params.shadowMapSampler,
+                    .imageView = params.shadowMapView,
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
                 }
             }
         },

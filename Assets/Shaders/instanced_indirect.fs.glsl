@@ -30,6 +30,11 @@ layout (binding = 0, std140) uniform UBO
     mat4 u_mvp;
     vec4 u_frustumPlanes[6];
     vec3 u_viewPos;
+    vec4 u_sunDirection;  // xyz = normalized direction towards the sun
+    vec4 u_sunColor;      // rgb = color * intensity
+    mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES];
+    vec4 u_cascadeSplits; // per-cascade far distance from the camera
+    vec4 u_shadowParams;  // x = depth bias, y = normal bias, z = 1/resolution, w = pcf radius
 };
 layout (binding = 2, std430) readonly buffer InMaterialInfos
 {
@@ -52,6 +57,7 @@ layout (binding = 6, std430) readonly buffer InGridTable
 };
 
 layout (binding = 7) uniform sampler2D u_textures[];
+layout (binding = 8) uniform sampler2DArrayShadow u_shadowMap;
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
@@ -181,10 +187,51 @@ vec3 doSpotLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, ve
 	vec3 lightRadiance = light.color * falloff * spot;
 	return doLight(lightRadiance, L, V, N, specularCol, matColOverPi, metalness, roughness, roughnessSq);
 }
-vec3 doSunLight(vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, float metalness, float roughness, float roughnessSq)
+// Set to 1 to tint fragments by which cascade they sample (red/green/blue/yellow, near->far).
+#define DEBUG_CASCADE_TINT 0
+
+// Picks the cascade for a world position by its distance from the camera.
+int getSunCascade(vec3 worldPos)
 {
-	vec3 L = normalize(vec3(0.5, 1.0, 0.5));
-	vec3 lightRadiance = vec3(1.0, 1.0, 1.0) * 5.0f;
+	float dist = length(worldPos - u_viewPos);
+	for (int i = 0; i < NUM_SHADOW_CASCADES; ++i)
+		if (dist < u_cascadeSplits[i]) return i;
+	return NUM_SHADOW_CASCADES - 1;
+}
+vec3 cascadeDebugColor(int cascade)
+{
+	if (cascade == 0) return vec3(1.0, 0.0, 0.0);
+	if (cascade == 1) return vec3(0.0, 1.0, 0.0);
+	if (cascade == 2) return vec3(0.0, 0.0, 1.0);
+	return vec3(1.0, 1.0, 0.0);
+}
+// Projects into the selected cascade's light space and returns sun visibility in [0,1] via a 3x3
+// grid of hardware-PCF taps.
+float sampleSunShadow(vec3 worldPos, vec3 N)
+{
+	int cascade = getSunCascade(worldPos);
+
+	vec4 lightPos = u_cascadeViewProj[cascade] * vec4(worldPos + N * u_shadowParams.y, 1.0);
+	vec3 proj = lightPos.xyz / lightPos.w;
+	vec2 uv = proj.xy * 0.5 + 0.5;
+	if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || proj.z > 1.0)
+		return 1.0; // outside this cascade's coverage => treat as lit
+
+	float depth = proj.z - u_shadowParams.x;
+	float texel = u_shadowParams.z * u_shadowParams.w;
+	float sum = 0.0;
+	for (int y = -1; y <= 1; ++y)
+		for (int x = -1; x <= 1; ++x)
+			sum += texture(u_shadowMap, vec4(uv + vec2(x, y) * texel, float(cascade), depth));
+	return sum / 9.0;
+}
+vec3 doSunLight(vec3 worldPos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, float metalness, float roughness, float roughnessSq)
+{
+	vec3 L = normalize(u_sunDirection.xyz);
+	if (max(dot(N, L), 0.0) <= 0.0)
+		return vec3(0.0);
+	float visibility = sampleSunShadow(worldPos, N);
+	vec3 lightRadiance = u_sunColor.rgb * visibility;
 	return doLight(lightRadiance, L, V, N, specularCol, matColOverPi, metalness, roughness, roughnessSq);
 }
 vec3 closestPointOnSegment(vec3 p, vec3 a, vec3 b)
@@ -389,7 +436,11 @@ void main()
 	const float ambient = 0.05f;
 	vec3 color = materialColor * ambient;
 
-	//color += doSunLight(V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
+	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
+
+#if DEBUG_CASCADE_TINT
+	color = mix(color, cascadeDebugColor(getSunCascade(in_pos)), 0.35);
+#endif
 
 	const ivec3 gridPos = getGridPos(in_pos);
     uint tableIdx = getPositionHash(gridPos) & (in_tableSize - 1); // tableSize is a power of two

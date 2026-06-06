@@ -38,6 +38,9 @@ public:
     Buffer& getIndirectCommandBuffer(uint32 idx)   { return m_perFrameData[idx].outIndirectCommandBuffer; }
     Buffer& getInstanceIdxBuffer(uint32 idx)      { return m_perFrameData[idx].outMeshInstanceIndexesBuffer; }
     Buffer& getOutMeshInstancesBuffer(uint32 idx) { return m_perFrameData[idx].outMeshInstancesBuffer; }
+    // Dispatch-size buffer { numInstances, 1, 1 }; reused by the shadow cull which dispatches the
+    // same instance set against each cascade's frustum.
+    Buffer& getDispatchIndirectBuffer(uint32 idx) { return m_perFrameData[idx].inIndirectCommandBuffer; }
     
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_computePipeline.getDescriptorSetLayout(); }
 

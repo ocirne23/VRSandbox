@@ -20,6 +20,84 @@ import :glslang;
 import :Layout;
 import :ObjectContainer;
 
+// Fits one orthographic light-space view-projection per cascade to the camera's view frustum,
+// stabilized to the shadow-map texel grid to avoid shimmering as the camera moves. Frustum corners
+// are derived analytically from the camera parameters so the result is independent of the projection
+// matrix's depth convention. outSplits holds each cascade's far distance from the camera.
+namespace
+{
+    void computeSunCascades(const Camera& camera, float aspect, const glm::vec3& sunDir,
+        glm::mat4(&outViewProj)[RendererVKLayout::NUM_SHADOW_CASCADES], glm::vec4& outSplits)
+    {
+        constexpr uint32 N = RendererVKLayout::NUM_SHADOW_CASCADES;
+        const float shadowNear = camera.near;
+        const float shadowFar = 500.0f; // sun shadows are capped well short of the camera far plane
+        const float res = (float)RendererVKLayout::SHADOW_MAP_RESOLUTION;
+
+        const glm::mat4 invView = glm::inverse(camera.viewMatrix);
+        const glm::vec3 camPos = glm::vec3(invView[3]);
+        const glm::vec3 right = glm::normalize(glm::vec3(invView[0]));
+        const glm::vec3 up = glm::normalize(glm::vec3(invView[1]));
+        const glm::vec3 forward = -glm::normalize(glm::vec3(invView[2])); // right-handed: -Z is forward
+        const float tanHalfV = tanf(glm::radians(camera.fovDeg) * 0.5f);
+
+        float splits[N + 1];
+        splits[0] = shadowNear;
+        for (uint32 i = 1; i <= N; ++i)
+        {
+            const float p = (float)i / (float)N;
+            const float logd = shadowNear * powf(shadowFar / shadowNear, p);
+            const float lind = shadowNear + (shadowFar - shadowNear) * p;
+            splits[i] = glm::mix(lind, logd, 0.7f); // practical split scheme
+        }
+
+        const glm::vec3 L = glm::normalize(sunDir);
+        const glm::vec3 upRef = (fabsf(L.y) > 0.99f) ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+
+        for (uint32 c = 0; c < N; ++c)
+        {
+            const float dists[2] = { splits[c], splits[c + 1] };
+            glm::vec3 corners[8];
+            int idx = 0;
+            for (int di = 0; di < 2; ++di)
+            {
+                const float d = dists[di];
+                const float h = d * tanHalfV;
+                const float w = h * aspect;
+                const glm::vec3 cc = camPos + forward * d;
+                corners[idx++] = cc + up * h + right * w;
+                corners[idx++] = cc + up * h - right * w;
+                corners[idx++] = cc - up * h + right * w;
+                corners[idx++] = cc - up * h - right * w;
+            }
+            glm::vec3 center(0.0f);
+            for (int k = 0; k < 8; ++k) center += corners[k];
+            center /= 8.0f;
+            float radius = 0.0f;
+            for (int k = 0; k < 8; ++k) radius = glm::max(radius, glm::length(corners[k] - center));
+            radius = ceilf(radius * 16.0f) / 16.0f;
+
+            const float zPad = 100.0f; // include casters between the light and the cascade volume
+            // L points towards the sun, so the light sits up-sun of the scene looking back along -L.
+            const glm::vec3 eye = center + L * (radius + zPad);
+            const glm::mat4 lightView = glm::lookAtRH(eye, center, upRef);
+            glm::mat4 lightProj = glm::orthoRH_ZO(-radius, radius, -radius, radius, 0.0f, 2.0f * radius + zPad);
+
+            // Snap the projected origin to whole texels to keep the shadow stable under camera motion.
+            const glm::mat4 vp = lightProj * lightView;
+            glm::vec4 origin = vp * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            origin *= res * 0.5f;
+            const glm::vec2 rounded = glm::round(glm::vec2(origin));
+            const glm::vec2 off = (rounded - glm::vec2(origin)) * (2.0f / res);
+            lightProj[3][0] += off.x;
+            lightProj[3][1] += off.y;
+
+            outViewProj[c] = lightProj * lightView;
+            outSplits[c] = dists[1];
+        }
+    }
+}
+
 Renderer::~Renderer()
 {
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
@@ -70,6 +148,11 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     m_indirectCullComputePipeline.initialize();
     m_lightGridComputePipeline.initialize();
 
+    for (ShadowMap& shadowMap : m_shadowMaps)
+        shadowMap.initialize();
+    m_shadowCullComputePipeline.initialize();
+    m_shadowMapGraphicsPipeline.initialize(m_shadowMaps[0]); // render pass is compatible across all
+
     vk::Device vkDevice = Globals::device.getDevice();
 
     for (PerFrameData& perFrame : m_perFrameData)
@@ -77,6 +160,9 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         perFrame.indirectCullPipelineDescriptorSet.initialize(m_indirectCullComputePipeline.getDescriptorSetLayout());
         perFrame.lightGridPipelineDescriptorSet.initialize(m_lightGridComputePipeline.getDescriptorSetLayout());
         perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout());
+
+        perFrame.shadowCullDescriptorSet.initialize(m_shadowCullComputePipeline.getDescriptorSetLayout());
+        perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout());
 
         perFrame.primaryCommandBuffer.initialize(vk::CommandBufferLevel::ePrimary);
         perFrame.indirectCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -181,6 +267,8 @@ void Renderer::reloadShaders()
     m_staticMeshGraphicsPipeline.reloadShaders();
     m_indirectCullComputePipeline.reloadShaders();
     m_lightGridComputePipeline.reloadShaders();
+    m_shadowCullComputePipeline.reloadShaders();
+    m_shadowMapGraphicsPipeline.reloadShaders();
 
     setHaveToRecordCommandBuffers();
     printf("Reloaded shaders\n");
@@ -206,7 +294,21 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     static RendererVKLayout::Ubo ubo;
     ubo.mvp = projection * viewMatrix;
     ubo.frustum.fromMatrix(ubo.mvp);
-    ubo.viewPos = camera.position; 
+    ubo.viewPos = camera.position;
+
+    // Sun + cascaded shadow maps.
+    const float aspect = (float)viewportSize.x / (float)viewportSize.y;
+    glm::mat4 cascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
+    glm::vec4 cascadeSplits(0.0f);
+    computeSunCascades(camera, aspect, m_sunDirection, cascadeViewProj, cascadeSplits);
+
+    ubo.sunDirection = glm::vec4(m_sunDirection, 0.0f);
+    ubo.sunColor = glm::vec4(m_sunColor, 0.0f);
+    for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
+        ubo.cascadeViewProj[c] = cascadeViewProj[c];
+    ubo.cascadeSplits = cascadeSplits;
+    ubo.shadowParams = glm::vec4(0.0015f, 0.25f, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION, 1.0f);
+
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
     m_lightCounter = 0;
@@ -253,6 +355,12 @@ void Renderer::addLightInfo(const RendererVKLayout::LightInfo& light)
 void Renderer::addPointLight(const PointLight& light)   { addLightInfo(light); }
 void Renderer::addAreaLight(const AreaLight& areaLight) { addLightInfo(areaLight); }
 void Renderer::addSpotLight(const SpotLight& spotLight) { addLightInfo(spotLight); }
+
+void Renderer::setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity)
+{
+    m_sunDirection = glm::normalize(direction);
+    m_sunColor = color * intensity;
+}
 
 void Renderer::present()
 {
@@ -392,6 +500,8 @@ void Renderer::recordCommandBuffers()
                 .lightInfosBuffer = frameData.lightInfosBuffer,
                 .lightGridsBuffer = frameData.lightGridsBuffer,
                 .lightTableBuffer = frameData.lightTableBuffer,
+                .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
+                .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
             };
             m_staticMeshGraphicsPipeline.record(staticMeshCommandBuffer, frameIdx, m_meshInfoCounter, drawParams);
             staticMeshCommandBuffer.end();
@@ -442,6 +552,59 @@ void Renderer::recordCommandBuffers()
         vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
 		vkCommandBuffer.executeCommands(1, &vkLightGridCommandBuffer);
     }
+
+    // Sun shadow cascades: cull casters against each cascade frustum, then render depth-only into
+    // that cascade's shadow-map layer. Recorded directly into the primary so the depth is ready
+    // before the lighting pass samples it. The camera cull above has already populated the shared
+    // transformed-instance buffer that the shadow vertex shader reads.
+    if (frameData.updated && m_meshInfoCounter > 0)
+    {
+        // Build the (cascade-independent) caster list once.
+        ShadowCullComputePipeline::RecordParams cullParams{
+            .descriptorSet = frameData.shadowCullDescriptorSet,
+            .ubo = frameData.ubo,
+            .dispatchIndirectBuffer = m_indirectCullComputePipeline.getDispatchIndirectBuffer(frameIdx),
+            .inRenderNodeTransformsBuffer = frameData.inRenderNodeTransformsBuffer,
+            .inMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
+            .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
+            .inMeshInfoBuffer = m_meshInfosBuffer,
+            .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
+        };
+        m_shadowCullComputePipeline.record(frameData.primaryCommandBuffer, frameIdx, m_meshInfoCounter, cullParams);
+
+        ShadowMap& shadowMap = m_shadowMaps[frameIdx];
+        const float shadowRes = (float)shadowMap.getResolution();
+        const vk::Extent2D shadowExtent{ shadowMap.getResolution(), shadowMap.getResolution() };
+        const vk::Viewport shadowViewport{ .x = 0.0f, .y = 0.0f, .width = shadowRes, .height = shadowRes, .minDepth = 0.0f, .maxDepth = 1.0f };
+        const vk::Rect2D shadowScissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = shadowExtent };
+        vk::ClearValue shadowClear;
+        shadowClear.depthStencil = vk::ClearDepthStencilValue{ .depth = 1.0f, .stencil = 0 };
+        for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
+        {
+            const vk::RenderPassBeginInfo shadowRpBegin{
+                .renderPass = shadowMap.getRenderPass(),
+                .framebuffer = shadowMap.getFramebuffer(c),
+                .renderArea = vk::Rect2D{ .offset = vk::Offset2D{ 0, 0 }, .extent = shadowExtent },
+                .clearValueCount = 1,
+                .pClearValues = &shadowClear,
+            };
+            vkCommandBuffer.beginRenderPass(shadowRpBegin, vk::SubpassContents::eInline);
+            vkCommandBuffer.setViewport(0, { shadowViewport });
+            vkCommandBuffer.setScissor(0, { shadowScissor });
+            ShadowMapGraphicsPipeline::RecordParams shadowDrawParams{
+                .descriptorSet = frameData.shadowDrawDescriptorSet,
+                .ubo = frameData.ubo,
+                .meshInstanceBuffer = m_shadowCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
+                .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+                .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
+                .instanceIdxBuffer = m_shadowCullComputePipeline.getInstanceIdxBuffer(frameIdx),
+                .indirectCommandBuffer = m_shadowCullComputePipeline.getIndirectCommandBuffer(frameIdx),
+            };
+            m_shadowMapGraphicsPipeline.record(frameData.primaryCommandBuffer, frameIdx, c, m_meshInfoCounter, shadowDrawParams);
+            vkCommandBuffer.endRenderPass();
+        }
+    }
+
     vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eSecondaryCommandBuffers);
     if (frameData.updated)
         vkCommandBuffer.executeCommands(1, &vkStaticMeshRenderCommandBuffer);
