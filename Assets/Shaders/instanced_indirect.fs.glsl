@@ -396,7 +396,7 @@ void main()
 	// evalProbeSH returns the cosine-convolved irradiance E(N); Lambertian indirect = albedo/PI * E.
 	// Falls back to a small flat ambient outside the probe volume.
 	const vec3 indirectE = evalProbeSH(in_pos, N, u_giVolumeMin.xyz);
-	vec3 color = (indirectE.x >= 0.0) ? materialColor * (indirectE / PI) : materialColor * 0.10;
+	vec3 color = materialColor * (indirectE / PI);//(indirectE.x >= 0.0) ? materialColor * (indirectE / PI) : materialColor * 0.10;
 
 	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
 	//color = mix(color, cascadeDebugColor(getSunCascade(in_pos)), 0.35);

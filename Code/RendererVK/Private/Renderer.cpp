@@ -236,6 +236,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 	uint16 normalIdx = Globals::textureManager.upload(*ITextureData::createFallbackNormalTexture(), false);
 	assert(normalIdx == RendererVKLayout::FALLBACK_NORMAL_TEX_IDX);
 
+    m_gpuCrashTracker.Initialize(false);
+
     return true;
 }
 
@@ -486,7 +488,6 @@ void Renderer::recordCommandBuffers()
         // a PRIMARY command buffer. It is therefore recorded inline into the primary in the main render pass
         // below (see beginRenderPass(eInline)), not into a secondary replayed via executeCommands().
 
-        frameData.updated = true;
     }
 
     constexpr std::array<vk::ClearValue, 2> clearValues
@@ -528,7 +529,7 @@ void Renderer::recordCommandBuffers()
     // that cascade's shadow-map layer. Recorded directly into the primary so the depth is ready
     // before the lighting pass samples it. The camera cull above has already populated the shared
     // transformed-instance buffer that the shadow vertex shader reads.
-    if (frameData.updated && m_meshInfoCounter > 0)
+    if (!frameData.updated && m_meshInfoCounter > 0)
     {
         // Build the (cascade-independent) caster list once.
         ShadowCullComputePipeline::RecordParams cullParams{
@@ -580,7 +581,7 @@ void Renderer::recordCommandBuffers()
     // Build/refit acceleration structures, allocate camera-region probes, then ray-trace and update the
     // probe SH. Recorded after the shadow pass (the trace samples the sun shadow map) and the light grid
     // (the trace reuses it to shade hits), and before the main pass (which reads the probe SH).
-    if (frameData.updated && m_meshInfoCounter > 0)
+    if (!frameData.updated && m_meshInfoCounter > 0)
     {
         auto fullBarrier = [&](vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess,
                                vk::PipelineStageFlags2 dstStage, vk::AccessFlags2 dstAccess)
@@ -618,10 +619,6 @@ void Renderer::recordCommandBuffers()
 
         // 3. Write the per-instance TLAS records on the GPU.
         const uint32 numInstances = std::min(m_meshInstanceCounter, RendererVKLayout::GI_MAX_TLAS_INSTANCES);
-        if (m_frameCounter <= 2)
-            printf("[GI] frame=%u numInstances=%u meshTypes=%u numBlas=%u camGrid=(%d,%d,%d)\n",
-                m_frameCounter, numInstances, m_meshInfoCounter, m_accelStructure.getNumBlas(),
-                (int)glm::floor(m_cameraPos.x / 32.0f), (int)glm::floor(m_cameraPos.y / 32.0f), (int)glm::floor(m_cameraPos.z / 32.0f));
         GIProbePipeline::TlasInstanceParams tlasParams{
             .renderNodeTransforms = frameData.inRenderNodeTransformsBuffer,
             .meshInstances = frameData.inMeshInstancesBuffer,
@@ -631,12 +628,14 @@ void Renderer::recordCommandBuffers()
         };
         m_giProbePipeline.recordTlasInstances(frameData.primaryCommandBuffer, frameIdx, tlasParams);
         
-        // instance write -> TLAS build read
+        // instance write -> TLAS build read. The build reads the instance buffer as SHADER_READ (AS_READ
+        // covers the source acceleration structures, not the instance data), so the dst access must include it.
         fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
-                    vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eAccelerationStructureReadKHR);
+                    vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+                    vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderRead);
 
-        // 4. Rebuild the TLAS.
-        m_accelStructure.recordBuildTlas(vkCommandBuffer, m_giProbePipeline.getTlasInstanceBuffer(), numInstances);
+        // 4. Rebuild this frame's TLAS (double-buffered).
+        m_accelStructure.recordBuildTlas(vkCommandBuffer, frameIdx, m_giProbePipeline.getTlasInstanceBuffer(frameIdx), numInstances);
         
         // TLAS build -> ray-query read
         fullBarrier(vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
@@ -645,8 +644,7 @@ void Renderer::recordCommandBuffers()
         // 5. Anchor the fixed probe volume on the camera, snapped to the probe spacing and centered.
         const glm::ivec3 camProbe = glm::ivec3(glm::round(m_cameraPos / RendererVKLayout::GI_PROBE_SPACING));
         const glm::ivec3 volumeMin = camProbe - glm::ivec3((int)RendererVKLayout::GI_PROBE_DIM / 2);
-        m_giProbePipeline.setVolumeMin(volumeMin);
-
+        m_giProbePipeline.setVolumeMin(frameIdx, volumeMin);
         // 6. Trace rays per probe and temporally blend irradiance into the SH.
         GIProbePipeline::TraceParams traceParams{
             .ubo = frameData.ubo,
@@ -658,7 +656,7 @@ void Renderer::recordCommandBuffers()
             .meshInfos = m_meshInfosBuffer,
             .meshInstances = frameData.inMeshInstancesBuffer,
             .materialInfos = m_materialInfosBuffer,
-            .tlas = m_accelStructure.getTlas(),
+            .tlas = m_accelStructure.getTlas(frameIdx),
             .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
             .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
             .volumeMin = volumeMin,
@@ -674,7 +672,7 @@ void Renderer::recordCommandBuffers()
     // Inline contents: the static-mesh pass uses DGC (vkCmdExecuteGeneratedCommandsEXT), which must run in
     // the primary command buffer, so the whole main pass is recorded inline (ImGui draws into the primary too).
     vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
-    if (frameData.updated && m_meshInfoCounter > 0)
+    if (!frameData.updated && m_meshInfoCounter > 0)
     {
         const glm::ivec2 viewportSize = m_viewportRect.getSize();
         const vk::Viewport viewport{
@@ -701,7 +699,7 @@ void Renderer::recordCommandBuffers()
             .lightGridsBuffer = frameData.lightGridsBuffer,
             .lightTableBuffer = frameData.lightTableBuffer,
             .probeShBuffer = m_giProbePipeline.getProbeShBuffer(),
-            .giVolumeBuffer = m_giProbePipeline.getGiVolumeBuffer(),
+            .giVolumeBuffer = m_giProbePipeline.getGiVolumeBuffer(frameIdx),
             .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
             .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
             .shadowMapDepthSampler = m_shadowMaps[frameIdx].getDepthSampler(),
@@ -712,6 +710,7 @@ void Renderer::recordCommandBuffers()
     vkCommandBuffer.endRenderPass();
 
     commandBuffer.end();
+    frameData.updated = true;
 }
 
 void Renderer::setHaveToRecordCommandBuffers()

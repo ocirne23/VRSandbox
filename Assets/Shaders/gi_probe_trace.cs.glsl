@@ -137,15 +137,25 @@ vec3 traceRadiance(vec3 origin, vec3 dir)
     const float t         = rayQueryGetIntersectionTEXT(rq, true);
     const mat4x3 o2w      = rayQueryGetIntersectionObjectToWorldEXT(rq, true);
 
+    // Bound every post-hit buffer access. A bad meshIdx/triBase/vertex index would otherwise read wildly
+    // out of bounds and MMU-fault; treat any out-of-range hit as a miss.
+    if (uint(instanceIdx) >= in_instances.length())
+        return skyRadiance(dir);
     const uint meshIdxMat  = in_instances[instanceIdx].meshIdxMaterialIdx;
     const uint meshIdx     = meshIdxMat & 0x0000FFFFu;
     const uint materialIdx = meshIdxMat >> 16;
+    if (meshIdx >= in_meshInfos.length() || materialIdx >= in_materialInfos.length())
+        return skyRadiance(dir);
     const InMeshInfo mi    = in_meshInfos[meshIdx];
 
     const uint triBase = mi.firstIndex + uint(prim) * 3u;
+    if (triBase + 2u >= in_indices.length())
+        return skyRadiance(dir);
     const uint v0 = uint(mi.vertexOffset) + in_indices[triBase + 0u];
     const uint v1 = uint(mi.vertexOffset) + in_indices[triBase + 1u];
     const uint v2 = uint(mi.vertexOffset) + in_indices[triBase + 2u];
+    if ((max(max(v0, v1), v2) * 12u + 11u) >= in_vertices.length())
+        return skyRadiance(dir);
 
     const vec3 b = vec3(1.0 - bc.x - bc.y, bc.x, bc.y);
     const vec3 objN = normalize(b.x * vNormal(v0) + b.y * vNormal(v1) + b.z * vNormal(v2));
@@ -180,22 +190,6 @@ void main()
     const uint x = rem - y * uint(GI_PROBE_DIM);
     const ivec3 local = ivec3(int(x), int(y), int(z));
     const vec3 probeCenter = vec3(pc.volumeMin + local) * GI_PROBE_SPACING;
-
-    if (id == 0u || id == 100u)
-    {
-        // DIAGNOSTIC: trace a few axis rays from this probe and report hit distances.
-        float tHit[3];
-        const vec3 dirs[3] = vec3[3](vec3(0,1,0), vec3(1,0,0), vec3(0,0,-1));
-        for (int k = 0; k < 3; ++k)
-        {
-            rayQueryEXT drq;
-            rayQueryInitializeEXT(drq, u_tlas, gl_RayFlagsOpaqueEXT, 0xFFu, probeCenter, 0.001, dirs[k], 1000.0);
-            while (rayQueryProceedEXT(drq)) {}
-            tHit[k] = (rayQueryGetIntersectionTypeEXT(drq, true) == gl_RayQueryCommittedIntersectionTriangleEXT)
-                ? rayQueryGetIntersectionTEXT(drq, true) : -1.0;
-        }
-        //debugPrintfEXT("[GIDBG] probe %u pos=%v3f  t_up=%f t_x=%f t_-z=%f\n", id, probeCenter, tHit[0], tHit[1], tHit[2]);
-    }
 
     const uint N = max(pc.numRays, 1u);
     const float wsh = 4.0 * PI / float(N);

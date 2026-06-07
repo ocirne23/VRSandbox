@@ -23,16 +23,17 @@ public:
     void recordBuildBlas(vk::CommandBuffer cmd, Buffer& vertexBuffer, Buffer& indexBuffer,
         const RendererVKLayout::MeshInfo* meshInfos, uint32 firstMesh, uint32 count, uint32 totalVertices);
 
-    // Records a TLAS (re)build from numInstances pre-written VkAccelerationStructureInstanceKHR records
-    // in instanceBuffer. The instance buffer is produced by the TLAS-instance compute shader.
-    void recordBuildTlas(vk::CommandBuffer cmd, Buffer& instanceBuffer, uint32 numInstances);
+    // Records a per-frame TLAS (re)build from numInstances pre-written VkAccelerationStructureInstanceKHR
+    // records in instanceBuffer. The TLAS is double-buffered (one per frame-in-flight): it is rebuilt
+    // every frame and ray-queried in the same frame, so a single shared TLAS would be write-after-read
+    // raced by the next frame's rebuild (pipelined across submits on one queue) -> device lost.
+    void recordBuildTlas(vk::CommandBuffer cmd, uint32 frameIdx, Buffer& instanceBuffer, uint32 numInstances);
 
     // mesh idx -> BLAS device address (uint64), consumed by the TLAS-instance compute shader.
     Buffer& getBlasAddressBuffer() { return m_blasAddressBuffer; }
     uint32 getNumBlas() const { return m_numBlas; }
 
-    vk::AccelerationStructureKHR getTlas() const { return m_tlas; }
-    bool hasTlas() const { return (bool)m_tlas; }
+    vk::AccelerationStructureKHR getTlas(uint32 frameIdx) const { return m_tlas[frameIdx]; }
 
 private:
     void ensureScratch(Buffer& scratch, vk::DeviceAddress& outAlignedAddr, vk::DeviceSize needed);
@@ -49,11 +50,12 @@ private:
     std::span<uint64> m_mappedBlasAddresses;
     uint32 m_numBlas = 0;
 
-    vk::AccelerationStructureKHR m_tlas = nullptr;
-    Buffer m_tlasBuffer;
-    Buffer m_tlasScratch;
-    vk::DeviceAddress m_tlasScratchAlignedAddr = 0;
-    uint32 m_tlasCapacity = 0;
+    // Double-buffered TLAS (one per frame-in-flight) to avoid a cross-frame WAR hazard on the structure.
+    std::array<vk::AccelerationStructureKHR, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_tlas{};
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_tlasBuffer;
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_tlasScratch;
+    std::array<vk::DeviceAddress, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_tlasScratchAlignedAddr{};
+    std::array<uint32, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_tlasCapacity{};
 
     uint32 m_scratchAlignment = 256;
 };

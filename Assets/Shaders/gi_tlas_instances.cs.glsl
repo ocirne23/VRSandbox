@@ -73,11 +73,28 @@ void main()
     o.row0 = vec4(scale * col0.x, scale * col1.x, scale * col2.x, pos.x);
     o.row1 = vec4(scale * col0.y, scale * col1.y, scale * col2.y, pos.y);
     o.row2 = vec4(scale * col0.z, scale * col1.z, scale * col2.z, pos.z);
-    o.instanceCustomIndexAndMask = (id & 0x00FFFFFFu) | (0xFFu << 24);     // custom = instance idx, mask = 0xFF
     o.sbtOffsetAndFlags          = (0x01u << 24);                          // flags = TriangleFacingCullDisable
-    const uvec2 addr = in_blasAddresses[meshIdx];
+
+    // Guard the address lookup: meshIdx = (meshIdxMaterialIdx & 0xFFFF) can be up to 65535, but the BLAS
+    // address buffer only has length() entries. An out-of-bounds read returns a foreign 64-bit value that,
+    // used as a BLAS reference, makes ray traversal chase a wild pointer -> MMU fault. Clamp to a null
+    // reference instead.
+    const bool meshInRange = meshIdx < uint(in_blasAddresses.length());
+    const uvec2 addr = meshInRange ? in_blasAddresses[meshIdx] : uvec2(0u);
     o.blasLo = addr.x;
     o.blasHi = addr.y;
+
+    // Mask gates traversal: the ray uses cullMask 0xFF, so mask 0 makes this instance unhittable. Mask off
+    // any instance that cannot be safely traversed:
+    //  - no real BLAS (zeroed/out-of-range address) -> would chase a null/garbage pointer, and
+    //  - a non-finite transform (NaN/Inf from an out-of-range renderNode/instanceOffset index) -> makes the
+    //    driver's TLAS bounds garbage, which also MMU-faults traversal on NVIDIA.
+    const bool hasBlas    = (addr.x != 0u || addr.y != 0u);
+    const bool finiteXform = !any(isnan(o.row0)) && !any(isinf(o.row0))
+                          && !any(isnan(o.row1)) && !any(isinf(o.row1))
+                          && !any(isnan(o.row2)) && !any(isinf(o.row2));
+    const uint mask = (hasBlas && finiteXform) ? 0xFFu : 0x00u;
+    o.instanceCustomIndexAndMask = (id & 0x00FFFFFFu) | (mask << 24);       // custom = instance idx
 
     out_instances[id] = o;
 }

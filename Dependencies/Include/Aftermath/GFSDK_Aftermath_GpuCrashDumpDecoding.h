@@ -1,49 +1,49 @@
 /*
-* Copyright (c) 2019-2024, NVIDIA CORPORATION.  All rights reserved.
-*
-* NVIDIA CORPORATION and its licensors retain all intellectual property
-* and proprietary rights in and to this software, related documentation
-* and any modifications thereto.  Any use, reproduction, disclosure or
-* distribution of this software and related documentation without an express
-* license agreement from NVIDIA CORPORATION is strictly prohibited.
-*/
+ * Copyright (c) 2019-2024, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * NVIDIA CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from NVIDIA CORPORATION is strictly prohibited.
+ */
 
 /*
-*   █████  █████ ██████ ████  ████   ███████   ████  ██████ ██   ██
-*   ██  ██ ██      ██   ██    ██  ██ ██ ██ ██ ██  ██   ██   ██   ██
-*   ██  ██ ██      ██   ██    ██  ██ ██ ██ ██ ██  ██   ██   ██   ██
-*   ██████ ████    ██   ████  █████  ██ ██ ██ ██████   ██   ███████
-*   ██  ██ ██      ██   ██    ██  ██ ██    ██ ██  ██   ██   ██   ██
-*   ██  ██ ██      ██   █████ ██  ██ ██    ██ ██  ██   ██   ██   ██   DEBUGGER
-*                                                           ██   ██
-*  ████████████████████████████████████████████████████████ ██ █ ██ ████████████
-*
-*
-*  HOW TO DECODE AFTERMATH GPU CRASH DUMPS:
-*  ----------------------------------------
-*
-*  1)  Call 'GFSDK_Aftermath_GpuCrashDump_CreateDecoder', to create a decoder object for
-*      a GPU crash dump.
-*
-*
-*  2) Call one or more of the 'GFSDK_Aftermath_GpuCrashDump_Get*' functions with this
-*     decoder, to query information from the GPU crash dump.
-*
-*     Some of the functions require caller allocated buffers to return the data. Those
-*     are accompanied with a corresponding 'GFSDK_Aftermath_GpuCrashDump_Get*Count'
-*     function to query the element count the caller has to reserve for these buffers.
-*
-*     If the requested data is not available in the GPU crash dump, the functions
-*     will return with 'GFSDK_Aftermath_Result_NotAvailable'.
-*
-*
-*  3) Call 'GFSDK_Aftermath_GpuCrashDump_DestroyDecoder', to destroy the decoder object
-*     and cleanup all related memory.
-*
-*/
+ *   █████  █████ ██████ ████  ████   ███████   ████  ██████ ██   ██
+ *   ██  ██ ██      ██   ██    ██  ██ ██ ██ ██ ██  ██   ██   ██   ██
+ *   ██  ██ ██      ██   ██    ██  ██ ██ ██ ██ ██  ██   ██   ██   ██
+ *   ██████ ████    ██   ████  █████  ██ ██ ██ ██████   ██   ███████
+ *   ██  ██ ██      ██   ██    ██  ██ ██    ██ ██  ██   ██   ██   ██
+ *   ██  ██ ██      ██   █████ ██  ██ ██    ██ ██  ██   ██   ██   ██   DEBUGGER
+ *                                                           ██   ██
+ *  ████████████████████████████████████████████████████████ ██ █ ██ ████████████
+ *
+ *
+ *  HOW TO DECODE AFTERMATH GPU CRASH DUMPS:
+ *  ----------------------------------------
+ *
+ *  1)  Call 'GFSDK_Aftermath_GpuCrashDump_CreateDecoder', to create a decoder object for
+ *      a GPU crash dump.
+ *
+ *
+ *  2) Call one or more of the 'GFSDK_Aftermath_GpuCrashDump_Get*' functions with this
+ *     decoder, to query information from the GPU crash dump.
+ *
+ *     Some of the functions require caller allocated buffers to return the data. Those
+ *     are accompanied with a corresponding 'GFSDK_Aftermath_GpuCrashDump_Get*Count'
+ *     function to query the element count the caller has to reserve for these buffers.
+ *
+ *     If the requested data is not available in the GPU crash dump, the functions
+ *     will return with 'GFSDK_Aftermath_Result_NotAvailable'.
+ *
+ *
+ *  3) Call 'GFSDK_Aftermath_GpuCrashDump_DestroyDecoder', to destroy the decoder object
+ *     and cleanup all related memory.
+ *
+ */
 
-#ifndef GFSDK_Aftermath_CrashDumpDecoding_H
-#define GFSDK_Aftermath_CrashDumpDecoding_H
+#ifndef GFSDK_Aftermath_GpuCrashDumpDecoding_H
+#define GFSDK_Aftermath_GpuCrashDumpDecoding_H
 
 #include "GFSDK_Aftermath_Defines.h"
 
@@ -121,8 +121,7 @@ typedef struct GFSDK_Aftermath_SpirvCode
 // Graphics API
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(GraphicsApi)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(GraphicsApi){
     GFSDK_Aftermath_GraphicsApi_Unknown = 0,
     GFSDK_Aftermath_GraphicsApi_D3D_10_0 = 1,
     GFSDK_Aftermath_GraphicsApi_D3D_10_1 = 2,
@@ -130,7 +129,7 @@ GFSDK_AFTERMATH_DECLARE_ENUM(GraphicsApi)
     GFSDK_Aftermath_GraphicsApi_D3D_11_1 = 4,
     GFSDK_Aftermath_GraphicsApi_D3D_11_2 = 5,
     GFSDK_Aftermath_GraphicsApi_D3D_12_0 = 6,
-    GFSDK_Aftermath_GraphicsApi_Vulkan   = 7,
+    GFSDK_Aftermath_GraphicsApi_Vulkan = 7,
 };
 
 ////////////////////////////////////////////////////////////////////////
@@ -201,8 +200,7 @@ typedef struct GFSDK_Aftermath_GpuCrashDump_GpuInfo
 // GPU crash dump - page fault type
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(FaultType)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(FaultType){
     GFSDK_Aftermath_FaultType_Unknown = 0,
     GFSDK_Aftermath_FaultType_AddressTranslationError,
     GFSDK_Aftermath_FaultType_IllegalAccessError,
@@ -215,8 +213,7 @@ GFSDK_AFTERMATH_DECLARE_ENUM(FaultType)
 // GPU crash dump - page fault access type
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(AccessType)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(AccessType){
     GFSDK_Aftermath_AccessType_Unknown = 0,
     GFSDK_Aftermath_AccessType_Read,
     GFSDK_Aftermath_AccessType_Write,
@@ -230,8 +227,7 @@ GFSDK_AFTERMATH_DECLARE_ENUM(AccessType)
 // GPU crash dump - page fault GPU engine
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(Engine)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(Engine){
     GFSDK_Aftermath_Engine_Unknown = 0,
     GFSDK_Aftermath_Engine_Graphics,
     GFSDK_Aftermath_Engine_GraphicsCompute,
@@ -249,8 +245,7 @@ GFSDK_AFTERMATH_DECLARE_ENUM(Engine)
 // GPU crash dump - page fault GPU client
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(Client)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(Client){
     GFSDK_Aftermath_Client_Unknown = 0,
     GFSDK_Aftermath_Client_HostInterface,
     GFSDK_Aftermath_Client_FrontEnd,
@@ -265,6 +260,21 @@ GFSDK_AFTERMATH_DECLARE_ENUM(Client)
     GFSDK_Aftermath_Client_VideoDecoder,
     GFSDK_Aftermath_Client_VideoEncoder,
     GFSDK_Aftermath_Client_Other,
+};
+
+////////////////////////////////////////////////////////////////////////
+// GFSDK_Aftermath_ResourceResidency
+// ---------------------------------
+//
+// GPU crash dump - page fault resource residency
+//
+/////////////////////////////////////////////////////////////////////////
+GFSDK_AFTERMATH_DECLARE_ENUM(ResourceResidency){
+    GFSDK_Aftermath_ResourceResidency_Unknown = 0,
+    GFSDK_Aftermath_ResourceResidency_FullyResident,
+    GFSDK_Aftermath_ResourceResidency_Evicted,       // DX12 only
+    GFSDK_Aftermath_ResourceResidency_MemoryFreed,   // Vulkan only
+    GFSDK_Aftermath_ResourceResidency_MemoryUnbound, // Vulkan only
 };
 
 ////////////////////////////////////////////////////////////////////////
@@ -284,7 +294,8 @@ typedef struct GFSDK_Aftermath_GpuCrashDump_PageFaultInfo
     uint32_t resourceInfoCount;
 } GFSDK_Aftermath_GpuCrashDump_PageFaultInfo;
 
-typedef struct GFSDK_Aftermath_GpuCrashDump_ResourceInfo {
+typedef struct GFSDK_Aftermath_GpuCrashDump_ResourceInfo
+{
     uint64_t gpuVa;
     uint64_t size;
 
@@ -312,6 +323,7 @@ typedef struct GFSDK_Aftermath_GpuCrashDump_ResourceInfo {
     GFSDK_AFTERMATH_DECLARE_BOOLEAN_MEMBER(bPlacedResource);
 
     GFSDK_AFTERMATH_DECLARE_BOOLEAN_MEMBER(bWasDestroyed);
+    GFSDK_Aftermath_ResourceResidency residency;
     uint32_t createDestroyTickCount;
 } GFSDK_Aftermath_GpuCrashDump_ResourceInfo;
 
@@ -322,8 +334,7 @@ typedef struct GFSDK_Aftermath_GpuCrashDump_ResourceInfo {
 // GPU crash dump - shader types
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(ShaderType)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(ShaderType){
     GFSDK_Aftermath_ShaderType_Unknown = 0,
     GFSDK_Aftermath_ShaderType_Vertex,
     GFSDK_Aftermath_ShaderType_Tessellation_Control,
@@ -354,12 +365,12 @@ GFSDK_AFTERMATH_DECLARE_ENUM(ShaderType)
 /////////////////////////////////////////////////////////////////////////
 typedef struct GFSDK_Aftermath_GpuCrashDump_ShaderInfo
 {
-   // NOTE: This shader hash value is not necessarily the same as the GFSDK_Aftermath_ShaderBinaryHash
-   // value for this shader info, which must be calculated with GFSDK_Aftermath_GetShaderHashForShaderInfo.
-   uint64_t shaderHash;
-   uint64_t shaderInstance;
-   GFSDK_AFTERMATH_DECLARE_BOOLEAN_MEMBER(isInternal);
-   GFSDK_Aftermath_ShaderType shaderType;
+    // NOTE: This shader hash value is not necessarily the same as the GFSDK_Aftermath_ShaderBinaryHash
+    // value for this shader info, which must be calculated with GFSDK_Aftermath_GetShaderHashForShaderInfo.
+    uint64_t shaderHash;
+    uint64_t shaderDebugInfoUid;
+    GFSDK_AFTERMATH_DECLARE_BOOLEAN_MEMBER(isInternal);
+    GFSDK_Aftermath_ShaderType shaderType;
 } GFSDK_Aftermath_GpuCrashDump_ShaderInfo;
 
 ////////////////////////////////////////////////////////////////////////
@@ -369,14 +380,12 @@ typedef struct GFSDK_Aftermath_GpuCrashDump_ShaderInfo
 // GPU crash dump - event marker context type
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(Context_Type)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(Context_Type){
     GFSDK_Aftermath_Context_Type_Invalid = 0,
     GFSDK_Aftermath_Context_Type_Immediate,
     GFSDK_Aftermath_Context_Type_CommandList,
     GFSDK_Aftermath_Context_Type_Bundle,
-    GFSDK_Aftermath_Context_Type_CommandQueue
-};
+    GFSDK_Aftermath_Context_Type_CommandQueue};
 
 /////////////////////////////////////////////////////////////////////////
 // GFSDK_Aftermath_EventMarkerDataOwnership
@@ -385,8 +394,7 @@ GFSDK_AFTERMATH_DECLARE_ENUM(Context_Type)
 // GPU crash dump - Event marker data ownership.
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(EventMarkerDataOwnership)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(EventMarkerDataOwnership){
     // Data is owned by the user application.
     GFSDK_Aftermath_EventMarkerDataOwnership_User = 0,
 
@@ -426,8 +434,7 @@ typedef struct GFSDK_Aftermath_GpuCrashDump_EventMarkerInfo
 // 'GFSDK_Aftermath_GpuCrashDump_GenerateJSON'.
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(GpuCrashDumpDecoderFlags)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(GpuCrashDumpDecoderFlags){
     // Include basic information about the GPU crash dump.
     GFSDK_Aftermath_GpuCrashDumpDecoderFlags_BASE_INFO = 0x1,
 
@@ -484,8 +491,7 @@ GFSDK_AFTERMATH_DECLARE_ENUM(GpuCrashDumpDecoderFlags)
 // 'GFSDK_Aftermath_GpuCrashDump_GenerateJSON'.
 //
 /////////////////////////////////////////////////////////////////////////
-GFSDK_AFTERMATH_DECLARE_ENUM(GpuCrashDumpFormatterFlags)
-{
+GFSDK_AFTERMATH_DECLARE_ENUM(GpuCrashDumpFormatterFlags){
     // No special formatting
     GFSDK_Aftermath_GpuCrashDumpFormatterFlags_NONE = 0x0,
 
@@ -505,7 +511,6 @@ GFSDK_AFTERMATH_DECLARE_ENUM(GpuCrashDumpFormatterFlags)
 /////////////////////////////////////////////////////////////////////////
 GFSDK_AFTERMATH_DECLARE_HANDLE(GFSDK_Aftermath_GpuCrashDump_Decoder);
 
-
 /////////////////////////////////////////////////////////////////////////
 // GFSDK_Aftermath_SetData
 // ---------------------------------
@@ -514,7 +519,7 @@ GFSDK_AFTERMATH_DECLARE_HANDLE(GFSDK_Aftermath_GpuCrashDump_Decoder);
 // the GPU crash dump decoder.
 //
 /////////////////////////////////////////////////////////////////////////
-typedef void(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_SetData)(const void* pData, uint32_t size);
+typedef void(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_SetData)(const void* pData, uint32_t size);
 
 /////////////////////////////////////////////////////////////////////////
 // GFSDK_Aftermath_ShaderDebugInfoLookupCb
@@ -524,7 +529,7 @@ typedef void(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_SetData)(const void* pDat
 // the description of 'GFSDK_Aftermath_GpuCrashDump_GenerateJSON' for more details.
 //
 /////////////////////////////////////////////////////////////////////////
-typedef void(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_ShaderDebugInfoLookupCb)(const GFSDK_Aftermath_ShaderDebugInfoIdentifier* pIdentifier, PFN_GFSDK_Aftermath_SetData setShaderDebugInfo, void* pUserData);
+typedef void(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_ShaderDebugInfoLookupCb)(const GFSDK_Aftermath_ShaderDebugInfoIdentifier* pIdentifier, PFN_GFSDK_Aftermath_SetData setShaderDebugInfo, void* pUserData);
 
 /////////////////////////////////////////////////////////////////////////
 // GFSDK_Aftermath_ShaderLookupCb
@@ -535,7 +540,7 @@ typedef void(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_ShaderDebugInfoLookupCb)(
 // details.
 //
 /////////////////////////////////////////////////////////////////////////
-typedef void(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_ShaderLookupCb)(const GFSDK_Aftermath_ShaderBinaryHash* pShaderHash, PFN_GFSDK_Aftermath_SetData setShaderBinary, void* pUserData);
+typedef void(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_ShaderLookupCb)(const GFSDK_Aftermath_ShaderBinaryHash* pShaderHash, PFN_GFSDK_Aftermath_SetData setShaderBinary, void* pUserData);
 
 /////////////////////////////////////////////////////////////////////////
 // GFSDK_Aftermath_ShaderSourceDebugInfoLookupCb
@@ -546,7 +551,7 @@ typedef void(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_ShaderLookupCb)(const GFS
 // for more details.
 //
 /////////////////////////////////////////////////////////////////////////
-typedef void(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_ShaderSourceDebugInfoLookupCb)(const GFSDK_Aftermath_ShaderDebugName* pShaderDebugName, PFN_GFSDK_Aftermath_SetData setShaderBinary, void* pUserData);
+typedef void(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_ShaderSourceDebugInfoLookupCb)(const GFSDK_Aftermath_ShaderDebugName* pShaderDebugName, PFN_GFSDK_Aftermath_SetData setShaderBinary, void* pUserData);
 
 /////////////////////////////////////////////////////////////////////////
 // GFSDK_Aftermath_GpuCrashDump_CreateDecoder
@@ -564,7 +569,9 @@ typedef void(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_ShaderSourceDebugInfoLook
 //      Size of GPU crash dump data in bytes.
 //
 // pDecoder;
-//      Pointer to a decoder object owned by the caller that is initialized.
+//      Pointer to receive the created decoder handle.
+//      On success, the caller owns the handle and must destroy it using
+//      'GFSDK_Aftermath_GpuCrashDump_DestroyDecoder'.
 //
 //// DESCRIPTION;
 //      Create a decoder object that can be used to query information about the
@@ -582,7 +589,8 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_CreateDecoder(
 // ---------------------------------
 //
 // decoder;
-//      A valid GPU crash dump decoder object.
+//      The decoder handle to be destroyed. After this call returns, the handle
+//      becomes invalid and must not be used.
 //
 //// DESCRIPTION;
 //      Free any data related to the passed in GPU crash dump decoder object.
@@ -596,7 +604,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_DestroyDecoder(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // pBaseInfo;
 //      Pointer to data structure owned by the caller that is filled in with
@@ -615,7 +623,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetBaseInfo(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // key;
 //      What value to query from the description section.
@@ -638,7 +646,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetDescriptionSize(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // key;
 //      What value to query from the description section.
@@ -664,7 +672,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetDescription(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // pDeviceInfo;
 //      Pointer to data structure owned by the caller that is filled in with
@@ -683,7 +691,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetDeviceInfo(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 //  pSystemInfo;
 //      Pointer to data structure owned by the caller that is filled in with
@@ -702,7 +710,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetSystemInfo(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // pGpuCount;
 //      Populated with the number of GPU entries from the GPU crash dump.
@@ -720,7 +728,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetGpuInfoCount(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // gpuInfoBufferCount;
 //      Number of elements in caller allocated array passed in 'pGpuInfo'.
@@ -743,7 +751,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetGpuInfo(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // pPageFaultInfo;
 //      Pointer to data structure owned by the caller that is filled in with
@@ -762,7 +770,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetPageFaultInfo(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // resourceInfoCount;
 //      Number of elements in caller allocated array passed in 'pResourceInfo'.
@@ -786,7 +794,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetPageFaultResourceInfo(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // pShaderCount;
 //      Populated with the number of active shaders from the GPU crash dump.
@@ -804,7 +812,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetActiveShadersInfoCount(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // shaderInfoBufferCount;
 //      Number of elements in caller allocated array passed in 'pShaderInfo'.
@@ -827,7 +835,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetActiveShadersInfo(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // pMarkerCount;
 //      Populated with the number of event markers from the GPU crash dump.
@@ -846,7 +854,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetEventMarkersInfoCount(
 // ---------------------------------
 //
 // decoder;
-//      A valid decoder object.
+//      A valid decoder handle.
 //
 // markerInfoBufferCount;
 //      Number of elements in caller allocated array passed in 'pMarkerInfo'.
@@ -1021,7 +1029,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GpuCrashDump_GetEventMarkersInfo(
 //              spirv-remap --map all --strip-all --input full/shader.spv --output ./stripped/
 //
 //         Then pass the content of ./full/shader.spv and ./stripped/shader.spv to
-//         'GFSDK_Aftermath_GetDebugNameSpirv' to generate the debug name to use with
+//         'GFSDK_Aftermath_GetShaderDebugNameSpirv' to generate the debug name to use with
 //         'shaderSourceDebugInfoLookupCb'.
 //
 // pUserData;
@@ -1115,7 +1123,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GetShaderDebugInfoIdentifier(
 //      the computed shader hash.
 //
 //// DESCRIPTION;
-//      Computes a shader hash uniquely identifying the provided DXBC shader binary.
+//      Computes a shader hash uniquely identifying the provided DXBC/DXIL shader binary.
 //      This is, for example, required for comparison in the shader binary lookup by
 //      'GFSDK_Aftermath_ShaderLookupCb' or for matching a
 //      'GFSDK_Aftermath_GpuCrashDump_ShaderInfo' with a shader binary using
@@ -1155,7 +1163,7 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GetShaderHash(
 #if defined(VULKAN_H_)
 GFSDK_Aftermath_API GFSDK_Aftermath_GetShaderHashSpirv(
     GFSDK_Aftermath_Version apiVersion,
-    const GFSDK_Aftermath_SpirvCode *pShader,
+    const GFSDK_Aftermath_SpirvCode* pShader,
     GFSDK_Aftermath_ShaderBinaryHash* pShaderHash);
 #endif
 
@@ -1175,10 +1183,10 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GetShaderHashSpirv(
 //      the generated DebugName.
 //
 //// DESCRIPTION;
-//      Extracts the shader's DebugName (if available) from the provided DXBC shader
-//      binary. This is, for example, required for comparison in the shader debug
-//      data lookup by 'GFSDK_Aftermath_ShaderSourceDebugInfoLookupCb'. For more
-//      information about shader debug names please read:
+//      Extracts the shader's DebugName (if available) from the provided DXBC/DXIL
+//      shader binary. This is, for example, required for comparison in the shader
+//      debug data lookup by 'GFSDK_Aftermath_ShaderSourceDebugInfoLookupCb'.
+//      For more information about shader debug names please read:
 //      https://github.com/microsoft/DirectXShaderCompiler/blob/master/docs/SourceLevelDebuggingHLSL.rst#using-debug-names.
 //
 /////////////////////////////////////////////////////////////////////////
@@ -1220,8 +1228,8 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GetShaderDebugName(
 #if defined(VULKAN_H_)
 GFSDK_Aftermath_API GFSDK_Aftermath_GetShaderDebugNameSpirv(
     GFSDK_Aftermath_Version apiVersion,
-    const GFSDK_Aftermath_SpirvCode *pShader,
-    const GFSDK_Aftermath_SpirvCode *pStrippedShader,
+    const GFSDK_Aftermath_SpirvCode* pShader,
+    const GFSDK_Aftermath_SpirvCode* pStrippedShader,
     GFSDK_Aftermath_ShaderDebugName* pShaderDebugName);
 #endif
 
@@ -1258,32 +1266,32 @@ GFSDK_Aftermath_API GFSDK_Aftermath_GetShaderHashForShaderInfo(
 //
 /////////////////////////////////////////////////////////////////////////
 
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_CreateDecoder)(GFSDK_Aftermath_Version apiVersion, const void* pGpuCrashDump, const uint32_t gpuCrashDumpSize, GFSDK_Aftermath_GpuCrashDump_Decoder* pDecoder);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_DestroyDecoder)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetBaseInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, GFSDK_Aftermath_GpuCrashDump_BaseInfo* pBaseInfo);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetDescriptionSize)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t key, uint32_t* pValueSize);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetDescription)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t key, const uint32_t valueBufferSize, char* pValue);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetDeviceInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, GFSDK_Aftermath_GpuCrashDump_DeviceInfo* pDeviceInfo);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetSystemInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, GFSDK_Aftermath_GpuCrashDump_SystemInfo* pSystemInfo);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetGpuInfoCount)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, uint32_t* pGpuCount);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetGpuInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t gpuInfoBufferCount, GFSDK_Aftermath_GpuCrashDump_GpuInfo* pGpuInfo);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetPageFaultInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, GFSDK_Aftermath_GpuCrashDump_PageFaultInfo* pPageFaultInfo);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetPageFaultResourceInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t resourceInfoCount, GFSDK_Aftermath_GpuCrashDump_ResourceInfo* pResourceInfo);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetActiveShadersInfoCount)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, uint32_t* pShaderCount);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetActiveShadersInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t shaderInfoBufferCount, GFSDK_Aftermath_GpuCrashDump_ShaderInfo* pShaderInfo);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetEventMarkersInfoCount)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t markerInfoBufferCount);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetEventMarkersInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t markerInfoBufferCount, GFSDK_Aftermath_GpuCrashDump_EventMarkerInfo* pMarkerInfo);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GenerateJSON)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, uint32_t decoderFlags, uint32_t formatFlags, PFN_GFSDK_Aftermath_ShaderDebugInfoLookupCb shaderDebugInfoLookupCb, PFN_GFSDK_Aftermath_ShaderLookupCb shaderLookupCb, PFN_GFSDK_Aftermath_ShaderSourceDebugInfoLookupCb shaderSourceDebugInfoLookupCb, void* pUserData, uint32_t* pJsonSize);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GpuCrashDump_GetJSON)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t jsonBufferSize, char* pJson);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GetShaderDebugInfoIdentifier)(GFSDK_Aftermath_Version apiVersion, const void* pShaderDebugInfo, const uint32_t shaderDebugInfoSize, GFSDK_Aftermath_ShaderDebugInfoIdentifier* pIdentifier);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GetShaderHashForShaderInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const GFSDK_Aftermath_GpuCrashDump_ShaderInfo* pShaderInfo, GFSDK_Aftermath_ShaderBinaryHash* pShaderHash);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_CreateDecoder)(GFSDK_Aftermath_Version apiVersion, const void* pGpuCrashDump, const uint32_t gpuCrashDumpSize, GFSDK_Aftermath_GpuCrashDump_Decoder* pDecoder);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_DestroyDecoder)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetBaseInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, GFSDK_Aftermath_GpuCrashDump_BaseInfo* pBaseInfo);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetDescriptionSize)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t key, uint32_t* pValueSize);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetDescription)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t key, const uint32_t valueBufferSize, char* pValue);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetDeviceInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, GFSDK_Aftermath_GpuCrashDump_DeviceInfo* pDeviceInfo);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetSystemInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, GFSDK_Aftermath_GpuCrashDump_SystemInfo* pSystemInfo);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetGpuInfoCount)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, uint32_t* pGpuCount);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetGpuInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t gpuInfoBufferCount, GFSDK_Aftermath_GpuCrashDump_GpuInfo* pGpuInfo);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetPageFaultInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, GFSDK_Aftermath_GpuCrashDump_PageFaultInfo* pPageFaultInfo);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetPageFaultResourceInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t resourceInfoCount, GFSDK_Aftermath_GpuCrashDump_ResourceInfo* pResourceInfo);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetActiveShadersInfoCount)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, uint32_t* pShaderCount);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetActiveShadersInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t shaderInfoBufferCount, GFSDK_Aftermath_GpuCrashDump_ShaderInfo* pShaderInfo);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetEventMarkersInfoCount)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t markerInfoBufferCount);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetEventMarkersInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t markerInfoBufferCount, GFSDK_Aftermath_GpuCrashDump_EventMarkerInfo* pMarkerInfo);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GenerateJSON)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, uint32_t decoderFlags, uint32_t formatFlags, PFN_GFSDK_Aftermath_ShaderDebugInfoLookupCb shaderDebugInfoLookupCb, PFN_GFSDK_Aftermath_ShaderLookupCb shaderLookupCb, PFN_GFSDK_Aftermath_ShaderSourceDebugInfoLookupCb shaderSourceDebugInfoLookupCb, void* pUserData, uint32_t* pJsonSize);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GpuCrashDump_GetJSON)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const uint32_t jsonBufferSize, char* pJson);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GetShaderDebugInfoIdentifier)(GFSDK_Aftermath_Version apiVersion, const void* pShaderDebugInfo, const uint32_t shaderDebugInfoSize, GFSDK_Aftermath_ShaderDebugInfoIdentifier* pIdentifier);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GetShaderHashForShaderInfo)(const GFSDK_Aftermath_GpuCrashDump_Decoder decoder, const GFSDK_Aftermath_GpuCrashDump_ShaderInfo* pShaderInfo, GFSDK_Aftermath_ShaderBinaryHash* pShaderHash);
 #if defined(__d3d12_h__)
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GetShaderHash)(GFSDK_Aftermath_Version apiVersion, const D3D12_SHADER_BYTECODE* pShader, GFSDK_Aftermath_ShaderBinaryHash* pShaderHash);
-GFSDK_Aftermath_PFN(*GPFN_GFSDK_Aftermath_GetShaderDebugName)(GFSDK_Aftermath_Version apiVersion, const D3D12_SHADER_BYTECODE* pShader, GFSDK_Aftermath_ShaderDebugName* pShaderDebugName);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GetShaderHash)(GFSDK_Aftermath_Version apiVersion, const D3D12_SHADER_BYTECODE* pShader, GFSDK_Aftermath_ShaderBinaryHash* pShaderHash);
+GFSDK_Aftermath_PFN (*GPFN_GFSDK_Aftermath_GetShaderDebugName)(GFSDK_Aftermath_Version apiVersion, const D3D12_SHADER_BYTECODE* pShader, GFSDK_Aftermath_ShaderDebugName* pShaderDebugName);
 #endif
 #if defined(VULKAN_H_)
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GetShaderHashSpirv)(GFSDK_Aftermath_Version apiVersion, const GFSDK_Aftermath_SpirvCode* pShader, GFSDK_Aftermath_ShaderBinaryHash* pShaderHash);
-GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GetShaderDebugNameSpirv)(GFSDK_Aftermath_Version apiVersion, const GFSDK_Aftermath_SpirvCode *pShader, const GFSDK_Aftermath_SpirvCode *pStrippedShader, GFSDK_Aftermath_ShaderDebugName* pShaderDebugName);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GetShaderHashSpirv)(GFSDK_Aftermath_Version apiVersion, const GFSDK_Aftermath_SpirvCode* pShader, GFSDK_Aftermath_ShaderBinaryHash* pShaderHash);
+GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL* PFN_GFSDK_Aftermath_GetShaderDebugNameSpirv)(GFSDK_Aftermath_Version apiVersion, const GFSDK_Aftermath_SpirvCode* pShader, const GFSDK_Aftermath_SpirvCode* pStrippedShader, GFSDK_Aftermath_ShaderDebugName* pShaderDebugName);
 #endif
 
 #ifdef __cplusplus
@@ -1292,5 +1300,4 @@ GFSDK_Aftermath_PFN(GFSDK_AFTERMATH_CALL *PFN_GFSDK_Aftermath_GetShaderDebugName
 
 #pragma pack(pop)
 
-#endif // GFSDK_Aftermath_CrashDumpDecoding_H
-
+#endif // GFSDK_Aftermath_GpuCrashDumpDecoding_H

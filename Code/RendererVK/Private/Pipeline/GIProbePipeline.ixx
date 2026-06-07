@@ -29,8 +29,8 @@ public:
     bool needsClear() const { return !m_cleared; }
     void markCleared() { m_cleared = true; }
 
-    // Writes the current volume min corner (probe-coordinate units) into the host-visible volume buffer.
-    void setVolumeMin(glm::ivec3 volumeMin);
+    // Writes the current volume min corner (probe-coordinate units) into this frame's volume buffer.
+    void setVolumeMin(uint32 frameIdx, glm::ivec3 volumeMin);
 
     struct TlasInstanceParams
     {
@@ -61,9 +61,9 @@ public:
     };
     void recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx, TraceParams& params);
 
-    Buffer& getTlasInstanceBuffer() { return m_tlasInstanceBuffer; }
+    Buffer& getTlasInstanceBuffer(uint32 frameIdx) { return m_tlasInstanceBuffer[frameIdx]; }
     Buffer& getProbeShBuffer()      { return m_probeSh; }
-    Buffer& getGiVolumeBuffer()     { return m_giVolumeBuffer; }
+    Buffer& getGiVolumeBuffer(uint32 frameIdx) { return m_giVolumeBuffer[frameIdx]; }
 
 private:
     void buildTlasInstanceLayout(ComputePipelineLayout& layout);
@@ -73,9 +73,13 @@ private:
     ComputePipeline m_tracePipeline;
 
     Buffer m_probeSh;            // persistent SH-L1 volume (GI_PROBE_COUNT * GI_SH_STRIDE floats)
-    Buffer m_giVolumeBuffer;     // host-visible ivec4 volume min corner
-    std::span<int32> m_mappedVolume;
-    Buffer m_tlasInstanceBuffer;
+    // Per-frame volume min corner (host-visible ivec4): written by the CPU each frame and read by that
+    // frame's fragment pass; double-buffered so the CPU write can't race the previous frame's GPU read.
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_giVolumeBuffer;
+    std::array<std::span<int32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_mappedVolume;
+    // Per-frame instance buffer: written each frame by the TLAS-instance compute and consumed by that
+    // frame's TLAS build; double-buffered for the same cross-frame-hazard reason as the TLAS itself.
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_tlasInstanceBuffer;
 
     Sampler m_textureSampler;
 

@@ -33,16 +33,20 @@ void GIProbePipeline::initialize()
 
     m_probeSh.initialize(RendererVKLayout::GI_PROBE_SH_BUFFER_SIZE,
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
-    m_giVolumeBuffer.initialize(RendererVKLayout::GI_VOLUME_BUFFER_SIZE,
-        vk::BufferUsageFlagBits::eStorageBuffer,
-        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
-    m_mappedVolume = m_giVolumeBuffer.mapMemory<int32>();
-    m_mappedVolume[0] = 0; m_mappedVolume[1] = 0; m_mappedVolume[2] = 0; m_mappedVolume[3] = 0;
-    m_giVolumeBuffer.flushMappedMemory(vk::WholeSize);
+    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    {
+        m_giVolumeBuffer[i].initialize(RendererVKLayout::GI_VOLUME_BUFFER_SIZE,
+            vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+        m_mappedVolume[i] = m_giVolumeBuffer[i].mapMemory<int32>();
+        m_mappedVolume[i][0] = 0; m_mappedVolume[i][1] = 0; m_mappedVolume[i][2] = 0; m_mappedVolume[i][3] = 0;
+        m_giVolumeBuffer[i].flushMappedMemory(m_giVolumeBuffer[i].getSize());
+    }
 
-    m_tlasInstanceBuffer.initialize((vk::DeviceSize)RendererVKLayout::GI_MAX_TLAS_INSTANCES * RendererVKLayout::GI_TLAS_INSTANCE_SIZE,
-        vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eStorageBuffer,
-        vk::MemoryPropertyFlagBits::eDeviceLocal);
+    for (Buffer& instBuf : m_tlasInstanceBuffer)
+        instBuf.initialize((vk::DeviceSize)RendererVKLayout::GI_MAX_TLAS_INSTANCES * RendererVKLayout::GI_TLAS_INSTANCE_SIZE,
+            vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     ComputePipelineLayout tlasLayout; buildTlasInstanceLayout(tlasLayout); m_tlasInstancePipeline.initialize(tlasLayout);
     ComputePipelineLayout traceLayout; buildTraceLayout(traceLayout); m_tracePipeline.initialize(traceLayout);
@@ -64,13 +68,13 @@ void GIProbePipeline::reloadShaders()
         printf("GIProbePipeline: shader reload failed, keeping previous pipeline(s)\n");
 }
 
-void GIProbePipeline::setVolumeMin(glm::ivec3 volumeMin)
+void GIProbePipeline::setVolumeMin(uint32 frameIdx, glm::ivec3 volumeMin)
 {
-    m_mappedVolume[0] = volumeMin.x;
-    m_mappedVolume[1] = volumeMin.y;
-    m_mappedVolume[2] = volumeMin.z;
-    m_mappedVolume[3] = (int32)RendererVKLayout::GI_PROBE_DIM;
-    m_giVolumeBuffer.flushMappedMemory(vk::WholeSize);
+    m_mappedVolume[frameIdx][0] = volumeMin.x;
+    m_mappedVolume[frameIdx][1] = volumeMin.y;
+    m_mappedVolume[frameIdx][2] = volumeMin.z;
+    m_mappedVolume[frameIdx][3] = (int32)RendererVKLayout::GI_PROBE_DIM;
+    m_giVolumeBuffer[frameIdx].flushMappedMemory(m_giVolumeBuffer[frameIdx].getSize()); // NOT WholeSize (overflows to 0)
 }
 
 void GIProbePipeline::buildTlasInstanceLayout(ComputePipelineLayout& layout)
@@ -121,6 +125,7 @@ void GIProbePipeline::recordTlasInstances(CommandBuffer& commandBuffer, uint32 f
 {
     if (params.numInstances == 0)
         return;
+
     DescriptorSet& set = m_tlasInstanceSets[frameIdx];
     vk::DescriptorSet vkSet = set.getDescriptorSet();
 
@@ -130,7 +135,7 @@ void GIProbePipeline::recordTlasInstances(CommandBuffer& commandBuffer, uint32 f
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.meshInstances) } },
         DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.instanceOffsets) } },
         DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.blasAddresses) } },
-        DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_tlasInstanceBuffer) } },
+        DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_tlasInstanceBuffer[frameIdx]) } },
     };
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
     commandBuffer.cmdUpdateDescriptorSets(m_tlasInstancePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, vkSet, updates);

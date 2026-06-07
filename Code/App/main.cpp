@@ -32,7 +32,7 @@ int main()
 
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::ENABLED);
-    glm::vec3 sunDir = normalize(glm::vec3(-0.5f, 1.0f, 0.1f));
+    glm::vec3 sunDir = normalize(glm::vec3(-0.5f, -1.0f, 0.1f));
     float sunSize = 250.0f;
 	float sunDistance = 5000.0f;
     renderer.setSunLight(sunDir, glm::vec3(1.0f), 5.0f);
@@ -66,15 +66,17 @@ int main()
     const int spawnCountY = 1;
     RenderNode sunLightNode;
     {
+        /*
         std::unique_ptr<ISceneData> sceneData = ISceneData::createProceduralLoader();
         sceneData->initialize("terrain", true, true);
         container2.initialize(*sceneData);
         spawnedNodes.push_back(container2.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(0.0f, -5.0f, 0.0f), 100.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+        */
     }
     
     {
         std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
-        sceneData->initialize("Models/sponza.glb", true, true);
+        sceneData->initialize("Models/sponza.glb", true, false);
         container.initialize(*sceneData);
         
         for (int x = 0; x < spawnCountX; ++x)
@@ -91,16 +93,16 @@ int main()
                 spawnedNodes.push_back(container3.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 2.0f, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }*/
     {
-        std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
-        sceneData->initialize("Models/baseshapes.glb", false, false);
-        ObjectContainer::MaterialOverrides overrides;
-        overrides.diffuseTexIdx = RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX;
-        overrides.normalTexIdx = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
-        overrides.metalRoughnessTexIdx = UINT16_MAX;
-        overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
-        baseShapes.initialize(*sceneData, &overrides);
-        // spawn a big sun sphere to visualize the sun light
-        sunLightNode = baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(sunDir * sunDistance, sunSize, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0))));
+       std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
+       sceneData->initialize("Models/baseshapes.glb", false, false);
+       ObjectContainer::MaterialOverrides overrides;
+       overrides.diffuseTexIdx = RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX;
+       overrides.normalTexIdx = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
+       overrides.metalRoughnessTexIdx = UINT16_MAX;
+       overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
+       baseShapes.initialize(*sceneData, &overrides);
+        //spawn a big sun sphere to visualize the sun light
+       sunLightNode = baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(sunDir * sunDistance, sunSize, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0))));
     }
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
@@ -243,7 +245,7 @@ int main()
                 renderer.renderNode(node);
             }
         }
-        renderer.renderNode(sunLightNode);
+        //renderer.renderNode(sunLightNode);
 
         ui.render();
         renderer.present();

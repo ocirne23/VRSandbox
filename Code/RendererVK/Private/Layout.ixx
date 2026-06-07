@@ -16,7 +16,7 @@ export namespace RendererVKLayout
     constexpr uint32 MAX_UNIQUE_MESHES = 1024; // match instanced_indirect.cs.glsl
     constexpr uint32 MAX_UNIQUE_MATERIALS = 1024;
     constexpr uint32 MAX_INSTANCE_OFFSETS = 1024;
-    constexpr uint32 MAX_INSTANCE_DATA = 1024 * 2024;
+    constexpr uint32 MAX_INSTANCE_DATA = 1024 * 2028;
     constexpr uint32 MAX_TEXTURES = 1024;
 
     static_assert(MAX_UNIQUE_MESHES < USHRT_MAX);
@@ -32,7 +32,7 @@ export namespace RendererVKLayout
 
     // Diffuse GI irradiance probes. A fixed DIM^3 camera-anchored probe volume (no hash grid). These
     // MUST match Assets/Shaders/gi_probe.inc.glsl.
-    constexpr uint32 GI_PROBE_DIM = 8;                                                   // probes per axis
+    constexpr uint32 GI_PROBE_DIM = 32;                                                  // probes per axis
     constexpr float  GI_PROBE_SPACING = 4.0f;                                            // world units between probes (volume = DIM*spacing)
     constexpr uint32 GI_SH_STRIDE = 12;                                                  // SH-L1 RGB floats per probe
     constexpr uint32 GI_PROBE_COUNT = GI_PROBE_DIM * GI_PROBE_DIM * GI_PROBE_DIM;
@@ -44,7 +44,7 @@ export namespace RendererVKLayout
     constexpr size_t GI_TLAS_INSTANCE_SIZE = 64;                                         // sizeof(VkAccelerationStructureInstanceKHR)
 
     // Trace tuning (passed via push constants). Rays are amortized over frames via the temporal blend.
-    constexpr uint32 GI_RAYS_PER_PROBE = 1;
+    constexpr uint32 GI_RAYS_PER_PROBE = 4;
     constexpr float  GI_TEMPORAL_ALPHA = 0.04f;
     constexpr float  GI_MAX_RAY_DIST   = 64.0f;
     constexpr float  GI_SKY_INTENSITY  = 1.0f;

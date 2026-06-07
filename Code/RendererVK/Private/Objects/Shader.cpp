@@ -137,13 +137,73 @@ static std::string buildPreamble(const std::vector<ShaderDefine>& defines)
 
 bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& source, std::vector<unsigned int>& spirv, const std::string& debugFilePath, const std::vector<ShaderDefine>& defines)
 {
-    EShLanguage stage = translateShaderStage(type);
-    glslang::TShader shader(stage);
+    std::string debugOutputFolder = "Local/";
+	// make folder if it doesn't exist
+	if (!std::filesystem::exists(debugOutputFolder))
+		std::filesystem::create_directories(debugOutputFolder);
+    std::string spvBinPath = debugOutputFolder + debugFilePath + ".spv";
+	std::string preprocessFilePath = debugOutputFolder + debugFilePath;
+    std::string preprocessFileFolder = std::filesystem::path(preprocessFilePath).parent_path().string();
+    if (!std::filesystem::exists(preprocessFileFolder))
+        std::filesystem::create_directories(preprocessFileFolder);
 
-    const char* shaderStrings[1] = { source.data() };
+    // Enable SPIR-V and Vulkan rules when parsing GLSL
+    EShMessages messages = (EShMessages)(EShMsgSpvRules | EShMsgVulkanRules);
+    EShLanguage stage = translateShaderStage(type);
+    std::string preprocessed;
+    {
+        glslang::TShader preprocessShader(stage);
+        const char* shaderStrings[1] = { source.data() };
+        preprocessShader.setStrings(shaderStrings, 1);
+        preprocessShader.addSourceText(source.c_str(), source.length());
+        preprocessShader.setSourceFile(debugFilePath.c_str());
+        preprocessShader.setDebugInfo(false);
+
+        // Target Vulkan 1.3 / SPIR-V 1.6 so modern extensions compile (notably GL_EXT_ray_query, which
+        // needs the RayQueryKHR capability and SPIR-V 1.4+). Without this glslang defaults to SPIR-V 1.0.
+        preprocessShader.setEnvInput(glslang::EShSourceGlsl, stage, glslang::EShClientVulkan, 100);
+        preprocessShader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
+        preprocessShader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
+
+        const std::string preamble = buildPreamble(defines);
+        if (!preamble.empty())
+            preprocessShader.setPreamble(preamble.c_str());
+
+        // Enable SPIR-V and Vulkan rules when parsing GLSL
+        ShaderIncluder includer(debugFilePath);
+        if (!preprocessShader.preprocess(GetDefaultResources(), 100, ENoProfile, false, false, messages, &preprocessed, includer))
+        {
+			puts(preprocessShader.getInfoLog());
+			puts(preprocessShader.getInfoDebugLog());
+			std::cout.flush();
+			return false;  // something didn't work
+        }
+    }
+
+    // swap the line with #version with the top line in preprocessed
+    size_t versionPos = preprocessed.find("#version");
+    if (versionPos != std::string::npos)
+    {
+        size_t lineEnd = preprocessed.find('\n', versionPos);
+        if (lineEnd != std::string::npos)
+        {
+            std::string versionLine = preprocessed.substr(versionPos, lineEnd - versionPos + 1);
+            preprocessed.erase(versionPos, lineEnd - versionPos + 1);
+            preprocessed = versionLine + preprocessed;
+        }
+    }
+
+    glslang::TShader shader(stage);
+    //std::ofstream f(preprocessFilePath, std::ios::out | std::ios::binary);
+    //if (f)
+    //{
+    //    f.write((const char*)preprocessed.data(), preprocessed.size());
+    //}
+
+    const char* shaderStrings[1] = { preprocessed.data() };
     shader.setStrings(shaderStrings, 1);
-    shader.addSourceText(source.c_str(), source.length());
-    shader.setSourceFile(debugFilePath.c_str());
+    shader.addSourceText(preprocessed.c_str(), preprocessed.length());
+    shader.setSourceFile(preprocessFilePath.c_str());
     shader.setDebugInfo(true);
 
     // Target Vulkan 1.3 / SPIR-V 1.6 so modern extensions compile (notably GL_EXT_ray_query, which
@@ -152,15 +212,7 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
     shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
     shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
 
-    const std::string preamble = buildPreamble(defines);
-    if (!preamble.empty())
-        shader.setPreamble(preamble.c_str());
-
-    ShaderIncluder includer(debugFilePath);
-
-    // Enable SPIR-V and Vulkan rules when parsing GLSL
-    EShMessages messages = (EShMessages)(EShMsgSpvRules | EShMsgVulkanRules);
-    if (!shader.parse(GetDefaultResources(), 100, ENoProfile, false, false, messages, includer))
+    if (!shader.parse(GetDefaultResources(), 100, ENoProfile, false, false, messages))
     {
         puts(shader.getInfoLog());
         puts(shader.getInfoDebugLog());
@@ -179,15 +231,19 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
     }
 
     glslang::SpvOptions spvOptions;
-    spvOptions.generateDebugInfo = false;
-    spvOptions.stripDebugInfo = true;
+    spvOptions.generateDebugInfo = true;
+    spvOptions.stripDebugInfo = false;
     spvOptions.disableOptimizer = false;
     spvOptions.optimizeSize = false;
     spvOptions.disassemble = false;
-    spvOptions.validate = true;
-    spvOptions.emitNonSemanticShaderDebugInfo = false;
-    spvOptions.emitNonSemanticShaderDebugSource = false;
+    spvOptions.validate = false;
+    spvOptions.emitNonSemanticShaderDebugInfo = true;
+    spvOptions.emitNonSemanticShaderDebugSource = true;
     spvOptions.compileOnly = false;
     glslang::GlslangToSpv(*program.getIntermediate(stage), spirv, &spvOptions);
+
+    glslang::OutputSpvBin(spirv, spvBinPath.c_str());
+
+
     return true;
 }

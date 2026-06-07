@@ -26,6 +26,7 @@ import :ShadowMapGraphicsPipeline;
 import :AccelerationStructure;
 import :GIProbePipeline;
 import :Light;
+import :GpuCrashTracker;
 
 export import Core.fwd;
 
@@ -141,6 +142,7 @@ private:
     SwapChain m_swapChain;
     RenderPass m_renderPass;
     Framebuffers m_framebuffers;
+	GpuCrashTracker m_gpuCrashTracker;
 
     IndirectCullComputePipeline m_indirectCullComputePipeline;
     LightGridComputePipeline m_lightGridComputePipeline;

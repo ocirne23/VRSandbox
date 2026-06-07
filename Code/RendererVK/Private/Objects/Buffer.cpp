@@ -101,12 +101,18 @@ void Buffer::unmapMemory()
 void Buffer::flushMappedMemory(size_t size, size_t offset)
 {
     const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
-    size = (size + atomSize - 1) & ~(atomSize - 1);
-    [[maybe_unused]] auto flushResult = Globals::device.getDevice().flushMappedMemoryRanges({ 
+    // vk::WholeSize must be passed through untouched: rounding it up to atomSize overflows to 0 and would
+    // flush nothing. Vulkan handles WholeSize natively (flush to the end of the allocation).
+    vk::DeviceSize flushSize = (size == (size_t)vk::WholeSize) ? vk::WholeSize : ((size + atomSize - 1) & ~(atomSize - 1));
+	if (flushSize != vk::WholeSize && flushSize > m_size - offset)
+	{
+		flushSize = vk::WholeSize;
+	}
+    [[maybe_unused]] auto flushResult = Globals::device.getDevice().flushMappedMemoryRanges({
         vk::MappedMemoryRange{
-            .memory = m_memory, 
-            .offset = offset, 
-            .size = size
+            .memory = m_memory,
+            .offset = offset,
+            .size = flushSize
         }});
     assert(flushResult == vk::Result::eSuccess);
 }

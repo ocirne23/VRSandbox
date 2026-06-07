@@ -1,5 +1,6 @@
 module RendererVK:AccelerationStructure;
 
+import Core;
 import :VK;
 import :Device;
 
@@ -10,8 +11,9 @@ AccelerationStructure::~AccelerationStructure()
     for (Blas& blas : m_blasList)
         if (blas.handle)
             dev.destroyAccelerationStructureKHR(blas.handle);
-    if (m_tlas)
-        dev.destroyAccelerationStructureKHR(m_tlas);
+    for (vk::AccelerationStructureKHR tlas : m_tlas)
+        if (tlas)
+            dev.destroyAccelerationStructureKHR(tlas);
 }
 
 void AccelerationStructure::initialize()
@@ -27,6 +29,12 @@ void AccelerationStructure::initialize()
         vk::BufferUsageFlagBits::eStorageBuffer,
         vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
     m_mappedBlasAddresses = m_blasAddressBuffer.mapMemory<uint64>();
+    // Zero every slot up front: only meshes that get a BLAS built write their address, but the instance
+    // compute looks up in_blasAddresses[meshIdx] unconditionally. An unwritten slot would otherwise hand
+    // the TLAS a garbage 64-bit BLAS reference -> ray traversal MMU-faults. A null reference is treated as
+    // an inactive instance by the driver, so zero is the safe default.
+    memset(m_mappedBlasAddresses.data(), 0, m_mappedBlasAddresses.size_bytes());
+    m_blasAddressBuffer.flushMappedMemory(m_blasAddressBuffer.getSize());
 }
 
 void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& outAlignedAddr, vk::DeviceSize needed)
@@ -77,9 +85,11 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
         const uint32 meshVertexCount = (i + 1u < count)
             ? (uint32)(meshInfos[firstMesh + i + 1u].vertexOffset - mi.vertexOffset)
             : (totalVertices - (uint32)mi.vertexOffset);
-        if (meshVertexCount == 0 || meshVertexCount > 4000000 || mi.indexCount == 0)
-            printf("[GI BLAS] mesh %u SUSPECT: indexCount=%u vertexOffset=%d vertexCount=%u\n",
-                firstMesh + i, mi.indexCount, mi.vertexOffset, meshVertexCount);
+        // A zero-span mesh (two meshes sharing a vertexOffset, an empty mesh, or a trailing mesh where
+        // totalVertices == vertexOffset) underflows maxVertex below to 0xFFFFFFFF, making the driver bound
+        // this BLAS over the whole vertex buffer -> ballooning AABB and wild vertex fetches that MMU-fault
+        // during ray traversal. Guard it.
+        assert(meshVertexCount > 0 && "zero-span mesh -> maxVertex underflow");
 
         // vk::DeviceOrHostAddressConstKHR / AccelerationStructureGeometryDataKHR are unions, which can't
         // be designated-initialized; default-construct then assign the active union member.
@@ -122,9 +132,8 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
 
     ensureScratch(m_blasScratch, m_blasScratchAlignedAddr, totalScratch);
 
-    // Pass 2: create each BLAS and record its build. Each build writes a disjoint scratch region, so the
-    // builds can run without inter-build barriers; a single barrier afterwards makes all BLASes readable
-    // by the subsequent TLAS build.
+    // Pass 2: create and build each BLAS, serialized with a barrier between builds (each also uses a
+    // disjoint scratch region). Serializing removes any concurrent-build interaction as a variable.
     for (uint32 i = 0; i < count; i++)
     {
         Blas& blas = m_blasList[firstMesh + i];
@@ -150,6 +159,14 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
 
         vk::AccelerationStructureDeviceAddressInfoKHR ai{ .accelerationStructure = blas.handle };
         m_mappedBlasAddresses[firstMesh + i] = dev.getAccelerationStructureAddressKHR(ai);
+
+        vk::MemoryBarrier2 b{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+            .srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR | vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+            .dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR | vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+        };
+        cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &b });
     }
 
     // One barrier so all BLAS builds complete before the TLAS build (or any reads) consume them.
@@ -162,10 +179,10 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
     cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
 
     m_numBlas = std::max(m_numBlas, firstMesh + count);
-    m_blasAddressBuffer.flushMappedMemory(vk::WholeSize);
+    m_blasAddressBuffer.flushMappedMemory(m_blasAddressBuffer.getSize());
 }
 
-void AccelerationStructure::recordBuildTlas(vk::CommandBuffer cmd, Buffer& instanceBuffer, uint32 numInstances)
+void AccelerationStructure::recordBuildTlas(vk::CommandBuffer cmd, uint32 frameIdx, Buffer& instanceBuffer, uint32 numInstances)
 {
     if (numInstances == 0)
         return;
@@ -189,29 +206,29 @@ void AccelerationStructure::recordBuildTlas(vk::CommandBuffer cmd, Buffer& insta
 
     // Grow (and recreate) the TLAS only when the instance count exceeds the current capacity; otherwise
     // rebuild in place. Capacity is rounded up generously so this is rare.
-    if (!m_tlas || numInstances > m_tlasCapacity)
+    if (!m_tlas[frameIdx] || numInstances > m_tlasCapacity[frameIdx])
     {
         const uint32 capacity = ((numInstances + 4095u) / 4096u) * 4096u;
         vk::AccelerationStructureBuildSizesInfoKHR sizes = dev.getAccelerationStructureBuildSizesKHR(vk::AccelerationStructureBuildTypeKHR::eDevice, buildInfo, capacity);
-        if (m_tlas)
-            dev.destroyAccelerationStructureKHR(m_tlas);
-        m_tlasBuffer.initialize(sizes.accelerationStructureSize,
+        if (m_tlas[frameIdx])
+            dev.destroyAccelerationStructureKHR(m_tlas[frameIdx]);
+        m_tlasBuffer[frameIdx].initialize(sizes.accelerationStructureSize,
             vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
         vk::AccelerationStructureCreateInfoKHR ci{
-            .buffer = m_tlasBuffer.getBuffer(),
+            .buffer = m_tlasBuffer[frameIdx].getBuffer(),
             .size = sizes.accelerationStructureSize,
             .type = vk::AccelerationStructureTypeKHR::eTopLevel,
         };
         auto res = dev.createAccelerationStructureKHR(ci);
         assert(res.result == vk::Result::eSuccess && "Failed to create TLAS");
-        m_tlas = res.value;
-        ensureScratch(m_tlasScratch, m_tlasScratchAlignedAddr, sizes.buildScratchSize);
-        m_tlasCapacity = capacity;
+        m_tlas[frameIdx] = res.value;
+        ensureScratch(m_tlasScratch[frameIdx], m_tlasScratchAlignedAddr[frameIdx], sizes.buildScratchSize);
+        m_tlasCapacity[frameIdx] = capacity;
     }
 
-    buildInfo.dstAccelerationStructure = m_tlas;
-    buildInfo.scratchData.deviceAddress = m_tlasScratchAlignedAddr;
+    buildInfo.dstAccelerationStructure = m_tlas[frameIdx];
+    buildInfo.scratchData.deviceAddress = m_tlasScratchAlignedAddr[frameIdx];
     vk::AccelerationStructureBuildRangeInfoKHR range{
         .primitiveCount = numInstances,
         .primitiveOffset = 0,
