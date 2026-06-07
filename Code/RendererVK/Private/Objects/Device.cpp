@@ -33,7 +33,9 @@ bool Device::initialize()
     printf("Device: %s\n", m_physicalDevice.getProperties().deviceName.data());
     m_nonCoherentAtomSize = m_physicalDevice.getProperties().limits.nonCoherentAtomSize;
 
-    std::vector<const char*> deviceExtensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME, VK_KHR_MAINTENANCE_5_EXTENSION_NAME, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME };
+    std::vector<const char*> deviceExtensions{ 
+        vk::KHRSwapchainExtensionName, vk::KHRPushDescriptorExtensionName, vk::KHRMaintenance5ExtensionName, vk::EXTDeviceGeneratedCommandsExtensionName, 
+        vk::KHRAccelerationStructureExtensionName, vk::KHRRayQueryExtensionName, vk::KHRDeferredHostOperationsExtensionName, vk::KHRShaderNonSemanticInfoExtensionName };
     if (!supportsExtensions(deviceExtensions))
     {
         assert(false && "Physical device does not support the extension\n");
@@ -70,18 +72,14 @@ bool Device::initialize()
     std::array<vk::DeviceQueueCreateInfo, 1> deviceQueueCreateInfos{
         vk::DeviceQueueCreateInfo {.queueFamilyIndex = m_graphicsQueueIndex, .queueCount = 1, .pQueuePriorities = queuePriorities }
     };
-    const std::vector<const char*>& enabledLayers = Globals::instance.getEnabledLayers();
+    //const std::vector<const char*>& enabledLayers = Globals::instance.getEnabledLayers();
 
     vk::PhysicalDeviceFeatures2 deviceFeatures;
     m_physicalDevice.getFeatures2(&deviceFeatures);
     deviceFeatures.features.samplerAnisotropy = vk::True;
-    vk::PhysicalDeviceSynchronization2Features syncFeatures{
-        .pNext = &deviceFeatures,
-        .synchronization2 = vk::True,
-    };
     vk::PhysicalDeviceVulkan11Features vk11Features
     {
-        .pNext = &syncFeatures,
+        .pNext = &deviceFeatures,
         .storageBuffer16BitAccess = vk::True,
         .uniformAndStorageBuffer16BitAccess = vk::True,
         //.storageInputOutput16 = vk::True, // Not supported on NVIDIA!
@@ -96,19 +94,34 @@ bool Device::initialize()
         .runtimeDescriptorArray = vk::True,
         .bufferDeviceAddress = vk::True, // required by VK_EXT_device_generated_commands (indirect/preprocess buffers are referenced by device address)
     };
-    vk::PhysicalDeviceMaintenance5Features maintenance5Features{ 
+    vk::PhysicalDeviceVulkan13Features vk13Features{
         .pNext = &vk12Features,
+        .shaderDemoteToHelperInvocation = vk::True,
+        .synchronization2 = vk::True,
+    };
+    vk::PhysicalDeviceMaintenance5Features maintenance5Features{
+        .pNext = &vk13Features,
         .maintenance5 = vk::True };
-    vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT dgcFeatures{ 
+    // Hardware ray tracing via ray queries in compute (for GI probe tracing). rayQuery pulls in
+    // acceleration structures; deferred_host_operations is a build-time dependency of both.
+    vk::PhysicalDeviceAccelerationStructureFeaturesKHR accelStructFeatures{
         .pNext = &maintenance5Features,
-        .deviceGeneratedCommands = vk::True 
+        .accelerationStructure = vk::True
+    };
+    vk::PhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{
+        .pNext = &accelStructFeatures,
+        .rayQuery = vk::True
+    };
+    vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT dgcFeatures{
+        .pNext = &rayQueryFeatures,
+        .deviceGeneratedCommands = vk::True
     };
     vk::DeviceCreateInfo deviceCreateInfo{
-        .pNext = dgcFeatures,
+        .pNext = &dgcFeatures,
         .queueCreateInfoCount = (uint32)deviceQueueCreateInfos.size(),
         .pQueueCreateInfos = deviceQueueCreateInfos.data(),
-        .enabledLayerCount = (uint32)enabledLayers.size(),
-        .ppEnabledLayerNames = enabledLayers.data(),
+        .enabledLayerCount = (uint32)0,
+        .ppEnabledLayerNames = nullptr,
         .enabledExtensionCount = (uint32)deviceExtensions.size(),
         .ppEnabledExtensionNames = deviceExtensions.data(),
     };
@@ -132,11 +145,11 @@ bool Device::initialize()
     }
     m_commandPool = commandPoolResult.value;
 
-    const uint32 poolSize = 1024;
+    const uint32 poolSize = 1024; // bumped: the GI trace set also binds a MAX_TEXTURES sampler array
     vk::DescriptorPoolSize poolSizes[] =
     {
-        { vk::DescriptorType::eSampler, poolSize },
-        { vk::DescriptorType::eCombinedImageSampler, poolSize },
+        { vk::DescriptorType::eSampler, poolSize * 4 },
+        { vk::DescriptorType::eCombinedImageSampler, poolSize * 4 },
         { vk::DescriptorType::eSampledImage, poolSize },
         { vk::DescriptorType::eStorageImage, poolSize },
         { vk::DescriptorType::eUniformTexelBuffer, poolSize },
@@ -145,7 +158,8 @@ bool Device::initialize()
         { vk::DescriptorType::eStorageBuffer, poolSize },
         { vk::DescriptorType::eUniformBufferDynamic, poolSize },
         { vk::DescriptorType::eStorageBufferDynamic, poolSize },
-        { vk::DescriptorType::eInputAttachment, poolSize }
+        { vk::DescriptorType::eInputAttachment, poolSize },
+        { vk::DescriptorType::eAccelerationStructureKHR, poolSize } // GI trace TLAS binding
     };
     vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo{
         .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
@@ -174,6 +188,12 @@ bool Device::initialize()
     pfVkCreateIndirectExecutionSetEXT = (PFN_vkCreateIndirectExecutionSetEXT)m_device.getProcAddr("vkCreateIndirectExecutionSetEXT");
     pfVkDestroyIndirectExecutionSetEXT = (PFN_vkDestroyIndirectExecutionSetEXT)m_device.getProcAddr("vkDestroyIndirectExecutionSetEXT");
     pfVkUpdateIndirectExecutionSetPipelineEXT = (PFN_vkUpdateIndirectExecutionSetPipelineEXT)m_device.getProcAddr("vkUpdateIndirectExecutionSetPipelineEXT");
+
+    pfVkGetAccelerationStructureBuildSizesKHR = (PFN_vkGetAccelerationStructureBuildSizesKHR)m_device.getProcAddr("vkGetAccelerationStructureBuildSizesKHR");
+    pfVkCreateAccelerationStructureKHR = (PFN_vkCreateAccelerationStructureKHR)m_device.getProcAddr("vkCreateAccelerationStructureKHR");
+    pfVkDestroyAccelerationStructureKHR = (PFN_vkDestroyAccelerationStructureKHR)m_device.getProcAddr("vkDestroyAccelerationStructureKHR");
+    pfVkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)m_device.getProcAddr("vkCmdBuildAccelerationStructuresKHR");
+    pfVkGetAccelerationStructureDeviceAddressKHR = (PFN_vkGetAccelerationStructureDeviceAddressKHR)m_device.getProcAddr("vkGetAccelerationStructureDeviceAddressKHR");
 
     m_graphicsQueue = m_device.getQueue(m_graphicsQueueIndex, 0);
     if (!m_graphicsQueue)

@@ -2,6 +2,7 @@
 
 #extension GL_EXT_shader_explicit_arithmetic_types : enable
 #extension GL_EXT_shader_16bit_storage : enable
+//#extension GL_EXT_debug_printf : enable
 
 #include "shared.inc.glsl"
 
@@ -119,6 +120,7 @@ bool frustumCheck(vec3 pos, float radius)
 
 void main()
 {
+    //debugPrintfEXT("instanceIdx %d\n", gl_GlobalInvocationID.x);
     const uint instanceIdx        = gl_GlobalInvocationID.x;
     const InMeshInstance instance = in_instances[instanceIdx];
     const uint16_t meshIdx        = uint16_t(instance.meshIdxMaterialIdx & 0x0000FFFF);

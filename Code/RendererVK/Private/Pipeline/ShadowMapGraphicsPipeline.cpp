@@ -47,11 +47,17 @@ void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layo
 
 void ShadowMapGraphicsPipeline::buildIndirectState()
 {
-    m_indirectExecutionSet.initialize(m_graphicsPipeline);
-    m_indirectCommandsLayout.initialize(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex);
+    // The shadow pass renders all cascades in a single multiview render pass (non-zero viewMask), where DGC
+    // forbids an Indirect Execution Set. We only ever use the one depth-only pipeline anyway, so the commands
+    // layout omits the EXECUTION_SET token and we bind the pipeline explicitly + pass a null execution set.
+    m_indirectCommandsLayout.initialize(m_graphicsPipeline.getPipelineLayout(),
+        vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, /*useExecutionSet*/ false);
 
+    // With no execution set, DGC needs the pipeline it will generate draws for supplied via pNext.
+    vk::GeneratedCommandsPipelineInfoEXT pipelineInfo{ .pipeline = m_graphicsPipeline.getPipeline() };
     vk::GeneratedCommandsMemoryRequirementsInfoEXT memReqInfo{
-        .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
+        .pNext = &pipelineInfo,
+        .indirectExecutionSet = VK_NULL_HANDLE,
         .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
         .maxSequenceCount = RendererVKLayout::MAX_UNIQUE_MESHES,
         .maxDrawCount = RendererVKLayout::MAX_UNIQUE_MESHES,
@@ -88,8 +94,7 @@ void ShadowMapGraphicsPipeline::reloadShaders()
         printf("ShadowMapGraphicsPipeline: shader reload failed, keeping previous pipeline\n");
         return;
     }
-    m_indirectExecutionSet.destroy();
-    m_indirectExecutionSet.initialize(m_graphicsPipeline);
+    // No execution set to rebuild: the multiview shadow pass binds its single pipeline directly.
 }
 
 void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
@@ -121,9 +126,12 @@ void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fram
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
 
     // One multiview execute renders all cascades (gl_ViewIndex selects the layer/matrix).
+    // With no execution set, the target pipeline must be supplied via pNext (matches the memory-requirements query).
+    vk::GeneratedCommandsPipelineInfoEXT pipelineInfo{ .pipeline = m_graphicsPipeline.getPipeline() };
     vk::GeneratedCommandsInfoEXT generatedCommandsInfo{
+        .pNext = &pipelineInfo,
         .shaderStages = vk::ShaderStageFlagBits::eVertex,
-        .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
+        .indirectExecutionSet = VK_NULL_HANDLE, // single pipeline, bound explicitly above (multiview disallows an execution set)
         .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
         .indirectAddress = params.indirectCommandBuffer.getDeviceAddress(),
         .indirectAddressSize = numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence),

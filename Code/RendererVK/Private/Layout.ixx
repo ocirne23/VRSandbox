@@ -30,6 +30,25 @@ export namespace RendererVKLayout
     constexpr uint32 NUM_SHADOW_CASCADES = 6;
     constexpr uint32 SHADOW_MAP_RESOLUTION = 2048;
 
+    // Diffuse GI irradiance probes. A fixed DIM^3 camera-anchored probe volume (no hash grid). These
+    // MUST match Assets/Shaders/gi_probe.inc.glsl.
+    constexpr uint32 GI_PROBE_DIM = 8;                                                   // probes per axis
+    constexpr float  GI_PROBE_SPACING = 4.0f;                                            // world units between probes (volume = DIM*spacing)
+    constexpr uint32 GI_SH_STRIDE = 12;                                                  // SH-L1 RGB floats per probe
+    constexpr uint32 GI_PROBE_COUNT = GI_PROBE_DIM * GI_PROBE_DIM * GI_PROBE_DIM;
+
+    constexpr size_t GI_PROBE_SH_BUFFER_SIZE = (size_t)GI_PROBE_COUNT * GI_SH_STRIDE * sizeof(float);
+    constexpr size_t GI_VOLUME_BUFFER_SIZE   = 4 * sizeof(int32);                        // ivec4 volumeMin (xyz) + pad
+
+    constexpr uint32 GI_MAX_TLAS_INSTANCES = 256 * 1024;
+    constexpr size_t GI_TLAS_INSTANCE_SIZE = 64;                                         // sizeof(VkAccelerationStructureInstanceKHR)
+
+    // Trace tuning (passed via push constants). Rays are amortized over frames via the temporal blend.
+    constexpr uint32 GI_RAYS_PER_PROBE = 1;
+    constexpr float  GI_TEMPORAL_ALPHA = 0.04f;
+    constexpr float  GI_MAX_RAY_DIST   = 64.0f;
+    constexpr float  GI_SKY_INTENSITY  = 1.0f;
+
     struct MeshVertex
     {
         glm::vec3 position;

@@ -156,6 +156,18 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // probe_sh (GI volume)
+        .binding = 10,
+        .descriptorType = vk::DescriptorType::eStorageBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // gi volume min (ivec4)
+        .binding = 11,
+        .descriptorType = vk::DescriptorType::eStorageBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
 }
 
 void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
@@ -217,7 +229,7 @@ void StaticMeshGraphicsPipeline::reloadShaders()
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
-    std::array<DescriptorSetUpdateInfo, 9> graphicsDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 11> graphicsDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo{
             .binding = 0,
@@ -301,6 +313,16 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
                     .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
                 }
             }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 10,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.probeShBuffer.getBuffer(), .range = params.probeShBuffer.getSize() } }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 11,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.giVolumeBuffer.getBuffer(), .range = params.giVolumeBuffer.getSize() } }
         },
 
         DescriptorSetUpdateInfo{

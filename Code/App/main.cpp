@@ -1,3 +1,4 @@
+#include <cstdio>
 import Core;
 import Core.Allocator;
 import Core.Window;
@@ -17,6 +18,7 @@ import RendererVK;
 
 int main()
 {
+    setvbuf(stdout, nullptr, _IONBF, 0); // unbuffered so crash diagnostics aren't lost on abort
     FileSystem::initialize();
 
     Window window;
@@ -29,7 +31,7 @@ int main()
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
+    renderer.initialize(window, EValidation::ENABLED, EVSync::ENABLED);
     glm::vec3 sunDir = normalize(glm::vec3(-0.5f, 1.0f, 0.1f));
     float sunSize = 250.0f;
 	float sunDistance = 5000.0f;
@@ -74,6 +76,7 @@ int main()
         std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
         sceneData->initialize("Models/sponza.glb", true, true);
         container.initialize(*sceneData);
+        
         for (int x = 0; x < spawnCountX; ++x)
             for (int y = 0; y < spawnCountY; ++y)
                 spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 0, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));

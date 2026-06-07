@@ -146,6 +146,12 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
     shader.setSourceFile(debugFilePath.c_str());
     shader.setDebugInfo(true);
 
+    // Target Vulkan 1.3 / SPIR-V 1.6 so modern extensions compile (notably GL_EXT_ray_query, which
+    // needs the RayQueryKHR capability and SPIR-V 1.4+). Without this glslang defaults to SPIR-V 1.0.
+    shader.setEnvInput(glslang::EShSourceGlsl, stage, glslang::EShClientVulkan, 100);
+    shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
+    shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
+
     const std::string preamble = buildPreamble(defines);
     if (!preamble.empty())
         shader.setPreamble(preamble.c_str());
@@ -173,14 +179,14 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
     }
 
     glslang::SpvOptions spvOptions;
-    spvOptions.generateDebugInfo = true;
-    spvOptions.stripDebugInfo = false;
+    spvOptions.generateDebugInfo = false;
+    spvOptions.stripDebugInfo = true;
     spvOptions.disableOptimizer = false;
     spvOptions.optimizeSize = false;
     spvOptions.disassemble = false;
     spvOptions.validate = true;
-    spvOptions.emitNonSemanticShaderDebugInfo = true;
-    spvOptions.emitNonSemanticShaderDebugSource = true;
+    spvOptions.emitNonSemanticShaderDebugInfo = false;
+    spvOptions.emitNonSemanticShaderDebugSource = false;
     spvOptions.compileOnly = false;
     glslang::GlslangToSpv(*program.getIntermediate(stage), spirv, &spvOptions);
     return true;

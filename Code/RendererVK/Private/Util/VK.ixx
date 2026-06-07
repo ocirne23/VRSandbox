@@ -17,24 +17,6 @@ export constexpr uint64 VK_WHOLE_SIZE = (~0ULL);
 
 export const char* VK_VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
 
-#undef VK_KHR_SWAPCHAIN_EXTENSION_NAME
-export const char* VK_KHR_SWAPCHAIN_EXTENSION_NAME = "VK_KHR_swapchain";
-
-#undef VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME
-export const char* VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME = "VK_KHR_push_descriptor";
-
-#undef VK_KHR_MAINTENANCE_5_EXTENSION_NAME
-export const char* VK_KHR_MAINTENANCE_5_EXTENSION_NAME = "VK_KHR_maintenance5";
-
-#undef VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME
-export const char* VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME = "VK_EXT_device_generated_commands";
-
-#undef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
-export const char* VK_EXT_DEBUG_REPORT_EXTENSION_NAME = "VK_EXT_debug_report";
-
-#undef VK_EXT_DEBUG_UTILS_EXTENSION_NAME
-export const char* VK_EXT_DEBUG_UTILS_EXTENSION_NAME = "VK_EXT_debug_utils";
-
 #undef VK_MAKE_API_VERSION
 export constexpr uint32 VK_MAKE_API_VERSION(uint32 variant, uint32 major, uint32 minor, uint32 patch)
 {
@@ -102,4 +84,37 @@ export PFN_vkUpdateIndirectExecutionSetPipelineEXT pfVkUpdateIndirectExecutionSe
 export extern "C" void vkUpdateIndirectExecutionSetPipelineEXT(VkDevice device, VkIndirectExecutionSetEXT indirectExecutionSet, uint32_t executionSetWriteCount, const VkWriteIndirectExecutionSetPipelineEXT* pExecutionSetWrites)
 {
     pfVkUpdateIndirectExecutionSetPipelineEXT(device, indirectExecutionSet, executionSetWriteCount, pExecutionSetWrites);
+}
+
+// VK_KHR_acceleration_structure entrypoints. Like the DGC functions above, vulkan-1.lib's static
+// loader does not export these, so forward the global C symbols (called by vulkan.hpp's static
+// dispatcher) to function pointers loaded in Device::initialize.
+export PFN_vkGetAccelerationStructureBuildSizesKHR pfVkGetAccelerationStructureBuildSizesKHR = nullptr;
+export extern "C" void vkGetAccelerationStructureBuildSizesKHR(VkDevice device, VkAccelerationStructureBuildTypeKHR buildType, const VkAccelerationStructureBuildGeometryInfoKHR* pBuildInfo, const uint32_t* pMaxPrimitiveCounts, VkAccelerationStructureBuildSizesInfoKHR* pSizeInfo)
+{
+    pfVkGetAccelerationStructureBuildSizesKHR(device, buildType, pBuildInfo, pMaxPrimitiveCounts, pSizeInfo);
+}
+
+export PFN_vkCreateAccelerationStructureKHR pfVkCreateAccelerationStructureKHR = nullptr;
+export extern "C" VkResult vkCreateAccelerationStructureKHR(VkDevice device, const VkAccelerationStructureCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkAccelerationStructureKHR* pAccelerationStructure)
+{
+    return pfVkCreateAccelerationStructureKHR(device, pCreateInfo, pAllocator, pAccelerationStructure);
+}
+
+export PFN_vkDestroyAccelerationStructureKHR pfVkDestroyAccelerationStructureKHR = nullptr;
+export extern "C" void vkDestroyAccelerationStructureKHR(VkDevice device, VkAccelerationStructureKHR accelerationStructure, const VkAllocationCallbacks* pAllocator)
+{
+    pfVkDestroyAccelerationStructureKHR(device, accelerationStructure, pAllocator);
+}
+
+export PFN_vkCmdBuildAccelerationStructuresKHR pfVkCmdBuildAccelerationStructuresKHR = nullptr;
+export extern "C" void vkCmdBuildAccelerationStructuresKHR(VkCommandBuffer commandBuffer, uint32_t infoCount, const VkAccelerationStructureBuildGeometryInfoKHR* pInfos, const VkAccelerationStructureBuildRangeInfoKHR* const* ppBuildRangeInfos)
+{
+    pfVkCmdBuildAccelerationStructuresKHR(commandBuffer, infoCount, pInfos, ppBuildRangeInfos);
+}
+
+export PFN_vkGetAccelerationStructureDeviceAddressKHR pfVkGetAccelerationStructureDeviceAddressKHR = nullptr;
+export extern "C" VkDeviceAddress vkGetAccelerationStructureDeviceAddressKHR(VkDevice device, const VkAccelerationStructureDeviceAddressInfoKHR* pInfo)
+{
+    return pfVkGetAccelerationStructureDeviceAddressKHR(device, pInfo);
 }

@@ -23,8 +23,14 @@ bool MeshDataManager::initialize(size_t vertexBufSize, size_t indexBufSize)
     m_vertexBufSize = vertexBufSize;
     m_indexBufSize = indexBufSize;
 
-    m_vertexBuffer.initialize(vertexBufSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
-    m_indexBuffer.initialize(indexBufSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    // Extra usage beyond vertex/index: the GI ray tracer builds BLASes directly from these mega-buffers
+    // (eAccelerationStructureBuildInputReadOnlyKHR + eShaderDeviceAddress) and fetches hit-triangle
+    // attributes from them in the probe-trace compute shader (eStorageBuffer).
+    const vk::BufferUsageFlags rtUsage = vk::BufferUsageFlagBits::eShaderDeviceAddress
+        | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR
+        | vk::BufferUsageFlagBits::eStorageBuffer;
+    m_vertexBuffer.initialize(vertexBufSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer | rtUsage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    m_indexBuffer.initialize(indexBufSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer | rtUsage, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     return true;
 }

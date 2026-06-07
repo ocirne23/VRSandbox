@@ -5,6 +5,8 @@ import Core.Windows;
 
 bool FileSystem::initialize()
 {
+    std::cout.setf(std::ios::unitbuf);
+
     constexpr const char* ASSETS_DIR = "/Assets/";
     constexpr const char* DLL_DIR = "/Dependencies/Dll/";
 

@@ -23,6 +23,8 @@ import :LightGridComputePipeline;
 import :ShadowMap;
 import :ShadowCullComputePipeline;
 import :ShadowMapGraphicsPipeline;
+import :AccelerationStructure;
+import :GIProbePipeline;
 import :Light;
 
 export import Core.fwd;
@@ -144,6 +146,15 @@ private:
     LightGridComputePipeline m_lightGridComputePipeline;
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
 
+    // Hardware ray-traced diffuse GI. The acceleration structures are queried by the probe-trace pass;
+    // BLASes are built once per mesh, the TLAS rebuilt each frame from the instance list.
+    AccelerationStructure m_accelStructure;
+    GIProbePipeline m_giProbePipeline;
+    std::vector<RendererVKLayout::MeshInfo> m_cpuMeshInfos; // CPU copy kept for BLAS builds
+    uint32 m_blasBuiltCount = 0;
+    glm::vec3 m_cameraPos = glm::vec3(0.0f);
+    uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray set each frame
+
     // One shadow map per frame-in-flight: it is written early and sampled later in the same frame,
     // so a single shared image would race across the 2 frames in flight (guarded only by the
     // per-frame fence). Indexing by frameIdx makes it safe like the other per-frame resources.
@@ -179,8 +190,6 @@ private:
         CommandBuffer primaryCommandBuffer;
         CommandBuffer indirectCullCommandBuffer;
         CommandBuffer lightGridCommandBuffer;
-        CommandBuffer staticMeshRenderCommandBuffer;
-        CommandBuffer imguiCommandBuffer;
 
         bool updated = false;
         Buffer ubo;

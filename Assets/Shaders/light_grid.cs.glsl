@@ -2,7 +2,7 @@
 
 #extension GL_EXT_shader_explicit_arithmetic_types : enable
 #extension GL_EXT_shader_16bit_storage : enable
-#extension GL_EXT_debug_printf : enable
+//#extension GL_EXT_debug_printf : enable
 
 #include "shared.inc.glsl"
 

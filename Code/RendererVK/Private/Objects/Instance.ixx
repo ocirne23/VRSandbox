@@ -32,6 +32,7 @@ private:
     std::vector<vk::ExtensionProperties> m_supportedExtensions;
     std::vector<vk::LayerProperties> m_supportedLayers;
     vk::DebugUtilsMessengerEXT m_debugMessenger;
+	vk::DebugReportCallbackEXT m_debugReportCallback;
 };
 
 export namespace Globals

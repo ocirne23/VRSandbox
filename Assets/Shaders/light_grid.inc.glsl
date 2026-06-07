@@ -27,7 +27,7 @@ void addLightToGrid(uint gridIdx, uint lightId, vec3 lightMin, vec3 lightMax);
 
 #define MAX_LARGE_LIGHTS_PER_GRID 6 // Must be even
 #define MAX_LIGHTCELL_LIGHTS 16     // Must be even
-#define GRID_SIZE 32
+// GRID_SIZE is defined in hash_grid.inc.glsl (included below).
 
 // GRID DATA MEMORY LAYOUT:
 // {
@@ -54,36 +54,23 @@ void addLightToGrid(uint gridIdx, uint lightId, vec3 lightMin, vec3 lightMax);
 #error "GRID_TABLE_NAME not set"
 #endif
 
-uint getPositionHash(ivec3 p) 
-{
-    uvec3 q = uvec3(p);
-    q = q * uvec3(1597334673u, 3812015801u, 2798796415u);
-    uint n = q.x ^ q.y ^ q.z;
-	// pcg hash
-	n = n * 747796405u + 2891336453u;
-	n = ((n >> ((n >> 28u) + 4u)) ^ n) * 277803737u;
-	n = (n >> 22u) ^ n;
-    return n;
-}
+// Hashing, table probing, GRID_SIZE and getGridPos are shared with the GI probe grid.
+#include "hash_grid.inc.glsl"
 
+// Thin wrappers binding the shared hash helpers to this grid's table size.
 uint getTableIdx(ivec3 gridPos)
 {
-    return getPositionHash(gridPos) & (TABLE_SIZE_NAME - 1);
+	return hashTableIndex(gridPos, TABLE_SIZE_NAME);
+}
+
+uint getNextTableIdx(uint idx)
+{
+	return hashNextIndex(idx, TABLE_SIZE_NAME);
 }
 
 uint getGridIdx(uint tableIdx)
 {
 	return GRID_TABLE_NAME[tableIdx];
-}
-
-uint getNextTableIdx(uint idx)
-{
-	return (idx + 1) & (TABLE_SIZE_NAME - 1);
-}
-
-ivec3 getGridPos(vec3 pos)
-{
-	return ivec3(floor(pos / GRID_SIZE));
 }
 
 ivec3 getGridMin(uint gridIdx)

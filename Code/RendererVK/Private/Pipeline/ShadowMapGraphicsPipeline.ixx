@@ -6,7 +6,6 @@ import :VK;
 import :Buffer;
 import :Layout;
 import :GraphicsPipeline;
-import :IndirectExecutionSet;
 import :IndirectCommandsLayout;
 import :DescriptorSet;
 import :Sampler;
@@ -16,8 +15,9 @@ export class CommandBuffer;
 
 // Depth-only pipeline that renders the shadow caster list into one cascade of the sun ShadowMap.
 // Mirrors StaticMeshGraphicsPipeline: it consumes the cull's IndirectDrawSequence buffer through
-// vkCmdExecuteGeneratedCommandsEXT so the draw path matches the main pass. The execution set holds a
-// single (depth-only) pipeline; cascades differ only by the view-projection bound at record time.
+// vkCmdExecuteGeneratedCommandsEXT so the draw path matches the main pass. All cascades render in one
+// multiview render pass (gl_ViewIndex picks the cascade matrix); because multiview disallows an Indirect
+// Execution Set, DGC here uses no execution set and binds the single depth-only pipeline directly.
 export class ShadowMapGraphicsPipeline final
 {
 public:
@@ -48,7 +48,6 @@ private:
     void buildIndirectState();
 
     GraphicsPipeline m_graphicsPipeline;
-    IndirectExecutionSet m_indirectExecutionSet;
     IndirectCommandsLayout m_indirectCommandsLayout;
     Sampler m_sampler; // for the diffuse texture array used by the alpha-mask discard
     vk::RenderPass m_renderPass;

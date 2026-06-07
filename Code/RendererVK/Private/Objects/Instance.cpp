@@ -7,6 +7,7 @@ import Core.Window;
 import :VK;
 import :Device;
 
+//#define USE_AFTERMATH
 #ifdef USE_AFTERMATH
 import :Aftermath;
 import Core.Windows;
@@ -161,6 +162,32 @@ Instance::~Instance()
     destroy();
 }
 
+static vk::Bool32 debugReportCallback(vk::DebugReportFlagsEXT flags,
+    vk::DebugReportObjectTypeEXT objectType,
+    uint64_t object,
+    size_t location,
+    int32_t messageCode,
+    const char* pLayerPrefix,
+    const char* pMessage,
+    void* pUserData)
+{
+	const char* severity = "UNKNOWN";
+    if (flags & vk::DebugReportFlagBitsEXT::eWarning)
+        severity = "WARNING";
+	else if (flags & vk::DebugReportFlagBitsEXT::eInformation)
+		severity = "INFO";
+	else if (flags & vk::DebugReportFlagBitsEXT::eError)
+		severity = "ERROR";
+	else if (flags & vk::DebugReportFlagBitsEXT::eDebug)
+		severity = "DEBUG";
+	else if (flags & vk::DebugReportFlagBitsEXT::ePerformanceWarning)
+		severity = "PERFORMANCE WARNING";
+
+    printf("VK%s: %s", severity, pMessage);
+
+    return false;
+}
+
 static vk::Bool32 debugCallback(
     vk::DebugUtilsMessageSeverityFlagBitsEXT       messageSeverity,
     vk::DebugUtilsMessageTypeFlagsEXT              messageTypes,
@@ -172,6 +199,8 @@ static vk::Bool32 debugCallback(
         printf(pCallbackData->pMessage + 94);
         return vk::False;
     }
+    if (pCallbackData->messageIdNumber == 0x92394c89)
+        return vk::False;
 
     const char* severity = "UNKNOWN";
     
@@ -183,7 +212,7 @@ static vk::Bool32 debugCallback(
         severity = "INFO";
     else if (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose)
         severity = "VERBOSE";
-    printf("Validation layer %s: %s\n", severity, pCallbackData->pMessage);
+    printf("VKV%s: %s\n", severity, pCallbackData->pMessage);
     bool* pBreakOnValidationLayerError = reinterpret_cast<bool*>(pUserData);
     if (*pBreakOnValidationLayerError && (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError))
     {
@@ -238,8 +267,16 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
         .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
         .pfnUserCallback = debugCallback,
         .pUserData = &m_breakOnValidationLayerError,
-    };    
-    std::vector<vk::ValidationFeatureEnableEXT> validationFeaturesList = { vk::ValidationFeatureEnableEXT::eDebugPrintf };
+    };
+	vk::DebugReportCallbackCreateInfoEXT debugReportCreateInfo{
+		.flags = vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eWarning | vk::DebugReportFlagBitsEXT::eInformation | vk::DebugReportFlagBitsEXT::ePerformanceWarning | vk::DebugReportFlagBitsEXT::eDebug,
+		.pfnCallback = debugReportCallback,
+	};
+
+    std::vector<vk::ValidationFeatureEnableEXT> validationFeaturesList = 
+    { 
+    //    vk::ValidationFeatureEnableEXT::eDebugPrintf 
+    };
     vk::ValidationFeaturesEXT validationFeatures{
         .pNext = &debugCreateInfo,
         .enabledValidationFeatureCount = (uint32)validationFeaturesList.size(),
@@ -250,10 +287,10 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
     {
         if (supportsLayer(VK_VALIDATION_LAYER_NAME))
             m_enabledLayers.push_back(VK_VALIDATION_LAYER_NAME);
-        if (supportsExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-        if (supportsExtension(VK_EXT_DEBUG_REPORT_EXTENSION_NAME))
-            extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+        if (supportsExtension(vk::EXTDebugUtilsExtensionName))
+            extensions.push_back(vk::EXTDebugUtilsExtensionName);
+        //if (supportsExtension(vk::EXTDebugReportExtensionName))
+        //    extensions.push_back(vk::EXTDebugReportExtensionName);
         createInfo.pNext = &validationFeatures;
     }
     createInfo.enabledLayerCount = (uint32)m_enabledLayers.size();
@@ -277,6 +314,15 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
         auto createMessengerFunc = (PFN_vkCreateDebugUtilsMessengerEXT)m_instance.getProcAddr("vkCreateDebugUtilsMessengerEXT");
         createMessengerFunc(m_instance, &debugCreateInfo2, nullptr, &debugMessenger);
         m_debugMessenger = debugMessenger;
+
+		VkDebugReportCallbackCreateInfoEXT debugReportCreateInfo2 = debugReportCreateInfo;
+        VkDebugReportCallbackEXT debugReportCallback;
+		auto createDebugReportFunc = (PFN_vkCreateDebugReportCallbackEXT)m_instance.getProcAddr("vkCreateDebugReportCallbackEXT");
+        if (createDebugReportFunc)
+        {
+            createDebugReportFunc(m_instance, &debugReportCreateInfo2, nullptr, &debugReportCallback);
+            m_debugReportCallback = debugReportCallback;
+        }
     }
 
     return true;
@@ -291,6 +337,11 @@ void Instance::destroy()
             auto destroyMessengerFunc = (PFN_vkDestroyDebugUtilsMessengerEXT)m_instance.getProcAddr("vkDestroyDebugUtilsMessengerEXT");
             destroyMessengerFunc(m_instance, m_debugMessenger, nullptr);
         }
+		if (m_debugReportCallback)
+		{
+			auto destroyDebugReportFunc = (PFN_vkDestroyDebugReportCallbackEXT)m_instance.getProcAddr("vkDestroyDebugReportCallbackEXT");
+			destroyDebugReportFunc(m_instance, m_debugReportCallback, nullptr);
+		}
         m_instance.destroy();
     }
     m_instance = nullptr;

@@ -5,7 +5,7 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 #extension GL_EXT_nonuniform_qualifier : enable
-#extension GL_EXT_debug_printf : enable
+//#extension GL_EXT_debug_printf : enable
 
 #include "shared.inc.glsl"
 
@@ -60,6 +60,10 @@ layout (binding = 7) uniform sampler2D u_textures[];
 layout (binding = 8) uniform sampler2DArrayShadow u_shadowMap;      // comparison sampler (hardware PCF)
 layout (binding = 9) uniform sampler2DArray u_shadowMapDepth;       // raw depth (PCSS blocker search)
 
+// GI irradiance probes (diffuse indirect). Fixed camera-anchored volume; written by the probe-trace pass.
+layout (binding = 10, std430) readonly buffer ProbeShBuffer { float probe_sh[]; };
+layout (binding = 11, std430) readonly buffer GiVolumeBuffer { ivec4 u_giVolumeMin; }; // xyz = volume min probe coord
+
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
 layout (location = 4) in vec2 in_uv;
@@ -73,6 +77,9 @@ layout (location = 0) out vec4 out_color;
 #define GRID_TABLE_NAME 	   in_gridTable
 #define TABLE_SIZE_NAME        in_tableSize
 #include "light_grid.inc.glsl"
+
+#define PROBE_SH_NAME          probe_sh
+#include "gi_probe.inc.glsl"
 
 float squareFalloff(float dist, float lightRadius) 
 {
@@ -385,12 +392,14 @@ void main()
 	const float roughnessSq = roughness * roughness;
 	const vec3 matColOverPi = materialColor / PI;
 	
-	const float ambient = 0.10f;
-	vec3 color = materialColor * ambient;
+	// Diffuse global illumination: sample the ray-traced SH irradiance probes from the fixed volume.
+	// evalProbeSH returns the cosine-convolved irradiance E(N); Lambertian indirect = albedo/PI * E.
+	// Falls back to a small flat ambient outside the probe volume.
+	const vec3 indirectE = evalProbeSH(in_pos, N, u_giVolumeMin.xyz);
+	vec3 color = (indirectE.x >= 0.0) ? materialColor * (indirectE / PI) : materialColor * 0.10;
 
 	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
 	//color = mix(color, cascadeDebugColor(getSunCascade(in_pos)), 0.35);
-
 	const ivec3 gridPos = getGridPos(in_pos);
     uint tableIdx = getTableIdx(gridPos);
 	

@@ -1,0 +1,105 @@
+// Diffuse-only direct lighting used to shade GI ray-trace hits. It reuses the exact same world-space
+// light grid as the main forward pass (light_grid.inc.glsl accessors) plus the sun, so an indirect
+// bounce is lit consistently with primary surfaces. Reflections/specular are intentionally dropped
+// (probes only store diffuse irradiance).
+//
+// Requires the includer to have declared/included, with these names:
+//   - struct LightInfo + in_lightInfos[]              (the light list)
+//   - the light grid buffers + #include "light_grid.inc.glsl"
+//   - UBO fields: u_viewPos, u_sunDirection, u_sunColor, u_cascadeViewProj[NUM_SHADOW_CASCADES]
+//   - u_shadowMap (sampler2DArrayShadow)
+//   - PI, NUM_SHADOW_CASCADES (shared.inc.glsl)
+
+#ifndef LIGHTING_INC_GLSL
+#define LIGHTING_INC_GLSL
+
+float giSquareFalloff(float dist, float lightRadius)
+{
+    float attenuation = 1.0 / (dist * dist + 1.0);
+    float dr = dist / lightRadius;
+    float dr2 = dr * dr;
+    float falloff = clamp(1.0 - dr2 * dr2, 0.0, 1.0);
+    falloff *= falloff;
+    return attenuation * falloff;
+}
+
+// Hard single-tap cascaded sun shadow. A trimmed version of shadows.inc.glsl's PCSS that avoids its
+// gl_FragCoord-based dither (unavailable in compute); cheap and leak-free enough for diffuse GI.
+float giSunShadow(vec3 worldPos, vec3 N)
+{
+    float dist = length(worldPos - u_viewPos);
+    int cascade = NUM_SHADOW_CASCADES - 1;
+    for (int i = 0; i < NUM_SHADOW_CASCADES; ++i)
+    {
+        if (dist < u_cascadeViewProj[i][0][3]) { cascade = i; break; } // per-cascade far stashed in m[0][3]
+    }
+    mat4 m = u_cascadeViewProj[cascade];
+    m[0][3] = 0.0; m[1][3] = 0.0; m[2][3] = 0.0; m[3][3] = 1.0; // restore canonical bottom row
+    vec4 lp = m * vec4(worldPos + N * 0.1, 1.0);
+    vec3 proj = lp.xyz / lp.w;
+    vec2 uv = proj.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || proj.z > 1.0)
+        return 1.0;
+    return texture(u_shadowMap, vec4(uv, float(cascade), proj.z - 0.0015));
+}
+
+// Incoming irradiance (radiance * NdotL, colored) from one grid light. Point/spot use the real falloff
+// and cone; area/tube lights are approximated as a point at their center (low-frequency diffuse only).
+vec3 giLightIrradiance(LightInfo light, vec3 pos, vec3 N)
+{
+    vec3 toLight = light.pos - pos;
+    float dist = length(toLight);
+    vec3 L = toLight / max(dist, 1e-4);
+    float NdotL = max(dot(N, L), 0.0);
+    if (NdotL <= 0.0)
+        return vec3(0.0);
+
+    vec3 rad = light.color * giSquareFalloff(dist, abs(light.range));
+    if (light.width < 0.0) // spot light: rotation = cone half-angle, |direction| = edge softness
+    {
+        float softness = length(light.direction);
+        float cosAngle = dot(-L, light.direction / max(softness, 1e-4));
+        float cosOuter = cos(light.rotation);
+        float cosInner = mix(cosOuter, 1.0, softness);
+        rad *= smoothstep(cosOuter, cosInner, cosAngle);
+    }
+    return rad * NdotL;
+}
+
+// Full diffuse direct lighting at a world position: sun (shadowed) + all grid lights, times albedo/PI.
+vec3 giGatherDirect(vec3 pos, vec3 N, vec3 albedo)
+{
+    vec3 E = vec3(0.0);
+
+    vec3 sunL = normalize(u_sunDirection.xyz);
+    float sunNdotL = max(dot(N, sunL), 0.0);
+    if (sunNdotL > 0.0)
+        E += u_sunColor.rgb * giSunShadow(pos, N) * sunNdotL;
+
+    const ivec3 gridPos = getGridPos(pos);
+    uint tableIdx = getTableIdx(gridPos);
+    while (true)
+    {
+        const uint gridIdx = getGridIdx(tableIdx);
+        if (gridIdx == EMPTY_ENTRY)
+            break;
+        const ivec3 gridMin = getGridMin(gridIdx);
+        if (gridMin == gridPos)
+        {
+            const uint numLargeLights = getLargeLightCount(gridIdx);
+            for (uint i = 0; i < min(numLargeLights, MAX_LARGE_LIGHTS_PER_GRID); ++i)
+                E += giLightIrradiance(in_lightInfos[getLargeLightId(gridIdx, i)], pos, N);
+
+            const uint cellOffset = calcCellOffset(gridIdx, gridMin, pos);
+            const uint numLights  = getNumLightsForCell(cellOffset);
+            for (uint i = 0; i < min(numLights, MAX_LIGHTCELL_LIGHTS); ++i)
+                E += giLightIrradiance(in_lightInfos[getLightId(cellOffset, i)], pos, N);
+            break;
+        }
+        tableIdx = getNextTableIdx(tableIdx);
+    }
+
+    return albedo * (E / PI);
+}
+
+#endif

@@ -10,9 +10,9 @@ IndirectCommandsLayout::~IndirectCommandsLayout()
     destroy();
 }
 
-bool IndirectCommandsLayout::initialize(vk::PipelineLayout pipelineLayout, vk::ShaderStageFlags shaderStages)
+bool IndirectCommandsLayout::initialize(vk::PipelineLayout pipelineLayout, vk::ShaderStageFlags shaderStages, bool useExecutionSet)
 {
-    // Token 0: select the pipeline variant for this sequence from the Indirect Execution Set.
+    // Token 0 (optional): select the pipeline variant for this sequence from the Indirect Execution Set.
     vk::IndirectCommandsExecutionSetTokenEXT executionSetToken{
         .type = vk::IndirectExecutionSetInfoTypeEXT::ePipelines,
         .shaderStages = shaderStages,
@@ -20,18 +20,20 @@ bool IndirectCommandsLayout::initialize(vk::PipelineLayout pipelineLayout, vk::S
     vk::IndirectCommandsTokenDataEXT executionSetTokenData;
     executionSetTokenData.pExecutionSet = &executionSetToken;
 
-    std::array<vk::IndirectCommandsLayoutTokenEXT, 2> tokens{
-        vk::IndirectCommandsLayoutTokenEXT{
+    // Always present: DRAW_INDEXED carries no token data struct; its buffer payload is a VkDrawIndexedIndirectCommand.
+    std::vector<vk::IndirectCommandsLayoutTokenEXT> tokens;
+    if (useExecutionSet)
+    {
+        tokens.push_back(vk::IndirectCommandsLayoutTokenEXT{
             .type = vk::IndirectCommandsTokenTypeEXT::eExecutionSet,
             .data = executionSetTokenData,
             .offset = offsetof(RendererVKLayout::IndirectDrawSequence, pipelineIndex),
-        },
-        // DRAW_INDEXED carries no token data struct; its buffer payload is a VkDrawIndexedIndirectCommand.
-        vk::IndirectCommandsLayoutTokenEXT{
-            .type = vk::IndirectCommandsTokenTypeEXT::eDrawIndexed,
-            .offset = offsetof(RendererVKLayout::IndirectDrawSequence, indexCount),
-        },
-    };
+        });
+    }
+    tokens.push_back(vk::IndirectCommandsLayoutTokenEXT{
+        .type = vk::IndirectCommandsTokenTypeEXT::eDrawIndexed,
+        .offset = offsetof(RendererVKLayout::IndirectDrawSequence, indexCount),
+    });
 
     m_indirectStride = (uint32)sizeof(RendererVKLayout::IndirectDrawSequence);
 
