@@ -76,7 +76,7 @@ public:
     {
         glm::vec3 zenith   = glm::vec3(0.20f, 0.40f, 0.85f);
         glm::vec3 horizon  = glm::vec3(0.55f, 0.65f, 0.85f);
-        glm::vec3 ground   = glm::vec3(0.20f, 0.20f, 0.22f);
+        glm::vec3 ground   = glm::vec3(0.0f);
         glm::vec3 up       = glm::vec3(0.0f, 1.0f, 0.0f); // sky-up axis; set to the local up on a planet
         float intensity     = 1.0f;
         float sunAngularCos = 0.9999f; // ~0.8 deg disc; 1.0 disables the disc

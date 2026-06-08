@@ -28,13 +28,13 @@
 // of two and match RendererVKLayout::GI_GRID_CUBE_SIZE. GI_MAX_CELL_LOG2 should be log2(GI_GRID_SIZE) so
 // the coarsest cube is a single cell.
 #ifndef GI_GRID_SIZE
-#define GI_GRID_SIZE 32
+#define GI_GRID_SIZE 16
 #endif
 #ifndef GI_MIN_CELL_LOG2
-#define GI_MIN_CELL_LOG2 2 // smallest probe cell = 1<<2 = 4 world units (floor; lights may go finer)
+#define GI_MIN_CELL_LOG2 1 // smallest probe cell = 1<<2 = 4 world units (floor; lights may go finer)
 #endif
 #ifndef GI_MAX_CELL_LOG2
-#define GI_MAX_CELL_LOG2 5 // largest probe cell = 1<<5 = 32 (== GI_GRID_SIZE)
+#define GI_MAX_CELL_LOG2 4 // largest probe cell = 1<<4 = 16 (== GI_GRID_SIZE)
 #endif
 #ifndef GI_CELL_DIST_SCALE
 #define GI_CELL_DIST_SCALE 1.0 // cellLog2 = floor(scale * sqrt(viewDist)); 0.25 matches the light grid

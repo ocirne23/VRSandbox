@@ -690,8 +690,8 @@ void Renderer::recordCommandBuffers()
         // irradiance forward from the previous frame's (prev) grid. The cur buffers are cleared inside
         // recordAlloc; the prev buffers are last frame's cur (read-only here; the frame fence guarantees
         // they are no longer being written).
-        const glm::ivec3 regionMin = glm::ivec3(glm::floor(m_cameraPos / float(RendererVKLayout::GI_GRID_CUBE_SIZE)))
-                                   - glm::ivec3(RendererVKLayout::GI_REGION_RADIUS);
+        glm::ivec3 centerPos = glm::ivec3(0, 0, 0);
+        const glm::ivec3 regionMin = centerPos - glm::ivec3(RendererVKLayout::GI_REGION_RADIUS);
         GIProbePipeline::AllocParams allocParams{
             .regionMin = regionMin,
             .regionDim = uint32(2 * RendererVKLayout::GI_REGION_RADIUS + 1),
