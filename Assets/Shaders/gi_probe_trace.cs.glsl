@@ -154,6 +154,18 @@ vec3 skyRadiance(vec3 dir)
     return sky * pc.skyIntensity;
 }
 
+// View-independent sun visibility from a point: one shadow ray toward the sun via the TLAS. Returns 1
+// (lit) or 0 (occluded). Used per-probe (shared by all gather rays) so off-screen probes are shadowed
+// correctly, unlike the camera-frustum-fit shadow maps.
+float sunVisibility(vec3 origin)
+{
+    vec3 sunDir = normalize(u_sunDirection.xyz);
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFFu, origin, 0.05, sunDir, 1.0e4);
+    while (rayQueryProceedEXT(rq)) {}
+    return (rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionTriangleEXT) ? 0.0 : 1.0;
+}
+
 vec3 traceRadiance(vec3 origin, vec3 dir)
 {
     rayQueryEXT rq;
@@ -226,6 +238,10 @@ void main()
         return;
 
     const vec3 probeCenter = giCellCenter(gridIdx, c);
+
+    // One view-independent sun-shadow ray per probe, shared by all gather rays this frame (cheap; avoids
+    // the camera shadow map's frustum-coverage gaps that make off-screen probes flash bright then darken).
+    g_sunShadowOverride = sunVisibility(probeCenter);
 
     const uint N = max(pc.numRays, 1u);
     const float wsh = 4.0 * PI / float(N);

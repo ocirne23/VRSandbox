@@ -66,6 +66,12 @@ vec3 giLightIrradiance(LightInfo light, vec3 pos, vec3 N)
     return rad * NdotL;
 }
 
+// Optional sun-shadow override: when >= 0, giGatherDirect uses this value instead of the cascade shadow
+// map (giSunShadow). The GI probe trace sets it to a view-independent, ray-traced per-probe visibility so
+// off-screen probes are shadowed correctly (the camera shadow maps only cover the view frustum). The
+// fragment shader never sets it, so it keeps using giSunShadow.
+float g_sunShadowOverride = -1.0;
+
 // Full diffuse direct lighting at a world position: sun (shadowed) + all grid lights, times albedo/PI.
 vec3 giGatherDirect(vec3 pos, vec3 N, vec3 albedo)
 {
@@ -74,7 +80,10 @@ vec3 giGatherDirect(vec3 pos, vec3 N, vec3 albedo)
     vec3 sunL = normalize(u_sunDirection.xyz);
     float sunNdotL = max(dot(N, sunL), 0.0);
     if (sunNdotL > 0.0)
-        E += u_sunColor.rgb * giSunShadow(pos, N) * sunNdotL;
+    {
+        float sunShadow = (g_sunShadowOverride >= 0.0) ? g_sunShadowOverride : giSunShadow(pos, N);
+        E += u_sunColor.rgb * sunShadow * sunNdotL;
+    }
 
     const ivec3 gridPos = getGridPos(pos);
     uint tableIdx = getTableIdx(gridPos);
