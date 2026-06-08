@@ -60,9 +60,16 @@ layout (binding = 7) uniform sampler2D u_textures[];
 layout (binding = 8) uniform sampler2DArrayShadow u_shadowMap;      // comparison sampler (hardware PCF)
 layout (binding = 9) uniform sampler2DArray u_shadowMapDepth;       // raw depth (PCSS blocker search)
 
-// GI irradiance probes (diffuse indirect). Fixed camera-anchored volume; written by the probe-trace pass.
-layout (binding = 10, std430) readonly buffer ProbeShBuffer { float probe_sh[]; };
-layout (binding = 11, std430) readonly buffer GiVolumeBuffer { ivec4 u_giVolumeMin; }; // xyz = volume min probe coord
+// GI irradiance probes (diffuse indirect). World-space probe hash grid (this frame's / cur buffers),
+// written by the probe alloc+trace passes.
+layout (binding = 10, std430) readonly buffer GiGridData { uint gi_gridData[]; };
+layout (binding = 11, std430) readonly buffer GiTable
+{
+    uint gi_numGrids;
+    uint gi_gridCounter;
+    uint gi_tableSize;
+    uint gi_table[];
+};
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
@@ -78,7 +85,9 @@ layout (location = 0) out vec4 out_color;
 #define TABLE_SIZE_NAME        in_tableSize
 #include "light_grid.inc.glsl"
 
-#define PROBE_SH_NAME          probe_sh
+#define GI_GRID_DATA_NAME      gi_gridData
+#define GI_TABLE_NAME          gi_table
+#define GI_TABLE_SIZE_NAME     gi_tableSize
 #include "gi_probe.inc.glsl"
 
 float squareFalloff(float dist, float lightRadius) 
@@ -395,7 +404,7 @@ void main()
 	// Diffuse global illumination: sample the ray-traced SH irradiance probes from the fixed volume.
 	// evalProbeSH returns the cosine-convolved irradiance E(N); Lambertian indirect = albedo/PI * E.
 	// Falls back to a small flat ambient outside the probe volume.
-	const vec3 indirectE = evalProbeSH(in_pos, N, u_giVolumeMin.xyz);
+	const vec3 indirectE = evalProbeSH(in_pos, N);
 	vec3 color = materialColor * (indirectE / PI);//(indirectE.x >= 0.0) ? materialColor * (indirectE / PI) : materialColor * 0.10;
 
 	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
@@ -431,6 +440,16 @@ void main()
 		}
 		tableIdx = getNextTableIdx(tableIdx);
 	}
+
+	// GI probe debug visualization. Set GI_DEBUG_VIZ to 1 to tint surfaces by probe cellSize/LOD band
+	// (red=4, green=8, blue=16, yellow=32) with a per-cell checker that reveals probe spacing/density;
+	// black = no probe grid here. Set to 2 to show the raw probe irradiance instead.
+	#define GI_DEBUG_VIZ 0
+	#if GI_DEBUG_VIZ == 1
+		color = giDebugColor(in_pos, N);
+	#elif GI_DEBUG_VIZ == 2
+		color = (indirectE.x >= 0.0) ? indirectE / PI : vec3(0.0);
+	#endif
 
 	out_color = vec4(color, min(diffuseSample.a, material.opacity));
 }

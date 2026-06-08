@@ -39,8 +39,8 @@ public:
 		Buffer& lightGridsBuffer;
 		Buffer& lightTableBuffer;
 
-		Buffer& probeShBuffer;       // GI diffuse irradiance probe volume (read in the fragment shader)
-		Buffer& giVolumeBuffer;      // ivec4 volume min corner
+		Buffer& giGridDataBuffer;    // GI probe grid SH cells (cur frame; read in the fragment shader)
+		Buffer& giTableBuffer;       // GI probe grid hash table (cur frame)
 
 		vk::ImageView shadowMapView;       // sun cascaded shadow map (e2DArray depth)
 		vk::Sampler shadowMapSampler;      // comparison sampler for PCF

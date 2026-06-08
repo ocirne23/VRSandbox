@@ -165,6 +165,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     m_lightGridComputePipeline.initialize();
     m_accelStructure.initialize();
     m_giProbePipeline.initialize();
+    m_giProbePipeline.initializeDebug(m_renderPass);
 
     for (ShadowMap& shadowMap : m_shadowMaps)
         shadowMap.initialize();
@@ -190,6 +191,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         perFrame.shadowCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.shadowDrawCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.globalIllumCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.giProbeDebugCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
 
         perFrame.ubo.initialize(sizeof(RendererVKLayout::Ubo),
             vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst,
@@ -293,6 +295,7 @@ void Renderer::reloadShaders()
     m_shadowCullComputePipeline.reloadShaders();
     m_shadowMapGraphicsPipeline.reloadShaders();
     m_giProbePipeline.reloadShaders();
+    m_giProbePipeline.reloadDebugShaders();
 
     setHaveToRecordCommandBuffers();
     printf("Reloaded shaders\n");
@@ -588,8 +591,8 @@ void Renderer::recordCommandBuffers()
                 .lightInfosBuffer = frameData.lightInfosBuffer,
                 .lightGridsBuffer = frameData.lightGridsBuffer,
                 .lightTableBuffer = frameData.lightTableBuffer,
-                .probeShBuffer = m_giProbePipeline.getProbeShBuffer(),
-                .giVolumeBuffer = m_giProbePipeline.getGiVolumeBuffer(frameIdx),
+                .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(frameIdx),
+                .giTableBuffer = m_giProbePipeline.getGiTableBuffer(frameIdx),
                 .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
                 .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
                 .shadowMapDepthSampler = m_shadowMaps[frameIdx].getDepthSampler(),
@@ -598,6 +601,21 @@ void Renderer::recordCommandBuffers()
             staticMeshCommandBuffer.end();
         }
         frameData.updated = true;
+    }
+
+    // GI probe debug visualization (re-recorded every frame so the toggle/mode take effect immediately;
+    // executed inside the main render pass only when enabled). Reads this frame's probe grid buffers.
+    {
+        CommandBuffer& dbgCommandBuffer = frameData.giProbeDebugCommandBuffer;
+        vk::CommandBuffer vkDbgCommandBuffer = dbgCommandBuffer.begin(false, &inheritanceInfo);
+        const glm::ivec2 vpSize = m_viewportRect.getSize();
+        const vk::Viewport viewport{ .x = (float)m_viewportRect.min.x, .y = (float)m_viewportRect.max.y,
+            .width = (float)vpSize.x, .height = -((float)vpSize.y), .minDepth = 0.0f, .maxDepth = 1.0f };
+        const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+        vkDbgCommandBuffer.setViewport(0, { viewport });
+        vkDbgCommandBuffer.setScissor(0, { scissor });
+        m_giProbePipeline.recordDebugDraw(dbgCommandBuffer, frameIdx, frameData.ubo, m_giProbeDebugRadius, m_giProbeDebugMode);
+        dbgCommandBuffer.end();
     }
 
     {
@@ -668,11 +686,24 @@ void Renderer::recordCommandBuffers()
         fullBarrier(vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
             vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderStorageRead);
 
-        // 5. Anchor the fixed probe volume
-        const glm::ivec3 camProbe = glm::ivec3(0, -10, 0);// glm::round(m_cameraPos / RendererVKLayout::GI_PROBE_SPACING));
-        const glm::ivec3 volumeMin = camProbe - glm::ivec3((int)RendererVKLayout::GI_PROBE_DIM / 2);
-        m_giProbePipeline.setVolumeMin(frameIdx, volumeMin);
-        // 6. Trace rays per probe and temporally blend irradiance into the SH.
+        // 5. Allocate the camera-region probe cubes into this frame's (cur) probe grid and carry the
+        // irradiance forward from the previous frame's (prev) grid. The cur buffers are cleared inside
+        // recordAlloc; the prev buffers are last frame's cur (read-only here; the frame fence guarantees
+        // they are no longer being written).
+        const glm::ivec3 regionMin = glm::ivec3(glm::floor(m_cameraPos / float(RendererVKLayout::GI_GRID_CUBE_SIZE)))
+                                   - glm::ivec3(RendererVKLayout::GI_REGION_RADIUS);
+        GIProbePipeline::AllocParams allocParams{
+            .regionMin = regionMin,
+            .regionDim = uint32(2 * RendererVKLayout::GI_REGION_RADIUS + 1),
+            .viewPos = m_cameraPos,
+        };
+        m_giProbePipeline.recordAlloc(globalIllumCommandBuffer, frameIdx, allocParams);
+
+        // alloc (table/gridData/work-list writes) -> trace reads
+        fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
+            vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite);
+
+        // 6. Trace rays per probe cell and temporally blend irradiance into the SH.
         GIProbePipeline::TraceParams traceParams{
             .ubo = frameData.ubo,
             .lightInfos = frameData.lightInfosBuffer,
@@ -686,7 +717,6 @@ void Renderer::recordCommandBuffers()
             .tlas = m_accelStructure.getTlas(frameIdx),
             .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
             .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
-            .volumeMin = volumeMin,
             .frameIndex = m_frameCounter,
         };
         m_giProbePipeline.recordTrace(globalIllumCommandBuffer, frameIdx, traceParams);
@@ -704,6 +734,7 @@ void Renderer::recordCommandBuffers()
     vk::CommandBuffer vkShadowCullCommandBuffer = frameData.shadowCullCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkShadowDrawCommandBuffer = frameData.shadowDrawCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkGlobalIllumCommandBuffer = frameData.globalIllumCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkGiProbeDebugCommandBuffer = frameData.giProbeDebugCommandBuffer.getCommandBuffer();
 
     vk::CommandBuffer vkImguiCommandBuffer = frameData.imguiCommandBuffer.begin(true, &inheritanceInfo);
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkImguiCommandBuffer, nullptr);
@@ -757,6 +788,8 @@ void Renderer::recordCommandBuffers()
     vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eSecondaryCommandBuffers);
     if (m_meshInfoCounter > 0)
         vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
+    if (m_giProbeDebugEnabled)
+        vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
     vkCommandBuffer.executeCommands(1, &vkImguiCommandBuffer);
     vkCommandBuffer.endRenderPass();
     commandBuffer.end();

@@ -70,11 +70,23 @@ layout (binding = 8, std430) readonly buffer InInstances   { InMeshInstance in_i
 layout (binding = 9, std430) readonly buffer InMaterials   { MaterialInfo in_materialInfos[]; };
 layout (binding = 10) uniform sampler2D u_textures[];
 layout (binding = 11) uniform sampler2DArrayShadow u_shadowMap;
-layout (binding = 12, std430) coherent buffer ProbeShBuffer { float probe_sh[]; };
+// GI probe grid (this frame's / cur buffers): SH read+write, table for the multi-bounce lookup, work list.
+layout (binding = 12, std430) coherent buffer GiGridData { uint gi_gridData[]; };
+layout (binding = 13, std430) coherent buffer GiTable
+{
+    uint gi_numGrids;
+    uint gi_gridCounter;
+    uint gi_tableSize;
+    uint gi_table[];
+};
+layout (binding = 14, std430) readonly buffer GiGridList
+{
+    uint gi_gridListCount;
+    uint gi_gridList[];
+};
 
 layout (push_constant) uniform PushConstants
 {
-    ivec3 volumeMin; // probe-coordinate of the volume's min corner (world/spacing, snapped to the camera)
     uint  frameIndex;
     uint  numRays;
     float temporalAlpha;
@@ -89,9 +101,13 @@ layout (push_constant) uniform PushConstants
 #include "light_grid.inc.glsl"
 #include "lighting.inc.glsl"
 
-// GI probe volume (read + write).
+// GI probe grid (read + write).
 #define GI_PROBE_WRITE
-#define PROBE_SH_NAME probe_sh
+#define GI_GRID_DATA_NAME    gi_gridData
+#define GI_TABLE_NAME        gi_table
+#define GI_TABLE_SIZE_NAME   gi_tableSize
+#define GI_NUM_GRIDS_NAME    gi_numGrids
+#define GI_GRID_COUNTER_NAME gi_gridCounter
 #include "gi_probe.inc.glsl"
 
 uint hashU(uint x)
@@ -169,8 +185,9 @@ vec3 traceRadiance(vec3 origin, vec3 dir)
     const vec3 albedo = textureLod(u_textures[nonuniformEXT(diffuseTexIdx)], uv, GI_ALBEDO_LOD).rgb;
 
     vec3 radiance = giGatherDirect(worldPos, worldN, albedo);
-    // Previous-frame indirect at the hit -> multi-bounce (infinite, temporally).
-    vec3 prevE = evalProbeSH(worldPos, worldN, pc.volumeMin);
+    // Previous-frame indirect at the hit -> multi-bounce (infinite, temporally). The cur SH already holds
+    // the carried-forward irradiance for this frame.
+    vec3 prevE = evalProbeSH(worldPos, worldN);
     if (prevE.x >= 0.0)
         radiance += albedo * (prevE / PI);
     return radiance;
@@ -181,15 +198,18 @@ layout(local_size_x = 64) in;
 void main()
 {
     const uint id = gl_GlobalInvocationID.x;
-    if (id >= uint(GI_PROBE_DIM * GI_PROBE_DIM * GI_PROBE_DIM))
+    const uint g  = id / uint(GI_MAX_CELLS_PER_GRID);
+    const uint c  = id - g * uint(GI_MAX_CELLS_PER_GRID);
+    if (g >= gi_gridListCount)
         return;
 
-    const uint z = id / uint(GI_PROBE_DIM * GI_PROBE_DIM);
-    const uint rem = id - z * uint(GI_PROBE_DIM * GI_PROBE_DIM);
-    const uint y = rem / uint(GI_PROBE_DIM);
-    const uint x = rem - y * uint(GI_PROBE_DIM);
-    const ivec3 local = ivec3(int(x), int(y), int(z));
-    const vec3 probeCenter = vec3(pc.volumeMin + local) * GI_PROBE_SPACING;
+    const uint gridIdx  = gi_gridList[g];
+    const uint cellSize = giGetCellSize(gridIdx);
+    const uint nc       = giNumCellsPerAxis(cellSize);
+    if (c >= nc * nc * nc)
+        return;
+
+    const vec3 probeCenter = giCellCenter(gridIdx, c);
 
     const uint N = max(pc.numRays, 1u);
     const float wsh = 4.0 * PI / float(N);
@@ -207,5 +227,5 @@ void main()
         c3 += radiance * (Y.w * wsh);
     }
 
-    probeBlendSH(id, c0, c1, c2, c3, pc.temporalAlpha);
+    giBlendCell(giCellBase(gridIdx, c), c0, c1, c2, c3, pc.temporalAlpha);
 }

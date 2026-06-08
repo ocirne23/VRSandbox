@@ -29,12 +29,6 @@ void AccelerationStructure::initialize()
         vk::BufferUsageFlagBits::eStorageBuffer,
         vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
     m_mappedBlasAddresses = m_blasAddressBuffer.mapMemory<uint64>();
-    // Zero every slot up front: only meshes that get a BLAS built write their address, but the instance
-    // compute looks up in_blasAddresses[meshIdx] unconditionally. An unwritten slot would otherwise hand
-    // the TLAS a garbage 64-bit BLAS reference -> ray traversal MMU-faults. A null reference is treated as
-    // an inactive instance by the driver, so zero is the safe default.
-    memset(m_mappedBlasAddresses.data(), 0, m_mappedBlasAddresses.size_bytes());
-    m_blasAddressBuffer.flushMappedMemory(m_blasAddressBuffer.getSize());
 }
 
 void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& outAlignedAddr, vk::DeviceSize needed)

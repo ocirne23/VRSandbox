@@ -71,6 +71,10 @@ public:
 
     void reloadShaders();
 
+    // GI probe debug visualization: instanced cubes at every live probe cell.
+    void toggleGiProbeDebug() { m_giProbeDebugEnabled = !m_giProbeDebugEnabled; }
+    void cycleGiProbeDebugMode() { m_giProbeDebugMode ^= 1u; } // 0 = irradiance, 1 = cellSize/LOD
+
     void setWindowMinimized(bool minimized);
     void recreateWindowSurface(Window& window);
     void setViewportRect(const Rect& rect) { if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } }
@@ -197,6 +201,7 @@ private:
         CommandBuffer shadowCullCommandBuffer;
         CommandBuffer shadowDrawCommandBuffer;
         CommandBuffer globalIllumCommandBuffer;
+        CommandBuffer giProbeDebugCommandBuffer;
 
         bool updated = false;
         Buffer ubo;
@@ -221,6 +226,10 @@ private:
     Rect m_viewportRect = Rect();
     bool m_windowMinimized = false;
     bool m_vsyncEnabled = true;
+
+    bool   m_giProbeDebugEnabled = false;
+    uint32 m_giProbeDebugMode = 0;
+    float  m_giProbeDebugRadius = 0.12f;
 };
 
 export namespace Globals

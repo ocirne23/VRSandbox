@@ -317,12 +317,12 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
         DescriptorSetUpdateInfo{
             .binding = 10,
             .type = vk::DescriptorType::eStorageBuffer,
-            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.probeShBuffer.getBuffer(), .range = params.probeShBuffer.getSize() } }
+            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.giGridDataBuffer.getBuffer(), .range = params.giGridDataBuffer.getSize() } }
         },
         DescriptorSetUpdateInfo{
             .binding = 11,
             .type = vk::DescriptorType::eStorageBuffer,
-            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.giVolumeBuffer.getBuffer(), .range = params.giVolumeBuffer.getSize() } }
+            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.giTableBuffer.getBuffer(), .range = params.giTableBuffer.getSize() } }
         },
 
         DescriptorSetUpdateInfo{

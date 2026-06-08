@@ -7,31 +7,31 @@ import :VK;
 import :Buffer;
 import :CommandBuffer;
 import :ComputePipeline;
+import :GraphicsPipeline;
+import :RenderPass;
 import :DescriptorSet;
 import :Sampler;
 import :Layout;
 
-// Diffuse GI probe system over a fixed DIM^3 camera-anchored probe volume (no hash grid). Two compute
-// passes:
+// Diffuse GI probe system over a persistent, world-space probe hash grid (sibling of the light grid). The
+// grid buffers (hash table, grid data / SH, work list) are ping-ponged prev/cur across frames so probe
+// irradiance is carried forward temporally. Three compute passes per frame:
 //   1. TLAS-instance pass : writes the per-instance VkAccelerationStructureInstanceKHR array on the GPU.
-//   2. Trace pass         : ray-queries the TLAS per probe, shades hits (reusing the light grid + sun),
-//                           and temporally blends the result into each probe's SH-L1.
-// The TLAS is built by the AccelerationStructure object between passes 1 and 2 (orchestrated by the
-// Renderer). The volume's min corner is written to a small buffer each frame (read by the fragment pass).
+//   2. Alloc+carry pass   : inserts camera-region cubes into the cur grid and carries SH from the prev grid.
+//   3. Trace pass         : ray-queries the TLAS per probe cell, shades hits (reusing the light grid + sun),
+//                           and temporally blends the result into each cell's SH-L1.
+// The TLAS is built by the AccelerationStructure object between passes 1 and 2 (orchestrated by the Renderer).
 export class GIProbePipeline final
 {
 public:
     void initialize();
     void reloadShaders();
 
-    // One-time clear of the persistent probe SH (it accumulates across frames thereafter).
+    // One-time clear of BOTH ping-pong grid tables (so the first frames' prev lookups are empty).
     void recordClearPersistent(CommandBuffer& commandBuffer);
     bool needsClear() const { return !m_cleared; }
     void markCleared() { m_cleared = true; }
     void doClear() { m_cleared = false; }
-
-    // Writes the current volume min corner (probe-coordinate units) into this frame's volume buffer.
-    void setVolumeMin(uint32 frameIdx, glm::ivec3 volumeMin);
 
     struct TlasInstanceParams
     {
@@ -42,6 +42,15 @@ public:
         uint32 numInstances;
     };
     void recordTlasInstances(CommandBuffer& commandBuffer, uint32 frameIdx, TlasInstanceParams& params);
+
+    struct AllocParams
+    {
+        glm::ivec3 regionMin; // grid-cube coord of the region's min corner
+        uint32     regionDim; // cubes per axis (2*radius + 1)
+        glm::vec3  viewPos;   // camera position (drives per-cube cellSize)
+    };
+    // Clears the cur grid table/work-list and inserts+carries the camera-region cubes.
+    void recordAlloc(CommandBuffer& commandBuffer, uint32 frameIdx, const AllocParams& params);
 
     struct TraceParams
     {
@@ -57,27 +66,39 @@ public:
         vk::AccelerationStructureKHR tlas;
         vk::ImageView shadowMapView;
         vk::Sampler shadowMapSampler;
-        glm::ivec3 volumeMin;
-        uint32 frameIndex;
+        uint32 frameIndex;       // free-running frame counter (RNG seed)
     };
     void recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx, TraceParams& params);
 
+    // Debug visualization: instanced cubes at every live probe cell, drawn into the main color pass.
+    // initializeDebug must be called after the main render pass exists.
+    void initializeDebug(const RenderPass& renderPass);
+    void reloadDebugShaders();
+    void recordDebugDraw(CommandBuffer& commandBuffer, uint32 frameIdx, Buffer& ubo, float radius, uint32 mode);
+
     Buffer& getTlasInstanceBuffer(uint32 frameIdx) { return m_tlasInstanceBuffer[frameIdx]; }
-    Buffer& getProbeShBuffer()      { return m_probeSh; }
-    Buffer& getGiVolumeBuffer(uint32 frameIdx) { return m_giVolumeBuffer[frameIdx]; }
+    // cur grid buffers for the given frame (consumed by the main pass's fragment shader).
+    Buffer& getGiGridDataBuffer(uint32 frameIdx) { return m_giGridData[frameIdx]; }
+    Buffer& getGiTableBuffer(uint32 frameIdx)    { return m_giTable[frameIdx]; }
 
 private:
     void buildTlasInstanceLayout(ComputePipelineLayout& layout);
+    void buildAllocLayout(ComputePipelineLayout& layout);
     void buildTraceLayout(ComputePipelineLayout& layout);
+    void buildDebugLayout(GraphicsPipelineLayout& layout);
+    void recordClearCur(CommandBuffer& commandBuffer, uint32 frameIdx);
 
     ComputePipeline m_tlasInstancePipeline;
+    ComputePipeline m_allocPipeline;
     ComputePipeline m_tracePipeline;
+    GraphicsPipeline m_debugPipeline;
+    const RenderPass* m_debugRenderPass = nullptr;
 
-    Buffer m_probeSh;            // persistent SH-L1 volume (GI_PROBE_COUNT * GI_SH_STRIDE floats)
-    // Per-frame volume min corner (host-visible ivec4): written by the CPU each frame and read by that
-    // frame's fragment pass; double-buffered so the CPU write can't race the previous frame's GPU read.
-    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_giVolumeBuffer;
-    std::array<std::span<int32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_mappedVolume;
+    // Persistent probe grid, ping-ponged by frame-in-flight index (prev = the other index).
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_giTable;    // { numGrids, gridCounter, tableSize, table[] }
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_giGridData; // headers + SH cells
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_giGridList; // { count, gridIdx[] }
+
     // Per-frame instance buffer: written each frame by the TLAS-instance compute and consumed by that
     // frame's TLAS build; double-buffered for the same cross-frame-hazard reason as the TLAS itself.
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_tlasInstanceBuffer;
@@ -85,7 +106,9 @@ private:
     Sampler m_textureSampler;
 
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_tlasInstanceSets;
+    std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_allocSets;
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_traceSets;
+    std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_debugSets;
 
     bool m_cleared = false;
 };

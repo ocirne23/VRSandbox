@@ -30,15 +30,25 @@ export namespace RendererVKLayout
     constexpr uint32 NUM_SHADOW_CASCADES = 6;
     constexpr uint32 SHADOW_MAP_RESOLUTION = 2048;
 
-    // Diffuse GI irradiance probes. A fixed DIM^3 camera-anchored probe volume (no hash grid). These
-    // MUST match Assets/Shaders/gi_probe.inc.glsl.
-    constexpr uint32 GI_PROBE_DIM = 32;                                                  // probes per axis
-    constexpr float  GI_PROBE_SPACING = 1.0f;                                            // world units between probes (volume = DIM*spacing)
+    // Diffuse GI irradiance probes. A separate, persistent, world-space hash grid (sibling of the light
+    // grid) keyed by GI_GRID_CUBE_SIZE-cubes; each occupied cube owns a dense (cube/cellSize)^3 block of
+    // SH-L1 probes. Buffers are ping-ponged prev/cur across frames so irradiance carries forward.
+    // These MUST match Assets/Shaders/gi_probe.inc.glsl (and hash_grid.inc.glsl's GRID_SIZE).
     constexpr uint32 GI_SH_STRIDE = 12;                                                  // SH-L1 RGB floats per probe
-    constexpr uint32 GI_PROBE_COUNT = GI_PROBE_DIM * GI_PROBE_DIM * GI_PROBE_DIM;
+    constexpr uint32 GI_GRID_CUBE_SIZE = 32;                                             // == hash_grid GRID_SIZE
+    constexpr uint32 GI_MIN_CELL_SIZE = 4;                                               // probe density floor (1<<GI_MIN_CELL_LOG2)
+    constexpr uint32 GI_MAX_CELLS_PER_AXIS = GI_GRID_CUBE_SIZE / GI_MIN_CELL_SIZE;       // = 8
+    constexpr uint32 GI_MAX_CELLS_PER_GRID = GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS; // = 512
+    constexpr uint32 GI_MAX_GRIDS = 512;                                                 // max live cubes
+    constexpr uint32 GI_TABLE_NUM_ENTRIES = 1024;                                        // power of two, > 2 * GI_MAX_GRIDS
+    constexpr int32  GI_REGION_RADIUS = 3;                                               // cubes around the camera (dim = 2r+1)
 
-    constexpr size_t GI_PROBE_SH_BUFFER_SIZE = (size_t)GI_PROBE_COUNT * GI_SH_STRIDE * sizeof(float);
-    constexpr size_t GI_VOLUME_BUFFER_SIZE   = 4 * sizeof(int32);                        // ivec4 volumeMin (xyz) + pad
+    // Per-cube grid-data footprint (worst case, at the finest cellSize): header(4) + cells * SH.
+    constexpr uint32 GI_GRID_WORDS_MAX = 4 + GI_MAX_CELLS_PER_GRID * GI_SH_STRIDE;
+    constexpr size_t GI_GRID_DATA_BUFFER_SIZE = (size_t)GI_MAX_GRIDS * GI_GRID_WORDS_MAX * sizeof(uint32);
+    constexpr size_t GI_TABLE_BUFFER_SIZE     = (size_t)(3 + GI_TABLE_NUM_ENTRIES) * sizeof(uint32);
+    constexpr size_t GI_GRID_LIST_BUFFER_SIZE = (size_t)(1 + GI_MAX_GRIDS) * sizeof(uint32);
+    constexpr uint32 GI_TRACE_THREADS = GI_MAX_GRIDS * GI_MAX_CELLS_PER_GRID;            // fixed trace dispatch
 
     constexpr uint32 GI_MAX_TLAS_INSTANCES = 256 * 1024;
     constexpr size_t GI_TLAS_INSTANCE_SIZE = 64;                                         // sizeof(VkAccelerationStructureInstanceKHR)
