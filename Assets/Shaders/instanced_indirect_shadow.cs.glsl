@@ -21,15 +21,7 @@ struct MaterialInfo         { uint flags; float opacity; uint diffuseNormalTexId
 struct OutMeshInstance      { vec4 posScale; vec4 quat; uint alphaTexIdxCascadeMask; };
 struct OutIndirectCommand   { uint pipelineIndex; uint indexCount; uint instanceCount; uint firstIndex; int vertexOffset; uint firstInstance; };
 
-layout (binding = 0, std140) uniform UBO
-{
-    mat4 u_mvp;
-    vec4 u_frustumPlanes[6];
-    vec3 u_viewPos;
-    vec4 u_sunDirection;
-    vec4 u_sunColor;
-    mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES]; // trailing UBO fields (shadowParams/splits/texel sizes) unused here
-};
+#include "ubo.inc.glsl"
 layout (binding = 1, std430) readonly buffer InRenderNodeTransformsBuffer  { RenderNodeTransform  in_renderNodeTransforms[]; };
 layout (binding = 2, std430) readonly buffer InMeshInstancesBuffer         { InMeshInstance       in_instances[]; };
 layout (binding = 3, std430) readonly buffer InMeshInstanceOffsetsBuffer   { InMeshInstanceOffset in_instanceOffsets[]; };

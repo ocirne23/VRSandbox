@@ -59,9 +59,21 @@ public:
     void addPointLight(const PointLight& light);
     void addAreaLight(const AreaLight& areaLight);
     void addSpotLight(const SpotLight& spotLight);
-    // Direction points towards the sun (will be normalized). color * intensity is the radiance.
     void setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity);
-    void setGiSkyParams(const GIProbePipeline::SkyParams& sky) { m_giProbePipeline.setSkyParams(sky); }
+    void setAmbientIntensity(float strength) { m_ambientIntensity = strength; } // 0.1 default
+    void setGIIntensity(float strength) { m_giIntensity = strength; } // 1.0 default
+
+    struct SkyParams
+    {
+        glm::vec3 zenith = glm::vec3(0.20f, 0.40f, 0.85f);
+        glm::vec3 horizon = glm::vec3(0.55f, 0.65f, 0.85f);
+        glm::vec3 ground = glm::vec3(0.0f);
+        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // sky-up axis; set to the local up on a planet
+        float intensity = 1.0f;
+        float sunAngularCos = 1.0f;// 0.9999f; // ~0.8 deg disc; 1.0 disables the disc
+        float sunGlow = 0.0f;    // 0 = none; e.g. 256 for a tight bloom around the sun
+    };
+    void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
     void present();
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
@@ -170,6 +182,9 @@ private:
     ShadowMapGraphicsPipeline m_shadowMapGraphicsPipeline;
     glm::vec3 m_sunDirection = glm::normalize(glm::vec3(0.5f, 1.0f, 0.5f));
     glm::vec3 m_sunColor = glm::vec3(5.0f);
+    SkyParams m_skyParams;
+    float m_ambientIntensity = 0.1f;
+    float m_giIntensity = 1.0f;
 
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform> m_renderNodeTransforms;

@@ -12,15 +12,7 @@
 // gl_ViewIndex selects the cascade. The shadow cull packed the set of cascades each caster overlaps
 // into a bitmask (in the meshIdxMaterialIdx slot); for cascades a caster does not touch the primitive
 // is collapsed to a degenerate point so it is cheaply discarded before rasterization.
-layout (binding = 0, std140) uniform UBO
-{
-    mat4 u_mvp;
-    vec4 u_frustumPlanes[6];
-    vec3 u_viewPos;
-    vec4 u_sunDirection;
-    vec4 u_sunColor;
-    mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES]; // trailing UBO fields (shadowParams/splits/texel sizes) unused here
-};
+#include "ubo.inc.glsl"
 struct InMeshInstancesData
 {
     vec4 posScale;

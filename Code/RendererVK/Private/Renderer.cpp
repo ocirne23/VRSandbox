@@ -318,20 +318,31 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
+    m_cameraPos = camera.position; // drives the GI probe region each frame
+
     static RendererVKLayout::Ubo ubo;
     ubo.mvp = projection * viewMatrix;
     ubo.frustum.fromMatrix(ubo.mvp);
     ubo.viewPos = camera.position;
-    m_cameraPos = camera.position; // drives the GI probe region each frame
-    m_frameCounter++;
+
+    ubo.giIntensity = m_giIntensity;
+    ubo.sunDirection = m_sunDirection;
+    ubo.sunAngularCos = m_skyParams.sunAngularCos;
+    ubo.sunColor = m_sunColor;
+    ubo.sunGlow = m_skyParams.sunGlow;
+
+    ubo.skyZenith = m_skyParams.zenith;
+    ubo.skyIntensity = m_skyParams.intensity;
+    ubo.skyHorizon = m_skyParams.horizon;
+    ubo.ambientIntensity = m_ambientIntensity;
+    ubo.skyGround = m_skyParams.ground;
+    ubo.skyUp = m_skyParams.up;
 
     // Sun + cascaded shadow maps.
     const float aspect = (float)viewportSize.x / (float)viewportSize.y;
     glm::mat4 cascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
     computeSunCascades(camera, aspect, m_sunDirection, cascadeViewProj);
 
-    ubo.sunDirection = glm::vec4(m_sunDirection, 0.0f);
-    ubo.sunColor = glm::vec4(m_sunColor, 0.0f);
     for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
         ubo.cascadeViewProj[c] = cascadeViewProj[c];
     // x = constant depth bias, y = normal-offset bias in *texels*, z = 1/resolution, w = pcf radius.
@@ -340,6 +351,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
     m_lightCounter = 0;
+    m_frameCounter++;
     return ubo.frustum;
 }
 
@@ -690,7 +702,7 @@ void Renderer::recordCommandBuffers()
         // irradiance forward from the previous frame's (prev) grid. The cur buffers are cleared inside
         // recordAlloc; the prev buffers are last frame's cur (read-only here; the frame fence guarantees
         // they are no longer being written).
-        glm::ivec3 centerPos = glm::ivec3(0, 0, 0);
+        const glm::ivec3 centerPos = glm::ivec3(glm::floor(m_cameraPos / float(RendererVKLayout::GI_GRID_CUBE_SIZE)));
         const glm::ivec3 regionMin = centerPos - glm::ivec3(RendererVKLayout::GI_REGION_RADIUS);
         GIProbePipeline::AllocParams allocParams{
             .regionMin = regionMin,
@@ -777,7 +789,7 @@ void Renderer::recordCommandBuffers()
     if (m_meshInfoCounter > 0)
         vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
 
-    constexpr std::array<vk::ClearValue, 2> clearValues{ vk::ClearColorValue{ std::array<float, 4> { 0.2f, 0.0f, 0.0f, 1.0f }}, vk::ClearDepthStencilValue{ 1.0f, 0 } };
+    constexpr std::array<vk::ClearValue, 2> clearValues{ vk::ClearColorValue{ std::array<float, 4> { 0.5f, 0.7f, 0.9f, 1.0f }}, vk::ClearDepthStencilValue{ 1.0f, 0 } };
     const vk::RenderPassBeginInfo renderPassBeginInfo{
         .renderPass = m_renderPass.getRenderPass(),
         .framebuffer = m_framebuffers.getFramebuffer(m_swapChain.getCurrentImageIdx()),

@@ -76,7 +76,9 @@ void main()
     v_normal = normalize(corner);
     if (pc.u_mode == 1u)
     {
-        if      (cellSize <= 4u)  v_color = vec3(1.0, 0.2, 0.2);
+		if      (cellSize <= 1u)  v_color = vec3(1.0, 0.2, 1.0);
+		else if (cellSize <= 2u)  v_color = vec3(1.0, 0.5, 0.2);
+        else if (cellSize <= 4u)  v_color = vec3(1.0, 0.2, 0.2);
         else if (cellSize <= 8u)  v_color = vec3(0.2, 1.0, 0.2);
         else if (cellSize <= 16u) v_color = vec3(0.3, 0.5, 1.0);
         else                      v_color = vec3(1.0, 1.0, 0.2);

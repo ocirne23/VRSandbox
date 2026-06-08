@@ -6,7 +6,7 @@
 // Requires the includer to have declared/included, with these names:
 //   - struct LightInfo + in_lightInfos[]              (the light list)
 //   - the light grid buffers + #include "light_grid.inc.glsl"
-//   - UBO fields: u_viewPos, u_sunDirection, u_sunColor, u_cascadeViewProj[NUM_SHADOW_CASCADES]
+//   - UBO
 //   - u_shadowMap (sampler2DArrayShadow)
 //   - PI, NUM_SHADOW_CASCADES (shared.inc.glsl)
 
@@ -82,7 +82,8 @@ vec3 giGatherDirect(vec3 pos, vec3 N, vec3 albedo)
     if (sunNdotL > 0.0)
     {
         float sunShadow = (g_sunShadowOverride >= 0.0) ? g_sunShadowOverride : giSunShadow(pos, N);
-        E += u_sunColor.rgb * sunShadow * sunNdotL;
+        //E += u_sunColor.rgb * sunShadow * sunNdotL;
+		E += u_sunColor.rgb *sunShadow;
     }
 
     const ivec3 gridPos = getGridPos(pos);

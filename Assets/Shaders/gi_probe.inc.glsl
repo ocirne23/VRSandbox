@@ -28,28 +28,24 @@
 // of two and match RendererVKLayout::GI_GRID_CUBE_SIZE. GI_MAX_CELL_LOG2 should be log2(GI_GRID_SIZE) so
 // the coarsest cube is a single cell.
 #ifndef GI_GRID_SIZE
-#define GI_GRID_SIZE 16
+#define GI_GRID_SIZE 8
 #endif
 #ifndef GI_MIN_CELL_LOG2
-#define GI_MIN_CELL_LOG2 1 // smallest probe cell = 1<<2 = 4 world units (floor; lights may go finer)
+#define GI_MIN_CELL_LOG2 0 // smallest probe cell = 1<<2 = 4 world units (floor; lights may go finer)
 #endif
 #ifndef GI_MAX_CELL_LOG2
-#define GI_MAX_CELL_LOG2 4 // largest probe cell = 1<<4 = 16 (== GI_GRID_SIZE)
+#define GI_MAX_CELL_LOG2 3 // largest probe cell = 1<<GI_MAX_CELL_LOG2 == GI_GRID_SIZE
 #endif
 #ifndef GI_CELL_DIST_SCALE
-#define GI_CELL_DIST_SCALE 1.0 // cellLog2 = floor(scale * sqrt(viewDist)); 0.25 matches the light grid
+#define GI_CELL_DIST_SCALE 0.50 // cellLog2 = floor(scale * sqrt(viewDist)); 0.25 matches the light grid
 #endif
 #ifndef GI_NORMAL_BIAS
-#define GI_NORMAL_BIAS 1.0 // push the sample point along the normal (world units) to limit self-leak
+#define GI_NORMAL_BIAS 1.5 // push the sample point along the normal (world units) to limit self-leak
 #endif
 // -----------------------------------------------------------------------------------------------------
 
 #define GI_MAX_CELLS_PER_AXIS (GI_GRID_SIZE >> GI_MIN_CELL_LOG2)
 #define GI_MAX_CELLS_PER_GRID (GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS)
-
-#ifndef GI_MAX_GRIDS
-#define GI_MAX_GRIDS 512u // max live probe cubes (== RendererVKLayout::GI_MAX_GRIDS)
-#endif
 
 vec4 shBasisL1(vec3 d)
 {
@@ -70,8 +66,9 @@ uint giCellSize(ivec3 gridPos, vec3 viewPos)
     vec3 hi = lo + float(GI_GRID_SIZE);
     vec3 d  = max(max(lo - viewPos, viewPos - hi), vec3(0.0)); // per-axis distance outside the cube
     float viewDist = length(d);
-    //int e = int(GI_CELL_DIST_SCALE * (viewDist));
-	uint e = int(mix(GI_MIN_CELL_LOG2, GI_MAX_CELL_LOG2, (viewDist) / float(GI_GRID_SIZE)));
+    int e = int(GI_CELL_DIST_SCALE * sqrt(viewDist - float(GI_GRID_SIZE)));
+	//uint e = int(mix(GI_MIN_CELL_LOG2, GI_MAX_CELL_LOG2, GI_CELL_DIST_SCALE * (viewDist / float(GI_GRID_SIZE))));
+	//uint e = int(mix(GI_MIN_CELL_LOG2, GI_MAX_CELL_LOG2, GI_CELL_DIST_SCALE * (sqrt(viewDist - 5.0) / float(GI_GRID_SIZE))));
 
     e = clamp(e, GI_MIN_CELL_LOG2, GI_MAX_CELL_LOG2);
     return 1u << uint(e);
@@ -211,8 +208,10 @@ vec3 giDebugColor(vec3 worldPos, vec3 n)
         return vec3(0.0);
 
     uint cellSize = giGetCellSize(g);
-    vec3 lod;
-    if      (cellSize <= 4u)  lod = vec3(1.0, 0.2, 0.2);
+	vec3 lod;
+	if      (cellSize <= 1u)  lod = vec3(1.0, 0.2, 1.0);
+	else if (cellSize <= 2u)  lod = vec3(1.0, 0.5, 0.2);
+    else if (cellSize <= 4u)  lod = vec3(1.0, 0.2, 0.2);
     else if (cellSize <= 8u)  lod = vec3(0.2, 1.0, 0.2);
     else if (cellSize <= 16u) lod = vec3(0.3, 0.5, 1.0);
     else                      lod = vec3(1.0, 1.0, 0.2);

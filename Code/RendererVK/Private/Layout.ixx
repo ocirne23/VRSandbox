@@ -37,13 +37,13 @@ export namespace RendererVKLayout
     // GI_MIN_CELL_SIZE==(1<<GI_MIN_CELL_LOG2), and log2(GI_GRID_CUBE_SIZE)==GI_MAX_CELL_LOG2. The GI cube
     // size is independent of the light grid's hash_grid GRID_SIZE and can be sized separately.
     constexpr uint32 GI_SH_STRIDE = 12;                                                  // SH-L1 RGB floats per probe
-    constexpr uint32 GI_GRID_CUBE_SIZE = 16;                                             // GI probe cube size (independent of light grid)
+    constexpr uint32 GI_GRID_CUBE_SIZE = 8;                                             // GI probe cube size (independent of light grid)
     constexpr uint32 GI_MIN_CELL_SIZE = 1;                                               // probe density floor (1<<GI_MIN_CELL_LOG2)
     constexpr uint32 GI_MAX_CELLS_PER_AXIS = GI_GRID_CUBE_SIZE / GI_MIN_CELL_SIZE;
     constexpr uint32 GI_MAX_CELLS_PER_GRID = GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS;
     constexpr uint32 GI_MAX_GRIDS = 512;                                                 // max live cubes
     constexpr uint32 GI_TABLE_NUM_ENTRIES = 1024;                                        // power of two, > 2 * GI_MAX_GRIDS
-    constexpr int32  GI_REGION_RADIUS = 2;                                               // cubes around the camera (dim = 2r+1)
+    constexpr int32  GI_REGION_RADIUS = 3;                                               // cubes around the camera (dim = 2r+1)
 
     // Per-cube grid-data footprint (worst case, at the finest cellSize): header(4) + cells * SH.
     constexpr uint32 GI_GRID_WORDS_MAX = 4 + GI_MAX_CELLS_PER_GRID * GI_SH_STRIDE;
@@ -72,11 +72,21 @@ export namespace RendererVKLayout
         glm::mat4 mvp;
         Frustum frustum;
         glm::vec3 viewPos;
-        uint32 _padding;
-        // Sun + cascaded shadow map data (consumed by the fragment shader; the vertex/cull shaders
-        // declare a shorter UBO block and simply ignore these trailing fields).
-        glm::vec4 sunDirection;  // xyz = normalized direction towards the sun, w unused
-        glm::vec4 sunColor;      // rgb = color * intensity
+
+        float giIntensity;       // multiplier on global illumination
+        glm::vec3 sunDirection;  // xyz = normalized direction towards the sun, w unused
+        float sunAngularCos;     // cos of the sun disc radius (1 = point, smaller = bigger disc)
+        glm::vec3 sunColor;      // rgb = color * intensity
+        float sunGlow;           // glow falloff exponent (0 = no glow); larger = tighter
+
+        glm::vec3  skyZenith;     // color along +skyUp
+        float skyIntensity;
+        glm::vec3  skyHorizon;    // horizon color (perpendicular to skyUp)
+        float ambientIntensity;   // multiplier on the ambient term (horizon + zenith, without GI)
+        glm::vec3  skyGround;     // color along -skyUp
+        float _pad1;
+        glm::vec3  skyUp;         // sky "up" axis (normalized); need not be world +Y (e.g. planet surface normal)
+        float _pad2;
         // Each cascadeViewProj has a structurally-zero bottom row ([0,0,0,1] for ortho*lookAt), so the
         // per-cascade far distance is stashed in m[0][3] and the world texel size in m[1][3]. Readers
         // restore the bottom row to [0,0,0,1] before using the matrix (see the shaders' cascadeMatrix).

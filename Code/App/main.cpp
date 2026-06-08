@@ -28,15 +28,17 @@ int main()
     input.initialize();
 
     FreeFlyCameraController cameraController;
-    cameraController.initialize(glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+    cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
-    glm::vec3 sunDir = normalize(glm::vec3(-0.5f, -1.0f, 0.1f));
-    float sunSize = 250.0f;
-	float sunDistance = 5000.0f;
+    glm::vec3 sunDir = normalize(glm::vec3(-0.5f, 1.0f, 0.1f));
+    //float sunSize = 250.0f;
+	//float sunDistance = 5000.0f;
     renderer.setSunLight(sunDir, glm::vec3(1.0f), 5.0f);
-    renderer.setGiSkyParams({ .up = glm::vec3(0.0f, -1.0f, 0.0f) });
+    renderer.setSkyParams({ .up = glm::vec3(0.0f, 1.0f, 0.0f), .intensity = 0.5f });
+    renderer.setGIIntensity(2.0f);
+    renderer.setAmbientIntensity(0.2f);
 
     UI& ui = Globals::ui;
     ui.initialize();
@@ -80,9 +82,12 @@ int main()
         sceneData->initialize("Models/sponza.glb", true, false);
         container.initialize(*sceneData);
         
+        // flip upside down
+        glm::quat rot = glm::rotate(glm::quat(1.0, 0.0, 0.0, 0), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+
         for (int x = 0; x < spawnCountX; ++x)
             for (int y = 0; y < spawnCountY; ++y)
-                spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 0, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+                spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 0, y * 20.0f), 1.0f, glm::normalize(rot))));
     }
     /*
     {
@@ -103,7 +108,7 @@ int main()
        overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
        baseShapes.initialize(*sceneData, &overrides);
         //spawn a big sun sphere to visualize the sun light
-       sunLightNode = baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(sunDir * sunDistance, sunSize, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0))));
+       //sunLightNode = baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(sunDir * sunDistance, sunSize, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0))));
     }
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
@@ -117,7 +122,7 @@ int main()
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_L && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
                 renderer.setSunLight(-cameraController.getDirection(), glm::vec3(1.0f), 5.0f); // aim the sun along the camera forward
-				sunLightNode.getTransform() = Transform(-cameraController.getDirection() * sunDistance, sunSize, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)));
+				//sunLightNode.getTransform() = Transform(-cameraController.getDirection() * sunDistance, sunSize, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)));
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
@@ -250,7 +255,7 @@ int main()
                 renderer.renderNode(node);
             }
         }
-        //renderer.renderNode(sunLightNode);
+        //renderer.renderNode(sunLightNode); // This blocks the sun GI...
 
         ui.render();
         renderer.present();

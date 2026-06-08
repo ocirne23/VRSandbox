@@ -25,16 +25,8 @@ struct LightInfo
 	vec3 direction;  // area light: up-axis, magnitude = height
 	float rotation;  // area light: rotation of the quad around direction
 };
-layout (binding = 0, std140) uniform UBO
-{
-    mat4 u_mvp;
-    vec4 u_frustumPlanes[6];
-    vec3 u_viewPos;
-    vec4 u_sunDirection;  // xyz = normalized direction towards the sun
-    vec4 u_sunColor;      // rgb = color * intensity
-    mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES]; // m[0][3] = far distance, m[1][3] = texel size (see cascade* below)
-    vec4 u_shadowParams;  // x = depth bias, y = normal bias (texels), z = 1/resolution, w = pcf radius
-};
+
+#include "ubo.inc.glsl"
 
 layout (binding = 2, std430) readonly buffer InMaterialInfos
 {
@@ -405,7 +397,7 @@ void main()
 	// evalProbeSH returns the cosine-convolved irradiance E(N); Lambertian indirect = albedo/PI * E.
 	// Falls back to a small flat ambient outside the probe volume.
 	const vec3 indirectE = evalProbeSH(in_pos, N);
-	vec3 color = materialColor * (indirectE / PI);//(indirectE.x >= 0.0) ? materialColor * (indirectE / PI) : materialColor * 0.10;
+	vec3 color = (indirectE.x >= 0.0) ? materialColor * (indirectE / PI) * u_giIntensity : materialColor * skyRadiance(N) * u_ambientIntensity;
 
 	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
 	//color = mix(color, cascadeDebugColor(getSunCascade(in_pos)), 0.35);
@@ -441,9 +433,6 @@ void main()
 		tableIdx = getNextTableIdx(tableIdx);
 	}
 
-	// GI probe debug visualization. Set GI_DEBUG_VIZ to 1 to tint surfaces by probe cellSize/LOD band
-	// (red=4, green=8, blue=16, yellow=32) with a per-cell checker that reveals probe spacing/density;
-	// black = no probe grid here. Set to 2 to show the raw probe irradiance instead.
 	#define GI_DEBUG_VIZ 0
 	#if GI_DEBUG_VIZ == 1
 		color = giDebugColor(in_pos, N);

@@ -43,16 +43,7 @@ struct InMeshInstance
     uint pipelineIdxAlphaMode;
 };
 
-layout (binding = 0, std140) uniform UBO
-{
-    mat4 u_mvp;
-    vec4 u_frustumPlanes[6];
-    vec3 u_viewPos;
-    vec4 u_sunDirection;
-    vec4 u_sunColor;
-    mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES];
-    vec4 u_shadowParams;
-};
+#include "ubo.inc.glsl"
 layout (binding = 1, std430) readonly buffer InLightInfos { LightInfo in_lightInfos[]; };
 layout (binding = 2, std430) readonly buffer InLightGrid  { uint in_gridData[]; };
 layout (binding = 3, std430) readonly buffer InGridTable
@@ -91,14 +82,6 @@ layout (push_constant) uniform PushConstants
     uint  numRays;
     float temporalAlpha;
     float maxRayDist;
-    float skyIntensity;
-    float sunAngularCos; // cos of the sun disc radius (1 = point, smaller = bigger disc)
-    float sunGlow;       // glow falloff exponent (0 = no glow); larger = tighter
-    float _pad0;
-    vec3  skyZenith;     // color along +skyUp
-    vec3  skyHorizon;    // horizon color (perpendicular to skyUp)
-    vec3  skyGround;     // color along -skyUp
-    vec3  skyUp;         // sky "up" axis (normalized); need not be world +Y (e.g. planet surface normal)
 } pc;
 
 // Light grid (read) + shared diffuse lighting.
@@ -136,23 +119,6 @@ vec3 sampleSphere(uint i, uint n, uint seed)
 
 vec3 vNormal(uint vi) { uint b = vi * 12u; return vec3(in_vertices[b + 3u], in_vertices[b + 4u], in_vertices[b + 5u]); }
 vec2 vUV(uint vi)     { uint b = vi * 12u; return vec2(in_vertices[b + 10u], in_vertices[b + 11u]); }
-
-vec3 skyRadiance(vec3 dir)
-{
-    // Configurable 3-stop gradient along the sky-up axis: ground (-up) -> horizon -> zenith (+up).
-    float t = dot(dir, normalize(pc.skyUp));
-    vec3 sky = (t >= 0.0) ? mix(pc.skyHorizon, pc.skyZenith, sqrt(t))
-                          : mix(pc.skyHorizon, pc.skyGround, min(-t * 2.0, 1.0));
-
-    // Sun disc + optional glow from the (dynamic) sun direction/color in the UBO.
-    vec3 sunDir = normalize(u_sunDirection.xyz);
-    float c = max(dot(dir, sunDir), 0.0);
-    float disc = step(pc.sunAngularCos, c);
-    float glow = (pc.sunGlow > 0.0) ? pow(c, pc.sunGlow) : 0.0;
-    sky += u_sunColor.rgb * (disc + glow);
-
-    return sky * pc.skyIntensity;
-}
 
 // View-independent sun visibility from a point: one shadow ray toward the sun via the TLAS. Returns 1
 // (lit) or 0 (occluded). Used per-probe (shared by all gather rays) so off-screen probes are shadowed
