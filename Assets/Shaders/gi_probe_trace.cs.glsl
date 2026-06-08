@@ -92,6 +92,13 @@ layout (push_constant) uniform PushConstants
     float temporalAlpha;
     float maxRayDist;
     float skyIntensity;
+    float sunAngularCos; // cos of the sun disc radius (1 = point, smaller = bigger disc)
+    float sunGlow;       // glow falloff exponent (0 = no glow); larger = tighter
+    float _pad0;
+    vec3  skyZenith;     // color along +skyUp
+    vec3  skyHorizon;    // horizon color (perpendicular to skyUp)
+    vec3  skyGround;     // color along -skyUp
+    vec3  skyUp;         // sky "up" axis (normalized); need not be world +Y (e.g. planet surface normal)
 } pc;
 
 // Light grid (read) + shared diffuse lighting.
@@ -132,10 +139,19 @@ vec2 vUV(uint vi)     { uint b = vi * 12u; return vec2(in_vertices[b + 10u], in_
 
 vec3 skyRadiance(vec3 dir)
 {
-    float up = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 horizon = vec3(0.55, 0.65, 0.85);
-    vec3 zenith  = vec3(0.20, 0.40, 0.85);
-    return mix(horizon, zenith, up) * pc.skyIntensity;
+    // Configurable 3-stop gradient along the sky-up axis: ground (-up) -> horizon -> zenith (+up).
+    float t = dot(dir, normalize(pc.skyUp));
+    vec3 sky = (t >= 0.0) ? mix(pc.skyHorizon, pc.skyZenith, sqrt(t))
+                          : mix(pc.skyHorizon, pc.skyGround, min(-t * 2.0, 1.0));
+
+    // Sun disc + optional glow from the (dynamic) sun direction/color in the UBO.
+    vec3 sunDir = normalize(u_sunDirection.xyz);
+    float c = max(dot(dir, sunDir), 0.0);
+    float disc = step(pc.sunAngularCos, c);
+    float glow = (pc.sunGlow > 0.0) ? pow(c, pc.sunGlow) : 0.0;
+    sky += u_sunColor.rgb * (disc + glow);
+
+    return sky * pc.skyIntensity;
 }
 
 vec3 traceRadiance(vec3 origin, vec3 dir)

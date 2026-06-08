@@ -70,6 +70,20 @@ public:
     };
     void recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx, TraceParams& params);
 
+    // Procedural sky used for probe rays that miss all geometry. The sun disc/glow is driven by the
+    // dynamic UBO sun direction/color (setSunLight); these control the gradient and intensity.
+    struct SkyParams
+    {
+        glm::vec3 zenith   = glm::vec3(0.20f, 0.40f, 0.85f);
+        glm::vec3 horizon  = glm::vec3(0.55f, 0.65f, 0.85f);
+        glm::vec3 ground   = glm::vec3(0.20f, 0.20f, 0.22f);
+        glm::vec3 up       = glm::vec3(0.0f, 1.0f, 0.0f); // sky-up axis; set to the local up on a planet
+        float intensity     = 1.0f;
+        float sunAngularCos = 0.9999f; // ~0.8 deg disc; 1.0 disables the disc
+        float sunGlow       = 0.0f;    // 0 = none; e.g. 256 for a tight bloom around the sun
+    };
+    void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
+
     // Debug visualization: instanced cubes at every live probe cell, drawn into the main color pass.
     // initializeDebug must be called after the main render pass exists.
     void initializeDebug(const RenderPass& renderPass);
@@ -93,6 +107,8 @@ private:
     ComputePipeline m_tracePipeline;
     GraphicsPipeline m_debugPipeline;
     const RenderPass* m_debugRenderPass = nullptr;
+
+    SkyParams m_skyParams;
 
     // Persistent probe grid, ping-ponged by frame-in-flight index (prev = the other index).
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_giTable;    // { numGrids, gridCounter, tableSize, table[] }

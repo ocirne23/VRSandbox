@@ -27,6 +27,13 @@ namespace
         float temporalAlpha;
         float maxRayDist;
         float skyIntensity;
+        float sunAngularCos;
+        float sunGlow;
+        float _pad0;
+        glm::vec3 skyZenith;  float _pad1;
+        glm::vec3 skyHorizon; float _pad2;
+        glm::vec3 skyGround;  float _pad3;
+        glm::vec3 skyUp;      float _pad4;
     };
     struct DebugPC
     {
@@ -261,14 +268,19 @@ void GIProbePipeline::recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx,
     constexpr uint32 GI_RAYS_PER_PROBE = 16;
     constexpr float  GI_TEMPORAL_ALPHA = 0.01f;
     constexpr float  GI_MAX_RAY_DIST = 32.0f;
-    constexpr float  GI_SKY_INTENSITY = 1.0f;
 
     TracePC pc{
         .frameIndex = params.frameIndex,
         .numRays = GI_RAYS_PER_PROBE,
         .temporalAlpha = GI_TEMPORAL_ALPHA,
         .maxRayDist = GI_MAX_RAY_DIST,
-        .skyIntensity = GI_SKY_INTENSITY,
+        .skyIntensity = m_skyParams.intensity,
+        .sunAngularCos = m_skyParams.sunAngularCos,
+        .sunGlow = m_skyParams.sunGlow,
+        .skyZenith = m_skyParams.zenith,
+        .skyHorizon = m_skyParams.horizon,
+        .skyGround = m_skyParams.ground,
+        .skyUp = m_skyParams.up,
     };
     cmd.pushConstants(m_tracePipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
 

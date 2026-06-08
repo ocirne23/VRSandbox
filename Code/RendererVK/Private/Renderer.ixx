@@ -61,6 +61,7 @@ public:
     void addSpotLight(const SpotLight& spotLight);
     // Direction points towards the sun (will be normalized). color * intensity is the radiance.
     void setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity);
+    void setGiSkyParams(const GIProbePipeline::SkyParams& sky) { m_giProbePipeline.setSkyParams(sky); }
     void present();
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }

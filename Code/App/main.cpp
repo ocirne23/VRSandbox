@@ -36,6 +36,7 @@ int main()
     float sunSize = 250.0f;
 	float sunDistance = 5000.0f;
     renderer.setSunLight(sunDir, glm::vec3(1.0f), 5.0f);
+    renderer.setGiSkyParams({ .up = glm::vec3(0.0f, -1.0f, 0.0f) });
 
     UI& ui = Globals::ui;
     ui.initialize();
