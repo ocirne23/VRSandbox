@@ -37,14 +37,6 @@ vec3 skyRadiance(vec3 dir)
     float t = dot(dir, normalize(u_skyUp));
     vec3 sky = (t >= 0.0) ? mix(u_skyHorizon, u_skyZenith, sqrt(t))
                           : mix(u_skyHorizon, u_skyGround, min(-t * 2.0, 1.0));
-
-    // Sun disc + optional glow from the (dynamic) sun direction/color in the UBO.
-    vec3 sunDir = normalize(u_sunDirection.xyz);
-    float c = max(dot(dir, sunDir), 0.0);
-    float disc = step(u_sunAngularCos, c);
-    float glow = (u_sunGlow > 0.0) ? pow(c, u_sunGlow) : 0.0;
-    sky += u_sunColor.rgb * (disc + glow);
-
     return sky * u_skyIntensity;
 }
 

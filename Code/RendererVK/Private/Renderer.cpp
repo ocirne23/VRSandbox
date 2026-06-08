@@ -7,6 +7,7 @@ import Core.Window;
 import Core.Frustum;
 import Core.imgui;
 import Core.Camera;
+import Core.Tweaks;
 
 import File.FileSystem;
 import File.ITextureData;
@@ -245,6 +246,17 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     m_gpuCrashTracker.Initialize(false);
 
+
+    Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
+    Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
+    Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
+    Tweak::color3("Sky/Gradient", "Horizon", &m_skyParams.horizon);
+    Tweak::color3("Sky/Gradient", "Ground", &m_skyParams.ground);
+    Tweak::floatVar("Lighting", "GI Intensity", &m_giIntensity, 0.0f, 10.0f);
+    Tweak::floatVar("Lighting", "Ambient Intensity", &m_ambientIntensity, 0.0f, 1.0f);
+    Tweak::float3("Lighting/Sun", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
+    Tweak::color3("Lighting/Sun", "Sun Color", &m_sunColor, &m_sunIntensity);      // color + intensity
+
     return true;
 }
 
@@ -328,7 +340,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.giIntensity = m_giIntensity;
     ubo.sunDirection = m_sunDirection;
     ubo.sunAngularCos = m_skyParams.sunAngularCos;
-    ubo.sunColor = m_sunColor;
+    ubo.sunColor = m_sunColor * m_sunIntensity;
     ubo.sunGlow = m_skyParams.sunGlow;
 
     ubo.skyZenith = m_skyParams.zenith;
@@ -399,7 +411,8 @@ void Renderer::addSpotLight(const SpotLight& spotLight) { addLightInfo(spotLight
 void Renderer::setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity)
 {
     m_sunDirection = glm::normalize(direction);
-    m_sunColor = color * intensity;
+    m_sunColor = color;
+    m_sunIntensity = intensity;
 }
 
 void Renderer::present()

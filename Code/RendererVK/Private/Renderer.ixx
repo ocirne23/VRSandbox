@@ -65,8 +65,8 @@ public:
 
     struct SkyParams
     {
-        glm::vec3 zenith = glm::vec3(0.20f, 0.40f, 0.85f);
-        glm::vec3 horizon = glm::vec3(0.55f, 0.65f, 0.85f);
+        glm::vec3 zenith = glm::vec3(0.80f, 0.75f, 0.85f);
+        glm::vec3 horizon = glm::vec3(0.80f, 0.55f, 0.40f);
         glm::vec3 ground = glm::vec3(0.0f);
         glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // sky-up axis; set to the local up on a planet
         float intensity = 1.0f;
@@ -181,7 +181,8 @@ private:
     ShadowCullComputePipeline m_shadowCullComputePipeline;
     ShadowMapGraphicsPipeline m_shadowMapGraphicsPipeline;
     glm::vec3 m_sunDirection = glm::normalize(glm::vec3(0.5f, 1.0f, 0.5f));
-    glm::vec3 m_sunColor = glm::vec3(5.0f);
+    glm::vec3 m_sunColor = glm::vec3(1.0f);
+    float m_sunIntensity = 5.0f;
     SkyParams m_skyParams;
     float m_ambientIntensity = 0.1f;
     float m_giIntensity = 1.0f;

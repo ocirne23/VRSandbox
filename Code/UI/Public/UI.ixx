@@ -10,6 +10,7 @@ import UI.AssetBrowser;
 import UI.SceneView;
 import UI.PropertiesPanel;
 import UI.OutputLog;
+import UI.TweakPanel;
 
 import RendererVK;
 
@@ -46,6 +47,7 @@ private:
 	SceneView       m_sceneView;
 	PropertiesPanel m_propertiesPanel;
 	OutputLog       m_outputLog;
+	TweakPanel      m_tweakPanel;
 };
 
 export namespace Globals

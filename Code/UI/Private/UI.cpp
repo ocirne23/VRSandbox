@@ -108,6 +108,7 @@ void UI::update(double deltaSec)
             ImGui::DockBuilderDockWindow("Properties", dock_id_properties);
             ImGui::DockBuilderDockWindow("Stats",      dock_id_left_bottom);
             ImGui::DockBuilderDockWindow("Log",        dock_id_left_bottom);
+            ImGui::DockBuilderDockWindow("Tweaks",     dock_id_left_bottom);
             ImGui::DockBuilderDockWindow("Content",    dock_id_down);
             ImGui::DockBuilderDockWindow("Script",     dock_id_up);
             ImGui::DockBuilderDockWindow("Viewport",   dock_id_up);
@@ -187,6 +188,12 @@ void UI::update(double deltaSec)
     {
         ImGui::Begin("Content");
         m_assetBrowser.render();
+        ImGui::End();
+    }
+
+    {
+        ImGui::Begin("Tweaks");
+        m_tweakPanel.render();
         ImGui::End();
     }
 }
