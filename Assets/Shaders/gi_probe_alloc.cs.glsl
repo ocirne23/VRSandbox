@@ -71,8 +71,8 @@ uint prevCellBase(uint prevGrid, vec3 worldCenter)
 {
     ivec3 pgm     = ivec3(prev_gridData[prevGrid + 0u], prev_gridData[prevGrid + 1u], prev_gridData[prevGrid + 2u]);
     uint  cellSize = prev_gridData[prevGrid + 3u];
-    int   nc       = int(uint(GRID_SIZE) / cellSize);
-    ivec3 cp       = (ivec3(floor(worldCenter)) - pgm * GRID_SIZE) / int(cellSize);
+    int   nc       = int(uint(GI_GRID_SIZE) / cellSize);
+    ivec3 cp       = (ivec3(floor(worldCenter)) - pgm * GI_GRID_SIZE) / int(cellSize);
     cp             = clamp(cp, ivec3(0), ivec3(nc - 1));
     uint  cellIdx  = uint(cp.x + cp.y * nc + cp.z * nc * nc);
     return prevGrid + 4u + cellIdx * uint(GI_SH_STRIDE);

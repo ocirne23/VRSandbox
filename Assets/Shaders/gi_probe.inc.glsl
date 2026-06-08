@@ -24,11 +24,17 @@
 #define GI_SH_STRIDE 12 // SH-L1 RGB: 4 coeffs * 3 channels
 
 // --- Configurable density tuning (override before including to retune) -------------------------------
+// GI probe cube size in world units, INDEPENDENT of the light grid's hash_grid GRID_SIZE. Must be a power
+// of two and match RendererVKLayout::GI_GRID_CUBE_SIZE. GI_MAX_CELL_LOG2 should be log2(GI_GRID_SIZE) so
+// the coarsest cube is a single cell.
+#ifndef GI_GRID_SIZE
+#define GI_GRID_SIZE 32
+#endif
 #ifndef GI_MIN_CELL_LOG2
 #define GI_MIN_CELL_LOG2 2 // smallest probe cell = 1<<2 = 4 world units (floor; lights may go finer)
 #endif
 #ifndef GI_MAX_CELL_LOG2
-#define GI_MAX_CELL_LOG2 5 // largest probe cell = 1<<5 = 32 (== GRID_SIZE)
+#define GI_MAX_CELL_LOG2 5 // largest probe cell = 1<<5 = 32 (== GI_GRID_SIZE)
 #endif
 #ifndef GI_CELL_DIST_SCALE
 #define GI_CELL_DIST_SCALE 1.0 // cellLog2 = floor(scale * sqrt(viewDist)); 0.25 matches the light grid
@@ -38,7 +44,7 @@
 #endif
 // -----------------------------------------------------------------------------------------------------
 
-#define GI_MAX_CELLS_PER_AXIS (GRID_SIZE >> GI_MIN_CELL_LOG2)
+#define GI_MAX_CELLS_PER_AXIS (GI_GRID_SIZE >> GI_MIN_CELL_LOG2)
 #define GI_MAX_CELLS_PER_GRID (GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS)
 
 #ifndef GI_MAX_GRIDS
@@ -50,19 +56,28 @@ vec4 shBasisL1(vec3 d)
     return vec4(0.282095, 0.488603 * d.y, 0.488603 * d.z, 0.488603 * d.x);
 }
 
+// GI cube coordinate for a world position (uses GI_GRID_SIZE, not the light grid's GRID_SIZE).
+ivec3 giGetGridPos(vec3 pos) { return ivec3(floor(pos / float(GI_GRID_SIZE))); }
+
 // Probe cell size (world units, power of two) for the cube at gridPos, given the camera position. Same
 // shape as the light grid's formula (sqrt-of-distance buckets) but with an independent floor/ceiling so
-// diffuse probes stay coarse enough to be affordable.
+// diffuse probes stay coarse enough to be affordable. Distance is measured to the NEAREST point on the
+// cube (its AABB), not the center, so a cube is refined whenever any part of it is near the camera
+// (camera inside the cube => distance 0 => finest cell).
 uint giCellSize(ivec3 gridPos, vec3 viewPos)
 {
-    vec3 center = (vec3(gridPos) + 0.5) * float(GRID_SIZE);
-    float viewDist = distance(center, viewPos);
-    int e = int(GI_CELL_DIST_SCALE * sqrt(viewDist));
+    vec3 lo = vec3(gridPos) * float(GI_GRID_SIZE);
+    vec3 hi = lo + float(GI_GRID_SIZE);
+    vec3 d  = max(max(lo - viewPos, viewPos - hi), vec3(0.0)); // per-axis distance outside the cube
+    float viewDist = length(d);
+    //int e = int(GI_CELL_DIST_SCALE * (viewDist));
+	uint e = int(mix(GI_MIN_CELL_LOG2, GI_MAX_CELL_LOG2, (viewDist) / float(GI_GRID_SIZE)));
+
     e = clamp(e, GI_MIN_CELL_LOG2, GI_MAX_CELL_LOG2);
     return 1u << uint(e);
 }
 
-uint giNumCellsPerAxis(uint cellSize) { return uint(GRID_SIZE) / cellSize; }
+uint giNumCellsPerAxis(uint cellSize) { return uint(GI_GRID_SIZE) / cellSize; }
 
 uint giGridMemoryUsage(uint cellSize)
 {
@@ -84,7 +99,7 @@ uint giCellIdx(uint gridIdx, ivec3 gridMin, vec3 pos)
 {
     uint cellSize = giGetCellSize(gridIdx);
     int  nc       = int(giNumCellsPerAxis(cellSize));
-    ivec3 cp      = (ivec3(floor(pos)) - gridMin * GRID_SIZE) / int(cellSize);
+    ivec3 cp      = (ivec3(floor(pos)) - gridMin * GI_GRID_SIZE) / int(cellSize);
     cp            = clamp(cp, ivec3(0), ivec3(nc - 1));
     return uint(cp.x + cp.y * nc + cp.z * nc * nc);
 }
@@ -99,7 +114,7 @@ vec3 giCellCenter(uint gridIdx, uint cellIdx)
     uint rem = cellIdx - z * nc * nc;
     uint y   = rem / nc;
     uint x   = rem - y * nc;
-    vec3 base = vec3(gridMin) * float(GRID_SIZE);
+    vec3 base = vec3(gridMin) * float(GI_GRID_SIZE);
     return base + (vec3(x, y, z) + 0.5) * float(cellSize);
 }
 
@@ -140,7 +155,7 @@ vec3 giEvalCell(uint cellBase, vec3 n)
 vec3 evalProbeSH(vec3 worldPos, vec3 n)
 {
     vec3 p = worldPos + n * GI_NORMAL_BIAS;
-    uint gHere = giFindGrid(getGridPos(p));
+    uint gHere = giFindGrid(giGetGridPos(p));
     if (gHere == EMPTY_ENTRY)
         return vec3(-1.0);
 
@@ -173,7 +188,7 @@ vec3 evalProbeSH(vec3 worldPos, vec3 n)
         if (w <= 0.0)
             continue;
 
-        uint g = giFindGrid(getGridPos(probeWorld));
+        uint g = giFindGrid(giGetGridPos(probeWorld));
         if (g == EMPTY_ENTRY)
             continue;
         uint cellIdx = giCellIdx(g, giGetGridMin(g), probeWorld);
@@ -191,7 +206,7 @@ vec3 evalProbeSH(vec3 worldPos, vec3 n)
 vec3 giDebugColor(vec3 worldPos, vec3 n)
 {
     vec3 p = worldPos + n * GI_NORMAL_BIAS;
-    uint g = giFindGrid(getGridPos(p));
+    uint g = giFindGrid(giGetGridPos(p));
     if (g == EMPTY_ENTRY)
         return vec3(0.0);
 
@@ -203,7 +218,7 @@ vec3 giDebugColor(vec3 worldPos, vec3 n)
     else                      lod = vec3(1.0, 1.0, 0.2);
 
     ivec3 gm = giGetGridMin(g);
-    ivec3 cp = (ivec3(floor(p)) - gm * GRID_SIZE) / int(cellSize);
+    ivec3 cp = (ivec3(floor(p)) - gm * GI_GRID_SIZE) / int(cellSize);
     float checker = (((cp.x + cp.y + cp.z) & 1) == 0) ? 1.0 : 0.55;
     return lod * checker;
 }

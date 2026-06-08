@@ -33,9 +33,11 @@ export namespace RendererVKLayout
     // Diffuse GI irradiance probes. A separate, persistent, world-space hash grid (sibling of the light
     // grid) keyed by GI_GRID_CUBE_SIZE-cubes; each occupied cube owns a dense (cube/cellSize)^3 block of
     // SH-L1 probes. Buffers are ping-ponged prev/cur across frames so irradiance carries forward.
-    // These MUST match Assets/Shaders/gi_probe.inc.glsl (and hash_grid.inc.glsl's GRID_SIZE).
+    // These MUST match Assets/Shaders/gi_probe.inc.glsl: GI_GRID_CUBE_SIZE==GI_GRID_SIZE,
+    // GI_MIN_CELL_SIZE==(1<<GI_MIN_CELL_LOG2), and log2(GI_GRID_CUBE_SIZE)==GI_MAX_CELL_LOG2. The GI cube
+    // size is independent of the light grid's hash_grid GRID_SIZE and can be sized separately.
     constexpr uint32 GI_SH_STRIDE = 12;                                                  // SH-L1 RGB floats per probe
-    constexpr uint32 GI_GRID_CUBE_SIZE = 32;                                             // == hash_grid GRID_SIZE
+    constexpr uint32 GI_GRID_CUBE_SIZE = 32;                                             // GI probe cube size (independent of light grid)
     constexpr uint32 GI_MIN_CELL_SIZE = 4;                                               // probe density floor (1<<GI_MIN_CELL_LOG2)
     constexpr uint32 GI_MAX_CELLS_PER_AXIS = GI_GRID_CUBE_SIZE / GI_MIN_CELL_SIZE;       // = 8
     constexpr uint32 GI_MAX_CELLS_PER_GRID = GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS * GI_MAX_CELLS_PER_AXIS; // = 512
