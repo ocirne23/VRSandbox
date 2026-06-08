@@ -185,13 +185,19 @@ void GIProbePipeline::recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx,
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipeline());
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
 
+    // Trace tuning (passed via push constants). Rays are amortized over frames via the temporal blend.
+    constexpr uint32 GI_RAYS_PER_PROBE = 16;
+    constexpr float  GI_TEMPORAL_ALPHA = 0.01f;
+    constexpr float  GI_MAX_RAY_DIST = 64.0f;
+    constexpr float  GI_SKY_INTENSITY = 1.0f;
+
     TracePC pc{
         .volumeMin = params.volumeMin,
         .frameIndex = params.frameIndex,
-        .numRays = RendererVKLayout::GI_RAYS_PER_PROBE,
-        .temporalAlpha = RendererVKLayout::GI_TEMPORAL_ALPHA,
-        .maxRayDist = RendererVKLayout::GI_MAX_RAY_DIST,
-        .skyIntensity = RendererVKLayout::GI_SKY_INTENSITY,
+        .numRays = GI_RAYS_PER_PROBE,
+        .temporalAlpha = GI_TEMPORAL_ALPHA,
+        .maxRayDist = GI_MAX_RAY_DIST,
+        .skyIntensity = GI_SKY_INTENSITY,
     };
     cmd.pushConstants(m_tracePipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
 

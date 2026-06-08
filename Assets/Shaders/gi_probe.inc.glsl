@@ -12,7 +12,7 @@
 #define GI_PROBE_INC_GLSL
 
 #define GI_PROBE_DIM     32
-#define GI_PROBE_SPACING 4.0
+#define GI_PROBE_SPACING 1.0
 #define GI_SH_STRIDE     12
 
 vec4 shBasisL1(vec3 d)

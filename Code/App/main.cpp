@@ -28,10 +28,10 @@ int main()
     input.initialize();
 
     FreeFlyCameraController cameraController;
-    cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f));
+    cameraController.initialize(glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::ENABLED, EVSync::ENABLED);
+    renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
     glm::vec3 sunDir = normalize(glm::vec3(-0.5f, -1.0f, 0.1f));
     float sunSize = 250.0f;
 	float sunDistance = 5000.0f;
@@ -131,7 +131,7 @@ int main()
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
-                spawnedLights.push_back(SpotLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.95f, 0.8f), 40.0f, cameraController.getDirection(), glm::radians(25.0f), 0.25f });
+                spawnedLights.push_back(SpotLight{ cameraController.getPosition(), 25.0f, glm::vec3(1.0f, 0.95f, 0.8f), 50.0f, cameraController.getDirection(), glm::radians(25.0f), 0.25f });
 				glm::quat orientation = cameraController.getOrientation();
 				const glm::vec3 camUp = cameraController.getUp();
 				const glm::vec3 camRight = glm::normalize(glm::cross(cameraController.getDirection(), camUp));

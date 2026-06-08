@@ -28,6 +28,7 @@ public:
     void recordClearPersistent(CommandBuffer& commandBuffer);
     bool needsClear() const { return !m_cleared; }
     void markCleared() { m_cleared = true; }
+    void doClear() { m_cleared = false; }
 
     // Writes the current volume min corner (probe-coordinate units) into this frame's volume buffer.
     void setVolumeMin(uint32 frameIdx, glm::ivec3 volumeMin);

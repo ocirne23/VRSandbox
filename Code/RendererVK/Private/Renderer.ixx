@@ -190,8 +190,13 @@ private:
         DescriptorSet shadowDrawDescriptorSet;
 
         CommandBuffer primaryCommandBuffer;
+        CommandBuffer staticMeshCommandBuffer;
         CommandBuffer indirectCullCommandBuffer;
         CommandBuffer lightGridCommandBuffer;
+        CommandBuffer imguiCommandBuffer;
+        CommandBuffer shadowCullCommandBuffer;
+        CommandBuffer shadowDrawCommandBuffer;
+        CommandBuffer globalIllumCommandBuffer;
 
         bool updated = false;
         Buffer ubo;

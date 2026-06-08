@@ -55,7 +55,8 @@ static vk::Bool32 debugCallback(
         return vk::False;
     if (pCallbackData->messageIdNumber == 0xa5625282)
         return vk::False;
-
+    if (pCallbackData->messageIdNumber == 0xd90fc835) //vkCmdExecuteGeneratedCommandsEXT() : command can't be executed on a secondary command buffer.
+        return vk::False;
     const char* severity = "UNKNOWN";
     
     if (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)
