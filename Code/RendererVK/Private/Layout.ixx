@@ -92,6 +92,15 @@ export namespace RendererVKLayout
         // restore the bottom row to [0,0,0,1] before using the matrix (see the shaders' cascadeMatrix).
         glm::mat4 cascadeViewProj[NUM_SHADOW_CASCADES];
         glm::vec4 shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution, w = pcf radius
+
+        glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv (screen-space passes)
+        glm::mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen (temporal reuse)
+        glm::mat4 prevInvMvp; // previous frame's inverse(mvp): reconstruct last frame's world pos (disocclusion)
+
+        glm::vec4 screenSize;   // xy = full render-target resolution (px); zw = 1/xy (screen-space AO lookup)
+        glm::vec4 viewportRect; // xy = viewport min, zw = viewport size, both normalized to [0,1] of the full
+                                // render target. The scene renders through this sub-rect (editor viewport panel),
+                                // so screen-space reconstruction must map full-frame UV through it.
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

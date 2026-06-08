@@ -90,6 +90,9 @@ bool Device::initialize()
         .pNext = &vk11Features,
         .shaderFloat16 = vk::True,
         .shaderSampledImageArrayNonUniformIndexing = vk::True,
+        // Lets the forward pass's cached draw CB keep its denoised-AO image descriptor refreshed each frame
+        // (the AO image is ping-ponged per frame and recreated on resize) without re-recording the CB.
+        .descriptorBindingSampledImageUpdateAfterBind = vk::True,
         .descriptorBindingVariableDescriptorCount = vk::True,
         .runtimeDescriptorArray = vk::True,
         .bufferDeviceAddress = vk::True, // required by VK_EXT_device_generated_commands (indirect/preprocess buffers are referenced by device address)
@@ -106,7 +109,10 @@ bool Device::initialize()
     // acceleration structures; deferred_host_operations is a build-time dependency of both.
     vk::PhysicalDeviceAccelerationStructureFeaturesKHR accelStructFeatures{
         .pNext = &maintenance5Features,
-        .accelerationStructure = vk::True
+        .accelerationStructure = vk::True,
+        // Lets the forward pass's cached draw CB keep its TLAS descriptor refreshed each frame (the TLAS
+        // handle is recreated on capacity growth) without re-recording or invalidating the CB.
+        .descriptorBindingAccelerationStructureUpdateAfterBind = vk::True
     };
     vk::PhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{
         .pNext = &accelStructFeatures,
@@ -162,7 +168,7 @@ bool Device::initialize()
         { vk::DescriptorType::eAccelerationStructureKHR, poolSize } // GI trace TLAS binding
     };
     vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo{
-        .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+        .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet | vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind,
         .maxSets = poolSize * (uint32)(sizeof(poolSizes) / sizeof(poolSizes[0])),
         .poolSizeCount = (uint32)(sizeof(poolSizes) / sizeof(poolSizes[0])),
         .pPoolSizes = poolSizes,

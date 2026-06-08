@@ -12,7 +12,7 @@ A modern c++ Game Engine codebase.
 ### Building
 * CMake project
 	* Visual Studio 26 as generator
-	* When new files are added, reconfigure cmake
+	* All files are globbed, no need to edit cmake to add files, do need to reconfigure
 	* Build using CMake
 * Prefer to let me test out changes myself rather than looking at log output/screen yourself
 

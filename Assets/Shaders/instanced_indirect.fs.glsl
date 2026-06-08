@@ -1,4 +1,4 @@
-#version 450
+#version 460
 
 #extension GL_EXT_shader_explicit_arithmetic_types : enable
 #extension GL_EXT_shader_16bit_storage : enable
@@ -51,6 +51,7 @@ layout (binding = 6, std430) readonly buffer InGridTable
 layout (binding = 7) uniform sampler2D u_textures[];
 layout (binding = 8) uniform sampler2DArrayShadow u_shadowMap;      // comparison sampler (hardware PCF)
 layout (binding = 9) uniform sampler2DArray u_shadowMapDepth;       // raw depth (PCSS blocker search)
+layout (binding = 13) uniform sampler2D u_ao;                       // denoised half-res screen-space AO (linear upsample)
 
 // GI irradiance probes (diffuse indirect). World-space probe hash grid (this frame's / cur buffers),
 // written by the probe alloc+trace passes.
@@ -82,7 +83,7 @@ layout (location = 0) out vec4 out_color;
 #define GI_TABLE_SIZE_NAME     gi_tableSize
 #include "gi_probe.inc.glsl"
 
-float squareFalloff(float dist, float lightRadius) 
+float squareFalloff(float dist, float lightRadius)
 {
     float attenuation = 1.0 / (dist * dist + 1.0);
     float dr = dist / lightRadius;
@@ -201,9 +202,6 @@ vec3 closestPointOnRect(vec3 p, vec3 center, vec3 right, vec3 up, float halfWidt
 vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, float metalness, float roughness, float roughnessSq)
 {
 	float height = length(light.direction);
-	if (height < 1e-5 || light.width < 1e-5)
-		return vec3(0.0);
-
 	vec3 up     = light.direction / height;
 	vec3 ref    = abs(up.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
 	vec3 right0 = normalize(cross(up, ref));
@@ -396,8 +394,18 @@ void main()
 	// Diffuse global illumination: sample the ray-traced SH irradiance probes from the fixed volume.
 	// evalProbeSH returns the cosine-convolved irradiance E(N); Lambertian indirect = albedo/PI * E.
 	// Falls back to a small flat ambient outside the probe volume.
-	const vec3 indirectE = evalProbeSH(in_pos, N);
-	vec3 color = (indirectE.x >= 0.0) ? materialColor * (indirectE / PI) * u_giIntensity : materialColor * skyRadiance(N) * u_ambientIntensity;
+	// Denoised screen-space AO (half-res, linearly upsampled). gl_FragCoord is in full render-target pixels;
+	// u_screenSize.zw = 1/resolution turns it into the [0,1] UV the AO image was traced in. rgb = bent
+	// normal (average unoccluded direction, world space), a = scalar AO.
+	const vec4 aoSample = texture(u_ao, gl_FragCoord.xy * u_screenSize.zw);
+	const float ao = aoSample.w;
+	// Evaluate the indirect irradiance along the bent normal rather than the surface normal: in concave
+	// areas it points toward the open hemisphere, so the low-frequency probe SH stops leaking light from
+	// occluded directions. Mix partway toward N so flat, unoccluded surfaces are left untouched.
+	const vec3 bentN = normalize(mix(N, normalize(aoSample.xyz), 0.75));
+	const vec3 indirectE = evalProbeSH(in_pos, bentN);
+	vec3 color = (indirectE.x >= 0.0) ? materialColor * (indirectE / PI) * u_giIntensity * ao
+	                                  : materialColor * skyRadiance(bentN) * u_ambientIntensity * ao;
 
 	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
 	//color = mix(color, cascadeDebugColor(getSunCascade(in_pos)), 0.35);

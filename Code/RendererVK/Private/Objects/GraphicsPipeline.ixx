@@ -37,6 +37,10 @@ export struct GraphicsPipelineLayout
     ShaderSource fragmentShader;
     VertexLayoutInfo vertexLayoutInfo;
     std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
+    // Optional, parallel to descriptorSetLayoutBindings. If non-empty, the set layout is created
+    // UPDATE_AFTER_BIND-capable and each binding gets the corresponding flags (e.g. eUpdateAfterBind for
+    // a descriptor that's refreshed after the command buffer is recorded, like a per-frame TLAS).
+    std::vector<vk::DescriptorBindingFlags> descriptorBindingFlags;
     std::vector<vk::PushConstantRange> pushConstantRanges;
 
     // Depth-only passes (e.g. shadow maps) bind no fragment shader and write to a render pass with

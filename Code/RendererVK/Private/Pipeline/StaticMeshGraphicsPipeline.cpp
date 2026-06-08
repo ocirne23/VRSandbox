@@ -168,6 +168,28 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_ao (denoised screen-space AO)
+        .binding = 13,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
+
+    // Only the AO binding is refreshed after the (cached) draw CB is recorded, so flag it
+    // UPDATE_AFTER_BIND. Parallel to descriptorSetBindings; all other bindings keep default (no) flags.
+    graphicsPipelineLayout.descriptorBindingFlags.resize(descriptorSetBindings.size());
+    graphicsPipelineLayout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
+}
+
+void StaticMeshGraphicsPipeline::updateAODescriptor(vk::DescriptorSet descriptorSet, vk::ImageView aoView, vk::Sampler aoSampler)
+{
+    // The cached draw command buffer binds this set by handle, so refreshing the AO image binding each frame
+    // keeps the forward pass pointed at this frame's denoised AO image (recreated on resize, ping-ponged
+    // per frame). The AO images stay in GENERAL layout (written by the compute denoise, sampled here).
+    vk::DescriptorImageInfo imageInfo{ .sampler = aoSampler, .imageView = aoView, .imageLayout = vk::ImageLayout::eGeneral };
+    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 13, .descriptorCount = 1,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
+    Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
 
 void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)

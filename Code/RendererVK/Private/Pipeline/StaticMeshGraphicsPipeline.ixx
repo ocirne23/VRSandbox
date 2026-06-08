@@ -50,6 +50,9 @@ public:
     void initialize(RenderPass& renderPass);
     void reloadShaders();
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
+    // Refresh the denoised-AO image binding on a descriptor set (call each frame; the draw CB is cached and
+    // the AO image is recreated on resize).
+    void updateAODescriptor(vk::DescriptorSet descriptorSet, vk::ImageView aoView, vk::Sampler aoSampler);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
     const IndirectExecutionSet& getIndirectExecutionSet() const { return m_indirectExecutionSet; }

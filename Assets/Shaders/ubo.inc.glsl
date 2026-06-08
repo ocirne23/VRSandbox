@@ -28,7 +28,38 @@ layout (binding = UBO_BINDING, std140) uniform UBO
 
     mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES];
     vec4 u_shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution, w = pcf radius
+
+    mat4 u_invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
+    mat4 u_prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen
+    mat4 u_prevInvMvp; // previous frame's inverse(mvp): reconstruct last frame's world pos
+
+    vec4 u_screenSize;   // xy = full render-target resolution (px); zw = 1/xy
+    vec4 u_viewportRect; // xy = viewport min, zw = viewport size, normalized to [0,1] of the full render target
 };
+
+// Reconstruct world-space position from a hardware depth sample and a full-frame screen UV (origin top-left),
+// given an inverse view-proj. The scene renders through u_viewportRect (a sub-rect of the render target, e.g.
+// the editor viewport panel), so the full-frame UV is first remapped into viewport-local [0,1], then to NDC.
+// The viewport is y-flipped (negative height), so viewport-local v=0 (top) maps to ndc.y=+1.
+vec3 worldPosFromDepthMat(vec2 uv, float depth, mat4 invM)
+{
+    vec2 vpUv = (uv - u_viewportRect.xy) / u_viewportRect.zw;
+    vec4 clip = vec4(vpUv.x * 2.0 - 1.0, 1.0 - vpUv.y * 2.0, depth, 1.0);
+    vec4 world = invM * clip;
+    return world.xyz / world.w;
+}
+vec3 worldPosFromDepth(vec2 uv, float depth) { return worldPosFromDepthMat(uv, depth, u_invMvp); }
+
+// Project a world position to a previous-frame full-frame screen UV (inverse of the mapping above): NDC ->
+// viewport-local UV -> full-frame UV through u_viewportRect.
+vec2 prevScreenUV(vec3 worldPos, out float clipW)
+{
+    vec4 p = u_prevMvp * vec4(worldPos, 1.0);
+    clipW = p.w;
+    vec3 ndc = p.xyz / p.w;
+    vec2 vpUv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    return u_viewportRect.xy + vpUv * u_viewportRect.zw;
+}
 
 // move somewhere cleaner
 vec3 skyRadiance(vec3 dir)

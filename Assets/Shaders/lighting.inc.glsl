@@ -43,8 +43,11 @@ float giSunShadow(vec3 worldPos, vec3 N)
     return texture(u_shadowMap, vec4(uv, float(cascade), proj.z - 0.0015));
 }
 
-// Incoming irradiance (radiance * NdotL, colored) from one grid light. Point/spot use the real falloff
-// and cone; area/tube lights are approximated as a point at their center (low-frequency diffuse only).
+// Incoming irradiance (radiance * NdotL, colored) from one grid light. The light type is selected with
+// the same width/range encoding as the forward pass' doLight() (instanced_indirect.fs.glsl): width < 0 =>
+// spot, width > 0 && range < 0 => tube, width > 0 => rect area, width == 0 => point. Lights are treated as
+// a point at their center for the falloff/distance (low-frequency diffuse only), but the cone (spot) and
+// one-sided forward emission (rect area) are honored so they match the primary surfaces.
 vec3 giLightIrradiance(LightInfo light, vec3 pos, vec3 N)
 {
     vec3 toLight = light.pos - pos;
@@ -62,6 +65,22 @@ vec3 giLightIrradiance(LightInfo light, vec3 pos, vec3 N)
         float cosOuter = cos(light.rotation);
         float cosInner = mix(cosOuter, 1.0, softness);
         rad *= smoothstep(cosOuter, cosInner, cosAngle);
+    }
+    else if (light.width > 0.0 && light.range >= 0.0) // rect area light: one-sided, emits along its normal
+    {
+        // Reconstruct the quad's facing normal exactly as doAreaLight() does: up = normalize(direction),
+        // right is rotated about up by light.rotation, normal = cross(up, right). Only fragments in front
+        // of the quad receive light, faded by how directly the quad faces them.
+        float height = length(light.direction);
+        vec3 up     = light.direction / height;
+        vec3 ref    = abs(up.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        vec3 right0 = normalize(cross(up, ref));
+        vec3 right  = right0 * cos(light.rotation) + cross(up, right0) * sin(light.rotation);
+        vec3 quadNormal = cross(up, right);
+        float facing = dot(quadNormal, -L); // -L points from the light toward the surface
+        if (facing <= 0.0)
+            return vec3(0.0);
+        rad *= facing;
     }
     return rad * NdotL;
 }

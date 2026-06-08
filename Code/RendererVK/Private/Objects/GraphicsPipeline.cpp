@@ -33,11 +33,20 @@ bool GraphicsPipeline::reloadShaders(const RenderPass& renderPass, GraphicsPipel
 bool GraphicsPipeline::initialize(vk::RenderPass renderPass, GraphicsPipelineLayout& layout)
 {
     vk::Device vkDevice = Globals::device.getDevice();
+    vk::DescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo{
+        .bindingCount = (uint32)layout.descriptorBindingFlags.size(),
+        .pBindingFlags = layout.descriptorBindingFlags.data(),
+    };
     vk::DescriptorSetLayoutCreateInfo layoutInfo
     {
         .bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
         .pBindings = layout.descriptorSetLayoutBindings.data(),
     };
+    if (!layout.descriptorBindingFlags.empty())
+    {
+        layoutInfo.pNext = &bindingFlagsInfo;
+        layoutInfo.flags |= vk::DescriptorSetLayoutCreateFlagBits::eUpdateAfterBindPool;
+    }
     auto createLayoutResult = vkDevice.createDescriptorSetLayout(layoutInfo);
     if (createLayoutResult.result != vk::Result::eSuccess)
     {

@@ -25,6 +25,9 @@ import :ShadowCullComputePipeline;
 import :ShadowMapGraphicsPipeline;
 import :AccelerationStructure;
 import :GIProbePipeline;
+import :GBuffer;
+import :GBufferPipeline;
+import :RTAOPipeline;
 import :Light;
 import :GpuCrashTracker;
 
@@ -165,6 +168,14 @@ private:
     LightGridComputePipeline m_lightGridComputePipeline;
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
 
+    // Depth + world-normal prepass (G-buffer), one per frame-in-flight (written then sampled within the
+    // same frame, like the shadow maps). Drives the screen-space ray-traced AO denoise pipeline.
+    std::array<GBuffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_gbuffers;
+    GBufferPipeline m_gbufferPipeline;
+
+    // Screen-space ray-traced AO (half-res compute) feeding a temporal-reprojection denoise.
+    RTAOPipeline m_rtaoPipeline;
+
     // Hardware ray-traced diffuse GI. The acceleration structures are queried by the probe-trace pass;
     // BLASes are built once per mesh, the TLAS rebuilt each frame from the instance list.
     AccelerationStructure m_accelStructure;
@@ -205,6 +216,7 @@ private:
     struct PerFrameData
     {
         DescriptorSet staticMeshPipelineDescriptorSet;
+        DescriptorSet gbufferDescriptorSet;
         DescriptorSet indirectCullPipelineDescriptorSet;
         DescriptorSet lightGridPipelineDescriptorSet;
         DescriptorSet shadowCullDescriptorSet;
@@ -212,6 +224,8 @@ private:
 
         CommandBuffer primaryCommandBuffer;
         CommandBuffer staticMeshCommandBuffer;
+        CommandBuffer gbufferCommandBuffer;
+        CommandBuffer aoCommandBuffer;
         CommandBuffer indirectCullCommandBuffer;
         CommandBuffer lightGridCommandBuffer;
         CommandBuffer imguiCommandBuffer;

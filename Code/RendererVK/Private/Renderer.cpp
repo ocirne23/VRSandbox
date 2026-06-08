@@ -162,6 +162,13 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     initImgui(window);
 
     m_staticMeshGraphicsPipeline.initialize(m_renderPass);
+    {
+        const vk::Extent2D ext = m_swapChain.getLayout().extent;
+        for (GBuffer& gbuffer : m_gbuffers)
+            gbuffer.initialize(ext.width, ext.height);
+        m_gbufferPipeline.initialize(m_gbuffers[0]); // render pass compatible across all
+        m_rtaoPipeline.initialize(ext.width, ext.height);
+    }
     m_indirectCullComputePipeline.initialize();
     m_lightGridComputePipeline.initialize();
     m_accelStructure.initialize();
@@ -180,12 +187,15 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         perFrame.indirectCullPipelineDescriptorSet.initialize(m_indirectCullComputePipeline.getDescriptorSetLayout());
         perFrame.lightGridPipelineDescriptorSet.initialize(m_lightGridComputePipeline.getDescriptorSetLayout());
         perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout());
+        perFrame.gbufferDescriptorSet.initialize(m_gbufferPipeline.getDescriptorSetLayout());
 
         perFrame.shadowCullDescriptorSet.initialize(m_shadowCullComputePipeline.getDescriptorSetLayout());
         perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout());
 
         perFrame.primaryCommandBuffer.initialize(vk::CommandBufferLevel::ePrimary);
         perFrame.staticMeshCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.gbufferCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.aoCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.indirectCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.lightGridCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.imguiCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -273,6 +283,12 @@ void Renderer::recreateWindowSurface(Window& window)
     m_surface.initialize(window);
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
+    {
+        const vk::Extent2D ext = m_swapChain.getLayout().extent;
+        for (GBuffer& gbuffer : m_gbuffers)
+            gbuffer.initialize(ext.width, ext.height);
+        m_rtaoPipeline.recreateImages(ext.width, ext.height);
+    }
     auto waitResult2 = Globals::device.getGraphicsQueue().waitIdle();
     if (waitResult2 != vk::Result::eSuccess)
     {
@@ -290,6 +306,12 @@ void Renderer::recreateSwapchain()
     printf("recreateSwapchain()\n");
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
+    {
+        const vk::Extent2D ext = m_swapChain.getLayout().extent;
+        for (GBuffer& gbuffer : m_gbuffers)
+            gbuffer.initialize(ext.width, ext.height);
+        m_rtaoPipeline.recreateImages(ext.width, ext.height);
+    }
 }
 
 void Renderer::reloadShaders()
@@ -302,6 +324,8 @@ void Renderer::reloadShaders()
     }
 
     m_staticMeshGraphicsPipeline.reloadShaders();
+    m_gbufferPipeline.reloadShaders();
+    m_rtaoPipeline.reloadShaders();
     m_indirectCullComputePipeline.reloadShaders();
     m_lightGridComputePipeline.reloadShaders();
     m_shadowCullComputePipeline.reloadShaders();
@@ -333,9 +357,25 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     m_cameraPos = camera.position; // drives the GI probe region each frame
 
     static RendererVKLayout::Ubo ubo;
+    ubo.prevMvp = ubo.mvp;       // last frame's mvp (before overwrite) for temporal reprojection
+    ubo.prevInvMvp = ubo.invMvp; // last frame's inverse mvp (before overwrite) for disocclusion
     ubo.mvp = projection * viewMatrix;
+    ubo.invMvp = glm::inverse(ubo.mvp);
     ubo.frustum.fromMatrix(ubo.mvp);
     ubo.viewPos = camera.position;
+
+    // Full render-target resolution (the G-buffer / AO images are sized to this); the forward pass turns
+    // gl_FragCoord into a [0,1] screen UV with the reciprocal to sample the half-res denoised AO.
+    const vk::Extent2D swapExtent = m_swapChain.getLayout().extent;
+    ubo.screenSize = glm::vec4((float)swapExtent.width, (float)swapExtent.height,
+        1.0f / (float)swapExtent.width, 1.0f / (float)swapExtent.height);
+    // The scene renders through the viewport panel's sub-rect; screen-space passes remap full-frame UVs
+    // through this to reconstruct/reproject correctly when the panel is offset or smaller than the window.
+    ubo.viewportRect = glm::vec4(
+        (float)m_viewportRect.min.x / (float)swapExtent.width,
+        (float)m_viewportRect.min.y / (float)swapExtent.height,
+        (float)viewportSize.x / (float)swapExtent.width,
+        (float)viewportSize.y / (float)swapExtent.height);
 
     ubo.giIntensity = m_giIntensity;
     ubo.sunDirection = m_sunDirection;
@@ -481,6 +521,7 @@ void Renderer::recordCommandBuffers()
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
     ShadowMap& shadowMap = m_shadowMaps[frameIdx];
+    GBuffer& gbuffer = m_gbuffers[frameIdx];
 
     vk::CommandBufferInheritanceInfo inheritanceInfo
     {
@@ -625,6 +666,40 @@ void Renderer::recordCommandBuffers()
             m_staticMeshGraphicsPipeline.record(frameData.staticMeshCommandBuffer, frameIdx, m_meshInfoCounter, drawParams);
             staticMeshCommandBuffer.end();
         }
+
+        { // Depth + world-normal G-buffer prepass (camera view), reusing the camera-cull draw outputs.
+            vk::CommandBufferInheritanceInfo gbufferInheritanceInfo
+            {
+                .renderPass = gbuffer.getRenderPass(),
+                .subpass = 0,
+                .framebuffer = VK_NULL_HANDLE,
+            };
+            CommandBuffer& gbufferCommandBuffer = frameData.gbufferCommandBuffer;
+            vk::CommandBuffer vkGbufferCommandBuffer = gbufferCommandBuffer.begin(false, &gbufferInheritanceInfo);
+
+            const glm::ivec2 viewportSize = m_viewportRect.getSize();
+            const vk::Viewport viewport{
+                .x = (float)m_viewportRect.min.x,
+                .y = (float)m_viewportRect.max.y,
+                .width = (float)viewportSize.x,
+                .height = -((float)viewportSize.y),
+                .minDepth = 0.0f,
+                .maxDepth = 1.0f };
+            const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+            vkGbufferCommandBuffer.setViewport(0, { viewport });
+            vkGbufferCommandBuffer.setScissor(0, { scissor });
+            GBufferPipeline::RecordParams gbufferParams{
+                .descriptorSet = frameData.gbufferDescriptorSet,
+                .ubo = frameData.ubo,
+                .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
+                .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+                .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
+                .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
+                .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
+            };
+            m_gbufferPipeline.record(gbufferCommandBuffer, frameIdx, m_meshInfoCounter, gbufferParams);
+            gbufferCommandBuffer.end();
+        }
         frameData.updated = true;
     }
 
@@ -753,12 +828,37 @@ void Renderer::recordCommandBuffers()
         globalIllumCommandBuffer.end();
     }
 
+    // Screen-space ray-traced AO (half-res). Runs after the G-buffer prepass (samples normal+depth) and
+    // the GI TLAS build (ray-queried here). Recorded every frame; the TLAS handle may change per frame.
+    {
+        CommandBuffer& aoCommandBuffer = frameData.aoCommandBuffer;
+        vk::CommandBufferInheritanceInfo aoInheritanceInfo;
+        aoCommandBuffer.begin(false, &aoInheritanceInfo);
+        if (m_meshInfoCounter > 0 && m_accelStructure.getTlas(frameIdx))
+        {
+            const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+            RTAOPipeline::RecordParams aoParams{
+                .ubo = frameData.ubo,
+                .gbufferNormalView = gbuffer.getNormalView(),
+                .gbufferDepthView = gbuffer.getDepthView(),
+                .prevGbufferDepthView = m_gbuffers[prevFrameIdx].getDepthView(),
+                .gbufferSampler = gbuffer.getSampler(),
+                .tlas = m_accelStructure.getTlas(frameIdx),
+                .frameIndex = m_frameCounter,
+            };
+            m_rtaoPipeline.record(aoCommandBuffer, frameIdx, aoParams);
+        }
+        aoCommandBuffer.end();
+    }
+
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkLightGridCommandBuffer = frameData.lightGridCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkStaticMeshCommandBuffer = frameData.staticMeshCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkGbufferCommandBuffer = frameData.gbufferCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkShadowCullCommandBuffer = frameData.shadowCullCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkShadowDrawCommandBuffer = frameData.shadowDrawCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkGlobalIllumCommandBuffer = frameData.globalIllumCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkAoCommandBuffer = frameData.aoCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkGiProbeDebugCommandBuffer = frameData.giProbeDebugCommandBuffer.getCommandBuffer();
 
     vk::CommandBuffer vkImguiCommandBuffer = frameData.imguiCommandBuffer.begin(true, &inheritanceInfo);
@@ -799,8 +899,37 @@ void Renderer::recordCommandBuffers()
         vkCommandBuffer.executeCommands(1, &vkShadowDrawCommandBuffer);
     vkCommandBuffer.endRenderPass();
 
+    // Depth + world-normal G-buffer prepass (camera view). Runs after the camera cull (consumed below)
+    // and feeds the screen-space ray-traced AO denoise. Clears normal to 0 and depth to far.
+    {
+        std::array<vk::ClearValue, 2> gbufferClears{
+            vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } },
+            vk::ClearDepthStencilValue{ 1.0f, 0 } };
+        const vk::RenderPassBeginInfo gbufferRpBegin{
+            .renderPass = gbuffer.getRenderPass(),
+            .framebuffer = gbuffer.getFramebuffer(),
+            .renderArea = vk::Rect2D{.offset = vk::Offset2D{ 0, 0 }, .extent = vk::Extent2D{ gbuffer.getWidth(), gbuffer.getHeight() } },
+            .clearValueCount = (uint32)gbufferClears.size(),
+            .pClearValues = gbufferClears.data(),
+        };
+        vkCommandBuffer.beginRenderPass(gbufferRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
+        if (m_meshInfoCounter > 0)
+            vkCommandBuffer.executeCommands(1, &vkGbufferCommandBuffer);
+        vkCommandBuffer.endRenderPass();
+    }
+
     if (m_meshInfoCounter > 0)
         vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
+
+    // Screen-space RTAO compute (reads the G-buffer + TLAS, writes the half-res AO image).
+    vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
+
+    // Keep the cached static-mesh draw's AO binding pointed at this frame's denoised AO image (ping-ponged
+    // per frame, recreated on resize). Safe here: the per-frame fence guarantees this set isn't still in use
+    // by an in-flight frame.
+    if (m_meshInfoCounter > 0)
+        m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(),
+            m_rtaoPipeline.getAOView(frameIdx), m_rtaoPipeline.getAOSampler());
 
     constexpr std::array<vk::ClearValue, 2> clearValues{ vk::ClearColorValue{ std::array<float, 4> { 0.5f, 0.7f, 0.9f, 1.0f }}, vk::ClearDepthStencilValue{ 1.0f, 0 } };
     const vk::RenderPassBeginInfo renderPassBeginInfo{
