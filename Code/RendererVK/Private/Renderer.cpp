@@ -256,7 +256,6 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     m_gpuCrashTracker.Initialize(false);
 
-
     Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
     Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
     Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
@@ -264,9 +263,9 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::color3("Sky/Gradient", "Ground", &m_skyParams.ground);
     Tweak::floatVar("GI", "GI Intensity", &m_giIntensity, 0.0f, 10.0f);
 
+    Tweak::float3("Lighting", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
+    Tweak::color3("Lighting", "Sun Color", &m_sunColor, &m_sunIntensity);
     Tweak::floatVar("Lighting", "Ambient Intensity", &m_ambientIntensity, 0.0f, 1.0f);
-    Tweak::float3("Lighting/Sun", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
-    Tweak::color3("Lighting/Sun", "Sun Color", &m_sunColor, &m_sunIntensity);      // color + intensity
 
     return true;
 }
