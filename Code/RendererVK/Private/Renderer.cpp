@@ -450,21 +450,16 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.invMvp = glm::inverse(ubo.mvp);
     ubo.frustum.fromMatrix(ubo.mvp);
     ubo.viewPos = camera.position;
-
-    // Full render-target resolution (the G-buffer / AO images are sized to this); the forward pass turns
-    // gl_FragCoord into a [0,1] screen UV with the reciprocal to sample the half-res denoised AO.
     const vk::Extent2D swapExtent = m_swapChain.getLayout().extent;
     ubo.screenSize = glm::vec4((float)swapExtent.width, (float)swapExtent.height,
         1.0f / (float)swapExtent.width, 1.0f / (float)swapExtent.height);
-    // The scene renders through the viewport panel's sub-rect; screen-space passes remap full-frame UVs
-    // through this to reconstruct/reproject correctly when the panel is offset or smaller than the window.
     ubo.viewportRect = glm::vec4(
         (float)m_viewportRect.min.x / (float)swapExtent.width,
         (float)m_viewportRect.min.y / (float)swapExtent.height,
         (float)viewportSize.x / (float)swapExtent.width,
         (float)viewportSize.y / (float)swapExtent.height);
     ubo.taaJitter = glm::vec4(taaJitterNdc, 0.0f, 0.0f);
-    ubo.frameIndex = m_frameCounter; // RNG/temporal-rotation source for record-once passes
+    ubo.frameIndex = m_frameCounter;
 
     ubo.giIntensity = m_giIntensity;
     ubo.sunDirection = m_sunDirection;
@@ -479,7 +474,6 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.skyGround = m_skyParams.ground;
     ubo.skyUp = m_skyParams.up;
 
-    // Sun + cascaded shadow maps.
     const float aspect = (float)viewportSize.x / (float)viewportSize.y;
     glm::mat4 cascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
     computeSunCascades(camera, aspect, m_sunDirection, cascadeViewProj);

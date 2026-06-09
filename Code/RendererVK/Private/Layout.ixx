@@ -26,7 +26,7 @@ export namespace RendererVKLayout
     constexpr size_t LIGHT_GRID_BUFFER_SIZE = 10 * 1024 * 1024;
 	constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 1024 * 8; // should be power of 2 for hashing
 
-    // Sun shadow cascaded shadow maps. NUM_SHADOW_CASCADES must match the count in shared.inc.glsl.
+    // Sun shadow cascaded shadow maps. NUM_SHADOW_CASCADES must match the count in ubo.inc.glsl.
     constexpr uint32 NUM_SHADOW_CASCADES = 6;
     constexpr uint32 SHADOW_MAP_RESOLUTION = 2048;
 

@@ -5,8 +5,6 @@
 #define ALPHA_MODE_MASK 1u
 #define ALPHA_MODE_BLEND 2u
 
-#define NUM_SHADOW_CASCADES 6       // Must match RendererVKLayout::NUM_SHADOW_CASCADES
-
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 const uint INITIALIZING_ENTRY = 0xEFFFFFFFu;
 

@@ -29,7 +29,7 @@ int main()
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
+    renderer.initialize(window, EValidation::DISABLED, EVSync::DISABLED); // ENABLED DISABLED
     renderer.setSunLight(glm::vec3(-0.5f, 1.0f, 0.1f), glm::vec3(1.0f), 3.0f);
     renderer.setSkyParams({ .up = glm::vec3(0.0f, 1.0f, 0.0f), .intensity = 0.5f });
     renderer.setGIIntensity(2.0f);
@@ -153,7 +153,8 @@ int main()
                 const glm::vec3 ref = glm::abs(up.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
                 const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
                 const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
-                const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
+                float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
+				// if (rotation < 0.0f) rotation += glm::two_pi<float>(); Lets encode use shadow in negative rotation
                 spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 1.0f, 1.0f), 10.0f, camUp, 1.0f, 1.0f, rotation });
 
 				// spawn a plane to visualize the area light geometry; orient it to match the light's emission direction
@@ -172,6 +173,7 @@ int main()
                 const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
                 const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
                 const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
+                assert(rotation >= 0.0f);
                 spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 10.0f, camUp, 0.1f, 1.0f, rotation });
             }
 

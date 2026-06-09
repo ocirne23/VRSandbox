@@ -5,6 +5,8 @@
 #define UBO_BINDING 0
 #endif
 
+#define NUM_SHADOW_CASCADES 6
+
 layout (binding = UBO_BINDING, std140) uniform UBO
 {
     mat4 u_mvp;

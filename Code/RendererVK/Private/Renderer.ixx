@@ -200,7 +200,6 @@ private:
     float m_taaFeedback = 0.8f;
     uint32 m_taaJitterFrame = 0;
 
-    std::vector<RendererVKLayout::MeshInfo> m_cpuMeshInfos; // CPU copy kept for BLAS builds
     uint32 m_blasBuiltCount = 0;
     glm::vec3 m_cameraPos = glm::vec3(0.0f);
     glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
@@ -213,8 +212,19 @@ private:
     float m_ambientIntensity = 0.1f;
     float m_giIntensity = 1.0f;
 
-    float m_shadowDepthBias = 0.0015f;
-    float m_shadowNormalBias = 2.0f;
+    float m_shadowDepthBias = 0.000f;
+    float m_shadowNormalBias = 0.0f;
+
+    bool   m_giProbeDebugEnabled = false;
+    uint32 m_giProbeDebugMode = 0;
+    float  m_giProbeDebugRadius = 0.12f;
+
+    glm::ivec2 m_windowSize;
+    Rect m_viewportRect = Rect();
+    bool m_windowMinimized = false;
+    bool m_vsyncEnabled = true;
+
+    std::vector<RendererVKLayout::MeshInfo> m_cpuMeshInfos; // CPU copy kept for BLAS builds, refactor later
 
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform> m_renderNodeTransforms;
@@ -233,6 +243,10 @@ private:
 
     struct PerFrameData
     {
+        SceneColor sceneColor;
+        GBuffer gbuffer;
+        ShadowMap shadowMap;
+
         DescriptorSet staticMeshPipelineDescriptorSet;
         DescriptorSet gbufferDescriptorSet;
         DescriptorSet compositeDescriptorSet;
@@ -255,10 +269,6 @@ private:
         CommandBuffer taaCommandBuffer;
         CommandBuffer compositeCommandBuffer;
 
-        SceneColor sceneColor;
-        GBuffer gbuffer;
-        ShadowMap shadowMap;
-
         bool updated = false;
         Buffer ubo;
         Buffer inRenderNodeTransformsBuffer;
@@ -277,15 +287,6 @@ private:
         std::span<RendererVKLayout::LightInfo> mappedLightInfos;
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
-
-    glm::ivec2 m_windowSize;
-    Rect m_viewportRect = Rect();
-    bool m_windowMinimized = false;
-    bool m_vsyncEnabled = true;
-
-    bool   m_giProbeDebugEnabled = false;
-    uint32 m_giProbeDebugMode = 0;
-    float  m_giProbeDebugRadius = 0.12f;
 };
 
 export namespace Globals

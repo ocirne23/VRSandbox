@@ -8,7 +8,7 @@
 //   - the light grid buffers + #include "light_grid.inc.glsl"
 //   - UBO
 //   - u_shadowMap (sampler2DArrayShadow)
-//   - PI, NUM_SHADOW_CASCADES (shared.inc.glsl)
+//   - PI (shared.inc.glsl)
 
 #ifndef LIGHTING_INC_GLSL
 #define LIGHTING_INC_GLSL
