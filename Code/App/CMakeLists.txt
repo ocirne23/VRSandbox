@@ -10,3 +10,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "/ignore:4099")
 target_link_libraries(${PROJECT_NAME} PRIVATE Core RendererVK UI Entity File Input Scene)
 
 apply_compile_settings(${PROJECT_NAME})
+
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/Dependencies/Dll/GFSDK_Aftermath_Lib.x64.dll"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+    COMMENT "Copying GFSDK_Aftermath_Lib.x64.dll to output directory")
