@@ -262,7 +262,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
     Tweak::color3("Sky/Gradient", "Horizon", &m_skyParams.horizon);
     Tweak::color3("Sky/Gradient", "Ground", &m_skyParams.ground);
-    Tweak::floatVar("Lighting", "GI Intensity", &m_giIntensity, 0.0f, 10.0f);
+    Tweak::floatVar("GI", "GI Intensity", &m_giIntensity, 0.0f, 10.0f);
+
     Tweak::floatVar("Lighting", "Ambient Intensity", &m_ambientIntensity, 0.0f, 1.0f);
     Tweak::float3("Lighting/Sun", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
     Tweak::color3("Lighting/Sun", "Sun Color", &m_sunColor, &m_sunIntensity);      // color + intensity
@@ -657,8 +658,7 @@ void Renderer::recordCommandBuffers()
                 .lightInfosBuffer = frameData.lightInfosBuffer,
                 .lightGridsBuffer = frameData.lightGridsBuffer,
                 .lightTableBuffer = frameData.lightTableBuffer,
-                .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(frameIdx),
-                .giTableBuffer = m_giProbePipeline.getGiTableBuffer(frameIdx),
+                .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
                 .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
                 .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
                 .shadowMapDepthSampler = m_shadowMaps[frameIdx].getDepthSampler(),
@@ -786,24 +786,9 @@ void Renderer::recordCommandBuffers()
         fullBarrier(vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
             vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderStorageRead);
 
-        // 5. Allocate the camera-region probe cubes into this frame's (cur) probe grid and carry the
-        // irradiance forward from the previous frame's (prev) grid. The cur buffers are cleared inside
-        // recordAlloc; the prev buffers are last frame's cur (read-only here; the frame fence guarantees
-        // they are no longer being written).
-        const glm::ivec3 centerPos = glm::ivec3(glm::floor(m_cameraPos / float(RendererVKLayout::GI_GRID_CUBE_SIZE)));
-        const glm::ivec3 regionMin = centerPos - glm::ivec3(RendererVKLayout::GI_REGION_RADIUS);
-        GIProbePipeline::AllocParams allocParams{
-            .regionMin = regionMin,
-            .regionDim = uint32(2 * RendererVKLayout::GI_REGION_RADIUS + 1),
-            .viewPos = m_cameraPos,
-        };
-        m_giProbePipeline.recordAlloc(globalIllumCommandBuffer, frameIdx, allocParams);
-
-        // alloc (table/gridData/work-list writes) -> trace reads
-        fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
-            vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite);
-
-        // 6. Trace rays per probe cell and temporally blend irradiance into the SH.
+        // 5. Trace rays per clipmap probe and temporally blend irradiance into the SH. The probe set and
+        // its toroidal window are derived from the camera (this frame's u_viewPos in the UBO); probes that
+        // scrolled in since last frame (relative to m_giPrevCameraPos) are full-replaced rather than blended.
         GIProbePipeline::TraceParams traceParams{
             .ubo = frameData.ubo,
             .lightInfos = frameData.lightInfosBuffer,
@@ -818,8 +803,10 @@ void Renderer::recordCommandBuffers()
             .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
             .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
             .frameIndex = m_frameCounter,
+            .prevViewPos = m_giPrevCameraPos,
         };
         m_giProbePipeline.recordTrace(globalIllumCommandBuffer, frameIdx, traceParams);
+        m_giPrevCameraPos = m_cameraPos;
 
         // trace (SH write) -> fragment read in the main pass
         fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,

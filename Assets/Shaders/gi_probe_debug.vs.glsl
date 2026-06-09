@@ -6,33 +6,18 @@
 // off-screen. Procedural geometry (no vertex buffers): 36 verts = 12 triangles of a unit cube.
 
 #include "shared.inc.glsl"
+#include "ubo.inc.glsl" // full UBO (binding 0): u_mvp + u_viewPos (centers the clipmap cascades)
 
-layout (binding = 0, std140) uniform UBO { mat4 u_mvp; }; // trailing UBO fields ignored here
-
-layout (binding = 1, std430) readonly buffer GiGridData { uint gi_gridData[]; };
-layout (binding = 2, std430) readonly buffer GiTable
-{
-    uint gi_numGrids;
-    uint gi_gridCounter;
-    uint gi_tableSize;
-    uint gi_table[];
-};
-layout (binding = 3, std430) readonly buffer GiGridList
-{
-    uint gi_gridListCount;
-    uint gi_gridList[];
-};
-
-#define GI_GRID_DATA_NAME  gi_gridData
-#define GI_TABLE_NAME      gi_table
-#define GI_TABLE_SIZE_NAME gi_tableSize
-#include "gi_probe.inc.glsl"
+layout (binding = 1, std430) readonly buffer GiGridData { float gi_gridData[]; };
 
 layout (push_constant) uniform PC
 {
-    float u_radius; // sphere/cube radius as a fraction of cell size
-    uint  u_mode;   // 0 = irradiance, 1 = cellSize/LOD color
+    float  u_radius; // cube radius as a fraction of probe spacing
+    uint   u_mode;   // 0 = irradiance, 1 = cascade/LOD color
 } pc;
+
+#define GI_GRID_DATA_NAME  gi_gridData
+#include "gi_probe.inc.glsl"
 
 layout (location = 0) out vec3 v_color;
 layout (location = 1) out vec3 v_normal;
@@ -47,44 +32,29 @@ const int IDX[36] = int[](
 void main()
 {
     uint inst = uint(gl_InstanceIndex);
-    uint g    = inst / uint(GI_MAX_CELLS_PER_GRID);
-    uint c    = inst - g * uint(GI_MAX_CELLS_PER_GRID);
+    int  cascade = int(inst / uint(GI_CASCADE_PROBES));
+    uint local   = inst - uint(cascade) * uint(GI_CASCADE_PROBES);
+    uint D       = uint(GI_CASCADE_PROBE_DIM);
+    ivec3 oc     = ivec3(int(local % D), int((local / D) % D), int(local / (D * D)));
 
-    bool valid = (g < gi_gridListCount);
-    uint gridIdx = 0u, cellSize = 4u;
-    if (valid)
-    {
-        gridIdx  = gi_gridList[g];
-        cellSize = giGetCellSize(gridIdx);
-        uint nc  = giNumCellsPerAxis(cellSize);
-        if (c >= nc * nc * nc)
-            valid = false;
-    }
-    if (!valid)
-    {
-        gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // outside clip volume -> discarded
-        v_color = vec3(0.0);
-        v_normal = vec3(0.0, 1.0, 0.0);
-        return;
-    }
+    int   spacing = giCascadeSpacing(cascade);
+    ivec3 lc      = giCascadeOrigin(cascade, u_viewPos) + oc;
+    vec3  center  = vec3(lc) * float(spacing);
 
     vec3 corner = CORNERS[IDX[gl_VertexIndex]];
-    vec3 center = giCellCenter(gridIdx, c);
-    vec3 world  = center + corner * (pc.u_radius * float(cellSize));
+    vec3 world  = center + corner * (pc.u_radius * sqrt(float(spacing)));
     gl_Position = u_mvp * vec4(world, 1.0);
 
     v_normal = normalize(corner);
     if (pc.u_mode == 1u)
     {
-		if      (cellSize <= 1u)  v_color = vec3(1.0, 0.2, 1.0);
-		else if (cellSize <= 2u)  v_color = vec3(1.0, 0.5, 0.2);
-        else if (cellSize <= 4u)  v_color = vec3(1.0, 0.2, 0.2);
-        else if (cellSize <= 8u)  v_color = vec3(0.2, 1.0, 0.2);
-        else if (cellSize <= 16u) v_color = vec3(0.3, 0.5, 1.0);
-        else                      v_color = vec3(1.0, 1.0, 0.2);
+        if      (cascade == 0) v_color = vec3(1.0, 0.2, 0.2);
+        else if (cascade == 1) v_color = vec3(0.2, 1.0, 0.2);
+        else if (cascade == 2) v_color = vec3(0.3, 0.5, 1.0);
+        else                   v_color = vec3(1.0, 1.0, 0.2);
     }
     else
     {
-        v_color = giEvalCell(giCellBase(gridIdx, c), v_normal) / PI;
+        v_color = giEvalCell(giProbeBase(cascade, lc), v_normal) / PI;
     }
 }

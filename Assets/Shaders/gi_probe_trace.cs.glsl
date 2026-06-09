@@ -61,20 +61,8 @@ layout (binding = 8, std430) readonly buffer InInstances   { InMeshInstance in_i
 layout (binding = 9, std430) readonly buffer InMaterials   { MaterialInfo in_materialInfos[]; };
 layout (binding = 10) uniform sampler2D u_textures[];
 layout (binding = 11) uniform sampler2DArrayShadow u_shadowMap;
-// GI probe grid (this frame's / cur buffers): SH read+write, table for the multi-bounce lookup, work list.
-layout (binding = 12, std430) coherent buffer GiGridData { uint gi_gridData[]; };
-layout (binding = 13, std430) coherent buffer GiTable
-{
-    uint gi_numGrids;
-    uint gi_gridCounter;
-    uint gi_tableSize;
-    uint gi_table[];
-};
-layout (binding = 14, std430) readonly buffer GiGridList
-{
-    uint gi_gridListCount;
-    uint gi_gridList[];
-};
+// GI probe clipmap volume (persistent SH, read+write for the multi-bounce lookup + temporal blend).
+layout (binding = 12, std430) coherent buffer GiGridData { float gi_gridData[]; };
 
 layout (push_constant) uniform PushConstants
 {
@@ -82,6 +70,8 @@ layout (push_constant) uniform PushConstants
     uint  numRays;
     float temporalAlpha;
     float maxRayDist;
+    vec3  prevViewPos; // last frame's camera (drives the previous clipmap window for freshness)
+    float _pad;
 } pc;
 
 // Light grid (read) + shared diffuse lighting.
@@ -91,13 +81,9 @@ layout (push_constant) uniform PushConstants
 #include "light_grid.inc.glsl"
 #include "lighting.inc.glsl"
 
-// GI probe grid (read + write).
+// GI probe clipmap (read + write).
 #define GI_PROBE_WRITE
 #define GI_GRID_DATA_NAME    gi_gridData
-#define GI_TABLE_NAME        gi_table
-#define GI_TABLE_SIZE_NAME   gi_tableSize
-#define GI_NUM_GRIDS_NAME    gi_numGrids
-#define GI_GRID_COUNTER_NAME gi_gridCounter
 #include "gi_probe.inc.glsl"
 
 uint hashU(uint x)
@@ -107,10 +93,11 @@ uint hashU(uint x)
 }
 float hashToFloat(uint x) { return float(hashU(x) & 0x00FFFFFFu) / float(0x01000000u); }
 
-vec3 sampleSphere(uint i, uint n, uint seed)
+// jitter = the two per-probe random offsets (loop-invariant; computed once by the caller).
+vec3 sampleSphere(uint i, uint n, vec2 jitter)
 {
-    float u1 = fract(float(i) * 0.61803398875 + hashToFloat(seed));
-    float u2 = (float(i) + hashToFloat(seed ^ 0x9e3779b9u)) / float(n);
+    float u1 = fract(float(i) * 0.61803398875 + jitter.x);
+    float u2 = (float(i) + jitter.y) / float(n);
     float z = 1.0 - 2.0 * u1;
     float r = sqrt(max(0.0, 1.0 - z * z));
     float phi = 2.0 * PI * u2;
@@ -132,10 +119,12 @@ float sunVisibility(vec3 origin)
     return (rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionTriangleEXT) ? 0.0 : 1.0;
 }
 
-vec3 traceRadiance(vec3 origin, vec3 dir)
+vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist)
 {
+    const float rayMax = pc.maxRayDist * (cascade + 1);
+    hitDist = rayMax; // misses (and out-of-bounds hits) count as open space at the gather range
     rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsOpaqueEXT, 0xFFu, origin, 0.05, dir, pc.maxRayDist);
+    rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsOpaqueEXT, 0xFFu, origin, 0.05, dir, rayMax);
     while (rayQueryProceedEXT(rq)) {}
 
     if (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
@@ -172,6 +161,7 @@ vec3 traceRadiance(vec3 origin, vec3 dir)
     vec3 worldN = normalize(mat3(o2w) * objN);
     const vec2 uv = b.x * vUV(v0) + b.y * vUV(v1) + b.z * vUV(v2);
     const vec3 worldPos = origin + dir * t;
+    hitDist = t; // committed surface hit -> actual distance to geometry along this ray
     if (dot(worldN, dir) > 0.0)
         worldN = -worldN;
 
@@ -192,18 +182,22 @@ layout(local_size_x = 64) in;
 void main()
 {
     const uint id = gl_GlobalInvocationID.x;
-    const uint g  = id / uint(GI_MAX_CELLS_PER_GRID);
-    const uint c  = id - g * uint(GI_MAX_CELLS_PER_GRID);
-    if (g >= gi_gridListCount)
+    if (id >= uint(GI_NUM_CASCADES) * uint(GI_CASCADE_PROBES))
         return;
 
-    const uint gridIdx  = gi_gridList[g];
-    const uint cellSize = giGetCellSize(gridIdx);
-    const uint nc       = giNumCellsPerAxis(cellSize);
-    if (c >= nc * nc * nc)
-        return;
+    const int  cascade = int(id / uint(GI_CASCADE_PROBES));
+    const uint local   = id - uint(cascade) * uint(GI_CASCADE_PROBES);
+    const uint D       = uint(GI_CASCADE_PROBE_DIM);
+    const ivec3 oc     = ivec3(int(local % D), int((local / D) % D), int(local / (D * D)));
 
-    const vec3 probeCenter = giCellCenter(gridIdx, c);
+    const int   spacing    = giCascadeSpacing(cascade);
+    const ivec3 lc         = giCascadeOrigin(cascade, u_viewPos) + oc;
+    const vec3  probeCenter = vec3(lc) * float(spacing);
+
+    // A probe is "fresh" when its lattice coord was outside the previous frame's clipmap window for this
+    // cascade (it just scrolled in), so we replace rather than blend to converge immediately.
+    const ivec3 prevOrigin = giCascadeOrigin(cascade, pc.prevViewPos);
+    const bool  fresh = any(lessThan(lc, prevOrigin)) || any(greaterThanEqual(lc, prevOrigin + GI_CASCADE_PROBE_DIM));
 
     // One view-independent sun-shadow ray per probe, shared by all gather rays this frame (cheap; avoids
     // the camera shadow map's frustum-coverage gaps that make off-screen probes flash bright then darken).
@@ -212,12 +206,16 @@ void main()
     const uint N = max(pc.numRays, 1u);
     const float wsh = 4.0 * PI / float(N);
     const uint seed = hashU(id ^ (pc.frameIndex * 0x9e3779b9u));
+    const vec2 jitter = vec2(hashToFloat(seed), hashToFloat(seed ^ 0x9e3779b9u));
 
     vec3 c0 = vec3(0.0), c1 = vec3(0.0), c2 = vec3(0.0), c3 = vec3(0.0);
+    float distSum = 0.0;
     for (uint i = 0u; i < N; ++i)
     {
-        const vec3 dir = sampleSphere(i, N, seed);
-        const vec3 radiance = traceRadiance(probeCenter, dir);
+        const vec3 dir = sampleSphere(i, N, jitter);
+        float hitDist;
+        const vec3 radiance = traceRadiance(probeCenter, dir, cascade, hitDist);
+        distSum += hitDist;
         const vec4 Y = shBasisL1(dir);
         c0 += radiance * (Y.x * wsh);
         c1 += radiance * (Y.y * wsh);
@@ -225,5 +223,8 @@ void main()
         c3 += radiance * (Y.w * wsh);
     }
 
-    giBlendCell(giCellBase(gridIdx, c), c0, c1, c2, c3, pc.temporalAlpha);
+    const uint cellBase = giProbeBase(cascade, lc);
+    const float alpha = fresh ? 1.0 : pc.temporalAlpha;
+    giBlendCell(cellBase, c0, c1, c2, c3, alpha);
+    giBlendMeanDist(cellBase, distSum / float(N), alpha); // mean free-space radius for occlusion at lookup
 }

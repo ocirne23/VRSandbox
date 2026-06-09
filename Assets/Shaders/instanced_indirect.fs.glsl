@@ -53,16 +53,9 @@ layout (binding = 8) uniform sampler2DArrayShadow u_shadowMap;      // compariso
 layout (binding = 9) uniform sampler2DArray u_shadowMapDepth;       // raw depth (PCSS blocker search)
 layout (binding = 13) uniform sampler2D u_ao;                       // denoised half-res screen-space AO (linear upsample)
 
-// GI irradiance probes (diffuse indirect). World-space probe hash grid (this frame's / cur buffers),
-// written by the probe alloc+trace passes.
-layout (binding = 10, std430) readonly buffer GiGridData { uint gi_gridData[]; };
-layout (binding = 11, std430) readonly buffer GiTable
-{
-    uint gi_numGrids;
-    uint gi_gridCounter;
-    uint gi_tableSize;
-    uint gi_table[];
-};
+// GI irradiance probes (diffuse indirect). Persistent cascaded clipmap SH volume, written by the probe
+// trace pass; addressed toroidally relative to the camera (u_viewPos), so no hash table is needed.
+layout (binding = 10, std430) readonly buffer GiGridData { float gi_gridData[]; };
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
@@ -79,8 +72,6 @@ layout (location = 0) out vec4 out_color;
 #include "light_grid.inc.glsl"
 
 #define GI_GRID_DATA_NAME      gi_gridData
-#define GI_TABLE_NAME          gi_table
-#define GI_TABLE_SIZE_NAME     gi_tableSize
 #include "gi_probe.inc.glsl"
 
 float squareFalloff(float dist, float lightRadius)

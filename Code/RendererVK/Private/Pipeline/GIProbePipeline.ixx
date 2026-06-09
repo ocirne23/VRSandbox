@@ -13,14 +13,15 @@ import :DescriptorSet;
 import :Sampler;
 import :Layout;
 
-// Diffuse GI probe system over a persistent, world-space probe hash grid (sibling of the light grid). The
-// grid buffers (hash table, grid data / SH, work list) are ping-ponged prev/cur across frames so probe
-// irradiance is carried forward temporally. Three compute passes per frame:
+// Diffuse GI probe system over a single persistent, world-space CASCADED CLIPMAP volume. GI_NUM_CASCADES
+// nested toroidal probe grids (camera-centered, doubling spacing) store SH-L1 irradiance at absolute lattice
+// positions; toroidal addressing carries irradiance forward in place with no hash table, copy, or ping-pong.
+// Two compute passes per frame:
 //   1. TLAS-instance pass : writes the per-instance VkAccelerationStructureInstanceKHR array on the GPU.
-//   2. Alloc+carry pass   : inserts camera-region cubes into the cur grid and carries SH from the prev grid.
-//   3. Trace pass         : ray-queries the TLAS per probe cell, shades hits (reusing the light grid + sun),
-//                           and temporally blends the result into each cell's SH-L1.
-// The TLAS is built by the AccelerationStructure object between passes 1 and 2 (orchestrated by the Renderer).
+//   2. Trace pass         : ray-queries the TLAS per probe, shades hits (reusing the light grid + sun), and
+//                           temporally blends into each probe's SH-L1 (full replace for probes that just
+//                           scrolled into the clipmap). The probe set + window is derived from the camera.
+// The TLAS is built by the AccelerationStructure object between the two passes (orchestrated by the Renderer).
 export class GIProbePipeline final
 {
 public:
@@ -43,15 +44,6 @@ public:
     };
     void recordTlasInstances(CommandBuffer& commandBuffer, uint32 frameIdx, TlasInstanceParams& params);
 
-    struct AllocParams
-    {
-        glm::ivec3 regionMin; // grid-cube coord of the region's min corner
-        uint32     regionDim; // cubes per axis (2*radius + 1)
-        glm::vec3  viewPos;   // camera position (drives per-cube cellSize)
-    };
-    // Clears the cur grid table/work-list and inserts+carries the camera-region cubes.
-    void recordAlloc(CommandBuffer& commandBuffer, uint32 frameIdx, const AllocParams& params);
-
     struct TraceParams
     {
         Buffer& ubo;
@@ -67,37 +59,39 @@ public:
         vk::ImageView shadowMapView;
         vk::Sampler shadowMapSampler;
         uint32 frameIndex;       // free-running frame counter (RNG seed)
+        glm::vec3 prevViewPos;   // last frame's camera (previous clipmap window, drives probe freshness)
     };
     void recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx, TraceParams& params);
 
-    // Debug visualization: instanced cubes at every live probe cell, drawn into the main color pass.
+    // Debug visualization: instanced cubes at every clipmap probe, drawn into the main color pass.
     // initializeDebug must be called after the main render pass exists.
     void initializeDebug(const RenderPass& renderPass);
     void reloadDebugShaders();
     void recordDebugDraw(CommandBuffer& commandBuffer, uint32 frameIdx, Buffer& ubo, float radius, uint32 mode);
 
     Buffer& getTlasInstanceBuffer(uint32 frameIdx) { return m_tlasInstanceBuffer[frameIdx]; }
-    // cur grid buffers for the given frame (consumed by the main pass's fragment shader).
-    Buffer& getGiGridDataBuffer(uint32 frameIdx) { return m_giGridData[frameIdx]; }
-    Buffer& getGiTableBuffer(uint32 frameIdx)    { return m_giTable[frameIdx]; }
+    // Persistent GI clipmap SH volume (consumed by the main pass's fragment shader).
+    Buffer& getGiGridDataBuffer() { return m_giGridData; }
 
 private:
     void buildTlasInstanceLayout(ComputePipelineLayout& layout);
-    void buildAllocLayout(ComputePipelineLayout& layout);
     void buildTraceLayout(ComputePipelineLayout& layout);
     void buildDebugLayout(GraphicsPipelineLayout& layout);
-    void recordClearCur(CommandBuffer& commandBuffer, uint32 frameIdx);
 
     ComputePipeline m_tlasInstancePipeline;
-    ComputePipeline m_allocPipeline;
     ComputePipeline m_tracePipeline;
     GraphicsPipeline m_debugPipeline;
     const RenderPass* m_debugRenderPass = nullptr;
 
-    // Persistent probe grid, ping-ponged by frame-in-flight index (prev = the other index).
-    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_giTable;    // { numGrids, gridCounter, tableSize, table[] }
-    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_giGridData; // headers + SH cells
-    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_giGridList; // { count, gridIdx[] }
+    // GI probe trace tuning (runtime-tweakable; consumed by GIProbePipeline::recordTrace).
+    int m_giRaysPerProbe = 17;         // gather rays per probe per frame
+    float m_giTemporalAlpha = 0.005f;  // per-frame blend toward freshly traced irradiance
+    float m_giMaxRayDist = 8.0f;       // gather ray max distance (world units)
+
+    // Single persistent GI clipmap SH volume: irradiance carries forward in place (toroidal addressing),
+    // so there is no prev/cur ping-pong. Read across frames by the fragment shader and read+written by the
+    // trace compute; GI is low-frequency so the cross-frame hazard is tolerated (slightly stale reads).
+    Buffer m_giGridData;
 
     // Per-frame instance buffer: written each frame by the TLAS-instance compute and consumed by that
     // frame's TLAS build; double-buffered for the same cross-frame-hazard reason as the TLAS itself.
@@ -106,7 +100,6 @@ private:
     Sampler m_textureSampler;
 
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_tlasInstanceSets;
-    std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_allocSets;
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_traceSets;
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_debugSets;
 

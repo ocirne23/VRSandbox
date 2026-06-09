@@ -2,6 +2,7 @@ module RendererVK:GIProbePipeline;
 
 import Core;
 import Core.glm;
+import Core.Tweaks;
 import File.FileSystem;
 import :Device;
 import :TextureManager;
@@ -13,48 +14,23 @@ import :Layout;
 namespace
 {
     struct TlasInstancePC { uint32 numInstances; };
-    struct AllocPC
-    {
-        glm::ivec3 regionMin;
-        uint32     regionDim;
-        glm::vec3  viewPos;
-        float      _pad;
-    };
     struct TracePC
     {
         uint32 frameIndex;
         uint32 numRays;
         float temporalAlpha;
         float maxRayDist;
-        float skyIntensity;
-        float sunAngularCos;
-        float sunGlow;
-        float _pad0;
-        glm::vec3 skyZenith;  float _pad1;
-        glm::vec3 skyHorizon; float _pad2;
-        glm::vec3 skyGround;  float _pad3;
-        glm::vec3 skyUp;      float _pad4;
+        glm::vec3 prevViewPos; float _pad0;
     };
     struct DebugPC
     {
-        float  radius; // cube half-extent as a fraction of cell size
-        uint32 mode;   // 0 = irradiance, 1 = cellSize/LOD color
+        float  radius; // cube half-extent as a fraction of probe spacing
+        uint32 mode;   // 0 = irradiance, 1 = cascade/LOD color
     };
-
-    constexpr uint32 GI_TABLE_EMPTY_ENTRY = 0xFFFFFFFFu;
 
     vk::DescriptorSetLayoutBinding storageBinding(uint32 b)
     {
         return vk::DescriptorSetLayoutBinding{ .binding = b, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute };
-    }
-
-    // Clear a probe grid table + work list to the empty/initial state.
-    void clearGridTable(vk::CommandBuffer cmd, Buffer& table, Buffer& gridList)
-    {
-        cmd.fillBuffer(table.getBuffer(), 0, 8, 0);                                        // numGrids, gridCounter
-        cmd.fillBuffer(table.getBuffer(), 8, 4, RendererVKLayout::GI_TABLE_NUM_ENTRIES);   // tableSize
-        cmd.fillBuffer(table.getBuffer(), 12, vk::WholeSize, GI_TABLE_EMPTY_ENTRY);        // table entries
-        cmd.fillBuffer(gridList.getBuffer(), 0, 4, 0);                                     // gridListCount
     }
 }
 
@@ -62,15 +38,8 @@ void GIProbePipeline::initialize()
 {
     m_textureSampler.initialize();
 
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
-    {
-        m_giTable[i].initialize(RendererVKLayout::GI_TABLE_BUFFER_SIZE,
-            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
-        m_giGridData[i].initialize(RendererVKLayout::GI_GRID_DATA_BUFFER_SIZE,
-            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
-        m_giGridList[i].initialize(RendererVKLayout::GI_GRID_LIST_BUFFER_SIZE,
-            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
-    }
+    m_giGridData.initialize(RendererVKLayout::GI_GRID_DATA_BUFFER_SIZE,
+        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     for (Buffer& instBuf : m_tlasInstanceBuffer)
         instBuf.initialize((vk::DeviceSize)RendererVKLayout::GI_MAX_TLAS_INSTANCES * RendererVKLayout::GI_TLAS_INSTANCE_SIZE,
@@ -78,24 +47,24 @@ void GIProbePipeline::initialize()
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     ComputePipelineLayout tlasLayout;  buildTlasInstanceLayout(tlasLayout); m_tlasInstancePipeline.initialize(tlasLayout);
-    ComputePipelineLayout allocLayout; buildAllocLayout(allocLayout);       m_allocPipeline.initialize(allocLayout);
     ComputePipelineLayout traceLayout; buildTraceLayout(traceLayout);       m_tracePipeline.initialize(traceLayout);
 
     for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
     {
         m_tlasInstanceSets[i].initialize(m_tlasInstancePipeline.getDescriptorSetLayout());
-        m_allocSets[i].initialize(m_allocPipeline.getDescriptorSetLayout());
         m_traceSets[i].initialize(m_tracePipeline.getDescriptorSetLayout());
     }
+
+    Tweak::intVar("GI/GI Probes", "Rays Per Probe", &m_giRaysPerProbe, 1, 128);
+    Tweak::floatVar("GI/GI Probes", "Temporal Alpha", &m_giTemporalAlpha, 0.0f, 0.05f);
+    Tweak::floatVar("GI/GI Probes", "Max Ray Distance", &m_giMaxRayDist, 0.0f, 128.0f);
 }
 
 void GIProbePipeline::reloadShaders()
 {
     ComputePipelineLayout tlasLayout;  buildTlasInstanceLayout(tlasLayout);
-    ComputePipelineLayout allocLayout; buildAllocLayout(allocLayout);
     ComputePipelineLayout traceLayout; buildTraceLayout(traceLayout);
     bool ok = m_tlasInstancePipeline.reloadShaders(tlasLayout);
-    ok = m_allocPipeline.reloadShaders(allocLayout) && ok;
     ok = m_tracePipeline.reloadShaders(traceLayout) && ok;
     if (!ok)
         printf("GIProbePipeline: shader reload failed, keeping previous pipeline(s)\n");
@@ -108,15 +77,6 @@ void GIProbePipeline::buildTlasInstanceLayout(ComputePipelineLayout& layout)
     for (uint32 b = 0; b <= 4; ++b)
         layout.descriptorSetLayoutBindings.push_back(storageBinding(b));
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(TlasInstancePC) });
-}
-
-void GIProbePipeline::buildAllocLayout(ComputePipelineLayout& layout)
-{
-    layout.computeShaderDebugFilePath = "Shaders/gi_probe_alloc.cs.glsl";
-    layout.computeShaderText = FileSystem::readFileStr(layout.computeShaderDebugFilePath);
-    for (uint32 b = 0; b <= 4; ++b) // cur table, cur gridData, cur gridList, prev table, prev gridData
-        layout.descriptorSetLayoutBindings.push_back(storageBinding(b));
-    layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(AllocPC) });
 }
 
 void GIProbePipeline::buildTraceLayout(ComputePipelineLayout& layout)
@@ -136,31 +96,16 @@ void GIProbePipeline::buildTraceLayout(ComputePipelineLayout& layout)
     b.push_back(storageBinding(9)); // materials
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 10, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = RendererVKLayout::MAX_TEXTURES, .stageFlags = vk::ShaderStageFlagBits::eCompute }); // textures
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 11, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute }); // shadow map
-    b.push_back(storageBinding(12)); // cur gridData (SH)
-    b.push_back(storageBinding(13)); // cur table
-    b.push_back(storageBinding(14)); // cur gridList
+    b.push_back(storageBinding(12)); // GI clipmap SH volume (read + write)
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(TracePC) });
 }
 
 void GIProbePipeline::recordClearPersistent(CommandBuffer& commandBuffer)
 {
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
-        clearGridTable(cmd, m_giTable[i], m_giGridList[i]);
-
-    vk::MemoryBarrier2 bar{
-        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-        .dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite,
-    };
-    cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
-}
-
-void GIProbePipeline::recordClearCur(CommandBuffer& commandBuffer, uint32 frameIdx)
-{
-    vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
-    clearGridTable(cmd, m_giTable[frameIdx], m_giGridList[frameIdx]);
+    // Zero the persistent clipmap SH so reads before the first trace are well-defined. The trace replaces
+    // (alpha=1) every probe on its first visit anyway, so this is just initial-frame hygiene.
+    cmd.fillBuffer(m_giGridData.getBuffer(), 0, vk::WholeSize, 0);
 
     vk::MemoryBarrier2 bar{
         .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
@@ -196,33 +141,6 @@ void GIProbePipeline::recordTlasInstances(CommandBuffer& commandBuffer, uint32 f
     cmd.dispatch((params.numInstances + 63) / 64, 1, 1);
 }
 
-void GIProbePipeline::recordAlloc(CommandBuffer& commandBuffer, uint32 frameIdx, const AllocParams& params)
-{
-    recordClearCur(commandBuffer, frameIdx);
-
-    const uint32 prevIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
-    DescriptorSet& set = m_allocSets[frameIdx];
-    vk::DescriptorSet vkSet = set.getDescriptorSet();
-    auto bufInfo = [](Buffer& buf) { return vk::DescriptorBufferInfo{ .buffer = buf.getBuffer(), .range = buf.getSize() }; };
-
-    std::array<DescriptorSetUpdateInfo, 5> updates{
-        DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giTable[frameIdx]) } },
-        DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giGridData[frameIdx]) } },
-        DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giGridList[frameIdx]) } },
-        DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giTable[prevIdx]) } },
-        DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giGridData[prevIdx]) } },
-    };
-
-    vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
-    commandBuffer.cmdUpdateDescriptorSets(m_allocPipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, vkSet, updates);
-    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_allocPipeline.getPipeline());
-    cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_allocPipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
-    AllocPC pc{ .regionMin = params.regionMin, .regionDim = params.regionDim, .viewPos = params.viewPos, ._pad = 0.0f };
-    cmd.pushConstants(m_allocPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
-    const uint32 numCubes = params.regionDim * params.regionDim * params.regionDim;
-    cmd.dispatch((numCubes + 63) / 64, 1, 1);
-}
-
 void GIProbePipeline::recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx, TraceParams& params)
 {
     DescriptorSet& set = m_traceSets[frameIdx];
@@ -248,9 +166,7 @@ void GIProbePipeline::recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx,
         updates.push_back(std::move(texUpdate));
 
     updates.push_back(DescriptorSetUpdateInfo{ .binding = 11, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { vk::DescriptorImageInfo{ .sampler = params.shadowMapSampler, .imageView = params.shadowMapView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal } } });
-    updates.push_back(DescriptorSetUpdateInfo{ .binding = 12, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giGridData[frameIdx]) } });
-    updates.push_back(DescriptorSetUpdateInfo{ .binding = 13, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giTable[frameIdx]) } });
-    updates.push_back(DescriptorSetUpdateInfo{ .binding = 14, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giGridList[frameIdx]) } });
+    updates.push_back(DescriptorSetUpdateInfo{ .binding = 12, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giGridData) } });
 
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
     commandBuffer.cmdUpdateDescriptorSets(m_tracePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, vkSet, updates);
@@ -264,16 +180,14 @@ void GIProbePipeline::recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx,
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipeline());
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
 
-    // Trace tuning (passed via push constants). Rays are amortized over frames via the temporal blend.
-    constexpr uint32 GI_RAYS_PER_PROBE = 17;
-    constexpr float  GI_TEMPORAL_ALPHA = 0.005f;
-    constexpr float  GI_MAX_RAY_DIST = 16.0f;
-
+    // Trace tuning (passed via push constants, runtime-tweakable). Rays are amortized over frames via the
+    // temporal blend.
     TracePC pc{
         .frameIndex = params.frameIndex,
-        .numRays = GI_RAYS_PER_PROBE,
-        .temporalAlpha = GI_TEMPORAL_ALPHA,
-        .maxRayDist = GI_MAX_RAY_DIST,
+        .numRays = (uint32)std::max(m_giRaysPerProbe, 1),
+        .temporalAlpha = m_giTemporalAlpha,
+        .maxRayDist = m_giMaxRayDist,
+        .prevViewPos = params.prevViewPos,
     };
     cmd.pushConstants(m_tracePipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
 
@@ -289,10 +203,8 @@ void GIProbePipeline::buildDebugLayout(GraphicsPipelineLayout& layout)
     layout.cullMode = vk::CullModeFlagBits::eNone; // procedural cube, winding not guaranteed
 
     auto& b = layout.descriptorSetLayoutBindings;
-    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex }); // UBO (mvp)
-    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex }); // gridData
-    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 2, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex }); // table
-    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 3, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex }); // gridList
+    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex }); // UBO (mvp + viewPos)
+    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex }); // clipmap SH volume
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eVertex, .offset = 0, .size = sizeof(DebugPC) });
 }
 
@@ -320,11 +232,9 @@ void GIProbePipeline::recordDebugDraw(CommandBuffer& commandBuffer, uint32 frame
     vk::DescriptorSet vkSet = set.getDescriptorSet();
     auto bufInfo = [](Buffer& buf) { return vk::DescriptorBufferInfo{ .buffer = buf.getBuffer(), .range = buf.getSize() }; };
 
-    std::array<DescriptorSetUpdateInfo, 4> updates{
+    std::array<DescriptorSetUpdateInfo, 2> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer, .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = ubo.getBuffer(), .range = sizeof(RendererVKLayout::Ubo) } } },
-        DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giGridData[frameIdx]) } },
-        DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giTable[frameIdx]) } },
-        DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giGridList[frameIdx]) } },
+        DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_giGridData) } },
     };
 
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
@@ -333,6 +243,6 @@ void GIProbePipeline::recordDebugDraw(CommandBuffer& commandBuffer, uint32 frame
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_debugPipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
     DebugPC pc{ .radius = radius, .mode = mode };
     cmd.pushConstants(m_debugPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(pc), &pc);
-    // One instanced cube (36 verts) per probe-cell slot; out-of-range instances self-cull in the VS.
-    cmd.draw(36, RendererVKLayout::GI_TRACE_THREADS, 0, 0);
+    // One instanced cube (36 verts) per clipmap probe across all cascades.
+    cmd.draw(36, RendererVKLayout::GI_PROBES_TOTAL, 0, 0);
 }

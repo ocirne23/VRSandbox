@@ -71,6 +71,16 @@ namespace
 			drawLabel(var);
 			changed = ImGui::Checkbox("##v", static_cast<bool*>(var.data));
 			break;
+		case ETweakType::Int:
+		{
+			drawLabel(var);
+			int* v = static_cast<int*>(var.data);
+			if (var.isUnbounded())
+				changed = ImGui::DragInt("##v", v, var.speed, static_cast<int>(var.min), INT_MAX);
+			else
+				changed = ImGui::SliderInt("##v", v, static_cast<int>(var.min), static_cast<int>(var.max));
+			break;
+		}
 		case ETweakType::Enum:
 		{
 			drawLabel(var);
@@ -127,9 +137,9 @@ namespace
 
 		bool open;
 		if (depth == 0)
-			open = ImGui::CollapsingHeader(label.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+			open = ImGui::CollapsingHeader(label.c_str());
 		else
-			open = ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
+			open = ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
 
 		if (open)
 		{

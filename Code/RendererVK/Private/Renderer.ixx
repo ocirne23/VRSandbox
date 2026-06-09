@@ -183,6 +183,7 @@ private:
     std::vector<RendererVKLayout::MeshInfo> m_cpuMeshInfos; // CPU copy kept for BLAS builds
     uint32 m_blasBuiltCount = 0;
     glm::vec3 m_cameraPos = glm::vec3(0.0f);
+    glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
     uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray set each frame
 
     // One shadow map per frame-in-flight: it is written early and sampled later in the same frame,

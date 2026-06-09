@@ -17,6 +17,7 @@ export enum class ETweakType : uint8
 	Color3,  // rgb color picker (+ optional intensity)
 	Color4,  // rgba color picker
 	Bool,
+	Int,     // single int, slider (bounded) or drag (unbounded)
 	Enum,    // int index into enumNames
 };
 
@@ -102,6 +103,14 @@ export namespace Tweak
 	inline void color4(std::string_view category, std::string_view name, glm::vec4* color, std::function<void()> onChange = {})
 	{
 		TweakVar var{ name, category, ETweakType::Color4, color };
+		var.onChange = std::move(onChange);
+		TweakRegistry::get().registerVar(var);
+	}
+
+	// Integer slider (bounded) or drag (max == FLT_MAX). min/max/speed are stored as floats and cast.
+	inline void intVar(std::string_view category, std::string_view name, int* value, int min = 0, int max = 100, float speed = 1.0f, std::function<void()> onChange = {})
+	{
+		TweakVar var{ name, category, ETweakType::Int, value, float(min), float(max), speed };
 		var.onChange = std::move(onChange);
 		TweakRegistry::get().registerVar(var);
 	}

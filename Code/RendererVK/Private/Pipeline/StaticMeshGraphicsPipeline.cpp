@@ -156,14 +156,8 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // probe_sh (GI volume)
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // probe_sh (GI clipmap volume)
         .binding = 10,
-        .descriptorType = vk::DescriptorType::eStorageBuffer,
-        .descriptorCount = 1,
-        .stageFlags = vk::ShaderStageFlagBits::eFragment
-    });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // gi volume min (ivec4)
-        .binding = 11,
         .descriptorType = vk::DescriptorType::eStorageBuffer,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
@@ -251,7 +245,7 @@ void StaticMeshGraphicsPipeline::reloadShaders()
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
-    std::array<DescriptorSetUpdateInfo, 11> graphicsDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 10> graphicsDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo{
             .binding = 0,
@@ -340,11 +334,6 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .binding = 10,
             .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.giGridDataBuffer.getBuffer(), .range = params.giGridDataBuffer.getSize() } }
-        },
-        DescriptorSetUpdateInfo{
-            .binding = 11,
-            .type = vk::DescriptorType::eStorageBuffer,
-            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.giTableBuffer.getBuffer(), .range = params.giTableBuffer.getSize() } }
         },
 
         DescriptorSetUpdateInfo{

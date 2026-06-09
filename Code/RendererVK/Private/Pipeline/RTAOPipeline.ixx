@@ -63,6 +63,15 @@ private:
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_temporalSets;
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_spatialSets;
 
+    // Tuning (runtime-tweakable; registered with the Tweak system in initialize()). Few rays per frame;
+    // temporal accumulation amortizes them into a clean result.
+    int   m_rays = 8;
+    float m_radius = 1.0f;
+    float m_power = 1.25f;
+    float m_intensity = 1.0f;
+    float m_maxHistory = 0.50f;
+    int   m_blurRadius = 3;
+
     uint32 m_width = 0;  // half-res AO dimensions
     uint32 m_height = 0;
     ImageSet m_raw;

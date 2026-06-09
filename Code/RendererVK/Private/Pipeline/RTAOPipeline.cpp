@@ -1,6 +1,7 @@
 module RendererVK:RTAOPipeline;
 
 import Core;
+import Core.Tweaks;
 import File.FileSystem;
 import :Device;
 import :CommandBuffer;
@@ -36,14 +37,6 @@ namespace
         int32  radius;
         float  _pad;
     };
-
-    // Tuning. Few rays per frame; temporal accumulation amortizes them into a clean result.
-    constexpr uint32 RTAO_RAYS       = 8;
-    constexpr float  RTAO_RADIUS     = 1.0f;
-    constexpr float  RTAO_POWER      = 1.25f;
-    constexpr float  RTAO_INTENSITY  = 1.0f;
-    constexpr float  RTAO_MAX_HISTORY = 0.50f;
-    constexpr int32  RTAO_BLUR_RADIUS = 3;
 
     auto imgInfoGeneral(vk::ImageView view) { return vk::DescriptorImageInfo{ .imageView = view, .imageLayout = vk::ImageLayout::eGeneral }; }
     auto sampledGeneral(vk::Sampler s, vk::ImageView v) { return vk::DescriptorImageInfo{ .sampler = s, .imageView = v, .imageLayout = vk::ImageLayout::eGeneral }; }
@@ -209,6 +202,13 @@ void RTAOPipeline::initialize(uint32 fullWidth, uint32 fullHeight)
     auto samplerResult = Globals::device.getDevice().createSampler(samplerInfo);
     assert(samplerResult.result == vk::Result::eSuccess);
     m_aoSampler = samplerResult.value;
+
+    Tweak::intVar("RTAO", "Rays Per Pixel", &m_rays, 1, 32);
+    Tweak::floatVar("RTAO", "Radius", &m_radius, 0.0f, 32.0f);
+    Tweak::floatVar("RTAO", "Power", &m_power, 0.0f, 8.0f);
+    Tweak::floatVar("RTAO", "Intensity", &m_intensity, 0.0f, 4.0f);
+    Tweak::floatVar("RTAO", "Max History", &m_maxHistory, 0.0f, 1.0f);
+    Tweak::intVar("RTAO", "Blur Radius", &m_blurRadius, 0, 8);
 }
 
 void RTAOPipeline::reloadShaders()
@@ -287,8 +287,8 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const R
 
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, traceLayout, 0, 1, &vkSet, 0, nullptr);
-        RtaoPC pc{ .frameIndex = params.frameIndex, .numRays = RTAO_RAYS, .radius = RTAO_RADIUS, .power = RTAO_POWER,
-            .intensity = RTAO_INTENSITY, .aoWidth = m_width, .aoHeight = m_height };
+        RtaoPC pc{ .frameIndex = params.frameIndex, .numRays = uint32(std::max(m_rays, 1)), .radius = m_radius, .power = m_power,
+            .intensity = m_intensity, .aoWidth = m_width, .aoHeight = m_height };
         cmd.pushConstants(traceLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
@@ -311,7 +311,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const R
         commandBuffer.cmdUpdateDescriptorSets(temporalLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_temporalPipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, temporalLayout, 0, 1, &vkSet, 0, nullptr);
-        TemporalPC pc{ .aoWidth = m_width, .aoHeight = m_height, .maxHistory = RTAO_MAX_HISTORY };
+        TemporalPC pc{ .aoWidth = m_width, .aoHeight = m_height, .maxHistory = m_maxHistory };
         cmd.pushConstants(temporalLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
@@ -333,7 +333,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const R
         commandBuffer.cmdUpdateDescriptorSets(spatialLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_spatialPipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, spatialLayout, 0, 1, &vkSet, 0, nullptr);
-        SpatialPC pc{ .aoWidth = m_width, .aoHeight = m_height, .radius = RTAO_BLUR_RADIUS };
+        SpatialPC pc{ .aoWidth = m_width, .aoHeight = m_height, .radius = m_blurRadius };
         cmd.pushConstants(spatialLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
