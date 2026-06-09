@@ -23,17 +23,19 @@ A modern c++ Game Engine codebase.
 * Shared functionality like memory allocation and containers
 * Provides the "Core" module which every .ixx has to import
 	* Any std library functions you need can be added to this file
+* Tweaks module to easily add variables to modify at runtime in UI panels
 ## Renderer
 * Modern Vulkan renderer designed to only use modern features (minimum spec RTX 2000 series) 
 * Device Generated Commands (DGC) for everything
 * Lights culled with a world space hash table indexing into grids with a cellcount based on distance to camera
-* Global illumination probes using hardware raytracing
-	* Also using hashtable lookup for probe data
+* Global illumination using scrolling clipmap radiance cascades
+* RTAO, TAA, PCSS cascades
 * Try to record CommandBuffers once (not per frame) whenever possible
 ## UI
 * ImGui library for all UI utilizing the Docking branch for windows
 * Couple of panels
 	* Viewport (Renderer output)
+	* Tweaks (panel to cinfigure renderer and other things)
 	* Script (WIP visual scripting thing)
 	* Scene (Scenegraph hierarchy display, dummy implementation)
 	* Properties (Selected scenegraph item info, dummy implementation)
