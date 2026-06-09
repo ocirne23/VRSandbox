@@ -1,4 +1,3 @@
-#include <cstdio>
 import Core;
 import Core.Allocator;
 import Core.Window;
@@ -18,7 +17,6 @@ import RendererVK;
 
 int main()
 {
-    setvbuf(stdout, nullptr, _IONBF, 0); // unbuffered so crash diagnostics aren't lost on abort
     FileSystem::initialize();
 
     Window window;
@@ -32,10 +30,7 @@ int main()
 
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED);
-    glm::vec3 sunDir = normalize(glm::vec3(-0.5f, 1.0f, 0.1f));
-    //float sunSize = 250.0f;
-	//float sunDistance = 5000.0f;
-    renderer.setSunLight(sunDir, glm::vec3(1.0f), 3.0f);
+    renderer.setSunLight(glm::vec3(-0.5f, 1.0f, 0.1f), glm::vec3(1.0f), 3.0f);
     renderer.setSkyParams({ .up = glm::vec3(0.0f, 1.0f, 0.0f), .intensity = 0.5f });
     renderer.setGIIntensity(2.0f);
     renderer.setAmbientIntensity(0.2f);
@@ -107,7 +102,7 @@ int main()
        overrides.metalRoughnessTexIdx = UINT16_MAX;
        overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
        baseShapes.initialize(*sceneData, &overrides);
-        //spawn a big sun sphere to visualize the sun light
+       // don't spawn sun sphere.. it blocks the GI probes...
        //sunLightNode = baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(sunDir * sunDistance, sunSize, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0))));
     }
 
