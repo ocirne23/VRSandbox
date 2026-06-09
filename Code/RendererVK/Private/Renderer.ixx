@@ -187,44 +187,25 @@ private:
     IndirectCullComputePipeline m_indirectCullComputePipeline;
     LightGridComputePipeline m_lightGridComputePipeline;
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
-
-    // Depth + world-normal prepass (G-buffer), one per frame-in-flight. Drives the screen-space ray-traced AO denoise pipeline and GI normal bending.
-    std::array<GBuffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_gbuffers;
     GBufferPipeline m_gbufferPipeline;
-
-    // Screen-space ray-traced AO (half-res compute) feeding a temporal-reprojection denoise. The AO command
-    // buffer is recorded once (with the scene) but bakes the ray-traced TLAS handle; recordGlobalIllum reports
-    // when that handle changes (first build / capacity growth) so the scene passes are re-recorded. The frame
-    // counter it samples comes from the UBO, so only the handle drives re-recording.
     RTAOPipeline m_rtaoPipeline;
-
-    // Temporal anti-aliasing. The lit scene renders into an offscreen colour target (one per frame-in-flight)
-    // instead of straight to the swapchain; a compute resolve reprojects+blends history, and a fullscreen
-    // composite copies the resolved image into the swapchain (with ImGui drawn on top). The camera projection
-    // is jittered sub-pixel each frame to feed the accumulation.
-    std::array<SceneColor, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_sceneColors;
     TaaPipeline m_taaPipeline;
+    ShadowCullComputePipeline m_shadowCullComputePipeline;
+    ShadowMapGraphicsPipeline m_shadowMapGraphicsPipeline;
     GraphicsPipeline m_compositePipeline;
+    AccelerationStructure m_accelStructure;
+    GIProbePipeline m_giProbePipeline;
+
     bool  m_taaEnabled = true;
     float m_taaFeedback = 0.8f;
     uint32 m_taaJitterFrame = 0;
 
-    // Hardware ray-traced diffuse GI. The acceleration structures are queried by the probe-trace pass;
-    // BLASes are built once per mesh, the TLAS rebuilt each frame from the instance list.
-    AccelerationStructure m_accelStructure;
-    GIProbePipeline m_giProbePipeline;
     std::vector<RendererVKLayout::MeshInfo> m_cpuMeshInfos; // CPU copy kept for BLAS builds
     uint32 m_blasBuiltCount = 0;
     glm::vec3 m_cameraPos = glm::vec3(0.0f);
     glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
     uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray set each frame
 
-    // One shadow map per frame-in-flight: it is written early and sampled later in the same frame,
-    // so a single shared image would race across the 2 frames in flight (guarded only by the
-    // per-frame fence). Indexing by frameIdx makes it safe like the other per-frame resources.
-    std::array<ShadowMap, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_shadowMaps;
-    ShadowCullComputePipeline m_shadowCullComputePipeline;
-    ShadowMapGraphicsPipeline m_shadowMapGraphicsPipeline;
     glm::vec3 m_sunDirection = glm::normalize(glm::vec3(0.5f, 1.0f, 0.5f));
     glm::vec3 m_sunColor = glm::vec3(1.0f);
     float m_sunIntensity = 5.0f;
@@ -273,6 +254,10 @@ private:
         CommandBuffer giProbeDebugCommandBuffer;
         CommandBuffer taaCommandBuffer;
         CommandBuffer compositeCommandBuffer;
+
+        SceneColor sceneColor;
+        GBuffer gbuffer;
+        ShadowMap shadowMap;
 
         bool updated = false;
         Buffer ubo;

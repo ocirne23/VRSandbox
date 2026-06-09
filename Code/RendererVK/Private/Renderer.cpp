@@ -177,18 +177,10 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     initImgui(window);
 
+    const vk::Extent2D ext = m_swapChain.getLayout().extent;
     m_staticMeshGraphicsPipeline.initialize(m_renderPass);
-    {
-        const vk::Extent2D ext = m_swapChain.getLayout().extent;
-        for (GBuffer& gbuffer : m_gbuffers)
-            gbuffer.initialize(ext.width, ext.height);
-        m_gbufferPipeline.initialize(m_gbuffers[0]); // render pass compatible across all
-        m_rtaoPipeline.initialize(ext.width, ext.height);
-        const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
-        for (SceneColor& sceneColor : m_sceneColors)
-            sceneColor.initialize(sceneFormat, ext.width, ext.height);
-        m_taaPipeline.initialize(ext.width, ext.height);
-    }
+    m_rtaoPipeline.initialize(ext.width, ext.height);
+    m_taaPipeline.initialize(ext.width, ext.height);
     initComposite();
     m_indirectCullComputePipeline.initialize();
     m_lightGridComputePipeline.initialize();
@@ -196,15 +188,23 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     m_giProbePipeline.initialize();
     m_giProbePipeline.initializeDebug(m_renderPass);
 
-    for (ShadowMap& shadowMap : m_shadowMaps)
-        shadowMap.initialize();
+
     m_shadowCullComputePipeline.initialize();
-    m_shadowMapGraphicsPipeline.initialize(m_shadowMaps[0]); // render pass is compatible across all
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        perFrame.gbuffer.initialize(ext.width, ext.height);
+        perFrame.shadowMap.initialize();
+    }
+    m_shadowMapGraphicsPipeline.initialize(m_perFrameData[0].shadowMap);
+    m_gbufferPipeline.initialize(m_perFrameData[0].gbuffer);
 
     vk::Device vkDevice = Globals::device.getDevice();
 
+    const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
     for (PerFrameData& perFrame : m_perFrameData)
     {
+        perFrame.sceneColor.initialize(sceneFormat, ext.width, ext.height);
+
         perFrame.indirectCullPipelineDescriptorSet.initialize(m_indirectCullComputePipeline.getDescriptorSetLayout());
         perFrame.lightGridPipelineDescriptorSet.initialize(m_lightGridComputePipeline.getDescriptorSetLayout());
         perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout());
@@ -329,16 +329,18 @@ void Renderer::recreateWindowSurface(Window& window)
     m_surface.initialize(window);
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
+
+    const vk::Extent2D ext = m_swapChain.getLayout().extent;
+    const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
+    m_rtaoPipeline.recreateImages(ext.width, ext.height);
+    m_taaPipeline.recreateImages(ext.width, ext.height);
+
+    for (PerFrameData& perFrame : m_perFrameData)
     {
-        const vk::Extent2D ext = m_swapChain.getLayout().extent;
-        for (GBuffer& gbuffer : m_gbuffers)
-            gbuffer.initialize(ext.width, ext.height);
-        m_rtaoPipeline.recreateImages(ext.width, ext.height);
-        const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
-        for (SceneColor& sceneColor : m_sceneColors)
-            sceneColor.initialize(sceneFormat, ext.width, ext.height);
-        m_taaPipeline.recreateImages(ext.width, ext.height);
+        perFrame.gbuffer.initialize(ext.width, ext.height);
+        perFrame.sceneColor.initialize(sceneFormat, ext.width, ext.height);
     }
+
     // The cached scene command buffers embed the (now-recreated) scene-colour render pass in their
     // inheritance info, so force them to re-record against the new handle.
     setHaveToRecordCommandBuffers();
@@ -359,16 +361,16 @@ void Renderer::recreateSwapchain()
     printf("recreateSwapchain()\n");
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
+    const vk::Extent2D ext = m_swapChain.getLayout().extent;
+    const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
+    m_rtaoPipeline.recreateImages(ext.width, ext.height);
+    m_taaPipeline.recreateImages(ext.width, ext.height);
+    for (PerFrameData& perFrame : m_perFrameData)
     {
-        const vk::Extent2D ext = m_swapChain.getLayout().extent;
-        for (GBuffer& gbuffer : m_gbuffers)
-            gbuffer.initialize(ext.width, ext.height);
-        m_rtaoPipeline.recreateImages(ext.width, ext.height);
-        const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
-        for (SceneColor& sceneColor : m_sceneColors)
-            sceneColor.initialize(sceneFormat, ext.width, ext.height);
-        m_taaPipeline.recreateImages(ext.width, ext.height);
+        perFrame.gbuffer.initialize(ext.width, ext.height);
+        perFrame.sceneColor.initialize(sceneFormat, ext.width, ext.height);
     }
+
     // Cached scene command buffers reference the recreated scene-colour render pass; re-record them.
     setHaveToRecordCommandBuffers();
 }
@@ -660,7 +662,7 @@ void Renderer::recordShadowCull(uint32 frameIdx)
 void Renderer::recordShadowDraw(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    ShadowMap& shadowMap = m_shadowMaps[frameIdx];
+    ShadowMap& shadowMap = frameData.shadowMap;
     vk::CommandBufferInheritanceInfo inheritance{ .renderPass = shadowMap.getRenderPass() };
     CommandBuffer& cb = frameData.shadowDrawCommandBuffer;
     vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
@@ -689,7 +691,7 @@ void Renderer::recordShadowDraw(uint32 frameIdx)
 void Renderer::recordStaticMesh(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = m_sceneColors[frameIdx].getRenderPass() };
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = frameData.sceneColor.getRenderPass() };
     CommandBuffer& cb = frameData.staticMeshCommandBuffer;
     vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
 
@@ -719,9 +721,9 @@ void Renderer::recordStaticMesh(uint32 frameIdx)
         .lightGridsBuffer = frameData.lightGridsBuffer,
         .lightTableBuffer = frameData.lightTableBuffer,
         .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
-        .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
-        .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
-        .shadowMapDepthSampler = m_shadowMaps[frameIdx].getDepthSampler(),
+        .shadowMapView = frameData.shadowMap.getSampleView(),
+        .shadowMapSampler = frameData.shadowMap.getSampler(),
+        .shadowMapDepthSampler = frameData.shadowMap.getDepthSampler(),
     };
     m_staticMeshGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, drawParams);
     cb.end();
@@ -730,7 +732,7 @@ void Renderer::recordStaticMesh(uint32 frameIdx)
 void Renderer::recordGBuffer(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    GBuffer& gbuffer = m_gbuffers[frameIdx];
+    GBuffer& gbuffer = frameData.gbuffer;
     vk::CommandBufferInheritanceInfo inheritance{ .renderPass = gbuffer.getRenderPass() };
     CommandBuffer& cb = frameData.gbufferCommandBuffer;
     vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
@@ -763,7 +765,7 @@ void Renderer::recordGBuffer(uint32 frameIdx)
 void Renderer::recordGiProbeDebug(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = m_sceneColors[frameIdx].getRenderPass() };
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = frameData.sceneColor.getRenderPass() };
     CommandBuffer& cb = frameData.giProbeDebugCommandBuffer;
     vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
     const vk::Extent2D extent = m_swapChain.getLayout().extent;
@@ -780,7 +782,7 @@ void Renderer::recordGiProbeDebug(uint32 frameIdx)
 void Renderer::recordAO(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    GBuffer& gbuffer = m_gbuffers[frameIdx];
+    GBuffer& gbuffer = frameData.gbuffer;
     CommandBuffer& cb = frameData.aoCommandBuffer;
     vk::CommandBufferInheritanceInfo inheritance;
     cb.begin(false, &inheritance);
@@ -792,7 +794,7 @@ void Renderer::recordAO(uint32 frameIdx)
             .ubo = frameData.ubo,
             .gbufferNormalView = gbuffer.getNormalView(),
             .gbufferDepthView = gbuffer.getDepthView(),
-            .prevGbufferDepthView = m_gbuffers[prevFrameIdx].getDepthView(),
+            .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(),
             .gbufferSampler = gbuffer.getSampler(),
             .tlas = tlas,
         };
@@ -804,8 +806,8 @@ void Renderer::recordAO(uint32 frameIdx)
 void Renderer::recordTaa(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    GBuffer& gbuffer = m_gbuffers[frameIdx];
-    SceneColor& sceneColor = m_sceneColors[frameIdx];
+    GBuffer& gbuffer = frameData.gbuffer;
+    SceneColor& sceneColor = frameData.sceneColor;
     CommandBuffer& cb = frameData.taaCommandBuffer;
     vk::CommandBufferInheritanceInfo inheritance;
     cb.begin(false, &inheritance);
@@ -815,7 +817,7 @@ void Renderer::recordTaa(uint32 frameIdx)
         .currentColorView = sceneColor.getColorView(),
         .currentColorSampler = sceneColor.getSampler(),
         .gbufferDepthView = gbuffer.getDepthView(),
-        .prevGbufferDepthView = m_gbuffers[prevFrameIdx].getDepthView(),
+        .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(),
         .gbufferSampler = gbuffer.getSampler(),
         .feedback = m_taaEnabled ? m_taaFeedback : 0.0f,
     };
@@ -940,8 +942,8 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         .meshInstances = frameData.inMeshInstancesBuffer,
         .materialInfos = m_materialInfosBuffer,
         .tlas = m_accelStructure.getTlas(frameIdx),
-        .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
-        .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
+        .shadowMapView = frameData.shadowMap.getSampleView(),
+        .shadowMapSampler = frameData.shadowMap.getSampler(),
         .frameIndex = m_frameCounter,
         .prevViewPos = m_giPrevCameraPos,
     };
@@ -960,9 +962,6 @@ void Renderer::recordCommandBuffers()
 {
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    ShadowMap& shadowMap = m_shadowMaps[frameIdx];
-    GBuffer& gbuffer = m_gbuffers[frameIdx];
-    SceneColor& sceneColor = m_sceneColors[frameIdx];
 
     const bool recordScene = !frameData.updated && m_meshInstanceCounter > 0;
     if (recordScene)
@@ -1019,6 +1018,7 @@ void Renderer::recordCommandBuffers()
         vkCommandBuffer.executeCommands(1, &vkShadowCullCommandBuffer);
 
         {
+            ShadowMap& shadowMap = frameData.shadowMap;
             vk::ClearValue shadowClear;
             shadowClear.depthStencil = vk::ClearDepthStencilValue{ .depth = 1.0f, .stencil = 0 };
             const vk::RenderPassBeginInfo shadowRpBegin{
@@ -1033,6 +1033,7 @@ void Renderer::recordCommandBuffers()
             vkCommandBuffer.endRenderPass();
         }
         { // Depth + world-normal G-buffer prepass (camera view)
+            GBuffer& gbuffer = frameData.gbuffer;
             std::array<vk::ClearValue, 2> gbufferClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
             const vk::RenderPassBeginInfo gbufferRpBegin{
                 .renderPass = gbuffer.getRenderPass(),
@@ -1050,6 +1051,7 @@ void Renderer::recordCommandBuffers()
         vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
         m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx), m_rtaoPipeline.getAOSampler());
 
+        SceneColor& sceneColor = frameData.sceneColor;
         std::array<vk::ClearValue, 2> sceneClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.5f, 0.7f, 0.9f, 1.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
         const vk::RenderPassBeginInfo sceneRpBegin{
             .renderPass = sceneColor.getRenderPass(),
