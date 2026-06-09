@@ -86,6 +86,9 @@ layout (push_constant) uniform PushConstants
 #define GI_GRID_DATA_NAME    gi_gridData
 #include "gi_probe.inc.glsl"
 
+// Alpha-masked-aware shadow rays (sun visibility at gather-ray hits).
+#include "rt_shadow.inc.glsl"
+
 uint hashU(uint x)
 {
     x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
@@ -108,15 +111,11 @@ vec3 vNormal(uint vi) { uint b = vi * 12u; return vec3(in_vertices[b + 3u], in_v
 vec2 vUV(uint vi)     { uint b = vi * 12u; return vec2(in_vertices[b + 10u], in_vertices[b + 11u]); }
 
 // View-independent sun visibility from a point: one shadow ray toward the sun via the TLAS. Returns 1
-// (lit) or 0 (occluded). Used per-probe (shared by all gather rays) so off-screen probes are shadowed
+// (lit) or 0 (occluded). Used per gather-ray hit (RT sun mode) so off-screen hits are shadowed
 // correctly, unlike the camera-frustum-fit shadow maps.
 float sunVisibility(vec3 origin)
 {
-    vec3 sunDir = normalize(u_sunDirection.xyz);
-    rayQueryEXT rq;
-    rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFFu, origin, 0.05, sunDir, 1.0e4);
-    while (rayQueryProceedEXT(rq)) {}
-    return (rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionTriangleEXT) ? 0.0 : 1.0;
+    return rtShadowVisibility(origin, normalize(u_sunDirection.xyz), 0.05, 1.0e4);
 }
 
 vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist)
@@ -168,6 +167,12 @@ vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist)
     const uint diffuseTexIdx = in_materialInfos[materialIdx].diffuseNormalTexIdx & 0x0000FFFFu;
     const vec3 albedo = textureLod(u_textures[nonuniformEXT(diffuseTexIdx)], uv, GI_ALBEDO_LOD).rgb;
 
+    // RT sun mode: per-hit sun visibility (one terminate-on-first-hit ray), so shadowed hit points stop
+    // contributing sun bounce; evaluating it at the probe center over-brightens GI (probe centers float
+    // in open air and their visibility was applied to every hit). Backfacing hits skip the ray: the sun
+    // term is NdotL-gated to zero anyway. Cascade mode: override stays unset, hits sample the shadow map.
+    if (u_rtSunShadow > 0.5)
+        g_sunShadowOverride = dot(worldN, u_sunDirection.xyz) <= 0.0 ? 0.0 : sunVisibility(worldPos + worldN * 0.02);
     vec3 radiance = giGatherDirect(worldPos, worldN, albedo);
     // Previous-frame indirect at the hit -> multi-bounce (infinite, temporally). The cur SH already holds
     // the carried-forward irradiance for this frame.
@@ -198,10 +203,6 @@ void main()
     // cascade (it just scrolled in), so we replace rather than blend to converge immediately.
     const ivec3 prevOrigin = giCascadeOrigin(cascade, pc.prevViewPos);
     const bool  fresh = any(lessThan(lc, prevOrigin)) || any(greaterThanEqual(lc, prevOrigin + GI_CASCADE_PROBE_DIM));
-
-    // One view-independent sun-shadow ray per probe, shared by all gather rays this frame (cheap; avoids
-    // the camera shadow map's frustum-coverage gaps that make off-screen probes flash bright then darken).
-    g_sunShadowOverride = sunVisibility(probeCenter);
 
     const uint N = max(pc.numRays, 1u);
     const float wsh = 4.0 * PI / float(N);

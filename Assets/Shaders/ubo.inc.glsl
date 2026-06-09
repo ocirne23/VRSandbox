@@ -26,11 +26,11 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec3  u_skyGround;     // color along -skyUp
     uint  u_frameIndex;    // monotonic frame counter (RNG / temporal-rotation source)
     vec3  u_skyUp;         // sky "up" axis (normalized); need not be world +Y (e.g. planet surface normal)
-    float _unused;
+    float u_rtSunShadow;   // > 0.5: ray-traced sun shadows instead of PCSS cascades
 
     mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES];
     vec3 u_shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution
-    float _unused2;
+    float u_sunShadowRays; // RT sun shadow rays per pixel (1 = single jittered ray)
 
     mat4 u_invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
     mat4 u_prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen

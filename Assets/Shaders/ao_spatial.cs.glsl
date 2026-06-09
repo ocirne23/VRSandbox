@@ -29,7 +29,33 @@ void main()
     const vec2 uv = (vec2(px) + 0.5) * texel;
 
     const float depth = texture(u_depth, uv).r;
-    if (depth >= 1.0) { imageStore(u_aoOut, px, texture(u_accumAO, uv)); return; }
+    if (depth >= 1.0)
+    {
+        // Dilate geometry AO into background texels. The trace writes background as (bentN=+Z, ao=1);
+        // the forward pass upsamples this image with plain bilinear, so background texels bleed into
+        // silhouette edge pixels and brighten their GI term (bright aliased rim). Averaging the nearby
+        // geometry samples instead makes the blend across the silhouette a no-op.
+        const int r = max(pc.radius, 1);
+        vec4 sum = vec4(0.0);
+        float wsum = 0.0;
+        for (int dy = -r; dy <= r; ++dy)
+        for (int dx = -r; dx <= r; ++dx)
+        {
+            const vec2 nuv = uv + vec2(dx, dy) * texel;
+            if (texture(u_depth, nuv).r >= 1.0) continue;
+            const float ws = exp(-float(dx * dx + dy * dy) / 8.0);
+            sum  += texture(u_accumAO, nuv) * ws;
+            wsum += ws;
+        }
+        vec4 bg = texture(u_accumAO, uv); // no geometry nearby: keep the background value
+        if (wsum > 1e-4)
+        {
+            bg = sum / wsum;
+            bg.xyz = (dot(bg.xyz, bg.xyz) > 1e-8) ? normalize(bg.xyz) : vec3(0.0, 0.0, 1.0);
+        }
+        imageStore(u_aoOut, px, bg);
+        return;
+    }
 
     const vec3 centerPos = worldPosFromDepth(uv, depth);
     const vec3 centerN   = normalize(texture(u_normal, uv).xyz);

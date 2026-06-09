@@ -126,22 +126,22 @@ int main()
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
-                spawnedLights.push_back(PointLight{ cameraController.getPosition(), 50.0f, glm::abs(glm::sphericalRand(1.0f)), 100.0f });
-                spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+                spawnedLights.push_back(PointLight{ cameraController.getPosition(), 25.0f, glm::abs(glm::sphericalRand(1.0f)), 50.0f });
+                //spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
                 spawnedLights.push_back(PointLight{ cameraController.getPosition(), 15.0f + glm::linearRand(0.5f, 1.5f), glm::abs(glm::sphericalRand(1.0f)), 30.0f });
-                spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+                //spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
-                spawnedLights.push_back(SpotLight{ cameraController.getPosition(), 25.0f, glm::vec3(1.0f, 0.95f, 0.8f), 50.0f, cameraController.getDirection(), glm::radians(25.0f), 0.25f });
+                spawnedLights.push_back(SpotLight{ cameraController.getPosition(), 12.5f, glm::vec3(1.0f, 0.95f, 0.8f), 20.0f, cameraController.getDirection(), glm::radians(25.0f), 0.25f });
 				glm::quat orientation = cameraController.getOrientation();
 				const glm::vec3 camUp = cameraController.getUp();
 				const glm::vec3 camRight = glm::normalize(glm::cross(cameraController.getDirection(), camUp));
 				orientation = glm::angleAxis(glm::radians(90.0f), camRight) * orientation;
-                spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Cone"), Transform(cameraController.getPosition(), 0.1f, orientation)));
+                //spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Cone"), Transform(cameraController.getPosition(), 0.1f, orientation)));
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
@@ -160,7 +160,7 @@ int main()
 				// spawn a plane to visualize the area light geometry; orient it to match the light's emission direction
 				glm::quat orientation = cameraController.getOrientation();
 				orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * orientation;
-				spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Plane"), Transform(cameraController.getPosition(), 0.5f, orientation)));
+				//spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Plane"), Transform(cameraController.getPosition(), 0.5f, orientation)));
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             {
@@ -184,7 +184,7 @@ int main()
 					glm::vec3 position = glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f));
                     spawnedLights.push_back(PointLight{ position,
                         glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
-                    spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(position, 0.05f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+                    //spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(position, 0.05f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
                 }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_8 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 for (int x = 0; x < spawnCountX; ++x)
@@ -194,7 +194,7 @@ int main()
 							glm::vec3 position = glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f));
                             spawnedLights.push_back(PointLight{ position,
                                 glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
-                            spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(position, 0.05f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+                            //spawnedLightGeom.push_back(baseShapes.spawnNodeForIdx(baseShapes.getSpawnIdxForPath("Sphere"), Transform(position, 0.05f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
                         }
         };
 

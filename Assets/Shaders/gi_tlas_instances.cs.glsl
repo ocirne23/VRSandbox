@@ -73,7 +73,12 @@ void main()
     o.row0 = vec4(scale * col0.x, scale * col1.x, scale * col2.x, pos.x);
     o.row1 = vec4(scale * col0.y, scale * col1.y, scale * col2.y, pos.y);
     o.row2 = vec4(scale * col0.z, scale * col1.z, scale * col2.z, pos.z);
-    o.sbtOffsetAndFlags          = (0x01u << 24);                          // flags = TriangleFacingCullDisable
+    // Flags: TriangleFacingCullDisable (0x01) always; ForceOpaque (0x04) for everything except
+    // alpha-masked instances, which stay non-opaque so shadow rays can run their alpha test
+    // (rt_shadow.inc.glsl). Opaque-flagged rays (RTAO, GI gather) still treat masked geometry as solid.
+    const uint alphaMode = inst.pipelineIdxAlphaMode >> 16;
+    const uint instFlags = 0x01u | (alphaMode == 1u ? 0x00u : 0x04u); // 1 = ALPHA_MODE_MASK
+    o.sbtOffsetAndFlags          = (instFlags << 24);
 
     // Guard the address lookup: meshIdx = (meshIdxMaterialIdx & 0xFFFF) can be up to 65535, but the BLAS
     // address buffer only has length() entries. An out-of-bounds read returns a foreign 64-bit value that,

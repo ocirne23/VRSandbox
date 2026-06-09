@@ -99,7 +99,9 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
 
         geoms[i] = vk::AccelerationStructureGeometryKHR{
             .geometryType = vk::GeometryTypeKHR::eTriangles,
-            .flags = vk::GeometryFlagBitsKHR::eOpaque,
+            // Opacity is decided per TLAS instance (ForceOpaque for everything except alpha-masked
+            // materials, see gi_tlas_instances.cs.glsl), so the BLAS geometry must not be flagged opaque.
+            .flags = {},
         };
         geoms[i].geometry.triangles = tri;
         buildInfos[i] = vk::AccelerationStructureBuildGeometryInfoKHR{

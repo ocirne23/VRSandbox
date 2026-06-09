@@ -83,13 +83,13 @@ export namespace RendererVKLayout
         uint32 frameIndex;        // monotonic frame counter (RNG / temporal-rotation source so passes that read
                                   // it can be recorded once instead of baking it into a push constant)
         glm::vec3  skyUp;         // sky "up" axis (normalized); need not be world +Y (e.g. planet surface normal)
-        float _unused;
+        float rtSunShadow;        // > 0.5: ray-traced sun shadows instead of PCSS cascades
         // Each cascadeViewProj has a structurally-zero bottom row ([0,0,0,1] for ortho*lookAt), so the
         // per-cascade far distance is stashed in m[0][3] and the world texel size in m[1][3]. Readers
         // restore the bottom row to [0,0,0,1] before using the matrix (see the shaders' cascadeMatrix).
         glm::mat4 cascadeViewProj[NUM_SHADOW_CASCADES];
         glm::vec3 shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution
-        float _unused2;
+        float sunShadowRays;    // RT sun shadow rays per pixel (1 = single jittered ray)
 
         glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv (screen-space passes)
         glm::mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen (temporal reuse)

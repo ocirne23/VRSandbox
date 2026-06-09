@@ -41,9 +41,15 @@ public:
 
 		Buffer& giGridDataBuffer;    // GI probe clipmap SH volume (read in the fragment shader)
 
+		Buffer& meshInfoBuffer;        // shadow-ray alpha test (firstIndex/vertexOffset per mesh)
+		Buffer& rtMeshInstancesBuffer; // the unculled instance list the TLAS records index into
+
 		vk::ImageView shadowMapView;       // sun cascaded shadow map (e2DArray depth)
 		vk::Sampler shadowMapSampler;      // comparison sampler for PCF
 		vk::Sampler shadowMapDepthSampler; // non-comparison sampler for the PCSS blocker search
+
+		vk::ImageView gbufferDepthView;    // full-res depth (AO bilateral upsample edge weights)
+		vk::Sampler gbufferSampler;
     };
 
     void initialize(RenderPass& renderPass);
@@ -52,6 +58,9 @@ public:
     // Refresh the denoised-AO image binding on a descriptor set (call each frame; the draw CB is cached and
     // the AO image is recreated on resize).
     void updateAODescriptor(vk::DescriptorSet descriptorSet, vk::ImageView aoView, vk::Sampler aoSampler);
+    // Refresh the TLAS binding for ray-traced light shadows (call each frame; the TLAS is rebuilt per frame
+    // and its handle can change).
+    void updateTlasDescriptor(vk::DescriptorSet descriptorSet, vk::AccelerationStructureKHR tlas);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
     const IndirectExecutionSet& getIndirectExecutionSet() const { return m_indirectExecutionSet; }

@@ -2,6 +2,7 @@ module RendererVK:ShadowMap;
 
 import :VK;
 import :Device;
+import :CommandBuffer;
 
 constexpr vk::Format SHADOW_DEPTH_FORMAT = vk::Format::eD32Sfloat;
 
@@ -169,6 +170,25 @@ bool ShadowMap::initialize(uint32 resolution, uint32 numCascades)
     auto depthSamplerResult = vkDevice.createSampler(depthSamplerInfo);
     if (depthSamplerResult.result != vk::Result::eSuccess) { assert(false && "shadow depth sampler"); return false; }
     m_depthSampler = depthSamplerResult.value;
+
+    // One-time UNDEFINED -> SHADER_READ_ONLY so the image is in its sampled layout even if the cascade
+    // render pass never runs (RT sun shadows skip it); the render pass starts from UNDEFINED anyway.
+    vk::ImageMemoryBarrier2 initBarrier{
+        .srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe,
+        .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader | vk::PipelineStageFlagBits2::eComputeShader,
+        .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+        .oldLayout = vk::ImageLayout::eUndefined,
+        .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+        .image = m_image,
+        .subresourceRange = { vk::ImageAspectFlagBits::eDepth, 0, 1, 0, numCascades },
+    };
+    CommandBuffer initCmd;
+    initCmd.initialize(vk::CommandBufferLevel::ePrimary);
+    vk::CommandBuffer cmd = initCmd.begin(true);
+    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &initBarrier });
+    initCmd.end();
+    initCmd.submitGraphics();
+    (void)Globals::device.getGraphicsQueue().waitIdle();
 
     return true;
 }

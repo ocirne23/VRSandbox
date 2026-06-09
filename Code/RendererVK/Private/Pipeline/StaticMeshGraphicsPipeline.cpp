@@ -162,17 +162,37 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
+    for (uint32 binding = 14; binding <= 17; ++binding) // shadow-ray alpha test: vertices/indices/meshInfos/instances
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
+            .binding = binding,
+            .descriptorType = vk::DescriptorType::eStorageBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment
+        });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_gbufferDepth (AO bilateral upsample)
+        .binding = 12,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_ao (denoised screen-space AO)
         .binding = 13,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_tlas (ray-traced light shadows)
+        .binding = 11,
+        .descriptorType = vk::DescriptorType::eAccelerationStructureKHR,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
 
-    // Only the AO binding is refreshed after the (cached) draw CB is recorded, so flag it
+    // The AO and TLAS bindings are refreshed after the (cached) draw CB is recorded, so flag them
     // UPDATE_AFTER_BIND. Parallel to descriptorSetBindings; all other bindings keep default (no) flags.
     graphicsPipelineLayout.descriptorBindingFlags.resize(descriptorSetBindings.size());
-    graphicsPipelineLayout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
+    graphicsPipelineLayout.descriptorBindingFlags[descriptorSetBindings.size() - 2] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
+    graphicsPipelineLayout.descriptorBindingFlags[descriptorSetBindings.size() - 1] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
 }
 
 void StaticMeshGraphicsPipeline::updateAODescriptor(vk::DescriptorSet descriptorSet, vk::ImageView aoView, vk::Sampler aoSampler)
@@ -183,6 +203,16 @@ void StaticMeshGraphicsPipeline::updateAODescriptor(vk::DescriptorSet descriptor
     vk::DescriptorImageInfo imageInfo{ .sampler = aoSampler, .imageView = aoView, .imageLayout = vk::ImageLayout::eGeneral };
     vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 13, .descriptorCount = 1,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
+    Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
+}
+
+void StaticMeshGraphicsPipeline::updateTlasDescriptor(vk::DescriptorSet descriptorSet, vk::AccelerationStructureKHR tlas)
+{
+    // Same recorded-once CB situation as the AO image: the TLAS is double-buffered and rebuilt every frame
+    // (its handle can change on resize), so the binding is refreshed per frame via UPDATE_AFTER_BIND.
+    vk::WriteDescriptorSetAccelerationStructureKHR asInfo{ .accelerationStructureCount = 1, .pAccelerationStructures = &tlas };
+    vk::WriteDescriptorSet write{ .pNext = &asInfo, .dstSet = descriptorSet, .dstBinding = 11, .descriptorCount = 1,
+        .descriptorType = vk::DescriptorType::eAccelerationStructureKHR };
     Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
 
@@ -245,7 +275,7 @@ void StaticMeshGraphicsPipeline::reloadShaders()
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
 {
-    std::array<DescriptorSetUpdateInfo, 10> graphicsDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 15> graphicsDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo{
             .binding = 0,
@@ -334,6 +364,37 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .binding = 10,
             .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.giGridDataBuffer.getBuffer(), .range = params.giGridDataBuffer.getSize() } }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 14,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.vertexBuffer.getBuffer(), .range = params.vertexBuffer.getSize() } }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 15,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.indexBuffer.getBuffer(), .range = params.indexBuffer.getSize() } }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 16,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.meshInfoBuffer.getBuffer(), .range = params.meshInfoBuffer.getSize() } }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 17,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.rtMeshInstancesBuffer.getBuffer(), .range = params.rtMeshInstancesBuffer.getSize() } }
+        },
+        DescriptorSetUpdateInfo{
+            .binding = 12,
+            .type = vk::DescriptorType::eCombinedImageSampler,
+            .imageInfos = {
+                vk::DescriptorImageInfo {
+                    .sampler = params.gbufferSampler,
+                    .imageView = params.gbufferDepthView,
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                }
+            }
         },
 
         DescriptorSetUpdateInfo{

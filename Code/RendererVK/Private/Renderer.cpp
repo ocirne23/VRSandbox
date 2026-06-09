@@ -289,6 +289,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     Tweak::float3("Lighting", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
     Tweak::color3("Lighting", "Sun Color", &m_sunColor, &m_sunIntensity);
+    Tweak::floatVar("Lighting", "Sun Angular Cos", &m_skyParams.sunAngularCos, 0.999f, 1.0f, 0.00001f);
     Tweak::floatVar("Lighting", "Ambient Intensity", &m_ambientIntensity, 0.0f, 1.0f);
 
     // The TAA resolve is recorded once and bakes the enable flag + feedback weight into its push constant, so
@@ -298,6 +299,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     Tweak::floatVar("Shadow", "Depth Bias", &m_shadowDepthBias, 0.0f, 0.005f, 0.0001f);
     Tweak::floatVar("Shadow", "Normal Bias", &m_shadowNormalBias, 0.0f, 10.0f);
+    Tweak::boolean("Shadow", "Ray Traced Sun", &m_rtSunShadow);
+    Tweak::intVar("Shadow", "Sun Shadow Rays", &m_sunShadowRays, 1, 8);
     return true;
 }
 
@@ -473,14 +476,19 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.ambientIntensity = m_ambientIntensity;
     ubo.skyGround = m_skyParams.ground;
     ubo.skyUp = m_skyParams.up;
+    ubo.rtSunShadow = m_rtSunShadow ? 1.0f : 0.0f;
 
-    const float aspect = (float)viewportSize.x / (float)viewportSize.y;
-    glm::mat4 cascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
-    computeSunCascades(camera, aspect, m_sunDirection, cascadeViewProj);
+    if (!m_rtSunShadow)
+    {
+        const float aspect = (float)viewportSize.x / (float)viewportSize.y;
+        glm::mat4 cascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
+        computeSunCascades(camera, aspect, m_sunDirection, cascadeViewProj);
+        for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
+            ubo.cascadeViewProj[c] = cascadeViewProj[c];
+        ubo.shadowParams = glm::vec3(m_shadowDepthBias, m_shadowNormalBias, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION);
+    }
 
-    for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
-        ubo.cascadeViewProj[c] = cascadeViewProj[c];
-    ubo.shadowParams = glm::vec3(m_shadowDepthBias, m_shadowNormalBias, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION);
+    ubo.sunShadowRays = (float)m_sunShadowRays;
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
@@ -715,9 +723,13 @@ void Renderer::recordStaticMesh(uint32 frameIdx)
         .lightGridsBuffer = frameData.lightGridsBuffer,
         .lightTableBuffer = frameData.lightTableBuffer,
         .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
+        .meshInfoBuffer = m_meshInfosBuffer,
+        .rtMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
         .shadowMapView = frameData.shadowMap.getSampleView(),
         .shadowMapSampler = frameData.shadowMap.getSampler(),
         .shadowMapDepthSampler = frameData.shadowMap.getDepthSampler(),
+        .gbufferDepthView = frameData.gbuffer.getDepthView(),
+        .gbufferSampler = frameData.gbuffer.getSampler(),
     };
     m_staticMeshGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, drawParams);
     cb.end();
@@ -918,9 +930,10 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     // (which bakes the handle) can be re-recorded.
     const bool tlasHandleChanged = m_accelStructure.recordBuildTlas(vkGlobalIllumCommandBuffer, frameIdx, m_giProbePipeline.getTlasInstanceBuffer(frameIdx), numInstances);
 
-    // TLAS build -> ray-query read
+    // TLAS build -> ray-query read (GI/AO compute, and the forward fragment pass for RT light shadows)
     fullBarrier(vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
-        vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderStorageRead);
+        vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
+        vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderStorageRead);
 
     // 5. Trace rays per clipmap probe and temporally blend irradiance into the SH. The probe set and
     // its toroidal window are derived from the camera (this frame's u_viewPos in the UBO); probes that
@@ -1009,9 +1022,13 @@ void Renderer::recordCommandBuffers()
     {
         vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkLightGridCommandBuffer);
-        vkCommandBuffer.executeCommands(1, &vkShadowCullCommandBuffer);
-
+        // RT sun shadows replace the cascades entirely (forward pass traces, GI uses per-probe sun rays),
+        // so skip the shadow cull + cascade render. The primary CB is re-recorded every frame, so the
+        // toggle takes effect immediately; the cached secondary CBs just go unexecuted.
+        if (!m_rtSunShadow)
         {
+            vkCommandBuffer.executeCommands(1, &vkShadowCullCommandBuffer);
+
             ShadowMap& shadowMap = frameData.shadowMap;
             vk::ClearValue shadowClear;
             shadowClear.depthStencil = vk::ClearDepthStencilValue{ .depth = 1.0f, .stencil = 0 };
@@ -1044,6 +1061,8 @@ void Renderer::recordCommandBuffers()
         vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
         m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx), m_rtaoPipeline.getAOSampler());
+        if (const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx))
+            m_staticMeshGraphicsPipeline.updateTlasDescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(), tlas);
 
         SceneColor& sceneColor = frameData.sceneColor;
         std::array<vk::ClearValue, 2> sceneClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.5f, 0.7f, 0.9f, 1.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };

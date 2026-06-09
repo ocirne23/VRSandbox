@@ -5,6 +5,7 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 #extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_ray_query : enable
 //#extension GL_EXT_debug_printf : enable
 
 #include "shared.inc.glsl"
@@ -51,7 +52,33 @@ layout (binding = 6, std430) readonly buffer InGridTable
 layout (binding = 7) uniform sampler2D u_textures[];
 layout (binding = 8) uniform sampler2DArrayShadow u_shadowMap;      // comparison sampler (hardware PCF)
 layout (binding = 9) uniform sampler2DArray u_shadowMapDepth;       // raw depth (PCSS blocker search)
-layout (binding = 13) uniform sampler2D u_ao;                       // denoised half-res screen-space AO (linear upsample)
+layout (binding = 13) uniform sampler2D u_ao;                       // denoised half-res screen-space AO (bilateral upsample)
+layout (binding = 12) uniform sampler2D u_gbufferDepth;             // full-res hardware depth (AO upsample edge weights)
+
+layout (binding = 11) uniform accelerationStructureEXT u_tlas;       // ray-traced shadows for punctual/area lights
+
+// Mesh/instance data for the shadow rays' alpha test (rt_shadow.inc.glsl). in_instances must be the same
+// buffer the TLAS instance records were built from (custom index = index into it), not the culled list.
+struct InMeshInfo
+{
+	vec3 center;
+	float radius;
+	uint indexCount;
+	uint firstIndex;
+	int  vertexOffset;
+	uint _padding;
+};
+struct InMeshInstance
+{
+	uint renderNodeIdx;
+	uint instanceOffsetIdx;
+	uint meshIdxMaterialIdx;
+	uint pipelineIdxAlphaMode;
+};
+layout (binding = 14, std430) readonly buffer InRTVertices  { float in_vertices[]; }; // MeshVertex as 12 floats
+layout (binding = 15, std430) readonly buffer InRTIndices   { uint in_indices[]; };
+layout (binding = 16, std430) readonly buffer InRTMeshInfos { InMeshInfo in_meshInfos[]; };
+layout (binding = 17, std430) readonly buffer InRTInstances { InMeshInstance in_instances[]; };
 
 // GI irradiance probes (diffuse indirect). Persistent cascaded clipmap SH volume, written by the probe
 // trace pass; addressed toroidally relative to the camera (u_viewPos), so no hash table is needed.
@@ -73,6 +100,62 @@ layout (location = 0) out vec4 out_color;
 
 #define GI_GRID_DATA_NAME      gi_gridData
 #include "gi_probe.inc.glsl"
+
+#include "rt_shadow.inc.glsl"
+
+// Hard ray-traced visibility toward a point on the light; tMax stops just short of the target so the
+// light's own position never registers as a hit. Alpha-masked geometry is alpha-tested.
+float traceLightVisibility(vec3 pos, vec3 N, vec3 target)
+{
+	vec3 toLight = target - pos;
+	float dist = length(toLight);
+	return rtShadowVisibility(pos + N * 0.02, toLight / dist, 0.01, dist - 0.02);
+}
+uint hashU(uint x)
+{
+	x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
+	return x;
+}
+// Per-pixel + per-frame white-noise jitter (hash-based rather than IGN: IGN's structured diagonal bands
+// show up as a wavey pattern in wide penumbras; unstructured grain resolves more gracefully under TAA).
+vec2 shadowJitter()
+{
+	const uint seed = hashU((uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u) ^ (u_frameIndex * 0x9e3779b9u));
+	return vec2(float(seed & 0x00FFFFFFu), float(hashU(seed) & 0x00FFFFFFu)) / float(0x01000000u);
+}
+// 1-4 rays based on the light's apparent size: penumbra noise only matters when the emitter subtends a
+// large solid angle, so distant/small lights stay at a single ray.
+uint shadowRayCount(float lightSize, float dist)
+{
+	return clamp(uint(lightSize / max(dist, 1e-4) * 8.0), 1u, 4u);
+}
+// R2 additive recurrence offsets successive rays so they stratify over the emitter within one frame.
+#define R2_OFFSET vec2(0.7548777, 0.5698403)
+// u_sunShadowRays rays jittered within the sun's angular cone (u_sunAngularCos), stratified across the
+// disc with the R2 recurrence; TAA resolves the remaining noise over time. More rays smooth out the
+// IGN's structured pattern when the disc is wide.
+float traceSunVisibility(vec3 pos, vec3 N)
+{
+	const vec3 L = normalize(u_sunDirection.xyz);
+	const vec3 ref = abs(L.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+	const vec3 T = normalize(cross(ref, L));
+	const vec3 B = cross(L, T);
+	const vec3 origin = pos + N * 0.02;
+
+	const uint numRays = clamp(uint(u_sunShadowRays), 1u, 8u);
+	const vec2 jitter = shadowJitter();
+	float vis = 0.0;
+	for (uint i = 0u; i < numRays; ++i)
+	{
+		const vec2 u = fract(jitter + R2_OFFSET * float(i));
+		const float cosTheta = mix(u_sunAngularCos, 1.0, u.x); // uniform over the spherical cap
+		const float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+		const float phi = 6.2831853 * u.y;
+		const vec3 dir = T * (sinTheta * cos(phi)) + B * (sinTheta * sin(phi)) + L * cosTheta;
+		vis += rtShadowVisibility(origin, dir, 0.01, 10000.0);
+	}
+	return vis / float(numRays);
+}
 
 float squareFalloff(float dist, float lightRadius)
 {
@@ -190,18 +273,24 @@ vec3 closestPointOnRect(vec3 p, vec3 center, vec3 right, vec3 up, float halfWidt
 	float y = clamp(dot(d, up), -halfHeight, halfHeight);
 	return center + right * x + up * y;
 }
-vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, float metalness, float roughness, float roughnessSq)
+void areaLightBasis(LightInfo light, out vec3 right, out vec3 up, out float halfWidth, out float halfHeight)
 {
 	float height = length(light.direction);
-	vec3 up     = light.direction / height;
+	up          = light.direction / height;
 	vec3 ref    = abs(up.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
 	vec3 right0 = normalize(cross(up, ref));
 	float cs    = cos(light.rotation);
 	float sn    = sin(light.rotation);
-	vec3 right  = right0 * cs + cross(up, right0) * sn;
+	right       = right0 * cs + cross(up, right0) * sn;
+	halfWidth   = light.width * 0.5;
+	halfHeight  = height * 0.5;
+}
+vec3 doAreaLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, float metalness, float roughness, float roughnessSq)
+{
+	vec3 right, up;
+	float halfWidth, halfHeight;
+	areaLightBasis(light, right, up, halfWidth, halfHeight);
 	vec3 quadNormal  = cross(up, right);
-	float halfWidth  = light.width * 0.5;
-	float halfHeight = height * 0.5;
 	float lightSize  = (halfWidth + halfHeight) * 0.5;
 	vec3 center      = light.pos;
 
@@ -332,7 +421,7 @@ vec3 doSunLight(vec3 worldPos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOver
 	vec3 L = normalize(u_sunDirection.xyz);
 	if (max(dot(N, L), 0.0) <= 0.0)
 		return vec3(0.0);
-	float visibility = sampleSunShadow(worldPos, N);
+	float visibility = u_rtSunShadow > 0.5 ? traceSunVisibility(worldPos, N) : sampleSunShadow(worldPos, N);
 	vec3 lightRadiance = u_sunColor.rgb * visibility;
 	return doLight(lightRadiance, L, V, N, specularCol, matColOverPi, metalness, roughness, roughnessSq);
 }
@@ -347,6 +436,86 @@ vec3 doLight(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 m
 	if (light.width < 0.0)
 		return doSpotLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughnessSq);
 	return doPointLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughnessSq);
+}
+float areaLightVisibility(LightInfo light, vec3 pos, vec3 N)
+{
+	vec3 right, up;
+	float halfWidth, halfHeight;
+	areaLightBasis(light, right, up, halfWidth, halfHeight);
+	const uint numRays = shadowRayCount(halfWidth + halfHeight, distance(pos, light.pos));
+	const vec2 jitter = shadowJitter();
+	float vis = 0.0;
+	for (uint i = 0u; i < numRays; ++i)
+	{
+		vec2 u = fract(jitter + R2_OFFSET * float(i)) * 2.0 - 1.0;
+		vis += traceLightVisibility(pos, N, light.pos + right * (u.x * halfWidth) + up * (u.y * halfHeight));
+	}
+	return vis / float(numRays);
+}
+float tubeLightVisibility(LightInfo light, vec3 pos, vec3 N)
+{
+	float height  = length(light.direction);
+	vec3 axis     = light.direction / height;
+	float halfLen = height * 0.5;
+	float radius  = abs(light.width);
+	// Sample the visible silhouette: jitter along the axis, plus a perpendicular offset within the plane
+	// facing the shaded point (the radial extent the surface actually sees).
+	vec3 toPos = pos - light.pos;
+	vec3 side  = cross(axis, toPos);
+	float sideLen = length(side);
+	side = sideLen > 1e-5 ? side / sideLen : vec3(0.0);
+	const uint numRays = shadowRayCount(halfLen + radius, length(toPos));
+	const vec2 jitter = shadowJitter();
+	float vis = 0.0;
+	for (uint i = 0u; i < numRays; ++i)
+	{
+		vec2 u = fract(jitter + R2_OFFSET * float(i)) * 2.0 - 1.0;
+		vis += traceLightVisibility(pos, N, light.pos + axis * (u.x * halfLen) + side * (u.y * radius));
+	}
+	return vis / float(numRays);
+}
+vec3 doLightShadowed(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, float metalness, float roughness, float roughnessSq)
+{
+	vec3 lit = doLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughnessSq);
+	if (dot(lit, lit) <= 1e-7) // black analytic term (backfacing/out of range/outside cone): skip the trace
+		return lit;
+	if (light.width > 0.0)
+		return lit * (light.range < 0.0 ? tubeLightVisibility(light, pos, N) : areaLightVisibility(light, pos, N));
+	return lit * traceLightVisibility(pos, N, light.pos); // point/spot: genuinely punctual, one center ray
+}
+
+// Depth-aware 2x2 upsample of the half-res AO/bent-normal image. Plain bilinear bleeds across depth
+// discontinuities (a far wall's AO/bent normal mixing into a near silhouette shows as a bright GI rim),
+// so each tap's bilinear weight is scaled by its world-space distance to the shaded point. Tap depths
+// come from the full-res depth at the tap's UV (the half-res texel center), which is close enough to
+// the depth the trace actually used.
+vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
+{
+	const vec2 aoRes   = ceil(u_screenSize.xy * 0.5);
+	const vec2 aoTexel = 1.0 / aoRes;
+	const vec2 st   = fullUv * aoRes - 0.5;
+	const vec2 base = (floor(st) + 0.5) * aoTexel;
+	const vec2 f    = fract(st);
+	const float bw[4] = float[]((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+	const vec2 offs[4] = vec2[](vec2(0.0), vec2(aoTexel.x, 0.0), vec2(0.0, aoTexel.y), aoTexel);
+
+	const float sigmaZ = max(0.05 * length(pos - u_viewPos), 0.02);
+	vec4 sum = vec4(0.0);
+	float wsum = 0.0;
+	for (int i = 0; i < 4; ++i)
+	{
+		const vec2 uv = base + offs[i];
+		const float d = texture(u_gbufferDepth, uv).r;
+		if (d >= 1.0)
+			continue;
+		const vec3 tapPos = worldPosFromDepth(uv, d);
+		const float dz = length(tapPos - pos);
+		const float w  = bw[i] * exp(-(dz * dz) / (2.0 * sigmaZ * sigmaZ));
+		sum  += texture(u_ao, uv) * w;
+		wsum += w;
+	}
+	// All taps rejected (thin geometry the half-res image never saw): fall back to plain bilinear.
+	return wsum > 1e-4 ? sum / wsum : texture(u_ao, fullUv);
 }
 
 void main()
@@ -388,7 +557,7 @@ void main()
 	// Denoised screen-space AO (half-res, linearly upsampled). gl_FragCoord is in full render-target pixels;
 	// u_screenSize.zw = 1/resolution turns it into the [0,1] UV the AO image was traced in. rgb = bent
 	// normal (average unoccluded direction, world space), a = scalar AO.
-	const vec4 aoSample = texture(u_ao, gl_FragCoord.xy * u_screenSize.zw);
+	const vec4 aoSample = sampleAOBilateral(gl_FragCoord.xy * u_screenSize.zw, in_pos);
 	const float ao = aoSample.w;
 	// Evaluate the indirect irradiance along the bent normal rather than the surface normal: in concave
 	// areas it points toward the open hemisphere, so the low-frequency probe SH stops leaking light from
@@ -416,7 +585,7 @@ void main()
 			{
 				const uint lightId    = getLargeLightId(gridIdx, i);
 				const LightInfo light = in_lightInfos[lightId];
-				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
+				color += doLightShadowed(light, in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
 			}
 
 			const uint cellOffset = calcCellOffset(gridIdx, gridMin, in_pos);
@@ -425,7 +594,7 @@ void main()
 			{
 				const uint lightId    = getLightId(cellOffset, i);
 				const LightInfo light = in_lightInfos[lightId];
-				color += doLight(light, in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
+				color += doLightShadowed(light, in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
 			}
 			break;
 		}

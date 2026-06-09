@@ -76,7 +76,7 @@ public:
         glm::vec3 ground = glm::vec3(0.0f);
         glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // sky-up axis; set to the local up on a planet
         float intensity = 1.0f;
-        float sunAngularCos = 1.0f;// 0.9999f; // ~0.8 deg disc; 1.0 disables the disc
+        float sunAngularCos = 0.99998f;// 0.9999f; // ~0.8 deg disc; 1.0 disables the disc
         float sunGlow = 0.0f;    // 0 = none; e.g. 256 for a tight bloom around the sun
     };
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
@@ -197,7 +197,7 @@ private:
     GIProbePipeline m_giProbePipeline;
 
     bool  m_taaEnabled = true;
-    float m_taaFeedback = 0.8f;
+    float m_taaFeedback = 0.9f;
     uint32 m_taaJitterFrame = 0;
 
     uint32 m_blasBuiltCount = 0;
@@ -214,6 +214,8 @@ private:
 
     float m_shadowDepthBias = 0.000f;
     float m_shadowNormalBias = 0.0f;
+    bool  m_rtSunShadow = true; // sun shadows from TLAS ray queries instead of PCSS cascades (A/B tweak)
+    int   m_sunShadowRays = 5;   // RT sun shadow rays per pixel
 
     bool   m_giProbeDebugEnabled = false;
     uint32 m_giProbeDebugMode = 0;

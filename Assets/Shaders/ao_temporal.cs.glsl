@@ -36,22 +36,44 @@ void main()
     float clipW;
     const vec2 prevUv = prevScreenUV(worldPos, clipW);
 
+    // Bilateral 2x2 history fetch: validate each bilinear tap against its own reprojected position
+    // instead of fetching with plain bilinear after a single-point disocclusion test. At silhouettes the
+    // history mixes foreground, far background, and sky texels; with sub-texel reprojection (camera
+    // motion) a plain fetch bleeds those into the edge history and leaves a bright trailing rim.
     float histWeight = 0.0;
     vec4 hist = raw;
     if (clipW > 0.0 && all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0))))
     {
-        const float prevDepth = texture(u_prevDepth, prevUv).r;
-        if (prevDepth < 1.0)
+        // Distance-scaled disocclusion threshold: tolerate more at range (depth precision falls off).
+        const float viewDist = length(worldPos - u_viewPos);
+        const float thresh = 0.02 + 0.01 * viewDist;
+
+        const vec2 res   = vec2(pc.aoWidth, pc.aoHeight);
+        const vec2 st    = prevUv * res - 0.5;
+        const vec2 base  = (floor(st) + 0.5) / res;
+        const vec2 f     = fract(st);
+        const float bw[4] = float[]((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+        const vec2 offs[4] = vec2[](vec2(0.0), vec2(1.0 / res.x, 0.0), vec2(0.0, 1.0 / res.y), 1.0 / res);
+
+        vec4 sum = vec4(0.0);
+        float wsum = 0.0;
+        for (int i = 0; i < 4; ++i)
         {
-            const vec3 prevWorld = worldPosFromDepthMat(prevUv, prevDepth, u_prevInvMvp);
-            // Distance-scaled disocclusion threshold: tolerate more at range (depth precision falls off).
-            const float viewDist = length(worldPos - u_viewPos);
-            const float thresh = 0.02 + 0.01 * viewDist;
-            if (length(prevWorld - worldPos) < thresh)
-            {
-                hist = texture(u_historyAO, prevUv);
-                histWeight = pc.maxHistory;
-            }
+            const vec2 tapUv = base + offs[i];
+            const float prevDepth = texture(u_prevDepth, tapUv).r;
+            if (prevDepth >= 1.0)
+                continue;
+            const vec3 prevWorld = worldPosFromDepthMat(tapUv, prevDepth, u_prevInvMvp);
+            if (length(prevWorld - worldPos) >= thresh)
+                continue;
+            sum  += texture(u_historyAO, tapUv) * bw[i];
+            wsum += bw[i];
+        }
+        if (wsum > 1e-4)
+        {
+            hist = sum / wsum;
+            // Scale trust by surviving coverage so a mostly-disoccluded fetch leans on the fresh sample.
+            histWeight = pc.maxHistory * wsum;
         }
     }
 
