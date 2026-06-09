@@ -30,7 +30,6 @@ public:
         vk::ImageView prevGbufferDepthView;  // previous frame (disocclusion)
         vk::Sampler   gbufferSampler;
         vk::AccelerationStructureKHR tlas;
-        uint32 frameIndex; // free-running frame counter (RNG / temporal rotation)
     };
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, const RecordParams& params);
 

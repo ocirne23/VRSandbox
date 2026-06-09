@@ -291,9 +291,13 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::color3("Lighting", "Sun Color", &m_sunColor, &m_sunIntensity);
     Tweak::floatVar("Lighting", "Ambient Intensity", &m_ambientIntensity, 0.0f, 1.0f);
 
-    Tweak::boolean("TAA", "Enabled", &m_taaEnabled);
-    Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f);
+    // The TAA resolve is recorded once and bakes the enable flag + feedback weight into its push constant, so
+    // changing them must re-record (the jitter itself is applied per-frame in beginFrame, no re-record needed).
+    Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
+    Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
 
+    Tweak::floatVar("Shadow", "Depth Bias", &m_shadowDepthBias, 0.0f, 0.005f, 0.0001f);
+    Tweak::floatVar("Shadow", "Normal Bias", &m_shadowNormalBias, 0.0f, 10.0f);
     return true;
 }
 
@@ -458,6 +462,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
         (float)viewportSize.x / (float)swapExtent.width,
         (float)viewportSize.y / (float)swapExtent.height);
     ubo.taaJitter = glm::vec4(taaJitterNdc, 0.0f, 0.0f);
+    ubo.frameIndex = m_frameCounter; // RNG/temporal-rotation source for record-once passes
 
     ubo.giIntensity = m_giIntensity;
     ubo.sunDirection = m_sunDirection;
@@ -479,8 +484,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
 
     for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
         ubo.cascadeViewProj[c] = cascadeViewProj[c];
-    // x = constant depth bias, y = normal-offset bias in *texels*, z = 1/resolution, w = pcf radius.
-    ubo.shadowParams = glm::vec4(0.0015f, 2.0f, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION, 1.0f);
+    ubo.shadowParams = glm::vec3(m_shadowDepthBias, m_shadowNormalBias, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION);
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
@@ -569,12 +573,7 @@ void Renderer::present()
 
     vk::Semaphore waitSemaphore = Globals::stagingManager.update();
     if (waitSemaphore != VK_NULL_HANDLE)
-    {
-        // Wait at all-commands (not just transfer): the GI BLAS build reads the staged vertex/index data
-        // at the acceleration-structure-build stage, which a transfer-only wait does not order against,
-        // letting the build race ahead and read zeroed memory -> collapsed (degenerate) BLAS geometry.
-		frameData.primaryCommandBuffer.addWaitSemaphore(waitSemaphore, vk::PipelineStageFlagBits::eAllCommands);
-    }
+		frameData.primaryCommandBuffer.addWaitSemaphore(waitSemaphore, vk::PipelineStageFlagBits::eAllCommands); // eAllCommands (not just transfer) for GI BLAS
 
     if (!m_swapChain.acquireNextImage())
     {
@@ -598,6 +597,365 @@ uint32 Renderer::addRenderNodeTransform(const Transform& transform)
     return renderNodeIdx;
 }
 
+void Renderer::recordIndirectCull(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& cb = frameData.indirectCullCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    IndirectCullComputePipeline::RecordParams cullParams
+    {
+        .descriptorSet = frameData.indirectCullPipelineDescriptorSet,
+        .ubo = frameData.ubo,
+        .inRenderNodeTransformsBuffer = frameData.inRenderNodeTransformsBuffer,
+        .inMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
+        .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
+        .inMeshInfoBuffer = m_meshInfosBuffer,
+        .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
+    };
+    m_indirectCullComputePipeline.record(cb, frameIdx, m_meshInfoCounter, cullParams);
+    cb.end();
+}
+
+void Renderer::recordLightGrid(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& cb = frameData.lightGridCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    LightGridComputePipeline::RecordParams params
+    {
+        .descriptorSet = frameData.lightGridPipelineDescriptorSet,
+        .ubo = frameData.ubo,
+        .inLightInfoBuffer = frameData.lightInfosBuffer,
+        .outLightGridBuffer = frameData.lightGridsBuffer,
+        .outLightTableBuffer = frameData.lightTableBuffer,
+    };
+    m_lightGridComputePipeline.record(cb, frameIdx, params);
+    cb.end();
+}
+
+void Renderer::recordShadowCull(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& cb = frameData.shadowCullCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+
+    ShadowCullComputePipeline::RecordParams params{
+        .descriptorSet = frameData.shadowCullDescriptorSet,
+        .ubo = frameData.ubo,
+        .dispatchIndirectBuffer = m_indirectCullComputePipeline.getDispatchIndirectBuffer(frameIdx),
+        .inRenderNodeTransformsBuffer = frameData.inRenderNodeTransformsBuffer,
+        .inMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
+        .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
+        .inMeshInfoBuffer = m_meshInfosBuffer,
+        .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
+        .inMaterialInfoBuffer = m_materialInfosBuffer,
+    };
+    m_shadowCullComputePipeline.record(cb, frameIdx, m_meshInfoCounter, params);
+    cb.end();
+}
+
+void Renderer::recordShadowDraw(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    ShadowMap& shadowMap = m_shadowMaps[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = shadowMap.getRenderPass() };
+    CommandBuffer& cb = frameData.shadowDrawCommandBuffer;
+    vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
+
+    // All cascades render in a single multiview render pass; gl_ViewIndex selects the layer.
+    const vk::Extent2D shadowExtent{ shadowMap.getResolution(), shadowMap.getResolution() };
+    const float shadowRes = (float)shadowMap.getResolution();
+    const vk::Viewport viewport{ .x = 0.0f, .y = 0.0f, .width = shadowRes, .height = shadowRes, .minDepth = 0.0f, .maxDepth = 1.0f };
+    const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = shadowExtent };
+    vkCb.setViewport(0, { viewport });
+    vkCb.setScissor(0, { scissor });
+
+    ShadowMapGraphicsPipeline::RecordParams params{
+        .descriptorSet = frameData.shadowDrawDescriptorSet,
+        .ubo = frameData.ubo,
+        .meshInstanceBuffer = m_shadowCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
+        .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+        .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
+        .instanceIdxBuffer = m_shadowCullComputePipeline.getInstanceIdxBuffer(frameIdx),
+        .indirectCommandBuffer = m_shadowCullComputePipeline.getIndirectCommandBuffer(frameIdx),
+    };
+    m_shadowMapGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, params);
+    cb.end();
+}
+
+void Renderer::recordStaticMesh(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = m_sceneColors[frameIdx].getRenderPass() };
+    CommandBuffer& cb = frameData.staticMeshCommandBuffer;
+    vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
+
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 viewportSize = m_viewportRect.getSize();
+    const vk::Viewport viewport{
+        .x = (float)m_viewportRect.min.x,
+        .y = (float)m_viewportRect.max.y,
+        .width = (float)viewportSize.x,
+        .height = -((float)viewportSize.y),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f };
+    const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+    vkCb.setViewport(0, { viewport });
+    vkCb.setScissor(0, { scissor });
+    StaticMeshGraphicsPipeline::RecordParams drawParams
+    {
+        .descriptorSet = frameData.staticMeshPipelineDescriptorSet,
+        .ubo = frameData.ubo,
+        .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+        .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
+        .materialInfoBuffer = m_materialInfosBuffer,
+        .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
+        .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
+        .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
+        .lightInfosBuffer = frameData.lightInfosBuffer,
+        .lightGridsBuffer = frameData.lightGridsBuffer,
+        .lightTableBuffer = frameData.lightTableBuffer,
+        .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
+        .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
+        .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
+        .shadowMapDepthSampler = m_shadowMaps[frameIdx].getDepthSampler(),
+    };
+    m_staticMeshGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, drawParams);
+    cb.end();
+}
+
+void Renderer::recordGBuffer(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    GBuffer& gbuffer = m_gbuffers[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = gbuffer.getRenderPass() };
+    CommandBuffer& cb = frameData.gbufferCommandBuffer;
+    vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
+
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 viewportSize = m_viewportRect.getSize();
+    const vk::Viewport viewport{
+        .x = (float)m_viewportRect.min.x,
+        .y = (float)m_viewportRect.max.y,
+        .width = (float)viewportSize.x,
+        .height = -((float)viewportSize.y),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f };
+    const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+    vkCb.setViewport(0, { viewport });
+    vkCb.setScissor(0, { scissor });
+    GBufferPipeline::RecordParams gbufferParams{
+        .descriptorSet = frameData.gbufferDescriptorSet,
+        .ubo = frameData.ubo,
+        .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
+        .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+        .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
+        .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
+        .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
+    };
+    m_gbufferPipeline.record(cb, frameIdx, m_meshInfoCounter, gbufferParams);
+    cb.end();
+}
+
+void Renderer::recordGiProbeDebug(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = m_sceneColors[frameIdx].getRenderPass() };
+    CommandBuffer& cb = frameData.giProbeDebugCommandBuffer;
+    vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 vpSize = m_viewportRect.getSize();
+    const vk::Viewport viewport{ .x = (float)m_viewportRect.min.x, .y = (float)m_viewportRect.max.y,
+        .width = (float)vpSize.x, .height = -((float)vpSize.y), .minDepth = 0.0f, .maxDepth = 1.0f };
+    const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+    vkCb.setViewport(0, { viewport });
+    vkCb.setScissor(0, { scissor });
+    m_giProbePipeline.recordDebugDraw(cb, frameIdx, frameData.ubo, m_giProbeDebugRadius, m_giProbeDebugMode);
+    cb.end();
+}
+
+void Renderer::recordAO(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    GBuffer& gbuffer = m_gbuffers[frameIdx];
+    CommandBuffer& cb = frameData.aoCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
+    if (m_meshInfoCounter > 0 && tlas)
+    {
+        const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+        RTAOPipeline::RecordParams aoParams{
+            .ubo = frameData.ubo,
+            .gbufferNormalView = gbuffer.getNormalView(),
+            .gbufferDepthView = gbuffer.getDepthView(),
+            .prevGbufferDepthView = m_gbuffers[prevFrameIdx].getDepthView(),
+            .gbufferSampler = gbuffer.getSampler(),
+            .tlas = tlas,
+        };
+        m_rtaoPipeline.record(cb, frameIdx, aoParams);
+    }
+    cb.end();
+}
+
+void Renderer::recordTaa(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    GBuffer& gbuffer = m_gbuffers[frameIdx];
+    SceneColor& sceneColor = m_sceneColors[frameIdx];
+    CommandBuffer& cb = frameData.taaCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    TaaPipeline::RecordParams taaParams{
+        .ubo = frameData.ubo,
+        .currentColorView = sceneColor.getColorView(),
+        .currentColorSampler = sceneColor.getSampler(),
+        .gbufferDepthView = gbuffer.getDepthView(),
+        .prevGbufferDepthView = m_gbuffers[prevFrameIdx].getDepthView(),
+        .gbufferSampler = gbuffer.getSampler(),
+        .feedback = m_taaEnabled ? m_taaFeedback : 0.0f,
+    };
+    m_taaPipeline.record(cb, frameIdx, taaParams);
+    cb.end();
+}
+
+void Renderer::recordComposite(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance { .renderPass = m_renderPass.getRenderPass(), };
+    CommandBuffer& cb = frameData.compositeCommandBuffer;
+    vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
+
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 vpMin = m_viewportRect.min;
+    const glm::ivec2 vpSize = m_viewportRect.getSize();
+    vkCb.setViewport(0, vk::Viewport{.x = 0.0f, .y = 0.0f, .width = (float)extent.width, .height = (float)extent.height, .minDepth = 0.0f, .maxDepth = 1.0f });
+    vkCb.setScissor(0, vk::Rect2D{.offset = vk::Offset2D{ vpMin.x, vpMin.y }, .extent = vk::Extent2D{ (uint32)vpSize.x, (uint32)vpSize.y } });
+
+    DescriptorSet& set = frameData.compositeDescriptorSet;
+    vk::DescriptorSet vkSet = set.getDescriptorSet();
+    std::array<DescriptorSetUpdateInfo, 1> updates{
+        DescriptorSetUpdateInfo{ 
+            .binding = 0, 
+            .type = vk::DescriptorType::eCombinedImageSampler,
+            .imageInfos = { 
+                vk::DescriptorImageInfo{ 
+                    .sampler = m_taaPipeline.getSampler(), 
+                    .imageView = m_taaPipeline.getResolvedView(frameIdx), 
+                    .imageLayout = vk::ImageLayout::eGeneral 
+    } } } };
+    cb.cmdUpdateDescriptorSets(m_compositePipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, vkSet, updates);
+    vkCb.bindPipeline(vk::PipelineBindPoint::eGraphics, m_compositePipeline.getPipeline());
+    vkCb.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_compositePipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
+    vkCb.draw(3, 1, 0, 0);
+    cb.end();
+}
+
+// Diffuse global illumination (hardware ray tracing). Re-recorded every frame: it refits the ray-tracing TLAS
+// from the live instance list and rotates the probe ray set (m_frameCounter) / clipmap freshness (prevViewPos)
+// per frame, so unlike the scene passes it cannot be recorded once. Recorded after the shadow + light-grid
+// passes (the trace samples both) and before the main pass (which reads the probe SH).
+bool Renderer::recordGlobalIllum(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& globalIllumCommandBuffer = frameData.globalIllumCommandBuffer;
+    vk::CommandBufferInheritanceInfo globalIllumInheritanceInfo;
+    vk::CommandBuffer vkGlobalIllumCommandBuffer = globalIllumCommandBuffer.begin(false, &globalIllumInheritanceInfo);
+    auto fullBarrier = [&](vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess,
+        vk::PipelineStageFlags2 dstStage, vk::AccessFlags2 dstAccess)
+        {
+            vk::MemoryBarrier2 bar{ .srcStageMask = srcStage, .srcAccessMask = srcAccess, .dstStageMask = dstStage, .dstAccessMask = dstAccess };
+            vkGlobalIllumCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
+        };
+
+    // 1. Build BLASes for any meshes added since last frame (one-time per mesh).
+    if (m_blasBuiltCount < m_meshInfoCounter)
+    {
+        const uint32 totalVertices = (uint32)(Globals::meshDataManager.getVertexBufUsed() / sizeof(RendererVKLayout::MeshVertex));
+        m_accelStructure.recordBuildBlas(vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
+            m_cpuMeshInfos.data(), m_blasBuiltCount, m_meshInfoCounter - m_blasBuiltCount, totalVertices);
+        m_blasBuiltCount = m_meshInfoCounter;
+
+        m_giProbePipeline.doClear();
+    }
+
+    // 2. One-time clear of the persistent probe table/SH (it accumulates across frames thereafter).
+    if (m_giProbePipeline.needsClear())
+    {
+        m_giProbePipeline.recordClearPersistent(globalIllumCommandBuffer);
+        m_giProbePipeline.markCleared();
+    }
+
+    // Make prior writes visible to the GI compute passes:
+    //  - the light grid (compute storage writes) that the trace reuses to shade hits, and
+    //  - the sun cascade shadow map depth writes (late/early fragment tests) that the trace samples.
+    // The shadow render pass only synchronizes its depth writes to the FRAGMENT stage (for the main
+    // pass); without this the compute trace samples the depth image with no dependency, which faults
+    // NVIDIA (depth-compression metadata read from the wrong stage).
+    fullBarrier(vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+        vk::AccessFlagBits2::eShaderStorageWrite | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+        vk::PipelineStageFlagBits2::eComputeShader,
+        vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite | vk::AccessFlagBits2::eShaderSampledRead);
+
+    // 3. Write the per-instance TLAS records on the GPU.
+    const uint32 numInstances = std::min(m_meshInstanceCounter, RendererVKLayout::GI_MAX_TLAS_INSTANCES);
+    GIProbePipeline::TlasInstanceParams tlasParams{
+        .renderNodeTransforms = frameData.inRenderNodeTransformsBuffer,
+        .meshInstances = frameData.inMeshInstancesBuffer,
+        .instanceOffsets = m_instanceOffsetsBuffer,
+        .blasAddresses = m_accelStructure.getBlasAddressBuffer(),
+        .numInstances = numInstances,
+    };
+    m_giProbePipeline.recordTlasInstances(globalIllumCommandBuffer, frameIdx, tlasParams);
+
+    // instance write -> TLAS build read. The build reads the instance buffer as SHADER_READ (AS_READ
+    // covers the source acceleration structures, not the instance data), so the dst access must include it.
+    fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
+        vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+        vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderRead);
+
+    // 4. Rebuild this frame's TLAS (double-buffered). Note if the handle changed so the recorded-once AO pass
+    // (which bakes the handle) can be re-recorded.
+    const bool tlasHandleChanged = m_accelStructure.recordBuildTlas(vkGlobalIllumCommandBuffer, frameIdx, m_giProbePipeline.getTlasInstanceBuffer(frameIdx), numInstances);
+
+    // TLAS build -> ray-query read
+    fullBarrier(vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
+        vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderStorageRead);
+
+    // 5. Trace rays per clipmap probe and temporally blend irradiance into the SH. The probe set and
+    // its toroidal window are derived from the camera (this frame's u_viewPos in the UBO); probes that
+    // scrolled in since last frame (relative to m_giPrevCameraPos) are full-replaced rather than blended.
+    GIProbePipeline::TraceParams traceParams{
+        .ubo = frameData.ubo,
+        .lightInfos = frameData.lightInfosBuffer,
+        .lightGrid = frameData.lightGridsBuffer,
+        .lightTable = frameData.lightTableBuffer,
+        .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+        .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
+        .meshInfos = m_meshInfosBuffer,
+        .meshInstances = frameData.inMeshInstancesBuffer,
+        .materialInfos = m_materialInfosBuffer,
+        .tlas = m_accelStructure.getTlas(frameIdx),
+        .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
+        .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
+        .frameIndex = m_frameCounter,
+        .prevViewPos = m_giPrevCameraPos,
+    };
+    m_giProbePipeline.recordTrace(globalIllumCommandBuffer, frameIdx, traceParams);
+    m_giPrevCameraPos = m_cameraPos;
+
+    // trace (SH write) -> fragment read in the main pass
+    fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
+        vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderStorageRead);
+
+    globalIllumCommandBuffer.end();
+    return tlasHandleChanged;
+}
+
 void Renderer::recordCommandBuffers()
 {
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
@@ -606,371 +964,24 @@ void Renderer::recordCommandBuffers()
     GBuffer& gbuffer = m_gbuffers[frameIdx];
     SceneColor& sceneColor = m_sceneColors[frameIdx];
 
-    // Swapchain render pass (composite + ImGui).
-    vk::CommandBufferInheritanceInfo inheritanceInfo
-    {
-        .renderPass = m_renderPass.getRenderPass(),
-        .subpass = 0,
-        .framebuffer = VK_NULL_HANDLE,
-        .occlusionQueryEnable = false,
-        .queryFlags = {},
-        .pipelineStatistics = {}
-    };
-    // Offscreen scene-colour render pass (lit static mesh + GI probe debug; resolved by TAA).
-    vk::CommandBufferInheritanceInfo sceneInheritanceInfo
-    {
-        .renderPass = sceneColor.getRenderPass(),
-        .subpass = 0,
-        .framebuffer = VK_NULL_HANDLE,
-        .occlusionQueryEnable = false,
-        .queryFlags = {},
-        .pipelineStatistics = {}
-    };
-
-    const vk::Extent2D extent = m_swapChain.getLayout().extent;
-    const vk::Extent2D shadowExtent{ shadowMap.getResolution(), shadowMap.getResolution() };
-
-    const bool recordScene = !frameData.updated && m_meshInfoCounter > 0;
+    const bool recordScene = !frameData.updated && m_meshInstanceCounter > 0;
     if (recordScene)
     {
-        {
-            CommandBuffer& indirectCullCommandBuffer = frameData.indirectCullCommandBuffer;
-            vk::CommandBufferInheritanceInfo indirectInheritanceInfo;
-            indirectCullCommandBuffer.begin(false, &indirectInheritanceInfo);
-            IndirectCullComputePipeline::RecordParams cullParams
-            {
-                .descriptorSet = frameData.indirectCullPipelineDescriptorSet,
-                .ubo = frameData.ubo,
-                .inRenderNodeTransformsBuffer = frameData.inRenderNodeTransformsBuffer,
-                .inMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
-                .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
-                .inMeshInfoBuffer = m_meshInfosBuffer,
-                .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
-            };
-            m_indirectCullComputePipeline.record(indirectCullCommandBuffer, frameIdx, m_meshInfoCounter, cullParams);
-            indirectCullCommandBuffer.end();
-        }
-
-        {
-			CommandBuffer& lightGridCommandBuffer = frameData.lightGridCommandBuffer;
-			vk::CommandBufferInheritanceInfo lightGridInheritanceInfo;
-			lightGridCommandBuffer.begin(false, &lightGridInheritanceInfo);
-            LightGridComputePipeline::RecordParams lightGridParams
-            {
-                .descriptorSet = frameData.lightGridPipelineDescriptorSet,
-                .ubo = frameData.ubo,
-                .inLightInfoBuffer = frameData.lightInfosBuffer,
-                .outLightGridBuffer = frameData.lightGridsBuffer,
-                .outLightTableBuffer = frameData.lightTableBuffer,
-            };
-			m_lightGridComputePipeline.record(frameData.lightGridCommandBuffer, frameIdx, lightGridParams);
-			lightGridCommandBuffer.end();
-        }
-        {
-            CommandBuffer& shadowCullCommandBuffer = frameData.shadowCullCommandBuffer;
-            vk::CommandBufferInheritanceInfo shadowCullInheritanceInfo;
-            vk::CommandBuffer vkShadowCullCommandBuffer = shadowCullCommandBuffer.begin(false, &shadowCullInheritanceInfo);
-
-            // Sun shadow cascades: cull casters against each cascade frustum, then render depth-only into
-            // that cascade's shadow-map layer. Recorded directly into the primary so the depth is ready
-            // before the lighting pass samples it. The camera cull above has already populated the shared
-            // transformed-instance buffer that the shadow vertex shader reads.
-            // Build the (cascade-independent) caster list once.
-            ShadowCullComputePipeline::RecordParams cullParams{
-                .descriptorSet = frameData.shadowCullDescriptorSet,
-                .ubo = frameData.ubo,
-                .dispatchIndirectBuffer = m_indirectCullComputePipeline.getDispatchIndirectBuffer(frameIdx),
-                .inRenderNodeTransformsBuffer = frameData.inRenderNodeTransformsBuffer,
-                .inMeshInstancesBuffer = frameData.inMeshInstancesBuffer,
-                .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
-                .inMeshInfoBuffer = m_meshInfosBuffer,
-                .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
-                .inMaterialInfoBuffer = m_materialInfosBuffer,
-            };
-            m_shadowCullComputePipeline.record(shadowCullCommandBuffer, frameIdx, m_meshInfoCounter, cullParams);
-            shadowCullCommandBuffer.end();
-        }
-        {
-            vk::CommandBufferInheritanceInfo shadowDrawInheritanceInfo
-            {
-                .renderPass = shadowMap.getRenderPass(),
-                .subpass = 0,
-                .framebuffer = VK_NULL_HANDLE,
-                .occlusionQueryEnable = false,
-                .queryFlags = {},
-                .pipelineStatistics = {}
-            };
-            CommandBuffer& shadowDrawCommandBuffer = frameData.shadowDrawCommandBuffer;
-			vk::CommandBuffer vkShadowDrawCommandBuffer = shadowDrawCommandBuffer.begin(false, &shadowDrawInheritanceInfo);
-
-            // All cascades render in a single multiview render pass; gl_ViewIndex selects the layer.
-            const float shadowRes = (float)shadowMap.getResolution();
-            const vk::Viewport shadowViewport{ .x = 0.0f, .y = 0.0f, .width = shadowRes, .height = shadowRes, .minDepth = 0.0f, .maxDepth = 1.0f };
-            const vk::Rect2D shadowScissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = shadowExtent };
-            vkShadowDrawCommandBuffer.setViewport(0, { shadowViewport });
-            vkShadowDrawCommandBuffer.setScissor(0, { shadowScissor });
-
-            ShadowMapGraphicsPipeline::RecordParams shadowDrawParams{
-                .descriptorSet = frameData.shadowDrawDescriptorSet,
-                .ubo = frameData.ubo,
-                .meshInstanceBuffer = m_shadowCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
-                .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
-                .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
-                .instanceIdxBuffer = m_shadowCullComputePipeline.getInstanceIdxBuffer(frameIdx),
-                .indirectCommandBuffer = m_shadowCullComputePipeline.getIndirectCommandBuffer(frameIdx),
-            };
-            m_shadowMapGraphicsPipeline.record(shadowDrawCommandBuffer, frameIdx, m_meshInfoCounter, shadowDrawParams);
-            shadowDrawCommandBuffer.end();
-        }
-        
-        {
-            CommandBuffer& staticMeshCommandBuffer = frameData.staticMeshCommandBuffer;
-            vk::CommandBuffer vkStaticMeshCommandBuffer = staticMeshCommandBuffer.begin(false, &sceneInheritanceInfo);
-
-            const glm::ivec2 viewportSize = m_viewportRect.getSize();
-            const vk::Viewport viewport{
-                .x = (float)m_viewportRect.min.x,
-                .y = (float)m_viewportRect.max.y,
-                .width = (float)viewportSize.x,
-                .height = -((float)viewportSize.y),
-                .minDepth = 0.0f,
-                .maxDepth = 1.0f };
-            const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
-            vkStaticMeshCommandBuffer.setViewport(0, { viewport });
-            vkStaticMeshCommandBuffer.setScissor(0, { scissor });
-            StaticMeshGraphicsPipeline::RecordParams drawParams
-            {
-                .descriptorSet = frameData.staticMeshPipelineDescriptorSet,
-                .ubo = frameData.ubo,
-                .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
-                .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
-                .materialInfoBuffer = m_materialInfosBuffer,
-                .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
-                .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
-                .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
-                .lightInfosBuffer = frameData.lightInfosBuffer,
-                .lightGridsBuffer = frameData.lightGridsBuffer,
-                .lightTableBuffer = frameData.lightTableBuffer,
-                .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
-                .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
-                .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
-                .shadowMapDepthSampler = m_shadowMaps[frameIdx].getDepthSampler(),
-            };
-            m_staticMeshGraphicsPipeline.record(frameData.staticMeshCommandBuffer, frameIdx, m_meshInfoCounter, drawParams);
-            staticMeshCommandBuffer.end();
-        }
-
-        { // Depth + world-normal G-buffer prepass (camera view), reusing the camera-cull draw outputs.
-            vk::CommandBufferInheritanceInfo gbufferInheritanceInfo
-            {
-                .renderPass = gbuffer.getRenderPass(),
-                .subpass = 0,
-                .framebuffer = VK_NULL_HANDLE,
-            };
-            CommandBuffer& gbufferCommandBuffer = frameData.gbufferCommandBuffer;
-            vk::CommandBuffer vkGbufferCommandBuffer = gbufferCommandBuffer.begin(false, &gbufferInheritanceInfo);
-
-            const glm::ivec2 viewportSize = m_viewportRect.getSize();
-            const vk::Viewport viewport{
-                .x = (float)m_viewportRect.min.x,
-                .y = (float)m_viewportRect.max.y,
-                .width = (float)viewportSize.x,
-                .height = -((float)viewportSize.y),
-                .minDepth = 0.0f,
-                .maxDepth = 1.0f };
-            const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
-            vkGbufferCommandBuffer.setViewport(0, { viewport });
-            vkGbufferCommandBuffer.setScissor(0, { scissor });
-            GBufferPipeline::RecordParams gbufferParams{
-                .descriptorSet = frameData.gbufferDescriptorSet,
-                .ubo = frameData.ubo,
-                .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
-                .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
-                .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
-                .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
-                .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
-            };
-            m_gbufferPipeline.record(gbufferCommandBuffer, frameIdx, m_meshInfoCounter, gbufferParams);
-            gbufferCommandBuffer.end();
-        }
+        recordIndirectCull(frameIdx);
+        recordLightGrid(frameIdx);
+        recordShadowCull(frameIdx);
+        recordShadowDraw(frameIdx);
+        recordStaticMesh(frameIdx);
+        recordGBuffer(frameIdx);
+        recordGiProbeDebug(frameIdx);
+        recordAO(frameIdx);
+        recordTaa(frameIdx);
+        recordComposite(frameIdx);
         frameData.updated = true;
     }
 
-    // GI probe debug visualization (re-recorded every frame so the toggle/mode take effect immediately;
-    // executed inside the main render pass only when enabled). Reads this frame's probe grid buffers.
-    {
-        CommandBuffer& dbgCommandBuffer = frameData.giProbeDebugCommandBuffer;
-        vk::CommandBuffer vkDbgCommandBuffer = dbgCommandBuffer.begin(false, &sceneInheritanceInfo);
-        const glm::ivec2 vpSize = m_viewportRect.getSize();
-        const vk::Viewport viewport{ .x = (float)m_viewportRect.min.x, .y = (float)m_viewportRect.max.y,
-            .width = (float)vpSize.x, .height = -((float)vpSize.y), .minDepth = 0.0f, .maxDepth = 1.0f };
-        const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
-        vkDbgCommandBuffer.setViewport(0, { viewport });
-        vkDbgCommandBuffer.setScissor(0, { scissor });
-        m_giProbePipeline.recordDebugDraw(dbgCommandBuffer, frameIdx, frameData.ubo, m_giProbeDebugRadius, m_giProbeDebugMode);
-        dbgCommandBuffer.end();
-    }
-
-    {
-        CommandBuffer& globalIllumCommandBuffer = frameData.globalIllumCommandBuffer;
-        vk::CommandBufferInheritanceInfo globalIllumInheritanceInfo;
-        vk::CommandBuffer vkGlobalIllumCommandBuffer = globalIllumCommandBuffer.begin(false, &globalIllumInheritanceInfo);
-        // -------- Diffuse global illumination (hardware ray tracing) --------
-        // Build/refit acceleration structures, allocate camera-region probes, then ray-trace and update the
-        // probe SH. Recorded after the shadow pass (the trace samples the sun shadow map) and the light grid
-        // (the trace reuses it to shade hits), and before the main pass (which reads the probe SH).
-        auto fullBarrier = [&](vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess,
-            vk::PipelineStageFlags2 dstStage, vk::AccessFlags2 dstAccess)
-            {
-                vk::MemoryBarrier2 bar{ .srcStageMask = srcStage, .srcAccessMask = srcAccess, .dstStageMask = dstStage, .dstAccessMask = dstAccess };
-                vkGlobalIllumCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
-            };
-
-        // 1. Build BLASes for any meshes added since last frame (one-time per mesh).
-        if (m_blasBuiltCount < m_meshInfoCounter)
-        {
-            const uint32 totalVertices = (uint32)(Globals::meshDataManager.getVertexBufUsed() / sizeof(RendererVKLayout::MeshVertex));
-            m_accelStructure.recordBuildBlas(vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
-                m_cpuMeshInfos.data(), m_blasBuiltCount, m_meshInfoCounter - m_blasBuiltCount, totalVertices);
-            m_blasBuiltCount = m_meshInfoCounter;
-
-            m_giProbePipeline.doClear();
-        }
-
-        // 2. One-time clear of the persistent probe table/SH (it accumulates across frames thereafter).
-        if (m_giProbePipeline.needsClear())
-        {
-            m_giProbePipeline.recordClearPersistent(globalIllumCommandBuffer);
-            m_giProbePipeline.markCleared();
-        }
-
-        // Make prior writes visible to the GI compute passes:
-        //  - the light grid (compute storage writes) that the trace reuses to shade hits, and
-        //  - the sun cascade shadow map depth writes (late/early fragment tests) that the trace samples.
-        // The shadow render pass only synchronizes its depth writes to the FRAGMENT stage (for the main
-        // pass); without this the compute trace samples the depth image with no dependency, which faults
-        // NVIDIA (depth-compression metadata read from the wrong stage).
-        fullBarrier(vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
-            vk::AccessFlagBits2::eShaderStorageWrite | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-            vk::PipelineStageFlagBits2::eComputeShader,
-            vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite | vk::AccessFlagBits2::eShaderSampledRead);
-
-        // 3. Write the per-instance TLAS records on the GPU.
-        const uint32 numInstances = std::min(m_meshInstanceCounter, RendererVKLayout::GI_MAX_TLAS_INSTANCES);
-        GIProbePipeline::TlasInstanceParams tlasParams{
-            .renderNodeTransforms = frameData.inRenderNodeTransformsBuffer,
-            .meshInstances = frameData.inMeshInstancesBuffer,
-            .instanceOffsets = m_instanceOffsetsBuffer,
-            .blasAddresses = m_accelStructure.getBlasAddressBuffer(),
-            .numInstances = numInstances,
-        };
-        m_giProbePipeline.recordTlasInstances(globalIllumCommandBuffer, frameIdx, tlasParams);
-
-        // instance write -> TLAS build read. The build reads the instance buffer as SHADER_READ (AS_READ
-        // covers the source acceleration structures, not the instance data), so the dst access must include it.
-        fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
-            vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
-            vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderRead);
-
-        // 4. Rebuild this frame's TLAS (double-buffered).
-        m_accelStructure.recordBuildTlas(vkGlobalIllumCommandBuffer, frameIdx, m_giProbePipeline.getTlasInstanceBuffer(frameIdx), numInstances);
-
-        // TLAS build -> ray-query read
-        fullBarrier(vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
-            vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eAccelerationStructureReadKHR | vk::AccessFlagBits2::eShaderStorageRead);
-
-        // 5. Trace rays per clipmap probe and temporally blend irradiance into the SH. The probe set and
-        // its toroidal window are derived from the camera (this frame's u_viewPos in the UBO); probes that
-        // scrolled in since last frame (relative to m_giPrevCameraPos) are full-replaced rather than blended.
-        GIProbePipeline::TraceParams traceParams{
-            .ubo = frameData.ubo,
-            .lightInfos = frameData.lightInfosBuffer,
-            .lightGrid = frameData.lightGridsBuffer,
-            .lightTable = frameData.lightTableBuffer,
-            .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
-            .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
-            .meshInfos = m_meshInfosBuffer,
-            .meshInstances = frameData.inMeshInstancesBuffer,
-            .materialInfos = m_materialInfosBuffer,
-            .tlas = m_accelStructure.getTlas(frameIdx),
-            .shadowMapView = m_shadowMaps[frameIdx].getSampleView(),
-            .shadowMapSampler = m_shadowMaps[frameIdx].getSampler(),
-            .frameIndex = m_frameCounter,
-            .prevViewPos = m_giPrevCameraPos,
-        };
-        m_giProbePipeline.recordTrace(globalIllumCommandBuffer, frameIdx, traceParams);
-        m_giPrevCameraPos = m_cameraPos;
-
-        // trace (SH write) -> fragment read in the main pass
-        fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
-            vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderStorageRead);
-
-        globalIllumCommandBuffer.end();
-    }
-
-    // Screen-space ray-traced AO (half-res). Runs after the G-buffer prepass (samples normal+depth) and
-    // the GI TLAS build (ray-queried here). Recorded every frame; the TLAS handle may change per frame.
-    {
-        CommandBuffer& aoCommandBuffer = frameData.aoCommandBuffer;
-        vk::CommandBufferInheritanceInfo aoInheritanceInfo;
-        aoCommandBuffer.begin(false, &aoInheritanceInfo);
-        if (m_meshInfoCounter > 0 && m_accelStructure.getTlas(frameIdx))
-        {
-            const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
-            RTAOPipeline::RecordParams aoParams{
-                .ubo = frameData.ubo,
-                .gbufferNormalView = gbuffer.getNormalView(),
-                .gbufferDepthView = gbuffer.getDepthView(),
-                .prevGbufferDepthView = m_gbuffers[prevFrameIdx].getDepthView(),
-                .gbufferSampler = gbuffer.getSampler(),
-                .tlas = m_accelStructure.getTlas(frameIdx),
-                .frameIndex = m_frameCounter,
-            };
-            m_rtaoPipeline.record(aoCommandBuffer, frameIdx, aoParams);
-        }
-        aoCommandBuffer.end();
-    }
-
-    // TAA resolve (compute): reproject + blend last frame's resolved colour into this frame's scene colour.
-    {
-        CommandBuffer& taaCommandBuffer = frameData.taaCommandBuffer;
-        vk::CommandBufferInheritanceInfo taaInheritanceInfo;
-        taaCommandBuffer.begin(false, &taaInheritanceInfo);
-        const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
-        TaaPipeline::RecordParams taaParams{
-            .ubo = frameData.ubo,
-            .currentColorView = sceneColor.getColorView(),
-            .currentColorSampler = sceneColor.getSampler(),
-            .gbufferDepthView = gbuffer.getDepthView(),
-            .prevGbufferDepthView = m_gbuffers[prevFrameIdx].getDepthView(),
-            .gbufferSampler = gbuffer.getSampler(),
-            .feedback = m_taaEnabled ? m_taaFeedback : 0.0f,
-        };
-        m_taaPipeline.record(taaCommandBuffer, frameIdx, taaParams);
-        taaCommandBuffer.end();
-    }
-
-    // Composite: copy the TAA-resolved image into the swapchain (fullscreen triangle), before ImGui.
-    {
-        CommandBuffer& compositeCommandBuffer = frameData.compositeCommandBuffer;
-        vk::CommandBuffer vkCompositeCommandBuffer = compositeCommandBuffer.begin(false, &inheritanceInfo);
-        const vk::Viewport viewport{ .x = 0.0f, .y = 0.0f, .width = (float)extent.width, .height = (float)extent.height, .minDepth = 0.0f, .maxDepth = 1.0f };
-        const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
-        vkCompositeCommandBuffer.setViewport(0, { viewport });
-        vkCompositeCommandBuffer.setScissor(0, { scissor });
-
-        DescriptorSet& set = frameData.compositeDescriptorSet;
-        vk::DescriptorSet vkSet = set.getDescriptorSet();
-        std::array<DescriptorSetUpdateInfo, 1> updates{
-            DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eCombinedImageSampler,
-                .imageInfos = { vk::DescriptorImageInfo{ .sampler = m_taaPipeline.getSampler(), .imageView = m_taaPipeline.getResolvedView(frameIdx), .imageLayout = vk::ImageLayout::eGeneral } } },
-        };
-        compositeCommandBuffer.cmdUpdateDescriptorSets(m_compositePipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, vkSet, updates);
-        vkCompositeCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_compositePipeline.getPipeline());
-        vkCompositeCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_compositePipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
-        vkCompositeCommandBuffer.draw(3, 1, 0, 0);
-        compositeCommandBuffer.end();
-    }
+    if (m_meshInstanceCounter > 0 && recordGlobalIllum(frameIdx))
+        recordAO(frameIdx);
 
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkLightGridCommandBuffer = frameData.lightGridCommandBuffer.getCommandBuffer();
@@ -984,7 +995,8 @@ void Renderer::recordCommandBuffers()
     vk::CommandBuffer vkTaaCommandBuffer = frameData.taaCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkCompositeCommandBuffer = frameData.compositeCommandBuffer.getCommandBuffer();
 
-    vk::CommandBuffer vkImguiCommandBuffer = frameData.imguiCommandBuffer.begin(true, &inheritanceInfo);
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = m_renderPass.getRenderPass() };
+    vk::CommandBuffer vkImguiCommandBuffer = frameData.imguiCommandBuffer.begin(true, &inheritance);
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkImguiCommandBuffer, nullptr);
     frameData.imguiCommandBuffer.end();
 
@@ -1000,109 +1012,80 @@ void Renderer::recordCommandBuffers()
         vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &memoryBarrier });
     }
 
-    if (m_meshInfoCounter > 0)
+    if (m_meshInstanceCounter > 0)
     {
         vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkLightGridCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkShadowCullCommandBuffer);
-    }
 
-    vk::ClearValue shadowClear;
-    shadowClear.depthStencil = vk::ClearDepthStencilValue{ .depth = 1.0f, .stencil = 0 };
-
-    const vk::RenderPassBeginInfo shadowRpBegin{
-        .renderPass = shadowMap.getRenderPass(),
-        .framebuffer = shadowMap.getFramebuffer(),
-        .renderArea = vk::Rect2D{.offset = vk::Offset2D{ 0, 0 }, .extent = shadowExtent },
-        .clearValueCount = 1,
-        .pClearValues = &shadowClear,
-    };
-    vkCommandBuffer.beginRenderPass(shadowRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
-    if (m_meshInfoCounter > 0)
-        vkCommandBuffer.executeCommands(1, &vkShadowDrawCommandBuffer);
-    vkCommandBuffer.endRenderPass();
-
-    // Depth + world-normal G-buffer prepass (camera view). Runs after the camera cull (consumed below)
-    // and feeds the screen-space ray-traced AO denoise. Clears normal to 0 and depth to far.
-    {
-        std::array<vk::ClearValue, 2> gbufferClears{
-            vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } },
-            vk::ClearDepthStencilValue{ 1.0f, 0 } };
-        const vk::RenderPassBeginInfo gbufferRpBegin{
-            .renderPass = gbuffer.getRenderPass(),
-            .framebuffer = gbuffer.getFramebuffer(),
-            .renderArea = vk::Rect2D{.offset = vk::Offset2D{ 0, 0 }, .extent = vk::Extent2D{ gbuffer.getWidth(), gbuffer.getHeight() } },
-            .clearValueCount = (uint32)gbufferClears.size(),
-            .pClearValues = gbufferClears.data(),
-        };
-        vkCommandBuffer.beginRenderPass(gbufferRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
-        if (m_meshInfoCounter > 0)
-            vkCommandBuffer.executeCommands(1, &vkGbufferCommandBuffer);
-        vkCommandBuffer.endRenderPass();
-    }
-
-    if (m_meshInfoCounter > 0)
+        {
+            vk::ClearValue shadowClear;
+            shadowClear.depthStencil = vk::ClearDepthStencilValue{ .depth = 1.0f, .stencil = 0 };
+            const vk::RenderPassBeginInfo shadowRpBegin{
+                .renderPass = shadowMap.getRenderPass(),
+                .framebuffer = shadowMap.getFramebuffer(),
+                .renderArea = vk::Rect2D{.offset = vk::Offset2D{ 0, 0 }, .extent = vk::Extent2D{ shadowMap.getResolution(), shadowMap.getResolution() } },
+                .clearValueCount = 1,
+                .pClearValues = &shadowClear,
+            };
+            vkCommandBuffer.beginRenderPass(shadowRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
+            vkCommandBuffer.executeCommands(1, &vkShadowDrawCommandBuffer);
+            vkCommandBuffer.endRenderPass();
+        }
+        { // Depth + world-normal G-buffer prepass (camera view)
+            std::array<vk::ClearValue, 2> gbufferClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
+            const vk::RenderPassBeginInfo gbufferRpBegin{
+                .renderPass = gbuffer.getRenderPass(),
+                .framebuffer = gbuffer.getFramebuffer(),
+                .renderArea = vk::Rect2D{.offset = vk::Offset2D{ 0, 0 }, .extent = vk::Extent2D{ gbuffer.getWidth(), gbuffer.getHeight() } },
+                .clearValueCount = (uint32)gbufferClears.size(),
+                .pClearValues = gbufferClears.data(),
+            };
+            vkCommandBuffer.beginRenderPass(gbufferRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
+            if (m_meshInfoCounter > 0)
+                vkCommandBuffer.executeCommands(1, &vkGbufferCommandBuffer);
+            vkCommandBuffer.endRenderPass();
+        }
         vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
+        vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
+        m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx), m_rtaoPipeline.getAOSampler());
 
-    // Screen-space RTAO compute (reads the G-buffer + TLAS, writes the half-res AO image).
-    vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
-
-    // Keep the cached static-mesh draw's AO binding pointed at this frame's denoised AO image (ping-ponged
-    // per frame, recreated on resize). Safe here: the per-frame fence guarantees this set isn't still in use
-    // by an in-flight frame.
-    if (m_meshInfoCounter > 0)
-        m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(),
-            m_rtaoPipeline.getAOView(frameIdx), m_rtaoPipeline.getAOSampler());
-
-    // Lit scene into the offscreen scene-colour target (instead of straight to the swapchain). The colour
-    // ends SHADER_READ_ONLY for the TAA resolve to sample. Cleared to the sky colour; outside the editor
-    // viewport sub-rect this clear is what shows through (later covered by ImGui).
-    {
-        std::array<vk::ClearValue, 2> sceneClears{
-            vk::ClearColorValue{ std::array<float, 4>{ 0.5f, 0.7f, 0.9f, 1.0f } },
-            vk::ClearDepthStencilValue{ 1.0f, 0 } };
+        std::array<vk::ClearValue, 2> sceneClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.5f, 0.7f, 0.9f, 1.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
         const vk::RenderPassBeginInfo sceneRpBegin{
             .renderPass = sceneColor.getRenderPass(),
             .framebuffer = sceneColor.getFramebuffer(),
-            .renderArea = vk::Rect2D{.offset = vk::Offset2D{ 0, 0 }, .extent = vk::Extent2D{ sceneColor.getWidth(), sceneColor.getHeight() } },
+            .renderArea = vk::Rect2D{.offset = vk::Offset2D{ m_viewportRect.min.x, m_viewportRect.min.y }, .extent = vk::Extent2D{ sceneColor.getWidth() - m_viewportRect.min.x, sceneColor.getHeight() - m_viewportRect.min.y } },
             .clearValueCount = (uint32)sceneClears.size(),
             .pClearValues = sceneClears.data(),
         };
         vkCommandBuffer.beginRenderPass(sceneRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
-        if (m_meshInfoCounter > 0)
-            vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
+        vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
         if (m_giProbeDebugEnabled)
             vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
         vkCommandBuffer.endRenderPass();
-    }
 
-    // Scene-colour render finished -> make it available to the TAA compute sample. The render pass already
-    // transitioned the image to SHADER_READ_ONLY (finalLayout); this supplies the execution+memory dependency
-    // (the scene pass's subpass dependencies mirror the swapchain pass for pipeline compatibility instead).
-    {
-        vk::MemoryBarrier2 bar{
+        vk::MemoryBarrier2 bar{ // color -> TAA barrier
             .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
             .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
             .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
             .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
         };
         vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
+        vkCommandBuffer.executeCommands(1, &vkTaaCommandBuffer);
     }
 
-    // TAA resolve (compute): scene colour + history -> resolved (this frame's display image and next history).
-    vkCommandBuffer.executeCommands(1, &vkTaaCommandBuffer);
-
     // Swapchain render pass: composite the resolved scene into the swapchain, then ImGui on top.
-    constexpr std::array<vk::ClearValue, 2> clearValues{ vk::ClearColorValue{ std::array<float, 4> { 0.5f, 0.7f, 0.9f, 1.0f }}, vk::ClearDepthStencilValue{ 1.0f, 0 } };
+    constexpr std::array<vk::ClearValue, 2> clearValues{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
     const vk::RenderPassBeginInfo renderPassBeginInfo{
         .renderPass = m_renderPass.getRenderPass(),
         .framebuffer = m_framebuffers.getFramebuffer(m_swapChain.getCurrentImageIdx()),
-        .renderArea = vk::Rect2D {.offset = vk::Offset2D { 0, 0 }, .extent = extent },
+        .renderArea = vk::Rect2D { .offset = vk::Offset2D { 0, 0 }, .extent = m_swapChain.getLayout().extent },
         .clearValueCount = (uint32)clearValues.size(),
         .pClearValues = clearValues.data(),
     };
     vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eSecondaryCommandBuffers);
-    vkCommandBuffer.executeCommands(1, &vkCompositeCommandBuffer);
+    if (m_meshInstanceCounter > 0)
+        vkCommandBuffer.executeCommands(1, &vkCompositeCommandBuffer);
     vkCommandBuffer.executeCommands(1, &vkImguiCommandBuffer);
     vkCommandBuffer.endRenderPass();
     commandBuffer.end();

@@ -22,12 +22,13 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec3  u_skyHorizon;    // horizon color (perpendicular to skyUp)
     float u_ambientIntensity; // multiplier on the ambient term (horizon + zenith, without GI)
     vec3  u_skyGround;     // color along -skyUp
-    float _pad1;
+    uint  u_frameIndex;    // monotonic frame counter (RNG / temporal-rotation source)
     vec3  u_skyUp;         // sky "up" axis (normalized); need not be world +Y (e.g. planet surface normal)
-    float _pad2;
+    float _unused;
 
     mat4 u_cascadeViewProj[NUM_SHADOW_CASCADES];
-    vec4 u_shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution, w = pcf radius
+    vec3 u_shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution
+    float _unused2;
 
     mat4 u_invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
     mat4 u_prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen

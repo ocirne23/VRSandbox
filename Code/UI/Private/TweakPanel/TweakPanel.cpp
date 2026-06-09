@@ -28,10 +28,12 @@ namespace
 		{
 			drawLabel(var);
 			float* v = static_cast<float*>(var.data);
+			int numDecimals = var.speed >= 1.0f ? 1 : static_cast<int>(-std::log10(var.speed));
+			std::string formatStr = ("%." + std::to_string(numDecimals) + "f");
 			if (var.isUnbounded())
-				changed = ImGui::DragFloat("##v", v, var.speed, var.min, FLT_MAX, "%.3f");
+				changed = ImGui::DragFloat("##v", v, var.speed, var.min, FLT_MAX, formatStr.c_str());
 			else
-				changed = ImGui::SliderFloat("##v", v, var.min, var.max, "%.3f");
+				changed = ImGui::SliderFloat("##v", v, var.min, var.max, formatStr.c_str());
 			break;
 		}
 		case ETweakType::Float2:

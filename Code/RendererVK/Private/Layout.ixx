@@ -80,14 +80,16 @@ export namespace RendererVKLayout
         glm::vec3  skyHorizon;    // horizon color (perpendicular to skyUp)
         float ambientIntensity;   // multiplier on the ambient term (horizon + zenith, without GI)
         glm::vec3  skyGround;     // color along -skyUp
-        float _pad1;
+        uint32 frameIndex;        // monotonic frame counter (RNG / temporal-rotation source so passes that read
+                                  // it can be recorded once instead of baking it into a push constant)
         glm::vec3  skyUp;         // sky "up" axis (normalized); need not be world +Y (e.g. planet surface normal)
-        float _pad2;
+        float _unused;
         // Each cascadeViewProj has a structurally-zero bottom row ([0,0,0,1] for ortho*lookAt), so the
         // per-cascade far distance is stashed in m[0][3] and the world texel size in m[1][3]. Readers
         // restore the bottom row to [0,0,0,1] before using the matrix (see the shaders' cascadeMatrix).
         glm::mat4 cascadeViewProj[NUM_SHADOW_CASCADES];
-        glm::vec4 shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution, w = pcf radius
+        glm::vec3 shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution
+        float _unused2;
 
         glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv (screen-space passes)
         glm::mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen (temporal reuse)

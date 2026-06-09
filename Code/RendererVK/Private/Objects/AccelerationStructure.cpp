@@ -176,10 +176,10 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
     m_blasAddressBuffer.flushMappedMemory(m_blasAddressBuffer.getSize());
 }
 
-void AccelerationStructure::recordBuildTlas(vk::CommandBuffer cmd, uint32 frameIdx, Buffer& instanceBuffer, uint32 numInstances)
+bool AccelerationStructure::recordBuildTlas(vk::CommandBuffer cmd, uint32 frameIdx, Buffer& instanceBuffer, uint32 numInstances)
 {
     if (numInstances == 0)
-        return;
+        return false;
 
     vk::Device dev = Globals::device.getDevice();
 
@@ -199,8 +199,10 @@ void AccelerationStructure::recordBuildTlas(vk::CommandBuffer cmd, uint32 frameI
     };
 
     // Grow (and recreate) the TLAS only when the instance count exceeds the current capacity; otherwise
-    // rebuild in place. Capacity is rounded up generously so this is rare.
-    if (!m_tlas[frameIdx] || numInstances > m_tlasCapacity[frameIdx])
+    // rebuild in place. Capacity is rounded up generously so this is rare. Returns true when the handle
+    // changed, so callers that bake it (e.g. the recorded-once AO pass) know to re-record.
+    const bool handleChanged = (!m_tlas[frameIdx] || numInstances > m_tlasCapacity[frameIdx]);
+    if (handleChanged)
     {
         const uint32 capacity = ((numInstances + 4095u) / 4096u) * 4096u;
         vk::AccelerationStructureBuildSizesInfoKHR sizes = dev.getAccelerationStructureBuildSizesKHR(vk::AccelerationStructureBuildTypeKHR::eDevice, buildInfo, capacity);
@@ -231,4 +233,5 @@ void AccelerationStructure::recordBuildTlas(vk::CommandBuffer cmd, uint32 frameI
     };
     const vk::AccelerationStructureBuildRangeInfoKHR* pRange = &range;
     cmd.buildAccelerationStructuresKHR(buildInfo, pRange);
+    return handleChanged;
 }

@@ -14,7 +14,6 @@ namespace
 
     struct RtaoPC
     {
-        uint32 frameIndex;
         uint32 numRays;
         float  radius;
         float  power;
@@ -22,6 +21,7 @@ namespace
         uint32 aoWidth;
         uint32 aoHeight;
         float  _pad;
+        float  _pad2;
     };
     struct TemporalPC
     {
@@ -145,8 +145,7 @@ void RTAOPipeline::recreateImages(uint32 fullWidth, uint32 fullHeight)
     createImageSet(m_accum);
     createImageSet(m_final);
 
-    // One-time UNDEFINED -> GENERAL for every AO image, so a never-yet-written image (e.g. the history
-    // accum buffer sampled on the very first frame) is in the layout its descriptor was written with.
+    // One-time UNDEFINED -> GENERAL for every AO image, so the history accum buffer can be sampled on the very first frame
     ImageSet* sets[] = { &m_raw, &m_accum, &m_final };
     std::vector<vk::ImageMemoryBarrier2> bars;
     for (ImageSet* s : sets)
@@ -261,8 +260,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const R
 
     auto uboInfo = vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = sizeof(RendererVKLayout::Ubo) };
 
-    // -------- Pass 1: trace raw AO --------
-    {
+    { // -------- Pass 1: trace raw AO --------
         vk::MemoryBarrier2 asVis{
             .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
             .srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
@@ -287,15 +285,14 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const R
 
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, traceLayout, 0, 1, &vkSet, 0, nullptr);
-        RtaoPC pc{ .frameIndex = params.frameIndex, .numRays = uint32(std::max(m_rays, 1)), .radius = m_radius, .power = m_power,
+        RtaoPC pc{ .numRays = uint32(std::max(m_rays, 1)), .radius = m_radius, .power = m_power,
             .intensity = m_intensity, .aoWidth = m_width, .aoHeight = m_height };
         cmd.pushConstants(traceLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
     storeWriteToSampledRead();
 
-    // -------- Pass 2: temporal accumulate (read raw + history accum[prev], write accum[cur]) --------
-    {
+    { // -------- Pass 2: temporal accumulate (read raw + history accum[prev], write accum[cur]) --------
         transitionToGeneral(cmd, m_accum, frameIdx, true);
 
         DescriptorSet& set = m_temporalSets[frameIdx];
@@ -317,8 +314,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const R
     }
     storeWriteToSampledRead();
 
-    // -------- Pass 3: spatial bilateral blur (read accum[cur], write final[cur]) --------
-    {
+    { // -------- Pass 3: spatial bilateral blur (read accum[cur], write final[cur]) --------
         transitionToGeneral(cmd, m_final, frameIdx, true);
 
         DescriptorSet& set = m_spatialSets[frameIdx];

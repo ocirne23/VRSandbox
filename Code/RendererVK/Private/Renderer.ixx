@@ -92,7 +92,9 @@ public:
 
     // GI probe debug visualization: instanced cubes at every live probe cell.
     void toggleGiProbeDebug() { m_giProbeDebugEnabled = !m_giProbeDebugEnabled; }
-    void cycleGiProbeDebugMode() { m_giProbeDebugMode ^= 1u; } // 0 = irradiance, 1 = cellSize/LOD
+    // The debug draw is now recorded once with the scene (the mode is baked into its push constant), so a mode
+    // change must force a re-record. Enable/disable is handled per-frame in the primary, so only this needs it.
+    void cycleGiProbeDebugMode() { m_giProbeDebugMode ^= 1u; setHaveToRecordCommandBuffers(); } // 0 = irradiance, 1 = cellSize/LOD
 
     void setWindowMinimized(bool minimized);
     void recreateWindowSurface(Window& window);
@@ -142,6 +144,20 @@ private:
     CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 
     void recordCommandBuffers();
+    // Per-pass secondary command-buffer recording (each fetches its per-frame data from frameIdx). The scene
+    // passes are recorded once (gated by recordScene in recordCommandBuffers); recordGlobalIllum runs every
+    // frame (it refits the ray-tracing TLAS and rotates the probe ray set).
+    void recordIndirectCull(uint32 frameIdx);
+    void recordLightGrid(uint32 frameIdx);
+    void recordShadowCull(uint32 frameIdx);
+    void recordShadowDraw(uint32 frameIdx);
+    void recordStaticMesh(uint32 frameIdx);
+    void recordGBuffer(uint32 frameIdx);
+    void recordGiProbeDebug(uint32 frameIdx);
+    void recordAO(uint32 frameIdx);
+    void recordTaa(uint32 frameIdx);
+    void recordComposite(uint32 frameIdx);
+    bool recordGlobalIllum(uint32 frameIdx); // returns true if the ray-tracing TLAS handle changed this frame
     void setHaveToRecordCommandBuffers();
     void recreateSwapchain();
     void initImgui(Window& window);
@@ -172,12 +188,14 @@ private:
     LightGridComputePipeline m_lightGridComputePipeline;
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
 
-    // Depth + world-normal prepass (G-buffer), one per frame-in-flight (written then sampled within the
-    // same frame, like the shadow maps). Drives the screen-space ray-traced AO denoise pipeline.
+    // Depth + world-normal prepass (G-buffer), one per frame-in-flight. Drives the screen-space ray-traced AO denoise pipeline and GI normal bending.
     std::array<GBuffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_gbuffers;
     GBufferPipeline m_gbufferPipeline;
 
-    // Screen-space ray-traced AO (half-res compute) feeding a temporal-reprojection denoise.
+    // Screen-space ray-traced AO (half-res compute) feeding a temporal-reprojection denoise. The AO command
+    // buffer is recorded once (with the scene) but bakes the ray-traced TLAS handle; recordGlobalIllum reports
+    // when that handle changes (first build / capacity growth) so the scene passes are re-recorded. The frame
+    // counter it samples comes from the UBO, so only the handle drives re-recording.
     RTAOPipeline m_rtaoPipeline;
 
     // Temporal anti-aliasing. The lit scene renders into an offscreen colour target (one per frame-in-flight)
@@ -213,6 +231,9 @@ private:
     SkyParams m_skyParams;
     float m_ambientIntensity = 0.1f;
     float m_giIntensity = 1.0f;
+
+    float m_shadowDepthBias = 0.0015f;
+    float m_shadowNormalBias = 2.0f;
 
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform> m_renderNodeTransforms;

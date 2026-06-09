@@ -15,7 +15,6 @@ layout (binding = 4, rgba16f) uniform restrict writeonly image2D u_aoOut; // rgb
 
 layout (push_constant) uniform PC
 {
-    uint  frameIndex;
     uint  numRays;
     float radius;     // world units
     float power;      // contrast curve
@@ -23,6 +22,7 @@ layout (push_constant) uniform PC
     uint  aoWidth;
     uint  aoHeight;
     float _pad;
+    float _pad2;
 } pc;
 
 // Radical-inverse base-2 -> 2D Hammersley point set.
@@ -63,8 +63,11 @@ void main()
 
     // Per-pixel + per-frame decorrelation (Cranley-Patterson). The frame term rotates the set so the
     // temporal pass (stage 3) accumulates fresh samples each frame.
-    vec2 jitter = vec2(ign(vec2(px) + float(pc.frameIndex) * 1.6180339),
-                       ign(vec2(px.yx) + float(pc.frameIndex) * 3.1415926 + vec2(17.3, 5.1)));
+    // Frame counter comes from the UBO (not the push constant) so this pass can be recorded once and still
+    // rotate its sampling each frame (the push-constant frameIndex is left unused / stale).
+    const float frameRot = float(u_frameIndex);
+    vec2 jitter = vec2(ign(vec2(px) + frameRot * 1.6180339),
+                       ign(vec2(px.yx) + frameRot * 3.1415926 + vec2(17.3, 5.1)));
 
     const uint n = max(pc.numRays, 1u);
     float occ = 0.0;
