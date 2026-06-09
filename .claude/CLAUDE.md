@@ -35,7 +35,7 @@ A modern c++ Game Engine codebase.
 * ImGui library for all UI utilizing the Docking branch for windows
 * Couple of panels
 	* Viewport (Renderer output)
-	* Tweaks (panel to cinfigure renderer and other things)
+	* Tweaks (panel to configure renderer and other things)
 	* Script (WIP visual scripting thing)
 	* Scene (Scenegraph hierarchy display, dummy implementation)
 	* Properties (Selected scenegraph item info, dummy implementation)
