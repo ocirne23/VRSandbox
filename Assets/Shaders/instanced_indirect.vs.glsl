@@ -10,6 +10,9 @@ layout (binding = 0, std140) uniform UBO
     mat4 u_mvp;
     vec4 u_frustumPlanes[6];
     vec3 u_viewPos;
+    // TAA sub-pixel jitter (NDC). Explicit std140 offset because this shader uses a truncated view of the UBO;
+    // 896 is u_taaJitter's offset in the full layout (see ubo.inc.glsl). Update if fields are inserted before it.
+    layout(offset = 896) vec4 u_taaJitter;
 };
 struct InMeshInstancesData
 {
@@ -55,6 +58,7 @@ void main()
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
 
     gl_Position = u_mvp * vec4(out_pos, 1.0);
+    gl_Position.xy += u_taaJitter.xy * gl_Position.w; // TAA sub-pixel jitter (clip space)
 }
 
 /*mat3 version

@@ -28,6 +28,9 @@ import :GIProbePipeline;
 import :GBuffer;
 import :GBufferPipeline;
 import :RTAOPipeline;
+import :SceneColor;
+import :TaaPipeline;
+import :GraphicsPipeline;
 import :Light;
 import :GpuCrashTracker;
 
@@ -142,6 +145,7 @@ private:
     void setHaveToRecordCommandBuffers();
     void recreateSwapchain();
     void initImgui(Window& window);
+    void initComposite();
 
     friend class ObjectContainer;
     void addObjectContainer(ObjectContainer* pObjectContainer);
@@ -175,6 +179,17 @@ private:
 
     // Screen-space ray-traced AO (half-res compute) feeding a temporal-reprojection denoise.
     RTAOPipeline m_rtaoPipeline;
+
+    // Temporal anti-aliasing. The lit scene renders into an offscreen colour target (one per frame-in-flight)
+    // instead of straight to the swapchain; a compute resolve reprojects+blends history, and a fullscreen
+    // composite copies the resolved image into the swapchain (with ImGui drawn on top). The camera projection
+    // is jittered sub-pixel each frame to feed the accumulation.
+    std::array<SceneColor, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_sceneColors;
+    TaaPipeline m_taaPipeline;
+    GraphicsPipeline m_compositePipeline;
+    bool  m_taaEnabled = true;
+    float m_taaFeedback = 0.8f;
+    uint32 m_taaJitterFrame = 0;
 
     // Hardware ray-traced diffuse GI. The acceleration structures are queried by the probe-trace pass;
     // BLASes are built once per mesh, the TLAS rebuilt each frame from the instance list.
@@ -218,6 +233,7 @@ private:
     {
         DescriptorSet staticMeshPipelineDescriptorSet;
         DescriptorSet gbufferDescriptorSet;
+        DescriptorSet compositeDescriptorSet;
         DescriptorSet indirectCullPipelineDescriptorSet;
         DescriptorSet lightGridPipelineDescriptorSet;
         DescriptorSet shadowCullDescriptorSet;
@@ -234,6 +250,8 @@ private:
         CommandBuffer shadowDrawCommandBuffer;
         CommandBuffer globalIllumCommandBuffer;
         CommandBuffer giProbeDebugCommandBuffer;
+        CommandBuffer taaCommandBuffer;
+        CommandBuffer compositeCommandBuffer;
 
         bool updated = false;
         Buffer ubo;

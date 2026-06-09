@@ -97,7 +97,12 @@ export namespace RendererVKLayout
         glm::vec4 viewportRect; // xy = viewport min, zw = viewport size, both normalized to [0,1] of the full
                                 // render target. The scene renders through this sub-rect (editor viewport panel),
                                 // so screen-space reconstruction must map full-frame UV through it.
+        glm::vec4 taaJitter;    // xy = this frame's TAA sub-pixel jitter in NDC (0 when TAA disabled). Applied in
+                                // clip space by the rasterization vertex shaders ONLY; mvp/invMvp/prevMvp stay
+                                // unjittered so reconstruction/reprojection (TAA, RTAO) is wobble-free. zw unused.
     };
+    // instanced_indirect.vs.glsl reads u_taaJitter via an explicit std140 offset; keep it in sync.
+    static_assert(offsetof(Ubo, taaJitter) == 896, "Update the u_taaJitter offset in instanced_indirect.vs.glsl");
 
     struct alignas(16) RenderNodeTransform : Transform {};
     struct alignas(16) MeshInstanceOffset {

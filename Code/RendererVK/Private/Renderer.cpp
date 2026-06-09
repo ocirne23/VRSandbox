@@ -27,6 +27,22 @@ import :ObjectContainer;
 // matrix's depth convention. outSplits holds each cascade's far distance from the camera.
 namespace
 {
+    // Radical inverse in an arbitrary base; (Halton(2), Halton(3)) gives the low-discrepancy sub-pixel jitter
+    // sequence used by the TAA accumulation.
+    float radicalInverse(uint32 i, uint32 base)
+    {
+        float invBase = 1.0f / (float)base;
+        float result = 0.0f;
+        float f = invBase;
+        while (i > 0)
+        {
+            result += (float)(i % base) * f;
+            i /= base;
+            f *= invBase;
+        }
+        return result;
+    }
+
     void computeSunCascades(const Camera& camera, float aspect, const glm::vec3& sunDir,
         glm::mat4(&outViewProj)[RendererVKLayout::NUM_SHADOW_CASCADES])
     {
@@ -168,7 +184,12 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
             gbuffer.initialize(ext.width, ext.height);
         m_gbufferPipeline.initialize(m_gbuffers[0]); // render pass compatible across all
         m_rtaoPipeline.initialize(ext.width, ext.height);
+        const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
+        for (SceneColor& sceneColor : m_sceneColors)
+            sceneColor.initialize(sceneFormat, ext.width, ext.height);
+        m_taaPipeline.initialize(ext.width, ext.height);
     }
+    initComposite();
     m_indirectCullComputePipeline.initialize();
     m_lightGridComputePipeline.initialize();
     m_accelStructure.initialize();
@@ -188,6 +209,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         perFrame.lightGridPipelineDescriptorSet.initialize(m_lightGridComputePipeline.getDescriptorSetLayout());
         perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout());
         perFrame.gbufferDescriptorSet.initialize(m_gbufferPipeline.getDescriptorSetLayout());
+        perFrame.compositeDescriptorSet.initialize(m_compositePipeline.getDescriptorSetLayout());
 
         perFrame.shadowCullDescriptorSet.initialize(m_shadowCullComputePipeline.getDescriptorSetLayout());
         perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout());
@@ -203,6 +225,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         perFrame.shadowDrawCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.globalIllumCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.giProbeDebugCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.taaCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.compositeCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
 
         perFrame.ubo.initialize(sizeof(RendererVKLayout::Ubo),
             vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst,
@@ -267,7 +291,25 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::color3("Lighting", "Sun Color", &m_sunColor, &m_sunIntensity);
     Tweak::floatVar("Lighting", "Ambient Intensity", &m_ambientIntensity, 0.0f, 1.0f);
 
+    Tweak::boolean("TAA", "Enabled", &m_taaEnabled);
+    Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f);
+
     return true;
+}
+
+// Fullscreen composite pipeline: samples the TAA-resolved image and writes it into the swapchain (drawn
+// before ImGui in the swapchain render pass). No vertex buffers; a single combined-image-sampler binding.
+void Renderer::initComposite()
+{
+    GraphicsPipelineLayout layout;
+    layout.vertexShader.debugFilePath = "Shaders/composite.vs.glsl";
+    layout.fragmentShader.debugFilePath = "Shaders/composite.fs.glsl";
+    layout.vertexShader.text = FileSystem::readFileStr(layout.vertexShader.debugFilePath);
+    layout.fragmentShader.text = FileSystem::readFileStr(layout.fragmentShader.debugFilePath);
+    layout.cullMode = vk::CullModeFlagBits::eNone;
+    layout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+        .binding = 0, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+    m_compositePipeline.initialize(m_renderPass, layout);
 }
 
 void Renderer::recreateWindowSurface(Window& window)
@@ -288,7 +330,14 @@ void Renderer::recreateWindowSurface(Window& window)
         for (GBuffer& gbuffer : m_gbuffers)
             gbuffer.initialize(ext.width, ext.height);
         m_rtaoPipeline.recreateImages(ext.width, ext.height);
+        const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
+        for (SceneColor& sceneColor : m_sceneColors)
+            sceneColor.initialize(sceneFormat, ext.width, ext.height);
+        m_taaPipeline.recreateImages(ext.width, ext.height);
     }
+    // The cached scene command buffers embed the (now-recreated) scene-colour render pass in their
+    // inheritance info, so force them to re-record against the new handle.
+    setHaveToRecordCommandBuffers();
     auto waitResult2 = Globals::device.getGraphicsQueue().waitIdle();
     if (waitResult2 != vk::Result::eSuccess)
     {
@@ -311,7 +360,13 @@ void Renderer::recreateSwapchain()
         for (GBuffer& gbuffer : m_gbuffers)
             gbuffer.initialize(ext.width, ext.height);
         m_rtaoPipeline.recreateImages(ext.width, ext.height);
+        const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
+        for (SceneColor& sceneColor : m_sceneColors)
+            sceneColor.initialize(sceneFormat, ext.width, ext.height);
+        m_taaPipeline.recreateImages(ext.width, ext.height);
     }
+    // Cached scene command buffers reference the recreated scene-colour render pass; re-record them.
+    setHaveToRecordCommandBuffers();
 }
 
 void Renderer::reloadShaders()
@@ -332,6 +387,19 @@ void Renderer::reloadShaders()
     m_shadowMapGraphicsPipeline.reloadShaders();
     m_giProbePipeline.reloadShaders();
     m_giProbePipeline.reloadDebugShaders();
+    m_taaPipeline.reloadShaders();
+    {
+        GraphicsPipelineLayout layout;
+        layout.vertexShader.debugFilePath = "Shaders/composite.vs.glsl";
+        layout.fragmentShader.debugFilePath = "Shaders/composite.fs.glsl";
+        layout.vertexShader.text = FileSystem::readFileStr(layout.vertexShader.debugFilePath);
+        layout.fragmentShader.text = FileSystem::readFileStr(layout.fragmentShader.debugFilePath);
+        layout.cullMode = vk::CullModeFlagBits::eNone;
+        layout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
+            .binding = 0, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+        if (!m_compositePipeline.reloadShaders(m_renderPass, layout))
+            printf("Composite: shader reload failed, keeping previous pipeline\n");
+    }
 
     setHaveToRecordCommandBuffers();
     printf("Reloaded shaders\n");
@@ -350,6 +418,19 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     const glm::ivec2 viewportSize = m_viewportRect.getSize();
     const glm::mat4x4 projection = glm::perspective(glm::radians(camera.fovDeg), (float)viewportSize.x / (float)viewportSize.y, camera.near, camera.far);
     glm::mat4 viewMatrix = camera.viewMatrix;
+
+    // TAA sub-pixel jitter: a Halton(2,3) offset within the pixel, in NDC units (one pixel spans 2/size in
+    // NDC). It is applied in clip space by the rasterization vertex shaders only (see u_taaJitter); the camera
+    // matrices stored below stay unjittered, so TAA/RTAO reconstruction and reprojection do not wobble. The
+    // jittered rasterization is what the TAA resolve accumulates into a higher-resolution result.
+    glm::vec2 taaJitterNdc(0.0f);
+    if (m_taaEnabled && viewportSize.x > 0 && viewportSize.y > 0)
+    {
+        const uint32 sampleIdx = (m_taaJitterFrame % 16u) + 1u;
+        taaJitterNdc.x = (radicalInverse(sampleIdx, 2u) - 0.5f) * 2.0f / (float)viewportSize.x;
+        taaJitterNdc.y = (radicalInverse(sampleIdx, 3u) - 0.5f) * 2.0f / (float)viewportSize.y;
+    }
+    m_taaJitterFrame++;
 
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -376,6 +457,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
         (float)m_viewportRect.min.y / (float)swapExtent.height,
         (float)viewportSize.x / (float)swapExtent.width,
         (float)viewportSize.y / (float)swapExtent.height);
+    ubo.taaJitter = glm::vec4(taaJitterNdc, 0.0f, 0.0f);
 
     ubo.giIntensity = m_giIntensity;
     ubo.sunDirection = m_sunDirection;
@@ -522,10 +604,22 @@ void Renderer::recordCommandBuffers()
     PerFrameData& frameData = m_perFrameData[frameIdx];
     ShadowMap& shadowMap = m_shadowMaps[frameIdx];
     GBuffer& gbuffer = m_gbuffers[frameIdx];
+    SceneColor& sceneColor = m_sceneColors[frameIdx];
 
+    // Swapchain render pass (composite + ImGui).
     vk::CommandBufferInheritanceInfo inheritanceInfo
     {
         .renderPass = m_renderPass.getRenderPass(),
+        .subpass = 0,
+        .framebuffer = VK_NULL_HANDLE,
+        .occlusionQueryEnable = false,
+        .queryFlags = {},
+        .pipelineStatistics = {}
+    };
+    // Offscreen scene-colour render pass (lit static mesh + GI probe debug; resolved by TAA).
+    vk::CommandBufferInheritanceInfo sceneInheritanceInfo
+    {
+        .renderPass = sceneColor.getRenderPass(),
         .subpass = 0,
         .framebuffer = VK_NULL_HANDLE,
         .occlusionQueryEnable = false,
@@ -631,7 +725,7 @@ void Renderer::recordCommandBuffers()
         
         {
             CommandBuffer& staticMeshCommandBuffer = frameData.staticMeshCommandBuffer;
-            vk::CommandBuffer vkStaticMeshCommandBuffer = staticMeshCommandBuffer.begin(false, &inheritanceInfo);
+            vk::CommandBuffer vkStaticMeshCommandBuffer = staticMeshCommandBuffer.begin(false, &sceneInheritanceInfo);
 
             const glm::ivec2 viewportSize = m_viewportRect.getSize();
             const vk::Viewport viewport{
@@ -706,7 +800,7 @@ void Renderer::recordCommandBuffers()
     // executed inside the main render pass only when enabled). Reads this frame's probe grid buffers.
     {
         CommandBuffer& dbgCommandBuffer = frameData.giProbeDebugCommandBuffer;
-        vk::CommandBuffer vkDbgCommandBuffer = dbgCommandBuffer.begin(false, &inheritanceInfo);
+        vk::CommandBuffer vkDbgCommandBuffer = dbgCommandBuffer.begin(false, &sceneInheritanceInfo);
         const glm::ivec2 vpSize = m_viewportRect.getSize();
         const vk::Viewport viewport{ .x = (float)m_viewportRect.min.x, .y = (float)m_viewportRect.max.y,
             .width = (float)vpSize.x, .height = -((float)vpSize.y), .minDepth = 0.0f, .maxDepth = 1.0f };
@@ -837,6 +931,47 @@ void Renderer::recordCommandBuffers()
         aoCommandBuffer.end();
     }
 
+    // TAA resolve (compute): reproject + blend last frame's resolved colour into this frame's scene colour.
+    {
+        CommandBuffer& taaCommandBuffer = frameData.taaCommandBuffer;
+        vk::CommandBufferInheritanceInfo taaInheritanceInfo;
+        taaCommandBuffer.begin(false, &taaInheritanceInfo);
+        const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+        TaaPipeline::RecordParams taaParams{
+            .ubo = frameData.ubo,
+            .currentColorView = sceneColor.getColorView(),
+            .currentColorSampler = sceneColor.getSampler(),
+            .gbufferDepthView = gbuffer.getDepthView(),
+            .prevGbufferDepthView = m_gbuffers[prevFrameIdx].getDepthView(),
+            .gbufferSampler = gbuffer.getSampler(),
+            .feedback = m_taaEnabled ? m_taaFeedback : 0.0f,
+        };
+        m_taaPipeline.record(taaCommandBuffer, frameIdx, taaParams);
+        taaCommandBuffer.end();
+    }
+
+    // Composite: copy the TAA-resolved image into the swapchain (fullscreen triangle), before ImGui.
+    {
+        CommandBuffer& compositeCommandBuffer = frameData.compositeCommandBuffer;
+        vk::CommandBuffer vkCompositeCommandBuffer = compositeCommandBuffer.begin(false, &inheritanceInfo);
+        const vk::Viewport viewport{ .x = 0.0f, .y = 0.0f, .width = (float)extent.width, .height = (float)extent.height, .minDepth = 0.0f, .maxDepth = 1.0f };
+        const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+        vkCompositeCommandBuffer.setViewport(0, { viewport });
+        vkCompositeCommandBuffer.setScissor(0, { scissor });
+
+        DescriptorSet& set = frameData.compositeDescriptorSet;
+        vk::DescriptorSet vkSet = set.getDescriptorSet();
+        std::array<DescriptorSetUpdateInfo, 1> updates{
+            DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eCombinedImageSampler,
+                .imageInfos = { vk::DescriptorImageInfo{ .sampler = m_taaPipeline.getSampler(), .imageView = m_taaPipeline.getResolvedView(frameIdx), .imageLayout = vk::ImageLayout::eGeneral } } },
+        };
+        compositeCommandBuffer.cmdUpdateDescriptorSets(m_compositePipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, vkSet, updates);
+        vkCompositeCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_compositePipeline.getPipeline());
+        vkCompositeCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_compositePipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
+        vkCompositeCommandBuffer.draw(3, 1, 0, 0);
+        compositeCommandBuffer.end();
+    }
+
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkLightGridCommandBuffer = frameData.lightGridCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkStaticMeshCommandBuffer = frameData.staticMeshCommandBuffer.getCommandBuffer();
@@ -846,6 +981,8 @@ void Renderer::recordCommandBuffers()
     vk::CommandBuffer vkGlobalIllumCommandBuffer = frameData.globalIllumCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkAoCommandBuffer = frameData.aoCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkGiProbeDebugCommandBuffer = frameData.giProbeDebugCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkTaaCommandBuffer = frameData.taaCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkCompositeCommandBuffer = frameData.compositeCommandBuffer.getCommandBuffer();
 
     vk::CommandBuffer vkImguiCommandBuffer = frameData.imguiCommandBuffer.begin(true, &inheritanceInfo);
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vkImguiCommandBuffer, nullptr);
@@ -917,6 +1054,45 @@ void Renderer::recordCommandBuffers()
         m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(),
             m_rtaoPipeline.getAOView(frameIdx), m_rtaoPipeline.getAOSampler());
 
+    // Lit scene into the offscreen scene-colour target (instead of straight to the swapchain). The colour
+    // ends SHADER_READ_ONLY for the TAA resolve to sample. Cleared to the sky colour; outside the editor
+    // viewport sub-rect this clear is what shows through (later covered by ImGui).
+    {
+        std::array<vk::ClearValue, 2> sceneClears{
+            vk::ClearColorValue{ std::array<float, 4>{ 0.5f, 0.7f, 0.9f, 1.0f } },
+            vk::ClearDepthStencilValue{ 1.0f, 0 } };
+        const vk::RenderPassBeginInfo sceneRpBegin{
+            .renderPass = sceneColor.getRenderPass(),
+            .framebuffer = sceneColor.getFramebuffer(),
+            .renderArea = vk::Rect2D{.offset = vk::Offset2D{ 0, 0 }, .extent = vk::Extent2D{ sceneColor.getWidth(), sceneColor.getHeight() } },
+            .clearValueCount = (uint32)sceneClears.size(),
+            .pClearValues = sceneClears.data(),
+        };
+        vkCommandBuffer.beginRenderPass(sceneRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
+        if (m_meshInfoCounter > 0)
+            vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
+        if (m_giProbeDebugEnabled)
+            vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
+        vkCommandBuffer.endRenderPass();
+    }
+
+    // Scene-colour render finished -> make it available to the TAA compute sample. The render pass already
+    // transitioned the image to SHADER_READ_ONLY (finalLayout); this supplies the execution+memory dependency
+    // (the scene pass's subpass dependencies mirror the swapchain pass for pipeline compatibility instead).
+    {
+        vk::MemoryBarrier2 bar{
+            .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+            .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+        };
+        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
+    }
+
+    // TAA resolve (compute): scene colour + history -> resolved (this frame's display image and next history).
+    vkCommandBuffer.executeCommands(1, &vkTaaCommandBuffer);
+
+    // Swapchain render pass: composite the resolved scene into the swapchain, then ImGui on top.
     constexpr std::array<vk::ClearValue, 2> clearValues{ vk::ClearColorValue{ std::array<float, 4> { 0.5f, 0.7f, 0.9f, 1.0f }}, vk::ClearDepthStencilValue{ 1.0f, 0 } };
     const vk::RenderPassBeginInfo renderPassBeginInfo{
         .renderPass = m_renderPass.getRenderPass(),
@@ -926,10 +1102,7 @@ void Renderer::recordCommandBuffers()
         .pClearValues = clearValues.data(),
     };
     vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eSecondaryCommandBuffers);
-    if (m_meshInfoCounter > 0)
-        vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
-    if (m_giProbeDebugEnabled)
-        vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
+    vkCommandBuffer.executeCommands(1, &vkCompositeCommandBuffer);
     vkCommandBuffer.executeCommands(1, &vkImguiCommandBuffer);
     vkCommandBuffer.endRenderPass();
     commandBuffer.end();

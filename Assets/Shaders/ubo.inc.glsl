@@ -35,6 +35,7 @@ layout (binding = UBO_BINDING, std140) uniform UBO
 
     vec4 u_screenSize;   // xy = full render-target resolution (px); zw = 1/xy
     vec4 u_viewportRect; // xy = viewport min, zw = viewport size, normalized to [0,1] of the full render target
+    vec4 u_taaJitter;    // xy = TAA sub-pixel jitter in NDC, applied in clip space by raster vertex shaders only
 };
 
 // Reconstruct world-space position from a hardware depth sample and a full-frame screen UV (origin top-left),
