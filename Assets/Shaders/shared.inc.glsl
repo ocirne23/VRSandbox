@@ -66,6 +66,15 @@ vec2 prevScreenUV(vec3 worldPos, out float clipW)
     return u_viewportRect.xy + vpUv * u_viewportRect.zw;
 }
 
+vec3 skyGradient(float up)
+{
+    // Below the horizon: smoothstep instead of the clamped linear ramp, so the ground fade eases out of the
+    // horizon color (no slope kink at up = 0) and eases into the ground color (no clamp kink at up = -0.5).
+    return (up >= 0.0) ? mix(u_skyHorizon, u_skyZenith, smoothstep(0.0, 0.5, up)) : mix(u_skyHorizon, u_skyGround, smoothstep(0.0, 0.05, -up));
+    //return mix(mix(u_skyHorizon, u_skyZenith, smoothstep(0.0, 0.5, up)), mix(u_skyHorizon, u_skyGround, smoothstep(0.0, 0.5, -up)), up + 1.0);
+     //return (up >= 0.0) ? mix(u_skyHorizon, u_skyZenith, sqrt(up)) : mix(u_skyHorizon, u_skyGround, smoothstep(0.0, 0.5, -up));
+}
+
 // Cheap analytic approximation of the raymarched sky (sky.fs.glsl) for GI/AO miss rays: the configured
 // gradient, dimmed toward night by sun elevation, with a warm halo toward the sun standing in for the
 // atmosphere's forward scattering. Intentionally approximate (a few ALU per miss ray).
@@ -74,7 +83,7 @@ vec3 skyColor(vec3 dir)
     vec3 up = normalize(u_skyUp);
     vec3 sunDir = normalize(u_sunDirection.xyz);
     float t = dot(dir, up);
-    vec3 sky = (t >= 0.0) ? mix(u_skyHorizon, u_skyZenith, sqrt(t)) : mix(u_skyHorizon, u_skyGround, min(-t * 2.0, 1.0));
+    vec3 sky = skyGradient(t);
     float dayLight = clamp(dot(sunDir, up) * 3.0 + 0.05, 0.0, 1.0);
     float halo = pow(clamp(dot(dir, sunDir), 0.0, 1.0), 6.0);
     return sky * dayLight * (1.0 + halo);

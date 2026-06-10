@@ -18,7 +18,7 @@ export class GBufferPipeline final
 {
 public:
     void initialize(const GBuffer& gbuffer);
-    void reloadShaders();
+    void reloadShaders(const GBuffer& gbuffer);
 
     struct RecordParams
     {
@@ -37,6 +37,5 @@ public:
 private:
     void buildPipelineLayout(GraphicsPipelineLayout& layout);
 
-    vk::RenderPass m_renderPass;
     GraphicsPipeline m_graphicsPipeline;
 };

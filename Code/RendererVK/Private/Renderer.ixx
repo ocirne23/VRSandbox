@@ -63,7 +63,6 @@ public:
     void renderNodeThreadSafe(const RenderNode& node);
     void renderNode(const RenderNode& node);
     void addLightInfo(const RendererVKLayout::LightInfo& light);
-    // Local participating-media box for the volumetric fog, submitted per frame like lights.
     void addFogVolume(const RendererVKLayout::FogVolumeInfo& fogVolume);
     void addPointLight(const PointLight& light);
     void addAreaLight(const AreaLight& areaLight);
@@ -76,10 +75,10 @@ public:
     {
         glm::vec3 zenith = glm::vec3(0.80f, 0.75f, 0.85f);
         glm::vec3 horizon = glm::vec3(0.80f, 0.55f, 0.40f);
-        glm::vec3 ground = glm::vec3(0.0f);
-        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // sky-up axis; set to the local up on a planet
+        glm::vec3 ground = glm::vec3(0.15f);
+        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
         float intensity = 1.0f;
-        float sunAngularCos = 0.99998f;// 0.9999f; // ~0.8 deg disc; 1.0 disables the disc
+        float sunAngularCos = 0.99998f;
         float sunGlow = 0.5f; // sun halo strength (0 = none, ~0.5 subtle, 2 = heavy); HG forward lobe in sky.fs
     };
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
@@ -215,42 +214,42 @@ private:
     glm::vec3 m_sunColor = glm::vec3(0.9568f, 1.0f, 0.9214f);
     float m_sunIntensity = 3.0f;
     SkyParams m_skyParams;
-    float m_cloudCoverage  = 0.45f;
-    float m_cloudHeight    = 1800.0f; // meters above the viewer (slab base)
-    float m_cloudThickness = 900.0f;  // slab thickness (m)
+    float m_cloudCoverage  = 0.66f;
+    float m_cloudHeight    = 3000.0f; // meters above the viewer (slab base)
+    float m_cloudThickness = 9000.0f;  // slab thickness (m)
     float m_cloudScale     = 1.0f;    // multiplier on the base noise frequency
-    float m_cloudWindSpeed = 1.0f;    // multiplier on the base wind drift
+    float m_cloudWindSpeed = 3.0f;    // multiplier on the base wind drift
     float m_cloudWindAngle = 0.4f;    // radians
-    float m_cloudSoftness  = 0.32f;   // density smoothstep width (small = crisp edges)
-    float m_cloudDensity   = 1.5f;    // extinction strength (high = opaque cores)
+    float m_cloudSoftness  = 0.5f;   // density smoothstep width (small = crisp edges)
+    float m_cloudDensity   = 2.0f;    // extinction strength (high = opaque cores)
     float m_cloudSharpness = 0.6f;    // density remap contrast (high = hard-edged shapes)
-    float m_cloudBaseVar   = 0.6f;    // per-column base/top height variation (0 = flat slab)
+    float m_cloudBaseVar   = 0.5f;    // per-column base/top height variation (0 = flat slab)
     float m_cloudShading   = 2.0f;    // directional sun-shading strength
-    float m_cloudSilver    = 0.8f;    // silver-lining strength
+    float m_cloudSilver    = 2.0f;    // silver-lining strength
     float m_cloudAmbient   = 0.35f;   // sky-ambient amount in the cloud color
     float m_skyScatterBoost = 4.0f;   // sun color -> atmosphere scattering source strength
     float m_skyMieG        = 0.76f;   // Mie anisotropy (forward-scatter lobe)
     float m_sunDiscFeather = 0.2f;    // disc rim feather, fraction of the disc's angular size
     float m_starDensity    = 0.5f;
     float m_moonBrightness = 0.4f;
-    float m_ambientIntensity = 0.1f;
-    float m_giIntensity = 1.0f;
+    float m_ambientIntensity = 0.2f;
+    float m_giIntensity = 2.0f;
 
     // Volumetric fog (froxel grid; see VolumetricFogPipeline). All UBO-driven, so tweaks apply live.
     bool  m_fogEnabled = true;
-    float m_fogDensity = 0.008f;        // global extinction at the height base (1/m)
+    float m_fogDensity = 0.020f;        // global extinction at the height base (1/m)
     float m_fogHeightBase = 0.0f;       // world height where the global fog is densest
-    float m_fogHeightFalloff = 0.02f;   // exponential density falloff above the base (1/m)
-    glm::vec3 m_fogAlbedo = glm::vec3(0.85f, 0.87f, 0.9f);
+    float m_fogHeightFalloff = 0.28f;  // exponential density falloff above the base (1/m)
+    glm::vec3 m_fogAlbedo = glm::vec3(1.0f, 1.0f, 1.0f);
     float m_fogAnisotropy = 0.5f;       // HG phase g (0 = isotropic, ->1 = forward scattering)
-    float m_fogRange = 128.0f;          // froxel grid far distance (m)
+    float m_fogRange = 500.0f;          // froxel grid far distance (m)
     float m_fogNoiseScale = 0.08f;      // density noise frequency (1/m)
     float m_fogNoiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
     float m_fogWindSpeed = 1.5f;        // noise drift (m/s)
     float m_fogTemporal = 0.9f;         // history blend weight (jittered Z integration)
-    float m_fogSunBoost = 1.0f;
-    float m_fogAmbientBoost = 1.0f;
-    bool  m_fogLightShadows = false;    // shadow ray per froxel per grid light (expensive)
+    float m_fogSunBoost = 0.66f;
+    float m_fogAmbientBoost = 5.0f;
+    bool  m_fogLightShadows = true;     // shadow ray per froxel per grid light (expensive)
     int   m_fogSunRays = 3;             // sun shadow rays per froxel (RT sun mode); main perf knob
     float m_fogSunSoftness = 0.04f;     // shadow ray cone half-angle (rad); softens + decorrelates the rays
     bool  m_fogSpatialFilter = true;    // 3x3 tent on the scatter grid in the integrate pass

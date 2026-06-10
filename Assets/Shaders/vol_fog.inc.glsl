@@ -15,7 +15,7 @@
 #define VOL_FROXEL_X 160
 #define VOL_FROXEL_Y 90
 #define VOL_FROXEL_Z 64
-#define VOL_FOG_NEAR 0.25
+#define VOL_FOG_NEAR 1.25
 
 float volFogFar() { return max(u_fogParams0.w, VOL_FOG_NEAR + 1.0); }
 

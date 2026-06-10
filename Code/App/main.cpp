@@ -31,9 +31,6 @@ int main()
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED); // ENABLED DISABLED
     renderer.setSunLight(glm::vec3(-0.5f, 1.0f, 0.1f), glm::vec3(1.0f), 3.0f);
-    renderer.setSkyParams({ .up = glm::vec3(0.0f, 1.0f, 0.0f), .intensity = 0.5f });
-    renderer.setGIIntensity(2.0f);
-    renderer.setAmbientIntensity(0.2f);
 
     UI& ui = Globals::ui;
     ui.initialize();
@@ -117,7 +114,7 @@ int main()
        overrides.excludeFromRayTracing = true;
        overrides.useSceneTextures = true;
        skySphere.initialize(*sceneData, &overrides);
-       spawnedNodes.push_back(skySphere.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(0.0f), 500.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
+       spawnedNodes.push_back(skySphere.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(0.0f), 1000.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
     }
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
@@ -265,7 +262,7 @@ int main()
             }
         }
         //renderer.renderNode(sunLightNode); // This blocks the sun GI...
-        renderer.addFogVolume({ .pos = {0, 2, 0}, .density = 0.15f, .halfExtents = {10, 3, 10}, .edgeSoftness = 0.4f, .albedo = {0.8f, 0.7f, 0.5f}, .emissive = 0.0f });
+        //renderer.addFogVolume({ .pos = {0, 5.5f, 0}, .density = 0.025f, .halfExtents = {12, 6, 6}, .edgeSoftness = 0.4f, .albedo = {1,1,1}, .emissive = 0.00f });
         ui.render();
         renderer.present();
         frameCount++;

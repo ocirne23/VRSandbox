@@ -171,12 +171,12 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
 
     Tweak::boolean("Fog", "Enabled", &m_fogEnabled);
-    Tweak::floatVar("Fog", "Density", &m_fogDensity, 0.0f, 0.2f, 0.0005f);
+    Tweak::floatVar("Fog", "Global Density", &m_fogDensity, 0.0f, 0.2f, 0.0005f);
     Tweak::floatVar("Fog", "Height Base", &m_fogHeightBase, -200.0f, 500.0f);
     Tweak::floatVar("Fog", "Height Falloff", &m_fogHeightFalloff, 0.0f, 1.0f, 0.002f);
     Tweak::color3("Fog", "Albedo", &m_fogAlbedo);
     Tweak::floatVar("Fog", "Anisotropy", &m_fogAnisotropy, -0.9f, 0.95f, 0.01f);
-    Tweak::floatVar("Fog", "Range", &m_fogRange, 16.0f, 1024.0f);
+    Tweak::floatVar("Fog", "Range", &m_fogRange, 1.0f, 1024.0f);
     Tweak::floatVar("Fog", "Noise Scale", &m_fogNoiseScale, 0.005f, 1.0f, 0.005f);
     Tweak::floatVar("Fog", "Noise Strength", &m_fogNoiseStrength, 0.0f, 1.0f, 0.01f);
     Tweak::floatVar("Fog", "Wind Speed", &m_fogWindSpeed, 0.0f, 20.0f);
@@ -198,8 +198,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::floatVar("Sky/Sun", "Disc Feather", &m_sunDiscFeather, 0.0f, 1.0f);
     Tweak::floatVar("Sky/Sun", "Glow Strength", &m_skyParams.sunGlow, 0.0f, 2.0f);
     Tweak::floatVar("Sky/Clouds", "Coverage", &m_cloudCoverage, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Height", &m_cloudHeight, 200.0f, 8000.0f);
-    Tweak::floatVar("Sky/Clouds", "Thickness", &m_cloudThickness, 100.0f, 4000.0f);
+    Tweak::floatVar("Sky/Clouds", "Height", &m_cloudHeight, 0.0f, 8000.0f);
+    Tweak::floatVar("Sky/Clouds", "Thickness", &m_cloudThickness, 500.0f, 10000.0f);
     Tweak::floatVar("Sky/Clouds", "Scale", &m_cloudScale, 0.1f, 5.0f);
     Tweak::floatVar("Sky/Clouds", "Wind Speed", &m_cloudWindSpeed, 0.0f, 10.0f);
     Tweak::floatVar("Sky/Clouds", "Wind Angle", &m_cloudWindAngle, 0.0f, 6.2832f);
@@ -442,7 +442,7 @@ void Renderer::reloadShaders()
     }
 
     m_staticMeshGraphicsPipeline.reloadShaders();
-    m_gbufferPipeline.reloadShaders();
+    m_gbufferPipeline.reloadShaders(m_perFrameData[m_swapChain.getPrevFrameIdx()].gbuffer);
     m_rtaoPipeline.reloadShaders();
     m_volumetricFogPipeline.reloadShaders(m_renderPass);
     m_indirectCullComputePipeline.reloadShaders();
@@ -554,7 +554,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.cloudParams2 = glm::vec4(m_cloudDensity, m_cloudSharpness, m_cloudBaseVar, m_moonBrightness);
     ubo.skySunParams = glm::vec4(m_skyScatterBoost, m_skyMieG, m_sunDiscFeather, m_starDensity);
 
-    ubo.fogParams0 = glm::vec4(m_fogDensity, m_fogHeightBase, m_fogHeightFalloff, m_fogRange);
+    ubo.fogParams0 = glm::vec4(m_fogDensity, m_fogHeightBase, m_fogHeightFalloff * m_fogHeightFalloff, m_fogRange);
     ubo.fogParams1 = glm::vec4(m_fogAlbedo, m_fogAnisotropy);
     ubo.fogParams2 = glm::vec4(m_fogNoiseScale, m_fogNoiseStrength, m_fogWindSpeed, m_fogTemporal);
     ubo.fogParams3 = glm::vec4(m_fogSunBoost, m_fogAmbientBoost, m_fogEnabled ? 1.0f : 0.0f, m_fogLightShadows ? 1.0f : 0.0f);

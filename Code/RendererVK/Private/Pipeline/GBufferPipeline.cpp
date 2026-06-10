@@ -33,19 +33,16 @@ void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout)
 
 void GBufferPipeline::initialize(const GBuffer& gbuffer)
 {
-    m_renderPass = gbuffer.getRenderPass();
     GraphicsPipelineLayout layout;
     buildPipelineLayout(layout);
-    m_graphicsPipeline.initialize(m_renderPass, layout);
+    m_graphicsPipeline.initialize(gbuffer.getRenderPass(), layout);
 }
 
-void GBufferPipeline::reloadShaders()
+void GBufferPipeline::reloadShaders(const GBuffer& gbuffer)
 {
-    if (!m_renderPass)
-        return;
     GraphicsPipelineLayout layout;
     buildPipelineLayout(layout);
-    if (!m_graphicsPipeline.reloadShaders(m_renderPass, layout))
+    if (!m_graphicsPipeline.reloadShaders(gbuffer.getRenderPass(), layout))
         printf("GBufferPipeline: shader reload failed, keeping previous pipeline\n");
 }
 

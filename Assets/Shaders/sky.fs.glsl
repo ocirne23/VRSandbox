@@ -33,7 +33,7 @@ const float MIE_EXT   = 1.11;                               // Mie extinction/sc
 const float H_RAY     = 8500.0;                             // Rayleigh scale height
 const float H_MIE     = 1200.0;                             // Mie scale height
 const int   VIEW_STEPS = 12;
-
+const float OBSERVE_HEIGHT = 2.0;
 // Near/far intersection distances of a ray with a sphere of radius r centered at the origin.
 vec2 raySphere(vec3 ro, vec3 rd, float r)
 {
@@ -79,14 +79,10 @@ vec2 sunOpticalDepth(vec3 pos, vec3 sunDir)
 
 // In-scattered radiance along dir (unit sun radiance; multiply by the sun color outside), plus the view
 // ray's total transmittance (used to attenuate the sun disc and stars behind the atmosphere).
-vec3 atmosphere(vec3 dir, vec3 sunDir, vec3 up, out vec3 transmittance, out bool hitGround)
+vec3 atmosphere(vec3 dir, vec3 sunDir, vec3 up, out vec3 transmittance)
 {
-	vec3 ro = up * (R_PLANET + 500.0); // observer 500m above the surface
+	vec3 ro = up * (R_PLANET + OBSERVE_HEIGHT);
 	float tFar = max(raySphere(ro, dir, R_ATMOS).y, 0.0);
-	vec2 ground = raySphere(ro, dir, R_PLANET);
-	hitGround = ground.x > 0.0;
-	if (hitGround)
-		tFar = min(tFar, ground.x);
 
 	float mu = dot(dir, sunDir);
 	float pR = phaseRayleigh(mu);
@@ -314,31 +310,21 @@ void main()
 	// multiply by zero: skip the raymarch and keep only the cheap ground test for the branches below.
 	const bool sunLit = (u_sunColor.r + u_sunColor.g + u_sunColor.b) * u_skySunParams.x > 1e-5;
 	vec3 transmittance = vec3(1.0);
-	bool hitGround;
 	vec3 color = vec3(0.0);
-	if (sunLit)
-	{
-		color = atmosphere(dir, L, up, transmittance, hitGround) * u_sunColor.rgb * u_skySunParams.x;
-
-		// Artistic grade from the Sky/Gradient tweaks, multiplied over the physical scattering (~neutral
-		// at the defaults; scaled so a mid-gray gradient leaves brightness unchanged). The same colors
-		// drive the GI miss-path approximation (skyColor in shared.inc.glsl), so bounce light follows.
-		float tUp = dot(dir, up);
-		vec3 grade = (tUp >= 0.0) ? mix(u_skyHorizon, u_skyZenith, sqrt(tUp))
-		                          : mix(u_skyHorizon, u_skyGround, min(-tUp * 2.0, 1.0));
-		color *= grade * 1.5;
-	}
-	else
-		hitGround = raySphere(up * (R_PLANET + 500.0), dir, R_PLANET).x > 0.0;
-
+	float tUp = dot(dir, up);
+	vec3 grade = skyGradient(tUp);
 	const float sunElev = dot(L, up);
 
-	if (hitGround)
+	if (sunLit)
 	{
-		// Below the horizon: the configured ground color, sun-lit and seen through the haze.
-		color += u_skyGround * clamp(sunElev * 4.0 + 0.1, 0.0, 1.0) * transmittance;
+		color = atmosphere(dir, L, up, transmittance) * u_sunColor.rgb * u_skySunParams.x;
+		if (tUp < -0.0)
+		{
+			color += grade * -tUp * (1.33 + tUp);
+		}
+		color *= grade * 1.5;
 	}
-	else
+	
 	{
 		const float cosAngle = dot(dir, L);
 		if (sunLit && u_sunAngularCos < 1.0) // 1.0 disables the disc
@@ -412,10 +398,10 @@ void main()
 	const float sunsetWarm = clamp(sunElev * 5.0, 0.0, 1.0);
 	const vec3 sunTint = u_sunColor.rgb * 0.30 * mix(vec3(1.0, 0.45, 0.2), vec3(1.0), sunsetWarm)
 	                   * clamp(sunElev * 8.0 + 0.25, 0.02, 1.0);
-	const vec3 skyAmbient = color; // local sky as the cloud's ambient source keeps hue coherent
+	const vec3 skyAmbient = color * u_skyIntensity; // local sky as the cloud's ambient source keeps hue coherent
 	vec4 cl = clouds(dir, up, L, sunTint, skyAmbient);
 	color = mix(color, cl.rgb, cl.a);
 
 	// u_skyIntensity is the user brightness slider; defaults to 0.5, so scale by 2 to be neutral there.
-	out_color = vec4(color * (u_skyIntensity * 2.0), 1.0);
+	out_color = vec4(color, 1.0);
 }
