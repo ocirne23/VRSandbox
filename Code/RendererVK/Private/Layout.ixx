@@ -98,6 +98,7 @@ export namespace RendererVKLayout
 
         glm::vec4 cloudParams0; // x = layer height (m), y = noise scale, z = wind speed (noise units/s), w = wind angle (rad)
         glm::vec4 cloudParams1; // x = edge softness, y = sun shading strength, z = silver lining, w = ambient amount
+        glm::vec4 cloudParams2; // x = density (extinction), y = sharpness, z = base/top height variation, w = moon brightness
         glm::vec4 skySunParams; // x = atmosphere scatter boost, y = Mie anisotropy g, z = sun disc feather, w = star density
 
         glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv (screen-space passes)

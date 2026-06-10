@@ -173,6 +173,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
     Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
     Tweak::floatVar("Sky", "Star Density", &m_starDensity, 0.0f, 1.0f);
+    Tweak::floatVar("Sky", "Moon Brightness", &m_moonBrightness, 0.0f, 2.0f);
     Tweak::floatVar("Sky/Atmosphere", "Scatter Boost", &m_skyScatterBoost, 0.0f, 16.0f);
     Tweak::floatVar("Sky/Atmosphere", "Mie Anisotropy", &m_skyMieG, 0.0f, 0.99f);
     Tweak::floatVar("Sky/Sun", "Disc Feather", &m_sunDiscFeather, 0.0f, 1.0f);
@@ -184,6 +185,9 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::floatVar("Sky/Clouds", "Wind Speed", &m_cloudWindSpeed, 0.0f, 10.0f);
     Tweak::floatVar("Sky/Clouds", "Wind Angle", &m_cloudWindAngle, 0.0f, 6.2832f);
     Tweak::floatVar("Sky/Clouds", "Softness", &m_cloudSoftness, 0.05f, 0.8f);
+    Tweak::floatVar("Sky/Clouds", "Density", &m_cloudDensity, 0.2f, 6.0f);
+    Tweak::floatVar("Sky/Clouds", "Sharpness", &m_cloudSharpness, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Height Variation", &m_cloudBaseVar, 0.0f, 1.0f);
     Tweak::floatVar("Sky/Clouds", "Sun Shading", &m_cloudShading, 0.0f, 6.0f);
     Tweak::floatVar("Sky/Clouds", "Silver Lining", &m_cloudSilver, 0.0f, 2.0f);
     Tweak::floatVar("Sky/Clouds", "Ambient", &m_cloudAmbient, 0.0f, 1.0f);
@@ -517,6 +521,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.cloudThickness = m_cloudThickness;
     ubo.cloudParams0 = glm::vec4(m_cloudHeight, 0.00012f * m_cloudScale, 0.0043f * m_cloudWindSpeed, m_cloudWindAngle);
     ubo.cloudParams1 = glm::vec4(m_cloudSoftness, m_cloudShading, m_cloudSilver, m_cloudAmbient);
+    ubo.cloudParams2 = glm::vec4(m_cloudDensity, m_cloudSharpness, m_cloudBaseVar, m_moonBrightness);
     ubo.skySunParams = glm::vec4(m_skyScatterBoost, m_skyMieG, m_sunDiscFeather, m_starDensity);
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);

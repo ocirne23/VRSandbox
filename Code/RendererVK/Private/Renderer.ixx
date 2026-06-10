@@ -216,6 +216,9 @@ private:
     float m_cloudWindSpeed = 1.0f;    // multiplier on the base wind drift
     float m_cloudWindAngle = 0.4f;    // radians
     float m_cloudSoftness  = 0.32f;   // density smoothstep width (small = crisp edges)
+    float m_cloudDensity   = 1.5f;    // extinction strength (high = opaque cores)
+    float m_cloudSharpness = 0.6f;    // density remap contrast (high = hard-edged shapes)
+    float m_cloudBaseVar   = 0.6f;    // per-column base/top height variation (0 = flat slab)
     float m_cloudShading   = 2.0f;    // directional sun-shading strength
     float m_cloudSilver    = 0.8f;    // silver-lining strength
     float m_cloudAmbient   = 0.35f;   // sky-ambient amount in the cloud color
@@ -223,6 +226,7 @@ private:
     float m_skyMieG        = 0.76f;   // Mie anisotropy (forward-scatter lobe)
     float m_sunDiscFeather = 0.2f;    // disc rim feather, fraction of the disc's angular size
     float m_starDensity    = 0.5f;
+    float m_moonBrightness = 0.4f;
     float m_ambientIntensity = 0.1f;
     float m_giIntensity = 1.0f;
 

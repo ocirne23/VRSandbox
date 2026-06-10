@@ -39,6 +39,7 @@ layout (binding = UBO_BINDING, std140) uniform UBO
 
     vec4 u_cloudParams0;    // x = layer height (m), y = noise scale, z = wind speed (noise units/s), w = wind angle (rad)
     vec4 u_cloudParams1;    // x = edge softness, y = sun shading strength, z = silver lining, w = ambient amount
+    vec4 u_cloudParams2;    // x = density (extinction), y = sharpness, z = base/top height variation, w = moon brightness
     vec4 u_skySunParams;    // x = atmosphere scatter boost, y = Mie anisotropy g, z = sun disc feather, w = star density
 
     mat4 u_invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
