@@ -182,7 +182,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::floatVar("Fog", "Wind Speed", &m_fogWindSpeed, 0.0f, 20.0f);
     Tweak::floatVar("Fog", "Temporal Blend", &m_fogTemporal, 0.0f, 0.97f, 0.01f);
     Tweak::floatVar("Fog", "Sun Boost", &m_fogSunBoost, 0.0f, 8.0f);
-    Tweak::floatVar("Fog", "Ambient Boost", &m_fogAmbientBoost, 0.0f, 8.0f);
+    Tweak::floatVar("Fog", "Ambient Boost", &m_fogAmbientBoost, 0.0f, 25.0f);
     Tweak::intVar("Fog/Quality", "Sun Rays", &m_fogSunRays, 1, 8);
     Tweak::floatVar("Fog/Quality", "Sun Softness", &m_fogSunSoftness, 0.0f, 0.2f, 0.005f);
     Tweak::boolean("Fog/Quality", "Spatial Filter", &m_fogSpatialFilter);

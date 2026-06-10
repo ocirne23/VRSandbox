@@ -37,7 +37,7 @@ public:
     vk::SwapchainKHR getSwapChain() const { return m_swapChain; }
     const Layout& getLayout() const { return m_layout; }
     uint32 getCurrentFrameIndex() const { return m_currentFrame; }
-    uint32 getPrevFrameIdx() const { return (m_currentFrame == 0) ? m_syncObjects.size() - 1 : m_currentFrame - 1; }
+    uint32 getPrevFrameIdx() const { return (m_currentFrame == 0) ? (uint32)m_syncObjects.size() - 1 : m_currentFrame - 1; }
     uint32 getCurrentImageIdx() const { return m_currentImageIdx; }
 
     bool acquireNextImage();

@@ -210,7 +210,7 @@ private:
     glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
     uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray set each frame
 
-    glm::vec3 m_sunDirection = glm::normalize(glm::vec3(-0.5f, 1.0f, 0.1f));
+    glm::vec3 m_sunDirection = glm::normalize(glm::vec3(-0.61f, 0.777f, 0.123f));
     glm::vec3 m_sunColor = glm::vec3(0.9568f, 1.0f, 0.9214f);
     float m_sunIntensity = 3.0f;
     SkyParams m_skyParams;
@@ -247,11 +247,11 @@ private:
     float m_fogNoiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
     float m_fogWindSpeed = 1.5f;        // noise drift (m/s)
     float m_fogTemporal = 0.9f;         // history blend weight (jittered Z integration)
-    float m_fogSunBoost = 0.66f;
-    float m_fogAmbientBoost = 5.0f;
+    float m_fogSunBoost = 0.5f;
+    float m_fogAmbientBoost = 10.0f;
     bool  m_fogLightShadows = true;     // shadow ray per froxel per grid light (expensive)
-    int   m_fogSunRays = 3;             // sun shadow rays per froxel (RT sun mode); main perf knob
-    float m_fogSunSoftness = 0.04f;     // shadow ray cone half-angle (rad); softens + decorrelates the rays
+    int   m_fogSunRays = 1;             // sun shadow rays per froxel (RT sun mode); main perf knob
+    float m_fogSunSoftness = 0.02f;     // shadow ray cone half-angle (rad); softens + decorrelates the rays
     bool  m_fogSpatialFilter = true;    // 3x3 tent on the scatter grid in the integrate pass
     bool  m_fogGIAmbient = true;        // GI probe ambient (off = analytic sky only, cheaper)
     uint32 m_fogVolumeCounter = 0;
