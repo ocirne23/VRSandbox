@@ -7,6 +7,7 @@
 //   u_fogParams1: rgb = fog albedo (scattering tint), w = phase anisotropy g
 //   u_fogParams2: x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal history weight
 //   u_fogParams3: x = sun boost, y = ambient boost, z = enabled, w = light shadow rays (> 0.5)
+//   u_fogParams4: x = sun shadow rays per froxel, y = spatial filter (> 0.5), z = GI ambient (> 0.5), w = sun shadow cone half-angle (rad)
 
 #ifndef VOL_FOG_INC_GLSL
 #define VOL_FOG_INC_GLSL

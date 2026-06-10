@@ -198,14 +198,38 @@ void main()
         const vec3 albedo = albedoWeighted / density;
         const float g = u_fogParams1.w;
 
-        // Sun, with either a TLAS shadow ray or a single cascade tap (matching the surface shadow mode).
+        // Sun, with either TLAS shadow rays or a single cascade tap (matching the surface shadow mode).
+        // Multiple rays are jittered in a cone (sun softness) per froxel per frame; together with the
+        // temporal blend this turns the binary visibility into a smooth penumbra instead of blotches.
         const vec3 sunDir = normalize(u_sunDirection.xyz);
-        const float sunVis = (u_rtSunShadow > 0.5) ? volRayVisibility(worldPos, sunDir, 1.0e4)
-                                                   : giSunShadow(worldPos, vec3(0.0));
+        float sunVis;
+        if (u_rtSunShadow > 0.5)
+        {
+            const uint numRays = max(uint(u_fogParams4.x), 1u);
+            const float softness = u_fogParams4.w;
+            const vec3 refAxis = abs(sunDir.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+            const vec3 t1 = normalize(cross(sunDir, refAxis));
+            const vec3 t2 = cross(sunDir, t1);
+            sunVis = 0.0;
+            for (uint r = 0u; r < numRays; ++r)
+            {
+                const uint rSeed = hashU(seed ^ (r * 0x68bc21ebu));
+                const float ang = hashToFloat(rSeed) * 2.0 * PI;
+                const float rad = sqrt(hashToFloat(rSeed ^ 0x9e3779b9u)) * softness;
+                const vec3 rayDir = normalize(sunDir + (t1 * cos(ang) + t2 * sin(ang)) * rad);
+                sunVis += volRayVisibility(worldPos, rayDir, 1.0e4);
+            }
+            sunVis /= float(numRays);
+        }
+        else
+            sunVis = giSunShadow(worldPos, vec3(0.0));
         vec3 inLight = u_sunColor.rgb * (volPhaseHG(dot(dir, sunDir), g) * sunVis * u_fogParams3.x);
 
-        // Ambient: GI probe irradiance toward the camera, falling back to the analytic sky.
-        vec3 amb = evalProbeSH(worldPos, -dir);
+        // Ambient: GI probe irradiance toward the camera (toggleable; the clipmap lookup is the next
+        // biggest cost after the shadow rays), falling back to the analytic sky.
+        vec3 amb = vec3(-1.0);
+        if (u_fogParams4.z > 0.5)
+            amb = evalProbeSH(worldPos, -dir);
         if (amb.x < 0.0)
             amb = skyColor(normalize(u_skyUp)) * u_skyIntensity;
         inLight += amb * (u_fogParams3.y / (4.0 * PI));
@@ -240,8 +264,12 @@ void main()
     }
 
     // ---- Temporal blend against last frame's reprojected froxel ---------------------------------------
+    // Reproject from the UNJITTERED froxel center: reprojecting the jittered sample point would smear the
+    // per-frame jitter into the history lookup itself (a second noise source on top of the lighting).
+    const float centerViewZ = volSliceToViewZ((float(cell.z) + 0.5) / float(VOL_FROXEL_Z));
+    const vec3 centerPos = u_viewPos + dir * (centerViewZ / max(dot(dir, camFwd), 1e-3));
     float prevW;
-    const vec2 prevFullUv = prevScreenUV(worldPos, prevW);
+    const vec2 prevFullUv = prevScreenUV(centerPos, prevW);
     const vec2 prevVpUv = (prevFullUv - u_viewportRect.xy) / u_viewportRect.zw;
     if (prevW > VOL_FOG_NEAR
         && all(greaterThanEqual(prevVpUv, vec2(0.0))) && all(lessThanEqual(prevVpUv, vec2(1.0))))

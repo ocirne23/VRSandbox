@@ -118,6 +118,7 @@ export namespace RendererVKLayout
         glm::vec4 fogParams1; // rgb = fog albedo, w = phase anisotropy g
         glm::vec4 fogParams2; // x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal blend
         glm::vec4 fogParams3; // x = sun boost, y = ambient boost, z = enabled, w = light shadow rays
+        glm::vec4 fogParams4; // x = sun shadow rays, y = spatial filter, z = GI ambient, w = sun shadow softness (rad)
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

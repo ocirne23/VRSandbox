@@ -247,10 +247,14 @@ private:
     float m_fogNoiseScale = 0.08f;      // density noise frequency (1/m)
     float m_fogNoiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
     float m_fogWindSpeed = 1.5f;        // noise drift (m/s)
-    float m_fogTemporal = 0.85f;        // history blend weight (jittered Z integration)
+    float m_fogTemporal = 0.9f;         // history blend weight (jittered Z integration)
     float m_fogSunBoost = 1.0f;
     float m_fogAmbientBoost = 1.0f;
     bool  m_fogLightShadows = false;    // shadow ray per froxel per grid light (expensive)
+    int   m_fogSunRays = 3;             // sun shadow rays per froxel (RT sun mode); main perf knob
+    float m_fogSunSoftness = 0.04f;     // shadow ray cone half-angle (rad); softens + decorrelates the rays
+    bool  m_fogSpatialFilter = true;    // 3x3 tent on the scatter grid in the integrate pass
+    bool  m_fogGIAmbient = true;        // GI probe ambient (off = analytic sky only, cheaper)
     uint32 m_fogVolumeCounter = 0;
 
     float m_shadowDepthBias = 0.000f;

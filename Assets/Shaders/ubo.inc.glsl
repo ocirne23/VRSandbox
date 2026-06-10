@@ -55,6 +55,7 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_fogParams1;   // rgb = fog albedo, w = phase anisotropy g
     vec4 u_fogParams2;   // x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal blend
     vec4 u_fogParams3;   // x = sun boost, y = ambient boost, z = enabled, w = light shadow rays
+    vec4 u_fogParams4;   // x = sun shadow rays, y = spatial filter, z = GI ambient, w = sun shadow softness (rad)
 };
 
 #endif

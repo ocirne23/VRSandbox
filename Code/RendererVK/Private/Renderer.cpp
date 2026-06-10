@@ -183,7 +183,11 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::floatVar("Fog", "Temporal Blend", &m_fogTemporal, 0.0f, 0.97f, 0.01f);
     Tweak::floatVar("Fog", "Sun Boost", &m_fogSunBoost, 0.0f, 8.0f);
     Tweak::floatVar("Fog", "Ambient Boost", &m_fogAmbientBoost, 0.0f, 8.0f);
-    Tweak::boolean("Fog", "Light Shadows", &m_fogLightShadows);
+    Tweak::intVar("Fog/Quality", "Sun Rays", &m_fogSunRays, 1, 8);
+    Tweak::floatVar("Fog/Quality", "Sun Softness", &m_fogSunSoftness, 0.0f, 0.2f, 0.005f);
+    Tweak::boolean("Fog/Quality", "Spatial Filter", &m_fogSpatialFilter);
+    Tweak::boolean("Fog/Quality", "GI Ambient", &m_fogGIAmbient);
+    Tweak::boolean("Fog/Quality", "Light Shadows", &m_fogLightShadows);
 
     Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
     Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
@@ -554,6 +558,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.fogParams1 = glm::vec4(m_fogAlbedo, m_fogAnisotropy);
     ubo.fogParams2 = glm::vec4(m_fogNoiseScale, m_fogNoiseStrength, m_fogWindSpeed, m_fogTemporal);
     ubo.fogParams3 = glm::vec4(m_fogSunBoost, m_fogAmbientBoost, m_fogEnabled ? 1.0f : 0.0f, m_fogLightShadows ? 1.0f : 0.0f);
+    ubo.fogParams4 = glm::vec4((float)m_fogSunRays, m_fogSpatialFilter ? 1.0f : 0.0f, m_fogGIAmbient ? 1.0f : 0.0f, m_fogSunSoftness);
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
