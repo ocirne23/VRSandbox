@@ -160,7 +160,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::float3("Lighting", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
     Tweak::color3("Lighting", "Sun Color", &m_sunColor, &m_sunIntensity);
     Tweak::floatVar("Lighting", "Sun Angle Cos", &m_skyParams.sunAngularCos, 0.9995f, 1.0f, 0.000001f);
-    Tweak::floatVar("Lighting", "Sun Glow", &m_skyParams.sunGlow, 0.0, 500.0f, 0.1f);
+    Tweak::floatVar("Lighting", "Sun Glow", &m_skyParams.sunGlow, 0.0, 2.0f, 0.01f);
 
     Tweak::floatVar("Lighting", "SunCasc D Bias", &m_shadowDepthBias, 0.0f, 0.005f, 0.0001f);
     Tweak::floatVar("Lighting", "SunCasc N Bias", &m_shadowNormalBias, 0.0f, 10.0f);
@@ -172,6 +172,21 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
     Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
+    Tweak::floatVar("Sky", "Star Density", &m_starDensity, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Atmosphere", "Scatter Boost", &m_skyScatterBoost, 0.0f, 16.0f);
+    Tweak::floatVar("Sky/Atmosphere", "Mie Anisotropy", &m_skyMieG, 0.0f, 0.99f);
+    Tweak::floatVar("Sky/Sun", "Disc Feather", &m_sunDiscFeather, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Sun", "Glow Strength", &m_skyParams.sunGlow, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Clouds", "Coverage", &m_cloudCoverage, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Height", &m_cloudHeight, 200.0f, 8000.0f);
+    Tweak::floatVar("Sky/Clouds", "Thickness", &m_cloudThickness, 100.0f, 4000.0f);
+    Tweak::floatVar("Sky/Clouds", "Scale", &m_cloudScale, 0.1f, 5.0f);
+    Tweak::floatVar("Sky/Clouds", "Wind Speed", &m_cloudWindSpeed, 0.0f, 10.0f);
+    Tweak::floatVar("Sky/Clouds", "Wind Angle", &m_cloudWindAngle, 0.0f, 6.2832f);
+    Tweak::floatVar("Sky/Clouds", "Softness", &m_cloudSoftness, 0.05f, 0.8f);
+    Tweak::floatVar("Sky/Clouds", "Sun Shading", &m_cloudShading, 0.0f, 6.0f);
+    Tweak::floatVar("Sky/Clouds", "Silver Lining", &m_cloudSilver, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Clouds", "Ambient", &m_cloudAmbient, 0.0f, 1.0f);
     Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
     Tweak::color3("Sky/Gradient", "Horizon", &m_skyParams.horizon);
     Tweak::color3("Sky/Gradient", "Ground", &m_skyParams.ground);
@@ -496,6 +511,13 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
 
     ubo.sunShadowRays = (float)m_sunShadowRays;
     ubo.rtLightShadows = m_rtLightShadows ? 1.0f : 0.0f;
+    static const Clock::time_point timeStart = Clock::now();
+    ubo.timeSeconds = std::chrono::duration<float>(Clock::now() - timeStart).count();
+    ubo.cloudCoverage = m_cloudCoverage;
+    ubo.cloudThickness = m_cloudThickness;
+    ubo.cloudParams0 = glm::vec4(m_cloudHeight, 0.00012f * m_cloudScale, 0.0043f * m_cloudWindSpeed, m_cloudWindAngle);
+    ubo.cloudParams1 = glm::vec4(m_cloudSoftness, m_cloudShading, m_cloudSilver, m_cloudAmbient);
+    ubo.skySunParams = glm::vec4(m_skyScatterBoost, m_skyMieG, m_sunDiscFeather, m_starDensity);
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 

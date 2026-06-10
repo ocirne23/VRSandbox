@@ -77,7 +77,7 @@ public:
         glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // sky-up axis; set to the local up on a planet
         float intensity = 1.0f;
         float sunAngularCos = 0.99998f;// 0.9999f; // ~0.8 deg disc; 1.0 disables the disc
-        float sunGlow = 200.0f;
+        float sunGlow = 0.5f; // sun halo strength (0 = none, ~0.5 subtle, 2 = heavy); HG forward lobe in sky.fs
     };
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
     void present();
@@ -209,6 +209,20 @@ private:
     glm::vec3 m_sunColor = glm::vec3(0.9568f, 1.0f, 0.9214f);
     float m_sunIntensity = 3.0f;
     SkyParams m_skyParams;
+    float m_cloudCoverage  = 0.45f;
+    float m_cloudHeight    = 1800.0f; // meters above the viewer (slab base)
+    float m_cloudThickness = 900.0f;  // slab thickness (m)
+    float m_cloudScale     = 1.0f;    // multiplier on the base noise frequency
+    float m_cloudWindSpeed = 1.0f;    // multiplier on the base wind drift
+    float m_cloudWindAngle = 0.4f;    // radians
+    float m_cloudSoftness  = 0.32f;   // density smoothstep width (small = crisp edges)
+    float m_cloudShading   = 2.0f;    // directional sun-shading strength
+    float m_cloudSilver    = 0.8f;    // silver-lining strength
+    float m_cloudAmbient   = 0.35f;   // sky-ambient amount in the cloud color
+    float m_skyScatterBoost = 4.0f;   // sun color -> atmosphere scattering source strength
+    float m_skyMieG        = 0.76f;   // Mie anisotropy (forward-scatter lobe)
+    float m_sunDiscFeather = 0.2f;    // disc rim feather, fraction of the disc's angular size
+    float m_starDensity    = 0.5f;
     float m_ambientIntensity = 0.1f;
     float m_giIntensity = 1.0f;
 

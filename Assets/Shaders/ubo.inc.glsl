@@ -33,9 +33,13 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     float u_sunShadowRays; // RT sun shadow rays per pixel (1 = single jittered ray)
 
     float u_rtLightShadows; // > 0.5: ray-traced shadows for punctual/area/tube lights
-    float _padShadow0;
-    float _padShadow1;
-    float _padShadow2;
+    float u_timeSeconds;    // elapsed app time (cloud wind / sky animation)
+    float u_cloudCoverage;  // 0 = clear sky, 1 = overcast
+    float u_cloudThickness; // cloud slab thickness (m)
+
+    vec4 u_cloudParams0;    // x = layer height (m), y = noise scale, z = wind speed (noise units/s), w = wind angle (rad)
+    vec4 u_cloudParams1;    // x = edge softness, y = sun shading strength, z = silver lining, w = ambient amount
+    vec4 u_skySunParams;    // x = atmosphere scatter boost, y = Mie anisotropy g, z = sun disc feather, w = star density
 
     mat4 u_invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
     mat4 u_prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen

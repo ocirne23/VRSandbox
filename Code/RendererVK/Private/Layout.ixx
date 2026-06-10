@@ -92,9 +92,13 @@ export namespace RendererVKLayout
         float sunShadowRays;    // RT sun shadow rays per pixel (1 = single jittered ray)
 
         float rtLightShadows;   // > 0.5: ray-traced shadows for punctual/area/tube lights
-        float _padShadow0;
-        float _padShadow1;
-        float _padShadow2;
+        float timeSeconds;      // elapsed app time (cloud wind / sky animation)
+        float cloudCoverage;    // 0 = clear sky, 1 = overcast
+        float cloudThickness;   // cloud slab thickness (m)
+
+        glm::vec4 cloudParams0; // x = layer height (m), y = noise scale, z = wind speed (noise units/s), w = wind angle (rad)
+        glm::vec4 cloudParams1; // x = edge softness, y = sun shading strength, z = silver lining, w = ambient amount
+        glm::vec4 skySunParams; // x = atmosphere scatter boost, y = Mie anisotropy g, z = sun disc feather, w = star density
 
         glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv (screen-space passes)
         glm::mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen (temporal reuse)
