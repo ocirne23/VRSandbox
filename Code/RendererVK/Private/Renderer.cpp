@@ -151,24 +151,47 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     _putenv("DISABLE_VULKAN_OW_OBS_CAPTURE=True");
     _putenv("DISABLE_VULKAN_OBS_CAPTURE=True");
 
-    Tweak::floatVar("GI", "GI Intensity", &m_giIntensity, 0.0f, 10.0f);
-
-    Tweak::boolean("Lighting", "RT Lights", &m_rtLightShadows);
-    Tweak::boolean("Lighting", "RT Sun", &m_rtSunShadow);
-    Tweak::intVar("Lighting", "RT Sun Rays", &m_sunShadowRays, 1, 8);
-
-    Tweak::float3("Lighting", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
-    Tweak::color3("Lighting", "Sun Color", &m_sunColor, &m_sunIntensity);
-    Tweak::floatVar("Lighting", "Sun Angle Cos", &m_skyParams.sunAngularCos, 0.9995f, 1.0f, 0.000001f);
-    Tweak::floatVar("Lighting", "Sun Glow", &m_skyParams.sunGlow, 0.0, 2.0f, 0.01f);
-
-    Tweak::floatVar("Lighting", "SunCasc D Bias", &m_shadowDepthBias, 0.0f, 0.005f, 0.0001f);
-    Tweak::floatVar("Lighting", "SunCasc N Bias", &m_shadowNormalBias, 0.0f, 10.0f);
-
-    // The TAA resolve is recorded once and bakes the enable flag + feedback weight into its push constant, so
-    // changing them must re-record (the jitter itself is applied per-frame in beginFrame, no re-record needed).
-    Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
-    Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
+    Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
+    Tweak::float3("Sky", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
+    Tweak::color3("Sky", "Sun Color", &m_sunColor, &m_sunIntensity);
+    Tweak::floatVar("Sky/Sun", "Sun Angle Cos", &m_skyParams.sunAngularCos, 0.9995f, 1.0f, 0.000001f);
+    Tweak::floatVar("Sky/Sun", "Sun Glow", &m_skyParams.sunGlow, 0.0, 2.0f, 0.01f);
+    Tweak::floatVar("Sky/Sun", "SunCasc D Bias", &m_shadowDepthBias, 0.0f, 0.005f, 0.0001f);
+    Tweak::floatVar("Sky/Sun", "SunCasc N Bias", &m_shadowNormalBias, 0.0f, 10.0f);
+    Tweak::floatVar("Sky/Sun", "Scatter Boost", &m_skyScatterBoost, 0.0f, 16.0f);
+    Tweak::floatVar("Sky/Sun", "Mie Anisotropy", &m_skyMieG, 0.0f, 0.99f);
+    Tweak::floatVar("Sky/Stars", "Density", &m_starDensity, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Stars", "Size", &m_starSize, 0.2f, 3.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Size Variation", &m_starSizeVar, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Brightness", &m_starBrightness, 0.0f, 4.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Color Variation", &m_starColorVar, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Sky/Nebula", "Intensity", &m_nebulaIntensity, 0.0f, 2.0f, 0.01f);
+    Tweak::floatVar("Sky/Nebula", "Scale", &m_nebulaScale, 0.5f, 12.0f, 0.05f);
+    Tweak::floatVar("Sky/Nebula", "Band Width", &m_nebulaBandWidth, 0.05f, 1.0f, 0.005f);
+    Tweak::floatVar("Sky/Nebula", "Dust Lanes", &m_nebulaDust, 0.0f, 1.0f, 0.01f);
+    Tweak::float3("Sky/Nebula", "Axis", &m_nebulaAxis, 0.01f, [&]() { m_nebulaAxis = glm::normalize(m_nebulaAxis); });
+    Tweak::float3("Sky/Moon", "Direction", &m_moonDirection, 0.01f, [&]() { m_moonDirection = glm::normalize(m_moonDirection); });
+    Tweak::floatVar("Sky/Moon", "Size", &m_moonSizeDeg, 0.05f, 10.0f, 0.01f);
+    Tweak::floatVar("Sky/Moon", "Brightness", &m_moonBrightness, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Sun", "Disc Feather", &m_sunDiscFeather, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Sun", "Glow Strength", &m_skyParams.sunGlow, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Clouds", "Coverage", &m_cloudCoverage, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Height", &m_cloudHeight, 0.0f, 8000.0f);
+    Tweak::floatVar("Sky/Clouds", "Thickness", &m_cloudThickness, 500.0f, 10000.0f);
+    Tweak::floatVar("Sky/Clouds", "Scale", &m_cloudScale, 0.1f, 5.0f);
+    Tweak::floatVar("Sky/Clouds", "Wind Speed", &m_cloudWindSpeed, 0.0f, 10.0f);
+    Tweak::floatVar("Sky/Clouds", "Wind Angle", &m_cloudWindAngle, 0.0f, 6.2832f);
+    Tweak::floatVar("Sky/Clouds", "Softness", &m_cloudSoftness, 0.05f, 0.8f);
+    Tweak::floatVar("Sky/Clouds", "Density", &m_cloudDensity, 0.2f, 6.0f);
+    Tweak::floatVar("Sky/Clouds", "Sharpness", &m_cloudSharpness, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Height Variation", &m_cloudBaseVar, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Sun Shading", &m_cloudShading, 0.0f, 6.0f);
+    Tweak::floatVar("Sky/Clouds", "Silver Lining", &m_cloudSilver, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Clouds", "Ambient", &m_cloudAmbient, 0.0f, 1.0f);
+    Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
+    Tweak::color3("Sky/Gradient", "Horizon", &m_skyParams.horizon);
+    Tweak::color3("Sky/Gradient", "Ground", &m_skyParams.ground);
+    Tweak::float3("Sky/Gradient", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
 
     Tweak::boolean("Fog", "Enabled", &m_fogEnabled);
     Tweak::floatVar("Fog", "Global Density", &m_fogDensity, 0.0f, 0.2f, 0.0005f);
@@ -189,41 +212,13 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::boolean("Fog/Quality", "GI Ambient", &m_fogGIAmbient);
     Tweak::boolean("Fog/Quality", "Light Shadows", &m_fogLightShadows);
 
-    Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
-    Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
-    Tweak::floatVar("Sky/Stars", "Density", &m_starDensity, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Stars", "Size", &m_starSize, 0.2f, 3.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Size Variation", &m_starSizeVar, 0.0f, 1.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Brightness", &m_starBrightness, 0.0f, 4.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Color Variation", &m_starColorVar, 0.0f, 1.0f, 0.01f);
-    Tweak::floatVar("Sky/Nebula", "Intensity", &m_nebulaIntensity, 0.0f, 2.0f, 0.01f);
-    Tweak::floatVar("Sky/Nebula", "Scale", &m_nebulaScale, 0.5f, 12.0f, 0.05f);
-    Tweak::floatVar("Sky/Nebula", "Band Width", &m_nebulaBandWidth, 0.05f, 1.0f, 0.005f);
-    Tweak::floatVar("Sky/Nebula", "Dust Lanes", &m_nebulaDust, 0.0f, 1.0f, 0.01f);
-    Tweak::float3("Sky/Nebula", "Axis", &m_nebulaAxis, 0.01f, [&]() { m_nebulaAxis = glm::normalize(m_nebulaAxis); });
-    Tweak::float3("Sky/Moon", "Direction", &m_moonDirection, 0.01f, [&]() { m_moonDirection = glm::normalize(m_moonDirection); });
-    Tweak::floatVar("Sky/Moon", "Size", &m_moonSizeDeg, 0.05f, 10.0f, 0.01f);
-    Tweak::floatVar("Sky/Moon", "Brightness", &m_moonBrightness, 0.0f, 2.0f);
-    Tweak::floatVar("Sky/Atmosphere", "Scatter Boost", &m_skyScatterBoost, 0.0f, 16.0f);
-    Tweak::floatVar("Sky/Atmosphere", "Mie Anisotropy", &m_skyMieG, 0.0f, 0.99f);
-    Tweak::floatVar("Sky/Sun", "Disc Feather", &m_sunDiscFeather, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Sun", "Glow Strength", &m_skyParams.sunGlow, 0.0f, 2.0f);
-    Tweak::floatVar("Sky/Clouds", "Coverage", &m_cloudCoverage, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Height", &m_cloudHeight, 0.0f, 8000.0f);
-    Tweak::floatVar("Sky/Clouds", "Thickness", &m_cloudThickness, 500.0f, 10000.0f);
-    Tweak::floatVar("Sky/Clouds", "Scale", &m_cloudScale, 0.1f, 5.0f);
-    Tweak::floatVar("Sky/Clouds", "Wind Speed", &m_cloudWindSpeed, 0.0f, 10.0f);
-    Tweak::floatVar("Sky/Clouds", "Wind Angle", &m_cloudWindAngle, 0.0f, 6.2832f);
-    Tweak::floatVar("Sky/Clouds", "Softness", &m_cloudSoftness, 0.05f, 0.8f);
-    Tweak::floatVar("Sky/Clouds", "Density", &m_cloudDensity, 0.2f, 6.0f);
-    Tweak::floatVar("Sky/Clouds", "Sharpness", &m_cloudSharpness, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Height Variation", &m_cloudBaseVar, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Sun Shading", &m_cloudShading, 0.0f, 6.0f);
-    Tweak::floatVar("Sky/Clouds", "Silver Lining", &m_cloudSilver, 0.0f, 2.0f);
-    Tweak::floatVar("Sky/Clouds", "Ambient", &m_cloudAmbient, 0.0f, 1.0f);
-    Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
-    Tweak::color3("Sky/Gradient", "Horizon", &m_skyParams.horizon);
-    Tweak::color3("Sky/Gradient", "Ground", &m_skyParams.ground);
+    Tweak::boolean("RT", "RT Lights", &m_rtLightShadows);
+    Tweak::boolean("RT", "RT Sun", &m_rtSunShadow);
+    Tweak::intVar("RT", "RT Sun Rays", &m_sunShadowRays, 1, 8);
+    Tweak::floatVar("RT/GI", "GI Intensity", &m_giIntensity, 0.0f, 10.0f);
+
+    Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
+    Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
 
     glslang::InitializeProcess();
     const bool enableValidationLayers = (validation == EValidation::ENABLED);

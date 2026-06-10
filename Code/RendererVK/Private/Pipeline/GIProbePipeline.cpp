@@ -55,9 +55,9 @@ void GIProbePipeline::initialize()
         m_traceSets[i].initialize(m_tracePipeline.getDescriptorSetLayout());
     }
 
-    Tweak::intVar("GI", "Rays Per Probe", &m_giRaysPerProbe, 1, 128);
-    Tweak::floatVar("GI", "Temporal Alpha", &m_giTemporalAlpha, 0.0f, 0.05f, 0.001f);
-    Tweak::floatVar("GI", "Max Ray Distance", &m_giMaxRayDist, 0.0f, 128.0f);
+    Tweak::intVar("RT/GI", "Rays Per Probe", &m_giRaysPerProbe, 1, 128);
+    Tweak::floatVar("RT/GI", "Temporal Alpha", &m_giTemporalAlpha, 0.0f, 0.05f, 0.001f);
+    Tweak::floatVar("RT/GI", "Max Ray Distance", &m_giMaxRayDist, 0.0f, 128.0f);
 }
 
 void GIProbePipeline::reloadShaders()
