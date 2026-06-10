@@ -265,7 +265,7 @@ int main()
             }
         }
         //renderer.renderNode(sunLightNode); // This blocks the sun GI...
-
+        renderer.addFogVolume({ .pos = {0, 2, 0}, .density = 0.15f, .halfExtents = {10, 3, 10}, .edgeSoftness = 0.4f, .albedo = {0.8f, 0.7f, 0.5f}, .emissive = 0.0f });
         ui.render();
         renderer.present();
         frameCount++;

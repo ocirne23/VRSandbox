@@ -112,6 +112,12 @@ export namespace RendererVKLayout
         glm::vec4 taaJitter;    // xy = this frame's TAA sub-pixel jitter in NDC (0 when TAA disabled). Applied in
                                 // clip space by the rasterization vertex shaders ONLY; mvp/invMvp/prevMvp stay
                                 // unjittered so reconstruction/reprojection (TAA, RTAO) is wobble-free. zw unused.
+
+        // Volumetric fog (packing documented in vol_fog.inc.glsl)
+        glm::vec4 fogParams0; // x = global density (1/m), y = height base, z = height falloff (1/m), w = range (m)
+        glm::vec4 fogParams1; // rgb = fog albedo, w = phase anisotropy g
+        glm::vec4 fogParams2; // x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal blend
+        glm::vec4 fogParams3; // x = sun boost, y = ambient boost, z = enabled, w = light shadow rays
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};
@@ -202,6 +208,33 @@ export namespace RendererVKLayout
         uint16 normalTexIdx;
         uint16 metalRoughnessTexIdx;
         uint16 alphaMode;
+    };
+
+    // Volumetric fog froxel grid (view-frustum-aligned 3D textures); dims must match vol_fog.inc.glsl.
+    constexpr uint32 VOL_FROXEL_X = 160;
+    constexpr uint32 VOL_FROXEL_Y = 90;
+    constexpr uint32 VOL_FROXEL_Z = 64;
+    constexpr uint32 MAX_FOG_VOLUMES = 256;
+
+    // Local participating-media box, submitted per frame like lights (Renderer::addFogVolume). Density adds
+    // to the global fog inside the box, fading out over the outer edgeSoftness fraction of each half extent.
+    struct alignas(16) FogVolumeInfo
+    {
+        glm::vec3 pos;
+        float density;          // extinction added inside the box (1/m)
+        glm::vec3 halfExtents;
+        float edgeSoftness;     // 0..1 fraction of each half extent that fades out
+        glm::vec3 albedo;       // scattering tint of this volume's media
+        float emissive;         // self-lit glow (radiance per meter at full density)
+    };
+    static_assert(sizeof(FogVolumeInfo) == 48);
+
+    // GPU layout of the per-frame fog volume buffer: count header + array (matches vol_scatter.cs.glsl).
+    struct alignas(16) FogVolumes
+    {
+        uint32 count;
+        uint32 _pad0, _pad1, _pad2;
+        FogVolumeInfo volumes[MAX_FOG_VOLUMES];
     };
 
     // Unified light record for both point and rectangular area lights. width == 0 marks a point

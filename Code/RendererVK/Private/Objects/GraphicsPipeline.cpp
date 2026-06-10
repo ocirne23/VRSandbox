@@ -163,8 +163,8 @@ bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipeli
     };
     vk::PipelineDepthStencilStateCreateInfo pipelineDepthStencilStateCreateInfo{
         .flags = {},
-        .depthTestEnable = vk::True,
-        .depthWriteEnable = vk::True,
+        .depthTestEnable = layout.depthTestEnable ? vk::True : vk::False,
+        .depthWriteEnable = layout.depthWriteEnable ? vk::True : vk::False,
         .depthCompareOp = vk::CompareOp::eLess,
         .depthBoundsTestEnable = vk::False,
         .stencilTestEnable = vk::False,
@@ -177,11 +177,11 @@ bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipeli
     vk::ColorComponentFlags colorComponentFlags = vk::FlagTraits<vk::ColorComponentFlagBits>::allFlags;
     vk::PipelineColorBlendAttachmentState pipelineColorBlendAttachmentState
     {
-        .blendEnable = vk::False,
-        .srcColorBlendFactor = vk::BlendFactor::eZero,
-        .dstColorBlendFactor = vk::BlendFactor::eZero,
+        .blendEnable = layout.blendEnable ? vk::True : vk::False,
+        .srcColorBlendFactor = layout.srcColorBlendFactor,
+        .dstColorBlendFactor = layout.dstColorBlendFactor,
         .colorBlendOp = vk::BlendOp::eAdd,
-        .srcAlphaBlendFactor = vk::BlendFactor::eZero,
+        .srcAlphaBlendFactor = vk::BlendFactor::eOne,
         .dstAlphaBlendFactor = vk::BlendFactor::eZero,
         .alphaBlendOp = vk::BlendOp::eAdd,
         .colorWriteMask = colorComponentFlags,

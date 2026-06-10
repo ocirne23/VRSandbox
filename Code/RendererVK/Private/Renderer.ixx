@@ -28,6 +28,7 @@ import :GIProbePipeline;
 import :GBuffer;
 import :GBufferPipeline;
 import :RTAOPipeline;
+import :VolumetricFogPipeline;
 import :SceneColor;
 import :TaaPipeline;
 import :GraphicsPipeline;
@@ -62,6 +63,8 @@ public:
     void renderNodeThreadSafe(const RenderNode& node);
     void renderNode(const RenderNode& node);
     void addLightInfo(const RendererVKLayout::LightInfo& light);
+    // Local participating-media box for the volumetric fog, submitted per frame like lights.
+    void addFogVolume(const RendererVKLayout::FogVolumeInfo& fogVolume);
     void addPointLight(const PointLight& light);
     void addAreaLight(const AreaLight& areaLight);
     void addSpotLight(const SpotLight& spotLight);
@@ -155,6 +158,8 @@ private:
     void recordGBuffer(uint32 frameIdx);
     void recordGiProbeDebug(uint32 frameIdx);
     void recordAO(uint32 frameIdx);
+    void recordVolumetricFog(uint32 frameIdx);
+    void recordFogApply(uint32 frameIdx);
     void recordTaa(uint32 frameIdx);
     void recordComposite(uint32 frameIdx);
     bool recordGlobalIllum(uint32 frameIdx); // returns true if the ray-tracing TLAS handle changed this frame
@@ -189,6 +194,7 @@ private:
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
     GBufferPipeline m_gbufferPipeline;
     RTAOPipeline m_rtaoPipeline;
+    VolumetricFogPipeline m_volumetricFogPipeline;
     TaaPipeline m_taaPipeline;
     ShadowCullComputePipeline m_shadowCullComputePipeline;
     ShadowMapGraphicsPipeline m_shadowMapGraphicsPipeline;
@@ -229,6 +235,23 @@ private:
     float m_moonBrightness = 0.4f;
     float m_ambientIntensity = 0.1f;
     float m_giIntensity = 1.0f;
+
+    // Volumetric fog (froxel grid; see VolumetricFogPipeline). All UBO-driven, so tweaks apply live.
+    bool  m_fogEnabled = true;
+    float m_fogDensity = 0.008f;        // global extinction at the height base (1/m)
+    float m_fogHeightBase = 0.0f;       // world height where the global fog is densest
+    float m_fogHeightFalloff = 0.02f;   // exponential density falloff above the base (1/m)
+    glm::vec3 m_fogAlbedo = glm::vec3(0.85f, 0.87f, 0.9f);
+    float m_fogAnisotropy = 0.5f;       // HG phase g (0 = isotropic, ->1 = forward scattering)
+    float m_fogRange = 128.0f;          // froxel grid far distance (m)
+    float m_fogNoiseScale = 0.08f;      // density noise frequency (1/m)
+    float m_fogNoiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
+    float m_fogWindSpeed = 1.5f;        // noise drift (m/s)
+    float m_fogTemporal = 0.85f;        // history blend weight (jittered Z integration)
+    float m_fogSunBoost = 1.0f;
+    float m_fogAmbientBoost = 1.0f;
+    bool  m_fogLightShadows = false;    // shadow ray per froxel per grid light (expensive)
+    uint32 m_fogVolumeCounter = 0;
 
     float m_shadowDepthBias = 0.000f;
     float m_shadowNormalBias = 0.0f;
@@ -286,6 +309,8 @@ private:
         CommandBuffer shadowCullCommandBuffer;
         CommandBuffer shadowDrawCommandBuffer;
         CommandBuffer globalIllumCommandBuffer;
+        CommandBuffer volumetricFogCommandBuffer;
+        CommandBuffer fogApplyCommandBuffer;
         CommandBuffer giProbeDebugCommandBuffer;
         CommandBuffer taaCommandBuffer;
         CommandBuffer compositeCommandBuffer;
@@ -306,6 +331,9 @@ private:
         std::span<uint32> mappedFirstInstances;
 
         std::span<RendererVKLayout::LightInfo> mappedLightInfos;
+
+        Buffer fogVolumesBuffer;
+        std::span<RendererVKLayout::FogVolumes> mappedFogVolumes; // single element: count header + array
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 };

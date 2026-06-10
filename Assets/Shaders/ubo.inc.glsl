@@ -49,6 +49,12 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_screenSize;   // xy = full render-target resolution (px); zw = 1/xy
     vec4 u_viewportRect; // xy = viewport min, zw = viewport size, normalized to [0,1] of the full render target
     vec4 u_taaJitter;    // xy = TAA sub-pixel jitter in NDC, applied in clip space by raster vertex shaders only
+
+    // Volumetric fog (packing documented in vol_fog.inc.glsl)
+    vec4 u_fogParams0;   // x = global density (1/m), y = height base, z = height falloff (1/m), w = range (m)
+    vec4 u_fogParams1;   // rgb = fog albedo, w = phase anisotropy g
+    vec4 u_fogParams2;   // x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal blend
+    vec4 u_fogParams3;   // x = sun boost, y = ambient boost, z = enabled, w = light shadow rays
 };
 
 #endif

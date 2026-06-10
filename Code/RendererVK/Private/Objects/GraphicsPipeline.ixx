@@ -52,6 +52,14 @@ export struct GraphicsPipelineLayout
     float depthBiasSlopeFactor = 0.0f;
     vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
 
+    // Variant-0 blend/depth state, for fullscreen overlay passes (e.g. the volumetric fog apply, which
+    // blends src.rgb + dst.rgb * src.a over the lit scene with depth ignored).
+    bool blendEnable = false;
+    vk::BlendFactor srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
+    vk::BlendFactor dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+    bool depthTestEnable = true;
+    bool depthWriteEnable = true;
+
     // Additional pipeline variants for DGC Indirect Execution Set selection. Variant 0 always
     // uses both layout defaults; each extra entry can independently override either shader stage.
     std::vector<PipelineVariant> additionalVariants;

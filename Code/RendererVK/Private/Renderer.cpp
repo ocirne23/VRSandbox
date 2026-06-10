@@ -170,6 +170,21 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
     Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
 
+    Tweak::boolean("Fog", "Enabled", &m_fogEnabled);
+    Tweak::floatVar("Fog", "Density", &m_fogDensity, 0.0f, 0.2f, 0.0005f);
+    Tweak::floatVar("Fog", "Height Base", &m_fogHeightBase, -200.0f, 500.0f);
+    Tweak::floatVar("Fog", "Height Falloff", &m_fogHeightFalloff, 0.0f, 1.0f, 0.002f);
+    Tweak::color3("Fog", "Albedo", &m_fogAlbedo);
+    Tweak::floatVar("Fog", "Anisotropy", &m_fogAnisotropy, -0.9f, 0.95f, 0.01f);
+    Tweak::floatVar("Fog", "Range", &m_fogRange, 16.0f, 1024.0f);
+    Tweak::floatVar("Fog", "Noise Scale", &m_fogNoiseScale, 0.005f, 1.0f, 0.005f);
+    Tweak::floatVar("Fog", "Noise Strength", &m_fogNoiseStrength, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Fog", "Wind Speed", &m_fogWindSpeed, 0.0f, 20.0f);
+    Tweak::floatVar("Fog", "Temporal Blend", &m_fogTemporal, 0.0f, 0.97f, 0.01f);
+    Tweak::floatVar("Fog", "Sun Boost", &m_fogSunBoost, 0.0f, 8.0f);
+    Tweak::floatVar("Fog", "Ambient Boost", &m_fogAmbientBoost, 0.0f, 8.0f);
+    Tweak::boolean("Fog", "Light Shadows", &m_fogLightShadows);
+
     Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
     Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
     Tweak::floatVar("Sky", "Star Density", &m_starDensity, 0.0f, 1.0f);
@@ -226,6 +241,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     const vk::Extent2D ext = m_swapChain.getLayout().extent;
     m_staticMeshGraphicsPipeline.initialize(m_renderPass);
     m_rtaoPipeline.initialize(ext.width, ext.height);
+    m_volumetricFogPipeline.initialize();
+    m_volumetricFogPipeline.initializeApply(m_renderPass);
     m_taaPipeline.initialize(ext.width, ext.height);
     initComposite();
     m_indirectCullComputePipeline.initialize();
@@ -270,6 +287,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         perFrame.shadowCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.shadowDrawCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.globalIllumCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.volumetricFogCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.fogApplyCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.giProbeDebugCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.taaCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.compositeCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -297,6 +316,12 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
             vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedLightInfos = perFrame.lightInfosBuffer.mapMemory<RendererVKLayout::LightInfo>();
+
+        perFrame.fogVolumesBuffer.initialize(sizeof(RendererVKLayout::FogVolumes),
+            vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+        perFrame.mappedFogVolumes = perFrame.fogVolumesBuffer.mapMemory<RendererVKLayout::FogVolumes>();
+        perFrame.mappedFogVolumes.data()->count = 0;
 
         perFrame.lightGridsBuffer.initialize(RendererVKLayout::LIGHT_GRID_BUFFER_SIZE,
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
@@ -415,6 +440,7 @@ void Renderer::reloadShaders()
     m_staticMeshGraphicsPipeline.reloadShaders();
     m_gbufferPipeline.reloadShaders();
     m_rtaoPipeline.reloadShaders();
+    m_volumetricFogPipeline.reloadShaders(m_renderPass);
     m_indirectCullComputePipeline.reloadShaders();
     m_lightGridComputePipeline.reloadShaders();
     m_shadowCullComputePipeline.reloadShaders();
@@ -524,9 +550,15 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.cloudParams2 = glm::vec4(m_cloudDensity, m_cloudSharpness, m_cloudBaseVar, m_moonBrightness);
     ubo.skySunParams = glm::vec4(m_skyScatterBoost, m_skyMieG, m_sunDiscFeather, m_starDensity);
 
+    ubo.fogParams0 = glm::vec4(m_fogDensity, m_fogHeightBase, m_fogHeightFalloff, m_fogRange);
+    ubo.fogParams1 = glm::vec4(m_fogAlbedo, m_fogAnisotropy);
+    ubo.fogParams2 = glm::vec4(m_fogNoiseScale, m_fogNoiseStrength, m_fogWindSpeed, m_fogTemporal);
+    ubo.fogParams3 = glm::vec4(m_fogSunBoost, m_fogAmbientBoost, m_fogEnabled ? 1.0f : 0.0f, m_fogLightShadows ? 1.0f : 0.0f);
+
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
     m_lightCounter = 0;
+    m_fogVolumeCounter = 0;
     m_frameCounter++;
     return ubo.frustum;
 }
@@ -568,6 +600,16 @@ void Renderer::addLightInfo(const RendererVKLayout::LightInfo& light)
     }
 }
 
+void Renderer::addFogVolume(const RendererVKLayout::FogVolumeInfo& fogVolume)
+{
+    if (m_fogVolumeCounter < RendererVKLayout::MAX_FOG_VOLUMES)
+    {
+        PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
+        frameData.mappedFogVolumes.data()->volumes[m_fogVolumeCounter] = fogVolume;
+        m_fogVolumeCounter++;
+    }
+}
+
 void Renderer::addPointLight(const PointLight& light)   { addLightInfo(light); }
 void Renderer::addAreaLight(const AreaLight& areaLight) { addLightInfo(areaLight); }
 void Renderer::addSpotLight(const SpotLight& spotLight) { addLightInfo(spotLight); }
@@ -605,6 +647,10 @@ void Renderer::present()
     frameData.inMeshInstancesBuffer.flushMappedMemory(m_meshInstanceCounter * sizeof(RendererVKLayout::InMeshInstance));
     frameData.inFirstInstancesBuffer.flushMappedMemory(numMeshInfos * sizeof(uint32));
     frameData.lightInfosBuffer.flushMappedMemory(m_lightCounter * sizeof(RendererVKLayout::LightInfo));
+
+    frameData.mappedFogVolumes.data()->count = m_fogVolumeCounter;
+    constexpr size_t fogVolumesHeaderSize = sizeof(RendererVKLayout::FogVolumes) - sizeof(RendererVKLayout::FogVolumeInfo) * RendererVKLayout::MAX_FOG_VOLUMES;
+    frameData.fogVolumesBuffer.flushMappedMemory(fogVolumesHeaderSize + m_fogVolumeCounter * sizeof(RendererVKLayout::FogVolumeInfo));
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_lightGridComputePipeline.update(frameIdx, m_lightCounter);
@@ -843,6 +889,56 @@ void Renderer::recordAO(uint32 frameIdx)
     cb.end();
 }
 
+// Volumetric fog compute (scatter + integrate). Like the AO pass it bakes the TLAS handle, so a TLAS
+// rebuild forces a re-record. The apply draw lives in its own secondary CB inside the scene-color pass.
+void Renderer::recordVolumetricFog(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& cb = frameData.volumetricFogCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
+    if (m_meshInfoCounter > 0 && tlas)
+    {
+        VolumetricFogPipeline::RecordParams params{
+            .ubo = frameData.ubo,
+            .lightInfosBuffer = frameData.lightInfosBuffer,
+            .lightGridsBuffer = frameData.lightGridsBuffer,
+            .lightTableBuffer = frameData.lightTableBuffer,
+            .fogVolumesBuffer = frameData.fogVolumesBuffer,
+            .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
+            .shadowMapView = frameData.shadowMap.getSampleView(),
+            .shadowMapSampler = frameData.shadowMap.getSampler(),
+            .tlas = tlas,
+        };
+        m_volumetricFogPipeline.record(cb, frameIdx, params);
+    }
+    cb.end();
+}
+
+void Renderer::recordFogApply(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = frameData.sceneColor.getRenderPass() };
+    CommandBuffer& cb = frameData.fogApplyCommandBuffer;
+    vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
+
+    // Fullscreen triangle in full-render-target UV space (like the composite), scissored to the viewport.
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 vpMin = m_viewportRect.min;
+    const glm::ivec2 vpSize = m_viewportRect.getSize();
+    vkCb.setViewport(0, vk::Viewport{ .x = 0.0f, .y = 0.0f, .width = (float)extent.width, .height = (float)extent.height, .minDepth = 0.0f, .maxDepth = 1.0f });
+    vkCb.setScissor(0, vk::Rect2D{ .offset = vk::Offset2D{ vpMin.x, vpMin.y }, .extent = vk::Extent2D{ (uint32)vpSize.x, (uint32)vpSize.y } });
+
+    VolumetricFogPipeline::ApplyParams params{
+        .ubo = frameData.ubo,
+        .gbufferDepthView = frameData.gbuffer.getDepthView(),
+        .gbufferSampler = frameData.gbuffer.getSampler(),
+    };
+    m_volumetricFogPipeline.recordApply(cb, frameIdx, params);
+    cb.end();
+}
+
 void Renderer::recordTaa(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -1016,13 +1112,18 @@ void Renderer::recordCommandBuffers()
         recordGBuffer(frameIdx);
         recordGiProbeDebug(frameIdx);
         recordAO(frameIdx);
+        recordVolumetricFog(frameIdx);
+        recordFogApply(frameIdx);
         recordTaa(frameIdx);
         recordComposite(frameIdx);
         frameData.updated = true;
     }
 
     if (m_meshInstanceCounter > 0 && recordGlobalIllum(frameIdx))
+    {
         recordAO(frameIdx);
+        recordVolumetricFog(frameIdx);
+    }
 
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkLightGridCommandBuffer = frameData.lightGridCommandBuffer.getCommandBuffer();
@@ -1032,6 +1133,8 @@ void Renderer::recordCommandBuffers()
     vk::CommandBuffer vkShadowDrawCommandBuffer = frameData.shadowDrawCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkGlobalIllumCommandBuffer = frameData.globalIllumCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkAoCommandBuffer = frameData.aoCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkVolumetricFogCommandBuffer = frameData.volumetricFogCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkFogApplyCommandBuffer = frameData.fogApplyCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkGiProbeDebugCommandBuffer = frameData.giProbeDebugCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkTaaCommandBuffer = frameData.taaCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkCompositeCommandBuffer = frameData.compositeCommandBuffer.getCommandBuffer();
@@ -1095,6 +1198,10 @@ void Renderer::recordCommandBuffers()
         }
         vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
+        // Fog scatter/integrate compute; the primary is re-recorded every frame, so the enable toggle takes
+        // effect immediately (the integrated grid was cleared to "no fog" at init for the disabled case).
+        if (m_fogEnabled)
+            vkCommandBuffer.executeCommands(1, &vkVolumetricFogCommandBuffer);
         m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx), m_rtaoPipeline.getAOSampler());
         if (const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx))
             m_staticMeshGraphicsPipeline.updateTlasDescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(), tlas);
@@ -1112,6 +1219,8 @@ void Renderer::recordCommandBuffers()
         vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
         if (m_giProbeDebugEnabled)
             vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
+        if (m_fogEnabled)
+            vkCommandBuffer.executeCommands(1, &vkFogApplyCommandBuffer);
         vkCommandBuffer.endRenderPass();
 
         vk::MemoryBarrier2 bar{ // color -> TAA barrier
