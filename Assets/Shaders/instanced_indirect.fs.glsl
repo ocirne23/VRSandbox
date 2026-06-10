@@ -27,8 +27,6 @@ struct LightInfo
 	float rotation;  // area light: rotation of the quad around direction
 };
 
-#include "ubo.inc.glsl"
-
 layout (binding = 2, std430) readonly buffer InMaterialInfos
 {
 	MaterialInfo in_materialInfos[];
@@ -477,7 +475,7 @@ float tubeLightVisibility(LightInfo light, vec3 pos, vec3 N)
 vec3 doLightShadowed(LightInfo light, vec3 pos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, float metalness, float roughness, float roughnessSq)
 {
 	vec3 lit = doLight(light, pos, V, N, specularCol, matColOverPi, metalness, roughness, roughnessSq);
-	if (dot(lit, lit) <= 1e-7) // black analytic term (backfacing/out of range/outside cone): skip the trace
+	if (u_rtLightShadows < 0.5 || dot(lit, lit) <= 1e-7) // toggle off, or black analytic term: skip the trace
 		return lit;
 	if (light.width > 0.0)
 		return lit * (light.range < 0.0 ? tubeLightVisibility(light, pos, N) : areaLightVisibility(light, pos, N));

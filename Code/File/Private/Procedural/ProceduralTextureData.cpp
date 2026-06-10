@@ -62,6 +62,35 @@ bool ProceduralTextureData::initialize(EProceduralTextureType type, uint32 width
 		}
 		break;
 	}
+	case EProceduralTextureType::SkyGradient:
+	{
+		m_fileName = "procedural_sky_gradient";
+		// v = 0 (top row) maps to the sky sphere's zenith, v = 1 to the bottom. Zenith -> horizon over
+		// the upper half, horizon -> ground over the lower half, with a sqrt ramp like skyRadiance().
+		const float zenith[3]  = { 0.80f, 0.75f, 0.85f };
+		const float horizon[3] = { 0.80f, 0.55f, 0.40f };
+		const float ground[3]  = { 0.10f, 0.09f, 0.08f };
+		for (uint32 y = 0; y < height; y++)
+		{
+			const float v = (height > 1) ? (float)y / (float)(height - 1) : 0.0f;
+			const float t = v * 2.0f - 1.0f; // -1 = zenith, 0 = horizon, +1 = ground
+			float rgb[3];
+			for (int c = 0; c < 3; c++)
+			{
+				rgb[c] = (t <= 0.0f) ? horizon[c] + (zenith[c] - horizon[c]) * std::sqrt(-t)
+				                     : horizon[c] + (ground[c] - horizon[c]) * std::min(t * 2.0f, 1.0f);
+			}
+			for (uint32 x = 0; x < width; x++)
+			{
+				Pixel& p = m_pixels[y * width + x];
+				p.r = (uint8)(rgb[0] * 255.0f + 0.5f);
+				p.g = (uint8)(rgb[1] * 255.0f + 0.5f);
+				p.b = (uint8)(rgb[2] * 255.0f + 0.5f);
+				p.a = (uint8)0xFF;
+			}
+		}
+		break;
+	}
 	default:
 		return false;
 	}

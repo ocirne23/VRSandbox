@@ -5,10 +5,16 @@
 #define ALPHA_MODE_MASK 1u
 #define ALPHA_MODE_BLEND 2u
 
+// MaterialInfo.flags bits (RendererVKLayout::MATERIAL_FLAG_*). Debug/gizmo geometry that never blocks
+// light: excluded from the TLAS (mask 0) and from the sun cascade caster cull.
+#define MATERIAL_FLAG_NO_RAYTRACING 0x80000000u
+
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 const uint INITIALIZING_ENTRY = 0xEFFFFFFFu;
 
 const float PI = 3.14159265359;
+
+#include "ubo.inc.glsl"
 
 vec3 randomColor(uint seed) 
 {
@@ -34,6 +40,44 @@ vec3 cascadeDebugColor(int cascade)
     if (cascade == 3) return vec3(1.0, 0.0, 1.0);
     if (cascade == 4) return vec3(0.0, 1.0, 1.0);
 	return vec3(1.0, 1.0, 0.0);
+}
+
+// Reconstruct world-space position from a hardware depth sample and a full-frame screen UV (origin top-left),
+// given an inverse view-proj. The scene renders through u_viewportRect (a sub-rect of the render target, e.g.
+// the editor viewport panel), so the full-frame UV is first remapped into viewport-local [0,1], then to NDC.
+// The viewport is y-flipped (negative height), so viewport-local v=0 (top) maps to ndc.y=+1.
+vec3 worldPosFromDepthMat(vec2 uv, float depth, mat4 invM)
+{
+    vec2 vpUv = (uv - u_viewportRect.xy) / u_viewportRect.zw;
+    vec4 clip = vec4(vpUv.x * 2.0 - 1.0, 1.0 - vpUv.y * 2.0, depth, 1.0);
+    vec4 world = invM * clip;
+    return world.xyz / world.w;
+}
+vec3 worldPosFromDepth(vec2 uv, float depth) { return worldPosFromDepthMat(uv, depth, u_invMvp); }
+
+// Project a world position to a previous-frame full-frame screen UV (inverse of the mapping above): NDC ->
+// viewport-local UV -> full-frame UV through u_viewportRect.
+vec2 prevScreenUV(vec3 worldPos, out float clipW)
+{
+    vec4 p = u_prevMvp * vec4(worldPos, 1.0);
+    clipW = p.w;
+    vec3 ndc = p.xyz / p.w;
+    vec2 vpUv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    return u_viewportRect.xy + vpUv * u_viewportRect.zw;
+}
+
+vec3 skyColor(vec3 dir)
+{
+    float t = dot(dir, normalize(u_skyUp));
+    vec3 sky = (t >= 0.0) ? mix(u_skyHorizon, u_skyZenith, sqrt(t)) : mix(u_skyHorizon, u_skyGround, min(-t * 2.0, 1.0));
+    return sky;
+}
+
+// move somewhere cleaner
+vec3 skyRadiance(vec3 dir)
+{
+    vec3 sky = skyColor(dir);
+    return (sky * u_skyIntensity) / PI;
 }
 
 #endif

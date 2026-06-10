@@ -49,6 +49,14 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 		.blendEnable = true,
 		.depthWrite = false,
 	});
+	// Variant 4 (EPipelineIndex::Sky): analytic sky + sun disc, for the inside of the sky sphere.
+	const std::string skyVariantPath = "Shaders/sky.fs.glsl";
+	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+		.fragmentShader = ShaderSource{
+			.text = FileSystem::readFileStr(skyVariantPath),
+			.debugFilePath = skyVariantPath,
+		},
+	});
 
     auto& bindingDescriptions = graphicsPipelineLayout.vertexLayoutInfo.bindingDescriptions;
     bindingDescriptions.push_back(vk::VertexInputBindingDescription{

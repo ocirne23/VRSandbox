@@ -5,15 +5,8 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 
-layout (binding = 0, std140) uniform UBO
-{
-    mat4 u_mvp;
-    vec4 u_frustumPlanes[6];
-    vec3 u_viewPos;
-    // TAA sub-pixel jitter (NDC). Explicit std140 offset because this shader uses a truncated view of the UBO;
-    // 896 is u_taaJitter's offset in the full layout (see ubo.inc.glsl). Update if fields are inserted before it.
-    layout(offset = 896) vec4 u_taaJitter;
-};
+#include "shared.inc.glsl"
+
 struct InMeshInstancesData
 {
     vec4 posScale;

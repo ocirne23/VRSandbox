@@ -3,7 +3,6 @@
 // Fraction of a cascade's far range over which it cross-fades into the next cascade.
 #define SHADOW_CASCADE_BLEND 0.25
 #define GOLDEN_RATIO_FRACT 0.6180339887
-#define PCSS_SUN_SIZE 200.0            // penumbra texels per unit normalized depth gap (~2*tan(sunRadius)*res); bigger = softer
 #define PCSS_MAX_PENUMBRA_TEXELS 15.0  // cap so the kernel never gets too sparse/noisy
 #define PCSS_MIN_PENUMBRA_TEXELS 1.0   // floor so contact shadows stay crisp
 #define PCSS_BLOCKER_SAMPLES 16
@@ -13,6 +12,18 @@
 // Per-cascade scalars are stashed in the matrix's bottom row; restore [0,0,0,1] before using it.
 float cascadeSplit(int c) { return u_cascadeViewProj[c][0][3]; }
 float cascadeTexelWorldSize(int c) { return u_cascadeViewProj[c][1][3]; }
+float cascadeDepthRange(int c) { return u_cascadeViewProj[c][2][3]; }
+
+// PCF disk radius (texels) per unit of normalized depth gap, derived from the sun's angular size so
+// PCSS softness matches the ray-traced sun. The physical penumbra over a world gap g spans 2*g*tan(
+// sunRadius) total, and a PCF disk of radius r ramps visibility over ~2r, so the radius is the HALF
+// width: g*tan(sunRadius). gapNorm * depthRange = world gap; / texelWorldSize = texels.
+float pcssSunSizeTexels(int c)
+{
+	float cosT = clamp(u_sunAngularCos, 0.5, 0.9999999);
+	float tanT = sqrt(1.0 - cosT * cosT) / cosT;
+	return tanT * cascadeDepthRange(c) / cascadeTexelWorldSize(c);
+}
 mat4 cascadeMatrix(int c)
 {
 	mat4 m = u_cascadeViewProj[c];
@@ -111,7 +122,7 @@ float pcssCascade(vec4 p, int cascade, float texelUV, float rotation)
 		return 1.0; // no occluders found
 	// Directional penumbra: width grows with the world gap to the blocker (constant across cascades
 	// once expressed in texels). Caster touching the surface => ~MIN texels (sharp); far => up to MAX.
-	float penumbraTexels = clamp((p.z - avgBlocker) * PCSS_SUN_SIZE, PCSS_MIN_PENUMBRA_TEXELS, PCSS_MAX_PENUMBRA_TEXELS);
+	float penumbraTexels = clamp((p.z - avgBlocker) * pcssSunSizeTexels(cascade), PCSS_MIN_PENUMBRA_TEXELS, PCSS_MAX_PENUMBRA_TEXELS);
 	return pcfVogelSingle(p, cascade, penumbraTexels * texelUV, rotation);
 }
 
@@ -148,8 +159,8 @@ float pcssBorder(vec4 pa, vec4 pb, int ca, int cb, float texelUV, float rotation
 	// the tap budget split, a cascade can easily find zero blockers even in shadow, so fall back to the
 	// minimum (sharp) radius rather than declaring it lit -- otherwise the PCF is skipped and a bright
 	// line appears between two fully-shadowed cascades.
-	float radA = (nDA > 0.0) ? clamp((pa.z - sumDA / nDA) * PCSS_SUN_SIZE, PCSS_MIN_PENUMBRA_TEXELS, PCSS_MAX_PENUMBRA_TEXELS) * texelUV : minRadiusUV;
-	float radB = (nDB > 0.0) ? clamp((pb.z - sumDB / nDB) * PCSS_SUN_SIZE, PCSS_MIN_PENUMBRA_TEXELS, PCSS_MAX_PENUMBRA_TEXELS) * texelUV : minRadiusUV;
+	float radA = (nDA > 0.0) ? clamp((pa.z - sumDA / nDA) * pcssSunSizeTexels(ca), PCSS_MIN_PENUMBRA_TEXELS, PCSS_MAX_PENUMBRA_TEXELS) * texelUV : minRadiusUV;
+	float radB = (nDB > 0.0) ? clamp((pb.z - sumDB / nDB) * pcssSunSizeTexels(cb), PCSS_MIN_PENUMBRA_TEXELS, PCSS_MAX_PENUMBRA_TEXELS) * texelUV : minRadiusUV;
 
 	// Filter, split between cascades; the PCF determines visibility for every tap.
 	float sumA = 0.0, nA = 0.0, sumB = 0.0, nB = 0.0;

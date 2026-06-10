@@ -43,7 +43,6 @@ struct InMeshInstance
     uint pipelineIdxAlphaMode;
 };
 
-#include "ubo.inc.glsl"
 layout (binding = 1, std430) readonly buffer InLightInfos { LightInfo in_lightInfos[]; };
 layout (binding = 2, std430) readonly buffer InLightGrid  { uint in_gridData[]; };
 layout (binding = 3, std430) readonly buffer InGridTable

@@ -34,14 +34,20 @@ public:
     ObjectContainer& operator=(const ObjectContainer&) = delete;
     ObjectContainer& operator=(const ObjectContainer&&) = delete;
 
-    // When passed to initialize(), every material uses these texture indices instead of its own
-    // scene textures, and is forced onto the given pipeline.
+    // When passed to initialize(), every material is forced onto the given pipeline, and (unless
+    // useSceneTextures is set) uses these texture indices instead of its own scene textures.
     struct MaterialOverrides
     {
         uint16 diffuseTexIdx = RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX;
         uint16 normalTexIdx = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
         uint16 metalRoughnessTexIdx = UINT16_MAX;
         RendererVKLayout::EPipelineIndex pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
+        // Exclude this container's geometry from all ray tracing (shadow rays, GI, RTAO): rasterized
+        // normally but never blocks or bounces light. For debug/gizmo geometry like light markers.
+        bool excludeFromRayTracing = false;
+        // Keep the scene's own textures (ignore the texture index overrides above) while still applying
+        // the pipeline/ray-tracing overrides. For e.g. the procedural sky sphere's gradient texture.
+        bool useSceneTextures = false;
     };
 
     bool initialize(const ISceneData& sceneData, const MaterialOverrides* pOverrides = nullptr);

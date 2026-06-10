@@ -15,12 +15,6 @@ struct LightInfo
 	vec3 direction;  // magnitude = height
 	float rotation;
 };
-layout (binding = 0, std140) uniform UBO
-{
-    mat4 u_mvp;
-    vec4 u_frustumPlanes[6];
-    vec3 u_viewPos;
-};
 layout (binding = 1, std430) readonly buffer InLightInfos
 {
 	LightInfo in_lightInfos[];

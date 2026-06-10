@@ -77,7 +77,7 @@ public:
         glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // sky-up axis; set to the local up on a planet
         float intensity = 1.0f;
         float sunAngularCos = 0.99998f;// 0.9999f; // ~0.8 deg disc; 1.0 disables the disc
-        float sunGlow = 0.0f;    // 0 = none; e.g. 256 for a tight bloom around the sun
+        float sunGlow = 200.0f;
     };
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
     void present();
@@ -205,9 +205,9 @@ private:
     glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
     uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray set each frame
 
-    glm::vec3 m_sunDirection = glm::normalize(glm::vec3(0.5f, 1.0f, 0.5f));
-    glm::vec3 m_sunColor = glm::vec3(1.0f);
-    float m_sunIntensity = 5.0f;
+    glm::vec3 m_sunDirection = glm::normalize(glm::vec3(-0.5f, 1.0f, 0.1f));
+    glm::vec3 m_sunColor = glm::vec3(0.9568f, 1.0f, 0.9214f);
+    float m_sunIntensity = 3.0f;
     SkyParams m_skyParams;
     float m_ambientIntensity = 0.1f;
     float m_giIntensity = 1.0f;
@@ -216,6 +216,7 @@ private:
     float m_shadowNormalBias = 0.0f;
     bool  m_rtSunShadow = true; // sun shadows from TLAS ray queries instead of PCSS cascades (A/B tweak)
     int   m_sunShadowRays = 5;   // RT sun shadow rays per pixel
+    bool  m_rtLightShadows = true; // ray-traced shadows for punctual/area/tube lights
 
     bool   m_giProbeDebugEnabled = false;
     uint32 m_giProbeDebugMode = 0;

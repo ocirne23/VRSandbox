@@ -55,9 +55,9 @@ void GIProbePipeline::initialize()
         m_traceSets[i].initialize(m_tracePipeline.getDescriptorSetLayout());
     }
 
-    Tweak::intVar("GI/GI Probes", "Rays Per Probe", &m_giRaysPerProbe, 1, 128);
-    Tweak::floatVar("GI/GI Probes", "Temporal Alpha", &m_giTemporalAlpha, 0.0f, 0.05f);
-    Tweak::floatVar("GI/GI Probes", "Max Ray Distance", &m_giMaxRayDist, 0.0f, 128.0f);
+    Tweak::intVar("GI", "Rays Per Probe", &m_giRaysPerProbe, 1, 128);
+    Tweak::floatVar("GI", "Temporal Alpha", &m_giTemporalAlpha, 0.0f, 0.05f, 0.001f);
+    Tweak::floatVar("GI", "Max Ray Distance", &m_giMaxRayDist, 0.0f, 128.0f);
 }
 
 void GIProbePipeline::reloadShaders()
@@ -74,7 +74,7 @@ void GIProbePipeline::buildTlasInstanceLayout(ComputePipelineLayout& layout)
 {
     layout.computeShaderDebugFilePath = "Shaders/gi_tlas_instances.cs.glsl";
     layout.computeShaderText = FileSystem::readFileStr(layout.computeShaderDebugFilePath);
-    for (uint32 b = 0; b <= 4; ++b)
+    for (uint32 b = 0; b <= 5; ++b)
         layout.descriptorSetLayoutBindings.push_back(storageBinding(b));
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(TlasInstancePC) });
 }
@@ -125,12 +125,13 @@ void GIProbePipeline::recordTlasInstances(CommandBuffer& commandBuffer, uint32 f
     vk::DescriptorSet vkSet = set.getDescriptorSet();
 
     auto bufInfo = [](Buffer& buf) { return vk::DescriptorBufferInfo{ .buffer = buf.getBuffer(), .range = buf.getSize() }; };
-    std::array<DescriptorSetUpdateInfo, 5> updates{
+    std::array<DescriptorSetUpdateInfo, 6> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.renderNodeTransforms) } },
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.meshInstances) } },
         DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.instanceOffsets) } },
         DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.blasAddresses) } },
         DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_tlasInstanceBuffer[frameIdx]) } },
+        DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.materialInfos) } },
     };
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
     commandBuffer.cmdUpdateDescriptorSets(m_tlasInstancePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, vkSet, updates);

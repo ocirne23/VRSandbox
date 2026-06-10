@@ -40,6 +40,7 @@ public:
         Buffer& meshInstances;   // InMeshInstance (cull input) buffer
         Buffer& instanceOffsets;
         Buffer& blasAddresses;   // mesh idx -> uint64 BLAS device address
+        Buffer& materialInfos;   // MATERIAL_FLAG_NO_RAYTRACING -> instance mask 0
         uint32 numInstances;
     };
     void recordTlasInstances(CommandBuffer& commandBuffer, uint32 frameIdx, TlasInstanceParams& params);

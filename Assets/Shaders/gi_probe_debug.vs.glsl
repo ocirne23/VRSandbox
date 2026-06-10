@@ -6,7 +6,6 @@
 // off-screen. Procedural geometry (no vertex buffers): 36 verts = 12 triangles of a unit cube.
 
 #include "shared.inc.glsl"
-#include "ubo.inc.glsl" // full UBO (binding 0): u_mvp + u_viewPos (centers the clipmap cascades)
 
 layout (binding = 1, std430) readonly buffer GiGridData { float gi_gridData[]; };
 

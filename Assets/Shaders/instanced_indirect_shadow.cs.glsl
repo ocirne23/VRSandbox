@@ -21,7 +21,6 @@ struct MaterialInfo         { uint flags; float opacity; uint diffuseNormalTexId
 struct OutMeshInstance      { vec4 posScale; vec4 quat; uint alphaTexIdxCascadeMask; };
 struct OutIndirectCommand   { uint pipelineIndex; uint indexCount; uint instanceCount; uint firstIndex; int vertexOffset; uint firstInstance; };
 
-#include "ubo.inc.glsl"
 layout (binding = 1, std430) readonly buffer InRenderNodeTransformsBuffer  { RenderNodeTransform  in_renderNodeTransforms[]; };
 layout (binding = 2, std430) readonly buffer InMeshInstancesBuffer         { InMeshInstance       in_instances[]; };
 layout (binding = 3, std430) readonly buffer InMeshInstanceOffsetsBuffer   { InMeshInstanceOffset in_instanceOffsets[]; };
@@ -98,6 +97,8 @@ void main()
     // fragments without touching the material buffer.
     const uint materialIdx = (instance.meshIdxMaterialIdx & 0xFFFF0000u) >> 16;
     const MaterialInfo material = in_materialInfos[materialIdx];
+    if ((material.flags & MATERIAL_FLAG_NO_RAYTRACING) != 0u)
+        return; // gizmo geometry: never casts shadows (matches its TLAS mask-0 exclusion)
     const uint alphaMode = (material.metalRoughnessTexIdxAlphaMode & 0xFFFF0000u) >> 16;
     const uint alphaTexIdx = (alphaMode == ALPHA_MODE_MASK) ? (material.diffuseNormalTexIdx & 0x0000FFFFu) : 0xFFFFu;
     const uint packed = (alphaTexIdx << 16) | (cascadeMask & 0x0000FFFFu);

@@ -9,7 +9,7 @@
 //   GI_GRID_DATA_NAME   float[] per-probe data: cascade-major, slot-linear, GI_PROBE_STRIDE floats each.
 // For the write side (trace) also define GI_PROBE_WRITE.
 //
-// Requires shared.inc.glsl (PI) and ubo.inc.glsl (u_viewPos — the camera, which centers the cascades).
+// Requires shared.inc.glsl (PI) (u_viewPos — the camera, which centers the cascades).
 // GI_* sizing constants must match RendererVKLayout (Layout.ixx).
 
 #ifndef GI_PROBE_INC_GLSL

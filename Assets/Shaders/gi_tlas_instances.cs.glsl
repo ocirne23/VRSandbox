@@ -3,6 +3,8 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : enable
 #extension GL_EXT_shader_16bit_storage : enable
 
+#include "shared.inc.glsl"
+
 // Builds the TLAS instance array on the GPU, one VkAccelerationStructureInstanceKHR per mesh instance.
 // Reuses the exact world-transform composition (renderNode * instanceOffset) from instanced_indirect.cs,
 // so ray-traced geometry matches what the raster path draws. No frustum culling: GI needs off-screen
@@ -11,6 +13,13 @@
 struct RenderNodeTransform { vec4 posScale; vec4 quat; };
 struct InMeshInstance      { uint renderNodeIdx; uint instanceOffsetIdx; uint meshIdxMaterialIdx; uint pipelineIdxAlphaMode; };
 struct InMeshInstanceOffset{ vec4 posScale; vec4 quat; };
+struct MaterialInfo
+{
+    uint flags;
+    float opacity;
+    uint diffuseNormalTexIdx;
+    uint metalRoughnessTexIdxAlphaMode;
+};
 
 // Matches VkAccelerationStructureInstanceKHR (64 bytes): a row-major 3x4 transform, packed
 // custom-index/mask and sbt-offset/flags words, then the 64-bit BLAS reference.
@@ -30,6 +39,7 @@ layout (binding = 1, std430) readonly buffer InMeshInstancesBuffer        { InMe
 layout (binding = 2, std430) readonly buffer InMeshInstanceOffsetsBuffer  { InMeshInstanceOffset in_instanceOffsets[]; };
 layout (binding = 3, std430) readonly buffer InBlasAddressesBuffer        { uvec2 in_blasAddresses[]; }; // uint64 split lo/hi per mesh
 layout (binding = 4, std430) writeonly buffer OutTlasInstancesBuffer      { TlasInstance out_instances[]; };
+layout (binding = 5, std430) readonly buffer InMaterialInfosBuffer        { MaterialInfo in_materialInfos[]; };
 
 layout (push_constant) uniform PushConstants { uint numInstances; } pc;
 
@@ -77,7 +87,7 @@ void main()
     // alpha-masked instances, which stay non-opaque so shadow rays can run their alpha test
     // (rt_shadow.inc.glsl). Opaque-flagged rays (RTAO, GI gather) still treat masked geometry as solid.
     const uint alphaMode = inst.pipelineIdxAlphaMode >> 16;
-    const uint instFlags = 0x01u | (alphaMode == 1u ? 0x00u : 0x04u); // 1 = ALPHA_MODE_MASK
+    const uint instFlags = 0x01u | (alphaMode == ALPHA_MODE_MASK ? 0x00u : 0x04u);
     o.sbtOffsetAndFlags          = (instFlags << 24);
 
     // Guard the address lookup: meshIdx = (meshIdxMaterialIdx & 0xFFFF) can be up to 65535, but the BLAS
@@ -98,7 +108,12 @@ void main()
     const bool finiteXform = !any(isnan(o.row0)) && !any(isinf(o.row0))
                           && !any(isnan(o.row1)) && !any(isinf(o.row1))
                           && !any(isnan(o.row2)) && !any(isinf(o.row2));
-    const uint mask = (hasBlas && finiteXform) ? 0xFFu : 0x00u;
+    // Mask 0 also excludes debug/gizmo geometry flagged NO_RAYTRACING on its material (rasterized only,
+    // never blocks shadow rays / GI / AO).
+    const uint materialIdx = inst.meshIdxMaterialIdx >> 16;
+    const bool noRT = materialIdx < uint(in_materialInfos.length())
+                   && (in_materialInfos[materialIdx].flags & MATERIAL_FLAG_NO_RAYTRACING) != 0u;
+    const uint mask = (hasBlas && finiteXform && !noRT) ? 0xFFu : 0x00u;
     o.instanceCustomIndexAndMask = (id & 0x00FFFFFFu) | (mask << 24);       // custom = instance idx
 
     out_instances[id] = o;

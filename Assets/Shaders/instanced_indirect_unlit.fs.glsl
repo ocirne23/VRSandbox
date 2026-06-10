@@ -37,9 +37,10 @@ void main()
 	const uint16_t alphaMode = uint16_t((material.metalRoughnessTexIdxAlphaMode & 0xFFFF0000) >> 16);
 
     const vec4 diffuseSample = texture(u_textures[diffuseTexIdx], in_uv);
+    //const vec4 diffuseSample = vec4(0.5, 0.5, 0.5, 1.0);
 
     // Alpha mask (alphaMode 1): discard fragments below the cutoff (stored in material.opacity).
     if (alphaMode == ALPHA_MODE_MASK && diffuseSample.a < material.opacity)
         discard;
-	out_color = vec4(diffuseSample.rgb, min(diffuseSample.a, material.opacity));
+	out_color = vec4(diffuseSample.xyz, min(diffuseSample.a, material.opacity));
 }

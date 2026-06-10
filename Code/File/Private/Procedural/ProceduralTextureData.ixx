@@ -8,6 +8,7 @@ export enum class EProceduralTextureType
 	Checkerboard, // 8x8 black-and-white checker pattern
 	White,        // solid white (1,1,1,1)
 	FlatNormal,   // flat normal map (0.5, 0.5, 1.0, 1.0)
+	SkyGradient,  // vertical zenith -> horizon -> ground gradient (for the sky sphere; v=0 = zenith)
 };
 
 export class ProceduralTextureData final : public ITextureData

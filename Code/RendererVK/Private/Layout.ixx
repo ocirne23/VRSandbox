@@ -91,6 +91,11 @@ export namespace RendererVKLayout
         glm::vec3 shadowParams; // x = depth bias, y = normal bias (texels), z = 1/resolution
         float sunShadowRays;    // RT sun shadow rays per pixel (1 = single jittered ray)
 
+        float rtLightShadows;   // > 0.5: ray-traced shadows for punctual/area/tube lights
+        float _padShadow0;
+        float _padShadow1;
+        float _padShadow2;
+
         glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv (screen-space passes)
         glm::mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen (temporal reuse)
         glm::mat4 prevInvMvp; // previous frame's inverse(mvp): reconstruct last frame's world pos (disocclusion)
@@ -103,8 +108,6 @@ export namespace RendererVKLayout
                                 // clip space by the rasterization vertex shaders ONLY; mvp/invMvp/prevMvp stay
                                 // unjittered so reconstruction/reprojection (TAA, RTAO) is wobble-free. zw unused.
     };
-    // instanced_indirect.vs.glsl reads u_taaJitter via an explicit std140 offset; keep it in sync.
-    static_assert(offsetof(Ubo, taaJitter) == 896, "Update the u_taaJitter offset in instanced_indirect.vs.glsl");
 
     struct alignas(16) RenderNodeTransform : Transform {};
     struct alignas(16) MeshInstanceOffset {
@@ -180,7 +183,11 @@ export namespace RendererVKLayout
         LitTransparent = 1,
         UnlitOpaque    = 2,
         UnlitTransparent = 3,
+        Sky            = 4, // analytic sky + sun disc (sky sphere interior)
     };
+
+    // MaterialInfo::flags bits.
+    constexpr uint32 MATERIAL_FLAG_NO_RAYTRACING = 1u << 31; // instance mask 0 in the TLAS: invisible to all rays
 
     struct alignas(16) MaterialInfo
     {

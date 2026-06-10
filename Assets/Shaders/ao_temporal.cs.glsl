@@ -4,7 +4,7 @@
 
 layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-#include "ubo.inc.glsl"
+#include "shared.inc.glsl"
 
 layout (binding = 1) uniform sampler2D u_curDepth;   // this frame's hardware depth (full-res gbuffer)
 layout (binding = 2) uniform sampler2D u_prevDepth;  // previous frame's hardware depth

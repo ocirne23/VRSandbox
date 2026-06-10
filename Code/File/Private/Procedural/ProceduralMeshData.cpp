@@ -27,6 +27,10 @@ bool ProceduralMeshData::initialize(EProceduralShape shape, const char* name)
 		m_name = name ? name : "Sphere";
 		buildSphere();
 		break;
+	case EProceduralShape::SkySphere:
+		m_name = name ? name : "SkySphere";
+		buildSkySphere();
+		break;
 	default:
 		return false;
 	}
@@ -259,6 +263,30 @@ void ProceduralMeshData::buildTerrain(const TerrainParams& params)
 				m_indices.push_back(a); m_indices.push_back(c); m_indices.push_back(b);
 				m_indices.push_back(b); m_indices.push_back(c); m_indices.push_back(d);
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Sky sphere: a UV sphere viewed from the inside. Built from the regular sphere, then normals/
+// bitangents are flipped inward and the triangle winding reversed so the inside faces pass backface
+// culling. UVs stay equirectangular (u = longitude, v = latitude, v=0 at the top).
+// ---------------------------------------------------------------------------
+void ProceduralMeshData::buildSkySphere(uint32 stacks, uint32 slices)
+{
+	buildSphere(stacks, slices);
+	for (glm::vec3& n : m_normals)    n = -n;
+	for (glm::vec3& b : m_bitangents) b = -b; // keep the TBN right-handed with the flipped normal
+	for (size_t i = 0; i + 2 < m_indices.size(); i += 3)
+		std::swap(m_indices[i + 1], m_indices[i + 2]);
+
+	// The sky gradient only varies vertically, so collapse u (the longitude seam and the u-derivative
+	// blow-up at the poles otherwise cause a visible pinch) and inset v from the texture edges: at
+	// exactly v=0/1 a bilinear repeat-wrap sampler blends the zenith row with the ground row, which
+	// shows as a dark spot at the top of the sky.
+	for (glm::vec3& uv : m_texCoords)
+	{
+		uv.x = 0.5f;
+		uv.y = glm::mix(0.01f, 0.99f, uv.y);
 	}
 }
 

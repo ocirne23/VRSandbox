@@ -122,10 +122,12 @@ namespace
 
             glm::mat4 viewProj = lightProj * lightView;
             // Stash per-cascade scalars in the matrix's structurally-zero bottom row: far distance in
-            // m[0][3], world texel size (ortho width / resolution) in m[1][3]. Shaders mask these back
-            // to the canonical [0,0,0,1] bottom row before using the matrix.
+            // m[0][3], world texel size (ortho width / resolution) in m[1][3], ortho depth range (world
+            // units, converts normalized depth gaps back to world for the PCSS penumbra) in m[2][3].
+            // Shaders mask these back to the canonical [0,0,0,1] bottom row before using the matrix.
             viewProj[0][3] = dists[1];
             viewProj[1][3] = (2.0f * radius) / res;
+            viewProj[2][3] = 2.0f * radius + zPad;
             outViewProj[c] = viewProj;
         }
     }
@@ -148,6 +150,31 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     _putenv("DISABLE_VULKAN_OW_OVERLAY_LAYER=True");
     _putenv("DISABLE_VULKAN_OW_OBS_CAPTURE=True");
     _putenv("DISABLE_VULKAN_OBS_CAPTURE=True");
+
+    Tweak::floatVar("GI", "GI Intensity", &m_giIntensity, 0.0f, 10.0f);
+
+    Tweak::boolean("Lighting", "RT Lights", &m_rtLightShadows);
+    Tweak::boolean("Lighting", "RT Sun", &m_rtSunShadow);
+    Tweak::intVar("Lighting", "RT Sun Rays", &m_sunShadowRays, 1, 8);
+
+    Tweak::float3("Lighting", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
+    Tweak::color3("Lighting", "Sun Color", &m_sunColor, &m_sunIntensity);
+    Tweak::floatVar("Lighting", "Sun Angle Cos", &m_skyParams.sunAngularCos, 0.9995f, 1.0f, 0.000001f);
+    Tweak::floatVar("Lighting", "Sun Glow", &m_skyParams.sunGlow, 0.0, 500.0f, 0.1f);
+
+    Tweak::floatVar("Lighting", "SunCasc D Bias", &m_shadowDepthBias, 0.0f, 0.005f, 0.0001f);
+    Tweak::floatVar("Lighting", "SunCasc N Bias", &m_shadowNormalBias, 0.0f, 10.0f);
+
+    // The TAA resolve is recorded once and bakes the enable flag + feedback weight into its push constant, so
+    // changing them must re-record (the jitter itself is applied per-frame in beginFrame, no re-record needed).
+    Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
+    Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
+
+    Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
+    Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
+    Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
+    Tweak::color3("Sky/Gradient", "Horizon", &m_skyParams.horizon);
+    Tweak::color3("Sky/Gradient", "Ground", &m_skyParams.ground);
 
     glslang::InitializeProcess();
     const bool enableValidationLayers = (validation == EValidation::ENABLED);
@@ -280,27 +307,6 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     m_gpuCrashTracker.Initialize(false);
 
-    Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
-    Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
-    Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
-    Tweak::color3("Sky/Gradient", "Horizon", &m_skyParams.horizon);
-    Tweak::color3("Sky/Gradient", "Ground", &m_skyParams.ground);
-    Tweak::floatVar("GI", "GI Intensity", &m_giIntensity, 0.0f, 10.0f);
-
-    Tweak::float3("Lighting", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
-    Tweak::color3("Lighting", "Sun Color", &m_sunColor, &m_sunIntensity);
-    Tweak::floatVar("Lighting", "Sun Angular Cos", &m_skyParams.sunAngularCos, 0.999f, 1.0f, 0.00001f);
-    Tweak::floatVar("Lighting", "Ambient Intensity", &m_ambientIntensity, 0.0f, 1.0f);
-
-    // The TAA resolve is recorded once and bakes the enable flag + feedback weight into its push constant, so
-    // changing them must re-record (the jitter itself is applied per-frame in beginFrame, no re-record needed).
-    Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
-    Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
-
-    Tweak::floatVar("Shadow", "Depth Bias", &m_shadowDepthBias, 0.0f, 0.005f, 0.0001f);
-    Tweak::floatVar("Shadow", "Normal Bias", &m_shadowNormalBias, 0.0f, 10.0f);
-    Tweak::boolean("Shadow", "Ray Traced Sun", &m_rtSunShadow);
-    Tweak::intVar("Shadow", "Sun Shadow Rays", &m_sunShadowRays, 1, 8);
     return true;
 }
 
@@ -489,6 +495,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     }
 
     ubo.sunShadowRays = (float)m_sunShadowRays;
+    ubo.rtLightShadows = m_rtLightShadows ? 1.0f : 0.0f;
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
@@ -916,6 +923,7 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         .meshInstances = frameData.inMeshInstancesBuffer,
         .instanceOffsets = m_instanceOffsetsBuffer,
         .blasAddresses = m_accelStructure.getBlasAddressBuffer(),
+        .materialInfos = m_materialInfosBuffer,
         .numInstances = numInstances,
     };
     m_giProbePipeline.recordTlasInstances(globalIllumCommandBuffer, frameIdx, tlasParams);

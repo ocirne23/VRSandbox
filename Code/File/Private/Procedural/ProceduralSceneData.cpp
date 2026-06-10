@@ -21,12 +21,18 @@ bool ProceduralSceneData::initialize(const char* shapeName, bool /*mergeNodes*/,
 
 	EProceduralShape shape;
 	bool isTerrain = false;
+	bool isSky     = false;
 	if (m_shapeName == "cube")
 		shape = EProceduralShape::Cube;
 	else if (m_shapeName == "plane")
 		shape = EProceduralShape::Plane;
 	else if (m_shapeName == "sphere")
 		shape = EProceduralShape::Sphere;
+	else if (m_shapeName == "skysphere")
+	{
+		shape = EProceduralShape::SkySphere;
+		isSky = true;
+	}
 	else if (m_shapeName == "terrain")
 	{
 		shape     = EProceduralShape::Terrain;
@@ -34,7 +40,7 @@ bool ProceduralSceneData::initialize(const char* shapeName, bool /*mergeNodes*/,
 	}
 	else
 	{
-		assert(false && "ProceduralSceneData: unknown shape name. Use \"cube\", \"plane\", \"sphere\" or \"terrain\".");
+		assert(false && "ProceduralSceneData: unknown shape name. Use \"cube\", \"plane\", \"sphere\", \"skysphere\" or \"terrain\".");
 		return false;
 	}
 
@@ -47,9 +53,11 @@ bool ProceduralSceneData::initialize(const char* shapeName, bool /*mergeNodes*/,
 		meshOk = mesh.initialize(shape, shapeName);
 	assert(meshOk && "Failed to initialize ProceduralMeshData");
 
-	// Textures: index 0 = checkerboard (diffuse), index 1 = flat normal map
+	// Textures: index 0 = diffuse (checkerboard, or a vertical gradient for the sky), index 1 = flat normal map
 	ProceduralTextureData& diffuseTex = m_textures.emplace_back();
-	[[maybe_unused]] bool diffuseOk = diffuseTex.initialize(EProceduralTextureType::Checkerboard, isTerrain ? 1024 : 64, isTerrain ? 1024 : 64);
+	[[maybe_unused]] bool diffuseOk = isSky
+		? diffuseTex.initialize(EProceduralTextureType::SkyGradient, 4, 256)
+		: diffuseTex.initialize(EProceduralTextureType::Checkerboard, isTerrain ? 1024 : 64, isTerrain ? 1024 : 64);
 	assert(diffuseOk && "Failed to initialize diffuse ProceduralTextureData");
 
 	ProceduralTextureData& normalTex = m_textures.emplace_back();

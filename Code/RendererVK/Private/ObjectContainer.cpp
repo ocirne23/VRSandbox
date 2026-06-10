@@ -158,10 +158,15 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
 
         if (pOverrides)
         {
+            temp.pipelineAlphaForMaterialIdx.back().first = pOverrides->pipelineIdx;
+            if (pOverrides->excludeFromRayTracing)
+                material.flags |= RendererVKLayout::MATERIAL_FLAG_NO_RAYTRACING;
+        }
+        if (pOverrides && !pOverrides->useSceneTextures)
+        {
             material.diffuseTexIdx = pOverrides->diffuseTexIdx;
             material.normalTexIdx = pOverrides->normalTexIdx;
             material.metalRoughnessTexIdx = pOverrides->metalRoughnessTexIdx;
-            temp.pipelineAlphaForMaterialIdx.back().first = pOverrides->pipelineIdx;
         }
         else
         {

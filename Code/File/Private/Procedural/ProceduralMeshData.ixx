@@ -10,6 +10,7 @@ export enum class EProceduralShape
 	Cube,
 	Plane,
 	Sphere,
+	SkySphere, // inward-facing sphere (viewed from inside); equirectangular UVs
 	Terrain,
 };
 
@@ -52,6 +53,7 @@ private:
 	void buildCube();
 	void buildPlane();
 	void buildSphere(uint32 stacks = 16, uint32 slices = 32);
+	void buildSkySphere(uint32 stacks = 24, uint32 slices = 48);
 	void buildTerrain(const TerrainParams& params);
 
 	std::string              m_name;

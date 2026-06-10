@@ -12,7 +12,6 @@
 // gl_ViewIndex selects the cascade. The shadow cull packed the set of cascades each caster overlaps
 // into a bitmask (in the meshIdxMaterialIdx slot); for cascades a caster does not touch the primitive
 // is collapsed to a degenerate point so it is cheaply discarded before rasterization.
-#include "ubo.inc.glsl"
 struct InMeshInstancesData
 {
     vec4 posScale;
