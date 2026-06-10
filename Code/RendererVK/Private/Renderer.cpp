@@ -864,6 +864,7 @@ void Renderer::recordGBuffer(uint32 frameIdx)
         .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
         .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
         .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
+        .materialInfoBuffer = m_materialInfosBuffer,
     };
     m_gbufferPipeline.record(cb, frameIdx, m_meshInfoCounter, gbufferParams);
     cb.end();

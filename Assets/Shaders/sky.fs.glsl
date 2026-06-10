@@ -324,6 +324,10 @@ vec4 clouds(vec3 dir, vec3 up, vec3 sunDir, vec3 sunTint, vec3 skyAmbient)
 void main()
 {
 	const vec3 dir = normalize(in_pos - u_viewPos);
+	// Direction-space size of one screen pixel, computed here in uniform control flow (derivatives are
+	// undefined inside non-uniform branches). Scaled by each star grid's frequency to clamp star
+	// footprints to >= a pixel so the TAA jitter samples them consistently.
+	const float dirPx = length(fwidth(dir));
 	const vec3 up = normalize(u_skyUp);
 	const vec3 L = normalize(u_sunDirection.xyz);
 
@@ -435,15 +439,22 @@ void main()
 						float grain = vnoise3(dir * u_nebulaParams.y * 1.0);
 						vec3 neb = hue * dens * (0.08 + 0.14 * grain * grain);
 
-						vec3 dir = dir * 155.753;
-						vec3 sd2 = dir * 100.0 + warp * 31.0;
+						// Micro-star grid scale: ~1.5 px per cell at 1080p, so each speck is resolvable and
+						// the footprint clamp below keeps it TAA-stable. (The old 155.753 * 100.0 scale put
+						// ~15 cells inside one pixel — sub-pixel stars that only showed up as aliasing noise.)
+						const float MICRO_STAR_SCALE = 650.0;
+						vec3 sd2 = dir * MICRO_STAR_SCALE + warp * 31.0;
 						float h2 = hash13(floor(sd2));
 						if (h2 > 1.0 - dens * 0.45)
 						{
-							bool taaEnabled = u_taaJitter.x != 0;
-							vec3 ofs2 = fract(h2 * vec3(113.1, 42.7, 743.3)) * 0.8 + 0.25;
-							float pt = smoothstep(taaEnabled ? 0.44 : 0.2, 0.0, length(fract(sd2) - ofs2));
-							neb += mix(vec3(1.0), hue, 0.35) * (pt * (0.3 + (taaEnabled ? 5.7 : 1.7) * fract(h2 * 27.3)));
+							// Footprint clamped to >= ~1.2 pixels with a pixel-wide edge, energy conserved by
+							// the area ratio: sub-pixel points land on a different TAA jitter sample every
+							// frame and get eaten by the variance clipping.
+							float px2 = dirPx * MICRO_STAR_SCALE;
+							float r2 = max(0.14, px2 * 1.2);
+							vec3 ofs2 = fract(h2 * vec3(113.1, 42.7, 743.3)) * 5.8 + 0.25;
+							float pt = smoothstep(r2, max(r2 - px2 * 1.5, 0.0), length(fract(sd2) - ofs2)) * (0.44 * 0.44) / (r2 * r2);
+							neb += mix(vec3(1.0), hue, 0.35) * (pt * (140.3 + 1.2 * fract(h2 * 27.3)));
 						}
 
 						color += neb * (u_nebulaParams.x * 0.9) * nightVis * transmittance.b;
@@ -453,6 +464,9 @@ void main()
 				if (u_skySunParams.w > 0.0)
 				{
 					vec3 sd = dir * 220.0;
+					// Cell-space size of one screen pixel (derivatives are only defined in uniform control
+					// flow, so this sits before the per-cell branch). Keeps every star >= ~a pixel wide.
+					float pxr = length(fwidth(sd));
 					vec3 cell = floor(sd);
 					float h = hash13(cell);
 					float gate = step(mix(0.9995, 0.995, u_skySunParams.w), h); // density: fraction of lit cells
@@ -463,7 +477,14 @@ void main()
 						// color variation tints each star along a cool/warm "temperature" axis.
 						vec3 ofs = fract(h * vec3(113.1, 412.7, 743.3)) * 0.5 + 0.25;
 						float radius = 0.52 * u_starParams.x * mix(1.0, 0.3 + 1.3 * fract(h * 57.31), u_starParams.y);
-						float core = smoothstep(radius, 0.0, length(fract(sd) - ofs));
+						// Clamp the rendered footprint to >= ~1.2 pixels with a pixel-wide smooth edge and
+						// conserve the original energy via the area ratio. A sub-pixel point lands on a
+						// different jitter sample every frame (it pops in and out), so the TAA variance
+						// clipping eats it — dim smeared stars. A pixel-sized, analytically anti-aliased
+						// disc shades identically every frame and survives the accumulation intact.
+						float r = max(radius, pxr * 1.2);
+						float comp = (radius * radius) / (r * r);
+						float core = smoothstep(r, max(r - pxr * 1.5, 0.0), length(fract(sd) - ofs)) * comp;
 						// Twinkle = two octaves of value noise sampled along the time axis (per-star rate and
 						// row, so every star walks its own random curve instead of a periodic wave), then
 						// squared so it reads as mostly-steady with occasional brighter glints.

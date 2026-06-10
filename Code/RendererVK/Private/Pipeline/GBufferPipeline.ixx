@@ -29,6 +29,7 @@ public:
         Buffer& indexBuffer;
         Buffer& instanceIdxBuffer;    // per-instance uint -> index into meshInstanceBuffer
         Buffer& indirectCommandBuffer; // IndirectDrawSequence[]; drawn with offset 4, stride 24
+        Buffer& materialInfoBuffer;    // MaterialInfo[]; the vertex shader culls MATERIAL_FLAG_SKY instances
     };
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
 

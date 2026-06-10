@@ -239,8 +239,8 @@ private:
     float m_nebulaScale    = 5.7f;  // nebula noise frequency
     float m_nebulaBandWidth = 0.1f; // gaussian width of the band around its great circle
     float m_nebulaDust     = 1.0f;  // dark dust lane strength inside the band
-    glm::vec3 m_nebulaAxis = glm::normalize(glm::vec3(0.5f, 0.30f, 0.8f)); // band pole
-    glm::vec3 m_moonDirection = glm::normalize(glm::vec3(0.5f, 0.85f, 0.2f)); // independent of the sun
+    glm::vec3 m_nebulaAxis = glm::normalize(glm::vec3(0.706f, -0.418f, 0.572f)); // band pole
+    glm::vec3 m_moonDirection = glm::normalize(glm::vec3(0.728f, 0.659f, -0.190f)); // independent of the sun
     float m_moonSizeDeg    = 6.0f; // moon disc radius (degrees); real moon is ~0.26
     float m_moonBrightness = 0.8f;
     float m_ambientIntensity = 0.2f;

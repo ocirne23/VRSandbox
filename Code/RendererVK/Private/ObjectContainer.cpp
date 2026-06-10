@@ -161,6 +161,8 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             temp.pipelineAlphaForMaterialIdx.back().first = pOverrides->pipelineIdx;
             if (pOverrides->excludeFromRayTracing)
                 material.flags |= RendererVKLayout::MATERIAL_FLAG_NO_RAYTRACING;
+            if (pOverrides->pipelineIdx == RendererVKLayout::EPipelineIndex::Sky)
+                material.flags |= RendererVKLayout::MATERIAL_FLAG_SKY;
         }
         if (pOverrides && !pOverrides->useSceneTextures)
         {

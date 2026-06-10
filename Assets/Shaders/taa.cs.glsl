@@ -49,15 +49,18 @@ void main()
     const vec3 current = texture(u_currentColor, uv).rgb;
     const float depth = texture(u_gbufferDepth, uv).r;
 
-    // Sky/background (no geometry) or pixels outside the editor viewport panel carry no reliable motion;
-    // pass the current sample straight through.
-    if (depth >= 1.0 || !insideViewport(uv) || pc.feedback <= 0.0)
+    // Pixels outside the editor viewport panel carry no reliable motion; pass straight through.
+    if (!insideViewport(uv) || pc.feedback <= 0.0)
     {
         imageStore(u_resolveOut, px, vec4(current, 1.0));
         return;
     }
 
-    const vec3 worldPos = worldPosFromDepth(uv, depth);
+    // Sky pixels (the sky sphere is excluded from the G-buffer, so its depth stays at the far plane)
+    // reproject AT the far plane: the reprojection is then purely rotational (parallax-free, correct for
+    // content at infinity) and the jittered sky raster still accumulates instead of visibly shaking.
+    const bool sky = depth >= 1.0;
+    const vec3 worldPos = worldPosFromDepth(uv, min(depth, 1.0));
     float clipW;
     const vec2 prevUv = prevScreenUV(worldPos, clipW);
 
@@ -91,7 +94,13 @@ void main()
     // if the surface moved more than a view-distance-scaled threshold (something else was there last frame).
     const float prevDepth = texture(u_prevGbufferDepth, prevUv).r;
     float fb = pc.feedback;
-    if (prevDepth < 1.0)
+    if (sky)
+    {
+        // Sky accumulates against sky only; geometry there last frame means a disocclusion.
+        if (prevDepth < 1.0)
+            fb = 0.0;
+    }
+    else if (prevDepth < 1.0)
     {
         const vec3 prevWorld = worldPosFromDepthMat(prevUv, prevDepth, u_prevInvMvp);
         const float thresh = 0.05 * (1.0 + distance(u_viewPos, worldPos));

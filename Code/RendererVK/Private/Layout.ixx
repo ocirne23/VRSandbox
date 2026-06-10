@@ -206,6 +206,8 @@ export namespace RendererVKLayout
 
     // MaterialInfo::flags bits.
     constexpr uint32 MATERIAL_FLAG_NO_RAYTRACING = 1u << 31; // instance mask 0 in the TLAS: invisible to all rays
+    constexpr uint32 MATERIAL_FLAG_SKY = 1u << 30; // sky sphere: skipped in the G-buffer prepass so its depth
+                                                   // stays at the far plane (TAA reprojects it parallax-free)
 
     struct alignas(16) MaterialInfo
     {
