@@ -56,6 +56,12 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_fogParams2;   // x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal blend
     vec4 u_fogParams3;   // x = sun boost, y = ambient boost, z = enabled, w = light shadow rays
     vec4 u_fogParams4;   // x = sun shadow rays, y = spatial filter, z = GI ambient, w = sun shadow softness (rad)
+
+    vec4 u_moonParams;   // xyz = normalized direction towards the moon, w = cos of the moon disc radius
+
+    vec4 u_starParams;   // x = star size, y = size variation, z = brightness, w = color variation
+    vec4 u_nebulaParams; // x = intensity, y = noise scale, z = band width, w = dust lane strength
+    vec4 u_nebulaAxis;   // xyz = normalized milky-way band pole (band lies on its great circle), w unused
 };
 
 #endif

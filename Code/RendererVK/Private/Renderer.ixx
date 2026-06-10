@@ -230,8 +230,19 @@ private:
     float m_skyScatterBoost = 4.0f;   // sun color -> atmosphere scattering source strength
     float m_skyMieG        = 0.76f;   // Mie anisotropy (forward-scatter lobe)
     float m_sunDiscFeather = 0.2f;    // disc rim feather, fraction of the disc's angular size
-    float m_starDensity    = 0.5f;
-    float m_moonBrightness = 0.4f;
+    float m_starDensity    = 0.63f;
+    float m_starSize       = 1.3f;  // base star core size multiplier
+    float m_starSizeVar    = 0.62f;  // 0 = uniform size, 1 = full per-star variation (skewed small)
+    float m_starBrightness = 1.23f;
+    float m_starColorVar   = 0.85f;  // 0 = white, 1 = full cool/warm per-star tint
+    float m_nebulaIntensity = 0.7f; // milky-way band glow strength (0 = off)
+    float m_nebulaScale    = 5.7f;  // nebula noise frequency
+    float m_nebulaBandWidth = 0.1f; // gaussian width of the band around its great circle
+    float m_nebulaDust     = 1.0f;  // dark dust lane strength inside the band
+    glm::vec3 m_nebulaAxis = glm::normalize(glm::vec3(0.5f, 0.30f, 0.8f)); // band pole
+    glm::vec3 m_moonDirection = glm::normalize(glm::vec3(0.5f, 0.85f, 0.2f)); // independent of the sun
+    float m_moonSizeDeg    = 6.0f; // moon disc radius (degrees); real moon is ~0.26
+    float m_moonBrightness = 0.8f;
     float m_ambientIntensity = 0.2f;
     float m_giIntensity = 2.0f;
 

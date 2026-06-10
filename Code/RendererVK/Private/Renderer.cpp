@@ -191,8 +191,19 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
     Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
-    Tweak::floatVar("Sky", "Star Density", &m_starDensity, 0.0f, 1.0f);
-    Tweak::floatVar("Sky", "Moon Brightness", &m_moonBrightness, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Stars", "Density", &m_starDensity, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Stars", "Size", &m_starSize, 0.2f, 3.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Size Variation", &m_starSizeVar, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Brightness", &m_starBrightness, 0.0f, 4.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Color Variation", &m_starColorVar, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Sky/Nebula", "Intensity", &m_nebulaIntensity, 0.0f, 2.0f, 0.01f);
+    Tweak::floatVar("Sky/Nebula", "Scale", &m_nebulaScale, 0.5f, 12.0f, 0.05f);
+    Tweak::floatVar("Sky/Nebula", "Band Width", &m_nebulaBandWidth, 0.05f, 1.0f, 0.005f);
+    Tweak::floatVar("Sky/Nebula", "Dust Lanes", &m_nebulaDust, 0.0f, 1.0f, 0.01f);
+    Tweak::float3("Sky/Nebula", "Axis", &m_nebulaAxis, 0.01f, [&]() { m_nebulaAxis = glm::normalize(m_nebulaAxis); });
+    Tweak::float3("Sky/Moon", "Direction", &m_moonDirection, 0.01f, [&]() { m_moonDirection = glm::normalize(m_moonDirection); });
+    Tweak::floatVar("Sky/Moon", "Size", &m_moonSizeDeg, 0.05f, 10.0f, 0.01f);
+    Tweak::floatVar("Sky/Moon", "Brightness", &m_moonBrightness, 0.0f, 2.0f);
     Tweak::floatVar("Sky/Atmosphere", "Scatter Boost", &m_skyScatterBoost, 0.0f, 16.0f);
     Tweak::floatVar("Sky/Atmosphere", "Mie Anisotropy", &m_skyMieG, 0.0f, 0.99f);
     Tweak::floatVar("Sky/Sun", "Disc Feather", &m_sunDiscFeather, 0.0f, 1.0f);
@@ -559,6 +570,11 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.fogParams2 = glm::vec4(m_fogNoiseScale, m_fogNoiseStrength, m_fogWindSpeed, m_fogTemporal);
     ubo.fogParams3 = glm::vec4(m_fogSunBoost, m_fogAmbientBoost, m_fogEnabled ? 1.0f : 0.0f, m_fogLightShadows ? 1.0f : 0.0f);
     ubo.fogParams4 = glm::vec4((float)m_fogSunRays, m_fogSpatialFilter ? 1.0f : 0.0f, m_fogGIAmbient ? 1.0f : 0.0f, m_fogSunSoftness);
+
+    ubo.moonParams = glm::vec4(glm::normalize(m_moonDirection), cosf(glm::radians(m_moonSizeDeg)));
+    ubo.starParams = glm::vec4(m_starSize, m_starSizeVar, m_starBrightness, m_starColorVar);
+    ubo.nebulaParams = glm::vec4(m_nebulaIntensity, m_nebulaScale, m_nebulaBandWidth, m_nebulaDust);
+    ubo.nebulaAxis = glm::vec4(glm::normalize(m_nebulaAxis), 0.0f);
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 

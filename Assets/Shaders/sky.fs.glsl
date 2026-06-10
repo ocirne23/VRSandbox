@@ -190,6 +190,27 @@ float fbm3(vec3 p, int octaves, float minNeeded)
 	return v / norm;
 }
 
+// FBM with a per-octave domain ROTATION (orthonormal, no axis preserved). fbm3 only scales+offsets
+// between octaves, so every octave shares one axis-aligned cube lattice and the sum shows repeating
+// grid/cube shapes at low frequencies; rotating decorrelates the lattices. Used by the nebula (the
+// clouds keep the cheaper fbm3 — their density threshold + profile already hide the lattice).
+float fbmR(vec3 p, int octaves)
+{
+	const mat3 rot = mat3( 0.00,  0.80,  0.60,
+	                      -0.80,  0.36, -0.48,
+	                      -0.60, -0.48,  0.64);
+	float norm = 1.0 - exp2(-float(octaves));
+	float v = 0.0;
+	float a = 0.5;
+	for (int i = 0; i < octaves; ++i)
+	{
+		v += a * vnoise3(p);
+		p = rot * p * 2.13 + vec3(17.7, 9.2, 31.4);
+		a *= 0.5;
+	}
+	return v / norm;
+}
+
 float ign(vec2 p) { return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y)); }
 
 const int CLOUD_STEPS = 6;
@@ -340,44 +361,21 @@ void main()
 		if (sunLit && u_sunGlow > 0.0)
 			color += u_sunColor.rgb * phaseHG(cosAngle, 0.985) * 0.015 * u_sunGlow * transmittance;
 
-		// Stars. Visibility comes from the local sky luminance — daylight in-scatter washes them out,
-		// so they fade in automatically at dusk and in dark sky regions. (The previous sun-elevation
-		// ramp kept them at zero until well after sunset, which made them effectively unreachable.)
-		if (u_skySunParams.w > 0.0)
+		// Moon: a sun-lit sphere shaded into the disc around u_moonParams.xyz (independent of the sun's
+		// position; the phases still fall out of lighting the reconstructed sphere normals with the
+		// actual sun direction, so they react to where the sun is). Disc size comes from u_moonParams.w.
+		// Drawn before the stars so its disc coverage can occlude them (even the unlit, new-moon part of
+		// the disc blocks the stars behind it). Clouds blend after this, so they occlude it.
+		float moonOcclusion = 0.0;
+		if (u_cloudParams2.w > 0.0 && u_moonParams.w < 1.0)
 		{
-			float skyLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
-			float starVis = clamp(1.0 - skyLum * 25.0, 0.0, 1.0);
-			if (starVis > 0.0)
-			{
-				vec3 sd = dir * 220.0;
-				vec3 cell = floor(sd);
-				float h = hash13(cell);
-				float gate = step(mix(0.9995, 0.995, u_skySunParams.w), h); // density: fraction of lit cells
-				if (gate > 0.0)
-				{
-					// Round point at a hashed position inside the cell (the old version lit whole cells
-					// as square blobs); size/brightness vary per star, with a slow twinkle.
-					vec3 ofs = fract(h * vec3(113.1, 412.7, 743.3)) * 0.5 + 0.25;
-					float core = smoothstep(0.22, 0.0, length(fract(sd) - ofs));
-					float twinkle = 0.75 + 0.25 * sin(u_timeSeconds * 3.0 + h * 113.0);
-					color += vec3(core * twinkle * (0.5 + h)) * starVis * transmittance.b;
-				}
-			}
-		}
-
-		// Moon: a sun-lit sphere shaded into the disc around moonDir. It drifts roughly opposite the sun
-		// (offset sideways so it is rarely exactly full and the terminator stays visible); the phases
-		// fall out of lighting the reconstructed sphere normals with the actual sun direction. Same
-		// angular size as the sun, like the real moon. Clouds blend after this, so they occlude it.
-		if (u_cloudParams2.w > 0.0 && u_sunAngularCos < 1.0)
-		{
-			vec3 moonDir = normalize(-L + up * 0.25 + cross(L, up) * 0.2);
+			vec3 moonDir = u_moonParams.xyz;
 			float cosM = dot(dir, moonDir);
-			if (cosM > u_sunAngularCos * 2.0 - 1.0) // cheap bound before building the disc basis
+			if (cosM > u_moonParams.w * 2.0 - 1.0) // cheap bound before building the disc basis
 			{
 				vec3 mT = normalize(cross(moonDir, abs(moonDir.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
 				vec3 mB = cross(moonDir, mT);
-				float discSin = sqrt(max(1.0 - u_sunAngularCos * u_sunAngularCos, 1e-8));
+				float discSin = sqrt(max(1.0 - u_moonParams.w * u_moonParams.w, 1e-8));
 				vec2 duv = vec2(dot(dir, mT), dot(dir, mB)) / discSin;
 				float r2 = dot(duv, duv);
 				if (r2 < 1.0)
@@ -388,6 +386,98 @@ void main()
 					float albedo = 0.7 + 0.6 * (fbm3(n * 7.0, 3, 0.0) - 0.5); // maria/crater mottling
 					float feather = smoothstep(1.0, 0.92, r2);                 // rim anti-aliasing
 					color += vec3(0.93, 0.95, 1.0) * (lambert * albedo * u_cloudParams2.w) * feather * transmittance;
+					moonOcclusion = feather;
+				}
+			}
+		}
+
+		// Night sky (stars + nebula). Visibility comes from the local sky luminance — daylight in-scatter
+		// washes them out, so they fade in automatically at dusk and in dark sky regions. The moon disc
+		// masks both out (it is a solid body, not additive light).
+		if ((u_skySunParams.w > 0.0 || u_nebulaParams.x > 0.0) && moonOcclusion < 1.0)
+		{
+			float skyLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+			float nightVis = clamp(1.0 - skyLum * 25.0, 0.0, 1.0) * (1.0 - moonOcclusion);
+			if (nightVis > 0.0)
+			{
+				// Milky-way band: a gaussian falloff around the great circle perpendicular to u_nebulaAxis.
+				// Raw value-noise FBM reads as soft low-res blobs, so the field is domain-warped by a vector
+				// FBM (turns the blobs into wisps and filaments) and squashed across the band so structure
+				// stretches lengthwise, like a galaxy seen edge-on. Composed from four layers: broad tinted
+				// gas, ridged bright filaments, a narrow hot core line, and dark dust lanes cutting through.
+				if (u_nebulaParams.x > 0.0)
+				{
+					vec3 bandPole = normalize(u_nebulaAxis.xyz);
+					float hgt = dot(dir, bandPole);
+					float bw = max(u_nebulaParams.z, 0.01);
+					float bandFade = exp(-(hgt * hgt) / (bw * bw));
+					if (bandFade > 0.004)
+					{
+						vec3 p = (dir - bandPole * hgt * 0.25) * u_nebulaParams.y;
+						vec3 warp = vec3(fbmR(p * 0.8 + vec3(17.1, 3.7, 9.2), 3),
+						                 fbmR(p * 0.8 + vec3(27.3, 21.9, 5.8), 3),
+						                 fbmR(p * 0.8 + vec3(91.7, 63.2, 33.4), 3)) - 0.5;
+						vec3 q = p + warp * (1.7 + 2.6 * vnoise3(p * 3.1 + vec3(77.0, 1.0, 36.0)));
+						float gas  = fbmR(q, 5);
+						float fil  = 1.0 - abs(2.0 * fbmR(q * 2.2 + vec3(5.0, 27.0, 11.0), 4) - 1.0); // ridged
+						float dust = fbmR(q * 1.6 - warp * 1.2 + vec3(31.0, 71.0, 13.0), 4);
+						float gasD = smoothstep(0.10, 0.78, gas);
+						float filD = pow(fil, 3.0) * smoothstep(0.14, 0.70, gas);
+						float coreLine = exp(-(hgt * hgt) / (bw * bw * 0.52)); // narrow hot line along the band center
+						float dustCut = 1.0 - u_nebulaParams.w * smoothstep(0.36, 0.72, dust) * mix(0.5, 1.0, coreLine) * bandFade;
+						float vary = smoothstep(0.88, 0.72, fbm3(q * 0.35 + vec3(1.2, 1.3, 2.9), 5, 0.0));
+						float dens = (gasD * 0.25 + filD * 0.4 + coreLine * gasD * 0.4) * dustCut * bandFade * (0.5 + 5.4 * vary);
+						float hueT = fbm3(q * 0.5 + vec3(3.0, 29.0, 3.0), 3, 0.0);
+						float t = hueT * 2.2 + dust * 0.6;
+						vec3 hue = vec3(0.5) + vec3(0.5) * cos(6.2831853 * (t + vec3(0.00, 0.30, 0.60)));
+						hue = mix(vec3(dot(hue, vec3(0.333))), hue, 0.65); // saturation push for vibrancy
+						hue = clamp(mix(hue, vec3(0.95), clamp(dens * 0.6, 0.0, 0.55)), 0.0, 1.0);
+						float grain = vnoise3(dir * u_nebulaParams.y * 1.0);
+						vec3 neb = hue * dens * (0.08 + 0.14 * grain * grain);
+
+						vec3 dir = dir * 155.753;
+						vec3 sd2 = dir * 100.0 + warp * 31.0;
+						float h2 = hash13(floor(sd2));
+						if (h2 > 1.0 - dens * 0.45)
+						{
+							bool taaEnabled = u_taaJitter.x != 0;
+							vec3 ofs2 = fract(h2 * vec3(113.1, 42.7, 743.3)) * 0.8 + 0.25;
+							float pt = smoothstep(taaEnabled ? 0.44 : 0.2, 0.0, length(fract(sd2) - ofs2));
+							neb += mix(vec3(1.0), hue, 0.35) * (pt * (0.3 + (taaEnabled ? 5.7 : 1.7) * fract(h2 * 27.3)));
+						}
+
+						color += neb * (u_nebulaParams.x * 0.9) * nightVis * transmittance.b;
+					}
+				}
+
+				if (u_skySunParams.w > 0.0)
+				{
+					vec3 sd = dir * 220.0;
+					vec3 cell = floor(sd);
+					float h = hash13(cell);
+					float gate = step(mix(0.9995, 0.995, u_skySunParams.w), h); // density: fraction of lit cells
+					if (gate > 0.0)
+					{
+						// Round point at a hashed position inside the cell; size/brightness vary per star,
+						// with a slow twinkle. Size variation skews small (most stars tiny, a few big), and
+						// color variation tints each star along a cool/warm "temperature" axis.
+						vec3 ofs = fract(h * vec3(113.1, 412.7, 743.3)) * 0.5 + 0.25;
+						float radius = 0.52 * u_starParams.x * mix(1.0, 0.3 + 1.3 * fract(h * 57.31), u_starParams.y);
+						float core = smoothstep(radius, 0.0, length(fract(sd) - ofs));
+						// Twinkle = two octaves of value noise sampled along the time axis (per-star rate and
+						// row, so every star walks its own random curve instead of a periodic wave), then
+						// squared so it reads as mostly-steady with occasional brighter glints.
+						float tt = u_timeSeconds * mix(0.5, 1.4, fract(h * 37.7));
+						float n = 0.75 * vnoise(vec2(tt, h * 797.0)) + 0.25 * vnoise(vec2(tt * 2.3 + 13.1, h * 311.0));
+						float twinkle = 0.65 + 0.7 * n * n;
+						vec3 tint = mix(vec3(1), 
+										mix(vec3(0.1, 0.52, 0.20), 
+											vec3(0.95, 0.40, 0.7), 
+											fract(h * 636)
+										), 
+									u_starParams.w);
+						color += tint * (core * twinkle * (0.5 + h) * u_starParams.z) * nightVis * transmittance.b;
+					}
 				}
 			}
 		}

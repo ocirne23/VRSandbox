@@ -119,6 +119,12 @@ export namespace RendererVKLayout
         glm::vec4 fogParams2; // x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal blend
         glm::vec4 fogParams3; // x = sun boost, y = ambient boost, z = enabled, w = light shadow rays
         glm::vec4 fogParams4; // x = sun shadow rays, y = spatial filter, z = GI ambient, w = sun shadow softness (rad)
+
+        glm::vec4 moonParams; // xyz = normalized direction towards the moon, w = cos of the moon disc radius
+
+        glm::vec4 starParams;   // x = star size, y = size variation, z = brightness, w = color variation
+        glm::vec4 nebulaParams; // x = intensity, y = noise scale, z = band width, w = dust lane strength
+        glm::vec4 nebulaAxis;   // xyz = normalized milky-way band pole (band lies on its great circle), w unused
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};
