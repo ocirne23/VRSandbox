@@ -388,7 +388,7 @@ void main()
 					vec3 n = normalize(mT * duv.x + mB * duv.y - moonDir * sqrt(1.0 - r2));
 					float lambert = clamp(dot(n, L), 0.0, 1.0);
 					float albedo = 0.7 + 0.6 * (fbm3(n * 7.0, 3, 0.0) - 0.5); // maria/crater mottling
-					float feather = smoothstep(1.0, 0.92, r2);                 // rim anti-aliasing
+					float feather = smoothstep(1.0, 0.99, r2);                 // rim anti-aliasing
 					color += vec3(0.93, 0.95, 1.0) * (lambert * albedo * u_cloudParams2.w) * feather * transmittance;
 					moonOcclusion = feather;
 				}
