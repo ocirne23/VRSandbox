@@ -93,6 +93,7 @@ bool Device::initialize()
         // Lets the forward pass's cached draw CB keep its denoised-AO image descriptor refreshed each frame
         // (the AO image is ping-ponged per frame and recreated on resize) without re-recording the CB.
         .descriptorBindingSampledImageUpdateAfterBind = vk::True,
+        .descriptorBindingPartiallyBound = vk::True, // texture arrays are written up to the live texture count only
         .descriptorBindingVariableDescriptorCount = vk::True,
         .runtimeDescriptorArray = vk::True,
         .bufferDeviceAddress = vk::True, // required by VK_EXT_device_generated_commands (indirect/preprocess buffers are referenced by device address)
@@ -151,11 +152,13 @@ bool Device::initialize()
     }
     m_commandPool = commandPoolResult.value;
 
-    const uint32 poolSize = 1024; // bumped: the GI trace set also binds a MAX_TEXTURES sampler array
+    const uint32 poolSize = 1024;
     vk::DescriptorPoolSize poolSizes[] =
     {
         { vk::DescriptorType::eSampler, poolSize * 4 },
-        { vk::DescriptorType::eCombinedImageSampler, poolSize * 4 },
+        // Several sets bind a texture array whose capacity can grow at runtime up to TextureManager's
+        // 16K soft cap (per frame in flight + re-allocations on growth), so provision generously.
+        { vk::DescriptorType::eCombinedImageSampler, 256 * 1024 },
         { vk::DescriptorType::eSampledImage, poolSize },
         { vk::DescriptorType::eStorageImage, poolSize },
         { vk::DescriptorType::eUniformTexelBuffer, poolSize },

@@ -10,6 +10,7 @@ export struct ComputePipelineLayout
     std::string computeShaderDebugFilePath;
     std::vector<ShaderDefine> defines;
     std::vector<vk::DescriptorSetLayoutBinding> descriptorSetLayoutBindings;
+    std::vector<vk::DescriptorBindingFlags> descriptorBindingFlags; // parallel to descriptorSetLayoutBindings (optional)
     std::vector<vk::PushConstantRange> pushConstantRanges;
 };
 

@@ -34,25 +34,22 @@ namespace
     }
 }
 
-void GIProbePipeline::initialize()
+void GIProbePipeline::initialize(uint32 maxTlasInstances, uint32 maxTextures, uint32 numTextureDescriptors)
 {
     m_textureSampler.initialize();
 
     m_giGridData.initialize(RendererVKLayout::GI_GRID_DATA_BUFFER_SIZE,
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-    for (Buffer& instBuf : m_tlasInstanceBuffer)
-        instBuf.initialize((vk::DeviceSize)RendererVKLayout::GI_MAX_TLAS_INSTANCES * RendererVKLayout::GI_TLAS_INSTANCE_SIZE,
-            vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
+    resizeTlasInstanceBuffers(maxTlasInstances);
 
-    ComputePipelineLayout tlasLayout;  buildTlasInstanceLayout(tlasLayout); m_tlasInstancePipeline.initialize(tlasLayout);
-    ComputePipelineLayout traceLayout; buildTraceLayout(traceLayout);       m_tracePipeline.initialize(traceLayout);
+    ComputePipelineLayout tlasLayout;  buildTlasInstanceLayout(tlasLayout);     m_tlasInstancePipeline.initialize(tlasLayout);
+    ComputePipelineLayout traceLayout; buildTraceLayout(traceLayout, maxTextures); m_tracePipeline.initialize(traceLayout);
 
     for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
     {
         m_tlasInstanceSets[i].initialize(m_tlasInstancePipeline.getDescriptorSetLayout());
-        m_traceSets[i].initialize(m_tracePipeline.getDescriptorSetLayout());
+        m_traceSets[i].initialize(m_tracePipeline.getDescriptorSetLayout(), numTextureDescriptors);
     }
 
     Tweak::intVar("RT/GI", "Rays Per Probe", &m_giRaysPerProbe, 1, 128);
@@ -60,10 +57,26 @@ void GIProbePipeline::initialize()
     Tweak::floatVar("RT/GI", "Max Ray Distance", &m_giMaxRayDist, 0.0f, 128.0f);
 }
 
-void GIProbePipeline::reloadShaders()
+void GIProbePipeline::resizeTlasInstanceBuffers(uint32 maxTlasInstances)
+{
+    for (Buffer& instBuf : m_tlasInstanceBuffer)
+        instBuf.initialize((vk::DeviceSize)maxTlasInstances * RendererVKLayout::GI_TLAS_INSTANCE_SIZE,
+            vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
+}
+
+void GIProbePipeline::resizeTextureDescriptors(uint32 numTextureDescriptors)
+{
+    // Variable-count texture binding: only the trace descriptor sets need re-allocating with the grown
+    // count; the layout and pipeline declare the fixed device-limit cap and stay untouched.
+    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+        m_traceSets[i].initialize(m_tracePipeline.getDescriptorSetLayout(), numTextureDescriptors);
+}
+
+void GIProbePipeline::reloadShaders(uint32 maxTextures)
 {
     ComputePipelineLayout tlasLayout;  buildTlasInstanceLayout(tlasLayout);
-    ComputePipelineLayout traceLayout; buildTraceLayout(traceLayout);
+    ComputePipelineLayout traceLayout; buildTraceLayout(traceLayout, maxTextures);
     bool ok = m_tlasInstancePipeline.reloadShaders(tlasLayout);
     ok = m_tracePipeline.reloadShaders(traceLayout) && ok;
     if (!ok)
@@ -79,7 +92,7 @@ void GIProbePipeline::buildTlasInstanceLayout(ComputePipelineLayout& layout)
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(TlasInstancePC) });
 }
 
-void GIProbePipeline::buildTraceLayout(ComputePipelineLayout& layout)
+void GIProbePipeline::buildTraceLayout(ComputePipelineLayout& layout, uint32 maxTextures)
 {
     layout.computeShaderDebugFilePath = "Shaders/gi_probe_trace.cs.glsl";
     layout.computeShaderText = FileSystem::readFileStr(layout.computeShaderDebugFilePath);
@@ -94,9 +107,13 @@ void GIProbePipeline::buildTraceLayout(ComputePipelineLayout& layout)
     b.push_back(storageBinding(7)); // meshInfos
     b.push_back(storageBinding(8)); // meshInstances
     b.push_back(storageBinding(9)); // materials
-    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 10, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = RendererVKLayout::MAX_TEXTURES, .stageFlags = vk::ShaderStageFlagBits::eCompute }); // textures
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 11, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute }); // shadow map
     b.push_back(storageBinding(12)); // GI clipmap SH volume (read + write)
+    // Texture array last (13 = the set's highest binding number, required for eVariableDescriptorCount):
+    // the layout declares the fixed device-limit cap, the live size comes from the set allocation.
+    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 13, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eCompute }); // textures
+    layout.descriptorBindingFlags.resize(b.size());
+    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(TracePC) });
 }
 
@@ -159,7 +176,7 @@ void GIProbePipeline::recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx,
     updates.push_back(DescriptorSetUpdateInfo{ .binding = 8, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.meshInstances) } });
     updates.push_back(DescriptorSetUpdateInfo{ .binding = 9, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.materialInfos) } });
 
-    DescriptorSetUpdateInfo texUpdate{ .binding = 10, .type = vk::DescriptorType::eCombinedImageSampler };
+    DescriptorSetUpdateInfo texUpdate{ .binding = 13, .type = vk::DescriptorType::eCombinedImageSampler };
     const std::vector<Texture>& textures = Globals::textureManager.getTextures();
     for (const Texture& tex : textures)
         texUpdate.imageInfos.push_back(vk::DescriptorImageInfo{ .sampler = m_textureSampler.getSampler(), .imageView = tex.getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal });

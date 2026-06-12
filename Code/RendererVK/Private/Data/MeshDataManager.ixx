@@ -1,6 +1,7 @@
 export module RendererVK:MeshDataManager;
 
 import Core;
+import :VK;
 import :Layout;
 import :Buffer;
 
@@ -25,16 +26,24 @@ public:
     size_t getVertexBufUsed() const { return m_vertexBufOffset; }
     size_t getIndexBufUsed() const { return m_indexBufOffset; }
 
+    // Bumped whenever a mega-buffer is reallocated (capacity growth). The Renderer compares this each
+    // frame and re-records its command buffers when it changes (they bind the buffers by handle).
+    uint32 getGeneration() const { return m_generation; }
+
 private:
 
     friend class ObjectContainer;
     size_t uploadVertexData(const void* pData, size_t size);
     size_t uploadIndexData(const void* pData, size_t size);
 
+    // Doubles the buffer until neededSize fits, GPU-copying the used range into the new allocation.
+    void growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSize, size_t neededSize, vk::BufferUsageFlags usage);
+
 private:
 
     Buffer m_vertexBuffer;
     Buffer m_indexBuffer;
+    uint32 m_generation = 0;
 
     size_t m_vertexBufSize = 0;
     size_t m_indexBufSize = 0;

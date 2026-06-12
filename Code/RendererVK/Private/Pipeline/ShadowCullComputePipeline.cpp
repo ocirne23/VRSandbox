@@ -8,26 +8,38 @@ import :Layout;
 ShadowCullComputePipeline::ShadowCullComputePipeline() {}
 ShadowCullComputePipeline::~ShadowCullComputePipeline() {}
 
-void ShadowCullComputePipeline::initialize()
+void ShadowCullComputePipeline::initialize(uint32 maxMeshInstances, uint32 maxUniqueMeshes)
 {
-    for (PerFrameData& perFrame : m_perFrameData)
-    {
-        perFrame.outMeshInstancesBuffer.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::OutShadowMeshInstance), // 6
-            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-        perFrame.outMeshInstanceIndexesBuffer.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(uint32), // 7
-            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-        perFrame.outIndirectCommandBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::IndirectDrawSequence), // 8 (single opaque region)
-            vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
-    }
+    resizeInstanceBuffers(maxMeshInstances);
+    resizeCommandBuffers(maxUniqueMeshes);
 
     ComputePipelineLayout computePipelineLayout;
     buildComputeLayout(computePipelineLayout);
     m_computePipeline.initialize(computePipelineLayout);
+}
+
+void ShadowCullComputePipeline::resizeInstanceBuffers(uint32 maxMeshInstances)
+{
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        perFrame.outMeshInstancesBuffer.initialize(maxMeshInstances * sizeof(RendererVKLayout::OutShadowMeshInstance), // 6
+            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+        perFrame.outMeshInstanceIndexesBuffer.initialize(maxMeshInstances * sizeof(uint32), // 7
+            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
+    }
+}
+
+void ShadowCullComputePipeline::resizeCommandBuffers(uint32 maxUniqueMeshes)
+{
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        perFrame.outIndirectCommandBuffer.initialize(maxUniqueMeshes * sizeof(RendererVKLayout::IndirectDrawSequence), // 8 (single opaque region)
+            vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
+    }
 }
 
 void ShadowCullComputePipeline::reloadShaders()

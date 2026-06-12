@@ -12,11 +12,22 @@ DescriptorSet::~DescriptorSet()
         m_descriptorSet = nullptr;
     }
 }
-bool DescriptorSet::initialize(vk::DescriptorSetLayout descriptorSetLayout)
+bool DescriptorSet::initialize(vk::DescriptorSetLayout descriptorSetLayout, uint32 variableDescriptorCount)
 {
     vk::Device vkDevice = Globals::device.getDevice();
+    if (m_descriptorSet) // re-initialize (e.g. the variable descriptor count grew): release the old set back to the pool
+    {
+        vkDevice.freeDescriptorSets(Globals::device.getDescriptorPool(), m_descriptorSet);
+        m_descriptorSet = nullptr;
+    }
+    vk::DescriptorSetVariableDescriptorCountAllocateInfo variableCountInfo
+    {
+        .descriptorSetCount = 1,
+        .pDescriptorCounts = &variableDescriptorCount,
+    };
     vk::DescriptorSetAllocateInfo allocInfo
     {
+        .pNext = variableDescriptorCount > 0 ? &variableCountInfo : nullptr,
         .descriptorPool = Globals::device.getDescriptorPool(),
         .descriptorSetCount = 1,
         .pSetLayouts = &descriptorSetLayout,

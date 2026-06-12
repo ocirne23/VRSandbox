@@ -33,7 +33,8 @@ public:
         Buffer& materialInfoBuffer;
         Buffer& instanceIdxBuffer;
         Buffer& meshInstanceBuffer;
-        Buffer& indirectCommandBuffer;
+        Buffer& indirectCommandBuffer;            // opaque draw sequences
+        Buffer& transparentIndirectCommandBuffer; // transparent draw sequences
 
         Buffer& lightInfosBuffer;
 		Buffer& lightGridsBuffer;
@@ -52,8 +53,10 @@ public:
 		vk::Sampler gbufferSampler;
     };
 
-    void initialize(RenderPass& renderPass);
-    void reloadShaders();
+    void initialize(RenderPass& renderPass, uint32 maxUniqueMeshes, uint32 maxTextures);
+    void reloadShaders(uint32 maxTextures);
+    // Re-sizes the DGC preprocess scratch for a grown unique-mesh capacity (GPU must be idle).
+    void resizeMeshCapacity(uint32 maxUniqueMeshes);
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
     // Refresh the denoised-AO image binding on a descriptor set (call each frame; the draw CB is cached and
     // the AO image is recreated on resize).
@@ -68,7 +71,7 @@ public:
 
 private:
 
-    void buildPipelineLayout(GraphicsPipelineLayout& layout);
+    void buildPipelineLayout(GraphicsPipelineLayout& layout, uint32 maxTextures);
 
     GraphicsPipeline m_graphicsPipeline;
     IndirectExecutionSet m_indirectExecutionSet;
@@ -80,6 +83,8 @@ private:
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;            // opaque pass
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_transparentPreprocessBuffers; // transparent pass
 
+    void createPreprocessBuffers(uint32 maxUniqueMeshes);
+
     // Issues one vkCmdExecuteGeneratedCommandsEXT over the given indirect/preprocess buffers.
-    void recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes, vk::DeviceSize indirectOffset = 0);
+    void recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes);
 };

@@ -15,7 +15,7 @@ import :TextureManager;
 StaticMeshGraphicsPipeline::StaticMeshGraphicsPipeline() {}
 StaticMeshGraphicsPipeline::~StaticMeshGraphicsPipeline() {}
 
-void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& graphicsPipelineLayout)
+void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& graphicsPipelineLayout, uint32 maxTextures)
 {
     graphicsPipelineLayout.vertexShader.debugFilePath = "Shaders/instanced_indirect.vs.glsl";
     graphicsPipelineLayout.fragmentShader.debugFilePath = "Shaders/instanced_indirect.fs.glsl";
@@ -146,10 +146,13 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
+    // 18 = the set's highest binding number: required for eVariableDescriptorCount. descriptorCount is
+    // the fixed device-limit cap; the actual array size is supplied per descriptor set allocation, so
+    // texture capacity growth never has to recreate this layout (or the pipeline/DGC state built on it).
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_textures
-        .binding = 7,
+        .binding = 18,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-        .descriptorCount = RendererVKLayout::MAX_TEXTURES,
+        .descriptorCount = maxTextures,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_shadowMap (sun CSM, comparison)
@@ -196,11 +199,17 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
 
-    // The AO and TLAS bindings are refreshed after the (cached) draw CB is recorded, so flag them
-    // UPDATE_AFTER_BIND. Parallel to descriptorSetBindings; all other bindings keep default (no) flags.
+    // Per-binding flags (parallel to descriptorSetBindings): the AO (13) and TLAS (11) bindings are
+    // refreshed after the (cached) draw CB is recorded -> UPDATE_AFTER_BIND; the texture array (18) is
+    // variable-count (allocated at the live texture capacity) and only partially written.
     graphicsPipelineLayout.descriptorBindingFlags.resize(descriptorSetBindings.size());
-    graphicsPipelineLayout.descriptorBindingFlags[descriptorSetBindings.size() - 2] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
-    graphicsPipelineLayout.descriptorBindingFlags[descriptorSetBindings.size() - 1] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
+    for (size_t i = 0; i < descriptorSetBindings.size(); ++i)
+    {
+        if (descriptorSetBindings[i].binding == 11 || descriptorSetBindings[i].binding == 13)
+            graphicsPipelineLayout.descriptorBindingFlags[i] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
+        else if (descriptorSetBindings[i].binding == 18)
+            graphicsPipelineLayout.descriptorBindingFlags[i] = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+    }
 }
 
 void StaticMeshGraphicsPipeline::updateAODescriptor(vk::DescriptorSet descriptorSet, vk::ImageView aoView, vk::Sampler aoSampler)
@@ -224,25 +233,35 @@ void StaticMeshGraphicsPipeline::updateTlasDescriptor(vk::DescriptorSet descript
     Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
 
-void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
+void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass, uint32 maxUniqueMeshes, uint32 maxTextures)
 {
     m_pRenderPass = &renderPass;
     m_sampler.initialize();
 
     GraphicsPipelineLayout graphicsPipelineLayout;
-    buildPipelineLayout(graphicsPipelineLayout);
+    buildPipelineLayout(graphicsPipelineLayout, maxTextures);
     m_graphicsPipeline.initialize(renderPass, graphicsPipelineLayout);
 
     m_indirectExecutionSet.initialize(m_graphicsPipeline);
     m_indirectCommandsLayout.initialize(m_graphicsPipeline.getPipelineLayout(),
         vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
 
+    createPreprocessBuffers(maxUniqueMeshes);
+}
+
+void StaticMeshGraphicsPipeline::resizeMeshCapacity(uint32 maxUniqueMeshes)
+{
+    createPreprocessBuffers(maxUniqueMeshes);
+}
+
+void StaticMeshGraphicsPipeline::createPreprocessBuffers(uint32 maxUniqueMeshes)
+{
     // Size the preprocess scratch buffer for the worst case (one sequence per unique mesh).
     vk::GeneratedCommandsMemoryRequirementsInfoEXT memReqInfo{
         .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
         .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
-        .maxSequenceCount = RendererVKLayout::MAX_UNIQUE_MESHES,
-        .maxDrawCount = RendererVKLayout::MAX_UNIQUE_MESHES,
+        .maxSequenceCount = maxUniqueMeshes,
+        .maxDrawCount = maxUniqueMeshes,
     };
     vk::MemoryRequirements2 memReq;
     Globals::device.getDevice().getGeneratedCommandsMemoryRequirementsEXT(&memReqInfo, &memReq);
@@ -264,13 +283,13 @@ void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass)
     }
 }
 
-void StaticMeshGraphicsPipeline::reloadShaders()
+void StaticMeshGraphicsPipeline::reloadShaders(uint32 maxTextures)
 {
     if (!m_pRenderPass)
         return;
 
     GraphicsPipelineLayout graphicsPipelineLayout;
-    buildPipelineLayout(graphicsPipelineLayout);
+    buildPipelineLayout(graphicsPipelineLayout, maxTextures);
     if (!m_graphicsPipeline.reloadShaders(*m_pRenderPass, graphicsPipelineLayout))
     {
         printf("StaticMeshGraphicsPipeline: shader reload failed, keeping previous pipeline\n");
@@ -406,7 +425,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
         },
 
         DescriptorSetUpdateInfo{
-            .binding = 7,
+            .binding = 18,
             .type = vk::DescriptorType::eCombinedImageSampler,
         },
     };
@@ -432,17 +451,16 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, {0});
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
     recordExecuteGeneratedCommands(vkCommandBuffer, params.indirectCommandBuffer, m_preprocessBuffers[frameIdx], numMeshes);
-    recordExecuteGeneratedCommands(vkCommandBuffer, params.indirectCommandBuffer, m_transparentPreprocessBuffers[frameIdx], numMeshes,
-        RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::IndirectDrawSequence));
+    recordExecuteGeneratedCommands(vkCommandBuffer, params.transparentIndirectCommandBuffer, m_transparentPreprocessBuffers[frameIdx], numMeshes);
 }
 
-void StaticMeshGraphicsPipeline::recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes, vk::DeviceSize indirectOffset)
+void StaticMeshGraphicsPipeline::recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes)
 {
     vk::GeneratedCommandsInfoEXT generatedCommandsInfo{
         .shaderStages = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
         .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
         .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
-        .indirectAddress = indirectCommandBuffer.getDeviceAddress() + indirectOffset,
+        .indirectAddress = indirectCommandBuffer.getDeviceAddress(),
         .indirectAddressSize = numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence),
         .preprocessAddress = m_preprocessSize > 0 ? preprocessBuffer.getDeviceAddress() : 0,
         .preprocessSize = m_preprocessSize,

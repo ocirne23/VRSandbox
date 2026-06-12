@@ -19,7 +19,7 @@ layout (binding = 2, std430) readonly buffer InMaterialInfos
     MaterialInfo in_materialInfos[];
 };
 
-layout (binding = 7) uniform sampler2D u_textures[];
+layout (binding = 18) uniform sampler2D u_textures[]; // highest binding in the set: variable descriptor count
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;

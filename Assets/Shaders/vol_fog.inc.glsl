@@ -12,9 +12,7 @@
 #ifndef VOL_FOG_INC_GLSL
 #define VOL_FOG_INC_GLSL
 
-#define VOL_FROXEL_X 160
-#define VOL_FROXEL_Y 90
-#define VOL_FROXEL_Z 64
+// VOL_FROXEL_X/Y/Z are injected by the engine from RendererVKLayout (Layout.ixx)
 #define VOL_FOG_NEAR 1.25
 
 float volFogFar() { return max(u_fogParams0.w, VOL_FOG_NEAR + 1.0); }

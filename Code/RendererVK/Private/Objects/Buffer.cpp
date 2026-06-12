@@ -84,7 +84,13 @@ vk::DeviceAddress Buffer::getDeviceAddress() const
 
 std::span<uint8> Buffer::mapMemory(uint64 offset, uint64 size)
 {
-    vk::ResultValue<void*> result = Globals::device.getDevice().mapMemory(m_memory, offset, size);
+    const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
+    vk::DeviceSize mapSize = (size == (size_t)vk::WholeSize) ? vk::WholeSize : ((size + atomSize - 1) & ~(atomSize - 1));
+    if (mapSize != vk::WholeSize && mapSize > m_size - offset)
+    {
+        mapSize = vk::WholeSize;
+    }
+    vk::ResultValue<void*> result = Globals::device.getDevice().mapMemory(m_memory, offset, mapSize);
     if (result.result != vk::Result::eSuccess)
     {
         assert(false && "Failed to map buffer memory");

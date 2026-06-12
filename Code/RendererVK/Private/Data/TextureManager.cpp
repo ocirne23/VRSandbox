@@ -38,9 +38,29 @@ uint16 TextureManager::upload(const std::vector<ITextureData*>& textureData, boo
     return startIdx;
 }*/
 
+uint32 TextureManager::getDescriptorCap() const
+{
+	const uint32 deviceLimit = Globals::device.getPhysicalDevice().getProperties().limits.maxPerStageDescriptorSampledImages;
+	return std::min({ deviceLimit - 16u, (uint32)UINT16_MAX - 1u, 16u * 1024u });
+}
+
 uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips)
 {
 	assert(m_textures.size() < UINT16_MAX && "Too many textures");
+	if ((uint32)m_textures.size() >= m_maxTextures)
+	{
+		const uint32 maxCapacity = getDescriptorCap();
+		if (m_maxTextures < maxCapacity)
+		{
+			m_maxTextures = std::min(m_maxTextures * 2u, maxCapacity);
+			m_generation++;
+			printf("TextureManager: grew texture capacity to %u\n", m_maxTextures);
+		}
+		else
+		{
+			assert(false && "Texture capacity at device limit");
+		}
+	}
 	const uint16 idx = (uint16)m_textures.size();
 	m_textures.emplace_back();
 	if (!m_textures[idx].initialize(textureData, generateMips))

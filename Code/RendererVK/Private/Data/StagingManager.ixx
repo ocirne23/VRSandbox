@@ -21,6 +21,9 @@ public:
     vk::Semaphore uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, uint32 mipLevel, vk::DeviceSize dstOffset = 0);
     vk::Semaphore uploadImageAndGenerateMipMaps(vk::Image image, uint32 imageWidth, uint32 imageHeight, uint32 numMipLevels, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
     vk::Semaphore update();
+    // Submits any queued copies now so their destination buffers can be destroyed (capacity growth).
+    // The signal semaphore is kept as m_nextUpdateSemaphore so the next update() consumes it.
+    void flushPending() { m_nextUpdateSemaphore = update(); }
 
 private:
 

@@ -29,9 +29,12 @@ public:
         Buffer& inMaterialInfoBuffer;         // 9 - resolves the alpha-mask texture per caster
     };
 
-    void initialize();
+    void initialize(uint32 maxMeshInstances, uint32 maxUniqueMeshes);
     void reloadShaders();
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
+    // Capacity growth (caller must have the GPU idle and re-record command buffers afterwards).
+    void resizeInstanceBuffers(uint32 maxMeshInstances);
+    void resizeCommandBuffers(uint32 maxUniqueMeshes);
 
     Buffer& getIndirectCommandBuffer(uint32 frameIdx) { return m_perFrameData[frameIdx].outIndirectCommandBuffer; }
     Buffer& getInstanceIdxBuffer(uint32 frameIdx)     { return m_perFrameData[frameIdx].outMeshInstanceIndexesBuffer; }
@@ -49,7 +52,7 @@ private:
     {
         Buffer outMeshInstancesBuffer;       // 6
         Buffer outMeshInstanceIndexesBuffer; // 7
-        Buffer outIndirectCommandBuffer;     // 8 - [0..MAX) opaque, [MAX..2*MAX) transparent
+        Buffer outIndirectCommandBuffer;     // 8 - single opaque region
     };
     std::array<PerFrameData, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_perFrameData;
 };

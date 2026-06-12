@@ -5,6 +5,7 @@ import File.FileSystem;
 import :VK;
 import :Device;
 import :glslang;
+import :Layout;
 
 Shader::Shader() {}
 Shader::~Shader()
@@ -122,9 +123,34 @@ private:
     std::vector<std::unique_ptr<IncludeResult>> m_results;
 };
 
+// RendererVKLayout constants every shader compile gets, so the GLSL never duplicates Layout.ixx values.
+static std::string buildLayoutPreamble()
+{
+    using namespace RendererVKLayout;
+    std::string s;
+    const auto def = [&s](const char* name, auto value, const char* suffix = "") {
+        s += "#define "; s += name; s += " " + std::to_string(value) + suffix + "\n";
+    };
+    def("NUM_SHADOW_CASCADES", NUM_SHADOW_CASCADES);
+    def("GI_SH_STRIDE", GI_SH_STRIDE);
+    def("GI_NUM_CASCADES", GI_NUM_CASCADES);
+    def("GI_CASCADE_PROBE_DIM", GI_CASCADE_PROBE_DIM);
+    def("GI_CASCADE_BASE_SPACING", GI_CASCADE_BASE_SPACING);
+    def("VOL_FROXEL_X", VOL_FROXEL_X);
+    def("VOL_FROXEL_Y", VOL_FROXEL_Y);
+    def("VOL_FROXEL_Z", VOL_FROXEL_Z);
+    def("ALPHA_MODE_OPAQUE", (uint32)EAlphaMode::Opaque, "u");
+    def("ALPHA_MODE_MASK", (uint32)EAlphaMode::Mask, "u");
+    def("ALPHA_MODE_BLEND", (uint32)EAlphaMode::Blend, "u");
+    def("MATERIAL_FLAG_NO_RAYTRACING", MATERIAL_FLAG_NO_RAYTRACING, "u");
+    def("MATERIAL_FLAG_SKY", MATERIAL_FLAG_SKY, "u");
+    return s;
+}
+
 static std::string buildPreamble(const std::vector<ShaderDefine>& defines)
 {
     std::string preamble = "#extension GL_ARB_shading_language_include : require\n";
+    preamble += buildLayoutPreamble();
     for (const ShaderDefine& define : defines)
     {
         preamble += "#define " + define.name;

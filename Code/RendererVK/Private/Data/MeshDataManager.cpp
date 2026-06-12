@@ -3,7 +3,26 @@ module RendererVK:MeshDataManager;
 import Core;
 import :StagingManager;
 import :Buffer;
+import :CommandBuffer;
 import :Device;
+
+namespace
+{
+    constexpr vk::BufferUsageFlags rtUsage()
+    {
+        return vk::BufferUsageFlagBits::eShaderDeviceAddress
+            | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR
+            | vk::BufferUsageFlagBits::eStorageBuffer;
+    }
+    constexpr vk::BufferUsageFlags vertexBufferUsage()
+    {
+        return vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eVertexBuffer | rtUsage();
+    }
+    constexpr vk::BufferUsageFlags indexBufferUsage()
+    {
+        return vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eIndexBuffer | rtUsage();
+    }
+}
 
 MeshDataManager::MeshDataManager()
 {
@@ -25,32 +44,61 @@ bool MeshDataManager::initialize(size_t vertexBufSize, size_t indexBufSize)
 
     // Extra usage beyond vertex/index: the GI ray tracer builds BLASes directly from these mega-buffers
     // (eAccelerationStructureBuildInputReadOnlyKHR + eShaderDeviceAddress) and fetches hit-triangle
-    // attributes from them in the probe-trace compute shader (eStorageBuffer).
-    const vk::BufferUsageFlags rtUsage = vk::BufferUsageFlagBits::eShaderDeviceAddress
-        | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR
-        | vk::BufferUsageFlagBits::eStorageBuffer;
-    m_vertexBuffer.initialize(vertexBufSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer | rtUsage, vk::MemoryPropertyFlagBits::eDeviceLocal);
-    m_indexBuffer.initialize(indexBufSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer | rtUsage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    // attributes from them in the probe-trace compute shader (eStorageBuffer). eTransferSrc enables the
+    // GPU copy that carries contents over on capacity growth.
+    m_vertexBuffer.initialize(vertexBufSize, vertexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal);
+    m_indexBuffer.initialize(indexBufSize, indexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     return true;
 }
 
+void MeshDataManager::growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSize, size_t neededSize, vk::BufferUsageFlags usage)
+{
+    size_t newSize = bufSize;
+    while (newSize < neededSize)
+        newSize *= 2;
+
+    // Queued staging copies may target the buffer being replaced; submit them, then drain the GPU so
+    // neither the old buffer nor its readers are in flight.
+    Globals::stagingManager.flushPending();
+    auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle in MeshDataManager::growBuffer");
+
+    Buffer oldBuffer = std::move(buffer);
+    buffer.initialize(newSize, usage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    if (usedSize > 0)
+    {
+        CommandBuffer copyCommandBuffer;
+        copyCommandBuffer.initialize(vk::CommandBufferLevel::ePrimary);
+        vk::CommandBuffer vkCmd = copyCommandBuffer.begin(true);
+        const vk::BufferCopy region{ .srcOffset = 0, .dstOffset = 0, .size = usedSize };
+        vkCmd.copyBuffer(oldBuffer.getBuffer(), buffer.getBuffer(), 1, &region);
+        copyCommandBuffer.end();
+        copyCommandBuffer.submitGraphics();
+        auto copyWaitResult = Globals::device.getGraphicsQueue().waitIdle();
+        assert(copyWaitResult == vk::Result::eSuccess && "Failed to wait for grow copy in MeshDataManager::growBuffer");
+    }
+    bufSize = newSize;
+    m_generation++;
+    printf("MeshDataManager: grew buffer to %zu bytes\n", newSize);
+}
+
 size_t MeshDataManager::uploadVertexData(const void* pData, size_t size)
 {
-    assert(m_vertexBufOffset + size <= m_vertexBufSize);
+    if (m_vertexBufOffset + size > m_vertexBufSize)
+        growBuffer(m_vertexBuffer, m_vertexBufSize, m_vertexBufOffset, m_vertexBufOffset + size, vertexBufferUsage());
     const size_t offset = m_vertexBufOffset;
     Globals::stagingManager.upload(m_vertexBuffer.getBuffer(), size, pData, m_vertexBufOffset);
     m_vertexBufOffset += size;
-    assert(m_vertexBufOffset <= m_vertexBufSize);
     return offset;
 }
 
 size_t MeshDataManager::uploadIndexData(const void* pData, size_t size)
 {
-    assert(m_indexBufOffset + size <= m_indexBufSize);
+    if (m_indexBufOffset + size > m_indexBufSize)
+        growBuffer(m_indexBuffer, m_indexBufSize, m_indexBufOffset, m_indexBufOffset + size, indexBufferUsage());
     const size_t offset = m_indexBufOffset;
     Globals::stagingManager.upload(m_indexBuffer.getBuffer(), size, pData, m_indexBufOffset);
     m_indexBufOffset += size;
-    assert(m_indexBufOffset <= m_indexBufSize);
     return offset;
 }

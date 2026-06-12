@@ -16,7 +16,7 @@ AccelerationStructure::~AccelerationStructure()
             dev.destroyAccelerationStructureKHR(tlas);
 }
 
-void AccelerationStructure::initialize()
+void AccelerationStructure::initialize(uint32 maxUniqueMeshes)
 {
     vk::PhysicalDeviceAccelerationStructurePropertiesKHR asProps{};
     vk::PhysicalDeviceProperties2 props2{ .pNext = &asProps };
@@ -25,10 +25,21 @@ void AccelerationStructure::initialize()
     if (m_scratchAlignment == 0)
         m_scratchAlignment = 256;
 
-    m_blasAddressBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(uint64),
+    m_blasAddressBuffer.initialize(maxUniqueMeshes * sizeof(uint64),
         vk::BufferUsageFlagBits::eStorageBuffer,
         vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
     m_mappedBlasAddresses = m_blasAddressBuffer.mapMemory<uint64>();
+}
+
+void AccelerationStructure::resizeBlasAddressBuffer(uint32 maxUniqueMeshes)
+{
+    const std::vector<uint64> oldAddresses(m_mappedBlasAddresses.begin(), m_mappedBlasAddresses.end());
+    m_blasAddressBuffer.initialize(maxUniqueMeshes * sizeof(uint64),
+        vk::BufferUsageFlagBits::eStorageBuffer,
+        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+    m_mappedBlasAddresses = m_blasAddressBuffer.mapMemory<uint64>();
+    memcpy(m_mappedBlasAddresses.data(), oldAddresses.data(), oldAddresses.size() * sizeof(uint64));
+    m_blasAddressBuffer.flushMappedMemory(oldAddresses.size() * sizeof(uint64));
 }
 
 void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& outAlignedAddr, vk::DeviceSize needed)

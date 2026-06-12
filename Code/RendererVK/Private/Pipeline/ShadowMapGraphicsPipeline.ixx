@@ -36,16 +36,19 @@ public:
         Buffer& indirectCommandBuffer; // shadow cull's IndirectDrawSequence buffer (opaque region)
     };
 
-    void initialize(ShadowMap& shadowMap);
-    void reloadShaders();
+    void initialize(ShadowMap& shadowMap, uint32 maxUniqueMeshes, uint32 maxTextures);
+    void reloadShaders(uint32 maxTextures);
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
+    // Re-sizes the DGC preprocess scratch for a grown unique-mesh capacity (GPU must be idle).
+    void resizeMeshCapacity(uint32 maxUniqueMeshes);
 
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
 
 private:
 
-    void buildPipelineLayout(GraphicsPipelineLayout& layout);
-    void buildIndirectState();
+    void buildPipelineLayout(GraphicsPipelineLayout& layout, uint32 maxTextures);
+    void buildIndirectState(uint32 maxUniqueMeshes);
+    void createPreprocessBuffers(uint32 maxUniqueMeshes);
 
     GraphicsPipeline m_graphicsPipeline;
     IndirectCommandsLayout m_indirectCommandsLayout;

@@ -1,15 +1,12 @@
 #ifndef SHARED_CONSTANTS_INC_GLSL
 #define SHARED_CONSTANTS_INC_GLSL
 
-#define ALPHA_MODE_OPAQUE 0u
-#define ALPHA_MODE_MASK 1u
-#define ALPHA_MODE_BLEND 2u
-
-// MaterialInfo.flags bits (RendererVKLayout::MATERIAL_FLAG_*). Debug/gizmo geometry that never blocks
-// light: excluded from the TLAS (mask 0) and from the sun cascade caster cull.
-#define MATERIAL_FLAG_NO_RAYTRACING 0x80000000u
-// Sky sphere: skipped in the G-buffer prepass so its depth stays at the far plane (parallax-free TAA).
-#define MATERIAL_FLAG_SKY 0x40000000u
+// ALPHA_MODE_* (RendererVKLayout::EAlphaMode) and MATERIAL_FLAG_* (RendererVKLayout::MATERIAL_FLAG_*)
+// are injected by the engine from Layout.ixx.
+// MATERIAL_FLAG_NO_RAYTRACING: debug/gizmo geometry that never blocks light — excluded from the TLAS
+// (mask 0) and from the sun cascade caster cull.
+// MATERIAL_FLAG_SKY: sky sphere, skipped in the G-buffer prepass so its depth stays at the far plane
+// (parallax-free TAA).
 
 const uint EMPTY_ENTRY        = 0xFFFFFFFFu;
 const uint INITIALIZING_ENTRY = 0xEFFFFFFFu;

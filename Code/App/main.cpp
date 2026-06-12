@@ -29,7 +29,7 @@ int main()
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::DISABLED, EVSync::DISABLED); // ENABLED DISABLED
+    renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED); // ENABLED DISABLED
     renderer.setSunLight(glm::vec3(-0.5f, 1.0f, 0.1f), glm::vec3(1.0f), 3.0f);
 
     UI& ui = Globals::ui;
@@ -91,6 +91,7 @@ int main()
             for (int y = 0; y < spawnCountY; ++y)
                 spawnedNodes.push_back(container3.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(x * 30.0f, 2.0f, y * 20.0f), 1.0f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
     }*/
+    
     {
        std::unique_ptr<ISceneData> sceneData = ISceneData::createAssimpLoader();
        sceneData->initialize("Models/baseshapes.glb", false, false);
@@ -116,9 +117,22 @@ int main()
        skySphere.initialize(*sceneData, &overrides);
        spawnedNodes.push_back(skySphere.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(glm::vec3(0.0f), 1000.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
     }
-
+    
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
+            // spawn sponza at camera pos with T
+			if (evt.scancode == SDL_Scancode::SDL_SCANCODE_T && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+			{
+				const glm::vec3 camPos = cameraController.getPosition();
+				const glm::vec3 camForward = cameraController.getDirection();
+				const float spawnDistance = 10.0f;
+				const glm::vec3 spawnPos = camPos + camForward * spawnDistance;
+                glm::quat orientation = cameraController.getOrientation();
+                const glm::vec3 camUp = cameraController.getUp();
+                const glm::vec3 camRight = glm::normalize(glm::cross(cameraController.getDirection(), camUp));
+                orientation = glm::angleAxis(glm::radians(180.0f), camRight) * orientation;
+				spawnedNodes.push_back(container.spawnNodeForIdx(NodeSpawnIdx_ROOT, Transform(spawnPos, 1.0f, glm::normalize(orientation))));
+			}
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_P && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)

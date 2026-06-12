@@ -19,11 +19,17 @@ ComputePipeline::~ComputePipeline()
 bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
 {
     vk::Device vkDevice = Globals::device.getDevice();
+    vk::DescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo{
+        .bindingCount = (uint32)layout.descriptorBindingFlags.size(),
+        .pBindingFlags = layout.descriptorBindingFlags.data(),
+    };
     vk::DescriptorSetLayoutCreateInfo layoutInfo
     {
         .bindingCount = (uint32)layout.descriptorSetLayoutBindings.size(),
         .pBindings = layout.descriptorSetLayoutBindings.data(),
     };
+    if (!layout.descriptorBindingFlags.empty())
+        layoutInfo.pNext = &bindingFlagsInfo;
     auto layoutResult = vkDevice.createDescriptorSetLayout(layoutInfo);
     if (layoutResult.result != vk::Result::eSuccess)
     {

@@ -25,8 +25,14 @@ import :Layout;
 export class GIProbePipeline final
 {
 public:
-    void initialize();
-    void reloadShaders();
+    // maxTextures = fixed device-limit cap baked into the trace layout; numTextureDescriptors = live
+    // variable count the trace sets are allocated with. Both owned by the Renderer.
+    void initialize(uint32 maxTlasInstances, uint32 maxTextures, uint32 numTextureDescriptors);
+    void reloadShaders(uint32 maxTextures);
+    // Grows the per-frame TLAS instance buffers (GPU scratch, nothing preserved; GPU must be idle).
+    void resizeTlasInstanceBuffers(uint32 maxTlasInstances);
+    // Re-allocates the trace descriptor sets with a grown live texture count (GPU must be idle).
+    void resizeTextureDescriptors(uint32 numTextureDescriptors);
 
     // One-time clear of BOTH ping-pong grid tables (so the first frames' prev lookups are empty).
     void recordClearPersistent(CommandBuffer& commandBuffer);
@@ -76,7 +82,7 @@ public:
 
 private:
     void buildTlasInstanceLayout(ComputePipelineLayout& layout);
-    void buildTraceLayout(ComputePipelineLayout& layout);
+    void buildTraceLayout(ComputePipelineLayout& layout, uint32 maxTextures);
     void buildDebugLayout(GraphicsPipelineLayout& layout);
 
     ComputePipeline m_tlasInstancePipeline;

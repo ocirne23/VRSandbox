@@ -10,24 +10,14 @@
 // For the write side (trace) also define GI_PROBE_WRITE.
 //
 // Requires shared.inc.glsl (PI) (u_viewPos — the camera, which centers the cascades).
-// GI_* sizing constants must match RendererVKLayout (Layout.ixx).
 
 #ifndef GI_PROBE_INC_GLSL
 #define GI_PROBE_INC_GLSL
 
-#define GI_SH_STRIDE 12 // SH-L1 RGB: 4 coeffs * 3 channels
+// GI_SH_STRIDE, GI_NUM_CASCADES, GI_CASCADE_PROBE_DIM and GI_CASCADE_BASE_SPACING are injected by the
+// engine from RendererVKLayout (Layout.ixx).
 #define GI_PROBE_STRIDE (GI_SH_STRIDE + 1) // SH + 1 mean free-space distance (visibility), at word +12
 
-// --- Cascade configuration (must match RendererVKLayout) ---------------------------------------------
-#ifndef GI_NUM_CASCADES
-#define GI_NUM_CASCADES 4
-#endif
-#ifndef GI_CASCADE_PROBE_DIM
-#define GI_CASCADE_PROBE_DIM 32 // probes per axis per cascade (power of two)
-#endif
-#ifndef GI_CASCADE_BASE_SPACING
-#define GI_CASCADE_BASE_SPACING 2 // finest cascade probe spacing, world units (power of two)
-#endif
 #ifndef GI_NORMAL_BIAS
 #define GI_NORMAL_BIAS 1.5 // push the sample point along the normal (world units) to limit self-leak
 #endif

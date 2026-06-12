@@ -12,7 +12,7 @@ import :TextureManager;
 ShadowMapGraphicsPipeline::ShadowMapGraphicsPipeline() {}
 ShadowMapGraphicsPipeline::~ShadowMapGraphicsPipeline() {}
 
-void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout)
+void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout, uint32 maxTextures)
 {
     layout.vertexShader.debugFilePath = "Shaders/shadow_depth.vs.glsl";
     layout.vertexShader.text = FileSystem::readFileStr(layout.vertexShader.debugFilePath);
@@ -41,11 +41,15 @@ void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layo
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // shared transformed instances
         .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // diffuse texture array (alpha-mask discard)
-        .binding = 7, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = RendererVKLayout::MAX_TEXTURES, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+        .binding = 7, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+    // The texture array (the set's highest binding) is variable-count: the layout declares the fixed
+    // device-limit cap, the live size comes from the descriptor set allocation.
+    layout.descriptorBindingFlags.resize(descriptorSetBindings.size());
+    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
     // The cascade is selected per multiview view via gl_ViewIndex, so no push constant is needed.
 }
 
-void ShadowMapGraphicsPipeline::buildIndirectState()
+void ShadowMapGraphicsPipeline::buildIndirectState(uint32 maxUniqueMeshes)
 {
     // The shadow pass renders all cascades in a single multiview render pass (non-zero viewMask), where DGC
     // forbids an Indirect Execution Set. We only ever use the one depth-only pipeline anyway, so the commands
@@ -53,14 +57,24 @@ void ShadowMapGraphicsPipeline::buildIndirectState()
     m_indirectCommandsLayout.initialize(m_graphicsPipeline.getPipelineLayout(),
         vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, /*useExecutionSet*/ false);
 
+    createPreprocessBuffers(maxUniqueMeshes);
+}
+
+void ShadowMapGraphicsPipeline::resizeMeshCapacity(uint32 maxUniqueMeshes)
+{
+    createPreprocessBuffers(maxUniqueMeshes);
+}
+
+void ShadowMapGraphicsPipeline::createPreprocessBuffers(uint32 maxUniqueMeshes)
+{
     // With no execution set, DGC needs the pipeline it will generate draws for supplied via pNext.
     vk::GeneratedCommandsPipelineInfoEXT pipelineInfo{ .pipeline = m_graphicsPipeline.getPipeline() };
     vk::GeneratedCommandsMemoryRequirementsInfoEXT memReqInfo{
         .pNext = &pipelineInfo,
         .indirectExecutionSet = VK_NULL_HANDLE,
         .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
-        .maxSequenceCount = RendererVKLayout::MAX_UNIQUE_MESHES,
-        .maxDrawCount = RendererVKLayout::MAX_UNIQUE_MESHES,
+        .maxSequenceCount = maxUniqueMeshes,
+        .maxDrawCount = maxUniqueMeshes,
     };
     vk::MemoryRequirements2 memReq;
     Globals::device.getDevice().getGeneratedCommandsMemoryRequirementsEXT(&memReqInfo, &memReq);
@@ -73,22 +87,22 @@ void ShadowMapGraphicsPipeline::buildIndirectState()
     }
 }
 
-void ShadowMapGraphicsPipeline::initialize(ShadowMap& shadowMap)
+void ShadowMapGraphicsPipeline::initialize(ShadowMap& shadowMap, uint32 maxUniqueMeshes, uint32 maxTextures)
 {
     m_renderPass = shadowMap.getRenderPass();
     m_sampler.initialize();
     GraphicsPipelineLayout layout;
-    buildPipelineLayout(layout);
+    buildPipelineLayout(layout, maxTextures);
     m_graphicsPipeline.initialize(m_renderPass, layout);
-    buildIndirectState();
+    buildIndirectState(maxUniqueMeshes);
 }
 
-void ShadowMapGraphicsPipeline::reloadShaders()
+void ShadowMapGraphicsPipeline::reloadShaders(uint32 maxTextures)
 {
     if (!m_renderPass)
         return;
     GraphicsPipelineLayout layout;
-    buildPipelineLayout(layout);
+    buildPipelineLayout(layout, maxTextures);
     if (!m_graphicsPipeline.reloadShaders(m_renderPass, layout))
     {
         printf("ShadowMapGraphicsPipeline: shader reload failed, keeping previous pipeline\n");

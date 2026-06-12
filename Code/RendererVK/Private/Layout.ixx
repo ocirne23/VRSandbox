@@ -11,22 +11,23 @@ export namespace RendererVKLayout
     constexpr uint16 FALLBACK_DIFFUSE_TEX_IDX = 0;
 	constexpr uint16 FALLBACK_NORMAL_TEX_IDX = 1;
 
-    // TODO make these dynamic
-    constexpr uint32 MAX_RENDER_NODES = 1024 * 64;
-    constexpr uint32 MAX_UNIQUE_MESHES = 1024; // match instanced_indirect.cs.glsl
-    constexpr uint32 MAX_UNIQUE_MATERIALS = 1024;
-    constexpr uint32 MAX_INSTANCE_OFFSETS = 1024;
-    constexpr uint32 MAX_INSTANCE_DATA = 1024 * 2028;
-    constexpr uint32 MAX_TEXTURES = 1024;
+    // Initial capacities only: the Renderer tracks the live capacities and grows the backing buffers
+    // at runtime when they are exceeded (GPU idle + buffer recreate + command buffer re-record).
+    constexpr uint32 INITIAL_RENDER_NODES = 8;
+    constexpr uint32 INITIAL_UNIQUE_MESHES = 4;
+    constexpr uint32 INITIAL_UNIQUE_MATERIALS = 8;
+    constexpr uint32 INITIAL_INSTANCE_OFFSETS = 64;
+    constexpr uint32 INITIAL_INSTANCE_DATA = 4;
+    constexpr uint32 INITIAL_TEXTURES = 64; // TextureManager grows this, clamped to the device limit
+    constexpr size_t INITIAL_LIGHT_GRID_BUFFER_SIZE = 10 * 1024 * 1024;
+	constexpr size_t INITIAL_LIGHT_TABLE_NUM_ENTRIES = 64; // must stay a power of 2 for hashing (doubling preserves this)
 
-    static_assert(MAX_UNIQUE_MESHES < USHRT_MAX);
-    static_assert(MAX_UNIQUE_MATERIALS < USHRT_MAX);
 
+    // Mesh/material indices are stored as uint16 in InMeshInstance, so growth clamps to this.
+    constexpr uint32 MESH_MATERIAL_INDEX_LIMIT = USHRT_MAX
+        - 1;
     constexpr size_t MAX_LIGHTS = USHRT_MAX - 1;
-    constexpr size_t LIGHT_GRID_BUFFER_SIZE = 10 * 1024 * 1024;
-	constexpr size_t LIGHT_TABLE_NUM_ENTRIES = 1024 * 8; // should be power of 2 for hashing
-
-    // Sun shadow cascaded shadow maps. NUM_SHADOW_CASCADES must match the count in ubo.inc.glsl.
+    // Sun shadow cascaded shadow maps.
     constexpr uint32 NUM_SHADOW_CASCADES = 6;
     constexpr uint32 SHADOW_MAP_RESOLUTION = 2048;
 
@@ -35,8 +36,7 @@ export namespace RendererVKLayout
     // (GI_CASCADE_BASE_SPACING << cascade), camera-centered. Probes live at absolute lattice positions
     // (lc * spacing) and are addressed toroidally (slot = lc & (DIM-1)), so irradiance carries forward in
     // place across frames with no hash table, copy, or ping-pong. SH-L1 RGB per probe.
-    // These MUST match Assets/Shaders/gi_probe.inc.glsl (GI_NUM_CASCADES, GI_CASCADE_PROBE_DIM,
-    // GI_CASCADE_BASE_SPACING, GI_SH_STRIDE).
+    // The GI_* sizing constants are injected into every shader compile (Shader.cpp buildLayoutPreamble).
     constexpr uint32 GI_SH_STRIDE = 12;                                                  // SH-L1 RGB floats per probe
     constexpr uint32 GI_PROBE_STRIDE = GI_SH_STRIDE + 1;                                  // SH + 1 mean free-space distance (visibility)
     constexpr uint32 GI_NUM_CASCADES = 4;                                                // nested clipmap levels
@@ -48,7 +48,7 @@ export namespace RendererVKLayout
     constexpr size_t GI_GRID_DATA_BUFFER_SIZE = (size_t)GI_PROBES_TOTAL * GI_PROBE_STRIDE * sizeof(uint32);
     constexpr uint32 GI_TRACE_THREADS = GI_PROBES_TOTAL;                                 // one invocation per probe
 
-    constexpr uint32 GI_MAX_TLAS_INSTANCES = 256 * 1024;
+    constexpr uint32 GI_INITIAL_TLAS_INSTANCES = 256; // grown when the instance count exceeds it
     constexpr size_t GI_TLAS_INSTANCE_SIZE = 64;                                         // sizeof(VkAccelerationStructureInstanceKHR)
 
     struct MeshVertex
@@ -60,8 +60,9 @@ export namespace RendererVKLayout
     };
     using MeshIndex = uint32;
 
-    constexpr size_t MAX_VERTEX_DATA = 1024 * 1024 * sizeof(RendererVKLayout::MeshVertex);
-    constexpr size_t MAX_INDEX_DATA = 4 * 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
+    // Initial mega-buffer sizes; MeshDataManager grows them on demand (GPU copy preserves contents).
+    constexpr size_t INITIAL_VERTEX_DATA = 1024 * 1024 * sizeof(RendererVKLayout::MeshVertex);
+    constexpr size_t INITIAL_INDEX_DATA = 4 * 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
 
     struct alignas(16) Ubo
     {
@@ -149,6 +150,9 @@ export namespace RendererVKLayout
         float scale;
         glm::vec4 quat;
         uint32 meshIdxMaterialIdx;
+        uint32 _padding1;
+        uint32 _padding2;
+        uint32 _padding3;
     };
 
     // Shadow cull output: like OutMeshInstance but its trailing uint packs the alpha-mask texture index
@@ -219,7 +223,7 @@ export namespace RendererVKLayout
         uint16 alphaMode;
     };
 
-    // Volumetric fog froxel grid (view-frustum-aligned 3D textures); dims must match vol_fog.inc.glsl.
+    // Volumetric fog froxel grid (view-frustum-aligned 3D textures).
     constexpr uint32 VOL_FROXEL_X = 160;
     constexpr uint32 VOL_FROXEL_Y = 90;
     constexpr uint32 VOL_FROXEL_Z = 64;

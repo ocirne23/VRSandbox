@@ -164,6 +164,7 @@ private:
     bool recordGlobalIllum(uint32 frameIdx); // returns true if the ray-tracing TLAS handle changed this frame
     void setHaveToRecordCommandBuffers();
     void recreateSwapchain();
+    void createLightGridBuffers();
     void initImgui(Window& window);
     void initComposite();
 
@@ -174,6 +175,19 @@ private:
     uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos);
     uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
+
+    // Capacity growth: each submits pending staged copies, waits for the GPU to go idle, recreates the
+    // affected buffers at (at least) double the size, restores persistent contents, and forces a command
+    // buffer re-record. Rare events, so the GPU stall is acceptable.
+    void waitForGpuAndFlushStaging();
+    void growRenderNodeCapacity(uint32 needed);
+    void growMeshInstanceCapacity(uint32 needed);
+    void growUniqueMeshCapacity(uint32 needed);
+    void growMaterialCapacity(uint32 needed);
+    void growInstanceOffsetCapacity(uint32 needed);
+    void growLightGridBuffers(size_t neededGridBytes, uint32 neededTableEntries);
+    // Reads last frame's light grid usage counters and grows the grid/table before they overflow.
+    void checkLightGridCapacity();
 
     friend class RenderNode;
     inline Transform& getRenderNodeTransform(uint32 idx) { return m_renderNodeTransforms[idx]; }
@@ -214,6 +228,7 @@ private:
     glm::vec3 m_sunColor = glm::vec3(0.9568f, 1.0f, 0.9214f);
     float m_sunIntensity = 3.0f;
     SkyParams m_skyParams;
+    /*
     float m_cloudCoverage  = 0.66f;
     float m_cloudHeight    = 3000.0f; // meters above the viewer (slab base)
     float m_cloudThickness = 9000.0f;  // slab thickness (m)
@@ -227,6 +242,21 @@ private:
     float m_cloudShading   = 2.0f;    // directional sun-shading strength
     float m_cloudSilver    = 2.0f;    // silver-lining strength
     float m_cloudAmbient   = 0.35f;   // sky-ambient amount in the cloud color
+    */
+    float m_cloudCoverage = 0.5f;
+    float m_cloudHeight = 5000.0f; // meters above the viewer (slab base)
+    float m_cloudThickness = 10000.0f;  // slab thickness (m)
+    float m_cloudScale = 0.6f;    // multiplier on the base noise frequency
+    float m_cloudWindSpeed = 2.22f;    // multiplier on the base wind drift
+    float m_cloudWindAngle = 1.95f;    // radians
+    float m_cloudSoftness = 0.25f;   // density smoothstep width (small = crisp edges)
+    float m_cloudDensity = 1.0f;    // extinction strength (high = opaque cores)
+    float m_cloudSharpness = 0.27f;    // density remap contrast (high = hard-edged shapes)
+    float m_cloudBaseVar = 0.2f;    // per-column base/top height variation (0 = flat slab)
+    float m_cloudShading = 1.5f;    // directional sun-shading strength
+    float m_cloudSilver = 2.0f;    // silver-lining strength
+    float m_cloudAmbient = 0.35f;   // sky-ambient amount in the cloud color
+
     float m_skyScatterBoost = 4.0f;   // sun color -> atmosphere scattering source strength
     float m_skyMieG        = 0.76f;   // Mie anisotropy (forward-scatter lobe)
     float m_sunDiscFeather = 0.2f;    // disc rim feather, fraction of the disc's angular size
@@ -282,7 +312,29 @@ private:
     bool m_windowMinimized = false;
     bool m_vsyncEnabled = true;
 
-    std::vector<RendererVKLayout::MeshInfo> m_cpuMeshInfos; // CPU copy kept for BLAS builds, refactor later
+    // Live buffer capacities (element counts); grown on demand from the INITIAL_* seeds in Layout.ixx.
+    uint32 m_maxRenderNodes = RendererVKLayout::INITIAL_RENDER_NODES;
+    uint32 m_maxUniqueMeshes = RendererVKLayout::INITIAL_UNIQUE_MESHES;
+    uint32 m_maxUniqueMaterials = RendererVKLayout::INITIAL_UNIQUE_MATERIALS;
+    uint32 m_maxInstanceOffsets = RendererVKLayout::INITIAL_INSTANCE_OFFSETS;
+    uint32 m_maxInstanceData = RendererVKLayout::INITIAL_INSTANCE_DATA;
+    // Mesh-instance overflow detected mid-frame (possibly from worker threads): the overflowing nodes are
+    // dropped for that frame and the capacity is grown at the next beginFrame (a safe sync point).
+    uint32 m_pendingMaxInstanceData = 0;
+    size_t m_lightGridBufferSize = RendererVKLayout::INITIAL_LIGHT_GRID_BUFFER_SIZE;
+    uint32 m_lightTableEntries = RendererVKLayout::INITIAL_LIGHT_TABLE_NUM_ENTRIES;
+    uint32 m_maxGiTlasInstances = RendererVKLayout::GI_INITIAL_TLAS_INSTANCES;
+    // Texture-array descriptor sizing: the layouts declare the fixed device-limit cap (m_maxTextures,
+    // set once at init from TextureManager::getDescriptorCap()); the sets are allocated with the live
+    // variable count (m_numTextureDescriptors, re-synced from TextureManager on generation change).
+    uint32 m_maxTextures = RendererVKLayout::INITIAL_TEXTURES;
+    uint32 m_numTextureDescriptors = RendererVKLayout::INITIAL_TEXTURES;
+    uint32 m_meshDataGeneration = 0; // last seen MeshDataManager::getGeneration(); change -> re-record
+    uint32 m_textureGeneration = 0;  // last seen TextureManager::getGeneration(); change -> rebuild texture-array pipelines
+
+    std::vector<RendererVKLayout::MeshInfo> m_cpuMeshInfos; // CPU copy kept for BLAS builds + capacity growth re-upload
+    std::vector<RendererVKLayout::MaterialInfo> m_cpuMaterialInfos;          // for capacity growth re-upload
+    std::vector<RendererVKLayout::MeshInstanceOffset> m_cpuInstanceOffsets;  // for capacity growth re-upload
 
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform> m_renderNodeTransforms;

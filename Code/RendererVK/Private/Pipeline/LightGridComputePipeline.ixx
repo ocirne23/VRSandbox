@@ -22,6 +22,7 @@ public:
 		Buffer& inLightInfoBuffer;
 		Buffer& outLightGridBuffer;
 		Buffer& outLightTableBuffer;
+		uint32 numTableEntries; // hash table size written into the table header (power of 2)
 	};
 	void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& recordParams);
 	void update(uint32 frameIdx, uint32 numLights);

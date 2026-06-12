@@ -173,8 +173,17 @@ uint getGridMemoryUsage(uint cellSize)
 	return 4 + (MAX_LARGE_LIGHTS_PER_GRID / 2 + 1) + numCells * numCells * numCells * (MAX_LIGHTCELL_LIGHTS / 2 + 1);
 }
 
+// Returned when the table or grid data buffer is out of space: the light is dropped for this frame.
+// The CPU reads the (deliberately still-incremented) usage counters back and grows the buffers to fit,
+// so the overflow lasts one frame instead of writing out of bounds (-> device lost).
+#define INVALID_GRID 0xFFFFFFFFu
+
 uint getOrInsertGrid(ivec3 gridPos, uint cellSize)
 {
+	// Stop inserting past 75% table load: keeps EMPTY entries so read/write probe loops terminate
+	// (the CPU grows the table at 50% load, so this only triggers on a burst within one frame).
+	if (NUM_GRIDS_NAME * 4u >= TABLE_SIZE_NAME * 3u)
+		return INVALID_GRID;
 	uint idx = getTableIdx(gridPos);
 	while (true)
 	{
@@ -192,6 +201,13 @@ uint getOrInsertGrid(ivec3 gridPos, uint cellSize)
 		{
 			const uint memSize = getGridMemoryUsage(cellSize);
 			const uint newGridIdx = atomicAdd(GRID_DATA_COUNTER_NAME, memSize);
+			if (newGridIdx + memSize > uint(GRID_DATA_NAME.length()))
+			{
+				// Out of grid data memory: release the claimed table slot and drop the light. The
+				// counter stays inflated on purpose - the CPU readback uses it to size the growth.
+				atomicExchange(GRID_TABLE_NAME[idx], EMPTY_ENTRY);
+				return INVALID_GRID;
+			}
 			setGridMin(newGridIdx, gridPos);
 			setCellSize(newGridIdx, cellSize);
 			memoryBarrierBuffer();

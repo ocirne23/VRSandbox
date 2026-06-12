@@ -295,8 +295,7 @@ vec4 clouds(vec3 dir, vec3 up, vec3 sunDir, vec3 sunTint, vec3 skyAmbient)
 		// Powder term: thin edges in-scatter less, which reads as the puffy "dark rim" of cumulus.
 		float powder = 1.0 - exp(-dens * 4.0);
 
-		vec3 c = skyAmbient * u_cloudParams1.w
-		       + sunTint * lit * mix(0.7, 1.3, powder) * mix(0.55, 1.0, x);
+		vec3 c = sunTint * lit * mix(0.7, 1.3, powder) * mix(0.55, 1.0, x);
 
 		// Exponential (Beer-Lambert) step opacity: u_cloudParams2.x is the extinction strength, so dense
 		// cores saturate to fully opaque instead of staying translucent ("gassy") like the old linear term.
@@ -333,7 +332,8 @@ void main()
 
 	// With the sun fully off (color/intensity/scatter boost zero) the entire scattering integral is a
 	// multiply by zero: skip the raymarch and keep only the cheap ground test for the branches below.
-	const bool sunLit = (u_sunColor.r + u_sunColor.g + u_sunColor.b) * u_skySunParams.x > 1e-5;
+	const float sunMagnitude = (u_sunColor.r + u_sunColor.g + u_sunColor.b);
+	const bool sunLit = sunMagnitude * u_skySunParams.x > 1e-5;
 	vec3 transmittance = vec3(1.0);
 	vec3 color = vec3(0.0);
 	float tUp = dot(dir, up);
@@ -351,8 +351,11 @@ void main()
 	}
 	
 	{
+		vec3 moonDir = u_moonParams.xyz;
+		float cosM = dot(dir, moonDir);
 		const float cosAngle = dot(dir, L);
-		if (sunLit && u_sunAngularCos < 1.0) // 1.0 disables the disc
+		const bool moonCovered = cosM < u_moonParams.w * 2.00 - cosM;
+		if (!sunLit && u_sunAngularCos < 1.0 && moonCovered) // 1.0 disables the disc
 		{
 			// Feathered rim + slight limb darkening; transmittance reddens/dims it near the horizon.
 			const float feather = (1.0 - u_sunAngularCos) * max(u_skySunParams.z, 0.01);
@@ -362,7 +365,7 @@ void main()
 		}
 		// Sun halo: a tight Henyey-Greenstein forward lobe (smooth peak, long graceful tail) instead of a
 		// pow() spike. u_sunGlow is the strength; the transmittance keeps it warm/dim near the horizon.
-		if (sunLit && u_sunGlow > 0.0)
+		if (sunLit && u_sunGlow > 0.0 && moonCovered)
 			color += u_sunColor.rgb * phaseHG(cosAngle, 0.985) * 0.015 * u_sunGlow * transmittance;
 
 		// Moon: a sun-lit sphere shaded into the disc around u_moonParams.xyz (independent of the sun's
@@ -370,38 +373,33 @@ void main()
 		// actual sun direction, so they react to where the sun is). Disc size comes from u_moonParams.w.
 		// Drawn before the stars so its disc coverage can occlude them (even the unlit, new-moon part of
 		// the disc blocks the stars behind it). Clouds blend after this, so they occlude it.
-		float moonOcclusion = 0.0;
-		if (u_cloudParams2.w > 0.0 && u_moonParams.w < 1.0)
+		if (u_cloudParams2.w > 0.0 && u_moonParams.w < 1.0 && !moonCovered)
 		{
-			vec3 moonDir = u_moonParams.xyz;
-			float cosM = dot(dir, moonDir);
-			if (cosM > u_moonParams.w * 2.0 - 1.0) // cheap bound before building the disc basis
-			{
-				vec3 mT = normalize(cross(moonDir, abs(moonDir.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-				vec3 mB = cross(moonDir, mT);
-				float discSin = sqrt(max(1.0 - u_moonParams.w * u_moonParams.w, 1e-8));
-				vec2 duv = vec2(dot(dir, mT), dot(dir, mB)) / discSin;
-				float r2 = dot(duv, duv);
-				if (r2 < 1.0)
-				{
-					// Visible-hemisphere normal at this disc point; Lambert against the sun => phase.
-					vec3 n = normalize(mT * duv.x + mB * duv.y - moonDir * sqrt(1.0 - r2));
-					float lambert = clamp(dot(n, L), 0.0, 1.0);
-					float albedo = 0.7 + 0.6 * (fbm3(n * 7.0, 3, 0.0) - 0.5); // maria/crater mottling
-					float feather = smoothstep(1.0, 0.99, r2);                 // rim anti-aliasing
-					color += vec3(0.93, 0.95, 1.0) * (lambert * albedo * u_cloudParams2.w) * feather * transmittance;
-					moonOcclusion = feather;
-				}
-			}
+			vec3 mT = normalize(cross(moonDir, abs(moonDir.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+			vec3 mB = cross(moonDir, mT);
+			float discSin = sqrt(max(1.0 - u_moonParams.w * u_moonParams.w, 1e-8));
+			vec2 duv = vec2(dot(dir, mT), dot(dir, mB)) / discSin;
+			float r2 = dot(duv, duv);
+
+			// Visible-hemisphere normal at this disc point; Lambert against the sun => phase.
+			vec3 n = normalize(mT * duv.x + mB * duv.y - moonDir * sqrt(1.0 - r2));
+			float surfAngle = dot(n, -dir);
+			float lambert = clamp(dot(n, L), 0.02, 1.0);
+			float planetlit = mix(0.0, 0.07, surfAngle * surfAngle * surfAngle);
+			float sunCovered = clamp(1.0 - distance(moonDir, L) * discSin, 0.0, 1.0);
+			lambert += planetlit * smoothstep(0.0, 0.2, distance(L, moonDir) * u_moonParams.w);
+			lambert += smoothstep(0.2, 0.0, dot(n, -L)) * sunCovered * clamp(0.1 * sunMagnitude * u_moonParams.w - distance(L, moonDir), 0.0, 1.0) ;
+			float albedo = 0.7 + 0.6 * (fbm3(n * 7.0, 3, 0.0) - 0.5); // maria/crater mottling
+			color += vec3(0.93, 0.95, 1.0) * ((lambert * albedo * u_cloudParams2.w) * transmittance);
 		}
 
 		// Night sky (stars + nebula). Visibility comes from the local sky luminance — daylight in-scatter
 		// washes them out, so they fade in automatically at dusk and in dark sky regions. The moon disc
 		// masks both out (it is a solid body, not additive light).
-		if ((u_skySunParams.w > 0.0 || u_nebulaParams.x > 0.0) && moonOcclusion < 1.0)
+		if ((u_skySunParams.w > 0.0 || u_nebulaParams.x > 0.0) && moonCovered)
 		{
 			float skyLum = dot(color, vec3(0.2126, 0.7152, 0.0722));
-			float nightVis = clamp(1.0 - skyLum * 25.0, 0.0, 1.0) * (1.0 - moonOcclusion);
+			float nightVis = clamp(1.0 - skyLum * 25.0, 0.0, 1.0);
 			if (nightVis > 0.0)
 			{
 				// Milky-way band: a gaussian falloff around the great circle perpendicular to u_nebulaAxis.

@@ -5,7 +5,7 @@
 #define UBO_BINDING 0
 #endif
 
-#define NUM_SHADOW_CASCADES 6
+// NUM_SHADOW_CASCADES is injected by the engine from RendererVKLayout (Layout.ixx)
 
 layout (binding = UBO_BINDING, std140) uniform UBO
 {

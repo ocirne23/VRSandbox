@@ -15,7 +15,10 @@ public:
     ~AccelerationStructure();
     AccelerationStructure(const AccelerationStructure&) = delete;
 
-    void initialize();
+    void initialize(uint32 maxUniqueMeshes);
+    // Grows the BLAS-address buffer for a larger unique-mesh capacity, preserving its contents
+    // (GPU must be idle).
+    void resizeBlasAddressBuffer(uint32 maxUniqueMeshes);
 
     // Records BLAS builds for meshes [firstMesh, firstMesh+count) into cmd, reading geometry directly
     // from the shared vertex/index buffers. totalVertices is the current vertex-buffer fill (in vertices)

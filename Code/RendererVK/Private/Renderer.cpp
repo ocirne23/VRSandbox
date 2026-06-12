@@ -186,7 +186,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::floatVar("Sky/Clouds", "Sharpness", &m_cloudSharpness, 0.0f, 1.0f);
     Tweak::floatVar("Sky/Clouds", "Height Variation", &m_cloudBaseVar, 0.0f, 1.0f);
     Tweak::floatVar("Sky/Clouds", "Sun Shading", &m_cloudShading, 0.0f, 6.0f);
-    Tweak::floatVar("Sky/Clouds", "Silver Lining", &m_cloudSilver, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Clouds", "Silver Lining", &m_cloudSilver, 0.0f, 4.0f);
     Tweak::floatVar("Sky/Clouds", "Ambient", &m_cloudAmbient, 0.0f, 1.0f);
     Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
     Tweak::color3("Sky/Gradient", "Horizon", &m_skyParams.horizon);
@@ -241,7 +241,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     m_viewportRect.max = glm::ivec2(m_swapChain.getLayout().extent.width, m_swapChain.getLayout().extent.height);
 
     Globals::stagingManager.initialize();
-    Globals::meshDataManager.initialize(RendererVKLayout::MAX_VERTEX_DATA, RendererVKLayout::MAX_INDEX_DATA);
+    Globals::meshDataManager.initialize(RendererVKLayout::INITIAL_VERTEX_DATA, RendererVKLayout::INITIAL_INDEX_DATA);
 
     m_renderPass.initialize(m_swapChain);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
@@ -249,26 +249,27 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     initImgui(window);
 
     const vk::Extent2D ext = m_swapChain.getLayout().extent;
-    m_staticMeshGraphicsPipeline.initialize(m_renderPass);
+    m_maxTextures = Globals::textureManager.getDescriptorCap(); // fixed layout cap; live count grows separately
+    m_staticMeshGraphicsPipeline.initialize(m_renderPass, m_maxUniqueMeshes, m_maxTextures);
     m_rtaoPipeline.initialize(ext.width, ext.height);
     m_volumetricFogPipeline.initialize();
     m_volumetricFogPipeline.initializeApply(m_renderPass);
     m_taaPipeline.initialize(ext.width, ext.height);
     initComposite();
-    m_indirectCullComputePipeline.initialize();
+    m_indirectCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
     m_lightGridComputePipeline.initialize();
-    m_accelStructure.initialize();
-    m_giProbePipeline.initialize();
+    m_accelStructure.initialize(m_maxUniqueMeshes);
+    m_giProbePipeline.initialize(m_maxGiTlasInstances, m_maxTextures, m_numTextureDescriptors);
     m_giProbePipeline.initializeDebug(m_renderPass);
 
 
-    m_shadowCullComputePipeline.initialize();
+    m_shadowCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.gbuffer.initialize(ext.width, ext.height);
         perFrame.shadowMap.initialize();
     }
-    m_shadowMapGraphicsPipeline.initialize(m_perFrameData[0].shadowMap);
+    m_shadowMapGraphicsPipeline.initialize(m_perFrameData[0].shadowMap, m_maxUniqueMeshes, m_maxTextures);
     m_gbufferPipeline.initialize(m_perFrameData[0].gbuffer);
 
     vk::Device vkDevice = Globals::device.getDevice();
@@ -280,12 +281,12 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
         perFrame.indirectCullPipelineDescriptorSet.initialize(m_indirectCullComputePipeline.getDescriptorSetLayout());
         perFrame.lightGridPipelineDescriptorSet.initialize(m_lightGridComputePipeline.getDescriptorSetLayout());
-        perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout());
+        perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
         perFrame.gbufferDescriptorSet.initialize(m_gbufferPipeline.getDescriptorSetLayout());
         perFrame.compositeDescriptorSet.initialize(m_compositePipeline.getDescriptorSetLayout());
 
         perFrame.shadowCullDescriptorSet.initialize(m_shadowCullComputePipeline.getDescriptorSetLayout());
-        perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout());
+        perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
 
         perFrame.primaryCommandBuffer.initialize(vk::CommandBufferLevel::ePrimary);
         perFrame.staticMeshCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -307,17 +308,17 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
             vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-        perFrame.inRenderNodeTransformsBuffer.initialize(RendererVKLayout::MAX_RENDER_NODES * sizeof(RendererVKLayout::RenderNodeTransform),
+        perFrame.inRenderNodeTransformsBuffer.initialize(m_maxRenderNodes * sizeof(RendererVKLayout::RenderNodeTransform),
             vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedRenderNodeTransforms = perFrame.inRenderNodeTransformsBuffer.mapMemory<RendererVKLayout::RenderNodeTransform>();
 
-        perFrame.inMeshInstancesBuffer.initialize(RendererVKLayout::MAX_INSTANCE_DATA * sizeof(RendererVKLayout::InMeshInstance),
+        perFrame.inMeshInstancesBuffer.initialize(m_maxInstanceData * sizeof(RendererVKLayout::InMeshInstance),
             vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedMeshInstances = perFrame.inMeshInstancesBuffer.mapMemory<RendererVKLayout::InMeshInstance>();
 
-        perFrame.inFirstInstancesBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(uint32),
+        perFrame.inFirstInstancesBuffer.initialize(m_maxUniqueMeshes * sizeof(uint32),
             vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedFirstInstances = perFrame.inFirstInstancesBuffer.mapMemory<uint32>();
@@ -333,24 +334,18 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         perFrame.mappedFogVolumes = perFrame.fogVolumesBuffer.mapMemory<RendererVKLayout::FogVolumes>();
         perFrame.mappedFogVolumes.data()->count = 0;
 
-        perFrame.lightGridsBuffer.initialize(RendererVKLayout::LIGHT_GRID_BUFFER_SIZE,
-            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-        perFrame.lightTableBuffer.initialize(3 * sizeof(uint32) + sizeof(uint32) * RendererVKLayout::LIGHT_TABLE_NUM_ENTRIES,
-            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostVisible);
     }
+    createLightGridBuffers();
 
-    m_meshInfosBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MESHES * sizeof(RendererVKLayout::MeshInfo),
+    m_meshInfosBuffer.initialize(m_maxUniqueMeshes * sizeof(RendererVKLayout::MeshInfo),
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-    m_materialInfosBuffer.initialize(RendererVKLayout::MAX_UNIQUE_MATERIALS * sizeof(RendererVKLayout::MaterialInfo),
+    m_materialInfosBuffer.initialize(m_maxUniqueMaterials * sizeof(RendererVKLayout::MaterialInfo),
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-    m_instanceOffsetsBuffer.initialize(RendererVKLayout::MAX_INSTANCE_OFFSETS * sizeof(RendererVKLayout::MeshInstanceOffset),
+    m_instanceOffsetsBuffer.initialize(m_maxInstanceOffsets * sizeof(RendererVKLayout::MeshInstanceOffset),
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal);
 
@@ -447,15 +442,15 @@ void Renderer::reloadShaders()
         return;
     }
 
-    m_staticMeshGraphicsPipeline.reloadShaders();
+    m_staticMeshGraphicsPipeline.reloadShaders(m_maxTextures);
     m_gbufferPipeline.reloadShaders(m_perFrameData[m_swapChain.getPrevFrameIdx()].gbuffer);
     m_rtaoPipeline.reloadShaders();
     m_volumetricFogPipeline.reloadShaders(m_renderPass);
     m_indirectCullComputePipeline.reloadShaders();
     m_lightGridComputePipeline.reloadShaders();
     m_shadowCullComputePipeline.reloadShaders();
-    m_shadowMapGraphicsPipeline.reloadShaders();
-    m_giProbePipeline.reloadShaders();
+    m_shadowMapGraphicsPipeline.reloadShaders(m_maxTextures);
+    m_giProbePipeline.reloadShaders(m_maxTextures);
     m_giProbePipeline.reloadDebugShaders();
     m_taaPipeline.reloadShaders();
     {
@@ -482,6 +477,48 @@ void Renderer::setWindowMinimized(bool minimized)
 
 const Frustum& Renderer::beginFrame(const Camera& camera)
 {
+    // Mesh instances overflowed mid-frame last frame (their nodes were dropped for that frame); grow
+    // here where no recording or worker-thread writes are in flight.
+    if (m_pendingMaxInstanceData > m_maxInstanceData)
+        growMeshInstanceCapacity(m_pendingMaxInstanceData);
+
+    // Last frame's instance count (still live here) outgrew the GI TLAS instance buffers.
+    if (m_meshInstanceCounter > m_maxGiTlasInstances)
+    {
+        while (m_maxGiTlasInstances < m_meshInstanceCounter)
+            m_maxGiTlasInstances *= 2;
+        waitForGpuAndFlushStaging();
+        m_giProbePipeline.resizeTlasInstanceBuffers(m_maxGiTlasInstances);
+        printf("Renderer: grew GI TLAS instance capacity to %u\n", m_maxGiTlasInstances);
+    }
+
+    // A mesh mega-buffer was reallocated (vertex/index data growth): the cached scene command buffers
+    // bind the old handles, so re-record.
+    if (Globals::meshDataManager.getGeneration() != m_meshDataGeneration)
+    {
+        m_meshDataGeneration = Globals::meshDataManager.getGeneration();
+        setHaveToRecordCommandBuffers();
+    }
+
+    // The live texture count outgrew the variable-count texture-array descriptors: re-allocate the
+    // affected descriptor sets with the new count (the layouts/pipelines declare the fixed cap and
+    // stay untouched).
+    if (Globals::textureManager.getGeneration() != m_textureGeneration)
+    {
+        m_textureGeneration = Globals::textureManager.getGeneration();
+        m_numTextureDescriptors = Globals::textureManager.getMaxTextures();
+        waitForGpuAndFlushStaging();
+        m_giProbePipeline.resizeTextureDescriptors(m_numTextureDescriptors);
+        for (PerFrameData& perFrame : m_perFrameData)
+        {
+            perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
+            perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
+        }
+        setHaveToRecordCommandBuffers();
+    }
+
+    checkLightGridCapacity();
+
     m_meshInstanceCounter = 0;
     memset(m_numInstancesPerMesh.data(), 0, m_numInstancesPerMesh.size() * sizeof(m_numInstancesPerMesh[0]));
 
@@ -583,7 +620,15 @@ void Renderer::renderNodeThreadSafe(const RenderNode& node)
 {
     const uint32 numInstances = (uint32)node.m_meshInstances.size();
     const uint32 startIdx = std::atomic_ref<uint32>(m_meshInstanceCounter).fetch_add(numInstances);
-    assert(startIdx + numInstances <= RendererVKLayout::MAX_INSTANCE_DATA);
+    if (startIdx + numInstances > m_maxInstanceData)
+    {
+        // Doesn't fit this frame: return the space, drop the node, and grow at the next beginFrame.
+        std::atomic_ref<uint32>(m_meshInstanceCounter).fetch_sub(numInstances);
+        std::atomic_ref<uint32> pending(m_pendingMaxInstanceData);
+        uint32 cur = pending.load(std::memory_order_relaxed);
+        while (cur < startIdx + numInstances && !pending.compare_exchange_weak(cur, startIdx + numInstances)) {}
+        return;
+    }
 
     for (auto& pair : node.m_numInstancesPerMesh)
         std::atomic_ref<uint32>(m_numInstancesPerMesh[pair.first]) += pair.second;
@@ -596,8 +641,11 @@ void Renderer::renderNode(const RenderNode& node)
 {
     const uint32 numInstances = (uint32)node.m_meshInstances.size();
     const uint32 startIdx = m_meshInstanceCounter;
+    if (startIdx + numInstances > m_maxInstanceData)
+    {
+        growMeshInstanceCapacity(startIdx + numInstances);
+    }
     m_meshInstanceCounter += numInstances;
-    assert(m_meshInstanceCounter <= RendererVKLayout::MAX_INSTANCE_DATA);
 
     for (auto& pair : node.m_numInstancesPerMesh)
         m_numInstancesPerMesh[pair.first] += pair.second;
@@ -694,7 +742,178 @@ uint32 Renderer::addRenderNodeTransform(const Transform& transform)
 {
     const uint32 renderNodeIdx = (uint32)m_renderNodeTransforms.size();
     m_renderNodeTransforms.emplace_back(transform);
+    if ((uint32)m_renderNodeTransforms.size() > m_maxRenderNodes)
+        growRenderNodeCapacity((uint32)m_renderNodeTransforms.size());
     return renderNodeIdx;
+}
+
+namespace
+{
+    uint32 growCapacity(uint32 current, uint32 needed, uint32 limit = UINT32_MAX)
+    {
+        uint64 capacity = current;
+        while (capacity < needed)
+            capacity *= 2;
+        assert(needed <= limit);
+        return (uint32)std::min<uint64>(capacity, limit);
+    }
+}
+
+void Renderer::waitForGpuAndFlushStaging()
+{
+    // Queued staging copies may target a buffer about to be destroyed; submit them first, then drain
+    // the GPU so every buffer being recreated is no longer in use.
+    Globals::stagingManager.flushPending();
+    auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle during capacity growth");
+}
+
+void Renderer::growRenderNodeCapacity(uint32 needed)
+{
+    m_maxRenderNodes = growCapacity(m_maxRenderNodes, needed);
+    waitForGpuAndFlushStaging();
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        // No contents to preserve: present() re-copies the full CPU transform list every frame.
+        perFrame.inRenderNodeTransformsBuffer.initialize(m_maxRenderNodes * sizeof(RendererVKLayout::RenderNodeTransform),
+            vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+        perFrame.mappedRenderNodeTransforms = perFrame.inRenderNodeTransformsBuffer.mapMemory<RendererVKLayout::RenderNodeTransform>();
+    }
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew render node capacity to %u\n", m_maxRenderNodes);
+}
+
+void Renderer::growMeshInstanceCapacity(uint32 needed)
+{
+    m_maxInstanceData = growCapacity(m_maxInstanceData, needed);
+    waitForGpuAndFlushStaging();
+
+    // renderNode() grows inline mid-frame, so the instances already written to the current frame's
+    // mapped buffer this frame must survive the reallocation. (At the beginFrame call site the counter
+    // holds last frame's count and the copy is redundant but harmless.)
+    PerFrameData& currentFrameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
+    std::vector<RendererVKLayout::InMeshInstance> writtenInstances(
+        currentFrameData.mappedMeshInstances.begin(), currentFrameData.mappedMeshInstances.begin() + m_meshInstanceCounter);
+
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        perFrame.inMeshInstancesBuffer.initialize(m_maxInstanceData * sizeof(RendererVKLayout::InMeshInstance),
+            vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+        perFrame.mappedMeshInstances = perFrame.inMeshInstancesBuffer.mapMemory<RendererVKLayout::InMeshInstance>();
+    }
+    memcpy(currentFrameData.mappedMeshInstances.data(), writtenInstances.data(), writtenInstances.size() * sizeof(RendererVKLayout::InMeshInstance));
+
+    m_indirectCullComputePipeline.resizeInstanceBuffers(m_maxInstanceData);
+    m_shadowCullComputePipeline.resizeInstanceBuffers(m_maxInstanceData);
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew mesh instance capacity to %u\n", m_maxInstanceData);
+}
+
+void Renderer::growUniqueMeshCapacity(uint32 needed)
+{
+    m_maxUniqueMeshes = growCapacity(m_maxUniqueMeshes, needed, RendererVKLayout::MESH_MATERIAL_INDEX_LIMIT);
+    waitForGpuAndFlushStaging();
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        // No contents to preserve: first-instance offsets are rewritten every present().
+        perFrame.inFirstInstancesBuffer.initialize(m_maxUniqueMeshes * sizeof(uint32),
+            vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+        perFrame.mappedFirstInstances = perFrame.inFirstInstancesBuffer.mapMemory<uint32>();
+    }
+    m_meshInfosBuffer.initialize(m_maxUniqueMeshes * sizeof(RendererVKLayout::MeshInfo),
+        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        vk::MemoryPropertyFlagBits::eDeviceLocal);
+    if (!m_cpuMeshInfos.empty())
+        Globals::stagingManager.upload(m_meshInfosBuffer.getBuffer(), m_cpuMeshInfos.size() * sizeof(RendererVKLayout::MeshInfo), m_cpuMeshInfos.data());
+    m_accelStructure.resizeBlasAddressBuffer(m_maxUniqueMeshes);
+    m_indirectCullComputePipeline.resizeCommandBuffers(m_maxUniqueMeshes);
+    m_shadowCullComputePipeline.resizeCommandBuffers(m_maxUniqueMeshes);
+    m_staticMeshGraphicsPipeline.resizeMeshCapacity(m_maxUniqueMeshes);
+    m_shadowMapGraphicsPipeline.resizeMeshCapacity(m_maxUniqueMeshes);
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew unique mesh capacity to %u\n", m_maxUniqueMeshes);
+}
+
+void Renderer::growMaterialCapacity(uint32 needed)
+{
+    m_maxUniqueMaterials = growCapacity(m_maxUniqueMaterials, needed, RendererVKLayout::MESH_MATERIAL_INDEX_LIMIT);
+    waitForGpuAndFlushStaging();
+    m_materialInfosBuffer.initialize(m_maxUniqueMaterials * sizeof(RendererVKLayout::MaterialInfo),
+        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        vk::MemoryPropertyFlagBits::eDeviceLocal);
+    if (!m_cpuMaterialInfos.empty())
+        Globals::stagingManager.upload(m_materialInfosBuffer.getBuffer(), m_cpuMaterialInfos.size() * sizeof(RendererVKLayout::MaterialInfo), m_cpuMaterialInfos.data());
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew material capacity to %u\n", m_maxUniqueMaterials);
+}
+
+void Renderer::createLightGridBuffers()
+{
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        perFrame.lightGridsBuffer.initialize(m_lightGridBufferSize,
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+        perFrame.lightTableBuffer.initialize(3 * sizeof(uint32) + sizeof(uint32) * m_lightTableEntries,
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostVisible);
+
+        // Zero the readback header so the capacity check / stats never see uninitialized counters
+        // before the first recorded frame fills them in.
+        std::span<uint32> header = perFrame.lightTableBuffer.mapMemory<uint32>(0, 3 * sizeof(uint32));
+        memset(header.data(), 0, 3 * sizeof(uint32));
+        perFrame.lightTableBuffer.flushMappedMemory(3 * sizeof(uint32));
+        perFrame.lightTableBuffer.unmapMemory();
+    }
+}
+
+void Renderer::growLightGridBuffers(size_t neededGridBytes, uint32 neededTableEntries)
+{
+    while (m_lightGridBufferSize < neededGridBytes)
+        m_lightGridBufferSize *= 2;
+    while (m_lightTableEntries < neededTableEntries)
+        m_lightTableEntries *= 2; // stays a power of 2 for the hash
+    waitForGpuAndFlushStaging();
+    createLightGridBuffers(); // per-frame GPU scratch, rebuilt every frame: nothing to preserve
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew light grid buffers to %zu bytes / %u table entries\n", m_lightGridBufferSize, m_lightTableEntries);
+}
+
+void Renderer::checkLightGridCapacity()
+{
+    // Read last frame's usage counters (same readback as getStats) and grow before the buffers fill:
+    // above a quarter of the table (hash collision quality) or 3/4 of the grid data. Growth targets FIT
+    // the observed demand (with headroom) rather than doubling once: a burst can overshoot the current
+    // capacity many times over within a single frame. When the shader runs out of space it drops lights
+    // for that frame (getOrInsertGrid -> INVALID_GRID) but keeps incrementing gridDataCounter, so the
+    // readback measures the true demand of an overflowed frame.
+    PerFrameData& lastFrameData = m_perFrameData[(m_swapChain.getCurrentFrameIndex() + m_perFrameData.size() - 1) % m_perFrameData.size()];
+    struct LightGridInfo { uint32 numGrids; uint32 gridDataCounter; };
+    std::span<LightGridInfo> infoSpan = lastFrameData.lightTableBuffer.mapMemory<LightGridInfo>(0, sizeof(LightGridInfo));
+    const LightGridInfo info = *infoSpan.data();
+    lastFrameData.lightTableBuffer.unmapMemory();
+
+    const bool tableHigh = info.numGrids > m_lightTableEntries / 4;
+    const bool gridHigh = (size_t)info.gridDataCounter * sizeof(uint32) > m_lightGridBufferSize / 4 * 3;
+    if (tableHigh || gridHigh)
+        growLightGridBuffers(gridHigh ? (size_t)(info.gridDataCounter * sizeof(uint32) * 1.5f) : m_lightGridBufferSize, tableHigh ? info.numGrids * 8 : m_lightTableEntries);
+}
+
+void Renderer::growInstanceOffsetCapacity(uint32 needed)
+{
+    m_maxInstanceOffsets = growCapacity(m_maxInstanceOffsets, needed);
+    waitForGpuAndFlushStaging();
+    m_instanceOffsetsBuffer.initialize(m_maxInstanceOffsets * sizeof(RendererVKLayout::MeshInstanceOffset),
+        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        vk::MemoryPropertyFlagBits::eDeviceLocal);
+    if (!m_cpuInstanceOffsets.empty())
+        Globals::stagingManager.upload(m_instanceOffsetsBuffer.getBuffer(), m_cpuInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset), m_cpuInstanceOffsets.data());
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew instance offset capacity to %u\n", m_maxInstanceOffsets);
 }
 
 void Renderer::recordIndirectCull(uint32 frameIdx)
@@ -730,6 +949,7 @@ void Renderer::recordLightGrid(uint32 frameIdx)
         .inLightInfoBuffer = frameData.lightInfosBuffer,
         .outLightGridBuffer = frameData.lightGridsBuffer,
         .outLightTableBuffer = frameData.lightTableBuffer,
+        .numTableEntries = m_lightTableEntries,
     };
     m_lightGridComputePipeline.record(cb, frameIdx, params);
     cb.end();
@@ -815,6 +1035,7 @@ void Renderer::recordStaticMesh(uint32 frameIdx)
         .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
         .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
         .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
+        .transparentIndirectCommandBuffer = m_indirectCullComputePipeline.getTransparentIndirectCommandBuffer(frameIdx),
         .lightInfosBuffer = frameData.lightInfosBuffer,
         .lightGridsBuffer = frameData.lightGridsBuffer,
         .lightTableBuffer = frameData.lightTableBuffer,
@@ -1057,7 +1278,7 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite | vk::AccessFlagBits2::eShaderSampledRead);
 
     // 3. Write the per-instance TLAS records on the GPU.
-    const uint32 numInstances = std::min(m_meshInstanceCounter, RendererVKLayout::GI_MAX_TLAS_INSTANCES);
+    const uint32 numInstances = std::min(m_meshInstanceCounter, m_maxGiTlasInstances);
     GIProbePipeline::TlasInstanceParams tlasParams{
         .renderNodeTransforms = frameData.inRenderNodeTransformsBuffer,
         .meshInstances = frameData.inMeshInstancesBuffer,
@@ -1285,13 +1506,16 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
     m_numInstancesPerMesh.resize(m_meshInfoCounter);
 
     assert(m_meshInfoCounter < USHRT_MAX);
-    assert(m_meshInfoCounter < RendererVKLayout::MAX_UNIQUE_MESHES);
 
-    Globals::stagingManager.upload(m_meshInfosBuffer.getBuffer(), meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
-        meshInfos.data(), baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
-
-    // Keep a CPU copy so the GI BLAS builder can read per-mesh firstIndex/vertexOffset/indexCount.
+    // Keep a CPU copy so the GI BLAS builder can read per-mesh firstIndex/vertexOffset/indexCount
+    // (and so capacity growth can re-upload everything).
     m_cpuMeshInfos.insert(m_cpuMeshInfos.end(), meshInfos.begin(), meshInfos.end());
+
+    if (m_meshInfoCounter > m_maxUniqueMeshes)
+        growUniqueMeshCapacity(m_meshInfoCounter); // re-uploads the full CPU copy
+    else
+        Globals::stagingManager.upload(m_meshInfosBuffer.getBuffer(), meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
+            meshInfos.data(), baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
 
     setHaveToRecordCommandBuffers();
     return baseMeshInfoIdx;
@@ -1302,10 +1526,14 @@ uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialIn
     const uint32 baseMaterialInfoIdx = m_materialInfoCounter;
     m_materialInfoCounter += (uint32)materialInfos.size();
     assert(m_materialInfoCounter < USHRT_MAX);
-    assert(m_materialInfoCounter < RendererVKLayout::MAX_UNIQUE_MATERIALS);
 
-    Globals::stagingManager.upload(m_materialInfosBuffer.getBuffer(), materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
-        materialInfos.data(), baseMaterialInfoIdx * sizeof(RendererVKLayout::MaterialInfo));
+    m_cpuMaterialInfos.insert(m_cpuMaterialInfos.end(), materialInfos.begin(), materialInfos.end());
+
+    if (m_materialInfoCounter > m_maxUniqueMaterials)
+        growMaterialCapacity(m_materialInfoCounter); // re-uploads the full CPU copy
+    else
+        Globals::stagingManager.upload(m_materialInfosBuffer.getBuffer(), materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
+            materialInfos.data(), baseMaterialInfoIdx * sizeof(RendererVKLayout::MaterialInfo));
 
     setHaveToRecordCommandBuffers();
     return baseMaterialInfoIdx;
@@ -1315,10 +1543,14 @@ uint32 Renderer::addMeshInstanceOffsets(const std::vector<RendererVKLayout::Mesh
 {
     const uint32 baseInstanceOffsetIdx = m_instanceOffsetCounter;
     m_instanceOffsetCounter += (uint32)meshInstanceOffsets.size();
-    assert(m_instanceOffsetCounter < RendererVKLayout::MAX_INSTANCE_OFFSETS);
 
-    Globals::stagingManager.upload(m_instanceOffsetsBuffer.getBuffer(), meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
-        meshInstanceOffsets.data(), baseInstanceOffsetIdx * sizeof(RendererVKLayout::MeshInstanceOffset));
+    m_cpuInstanceOffsets.insert(m_cpuInstanceOffsets.end(), meshInstanceOffsets.begin(), meshInstanceOffsets.end());
+
+    if (m_instanceOffsetCounter > m_maxInstanceOffsets)
+        growInstanceOffsetCapacity(m_instanceOffsetCounter); // re-uploads the full CPU copy
+    else
+        Globals::stagingManager.upload(m_instanceOffsetsBuffer.getBuffer(), meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
+            meshInstanceOffsets.data(), baseInstanceOffsetIdx * sizeof(RendererVKLayout::MeshInstanceOffset));
 
     setHaveToRecordCommandBuffers();
     return baseInstanceOffsetIdx;
@@ -1364,22 +1596,22 @@ Renderer::Stats Renderer::getStats()
     stats.maxLights = RendererVKLayout::MAX_LIGHTS;
 
     stats.numMeshInstances = m_meshInstanceCounter;
-    stats.maxMeshInstances = RendererVKLayout::MAX_INSTANCE_DATA;
+    stats.maxMeshInstances = m_maxInstanceData;
 
     stats.numInstanceOffsets = m_instanceOffsetCounter;
-    stats.maxInstanceOffsets = RendererVKLayout::MAX_INSTANCE_OFFSETS;
+    stats.maxInstanceOffsets = m_maxInstanceOffsets;
 
     stats.numMeshTypes = m_meshInfoCounter;
-    stats.maxMeshTypes = RendererVKLayout::MAX_UNIQUE_MESHES;
+    stats.maxMeshTypes = m_maxUniqueMeshes;
 
     stats.numMaterials = m_materialInfoCounter;
-    stats.maxMaterials = RendererVKLayout::MAX_UNIQUE_MATERIALS;
+    stats.maxMaterials = m_maxUniqueMaterials;
 
     stats.numRenderNodes = (uint32)m_renderNodeTransforms.size();
-    stats.maxRenderNodes = RendererVKLayout::MAX_RENDER_NODES;
+    stats.maxRenderNodes = m_maxRenderNodes;
 
     stats.numTextures = (uint32)Globals::textureManager.getNumTextures();
-	stats.maxTextures = RendererVKLayout::MAX_TEXTURES;
+	stats.maxTextures = Globals::textureManager.getMaxTextures();
 
 	stats.vertexDataUsedBytes = Globals::meshDataManager.getVertexBufUsed();
 	stats.maxVertexDataBytes = Globals::meshDataManager.getVertexBufSize();
@@ -1402,9 +1634,9 @@ Renderer::Stats Renderer::getStats()
     info = *infoSpan.data();
     lastFrameData.lightTableBuffer.unmapMemory();
     stats.numLightGrids = info.inout_numGrids;
-    stats.maxLightGrids = RendererVKLayout::LIGHT_TABLE_NUM_ENTRIES / 2; // We don't want to go over 50% because of hash table collisions
+    stats.maxLightGrids = m_lightTableEntries / 2; // We don't want to go over 50% because of hash table collisions
     stats.lightGridMemUsageBytes = info.inout_gridDataCounter * sizeof(uint32);
-    stats.maxLightGridMemUsageBytes = RendererVKLayout::LIGHT_GRID_BUFFER_SIZE;
+    stats.maxLightGridMemUsageBytes = m_lightGridBufferSize;
 
     return stats;
 }

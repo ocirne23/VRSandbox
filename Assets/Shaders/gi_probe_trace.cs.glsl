@@ -58,7 +58,7 @@ layout (binding = 6, std430) readonly buffer InIndices     { uint in_indices[]; 
 layout (binding = 7, std430) readonly buffer InMeshInfos   { InMeshInfo in_meshInfos[]; };
 layout (binding = 8, std430) readonly buffer InInstances   { InMeshInstance in_instances[]; };
 layout (binding = 9, std430) readonly buffer InMaterials   { MaterialInfo in_materialInfos[]; };
-layout (binding = 10) uniform sampler2D u_textures[];
+layout (binding = 13) uniform sampler2D u_textures[]; // highest binding in the set: variable descriptor count
 layout (binding = 11) uniform sampler2DArrayShadow u_shadowMap;
 // GI probe clipmap volume (persistent SH, read+write for the multi-bounce lookup + temporal blend).
 layout (binding = 12, std430) coherent buffer GiGridData { float gi_gridData[]; };

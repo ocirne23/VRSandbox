@@ -110,6 +110,8 @@ void main()
                 if (cellSize > GRID_SIZE / 2)
                     cellSize = GRID_SIZE;
                 const uint gridIdx = getOrInsertGrid(ivec3(x, y, z), cellSize);
+                if (gridIdx == INVALID_GRID) // out of table/data space; buffers grow next frame
+                    continue;
                 if (reach <= float(GRID_SIZE / 2))
                 {
                     addLightToGrid(gridIdx, lightIdx, lightMin, lightMax);
