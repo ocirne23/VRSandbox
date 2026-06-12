@@ -356,7 +356,7 @@ void main()
 		const bool moonCovered = cosM < u_moonParams.w * 2.00 - cosM;
 
 		color = atmosphere(dir, L, up, transmittance) * sunSurfaceColor.rgb * u_skySunParams.x;
-		color = adjustSaturation(color, 2.0-eclipseFactor)) * eclipseFactor; // Saturate the sky as the sun goes into eclipse, to keep it from looking like a flat gray haze
+		color = adjustSaturation(color, 2.0-eclipseFactor) * eclipseFactor; // Saturate the sky as the sun goes into eclipse, to keep it from looking like a flat gray haze
 		sunSurfaceColor *= eclipseFactor;
 
 		if (!sunLit && u_sunAngularCos < 1.0 && moonCovered) // 1.0 disables the disc
