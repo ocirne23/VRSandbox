@@ -11,7 +11,8 @@
 //    smooth (unthresholded) directional sun-shading term and a silver lining
 //  - hash stars that fade in when the sun sets
 // Everything is driven from the UBO sky params (Tweaks panel: Sky / Sky/Atmosphere / Sky/Sun /
-// Sky/Clouds). The GI/AO miss paths use the much cheaper analytic skyColor() (shared.inc.glsl).
+// Sky/Clouds). The GI/fog/fallback paths use the low-step skyRadiance() (atmosphere.inc.glsl), the
+// same scatter model with the same UBO coefficients, so indirect sky light matches the visible sky.
 
 #include "shared.inc.glsl"
 
@@ -23,91 +24,10 @@ layout (location = 5) in flat uint in_meshIdxMaterialIdx;
 layout (location = 0) out vec4 out_color;
 
 // ---------------------------------------------------------------------------------------------
-// Atmosphere (single scattering). Earth-ish constants; heights in meters.
+// Atmosphere: single-scattering Rayleigh + Mie, shared with the indirect paths (atmosphere.inc.glsl,
+// pulled in by shared.inc.glsl). Coefficients come from the UBO (u_betaRayleigh / u_betaMie).
 // ---------------------------------------------------------------------------------------------
-const float R_PLANET  = 6371e3;
-const float R_ATMOS   = 6451e3;
-const vec3  BETA_RAY  = vec3(5.802e-6, 13.558e-6, 33.1e-6); // Rayleigh scattering at sea level
-const float BETA_MIE  = 3.996e-6;                           // Mie scattering at sea level
-const float MIE_EXT   = 1.11;                               // Mie extinction/scattering ratio (absorption)
-const float H_RAY     = 8500.0;                             // Rayleigh scale height
-const float H_MIE     = 1200.0;                             // Mie scale height
-const int   VIEW_STEPS = 12;
-const float OBSERVE_HEIGHT = 2.0;
-// Near/far intersection distances of a ray with a sphere of radius r centered at the origin.
-vec2 raySphere(vec3 ro, vec3 rd, float r)
-{
-	float b = dot(ro, rd);
-	float c = dot(ro, ro) - r * r;
-	float d = b * b - c;
-	if (d < 0.0) return vec2(1e20, -1e20);
-	d = sqrt(d);
-	return vec2(-b - d, -b + d);
-}
-
-float phaseRayleigh(float mu) { return 3.0 / (16.0 * PI) * (1.0 + mu * mu); }
-// Henyey-Greenstein, used both for the Mie scattering lobe and the sun halo.
-float phaseHG(float mu, float g)
-{
-	float g2 = g * g;
-	return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * mu, 1.5));
-}
-
-// Chapman grazing-incidence approximation (Schüler): the closed form of the optical-depth integral
-// along a ray to space through an exponential atmosphere. Replaces the old SUN_STEPS inner raymarch
-// (4 samples x length/exp for every view step) with a couple of sqrts; exact at the zenith, ~airmass 38
-// at the horizon, and handles the below-horizon case.
-float chapman(float X, float cosChi) // X = (planet radius + height) / scale height
-{
-	float c = sqrt(1.5707963 * X); // sqrt(pi/2 * X)
-	if (cosChi >= 0.0)
-		return c / ((c - 1.0) * cosChi + 1.0);
-	float sinChi = sqrt(max(1.0 - cosChi * cosChi, 1e-6));
-	float X0 = X * sinChi;
-	return 2.0 * sqrt(1.5707963 * X0) * exp(min(X - X0, 60.0)) - c / ((c - 1.0) * (-cosChi) + 1.0);
-}
-// (Rayleigh, Mie) optical depth from pos to the atmosphere edge toward the sun.
-vec2 sunOpticalDepth(vec3 pos, vec3 sunDir)
-{
-	float r = length(pos);
-	float h = max(r - R_PLANET, 0.0);
-	float cosChi = dot(pos, sunDir) / r;
-	float odR = exp(-h / H_RAY) * H_RAY * chapman(r / H_RAY, cosChi);
-	float odM = exp(-h / H_MIE) * H_MIE * chapman(r / H_MIE, cosChi);
-	return vec2(odR, odM);
-}
-
-// In-scattered radiance along dir (unit sun radiance; multiply by the sun color outside), plus the view
-// ray's total transmittance (used to attenuate the sun disc and stars behind the atmosphere).
-vec3 atmosphere(vec3 dir, vec3 sunDir, vec3 up, out vec3 transmittance)
-{
-	vec3 ro = up * (R_PLANET + OBSERVE_HEIGHT);
-	float tFar = max(raySphere(ro, dir, R_ATMOS).y, 0.0);
-
-	float mu = dot(dir, sunDir);
-	float pR = phaseRayleigh(mu);
-	float pM = phaseHG(mu, u_skySunParams.y);
-
-	vec2 odView = vec2(0.0);
-	vec3 sumR = vec3(0.0), sumM = vec3(0.0);
-	float dt = tFar / float(VIEW_STEPS);
-	float t = 0.5 * dt;
-	for (int i = 0; i < VIEW_STEPS; ++i)
-	{
-		vec3 p = ro + dir * t;
-		float h = length(p) - R_PLANET;
-		vec2 dens = exp(-max(h, 0.0) / vec2(H_RAY, H_MIE)) * dt;
-		odView += dens;
-		vec2 odSun = sunOpticalDepth(p, sunDir);
-		vec3 tau = BETA_RAY * (odView.x + odSun.x) + vec3(BETA_MIE * MIE_EXT) * (odView.y + odSun.y);
-		vec3 atten = exp(-tau);
-		sumR += atten * dens.x;
-		sumM += atten * dens.y;
-		t += dt;
-	}
-	transmittance = exp(-(BETA_RAY * odView.x + vec3(BETA_MIE * MIE_EXT) * odView.y));
-	return sumR * BETA_RAY * pR + sumM * vec3(BETA_MIE) * pM;
-}
+const int VIEW_STEPS = 12;
 
 // ---------------------------------------------------------------------------------------------
 // Clouds: a marched slab [height, height + thickness] of domain-warped FBM with a vertical density
@@ -312,7 +232,7 @@ vec4 clouds(vec3 dir, vec3 up, vec3 sunDir, vec3 sunTint, vec3 skyAmbient)
 
 	// Silver lining: forward-scatter highlight through the thin parts, on the accumulated result.
 	float mu = max(dot(dir, sunDir), 0.0);
-	vec3 col = acc / alpha + sunTint * pow(mu, 12.0) * (1.0 - alpha) * u_cloudParams1.z;
+	vec3 col = acc / alpha + sunTint * pow(mu, 12.0) * (1.0 - alpha) * skyAmbient;
 
 	// Horizon fade doubles as anti-aliasing: distant FBM has no mips, so melt it into the haze.
 	return vec4(col, alpha * smoothstep(0.02, 0.18, cosUp));
@@ -336,16 +256,14 @@ void main()
 	const vec3 up = normalize(u_skyUp);
 	const vec3 L = normalize(u_sunDirection.xyz);
 
-	// With the sun fully off (color/intensity/scatter boost zero) the entire scattering integral is a
-	// multiply by zero: skip the raymarch and keep only the cheap ground test for the branches below.
+	// With the sun fully off (color/intensity zero) the entire scattering integral is a multiply by
+	// zero: skip the raymarch and keep only the cheap ground test for the branches below.
 	vec3 sunSurfaceColor = u_sunColor.rgb;
 	const float eclipseFactor = u_eclipseParams.x;
 	const float sunMagnitude = (u_sunColor.r + u_sunColor.g + u_sunColor.b);
-	const bool sunLit = sunMagnitude * u_skySunParams.x * eclipseFactor > 1e-5;
+	const bool sunLit = sunMagnitude * eclipseFactor > 1e-5;
 	vec3 transmittance = vec3(1.0);
 	vec3 color = vec3(0.0);
-	float tUp = dot(dir, up);
-	vec3 grade = skyGradient(tUp);
 	const float sunElev = dot(L, up);
 	
 	{
@@ -355,22 +273,41 @@ void main()
 		const float sunMoonAngle = dot(L, moonDir);
 		const bool moonCovered = cosM < u_moonParams.w * 2.00 - cosM;
 
-		color = atmosphere(dir, L, up, transmittance) * sunSurfaceColor.rgb * u_skySunParams.x;
-		color = adjustSaturation(color, 2.0-eclipseFactor) * eclipseFactor; // Saturate the sky as the sun goes into eclipse, to keep it from looking like a flat gray haze
+		color = atmosphereScatter(dir, L, up, VIEW_STEPS, transmittance) * sunSurfaceColor.rgb;
+		color = adjustSaturation(color, 2.0 * (2.0-eclipseFactor)) * eclipseFactor; // Saturate the sky as the sun goes into eclipse, to keep it from looking like a flat gray haze
 		sunSurfaceColor *= eclipseFactor;
 
-		if (!sunLit && u_sunAngularCos < 1.0 && moonCovered) // 1.0 disables the disc
+		// Sky radiance (moonlight / space light): a second in-scatter pass from the sky up axis, so it
+		// gives the night sky a faint glow consistent with what GI/fog receive from skyRadiance().
+		if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
 		{
-			// Feathered rim + slight limb darkening; transmittance reddens/dims it near the horizon.
-			const float feather = (1.0 - u_sunAngularCos) * max(u_skySunParams.z, 0.01);
-			float disc = smoothstep(u_sunAngularCos - feather * 0.5, u_sunAngularCos + feather * 0.5, cosAngle);
-			float limb = mix(0.55, 1.0, smoothstep(u_sunAngularCos, 1.0, cosAngle));
-			color += sunSurfaceColor * disc * limb * transmittance;
+			vec3 skyLTrans;
+			color += atmosphereScatter(dir, up, up, 4, skyLTrans) * u_skyRadianceColor;
 		}
+
 		// Sun halo: a tight Henyey-Greenstein forward lobe (smooth peak, long graceful tail) instead of a
 		// pow() spike. u_sunGlow is the strength; the transmittance keeps it warm/dim near the horizon.
 		if (sunLit && u_sunGlow > 0.0 && moonCovered)
 			color += sunSurfaceColor * phaseHG(cosAngle, 0.985) * 0.015 * u_sunGlow * transmittance;
+
+		if (sunLit && u_sunAngularCos < 1.0 && moonCovered) // 1.0 disables the disc
+		{
+			// Sun disc: analytically anti-aliased rim (pixel-footprint smoothstep, TAA-stable) and a mild
+			// limb darkening. The gradient through the overexposed sun region is recovered by the highlight
+			// roll-off at the end of main() (u_skySunParams.z), not by darkening the disc itself.
+			vec3 sT = normalize(cross(L, abs(L.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+			vec3 sB = cross(L, sT);
+			float discSin = sqrt(max(1.0 - u_sunAngularCos * u_sunAngularCos, 1e-12));
+			vec2 suv = vec2(dot(dir, sT), dot(dir, sB)) / discSin; // disc-local, rim at |suv| = 1
+			float r2 = dot(suv, suv);
+			if (r2 < 1.1 && cosAngle > 0.0)
+			{
+				float pr = max(dirPx / discSin, 0.004); // pixel footprint in disc radii
+				float edge = 1.0 - smoothstep(1.0 - pr * 1.5, 1.0 + pr * 0.5, sqrt(r2));
+				float limb = 1.0 - 0.35 * (1.0 - sqrt(max(1.0 - r2, 0.0)));
+				color += sunSurfaceColor * (edge * limb) * transmittance;
+			}
+		}
 
 		// Moon: a sun-lit sphere shaded into the disc around u_moonParams.xyz (independent of the sun's
 		// position; the phases still fall out of lighting the reconstructed sphere normals with the
@@ -463,6 +400,7 @@ void main()
 					}
 				}
 
+				// Random stars
 				if (u_skySunParams.w > 0.0)
 				{
 					vec3 sd = dir * 220.0;
@@ -506,15 +444,31 @@ void main()
 		}
 	}
 
-	// Clouds last, over everything (they also dim the sun disc behind them). Sun tint approximates the
-	// transmittance toward the sun at cloud height: white at day, warm at the horizon, dark at night.
-	const float sunsetWarm = clamp(sunElev * 5.0, 0.0, 1.0);
-	const vec3 sunTint = sunSurfaceColor.rgb * 0.30 * mix(vec3(1.0, 0.45, 0.2), vec3(1.0), sunsetWarm)
-	                   * clamp(sunElev * 8.0 + 0.25, 0.02, 1.0);
-	const vec3 skyAmbient = color * u_skyIntensity; // local sky as the cloud's ambient source keeps hue coherent
-	vec4 cl = clouds(dir, up, L, sunTint, skyAmbient);
+	// Clouds last, over everything (they also dim the sun disc behind them). Direct cloud light = sun
+	const vec3 sunTint = (sunSurfaceColor.rgb * atmosTransmittanceToLight(u_cloudParams0.x, L, up) + u_skyRadianceColor) / PI;
+	vec4 cl = clouds(dir, up, L, sunTint, color);
 	color = mix(color, cl.rgb, cl.a);
 
-	// u_skyIntensity is the user brightness slider; defaults to 0.5, so scale by 2 to be neutral there.
+	// Highlight roll-off (u_skySunParams.z): there is no tonemapper, so everything over 1.0 hard-clips
+	// to flat white — the sun disc, its halo and the Mie forward peak all merge into one featureless
+	// circle. Soft-clip the max channel above a knee with an exponential shoulder that asymptotes at 1:
+	// the overexposed region keeps a smooth gradient (disc > halo core > halo tail) instead of a hard
+	// silhouette. Max-channel (not per-channel) so saturated sunset hues roll off without shifting hue.
+	// 0 = off (raw clip); higher = lower knee + longer shoulder = more of the brightness range mapped
+	// into the visible gradient.
+	const float rolloff = clamp(u_skySunParams.z, 0.0, 2.0);
+	if (rolloff > 0.0)
+	{
+		// Knee saturates at rolloff = 1; past that only the headroom keeps growing (gentler shoulder).
+		const float knee = mix(1.0, min(u_rolloffKnee, 0.99), min(rolloff, 1.0)); // where compression starts
+		const float headroom = mix(0.35, u_eclipseParams.y, rolloff);             // brightness range the shoulder absorbs
+		float lum = max(color.r, max(color.g, color.b));
+		if (lum > knee)
+		{
+			float compressed = knee + (1.0 - knee) * (1.0 - exp(-(lum - knee) / ((1.0 - knee) * headroom)));
+			color *= compressed / lum;
+		}
+	}
+
 	out_color = vec4(color, 1.0);
 }

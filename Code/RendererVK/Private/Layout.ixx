@@ -70,17 +70,17 @@ export namespace RendererVKLayout
         Frustum frustum;
         glm::vec3 viewPos;
 
-        float giIntensity;       // multiplier on global illumination
+        float betaMie;           // Mie scattering coefficient at sea level (1/m), drives sky + indirect sky light
         glm::vec3 sunDirection;  // xyz = normalized direction towards the sun, w unused
         float sunAngularCos;     // cos of the sun disc radius (1 = point, smaller = bigger disc)
-        glm::vec3 sunColor;      // rgb = color * intensity
+        glm::vec3 sunColor;      // rgb = color * intensity (sun irradiance; also sources atmosphere scattering)
         float sunGlow;           // glow falloff exponent (0 = no glow); larger = tighter
 
-        glm::vec3  skyZenith;     // color along +skyUp
-        float skyIntensity;
-        glm::vec3  skyHorizon;    // horizon color (perpendicular to skyUp)
-        float ambientIntensity;   // multiplier on the ambient term (horizon + zenith, without GI)
-        glm::vec3  skyGround;     // color along -skyUp
+        glm::vec3 betaRayleigh;  // Rayleigh scattering coefficients at sea level (1/m), drives sky + indirect
+        float rolloffKnee;       // sky highlight roll-off: luminance where compression starts (at full roll-off)
+        glm::vec3 skyRadianceColor; // directional atmosphere light (moonlight/space light) radiance, along skyUp; GI-only
+        float rtSkyRadiance;        // > 0.5: one sky-visibility ray per GI probe gates the sky radiance injection
+        glm::vec3 ambientColor;   // flat, non-physical minimum ambient radiance (applied once at final shading)
         uint32 frameIndex;        // monotonic frame counter (RNG / temporal-rotation source so passes that read
                                   // it can be recorded once instead of baking it into a push constant)
         glm::vec3  skyUp;         // sky "up" axis (normalized); need not be world +Y (e.g. planet surface normal)
@@ -98,9 +98,9 @@ export namespace RendererVKLayout
         float cloudThickness;   // cloud slab thickness (m)
 
         glm::vec4 cloudParams0; // x = layer height (m), y = noise scale, z = wind speed (noise units/s), w = wind angle (rad)
-        glm::vec4 cloudParams1; // x = edge softness, y = sun shading strength, z = silver lining, w = ambient amount
+        glm::vec4 cloudParams1; // x = edge softness, y = sun shading strength, z = unused, w = unused
         glm::vec4 cloudParams2; // x = density (extinction), y = sharpness, z = base/top height variation, w = moon brightness
-        glm::vec4 skySunParams; // x = atmosphere scatter boost, y = Mie anisotropy g, z = sun disc feather, w = star density
+        glm::vec4 skySunParams; // x = atmosphere scatter boost (in-scatter only), y = Mie anisotropy g, z = sky highlight roll-off, w = star density
 
         glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv (screen-space passes)
         glm::mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen (temporal reuse)
@@ -116,9 +116,9 @@ export namespace RendererVKLayout
 
         // Volumetric fog (packing documented in vol_fog.inc.glsl)
         glm::vec4 fogParams0; // x = global density (1/m), y = height base, z = height falloff (1/m), w = range (m)
-        glm::vec4 fogParams1; // rgb = fog albedo, w = phase anisotropy g
+        glm::vec4 fogParams1; // rgb = fog albedo * intensity (> 1 = non-physical gain), w = phase anisotropy g
         glm::vec4 fogParams2; // x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal blend
-        glm::vec4 fogParams3; // x = sun boost, y = ambient boost, z = enabled, w = light shadow rays
+        glm::vec4 fogParams3; // xy = unused, z = enabled, w = light shadow rays
         glm::vec4 fogParams4; // x = sun shadow rays, y = spatial filter, z = GI ambient, w = sun shadow softness (rad)
 
         glm::vec4 moonParams; // xyz = normalized direction towards the moon, w = cos of the moon disc radius
@@ -128,7 +128,10 @@ export namespace RendererVKLayout
         glm::vec4 nebulaAxis;   // xyz = normalized milky-way band pole (band lies on its great circle), w unused
 
         glm::vec4 eclipseParams; // x = visible sun fraction (solar eclipse; sunColor is pre-multiplied by it,
-                                 // the sky divides it back out for the unoccluded disc/corona), yzw unused
+                                 // y = sky highlight roll-off headroom (stops the shoulder absorbs),
+                                 // the sky divides it back out for the unoccluded disc/corona), zw unused
+
+        glm::vec4 atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

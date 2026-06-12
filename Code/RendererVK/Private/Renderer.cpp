@@ -1,4 +1,4 @@
-module RendererVK:Renderer;
+﻿module RendererVK:Renderer;
 
 import Core;
 import Core.fwd;
@@ -166,71 +166,73 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     _putenv("DISABLE_VULKAN_OW_OBS_CAPTURE=True");
     _putenv("DISABLE_VULKAN_OBS_CAPTURE=True");
 
-    Tweak::floatVar("Sky", "Sky Brightness", &m_skyParams.intensity, 0.0f, FLT_MAX);
-    Tweak::float3("Sky", "Sun Direction", &m_sunDirection, 0.01f, [&]() { m_sunDirection = glm::normalize(m_sunDirection); });
-    Tweak::color3("Sky", "Sun Color", &m_sunColor, &m_sunIntensity);
+    Tweak::float3("Sky", "Sun Direction", &m_skyParams.sunDirection, 0.01f, [&]() { m_skyParams.sunDirection = glm::normalize(m_skyParams.sunDirection); });
+    Tweak::color3("Sky", "Sun Color", &m_skyParams.sunColor, &m_skyParams.sunIntensity);
+    Tweak::color3("Sky", "Ambient", &m_skyParams.ambientColor, &m_skyParams.ambientIntensity, 0.0f, 0.2f, 0.001f);
+    Tweak::color3("Sky", "Sky Radiance", &m_skyParams.skyRadianceColor, &m_skyParams.skyRadianceIntensity, 0.0f, 1.2f, 0.001f);
     Tweak::floatVar("Sky/Sun", "Sun Angle Cos", &m_skyParams.sunAngularCos, 0.9995f, 1.0f, 0.000001f);
-    Tweak::floatVar("Sky/Sun", "Sun Glow", &m_skyParams.sunGlow, 0.0, 2.0f, 0.01f);
-    Tweak::floatVar("Sky/Sun", "SunCasc D Bias", &m_shadowDepthBias, 0.0f, 0.005f, 0.0001f);
-    Tweak::floatVar("Sky/Sun", "SunCasc N Bias", &m_shadowNormalBias, 0.0f, 10.0f);
-    Tweak::floatVar("Sky/Sun", "Scatter Boost", &m_skyScatterBoost, 0.0f, 16.0f);
-    Tweak::floatVar("Sky/Sun", "Mie Anisotropy", &m_skyMieG, 0.0f, 0.99f);
-    Tweak::floatVar("Sky/Stars", "Density", &m_starDensity, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Stars", "Size", &m_starSize, 0.2f, 3.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Size Variation", &m_starSizeVar, 0.0f, 1.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Brightness", &m_starBrightness, 0.0f, 4.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Color Variation", &m_starColorVar, 0.0f, 1.0f, 0.01f);
-    Tweak::floatVar("Sky/Nebula", "Intensity", &m_nebulaIntensity, 0.0f, 2.0f, 0.01f);
-    Tweak::floatVar("Sky/Nebula", "Scale", &m_nebulaScale, 0.5f, 12.0f, 0.05f);
-    Tweak::floatVar("Sky/Nebula", "Band Width", &m_nebulaBandWidth, 0.05f, 1.0f, 0.005f);
-    Tweak::floatVar("Sky/Nebula", "Dust Lanes", &m_nebulaDust, 0.0f, 1.0f, 0.01f);
-    Tweak::float3("Sky/Nebula", "Axis", &m_nebulaAxis, 0.01f, [&]() { m_nebulaAxis = glm::normalize(m_nebulaAxis); });
-    Tweak::float3("Sky/Moon", "Direction", &m_moonDirection, 0.01f, [&]() { m_moonDirection = glm::normalize(m_moonDirection); });
-    Tweak::floatVar("Sky/Moon", "Size", &m_moonSizeDeg, 0.05f, 10.0f, 0.01f);
-    Tweak::floatVar("Sky/Moon", "Brightness", &m_moonBrightness, 0.0f, 2.0f);
-    Tweak::floatVar("Sky/Sun", "Disc Feather", &m_sunDiscFeather, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Sun", "Glow Strength", &m_skyParams.sunGlow, 0.0f, 2.0f);
-    Tweak::floatVar("Sky/Clouds", "Coverage", &m_cloudCoverage, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Height", &m_cloudHeight, 0.0f, 8000.0f);
-    Tweak::floatVar("Sky/Clouds", "Thickness", &m_cloudThickness, 500.0f, 10000.0f);
-    Tweak::floatVar("Sky/Clouds", "Scale", &m_cloudScale, 0.1f, 5.0f);
-    Tweak::floatVar("Sky/Clouds", "Wind Speed", &m_cloudWindSpeed, 0.0f, 10.0f);
-    Tweak::floatVar("Sky/Clouds", "Wind Angle", &m_cloudWindAngle, 0.0f, 6.2832f);
-    Tweak::floatVar("Sky/Clouds", "Softness", &m_cloudSoftness, 0.05f, 0.8f);
-    Tweak::floatVar("Sky/Clouds", "Density", &m_cloudDensity, 0.2f, 6.0f);
-    Tweak::floatVar("Sky/Clouds", "Sharpness", &m_cloudSharpness, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Height Variation", &m_cloudBaseVar, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Sun Shading", &m_cloudShading, 0.0f, 6.0f);
-    Tweak::floatVar("Sky/Clouds", "Silver Lining", &m_cloudSilver, 0.0f, 4.0f);
-    Tweak::floatVar("Sky/Clouds", "Ambient", &m_cloudAmbient, 0.0f, 1.0f);
-    Tweak::color3("Sky/Gradient", "Zenith", &m_skyParams.zenith);
-    Tweak::color3("Sky/Gradient", "Horizon", &m_skyParams.horizon);
-    Tweak::color3("Sky/Gradient", "Ground", &m_skyParams.ground);
-    Tweak::float3("Sky/Gradient", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
+    Tweak::floatVar("Sky/Sun", "Sun Glow", &m_skyParams.sunGlow, 0.0, 5.0f, 0.01f);
+    Tweak::floatVar("Sky/Sun", "SunCasc D Bias", &m_skyParams.shadowDepthBias, 0.0f, 0.005f, 0.0001f);
+    Tweak::floatVar("Sky/Sun", "SunCasc N Bias", &m_skyParams.shadowNormalBias, 0.0f, 10.0f);
+    Tweak::floatVar("Sky/Sun", "Highlight Rolloff", &m_skyParams.sunRolloff, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Sun", "Rolloff Knee", &m_skyParams.sunRolloffKnee, 0.1f, 1.0f, 0.005f);
+    Tweak::floatVar("Sky/Sun", "Rolloff Headroom", &m_skyParams.sunRolloffHeadroom, 0.5f, 32.0f, 0.05f);
 
-    Tweak::boolean("Fog", "Enabled", &m_fogEnabled);
-    Tweak::floatVar("Fog", "Global Density", &m_fogDensity, 0.0f, 0.2f, 0.0005f);
-    Tweak::floatVar("Fog", "Height Base", &m_fogHeightBase, -200.0f, 500.0f);
-    Tweak::floatVar("Fog", "Height Falloff", &m_fogHeightFalloff, 0.0f, 1.0f, 0.002f);
-    Tweak::color3("Fog", "Albedo", &m_fogAlbedo);
-    Tweak::floatVar("Fog", "Anisotropy", &m_fogAnisotropy, -0.9f, 0.95f, 0.01f);
-    Tweak::floatVar("Fog", "Range", &m_fogRange, 1.0f, 1024.0f);
-    Tweak::floatVar("Fog", "Noise Scale", &m_fogNoiseScale, 0.005f, 1.0f, 0.005f);
-    Tweak::floatVar("Fog", "Noise Strength", &m_fogNoiseStrength, 0.0f, 1.0f, 0.01f);
-    Tweak::floatVar("Fog", "Wind Speed", &m_fogWindSpeed, 0.0f, 20.0f);
-    Tweak::floatVar("Fog", "Temporal Blend", &m_fogTemporal, 0.0f, 0.97f, 0.01f);
-    Tweak::floatVar("Fog", "Sun Boost", &m_fogSunBoost, 0.0f, 8.0f);
-    Tweak::floatVar("Fog", "Ambient Boost", &m_fogAmbientBoost, 0.0f, 25.0f);
-    Tweak::intVar("Fog/Quality", "Sun Rays", &m_fogSunRays, 1, 8);
-    Tweak::floatVar("Fog/Quality", "Sun Softness", &m_fogSunSoftness, 0.0f, 0.2f, 0.005f);
-    Tweak::boolean("Fog/Quality", "Spatial Filter", &m_fogSpatialFilter);
-    Tweak::boolean("Fog/Quality", "GI Ambient", &m_fogGIAmbient);
-    Tweak::boolean("Fog/Quality", "Light Shadows", &m_fogLightShadows);
+    Tweak::floatVar("Sky/Atmosphere", "Scatter Boost", &m_skyParams.scatterBoost, 0.0f, 32.0f);
+    Tweak::floatVar("Sky/Atmosphere", "Rayleigh", &m_skyParams.rayleighScatter, 0.0f, 8.0f, 0.01f);
+    Tweak::floatVar("Sky/Atmosphere", "Mie", &m_skyParams.mieScatter, 0.0f, 8.0f, 0.01f);
+    Tweak::floatVar("Sky/Atmosphere", "Mie Anisotropy", &m_skyParams.mieG, 0.0f, 0.99f);
+    Tweak::floatVar("Sky/Atmosphere", "Rayleigh Height", &m_skyParams.rayleighHeight, 1000.0f, 20000.0f, 10.0f);
+    Tweak::floatVar("Sky/Atmosphere", "Mie Height", &m_skyParams.mieHeight, 200.0f, 5000.0f, 5.0f);
+    Tweak::floatVar("Sky/Atmosphere", "Mie Extinction", &m_skyParams.mieExtinction, 1.0f, 2.0f, 0.005f);
+    Tweak::floatVar("Sky/Atmosphere", "Ozone", &m_skyParams.ozone, 0.0f, 4.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Density", &m_skyParams.starDensity, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Stars", "Size", &m_skyParams.starSize, 0.2f, 3.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Size Variation", &m_skyParams.starSizeVar, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Brightness", &m_skyParams.starBrightness, 0.0f, 4.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Color Variation", &m_skyParams.starColorVar, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Sky/Nebula", "Intensity", &m_skyParams.nebulaIntensity, 0.0f, 2.0f, 0.01f);
+    Tweak::floatVar("Sky/Nebula", "Scale", &m_skyParams.nebulaScale, 0.5f, 12.0f, 0.05f);
+    Tweak::floatVar("Sky/Nebula", "Band Width", &m_skyParams.nebulaBandWidth, 0.05f, 1.0f, 0.005f);
+    Tweak::floatVar("Sky/Nebula", "Dust Lanes", &m_skyParams.nebulaDust, 0.0f, 1.0f, 0.01f);
+    Tweak::float3("Sky/Nebula", "Axis", &m_skyParams.nebulaAxis, 0.01f, [&]() { m_skyParams.nebulaAxis = glm::normalize(m_skyParams.nebulaAxis); });
+    Tweak::float3("Sky/Moon", "Direction", &m_skyParams.moonDirection, 0.01f, [&]() { m_skyParams.moonDirection = glm::normalize(m_skyParams.moonDirection); });
+    Tweak::floatVar("Sky/Moon", "Size", &m_skyParams.moonSizeDeg, 0.05f, 10.0f, 0.01f);
+    Tweak::floatVar("Sky/Moon", "Brightness", &m_skyParams.moonBrightness, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Clouds", "Coverage", &m_skyParams.cloudCoverage, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Height", &m_skyParams.cloudHeight, 0.0f, 8000.0f);
+    Tweak::floatVar("Sky/Clouds", "Thickness", &m_skyParams.cloudThickness, 20.0f, 250.0f);
+    Tweak::floatVar("Sky/Clouds", "Scale", &m_skyParams.cloudScale, 0.1f, 5.0f);
+    Tweak::floatVar("Sky/Clouds", "Wind Speed", &m_skyParams.cloudWindSpeed, 0.0f, 10.0f);
+    Tweak::floatVar("Sky/Clouds", "Wind Angle", &m_skyParams.cloudWindAngle, 0.0f, 6.2832f);
+    Tweak::floatVar("Sky/Clouds", "Softness", &m_skyParams.cloudSoftness, 0.05f, 2.0f);
+    Tweak::floatVar("Sky/Clouds", "Density", &m_skyParams.cloudDensity, 0.2f, 25.0f);
+    Tweak::floatVar("Sky/Clouds", "Sharpness", &m_skyParams.cloudSharpness, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Height Variation", &m_skyParams.cloudBaseVar, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Sun Shading", &m_skyParams.cloudShading, 0.0f, 6.0f);
+    Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
+
+    Tweak::boolean("Fog", "Enabled", &m_fogParams.enabled);
+    Tweak::floatVar("Fog", "Global Density", &m_fogParams.density, 0.0f, 1.0f, 0.001f);
+    Tweak::floatVar("Fog", "Height Base", &m_fogParams.heightBase, -200.0f, 500.0f);
+    Tweak::floatVar("Fog", "Height Falloff", &m_fogParams.heightFalloff, 0.0f, 1.0f, 0.002f);
+    Tweak::color3("Fog", "Albedo", &m_fogParams.albedo, &m_fogParams.albedoIntensity);
+    Tweak::floatVar("Fog", "Anisotropy", &m_fogParams.anisotropy, -0.9f, 0.95f, 0.01f);
+    Tweak::floatVar("Fog", "Range", &m_fogParams.range, 1.0f, 1024.0f);
+    Tweak::floatVar("Fog", "Noise Scale", &m_fogParams.noiseScale, 0.005f, 1.0f, 0.005f);
+    Tweak::floatVar("Fog", "Noise Strength", &m_fogParams.noiseStrength, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Fog", "Wind Speed", &m_fogParams.windSpeed, 0.0f, 20.0f);
+    Tweak::floatVar("Fog", "Temporal Blend", &m_fogParams.temporalBlend, 0.0f, 0.97f, 0.01f);
+    Tweak::intVar("Fog/Quality", "Sun Rays", &m_fogParams.sunRays, 1, 8);
+    Tweak::floatVar("Fog/Quality", "Sun Softness", &m_fogParams.sunSoftness, 0.0f, 0.2f, 0.005f);
+    Tweak::boolean("Fog/Quality", "Spatial Filter", &m_fogParams.spatialFilter);
+    Tweak::boolean("Fog/Quality", "GI Ambient", &m_fogParams.giAmbient);
+    Tweak::boolean("Fog/Quality", "Light Shadows", &m_fogParams.lightShadows);
 
     Tweak::boolean("RT", "RT Lights", &m_rtLightShadows);
     Tweak::boolean("RT", "RT Sun", &m_rtSunShadow);
     Tweak::intVar("RT", "RT Sun Rays", &m_sunShadowRays, 1, 8);
-    Tweak::floatVar("RT/GI", "GI Intensity", &m_giIntensity, 0.0f, 10.0f);
+    Tweak::boolean("RT", "RT Sky Radiance", &m_rtSkyRadiance);
 
     Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
     Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
@@ -577,56 +579,62 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.taaJitter = glm::vec4(taaJitterNdc, 0.0f, 0.0f);
     ubo.frameIndex = m_frameCounter;
 
-    ubo.giIntensity = m_giIntensity;
-    ubo.sunDirection = m_sunDirection;
-    ubo.sunAngularCos = m_skyParams.sunAngularCos;
+    const SkyParams& sky = m_skyParams;
+    const FogParams& fog = m_fogParams;
+
+    // Earth sea-level scattering coefficients, scaled by the atmosphere tweaks. These drive the sky
+    // raymarch and every indirect sky-light consumer (GI miss rays, fog ambient, surface fallback).
+    ubo.betaRayleigh = glm::vec3(5.802e-6f, 13.558e-6f, 33.1e-6f) * sky.rayleighScatter;
+    ubo.rolloffKnee = sky.sunRolloffKnee;
+    ubo.betaMie = 3.996e-6f * sky.mieScatter;
+    ubo.sunDirection = sky.sunDirection;
+    ubo.sunAngularCos = sky.sunAngularCos;
     // Solar eclipse: fold the moon-covered sun fraction into the UBO sun color so every sun consumer
     // (sky atmosphere, forward lighting, GI trace, volumetric fog, clouds) dims consistently.
-    const float eclipseVisible = sunVisibleFraction(m_sunDirection, glm::normalize(m_moonDirection),
-        m_skyParams.sunAngularCos, cosf(glm::radians(m_moonSizeDeg)), m_skyParams.sunGlow);
-    ubo.sunColor = m_sunColor * m_sunIntensity;
-    ubo.eclipseParams = glm::vec4(eclipseVisible, 0.0f, 0.0f, 0.0f);
-    ubo.sunGlow = m_skyParams.sunGlow;
+    const float eclipseVisible = sunVisibleFraction(sky.sunDirection, glm::normalize(sky.moonDirection),
+        sky.sunAngularCos, cosf(glm::radians(sky.moonSizeDeg)), sky.sunGlow);
+    ubo.sunColor = sky.sunColor * sky.sunIntensity;
+    ubo.eclipseParams = glm::vec4(eclipseVisible, sky.sunRolloffHeadroom, 0.0f, 0.0f);
+    ubo.sunGlow = sky.sunGlow;
 
-    ubo.skyZenith = m_skyParams.zenith;
-    ubo.skyIntensity = m_skyParams.intensity;
-    ubo.skyHorizon = m_skyParams.horizon;
-    ubo.ambientIntensity = m_ambientIntensity;
-    ubo.skyGround = m_skyParams.ground;
-    ubo.skyUp = m_skyParams.up;
+    ubo.skyRadianceColor = sky.skyRadianceColor * sky.skyRadianceIntensity;
+    ubo.rtSkyRadiance = m_rtSkyRadiance ? 1.0f : 0.0f;
+    ubo.ambientColor = sky.ambientColor * sky.ambientIntensity;
+    ubo.skyUp = sky.up;
     ubo.rtSunShadow = m_rtSunShadow ? 1.0f : 0.0f;
 
     if (!m_rtSunShadow)
     {
         const float aspect = (float)viewportSize.x / (float)viewportSize.y;
         glm::mat4 cascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
-        computeSunCascades(camera, aspect, m_sunDirection, cascadeViewProj);
+        computeSunCascades(camera, aspect, sky.sunDirection, cascadeViewProj);
         for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
             ubo.cascadeViewProj[c] = cascadeViewProj[c];
-        ubo.shadowParams = glm::vec3(m_shadowDepthBias, m_shadowNormalBias, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION);
+        ubo.shadowParams = glm::vec3(sky.shadowDepthBias, sky.shadowNormalBias, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION);
     }
 
     ubo.sunShadowRays = (float)m_sunShadowRays;
     ubo.rtLightShadows = m_rtLightShadows ? 1.0f : 0.0f;
     static const Clock::time_point timeStart = Clock::now();
     ubo.timeSeconds = std::chrono::duration<float>(Clock::now() - timeStart).count();
-    ubo.cloudCoverage = m_cloudCoverage;
-    ubo.cloudThickness = m_cloudThickness;
-    ubo.cloudParams0 = glm::vec4(m_cloudHeight, 0.00012f * m_cloudScale, 0.0043f * m_cloudWindSpeed, m_cloudWindAngle);
-    ubo.cloudParams1 = glm::vec4(m_cloudSoftness, m_cloudShading, m_cloudSilver, m_cloudAmbient);
-    ubo.cloudParams2 = glm::vec4(m_cloudDensity, m_cloudSharpness, m_cloudBaseVar, m_moonBrightness);
-    ubo.skySunParams = glm::vec4(m_skyScatterBoost, m_skyMieG, m_sunDiscFeather, m_starDensity);
+    ubo.cloudCoverage = sky.cloudCoverage;
+    ubo.cloudThickness = sky.cloudThickness * sky.cloudThickness;
+    ubo.cloudParams0 = glm::vec4(sky.cloudHeight, 0.00012f * sky.cloudScale, 0.0043f * sky.cloudWindSpeed, sky.cloudWindAngle);
+    ubo.cloudParams1 = glm::vec4(sky.cloudSoftness, sky.cloudShading, 0.0f, 0.0f);
+    ubo.cloudParams2 = glm::vec4(sky.cloudDensity, sky.cloudSharpness, sky.cloudBaseVar, sky.moonBrightness);
+    ubo.skySunParams = glm::vec4(sky.scatterBoost, sky.mieG, sky.sunRolloff, sky.starDensity);
 
-    ubo.fogParams0 = glm::vec4(m_fogDensity, m_fogHeightBase, m_fogHeightFalloff * m_fogHeightFalloff, m_fogRange);
-    ubo.fogParams1 = glm::vec4(m_fogAlbedo, m_fogAnisotropy);
-    ubo.fogParams2 = glm::vec4(m_fogNoiseScale, m_fogNoiseStrength, m_fogWindSpeed, m_fogTemporal);
-    ubo.fogParams3 = glm::vec4(m_fogSunBoost, m_fogAmbientBoost, m_fogEnabled ? 1.0f : 0.0f, m_fogLightShadows ? 1.0f : 0.0f);
-    ubo.fogParams4 = glm::vec4((float)m_fogSunRays, m_fogSpatialFilter ? 1.0f : 0.0f, m_fogGIAmbient ? 1.0f : 0.0f, m_fogSunSoftness);
+    ubo.fogParams0 = glm::vec4(fog.density, fog.heightBase, fog.heightFalloff * fog.heightFalloff, fog.range);
+    ubo.fogParams1 = glm::vec4(fog.albedo * fog.albedoIntensity, fog.anisotropy);
+    ubo.fogParams2 = glm::vec4(fog.noiseScale, fog.noiseStrength, fog.windSpeed, fog.temporalBlend);
+    ubo.fogParams3 = glm::vec4(0.0f, 0.0f, fog.enabled ? 1.0f : 0.0f, fog.lightShadows ? 1.0f : 0.0f);
+    ubo.fogParams4 = glm::vec4((float)fog.sunRays, fog.spatialFilter ? 1.0f : 0.0f, fog.giAmbient ? 1.0f : 0.0f, fog.sunSoftness);
 
-    ubo.moonParams = glm::vec4(glm::normalize(m_moonDirection), cosf(glm::radians(m_moonSizeDeg)));
-    ubo.starParams = glm::vec4(m_starSize, m_starSizeVar, m_starBrightness, m_starColorVar);
-    ubo.nebulaParams = glm::vec4(m_nebulaIntensity, m_nebulaScale, m_nebulaBandWidth, m_nebulaDust);
-    ubo.nebulaAxis = glm::vec4(glm::normalize(m_nebulaAxis), 0.0f);
+    ubo.moonParams = glm::vec4(glm::normalize(sky.moonDirection), cosf(glm::radians(sky.moonSizeDeg)));
+    ubo.starParams = glm::vec4(sky.starSize, sky.starSizeVar, sky.starBrightness, sky.starColorVar);
+    ubo.nebulaParams = glm::vec4(sky.nebulaIntensity, sky.nebulaScale, sky.nebulaBandWidth, sky.nebulaDust);
+    ubo.nebulaAxis = glm::vec4(glm::normalize(sky.nebulaAxis), 0.0f);
+    ubo.atmosParams = glm::vec4(sky.rayleighHeight, sky.mieHeight, sky.mieExtinction, sky.ozone);
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
@@ -700,9 +708,9 @@ void Renderer::addSpotLight(const SpotLight& spotLight) { addLightInfo(spotLight
 
 void Renderer::setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity)
 {
-    m_sunDirection = glm::normalize(direction);
-    m_sunColor = color;
-    m_sunIntensity = intensity;
+    m_skyParams.sunDirection = glm::normalize(direction);
+    m_skyParams.sunColor = color;
+    m_skyParams.sunIntensity = intensity;
 }
 
 void Renderer::present()
@@ -1458,7 +1466,7 @@ void Renderer::recordCommandBuffers()
         vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
         // Fog scatter/integrate compute; the primary is re-recorded every frame, so the enable toggle takes
         // effect immediately (the integrated grid was cleared to "no fog" at init for the disabled case).
-        if (m_fogEnabled)
+        if (m_fogParams.enabled)
             vkCommandBuffer.executeCommands(1, &vkVolumetricFogCommandBuffer);
         m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx), m_rtaoPipeline.getAOSampler());
         if (const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx))
@@ -1477,7 +1485,7 @@ void Renderer::recordCommandBuffers()
         vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
         if (m_giProbeDebugEnabled)
             vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
-        if (m_fogEnabled)
+        if (m_fogParams.enabled)
             vkCommandBuffer.executeCommands(1, &vkFogApplyCommandBuffer);
         vkCommandBuffer.endRenderPass();
 

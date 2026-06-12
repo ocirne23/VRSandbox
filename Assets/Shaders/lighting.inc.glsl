@@ -104,6 +104,10 @@ vec3 giGatherDirect(vec3 pos, vec3 N, vec3 albedo)
         E += u_sunColor.rgb * sunShadow * sunNdotL;
     }
 
+    // The sky radiance light is intentionally absent here: it is injected directly into the probe SH
+    // (gi_probe_trace.cs.glsl), and its bounces arrive through the multi-bounce prevE feedback — adding
+    // it at hit points too would double-count.
+
     const ivec3 gridPos = getGridPos(pos);
     uint tableIdx = getTableIdx(gridPos);
     while (true)

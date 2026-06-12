@@ -32,7 +32,7 @@ export struct TweakVar
 	float            max   = 1.0f;
 	float            speed = 0.01f;      // drag step for unbounded floats
 
-	float*           intensity = nullptr;                 // optional, Color3 only
+	float*           intensity = nullptr;                 // optional, Color3 only (min/max/speed then bound the intensity drag)
 	std::span<const std::string_view> enumNames;          // Enum only
 
 	std::function<void()> onChange;                       // optional, fired when the value changes
@@ -92,9 +92,11 @@ export namespace Tweak
 		TweakRegistry::get().registerVar(var);
 	}
 
-	inline void color3(std::string_view category, std::string_view name, glm::vec3* color, float* intensity = nullptr, std::function<void()> onChange = {})
+	// intensityMin/Max/Speed only affect the intensity drag (ignored when intensity == nullptr).
+	inline void color3(std::string_view category, std::string_view name, glm::vec3* color, float* intensity = nullptr,
+		float intensityMin = 0.0f, float intensityMax = FLT_MAX, float intensitySpeed = 0.05f, std::function<void()> onChange = {})
 	{
-		TweakVar var{ name, category, ETweakType::Color3, color };
+		TweakVar var{ name, category, ETweakType::Color3, color, intensityMin, intensityMax, intensitySpeed };
 		var.intensity = intensity;
 		var.onChange = std::move(onChange);
 		TweakRegistry::get().registerVar(var);

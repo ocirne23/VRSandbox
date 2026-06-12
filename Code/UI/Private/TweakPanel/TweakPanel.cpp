@@ -57,7 +57,7 @@ namespace
 				changed = ImGui::ColorEdit3("##v", c, ImGuiColorEditFlags_NoInputs);
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(-1.0f);
-				changed |= ImGui::DragFloat("##intensity", var.intensity, 0.05f, 0.0f, FLT_MAX, "x %.2f");
+				changed |= ImGui::DragFloat("##intensity", var.intensity, var.speed, var.min, var.max, "x %.3f");
 			}
 			else
 			{

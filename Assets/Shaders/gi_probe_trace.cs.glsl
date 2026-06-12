@@ -223,6 +223,23 @@ void main()
         c3 += radiance * (Y.w * wsh);
     }
 
+    // Sky radiance (moonlight / space light): a directional delta light can't be hit by gather rays, so
+    // its direct irradiance is projected straight into the probe SH (one SH-L1 delta projection; eval's
+    // cosine convolution then yields ~E * max(dot(n, up), 0)). Visibility is a single ray from the probe
+    // center toward up (toggleable) — probes float in open space, so this is a soft, low-noise gate, and
+    // the temporal blend smooths it further. Bounces arrive for free through the prevE multi-bounce.
+    if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
+    {
+        const vec3 skyL = normalize(u_skyUp);
+        const float skyVis = u_rtSkyRadiance > 0.5 ? rtShadowVisibility(probeCenter, skyL, 0.05, 1.0e4) : 1.0;
+        const vec3 cd = u_skyRadianceColor * skyVis;
+        const vec4 Ysky = shBasisL1(skyL);
+        c0 += cd * Ysky.x;
+        c1 += cd * Ysky.y;
+        c2 += cd * Ysky.z;
+        c3 += cd * Ysky.w;
+    }
+
     const uint cellBase = giProbeBase(cascade, lc);
     const float alpha = fresh ? 1.0 : pc.temporalAlpha;
     giBlendCell(cellBase, c0, c1, c2, c3, alpha);

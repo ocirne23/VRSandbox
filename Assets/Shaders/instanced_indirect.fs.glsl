@@ -562,8 +562,12 @@ void main()
 	// occluded directions. Mix partway toward N so flat, unoccluded surfaces are left untouched.
 	const vec3 bentN = normalize(mix(N, normalize(aoSample.xyz), 0.75));
 	const vec3 indirectE = evalProbeSH(in_pos, bentN);
-	vec3 color = (indirectE.x >= 0.0) ? materialColor * (indirectE / PI) * u_giIntensity * ao
-	                                  : materialColor * skyRadiance(bentN) * u_ambientIntensity * ao;
+	// Outside the probe volume fall back to the analytic sky: treating it as locally uniform, the
+	// irradiance is PI * skyRadiance, so Lambertian indirect = albedo * skyRadiance — the same energy a
+	// probe traced here would converge to. u_ambientColor is the flat, non-physical minimum (an
+	// isotropic radiance field: diffuse = albedo * radiance), applied once here, never inside GI.
+	const vec3 indirect = (indirectE.x >= 0.0) ? (indirectE / PI) : skyRadiance(bentN);
+	vec3 color = materialColor * (indirect + u_ambientColor) * ao;
 
 	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
 	//color = mix(color, cascadeDebugColor(getSunCascade(in_pos)), 0.35);

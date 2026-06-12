@@ -223,16 +223,19 @@ void main()
         }
         else
             sunVis = giSunShadow(worldPos, vec3(0.0));
-        vec3 inLight = u_sunColor.rgb * (volPhaseHG(dot(dir, sunDir), g) * sunVis * u_fogParams3.x);
+        vec3 inLight = u_sunColor.rgb * (volPhaseHG(dot(dir, sunDir), g) * sunVis);
 
         // Ambient: GI probe irradiance toward the camera (toggleable; the clipmap lookup is the next
-        // biggest cost after the shadow rays), falling back to the analytic sky.
+        // biggest cost after the shadow rays), falling back to the analytic sky. For an SH-L1 field the
+        // isotropically in-scattered radiance is E_mean / PI; E(-dir) is the single-sample stand-in for
+        // E_mean. The sky fallback covers ~the upper hemisphere, hence the 0.5. u_ambientColor is an
+        // isotropic radiance, so its phase integral is just itself.
         vec3 amb = vec3(-1.0);
         if (u_fogParams4.z > 0.5)
             amb = evalProbeSH(worldPos, -dir);
         if (amb.x < 0.0)
-            amb = skyColor(normalize(u_skyUp)) * u_skyIntensity;
-        inLight += amb * (u_fogParams3.y / (4.0 * PI));
+            amb = skyRadiance(normalize(u_skyUp)) * (PI);
+        inLight += amb / PI + u_ambientColor;
 
         // Local lights from the world-space hash grid cell containing this froxel.
         const bool lightShadows = u_fogParams3.w > 0.5;
