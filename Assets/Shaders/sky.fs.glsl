@@ -319,7 +319,13 @@ vec4 clouds(vec3 dir, vec3 up, vec3 sunDir, vec3 sunTint, vec3 skyAmbient)
 }
 
 // ---------------------------------------------------------------------------------------------
-
+vec3 adjustSaturation(vec3 color, float saturation) {
+    // Standard luminosity weights for human perception
+    const vec3 luminosity = vec3(0.2126, 0.7152, 0.0722);
+    vec3 grayscale = vec3(dot(color, luminosity));
+    
+    return mix(grayscale, color, saturation);
+}
 void main()
 {
 	const vec3 dir = normalize(in_pos - u_viewPos);
@@ -332,41 +338,39 @@ void main()
 
 	// With the sun fully off (color/intensity/scatter boost zero) the entire scattering integral is a
 	// multiply by zero: skip the raymarch and keep only the cheap ground test for the branches below.
+	vec3 sunSurfaceColor = u_sunColor.rgb;
+	const float eclipseFactor = u_eclipseParams.x;
 	const float sunMagnitude = (u_sunColor.r + u_sunColor.g + u_sunColor.b);
-	const bool sunLit = sunMagnitude * u_skySunParams.x > 1e-5;
+	const bool sunLit = sunMagnitude * u_skySunParams.x * eclipseFactor > 1e-5;
 	vec3 transmittance = vec3(1.0);
 	vec3 color = vec3(0.0);
 	float tUp = dot(dir, up);
 	vec3 grade = skyGradient(tUp);
 	const float sunElev = dot(L, up);
-
-	if (sunLit)
-	{
-		color = atmosphere(dir, L, up, transmittance) * u_sunColor.rgb * u_skySunParams.x;
-		if (tUp < -0.0)
-		{
-			color += grade * -tUp * (1.33 + tUp);
-		}
-		color *= grade * 1.5;
-	}
 	
 	{
 		vec3 moonDir = u_moonParams.xyz;
 		float cosM = dot(dir, moonDir);
 		const float cosAngle = dot(dir, L);
+		const float sunMoonAngle = dot(L, moonDir);
 		const bool moonCovered = cosM < u_moonParams.w * 2.00 - cosM;
+
+		color = atmosphere(dir, L, up, transmittance) * sunSurfaceColor.rgb * u_skySunParams.x;
+		color = adjustSaturation(color, 2.0-eclipseFactor)) * eclipseFactor; // Saturate the sky as the sun goes into eclipse, to keep it from looking like a flat gray haze
+		sunSurfaceColor *= eclipseFactor;
+
 		if (!sunLit && u_sunAngularCos < 1.0 && moonCovered) // 1.0 disables the disc
 		{
 			// Feathered rim + slight limb darkening; transmittance reddens/dims it near the horizon.
 			const float feather = (1.0 - u_sunAngularCos) * max(u_skySunParams.z, 0.01);
 			float disc = smoothstep(u_sunAngularCos - feather * 0.5, u_sunAngularCos + feather * 0.5, cosAngle);
 			float limb = mix(0.55, 1.0, smoothstep(u_sunAngularCos, 1.0, cosAngle));
-			color += u_sunColor.rgb * disc * limb * transmittance;
+			color += sunSurfaceColor * disc * limb * transmittance;
 		}
 		// Sun halo: a tight Henyey-Greenstein forward lobe (smooth peak, long graceful tail) instead of a
 		// pow() spike. u_sunGlow is the strength; the transmittance keeps it warm/dim near the horizon.
 		if (sunLit && u_sunGlow > 0.0 && moonCovered)
-			color += u_sunColor.rgb * phaseHG(cosAngle, 0.985) * 0.015 * u_sunGlow * transmittance;
+			color += sunSurfaceColor * phaseHG(cosAngle, 0.985) * 0.015 * u_sunGlow * transmittance;
 
 		// Moon: a sun-lit sphere shaded into the disc around u_moonParams.xyz (independent of the sun's
 		// position; the phases still fall out of lighting the reconstructed sphere normals with the
@@ -386,9 +390,9 @@ void main()
 			float surfAngle = dot(n, -dir);
 			float lambert = clamp(dot(n, L), 0.02, 1.0);
 			float planetlit = mix(0.0, 0.07, surfAngle * surfAngle * surfAngle);
-			float sunCovered = clamp(1.0 - distance(moonDir, L) * discSin, 0.0, 1.0);
-			lambert += planetlit * smoothstep(0.0, 0.2, distance(L, moonDir) * u_moonParams.w);
-			lambert += smoothstep(0.2, 0.0, dot(n, -L)) * sunCovered * clamp(0.1 * sunMagnitude * u_moonParams.w - distance(L, moonDir), 0.0, 1.0) ;
+			float rimlight = clamp(1.0 - distance(moonDir, L) * discSin, 0.0, 1.0);
+			lambert += planetlit * smoothstep(0.0, 0.2, distance(L, moonDir) * u_moonParams.w) * length(color);
+			lambert += smoothstep(0.15, 0.0, dot(n, -L)) * rimlight * clamp(0.1 * sunMagnitude * u_moonParams.w - distance(L, moonDir), 0.0, 1.0);
 			float albedo = 0.7 + 0.6 * (fbm3(n * 7.0, 3, 0.0) - 0.5); // maria/crater mottling
 			color += vec3(0.93, 0.95, 1.0) * ((lambert * albedo * u_cloudParams2.w) * transmittance);
 		}
@@ -505,7 +509,7 @@ void main()
 	// Clouds last, over everything (they also dim the sun disc behind them). Sun tint approximates the
 	// transmittance toward the sun at cloud height: white at day, warm at the horizon, dark at night.
 	const float sunsetWarm = clamp(sunElev * 5.0, 0.0, 1.0);
-	const vec3 sunTint = u_sunColor.rgb * 0.30 * mix(vec3(1.0, 0.45, 0.2), vec3(1.0), sunsetWarm)
+	const vec3 sunTint = sunSurfaceColor.rgb * 0.30 * mix(vec3(1.0, 0.45, 0.2), vec3(1.0), sunsetWarm)
 	                   * clamp(sunElev * 8.0 + 0.25, 0.02, 1.0);
 	const vec3 skyAmbient = color * u_skyIntensity; // local sky as the cloud's ambient source keeps hue coherent
 	vec4 cl = clouds(dir, up, L, sunTint, skyAmbient);

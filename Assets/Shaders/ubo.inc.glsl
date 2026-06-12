@@ -62,6 +62,9 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_starParams;   // x = star size, y = size variation, z = brightness, w = color variation
     vec4 u_nebulaParams; // x = intensity, y = noise scale, z = band width, w = dust lane strength
     vec4 u_nebulaAxis;   // xyz = normalized milky-way band pole (band lies on its great circle), w unused
+
+    vec4 u_eclipseParams; // x = visible sun fraction (solar eclipse; u_sunColor is pre-multiplied by it,
+                          // the sky divides it back out for the unoccluded disc/corona), yzw unused
 };
 
 #endif

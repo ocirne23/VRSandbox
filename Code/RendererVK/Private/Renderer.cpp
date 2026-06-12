@@ -43,6 +43,21 @@ namespace
         return result;
     }
 
+    // Solar eclipse: fraction of the sun's disc (plus its glow halo, which acts as an extended light
+    // source) the moon leaves visible. 1 = no overlap, 0 = totality, with the annular 1 - rm^2/rs^2
+    // floor when the moon is smaller than sun + corona. Radii and separation are chord lengths
+    // (sqrt(2-2cos) == the angle for discs this small); the partial phase uses a smoothstep area
+    // approximation (within a few percent of the exact circle-circle lens area).
+    float sunVisibleFraction(const glm::vec3& sunDir, const glm::vec3& moonDir,
+        float cosSunRadius, float cosMoonRadius, float sunGlow)
+    {
+        const float rs = sqrtf(std::max(2.0f - 2.0f * cosSunRadius, 0.0f)) + sunGlow * 0.02f;
+        const float rm = sqrtf(std::max(2.0f - 2.0f * cosMoonRadius, 0.0f));
+        const float d = glm::distance(sunDir, moonDir);
+        const float contained = rm >= rs ? 0.0f : 1.0f - (rm * rm) / (rs * rs);
+        return glm::mix(contained, 1.0f, glm::smoothstep(fabsf(rs - rm), rs + rm, d));
+    }
+
     void computeSunCascades(const Camera& camera, float aspect, const glm::vec3& sunDir,
         glm::mat4(&outViewProj)[RendererVKLayout::NUM_SHADOW_CASCADES])
     {
@@ -565,7 +580,12 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.giIntensity = m_giIntensity;
     ubo.sunDirection = m_sunDirection;
     ubo.sunAngularCos = m_skyParams.sunAngularCos;
+    // Solar eclipse: fold the moon-covered sun fraction into the UBO sun color so every sun consumer
+    // (sky atmosphere, forward lighting, GI trace, volumetric fog, clouds) dims consistently.
+    const float eclipseVisible = sunVisibleFraction(m_sunDirection, glm::normalize(m_moonDirection),
+        m_skyParams.sunAngularCos, cosf(glm::radians(m_moonSizeDeg)), m_skyParams.sunGlow);
     ubo.sunColor = m_sunColor * m_sunIntensity;
+    ubo.eclipseParams = glm::vec4(eclipseVisible, 0.0f, 0.0f, 0.0f);
     ubo.sunGlow = m_skyParams.sunGlow;
 
     ubo.skyZenith = m_skyParams.zenith;

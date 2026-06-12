@@ -126,6 +126,9 @@ export namespace RendererVKLayout
         glm::vec4 starParams;   // x = star size, y = size variation, z = brightness, w = color variation
         glm::vec4 nebulaParams; // x = intensity, y = noise scale, z = band width, w = dust lane strength
         glm::vec4 nebulaAxis;   // xyz = normalized milky-way band pole (band lies on its great circle), w unused
+
+        glm::vec4 eclipseParams; // x = visible sun fraction (solar eclipse; sunColor is pre-multiplied by it,
+                                 // the sky divides it back out for the unoccluded disc/corona), yzw unused
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};
