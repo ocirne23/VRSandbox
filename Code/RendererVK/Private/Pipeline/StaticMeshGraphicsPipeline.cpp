@@ -233,9 +233,9 @@ void StaticMeshGraphicsPipeline::updateTlasDescriptor(vk::DescriptorSet descript
     Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
 
-void StaticMeshGraphicsPipeline::initialize(RenderPass& renderPass, uint32 maxUniqueMeshes, uint32 maxTextures)
+void StaticMeshGraphicsPipeline::initialize(vk::RenderPass renderPass, uint32 maxUniqueMeshes, uint32 maxTextures)
 {
-    m_pRenderPass = &renderPass;
+    m_renderPass = renderPass;
     m_sampler.initialize();
 
     GraphicsPipelineLayout graphicsPipelineLayout;
@@ -285,12 +285,12 @@ void StaticMeshGraphicsPipeline::createPreprocessBuffers(uint32 maxUniqueMeshes)
 
 void StaticMeshGraphicsPipeline::reloadShaders(uint32 maxTextures)
 {
-    if (!m_pRenderPass)
+    if (!m_renderPass)
         return;
 
     GraphicsPipelineLayout graphicsPipelineLayout;
     buildPipelineLayout(graphicsPipelineLayout, maxTextures);
-    if (!m_graphicsPipeline.reloadShaders(*m_pRenderPass, graphicsPipelineLayout))
+    if (!m_graphicsPipeline.reloadShaders(m_renderPass, graphicsPipelineLayout))
     {
         printf("StaticMeshGraphicsPipeline: shader reload failed, keeping previous pipeline\n");
         return;

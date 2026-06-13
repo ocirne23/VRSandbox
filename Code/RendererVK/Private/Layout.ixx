@@ -5,9 +5,14 @@ import Core.glm;
 import Core.Frustum;
 import Core.Transform;
 
+import :VK;
+
 export namespace RendererVKLayout
 {
     constexpr uint32 NUM_FRAMES_IN_FLIGHT = 2;
+
+    // HDR scene color target (linear radiance until the composite's exposure + tonemap).
+    constexpr vk::Format SCENE_COLOR_FORMAT = vk::Format::eR16G16B16A16Sfloat;
     constexpr uint16 FALLBACK_DIFFUSE_TEX_IDX = 0;
 	constexpr uint16 FALLBACK_NORMAL_TEX_IDX = 1;
 
@@ -132,6 +137,7 @@ export namespace RendererVKLayout
                                  // the sky divides it back out for the unoccluded disc/corona), zw unused
 
         glm::vec4 atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
+        glm::vec4 groundParams;  // rgb = ground albedo * intensity, w unused
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

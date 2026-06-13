@@ -72,7 +72,7 @@ public:
 
     // Debug visualization: instanced cubes at every clipmap probe, drawn into the main color pass.
     // initializeDebug must be called after the main render pass exists.
-    void initializeDebug(const RenderPass& renderPass);
+    void initializeDebug(vk::RenderPass renderPass);
     void reloadDebugShaders();
     void recordDebugDraw(CommandBuffer& commandBuffer, uint32 frameIdx, Buffer& ubo, float radius, uint32 mode);
 
@@ -88,7 +88,7 @@ private:
     ComputePipeline m_tlasInstancePipeline;
     ComputePipeline m_tracePipeline;
     GraphicsPipeline m_debugPipeline;
-    const RenderPass* m_debugRenderPass = nullptr;
+    vk::RenderPass m_debugRenderPass;
 
     // GI probe trace tuning (runtime-tweakable; consumed by GIProbePipeline::recordTrace).
     int m_giRaysPerProbe = 17;         // gather rays per probe per frame

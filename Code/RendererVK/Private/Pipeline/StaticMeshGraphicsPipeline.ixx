@@ -53,7 +53,7 @@ public:
 		vk::Sampler gbufferSampler;
     };
 
-    void initialize(RenderPass& renderPass, uint32 maxUniqueMeshes, uint32 maxTextures);
+    void initialize(vk::RenderPass renderPass, uint32 maxUniqueMeshes, uint32 maxTextures);
     void reloadShaders(uint32 maxTextures);
     // Re-sizes the DGC preprocess scratch for a grown unique-mesh capacity (GPU must be idle).
     void resizeMeshCapacity(uint32 maxUniqueMeshes);
@@ -77,7 +77,7 @@ private:
     IndirectExecutionSet m_indirectExecutionSet;
     IndirectCommandsLayout m_indirectCommandsLayout;
     Sampler m_sampler;
-    RenderPass* m_pRenderPass = nullptr;
+    vk::RenderPass m_renderPass;
 
     vk::DeviceSize m_preprocessSize = 0;
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;            // opaque pass

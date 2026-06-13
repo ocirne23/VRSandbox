@@ -226,9 +226,9 @@ void GIProbePipeline::buildDebugLayout(GraphicsPipelineLayout& layout)
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eVertex, .offset = 0, .size = sizeof(DebugPC) });
 }
 
-void GIProbePipeline::initializeDebug(const RenderPass& renderPass)
+void GIProbePipeline::initializeDebug(vk::RenderPass renderPass)
 {
-    m_debugRenderPass = &renderPass;
+    m_debugRenderPass = renderPass;
     GraphicsPipelineLayout layout; buildDebugLayout(layout);
     m_debugPipeline.initialize(renderPass, layout);
     for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
@@ -240,7 +240,7 @@ void GIProbePipeline::reloadDebugShaders()
     if (!m_debugRenderPass)
         return;
     GraphicsPipelineLayout layout; buildDebugLayout(layout);
-    if (!m_debugPipeline.reloadShaders(*m_debugRenderPass, layout))
+    if (!m_debugPipeline.reloadShaders(m_debugRenderPass, layout))
         printf("GIProbePipeline: debug shader reload failed, keeping previous pipeline\n");
 }
 

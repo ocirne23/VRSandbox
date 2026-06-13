@@ -68,6 +68,9 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                           // y = sky highlight roll-off headroom (stops the shoulder absorbs), zw unused
 
     vec4 u_atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
+
+    vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
+                          // ground-bounce tint for downward GI/fog rays), w unused
 };
 
 #endif

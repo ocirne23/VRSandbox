@@ -23,8 +23,8 @@ export class VolumetricFogPipeline final
 {
 public:
     void initialize();
-    void initializeApply(const RenderPass& renderPass);
-    void reloadShaders(const RenderPass& renderPass);
+    void initializeApply(vk::RenderPass renderPass);
+    void reloadShaders(vk::RenderPass renderPass);
 
     struct RecordParams
     {

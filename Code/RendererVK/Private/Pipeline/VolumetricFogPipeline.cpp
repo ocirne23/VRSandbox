@@ -170,7 +170,7 @@ void VolumetricFogPipeline::initialize()
     m_sampler = samplerResult.value;
 }
 
-void VolumetricFogPipeline::initializeApply(const RenderPass& renderPass)
+void VolumetricFogPipeline::initializeApply(vk::RenderPass renderPass)
 {
     GraphicsPipelineLayout layout;
     buildApplyLayout(layout);
@@ -179,7 +179,7 @@ void VolumetricFogPipeline::initializeApply(const RenderPass& renderPass)
         m_applySets[i].initialize(m_applyPipeline.getDescriptorSetLayout());
 }
 
-void VolumetricFogPipeline::reloadShaders(const RenderPass& renderPass)
+void VolumetricFogPipeline::reloadShaders(vk::RenderPass renderPass)
 {
     ComputePipelineLayout scatterLayout;   buildScatterLayout(scatterLayout);
     ComputePipelineLayout integrateLayout; buildIntegrateLayout(integrateLayout);

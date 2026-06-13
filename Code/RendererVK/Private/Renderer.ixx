@@ -31,6 +31,7 @@ import :RTAOPipeline;
 import :VolumetricFogPipeline;
 import :SceneColor;
 import :TaaPipeline;
+import :CompositePipeline;
 import :GraphicsPipeline;
 import :Light;
 import :GpuCrashTracker;
@@ -93,15 +94,20 @@ public:
 
         // Ambient + sky radiance (the non-sun lighting inputs)
         glm::vec3 ambientColor = glm::vec3(1.0f);   // flat non-physical minimum ambient
-        float ambientIntensity = 0.01f;
+        float ambientIntensity = 0.005f;
         glm::vec3 skyRadianceColor = glm::vec3(0.55f, 0.65f, 1.0f); // directional sky radiance (moonlight/space light), along up
-        float skyRadianceIntensity = 0.50f;
+        float skyRadianceIntensity = 0.20f;
+
+        // Ground plane of the sky sphere (below the horizon): albedo lit by sun + sky. Also tints the
+        // ground-bounce fallback in skyRadiance() for downward GI/fog rays.
+        glm::vec3 groundColor = glm::vec3(0.0f, 0.17f, 1.0f);
+        float groundIntensity = 1.0f;
 
         // Atmosphere scattering: multipliers on the Earth sea-level Rayleigh/Mie coefficients. These drive
         // both the visible sky and (through skyRadiance) the majority of the indirect sky lighting.
         float rayleighScatter = 1.0f;
         float mieScatter = 1.0f;
-        float scatterBoost = 4.0f;          // in-scatter multiplier: how much sunlight the atmosphere scatters (more = more indirect light)
+        float scatterBoost = 3.0f;          // in-scatter multiplier: how much sunlight the atmosphere scatters (more = more indirect light)
         float mieG = 0.76f;                 // Mie anisotropy (forward-scatter lobe)
         float rayleighHeight = 8500.0f;     // Rayleigh scale height (m): how fast air density falls off
         float mieHeight = 1200.0f;          // Mie scale height (m): how high the haze layer reaches
@@ -130,7 +136,7 @@ public:
         float starColorVar = 0.85f;         // 0 = white, 1 = full cool/warm per-star tint
 
         // Nebula (milky-way band)
-        float nebulaIntensity = 0.7f;       // band glow strength (0 = off)
+        float nebulaIntensity = 0.2f;       // band glow strength (0 = off)
         float nebulaScale = 5.7f;           // noise frequency
         float nebulaBandWidth = 0.1f;       // gaussian width of the band around its great circle
         float nebulaDust = 1.0f;            // dark dust lane strength inside the band
@@ -139,7 +145,7 @@ public:
         // Moon
         glm::vec3 moonDirection = glm::normalize(glm::vec3(0.728f, 0.659f, -0.190f)); // independent of the sun
         float moonSizeDeg = 6.0f;           // disc radius (degrees); real moon is ~0.26
-        float moonBrightness = 0.8f;
+        float moonBrightness = 0.3f;
     };
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
 
@@ -150,11 +156,11 @@ public:
         bool  enabled = true;
         float density = 0.020f;        // global extinction at the height base (1/m)
         float heightBase = 0.0f;       // world height where the global fog is densest
-        float heightFalloff = 0.28f;   // exponential density falloff above the base (1/m)
+        float heightFalloff = 0.40f;   // exponential density falloff above the base (1/m)
         glm::vec3 albedo = glm::vec3(1.0f, 1.0f, 1.0f);
         float albedoIntensity = 2.0f;  // > 1 is a non-physical gain (emissive-ish fog)
         float anisotropy = 0.15f;      // HG phase g (0 = isotropic, ->1 = forward scattering)
-        float range = 500.0f;          // froxel grid far distance (m)
+        float range = 1024.0f;         // froxel grid far distance (m)
         float noiseScale = 0.08f;      // density noise frequency (1/m)
         float noiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
         float windSpeed = 1.5f;        // noise drift (m/s)
@@ -166,6 +172,15 @@ public:
         bool  giAmbient = true;        // GI probe ambient (off = analytic sky only, cheaper)
     };
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
+
+    // Exposure + tonemapping, applied in the composite pass (the HDR -> display mapping) — the
+    // TweakPanel's "Post" category. Baked into the composite push constants, so changes re-record.
+    struct PostParams
+    {
+        float exposureEV = 0.0f; // exposure in stops; the shader gets exp2(exposureEV)
+        int   tonemapper = 3;    // 0 = off (legacy raw clip), 1 = Reinhard, 2 = ACES, 3 = AgX
+    };
+    void setPostParams(const PostParams& post) { m_postParams = post; setHaveToRecordCommandBuffers(); }
     void present();
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
@@ -250,7 +265,6 @@ private:
     void recreateSwapchain();
     void createLightGridBuffers();
     void initImgui(Window& window);
-    void initComposite();
 
     friend class ObjectContainer;
     void addObjectContainer(ObjectContainer* pObjectContainer);
@@ -295,7 +309,7 @@ private:
     TaaPipeline m_taaPipeline;
     ShadowCullComputePipeline m_shadowCullComputePipeline;
     ShadowMapGraphicsPipeline m_shadowMapGraphicsPipeline;
-    GraphicsPipeline m_compositePipeline;
+    CompositePipeline m_compositePipeline;
     AccelerationStructure m_accelStructure;
     GIProbePipeline m_giProbePipeline;
 
@@ -310,6 +324,7 @@ private:
 
     SkyParams m_skyParams;
     FogParams m_fogParams;
+    PostParams m_postParams;
     uint32 m_fogVolumeCounter = 0;
 
     bool  m_rtSunShadow = true; // sun shadows from TLAS ray queries instead of PCSS cascades (A/B tweak)

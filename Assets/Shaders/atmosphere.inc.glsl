@@ -162,12 +162,12 @@ vec3 atmosphereScatterCheap(vec3 dir, vec3 lightDir, vec3 up, int steps)
 vec3 skyRadiance(vec3 dir)
 {
 	const vec3 up = normalize(u_skyUp);
-	float groundAtten = 1.0;
+	vec3 groundAtten = vec3(1.0);
 	float cosUp = dot(dir, up);
 	if (cosUp < 0.0)
 	{
 		dir = normalize(dir - up * (cosUp - 0.02));
-		groundAtten = 0.3;
+		groundAtten = u_groundParams.rgb;
 	}
 	vec3 radiance = atmosphereScatterCheap(dir, normalize(u_sunDirection.xyz), up, 4) * u_sunColor.rgb;
 	if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)

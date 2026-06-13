@@ -444,6 +444,27 @@ void main()
 		}
 	}
 
+	// Ground plane (below the horizon): the through-planet march is meaningless there, so blend to a
+	// ground albedo (u_groundParams, Sky > Ground Albedo) lit like a diffuse surface — direct sun
+	// (horizon-tinted by the same transmittance the clouds use) plus the grazing sky as ambient, the
+	// same fallback skyRadiance() gives downward GI/fog rays. A narrow blend band keeps the horizon
+	// scatter colors (the red sunset band) intact right at the horizon line.
+	const float cosUpDir = dot(dir, up);
+	if (cosUpDir < 0.0)
+	{
+		// The marched color is meaningless below the horizon (it collapses to black within a degree or
+		// two), so it is replaced entirely: the blend runs from the grazing-horizon sky color (continuous
+		// with the sky right at the horizon line) into the lit ground, never through black.
+		vec3 grazeDir = normalize(dir - up * (cosUpDir - 0.02));
+		vec3 skyAmb = atmosphereScatterCheap(grazeDir, L, up, 4) * u_sunColor.rgb;
+		if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
+			skyAmb += atmosphereScatterCheap(grazeDir, up, up, 2) * u_skyRadianceColor;
+		vec3 groundLit = u_groundParams.rgb *
+			(sunSurfaceColor * atmosTransmittanceToLight(0.0, L, up) * (max(sunElev, 0.0) / PI) + skyAmb);
+		const float groundBlend = smoothstep(0.0, 0.08, -cosUpDir);
+		color = mix(skyAmb, groundLit + u_ambientColor, groundBlend);
+	}
+
 	// Clouds last, over everything (they also dim the sun disc behind them). Direct cloud light = sun
 	const vec3 sunTint = (sunSurfaceColor.rgb * atmosTransmittanceToLight(u_cloudParams0.x, L, up) + u_skyRadianceColor) / PI;
 	vec4 cl = clouds(dir, up, L, sunTint, color);

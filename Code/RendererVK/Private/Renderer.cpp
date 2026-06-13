@@ -27,6 +27,8 @@ import :ObjectContainer;
 // matrix's depth convention. outSplits holds each cascade's far distance from the camera.
 namespace
 {
+    constexpr std::string_view s_tonemapperNames[] = { "Off", "Reinhard", "ACES", "AgX" };
+
     // Radical inverse in an arbitrary base; (Halton(2), Halton(3)) gives the low-discrepancy sub-pixel jitter
     // sequence used by the TAA accumulation.
     float radicalInverse(uint32 i, uint32 base)
@@ -170,6 +172,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::color3("Sky", "Sun Color", &m_skyParams.sunColor, &m_skyParams.sunIntensity);
     Tweak::color3("Sky", "Ambient", &m_skyParams.ambientColor, &m_skyParams.ambientIntensity, 0.0f, 0.2f, 0.001f);
     Tweak::color3("Sky", "Sky Radiance", &m_skyParams.skyRadianceColor, &m_skyParams.skyRadianceIntensity, 0.0f, 1.2f, 0.001f);
+    Tweak::color3("Sky", "Ground Albedo", &m_skyParams.groundColor, &m_skyParams.groundIntensity, 0.0f, 2.0f, 0.01f);
     Tweak::floatVar("Sky/Sun", "Sun Angle Cos", &m_skyParams.sunAngularCos, 0.9995f, 1.0f, 0.000001f);
     Tweak::floatVar("Sky/Sun", "Sun Glow", &m_skyParams.sunGlow, 0.0, 5.0f, 0.01f);
     Tweak::floatVar("Sky/Sun", "SunCasc D Bias", &m_skyParams.shadowDepthBias, 0.0f, 0.005f, 0.0001f);
@@ -237,6 +240,9 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
     Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
 
+    Tweak::floatVar("Post", "Exposure (EV)", &m_postParams.exposureEV, -8.0f, 8.0f, 0.05f, [this]() { setHaveToRecordCommandBuffers(); });
+    Tweak::enumVar("Post", "Tonemapper", &m_postParams.tonemapper, s_tonemapperNames, [this]() { setHaveToRecordCommandBuffers(); });
+
     glslang::InitializeProcess();
     const bool enableValidationLayers = (validation == EValidation::ENABLED);
     if (enableValidationLayers)
@@ -266,18 +272,27 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     initImgui(window);
 
     const vk::Extent2D ext = m_swapChain.getLayout().extent;
+
+    // HDR scene target: the scene stays float (linear radiance, no clipping) all the way to the
+    // composite pass, which does the exposure + tonemap down to the 8-bit swapchain. Created before the
+    // pipelines that draw into its render pass (static mesh/sky, fog apply, GI probe debug) — they must
+    // be built against a render-pass with this format, not the swapchain's.
+    for (PerFrameData& perFrame : m_perFrameData)
+        perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height);
+    const vk::RenderPass sceneRenderPass = m_perFrameData[0].sceneColor.getRenderPass();
+
     m_maxTextures = Globals::textureManager.getDescriptorCap(); // fixed layout cap; live count grows separately
-    m_staticMeshGraphicsPipeline.initialize(m_renderPass, m_maxUniqueMeshes, m_maxTextures);
+    m_staticMeshGraphicsPipeline.initialize(sceneRenderPass, m_maxUniqueMeshes, m_maxTextures);
     m_rtaoPipeline.initialize(ext.width, ext.height);
     m_volumetricFogPipeline.initialize();
-    m_volumetricFogPipeline.initializeApply(m_renderPass);
+    m_volumetricFogPipeline.initializeApply(sceneRenderPass);
     m_taaPipeline.initialize(ext.width, ext.height);
-    initComposite();
+    m_compositePipeline.initialize(m_renderPass);
     m_indirectCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
     m_lightGridComputePipeline.initialize();
     m_accelStructure.initialize(m_maxUniqueMeshes);
     m_giProbePipeline.initialize(m_maxGiTlasInstances, m_maxTextures, m_numTextureDescriptors);
-    m_giProbePipeline.initializeDebug(m_renderPass);
+    m_giProbePipeline.initializeDebug(sceneRenderPass);
 
 
     m_shadowCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
@@ -291,11 +306,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     vk::Device vkDevice = Globals::device.getDevice();
 
-    const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
     for (PerFrameData& perFrame : m_perFrameData)
     {
-        perFrame.sceneColor.initialize(sceneFormat, ext.width, ext.height);
-
         perFrame.indirectCullPipelineDescriptorSet.initialize(m_indirectCullComputePipeline.getDescriptorSetLayout());
         perFrame.lightGridPipelineDescriptorSet.initialize(m_lightGridComputePipeline.getDescriptorSetLayout());
         perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
@@ -376,21 +388,6 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     return true;
 }
 
-// Fullscreen composite pipeline: samples the TAA-resolved image and writes it into the swapchain (drawn
-// before ImGui in the swapchain render pass). No vertex buffers; a single combined-image-sampler binding.
-void Renderer::initComposite()
-{
-    GraphicsPipelineLayout layout;
-    layout.vertexShader.debugFilePath = "Shaders/composite.vs.glsl";
-    layout.fragmentShader.debugFilePath = "Shaders/composite.fs.glsl";
-    layout.vertexShader.text = FileSystem::readFileStr(layout.vertexShader.debugFilePath);
-    layout.fragmentShader.text = FileSystem::readFileStr(layout.fragmentShader.debugFilePath);
-    layout.cullMode = vk::CullModeFlagBits::eNone;
-    layout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-        .binding = 0, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
-    m_compositePipeline.initialize(m_renderPass, layout);
-}
-
 void Renderer::recreateWindowSurface(Window& window)
 {
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
@@ -406,14 +403,13 @@ void Renderer::recreateWindowSurface(Window& window)
     m_framebuffers.initialize(m_renderPass, m_swapChain);
 
     const vk::Extent2D ext = m_swapChain.getLayout().extent;
-    const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
     m_rtaoPipeline.recreateImages(ext.width, ext.height);
     m_taaPipeline.recreateImages(ext.width, ext.height);
 
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.gbuffer.initialize(ext.width, ext.height);
-        perFrame.sceneColor.initialize(sceneFormat, ext.width, ext.height);
+        perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height);
     }
 
     // The cached scene command buffers embed the (now-recreated) scene-colour render pass in their
@@ -437,13 +433,12 @@ void Renderer::recreateSwapchain()
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
     const vk::Extent2D ext = m_swapChain.getLayout().extent;
-    const vk::Format sceneFormat = m_swapChain.getLayout().surfaceFormat.format;
     m_rtaoPipeline.recreateImages(ext.width, ext.height);
     m_taaPipeline.recreateImages(ext.width, ext.height);
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.gbuffer.initialize(ext.width, ext.height);
-        perFrame.sceneColor.initialize(sceneFormat, ext.width, ext.height);
+        perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height);
     }
 
     // Cached scene command buffers reference the recreated scene-colour render pass; re-record them.
@@ -462,7 +457,7 @@ void Renderer::reloadShaders()
     m_staticMeshGraphicsPipeline.reloadShaders(m_maxTextures);
     m_gbufferPipeline.reloadShaders(m_perFrameData[m_swapChain.getPrevFrameIdx()].gbuffer);
     m_rtaoPipeline.reloadShaders();
-    m_volumetricFogPipeline.reloadShaders(m_renderPass);
+    m_volumetricFogPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_indirectCullComputePipeline.reloadShaders();
     m_lightGridComputePipeline.reloadShaders();
     m_shadowCullComputePipeline.reloadShaders();
@@ -470,18 +465,7 @@ void Renderer::reloadShaders()
     m_giProbePipeline.reloadShaders(m_maxTextures);
     m_giProbePipeline.reloadDebugShaders();
     m_taaPipeline.reloadShaders();
-    {
-        GraphicsPipelineLayout layout;
-        layout.vertexShader.debugFilePath = "Shaders/composite.vs.glsl";
-        layout.fragmentShader.debugFilePath = "Shaders/composite.fs.glsl";
-        layout.vertexShader.text = FileSystem::readFileStr(layout.vertexShader.debugFilePath);
-        layout.fragmentShader.text = FileSystem::readFileStr(layout.fragmentShader.debugFilePath);
-        layout.cullMode = vk::CullModeFlagBits::eNone;
-        layout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
-            .binding = 0, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
-        if (!m_compositePipeline.reloadShaders(m_renderPass, layout))
-            printf("Composite: shader reload failed, keeping previous pipeline\n");
-    }
+    m_compositePipeline.reloadShaders(m_renderPass);
 
     setHaveToRecordCommandBuffers();
     printf("Reloaded shaders\n");
@@ -635,6 +619,7 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     ubo.nebulaParams = glm::vec4(sky.nebulaIntensity, sky.nebulaScale, sky.nebulaBandWidth, sky.nebulaDust);
     ubo.nebulaAxis = glm::vec4(glm::normalize(sky.nebulaAxis), 0.0f);
     ubo.atmosParams = glm::vec4(sky.rayleighHeight, sky.mieHeight, sky.mieExtinction, sky.ozone);
+    ubo.groundParams = glm::vec4(sky.groundColor * sky.groundIntensity, 0.0f);
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
@@ -1240,22 +1225,14 @@ void Renderer::recordComposite(uint32 frameIdx)
     vkCb.setViewport(0, vk::Viewport{.x = 0.0f, .y = 0.0f, .width = (float)extent.width, .height = (float)extent.height, .minDepth = 0.0f, .maxDepth = 1.0f });
     vkCb.setScissor(0, vk::Rect2D{.offset = vk::Offset2D{ vpMin.x, vpMin.y }, .extent = vk::Extent2D{ (uint32)vpSize.x, (uint32)vpSize.y } });
 
-    DescriptorSet& set = frameData.compositeDescriptorSet;
-    vk::DescriptorSet vkSet = set.getDescriptorSet();
-    std::array<DescriptorSetUpdateInfo, 1> updates{
-        DescriptorSetUpdateInfo{ 
-            .binding = 0, 
-            .type = vk::DescriptorType::eCombinedImageSampler,
-            .imageInfos = { 
-                vk::DescriptorImageInfo{ 
-                    .sampler = m_taaPipeline.getSampler(), 
-                    .imageView = m_taaPipeline.getResolvedView(frameIdx), 
-                    .imageLayout = vk::ImageLayout::eGeneral 
-    } } } };
-    cb.cmdUpdateDescriptorSets(m_compositePipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, vkSet, updates);
-    vkCb.bindPipeline(vk::PipelineBindPoint::eGraphics, m_compositePipeline.getPipeline());
-    vkCb.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_compositePipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
-    vkCb.draw(3, 1, 0, 0);
+    CompositePipeline::RecordParams params{
+        .descriptorSet = frameData.compositeDescriptorSet,
+        .resolvedView = m_taaPipeline.getResolvedView(frameIdx),
+        .sampler = m_taaPipeline.getSampler(),
+        .exposureEV = m_postParams.exposureEV,
+        .tonemapper = m_postParams.tonemapper,
+    };
+    m_compositePipeline.record(cb, params);
     cb.end();
 }
 

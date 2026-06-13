@@ -177,7 +177,7 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             {
                 uint16& idx = temp.textureIdxForMaterialTex[diffuseTexIdx];
                 if (idx == UINT16_MAX)
-                    idx = Globals::textureManager.upload(*sceneData.getTexture(diffuseTexIdx), true);
+                    idx = Globals::textureManager.upload(*sceneData.getTexture(diffuseTexIdx), true, true);
                 material.diffuseTexIdx = idx;
             }
 

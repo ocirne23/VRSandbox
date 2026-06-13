@@ -101,9 +101,8 @@ bool Texture::initialize(const char* filePath, bool generateMips)
 	return initialize(width, height, format, imgData, generateMips);
 }
 
-bool Texture::initialize(const ITextureData& textureData, bool generateMips)
+bool Texture::initialize(const ITextureData& textureData, bool generateMips, bool sRGB)
 {
-    const bool sRGB = false;
     std::string formatInfo = textureData.getFormatInfo();
     
     int width = textureData.getWidth();
@@ -130,16 +129,16 @@ bool Texture::initialize(const ITextureData& textureData, bool generateMips)
             switch (desiredComponents)
             {
             case 1:
-                format = sRGB ? vk::Format::eR8Snorm : vk::Format::eR8Unorm;
+                format = sRGB ? vk::Format::eR8Srgb : vk::Format::eR8Unorm;
                 break;
             case 2:
-				format = sRGB ? vk::Format::eR8G8Snorm : vk::Format::eR8G8Unorm;
+				format = sRGB ? vk::Format::eR8G8Srgb : vk::Format::eR8G8Unorm;
 				break;
 			case 3:
-				format = sRGB ? vk::Format::eR8G8B8Snorm : vk::Format::eR8G8B8Unorm;
+				format = sRGB ? vk::Format::eR8G8B8Srgb : vk::Format::eR8G8B8Unorm;
 				break;
 			case 4:
-				format = sRGB ? vk::Format::eR8G8B8A8Snorm : vk::Format::eR8G8B8A8Unorm;
+				format = sRGB ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
 				break;
             default:
                 assert(false && "unsupported number of components in png");
@@ -163,7 +162,7 @@ bool Texture::initialize(const ITextureData& textureData, bool generateMips)
 		{
 			const size_t dataSize = (size_t)width * height * sizeof(ITextureData::Pixel);
 			imgData.push_back(std::span((uint8*)textureData.getPixels(), dataSize));
-			format = vk::Format::eR8G8B8A8Unorm;
+			format = sRGB ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
 		}
 		else
 		{

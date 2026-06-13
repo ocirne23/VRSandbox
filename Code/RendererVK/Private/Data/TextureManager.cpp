@@ -44,7 +44,7 @@ uint32 TextureManager::getDescriptorCap() const
 	return std::min({ deviceLimit - 16u, (uint32)UINT16_MAX - 1u, 16u * 1024u });
 }
 
-uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips)
+uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips, bool sRGB)
 {
 	assert(m_textures.size() < UINT16_MAX && "Too many textures");
 	if ((uint32)m_textures.size() >= m_maxTextures)
@@ -63,7 +63,7 @@ uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips
 	}
 	const uint16 idx = (uint16)m_textures.size();
 	m_textures.emplace_back();
-	if (!m_textures[idx].initialize(textureData, generateMips))
+	if (!m_textures[idx].initialize(textureData, generateMips, sRGB))
 	{
 		assert(false && "Failed to initialize texture");
 		m_textures.pop_back();
