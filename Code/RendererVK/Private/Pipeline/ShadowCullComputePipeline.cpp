@@ -24,11 +24,11 @@ void ShadowCullComputePipeline::resizeInstanceBuffers(uint32 maxMeshInstances)
     {
         perFrame.outMeshInstancesBuffer.initialize(maxMeshInstances * sizeof(RendererVKLayout::OutShadowMeshInstance), // 6
             vk::BufferUsageFlagBits2::eVertexBuffer | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
+            vk::MemoryPropertyFlagBits::eDeviceLocal, false, "ShadowCullOutInstances");
 
         perFrame.outMeshInstanceIndexesBuffer.initialize(maxMeshInstances * sizeof(uint32), // 7
             vk::BufferUsageFlagBits2::eVertexBuffer | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
+            vk::MemoryPropertyFlagBits::eDeviceLocal, false, "ShadowCullOutIndices");
     }
 }
 

@@ -45,10 +45,10 @@ void EyeAdaptationPipeline::initialize()
 
     m_histogramBuffer.initialize(NUM_BINS * sizeof(uint32),
         vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal);
+        vk::MemoryPropertyFlagBits::eDeviceLocal, false, "EyeAdaptHistogram");
     m_adaptBuffer.initialize(2 * sizeof(float),
         vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal);
+        vk::MemoryPropertyFlagBits::eDeviceLocal, false, "EyeAdaptState");
     for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
     {
         m_paramsBuffer[i].initialize(sizeof(GpuParams), vk::BufferUsageFlagBits2::eUniformBuffer,

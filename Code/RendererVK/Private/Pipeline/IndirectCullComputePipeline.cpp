@@ -34,11 +34,11 @@ void IndirectCullComputePipeline::resizeInstanceBuffers(uint32 maxMeshInstances)
     {
         perFrame.outMeshInstancesBuffer.initialize(maxMeshInstances * sizeof(RendererVKLayout::OutMeshInstance), // 6
             vk::BufferUsageFlagBits2::eVertexBuffer | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
+            vk::MemoryPropertyFlagBits::eDeviceLocal, false, "CullOutInstances");
 
         perFrame.outMeshInstanceIndexesBuffer.initialize(maxMeshInstances * sizeof(uint32), // 7
             vk::BufferUsageFlagBits2::eVertexBuffer | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
+            vk::MemoryPropertyFlagBits::eDeviceLocal, false, "CullOutIndices");
     }
 }
 
@@ -49,9 +49,9 @@ void IndirectCullComputePipeline::resizeCommandBuffers(uint32 maxUniqueMeshes)
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.outIndirectCommandBuffer.initialize(maxUniqueMeshes * sizeof(RendererVKLayout::IndirectDrawSequence), // 8
-            usage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+            usage, vk::MemoryPropertyFlagBits::eDeviceLocal, false, "CullOutDraws");
         perFrame.outTransparentIndirectCommandBuffer.initialize(maxUniqueMeshes * sizeof(RendererVKLayout::IndirectDrawSequence), // 9
-            usage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+            usage, vk::MemoryPropertyFlagBits::eDeviceLocal, false, "CullOutDrawsTransparent");
     }
 }
 

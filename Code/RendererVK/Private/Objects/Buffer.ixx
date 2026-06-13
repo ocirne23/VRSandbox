@@ -79,6 +79,7 @@ public:
 
     vk::Buffer getBuffer() const       { return m_buffer; }
 	size_t getSize() const             { return (size_t)m_size; }
+    const char* getDebugName() const   { return m_debugName; }
 
 private:
 

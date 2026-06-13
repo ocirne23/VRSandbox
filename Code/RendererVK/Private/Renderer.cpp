@@ -274,7 +274,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
         perFrame.ubo.initialize(sizeof(RendererVKLayout::Ubo),
             vk::BufferUsageFlagBits2::eUniformBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
+            vk::MemoryPropertyFlagBits::eDeviceLocal, false, "Ubo");
 
         perFrame.inRenderNodeTransformsBuffer.initialize(m_maxRenderNodes * sizeof(RendererVKLayout::RenderNodeTransform),
             vk::BufferUsageFlagBits2::eStorageBuffer,
@@ -309,15 +309,15 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     m_meshInfosBuffer.initialize(m_maxUniqueMeshes * sizeof(RendererVKLayout::MeshInfo),
         vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal, true);
+        vk::MemoryPropertyFlagBits::eDeviceLocal, true, "MeshInfos");
 
     m_materialInfosBuffer.initialize(m_maxUniqueMaterials * sizeof(RendererVKLayout::MaterialInfo),
         vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal, true);
+        vk::MemoryPropertyFlagBits::eDeviceLocal, true, "MaterialInfos");
 
     m_instanceOffsetsBuffer.initialize(m_maxInstanceOffsets * sizeof(RendererVKLayout::MeshInstanceOffset),
         vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal, true);
+        vk::MemoryPropertyFlagBits::eDeviceLocal, true, "InstanceOffsets");
 
 	uint16 diffuseIdx = Globals::textureManager.upload(*ITextureData::createFallbackWhiteTexture(), false);
 	assert(diffuseIdx == RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX);
@@ -801,7 +801,7 @@ void Renderer::createLightGridBuffers()
     {
         perFrame.lightGridsBuffer.initialize(m_lightGridBufferSize,
             vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal);
+            vk::MemoryPropertyFlagBits::eDeviceLocal, false, "LightGrids");
 
         // Device-local + host-visible (ReBAR) so GPU writes are fast; the CPU reads the header in getStats,
         // hence the default random (cached-where-possible) access.

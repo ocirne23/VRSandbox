@@ -46,8 +46,8 @@ bool MeshDataManager::initialize(size_t vertexBufSize, size_t indexBufSize)
     // (eAccelerationStructureBuildInputReadOnlyKHR + eShaderDeviceAddress) and fetches hit-triangle
     // attributes from them in the probe-trace compute shader (eStorageBuffer). eTransferSrc enables the
     // GPU copy that carries contents over on capacity growth.
-    m_vertexBuffer.initialize(vertexBufSize, vertexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal);
-    m_indexBuffer.initialize(indexBufSize, indexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal);
+    m_vertexBuffer.initialize(vertexBufSize, vertexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshVertex");
+    m_indexBuffer.initialize(indexBufSize, indexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshIndex");
 
     return true;
 }
@@ -65,7 +65,7 @@ void MeshDataManager::growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSiz
     assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle in MeshDataManager::growBuffer");
 
     Buffer oldBuffer = std::move(buffer);
-    buffer.initialize(newSize, usage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    buffer.initialize(newSize, usage, vk::MemoryPropertyFlagBits::eDeviceLocal, false, oldBuffer.getDebugName());
     if (usedSize > 0)
     {
         CommandBuffer copyCommandBuffer;
