@@ -8,19 +8,19 @@ import :Device;
 
 namespace
 {
-    constexpr vk::BufferUsageFlags rtUsage()
+    constexpr vk::BufferUsageFlags2 rtUsage()
     {
-        return vk::BufferUsageFlagBits::eShaderDeviceAddress
-            | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR
-            | vk::BufferUsageFlagBits::eStorageBuffer;
+        return vk::BufferUsageFlagBits2::eShaderDeviceAddress
+            | vk::BufferUsageFlagBits2::eAccelerationStructureBuildInputReadOnlyKHR
+            | vk::BufferUsageFlagBits2::eStorageBuffer;
     }
-    constexpr vk::BufferUsageFlags vertexBufferUsage()
+    constexpr vk::BufferUsageFlags2 vertexBufferUsage()
     {
-        return vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eVertexBuffer | rtUsage();
+        return vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eTransferSrc | vk::BufferUsageFlagBits2::eVertexBuffer | rtUsage();
     }
-    constexpr vk::BufferUsageFlags indexBufferUsage()
+    constexpr vk::BufferUsageFlags2 indexBufferUsage()
     {
-        return vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eIndexBuffer | rtUsage();
+        return vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eTransferSrc | vk::BufferUsageFlagBits2::eIndexBuffer | rtUsage();
     }
 }
 
@@ -52,7 +52,7 @@ bool MeshDataManager::initialize(size_t vertexBufSize, size_t indexBufSize)
     return true;
 }
 
-void MeshDataManager::growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSize, size_t neededSize, vk::BufferUsageFlags usage)
+void MeshDataManager::growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSize, size_t neededSize, vk::BufferUsageFlags2 usage)
 {
     size_t newSize = bufSize;
     while (newSize < neededSize)

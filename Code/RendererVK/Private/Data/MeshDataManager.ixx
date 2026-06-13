@@ -37,7 +37,7 @@ private:
     size_t uploadIndexData(const void* pData, size_t size);
 
     // Doubles the buffer until neededSize fits, GPU-copying the used range into the new allocation.
-    void growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSize, size_t neededSize, vk::BufferUsageFlags usage);
+    void growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSize, size_t neededSize, vk::BufferUsageFlags2 usage);
 
 private:
 

@@ -10,7 +10,7 @@ void LightGridComputePipeline::initialize()
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.inIndirectCommandBuffer.initialize(sizeof(vk::DispatchIndirectCommand),
-            vk::BufferUsageFlagBits::eIndirectBuffer,
+            vk::BufferUsageFlagBits2::eIndirectBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedIndirectCommands = perFrame.inIndirectCommandBuffer.mapMemory<vk::DispatchIndirectCommand>();
     }

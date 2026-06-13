@@ -24,7 +24,7 @@ void Buffer::destroy()
     }
 }
 
-bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::BufferUsageFlags2 usage2, bool useBackingStore)
+bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore)
 {
     if (m_buffer)
         destroy();
@@ -32,21 +32,13 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Mem
     m_size = size;
     m_usage = usage;
     m_properties = properties;
-    m_usage2 = usage2;
     m_hasBackingStore = useBackingStore;
+    m_uploadOffset = 0;
     vk::Device vkDevice = Globals::device.getDevice();
-    vk::BufferUsageFlags2CreateInfo usage2Info{ .usage = usage2 };
+    vk::BufferUsageFlags2CreateInfo usageInfo{ .usage = usage };
     vk::BufferCreateInfo bufferInfo = {};
+    bufferInfo.pNext = &usageInfo;
     bufferInfo.size = size;
-    if (usage2)
-    {
-        // When flags2 are used the legacy usage field must be 0; the caller passes all bits in usage2.
-        bufferInfo.pNext = &usage2Info;
-    }
-    else
-    {
-        bufferInfo.usage = usage;
-    }
     bufferInfo.sharingMode = vk::SharingMode::eExclusive;
     vk::ResultValue<vk::Buffer> bufResult = vkDevice.createBuffer(bufferInfo);
     if (bufResult.result != vk::Result::eSuccess)
@@ -56,8 +48,7 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Mem
     }
     m_buffer = bufResult.value;
 
-    const bool needsDeviceAddress = (bool)(usage & vk::BufferUsageFlagBits::eShaderDeviceAddress)
-        || (bool)(usage2 & vk::BufferUsageFlagBits2::eShaderDeviceAddress);
+    const bool needsDeviceAddress = (bool)(usage & vk::BufferUsageFlagBits2::eShaderDeviceAddress);
 
     vk::MemoryRequirements memRequirements = vkDevice.getBufferMemoryRequirements(m_buffer);
     vk::MemoryAllocateFlagsInfo allocFlagsInfo{ .flags = vk::MemoryAllocateFlagBits::eDeviceAddress };
@@ -90,7 +81,44 @@ bool Buffer::resize(vk::DeviceSize newSize)
     assert(m_hasBackingStore && "resize() requires a buffer initialized with useBackingStore = true");
     if (!m_hasBackingStore)
         return false;
-    return initialize(newSize, m_usage, m_properties, m_usage2, true);
+    const vk::DeviceSize uploadOffset = m_uploadOffset;
+    const bool result = initialize(newSize, m_usage, m_properties, true);
+    m_uploadOffset = uploadOffset;
+    return result;
+}
+
+bool Buffer::upload(vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset)
+{
+    if (dataSize == 0)
+        return true;
+    assert(dstOffset + dataSize <= m_size);
+    if (m_properties & vk::MemoryPropertyFlagBits::eHostVisible)
+    {
+        std::span<uint8> mapped = mapMemory(dstOffset, dataSize);
+        if (mapped.empty())
+            return false;
+        memcpy(mapped.data(), data, (size_t)dataSize);
+        flushMappedMemory((size_t)dataSize, (size_t)dstOffset);
+        unmapMemory();
+    }
+    else
+    {
+        Globals::stagingManager.upload(m_buffer, dataSize, data, dstOffset);
+    }
+    return true;
+}
+
+vk::DeviceSize Buffer::appendUpload(vk::DeviceSize dataSize, const void* data)
+{
+    const vk::DeviceSize offset = m_uploadOffset;
+    if (m_hasBackingStore)
+    {
+        const uint8* bytes = (const uint8*)data;
+        m_backingStore.insert(m_backingStore.end(), bytes, bytes + dataSize);
+    }
+    upload(dataSize, data, offset);
+    m_uploadOffset += dataSize;
+    return offset;
 }
 
 bool Buffer::uploadBackingStore()
@@ -98,21 +126,7 @@ bool Buffer::uploadBackingStore()
     assert(m_hasBackingStore && "uploadBackingStore() requires a buffer initialized with useBackingStore = true");
     if (!m_hasBackingStore || m_backingStore.empty())
         return true;
-    const size_t uploadSize = std::min((size_t)m_size, m_backingStore.size());
-    if (m_properties & vk::MemoryPropertyFlagBits::eHostVisible)
-    {
-        std::span<uint8> mapped = mapMemory(0, uploadSize);
-        if (mapped.empty())
-            return false;
-        memcpy(mapped.data(), m_backingStore.data(), uploadSize);
-        flushMappedMemory(uploadSize);
-        unmapMemory();
-    }
-    else
-    {
-        Globals::stagingManager.upload(m_buffer, uploadSize, m_backingStore.data());
-    }
-    return true;
+    return upload(std::min((size_t)m_size, m_backingStore.size()), m_backingStore.data());
 }
 
 vk::DeviceAddress Buffer::getDeviceAddress() const

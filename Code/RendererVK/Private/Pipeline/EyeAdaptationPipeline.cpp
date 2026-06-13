@@ -43,14 +43,14 @@ void EyeAdaptationPipeline::initialize()
     }
 
     m_histogramBuffer.initialize(NUM_BINS * sizeof(uint32),
-        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal);
     m_adaptBuffer.initialize(2 * sizeof(float),
-        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal);
     for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
     {
-        m_paramsBuffer[i].initialize(sizeof(GpuParams), vk::BufferUsageFlagBits::eUniformBuffer,
+        m_paramsBuffer[i].initialize(sizeof(GpuParams), vk::BufferUsageFlagBits2::eUniformBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         m_mappedParams[i] = m_paramsBuffer[i].mapMemory<GpuParams>();
     }

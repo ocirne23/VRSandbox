@@ -15,8 +15,8 @@ public:
         m_memory = move.getMemory();
         m_usage = move.m_usage;
         m_properties = move.m_properties;
-        m_usage2 = move.m_usage2;
         m_backingStore = std::move(move.m_backingStore);
+        m_uploadOffset = move.m_uploadOffset;
         m_hasBackingStore = move.m_hasBackingStore;
         move.m_size = 0;
         move.m_buffer = nullptr;
@@ -25,10 +25,9 @@ public:
     }
     Buffer(const Buffer&) = delete;
 
-    // usage2 supplies VkBufferUsageFlags2 bits (e.g. ePreprocessBufferEXT) that have no 32-bit
-    // equivalent; when non-zero it supersedes usage. Requesting a shader-device-address usage (in
-    // either parameter) allocates the memory with the device-address flag so getDeviceAddress works.
-    bool initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::BufferUsageFlags2 usage2 = {}, bool useBackingStore = false);
+    // Requesting a shader-device-address usage allocates the memory with the device-address flag so
+    // getDeviceAddress works.
+    bool initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore = false);
     void destroy();
 
     bool resize(vk::DeviceSize newSize);
@@ -42,6 +41,20 @@ public:
         const uint8* bytes = (const uint8*)items.data();
         m_backingStore.insert(m_backingStore.end(), bytes, bytes + items.size_bytes());
     }
+    bool upload(vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
+    template<typename T>
+    bool upload(std::span<const T> items, vk::DeviceSize dstOffset = 0)
+    {
+        return upload(items.size_bytes(), items.data(), dstOffset);
+    }
+
+    vk::DeviceSize appendUpload(vk::DeviceSize dataSize, const void* data);
+    template<typename T>
+    vk::DeviceSize appendUpload(std::span<const T> items)
+    {
+        return appendUpload(items.size_bytes(), items.data());
+    }
+
     bool uploadBackingStore();
 
     vk::DeviceAddress getDeviceAddress() const;
@@ -66,9 +79,9 @@ private:
     vk::Buffer m_buffer;
     vk::DeviceMemory m_memory;
 
-    vk::BufferUsageFlags m_usage;
+    vk::BufferUsageFlags2 m_usage;
     vk::MemoryPropertyFlags m_properties;
-    vk::BufferUsageFlags2 m_usage2;
     std::vector<uint8> m_backingStore;
+    vk::DeviceSize m_uploadOffset = 0;
     bool m_hasBackingStore = false;
 };

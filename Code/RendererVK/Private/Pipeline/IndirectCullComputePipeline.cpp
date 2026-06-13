@@ -15,7 +15,7 @@ void IndirectCullComputePipeline::initialize(uint32 maxMeshInstances, uint32 max
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.inIndirectCommandBuffer.initialize(sizeof(vk::DispatchIndirectCommand), // x
-            vk::BufferUsageFlagBits::eIndirectBuffer,
+            vk::BufferUsageFlagBits2::eIndirectBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedIndirectCommands = perFrame.inIndirectCommandBuffer.mapMemory<vk::DispatchIndirectCommand>();
     }
@@ -32,19 +32,19 @@ void IndirectCullComputePipeline::resizeInstanceBuffers(uint32 maxMeshInstances)
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.outMeshInstancesBuffer.initialize(maxMeshInstances * sizeof(RendererVKLayout::OutMeshInstance), // 6
-            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::BufferUsageFlagBits2::eVertexBuffer | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
         perFrame.outMeshInstanceIndexesBuffer.initialize(maxMeshInstances * sizeof(uint32), // 7
-            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::BufferUsageFlagBits2::eVertexBuffer | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
     }
 }
 
 void IndirectCullComputePipeline::resizeCommandBuffers(uint32 maxUniqueMeshes)
 {
-    constexpr vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst
-        | vk::BufferUsageFlagBits::eShaderDeviceAddress; // device address consumed by vkCmdExecuteGeneratedCommandsEXT
+    constexpr vk::BufferUsageFlags2 usage = vk::BufferUsageFlagBits2::eIndirectBuffer | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst
+        | vk::BufferUsageFlagBits2::eShaderDeviceAddress; // device address consumed by vkCmdExecuteGeneratedCommandsEXT
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.outIndirectCommandBuffer.initialize(maxUniqueMeshes * sizeof(RendererVKLayout::IndirectDrawSequence), // 8

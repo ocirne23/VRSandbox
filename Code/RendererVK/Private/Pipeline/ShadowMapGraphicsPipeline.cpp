@@ -82,8 +82,9 @@ void ShadowMapGraphicsPipeline::createPreprocessBuffers(uint32 maxUniqueMeshes)
     if (m_preprocessSize > 0)
     {
         for (Buffer& preprocess : m_preprocessBuffers)
-            preprocess.initialize(m_preprocessSize, {}, vk::MemoryPropertyFlagBits::eDeviceLocal,
-                vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress);
+            preprocess.initialize(m_preprocessSize,
+                vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
+                vk::MemoryPropertyFlagBits::eDeviceLocal);
     }
 }
 

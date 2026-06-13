@@ -39,7 +39,7 @@ void GIProbePipeline::initialize(uint32 maxTlasInstances, uint32 maxTextures, ui
     m_textureSampler.initialize();
 
     m_giGridData.initialize(RendererVKLayout::GI_GRID_DATA_BUFFER_SIZE,
-        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
+        vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     resizeTlasInstanceBuffers(maxTlasInstances);
 
@@ -61,7 +61,7 @@ void GIProbePipeline::resizeTlasInstanceBuffers(uint32 maxTlasInstances)
 {
     for (Buffer& instBuf : m_tlasInstanceBuffer)
         instBuf.initialize((vk::DeviceSize)maxTlasInstances * RendererVKLayout::GI_TLAS_INSTANCE_SIZE,
-            vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::BufferUsageFlagBits2::eShaderDeviceAddress | vk::BufferUsageFlagBits2::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits2::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 }
 

@@ -272,13 +272,11 @@ void StaticMeshGraphicsPipeline::createPreprocessBuffers(uint32 maxUniqueMeshes)
         for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; i++)
         {
             m_preprocessBuffers[i].initialize(m_preprocessSize,
-                {}, // all usage bits supplied via usage2 below
-                vk::MemoryPropertyFlagBits::eDeviceLocal,
-                vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress);
+                vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
+                vk::MemoryPropertyFlagBits::eDeviceLocal);
             m_transparentPreprocessBuffers[i].initialize(m_preprocessSize,
-                {},
-                vk::MemoryPropertyFlagBits::eDeviceLocal,
-                vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress);
+                vk::BufferUsageFlagBits2::ePreprocessBufferEXT | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
+                vk::MemoryPropertyFlagBits::eDeviceLocal);
         }
     }
 }

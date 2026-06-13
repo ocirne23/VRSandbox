@@ -26,7 +26,7 @@ void AccelerationStructure::initialize(uint32 maxUniqueMeshes)
         m_scratchAlignment = 256;
 
     m_blasAddressBuffer.initialize(maxUniqueMeshes * sizeof(uint64),
-        vk::BufferUsageFlagBits::eStorageBuffer,
+        vk::BufferUsageFlagBits2::eStorageBuffer,
         vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
     m_mappedBlasAddresses = m_blasAddressBuffer.mapMemory<uint64>();
 }
@@ -35,7 +35,7 @@ void AccelerationStructure::resizeBlasAddressBuffer(uint32 maxUniqueMeshes)
 {
     const std::vector<uint64> oldAddresses(m_mappedBlasAddresses.begin(), m_mappedBlasAddresses.end());
     m_blasAddressBuffer.initialize(maxUniqueMeshes * sizeof(uint64),
-        vk::BufferUsageFlagBits::eStorageBuffer,
+        vk::BufferUsageFlagBits2::eStorageBuffer,
         vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
     m_mappedBlasAddresses = m_blasAddressBuffer.mapMemory<uint64>();
     memcpy(m_mappedBlasAddresses.data(), oldAddresses.data(), oldAddresses.size() * sizeof(uint64));
@@ -48,7 +48,7 @@ void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& ou
     if (scratch.getSize() < allocSize)
     {
         scratch.initialize(allocSize,
-            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+            vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
     }
     const vk::DeviceAddress base = scratch.getDeviceAddress();
@@ -147,7 +147,7 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
         if (blas.handle)
             dev.destroyAccelerationStructureKHR(blas.handle);
         blas.buffer.initialize(sizes[i].accelerationStructureSize,
-            vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+            vk::BufferUsageFlagBits2::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
         vk::AccelerationStructureCreateInfoKHR ci{
@@ -222,7 +222,7 @@ bool AccelerationStructure::recordBuildTlas(vk::CommandBuffer cmd, uint32 frameI
         if (m_tlas[frameIdx])
             dev.destroyAccelerationStructureKHR(m_tlas[frameIdx]);
         m_tlasBuffer[frameIdx].initialize(sizes.accelerationStructureSize,
-            vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+            vk::BufferUsageFlagBits2::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
         vk::AccelerationStructureCreateInfoKHR ci{
             .buffer = m_tlasBuffer[frameIdx].getBuffer(),
