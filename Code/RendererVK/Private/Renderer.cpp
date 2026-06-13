@@ -27,8 +27,6 @@ import :ObjectContainer;
 // matrix's depth convention. outSplits holds each cascade's far distance from the camera.
 namespace
 {
-    constexpr std::string_view s_tonemapperNames[] = { "Off", "Reinhard", "ACES", "AgX" };
-
     // Radical inverse in an arbitrary base; (Halton(2), Halton(3)) gives the low-discrepancy sub-pixel jitter
     // sequence used by the TAA accumulation.
     float radicalInverse(uint32 i, uint32 base)
@@ -168,69 +166,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     _putenv("DISABLE_VULKAN_OW_OBS_CAPTURE=True");
     _putenv("DISABLE_VULKAN_OBS_CAPTURE=True");
 
-    Tweak::float3("Sky", "Sun Direction", &m_skyParams.sunDirection, 0.01f, [&]() { m_skyParams.sunDirection = glm::normalize(m_skyParams.sunDirection); });
-    Tweak::color3("Sky", "Sun Color", &m_skyParams.sunColor, &m_skyParams.sunIntensity);
-    Tweak::color3("Sky", "Ambient", &m_skyParams.ambientColor, &m_skyParams.ambientIntensity, 0.0f, 0.2f, 0.001f);
-    Tweak::color3("Sky", "Sky Radiance", &m_skyParams.skyRadianceColor, &m_skyParams.skyRadianceIntensity, 0.0f, 1.2f, 0.001f);
-    Tweak::color3("Sky", "Ground Albedo", &m_skyParams.groundColor, &m_skyParams.groundIntensity, 0.0f, 2.0f, 0.01f);
-    Tweak::floatVar("Sky/Sun", "Sun Angle Cos", &m_skyParams.sunAngularCos, 0.9995f, 1.0f, 0.000001f);
-    Tweak::floatVar("Sky/Sun", "Sun Glow", &m_skyParams.sunGlow, 0.0, 5.0f, 0.01f);
-    Tweak::floatVar("Sky/Sun", "SunCasc D Bias", &m_skyParams.shadowDepthBias, 0.0f, 0.005f, 0.0001f);
-    Tweak::floatVar("Sky/Sun", "SunCasc N Bias", &m_skyParams.shadowNormalBias, 0.0f, 10.0f);
-    Tweak::floatVar("Sky/Sun", "Highlight Rolloff", &m_skyParams.sunRolloff, 0.0f, 2.0f);
-    Tweak::floatVar("Sky/Sun", "Rolloff Knee", &m_skyParams.sunRolloffKnee, 0.1f, 1.0f, 0.005f);
-    Tweak::floatVar("Sky/Sun", "Rolloff Headroom", &m_skyParams.sunRolloffHeadroom, 0.5f, 32.0f, 0.05f);
-
-    Tweak::floatVar("Sky/Atmosphere", "Scatter Boost", &m_skyParams.scatterBoost, 0.0f, 32.0f);
-    Tweak::floatVar("Sky/Atmosphere", "Rayleigh", &m_skyParams.rayleighScatter, 0.0f, 8.0f, 0.01f);
-    Tweak::floatVar("Sky/Atmosphere", "Mie", &m_skyParams.mieScatter, 0.0f, 8.0f, 0.01f);
-    Tweak::floatVar("Sky/Atmosphere", "Mie Anisotropy", &m_skyParams.mieG, 0.0f, 0.99f);
-    Tweak::floatVar("Sky/Atmosphere", "Rayleigh Height", &m_skyParams.rayleighHeight, 1000.0f, 20000.0f, 10.0f);
-    Tweak::floatVar("Sky/Atmosphere", "Mie Height", &m_skyParams.mieHeight, 200.0f, 5000.0f, 5.0f);
-    Tweak::floatVar("Sky/Atmosphere", "Mie Extinction", &m_skyParams.mieExtinction, 1.0f, 2.0f, 0.005f);
-    Tweak::floatVar("Sky/Atmosphere", "Ozone", &m_skyParams.ozone, 0.0f, 4.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Density", &m_skyParams.starDensity, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Stars", "Size", &m_skyParams.starSize, 0.2f, 3.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Size Variation", &m_skyParams.starSizeVar, 0.0f, 1.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Brightness", &m_skyParams.starBrightness, 0.0f, 4.0f, 0.01f);
-    Tweak::floatVar("Sky/Stars", "Color Variation", &m_skyParams.starColorVar, 0.0f, 1.0f, 0.01f);
-    Tweak::floatVar("Sky/Nebula", "Intensity", &m_skyParams.nebulaIntensity, 0.0f, 2.0f, 0.01f);
-    Tweak::floatVar("Sky/Nebula", "Scale", &m_skyParams.nebulaScale, 0.5f, 12.0f, 0.05f);
-    Tweak::floatVar("Sky/Nebula", "Band Width", &m_skyParams.nebulaBandWidth, 0.05f, 1.0f, 0.005f);
-    Tweak::floatVar("Sky/Nebula", "Dust Lanes", &m_skyParams.nebulaDust, 0.0f, 1.0f, 0.01f);
-    Tweak::float3("Sky/Nebula", "Axis", &m_skyParams.nebulaAxis, 0.01f, [&]() { m_skyParams.nebulaAxis = glm::normalize(m_skyParams.nebulaAxis); });
-    Tweak::float3("Sky/Moon", "Direction", &m_skyParams.moonDirection, 0.01f, [&]() { m_skyParams.moonDirection = glm::normalize(m_skyParams.moonDirection); });
-    Tweak::floatVar("Sky/Moon", "Size", &m_skyParams.moonSizeDeg, 0.05f, 10.0f, 0.01f);
-    Tweak::floatVar("Sky/Moon", "Brightness", &m_skyParams.moonBrightness, 0.0f, 2.0f);
-    Tweak::floatVar("Sky/Clouds", "Coverage", &m_skyParams.cloudCoverage, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Height", &m_skyParams.cloudHeight, 0.0f, 8000.0f);
-    Tweak::floatVar("Sky/Clouds", "Thickness", &m_skyParams.cloudThickness, 20.0f, 250.0f);
-    Tweak::floatVar("Sky/Clouds", "Scale", &m_skyParams.cloudScale, 0.1f, 5.0f);
-    Tweak::floatVar("Sky/Clouds", "Wind Speed", &m_skyParams.cloudWindSpeed, 0.0f, 10.0f);
-    Tweak::floatVar("Sky/Clouds", "Wind Angle", &m_skyParams.cloudWindAngle, 0.0f, 6.2832f);
-    Tweak::floatVar("Sky/Clouds", "Softness", &m_skyParams.cloudSoftness, 0.05f, 2.0f);
-    Tweak::floatVar("Sky/Clouds", "Density", &m_skyParams.cloudDensity, 0.2f, 25.0f);
-    Tweak::floatVar("Sky/Clouds", "Sharpness", &m_skyParams.cloudSharpness, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Height Variation", &m_skyParams.cloudBaseVar, 0.0f, 1.0f);
-    Tweak::floatVar("Sky/Clouds", "Sun Shading", &m_skyParams.cloudShading, 0.0f, 6.0f);
-    Tweak::float3("Sky", "Up Axis", &m_skyParams.up, 0.01f, [&]() { m_skyParams.up = glm::normalize(m_skyParams.up); });
-
-    Tweak::boolean("Fog", "Enabled", &m_fogParams.enabled);
-    Tweak::floatVar("Fog", "Global Density", &m_fogParams.density, 0.0f, 1.0f, 0.001f);
-    Tweak::floatVar("Fog", "Height Base", &m_fogParams.heightBase, -200.0f, 500.0f);
-    Tweak::floatVar("Fog", "Height Falloff", &m_fogParams.heightFalloff, 0.0f, 1.0f, 0.002f);
-    Tweak::color3("Fog", "Albedo", &m_fogParams.albedo, &m_fogParams.albedoIntensity);
-    Tweak::floatVar("Fog", "Anisotropy", &m_fogParams.anisotropy, -0.9f, 0.95f, 0.01f);
-    Tweak::floatVar("Fog", "Range", &m_fogParams.range, 1.0f, 1024.0f);
-    Tweak::floatVar("Fog", "Noise Scale", &m_fogParams.noiseScale, 0.005f, 1.0f, 0.005f);
-    Tweak::floatVar("Fog", "Noise Strength", &m_fogParams.noiseStrength, 0.0f, 1.0f, 0.01f);
-    Tweak::floatVar("Fog", "Wind Speed", &m_fogParams.windSpeed, 0.0f, 20.0f);
-    Tweak::floatVar("Fog", "Temporal Blend", &m_fogParams.temporalBlend, 0.0f, 0.97f, 0.01f);
-    Tweak::intVar("Fog/Quality", "Sun Rays", &m_fogParams.sunRays, 1, 8);
-    Tweak::floatVar("Fog/Quality", "Sun Softness", &m_fogParams.sunSoftness, 0.0f, 0.2f, 0.005f);
-    Tweak::boolean("Fog/Quality", "Spatial Filter", &m_fogParams.spatialFilter);
-    Tweak::boolean("Fog/Quality", "GI Ambient", &m_fogParams.giAmbient);
-    Tweak::boolean("Fog/Quality", "Light Shadows", &m_fogParams.lightShadows);
+    m_skyParams.registerTweaks();
+    m_fogParams.registerTweaks();
 
     Tweak::boolean("RT", "RT Lights", &m_rtLightShadows);
     Tweak::boolean("RT", "RT Sun", &m_rtSunShadow);
@@ -240,15 +177,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
     Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
 
-    Tweak::floatVar("Post", "Exposure (EV)", &m_postParams.exposureEV, -8.0f, 8.0f, 0.05f, [this]() { setHaveToRecordCommandBuffers(); });
-    Tweak::enumVar("Post", "Tonemapper", &m_postParams.tonemapper, s_tonemapperNames, [this]() { setHaveToRecordCommandBuffers(); });
-    Tweak::boolean("Post", "Auto Exposure", &m_postParams.autoExposure, [this]() { setHaveToRecordCommandBuffers(); });
-    Tweak::floatVar("Post", "Adapt Speed (s)", &m_postParams.adaptTau, 0.05f, 5.0f, 0.05f);
-    Tweak::floatVar("Post", "Adapt Key", &m_postParams.adaptKey, 0.02f, 0.5f, 0.005f);
-    Tweak::floatVar("Post", "Adapt Min LogLum", &m_postParams.adaptMinLogLum, -12.0f, 0.0f, 0.1f);
-    Tweak::floatVar("Post", "Adapt Max LogLum", &m_postParams.adaptMaxLogLum, 0.0f, 12.0f, 0.1f);
-    Tweak::floatVar("Post", "Adapt Min EV", &m_postParams.adaptMinEV, -12.0f, 0.0f, 0.1f);
-    Tweak::floatVar("Post", "Adapt Max EV", &m_postParams.adaptMaxEV, 0.0f, 12.0f, 0.1f);
+    m_postParams.registerTweaks([this]() { setHaveToRecordCommandBuffers(); });
 
     glslang::InitializeProcess();
     const bool enableValidationLayers = (validation == EValidation::ENABLED);
@@ -537,10 +466,6 @@ const Frustum& Renderer::beginFrame(const Camera& camera)
     const glm::mat4x4 projection = glm::perspective(glm::radians(camera.fovDeg), (float)viewportSize.x / (float)viewportSize.y, camera.near, camera.far);
     glm::mat4 viewMatrix = camera.viewMatrix;
 
-    // TAA sub-pixel jitter: a Halton(2,3) offset within the pixel, in NDC units (one pixel spans 2/size in
-    // NDC). It is applied in clip space by the rasterization vertex shaders only (see u_taaJitter); the camera
-    // matrices stored below stay unjittered, so TAA/RTAO reconstruction and reprojection do not wobble. The
-    // jittered rasterization is what the TAA resolve accumulates into a higher-resolution result.
     glm::vec2 taaJitterNdc(0.0f);
     if (m_taaEnabled && viewportSize.x > 0 && viewportSize.y > 0)
     {
@@ -1397,15 +1322,7 @@ void Renderer::recordCommandBuffers()
         const Clock::time_point now = Clock::now();
         const float deltaSeconds = std::min(std::chrono::duration<float>(now - lastTime).count(), 0.25f);
         lastTime = now;
-        m_eyeAdaptationPipeline.updateParams(frameIdx, EyeAdaptationPipeline::FrameParams{
-            .deltaSeconds = deltaSeconds,
-            .adaptTau = m_postParams.adaptTau,
-            .keyValue = m_postParams.adaptKey,
-            .minLogLum = m_postParams.adaptMinLogLum,
-            .maxLogLum = m_postParams.adaptMaxLogLum,
-            .minEV = m_postParams.adaptMinEV,
-            .maxEV = m_postParams.adaptMaxEV,
-        });
+        m_eyeAdaptationPipeline.updateParams(frameIdx, m_postParams, deltaSeconds);
     }
 
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
@@ -1555,8 +1472,6 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
 
     assert(m_meshInfoCounter < USHRT_MAX);
 
-    // Keep a CPU copy so the GI BLAS builder can read per-mesh firstIndex/vertexOffset/indexCount
-    // (and so capacity growth can re-upload everything).
     m_meshInfosBuffer.appendToBackingStore<RendererVKLayout::MeshInfo>(meshInfos);
 
     if (m_meshInfoCounter > m_maxUniqueMeshes)

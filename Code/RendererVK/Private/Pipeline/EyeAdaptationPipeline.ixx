@@ -7,6 +7,7 @@ import :CommandBuffer;
 import :ComputePipeline;
 import :DescriptorSet;
 import :Layout;
+import :Settings;
 
 // Automatic exposure ("eye adaptation"). Two compute passes per frame over the TAA-resolved scene colour:
 //   1. histogram : 256-bin log-luminance histogram of the viewport region (eyeadapt_histogram.cs.glsl).
@@ -31,19 +32,9 @@ public:
     };
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, const RecordParams& params);
 
-    // Runtime-tunable values + delta time, written to a mapped buffer each frame so the once-recorded
-    // command buffer always reads the live values (no per-frame re-record).
-    struct FrameParams
-    {
-        float deltaSeconds = 0.0f;  // for frame-rate-independent adaptation
-        float adaptTau = 1.0f;      // adaptation time constant (s)
-        float keyValue = 0.18f;     // target middle-grey luminance
-        float minLogLum = -8.0f;    // log2-luminance histogram range
-        float maxLogLum = 4.0f;
-        float minEV = -8.0f;        // exposure clamp (stops)
-        float maxEV = 8.0f;
-    };
-    void updateParams(uint32 frameIdx, const FrameParams& params);
+    // The runtime-tunable adaptation values (from PostParams) + delta time are written to a mapped buffer
+    // each frame so the once-recorded command buffer always reads the live values (no per-frame re-record).
+    void updateParams(uint32 frameIdx, const PostParams& post, float deltaSeconds);
 
     // Persistent { float avgLuminance; float exposure; } consumed by the composite pass.
     Buffer& getExposureBuffer() { return m_adaptBuffer; }

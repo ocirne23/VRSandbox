@@ -71,18 +71,18 @@ void EyeAdaptationPipeline::reloadShaders()
     { ComputePipelineLayout layout; buildReduceLayout(layout); if (!m_reducePipeline.reloadShaders(layout)) printf("EyeAdaptationPipeline: reduce shader reload failed\n"); }
 }
 
-void EyeAdaptationPipeline::updateParams(uint32 frameIdx, const FrameParams& params)
+void EyeAdaptationPipeline::updateParams(uint32 frameIdx, const PostParams& post, float deltaSeconds)
 {
-    const float logLumRange = std::max(params.maxLogLum - params.minLogLum, 1e-3f);
+    const float logLumRange = std::max(post.adaptMaxLogLum - post.adaptMinLogLum, 1e-3f);
     m_mappedParams[frameIdx][0] = GpuParams{
-        .minLogLum = params.minLogLum,
+        .minLogLum = post.adaptMinLogLum,
         .invLogLumRange = 1.0f / logLumRange,
         .logLumRange = logLumRange,
-        .dt = params.deltaSeconds,
-        .tau = params.adaptTau,
-        .key = params.keyValue,
-        .minExposure = exp2f(params.minEV),
-        .maxExposure = exp2f(params.maxEV),
+        .dt = deltaSeconds,
+        .tau = post.adaptTau,
+        .key = post.adaptKey,
+        .minExposure = exp2f(post.adaptMinEV),
+        .maxExposure = exp2f(post.adaptMaxEV),
     };
 }
 

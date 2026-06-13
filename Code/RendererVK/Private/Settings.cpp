@@ -1,0 +1,93 @@
+module RendererVK:Settings;
+
+import Core;
+import Core.glm;
+import Core.Tweaks;
+
+namespace
+{
+    constexpr std::string_view s_tonemapperNames[] = { "Off", "Reinhard", "ACES", "AgX" };
+}
+
+void SkyParams::registerTweaks()
+{
+    Tweak::float3("Sky", "Sun Direction", &sunDirection, 0.01f, [&]() { sunDirection = glm::normalize(sunDirection); });
+    Tweak::color3("Sky", "Sun Color", &sunColor, &sunIntensity);
+    Tweak::color3("Sky", "Ambient", &ambientColor, &ambientIntensity, 0.0f, 0.2f, 0.001f);
+    Tweak::color3("Sky", "Sky Radiance", &skyRadianceColor, &skyRadianceIntensity, 0.0f, 1.2f, 0.001f);
+    Tweak::color3("Sky", "Ground Albedo", &groundColor, &groundIntensity, 0.0f, 2.0f, 0.01f);
+    Tweak::floatVar("Sky/Sun", "Sun Angle Cos", &sunAngularCos, 0.9995f, 1.0f, 0.000001f);
+    Tweak::floatVar("Sky/Sun", "Sun Glow", &sunGlow, 0.0, 5.0f, 0.01f);
+    Tweak::floatVar("Sky/Sun", "SunCasc D Bias", &shadowDepthBias, 0.0f, 0.005f, 0.0001f);
+    Tweak::floatVar("Sky/Sun", "SunCasc N Bias", &shadowNormalBias, 0.0f, 10.0f);
+    Tweak::floatVar("Sky/Sun", "Highlight Rolloff", &sunRolloff, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Sun", "Rolloff Knee", &sunRolloffKnee, 0.1f, 1.0f, 0.005f);
+    Tweak::floatVar("Sky/Sun", "Rolloff Headroom", &sunRolloffHeadroom, 0.5f, 32.0f, 0.05f);
+
+    Tweak::floatVar("Sky/Atmosphere", "Scatter Boost", &scatterBoost, 0.0f, 32.0f);
+    Tweak::floatVar("Sky/Atmosphere", "Rayleigh", &rayleighScatter, 0.0f, 8.0f, 0.01f);
+    Tweak::floatVar("Sky/Atmosphere", "Mie", &mieScatter, 0.0f, 8.0f, 0.01f);
+    Tweak::floatVar("Sky/Atmosphere", "Mie Anisotropy", &mieG, 0.0f, 0.99f);
+    Tweak::floatVar("Sky/Atmosphere", "Rayleigh Height", &rayleighHeight, 1000.0f, 20000.0f, 10.0f);
+    Tweak::floatVar("Sky/Atmosphere", "Mie Height", &mieHeight, 200.0f, 5000.0f, 5.0f);
+    Tweak::floatVar("Sky/Atmosphere", "Mie Extinction", &mieExtinction, 1.0f, 2.0f, 0.005f);
+    Tweak::floatVar("Sky/Atmosphere", "Ozone", &ozone, 0.0f, 4.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Density", &starDensity, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Stars", "Size", &starSize, 0.2f, 3.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Size Variation", &starSizeVar, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Brightness", &starBrightness, 0.0f, 4.0f, 0.01f);
+    Tweak::floatVar("Sky/Stars", "Color Variation", &starColorVar, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Sky/Nebula", "Intensity", &nebulaIntensity, 0.0f, 2.0f, 0.01f);
+    Tweak::floatVar("Sky/Nebula", "Scale", &nebulaScale, 0.5f, 12.0f, 0.05f);
+    Tweak::floatVar("Sky/Nebula", "Band Width", &nebulaBandWidth, 0.05f, 1.0f, 0.005f);
+    Tweak::floatVar("Sky/Nebula", "Dust Lanes", &nebulaDust, 0.0f, 1.0f, 0.01f);
+    Tweak::float3("Sky/Nebula", "Axis", &nebulaAxis, 0.01f, [&]() { nebulaAxis = glm::normalize(nebulaAxis); });
+    Tweak::float3("Sky/Moon", "Direction", &moonDirection, 0.01f, [&]() { moonDirection = glm::normalize(moonDirection); });
+    Tweak::floatVar("Sky/Moon", "Size", &moonSizeDeg, 0.05f, 10.0f, 0.01f);
+    Tweak::floatVar("Sky/Moon", "Brightness", &moonBrightness, 0.0f, 2.0f);
+    Tweak::floatVar("Sky/Clouds", "Coverage", &cloudCoverage, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Height", &cloudHeight, 0.0f, 8000.0f);
+    Tweak::floatVar("Sky/Clouds", "Thickness", &cloudThickness, 20.0f, 250.0f);
+    Tweak::floatVar("Sky/Clouds", "Scale", &cloudScale, 0.1f, 5.0f);
+    Tweak::floatVar("Sky/Clouds", "Wind Speed", &cloudWindSpeed, 0.0f, 10.0f);
+    Tweak::floatVar("Sky/Clouds", "Wind Angle", &cloudWindAngle, 0.0f, 6.2832f);
+    Tweak::floatVar("Sky/Clouds", "Softness", &cloudSoftness, 0.05f, 2.0f);
+    Tweak::floatVar("Sky/Clouds", "Density", &cloudDensity, 0.2f, 25.0f);
+    Tweak::floatVar("Sky/Clouds", "Sharpness", &cloudSharpness, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Height Variation", &cloudBaseVar, 0.0f, 1.0f);
+    Tweak::floatVar("Sky/Clouds", "Sun Shading", &cloudShading, 0.0f, 6.0f);
+    Tweak::float3("Sky", "Up Axis", &up, 0.01f, [&]() { up = glm::normalize(up); });
+}
+
+void FogParams::registerTweaks()
+{
+    Tweak::boolean("Fog", "Enabled", &enabled);
+    Tweak::floatVar("Fog", "Global Density", &density, 0.0f, 1.0f, 0.001f);
+    Tweak::floatVar("Fog", "Height Base", &heightBase, -200.0f, 500.0f);
+    Tweak::floatVar("Fog", "Height Falloff", &heightFalloff, 0.0f, 1.0f, 0.002f);
+    Tweak::color3("Fog", "Albedo", &albedo, &albedoIntensity);
+    Tweak::floatVar("Fog", "Anisotropy", &anisotropy, -0.9f, 0.95f, 0.01f);
+    Tweak::floatVar("Fog", "Range", &range, 1.0f, 1024.0f);
+    Tweak::floatVar("Fog", "Noise Scale", &noiseScale, 0.005f, 1.0f, 0.005f);
+    Tweak::floatVar("Fog", "Noise Strength", &noiseStrength, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Fog", "Wind Speed", &windSpeed, 0.0f, 20.0f);
+    Tweak::floatVar("Fog", "Temporal Blend", &temporalBlend, 0.0f, 0.97f, 0.01f);
+    Tweak::intVar("Fog/Quality", "Sun Rays", &sunRays, 1, 8);
+    Tweak::floatVar("Fog/Quality", "Sun Softness", &sunSoftness, 0.0f, 0.2f, 0.005f);
+    Tweak::boolean("Fog/Quality", "Spatial Filter", &spatialFilter);
+    Tweak::boolean("Fog/Quality", "GI Ambient", &giAmbient);
+    Tweak::boolean("Fog/Quality", "Light Shadows", &lightShadows);
+}
+
+void PostParams::registerTweaks(const std::function<void()>& onReRecord)
+{
+    Tweak::floatVar("Post", "Exposure (EV)", &exposureEV, -8.0f, 8.0f, 0.05f, onReRecord);
+    Tweak::enumVar("Post", "Tonemapper", &tonemapper, s_tonemapperNames, onReRecord);
+    Tweak::boolean("Post", "Auto Exposure", &autoExposure, onReRecord);
+    Tweak::floatVar("Post", "Adapt Speed (s)", &adaptTau, 0.05f, 5.0f, 0.05f);
+    Tweak::floatVar("Post", "Adapt Key", &adaptKey, 0.02f, 0.5f, 0.005f);
+    Tweak::floatVar("Post", "Adapt Min LogLum", &adaptMinLogLum, -12.0f, 0.0f, 0.1f);
+    Tweak::floatVar("Post", "Adapt Max LogLum", &adaptMaxLogLum, 0.0f, 12.0f, 0.1f);
+    Tweak::floatVar("Post", "Adapt Min EV", &adaptMinEV, -12.0f, 0.0f, 0.1f);
+    Tweak::floatVar("Post", "Adapt Max EV", &adaptMaxEV, 0.0f, 12.0f, 0.1f);
+}
