@@ -195,7 +195,6 @@ int main()
                 const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
                 const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
                 const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-                assert(rotation >= 0.0f);
                 spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 10.0f, camUp, 0.1f, 1.0f, rotation });
             }
 

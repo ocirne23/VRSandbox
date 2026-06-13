@@ -3,6 +3,7 @@ export module RendererVK:CompositePipeline;
 import Core;
 
 import :VK;
+import :Buffer;
 import :CommandBuffer;
 import :GraphicsPipeline;
 import :DescriptorSet;
@@ -23,8 +24,10 @@ public:
         DescriptorSet& descriptorSet;
         vk::ImageView resolvedView; // TAA-resolved scene colour for this frame (GENERAL layout)
         vk::Sampler   sampler;
+        vk::Buffer    exposureBuffer; // eye-adaptation { avgLum, exposure } (storage)
         float exposureEV = 0.0f;    // exposure in stops; the shader gets exp2(exposureEV)
         int32 tonemapper = 0;       // 0 = off (raw clip), 1 = Reinhard, 2 = ACES, 3 = AgX
+        int32 autoExposure = 0;     // 1 = multiply by the eye-adaptation exposure
     };
     void record(CommandBuffer& commandBuffer, const RecordParams& params);
 
@@ -38,6 +41,7 @@ private:
     {
         float exposure;   // linear scale, exp2 of the EV tweak
         int32 tonemapper;
+        int32 autoExposure;
     };
 
     GraphicsPipeline m_graphicsPipeline;

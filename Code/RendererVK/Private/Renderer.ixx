@@ -32,6 +32,7 @@ import :VolumetricFogPipeline;
 import :SceneColor;
 import :TaaPipeline;
 import :CompositePipeline;
+import :EyeAdaptationPipeline;
 import :GraphicsPipeline;
 import :Light;
 import :GpuCrashTracker;
@@ -177,8 +178,15 @@ public:
     // TweakPanel's "Post" category. Baked into the composite push constants, so changes re-record.
     struct PostParams
     {
-        float exposureEV = 0.0f; // exposure in stops; the shader gets exp2(exposureEV)
-        int   tonemapper = 3;    // 0 = off (legacy raw clip), 1 = Reinhard, 2 = ACES, 3 = AgX
+        float exposureEV = 0.0f; // exposure in stops; manual exposure, or exposure compensation in auto mode
+        int   tonemapper = 2;    // 0 = off (legacy raw clip), 1 = Reinhard, 2 = ACES, 3 = AgX
+        bool  autoExposure = true; // eye adaptation: drive exposure from scene luminance
+        float adaptTau = 3.0f;   // adaptation time constant (s); larger = slower eye
+        float adaptKey = 0.18f;  // target middle-grey luminance
+        float adaptMinLogLum = 3.14f; // histogram log2-luminance range
+        float adaptMaxLogLum = 4.0f;
+        float adaptMinEV = -6.0f; // auto-exposure clamp (stops)
+        float adaptMaxEV = 6.0f;
     };
     void setPostParams(const PostParams& post) { m_postParams = post; setHaveToRecordCommandBuffers(); }
     void present();
@@ -259,6 +267,7 @@ private:
     void recordVolumetricFog(uint32 frameIdx);
     void recordFogApply(uint32 frameIdx);
     void recordTaa(uint32 frameIdx);
+    void recordEyeAdaptation(uint32 frameIdx);
     void recordComposite(uint32 frameIdx);
     bool recordGlobalIllum(uint32 frameIdx); // returns true if the ray-tracing TLAS handle changed this frame
     void setHaveToRecordCommandBuffers();
@@ -310,6 +319,7 @@ private:
     ShadowCullComputePipeline m_shadowCullComputePipeline;
     ShadowMapGraphicsPipeline m_shadowMapGraphicsPipeline;
     CompositePipeline m_compositePipeline;
+    EyeAdaptationPipeline m_eyeAdaptationPipeline;
     AccelerationStructure m_accelStructure;
     GIProbePipeline m_giProbePipeline;
 
@@ -408,6 +418,7 @@ private:
         CommandBuffer fogApplyCommandBuffer;
         CommandBuffer giProbeDebugCommandBuffer;
         CommandBuffer taaCommandBuffer;
+        CommandBuffer eyeAdaptCommandBuffer;
         CommandBuffer compositeCommandBuffer;
 
         bool updated = false;

@@ -242,6 +242,13 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     Tweak::floatVar("Post", "Exposure (EV)", &m_postParams.exposureEV, -8.0f, 8.0f, 0.05f, [this]() { setHaveToRecordCommandBuffers(); });
     Tweak::enumVar("Post", "Tonemapper", &m_postParams.tonemapper, s_tonemapperNames, [this]() { setHaveToRecordCommandBuffers(); });
+    Tweak::boolean("Post", "Auto Exposure", &m_postParams.autoExposure, [this]() { setHaveToRecordCommandBuffers(); });
+    Tweak::floatVar("Post", "Adapt Speed (s)", &m_postParams.adaptTau, 0.05f, 5.0f, 0.05f);
+    Tweak::floatVar("Post", "Adapt Key", &m_postParams.adaptKey, 0.02f, 0.5f, 0.005f);
+    Tweak::floatVar("Post", "Adapt Min LogLum", &m_postParams.adaptMinLogLum, -12.0f, 0.0f, 0.1f);
+    Tweak::floatVar("Post", "Adapt Max LogLum", &m_postParams.adaptMaxLogLum, 0.0f, 12.0f, 0.1f);
+    Tweak::floatVar("Post", "Adapt Min EV", &m_postParams.adaptMinEV, -12.0f, 0.0f, 0.1f);
+    Tweak::floatVar("Post", "Adapt Max EV", &m_postParams.adaptMaxEV, 0.0f, 12.0f, 0.1f);
 
     glslang::InitializeProcess();
     const bool enableValidationLayers = (validation == EValidation::ENABLED);
@@ -287,6 +294,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
     m_volumetricFogPipeline.initialize();
     m_volumetricFogPipeline.initializeApply(sceneRenderPass);
     m_taaPipeline.initialize(ext.width, ext.height);
+    m_eyeAdaptationPipeline.initialize();
     m_compositePipeline.initialize(m_renderPass);
     m_indirectCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
     m_lightGridComputePipeline.initialize();
@@ -331,6 +339,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         perFrame.fogApplyCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.giProbeDebugCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.taaCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.eyeAdaptCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.compositeCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
 
         perFrame.ubo.initialize(sizeof(RendererVKLayout::Ubo),
@@ -465,6 +474,7 @@ void Renderer::reloadShaders()
     m_giProbePipeline.reloadShaders(m_maxTextures);
     m_giProbePipeline.reloadDebugShaders();
     m_taaPipeline.reloadShaders();
+    m_eyeAdaptationPipeline.reloadShaders();
     m_compositePipeline.reloadShaders(m_renderPass);
 
     setHaveToRecordCommandBuffers();
@@ -1212,6 +1222,27 @@ void Renderer::recordTaa(uint32 frameIdx)
     cb.end();
 }
 
+// Eye adaptation (auto-exposure). Recorded once (re-recorded only on viewport/shader change like the other
+// passes); the runtime tunables + delta time are written to a mapped buffer each frame via updateParams, so
+// the recorded buffer always reads live values. Samples this frame's TAA-resolved colour (covered by the TAA
+// resolved->sampled barrier) and writes the persistent exposure buffer the composite reads. Compute, executed
+// outside any render pass.
+void Renderer::recordEyeAdaptation(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& cb = frameData.eyeAdaptCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    EyeAdaptationPipeline::RecordParams params{
+        .resolvedView = m_taaPipeline.getResolvedView(frameIdx),
+        .sampler = m_taaPipeline.getSampler(),
+        .viewportMin = m_viewportRect.min,
+        .viewportSize = m_viewportRect.getSize(),
+    };
+    m_eyeAdaptationPipeline.record(cb, frameIdx, params);
+    cb.end();
+}
+
 void Renderer::recordComposite(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -1229,8 +1260,10 @@ void Renderer::recordComposite(uint32 frameIdx)
         .descriptorSet = frameData.compositeDescriptorSet,
         .resolvedView = m_taaPipeline.getResolvedView(frameIdx),
         .sampler = m_taaPipeline.getSampler(),
+        .exposureBuffer = m_eyeAdaptationPipeline.getExposureBuffer().getBuffer(),
         .exposureEV = m_postParams.exposureEV,
         .tonemapper = m_postParams.tonemapper,
+        .autoExposure = m_postParams.autoExposure ? 1 : 0,
     };
     m_compositePipeline.record(cb, params);
     cb.end();
@@ -1358,6 +1391,7 @@ void Renderer::recordCommandBuffers()
         recordVolumetricFog(frameIdx);
         recordFogApply(frameIdx);
         recordTaa(frameIdx);
+        recordEyeAdaptation(frameIdx);
         recordComposite(frameIdx);
         frameData.updated = true;
     }
@@ -1366,6 +1400,24 @@ void Renderer::recordCommandBuffers()
     {
         recordAO(frameIdx);
         recordVolumetricFog(frameIdx);
+    }
+
+    // Live tunables + delta time into the mapped params buffer (no command-buffer re-record needed).
+    if (m_meshInstanceCounter > 0)
+    {
+        static Clock::time_point lastTime = Clock::now();
+        const Clock::time_point now = Clock::now();
+        const float deltaSeconds = std::min(std::chrono::duration<float>(now - lastTime).count(), 0.25f);
+        lastTime = now;
+        m_eyeAdaptationPipeline.updateParams(frameIdx, EyeAdaptationPipeline::FrameParams{
+            .deltaSeconds = deltaSeconds,
+            .adaptTau = m_postParams.adaptTau,
+            .keyValue = m_postParams.adaptKey,
+            .minLogLum = m_postParams.adaptMinLogLum,
+            .maxLogLum = m_postParams.adaptMaxLogLum,
+            .minEV = m_postParams.adaptMinEV,
+            .maxEV = m_postParams.adaptMaxEV,
+        });
     }
 
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
@@ -1380,6 +1432,7 @@ void Renderer::recordCommandBuffers()
     vk::CommandBuffer vkFogApplyCommandBuffer = frameData.fogApplyCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkGiProbeDebugCommandBuffer = frameData.giProbeDebugCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkTaaCommandBuffer = frameData.taaCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkEyeAdaptCommandBuffer = frameData.eyeAdaptCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkCompositeCommandBuffer = frameData.compositeCommandBuffer.getCommandBuffer();
 
     vk::CommandBufferInheritanceInfo inheritance{ .renderPass = m_renderPass.getRenderPass() };
@@ -1474,6 +1527,8 @@ void Renderer::recordCommandBuffers()
         };
         vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
         vkCommandBuffer.executeCommands(1, &vkTaaCommandBuffer);
+        // Eye adaptation: reads the resolved colour (TAA barrier above), writes the exposure the composite reads.
+        vkCommandBuffer.executeCommands(1, &vkEyeAdaptCommandBuffer);
     }
 
     // Swapchain render pass: composite the resolved scene into the swapchain, then ImGui on top.
