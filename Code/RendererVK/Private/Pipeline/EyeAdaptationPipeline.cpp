@@ -3,6 +3,7 @@ module RendererVK:EyeAdaptationPipeline;
 import Core;
 import File.FileSystem;
 import :Device;
+import :Allocator;
 import :CommandBuffer;
 
 namespace
@@ -51,7 +52,7 @@ void EyeAdaptationPipeline::initialize()
     for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
     {
         m_paramsBuffer[i].initialize(sizeof(GpuParams), vk::BufferUsageFlagBits2::eUniformBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, false, "EyeAdaptParams", BufferHostAccess::eSequentialWrite);
         m_mappedParams[i] = m_paramsBuffer[i].mapMemory<GpuParams>();
     }
 

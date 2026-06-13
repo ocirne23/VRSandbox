@@ -18,6 +18,7 @@ public:
         m_usage = move.m_usage;
         m_properties = move.m_properties;
         m_debugName = move.m_debugName;
+        m_hostAccess = move.m_hostAccess;
         m_backingStore = std::move(move.m_backingStore);
         m_uploadOffset = move.m_uploadOffset;
         m_hasBackingStore = move.m_hasBackingStore;
@@ -32,7 +33,9 @@ public:
     // Requesting a shader-device-address usage allocates the memory with the device-address flag so
     // getDeviceAddress works.
     // debugName (optional) is attached to the underlying VMA allocation to identify it in leak reports.
-    bool initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore = false, const char* debugName = nullptr);
+    // hostAccess selects the memory type for host-visible buffers (see BufferHostAccess); pass
+    // eSequentialWrite for buffers the CPU only writes (never reads) to allow faster write-combined memory.
+    bool initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore = false, const char* debugName = nullptr, BufferHostAccess hostAccess = BufferHostAccess::eRandom);
     void destroy();
 
     bool resize(vk::DeviceSize newSize);
@@ -87,6 +90,7 @@ private:
     vk::BufferUsageFlags2 m_usage;
     vk::MemoryPropertyFlags m_properties;
     const char* m_debugName = nullptr;
+    BufferHostAccess m_hostAccess = BufferHostAccess::eRandom;
     std::vector<uint8> m_backingStore;
     vk::DeviceSize m_uploadOffset = 0;
     bool m_hasBackingStore = false;

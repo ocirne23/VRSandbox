@@ -3,6 +3,7 @@ module RendererVK:IndirectCullComputePipeline;
 import Core;
 import File.FileSystem;
 import :Device;
+import :Allocator;
 import :Layout;
 import :ObjectContainer;
 import :StagingManager;
@@ -16,7 +17,7 @@ void IndirectCullComputePipeline::initialize(uint32 maxMeshInstances, uint32 max
     {
         perFrame.inIndirectCommandBuffer.initialize(sizeof(vk::DispatchIndirectCommand), // x
             vk::BufferUsageFlagBits2::eIndirectBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "IndirectCullCmd", BufferHostAccess::eSequentialWrite);
         perFrame.mappedIndirectCommands = perFrame.inIndirectCommandBuffer.mapMemory<vk::DispatchIndirectCommand>();
     }
     resizeInstanceBuffers(maxMeshInstances);

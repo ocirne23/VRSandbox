@@ -3,6 +3,7 @@ module RendererVK:LightGridComputePipeline;
 import Core;
 import Core.glm;
 import File.FileSystem;
+import :Allocator;
 import :Layout;
 
 void LightGridComputePipeline::initialize()
@@ -11,7 +12,7 @@ void LightGridComputePipeline::initialize()
     {
         perFrame.inIndirectCommandBuffer.initialize(sizeof(vk::DispatchIndirectCommand),
             vk::BufferUsageFlagBits2::eIndirectBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "LightGridCmd", BufferHostAccess::eSequentialWrite);
         perFrame.mappedIndirectCommands = perFrame.inIndirectCommandBuffer.mapMemory<vk::DispatchIndirectCommand>();
     }
 

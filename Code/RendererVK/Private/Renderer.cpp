@@ -278,27 +278,29 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
         perFrame.inRenderNodeTransformsBuffer.initialize(m_maxRenderNodes * sizeof(RendererVKLayout::RenderNodeTransform),
             vk::BufferUsageFlagBits2::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "RenderNodeTransforms", BufferHostAccess::eSequentialWrite);
         perFrame.mappedRenderNodeTransforms = perFrame.inRenderNodeTransformsBuffer.mapMemory<RendererVKLayout::RenderNodeTransform>();
 
+        // Kept cached/random: growMeshInstanceCapacity reads the existing mapping to preserve in-flight
+        // instances across a resize, so this buffer must stay CPU-readable.
         perFrame.inMeshInstancesBuffer.initialize(m_maxInstanceData * sizeof(RendererVKLayout::InMeshInstance),
             vk::BufferUsageFlagBits2::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "MeshInstances");
         perFrame.mappedMeshInstances = perFrame.inMeshInstancesBuffer.mapMemory<RendererVKLayout::InMeshInstance>();
 
         perFrame.inFirstInstancesBuffer.initialize(m_maxUniqueMeshes * sizeof(uint32),
             vk::BufferUsageFlagBits2::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "FirstInstances", BufferHostAccess::eSequentialWrite);
         perFrame.mappedFirstInstances = perFrame.inFirstInstancesBuffer.mapMemory<uint32>();
 
         perFrame.lightInfosBuffer.initialize(sizeof(RendererVKLayout::LightInfo) * RendererVKLayout::MAX_LIGHTS,
             vk::BufferUsageFlagBits2::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "LightInfos", BufferHostAccess::eSequentialWrite);
         perFrame.mappedLightInfos = perFrame.lightInfosBuffer.mapMemory<RendererVKLayout::LightInfo>();
 
         perFrame.fogVolumesBuffer.initialize(sizeof(RendererVKLayout::FogVolumes),
             vk::BufferUsageFlagBits2::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "FogVolumes", BufferHostAccess::eSequentialWrite);
         perFrame.mappedFogVolumes = perFrame.fogVolumesBuffer.mapMemory<RendererVKLayout::FogVolumes>();
         perFrame.mappedFogVolumes.data()->count = 0;
 
@@ -726,7 +728,7 @@ void Renderer::growRenderNodeCapacity(uint32 needed)
         // No contents to preserve: present() re-copies the full CPU transform list every frame.
         perFrame.inRenderNodeTransformsBuffer.initialize(m_maxRenderNodes * sizeof(RendererVKLayout::RenderNodeTransform),
             vk::BufferUsageFlagBits2::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "RenderNodeTransforms", BufferHostAccess::eSequentialWrite);
         perFrame.mappedRenderNodeTransforms = perFrame.inRenderNodeTransformsBuffer.mapMemory<RendererVKLayout::RenderNodeTransform>();
     }
     setHaveToRecordCommandBuffers();
@@ -747,9 +749,11 @@ void Renderer::growMeshInstanceCapacity(uint32 needed)
 
     for (PerFrameData& perFrame : m_perFrameData)
     {
+        // Kept cached/random: growMeshInstanceCapacity reads the existing mapping to preserve in-flight
+        // instances across a resize, so this buffer must stay CPU-readable.
         perFrame.inMeshInstancesBuffer.initialize(m_maxInstanceData * sizeof(RendererVKLayout::InMeshInstance),
             vk::BufferUsageFlagBits2::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "MeshInstances");
         perFrame.mappedMeshInstances = perFrame.inMeshInstancesBuffer.mapMemory<RendererVKLayout::InMeshInstance>();
     }
     memcpy(currentFrameData.mappedMeshInstances.data(), writtenInstances.data(), writtenInstances.size() * sizeof(RendererVKLayout::InMeshInstance));
@@ -769,7 +773,7 @@ void Renderer::growUniqueMeshCapacity(uint32 needed)
         // No contents to preserve: first-instance offsets are rewritten every present().
         perFrame.inFirstInstancesBuffer.initialize(m_maxUniqueMeshes * sizeof(uint32),
             vk::BufferUsageFlagBits2::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "FirstInstances", BufferHostAccess::eSequentialWrite);
         perFrame.mappedFirstInstances = perFrame.inFirstInstancesBuffer.mapMemory<uint32>();
     }
     m_meshInfosBuffer.resize(m_maxUniqueMeshes * sizeof(RendererVKLayout::MeshInfo));
@@ -799,9 +803,11 @@ void Renderer::createLightGridBuffers()
             vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
+        // Device-local + host-visible (ReBAR) so GPU writes are fast; the CPU reads the header in getStats,
+        // hence the default random (cached-where-possible) access.
         perFrame.lightTableBuffer.initialize(3 * sizeof(uint32) + sizeof(uint32) * m_lightTableEntries,
             vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostVisible);
+            vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostVisible, false, "LightTable");
 
         // Zero the readback header so the capacity check / stats never see uninitialized counters
         // before the first recorded frame fills them in.

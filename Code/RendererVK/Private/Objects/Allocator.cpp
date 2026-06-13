@@ -1,5 +1,7 @@
 module;
 
+#include <cstdio>
+
 // The C VMA header lives in the global module fragment (no VMA_IMPLEMENTATION — that is compiled once in
 // Vma.cpp). Its declarations attach to the global module so they link against that implementation.
 #pragma warning(push, 0)
@@ -44,6 +46,22 @@ void Allocator::destroy()
 {
     if (m_allocator)
     {
+#ifndef NDEBUG
+        // Before tearing down, list anything still allocated. vmaBuildStatsString includes each
+        // allocation's debug name, so this names leaks regardless of whether they are block or dedicated
+        // allocations (VMA's own per-block leak log only covers the former).
+        VmaTotalStatistics totalStats{};
+        vmaCalculateStatistics(m_allocator, &totalStats);
+        if (totalStats.total.statistics.allocationCount > 0)
+        {
+            char* statsString = nullptr;
+            vmaBuildStatsString(m_allocator, &statsString, VK_TRUE);
+            fprintf(stderr, "VMA: %u allocation(s) still alive at allocator destruction:\n%s\n",
+                totalStats.total.statistics.allocationCount, statsString ? statsString : "(no stats)");
+            fflush(stderr);
+            vmaFreeStatsString(m_allocator, statsString);
+        }
+#endif
         vmaDestroyAllocator(m_allocator);
         m_allocator = nullptr;
     }
@@ -74,15 +92,23 @@ void Allocator::destroyImage(vk::Image image, VmaAllocation allocation)
 }
 
 bool Allocator::createBuffer(const vk::BufferCreateInfo& info, vk::MemoryPropertyFlags properties,
-    vk::Buffer& outBuffer, VmaAllocation& outAllocation, void*& outMappedData, const char* debugName)
+    vk::Buffer& outBuffer, VmaAllocation& outAllocation, void*& outMappedData, BufferHostAccess hostAccess,
+    const char* debugName)
 {
     const VkBufferCreateInfo ci = info;
     VmaAllocationCreateInfo aci{};
     aci.usage = VMA_MEMORY_USAGE_AUTO;
     aci.requiredFlags = (VkMemoryPropertyFlags)(VkFlags)properties;
     // Host-visible buffers are kept persistently mapped so uploads/readbacks can hit the pointer directly.
+    // The access pattern picks the memory type: SEQUENTIAL_WRITE allows fast write-combined placement,
+    // RANDOM keeps it cached for CPU reads.
     if (properties & vk::MemoryPropertyFlagBits::eHostVisible)
-        aci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    {
+        aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        aci.flags |= (hostAccess == BufferHostAccess::eSequentialWrite)
+            ? VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+            : VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+    }
 
     VkBuffer buffer = VK_NULL_HANDLE;
     VmaAllocationInfo allocInfo{};

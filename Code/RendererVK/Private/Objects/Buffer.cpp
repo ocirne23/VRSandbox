@@ -22,7 +22,7 @@ void Buffer::destroy()
     }
 }
 
-bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore, const char* debugName)
+bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore, const char* debugName, BufferHostAccess hostAccess)
 {
     if (m_buffer)
         destroy();
@@ -31,6 +31,7 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::Me
     m_usage = usage;
     m_properties = properties;
     m_debugName = debugName;
+    m_hostAccess = hostAccess;
     m_hasBackingStore = useBackingStore;
     m_uploadOffset = 0;
     // BufferUsageFlags2 is carried in the pNext chain (maintenance5). The device-address allocation flag
@@ -40,7 +41,7 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::Me
     bufferInfo.pNext = &usageInfo;
     bufferInfo.size = size;
     bufferInfo.sharingMode = vk::SharingMode::eExclusive;
-    if (!Globals::gpuAllocator.createBuffer(bufferInfo, properties, m_buffer, m_allocation, m_mappedData, m_debugName))
+    if (!Globals::gpuAllocator.createBuffer(bufferInfo, properties, m_buffer, m_allocation, m_mappedData, m_hostAccess, m_debugName))
         return false;
 
     if (m_hasBackingStore)
@@ -54,7 +55,7 @@ bool Buffer::resize(vk::DeviceSize newSize)
     if (!m_hasBackingStore)
         return false;
     const vk::DeviceSize uploadOffset = m_uploadOffset;
-    const bool result = initialize(newSize, m_usage, m_properties, true, m_debugName);
+    const bool result = initialize(newSize, m_usage, m_properties, true, m_debugName, m_hostAccess);
     m_uploadOffset = uploadOffset;
     return result;
 }

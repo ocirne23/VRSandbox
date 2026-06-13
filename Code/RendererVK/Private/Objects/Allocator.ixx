@@ -16,6 +16,18 @@ import :VK;
 export using VmaAllocator = VmaAllocator_T*;
 export using VmaAllocation = VmaAllocation_T*;
 
+// How the CPU touches a host-visible buffer's mapping. Device-local buffers ignore this.
+export enum class BufferHostAccess
+{
+    // CPU reads the mapping (e.g. readback / resize copy). VMA keeps it in cached host memory so reads
+    // are fast. This is the safe default.
+    eRandom,
+    // CPU only ever writes the mapping (uploads, per-frame UBO/SSBO fills). Lets VMA place it in
+    // write-combined (uncached) — or ReBAR device-local-host-visible — memory, which is faster for the
+    // GPU to read and for sequential CPU writes. Never read such a mapping on the CPU: WC reads are slow.
+    eSequentialWrite,
+};
+
 // Thin wrapper around the VulkanMemoryAllocator. Owns a single VmaAllocator for the whole renderer and
 // is the one place GPU buffer/image memory is allocated; everything else goes through Buffer / the image
 // helpers which call into here.
@@ -40,7 +52,7 @@ public:
     // is attached to the allocation for leak reporting. Returns false on failure.
     bool createBuffer(const vk::BufferCreateInfo& info, vk::MemoryPropertyFlags properties,
         vk::Buffer& outBuffer, VmaAllocation& outAllocation, void*& outMappedData,
-        const char* debugName = nullptr);
+        BufferHostAccess hostAccess = BufferHostAccess::eRandom, const char* debugName = nullptr);
     void destroyBuffer(vk::Buffer buffer, VmaAllocation allocation);
 
     // Flush a host-visible (possibly non-coherent) allocation. Atom-size alignment is handled internally;

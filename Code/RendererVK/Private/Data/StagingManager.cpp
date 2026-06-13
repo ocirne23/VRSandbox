@@ -3,6 +3,7 @@ module RendererVK:StagingManager;
 import Core;
 import :VK;
 import :Device;
+import :Allocator;
 import :Buffer;
 import :CommandBuffer;
 import :SwapChain;
@@ -29,7 +30,7 @@ bool StagingManager::initialize()
     vk::Device vkDevice = Globals::device.getDevice();
     for (int i = 0; i < NUM_STAGING_BUFFERS; i++)
     {
-        if (!m_stagingBuffers[i].initialize(STAGING_BUFFER_SIZE, vk::BufferUsageFlagBits2::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "Staging"))
+        if (!m_stagingBuffers[i].initialize(STAGING_BUFFER_SIZE, vk::BufferUsageFlagBits2::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible, false, "Staging", BufferHostAccess::eSequentialWrite))
             return false;
 
         m_commandBuffers[i].initialize(vk::CommandBufferLevel::ePrimary);
