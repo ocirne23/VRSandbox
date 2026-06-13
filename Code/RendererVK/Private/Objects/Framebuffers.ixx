@@ -2,6 +2,7 @@ export module RendererVK:Framebuffers;
 
 import Core;
 import :VK;
+import :Allocator;
 
 export class RenderPass;
 export class SwapChain;
@@ -23,7 +24,7 @@ private:
 
     std::vector<vk::Framebuffer> m_framebuffers;
     std::vector<vk::ImageView> m_imageViews;
-    vk::DeviceMemory m_depthImageMemory;
+    VmaAllocation m_depthImageMemory = nullptr;
     vk::Image m_depthImage;
     vk::ImageView m_depthImageView;
 };

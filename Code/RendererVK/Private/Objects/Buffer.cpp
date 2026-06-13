@@ -2,6 +2,7 @@ module RendererVK:Buffer;
 
 import :VK;
 import :Device;
+import :Allocator;
 import :StagingManager;
 
 Buffer::Buffer() {}
@@ -14,17 +15,14 @@ void Buffer::destroy()
 {
     if (m_buffer)
     {
-        Globals::device.getDevice().destroyBuffer(m_buffer);
+        Globals::gpuAllocator.destroyBuffer(m_buffer, m_allocation);
         m_buffer = VK_NULL_HANDLE;
-    }
-    if (m_memory)
-    {
-        Globals::device.getDevice().freeMemory(m_memory);
-        m_memory = VK_NULL_HANDLE;
+        m_allocation = nullptr;
+        m_mappedData = nullptr;
     }
 }
 
-bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore)
+bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore, const char* debugName)
 {
     if (m_buffer)
         destroy();
@@ -32,44 +30,18 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::Me
     m_size = size;
     m_usage = usage;
     m_properties = properties;
+    m_debugName = debugName;
     m_hasBackingStore = useBackingStore;
     m_uploadOffset = 0;
-    vk::Device vkDevice = Globals::device.getDevice();
+    // BufferUsageFlags2 is carried in the pNext chain (maintenance5). The device-address allocation flag
+    // is added automatically by VMA for buffers that request shaderDeviceAddress usage.
     vk::BufferUsageFlags2CreateInfo usageInfo{ .usage = usage };
     vk::BufferCreateInfo bufferInfo = {};
     bufferInfo.pNext = &usageInfo;
     bufferInfo.size = size;
     bufferInfo.sharingMode = vk::SharingMode::eExclusive;
-    vk::ResultValue<vk::Buffer> bufResult = vkDevice.createBuffer(bufferInfo);
-    if (bufResult.result != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to create buffer");
+    if (!Globals::gpuAllocator.createBuffer(bufferInfo, properties, m_buffer, m_allocation, m_mappedData, m_debugName))
         return false;
-    }
-    m_buffer = bufResult.value;
-
-    const bool needsDeviceAddress = (bool)(usage & vk::BufferUsageFlagBits2::eShaderDeviceAddress);
-
-    vk::MemoryRequirements memRequirements = vkDevice.getBufferMemoryRequirements(m_buffer);
-    vk::MemoryAllocateFlagsInfo allocFlagsInfo{ .flags = vk::MemoryAllocateFlagBits::eDeviceAddress };
-    vk::MemoryAllocateInfo allocInfo = {};
-    if (needsDeviceAddress)
-        allocInfo.pNext = &allocFlagsInfo;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = Globals::device.findMemoryType(memRequirements.memoryTypeBits, properties);
-    vk::ResultValue<vk::DeviceMemory> memResult = vkDevice.allocateMemory(allocInfo);
-    if (memResult.result != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to allocate buffer memory");
-        return false;
-    }
-    m_memory = memResult.value;
-    auto bindResult = vkDevice.bindBufferMemory(m_buffer, m_memory, 0);
-    if (bindResult != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to bind buffer memory");
-        return false;
-    }
 
     if (m_hasBackingStore)
         return uploadBackingStore();
@@ -82,7 +54,7 @@ bool Buffer::resize(vk::DeviceSize newSize)
     if (!m_hasBackingStore)
         return false;
     const vk::DeviceSize uploadOffset = m_uploadOffset;
-    const bool result = initialize(newSize, m_usage, m_properties, true);
+    const bool result = initialize(newSize, m_usage, m_properties, true, m_debugName);
     m_uploadOffset = uploadOffset;
     return result;
 }
@@ -136,41 +108,24 @@ vk::DeviceAddress Buffer::getDeviceAddress() const
 
 std::span<uint8> Buffer::mapMemory(uint64 offset, uint64 size)
 {
-    const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
-    vk::DeviceSize mapSize = (size == (size_t)vk::WholeSize) ? vk::WholeSize : ((size + atomSize - 1) & ~(atomSize - 1));
-    if (mapSize != vk::WholeSize && mapSize > m_size - offset)
+    // Host-visible allocations are persistently mapped by VMA, so this just hands back a view into the
+    // existing mapping. Device-local buffers have no mapped pointer.
+    if (!m_mappedData)
     {
-        mapSize = vk::WholeSize;
-    }
-    vk::ResultValue<void*> result = Globals::device.getDevice().mapMemory(m_memory, offset, mapSize);
-    if (result.result != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to map buffer memory");
+        assert(false && "Buffer is not host-visible / not mapped");
         return {};
     }
-    return std::span<uint8>((uint8*)result.value, (size_t)std::min(size, m_size - offset));
+    return std::span<uint8>((uint8*)m_mappedData + offset, (size_t)std::min(size, m_size - offset));
 }
 
 void Buffer::unmapMemory()
 {
-    Globals::device.getDevice().unmapMemory(m_memory);
+    // No-op: the allocation stays persistently mapped for the buffer's lifetime.
 }
 
 void Buffer::flushMappedMemory(size_t size, size_t offset)
 {
-    const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
-    // vk::WholeSize must be passed through untouched: rounding it up to atomSize overflows to 0 and would
-    // flush nothing. Vulkan handles WholeSize natively (flush to the end of the allocation).
-    vk::DeviceSize flushSize = (size == (size_t)vk::WholeSize) ? vk::WholeSize : ((size + atomSize - 1) & ~(atomSize - 1));
-	if (flushSize != vk::WholeSize && flushSize > m_size - offset)
-	{
-		flushSize = vk::WholeSize;
-	}
-    [[maybe_unused]] auto flushResult = Globals::device.getDevice().flushMappedMemoryRanges({
-        vk::MappedMemoryRange{
-            .memory = m_memory,
-            .offset = offset,
-            .size = flushSize
-        }});
-    assert(flushResult == vk::Result::eSuccess);
+    // VMA handles non-coherent atom alignment internally and treats vk::WholeSize natively; it is a no-op
+    // when the underlying memory is host-coherent.
+    Globals::gpuAllocator.flushAllocation(m_allocation, offset, (size == (size_t)vk::WholeSize) ? vk::WholeSize : size);
 }

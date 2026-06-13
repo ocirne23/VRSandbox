@@ -2,6 +2,7 @@ module RendererVK:Framebuffers;
 
 import :VK;
 import :Device;
+import :Allocator;
 import :RenderPass;
 import :SwapChain;
 
@@ -12,10 +13,7 @@ Framebuffers::~Framebuffers()
 
     if (m_depthImageView)
         vkDevice.destroyImageView(m_depthImageView);
-    if (m_depthImage)
-        vkDevice.destroyImage(m_depthImage);
-    if (m_depthImageMemory)
-        vkDevice.freeMemory(m_depthImageMemory);
+    Globals::gpuAllocator.destroyImage(m_depthImage, m_depthImageMemory);
     for (vk::ImageView imageView : m_imageViews)
         vkDevice.destroyImageView(imageView);
     for (vk::Framebuffer framebuffer : m_framebuffers)
@@ -30,10 +28,8 @@ bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swa
     {
         if (m_depthImageView)
             vkDevice.destroyImageView(m_depthImageView);
-        if (m_depthImage)
-            vkDevice.destroyImage(m_depthImage);
-        if (m_depthImageMemory)
-            vkDevice.freeMemory(m_depthImageMemory);
+        Globals::gpuAllocator.destroyImage(m_depthImage, m_depthImageMemory);
+        m_depthImage = nullptr; m_depthImageMemory = nullptr;
         for (vk::ImageView imageView : m_imageViews)
             vkDevice.destroyImageView(imageView);
         m_imageViews.clear();
@@ -91,34 +87,9 @@ bool Framebuffers::initialize(const RenderPass& renderPass, const SwapChain& swa
         .sharingMode = vk::SharingMode::eExclusive,
         .initialLayout = vk::ImageLayout::eUndefined,
     };
-    auto createImageResult = vkDevice.createImage(depthImageInfo);
-    if (createImageResult.result != vk::Result::eSuccess)
+    if (!Globals::gpuAllocator.createImage(depthImageInfo, m_depthImage, m_depthImageMemory, "Framebuffers.depth"))
     {
         assert(false && "Could not create a depth image\n");
-        return false;
-    }
-    m_depthImage = createImageResult.value;
-
-    vk::PhysicalDeviceMemoryProperties memoryProperties = Globals::device.getPhysicalDevice().getMemoryProperties();
-    vk::MemoryRequirements memoryRequirements = vkDevice.getImageMemoryRequirements(m_depthImage);
-    const uint32 typeIndex = Globals::device.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
-    vk::MemoryAllocateInfo depthImageAllocInfo{
-        .allocationSize = memoryRequirements.size,
-        .memoryTypeIndex = typeIndex
-    };
-
-    auto allocateMemoryResult = vkDevice.allocateMemory(depthImageAllocInfo);
-    if (allocateMemoryResult.result != vk::Result::eSuccess)
-    {
-        assert(false && "Could not allocate memory for depth image\n");
-        return false;
-    }
-    m_depthImageMemory = allocateMemoryResult.value;
-
-    auto bindResult = vkDevice.bindImageMemory(m_depthImage, m_depthImageMemory, 0);
-    if (bindResult != vk::Result::eSuccess)
-    {
-        assert(false && "Could not bind memory to depth image\n");
         return false;
     }
     vk::ImageViewCreateInfo depthImageViewInfo{

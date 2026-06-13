@@ -2,6 +2,7 @@ export module RendererVK:Buffer;
 
 import Core;
 import :VK;
+import :Allocator;
 
 export class Buffer final
 {
@@ -12,22 +13,26 @@ public:
     {
         m_size = move.m_size;
         m_buffer = move.getBuffer();
-        m_memory = move.getMemory();
+        m_allocation = move.m_allocation;
+        m_mappedData = move.m_mappedData;
         m_usage = move.m_usage;
         m_properties = move.m_properties;
+        m_debugName = move.m_debugName;
         m_backingStore = std::move(move.m_backingStore);
         m_uploadOffset = move.m_uploadOffset;
         m_hasBackingStore = move.m_hasBackingStore;
         move.m_size = 0;
         move.m_buffer = nullptr;
-        move.m_memory = nullptr;
+        move.m_allocation = nullptr;
+        move.m_mappedData = nullptr;
         move.m_hasBackingStore = false;
     }
     Buffer(const Buffer&) = delete;
 
     // Requesting a shader-device-address usage allocates the memory with the device-address flag so
     // getDeviceAddress works.
-    bool initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore = false);
+    // debugName (optional) is attached to the underlying VMA allocation to identify it in leak reports.
+    bool initialize(vk::DeviceSize size, vk::BufferUsageFlags2 usage, vk::MemoryPropertyFlags properties, bool useBackingStore = false, const char* debugName = nullptr);
     void destroy();
 
     bool resize(vk::DeviceSize newSize);
@@ -70,17 +75,18 @@ public:
     void flushMappedMemory(size_t size, size_t offset = 0);
 
     vk::Buffer getBuffer() const       { return m_buffer; }
-    vk::DeviceMemory getMemory() const { return m_memory; }
 	size_t getSize() const             { return (size_t)m_size; }
 
 private:
 
     vk::DeviceSize m_size = 0;
     vk::Buffer m_buffer;
-    vk::DeviceMemory m_memory;
+    VmaAllocation m_allocation = nullptr;
+    void* m_mappedData = nullptr;
 
     vk::BufferUsageFlags2 m_usage;
     vk::MemoryPropertyFlags m_properties;
+    const char* m_debugName = nullptr;
     std::vector<uint8> m_backingStore;
     vk::DeviceSize m_uploadOffset = 0;
     bool m_hasBackingStore = false;

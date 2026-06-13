@@ -135,6 +135,11 @@ public:
 
 		uint64 lightGridMemUsageBytes;
 		uint64 maxLightGridMemUsageBytes;
+
+        // Total GPU memory tracked by VMA across all heaps.
+        uint64 gpuMemoryUsedBytes;     // bytes our live allocations occupy
+        uint64 gpuMemoryReservedBytes; // bytes VMA has reserved in blocks (>= used)
+        uint64 gpuMemoryBudgetBytes;   // device-local budget available to the process
     };
     Stats getStats();
 

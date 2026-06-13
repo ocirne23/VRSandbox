@@ -2,6 +2,7 @@ module RendererVK:Device;
 
 import :VK;
 import :Instance;
+import :Allocator;
 
 Device::Device() {}
 Device::~Device()
@@ -408,6 +409,9 @@ bool Device::initialize()
         }
     }
 
+    if (!Globals::gpuAllocator.initialize())
+        return false;
+
     return true;
 }
 
@@ -420,6 +424,7 @@ void Device::destroy()
         {
             assert(false && "Failed to wait for device idle");
         }
+        Globals::gpuAllocator.destroy();
         m_device.destroyCommandPool(m_commandPool);
         m_device.destroyDescriptorPool(m_descriptorPool);
         m_device.destroy();

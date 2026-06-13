@@ -1,0 +1,133 @@
+module;
+
+// The C VMA header lives in the global module fragment (no VMA_IMPLEMENTATION — that is compiled once in
+// Vma.cpp). Its declarations attach to the global module so they link against that implementation.
+#pragma warning(push, 0)
+#include "vma/vk_mem_alloc.h"
+#pragma warning(pop)
+
+module RendererVK:Allocator;
+
+import Core;
+import :VK;
+import :Instance;
+import :Device;
+
+Allocator::Allocator() {}
+Allocator::~Allocator()
+{
+    destroy();
+}
+
+bool Allocator::initialize()
+{
+    VmaAllocatorCreateInfo createInfo{};
+    createInfo.instance = Globals::instance.getInstance();
+    createInfo.physicalDevice = Globals::device.getPhysicalDevice();
+    createInfo.device = Globals::device.getDevice();
+    createInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    // BUFFER_DEVICE_ADDRESS: the device enables bufferDeviceAddress and many buffers request it; this lets
+    // VMA add the device-address allocation flag automatically so getDeviceAddress works on those buffers.
+    // KHR_MAINTENANCE5: buffers pass their usage via VkBufferUsageFlags2CreateInfo, which VMA only reads
+    // (needed by VMA_MEMORY_USAGE_AUTO) when maintenance5 is enabled. The device enables it.
+    createInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT;
+
+    if (vmaCreateAllocator(&createInfo, &m_allocator) != VK_SUCCESS)
+    {
+        assert(false && "Failed to create VMA allocator");
+        return false;
+    }
+    return true;
+}
+
+void Allocator::destroy()
+{
+    if (m_allocator)
+    {
+        vmaDestroyAllocator(m_allocator);
+        m_allocator = nullptr;
+    }
+}
+
+bool Allocator::createImage(const vk::ImageCreateInfo& info, vk::Image& outImage, VmaAllocation& outAllocation,
+    const char* debugName)
+{
+    const VkImageCreateInfo ci = info;
+    VmaAllocationCreateInfo aci{};
+    aci.usage = VMA_MEMORY_USAGE_AUTO;
+    VkImage image = VK_NULL_HANDLE;
+    if (vmaCreateImage(m_allocator, &ci, &aci, &image, &outAllocation, nullptr) != VK_SUCCESS)
+    {
+        assert(false && "Failed to create image");
+        return false;
+    }
+    if (debugName)
+        vmaSetAllocationName(m_allocator, outAllocation, debugName);
+    outImage = vk::Image(image);
+    return true;
+}
+
+void Allocator::destroyImage(vk::Image image, VmaAllocation allocation)
+{
+    if (image)
+        vmaDestroyImage(m_allocator, (VkImage)image, allocation);
+}
+
+bool Allocator::createBuffer(const vk::BufferCreateInfo& info, vk::MemoryPropertyFlags properties,
+    vk::Buffer& outBuffer, VmaAllocation& outAllocation, void*& outMappedData, const char* debugName)
+{
+    const VkBufferCreateInfo ci = info;
+    VmaAllocationCreateInfo aci{};
+    aci.usage = VMA_MEMORY_USAGE_AUTO;
+    aci.requiredFlags = (VkMemoryPropertyFlags)(VkFlags)properties;
+    // Host-visible buffers are kept persistently mapped so uploads/readbacks can hit the pointer directly.
+    if (properties & vk::MemoryPropertyFlagBits::eHostVisible)
+        aci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VmaAllocationInfo allocInfo{};
+    if (vmaCreateBuffer(m_allocator, &ci, &aci, &buffer, &outAllocation, &allocInfo) != VK_SUCCESS)
+    {
+        assert(false && "Failed to create buffer");
+        return false;
+    }
+    if (debugName)
+        vmaSetAllocationName(m_allocator, outAllocation, debugName);
+    outBuffer = vk::Buffer(buffer);
+    outMappedData = allocInfo.pMappedData;
+    return true;
+}
+
+void Allocator::destroyBuffer(vk::Buffer buffer, VmaAllocation allocation)
+{
+    if (buffer)
+        vmaDestroyBuffer(m_allocator, (VkBuffer)buffer, allocation);
+}
+
+void Allocator::flushAllocation(VmaAllocation allocation, vk::DeviceSize offset, vk::DeviceSize size)
+{
+    if (allocation)
+        (void)vmaFlushAllocation(m_allocator, allocation, offset, size);
+}
+
+Allocator::MemoryUsage Allocator::getMemoryUsage() const
+{
+    MemoryUsage usage{};
+    if (!m_allocator)
+        return usage;
+
+    const VkPhysicalDeviceMemoryProperties* memProps = nullptr;
+    vmaGetMemoryProperties(m_allocator, &memProps);
+
+    // One budget entry per memory heap (cheap; backed by VK_EXT_memory_budget where available).
+    std::vector<VmaBudget> budgets(memProps->memoryHeapCount);
+    vmaGetHeapBudgets(m_allocator, budgets.data());
+    for (uint32 i = 0; i < memProps->memoryHeapCount; i++)
+    {
+        usage.usedBytes += budgets[i].statistics.allocationBytes;
+        usage.reservedBytes += budgets[i].statistics.blockBytes;
+        if (memProps->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+            usage.budgetBytes += budgets[i].budget;
+    }
+    return usage;
+}

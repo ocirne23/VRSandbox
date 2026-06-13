@@ -2,6 +2,7 @@ export module RendererVK:RTAOPipeline;
 
 import Core;
 import :VK;
+import :Allocator;
 import :Buffer;
 import :CommandBuffer;
 import :ComputePipeline;
@@ -18,6 +19,10 @@ import :Layout;
 export class RTAOPipeline final
 {
 public:
+    RTAOPipeline() = default;
+    ~RTAOPipeline();
+    RTAOPipeline(const RTAOPipeline&) = delete;
+
     void initialize(uint32 fullWidth, uint32 fullHeight);
     void recreateImages(uint32 fullWidth, uint32 fullHeight);
     void reloadShaders();
@@ -43,7 +48,7 @@ private:
     struct ImageSet
     {
         std::array<vk::Image, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> image;
-        std::array<vk::DeviceMemory, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> memory;
+        std::array<VmaAllocation, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> memory{};
         std::array<vk::ImageView, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> view;
         std::array<bool, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> initialized{};
     };

@@ -1,0 +1,68 @@
+module;
+
+// Forward-declare VMA's opaque handle types in the global module fragment so they name the same global
+// entities that vk_mem_alloc.h defines (a forward declaration in module purview would instead create
+// distinct module-owned types that wouldn't match the C API in the implementation unit).
+struct VmaAllocator_T;
+struct VmaAllocation_T;
+
+export module RendererVK:Allocator;
+
+import Core;
+import :VK;
+
+// Opaque VMA handles re-exported as aliases, so vk_mem_alloc.h stays out of this interface (and out of
+// every module that imports it). The definitions live in Vma.cpp via VMA_IMPLEMENTATION.
+export using VmaAllocator = VmaAllocator_T*;
+export using VmaAllocation = VmaAllocation_T*;
+
+// Thin wrapper around the VulkanMemoryAllocator. Owns a single VmaAllocator for the whole renderer and
+// is the one place GPU buffer/image memory is allocated; everything else goes through Buffer / the image
+// helpers which call into here.
+export class Allocator final
+{
+public:
+    Allocator();
+    ~Allocator();
+    Allocator(const Allocator&) = delete;
+
+    bool initialize();
+    void destroy();
+
+    // Device-local image. The optional debugName is attached to the allocation for leak reporting.
+    // Returns false on failure.
+    bool createImage(const vk::ImageCreateInfo& info, vk::Image& outImage, VmaAllocation& outAllocation,
+        const char* debugName = nullptr);
+    void destroyImage(vk::Image image, VmaAllocation allocation);
+
+    // Buffer allocated to satisfy the given memory properties. Host-visible allocations are persistently
+    // mapped; outMappedData receives the base pointer (nullptr for device-local). The optional debugName
+    // is attached to the allocation for leak reporting. Returns false on failure.
+    bool createBuffer(const vk::BufferCreateInfo& info, vk::MemoryPropertyFlags properties,
+        vk::Buffer& outBuffer, VmaAllocation& outAllocation, void*& outMappedData,
+        const char* debugName = nullptr);
+    void destroyBuffer(vk::Buffer buffer, VmaAllocation allocation);
+
+    // Flush a host-visible (possibly non-coherent) allocation. Atom-size alignment is handled internally;
+    // a no-op when the underlying memory is host-coherent. Pass vk::WholeSize to flush to the end.
+    void flushAllocation(VmaAllocation allocation, vk::DeviceSize offset, vk::DeviceSize size);
+
+    struct MemoryUsage
+    {
+        uint64 usedBytes;     // sum of live allocations (the bytes our resources actually occupy)
+        uint64 reservedBytes; // memory VMA has reserved in blocks (>= usedBytes, includes free space)
+        uint64 budgetBytes;   // how many bytes the process may use across device-local heaps
+    };
+    MemoryUsage getMemoryUsage() const;
+
+private:
+    VmaAllocator m_allocator = nullptr;
+};
+
+export namespace Globals
+{
+#pragma warning(disable: 4075)
+#pragma init_seg(".CRT$XCU2")
+    Allocator gpuAllocator;
+#pragma warning(default: 4075)
+}

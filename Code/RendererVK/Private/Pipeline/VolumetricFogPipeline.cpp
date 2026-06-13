@@ -3,6 +3,7 @@ module RendererVK:VolumetricFogPipeline;
 import Core;
 import File.FileSystem;
 import :Device;
+import :Allocator;
 import :CommandBuffer;
 import :RenderPass;
 
@@ -79,17 +80,7 @@ void VolumetricFogPipeline::createImageSet(ImageSet& set)
             .sharingMode = vk::SharingMode::eExclusive,
             .initialLayout = vk::ImageLayout::eUndefined,
         };
-        auto imageResult = vkDevice.createImage(info);
-        assert(imageResult.result == vk::Result::eSuccess);
-        set.image[i] = imageResult.value;
-
-        vk::MemoryRequirements memReq = vkDevice.getImageMemoryRequirements(set.image[i]);
-        vk::MemoryAllocateInfo allocInfo{ .allocationSize = memReq.size,
-            .memoryTypeIndex = Globals::device.findMemoryType(memReq.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal) };
-        auto allocResult = vkDevice.allocateMemory(allocInfo);
-        assert(allocResult.result == vk::Result::eSuccess);
-        set.memory[i] = allocResult.value;
-        (void)vkDevice.bindImageMemory(set.image[i], set.memory[i], 0);
+        (void)Globals::gpuAllocator.createImage(info, set.image[i], set.memory[i], "VolumetricFog");
 
         vk::ImageViewCreateInfo viewInfo{
             .image = set.image[i],
@@ -101,6 +92,25 @@ void VolumetricFogPipeline::createImageSet(ImageSet& set)
         assert(viewResult.result == vk::Result::eSuccess);
         set.view[i] = viewResult.value;
     }
+}
+
+void VolumetricFogPipeline::destroyImageSet(ImageSet& set)
+{
+    vk::Device vkDevice = Globals::device.getDevice();
+    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    {
+        if (set.view[i]) vkDevice.destroyImageView(set.view[i]);
+        Globals::gpuAllocator.destroyImage(set.image[i], set.memory[i]);
+        set.view[i] = nullptr; set.image[i] = nullptr; set.memory[i] = nullptr;
+    }
+}
+
+VolumetricFogPipeline::~VolumetricFogPipeline()
+{
+    destroyImageSet(m_scatter);
+    destroyImageSet(m_integrated);
+    if (m_sampler)
+        Globals::device.getDevice().destroySampler(m_sampler);
 }
 
 void VolumetricFogPipeline::initialize()

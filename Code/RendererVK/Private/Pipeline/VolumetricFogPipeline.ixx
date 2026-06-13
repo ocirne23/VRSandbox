@@ -2,6 +2,7 @@ export module RendererVK:VolumetricFogPipeline;
 
 import Core;
 import :VK;
+import :Allocator;
 import :Buffer;
 import :CommandBuffer;
 import :ComputePipeline;
@@ -22,6 +23,10 @@ export class RenderPass;
 export class VolumetricFogPipeline final
 {
 public:
+    VolumetricFogPipeline() = default;
+    ~VolumetricFogPipeline();
+    VolumetricFogPipeline(const VolumetricFogPipeline&) = delete;
+
     void initialize();
     void initializeApply(vk::RenderPass renderPass);
     void reloadShaders(vk::RenderPass renderPass);
@@ -54,7 +59,7 @@ private:
     struct ImageSet
     {
         std::array<vk::Image, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> image;
-        std::array<vk::DeviceMemory, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> memory;
+        std::array<VmaAllocation, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> memory{};
         std::array<vk::ImageView, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> view;
     };
 
@@ -62,6 +67,7 @@ private:
     void buildIntegrateLayout(ComputePipelineLayout& layout);
     void buildApplyLayout(GraphicsPipelineLayout& layout);
     void createImageSet(ImageSet& set);
+    void destroyImageSet(ImageSet& set);
 
     ComputePipeline m_scatterPipeline;
     ComputePipeline m_integratePipeline;

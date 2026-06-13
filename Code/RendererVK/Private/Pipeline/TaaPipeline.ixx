@@ -2,6 +2,7 @@ export module RendererVK:TaaPipeline;
 
 import Core;
 import :VK;
+import :Allocator;
 import :Buffer;
 import :CommandBuffer;
 import :ComputePipeline;
@@ -16,6 +17,10 @@ import :Layout;
 export class TaaPipeline final
 {
 public:
+    TaaPipeline() = default;
+    ~TaaPipeline();
+    TaaPipeline(const TaaPipeline&) = delete;
+
     void initialize(uint32 width, uint32 height);
     void recreateImages(uint32 width, uint32 height);
     void reloadShaders();
@@ -42,7 +47,7 @@ private:
     struct ImageSet
     {
         std::array<vk::Image, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> image;
-        std::array<vk::DeviceMemory, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> memory;
+        std::array<VmaAllocation, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> memory{};
         std::array<vk::ImageView, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> view;
         std::array<bool, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> initialized{};
     };

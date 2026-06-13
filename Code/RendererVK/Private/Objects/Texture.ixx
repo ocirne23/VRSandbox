@@ -5,6 +5,7 @@ import File.fwd;
 
 import :VK;
 import :Device;
+import :Allocator;
 
 export class StagingManager;
 
@@ -32,6 +33,6 @@ private:
     uint32 m_numMipLevels = 0;
     vk::Format m_format;
     vk::Image m_image;
-    vk::DeviceMemory m_imageMemory;
+    VmaAllocation m_imageMemory = nullptr;
     vk::ImageView m_imageView;
 };

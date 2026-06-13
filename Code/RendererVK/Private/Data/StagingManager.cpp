@@ -29,7 +29,7 @@ bool StagingManager::initialize()
     vk::Device vkDevice = Globals::device.getDevice();
     for (int i = 0; i < NUM_STAGING_BUFFERS; i++)
     {
-        if (!m_stagingBuffers[i].initialize(STAGING_BUFFER_SIZE, vk::BufferUsageFlagBits2::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached))
+        if (!m_stagingBuffers[i].initialize(STAGING_BUFFER_SIZE, vk::BufferUsageFlagBits2::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "Staging"))
             return false;
 
         m_commandBuffers[i].initialize(vk::CommandBufferLevel::ePrimary);
@@ -136,15 +136,7 @@ vk::Semaphore StagingManager::update()
     if (result != vk::Result::eSuccess)
         assert(false && "Failed to reset fence");
 
-    const static vk::DeviceSize atomSize = Globals::device.getNonCoherentAtomSize();
-    vk::DeviceSize size = (m_currentBufferOffset + atomSize - 1) & ~(atomSize - 1);
-    auto flushResult = vkDevice.flushMappedMemoryRanges({ vk::MappedMemoryRange{
-        .memory = m_stagingBuffers[m_currentBuffer].getMemory(), .offset = 0, .size = size
-    } });
-    if (flushResult != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to flush memory");
-    }
+    m_stagingBuffers[m_currentBuffer].flushMappedMemory(m_currentBufferOffset);
     CommandBuffer& commandBuffer = m_commandBuffers[m_currentBuffer];
     if (m_nextUpdateSemaphore)
 		commandBuffer.addWaitSemaphore(m_nextUpdateSemaphore, vk::PipelineStageFlagBits::eTransfer);

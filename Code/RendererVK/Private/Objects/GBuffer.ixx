@@ -2,6 +2,7 @@ export module RendererVK:GBuffer;
 
 import Core;
 import :VK;
+import :Allocator;
 import :Layout;
 
 // Thin G-buffer used to drive screen-space ray-traced AO (and, later, other screen-space effects).
@@ -32,11 +33,11 @@ private:
     uint32 m_height = 0;
 
     vk::Image m_normalImage;
-    vk::DeviceMemory m_normalMemory;
+    VmaAllocation m_normalMemory = nullptr;
     vk::ImageView m_normalView;
 
     vk::Image m_depthImage;
-    vk::DeviceMemory m_depthMemory;
+    VmaAllocation m_depthMemory = nullptr;
     vk::ImageView m_depthView;
 
     vk::RenderPass m_renderPass;

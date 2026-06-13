@@ -2,6 +2,7 @@ module RendererVK:SceneColor;
 
 import :VK;
 import :Device;
+import :Allocator;
 import :CommandBuffer;
 
 namespace
@@ -9,7 +10,7 @@ namespace
     constexpr vk::Format SCENE_DEPTH_FORMAT = vk::Format::eD32Sfloat;
 
     bool createImage(vk::Device vkDevice, uint32 w, uint32 h, vk::Format format, vk::ImageUsageFlags usage,
-        vk::Image& outImage, vk::DeviceMemory& outMemory)
+        vk::Image& outImage, VmaAllocation& outMemory, const char* name)
     {
         vk::ImageCreateInfo info{
             .imageType = vk::ImageType::e2D,
@@ -23,19 +24,7 @@ namespace
             .sharingMode = vk::SharingMode::eExclusive,
             .initialLayout = vk::ImageLayout::eUndefined,
         };
-        auto imageResult = vkDevice.createImage(info);
-        if (imageResult.result != vk::Result::eSuccess) { assert(false && "scenecolor image"); return false; }
-        outImage = imageResult.value;
-
-        vk::MemoryRequirements memReq = vkDevice.getImageMemoryRequirements(outImage);
-        vk::MemoryAllocateInfo allocInfo{
-            .allocationSize = memReq.size,
-            .memoryTypeIndex = Globals::device.findMemoryType(memReq.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal),
-        };
-        auto allocResult = vkDevice.allocateMemory(allocInfo);
-        if (allocResult.result != vk::Result::eSuccess) { assert(false && "scenecolor mem"); return false; }
-        outMemory = allocResult.value;
-        if (vkDevice.bindImageMemory(outImage, outMemory, 0) != vk::Result::eSuccess) { assert(false && "scenecolor bind"); return false; }
+        if (!Globals::gpuAllocator.createImage(info, outImage, outMemory, name)) { assert(false && "scenecolor image"); return false; }
         return true;
     }
 
@@ -65,10 +54,8 @@ void SceneColor::destroy()
     if (m_renderPass)   vkDevice.destroyRenderPass(m_renderPass);
     if (m_colorView)    vkDevice.destroyImageView(m_colorView);
     if (m_depthView)    vkDevice.destroyImageView(m_depthView);
-    if (m_colorImage)   vkDevice.destroyImage(m_colorImage);
-    if (m_depthImage)   vkDevice.destroyImage(m_depthImage);
-    if (m_colorMemory)  vkDevice.freeMemory(m_colorMemory);
-    if (m_depthMemory)  vkDevice.freeMemory(m_depthMemory);
+    Globals::gpuAllocator.destroyImage(m_colorImage, m_colorMemory);
+    Globals::gpuAllocator.destroyImage(m_depthImage, m_depthMemory);
     m_sampler = nullptr; m_framebuffer = nullptr; m_renderPass = nullptr;
     m_colorView = nullptr; m_depthView = nullptr;
     m_colorImage = nullptr; m_depthImage = nullptr;
@@ -84,9 +71,9 @@ bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height)
     m_colorFormat = colorFormat;
 
     if (!createImage(vkDevice, width, height, colorFormat,
-        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled, m_colorImage, m_colorMemory)) return false;
+        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled, m_colorImage, m_colorMemory, "SceneColor.color")) return false;
     if (!createImage(vkDevice, width, height, SCENE_DEPTH_FORMAT,
-        vk::ImageUsageFlagBits::eDepthStencilAttachment, m_depthImage, m_depthMemory)) return false;
+        vk::ImageUsageFlagBits::eDepthStencilAttachment, m_depthImage, m_depthMemory, "SceneColor.depth")) return false;
     if (!createView(vkDevice, m_colorImage, colorFormat, vk::ImageAspectFlagBits::eColor, m_colorView)) return false;
     if (!createView(vkDevice, m_depthImage, SCENE_DEPTH_FORMAT, vk::ImageAspectFlagBits::eDepth, m_depthView)) return false;
 

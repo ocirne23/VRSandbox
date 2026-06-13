@@ -2,6 +2,7 @@ module RendererVK:GBuffer;
 
 import :VK;
 import :Device;
+import :Allocator;
 import :CommandBuffer;
 
 namespace
@@ -10,7 +11,7 @@ namespace
     constexpr vk::Format GBUFFER_DEPTH_FORMAT  = vk::Format::eD32Sfloat;
 
     bool createImage(vk::Device vkDevice, uint32 w, uint32 h, vk::Format format, vk::ImageUsageFlags usage,
-        vk::Image& outImage, vk::DeviceMemory& outMemory)
+        vk::Image& outImage, VmaAllocation& outMemory, const char* name)
     {
         vk::ImageCreateInfo info{
             .imageType = vk::ImageType::e2D,
@@ -24,19 +25,7 @@ namespace
             .sharingMode = vk::SharingMode::eExclusive,
             .initialLayout = vk::ImageLayout::eUndefined,
         };
-        auto imageResult = vkDevice.createImage(info);
-        if (imageResult.result != vk::Result::eSuccess) { assert(false && "gbuffer image"); return false; }
-        outImage = imageResult.value;
-
-        vk::MemoryRequirements memReq = vkDevice.getImageMemoryRequirements(outImage);
-        vk::MemoryAllocateInfo allocInfo{
-            .allocationSize = memReq.size,
-            .memoryTypeIndex = Globals::device.findMemoryType(memReq.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal),
-        };
-        auto allocResult = vkDevice.allocateMemory(allocInfo);
-        if (allocResult.result != vk::Result::eSuccess) { assert(false && "gbuffer mem"); return false; }
-        outMemory = allocResult.value;
-        if (vkDevice.bindImageMemory(outImage, outMemory, 0) != vk::Result::eSuccess) { assert(false && "gbuffer bind"); return false; }
+        if (!Globals::gpuAllocator.createImage(info, outImage, outMemory, name)) { assert(false && "gbuffer image"); return false; }
         return true;
     }
 
@@ -66,10 +55,8 @@ void GBuffer::destroy()
     if (m_renderPass)   vkDevice.destroyRenderPass(m_renderPass);
     if (m_normalView)   vkDevice.destroyImageView(m_normalView);
     if (m_depthView)    vkDevice.destroyImageView(m_depthView);
-    if (m_normalImage)  vkDevice.destroyImage(m_normalImage);
-    if (m_depthImage)   vkDevice.destroyImage(m_depthImage);
-    if (m_normalMemory) vkDevice.freeMemory(m_normalMemory);
-    if (m_depthMemory)  vkDevice.freeMemory(m_depthMemory);
+    Globals::gpuAllocator.destroyImage(m_normalImage, m_normalMemory);
+    Globals::gpuAllocator.destroyImage(m_depthImage, m_depthMemory);
     m_sampler = nullptr; m_framebuffer = nullptr; m_renderPass = nullptr;
     m_normalView = nullptr; m_depthView = nullptr;
     m_normalImage = nullptr; m_depthImage = nullptr;
@@ -84,9 +71,9 @@ bool GBuffer::initialize(uint32 width, uint32 height)
     m_height = height;
 
     if (!createImage(vkDevice, width, height, GBUFFER_NORMAL_FORMAT,
-        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled, m_normalImage, m_normalMemory)) return false;
+        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled, m_normalImage, m_normalMemory, "GBuffer.normal")) return false;
     if (!createImage(vkDevice, width, height, GBUFFER_DEPTH_FORMAT,
-        vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled, m_depthImage, m_depthMemory)) return false;
+        vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled, m_depthImage, m_depthMemory, "GBuffer.depth")) return false;
     if (!createView(vkDevice, m_normalImage, GBUFFER_NORMAL_FORMAT, vk::ImageAspectFlagBits::eColor, m_normalView)) return false;
     if (!createView(vkDevice, m_depthImage, GBUFFER_DEPTH_FORMAT, vk::ImageAspectFlagBits::eDepth, m_depthView)) return false;
 

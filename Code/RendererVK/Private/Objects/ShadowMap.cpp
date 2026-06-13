@@ -2,6 +2,7 @@ module RendererVK:ShadowMap;
 
 import :VK;
 import :Device;
+import :Allocator;
 import :CommandBuffer;
 
 constexpr vk::Format SHADOW_DEPTH_FORMAT = vk::Format::eD32Sfloat;
@@ -20,8 +21,7 @@ void ShadowMap::destroy()
     if (m_framebuffer)  vkDevice.destroyFramebuffer(m_framebuffer);
     if (m_renderPass)   vkDevice.destroyRenderPass(m_renderPass);
     if (m_sampleView)   vkDevice.destroyImageView(m_sampleView);
-    if (m_image)        vkDevice.destroyImage(m_image);
-    if (m_imageMemory)  vkDevice.freeMemory(m_imageMemory);
+    Globals::gpuAllocator.destroyImage(m_image, m_imageMemory);
     m_sampler = nullptr; m_depthSampler = nullptr; m_framebuffer = nullptr; m_renderPass = nullptr; m_sampleView = nullptr; m_image = nullptr; m_imageMemory = nullptr;
 }
 
@@ -44,19 +44,7 @@ bool ShadowMap::initialize(uint32 resolution, uint32 numCascades)
         .sharingMode = vk::SharingMode::eExclusive,
         .initialLayout = vk::ImageLayout::eUndefined,
     };
-    auto imageResult = vkDevice.createImage(imageInfo);
-    if (imageResult.result != vk::Result::eSuccess) { assert(false && "shadow image"); return false; }
-    m_image = imageResult.value;
-
-    vk::MemoryRequirements memReq = vkDevice.getImageMemoryRequirements(m_image);
-    vk::MemoryAllocateInfo allocInfo{
-        .allocationSize = memReq.size,
-        .memoryTypeIndex = Globals::device.findMemoryType(memReq.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal),
-    };
-    auto allocResult = vkDevice.allocateMemory(allocInfo);
-    if (allocResult.result != vk::Result::eSuccess) { assert(false && "shadow mem"); return false; }
-    m_imageMemory = allocResult.value;
-    if (vkDevice.bindImageMemory(m_image, m_imageMemory, 0) != vk::Result::eSuccess) { assert(false && "shadow bind"); return false; }
+    if (!Globals::gpuAllocator.createImage(imageInfo, m_image, m_imageMemory, "ShadowMap")) { assert(false && "shadow image"); return false; }
 
     // ---- Views -------------------------------------------------------------
     vk::ImageViewCreateInfo sampleViewInfo{

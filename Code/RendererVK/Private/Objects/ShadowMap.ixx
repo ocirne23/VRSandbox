@@ -2,6 +2,7 @@ export module RendererVK:ShadowMap;
 
 import Core;
 import :VK;
+import :Allocator;
 import :Layout;
 
 // Cascaded shadow map render target: a single D32 depth image with one array layer per cascade,
@@ -33,7 +34,7 @@ private:
     uint32 m_resolution = 0;
     uint32 m_numCascades = 0;
     vk::Image m_image;
-    vk::DeviceMemory m_imageMemory;
+    VmaAllocation m_imageMemory = nullptr;
     vk::ImageView m_sampleView; // e2DArray over all cascades; used both as the render target and for sampling
     vk::Framebuffer m_framebuffer;
     vk::RenderPass m_renderPass;

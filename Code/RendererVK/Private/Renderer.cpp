@@ -14,6 +14,7 @@ import File.ITextureData;
 
 import :RenderNode;
 import :VK;
+import :Allocator;
 import :StagingManager;
 import :TextureManager;
 import :MeshDataManager;
@@ -1600,6 +1601,11 @@ Renderer::Stats Renderer::getStats()
     stats.maxLightGrids = m_lightTableEntries / 2; // We don't want to go over 50% because of hash table collisions
     stats.lightGridMemUsageBytes = info.inout_gridDataCounter * sizeof(uint32);
     stats.maxLightGridMemUsageBytes = m_lightGridBufferSize;
+
+    const Allocator::MemoryUsage gpuMem = Globals::gpuAllocator.getMemoryUsage();
+    stats.gpuMemoryUsedBytes = gpuMem.usedBytes;
+    stats.gpuMemoryReservedBytes = gpuMem.reservedBytes;
+    stats.gpuMemoryBudgetBytes = gpuMem.budgetBytes;
 
     return stats;
 }

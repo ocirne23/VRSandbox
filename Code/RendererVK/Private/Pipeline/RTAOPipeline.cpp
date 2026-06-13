@@ -4,6 +4,7 @@ import Core;
 import Core.Tweaks;
 import File.FileSystem;
 import :Device;
+import :Allocator;
 import :CommandBuffer;
 
 namespace
@@ -80,14 +81,22 @@ void RTAOPipeline::buildSpatialLayout(ComputePipelineLayout& layout)
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(SpatialPC) });
 }
 
+RTAOPipeline::~RTAOPipeline()
+{
+    destroyImageSet(m_raw);
+    destroyImageSet(m_accum);
+    destroyImageSet(m_final);
+    if (m_aoSampler)
+        Globals::device.getDevice().destroySampler(m_aoSampler);
+}
+
 void RTAOPipeline::destroyImageSet(ImageSet& set)
 {
     vk::Device vkDevice = Globals::device.getDevice();
     for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
     {
         if (set.view[i])   vkDevice.destroyImageView(set.view[i]);
-        if (set.image[i])  vkDevice.destroyImage(set.image[i]);
-        if (set.memory[i]) vkDevice.freeMemory(set.memory[i]);
+        Globals::gpuAllocator.destroyImage(set.image[i], set.memory[i]);
         set.view[i] = nullptr; set.image[i] = nullptr; set.memory[i] = nullptr;
         set.initialized[i] = false;
     }
@@ -110,17 +119,7 @@ void RTAOPipeline::createImageSet(ImageSet& set)
             .sharingMode = vk::SharingMode::eExclusive,
             .initialLayout = vk::ImageLayout::eUndefined,
         };
-        auto imageResult = vkDevice.createImage(info);
-        assert(imageResult.result == vk::Result::eSuccess);
-        set.image[i] = imageResult.value;
-
-        vk::MemoryRequirements memReq = vkDevice.getImageMemoryRequirements(set.image[i]);
-        vk::MemoryAllocateInfo allocInfo{ .allocationSize = memReq.size,
-            .memoryTypeIndex = Globals::device.findMemoryType(memReq.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal) };
-        auto allocResult = vkDevice.allocateMemory(allocInfo);
-        assert(allocResult.result == vk::Result::eSuccess);
-        set.memory[i] = allocResult.value;
-        (void)vkDevice.bindImageMemory(set.image[i], set.memory[i], 0);
+        (void)Globals::gpuAllocator.createImage(info, set.image[i], set.memory[i], "Rtao");
 
         vk::ImageViewCreateInfo viewInfo{
             .image = set.image[i],

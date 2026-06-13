@@ -4,6 +4,7 @@ import Core;
 import File.ITextureData;
 
 import :VK;
+import :Allocator;
 import :Buffer;
 import :StagingManager;
 import :stb_image;
@@ -18,10 +19,7 @@ Texture::~Texture()
     vk::Device vkDevice = Globals::device.getDevice();
     if (m_imageView)
         vkDevice.destroyImageView(m_imageView);
-    if (m_imageMemory)
-        vkDevice.freeMemory(m_imageMemory);
-    if (m_image)
-        vkDevice.destroyImage(m_image);
+    Globals::gpuAllocator.destroyImage(m_image, m_imageMemory);
 }
 
 Texture::Texture(Texture&& move)
@@ -203,33 +201,8 @@ bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const s
 	}
 	auto imageFormatProperties = imageFormatPropertiesresult.value;
 
-    auto createImageResult = vkDevice.createImage(imageCreateInfo);
-    if (createImageResult.result != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to create image");
+    if (!Globals::gpuAllocator.createImage(imageCreateInfo, m_image, m_imageMemory, "Texture"))
         return false;
-    }
-    m_image = createImageResult.value;
-
-    vk::MemoryRequirements memoryRequirements = vkDevice.getImageMemoryRequirements(m_image);
-    vk::MemoryAllocateInfo memoryAllocateInfo = {
-        .allocationSize = memoryRequirements.size,
-        .memoryTypeIndex = Globals::device.findMemoryType(memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)
-    };
-    auto allocateMemoryResult = vkDevice.allocateMemory(memoryAllocateInfo);
-    if (allocateMemoryResult.result != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to allocate memory");
-        return false;
-    }
-    m_imageMemory = allocateMemoryResult.value;
-
-    auto bindResult = vkDevice.bindImageMemory(m_image, m_imageMemory, 0);
-    if (bindResult != vk::Result::eSuccess)
-    {
-        assert(false && "Failed to bind image memory");
-        return false;
-    }
 
     vk::ImageViewCreateInfo imageViewInfo{
         .image = m_image,

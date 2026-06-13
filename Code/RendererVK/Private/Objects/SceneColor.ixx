@@ -2,6 +2,7 @@ export module RendererVK:SceneColor;
 
 import Core;
 import :VK;
+import :Allocator;
 
 // Offscreen colour+depth target the lit scene renders into (instead of straight to the swapchain), so the
 // TAA resolve has an isolated image to accumulate. The colour attachment uses the swapchain surface format
@@ -31,11 +32,11 @@ private:
     vk::Format m_colorFormat = vk::Format::eUndefined;
 
     vk::Image m_colorImage;
-    vk::DeviceMemory m_colorMemory;
+    VmaAllocation m_colorMemory = nullptr;
     vk::ImageView m_colorView;
 
     vk::Image m_depthImage;
-    vk::DeviceMemory m_depthMemory;
+    VmaAllocation m_depthMemory = nullptr;
     vk::ImageView m_depthView;
 
     vk::RenderPass m_renderPass;
