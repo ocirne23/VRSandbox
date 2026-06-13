@@ -377,15 +377,15 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
 
     m_meshInfosBuffer.initialize(m_maxUniqueMeshes * sizeof(RendererVKLayout::MeshInfo),
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal);
+        vk::MemoryPropertyFlagBits::eDeviceLocal, {}, true);
 
     m_materialInfosBuffer.initialize(m_maxUniqueMaterials * sizeof(RendererVKLayout::MaterialInfo),
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal);
+        vk::MemoryPropertyFlagBits::eDeviceLocal, {}, true);
 
     m_instanceOffsetsBuffer.initialize(m_maxInstanceOffsets * sizeof(RendererVKLayout::MeshInstanceOffset),
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal);
+        vk::MemoryPropertyFlagBits::eDeviceLocal, {}, true);
 
 	uint16 diffuseIdx = Globals::textureManager.upload(*ITextureData::createFallbackWhiteTexture(), false);
 	assert(diffuseIdx == RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX);
@@ -846,11 +846,7 @@ void Renderer::growUniqueMeshCapacity(uint32 needed)
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
         perFrame.mappedFirstInstances = perFrame.inFirstInstancesBuffer.mapMemory<uint32>();
     }
-    m_meshInfosBuffer.initialize(m_maxUniqueMeshes * sizeof(RendererVKLayout::MeshInfo),
-        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal);
-    if (!m_cpuMeshInfos.empty())
-        Globals::stagingManager.upload(m_meshInfosBuffer.getBuffer(), m_cpuMeshInfos.size() * sizeof(RendererVKLayout::MeshInfo), m_cpuMeshInfos.data());
+    m_meshInfosBuffer.resize(m_maxUniqueMeshes * sizeof(RendererVKLayout::MeshInfo));
     m_accelStructure.resizeBlasAddressBuffer(m_maxUniqueMeshes);
     m_indirectCullComputePipeline.resizeCommandBuffers(m_maxUniqueMeshes);
     m_shadowCullComputePipeline.resizeCommandBuffers(m_maxUniqueMeshes);
@@ -864,11 +860,7 @@ void Renderer::growMaterialCapacity(uint32 needed)
 {
     m_maxUniqueMaterials = growCapacity(m_maxUniqueMaterials, needed, RendererVKLayout::MESH_MATERIAL_INDEX_LIMIT);
     waitForGpuAndFlushStaging();
-    m_materialInfosBuffer.initialize(m_maxUniqueMaterials * sizeof(RendererVKLayout::MaterialInfo),
-        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal);
-    if (!m_cpuMaterialInfos.empty())
-        Globals::stagingManager.upload(m_materialInfosBuffer.getBuffer(), m_cpuMaterialInfos.size() * sizeof(RendererVKLayout::MaterialInfo), m_cpuMaterialInfos.data());
+    m_materialInfosBuffer.resize(m_maxUniqueMaterials * sizeof(RendererVKLayout::MaterialInfo));
     setHaveToRecordCommandBuffers();
     printf("Renderer: grew material capacity to %u\n", m_maxUniqueMaterials);
 }
@@ -930,11 +922,7 @@ void Renderer::growInstanceOffsetCapacity(uint32 needed)
 {
     m_maxInstanceOffsets = growCapacity(m_maxInstanceOffsets, needed);
     waitForGpuAndFlushStaging();
-    m_instanceOffsetsBuffer.initialize(m_maxInstanceOffsets * sizeof(RendererVKLayout::MeshInstanceOffset),
-        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-        vk::MemoryPropertyFlagBits::eDeviceLocal);
-    if (!m_cpuInstanceOffsets.empty())
-        Globals::stagingManager.upload(m_instanceOffsetsBuffer.getBuffer(), m_cpuInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset), m_cpuInstanceOffsets.data());
+    m_instanceOffsetsBuffer.resize(m_maxInstanceOffsets * sizeof(RendererVKLayout::MeshInstanceOffset));
     setHaveToRecordCommandBuffers();
     printf("Renderer: grew instance offset capacity to %u\n", m_maxInstanceOffsets);
 }
@@ -1291,7 +1279,7 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     {
         const uint32 totalVertices = (uint32)(Globals::meshDataManager.getVertexBufUsed() / sizeof(RendererVKLayout::MeshVertex));
         m_accelStructure.recordBuildBlas(vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
-            m_cpuMeshInfos.data(), m_blasBuiltCount, m_meshInfoCounter - m_blasBuiltCount, totalVertices);
+            m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>().data(), m_blasBuiltCount, m_meshInfoCounter - m_blasBuiltCount, totalVertices);
         m_blasBuiltCount = m_meshInfoCounter;
 
         m_giProbePipeline.doClear();
@@ -1569,7 +1557,7 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
 
     // Keep a CPU copy so the GI BLAS builder can read per-mesh firstIndex/vertexOffset/indexCount
     // (and so capacity growth can re-upload everything).
-    m_cpuMeshInfos.insert(m_cpuMeshInfos.end(), meshInfos.begin(), meshInfos.end());
+    m_meshInfosBuffer.appendToBackingStore<RendererVKLayout::MeshInfo>(meshInfos);
 
     if (m_meshInfoCounter > m_maxUniqueMeshes)
         growUniqueMeshCapacity(m_meshInfoCounter); // re-uploads the full CPU copy
@@ -1587,7 +1575,7 @@ uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialIn
     m_materialInfoCounter += (uint32)materialInfos.size();
     assert(m_materialInfoCounter < USHRT_MAX);
 
-    m_cpuMaterialInfos.insert(m_cpuMaterialInfos.end(), materialInfos.begin(), materialInfos.end());
+    m_materialInfosBuffer.appendToBackingStore<RendererVKLayout::MaterialInfo>(materialInfos);
 
     if (m_materialInfoCounter > m_maxUniqueMaterials)
         growMaterialCapacity(m_materialInfoCounter); // re-uploads the full CPU copy
@@ -1604,7 +1592,7 @@ uint32 Renderer::addMeshInstanceOffsets(const std::vector<RendererVKLayout::Mesh
     const uint32 baseInstanceOffsetIdx = m_instanceOffsetCounter;
     m_instanceOffsetCounter += (uint32)meshInstanceOffsets.size();
 
-    m_cpuInstanceOffsets.insert(m_cpuInstanceOffsets.end(), meshInstanceOffsets.begin(), meshInstanceOffsets.end());
+    m_instanceOffsetsBuffer.appendToBackingStore<RendererVKLayout::MeshInstanceOffset>(meshInstanceOffsets);
 
     if (m_instanceOffsetCounter > m_maxInstanceOffsets)
         growInstanceOffsetCapacity(m_instanceOffsetCounter); // re-uploads the full CPU copy

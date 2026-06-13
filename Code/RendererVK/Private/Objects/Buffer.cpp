@@ -2,6 +2,7 @@ module RendererVK:Buffer;
 
 import :VK;
 import :Device;
+import :StagingManager;
 
 Buffer::Buffer() {}
 Buffer::~Buffer()
@@ -23,12 +24,16 @@ void Buffer::destroy()
     }
 }
 
-bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::BufferUsageFlags2 usage2)
+bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::BufferUsageFlags2 usage2, bool useBackingStore)
 {
     if (m_buffer)
         destroy();
 
     m_size = size;
+    m_usage = usage;
+    m_properties = properties;
+    m_usage2 = usage2;
+    m_hasBackingStore = useBackingStore;
     vk::Device vkDevice = Globals::device.getDevice();
     vk::BufferUsageFlags2CreateInfo usage2Info{ .usage = usage2 };
     vk::BufferCreateInfo bufferInfo = {};
@@ -73,6 +78,39 @@ bool Buffer::initialize(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Mem
     {
         assert(false && "Failed to bind buffer memory");
         return false;
+    }
+
+    if (m_hasBackingStore)
+        return uploadBackingStore();
+    return true;
+}
+
+bool Buffer::resize(vk::DeviceSize newSize)
+{
+    assert(m_hasBackingStore && "resize() requires a buffer initialized with useBackingStore = true");
+    if (!m_hasBackingStore)
+        return false;
+    return initialize(newSize, m_usage, m_properties, m_usage2, true);
+}
+
+bool Buffer::uploadBackingStore()
+{
+    assert(m_hasBackingStore && "uploadBackingStore() requires a buffer initialized with useBackingStore = true");
+    if (!m_hasBackingStore || m_backingStore.empty())
+        return true;
+    const size_t uploadSize = std::min((size_t)m_size, m_backingStore.size());
+    if (m_properties & vk::MemoryPropertyFlagBits::eHostVisible)
+    {
+        std::span<uint8> mapped = mapMemory(0, uploadSize);
+        if (mapped.empty())
+            return false;
+        memcpy(mapped.data(), m_backingStore.data(), uploadSize);
+        flushMappedMemory(uploadSize);
+        unmapMemory();
+    }
+    else
+    {
+        Globals::stagingManager.upload(m_buffer, uploadSize, m_backingStore.data());
     }
     return true;
 }

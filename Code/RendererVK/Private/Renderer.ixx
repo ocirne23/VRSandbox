@@ -183,7 +183,7 @@ public:
         bool  autoExposure = true; // eye adaptation: drive exposure from scene luminance
         float adaptTau = 3.0f;   // adaptation time constant (s); larger = slower eye
         float adaptKey = 0.18f;  // target middle-grey luminance
-        float adaptMinLogLum = 3.14f; // histogram log2-luminance range
+        float adaptMinLogLum = -3.14f; // histogram log2-luminance range
         float adaptMaxLogLum = 4.0f;
         float adaptMinEV = -6.0f; // auto-exposure clamp (stops)
         float adaptMaxEV = 6.0f;
@@ -370,10 +370,6 @@ private:
     uint32 m_numTextureDescriptors = RendererVKLayout::INITIAL_TEXTURES;
     uint32 m_meshDataGeneration = 0; // last seen MeshDataManager::getGeneration(); change -> re-record
     uint32 m_textureGeneration = 0;  // last seen TextureManager::getGeneration(); change -> rebuild texture-array pipelines
-
-    std::vector<RendererVKLayout::MeshInfo> m_cpuMeshInfos; // CPU copy kept for BLAS builds + capacity growth re-upload
-    std::vector<RendererVKLayout::MaterialInfo> m_cpuMaterialInfos;          // for capacity growth re-upload
-    std::vector<RendererVKLayout::MeshInstanceOffset> m_cpuInstanceOffsets;  // for capacity growth re-upload
 
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform> m_renderNodeTransforms;
