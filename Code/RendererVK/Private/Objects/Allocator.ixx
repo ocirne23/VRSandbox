@@ -1,10 +1,13 @@
 module;
 
+#pragma warning(push)
+#pragma warning(disable: 5202)
 // Forward-declare VMA's opaque handle types in the global module fragment so they name the same global
 // entities that vk_mem_alloc.h defines (a forward declaration in module purview would instead create
 // distinct module-owned types that wouldn't match the C API in the implementation unit).
 struct VmaAllocator_T;
 struct VmaAllocation_T;
+#pragma warning(pop)
 
 export module RendererVK:Allocator;
 

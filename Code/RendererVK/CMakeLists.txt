@@ -29,6 +29,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC Core File vulkan-1
 	SPIRV$<$<CONFIG:Debug>:d>
 	SPIRV-Tools$<$<CONFIG:Debug>:d>
 	SPIRV-Tools-opt$<$<CONFIG:Debug>:d>
+	openxr_loader$<$<CONFIG:Debug>:d>
 	GFSDK_Aftermath_Lib.x64
 )
 

@@ -6,6 +6,7 @@ import Core.Window;
 
 import :VK;
 import :Device;
+import :OpenXRSession;
 
 Instance::Instance() {}
 Instance::~Instance()
@@ -57,6 +58,11 @@ static vk::Bool32 debugCallback(
         return vk::False;
     if (pCallbackData->messageIdNumber == 0xd90fc835) //vkCmdExecuteGeneratedCommandsEXT() : command can't be executed on a secondary command buffer.
         return vk::False;
+    // The SteamVR OpenXR runtime creates its swapchain images (inside xrCreateSwapchain) with external
+    // D3D11 memory and a PREINITIALIZED initialLayout, which the spec forbids for external-memory images.
+    // It's the runtime's vkCreateImage, not ours, so suppress this known false positive.
+    if (pCallbackData->pMessageIdName && strstr(pCallbackData->pMessageIdName, "VUID-VkImageCreateInfo-pNext-01443"))
+        return vk::False;
     const char* severity = "UNKNOWN";
     
     if (messageSeverity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)
@@ -101,6 +107,20 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
     for (uint32 i = 0; i < numExtensions; i++)
         if (ppExtensions[i] && supportsExtension(ppExtensions[i]))
             extensions.push_back(ppExtensions[i]);
+
+    // Instance extensions the OpenXR runtime requires (none when VR is disabled). Kept alive for the
+    // duration of this call; skip any SDL already added.
+    std::vector<std::string> xrExtensions;
+    if (Globals::openXR.isEnabled())
+        xrExtensions = Globals::openXR.getRequiredVulkanInstanceExtensions();
+    for (const std::string& ext : xrExtensions)
+    {
+        bool alreadyAdded = false;
+        for (const char* have : extensions)
+            if (ext == have) { alreadyAdded = true; break; }
+        if (!alreadyAdded && supportsExtension(ext.c_str()))
+            extensions.push_back(ext.c_str());
+    }
 
     vk::ApplicationInfo appInfo{ .pApplicationName = "App", .applicationVersion = VK_MAKE_VERSION(1, 0, 0), .pEngineName = "VRSandbox", .engineVersion = VK_MAKE_VERSION(1, 0, 0), .apiVersion = m_apiVersion };
     vk::InstanceCreateInfo createInfo{ .pApplicationInfo = &appInfo };

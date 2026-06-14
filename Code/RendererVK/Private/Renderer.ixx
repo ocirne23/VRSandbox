@@ -9,6 +9,7 @@ import Core.Camera;
 import :Layout;
 import :Instance;
 import :Device;
+import :OpenXRSession;
 import :Surface;
 import :SwapChain;
 import :RenderPass;
@@ -48,6 +49,7 @@ export struct Frustum;
 
 export enum class EValidation { ENABLED, DISABLED };
 export enum class EVSync { ENABLED, DISABLED };
+export enum class EVr { ENABLED, DISABLED };
 
 export class Renderer final
 {
@@ -60,7 +62,10 @@ public:
     Renderer& operator=(const Renderer&) = delete;
     Renderer& operator=(const Renderer&&) = delete;
 
-    bool initialize(Window& window, EValidation validation, EVSync vsync);
+    bool initialize(Window& window, EValidation validation, EVSync vsync, EVr vr = EVr::DISABLED);
+
+    // True when an OpenXR session is active. XR is otherwise driven entirely inside beginFrame/present.
+    bool isVrEnabled() const { return Globals::openXR.isEnabled(); }
 
     const Frustum& beginFrame(const Camera& camera);
     void renderNodeThreadSafe(const RenderNode& node);

@@ -3,6 +3,7 @@ module RendererVK:Device;
 import :VK;
 import :Instance;
 import :Allocator;
+import :OpenXRSession;
 
 Device::Device() {}
 Device::~Device()
@@ -13,30 +14,55 @@ Device::~Device()
 bool Device::initialize()
 {
     vk::Instance instance = Globals::instance.getInstance();
-    // try to find the discrete GPU with the most memory
-    auto enumResult = instance.enumeratePhysicalDevices();
-    if (enumResult.result != vk::Result::eSuccess || enumResult.value.size() == 0)
+    const bool vrEnabled = Globals::openXR.isEnabled();
+    if (vrEnabled)
     {
-        assert(false && "Could not find any physical devices\n");
-        return false;
+        // OpenXR dictates which physical device drives the HMD; honour it over the heuristic below.
+        m_physicalDevice = Globals::openXR.getVulkanGraphicsDevice(instance);
     }
-    for (vk::PhysicalDevice physDevice : enumResult.value)
+    else
     {
-        if (!m_physicalDevice)
-            m_physicalDevice = physDevice;
-        else if (physDevice.getProperties().limits.maxMemoryAllocationCount > m_physicalDevice.getProperties().limits.maxMemoryAllocationCount
-            && physDevice.getProperties().deviceType == vk::PhysicalDeviceType::eDiscreteGpu
-            || m_physicalDevice.getProperties().deviceType != vk::PhysicalDeviceType::eDiscreteGpu)
+        // try to find the discrete GPU with the most memory
+        auto enumResult = instance.enumeratePhysicalDevices();
+        if (enumResult.result != vk::Result::eSuccess || enumResult.value.size() == 0)
         {
-            m_physicalDevice = physDevice;
+            assert(false && "Could not find any physical devices\n");
+            return false;
+        }
+        for (vk::PhysicalDevice physDevice : enumResult.value)
+        {
+            if (!m_physicalDevice)
+                m_physicalDevice = physDevice;
+            else if (physDevice.getProperties().limits.maxMemoryAllocationCount > m_physicalDevice.getProperties().limits.maxMemoryAllocationCount
+                && physDevice.getProperties().deviceType == vk::PhysicalDeviceType::eDiscreteGpu
+                || m_physicalDevice.getProperties().deviceType != vk::PhysicalDeviceType::eDiscreteGpu)
+            {
+                m_physicalDevice = physDevice;
+            }
         }
     }
     printf("Device: %s\n", m_physicalDevice.getProperties().deviceName.data());
     m_nonCoherentAtomSize = m_physicalDevice.getProperties().limits.nonCoherentAtomSize;
 
-    std::vector<const char*> deviceExtensions{ 
-        vk::KHRSwapchainExtensionName, vk::KHRPushDescriptorExtensionName, vk::KHRMaintenance5ExtensionName, vk::EXTDeviceGeneratedCommandsExtensionName, 
-        vk::KHRAccelerationStructureExtensionName, vk::KHRRayQueryExtensionName, vk::KHRDeferredHostOperationsExtensionName, vk::KHRShaderNonSemanticInfoExtensionName };
+    std::vector<const char*> deviceExtensions{
+        vk::KHRSwapchainExtensionName, vk::KHRPushDescriptorExtensionName, vk::KHRMaintenance5ExtensionName, vk::EXTDeviceGeneratedCommandsExtensionName,
+        vk::KHRAccelerationStructureExtensionName, vk::KHRRayQueryExtensionName, vk::KHRDeferredHostOperationsExtensionName, vk::KHRShaderNonSemanticInfoExtensionName,
+        vk::EXTShaderViewportIndexLayerExtensionName };
+
+    // Device extensions the OpenXR runtime requires (none when VR is disabled). Kept alive for the
+    // duration of this call; skip duplicates already in the list above.
+    std::vector<std::string> xrExtensions;
+    if (vrEnabled)
+        xrExtensions = Globals::openXR.getRequiredVulkanDeviceExtensions();
+    for (const std::string& ext : xrExtensions)
+    {
+        bool alreadyAdded = false;
+        for (const char* have : deviceExtensions)
+            if (ext == have) { alreadyAdded = true; break; }
+        if (!alreadyAdded)
+            deviceExtensions.push_back(ext.c_str());
+    }
+
     if (!supportsExtensions(deviceExtensions))
     {
         assert(false && "Physical device does not support the extension\n");
@@ -97,7 +123,10 @@ bool Device::initialize()
         .descriptorBindingPartiallyBound = vk::True, // texture arrays are written up to the live texture count only
         .descriptorBindingVariableDescriptorCount = vk::True,
         .runtimeDescriptorArray = vk::True,
+        .timelineSemaphore = vk::True,
         .bufferDeviceAddress = vk::True, // required by VK_EXT_device_generated_commands (indirect/preprocess buffers are referenced by device address)
+        .shaderOutputViewportIndex = vk::True,
+        .shaderOutputLayer = vk::True,
     };
     vk::PhysicalDeviceVulkan13Features vk13Features{
         .pNext = &vk12Features,

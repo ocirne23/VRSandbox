@@ -159,7 +159,7 @@ Renderer::~Renderer()
     ImGui_ImplVulkan_Shutdown();
 }
 
-bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
+bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, EVr vr)
 {
     // Disable layers we don't care about for now to eliminate potential issues
     _putenv("DISABLE_LAYER_NV_OPTIMUS_1=True");
@@ -189,9 +189,28 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync)
         //_putenv("VK_LAYER_PRINTF_BUFFER_SIZE=16777216");
     }
     m_vsyncEnabled = (vsync == EVSync::ENABLED);
+
+    // OpenXR phase 1: create the XR instance + system BEFORE the Vulkan instance/device so the runtime
+    // can dictate the required Vulkan extensions and the physical device that drives the HMD.
+    // Instance/Device query Globals::openXR.isEnabled() during their own init. Any failure leaves
+    // isEnabled() false and the engine runs desktop-only.
+    if (vr == EVr::ENABLED)
+        Globals::openXR.initInstanceAndSystem();
+
     Globals::instance.initialize(window, enableValidationLayers);
     Globals::instance.setBreakOnValidationLayerError(enableValidationLayers);
     Globals::device.initialize();
+
+    // OpenXR phase 2: bind the session to the now-created Vulkan device and build the stereo swapchain.
+    if (Globals::openXR.isEnabled())
+    {
+        if (!Globals::openXR.createSession(Globals::instance.getInstance(), Globals::device.getPhysicalDevice(),
+            Globals::device.getDevice(), Globals::device.getGraphicsQueueIndex(), 0))
+        {
+            printf("Renderer: failed to create OpenXR session, continuing without VR.\n");
+            Globals::openXR.destroy(); // clears isEnabled()
+        }
+    }
 
     window.getWindowSize(m_windowSize);
     m_surface.initialize(window);
@@ -420,6 +439,8 @@ void Renderer::setWindowMinimized(bool minimized)
 
 const Frustum& Renderer::beginFrame(const Camera& camera)
 {
+    Globals::openXR.pollEvents(); // advance the OpenXR session state machine (no-op when VR is off)
+
     // Mesh instances overflowed mid-frame last frame (their nodes were dropped for that frame); grow
     // here where no recording or worker-thread writes are in flight.
     if (m_pendingMaxInstanceData > m_maxInstanceData)
@@ -638,6 +659,8 @@ void Renderer::setSunLight(const glm::vec3& direction, const glm::vec3& color, f
 
 void Renderer::present()
 {
+    Globals::openXR.renderClearFrame(); // submit the headset frame (no-op when VR is off)
+
     if(m_windowMinimized)
         return;
 
