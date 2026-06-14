@@ -47,7 +47,7 @@ void CompositePipeline::record(CommandBuffer& commandBuffer, const RecordParams&
                 vk::DescriptorImageInfo{
                     .sampler = params.sampler,
                     .imageView = params.resolvedView,
-                    .imageLayout = vk::ImageLayout::eGeneral
+                    .imageLayout = params.resolvedLayout
     } } },
         DescriptorSetUpdateInfo{
             .binding = 1,

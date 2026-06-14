@@ -16,12 +16,19 @@ public:
     ~SceneColor();
     SceneColor(const SceneColor&) = delete;
 
-    bool initialize(vk::Format colorFormat, uint32 width, uint32 height);
+    // viewCount > 1 allocates the colour/depth as arraySize=viewCount with a single-layer framebuffer
+    // per eye (getFramebuffer(eye)). The render pass stays non-multiview (viewMask 0) so the forward
+    // pass's DGC execution set is allowed; the forward is rendered once per eye into its layer.
+    bool initialize(vk::Format colorFormat, uint32 width, uint32 height, uint32 viewCount = 1);
     void destroy();
 
     vk::RenderPass  getRenderPass() const  { return m_renderPass; }
-    vk::Framebuffer getFramebuffer() const { return m_framebuffer; }
-    vk::ImageView   getColorView() const   { return m_colorView; }
+    vk::Framebuffer getFramebuffer() const { return m_framebuffers[0]; }
+    vk::Framebuffer getFramebuffer(uint32 eye) const { return m_framebuffers[eye]; }
+    vk::ImageView   getColorView() const   { return m_colorLayerViews[0]; } // 2D, layer 0 (sampling)
+    vk::ImageView   getColorLayerView(uint32 layer) const { return m_colorLayerViews[layer]; }
+    vk::Image       getColorImage() const  { return m_colorImage; }
+    uint32          getViewCount() const   { return m_viewCount; }
     vk::Sampler     getSampler() const     { return m_sampler; } // linear, clamp
     uint32 getWidth() const  { return m_width; }
     uint32 getHeight() const { return m_height; }
@@ -29,17 +36,18 @@ public:
 private:
     uint32 m_width = 0;
     uint32 m_height = 0;
+    uint32 m_viewCount = 1;
     vk::Format m_colorFormat = vk::Format::eUndefined;
 
     vk::Image m_colorImage;
     VmaAllocation m_colorMemory = nullptr;
-    vk::ImageView m_colorView;
+    std::array<vk::ImageView, 2> m_colorLayerViews{}; // per-eye 2D colour views (layer i); [0] also used for sampling
 
     vk::Image m_depthImage;
     VmaAllocation m_depthMemory = nullptr;
-    vk::ImageView m_depthView;
+    std::array<vk::ImageView, 2> m_depthLayerViews{}; // per-eye 2D depth views (layer i)
 
     vk::RenderPass m_renderPass;
-    vk::Framebuffer m_framebuffer;
+    std::array<vk::Framebuffer, 2> m_framebuffers{}; // one single-layer framebuffer per eye
     vk::Sampler m_sampler;
 };

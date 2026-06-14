@@ -71,6 +71,12 @@ layout (binding = UBO_BINDING, std140) uniform UBO
 
     vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
                           // ground-bounce tint for downward GI/fog rays), w unused
+
+    // Per-eye stereo matrices (VR multiview). [0] mirrors the mono u_mvp/u_invMvp/u_viewPos above;
+    // multiview graphics passes index these by gl_ViewIndex.
+    mat4 u_mvpStereo[2];
+    mat4 u_invMvpStereo[2];
+    vec4 u_viewPosStereo[2];
 };
 
 #endif

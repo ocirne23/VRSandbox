@@ -138,6 +138,13 @@ export namespace RendererVKLayout
 
         glm::vec4 atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
         glm::vec4 groundParams;  // rgb = ground albedo * intensity, w unused
+
+        // Per-eye stereo matrices for VR multiview rendering. Index [0] mirrors the mono mvp/invMvp/
+        // viewPos above (so desktop and the still-mono compute passes keep using the scalar fields);
+        // the multiview graphics passes index these by gl_ViewIndex. [1] is only meaningful in VR.
+        glm::mat4 mvpStereo[2];
+        glm::mat4 invMvpStereo[2];
+        glm::vec4 viewPosStereo[2]; // xyz = per-eye world position
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

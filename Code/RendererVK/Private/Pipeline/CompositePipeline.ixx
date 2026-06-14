@@ -22,7 +22,8 @@ public:
     struct RecordParams
     {
         DescriptorSet& descriptorSet;
-        vk::ImageView resolvedView; // TAA-resolved scene colour for this frame (GENERAL layout)
+        vk::ImageView resolvedView; // scene colour to tonemap (TAA-resolved, or a SceneColor eye layer in VR)
+        vk::ImageLayout resolvedLayout = vk::ImageLayout::eGeneral; // GENERAL for TAA, SHADER_READ_ONLY for SceneColor
         vk::Sampler   sampler;
         vk::Buffer    exposureBuffer; // eye-adaptation { avgLum, exposure } (storage)
         float exposureEV = 0.0f;    // exposure in stops; the shader gets exp2(exposureEV)

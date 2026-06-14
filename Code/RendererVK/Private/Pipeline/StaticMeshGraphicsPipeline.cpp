@@ -23,6 +23,14 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
     graphicsPipelineLayout.vertexShader.text = FileSystem::readFileStr(graphicsPipelineLayout.vertexShader.debugFilePath);
     graphicsPipelineLayout.fragmentShader.text = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShader.debugFilePath);
 
+    // VR variant: the vertex shader picks u_mvpStereo[u_eyeIndex] via a push constant (one pass per eye).
+    if (m_stereo)
+    {
+        graphicsPipelineLayout.vertexShader.defines.push_back({ "STEREO", "1" });
+        graphicsPipelineLayout.pushConstantRanges.push_back(vk::PushConstantRange{
+            .stageFlags = vk::ShaderStageFlagBits::eVertex, .offset = 0, .size = sizeof(uint32) });
+    }
+
     // Variant 1 (MeshShaderVariant::LitTransparent): same lit shader, alpha-blended, no depth write.
     graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
         .fragmentShader = ShaderSource{
@@ -233,9 +241,10 @@ void StaticMeshGraphicsPipeline::updateTlasDescriptor(vk::DescriptorSet descript
     Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
 
-void StaticMeshGraphicsPipeline::initialize(vk::RenderPass renderPass, uint32 maxUniqueMeshes, uint32 maxTextures)
+void StaticMeshGraphicsPipeline::initialize(vk::RenderPass renderPass, uint32 maxUniqueMeshes, uint32 maxTextures, bool stereo)
 {
     m_renderPass = renderPass;
+    m_stereo = stereo;
     m_sampler.initialize();
 
     GraphicsPipelineLayout graphicsPipelineLayout;
@@ -298,7 +307,7 @@ void StaticMeshGraphicsPipeline::reloadShaders(uint32 maxTextures)
     m_indirectExecutionSet.initialize(m_graphicsPipeline);
 }
 
-void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
+void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, bool updateDescriptors)
 {
     std::array<DescriptorSetUpdateInfo, 15> graphicsDescriptorSetUpdateInfos
     {
@@ -442,9 +451,12 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
 
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
     vk::DescriptorSet descriptorSet = params.descriptorSet.getDescriptorSet();
-    commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, descriptorSet, graphicsDescriptorSetUpdateInfos);
+    if (updateDescriptors)
+        commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, descriptorSet, graphicsDescriptorSetUpdateInfos);
     vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
     vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
+    if (m_stereo) // select the eye matrix for the generated draws (set before execute -> inherited as current state)
+        vkCommandBuffer.pushConstants(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(uint32), &params.eyeIndex);
     vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, {0});
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);

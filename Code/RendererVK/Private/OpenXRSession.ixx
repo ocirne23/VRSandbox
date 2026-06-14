@@ -50,9 +50,14 @@ public:
     // World-space head view matrix + position for the mono camera, given the play-space origin (driven
     // by keyboard locomotion). Valid after a successful beginFrame().
     void getHeadView(const glm::vec3& playSpaceOrigin, glm::mat4& outViewMatrix, glm::vec3& outPosition) const;
-    // Blit the rendered frame into both eye swapchains and submit it to the compositor. Pass a null
-    // source to submit an empty frame (keeps the begin/end pairing balanced when nothing was rendered).
-    void endFrame(vk::Image source, vk::Extent2D sourceExtent, vk::ImageLayout sourceLayout);
+    // Per-eye world view matrix + position (eye 0 = left, 1 = right), given the play-space origin.
+    void getEyeView(uint32 eye, const glm::vec3& playSpaceOrigin, glm::mat4& outViewMatrix, glm::vec3& outPosition) const;
+    // Per-eye asymmetric projection from the runtime's FOV, built like glm::perspective (the engine's
+    // convention) so it stays consistent with the mono path. Valid after a successful beginFrame().
+    glm::mat4 getEyeProjection(uint32 eye, float nearZ, float farZ) const;
+    // Blit the per-eye rendered images into the eye swapchains and submit to the compositor. Pass null
+    // sources to submit an empty frame (keeps the begin/end pairing balanced when nothing was rendered).
+    void endFrame(vk::Image leftSource, vk::Image rightSource, vk::Extent2D sourceExtent, vk::ImageLayout sourceLayout);
 
     // True once the XR instance + system are up (i.e. VR is active). Instance/Device query this to
     // decide whether to pull in the runtime's required Vulkan extensions / physical device.

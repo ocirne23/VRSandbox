@@ -7,6 +7,12 @@
 
 #include "shared.inc.glsl"
 
+#ifdef STEREO
+// VR renders one eye per pass (no multiview here: the forward pass's DGC execution set forbids it),
+// so the eye index is a push constant selecting the per-eye matrix.
+layout (push_constant) uniform EyePC { uint u_eyeIndex; };
+#endif
+
 struct InMeshInstancesData
 {
     vec4 posScale;
@@ -50,8 +56,13 @@ void main()
     out_uv  = in_uv;
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
 
+#ifdef STEREO
+    // VR: per-eye projection selected by the pushed eye index. No TAA jitter (TAA is bypassed in VR).
+    gl_Position = u_mvpStereo[u_eyeIndex] * vec4(out_pos, 1.0);
+#else
     gl_Position = u_mvp * vec4(out_pos, 1.0);
     gl_Position.xy += u_taaJitter.xy * gl_Position.w; // TAA sub-pixel jitter (clip space)
+#endif
 }
 
 /*mat3 version

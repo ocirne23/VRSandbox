@@ -10,6 +10,7 @@ import :Layout;
 import :Instance;
 import :Device;
 import :OpenXRSession;
+import :Allocator;
 import :Surface;
 import :SwapChain;
 import :RenderPass;
@@ -102,7 +103,7 @@ public:
 
     void setWindowMinimized(bool minimized);
     void recreateWindowSurface(Window& window);
-    void setViewportRect(const Rect& rect) { if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } }
+    void setViewportRect(const Rect& rect) { if (Globals::openXR.isEnabled()) return; if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } } // VR renders full-extent (no editor panel sub-rect)
 
     struct Stats
     {
@@ -161,6 +162,9 @@ private:
     void recordShadowCull(uint32 frameIdx);
     void recordShadowDraw(uint32 frameIdx);
     void recordStaticMesh(uint32 frameIdx);
+    // Records the forward draw (viewport/scissor + bind + DGC execute) into cb for the given eye. Shared
+    // by recordStaticMesh (desktop secondary, eye 0) and the per-eye VR path (recorded inline in the primary).
+    void recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordGBuffer(uint32 frameIdx);
     void recordGiProbeDebug(uint32 frameIdx);
     void recordAO(uint32 frameIdx);
@@ -169,6 +173,10 @@ private:
     void recordTaa(uint32 frameIdx);
     void recordEyeAdaptation(uint32 frameIdx);
     void recordComposite(uint32 frameIdx);
+    // VR: (re)create / destroy the per-eye LDR composite targets (sized to the swapchain extent, reusing
+    // the swapchain render pass so the composite pipeline is shared with the desktop path).
+    void createEyeCompositeTargets();
+    void destroyEyeCompositeTargets();
     bool recordGlobalIllum(uint32 frameIdx); // returns true if the ray-tracing TLAS handle changed this frame
     void setHaveToRecordCommandBuffers();
     void recreateSwapchain();
@@ -250,6 +258,18 @@ private:
     Rect m_viewportRect = Rect();
     bool m_windowMinimized = false;
     bool m_vsyncEnabled = true;
+    uint32 m_sceneViewCount = 1; // 2 in VR: SceneColor + forward pass are multiview (one layer per eye)
+
+    // VR: per-eye LDR composite targets. Each eye's SceneColor layer is tonemapped here (TAA bypassed),
+    // then copied into its OpenXR eye swapchain in present(). Reuse m_renderPass (shared depth).
+    std::array<vk::Image, 2> m_eyeColorImage{};
+    std::array<VmaAllocation, 2> m_eyeColorMem{};
+    std::array<vk::ImageView, 2> m_eyeColorView{};
+    std::array<vk::Framebuffer, 2> m_eyeFramebuffer{};
+    vk::Image m_eyeDepthImage;
+    VmaAllocation m_eyeDepthMem = nullptr;
+    vk::ImageView m_eyeDepthView;
+    std::array<DescriptorSet, 2> m_vrCompositeDescriptorSet;
 
     // Live buffer capacities (element counts); grown on demand from the INITIAL_* seeds in Layout.ixx.
     uint32 m_maxRenderNodes = RendererVKLayout::INITIAL_RENDER_NODES;

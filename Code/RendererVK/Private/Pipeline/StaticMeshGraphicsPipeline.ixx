@@ -51,13 +51,19 @@ public:
 
 		vk::ImageView gbufferDepthView;    // full-res depth (AO bilateral upsample edge weights)
 		vk::Sampler gbufferSampler;
+
+		uint32 eyeIndex = 0; // VR (stereo): selects u_mvpStereo[eyeIndex] via push constant
     };
 
-    void initialize(vk::RenderPass renderPass, uint32 maxUniqueMeshes, uint32 maxTextures);
+    // stereo = build the multiview (VR) variant: the vertex shader gets STEREO defined so it uses
+    // u_mvpStereo[gl_ViewIndex]. The render pass must be a matching multiview (2-view) pass.
+    void initialize(vk::RenderPass renderPass, uint32 maxUniqueMeshes, uint32 maxTextures, bool stereo = false);
     void reloadShaders(uint32 maxTextures);
     // Re-sizes the DGC preprocess scratch for a grown unique-mesh capacity (GPU must be idle).
     void resizeMeshCapacity(uint32 maxUniqueMeshes);
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
+    // updateDescriptors=false skips the (host) descriptor-set write: used for the 2nd VR eye, which
+    // reuses the 1st eye's identical descriptors (re-writing a bound non-UAB set would invalidate the CB).
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, bool updateDescriptors = true);
     // Refresh the denoised-AO image binding on a descriptor set (call each frame; the draw CB is cached and
     // the AO image is recreated on resize).
     void updateAODescriptor(vk::DescriptorSet descriptorSet, vk::ImageView aoView, vk::Sampler aoSampler);
@@ -78,6 +84,7 @@ private:
     IndirectCommandsLayout m_indirectCommandsLayout;
     Sampler m_sampler;
     vk::RenderPass m_renderPass;
+    bool m_stereo = false;
 
     vk::DeviceSize m_preprocessSize = 0;
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;            // opaque pass

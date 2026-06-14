@@ -10,14 +10,14 @@ namespace
     constexpr vk::Format SCENE_DEPTH_FORMAT = vk::Format::eD32Sfloat;
 
     bool createImage(vk::Device vkDevice, uint32 w, uint32 h, vk::Format format, vk::ImageUsageFlags usage,
-        vk::Image& outImage, VmaAllocation& outMemory, const char* name)
+        uint32 arrayLayers, vk::Image& outImage, VmaAllocation& outMemory, const char* name)
     {
         vk::ImageCreateInfo info{
             .imageType = vk::ImageType::e2D,
             .format = format,
             .extent = { w, h, 1 },
             .mipLevels = 1,
-            .arrayLayers = 1,
+            .arrayLayers = arrayLayers,
             .samples = vk::SampleCountFlagBits::e1,
             .tiling = vk::ImageTiling::eOptimal,
             .usage = usage,
@@ -28,13 +28,14 @@ namespace
         return true;
     }
 
-    bool createView(vk::Device vkDevice, vk::Image image, vk::Format format, vk::ImageAspectFlags aspect, vk::ImageView& outView)
+    bool createView(vk::Device vkDevice, vk::Image image, vk::Format format, vk::ImageAspectFlags aspect,
+        vk::ImageViewType viewType, uint32 baseLayer, uint32 layerCount, vk::ImageView& outView)
     {
         vk::ImageViewCreateInfo info{
             .image = image,
-            .viewType = vk::ImageViewType::e2D,
+            .viewType = viewType,
             .format = format,
-            .subresourceRange = { .aspectMask = aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 },
+            .subresourceRange = { .aspectMask = aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = baseLayer, .layerCount = layerCount },
         };
         auto result = vkDevice.createImageView(info);
         if (result.result != vk::Result::eSuccess) { assert(false && "scenecolor view"); return false; }
@@ -50,32 +51,39 @@ void SceneColor::destroy()
 {
     vk::Device vkDevice = Globals::device.getDevice();
     if (m_sampler)      vkDevice.destroySampler(m_sampler);
-    if (m_framebuffer)  vkDevice.destroyFramebuffer(m_framebuffer);
+    for (vk::Framebuffer& fb : m_framebuffers) { if (fb) vkDevice.destroyFramebuffer(fb); fb = nullptr; }
     if (m_renderPass)   vkDevice.destroyRenderPass(m_renderPass);
-    if (m_colorView)    vkDevice.destroyImageView(m_colorView);
-    if (m_depthView)    vkDevice.destroyImageView(m_depthView);
+    for (vk::ImageView& v : m_colorLayerViews) { if (v) vkDevice.destroyImageView(v); v = nullptr; }
+    for (vk::ImageView& v : m_depthLayerViews) { if (v) vkDevice.destroyImageView(v); v = nullptr; }
     Globals::gpuAllocator.destroyImage(m_colorImage, m_colorMemory);
     Globals::gpuAllocator.destroyImage(m_depthImage, m_depthMemory);
-    m_sampler = nullptr; m_framebuffer = nullptr; m_renderPass = nullptr;
-    m_colorView = nullptr; m_depthView = nullptr;
+    m_sampler = nullptr; m_renderPass = nullptr;
     m_colorImage = nullptr; m_depthImage = nullptr;
     m_colorMemory = nullptr; m_depthMemory = nullptr;
 }
 
-bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height)
+bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height, uint32 viewCount)
 {
     vk::Device vkDevice = Globals::device.getDevice();
     destroy();
     m_width = width;
     m_height = height;
+    m_viewCount = viewCount;
     m_colorFormat = colorFormat;
 
+    // The colour/depth images hold one layer per eye; the forward pass renders into each layer in a
+    // separate (non-multiview) pass. TRANSFER_SRC lets the VR path copy each layer into its eye swapchain.
     if (!createImage(vkDevice, width, height, colorFormat,
-        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled, m_colorImage, m_colorMemory, "SceneColor.color")) return false;
+        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc,
+        viewCount, m_colorImage, m_colorMemory, "SceneColor.color")) return false;
     if (!createImage(vkDevice, width, height, SCENE_DEPTH_FORMAT,
-        vk::ImageUsageFlagBits::eDepthStencilAttachment, m_depthImage, m_depthMemory, "SceneColor.depth")) return false;
-    if (!createView(vkDevice, m_colorImage, colorFormat, vk::ImageAspectFlagBits::eColor, m_colorView)) return false;
-    if (!createView(vkDevice, m_depthImage, SCENE_DEPTH_FORMAT, vk::ImageAspectFlagBits::eDepth, m_depthView)) return false;
+        vk::ImageUsageFlagBits::eDepthStencilAttachment, viewCount, m_depthImage, m_depthMemory, "SceneColor.depth")) return false;
+
+    for (uint32 i = 0; i < viewCount; ++i)
+    {
+        if (!createView(vkDevice, m_colorImage, colorFormat, vk::ImageAspectFlagBits::eColor, vk::ImageViewType::e2D, i, 1, m_colorLayerViews[i])) return false;
+        if (!createView(vkDevice, m_depthImage, SCENE_DEPTH_FORMAT, vk::ImageAspectFlagBits::eDepth, vk::ImageViewType::e2D, i, 1, m_depthLayerViews[i])) return false;
+    }
 
     // ---- Render pass: colour (ends SHADER_READ_ONLY for the TAA compute pass) + transient depth ----
     std::array<vk::AttachmentDescription2, 2> attachments{
@@ -100,6 +108,8 @@ bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height)
     vk::AttachmentReference2 depthRef{ .attachment = 1, .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal, .aspectMask = vk::ImageAspectFlagBits::eDepth };
     vk::SubpassDescription2 subpass{
         .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+        // Non-multiview: each eye is a separate single-layer pass so the forward pass's DGC execution
+        // set is allowed (an execution set requires viewMask == 0).
         .colorAttachmentCount = 1,
         .pColorAttachments = &colorRef,
         .pDepthStencilAttachment = &depthRef,
@@ -140,18 +150,21 @@ bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height)
     if (rpResult.result != vk::Result::eSuccess) { assert(false && "scenecolor renderpass"); return false; }
     m_renderPass = rpResult.value;
 
-    std::array<vk::ImageView, 2> fbViews{ m_colorView, m_depthView };
-    vk::FramebufferCreateInfo fbInfo{
-        .renderPass = m_renderPass,
-        .attachmentCount = (uint32)fbViews.size(),
-        .pAttachments = fbViews.data(),
-        .width = width,
-        .height = height,
-        .layers = 1,
-    };
-    auto fbResult = vkDevice.createFramebuffer(fbInfo);
-    if (fbResult.result != vk::Result::eSuccess) { assert(false && "scenecolor framebuffer"); return false; }
-    m_framebuffer = fbResult.value;
+    for (uint32 i = 0; i < viewCount; ++i)
+    {
+        std::array<vk::ImageView, 2> fbViews{ m_colorLayerViews[i], m_depthLayerViews[i] };
+        vk::FramebufferCreateInfo fbInfo{
+            .renderPass = m_renderPass,
+            .attachmentCount = (uint32)fbViews.size(),
+            .pAttachments = fbViews.data(),
+            .width = width,
+            .height = height,
+            .layers = 1,
+        };
+        auto fbResult = vkDevice.createFramebuffer(fbInfo);
+        if (fbResult.result != vk::Result::eSuccess) { assert(false && "scenecolor framebuffer"); return false; }
+        m_framebuffers[i] = fbResult.value;
+    }
 
     vk::SamplerCreateInfo samplerInfo{
         .magFilter = vk::Filter::eLinear,
@@ -185,7 +198,7 @@ bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height)
             .oldLayout = vk::ImageLayout::eUndefined,
             .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
             .image = m_colorImage,
-            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, viewCount },
         };
         cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &bar });
         init.end();

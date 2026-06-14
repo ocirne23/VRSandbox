@@ -1,6 +1,7 @@
 module;
 
 #include <vulkan/vulkan_core.h>
+#include <cmath>
 #define XR_USE_GRAPHICS_API_VULKAN
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
@@ -400,7 +401,31 @@ void OpenXRSession::getHeadView(const glm::vec3& playSpaceOrigin, glm::mat4& out
     outViewMatrix = glm::inverse(headWorld);
 }
 
-void OpenXRSession::endFrame(vk::Image source, vk::Extent2D sourceExtent, vk::ImageLayout sourceLayout)
+void OpenXRSession::getEyeView(uint32 eye, const glm::vec3& playSpaceOrigin, glm::mat4& outViewMatrix, glm::vec3& outPosition) const
+{
+    const XrPosef& pose = m_views[eye].pose;
+    const glm::quat orientation(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+    const glm::vec3 localPos(pose.position.x, pose.position.y, pose.position.z);
+    // M3: play-space origin (keyboard locomotion) is a pure translation; the eye pose adds rotation +
+    // the per-eye offset (IPD) on top.
+    outPosition = playSpaceOrigin + localPos;
+    const glm::mat4 eyeWorld = glm::translate(glm::mat4(1.0f), outPosition) * glm::mat4_cast(orientation);
+    outViewMatrix = glm::inverse(eyeWorld);
+}
+
+glm::mat4 OpenXRSession::getEyeProjection(uint32 eye, float nearZ, float farZ) const
+{
+    // OpenXR gives asymmetric half-angles (angleLeft/Down are negative). Build the off-centre frustum
+    // the same way glm::perspective is built in the mono path so the depth/handedness convention matches.
+    const XrFovf& fov = m_views[eye].fov;
+    const float l = std::tan(fov.angleLeft) * nearZ;
+    const float r = std::tan(fov.angleRight) * nearZ;
+    const float b = std::tan(fov.angleDown) * nearZ;
+    const float t = std::tan(fov.angleUp) * nearZ;
+    return glm::frustum(l, r, b, t, nearZ, farZ);
+}
+
+void OpenXRSession::endFrame(vk::Image leftSource, vk::Image rightSource, vk::Extent2D sourceExtent, vk::ImageLayout sourceLayout)
 {
     if (!m_frameActive)
         return;
@@ -411,7 +436,7 @@ void OpenXRSession::endFrame(vk::Image source, vk::Extent2D sourceExtent, vk::Im
     const XrCompositionLayerBaseHeader* layers[1] = { nullptr };
     uint32 layerCount = 0;
 
-    if (m_shouldRender && source)
+    if (m_shouldRender && leftSource && rightSource)
     {
         uint32 imageIndex[VIEW_COUNT] = {};
         bool acquired[VIEW_COUNT] = { false, false };
@@ -433,7 +458,7 @@ void OpenXRSession::endFrame(vk::Image source, vk::Extent2D sourceExtent, vk::Im
 
         if (ok)
         {
-            const VkImage src = (VkImage)source;
+            const VkImage eyeSrc[VIEW_COUNT] = { (VkImage)leftSource, (VkImage)rightSource };
             VkCommandBuffer cb = m_clearCommandBuffer;
             VkCommandBufferBeginInfo cbBegin{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
             cbBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -444,22 +469,24 @@ void OpenXRSession::endFrame(vk::Image source, vk::Extent2D sourceExtent, vk::Im
             range.levelCount = 1;
             range.layerCount = 1;
 
-            // Source (the just-composited desktop image) -> TRANSFER_SRC.
-            VkImageMemoryBarrier srcToRead{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-            srcToRead.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-            srcToRead.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            srcToRead.oldLayout = (VkImageLayout)sourceLayout;
-            srcToRead.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            srcToRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            srcToRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            srcToRead.image = src;
-            srcToRead.subresourceRange = range;
-            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                0, 0, nullptr, 0, nullptr, 1, &srcToRead);
-
             for (uint32 eye = 0; eye < VIEW_COUNT; ++eye)
             {
+                const VkImage src = eyeSrc[eye];
                 const VkImage dst = m_swapchainImages[eye][imageIndex[eye]].image;
+
+                // This eye's composited LDR image -> TRANSFER_SRC (it is re-cleared next frame, so no restore).
+                VkImageMemoryBarrier srcToRead{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                srcToRead.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+                srcToRead.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                srcToRead.oldLayout = (VkImageLayout)sourceLayout;
+                srcToRead.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                srcToRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                srcToRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                srcToRead.image = src;
+                srcToRead.subresourceRange = range;
+                vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &srcToRead);
+
                 VkImageMemoryBarrier toDst{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
                 toDst.srcAccessMask = 0;
                 toDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -472,8 +499,7 @@ void OpenXRSession::endFrame(vk::Image source, vk::Extent2D sourceExtent, vk::Im
                 vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                     0, 0, nullptr, 0, nullptr, 1, &toDst);
 
-                // Blit (scales the desktop-resolution frame to the eye target). For mono both eyes get
-                // the same image; per-eye stereo arrives in M3.
+                // Blit (scales the render-resolution eye image to the runtime's eye target).
                 VkImageBlit blit{};
                 blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
                 blit.srcOffsets[0] = { 0, 0, 0 };
@@ -495,19 +521,6 @@ void OpenXRSession::endFrame(vk::Image source, vk::Extent2D sourceExtent, vk::Im
                 vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                     0, 0, nullptr, 0, nullptr, 1, &toColor);
             }
-
-            // Restore the source to its original layout so the desktop present still works.
-            VkImageMemoryBarrier srcRestore{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-            srcRestore.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            srcRestore.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-            srcRestore.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            srcRestore.newLayout = (VkImageLayout)sourceLayout;
-            srcRestore.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            srcRestore.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            srcRestore.image = src;
-            srcRestore.subresourceRange = range;
-            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                0, 0, nullptr, 0, nullptr, 1, &srcRestore);
 
             vkEndCommandBuffer(cb);
             VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
