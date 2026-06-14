@@ -437,9 +437,22 @@ void Renderer::setWindowMinimized(bool minimized)
     m_windowMinimized = minimized;
 }
 
-const Frustum& Renderer::beginFrame(const Camera& camera)
+const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 {
     Globals::openXR.pollEvents(); // advance the OpenXR session state machine (no-op when VR is off)
+
+    // When VR is active the headset drives the view: the passed camera supplies the play-space origin
+    // (keyboard locomotion), and the head pose is composed on top. beginFrame() also begins the XR
+    // frame (paired with endFrame() in present()).
+    Camera camera = cameraIn;
+    if (Globals::openXR.beginFrame())
+    {
+        glm::mat4 headView;
+        glm::vec3 headPos;
+        Globals::openXR.getHeadView(cameraIn.position, headView, headPos);
+        camera.viewMatrix = headView;
+        camera.position = headPos;
+    }
 
     // Mesh instances overflowed mid-frame last frame (their nodes were dropped for that frame); grow
     // here where no recording or worker-thread writes are in flight.
@@ -659,10 +672,11 @@ void Renderer::setSunLight(const glm::vec3& direction, const glm::vec3& color, f
 
 void Renderer::present()
 {
-    Globals::openXR.renderClearFrame(); // submit the headset frame (no-op when VR is off)
-
     if(m_windowMinimized)
+    {
+        Globals::openXR.endFrame(nullptr, {}, vk::ImageLayout::eUndefined); // balance the begun XR frame
         return;
+    }
 
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -699,12 +713,17 @@ void Renderer::present()
 
     if (!m_swapChain.acquireNextImage())
     {
+        Globals::openXR.endFrame(nullptr, {}, vk::ImageLayout::eUndefined); // balance the begun XR frame
         recreateSwapchain();
         return;
     }
     recordCommandBuffers();
 
     m_swapChain.submitCommandBuffer(getCurrentCommandBuffer());
+
+    // VR: mirror the just-composited frame into both eye swapchains and submit it to the compositor.
+    // (No-op when VR is off.) Sourced before the desktop present so the rendered image is available.
+    Globals::openXR.endFrame(m_swapChain.getCurrentImage(), m_swapChain.getLayout().extent, vk::ImageLayout::ePresentSrcKHR);
 
     if (!m_swapChain.present())
     {

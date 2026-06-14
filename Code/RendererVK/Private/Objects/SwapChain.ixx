@@ -39,6 +39,7 @@ public:
     uint32 getCurrentFrameIndex() const { return m_currentFrame; }
     uint32 getPrevFrameIdx() const { return (m_currentFrame == 0) ? (uint32)m_syncObjects.size() - 1 : m_currentFrame - 1; }
     uint32 getCurrentImageIdx() const { return m_currentImageIdx; }
+    vk::Image getCurrentImage() const { return m_images[m_currentImageIdx]; }
 
     bool acquireNextImage();
     bool present();
@@ -50,6 +51,7 @@ private:
 
     vk::SwapchainKHR m_swapChain;
     Layout m_layout;
+    std::vector<vk::Image> m_images; // owned by the swapchain; cached for the VR mirror blit
 
     uint32 m_currentFrame = 0;
     uint32 m_currentImageIdx = (~0u);

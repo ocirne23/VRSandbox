@@ -110,7 +110,8 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize, bool vs
         .imageColorSpace = surfaceFormat.colorSpace,
         .imageExtent = capabilities.currentExtent,
         .imageArrayLayers = 1,// capabilities.maxImageArrayLayers,
-        .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
+        // eTransferSrc lets the VR path blit the composited frame into the eye swapchains.
+        .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc,
         .imageSharingMode = vk::SharingMode::eExclusive,
         .preTransform = capabilities.currentTransform,
         .compositeAlpha = compositeAlpha,
@@ -130,7 +131,15 @@ bool SwapChain::initialize(const Surface& surface, uint32 swapChainSize, bool vs
         return false;
     }
     m_swapChain = createSwapChainResult.value;
-    
+
+    auto imagesResult = vkDevice.getSwapchainImagesKHR(m_swapChain);
+    if (imagesResult.result != vk::Result::eSuccess)
+    {
+        assert(false && "Failed to get swapchain images");
+        return false;
+    }
+    m_images = imagesResult.value;
+
     return true;
 }
 

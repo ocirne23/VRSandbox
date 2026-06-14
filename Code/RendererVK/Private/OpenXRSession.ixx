@@ -10,6 +10,7 @@ module;
 export module RendererVK:OpenXRSession;
 
 import Core;
+import Core.glm;
 import :VK;
 
 // Minimal OpenXR session wrapper (Milestone 1: lifecycle + a cleared stereo image to the headset).
@@ -42,8 +43,16 @@ public:
     // Pump the OpenXR event queue and advance the session state machine. Call once per frame.
     void pollEvents();
 
-    // M1 test path: submit one stereo frame that just clears both eye layers to an animated colour.
-    void renderClearFrame();
+    // Per-frame: wait for the runtime's render cadence, begin the XR frame, and locate the head + eye
+    // poses. Returns true if a frame was begun (the caller must then call endFrame to balance it).
+    // No-op returning false when the session isn't running.
+    bool beginFrame();
+    // World-space head view matrix + position for the mono camera, given the play-space origin (driven
+    // by keyboard locomotion). Valid after a successful beginFrame().
+    void getHeadView(const glm::vec3& playSpaceOrigin, glm::mat4& outViewMatrix, glm::vec3& outPosition) const;
+    // Blit the rendered frame into both eye swapchains and submit it to the compositor. Pass a null
+    // source to submit an empty frame (keeps the begin/end pairing balanced when nothing was rendered).
+    void endFrame(vk::Image source, vk::Extent2D sourceExtent, vk::ImageLayout sourceLayout);
 
     // True once the XR instance + system are up (i.e. VR is active). Instance/Device query this to
     // decide whether to pull in the runtime's required Vulkan extensions / physical device.
@@ -63,7 +72,16 @@ private:
     XrInstance m_instance = XR_NULL_HANDLE;
     XrSystemId m_systemId = XR_NULL_SYSTEM_ID;
     XrSession m_session = XR_NULL_HANDLE;
-    XrSpace m_space = XR_NULL_HANDLE;
+    XrSpace m_space = XR_NULL_HANDLE;      // LOCAL reference space (world origin)
+    XrSpace m_viewSpace = XR_NULL_HANDLE;  // VIEW reference space (head pose)
+
+    // Per-frame state produced by beginFrame() and consumed by getHeadView()/endFrame().
+    XrView m_views[VIEW_COUNT] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
+    XrPosef m_headPose{};
+    bool m_headPoseValid = false;
+    XrTime m_predictedDisplayTime = 0;
+    bool m_frameActive = false;
+    bool m_shouldRender = false;
 
     // One swapchain per eye (arraySize=1): the SteamVR Vulkan runtime does not support array
     // (arraySize>1) swapchains. Multiview rendering still happens into our own 2-layer array target;

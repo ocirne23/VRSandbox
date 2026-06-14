@@ -226,7 +226,13 @@ bool OpenXRSession::createSession(vk::Instance vkInstance, vk::PhysicalDevice vk
     XrReferenceSpaceCreateInfo spaceInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
     spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
     spaceInfo.poseInReferenceSpace.orientation.w = 1.0f; // identity
-    if (!xrCheck(xrCreateReferenceSpace(m_session, &spaceInfo, &m_space), "xrCreateReferenceSpace"))
+    if (!xrCheck(xrCreateReferenceSpace(m_session, &spaceInfo, &m_space), "xrCreateReferenceSpace(LOCAL)"))
+        return false;
+
+    XrReferenceSpaceCreateInfo viewSpaceInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
+    viewSpaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+    viewSpaceInfo.poseInReferenceSpace.orientation.w = 1.0f; // identity
+    if (!xrCheck(xrCreateReferenceSpace(m_session, &viewSpaceInfo, &m_viewSpace), "xrCreateReferenceSpace(VIEW)"))
         return false;
 
     m_swapchainFormat = selectSwapchainFormat();
@@ -334,69 +340,126 @@ void OpenXRSession::pollEvents()
     }
 }
 
-void OpenXRSession::renderClearFrame()
+bool OpenXRSession::beginFrame()
 {
+    m_frameActive = false;
+    m_shouldRender = false;
+    m_headPoseValid = false;
     if (!m_sessionRunning)
-        return;
+        return false;
 
     XrFrameWaitInfo waitInfo{ XR_TYPE_FRAME_WAIT_INFO };
     XrFrameState frameState{ XR_TYPE_FRAME_STATE };
     if (!xrCheck(xrWaitFrame(m_session, &waitInfo, &frameState), "xrWaitFrame"))
-        return;
+        return false;
 
     XrFrameBeginInfo beginInfo{ XR_TYPE_FRAME_BEGIN_INFO };
     if (!xrCheck(xrBeginFrame(m_session, &beginInfo), "xrBeginFrame"))
+        return false;
+
+    m_predictedDisplayTime = frameState.predictedDisplayTime;
+    m_shouldRender = (frameState.shouldRender == XR_TRUE);
+    m_frameActive = true;
+
+    // Per-eye views (pose + fov) for the composition layer.
+    XrViewLocateInfo locateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
+    locateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    locateInfo.displayTime = m_predictedDisplayTime;
+    locateInfo.space = m_space;
+    XrViewState viewState{ XR_TYPE_VIEW_STATE };
+    for (uint32 i = 0; i < VIEW_COUNT; ++i) m_views[i] = { XR_TYPE_VIEW };
+    uint32 located = 0;
+    xrCheck(xrLocateViews(m_session, &locateInfo, &viewState, VIEW_COUNT, &located, m_views), "xrLocateViews");
+
+    // Head pose (VIEW space relative to LOCAL) for the mono camera.
+    XrSpaceLocation headLoc{ XR_TYPE_SPACE_LOCATION };
+    if (XR_SUCCEEDED(xrLocateSpace(m_viewSpace, m_space, m_predictedDisplayTime, &headLoc))
+        && (headLoc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)
+        && (headLoc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT))
+    {
+        m_headPose = headLoc.pose;
+        m_headPoseValid = true;
+    }
+
+    return true;
+}
+
+void OpenXRSession::getHeadView(const glm::vec3& playSpaceOrigin, glm::mat4& outViewMatrix, glm::vec3& outPosition) const
+{
+    glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+    glm::vec3 localPos(0.0f);
+    if (m_headPoseValid)
+    {
+        orientation = glm::quat(m_headPose.orientation.w, m_headPose.orientation.x, m_headPose.orientation.y, m_headPose.orientation.z);
+        localPos = glm::vec3(m_headPose.position.x, m_headPose.position.y, m_headPose.position.z);
+    }
+    // M2: the play-space origin (keyboard locomotion) is a pure translation; the headset supplies head
+    // rotation + positional tracking on top.
+    outPosition = playSpaceOrigin + localPos;
+    const glm::mat4 headWorld = glm::translate(glm::mat4(1.0f), outPosition) * glm::mat4_cast(orientation);
+    outViewMatrix = glm::inverse(headWorld);
+}
+
+void OpenXRSession::endFrame(vk::Image source, vk::Extent2D sourceExtent, vk::ImageLayout sourceLayout)
+{
+    if (!m_frameActive)
         return;
+    m_frameActive = false;
 
     XrCompositionLayerProjectionView projViews[VIEW_COUNT]{};
     XrCompositionLayerProjection projLayer{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
     const XrCompositionLayerBaseHeader* layers[1] = { nullptr };
     uint32 layerCount = 0;
 
-    if (frameState.shouldRender)
+    if (m_shouldRender && source)
     {
-        XrViewLocateInfo locateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
-        locateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-        locateInfo.displayTime = frameState.predictedDisplayTime;
-        locateInfo.space = m_space;
-        XrViewState viewState{ XR_TYPE_VIEW_STATE };
-        XrView xrViews[VIEW_COUNT]{ { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };
-        uint32 located = 0;
-        xrCheck(xrLocateViews(m_session, &locateInfo, &viewState, VIEW_COUNT, &located, xrViews), "xrLocateViews");
-
-        // Animate the clear colour so it's obvious the headset is live.
-        const float t = (float)(m_frameCounter % 256) / 255.0f;
-        VkClearColorValue clearColor{};
-        clearColor.float32[0] = t;
-        clearColor.float32[1] = 0.2f;
-        clearColor.float32[2] = 1.0f - t;
-        clearColor.float32[3] = 1.0f;
-
-        bool allEyesOk = true;
-        for (uint32 eye = 0; eye < VIEW_COUNT; ++eye)
+        uint32 imageIndex[VIEW_COUNT] = {};
+        bool acquired[VIEW_COUNT] = { false, false };
+        bool ok = true;
+        for (uint32 eye = 0; eye < VIEW_COUNT && ok; ++eye)
         {
-            uint32 imageIndex = 0;
             XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-            if (!xrCheck(xrAcquireSwapchainImage(m_swapchains[eye], &acquireInfo, &imageIndex), "xrAcquireSwapchainImage"))
+            if (!xrCheck(xrAcquireSwapchainImage(m_swapchains[eye], &acquireInfo, &imageIndex[eye]), "xrAcquireSwapchainImage"))
             {
-                allEyesOk = false;
+                ok = false;
                 break;
             }
+            acquired[eye] = true;
             XrSwapchainImageWaitInfo scWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
             scWaitInfo.timeout = XR_INFINITE_DURATION;
-            if (xrCheck(xrWaitSwapchainImage(m_swapchains[eye], &scWaitInfo), "xrWaitSwapchainImage"))
+            if (!xrCheck(xrWaitSwapchainImage(m_swapchains[eye], &scWaitInfo), "xrWaitSwapchainImage"))
+                ok = false;
+        }
+
+        if (ok)
+        {
+            const VkImage src = (VkImage)source;
+            VkCommandBuffer cb = m_clearCommandBuffer;
+            VkCommandBufferBeginInfo cbBegin{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+            cbBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            vkBeginCommandBuffer(cb, &cbBegin);
+
+            VkImageSubresourceRange range{};
+            range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            range.levelCount = 1;
+            range.layerCount = 1;
+
+            // Source (the just-composited desktop image) -> TRANSFER_SRC.
+            VkImageMemoryBarrier srcToRead{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+            srcToRead.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+            srcToRead.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            srcToRead.oldLayout = (VkImageLayout)sourceLayout;
+            srcToRead.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            srcToRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            srcToRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            srcToRead.image = src;
+            srcToRead.subresourceRange = range;
+            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &srcToRead);
+
+            for (uint32 eye = 0; eye < VIEW_COUNT; ++eye)
             {
-                VkCommandBuffer cb = m_clearCommandBuffer;
-                VkCommandBufferBeginInfo cbBegin{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-                cbBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-                vkBeginCommandBuffer(cb, &cbBegin);
-
-                VkImage image = m_swapchainImages[eye][imageIndex].image;
-                VkImageSubresourceRange range{};
-                range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                range.levelCount = 1;
-                range.layerCount = 1;
-
+                const VkImage dst = m_swapchainImages[eye][imageIndex[eye]].image;
                 VkImageMemoryBarrier toDst{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
                 toDst.srcAccessMask = 0;
                 toDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -404,12 +467,21 @@ void OpenXRSession::renderClearFrame()
                 toDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
                 toDst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                 toDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                toDst.image = image;
+                toDst.image = dst;
                 toDst.subresourceRange = range;
                 vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                     0, 0, nullptr, 0, nullptr, 1, &toDst);
 
-                vkCmdClearColorImage(cb, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &range);
+                // Blit (scales the desktop-resolution frame to the eye target). For mono both eyes get
+                // the same image; per-eye stereo arrives in M3.
+                VkImageBlit blit{};
+                blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+                blit.srcOffsets[0] = { 0, 0, 0 };
+                blit.srcOffsets[1] = { (int32_t)sourceExtent.width, (int32_t)sourceExtent.height, 1 };
+                blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+                blit.dstOffsets[0] = { 0, 0, 0 };
+                blit.dstOffsets[1] = { (int32_t)m_viewConfig.recommendedImageRectWidth, (int32_t)m_viewConfig.recommendedImageRectHeight, 1 };
+                vkCmdBlitImage(cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
 
                 VkImageMemoryBarrier toColor{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
                 toColor.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -418,46 +490,62 @@ void OpenXRSession::renderClearFrame()
                 toColor.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
                 toColor.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                 toColor.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                toColor.image = image;
+                toColor.image = dst;
                 toColor.subresourceRange = range;
                 vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                     0, 0, nullptr, 0, nullptr, 1, &toColor);
-
-                vkEndCommandBuffer(cb);
-
-                VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
-                submit.commandBufferCount = 1;
-                submit.pCommandBuffers = &cb;
-                vkQueueSubmit(m_vkQueue, 1, &submit, VK_NULL_HANDLE);
-                vkQueueWaitIdle(m_vkQueue); // M1: simple, correct; replaced with proper sync later
             }
 
-            XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-            xrCheck(xrReleaseSwapchainImage(m_swapchains[eye], &releaseInfo), "xrReleaseSwapchainImage");
+            // Restore the source to its original layout so the desktop present still works.
+            VkImageMemoryBarrier srcRestore{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+            srcRestore.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            srcRestore.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+            srcRestore.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            srcRestore.newLayout = (VkImageLayout)sourceLayout;
+            srcRestore.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            srcRestore.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            srcRestore.image = src;
+            srcRestore.subresourceRange = range;
+            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &srcRestore);
 
-            projViews[eye] = { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW };
-            projViews[eye].pose = xrViews[eye].pose;
-            projViews[eye].fov = xrViews[eye].fov;
-            projViews[eye].subImage.swapchain = m_swapchains[eye];
-            projViews[eye].subImage.imageArrayIndex = 0;
-            projViews[eye].subImage.imageRect.offset = { 0, 0 };
-            projViews[eye].subImage.imageRect.extent = {
-                (int32_t)m_viewConfig.recommendedImageRectWidth,
-                (int32_t)m_viewConfig.recommendedImageRectHeight };
-        }
+            vkEndCommandBuffer(cb);
+            VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+            submit.commandBufferCount = 1;
+            submit.pCommandBuffers = &cb;
+            vkQueueSubmit(m_vkQueue, 1, &submit, VK_NULL_HANDLE);
+            vkQueueWaitIdle(m_vkQueue); // M2: simple serialization; replaced with proper sync later
 
-        if (allEyesOk)
-        {
+            for (uint32 eye = 0; eye < VIEW_COUNT; ++eye)
+            {
+                projViews[eye] = { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW };
+                projViews[eye].pose = m_views[eye].pose;
+                projViews[eye].fov = m_views[eye].fov;
+                projViews[eye].subImage.swapchain = m_swapchains[eye];
+                projViews[eye].subImage.imageArrayIndex = 0;
+                projViews[eye].subImage.imageRect.offset = { 0, 0 };
+                projViews[eye].subImage.imageRect.extent = {
+                    (int32_t)m_viewConfig.recommendedImageRectWidth,
+                    (int32_t)m_viewConfig.recommendedImageRectHeight };
+            }
             projLayer.space = m_space;
             projLayer.viewCount = VIEW_COUNT;
             projLayer.views = projViews;
             layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projLayer);
             layerCount = 1;
         }
+
+        // Release whatever we acquired (required before xrEndFrame references the swapchains).
+        for (uint32 eye = 0; eye < VIEW_COUNT; ++eye)
+            if (acquired[eye])
+            {
+                XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+                xrCheck(xrReleaseSwapchainImage(m_swapchains[eye], &releaseInfo), "xrReleaseSwapchainImage");
+            }
     }
 
     XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
-    endInfo.displayTime = frameState.predictedDisplayTime;
+    endInfo.displayTime = m_predictedDisplayTime;
     endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     endInfo.layerCount = layerCount;
     endInfo.layers = layers;
@@ -482,6 +570,11 @@ void OpenXRSession::destroy()
             m_swapchains[eye] = XR_NULL_HANDLE;
         }
         m_swapchainImages[eye].clear();
+    }
+    if (m_viewSpace != XR_NULL_HANDLE)
+    {
+        xrDestroySpace(m_viewSpace);
+        m_viewSpace = XR_NULL_HANDLE;
     }
     if (m_space != XR_NULL_HANDLE)
     {
