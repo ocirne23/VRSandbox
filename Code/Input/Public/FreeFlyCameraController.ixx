@@ -1,4 +1,4 @@
-export module Entity.FreeFlyCameraController;
+export module Input.FreeFlyCameraController;
 
 import Core;
 import Core.glm;

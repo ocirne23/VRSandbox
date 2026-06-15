@@ -11,6 +11,7 @@ export module RendererVK:OpenXRSession;
 
 import Core;
 import Core.glm;
+import Core.VrSession;
 import :VK;
 
 // Minimal OpenXR session wrapper (Milestone 1: lifecycle + a cleared stereo image to the headset).
@@ -18,7 +19,7 @@ import :VK;
 // the multiview (2-layer) layout the rest of the renderer will grow into. Exposed as the Globals::openXR
 // singleton: Renderer initializes it (only when VR is requested), and Instance/Device query it during
 // their own creation for the runtime's required Vulkan extensions and physical device.
-export class OpenXRSession final
+export class OpenXRSession final : public IVrSession
 {
 public:
     OpenXRSession() {}
@@ -47,11 +48,12 @@ public:
     // poses. Returns true if a frame was begun (the caller must then call endFrame to balance it).
     // No-op returning false when the session isn't running.
     bool beginFrame();
-    // World-space head view matrix + position for the mono camera, given the play-space origin (driven
-    // by keyboard locomotion). Valid after a successful beginFrame().
-    void getHeadView(const glm::vec3& playSpaceOrigin, glm::mat4& outViewMatrix, glm::vec3& outPosition) const;
-    // Per-eye world view matrix + position (eye 0 = left, 1 = right), given the play-space origin.
-    void getEyeView(uint32 eye, const glm::vec3& playSpaceOrigin, glm::mat4& outViewMatrix, glm::vec3& outPosition) const;
+    // World-space head view matrix + position for the mono camera. The play-space is the rigid base the
+    // headset pose rides on: T(playSpacePos) * R(baseOrientation) * headLocal. baseOrientation is the
+    // camera's world rotation combined with the play-space yaw. Valid after a successful beginFrame().
+    void getHeadView(const glm::vec3& playSpacePos, const glm::quat& baseOrientation, glm::mat4& outViewMatrix, glm::vec3& outPosition) const;
+    // Per-eye world view matrix + position (eye 0 = left, 1 = right), same play-space base.
+    void getEyeView(uint32 eye, const glm::vec3& playSpacePos, const glm::quat& baseOrientation, glm::mat4& outViewMatrix, glm::vec3& outPosition) const;
     // Per-eye asymmetric projection from the runtime's FOV, built like glm::perspective (the engine's
     // convention) so it stays consistent with the mono path. Valid after a successful beginFrame().
     glm::mat4 getEyeProjection(uint32 eye, float nearZ, float farZ) const;
@@ -68,6 +70,13 @@ public:
     bool isEnabled() const { return m_enabled; }
     bool isSessionRunning() const { return m_sessionRunning; }
     bool exitRequested() const { return m_exitRequested; }
+
+    // IVrSession (Core): opaque handles for the decoupled Input lib to build its own controller action set,
+    // bridged via main.cpp. Pointer handles round-trip cleanly through void*. Null when VR is inactive.
+    void* xrInstance() const override { return m_instance; }
+    void* xrSession() const override { return m_session; }
+    void* xrReferenceSpace() const override { return m_space; }
+    int64 predictedDisplayTime() const override { return (int64)m_predictedDisplayTime; }
 
     void destroy();
 

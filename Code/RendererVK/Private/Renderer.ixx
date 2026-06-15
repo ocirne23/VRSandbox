@@ -5,6 +5,7 @@ import Core.glm;
 import Core.Rect;
 import Core.Transform;
 import Core.Camera;
+import Core.VrSession;
 
 import :Layout;
 import :Instance;
@@ -67,6 +68,10 @@ public:
 
     // True when an OpenXR session is active. XR is otherwise driven entirely inside beginFrame/present.
     bool isVrEnabled() const { return Globals::openXR.isEnabled(); }
+
+    // The active VR session as a shared Core interface (IVrSession), or null when VR is off. The Input lib
+    // uses it to build its controller action set without depending on RendererVK. (See Core.VrSession.)
+    IVrSession* getVrSession() { return Globals::openXR.isEnabled() ? &Globals::openXR : nullptr; }
 
     const Frustum& beginFrame(const Camera& camera);
     void renderNodeThreadSafe(const RenderNode& node);

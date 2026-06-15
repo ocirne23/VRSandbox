@@ -5,12 +5,14 @@ import Core.SDL;
 import Core.Frustum;
 import Core.Time;
 import Core.glm;
+import Core.Camera;
 
-import Entity;
-import Entity.FreeFlyCameraController;
 import File.FileSystem;
 import File.ISceneData;
 import Input;
+import Input.VrInput;
+import Input.FreeFlyCameraController;
+import Input.VRFreeFlyCameraController;
 import UI;
 
 import RendererVK;
@@ -28,8 +30,16 @@ int main()
     FreeFlyCameraController cameraController;
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
+    VRFreeFlyCameraController vrCameraController;
+    vrCameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f));
+
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED, EVr::DISABLED); // ENABLED DISABLED
+
+    // VR controller input lives in the Input lib but OpenXR is owned by the renderer; bridge the handles
+    // here so the two libs stay decoupled. No-op (falls back to desktop) when VR isn't active.
+    VrInput& vrInput = Globals::vrInput;
+    vrInput.initialize(renderer.getVrSession());
 
     UI& ui = Globals::ui;
     ui.initialize();
@@ -252,7 +262,18 @@ int main()
         ui.update(deltaSec);
         renderer.setViewportRect(ui.getViewportRect());
 
-        const Frustum& frustum = renderer.beginFrame(cameraController.getCamera());
+        Camera camera;
+        if (renderer.isVrEnabled())
+        {
+            vrCameraController.update(deltaSec); // thumbstick locomotion; pulls Globals::vrInput
+            camera = vrCameraController.getCamera();
+        }
+        else
+        {
+            camera = cameraController.getCamera();
+        }
+
+        const Frustum& frustum = renderer.beginFrame(camera);
         for (RenderNode& node : spawnedNodes)
         {
             //if (frustum.sphereInFrustum(node.getWorldBounds()))

@@ -1,4 +1,4 @@
-module Entity.FreeFlyCameraController;
+module Input.FreeFlyCameraController;
 
 import Core;
 import Input;

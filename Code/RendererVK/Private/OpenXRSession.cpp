@@ -385,7 +385,7 @@ bool OpenXRSession::beginFrame()
     return true;
 }
 
-void OpenXRSession::getHeadView(const glm::vec3& playSpaceOrigin, glm::mat4& outViewMatrix, glm::vec3& outPosition) const
+void OpenXRSession::getHeadView(const glm::vec3& playSpacePos, const glm::quat& baseOrientation, glm::mat4& outViewMatrix, glm::vec3& outPosition) const
 {
     glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
     glm::vec3 localPos(0.0f);
@@ -394,22 +394,23 @@ void OpenXRSession::getHeadView(const glm::vec3& playSpaceOrigin, glm::mat4& out
         orientation = glm::quat(m_headPose.orientation.w, m_headPose.orientation.x, m_headPose.orientation.y, m_headPose.orientation.z);
         localPos = glm::vec3(m_headPose.position.x, m_headPose.position.y, m_headPose.position.z);
     }
-    // M2: the play-space origin (keyboard locomotion) is a pure translation; the headset supplies head
-    // rotation + positional tracking on top.
-    outPosition = playSpaceOrigin + localPos;
-    const glm::mat4 headWorld = glm::translate(glm::mat4(1.0f), outPosition) * glm::mat4_cast(orientation);
+    // The play space is a full rigid transform (position + base orientation: camera rotation * play yaw);
+    // the headset's tracked pose rides on top of it. world = playSpace * headLocal.
+    const glm::mat4 playSpace = glm::translate(glm::mat4(1.0f), playSpacePos) * glm::mat4_cast(baseOrientation);
+    const glm::mat4 headWorld = playSpace * glm::translate(glm::mat4(1.0f), localPos) * glm::mat4_cast(orientation);
+    outPosition = glm::vec3(headWorld[3]);
     outViewMatrix = glm::inverse(headWorld);
 }
 
-void OpenXRSession::getEyeView(uint32 eye, const glm::vec3& playSpaceOrigin, glm::mat4& outViewMatrix, glm::vec3& outPosition) const
+void OpenXRSession::getEyeView(uint32 eye, const glm::vec3& playSpacePos, const glm::quat& baseOrientation, glm::mat4& outViewMatrix, glm::vec3& outPosition) const
 {
     const XrPosef& pose = m_views[eye].pose;
     const glm::quat orientation(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
     const glm::vec3 localPos(pose.position.x, pose.position.y, pose.position.z);
-    // M3: play-space origin (keyboard locomotion) is a pure translation; the eye pose adds rotation +
-    // the per-eye offset (IPD) on top.
-    outPosition = playSpaceOrigin + localPos;
-    const glm::mat4 eyeWorld = glm::translate(glm::mat4(1.0f), outPosition) * glm::mat4_cast(orientation);
+    // Same play-space rigid transform as the head; the eye pose adds rotation + the per-eye offset (IPD).
+    const glm::mat4 playSpace = glm::translate(glm::mat4(1.0f), playSpacePos) * glm::mat4_cast(baseOrientation);
+    const glm::mat4 eyeWorld = playSpace * glm::translate(glm::mat4(1.0f), localPos) * glm::mat4_cast(orientation);
+    outPosition = glm::vec3(eyeWorld[3]);
     outViewMatrix = glm::inverse(eyeWorld);
 }
 

@@ -63,7 +63,7 @@ Dependency direction: everything imports Core. RendererVK imports File; UI impor
 	* Log (Console output, dummy implementation)
 	* Stats (Random renderer statistics)
 ## Entity
-* Intended to implement an Entity-Component-System, but mostly unimplemented and mostly unused (App does use `FreeFlyCameraController`)
+* Intended to implement an Entity-Component-System, but mostly unimplemented and currently unused
 ## Scene
 * Intended to manage the scenegraph, but completely unimplemented at this point
 ## File
@@ -72,3 +72,5 @@ Dependency direction: everything imports Core. RendererVK imports File; UI impor
 * `FileSystem` sets the working directory to `Assets/` at startup
 ## Input
 * SDL3 event pump; listener objects (`addKeyboardListener()`, `addMouseListener()`, `addSystemEventListener()`) with std::function callbacks
+* `VrInput` (`Globals::vrInput`): OpenXR controller input (thumbsticks/poses/buttons), wired via the shared `Core.VrSession` `IVrSession` interface the renderer implements (no Input↔Renderer link)
+* Camera controllers: `FreeFlyCameraController` (desktop WASD+mouse) and `VRFreeFlyCameraController` (thumbstick play-space locomotion); both expose `getCamera()`. App picks by `renderer.isVrEnabled()`

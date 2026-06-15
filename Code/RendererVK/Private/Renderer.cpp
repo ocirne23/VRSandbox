@@ -463,15 +463,18 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 {
     Globals::openXR.pollEvents(); // advance the OpenXR session state machine (no-op when VR is off)
 
-    // When VR is active the headset drives the view: the passed camera supplies the play-space origin
-    // (keyboard locomotion), and the head pose is composed on top. beginFrame() also begins the XR
-    // frame (paired with endFrame() in present()).
+    // When VR is active the headset drives the view: the passed camera supplies the play-space pose, and the
+    // head pose is composed on top. The play-space base orientation is the camera's own world rotation (from
+    // its view matrix) combined with the play-space yaw, so the headset rides on top of BOTH:
+    //   world = T(camPos) * R(camRot) * R(playYaw) * headLocal.
+    // beginFrame() also begins the XR frame (paired with endFrame() in present()).
     Camera camera = cameraIn;
+    const glm::quat vrBaseOrientation = glm::quat_cast(glm::inverse(cameraIn.viewMatrix)) * cameraIn.playSpaceOrientation;
     if (Globals::openXR.beginFrame())
     {
         glm::mat4 headView;
         glm::vec3 headPos;
-        Globals::openXR.getHeadView(cameraIn.position, headView, headPos);
+        Globals::openXR.getHeadView(cameraIn.position, vrBaseOrientation, headView, headPos);
         camera.viewMatrix = headView;
         camera.position = headPos;
     }
@@ -570,7 +573,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         {
             glm::mat4 eyeView;
             glm::vec3 eyePos;
-            Globals::openXR.getEyeView(eye, cameraIn.position, eyeView, eyePos);
+            Globals::openXR.getEyeView(eye, cameraIn.position, vrBaseOrientation, eyeView, eyePos);
             const glm::mat4 eyeProj = Globals::openXR.getEyeProjection(eye, camera.near, camera.far);
             RendererVKLayout::ViewData& v = ubo.views[eye + 1]; // [1] = left eye, [2] = right eye
             v.mvp = eyeProj * eyeView;
