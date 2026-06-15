@@ -425,6 +425,27 @@ glm::mat4 OpenXRSession::getEyeProjection(uint32 eye, float nearZ, float farZ) c
     return glm::frustum(l, r, b, t, nearZ, farZ);
 }
 
+glm::mat4 OpenXRSession::getCombinedProjection(float nearZ, float farZ) const
+{
+    // Widest extent each side across both eyes (angleLeft/Down are negative), with a small margin so the
+    // head-centred frustum also covers the eyes' horizontal offset (IPD) for near geometry. This guarantees
+    // any point either eye can see reprojects inside the centre view's [0,1] (no fog-volume edge clamp).
+    XrFovf u = m_views[0].fov;
+    for (uint32 i = 1; i < VIEW_COUNT; ++i)
+    {
+        u.angleLeft  = std::min(u.angleLeft,  m_views[i].fov.angleLeft);
+        u.angleRight = std::max(u.angleRight, m_views[i].fov.angleRight);
+        u.angleDown  = std::min(u.angleDown,  m_views[i].fov.angleDown);
+        u.angleUp    = std::max(u.angleUp,    m_views[i].fov.angleUp);
+    }
+    constexpr float margin = 1.1f;
+    const float l = std::tan(u.angleLeft)  * nearZ * margin;
+    const float r = std::tan(u.angleRight) * nearZ * margin;
+    const float b = std::tan(u.angleDown)  * nearZ * margin;
+    const float t = std::tan(u.angleUp)    * nearZ * margin;
+    return glm::frustum(l, r, b, t, nearZ, farZ);
+}
+
 void OpenXRSession::endFrame(vk::Image leftSource, vk::Image rightSource, vk::Extent2D sourceExtent, vk::ImageLayout sourceLayout)
 {
     if (!m_frameActive)

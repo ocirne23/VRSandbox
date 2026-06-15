@@ -17,11 +17,12 @@ layout (push_constant) uniform PC
     uint  aoWidth;
     uint  aoHeight;
     float maxHistory;   // blend weight for valid history (e.g. 0.92)
-    float _pad;
+    uint  eye;          // stereo eye index (0 on desktop / left eye)
 } pc;
 
 void main()
 {
+    g_viewIndex = int(pc.eye);
     const ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     if (px.x >= int(pc.aoWidth) || px.y >= int(pc.aoHeight))
         return;
@@ -31,10 +32,10 @@ void main()
     const float depth = texture(u_curDepth, uv).r;
     if (depth >= 1.0) { imageStore(u_accumOut, px, raw); return; }
 
-    const vec3 worldPos = worldPosFromDepth(uv, depth);
+    const vec3 worldPos = worldPosFromDepthEye(uv, depth);
 
     float clipW;
-    const vec2 prevUv = prevScreenUV(worldPos, clipW);
+    const vec2 prevUv = prevScreenUVEye(worldPos, clipW);
 
     // Bilateral 2x2 history fetch: validate each bilinear tap against its own reprojected position
     // instead of fetching with plain bilinear after a single-point disocclusion test. At silhouettes the
@@ -45,7 +46,7 @@ void main()
     if (clipW > 0.0 && all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0))))
     {
         // Distance-scaled disocclusion threshold: tolerate more at range (depth precision falls off).
-        const float viewDist = length(worldPos - u_viewPos);
+        const float viewDist = length(worldPos - viewPosEye());
         const float thresh = 0.02 + 0.01 * viewDist;
 
         const vec2 res   = vec2(pc.aoWidth, pc.aoHeight);
@@ -63,7 +64,7 @@ void main()
             const float prevDepth = texture(u_prevDepth, tapUv).r;
             if (prevDepth >= 1.0)
                 continue;
-            const vec3 prevWorld = worldPosFromDepthMat(tapUv, prevDepth, u_prevInvMvp);
+            const vec3 prevWorld = worldPosFromDepthMat(tapUv, prevDepth, u_prevInvMvpStereo[g_viewIndex]);
             if (length(prevWorld - worldPos) >= thresh)
                 continue;
             sum  += texture(u_historyAO, tapUv) * bw[i];

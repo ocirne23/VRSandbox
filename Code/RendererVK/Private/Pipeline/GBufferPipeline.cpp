@@ -31,6 +31,10 @@ void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout)
         .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // material infos (sky flag)
         .binding = 2, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
+
+    // Eye index (u_mvpStereo[eyeIndex]); the prepass is rendered once per eye in VR (0 on desktop).
+    layout.pushConstantRanges.push_back(vk::PushConstantRange{
+        .stageFlags = vk::ShaderStageFlagBits::eVertex, .offset = 0, .size = sizeof(uint32) });
 }
 
 void GBufferPipeline::initialize(const GBuffer& gbuffer)
@@ -48,7 +52,7 @@ void GBufferPipeline::reloadShaders(const GBuffer& gbuffer)
         printf("GBufferPipeline: shader reload failed, keeping previous pipeline\n");
 }
 
-void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
+void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, uint32 eyeIndex)
 {
     std::array<DescriptorSetUpdateInfo, 3> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
@@ -67,6 +71,7 @@ void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint
     vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
+    vkCommandBuffer.pushConstants(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(uint32), &eyeIndex);
 
     // Reuse the camera-cull IndirectDrawSequence buffer: skip the leading pipelineIndex uint (offset 4),
     // and draw one VkDrawIndexedIndirectCommand per mesh (stride = sizeof(IndirectDrawSequence) = 24).

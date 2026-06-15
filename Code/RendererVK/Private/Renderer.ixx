@@ -166,6 +166,12 @@ private:
     // by recordStaticMesh (desktop secondary, eye 0) and the per-eye VR path (recorded inline in the primary).
     void recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordGBuffer(uint32 frameIdx);
+    // Inline per-eye variants (VR): recorded straight into the primary so the per-eye push constant + the
+    // per-eye descriptor sets / image slots apply. The caller manages the surrounding render pass / barriers.
+    void recordGBufferInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
+    void recordAOInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
+    void recordFogApplyInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
+    void recordTaaInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordGiProbeDebug(uint32 frameIdx);
     void recordAO(uint32 frameIdx);
     void recordVolumetricFog(uint32 frameIdx);
@@ -312,8 +318,11 @@ private:
         GBuffer gbuffer;
         ShadowMap shadowMap;
 
-        DescriptorSet staticMeshPipelineDescriptorSet;
-        DescriptorSet gbufferDescriptorSet;
+        // Per-eye in VR (the forward/gbuffer passes are rendered once per eye inline in the primary, so the
+        // two eyes can't share a descriptor set — a host update between the two uses would invalidate it).
+        // Desktop uses index 0 only.
+        std::array<DescriptorSet, 2> staticMeshPipelineDescriptorSet;
+        std::array<DescriptorSet, 2> gbufferDescriptorSet;
         DescriptorSet compositeDescriptorSet;
         DescriptorSet indirectCullPipelineDescriptorSet;
         DescriptorSet lightGridPipelineDescriptorSet;

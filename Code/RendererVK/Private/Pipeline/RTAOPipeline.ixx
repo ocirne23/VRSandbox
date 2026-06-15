@@ -23,7 +23,8 @@ public:
     ~RTAOPipeline();
     RTAOPipeline(const RTAOPipeline&) = delete;
 
-    void initialize(uint32 fullWidth, uint32 fullHeight);
+    // viewCount > 1 (VR) keeps a separate AO image set + history per eye (record() takes the eye index).
+    void initialize(uint32 fullWidth, uint32 fullHeight, uint32 viewCount = 1);
     void recreateImages(uint32 fullWidth, uint32 fullHeight);
     void reloadShaders();
 
@@ -36,21 +37,25 @@ public:
         vk::Sampler   gbufferSampler;
         vk::AccelerationStructureKHR tlas;
     };
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, const RecordParams& params);
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params);
 
-    // Final denoised AO (half-res); sampled by the forward pass with getAOSampler() (linear upsample).
-    vk::ImageView getAOView(uint32 frameIdx) const { return m_final.view[frameIdx]; }
+    // Final denoised AO (half-res) for an eye; sampled by the forward pass with getAOSampler() (linear upsample).
+    vk::ImageView getAOView(uint32 frameIdx, uint32 eye) const { return m_final.view[slot(frameIdx, eye)]; }
     vk::Sampler   getAOSampler() const { return m_aoSampler; }
     uint32 getWidth() const  { return m_width; }
     uint32 getHeight() const { return m_height; }
 
 private:
+    static constexpr uint32 MAX_VIEWS = 2;
+    static constexpr uint32 SLOTS = RendererVKLayout::NUM_FRAMES_IN_FLIGHT * MAX_VIEWS;
+    static uint32 slot(uint32 frameIdx, uint32 eye) { return frameIdx * MAX_VIEWS + eye; }
+
     struct ImageSet
     {
-        std::array<vk::Image, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> image;
-        std::array<VmaAllocation, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> memory{};
-        std::array<vk::ImageView, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> view;
-        std::array<bool, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> initialized{};
+        std::array<vk::Image, SLOTS> image{};
+        std::array<VmaAllocation, SLOTS> memory{};
+        std::array<vk::ImageView, SLOTS> view{};
+        std::array<bool, SLOTS> initialized{};
     };
 
     void buildTraceLayout(ComputePipelineLayout& layout);
@@ -58,14 +63,15 @@ private:
     void buildSpatialLayout(ComputePipelineLayout& layout);
     void createImageSet(ImageSet& set);
     void destroyImageSet(ImageSet& set);
-    void transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uint32 frameIdx, bool forWrite);
+    void transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uint32 slotIdx, bool forWrite);
 
+    uint32 m_viewCount = 1;
     ComputePipeline m_tracePipeline;
     ComputePipeline m_temporalPipeline;
     ComputePipeline m_spatialPipeline;
-    std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_traceSets;
-    std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_temporalSets;
-    std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_spatialSets;
+    std::array<DescriptorSet, SLOTS> m_traceSets;
+    std::array<DescriptorSet, SLOTS> m_temporalSets;
+    std::array<DescriptorSet, SLOTS> m_spatialSets;
 
     // Tuning (runtime-tweakable; registered with the Tweak system in initialize()). Few rays per frame;
     // temporal accumulation amortizes them into a clean result.

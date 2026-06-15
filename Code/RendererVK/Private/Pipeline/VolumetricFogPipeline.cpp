@@ -61,6 +61,9 @@ void VolumetricFogPipeline::buildApplyLayout(GraphicsPipelineLayout& layout)
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 1, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 2, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+    // Eye index (per-eye depth reconstruction + projection; 0 on desktop / left eye).
+    layout.pushConstantRanges.push_back(vk::PushConstantRange{
+        .stageFlags = vk::ShaderStageFlagBits::eFragment, .offset = 0, .size = sizeof(uint32) });
 }
 
 void VolumetricFogPipeline::createImageSet(ImageSet& set)
@@ -180,13 +183,15 @@ void VolumetricFogPipeline::initialize()
     m_sampler = samplerResult.value;
 }
 
-void VolumetricFogPipeline::initializeApply(vk::RenderPass renderPass)
+void VolumetricFogPipeline::initializeApply(vk::RenderPass renderPass, uint32 viewCount)
 {
+    m_applyViewCount = viewCount;
     GraphicsPipelineLayout layout;
     buildApplyLayout(layout);
     m_applyPipeline.initialize(renderPass, layout);
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
-        m_applySets[i].initialize(m_applyPipeline.getDescriptorSetLayout());
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+    for (uint32 e = 0; e < m_applyViewCount; ++e)
+        m_applySets[applySlot(f, e)].initialize(m_applyPipeline.getDescriptorSetLayout());
 }
 
 void VolumetricFogPipeline::reloadShaders(vk::RenderPass renderPass)
@@ -277,10 +282,10 @@ void VolumetricFogPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx
     cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &integrateToApply });
 }
 
-void VolumetricFogPipeline::recordApply(CommandBuffer& commandBuffer, uint32 frameIdx, const ApplyParams& params)
+void VolumetricFogPipeline::recordApply(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const ApplyParams& params)
 {
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
-    DescriptorSet& set = m_applySets[frameIdx];
+    DescriptorSet& set = m_applySets[applySlot(frameIdx, eye)];
     vk::DescriptorSet vkSet = set.getDescriptorSet();
     auto uboInfo = vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = sizeof(RendererVKLayout::Ubo) };
     std::array<DescriptorSetUpdateInfo, 3> updates{
@@ -291,5 +296,6 @@ void VolumetricFogPipeline::recordApply(CommandBuffer& commandBuffer, uint32 fra
     commandBuffer.cmdUpdateDescriptorSets(m_applyPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, vkSet, updates);
     cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_applyPipeline.getPipeline());
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_applyPipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
+    cmd.pushConstants(m_applyPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eFragment, 0, sizeof(uint32), &eye);
     cmd.draw(3, 1, 0, 0);
 }

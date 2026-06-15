@@ -21,7 +21,8 @@ public:
     ~TaaPipeline();
     TaaPipeline(const TaaPipeline&) = delete;
 
-    void initialize(uint32 width, uint32 height);
+    // viewCount > 1 (VR) keeps a separate resolved image + history per eye (record() takes the eye index).
+    void initialize(uint32 width, uint32 height, uint32 viewCount = 1);
     void recreateImages(uint32 width, uint32 height);
     void reloadShaders();
 
@@ -35,30 +36,35 @@ public:
         vk::Sampler   gbufferSampler;
         float feedback;                      // history weight; 0 disables accumulation
     };
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, const RecordParams& params);
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params);
 
-    // Resolved colour for this frame; sampled by the composite pass with getSampler() (linear).
-    vk::ImageView getResolvedView(uint32 frameIdx) const { return m_resolved.view[frameIdx]; }
+    // Resolved colour for this frame/eye; sampled by the composite pass with getSampler() (linear).
+    vk::ImageView getResolvedView(uint32 frameIdx, uint32 eye) const { return m_resolved.view[slot(frameIdx, eye)]; }
     vk::Sampler   getSampler() const { return m_sampler; }
     uint32 getWidth() const  { return m_width; }
     uint32 getHeight() const { return m_height; }
 
 private:
+    static constexpr uint32 MAX_VIEWS = 2;
+    static constexpr uint32 SLOTS = RendererVKLayout::NUM_FRAMES_IN_FLIGHT * MAX_VIEWS;
+    static uint32 slot(uint32 frameIdx, uint32 eye) { return frameIdx * MAX_VIEWS + eye; }
+
     struct ImageSet
     {
-        std::array<vk::Image, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> image;
-        std::array<VmaAllocation, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> memory{};
-        std::array<vk::ImageView, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> view;
-        std::array<bool, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> initialized{};
+        std::array<vk::Image, SLOTS> image{};
+        std::array<VmaAllocation, SLOTS> memory{};
+        std::array<vk::ImageView, SLOTS> view{};
+        std::array<bool, SLOTS> initialized{};
     };
 
     void buildLayout(ComputePipelineLayout& layout);
     void createImageSet(ImageSet& set);
     void destroyImageSet(ImageSet& set);
-    void transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uint32 frameIdx, bool forWrite);
+    void transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uint32 slotIdx, bool forWrite);
 
+    uint32 m_viewCount = 1;
     ComputePipeline m_pipeline;
-    std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_sets;
+    std::array<DescriptorSet, SLOTS> m_sets;
 
     uint32 m_width = 0;
     uint32 m_height = 0;

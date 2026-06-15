@@ -13,13 +13,30 @@ layout (binding = 1) uniform sampler2D u_depth;
 layout (binding = 2) uniform sampler3D u_integrated;
 layout (location = 0) out vec4 out_color;
 
+// Eye index (0 on desktop / left eye); selects the per-eye depth reconstruction + projection. The fog
+// volume itself is built once for the centre view, sampled here at each eye's reconstructed world pos.
+layout (push_constant) uniform EyePC { uint u_eyeIndex; };
+
 void main()
 {
+    g_viewIndex = int(u_eyeIndex);
     const float depth = texture(u_depth, v_uv).r;
-    const vec3 worldPos = worldPosFromDepth(v_uv, depth);
-    const float viewZ = (u_mvp * vec4(worldPos, 1.0)).w;
-
-    const vec2 vpUv = (v_uv - u_viewportRect.xy) / u_viewportRect.zw;
+    // Reconstruct this eye's world position, then reproject it through the shared CENTRE (head) view that
+    // the froxel volume was built in, so the lookup lands at the correct froxel regardless of which eye is
+    // sampling (on desktop u_mvp == this eye, so vpUv collapses back to v_uv). Sampling the centre-built
+    // volume at the eye's own screen UV would offset the fog by the eye/head parallax (a sliding "shadow").
+    const vec3 worldPos = worldPosFromDepthEye(v_uv, depth);
+    const vec4 centerClip = u_mvp * vec4(worldPos, 1.0);
+    const float viewZ = centerClip.w;
+    const vec2 ndc = centerClip.xy / centerClip.w;
+    const vec2 vpUv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    // Outside the centre view (a sliver an eye can see past the volume's coverage): emit no fog rather than
+    // letting the clamp sampler smear the edge froxels across the screen.
+    if (centerClip.w <= 0.0 || any(lessThan(vpUv, vec2(0.0))) || any(greaterThan(vpUv, vec2(1.0))))
+    {
+        out_color = vec4(0.0, 0.0, 0.0, 1.0); // inScatter 0, transmittance 1 -> scene unchanged
+        return;
+    }
     const float w = clamp(volViewZToSlice(viewZ), 0.0, 1.0);
     const vec4 fog = texture(u_integrated, vec3(vpUv, w));
     out_color = vec4(fog.rgb, fog.a);

@@ -11,14 +11,14 @@ namespace
     constexpr vk::Format GBUFFER_DEPTH_FORMAT  = vk::Format::eD32Sfloat;
 
     bool createImage(vk::Device vkDevice, uint32 w, uint32 h, vk::Format format, vk::ImageUsageFlags usage,
-        vk::Image& outImage, VmaAllocation& outMemory, const char* name)
+        uint32 arrayLayers, vk::Image& outImage, VmaAllocation& outMemory, const char* name)
     {
         vk::ImageCreateInfo info{
             .imageType = vk::ImageType::e2D,
             .format = format,
             .extent = { w, h, 1 },
             .mipLevels = 1,
-            .arrayLayers = 1,
+            .arrayLayers = arrayLayers,
             .samples = vk::SampleCountFlagBits::e1,
             .tiling = vk::ImageTiling::eOptimal,
             .usage = usage,
@@ -29,13 +29,13 @@ namespace
         return true;
     }
 
-    bool createView(vk::Device vkDevice, vk::Image image, vk::Format format, vk::ImageAspectFlags aspect, vk::ImageView& outView)
+    bool createView(vk::Device vkDevice, vk::Image image, vk::Format format, vk::ImageAspectFlags aspect, uint32 baseLayer, vk::ImageView& outView)
     {
         vk::ImageViewCreateInfo info{
             .image = image,
             .viewType = vk::ImageViewType::e2D,
             .format = format,
-            .subresourceRange = { .aspectMask = aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 },
+            .subresourceRange = { .aspectMask = aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = baseLayer, .layerCount = 1 },
         };
         auto result = vkDevice.createImageView(info);
         if (result.result != vk::Result::eSuccess) { assert(false && "gbuffer view"); return false; }
@@ -51,31 +51,34 @@ void GBuffer::destroy()
 {
     vk::Device vkDevice = Globals::device.getDevice();
     if (m_sampler)      vkDevice.destroySampler(m_sampler);
-    if (m_framebuffer)  vkDevice.destroyFramebuffer(m_framebuffer);
+    for (vk::Framebuffer& fb : m_framebuffers) { if (fb) vkDevice.destroyFramebuffer(fb); fb = nullptr; }
     if (m_renderPass)   vkDevice.destroyRenderPass(m_renderPass);
-    if (m_normalView)   vkDevice.destroyImageView(m_normalView);
-    if (m_depthView)    vkDevice.destroyImageView(m_depthView);
+    for (vk::ImageView& v : m_normalViews) { if (v) vkDevice.destroyImageView(v); v = nullptr; }
+    for (vk::ImageView& v : m_depthViews)  { if (v) vkDevice.destroyImageView(v); v = nullptr; }
     Globals::gpuAllocator.destroyImage(m_normalImage, m_normalMemory);
     Globals::gpuAllocator.destroyImage(m_depthImage, m_depthMemory);
-    m_sampler = nullptr; m_framebuffer = nullptr; m_renderPass = nullptr;
-    m_normalView = nullptr; m_depthView = nullptr;
+    m_sampler = nullptr; m_renderPass = nullptr;
     m_normalImage = nullptr; m_depthImage = nullptr;
     m_normalMemory = nullptr; m_depthMemory = nullptr;
 }
 
-bool GBuffer::initialize(uint32 width, uint32 height)
+bool GBuffer::initialize(uint32 width, uint32 height, uint32 viewCount)
 {
     vk::Device vkDevice = Globals::device.getDevice();
     destroy();
     m_width = width;
     m_height = height;
+    m_viewCount = viewCount;
 
     if (!createImage(vkDevice, width, height, GBUFFER_NORMAL_FORMAT,
-        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled, m_normalImage, m_normalMemory, "GBuffer.normal")) return false;
+        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled, viewCount, m_normalImage, m_normalMemory, "GBuffer.normal")) return false;
     if (!createImage(vkDevice, width, height, GBUFFER_DEPTH_FORMAT,
-        vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled, m_depthImage, m_depthMemory, "GBuffer.depth")) return false;
-    if (!createView(vkDevice, m_normalImage, GBUFFER_NORMAL_FORMAT, vk::ImageAspectFlagBits::eColor, m_normalView)) return false;
-    if (!createView(vkDevice, m_depthImage, GBUFFER_DEPTH_FORMAT, vk::ImageAspectFlagBits::eDepth, m_depthView)) return false;
+        vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled, viewCount, m_depthImage, m_depthMemory, "GBuffer.depth")) return false;
+    for (uint32 i = 0; i < viewCount; ++i)
+    {
+        if (!createView(vkDevice, m_normalImage, GBUFFER_NORMAL_FORMAT, vk::ImageAspectFlagBits::eColor, i, m_normalViews[i])) return false;
+        if (!createView(vkDevice, m_depthImage, GBUFFER_DEPTH_FORMAT, vk::ImageAspectFlagBits::eDepth, i, m_depthViews[i])) return false;
+    }
 
     // ---- Render pass: color (normal) + depth, both end SHADER_READ_ONLY for the AO compute pass ----
     std::array<vk::AttachmentDescription2, 2> attachments{
@@ -134,18 +137,21 @@ bool GBuffer::initialize(uint32 width, uint32 height)
     if (rpResult.result != vk::Result::eSuccess) { assert(false && "gbuffer renderpass"); return false; }
     m_renderPass = rpResult.value;
 
-    std::array<vk::ImageView, 2> fbViews{ m_normalView, m_depthView };
-    vk::FramebufferCreateInfo fbInfo{
-        .renderPass = m_renderPass,
-        .attachmentCount = (uint32)fbViews.size(),
-        .pAttachments = fbViews.data(),
-        .width = width,
-        .height = height,
-        .layers = 1,
-    };
-    auto fbResult = vkDevice.createFramebuffer(fbInfo);
-    if (fbResult.result != vk::Result::eSuccess) { assert(false && "gbuffer framebuffer"); return false; }
-    m_framebuffer = fbResult.value;
+    for (uint32 i = 0; i < viewCount; ++i)
+    {
+        std::array<vk::ImageView, 2> fbViews{ m_normalViews[i], m_depthViews[i] };
+        vk::FramebufferCreateInfo fbInfo{
+            .renderPass = m_renderPass,
+            .attachmentCount = (uint32)fbViews.size(),
+            .pAttachments = fbViews.data(),
+            .width = width,
+            .height = height,
+            .layers = 1,
+        };
+        auto fbResult = vkDevice.createFramebuffer(fbInfo);
+        if (fbResult.result != vk::Result::eSuccess) { assert(false && "gbuffer framebuffer"); return false; }
+        m_framebuffers[i] = fbResult.value;
+    }
 
     vk::SamplerCreateInfo samplerInfo{
         .magFilter = vk::Filter::eNearest,
@@ -180,7 +186,7 @@ bool GBuffer::initialize(uint32 width, uint32 height)
                 .oldLayout = vk::ImageLayout::eUndefined,
                 .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
                 .image = m_normalImage,
-                .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
+                .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, viewCount },
             },
             vk::ImageMemoryBarrier2{
                 .srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe,
@@ -189,7 +195,7 @@ bool GBuffer::initialize(uint32 width, uint32 height)
                 .oldLayout = vk::ImageLayout::eUndefined,
                 .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
                 .image = m_depthImage,
-                .subresourceRange = { vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1 },
+                .subresourceRange = { vk::ImageAspectFlagBits::eDepth, 0, 1, 0, viewCount },
             },
         };
         cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = (uint32)bars.size(), .pImageMemoryBarriers = bars.data() });

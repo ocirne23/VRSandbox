@@ -5,6 +5,10 @@
 
 #include "shared.inc.glsl"
 
+// Eye index (0 on desktop / left eye). The G-buffer is rendered once per eye into its own layer, like the
+// forward pass; selects the matching per-eye projection. No TAA jitter here (this is the reference depth).
+layout (push_constant) uniform EyePC { uint u_eyeIndex; };
+
 struct InMeshInstancesData
 {
     vec4 posScale;
@@ -49,5 +53,5 @@ void main()
     }
     vec3 worldPos = quat_transform(in_pos * inst.posScale.w, inst.quat) + inst.posScale.xyz;
     out_normal = quat_transform(in_normal, inst.quat);
-    gl_Position = u_mvp * vec4(worldPos, 1.0);
+    gl_Position = u_mvpStereo[u_eyeIndex] * vec4(worldPos, 1.0);
 }

@@ -57,8 +57,10 @@ void main()
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
 
 #ifdef STEREO
-    // VR: per-eye projection selected by the pushed eye index. No TAA jitter (TAA is bypassed in VR).
+    // VR: per-eye projection selected by the pushed eye index, with the same TAA sub-pixel jitter as the
+    // mono path (per-eye TAA accumulates it just like desktop). The fragment reads the same push constant.
     gl_Position = u_mvpStereo[u_eyeIndex] * vec4(out_pos, 1.0);
+    gl_Position.xy += u_taaJitter.xy * gl_Position.w;
 #else
     gl_Position = u_mvp * vec4(out_pos, 1.0);
     gl_Position.xy += u_taaJitter.xy * gl_Position.w; // TAA sub-pixel jitter (clip space)

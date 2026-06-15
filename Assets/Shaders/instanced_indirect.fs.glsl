@@ -86,6 +86,9 @@ layout (location = 0) in vec3 in_pos;
 layout (location = 1) in mat3 in_tbn;
 layout (location = 4) in vec2 in_uv;
 layout (location = 5) in flat uint in_meshIdxMaterialIdx;
+#ifdef STEREO
+layout (push_constant) uniform EyePC { uint u_eyeIndex; }; // per-eye view pos + AO selection (VR)
+#endif
 
 layout (location = 0) out vec4 out_color;
 
@@ -497,7 +500,7 @@ vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
 	const float bw[4] = float[]((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
 	const vec2 offs[4] = vec2[](vec2(0.0), vec2(aoTexel.x, 0.0), vec2(0.0, aoTexel.y), aoTexel);
 
-	const float sigmaZ = max(0.05 * length(pos - u_viewPos), 0.02);
+	const float sigmaZ = max(0.05 * length(pos - viewPosEye()), 0.02);
 	vec4 sum = vec4(0.0);
 	float wsum = 0.0;
 	for (int i = 0; i < 4; ++i)
@@ -506,7 +509,7 @@ vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
 		const float d = texture(u_gbufferDepth, uv).r;
 		if (d >= 1.0)
 			continue;
-		const vec3 tapPos = worldPosFromDepth(uv, d);
+		const vec3 tapPos = worldPosFromDepthEye(uv, d);
 		const float dz = length(tapPos - pos);
 		const float w  = bw[i] * exp(-(dz * dz) / (2.0 * sigmaZ * sigmaZ));
 		sum  += texture(u_ao, uv) * w;
@@ -518,6 +521,9 @@ vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
 
 void main()
 {
+#ifdef STEREO
+	g_viewIndex = int(u_eyeIndex); // per-eye reconstruction (AO upsample) + view pos
+#endif
 	const uint16_t materialIdx   = uint16_t((in_meshIdxMaterialIdx & 0xFFFF0000) >> 16);
 	const MaterialInfo material  = in_materialInfos[materialIdx];
 	const uint16_t diffuseTexIdx = uint16_t(material.diffuseNormalTexIdx & 0x0000FFFF);
@@ -534,7 +540,7 @@ void main()
 		roughness = max(metalRoughness.y, 0.01);
 	}
 
-	const vec3 V  = normalize(u_viewPos - in_pos);
+	const vec3 V  = normalize(viewPosEye() - in_pos);
 	const vec2 uv = in_uv; //spomDisplaceUV(uint(normalTexIdx), V);
 
 	const vec4 diffuseSample  = texture(u_textures[diffuseTexIdx], uv);

@@ -15,7 +15,7 @@ namespace
         uint32 width;
         uint32 height;
         float  feedback;
-        float  _pad;
+        uint32 eye;
     };
 
     auto imgInfoGeneral(vk::ImageView view) { return vk::DescriptorImageInfo{ .imageView = view, .imageLayout = vk::ImageLayout::eGeneral }; }
@@ -45,7 +45,7 @@ TaaPipeline::~TaaPipeline()
 void TaaPipeline::destroyImageSet(ImageSet& set)
 {
     vk::Device vkDevice = Globals::device.getDevice();
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    for (uint32 i = 0; i < SLOTS; ++i)
     {
         if (set.view[i])   vkDevice.destroyImageView(set.view[i]);
         Globals::gpuAllocator.destroyImage(set.image[i], set.memory[i]);
@@ -57,8 +57,10 @@ void TaaPipeline::destroyImageSet(ImageSet& set)
 void TaaPipeline::createImageSet(ImageSet& set)
 {
     vk::Device vkDevice = Globals::device.getDevice();
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+    for (uint32 e = 0; e < m_viewCount; ++e)
     {
+        const uint32 i = slot(f, e);
         vk::ImageCreateInfo info{
             .imageType = vk::ImageType::e2D,
             .format = TAA_FORMAT,
@@ -95,8 +97,10 @@ void TaaPipeline::recreateImages(uint32 width, uint32 height)
     // One-time UNDEFINED -> GENERAL so a never-yet-written resolved image (sampled as history on the very
     // first frame) is in the layout its descriptor was written with.
     std::vector<vk::ImageMemoryBarrier2> bars;
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+    for (uint32 e = 0; e < m_viewCount; ++e)
     {
+        const uint32 i = slot(f, e);
         bars.push_back(vk::ImageMemoryBarrier2{
             .srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe,
             .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
@@ -117,11 +121,13 @@ void TaaPipeline::recreateImages(uint32 width, uint32 height)
     (void)Globals::device.getGraphicsQueue().waitIdle();
 }
 
-void TaaPipeline::initialize(uint32 width, uint32 height)
+void TaaPipeline::initialize(uint32 width, uint32 height, uint32 viewCount)
 {
+    m_viewCount = viewCount;
     ComputePipelineLayout layout; buildLayout(layout); m_pipeline.initialize(layout);
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
-        m_sets[i].initialize(m_pipeline.getDescriptorSetLayout());
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+    for (uint32 e = 0; e < m_viewCount; ++e)
+        m_sets[slot(f, e)].initialize(m_pipeline.getDescriptorSetLayout());
 
     recreateImages(width, height);
 
@@ -150,34 +156,36 @@ void TaaPipeline::reloadShaders()
         printf("TaaPipeline: shader reload failed, keeping previous pipeline\n");
 }
 
-void TaaPipeline::transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uint32 frameIdx, bool forWrite)
+void TaaPipeline::transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uint32 slotIdx, bool forWrite)
 {
     vk::ImageMemoryBarrier2 bar{
         .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
         .srcAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
         .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
         .dstAccessMask = forWrite ? vk::AccessFlagBits2::eShaderStorageWrite : vk::AccessFlagBits2::eShaderSampledRead,
-        .oldLayout = set.initialized[frameIdx] ? vk::ImageLayout::eGeneral : vk::ImageLayout::eUndefined,
+        .oldLayout = set.initialized[slotIdx] ? vk::ImageLayout::eGeneral : vk::ImageLayout::eUndefined,
         .newLayout = vk::ImageLayout::eGeneral,
-        .image = set.image[frameIdx],
+        .image = set.image[slotIdx],
         .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
     };
     cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &bar });
-    set.initialized[frameIdx] = true;
+    set.initialized[slotIdx] = true;
 }
 
-void TaaPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const RecordParams& params)
+void TaaPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params)
 {
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
-    const uint32 prevIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    const uint32 prevFrame = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    const uint32 cur = slot(frameIdx, eye);
+    const uint32 prevIdx = slot(prevFrame, eye); // same eye's resolved image last frame (history)
     vk::PipelineLayout pipelineLayout = m_pipeline.getPipelineLayout();
     const uint32 gx = (m_width + 7) / 8;
     const uint32 gy = (m_height + 7) / 8;
 
-    transitionToGeneral(cmd, m_resolved, frameIdx, true);
+    transitionToGeneral(cmd, m_resolved, cur, true);
 
     auto uboInfo = vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = sizeof(RendererVKLayout::Ubo) };
-    DescriptorSet& set = m_sets[frameIdx];
+    DescriptorSet& set = m_sets[cur];
     vk::DescriptorSet vkSet = set.getDescriptorSet();
     std::array<DescriptorSetUpdateInfo, 6> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer, .bufferInfos = { uboInfo } },
@@ -185,12 +193,12 @@ void TaaPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const Re
         DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledGeneral(m_sampler, m_resolved.view[prevIdx]) } },
         DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferDepthView) } },
         DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.prevGbufferDepthView) } },
-        DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_resolved.view[frameIdx]) } },
+        DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_resolved.view[cur]) } },
     };
     commandBuffer.cmdUpdateDescriptorSets(pipelineLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_pipeline.getPipeline());
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout, 0, 1, &vkSet, 0, nullptr);
-    TaaPC pc{ .width = m_width, .height = m_height, .feedback = params.feedback };
+    TaaPC pc{ .width = m_width, .height = m_height, .feedback = params.feedback, .eye = eye };
     cmd.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
     cmd.dispatch(gx, gy, 1);
 

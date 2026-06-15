@@ -23,12 +23,14 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
     graphicsPipelineLayout.vertexShader.text = FileSystem::readFileStr(graphicsPipelineLayout.vertexShader.debugFilePath);
     graphicsPipelineLayout.fragmentShader.text = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShader.debugFilePath);
 
-    // VR variant: the vertex shader picks u_mvpStereo[u_eyeIndex] via a push constant (one pass per eye).
+    // VR variant: the vertex shader picks u_mvpStereo[u_eyeIndex] via a push constant (one pass per eye)
+    // and forwards the eye index to the (lit) fragment shader, which selects the per-eye view pos + AO.
     if (m_stereo)
     {
         graphicsPipelineLayout.vertexShader.defines.push_back({ "STEREO", "1" });
+        graphicsPipelineLayout.fragmentShader.defines.push_back({ "STEREO", "1" });
         graphicsPipelineLayout.pushConstantRanges.push_back(vk::PushConstantRange{
-            .stageFlags = vk::ShaderStageFlagBits::eVertex, .offset = 0, .size = sizeof(uint32) });
+            .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, .offset = 0, .size = sizeof(uint32) });
     }
 
     // Variant 1 (MeshShaderVariant::LitTransparent): same lit shader, alpha-blended, no depth write.
@@ -65,6 +67,10 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 			.debugFilePath = skyVariantPath,
 		},
 	});
+
+    // The lit-transparent variant reuses the lit fragment text; give it the same STEREO per-eye handling.
+    if (m_stereo)
+        graphicsPipelineLayout.additionalVariants[0].fragmentShader.defines.push_back({ "STEREO", "1" });
 
     auto& bindingDescriptions = graphicsPipelineLayout.vertexLayoutInfo.bindingDescriptions;
     bindingDescriptions.push_back(vk::VertexInputBindingDescription{
@@ -455,8 +461,8 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
         commandBuffer.cmdUpdateDescriptorSets(m_graphicsPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, descriptorSet, graphicsDescriptorSetUpdateInfos);
     vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
     vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
-    if (m_stereo) // select the eye matrix for the generated draws (set before execute -> inherited as current state)
-        vkCommandBuffer.pushConstants(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, sizeof(uint32), &params.eyeIndex);
+    if (m_stereo) // select the eye matrix/view pos for the generated draws (vertex + fragment read it)
+        vkCommandBuffer.pushConstants(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, sizeof(uint32), &params.eyeIndex);
     vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, {0});
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);

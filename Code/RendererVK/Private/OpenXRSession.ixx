@@ -55,6 +55,10 @@ public:
     // Per-eye asymmetric projection from the runtime's FOV, built like glm::perspective (the engine's
     // convention) so it stays consistent with the mono path. Valid after a successful beginFrame().
     glm::mat4 getEyeProjection(uint32 eye, float nearZ, float farZ) const;
+    // A single head-centred projection whose FOV is the union of both eyes' (slightly margined). Used as the
+    // VR "centre view" for frustum culling + the shared screen-space froxel fog volume, so it covers
+    // everything either eye can see. Valid after a successful beginFrame().
+    glm::mat4 getCombinedProjection(float nearZ, float farZ) const;
     // Blit the per-eye rendered images into the eye swapchains and submit to the compositor. Pass null
     // sources to submit an empty frame (keeps the begin/end pairing balanced when nothing was rendered).
     void endFrame(vk::Image leftSource, vk::Image rightSource, vk::Extent2D sourceExtent, vk::ImageLayout sourceLayout);

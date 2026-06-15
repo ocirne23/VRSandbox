@@ -178,6 +178,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
 
     Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
     Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
+    if (vr == EVr::ENABLED)
+        m_taaFeedback *= 0.5f; // Reduce blur for VR;
 
     m_postParams.registerTweaks([this]() { setHaveToRecordCommandBuffers(); });
 
@@ -244,10 +246,10 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
 
     m_maxTextures = Globals::textureManager.getDescriptorCap(); // fixed layout cap; live count grows separately
     m_staticMeshGraphicsPipeline.initialize(sceneRenderPass, m_maxUniqueMeshes, m_maxTextures, m_sceneViewCount > 1);
-    m_rtaoPipeline.initialize(ext.width, ext.height);
+    m_rtaoPipeline.initialize(ext.width, ext.height, m_sceneViewCount);
     m_volumetricFogPipeline.initialize();
-    m_volumetricFogPipeline.initializeApply(sceneRenderPass);
-    m_taaPipeline.initialize(ext.width, ext.height);
+    m_volumetricFogPipeline.initializeApply(sceneRenderPass, m_sceneViewCount);
+    m_taaPipeline.initialize(ext.width, ext.height, m_sceneViewCount);
     m_eyeAdaptationPipeline.initialize();
     m_compositePipeline.initialize(m_renderPass);
     m_indirectCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
@@ -260,7 +262,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_shadowCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
     for (PerFrameData& perFrame : m_perFrameData)
     {
-        perFrame.gbuffer.initialize(ext.width, ext.height);
+        perFrame.gbuffer.initialize(ext.width, ext.height, m_sceneViewCount);
         perFrame.shadowMap.initialize();
     }
     m_shadowMapGraphicsPipeline.initialize(m_perFrameData[0].shadowMap, m_maxUniqueMeshes, m_maxTextures);
@@ -272,8 +274,11 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     {
         perFrame.indirectCullPipelineDescriptorSet.initialize(m_indirectCullComputePipeline.getDescriptorSetLayout());
         perFrame.lightGridPipelineDescriptorSet.initialize(m_lightGridComputePipeline.getDescriptorSetLayout());
-        perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
-        perFrame.gbufferDescriptorSet.initialize(m_gbufferPipeline.getDescriptorSetLayout());
+        for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
+        {
+            perFrame.staticMeshPipelineDescriptorSet[eye].initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
+            perFrame.gbufferDescriptorSet[eye].initialize(m_gbufferPipeline.getDescriptorSetLayout());
+        }
         perFrame.compositeDescriptorSet.initialize(m_compositePipeline.getDescriptorSetLayout());
 
         perFrame.shadowCullDescriptorSet.initialize(m_shadowCullComputePipeline.getDescriptorSetLayout());
@@ -381,7 +386,7 @@ void Renderer::recreateWindowSurface(Window& window)
 
     for (PerFrameData& perFrame : m_perFrameData)
     {
-        perFrame.gbuffer.initialize(ext.width, ext.height);
+        perFrame.gbuffer.initialize(ext.width, ext.height, m_sceneViewCount);
         perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height, m_sceneViewCount);
     }
     createEyeCompositeTargets(); // VR: resize the per-eye LDR composite targets
@@ -411,7 +416,7 @@ void Renderer::recreateSwapchain()
     m_taaPipeline.recreateImages(ext.width, ext.height);
     for (PerFrameData& perFrame : m_perFrameData)
     {
-        perFrame.gbuffer.initialize(ext.width, ext.height);
+        perFrame.gbuffer.initialize(ext.width, ext.height, m_sceneViewCount);
         perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height, m_sceneViewCount);
     }
     createEyeCompositeTargets(); // VR: resize the per-eye LDR composite targets
@@ -503,7 +508,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         m_giProbePipeline.resizeTextureDescriptors(m_numTextureDescriptors);
         for (PerFrameData& perFrame : m_perFrameData)
         {
-            perFrame.staticMeshPipelineDescriptorSet.initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
+            for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
+                perFrame.staticMeshPipelineDescriptorSet[eye].initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
             perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
         }
         setHaveToRecordCommandBuffers();
@@ -515,7 +521,12 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     memset(m_numInstancesPerMesh.data(), 0, m_numInstancesPerMesh.size() * sizeof(m_numInstancesPerMesh[0]));
 
     const glm::ivec2 viewportSize = m_viewportRect.getSize();
-    const glm::mat4x4 projection = glm::perspective(glm::radians(camera.fovDeg), (float)viewportSize.x / (float)viewportSize.y, camera.near, camera.far);
+    // In VR the "centre view" (used for culling, GI region, shadow cascade fit, and the shared screen-space
+    // froxel fog volume) uses a head-centred projection spanning the union of both eyes' FOV, so it covers
+    // everything either eye renders. Desktop uses the plain camera perspective.
+    const glm::mat4x4 projection = Globals::openXR.isEnabled()
+        ? Globals::openXR.getCombinedProjection(camera.near, camera.far)
+        : glm::perspective(glm::radians(camera.fovDeg), (float)viewportSize.x / (float)viewportSize.y, camera.near, camera.far);
     glm::mat4 viewMatrix = camera.viewMatrix;
 
     glm::vec2 taaJitterNdc(0.0f);
@@ -540,8 +551,14 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.frustum.fromMatrix(ubo.mvp);
     ubo.viewPos = camera.position;
 
-    // Per-eye stereo matrices for the multiview graphics passes. In VR each eye uses the runtime's pose
-    // + asymmetric projection; on desktop both eyes mirror the mono matrices so gl_ViewIndex==0 works.
+    // Per-eye matrices for the per-eye screen-space passes. Save last frame's (still in ubo) as the prev
+    // matrices for temporal reprojection, then overwrite. In VR each eye uses the runtime's pose +
+    // asymmetric projection; on desktop both eyes mirror the mono matrices so eye 0 reproduces the mono path.
+    for (uint32 eye = 0; eye < 2; ++eye)
+    {
+        ubo.prevMvpStereo[eye] = ubo.mvpStereo[eye];
+        ubo.prevInvMvpStereo[eye] = ubo.invMvpStereo[eye];
+    }
     if (Globals::openXR.isEnabled())
     {
         for (uint32 eye = 0; eye < 2; ++eye)
@@ -1059,7 +1076,7 @@ void Renderer::recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 e
     vkCb.setScissor(0, { scissor });
     StaticMeshGraphicsPipeline::RecordParams drawParams
     {
-        .descriptorSet = frameData.staticMeshPipelineDescriptorSet,
+        .descriptorSet = frameData.staticMeshPipelineDescriptorSet[eyeIndex],
         .ubo = frameData.ubo,
         .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
         .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
@@ -1077,22 +1094,18 @@ void Renderer::recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 e
         .shadowMapView = frameData.shadowMap.getSampleView(),
         .shadowMapSampler = frameData.shadowMap.getSampler(),
         .shadowMapDepthSampler = frameData.shadowMap.getDepthSampler(),
-        .gbufferDepthView = frameData.gbuffer.getDepthView(),
+        .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
         .gbufferSampler = frameData.gbuffer.getSampler(),
         .eyeIndex = eyeIndex,
     };
-    // Both VR eyes share one descriptor set (identical content); only the first eye writes it, so the
-    // second eye's draw doesn't invalidate the bound set.
-    m_staticMeshGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, drawParams, eyeIndex == 0);
+    // Each eye has its own descriptor set (per-eye AO + gbuffer depth), so both eyes write their own.
+    m_staticMeshGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, drawParams, true);
 }
 
-void Renderer::recordGBuffer(uint32 frameIdx)
+void Renderer::recordGBufferInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    GBuffer& gbuffer = frameData.gbuffer;
-    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = gbuffer.getRenderPass() };
-    CommandBuffer& cb = frameData.gbufferCommandBuffer;
-    vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
+    vk::CommandBuffer vkCb = cb.getCommandBuffer();
 
     const vk::Extent2D extent = m_swapChain.getLayout().extent;
     const glm::ivec2 viewportSize = m_viewportRect.getSize();
@@ -1107,7 +1120,7 @@ void Renderer::recordGBuffer(uint32 frameIdx)
     vkCb.setViewport(0, { viewport });
     vkCb.setScissor(0, { scissor });
     GBufferPipeline::RecordParams gbufferParams{
-        .descriptorSet = frameData.gbufferDescriptorSet,
+        .descriptorSet = frameData.gbufferDescriptorSet[eyeIndex],
         .ubo = frameData.ubo,
         .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
         .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
@@ -1116,8 +1129,74 @@ void Renderer::recordGBuffer(uint32 frameIdx)
         .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
         .materialInfoBuffer = m_materialInfosBuffer,
     };
-    m_gbufferPipeline.record(cb, frameIdx, m_meshInfoCounter, gbufferParams);
+    m_gbufferPipeline.record(cb, frameIdx, m_meshInfoCounter, gbufferParams, eyeIndex);
+}
+
+void Renderer::recordGBuffer(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = frameData.gbuffer.getRenderPass() };
+    CommandBuffer& cb = frameData.gbufferCommandBuffer;
+    cb.begin(false, &inheritance);
+    recordGBufferInto(cb, frameIdx, 0);
     cb.end();
+}
+
+// AO trace+denoise for one eye (compute, no render pass); reads that eye's G-buffer, writes that eye's AO.
+void Renderer::recordAOInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    GBuffer& gbuffer = frameData.gbuffer;
+    const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
+    if (m_meshInfoCounter == 0 || !tlas)
+        return;
+    const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    RTAOPipeline::RecordParams aoParams{
+        .ubo = frameData.ubo,
+        .gbufferNormalView = gbuffer.getNormalView(eyeIndex),
+        .gbufferDepthView = gbuffer.getDepthView(eyeIndex),
+        .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(eyeIndex),
+        .gbufferSampler = gbuffer.getSampler(),
+        .tlas = tlas,
+    };
+    m_rtaoPipeline.record(cb, frameIdx, eyeIndex, aoParams);
+}
+
+// Fog apply draw for one eye, inside the eye's scene-colour render pass (viewport set by the caller).
+void Renderer::recordFogApplyInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBuffer vkCb = cb.getCommandBuffer();
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 vpMin = m_viewportRect.min;
+    const glm::ivec2 vpSize = m_viewportRect.getSize();
+    vkCb.setViewport(0, vk::Viewport{ .x = 0.0f, .y = 0.0f, .width = (float)extent.width, .height = (float)extent.height, .minDepth = 0.0f, .maxDepth = 1.0f });
+    vkCb.setScissor(0, vk::Rect2D{ .offset = vk::Offset2D{ vpMin.x, vpMin.y }, .extent = vk::Extent2D{ (uint32)vpSize.x, (uint32)vpSize.y } });
+    VolumetricFogPipeline::ApplyParams params{
+        .ubo = frameData.ubo,
+        .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
+        .gbufferSampler = frameData.gbuffer.getSampler(),
+    };
+    m_volumetricFogPipeline.recordApply(cb, frameIdx, eyeIndex, params);
+}
+
+// TAA resolve for one eye (compute, no render pass); reads that eye's scene colour + depth, writes its history.
+void Renderer::recordTaaInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    GBuffer& gbuffer = frameData.gbuffer;
+    SceneColor& sceneColor = frameData.sceneColor;
+    const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    TaaPipeline::RecordParams taaParams{
+        .ubo = frameData.ubo,
+        .currentColorView = sceneColor.getColorLayerView(eyeIndex),
+        .currentColorSampler = sceneColor.getSampler(),
+        .gbufferDepthView = gbuffer.getDepthView(eyeIndex),
+        .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(eyeIndex),
+        .gbufferSampler = gbuffer.getSampler(),
+        .feedback = m_taaEnabled ? m_taaFeedback : 0.0f,
+    };
+    m_taaPipeline.record(cb, frameIdx, eyeIndex, taaParams);
 }
 
 void Renderer::recordGiProbeDebug(uint32 frameIdx)
@@ -1156,7 +1235,7 @@ void Renderer::recordAO(uint32 frameIdx)
             .gbufferSampler = gbuffer.getSampler(),
             .tlas = tlas,
         };
-        m_rtaoPipeline.record(cb, frameIdx, aoParams);
+        m_rtaoPipeline.record(cb, frameIdx, 0, aoParams);
     }
     cb.end();
 }
@@ -1207,7 +1286,7 @@ void Renderer::recordFogApply(uint32 frameIdx)
         .gbufferDepthView = frameData.gbuffer.getDepthView(),
         .gbufferSampler = frameData.gbuffer.getSampler(),
     };
-    m_volumetricFogPipeline.recordApply(cb, frameIdx, params);
+    m_volumetricFogPipeline.recordApply(cb, frameIdx, 0, params);
     cb.end();
 }
 
@@ -1229,7 +1308,7 @@ void Renderer::recordTaa(uint32 frameIdx)
         .gbufferSampler = gbuffer.getSampler(),
         .feedback = m_taaEnabled ? m_taaFeedback : 0.0f,
     };
-    m_taaPipeline.record(cb, frameIdx, taaParams);
+    m_taaPipeline.record(cb, frameIdx, 0, taaParams);
     cb.end();
 }
 
@@ -1245,7 +1324,7 @@ void Renderer::recordEyeAdaptation(uint32 frameIdx)
     vk::CommandBufferInheritanceInfo inheritance;
     cb.begin(false, &inheritance);
     EyeAdaptationPipeline::RecordParams params{
-        .resolvedView = m_taaPipeline.getResolvedView(frameIdx),
+        .resolvedView = m_taaPipeline.getResolvedView(frameIdx, 0),
         .sampler = m_taaPipeline.getSampler(),
         .viewportMin = m_viewportRect.min,
         .viewportSize = m_viewportRect.getSize(),
@@ -1269,7 +1348,7 @@ void Renderer::recordComposite(uint32 frameIdx)
 
     CompositePipeline::RecordParams params{
         .descriptorSet = frameData.compositeDescriptorSet,
-        .resolvedView = m_taaPipeline.getResolvedView(frameIdx),
+        .resolvedView = m_taaPipeline.getResolvedView(frameIdx, 0),
         .sampler = m_taaPipeline.getSampler(),
         .exposureBuffer = m_eyeAdaptationPipeline.getExposureBuffer().getBuffer(),
         .exposureEV = m_postParams.exposureEV,
@@ -1445,21 +1524,29 @@ void Renderer::recordCommandBuffers()
         recordLightGrid(frameIdx);
         recordShadowCull(frameIdx);
         recordShadowDraw(frameIdx);
-        recordStaticMesh(frameIdx);
-        recordGBuffer(frameIdx);
-        recordGiProbeDebug(frameIdx);
-        recordAO(frameIdx);
-        recordVolumetricFog(frameIdx);
-        recordFogApply(frameIdx);
-        recordTaa(frameIdx);
-        recordEyeAdaptation(frameIdx);
+        recordVolumetricFog(frameIdx); // shared scatter/integrate (center view in VR)
+        recordEyeAdaptation(frameIdx); // shared (samples the left eye's resolved colour in VR)
+        // Composite secondary draws into the desktop swapchain (the left eye / TAA-resolved colour); in VR
+        // it's the desktop-window mirror, so it's recorded in both modes.
         recordComposite(frameIdx);
+        // The remaining per-eye screen-space passes (gbuffer, AO, forward, fog apply, TAA) are recorded
+        // inline in the primary below in VR; on desktop they stay cached secondaries (one eye).
+        if (m_sceneViewCount == 1)
+        {
+            recordStaticMesh(frameIdx);
+            recordGBuffer(frameIdx);
+            recordGiProbeDebug(frameIdx);
+            recordAO(frameIdx);
+            recordFogApply(frameIdx);
+            recordTaa(frameIdx);
+        }
         frameData.updated = true;
     }
 
     if (m_meshInstanceCounter > 0 && recordGlobalIllum(frameIdx))
     {
-        recordAO(frameIdx);
+        if (m_sceneViewCount == 1)
+            recordAO(frameIdx);
         recordVolumetricFog(frameIdx);
     }
 
@@ -1530,98 +1617,76 @@ void Renderer::recordCommandBuffers()
             vkCommandBuffer.executeCommands(1, &vkShadowDrawCommandBuffer);
             vkCommandBuffer.endRenderPass();
         }
-        { // Depth + world-normal G-buffer prepass (camera view)
-            GBuffer& gbuffer = frameData.gbuffer;
-            std::array<vk::ClearValue, 2> gbufferClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
-            const vk::RenderPassBeginInfo gbufferRpBegin{
-                .renderPass = gbuffer.getRenderPass(),
-                .framebuffer = gbuffer.getFramebuffer(),
-                .renderArea = vk::Rect2D{.offset = vk::Offset2D{ 0, 0 }, .extent = vk::Extent2D{ gbuffer.getWidth(), gbuffer.getHeight() } },
-                .clearValueCount = (uint32)gbufferClears.size(),
-                .pClearValues = gbufferClears.data(),
-            };
-            vkCommandBuffer.beginRenderPass(gbufferRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
-            if (m_meshInfoCounter > 0)
-                vkCommandBuffer.executeCommands(1, &vkGbufferCommandBuffer);
-            vkCommandBuffer.endRenderPass();
-        }
-        vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
-        vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
-        // Fog scatter/integrate compute; the primary is re-recorded every frame, so the enable toggle takes
-        // effect immediately (the integrated grid was cleared to "no fog" at init for the disabled case).
-        if (m_fogParams.enabled)
-            vkCommandBuffer.executeCommands(1, &vkVolumetricFogCommandBuffer);
-        m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx), m_rtaoPipeline.getAOSampler());
-        if (const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx))
-            m_staticMeshGraphicsPipeline.updateTlasDescriptor(frameData.staticMeshPipelineDescriptorSet.getDescriptorSet(), tlas);
-
         SceneColor& sceneColor = frameData.sceneColor;
+        GBuffer& gbuffer = frameData.gbuffer;
+        std::array<vk::ClearValue, 2> gbufferClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
+        const vk::Rect2D gbufferArea{ .offset = vk::Offset2D{ 0, 0 }, .extent = vk::Extent2D{ gbuffer.getWidth(), gbuffer.getHeight() } };
         std::array<vk::ClearValue, 2> sceneClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.5f, 0.7f, 0.9f, 1.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
         const vk::Rect2D sceneArea{ .offset = vk::Offset2D{ m_viewportRect.min.x, m_viewportRect.min.y }, .extent = vk::Extent2D{ sceneColor.getWidth() - m_viewportRect.min.x, sceneColor.getHeight() - m_viewportRect.min.y } };
+        const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
+
         if (m_sceneViewCount > 1)
         {
-            // VR: render the forward pass once per eye into its own SceneColor layer (the DGC execution
-            // set forbids a multiview pass). Recorded inline in the primary so the per-eye push constant
-            // applies to the generated draws. giProbeDebug/fogApply are skipped in VR for now (M4).
+            // ---- VR: per-eye screen-space chain (gbuffer -> AO -> forward+fog -> TAA), recorded inline ----
+            // GI (TLAS build + probe trace) and fog scatter/integrate are shared (built once for the centre
+            // view); each eye's gbuffer/AO/forward/TAA then runs against its own images.
+            vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
+            if (m_fogParams.enabled)
+                vkCommandBuffer.executeCommands(1, &vkVolumetricFogCommandBuffer);
+
             for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
             {
-                const vk::RenderPassBeginInfo eyeRpBegin{
-                    .renderPass = sceneColor.getRenderPass(),
-                    .framebuffer = sceneColor.getFramebuffer(eye),
-                    .renderArea = sceneArea,
-                    .clearValueCount = (uint32)sceneClears.size(),
-                    .pClearValues = sceneClears.data(),
+                { // G-buffer prepass for this eye (layer eye)
+                    const vk::RenderPassBeginInfo gbufferRpBegin{
+                        .renderPass = gbuffer.getRenderPass(),
+                        .framebuffer = gbuffer.getFramebuffer(eye),
+                        .renderArea = gbufferArea,
+                        .clearValueCount = (uint32)gbufferClears.size(),
+                        .pClearValues = gbufferClears.data(),
+                    };
+                    vkCommandBuffer.beginRenderPass(gbufferRpBegin, vk::SubpassContents::eInline);
+                    if (m_meshInfoCounter > 0)
+                        recordGBufferInto(commandBuffer, frameIdx, eye);
+                    vkCommandBuffer.endRenderPass();
+                }
+                recordAOInto(commandBuffer, frameIdx, eye); // compute AO for this eye
+
+                // This eye's forward descriptor set takes this eye's AO + the (per-frame) TLAS.
+                m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet[eye].getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx, eye), m_rtaoPipeline.getAOSampler());
+                if (tlas)
+                    m_staticMeshGraphicsPipeline.updateTlasDescriptor(frameData.staticMeshPipelineDescriptorSet[eye].getDescriptorSet(), tlas);
+
+                { // Forward (+ fog apply) into this eye's SceneColor layer
+                    const vk::RenderPassBeginInfo eyeRpBegin{
+                        .renderPass = sceneColor.getRenderPass(),
+                        .framebuffer = sceneColor.getFramebuffer(eye),
+                        .renderArea = sceneArea,
+                        .clearValueCount = (uint32)sceneClears.size(),
+                        .pClearValues = sceneClears.data(),
+                    };
+                    vkCommandBuffer.beginRenderPass(eyeRpBegin, vk::SubpassContents::eInline);
+                    recordStaticMeshInto(commandBuffer, frameIdx, eye);
+                    if (m_fogParams.enabled)
+                        recordFogApplyInto(commandBuffer, frameIdx, eye);
+                    vkCommandBuffer.endRenderPass();
+                }
+
+                vk::MemoryBarrier2 colorToTaa{ // scene colour -> TAA compute sampled read
+                    .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                    .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+                    .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+                    .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
                 };
-                vkCommandBuffer.beginRenderPass(eyeRpBegin, vk::SubpassContents::eInline);
-                recordStaticMeshInto(commandBuffer, frameIdx, eye);
-                vkCommandBuffer.endRenderPass();
+                vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &colorToTaa });
+                recordTaaInto(commandBuffer, frameIdx, eye); // resolve into this eye's history
             }
-        }
-        else
-        {
-            const vk::RenderPassBeginInfo sceneRpBegin{
-                .renderPass = sceneColor.getRenderPass(),
-                .framebuffer = sceneColor.getFramebuffer(),
-                .renderArea = sceneArea,
-                .clearValueCount = (uint32)sceneClears.size(),
-                .pClearValues = sceneClears.data(),
-            };
-            vkCommandBuffer.beginRenderPass(sceneRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
-            vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
-            if (m_giProbeDebugEnabled)
-                vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
-            if (m_fogParams.enabled)
-                vkCommandBuffer.executeCommands(1, &vkFogApplyCommandBuffer);
-            vkCommandBuffer.endRenderPass();
-        }
 
-        vk::MemoryBarrier2 bar{ // color -> TAA barrier
-            .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-            .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-            .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
-        };
-        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
-        vkCommandBuffer.executeCommands(1, &vkTaaCommandBuffer);
-        // Eye adaptation: reads the resolved colour (TAA barrier above), writes the exposure the composite reads.
-        vkCommandBuffer.executeCommands(1, &vkEyeAdaptCommandBuffer);
+            // Eye adaptation samples the left eye's resolved colour (shared exposure, no per-eye flicker).
+            vkCommandBuffer.executeCommands(1, &vkEyeAdaptCommandBuffer);
 
-        // VR: tonemap each eye's SceneColor layer into its LDR composite target (TAA bypassed). Exposure
-        // comes from the shared eye-adaptation result (left eye) to avoid per-eye flicker. These targets
-        // are copied into the OpenXR eye swapchains in present().
-        if (m_sceneViewCount > 1)
-        {
+            // Tonemap each eye's TAA-resolved colour into its LDR composite target (copied into the OpenXR
+            // eye swapchains in present()). TAA left the resolved images in GENERAL with a write->read barrier.
             const vk::Extent2D ext = m_swapChain.getLayout().extent;
-            // Make the per-eye forward colour writes visible to the composite's fragment sampling
-            // (the SceneColor render pass left the layers in SHADER_READ_ONLY but without a dependency
-            // to this later pass).
-            vk::MemoryBarrier2 sceneToComposite{
-                .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-                .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-                .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
-            };
-            vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &sceneToComposite });
             for (uint32 eye = 0; eye < 2; ++eye)
             {
                 std::array<vk::ClearValue, 2> eyeClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 1.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
@@ -1637,9 +1702,9 @@ void Renderer::recordCommandBuffers()
                 vkCommandBuffer.setScissor(0, vk::Rect2D{ .offset = vk::Offset2D{ 0, 0 }, .extent = ext });
                 CompositePipeline::RecordParams eyeComposite{
                     .descriptorSet = m_vrCompositeDescriptorSet[eye],
-                    .resolvedView = frameData.sceneColor.getColorLayerView(eye),
-                    .resolvedLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-                    .sampler = frameData.sceneColor.getSampler(),
+                    .resolvedView = m_taaPipeline.getResolvedView(frameIdx, eye),
+                    .resolvedLayout = vk::ImageLayout::eGeneral,
+                    .sampler = m_taaPipeline.getSampler(),
                     .exposureBuffer = m_eyeAdaptationPipeline.getExposureBuffer().getBuffer(),
                     .exposureEV = m_postParams.exposureEV,
                     .tonemapper = m_postParams.tonemapper,
@@ -1648,6 +1713,57 @@ void Renderer::recordCommandBuffers()
                 m_compositePipeline.record(commandBuffer, eyeComposite);
                 vkCommandBuffer.endRenderPass();
             }
+        }
+        else
+        {
+            { // Depth + world-normal G-buffer prepass (camera view)
+                const vk::RenderPassBeginInfo gbufferRpBegin{
+                    .renderPass = gbuffer.getRenderPass(),
+                    .framebuffer = gbuffer.getFramebuffer(),
+                    .renderArea = gbufferArea,
+                    .clearValueCount = (uint32)gbufferClears.size(),
+                    .pClearValues = gbufferClears.data(),
+                };
+                vkCommandBuffer.beginRenderPass(gbufferRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
+                if (m_meshInfoCounter > 0)
+                    vkCommandBuffer.executeCommands(1, &vkGbufferCommandBuffer);
+                vkCommandBuffer.endRenderPass();
+            }
+            vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
+            vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
+            // Fog scatter/integrate compute; the primary is re-recorded every frame, so the enable toggle
+            // takes effect immediately (the integrated grid was cleared to "no fog" at init when disabled).
+            if (m_fogParams.enabled)
+                vkCommandBuffer.executeCommands(1, &vkVolumetricFogCommandBuffer);
+            m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet[0].getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx, 0), m_rtaoPipeline.getAOSampler());
+            if (tlas)
+                m_staticMeshGraphicsPipeline.updateTlasDescriptor(frameData.staticMeshPipelineDescriptorSet[0].getDescriptorSet(), tlas);
+
+            const vk::RenderPassBeginInfo sceneRpBegin{
+                .renderPass = sceneColor.getRenderPass(),
+                .framebuffer = sceneColor.getFramebuffer(),
+                .renderArea = sceneArea,
+                .clearValueCount = (uint32)sceneClears.size(),
+                .pClearValues = sceneClears.data(),
+            };
+            vkCommandBuffer.beginRenderPass(sceneRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
+            vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
+            if (m_giProbeDebugEnabled)
+                vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
+            if (m_fogParams.enabled)
+                vkCommandBuffer.executeCommands(1, &vkFogApplyCommandBuffer);
+            vkCommandBuffer.endRenderPass();
+
+            vk::MemoryBarrier2 bar{ // color -> TAA barrier
+                .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+                .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+                .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+            };
+            vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
+            vkCommandBuffer.executeCommands(1, &vkTaaCommandBuffer);
+            // Eye adaptation: reads the resolved colour (TAA barrier above), writes the exposure the composite reads.
+            vkCommandBuffer.executeCommands(1, &vkEyeAdaptCommandBuffer);
         }
     }
 

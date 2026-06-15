@@ -21,7 +21,7 @@ namespace
         float  intensity;
         uint32 aoWidth;
         uint32 aoHeight;
-        float  _pad;
+        uint32 eye;
         float  _pad2;
     };
     struct TemporalPC
@@ -29,14 +29,14 @@ namespace
         uint32 aoWidth;
         uint32 aoHeight;
         float  maxHistory;
-        float  _pad;
+        uint32 eye;
     };
     struct SpatialPC
     {
         uint32 aoWidth;
         uint32 aoHeight;
         int32  radius;
-        float  _pad;
+        uint32 eye;
     };
 
     auto imgInfoGeneral(vk::ImageView view) { return vk::DescriptorImageInfo{ .imageView = view, .imageLayout = vk::ImageLayout::eGeneral }; }
@@ -93,7 +93,7 @@ RTAOPipeline::~RTAOPipeline()
 void RTAOPipeline::destroyImageSet(ImageSet& set)
 {
     vk::Device vkDevice = Globals::device.getDevice();
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    for (uint32 i = 0; i < SLOTS; ++i)
     {
         if (set.view[i])   vkDevice.destroyImageView(set.view[i]);
         Globals::gpuAllocator.destroyImage(set.image[i], set.memory[i]);
@@ -105,8 +105,10 @@ void RTAOPipeline::destroyImageSet(ImageSet& set)
 void RTAOPipeline::createImageSet(ImageSet& set)
 {
     vk::Device vkDevice = Globals::device.getDevice();
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+    for (uint32 e = 0; e < m_viewCount; ++e)
     {
+        const uint32 i = slot(f, e);
         vk::ImageCreateInfo info{
             .imageType = vk::ImageType::e2D,
             .format = AO_FORMAT,
@@ -148,8 +150,10 @@ void RTAOPipeline::recreateImages(uint32 fullWidth, uint32 fullHeight)
     ImageSet* sets[] = { &m_raw, &m_accum, &m_final };
     std::vector<vk::ImageMemoryBarrier2> bars;
     for (ImageSet* s : sets)
-        for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+        for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+        for (uint32 e = 0; e < m_viewCount; ++e)
         {
+            const uint32 i = slot(f, e);
             bars.push_back(vk::ImageMemoryBarrier2{
                 .srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe,
                 .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
@@ -170,13 +174,16 @@ void RTAOPipeline::recreateImages(uint32 fullWidth, uint32 fullHeight)
     (void)Globals::device.getGraphicsQueue().waitIdle();
 }
 
-void RTAOPipeline::initialize(uint32 fullWidth, uint32 fullHeight)
+void RTAOPipeline::initialize(uint32 fullWidth, uint32 fullHeight, uint32 viewCount)
 {
+    m_viewCount = viewCount;
     ComputePipelineLayout traceLayout;    buildTraceLayout(traceLayout);       m_tracePipeline.initialize(traceLayout);
     ComputePipelineLayout temporalLayout; buildTemporalLayout(temporalLayout); m_temporalPipeline.initialize(temporalLayout);
     ComputePipelineLayout spatialLayout;  buildSpatialLayout(spatialLayout);   m_spatialPipeline.initialize(spatialLayout);
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+    for (uint32 e = 0; e < m_viewCount; ++e)
     {
+        const uint32 i = slot(f, e);
         m_traceSets[i].initialize(m_tracePipeline.getDescriptorSetLayout());
         m_temporalSets[i].initialize(m_temporalPipeline.getDescriptorSetLayout());
         m_spatialSets[i].initialize(m_spatialPipeline.getDescriptorSetLayout());
@@ -221,26 +228,28 @@ void RTAOPipeline::reloadShaders()
         printf("RTAOPipeline: shader reload failed, keeping previous pipeline(s)\n");
 }
 
-void RTAOPipeline::transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uint32 frameIdx, bool forWrite)
+void RTAOPipeline::transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uint32 slotIdx, bool forWrite)
 {
     vk::ImageMemoryBarrier2 bar{
         .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
         .srcAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
         .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
         .dstAccessMask = forWrite ? vk::AccessFlagBits2::eShaderStorageWrite : vk::AccessFlagBits2::eShaderSampledRead,
-        .oldLayout = set.initialized[frameIdx] ? vk::ImageLayout::eGeneral : vk::ImageLayout::eUndefined,
+        .oldLayout = set.initialized[slotIdx] ? vk::ImageLayout::eGeneral : vk::ImageLayout::eUndefined,
         .newLayout = vk::ImageLayout::eGeneral,
-        .image = set.image[frameIdx],
+        .image = set.image[slotIdx],
         .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
     };
     cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &bar });
-    set.initialized[frameIdx] = true;
+    set.initialized[slotIdx] = true;
 }
 
-void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const RecordParams& params)
+void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params)
 {
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
-    const uint32 prevIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    const uint32 prevFrame = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    const uint32 cur = slot(frameIdx, eye);   // this eye's images this frame
+    const uint32 prevIdx = slot(prevFrame, eye); // same eye's images last frame (history)
     vk::PipelineLayout traceLayout = m_tracePipeline.getPipelineLayout();
     vk::PipelineLayout temporalLayout = m_temporalPipeline.getPipelineLayout();
     vk::PipelineLayout spatialLayout = m_spatialPipeline.getPipelineLayout();
@@ -267,15 +276,15 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const R
             .dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR,
         };
         cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &asVis });
-        transitionToGeneral(cmd, m_raw, frameIdx, true);
+        transitionToGeneral(cmd, m_raw, cur, true);
 
-        DescriptorSet& set = m_traceSets[frameIdx];
+        DescriptorSet& set = m_traceSets[cur];
         vk::DescriptorSet vkSet = set.getDescriptorSet();
         std::array<DescriptorSetUpdateInfo, 4> updates{
             DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer, .bufferInfos = { uboInfo } },
             DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferNormalView) } },
             DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferDepthView) } },
-            DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_raw.view[frameIdx]) } },
+            DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_raw.view[cur]) } },
         };
         commandBuffer.cmdUpdateDescriptorSets(traceLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         vk::WriteDescriptorSetAccelerationStructureKHR asInfo{ .accelerationStructureCount = 1, .pAccelerationStructures = &params.tlas };
@@ -285,50 +294,50 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const R
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, traceLayout, 0, 1, &vkSet, 0, nullptr);
         RtaoPC pc{ .numRays = uint32(std::max(m_rays, 1)), .radius = m_radius, .power = m_power,
-            .intensity = m_intensity, .aoWidth = m_width, .aoHeight = m_height };
+            .intensity = m_intensity, .aoWidth = m_width, .aoHeight = m_height, .eye = eye };
         cmd.pushConstants(traceLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
     storeWriteToSampledRead();
 
     { // -------- Pass 2: temporal accumulate (read raw + history accum[prev], write accum[cur]) --------
-        transitionToGeneral(cmd, m_accum, frameIdx, true);
+        transitionToGeneral(cmd, m_accum, cur, true);
 
-        DescriptorSet& set = m_temporalSets[frameIdx];
+        DescriptorSet& set = m_temporalSets[cur];
         vk::DescriptorSet vkSet = set.getDescriptorSet();
         std::array<DescriptorSetUpdateInfo, 6> updates{
             DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer, .bufferInfos = { uboInfo } },
             DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferDepthView) } },
             DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.prevGbufferDepthView) } },
-            DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledGeneral(m_aoSampler, m_raw.view[frameIdx]) } },
+            DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledGeneral(m_aoSampler, m_raw.view[cur]) } },
             DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledGeneral(m_aoSampler, m_accum.view[prevIdx]) } },
-            DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_accum.view[frameIdx]) } },
+            DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_accum.view[cur]) } },
         };
         commandBuffer.cmdUpdateDescriptorSets(temporalLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_temporalPipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, temporalLayout, 0, 1, &vkSet, 0, nullptr);
-        TemporalPC pc{ .aoWidth = m_width, .aoHeight = m_height, .maxHistory = m_maxHistory };
+        TemporalPC pc{ .aoWidth = m_width, .aoHeight = m_height, .maxHistory = m_maxHistory, .eye = eye };
         cmd.pushConstants(temporalLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
     storeWriteToSampledRead();
 
     { // -------- Pass 3: spatial bilateral blur (read accum[cur], write final[cur]) --------
-        transitionToGeneral(cmd, m_final, frameIdx, true);
+        transitionToGeneral(cmd, m_final, cur, true);
 
-        DescriptorSet& set = m_spatialSets[frameIdx];
+        DescriptorSet& set = m_spatialSets[cur];
         vk::DescriptorSet vkSet = set.getDescriptorSet();
         std::array<DescriptorSetUpdateInfo, 5> updates{
             DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer, .bufferInfos = { uboInfo } },
             DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferDepthView) } },
             DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferNormalView) } },
-            DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledGeneral(m_aoSampler, m_accum.view[frameIdx]) } },
-            DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_final.view[frameIdx]) } },
+            DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledGeneral(m_aoSampler, m_accum.view[cur]) } },
+            DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_final.view[cur]) } },
         };
         commandBuffer.cmdUpdateDescriptorSets(spatialLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_spatialPipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, spatialLayout, 0, 1, &vkSet, 0, nullptr);
-        SpatialPC pc{ .aoWidth = m_width, .aoHeight = m_height, .radius = m_blurRadius };
+        SpatialPC pc{ .aoWidth = m_width, .aoHeight = m_height, .radius = m_blurRadius, .eye = eye };
         cmd.pushConstants(spatialLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }

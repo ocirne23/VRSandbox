@@ -72,11 +72,18 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
                           // ground-bounce tint for downward GI/fog rays), w unused
 
-    // Per-eye stereo matrices (VR multiview). [0] mirrors the mono u_mvp/u_invMvp/u_viewPos above;
-    // multiview graphics passes index these by gl_ViewIndex.
+    // Per-eye matrices (VR stereo). [0] mirrors the mono u_mvp/u_invMvp/u_viewPos/u_prev* above, so a
+    // per-eye pass that selects eye 0 reproduces the mono path exactly (desktop and the left eye).
     mat4 u_mvpStereo[2];
     mat4 u_invMvpStereo[2];
     vec4 u_viewPosStereo[2];
+    mat4 u_prevMvpStereo[2];
+    mat4 u_prevInvMvpStereo[2];
 };
+
+// Per-eye view index for the stereo screen-space passes. Set once at the top of main() from a push
+// constant (VR) and left at 0 otherwise (desktop / mono); the helpers below index the u_*Stereo[] arrays
+// with it. Eye 0's stereo matrices mirror the mono ones, so the default reproduces the mono behaviour.
+int g_viewIndex = 0;
 
 #endif

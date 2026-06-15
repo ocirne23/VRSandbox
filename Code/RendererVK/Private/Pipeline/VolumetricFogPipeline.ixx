@@ -28,7 +28,8 @@ public:
     VolumetricFogPipeline(const VolumetricFogPipeline&) = delete;
 
     void initialize();
-    void initializeApply(vk::RenderPass renderPass);
+    // viewCount > 1 (VR): one apply descriptor set per eye so the per-eye inline draws don't clobber each other.
+    void initializeApply(vk::RenderPass renderPass, uint32 viewCount = 1);
     void reloadShaders(vk::RenderPass renderPass);
 
     struct RecordParams
@@ -51,9 +52,9 @@ public:
         vk::ImageView gbufferDepthView;
         vk::Sampler   gbufferSampler;
     };
-    // Records the fullscreen apply draw; the caller has begun a secondary command buffer inside the
-    // scene-color render pass and set the viewport/scissor.
-    void recordApply(CommandBuffer& commandBuffer, uint32 frameIdx, const ApplyParams& params);
+    // Records the fullscreen apply draw; the caller has begun a command buffer inside the scene-color
+    // render pass and set the viewport/scissor. eye selects the per-eye depth/projection (0 = desktop/left).
+    void recordApply(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const ApplyParams& params);
 
 private:
     struct ImageSet
@@ -72,9 +73,13 @@ private:
     ComputePipeline m_scatterPipeline;
     ComputePipeline m_integratePipeline;
     GraphicsPipeline m_applyPipeline;
+    static constexpr uint32 MAX_VIEWS = 2;
+    static uint32 applySlot(uint32 frameIdx, uint32 eye) { return frameIdx * MAX_VIEWS + eye; }
+    uint32 m_applyViewCount = 1;
+
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_scatterSets;
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_integrateSets;
-    std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_applySets;
+    std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT * MAX_VIEWS> m_applySets;
 
     ImageSet m_scatter;    // per-froxel in-scatter/extinction; previous frame's image is the temporal history
     ImageSet m_integrated; // accumulated in-scatter + transmittance per slice
