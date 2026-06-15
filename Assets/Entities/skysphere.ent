@@ -2,4 +2,4 @@ Entity skysphere
 	Component RenderNode
 		ObjectContainer skysphere
 		Node ROOT
-		Scale 1000
+		Scale 4000

@@ -33,14 +33,16 @@ int main()
     FreeFlyCameraController cameraController;
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
-    VRFreeFlyCameraController vrCameraController;
-    vrCameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f));
-
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED, EVr::ENABLED); // ENABLED DISABLED
 
     VrInput& vrInput = Globals::vrInput;
     vrInput.initialize(renderer.getVrSession());
+
+    // Seed the VR play-space after the session exists: STAGE puts y=0 on the physical floor (stand on the
+    // virtual floor), the LOCAL fallback is head-seeded (lift by ~eye height instead).
+    VRFreeFlyCameraController vrCameraController;
+    vrCameraController.initialize(glm::vec3(-1.0f, renderer.isVrStageSpace() ? 0.0f : 1.0f, 0.0f));
 
     UI& ui = Globals::ui;
     ui.initialize();

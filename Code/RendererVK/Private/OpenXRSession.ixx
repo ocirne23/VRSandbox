@@ -70,6 +70,9 @@ public:
     bool isEnabled() const { return m_enabled; }
     bool isSessionRunning() const { return m_sessionRunning; }
     bool exitRequested() const { return m_exitRequested; }
+    // True when the app/world space is STAGE (floor-centred, follows runtime space drag/recenter); false =
+    // LOCAL fallback (head-seeded). Lets the caller seed the play-space start height appropriately.
+    bool isStageSpace() const { return m_appSpaceIsStage; }
 
     // IVrSession (Core): opaque handles for the decoupled Input lib to build its own controller action set,
     // bridged via main.cpp. Pointer handles round-trip cleanly through void*. Null when VR is inactive.
@@ -90,8 +93,9 @@ private:
     XrInstance m_instance = XR_NULL_HANDLE;
     XrSystemId m_systemId = XR_NULL_SYSTEM_ID;
     XrSession m_session = XR_NULL_HANDLE;
-    XrSpace m_space = XR_NULL_HANDLE;      // LOCAL reference space (world origin)
+    XrSpace m_space = XR_NULL_HANDLE;      // app/world reference space (STAGE if available, else LOCAL)
     XrSpace m_viewSpace = XR_NULL_HANDLE;  // VIEW reference space (head pose)
+    bool m_appSpaceIsStage = false;
 
     // Per-frame state produced by beginFrame() and consumed by getHeadView()/endFrame().
     XrView m_views[VIEW_COUNT] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } };

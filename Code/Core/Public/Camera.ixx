@@ -39,6 +39,6 @@ public:
     // on top of it (T(position) * R(playSpaceOrientation) * headPose). Identity on desktop (unused).
     glm::quat playSpaceOrientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
     float fovDeg = 45.0f;
-    float near = 0.1f;
+    float near = 0.01f;
     float far = 5000.0f;
 };

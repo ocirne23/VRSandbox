@@ -68,6 +68,9 @@ public:
 
     // True when an OpenXR session is active. XR is otherwise driven entirely inside beginFrame/present.
     bool isVrEnabled() const { return Globals::openXR.isEnabled(); }
+    // True when the VR world space is STAGE (floor-centred); false = LOCAL fallback. Used to seed the
+    // play-space start height (floor vs head-seeded). Only meaningful after initialize().
+    bool isVrStageSpace() const { return Globals::openXR.isStageSpace(); }
 
     // The active VR session as a shared Core interface (IVrSession), or null when VR is off. The Input lib
     // uses it to build its controller action set without depending on RendererVK. (See Core.VrSession.)

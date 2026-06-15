@@ -224,11 +224,28 @@ bool OpenXRSession::createSession(vk::Instance vkInstance, vk::PhysicalDevice vk
     if (!xrCheck(xrCreateSession(m_instance, &sessionInfo, &m_session), "xrCreateSession"))
         return false;
 
+    // App/world space: prefer STAGE (the room/standing universe) so runtime-level space adjustments — SteamVR
+    // space drag, recenter — move the rendered view. STAGE origin sits on the floor at the play-area centre.
+    // Fall back to LOCAL (head-seeded, world-locked) where STAGE isn't offered.
+    XrReferenceSpaceType appSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+    {
+        uint32 spaceCount = 0;
+        if (XR_SUCCEEDED(xrEnumerateReferenceSpaces(m_session, 0, &spaceCount, nullptr)))
+        {
+            std::vector<XrReferenceSpaceType> spaces(spaceCount);
+            if (XR_SUCCEEDED(xrEnumerateReferenceSpaces(m_session, spaceCount, &spaceCount, spaces.data())))
+                for (XrReferenceSpaceType type : spaces)
+                    if (type == XR_REFERENCE_SPACE_TYPE_STAGE) { appSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE; break; }
+        }
+    }
+    m_appSpaceIsStage = (appSpaceType == XR_REFERENCE_SPACE_TYPE_STAGE);
+
     XrReferenceSpaceCreateInfo spaceInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
-    spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+    spaceInfo.referenceSpaceType = appSpaceType;
     spaceInfo.poseInReferenceSpace.orientation.w = 1.0f; // identity
-    if (!xrCheck(xrCreateReferenceSpace(m_session, &spaceInfo, &m_space), "xrCreateReferenceSpace(LOCAL)"))
+    if (!xrCheck(xrCreateReferenceSpace(m_session, &spaceInfo, &m_space), "xrCreateReferenceSpace(app)"))
         return false;
+    printf("OpenXR: app reference space = %s\n", m_appSpaceIsStage ? "STAGE" : "LOCAL");
 
     XrReferenceSpaceCreateInfo viewSpaceInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
     viewSpaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
@@ -394,8 +411,10 @@ void OpenXRSession::getHeadView(const glm::vec3& playSpacePos, const glm::quat& 
         orientation = glm::quat(m_headPose.orientation.w, m_headPose.orientation.x, m_headPose.orientation.y, m_headPose.orientation.z);
         localPos = glm::vec3(m_headPose.position.x, m_headPose.position.y, m_headPose.position.z);
     }
-    // The play space is a full rigid transform (position + base orientation: camera rotation * play yaw);
-    // the headset's tracked pose rides on top of it. world = playSpace * headLocal.
+    // Rigid play-space transform (locomotion + base orientation: camera rotation * play yaw); the headset's
+    // tracked pose rides on top. world = T(pos) * R(base) * headLocal. Keeping headLocal inside R(base) is
+    // deliberate: head tracking AND the STAGE/space-drag offset must rotate with the yawed world. Turning in
+    // place is handled in the controller (it pivots about the head by adjusting the locomotion origin).
     const glm::mat4 playSpace = glm::translate(glm::mat4(1.0f), playSpacePos) * glm::mat4_cast(baseOrientation);
     const glm::mat4 headWorld = playSpace * glm::translate(glm::mat4(1.0f), localPos) * glm::mat4_cast(orientation);
     outPosition = glm::vec3(headWorld[3]);
@@ -407,7 +426,7 @@ void OpenXRSession::getEyeView(uint32 eye, const glm::vec3& playSpacePos, const 
     const XrPosef& pose = m_views[eye].pose;
     const glm::quat orientation(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
     const glm::vec3 localPos(pose.position.x, pose.position.y, pose.position.z);
-    // Same play-space rigid transform as the head; the eye pose adds rotation + the per-eye offset (IPD).
+    // Same rigid play-space transform as getHeadView; the eye pose adds rotation + the per-eye offset (IPD).
     const glm::mat4 playSpace = glm::translate(glm::mat4(1.0f), playSpacePos) * glm::mat4_cast(baseOrientation);
     const glm::mat4 eyeWorld = playSpace * glm::translate(glm::mat4(1.0f), localPos) * glm::mat4_cast(orientation);
     outPosition = glm::vec3(eyeWorld[3]);
