@@ -546,21 +546,24 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     m_cameraPos = camera.position; // drives the GI probe region each frame
 
     static RendererVKLayout::Ubo ubo;
-    ubo.prevMvp = ubo.mvp;       // last frame's mvp (before overwrite) for temporal reprojection
-    ubo.prevInvMvp = ubo.invMvp; // last frame's inverse mvp (before overwrite) for disocclusion
-    ubo.mvp = projection * viewMatrix;
-    ubo.invMvp = glm::inverse(ubo.mvp);
-    ubo.frustum.fromMatrix(ubo.mvp);
-    ubo.viewPos = camera.position;
 
-    // Per-eye matrices for the per-eye screen-space passes. Save last frame's (still in ubo) as the prev
-    // matrices for temporal reprojection, then overwrite. In VR each eye uses the runtime's pose +
-    // asymmetric projection; on desktop both eyes mirror the mono matrices so eye 0 reproduces the mono path.
-    for (uint32 eye = 0; eye < 2; ++eye)
+    // Save last frame's per-view matrices (still in ubo) as the prev matrices for temporal reprojection,
+    // then overwrite. views[VIEW_CENTER] = centre/combined view (the sole desktop view + every shared
+    // world-space pass); in VR views[1]/[2] are the left/right eyes. Desktop leaves [1]/[2] untouched
+    // (never read: the view index pushed to the per-eye passes is always 0 there).
+    const uint32 numViews = Globals::openXR.isEnabled() ? RendererVKLayout::NUM_UBO_VIEWS : 1;
+    for (uint32 v = 0; v < numViews; ++v)
     {
-        ubo.prevMvpStereo[eye] = ubo.mvpStereo[eye];
-        ubo.prevInvMvpStereo[eye] = ubo.invMvpStereo[eye];
+        ubo.views[v].prevMvp = ubo.views[v].mvp;
+        ubo.views[v].prevInvMvp = ubo.views[v].invMvp;
     }
+
+    RendererVKLayout::ViewData& centerView = ubo.views[RendererVKLayout::VIEW_CENTER];
+    centerView.mvp = projection * viewMatrix;
+    centerView.invMvp = glm::inverse(centerView.mvp);
+    centerView.viewPos = glm::vec4(camera.position, 1.0f);
+    ubo.frustum.fromMatrix(centerView.mvp);
+
     if (Globals::openXR.isEnabled())
     {
         for (uint32 eye = 0; eye < 2; ++eye)
@@ -569,16 +572,11 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
             glm::vec3 eyePos;
             Globals::openXR.getEyeView(eye, cameraIn.position, eyeView, eyePos);
             const glm::mat4 eyeProj = Globals::openXR.getEyeProjection(eye, camera.near, camera.far);
-            ubo.mvpStereo[eye] = eyeProj * eyeView;
-            ubo.invMvpStereo[eye] = glm::inverse(ubo.mvpStereo[eye]);
-            ubo.viewPosStereo[eye] = glm::vec4(eyePos, 1.0f);
+            RendererVKLayout::ViewData& v = ubo.views[eye + 1]; // [1] = left eye, [2] = right eye
+            v.mvp = eyeProj * eyeView;
+            v.invMvp = glm::inverse(v.mvp);
+            v.viewPos = glm::vec4(eyePos, 1.0f);
         }
-    }
-    else
-    {
-        ubo.mvpStereo[0] = ubo.mvpStereo[1] = ubo.mvp;
-        ubo.invMvpStereo[0] = ubo.invMvpStereo[1] = ubo.invMvp;
-        ubo.viewPosStereo[0] = ubo.viewPosStereo[1] = glm::vec4(camera.position, 1.0f);
     }
 
     const vk::Extent2D swapExtent = m_swapChain.getLayout().extent;
@@ -1099,7 +1097,7 @@ void Renderer::recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 e
         .shadowMapDepthSampler = frameData.shadowMap.getDepthSampler(),
         .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
         .gbufferSampler = frameData.gbuffer.getSampler(),
-        .eyeIndex = eyeIndex,
+        .viewIndex = (m_sceneViewCount > 1) ? eyeIndex + 1 : 0,
     };
     // Each eye has its own descriptor set (per-eye AO + gbuffer depth), so both eyes write their own.
     m_staticMeshGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, drawParams, true);
@@ -1132,7 +1130,7 @@ void Renderer::recordGBufferInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeI
         .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
         .materialInfoBuffer = m_materialInfosBuffer,
     };
-    m_gbufferPipeline.record(cb, frameIdx, m_meshInfoCounter, gbufferParams, eyeIndex);
+    m_gbufferPipeline.record(cb, frameIdx, m_meshInfoCounter, gbufferParams, (m_sceneViewCount > 1) ? eyeIndex + 1 : 0);
 }
 
 void Renderer::recordGBuffer(uint32 frameIdx)

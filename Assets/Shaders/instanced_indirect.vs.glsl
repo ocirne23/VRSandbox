@@ -8,9 +8,9 @@
 #include "shared.inc.glsl"
 
 #ifdef STEREO
-// VR renders one eye per pass (no multiview here: the forward pass's DGC execution set forbids it),
-// so the eye index is a push constant selecting the per-eye matrix.
-layout (push_constant) uniform EyePC { uint u_eyeIndex; };
+// VR renders one eye per pass (no multiview here: the forward pass's DGC execution set forbids it), so the
+// view index (1 = left eye, 2 = right eye) is a push constant selecting the per-eye matrices via g_viewIndex.
+layout (push_constant) uniform ViewPC { uint u_viewIndex; };
 #endif
 
 struct InMeshInstancesData
@@ -42,6 +42,9 @@ vec3 quat_transform(vec3 v, vec4 q)
 
 void main()
 {
+#ifdef STEREO
+    g_viewIndex = int(u_viewIndex);
+#endif
     const InMeshInstancesData inst = in_instances[inst_idx];
     vec3  inst_pos   = inst.posScale.xyz;
     float inst_scale = inst.posScale.w;
@@ -56,15 +59,10 @@ void main()
     out_uv  = in_uv;
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
 
-#ifdef STEREO
-    // VR: per-eye projection selected by the pushed eye index, with the same TAA sub-pixel jitter as the
-    // mono path (per-eye TAA accumulates it just like desktop). The fragment reads the same push constant.
-    gl_Position = u_mvpStereo[u_eyeIndex] * vec4(out_pos, 1.0);
-    gl_Position.xy += u_taaJitter.xy * gl_Position.w;
-#else
+    // Per-eye projection in VR (g_viewIndex set above) / centre view on desktop, with the same TAA
+    // sub-pixel jitter both eyes (per-eye TAA accumulates it just like desktop).
     gl_Position = u_mvp * vec4(out_pos, 1.0);
     gl_Position.xy += u_taaJitter.xy * gl_Position.w; // TAA sub-pixel jitter (clip space)
-#endif
 }
 
 /*mat3 version

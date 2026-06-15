@@ -7,11 +7,25 @@
 
 // NUM_SHADOW_CASCADES is injected by the engine from RendererVKLayout (Layout.ixx)
 
+#define VIEW_CENTER 0 // shared passes + desktop; the eyes are 1 (left) and 2 (right) in VR
+
+// One camera view's matrices grouped contiguously (AoS), matching RendererVKLayout::ViewData. u_views[0] =
+// centre/combined view (the only view on desktop; in VR sized to the union of both eyes' FOV), [1] = left
+// eye, [2] = right eye (VR only). Selected by g_viewIndex (see below + the u_mvp/... convenience macros).
+struct ViewData
+{
+    mat4 mvp;
+    mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
+    mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen
+    mat4 prevInvMvp; // previous frame's inverse(mvp): reconstruct last frame's world pos
+    vec4 viewPos;    // xyz = world position
+};
+
 layout (binding = UBO_BINDING, std140) uniform UBO
 {
-    mat4 u_mvp;
+    ViewData u_views[3];
     vec4 u_frustumPlanes[6];
-    vec3 u_viewPos;
+    vec3 u_viewPad;        // padding (centre viewPos lives in u_views[]); keeps u_betaMie 16-byte aligned
     float u_betaMie;       // Mie scattering coefficient at sea level (1/m), drives sky + indirect sky light
 
     vec3 u_sunDirection;   // xyz = normalized direction towards the sun, w unused
@@ -42,10 +56,6 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_cloudParams2;    // x = density (extinction), y = sharpness, z = base/top height variation, w = moon brightness
     vec4 u_skySunParams;    // x = atmosphere scatter boost (in-scatter only), y = Mie anisotropy g, z = sky highlight roll-off, w = star density
 
-    mat4 u_invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
-    mat4 u_prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen
-    mat4 u_prevInvMvp; // previous frame's inverse(mvp): reconstruct last frame's world pos
-
     vec4 u_screenSize;   // xy = full render-target resolution (px); zw = 1/xy
     vec4 u_viewportRect; // xy = viewport min, zw = viewport size, normalized to [0,1] of the full render target
     vec4 u_taaJitter;    // xy = TAA sub-pixel jitter in NDC, applied in clip space by raster vertex shaders only
@@ -72,19 +82,21 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
                           // ground-bounce tint for downward GI/fog rays), w unused
     vec4 u_aoParams;      // x = RTAO enabled (0/1), yzw unused
-
-    // Per-eye matrices (VR stereo). [0] mirrors the mono u_mvp/u_invMvp/u_viewPos/u_prev* above, so a
-    // per-eye pass that selects eye 0 reproduces the mono path exactly (desktop and the left eye).
-    mat4 u_mvpStereo[2];
-    mat4 u_invMvpStereo[2];
-    vec4 u_viewPosStereo[2];
-    mat4 u_prevMvpStereo[2];
-    mat4 u_prevInvMvpStereo[2];
 };
 
-// Per-eye view index for the stereo screen-space passes. Set once at the top of main() from a push
-// constant (VR) and left at 0 otherwise (desktop / mono); the helpers below index the u_*Stereo[] arrays
-// with it. Eye 0's stereo matrices mirror the mono ones, so the default reproduces the mono behaviour.
+// View index selecting which u_views[] entry the convenience macros / reconstruction helpers read. Defaults
+// to VIEW_CENTER (0): shared world-space passes and the whole desktop path leave it there. The per-eye
+// screen-space passes set it once at the top of main() from a push constant (1 = left eye, 2 = right eye).
 int g_viewIndex = 0;
+
+// Convenience accessors so call sites read the current view's matrices without spelling out u_views[..].
+// Shared passes get the centre view for free (g_viewIndex == VIEW_CENTER). A pass that needs a specific
+// view regardless of g_viewIndex (e.g. fog apply sampling the centre-built froxel volume) must index
+// u_views[] explicitly instead of using these.
+#define u_mvp        u_views[g_viewIndex].mvp
+#define u_invMvp     u_views[g_viewIndex].invMvp
+#define u_prevMvp    u_views[g_viewIndex].prevMvp
+#define u_prevInvMvp u_views[g_viewIndex].prevInvMvp
+#define u_viewPos    (u_views[g_viewIndex].viewPos.xyz)
 
 #endif

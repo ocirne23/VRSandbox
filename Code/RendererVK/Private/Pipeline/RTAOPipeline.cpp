@@ -21,7 +21,7 @@ namespace
         float  intensity;
         uint32 aoWidth;
         uint32 aoHeight;
-        uint32 eye;
+        uint32 viewIndex;
         float  _pad2;
     };
     struct TemporalPC
@@ -29,14 +29,14 @@ namespace
         uint32 aoWidth;
         uint32 aoHeight;
         float  maxHistory;
-        uint32 eye;
+        uint32 viewIndex;
     };
     struct SpatialPC
     {
         uint32 aoWidth;
         uint32 aoHeight;
         int32  radius;
-        uint32 eye;
+        uint32 viewIndex;
     };
 
     auto imgInfoGeneral(vk::ImageView view) { return vk::DescriptorImageInfo{ .imageView = view, .imageLayout = vk::ImageLayout::eGeneral }; }
@@ -247,6 +247,9 @@ void RTAOPipeline::transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uin
 void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params)
 {
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
+    // eye (0/1) selects the per-eye history images; viewIndex selects the UBO matrices (0 = centre/desktop,
+    // 1/2 = the eyes in VR). They differ in VR because u_views[0] is the centre view, not an eye.
+    const uint32 viewIndex = (m_viewCount > 1) ? eye + 1 : 0;
     const uint32 prevFrame = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
     const uint32 cur = slot(frameIdx, eye);   // this eye's images this frame
     const uint32 prevIdx = slot(prevFrame, eye); // same eye's images last frame (history)
@@ -294,7 +297,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, traceLayout, 0, 1, &vkSet, 0, nullptr);
         RtaoPC pc{ .numRays = uint32(std::max(m_rays, 1)), .radius = m_radius, .power = m_power,
-            .intensity = m_intensity, .aoWidth = m_width, .aoHeight = m_height, .eye = eye };
+            .intensity = m_intensity, .aoWidth = m_width, .aoHeight = m_height, .viewIndex = viewIndex };
         cmd.pushConstants(traceLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
@@ -316,7 +319,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
         commandBuffer.cmdUpdateDescriptorSets(temporalLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_temporalPipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, temporalLayout, 0, 1, &vkSet, 0, nullptr);
-        TemporalPC pc{ .aoWidth = m_width, .aoHeight = m_height, .maxHistory = m_maxHistory, .eye = eye };
+        TemporalPC pc{ .aoWidth = m_width, .aoHeight = m_height, .maxHistory = m_maxHistory, .viewIndex = viewIndex };
         cmd.pushConstants(temporalLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
@@ -337,7 +340,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
         commandBuffer.cmdUpdateDescriptorSets(spatialLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_spatialPipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, spatialLayout, 0, 1, &vkSet, 0, nullptr);
-        SpatialPC pc{ .aoWidth = m_width, .aoHeight = m_height, .radius = m_blurRadius, .eye = eye };
+        SpatialPC pc{ .aoWidth = m_width, .aoHeight = m_height, .radius = m_blurRadius, .viewIndex = viewIndex };
         cmd.pushConstants(spatialLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }

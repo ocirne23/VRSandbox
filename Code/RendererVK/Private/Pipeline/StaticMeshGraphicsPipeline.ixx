@@ -52,11 +52,11 @@ public:
 		vk::ImageView gbufferDepthView;    // full-res depth (AO bilateral upsample edge weights)
 		vk::Sampler gbufferSampler;
 
-		uint32 eyeIndex = 0; // VR (stereo): selects u_mvpStereo[eyeIndex] via push constant
+		uint32 viewIndex = 0; // selects u_views[viewIndex] via push constant (0 = centre/desktop, 1/2 = eyes)
     };
 
-    // stereo = build the multiview (VR) variant: the vertex shader gets STEREO defined so it uses
-    // u_mvpStereo[gl_ViewIndex]. The render pass must be a matching multiview (2-view) pass.
+    // stereo = build the VR variant: the shaders get STEREO defined so they read a push-constant view
+    // index (u_views[u_viewIndex]); the pass is rendered once per eye (not multiview).
     void initialize(vk::RenderPass renderPass, uint32 maxUniqueMeshes, uint32 maxTextures, bool stereo = false);
     void reloadShaders(uint32 maxTextures);
     // Re-sizes the DGC preprocess scratch for a grown unique-mesh capacity (GPU must be idle).

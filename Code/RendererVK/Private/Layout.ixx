@@ -69,12 +69,26 @@ export namespace RendererVKLayout
     constexpr size_t INITIAL_VERTEX_DATA = 1024 * 1024 * sizeof(RendererVKLayout::MeshVertex);
     constexpr size_t INITIAL_INDEX_DATA = 4 * 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
 
-    struct alignas(16) Ubo
+    // A camera view's matrices grouped contiguously (AoS): one view's data in a single block, so on desktop
+    // only views[0] is touched. views[0] = centre/combined view (the sole desktop view; in VR sized to the
+    // union of both eyes' FOV so the shared world-space passes cover everything either eye sees);
+    // views[1] = left eye, views[2] = right eye (VR only). Shaders select via g_viewIndex.
+    struct alignas(16) ViewData
     {
         glm::mat4 mvp;
-        Frustum frustum;
-        glm::vec3 viewPos;
+        glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
+        glm::mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen
+        glm::mat4 prevInvMvp; // previous frame's inverse(mvp): reconstruct last frame's world pos
+        glm::vec4 viewPos;    // xyz = world position
+    };
+    constexpr uint32 VIEW_CENTER = 0;  // shared passes + desktop; the eyes are 1 (left) and 2 (right)
+    constexpr uint32 NUM_UBO_VIEWS = 3;
 
+    struct alignas(16) Ubo
+    {
+        ViewData views[NUM_UBO_VIEWS];
+        Frustum frustum;         // centre/combined frustum (culling, shadow cascade fit)
+        glm::vec3 viewPad_;      // (the centre viewPos moved into views[]) keeps betaMie in a std140 16-byte slot
         float betaMie;           // Mie scattering coefficient at sea level (1/m), drives sky + indirect sky light
         glm::vec3 sunDirection;  // xyz = normalized direction towards the sun, w unused
         float sunAngularCos;     // cos of the sun disc radius (1 = point, smaller = bigger disc)
@@ -107,10 +121,6 @@ export namespace RendererVKLayout
         glm::vec4 cloudParams2; // x = density (extinction), y = sharpness, z = base/top height variation, w = moon brightness
         glm::vec4 skySunParams; // x = atmosphere scatter boost (in-scatter only), y = Mie anisotropy g, z = sky highlight roll-off, w = star density
 
-        glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv (screen-space passes)
-        glm::mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen (temporal reuse)
-        glm::mat4 prevInvMvp; // previous frame's inverse(mvp): reconstruct last frame's world pos (disocclusion)
-
         glm::vec4 screenSize;   // xy = full render-target resolution (px); zw = 1/xy (screen-space AO lookup)
         glm::vec4 viewportRect; // xy = viewport min, zw = viewport size, both normalized to [0,1] of the full
                                 // render target. The scene renders through this sub-rect (editor viewport panel),
@@ -139,15 +149,6 @@ export namespace RendererVKLayout
         glm::vec4 atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
         glm::vec4 groundParams;  // rgb = ground albedo * intensity, w unused
         glm::vec4 aoParams;      // x = RTAO enabled (0/1), yzw unused
-
-        // Per-eye matrices for VR stereo rendering. Index [0] mirrors the mono mvp/invMvp/viewPos/prev*
-        // above, so desktop (viewCount 1) and every per-eye pass select eye 0 and reproduce the mono path
-        // exactly. In VR the forward/gbuffer/AO/TAA/fog-apply passes index these by the eye they render.
-        glm::mat4 mvpStereo[2];
-        glm::mat4 invMvpStereo[2];
-        glm::vec4 viewPosStereo[2]; // xyz = per-eye world position
-        glm::mat4 prevMvpStereo[2];    // previous frame's per-eye mvp (temporal reprojection)
-        glm::mat4 prevInvMvpStereo[2]; // previous frame's per-eye inverse mvp (disocclusion)
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

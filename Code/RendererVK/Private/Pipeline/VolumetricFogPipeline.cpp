@@ -285,6 +285,9 @@ void VolumetricFogPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx
 void VolumetricFogPipeline::recordApply(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const ApplyParams& params)
 {
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
+    // eye (0/1) selects the per-eye apply descriptor set; viewIndex selects the UBO view used to reconstruct
+    // depth (0 = centre/desktop, 1/2 = the eyes in VR). The froxel volume itself is the shared centre view.
+    const uint32 viewIndex = (m_applyViewCount > 1) ? eye + 1 : 0;
     DescriptorSet& set = m_applySets[applySlot(frameIdx, eye)];
     vk::DescriptorSet vkSet = set.getDescriptorSet();
     auto uboInfo = vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = sizeof(RendererVKLayout::Ubo) };
@@ -296,6 +299,6 @@ void VolumetricFogPipeline::recordApply(CommandBuffer& commandBuffer, uint32 fra
     commandBuffer.cmdUpdateDescriptorSets(m_applyPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, vkSet, updates);
     cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_applyPipeline.getPipeline());
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_applyPipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
-    cmd.pushConstants(m_applyPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eFragment, 0, sizeof(uint32), &eye);
+    cmd.pushConstants(m_applyPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eFragment, 0, sizeof(uint32), &viewIndex);
     cmd.draw(3, 1, 0, 0);
 }

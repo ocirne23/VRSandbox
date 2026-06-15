@@ -31,8 +31,8 @@ public:
         Buffer& indirectCommandBuffer; // IndirectDrawSequence[]; drawn with offset 4, stride 24
         Buffer& materialInfoBuffer;    // MaterialInfo[]; the vertex shader culls MATERIAL_FLAG_SKY instances
     };
-    // eyeIndex selects the per-eye projection (u_mvpStereo[eyeIndex]); 0 on desktop / left eye.
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, uint32 eyeIndex = 0);
+    // viewIndex selects the view matrices (u_views[viewIndex]); 0 = centre/desktop, 1/2 = the eyes in VR.
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, uint32 viewIndex = 0);
 
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
 

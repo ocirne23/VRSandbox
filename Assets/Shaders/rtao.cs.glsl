@@ -20,7 +20,7 @@ layout (push_constant) uniform PC
     float intensity;  // 0 = off, 1 = full
     uint  aoWidth;
     uint  aoHeight;
-    uint  eye;        // stereo eye index (0 on desktop / left eye)
+    uint  viewIndex;  // view to reconstruct in (0 = centre/desktop, 1 = left eye, 2 = right eye)
     float _pad2;
 } pc;
 
@@ -40,7 +40,7 @@ float ign(vec2 p) { return fract(52.9829189 * fract(0.06711056 * p.x + 0.0058371
 
 void main()
 {
-    g_viewIndex = int(pc.eye);
+    g_viewIndex = int(pc.viewIndex);
     const ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     if (px.x >= int(pc.aoWidth) || px.y >= int(pc.aoHeight))
         return;
@@ -55,7 +55,7 @@ void main()
     if (nLen < 0.5) { imageStore(u_aoOut, px, vec4(0.0, 0.0, 1.0, 1.0)); return; }
     const vec3 N = nRaw / nLen;
 
-    const vec3 worldPos = worldPosFromDepthEye(uv, depth);
+    const vec3 worldPos = worldPosFromDepth(uv, depth);
 
     vec3 up = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     vec3 T = normalize(cross(up, N));

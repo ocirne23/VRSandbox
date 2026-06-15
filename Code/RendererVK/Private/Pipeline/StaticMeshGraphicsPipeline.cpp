@@ -23,8 +23,8 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
     graphicsPipelineLayout.vertexShader.text = FileSystem::readFileStr(graphicsPipelineLayout.vertexShader.debugFilePath);
     graphicsPipelineLayout.fragmentShader.text = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShader.debugFilePath);
 
-    // VR variant: the vertex shader picks u_mvpStereo[u_eyeIndex] via a push constant (one pass per eye)
-    // and forwards the eye index to the (lit) fragment shader, which selects the per-eye view pos + AO.
+    // VR variant: the vertex shader picks u_views[u_viewIndex] via a push constant (one pass per eye)
+    // and the (lit) fragment shader reads the same push constant to select the per-eye view pos + AO.
     if (m_stereo)
     {
         graphicsPipelineLayout.vertexShader.defines.push_back({ "STEREO", "1" });
@@ -462,7 +462,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
     vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipeline());
     vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
     if (m_stereo) // select the eye matrix/view pos for the generated draws (vertex + fragment read it)
-        vkCommandBuffer.pushConstants(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, sizeof(uint32), &params.eyeIndex);
+        vkCommandBuffer.pushConstants(m_graphicsPipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, sizeof(uint32), &params.viewIndex);
     vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, {0});
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);

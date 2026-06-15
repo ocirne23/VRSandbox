@@ -16,12 +16,12 @@ layout (push_constant) uniform PC
     uint  aoWidth;
     uint  aoHeight;
     int   radius;     // kernel half-extent (texels)
-    uint  eye;        // stereo eye index (0 on desktop / left eye)
+    uint  viewIndex;  // view to reconstruct in (0 = centre/desktop, 1 = left eye, 2 = right eye)
 } pc;
 
 void main()
 {
-    g_viewIndex = int(pc.eye);
+    g_viewIndex = int(pc.viewIndex);
     const ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     if (px.x >= int(pc.aoWidth) || px.y >= int(pc.aoHeight))
         return;
@@ -58,9 +58,9 @@ void main()
         return;
     }
 
-    const vec3 centerPos = worldPosFromDepthEye(uv, depth);
+    const vec3 centerPos = worldPosFromDepth(uv, depth);
     const vec3 centerN   = normalize(texture(u_normal, uv).xyz);
-    const float viewDist = length(centerPos - viewPosEye());
+    const float viewDist = length(centerPos - u_viewPos);
     const float sigmaZ   = max(0.05 * viewDist, 0.02);
 
     vec4 sum = vec4(0.0); // .a = AO, .xyz = bent normal
@@ -72,7 +72,7 @@ void main()
         const float nDepth = texture(u_depth, nuv).r;
         if (nDepth >= 1.0) continue;
 
-        const vec3 nPos = worldPosFromDepthEye(nuv, nDepth);
+        const vec3 nPos = worldPosFromDepth(nuv, nDepth);
         const vec3 nN   = normalize(texture(u_normal, nuv).xyz);
 
         const float dz = length(nPos - centerPos);

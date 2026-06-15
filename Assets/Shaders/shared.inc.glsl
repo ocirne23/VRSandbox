@@ -52,17 +52,12 @@ vec3 worldPosFromDepthMat(vec2 uv, float depth, mat4 invM)
     vec4 world = invM * clip;
     return world.xyz / world.w;
 }
-// Mono (centre/head view) reconstruction. Used by the shared passes (e.g. volumetric fog scatter, whose
-// froxel volume is built once for the centre view); on desktop this is the only view.
+// Reconstruction for the current view (u_invMvp = u_views[g_viewIndex].invMvp). Shared passes leave
+// g_viewIndex at VIEW_CENTER (centre view); per-eye passes set it to the eye they process.
 vec3 worldPosFromDepth(vec2 uv, float depth) { return worldPosFromDepthMat(uv, depth, u_invMvp); }
 
-// Per-eye variants (g_viewIndex). The per-eye screen-space passes set g_viewIndex to the eye they process
-// before calling these; eye 0's stereo matrices mirror the mono ones, so desktop reproduces the mono path.
-vec3 worldPosFromDepthEye(vec2 uv, float depth) { return worldPosFromDepthMat(uv, depth, u_invMvpStereo[g_viewIndex]); }
-vec3 viewPosEye() { return u_viewPosStereo[g_viewIndex].xyz; }
-
 // Project a world position to a previous-frame full-frame screen UV (inverse of the mapping above): NDC ->
-// viewport-local UV -> full-frame UV through u_viewportRect. prevScreenUV = mono; prevScreenUVEye = per-eye.
+// viewport-local UV -> full-frame UV through u_viewportRect. Uses the current view's previous matrix.
 vec2 prevScreenUVMat(vec3 worldPos, mat4 prevM, out float clipW)
 {
     vec4 p = prevM * vec4(worldPos, 1.0);
@@ -71,8 +66,7 @@ vec2 prevScreenUVMat(vec3 worldPos, mat4 prevM, out float clipW)
     vec2 vpUv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
     return u_viewportRect.xy + vpUv * u_viewportRect.zw;
 }
-vec2 prevScreenUV(vec3 worldPos, out float clipW)    { return prevScreenUVMat(worldPos, u_prevMvp, clipW); }
-vec2 prevScreenUVEye(vec3 worldPos, out float clipW) { return prevScreenUVMat(worldPos, u_prevMvpStereo[g_viewIndex], clipW); }
+vec2 prevScreenUV(vec3 worldPos, out float clipW) { return prevScreenUVMat(worldPos, u_prevMvp, clipW); }
 
 // Atmosphere scattering + skyRadiance() for GI miss rays / fog ambient / surface fallback: the same
 // Rayleigh+Mie model the sky renders with, so indirect sky light follows the atmosphere settings.

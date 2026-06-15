@@ -5,9 +5,9 @@
 
 #include "shared.inc.glsl"
 
-// Eye index (0 on desktop / left eye). The G-buffer is rendered once per eye into its own layer, like the
-// forward pass; selects the matching per-eye projection. No TAA jitter here (this is the reference depth).
-layout (push_constant) uniform EyePC { uint u_eyeIndex; };
+// View index (0 = centre/desktop, 1 = left eye, 2 = right eye). The G-buffer is rendered once per eye into
+// its own layer, like the forward pass; selects the matching view. No TAA jitter (this is the reference depth).
+layout (push_constant) uniform ViewPC { uint u_viewIndex; };
 
 struct InMeshInstancesData
 {
@@ -41,6 +41,7 @@ vec3 quat_transform(vec3 v, vec4 q)
 
 void main()
 {
+    g_viewIndex = int(u_viewIndex);
     const InMeshInstancesData inst = in_instances[inst_idx];
     // Sky sphere: emit degenerate triangles so it never writes the G-buffer. Its depth stays at the
     // cleared far plane, so TAA reprojection (and fog/AO depth reads) treat the sky as infinitely far
@@ -53,5 +54,5 @@ void main()
     }
     vec3 worldPos = quat_transform(in_pos * inst.posScale.w, inst.quat) + inst.posScale.xyz;
     out_normal = quat_transform(in_normal, inst.quat);
-    gl_Position = u_mvpStereo[u_eyeIndex] * vec4(worldPos, 1.0);
+    gl_Position = u_mvp * vec4(worldPos, 1.0);
 }

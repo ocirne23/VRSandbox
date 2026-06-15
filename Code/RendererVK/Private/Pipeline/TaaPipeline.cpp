@@ -15,7 +15,7 @@ namespace
         uint32 width;
         uint32 height;
         float  feedback;
-        uint32 eye;
+        uint32 viewIndex;
     };
 
     auto imgInfoGeneral(vk::ImageView view) { return vk::DescriptorImageInfo{ .imageView = view, .imageLayout = vk::ImageLayout::eGeneral }; }
@@ -175,6 +175,8 @@ void TaaPipeline::transitionToGeneral(vk::CommandBuffer cmd, ImageSet& set, uint
 void TaaPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params)
 {
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
+    // eye (0/1) selects the per-eye history; viewIndex selects the UBO matrices (0 = centre/desktop, 1/2 = eyes).
+    const uint32 viewIndex = (m_viewCount > 1) ? eye + 1 : 0;
     const uint32 prevFrame = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
     const uint32 cur = slot(frameIdx, eye);
     const uint32 prevIdx = slot(prevFrame, eye); // same eye's resolved image last frame (history)
@@ -198,7 +200,7 @@ void TaaPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 e
     commandBuffer.cmdUpdateDescriptorSets(pipelineLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_pipeline.getPipeline());
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout, 0, 1, &vkSet, 0, nullptr);
-    TaaPC pc{ .width = m_width, .height = m_height, .feedback = params.feedback, .eye = eye };
+    TaaPC pc{ .width = m_width, .height = m_height, .feedback = params.feedback, .viewIndex = viewIndex };
     cmd.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
     cmd.dispatch(gx, gy, 1);
 

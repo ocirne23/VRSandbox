@@ -28,7 +28,7 @@ layout (push_constant) uniform PC
     uint  width;
     uint  height;
     float feedback;  // history weight in [0,1]; 0 disables temporal accumulation
-    uint  eye;       // stereo eye index (0 on desktop / left eye)
+    uint  viewIndex; // view to reconstruct in (0 = centre/desktop, 1 = left eye, 2 = right eye)
 } pc;
 
 bool insideViewport(vec2 uv)
@@ -39,7 +39,7 @@ bool insideViewport(vec2 uv)
 
 void main()
 {
-    g_viewIndex = int(pc.eye);
+    g_viewIndex = int(pc.viewIndex);
     const ivec2 px = ivec2(gl_GlobalInvocationID.xy);
     if (px.x >= int(pc.width) || px.y >= int(pc.height))
         return;
@@ -61,9 +61,9 @@ void main()
     // reproject AT the far plane: the reprojection is then purely rotational (parallax-free, correct for
     // content at infinity) and the jittered sky raster still accumulates instead of visibly shaking.
     const bool sky = depth >= 1.0;
-    const vec3 worldPos = worldPosFromDepthEye(uv, min(depth, 1.0));
+    const vec3 worldPos = worldPosFromDepth(uv, min(depth, 1.0));
     float clipW;
-    const vec2 prevUv = prevScreenUVEye(worldPos, clipW);
+    const vec2 prevUv = prevScreenUV(worldPos, clipW);
 
     const bool histValid = clipW > 0.0 && insideViewport(prevUv);
     if (!histValid)
@@ -103,8 +103,8 @@ void main()
     }
     else if (prevDepth < 1.0)
     {
-        const vec3 prevWorld = worldPosFromDepthMat(prevUv, prevDepth, u_prevInvMvpStereo[g_viewIndex]);
-        const float thresh = 0.05 * (1.0 + distance(viewPosEye(), worldPos));
+        const vec3 prevWorld = worldPosFromDepthMat(prevUv, prevDepth, u_prevInvMvp);
+        const float thresh = 0.05 * (1.0 + distance(u_viewPos, worldPos));
         if (distance(prevWorld, worldPos) > thresh)
             fb = 0.0;
     }
