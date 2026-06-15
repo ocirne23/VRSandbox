@@ -237,6 +237,7 @@ private:
     AccelerationStructure m_accelStructure;
     GIProbePipeline m_giProbePipeline;
 
+    bool  m_aoEnabled = true;
     bool  m_taaEnabled = true;
     float m_taaFeedback = 0.9f;
     uint32 m_taaJitterFrame = 0;

@@ -561,12 +561,19 @@ void main()
 	// Denoised screen-space AO (half-res, linearly upsampled). gl_FragCoord is in full render-target pixels;
 	// u_screenSize.zw = 1/resolution turns it into the [0,1] UV the AO image was traced in. rgb = bent
 	// normal (average unoccluded direction, world space), a = scalar AO.
-	const vec4 aoSample = sampleAOBilateral(gl_FragCoord.xy * u_screenSize.zw, in_pos);
-	const float ao = aoSample.w;
-	// Evaluate the indirect irradiance along the bent normal rather than the surface normal: in concave
-	// areas it points toward the open hemisphere, so the low-frequency probe SH stops leaking light from
-	// occluded directions. Mix partway toward N so flat, unoccluded surfaces are left untouched.
-	const vec3 bentN = normalize(mix(N, normalize(aoSample.xyz), 0.75));
+	// RTAO toggle (u_aoParams.x): when off, no occlusion (ao = 1) and the bent normal collapses to N, so
+	// the AO image (which isn't being traced) is never sampled.
+	float ao = 1.0;
+	vec3 bentN = N;
+	if (u_aoParams.x > 0.5)
+	{
+		const vec4 aoSample = sampleAOBilateral(gl_FragCoord.xy * u_screenSize.zw, in_pos);
+		ao = aoSample.w;
+		// Evaluate the indirect irradiance along the bent normal rather than the surface normal: in concave
+		// areas it points toward the open hemisphere, so the low-frequency probe SH stops leaking light from
+		// occluded directions. Mix partway toward N so flat, unoccluded surfaces are left untouched.
+		bentN = normalize(mix(N, normalize(aoSample.xyz), 0.75));
+	}
 	const vec3 indirectE = evalProbeSH(in_pos, bentN);
 	// Outside the probe volume fall back to the analytic sky: treating it as locally uniform, the
 	// irradiance is PI * skyRadiance, so Lambertian indirect = albedo * skyRadiance — the same energy a

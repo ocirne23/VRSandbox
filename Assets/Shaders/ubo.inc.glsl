@@ -71,6 +71,7 @@ layout (binding = UBO_BINDING, std140) uniform UBO
 
     vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
                           // ground-bounce tint for downward GI/fog rays), w unused
+    vec4 u_aoParams;      // x = RTAO enabled (0/1), yzw unused
 
     // Per-eye matrices (VR stereo). [0] mirrors the mono u_mvp/u_invMvp/u_viewPos/u_prev* above, so a
     // per-eye pass that selects eye 0 reproduces the mono path exactly (desktop and the left eye).

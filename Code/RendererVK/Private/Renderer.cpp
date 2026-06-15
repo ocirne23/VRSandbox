@@ -176,6 +176,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     Tweak::intVar("RT", "RT Sun Rays", &m_sunShadowRays, 1, 8);
     Tweak::boolean("RT", "RT Sky Radiance", &m_rtSkyRadiance);
 
+    Tweak::boolean("RTAO", "Enabled", &m_aoEnabled, [this]() { setHaveToRecordCommandBuffers(); });
+
     Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
     Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
     if (vr == EVr::ENABLED)
@@ -588,6 +590,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         (float)viewportSize.x / (float)swapExtent.width,
         (float)viewportSize.y / (float)swapExtent.height);
     ubo.taaJitter = glm::vec4(taaJitterNdc, 0.0f, 0.0f);
+    ubo.aoParams = glm::vec4(m_aoEnabled ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
     ubo.frameIndex = m_frameCounter;
 
     const SkyParams& sky = m_skyParams;
@@ -1649,7 +1652,8 @@ void Renderer::recordCommandBuffers()
                         recordGBufferInto(commandBuffer, frameIdx, eye);
                     vkCommandBuffer.endRenderPass();
                 }
-                recordAOInto(commandBuffer, frameIdx, eye); // compute AO for this eye
+                if (m_aoEnabled)
+                    recordAOInto(commandBuffer, frameIdx, eye); // compute AO for this eye
 
                 // This eye's forward descriptor set takes this eye's AO + the (per-frame) TLAS.
                 m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet[eye].getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx, eye), m_rtaoPipeline.getAOSampler());
@@ -1730,7 +1734,8 @@ void Renderer::recordCommandBuffers()
                 vkCommandBuffer.endRenderPass();
             }
             vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
-            vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
+            if (m_aoEnabled)
+                vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
             // Fog scatter/integrate compute; the primary is re-recorded every frame, so the enable toggle
             // takes effect immediately (the integrated grid was cleared to "no fog" at init when disabled).
             if (m_fogParams.enabled)
