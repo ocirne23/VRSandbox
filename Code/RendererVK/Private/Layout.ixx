@@ -83,6 +83,9 @@ export namespace RendererVKLayout
     };
     constexpr uint32 VIEW_CENTER = 0;  // shared passes + desktop; the eyes are 1 (left) and 2 (right)
     constexpr uint32 NUM_UBO_VIEWS = 3;
+    // Maps a per-eye index (0/1, also used for per-eye history slots) to the u_views[] matrix index a
+    // per-eye pass should read: desktop (viewCount 1) collapses to VIEW_CENTER; VR maps eye 0/1 -> 1/2.
+    constexpr uint32 eyeToViewIndex(uint32 eye, uint32 viewCount) { return viewCount > 1 ? eye + 1 : VIEW_CENTER; }
 
     struct alignas(16) Ubo
     {

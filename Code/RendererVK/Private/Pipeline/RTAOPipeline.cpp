@@ -249,7 +249,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
     // eye (0/1) selects the per-eye history images; viewIndex selects the UBO matrices (0 = centre/desktop,
     // 1/2 = the eyes in VR). They differ in VR because u_views[0] is the centre view, not an eye.
-    const uint32 viewIndex = (m_viewCount > 1) ? eye + 1 : 0;
+    const uint32 viewIndex = RendererVKLayout::eyeToViewIndex(eye, m_viewCount);
     const uint32 prevFrame = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
     const uint32 cur = slot(frameIdx, eye);   // this eye's images this frame
     const uint32 prevIdx = slot(prevFrame, eye); // same eye's images last frame (history)

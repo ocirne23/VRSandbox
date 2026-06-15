@@ -287,7 +287,7 @@ void VolumetricFogPipeline::recordApply(CommandBuffer& commandBuffer, uint32 fra
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
     // eye (0/1) selects the per-eye apply descriptor set; viewIndex selects the UBO view used to reconstruct
     // depth (0 = centre/desktop, 1/2 = the eyes in VR). The froxel volume itself is the shared centre view.
-    const uint32 viewIndex = (m_applyViewCount > 1) ? eye + 1 : 0;
+    const uint32 viewIndex = RendererVKLayout::eyeToViewIndex(eye, m_applyViewCount);
     DescriptorSet& set = m_applySets[applySlot(frameIdx, eye)];
     vk::DescriptorSet vkSet = set.getDescriptorSet();
     auto uboInfo = vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = sizeof(RendererVKLayout::Ubo) };

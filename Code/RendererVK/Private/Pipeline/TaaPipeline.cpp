@@ -176,7 +176,7 @@ void TaaPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 e
 {
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
     // eye (0/1) selects the per-eye history; viewIndex selects the UBO matrices (0 = centre/desktop, 1/2 = eyes).
-    const uint32 viewIndex = (m_viewCount > 1) ? eye + 1 : 0;
+    const uint32 viewIndex = RendererVKLayout::eyeToViewIndex(eye, m_viewCount);
     const uint32 prevFrame = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
     const uint32 cur = slot(frameIdx, eye);
     const uint32 prevIdx = slot(prevFrame, eye); // same eye's resolved image last frame (history)

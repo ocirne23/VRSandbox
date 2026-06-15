@@ -1097,7 +1097,7 @@ void Renderer::recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 e
         .shadowMapDepthSampler = frameData.shadowMap.getDepthSampler(),
         .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
         .gbufferSampler = frameData.gbuffer.getSampler(),
-        .viewIndex = (m_sceneViewCount > 1) ? eyeIndex + 1 : 0,
+        .viewIndex = RendererVKLayout::eyeToViewIndex(eyeIndex, m_sceneViewCount),
     };
     // Each eye has its own descriptor set (per-eye AO + gbuffer depth), so both eyes write their own.
     m_staticMeshGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, drawParams, true);
@@ -1130,7 +1130,7 @@ void Renderer::recordGBufferInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeI
         .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
         .materialInfoBuffer = m_materialInfosBuffer,
     };
-    m_gbufferPipeline.record(cb, frameIdx, m_meshInfoCounter, gbufferParams, (m_sceneViewCount > 1) ? eyeIndex + 1 : 0);
+    m_gbufferPipeline.record(cb, frameIdx, m_meshInfoCounter, gbufferParams, RendererVKLayout::eyeToViewIndex(eyeIndex, m_sceneViewCount));
 }
 
 void Renderer::recordGBuffer(uint32 frameIdx)
@@ -1225,7 +1225,7 @@ void Renderer::recordAO(uint32 frameIdx)
     vk::CommandBufferInheritanceInfo inheritance;
     cb.begin(false, &inheritance);
     const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
-    if (m_meshInfoCounter > 0 && tlas)
+    if (m_aoEnabled && m_meshInfoCounter > 0 && tlas)
     {
         const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
         RTAOPipeline::RecordParams aoParams{
