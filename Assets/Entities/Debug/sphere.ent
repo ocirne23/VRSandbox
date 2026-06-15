@@ -1,0 +1,4 @@
+Entity sphere
+	Component RenderNode
+		ObjectContainer baseshapes
+		Node Sphere

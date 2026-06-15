@@ -1,0 +1,4 @@
+Entity ramp
+	Component RenderNode
+		ObjectContainer baseshapes
+		Node Ramp

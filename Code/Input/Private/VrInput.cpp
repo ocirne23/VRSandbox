@@ -168,6 +168,12 @@ bool VrInput::initialize(IVrSession* vrSession)
             return false;
     }
 
+    // VIEW reference space for the head pose (separate from the renderer's own; used for head-relative locomotion).
+    XrReferenceSpaceCreateInfo viewSpaceInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
+    viewSpaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+    viewSpaceInfo.poseInReferenceSpace.orientation.w = 1.0f; // identity
+    xrOk(xrCreateReferenceSpace(m_session, &viewSpaceInfo, &m_viewSpace), "xrCreateReferenceSpace(VIEW)");
+
     m_enabled = true;
     printf("VrInput: action set attached (thumbsticks, poses, triggers, buttons)\n");
     return true;
@@ -180,6 +186,7 @@ void VrInput::update()
     m_turnAxis = glm::vec2(0.0f);
     for (VrHandState& hand : m_hands)
         hand = VrHandState{};
+    m_headPoseValid = false;
     if (!m_enabled)
         return;
 
@@ -228,6 +235,20 @@ void VrInput::update()
     m_active = stickActive;
 
     const XrTime displayTime = (XrTime)m_vrSession->predictedDisplayTime();
+
+    if (m_viewSpace != XR_NULL_HANDLE && displayTime > 0)
+    {
+        XrSpaceLocation loc{ XR_TYPE_SPACE_LOCATION };
+        if (XR_SUCCEEDED(xrLocateSpace(m_viewSpace, m_referenceSpace, displayTime, &loc))
+            && (loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)
+            && (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT))
+        {
+            m_headPoseValid = true;
+            m_headPosition = glm::vec3(loc.pose.position.x, loc.pose.position.y, loc.pose.position.z);
+            m_headOrientation = glm::quat(loc.pose.orientation.w, loc.pose.orientation.x, loc.pose.orientation.y, loc.pose.orientation.z);
+        }
+    }
+
     for (uint32 hand = 0; hand < HAND_COUNT; ++hand)
     {
         VrHandState& state = m_hands[hand];
@@ -260,6 +281,11 @@ void VrInput::destroy()
             xrDestroySpace(m_poseSpace[hand]);
             m_poseSpace[hand] = XR_NULL_HANDLE;
         }
+    }
+    if (m_viewSpace != XR_NULL_HANDLE)
+    {
+        xrDestroySpace(m_viewSpace);
+        m_viewSpace = XR_NULL_HANDLE;
     }
     if (m_actionSet != XR_NULL_HANDLE)
     {

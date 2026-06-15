@@ -2,11 +2,12 @@ export module Entity;
 
 import Core;
 import Core.glm;
+import Core.Transform;
 
-export struct Entity;
-
-export enum EComponentID : uint16;
-
+// Lightweight entity header. Its components live in memory immediately after this header; which
+// components are present is encoded in typeBits, and each component's byte offset is derived from
+// that mask (see Entity.Component). Entities are created via createEntity() (which allocates the
+// header + trailing component bytes from the EntityAllocator), never constructed standalone.
 export struct Entity
 {
     glm::vec3 pos;
@@ -16,62 +17,101 @@ export struct Entity
     uint16 refCount = 0;
     uint16 typeBits = 0;
     uint8 ecsComponentCount = 0;
-    uint8 zoneIdx;
+    uint8 zoneIdx = 0;
 
     ~Entity()
     {
         assert(refCount == 0);
     }
-    template <typename T>
-    T* getComponent();
-    constexpr uint32 getComponentOffset(uint16 typeBits, EComponentID id);
 };
 
+// Tears an entity down and returns its memory: runs the inline component destructors, then ~Entity,
+// then deallocates the contiguous block. Defined in Entity.cpp, where the allocator and the inline
+// component tables are visible. Only EntityPtr (on the last reference) should call this.
+export void destroyEntity(Entity* entity);
+
+// Intrusive refcounted handle to an entity. The count lives in Entity::refCount; when it falls to
+// zero the entity is freed via destroyEntity(). Copy = share, move = transfer. Default-constructed
+// (or moved-from) handles are null and safe to destroy. Copyable/movable so it can live in
+// containers (e.g. ZoneComponent::entities).
 export struct EntityPtr
 {
-    uint64 id;
+    EntityPtr() = default;
+    explicit EntityPtr(Entity* entity) : m_entity(entity) { addRef(); }
 
-    constexpr static uint64 PointerBits = 0b00000000'00000000'11111111'11111111'11111111'11111111'11111111'11110000;
-    constexpr static uint64 SaltBits    = 0b00000000'00000000'00000000'00000000'00000000'00000000'00000000'00001111;
-    constexpr static uint64 TypeBits    = 0b11111111'11111111'00000000'00000000'00000000'00000000'00000000'00000000;
+    EntityPtr(const EntityPtr& other) : m_entity(other.m_entity) { addRef(); }
+    EntityPtr(EntityPtr&& other) noexcept : m_entity(other.m_entity) { other.m_entity = nullptr; }
 
-    Entity* getEntity()
+    EntityPtr& operator=(const EntityPtr& other)
     {
-        Entity* pEntity = reinterpret_cast<Entity*>(id & PointerBits);
-        return pEntity;
-    }
-
-    const Entity* getEntity() const
-    {
-        Entity* pEntity = reinterpret_cast<Entity*>(id & PointerBits);
-        return pEntity;
-    }
-
-    uint8 getSalt() const
-    {
-        return uint8(id & SaltBits);
-    }
-
-    uint16 getType() const
-    {
-        return uint16((id & TypeBits) >> 48);
-    }
-
-    EntityPtr(Entity* pEntity)
-    {
-        uint16 oldRefCount = std::atomic_ref<uint16>(pEntity->refCount).fetch_add(1);
-        (void)oldRefCount;
-        assert(oldRefCount != 0);
-    }
-
-    ~EntityPtr()
-    {
-        Entity* pEntity = getEntity();
-        uint16 oldRefCount = std::atomic_ref<uint16>(pEntity->refCount).fetch_sub(1);
-        assert(oldRefCount != 0);
-        if (oldRefCount == 1)
+        if (this != &other)
         {
-            delete pEntity;
+            release();
+            m_entity = other.m_entity;
+            addRef();
         }
+        return *this;
     }
+
+    EntityPtr& operator=(EntityPtr&& other) noexcept
+    {
+        if (this != &other)
+        {
+            release();
+            m_entity = other.m_entity;
+            other.m_entity = nullptr;
+        }
+        return *this;
+    }
+
+    ~EntityPtr() { release(); }
+
+    Entity* get() const { return m_entity; }
+    Entity* operator->() const { return m_entity; }
+    Entity& operator*() const { return *m_entity; }
+    explicit operator bool() const { return m_entity != nullptr; }
+
+    // Implicit decay to the raw non-owning pointer, so an EntityPtr can be passed anywhere an
+    // Entity* is expected (e.g. getComponent<T>(entity)) without calling get(). Non-owning — the
+    // returned pointer must not outlive the handle.
+    operator Entity*() const { return m_entity; }
+
+    // Drop this handle's reference early (frees the entity if it was the last one) and become null.
+    // Safe to call on an already-null handle and to call repeatedly.
+    void release()
+    {
+        if (!m_entity)
+            return;
+        if (std::atomic_ref<uint16>(m_entity->refCount).fetch_sub(1) == 1)
+            destroyEntity(m_entity);
+        m_entity = nullptr;
+    }
+
+private:
+
+    void addRef()
+    {
+        if (m_entity)
+            std::atomic_ref<uint16>(m_entity->refCount).fetch_add(1);
+    }
+
+    Entity* m_entity = nullptr;
 };
+
+// An entity "archetype": the component mask plus the allocation size it implies. Computed once (the
+// size is derived from the mask via getEntityAllocSize) and cached by callers that spawn the same
+// kind repeatedly, so each spawn skips recomputing the size and re-interpreting the source asset.
+export struct EntityArchetype
+{
+    uint16 allocSize = 0;
+    uint16 typeBits = 0;
+};
+
+// Builds the archetype for a component mask, computing its allocation size. Defined in Entity.cpp.
+export EntityArchetype makeEntityArchetype(uint16 typeBits);
+
+// Allocates and constructs an entity for the given archetype, initialised to the given transform,
+// and returns the first owning handle to it. The archetype form is the fast path (no size recompute);
+// the typeBits form is a convenience that builds the archetype first. Both defined in Entity.cpp.
+export EntityPtr createEntity(const EntityArchetype& archetype, const Transform& transform);
+export EntityPtr createEntity(uint16 typeBits, const Transform& transform);

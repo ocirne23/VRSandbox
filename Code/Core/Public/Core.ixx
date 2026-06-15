@@ -51,6 +51,8 @@ export import <type_traits>;
 export import <chrono>;
 export import <initializer_list>;
 export import <execution>;
+export import <charconv>;
+export import <new>;
 
 export template<typename T, size_t N>
 constexpr size_t ARRAY_SIZE(const T(&)[N]) { return N; }

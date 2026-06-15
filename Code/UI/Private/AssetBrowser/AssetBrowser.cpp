@@ -28,6 +28,19 @@ static bool isSceneFile(const std::filesystem::path& p)
 	return ext == ".scene" || ext == ".prefab";
 }
 
+// Asset description files parsed by the Scene library (.oc = ObjectContainer, .ent = Entity).
+static bool isObjectFile(const std::filesystem::path& p)
+{
+	const auto ext = p.extension().string();
+	return ext == ".oc" || ext == ".ent";
+}
+
+// Only entities (.ent) can be spawned into the scene; ObjectContainers (.oc) are dependency-only.
+static bool isSpawnableFile(const std::filesystem::path& p)
+{
+	return p.extension().string() == ".ent";
+}
+
 static const char* fileIcon(const std::filesystem::path& p)
 {
 	if (std::filesystem::is_directory(p)) return "[Dir]";
@@ -35,6 +48,7 @@ static const char* fileIcon(const std::filesystem::path& p)
 	if (isMeshFile(p))                   return "[Msh]";
 	if (isShaderFile(p))                 return "[Shd]";
 	if (isSceneFile(p))                  return "[Scn]";
+	if (isObjectFile(p))                 return "[Obj]";
 	return "[Fil]";
 }
 
@@ -45,7 +59,23 @@ static ImVec4 fileColor(const std::filesystem::path& p)
 	if (isMeshFile(p))                    return ImVec4(0.6f, 1.0f,  0.6f, 1.0f);   // green
 	if (isShaderFile(p))                  return ImVec4(1.0f, 0.6f,  0.3f, 1.0f);   // orange
 	if (isSceneFile(p))                   return ImVec4(0.9f, 0.5f,  1.0f, 1.0f);   // purple
+	if (isObjectFile(p))                  return ImVec4(0.5f, 0.9f,  1.0f, 1.0f);   // light blue
 	return ImVec4(0.85f, 0.85f, 0.85f, 1.0f);                                        // grey
+}
+
+// Marks the just-submitted item as a drag source carrying an asset file path, so it can be
+// dropped onto the Viewport to spawn. Payload "ASSET_FILE" is the null-terminated absolute path.
+static void assetDragSource(const std::filesystem::path& p)
+{
+	if (!isSpawnableFile(p))
+		return;
+	if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+	{
+		const std::string path = p.string();
+		ImGui::SetDragDropPayload("ASSET_FILE", path.c_str(), path.size() + 1);
+		ImGui::Text("Spawn %s", p.filename().string().c_str());
+		ImGui::EndDragDropSource();
+	}
 }
 
 static std::string truncateLabel(const std::string& name, float maxWidth)
@@ -290,6 +320,8 @@ void AssetBrowser::renderContentGrid()
 			const bool clicked = ImGui::Button(fileIcon(p), ImVec2(m_iconSize, m_iconSize));
 			ImGui::PopStyleColor(2); // Text + Button
 
+			assetDragSource(p);
+
 			// Selection on single click
 			if (clicked)
 				m_selectedPath = p;
@@ -376,6 +408,8 @@ void AssetBrowser::renderContentList()
 				m_selectedPath = p;
 			}
 			ImGui::PopStyleColor();
+
+			assetDragSource(p);
 
 			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
 				if (entry.is_directory()) navigateTo(p);

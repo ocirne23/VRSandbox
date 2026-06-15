@@ -1,0 +1,4 @@
+Entity capsule
+	Component RenderNode
+		ObjectContainer baseshapes
+		Node Capsule

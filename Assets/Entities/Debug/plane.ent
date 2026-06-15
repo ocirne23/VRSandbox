@@ -1,0 +1,4 @@
+Entity plane
+	Component RenderNode
+		ObjectContainer baseshapes
+		Node Plane

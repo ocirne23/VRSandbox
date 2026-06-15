@@ -2,6 +2,7 @@ module UI;
 
 import Core.imgui;
 import Core.Log;
+import Core.glm;
 
 UI::~UI()
 {
@@ -133,6 +134,20 @@ void UI::update(double deltaSec)
         const bool isViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_DockHierarchy) && !m_isViewportGrabbed && !wasViewportGrabbed;
         m_hasViewportGainedFocus = isViewportFocused && !m_isViewportFocused;
         m_isViewportFocused = isViewportFocused;
+
+        // Accept assets dragged from the browser. Custom target (no item) so it never steals mouse
+        // input from the camera controls when nothing is being dragged.
+        const ImRect dropRect(viewportPos, ImVec2(viewportPos.x + size.x, viewportPos.y + size.y));
+        if (ImGui::BeginDragDropTargetCustom(dropRect, ImGui::GetID("##viewport_drop")))
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_FILE"))
+            {
+                const char* droppedPath = static_cast<const char*>(payload->Data);
+                const ImVec2 mouse = ImGui::GetMousePos();
+                m_assetDrops.push_back({ std::string(droppedPath), glm::vec2(mouse.x, mouse.y) });
+            }
+            ImGui::EndDragDropTarget();
+        }
 
         ImGui::End();
         ImGui::PopStyleVar(1);

@@ -1,0 +1,4 @@
+Entity cone
+	Component RenderNode
+		ObjectContainer baseshapes
+		Node Cone

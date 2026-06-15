@@ -2,6 +2,7 @@ export module UI;
 
 import Core;
 import Core.Rect;
+import Core.glm;
 
 import UI.fwd;
 import UI.imgui_node_editor;
@@ -32,12 +33,23 @@ public:
     bool hasViewportGainedFocused() const { return m_hasViewportGainedFocus; }
     const Rect& getViewportRect() const { return m_viewportRect; }
 
+    // An asset file dropped onto the Viewport from the asset browser. screenPos is the drop point
+    // in screen pixels (same space as getViewportRect()), for the app to unproject into the world.
+    struct AssetDrop
+    {
+        std::string path;
+        glm::vec2   screenPos;
+    };
+    // Returns and clears the drops queued since the last call (drain once per frame).
+    std::vector<AssetDrop> takeAssetDrops() { return std::move(m_assetDrops); }
+
 private:
 
     bool m_isViewportGrabbed = false;
     bool m_isViewportFocused = false;
     bool m_hasViewportGainedFocus = false;
     Rect m_viewportRect = Rect();
+    std::vector<AssetDrop> m_assetDrops;
 
     ed::EditorContext* m_nodeEditorContext = nullptr;
 

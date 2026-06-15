@@ -1,0 +1,4 @@
+Entity cube
+	Component RenderNode
+		ObjectContainer baseshapes
+		Node Cube

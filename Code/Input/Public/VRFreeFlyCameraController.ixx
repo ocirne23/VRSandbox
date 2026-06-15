@@ -44,4 +44,5 @@ private:
     float m_moveSpeed = 3.0f;                  // metres / second
     float m_turnSpeed = glm::radians(90.0f);   // radians / second (smooth turn)
     float m_deadzone = 0.15f;
+    float m_verticalDeadzone = 0.6f;           // big: right-stick Y is vertical move, must not trip while turning (X)
 };

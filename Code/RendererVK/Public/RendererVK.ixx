@@ -1,5 +1,6 @@
 export module RendererVK;
 
+export import :Layout;
 export import :Renderer;
 export import :ObjectContainer;
 export import :RenderNode;

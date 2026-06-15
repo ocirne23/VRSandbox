@@ -1,0 +1,4 @@
+Entity wedge
+	Component RenderNode
+		ObjectContainer baseshapes
+		Node Wedge
