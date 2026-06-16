@@ -26,6 +26,14 @@ public:
 	// the scene graph (e.g. the app's root-entity list) drop their own handle by matching pointers.
 	std::vector<EntityPtr> takeDeletedEntities() { return std::move(m_deletedEntities); }
 
+	// Entities whose root-status changed via a panel reparent since the last call (drain once per
+	// frame). Each entry is {isRoot, handle}: isRoot == true means it was moved out to the top level
+	// and is now a root, so an external owner (e.g. the app's root-entity list) should TAKE the handle
+	// (the scene graph may not own it otherwise); isRoot == false means it was put under another entity
+	// whose lifecycle now owns it, so that owner should DROP its handle (matched by pointer). The
+	// handle keeps the entity alive across the hand-off either way.
+	std::vector<std::tuple<bool, EntityPtr>> handleReparentedEntities() { return std::move(m_reparentedEntities); }
+
 private:
 
 	void renderToolbar();
@@ -39,7 +47,8 @@ private:
 
 	void applyPendingMutations();
 
-	std::vector<EntityPtr> m_deletedEntities; // queued for the app to poll (keeps them alive meanwhile)
+	std::vector<EntityPtr> m_deletedEntities;                        // queued for the app to poll (keeps them alive meanwhile)
+	std::vector<std::tuple<bool, EntityPtr>> m_reparentedEntities;   // {isRoot, handle} root-status changes for the app to reconcile
 
 	Entity* m_selected       = nullptr;
 	Entity* m_renamingEntity = nullptr;

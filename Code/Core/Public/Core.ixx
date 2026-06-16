@@ -36,6 +36,7 @@ export import <unordered_set>;
 export import <string>;
 export import <string_view>;
 export import <variant>;
+export import <tuple>;
 export import <fstream>;
 export import <iostream>;
 export import <filesystem>;

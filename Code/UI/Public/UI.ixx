@@ -48,6 +48,12 @@ public:
     // keeps its entity alive until dropped, so the app can match pointers and release its own handle.
     std::vector<EntityPtr> takeDeletedEntities() { return m_sceneView.takeDeletedEntities(); }
 
+    // Entities whose root-status changed via a Scene-panel reparent since the last call (drain once
+    // per frame). Each {isRoot, handle}: isRoot == true means it became a top-level root and the app
+    // should take the handle; isRoot == false means it was put under another entity that now owns it,
+    // so the app should drop its handle (matched by pointer).
+    std::vector<std::tuple<bool, EntityPtr>> handleReparentedEntities() { return m_sceneView.handleReparentedEntities(); }
+
 private:
 
     bool m_isViewportGrabbed = false;

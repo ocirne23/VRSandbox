@@ -299,7 +299,15 @@ void SceneView::applyPendingMutations()
 	}
 	if (m_hasPendingReparent)
 	{
-		reparentEntity(m_pendingReparentChild, m_pendingReparentTarget);
+		Entity* child     = m_pendingReparentChild;
+		Entity* target    = m_pendingReparentTarget; // nullptr → top level (root)
+		Entity* oldParent = child->parent;
+
+		if (oldParent != target)
+			m_reparentedEntities.emplace_back(target == nullptr, EntityPtr(child));
+
+		reparentEntity(child, target);
+
 		m_hasPendingReparent    = false;
 		m_pendingReparentChild  = nullptr;
 		m_pendingReparentTarget = nullptr;
@@ -344,7 +352,7 @@ void SceneView::render()
 		if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SV_ENTITY"))
 		{
 			Entity* dragged = *static_cast<Entity**>(payload->Data);
-			if (dragged->parent != nullptr)
+			if (dragged->parent != nullptr && !hasComponent<SceneComponent>(dragged))
 			{
 				m_hasPendingReparent    = true;
 				m_pendingReparentChild  = dragged;

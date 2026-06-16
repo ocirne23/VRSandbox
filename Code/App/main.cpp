@@ -24,11 +24,15 @@ import Entity.World;
 // loaded prefab hierarchy draws every nested mesh, not just its root.
 static void renderEntityTree(Renderer& renderer, Entity* entity)
 {
-    if (RenderComponent* render = getComponent<RenderComponent>(entity))
-        renderer.renderNode(render->node);
     if (SceneComponent* sc = getComponent<SceneComponent>(entity))
+    {
+		if (!sc->enabled)
+			return;
         for (const EntityPtr& child : sc->children)
             renderEntityTree(renderer, child);
+    }
+    if (RenderComponent* render = getComponent<RenderComponent>(entity))
+        renderer.renderNode(render->node);
 }
 
 int main()
@@ -201,6 +205,11 @@ int main()
 
         for (const EntityPtr& deleted : ui.takeDeletedEntities())
             std::erase_if(entities, [&deleted](const EntityPtr& e) { return e.get() == deleted.get(); });
+        for (auto& [isRoot, entity] : ui.handleReparentedEntities())
+            if (isRoot)
+                entities.push_back(std::move(entity));
+            else
+                std::erase_if(entities, [&](const EntityPtr& h) { return h == entity; });
 
         for (const UI::AssetDrop& drop : ui.takeAssetDrops())
         {
