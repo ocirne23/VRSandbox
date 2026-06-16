@@ -206,11 +206,7 @@ int main()
         for (const EntityPtr& deleted : ui.takeDeletedEntities())
             std::erase_if(entities, [&deleted](const EntityPtr& e) { return e.get() == deleted.get(); });
         for (auto& [isRoot, entity] : ui.handleReparentedEntities())
-            if (isRoot)
-                entities.push_back(std::move(entity));
-            else
-                std::erase_if(entities, [&](const EntityPtr& h) { return h == entity; });
-
+            isRoot ? entities.push_back(std::move(entity)) : (void)std::erase_if(entities, [&](const EntityPtr& h) { return h == entity; });
         for (const UI::AssetDrop& drop : ui.takeAssetDrops())
         {
             const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), drop.screenPos);
