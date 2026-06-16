@@ -1,9 +1,20 @@
 module Entity.Component;
 
 import Core;
+import Core.glm;
 import Core.Transform;
 import Entity;
 import Entity.Registry;
+import RendererVK;
+
+void RenderComponent::spawn(const SpawnInfo& info, const Transform& base)
+{
+    if (!info.container)
+        return;
+    const glm::quat rot = glm::normalize(base.quat * info.localTransform.quat);
+    const Transform transform(base.pos + info.localTransform.pos, base.scale * info.localTransform.scale, rot);
+    node = info.container->spawnNodeForIdx(info.nodeIdx, transform);
+}
 
 EntityPtr createSceneEntity(uint16 typeBits, const Transform& transform, const char* name)
 {
@@ -109,6 +120,17 @@ void deserializeComponent(Entity* entity, EComponentID id, const AssetNode& in)
     case EComponentID_Cull:   getComponent<CullingComponent>(entity)->deserialize(in);  break;
     case EComponentID_Render: getComponent<RenderComponent>(entity)->deserialize(in);   break;
     default: break;
+    }
+}
+
+void spawnComponent(Entity* entity, EComponentID id, const void* info, const Transform& base)
+{
+    switch (id)
+    {
+    case EComponentID_Render:
+        getComponent<RenderComponent>(entity)->spawn(*static_cast<const RenderComponent::SpawnInfo*>(info), base);
+        break;
+    default: break; // components without a spawn step
     }
 }
 

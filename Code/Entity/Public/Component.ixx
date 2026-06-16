@@ -90,8 +90,22 @@ export struct RenderComponent
     static constexpr EComponentID getId() { return EComponentID_Render; }
     RenderNode node;
 
-    // The mesh/RenderNode is restored by the prefab loader via Entity::sourceAsset, so there is no
-    // intrinsic render data to write here.
+    // Cached, parse-once data that makes per-instance spawn a pure lookup. The ObjectContainer is
+    // resolved by Scene::World (which owns the containers) when it builds the spawn template; the
+    // rest is baked from the entity's ".ent" RenderNode component node.
+    struct SpawnInfo
+    {
+        ObjectContainer* container = nullptr;       // null = nothing to spawn
+        NodeSpawnIdx nodeIdx = NodeSpawnIdx_ROOT;
+        Transform localTransform;                   // applied on top of the spawn base transform
+    };
+
+    // Instantiates the RenderNode by composing `info.localTransform` onto `base`. No-op when the
+    // info carries no container.
+    void spawn(const SpawnInfo& info, const Transform& base);
+
+    // The mesh/RenderNode is rebuilt from the source template on load, so there is no intrinsic
+    // render data to write here.
     void serialize(AssetNode&) const {}
     void deserialize(const AssetNode&) {}
 };
@@ -115,6 +129,11 @@ export int componentIdFromName(std::string_view name);
 // Dispatch (de)serialization of the inline component `id` on `entity` (which must currently have it).
 export void serializeComponent(Entity* entity, EComponentID id, AssetNode& out);
 export void deserializeComponent(Entity* entity, EComponentID id, const AssetNode& in);
+
+// Apply the cached spawn info for inline component `id` on `entity` (which must currently have it).
+// `info` points to the component-specific <Component>::SpawnInfo; its concrete type is implied by
+// `id` and cast accordingly. No-op for components that have no spawn step.
+export void spawnComponent(Entity* entity, EComponentID id, const void* info, const Transform& base);
 
 // ---- packing internals ------------------------------------------------------
 

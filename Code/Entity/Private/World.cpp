@@ -92,14 +92,9 @@ namespace Scene
             const SpawnTemplate& tmpl = *it->second;
             EntityPtr entity = createEntity(tmpl.archetype, base);
             entity->name = name;
-            entity->sourceAsset = tmpl.filePath; // lets a saved prefab re-spawn this entity from its ".ent"
+            entity->sourceAsset = name; // lets a saved prefab re-spawn this entity from its template
             entity->spawnTemplate = it->second.get();
-            if (tmpl.container)
-            {
-                const glm::quat rot = glm::normalize(base.quat * tmpl.localTransform.quat);
-                const Transform transform(base.pos + tmpl.localTransform.pos, base.scale * tmpl.localTransform.scale, rot);
-                getComponent<RenderComponent>(entity)->node = tmpl.container->spawnNodeForIdx(tmpl.nodeIdx, transform);
-            }
+            applySpawnInfos(tmpl, entity, base);
             return entity;
         }
 
@@ -112,6 +107,21 @@ namespace Scene
     // properties) and computing its archetype happens once, here. Only entities are spawnable;
     // ObjectContainers are loaded on demand as dependencies but never get a template of their own.
 
+    void World::applySpawnInfos(const SpawnTemplate& tmpl, Entity* entity, const Transform& base) const
+    {
+        // spawnInfos is parallel to the set bits of archetype.typeBits (id order), so walk the bits
+        // and the slots together; the slot's concrete type is implied by the bit it lines up with.
+        size_t idx = 0;
+        for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
+        {
+            if (!(tmpl.archetype.typeBits & (1 << i)))
+                continue;
+            if (const void* info = tmpl.spawnInfos[idx].get())
+                spawnComponent(entity, EComponentID(i), info, base);
+            ++idx;
+        }
+    }
+
     void World::registerTemplate(const EntityDesc& desc)
     {
         SpawnTemplate tmpl;
@@ -119,28 +129,41 @@ namespace Scene
 
         // Only the RenderNode component maps to an inline component today; the Render bit (and inline
         // storage) is added only if its container resolves.
+        std::shared_ptr<RenderComponent::SpawnInfo> renderInfo;
         if (const ComponentDesc* renderDesc = desc.findComponent("RenderNode"))
         {
             if (ObjectContainer* container = getOrLoadContainer(renderDesc->property("ObjectContainer")))
             {
                 typeBits |= uint16(1 << EComponentID_Render);
-                tmpl.container = container;
+                renderInfo = std::make_shared<RenderComponent::SpawnInfo>();
+                renderInfo->container = container;
 
                 const std::string node = renderDesc->property("Node");
                 if (node.empty() || node == "ROOT")
-                    tmpl.nodeIdx = NodeSpawnIdx_ROOT;
+                    renderInfo->nodeIdx = NodeSpawnIdx_ROOT;
                 else if (NodeSpawnIdx idx = container->getSpawnIdxForPath(node); idx != NodeSpawnIdx_INVALID)
-                    tmpl.nodeIdx = idx;
+                    renderInfo->nodeIdx = idx;
                 else
                     Log::warning("Scene: entity '" + desc.name + "' references unknown node '" + node + "', using ROOT");
 
                 const glm::quat rot = glm::normalize(glm::quat(glm::radians(renderDesc->vec3Property("Rotation"))));
-                tmpl.localTransform = Transform(renderDesc->vec3Property("Position"), renderDesc->floatProperty("Scale", 1.0f), rot);
+                renderInfo->localTransform = Transform(renderDesc->vec3Property("Position"), renderDesc->floatProperty("Scale", 1.0f), rot);
             }
         }
 
         tmpl.archetype = makeEntityArchetype(typeBits);
-        tmpl.filePath = desc.filePath;
+
+        // One spawn-info slot per set component bit, in id order; null where the component has no
+        // spawn step (only RenderComponent has one today).
+        for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
+        {
+            if (!(typeBits & (1 << i)))
+                continue;
+            if (EComponentID(i) == EComponentID_Render)
+                tmpl.spawnInfos.push_back(std::move(renderInfo));
+            else
+                tmpl.spawnInfos.emplace_back();
+        }
         // keep-first (an entity may share a name with its container). Heap-owned so the SpawnTemplate
         // address stays stable for the Entity::spawnTemplate back-pointers.
         m_spawnTemplates.emplace(desc.name, std::make_unique<SpawnTemplate>(std::move(tmpl)));
@@ -148,7 +171,7 @@ namespace Scene
 
     // ---- prefab (.pre) loading ---------------------------------------------------------------------
 
-    EntityPtr World::instantiatePrefabNode(const AssetNode& node, const glm::vec3& delta, Entity* parent)
+    static Transform readPrefabTransform(const AssetNode& node, const glm::vec3& delta)
     {
         Transform t;
         t.scale = 1.0f;
@@ -156,41 +179,153 @@ namespace Scene
         if (const AssetNode* n = node.find("Rotation")) t.quat = glm::quat(glm::radians(n->asVec3()));
         if (const AssetNode* n = node.find("Scale"))    t.scale = n->asFloat(0, 1.0f);
         t.pos += delta;
+        return t;
+    }
 
-        const std::string source = node.find("Source") ? node.find("Source")->asString() : std::string();
-
-        // Component bits = those listed in the prefab, unioned with whatever the source ".ent" carries.
-        uint16 listedBits = 0;
+    // The "Component <name>" child of a prefab node, or null if absent.
+    static const AssetNode* findComponentNode(const AssetNode& node, const char* name)
+    {
         for (const AssetNode* comp : node.findAll("Component"))
-            if (int id = componentIdFromName(comp->asString()); id >= 0)
-                listedBits |= uint16(1 << id);
+            if (comp->asString() == name)
+                return comp;
+        return nullptr;
+    }
 
-        const SpawnTemplate* tmpl = nullptr;
-        if (!source.empty())
+    static bool keyIs(const AssetNode& node, std::string_view key)
+    {
+        if (node.key.size() != key.size())
+            return false;
+        for (size_t i = 0; i < key.size(); ++i)
         {
-            if (auto it = m_spawnTemplates.find(source); it != m_spawnTemplates.end())
-                tmpl = it->second.get();
-            else
-                Log::warning("Scene: prefab references unknown source entity '" + source + "'");
+            const char a = node.key[i] | 0x20, b = key[i] | 0x20; // ASCII lower
+            if (a != b)
+                return false;
+        }
+        return true;
+    }
+
+    void World::instantiateSceneChildren(const AssetNode& sceneNode, const glm::vec3& delta, Entity* parent)
+    {
+        // Preserve authoring order: an "Entity" is a ".ent" reference, a "Prefab" is a nested prefab.
+        for (const AssetNode& child : sceneNode.children)
+        {
+            if (keyIs(child, "Entity"))
+                instantiatePrefabNode(child, delta, parent);
+            else if (keyIs(child, "Prefab"))
+                instantiateNestedPrefab(child, delta, parent);
+        }
+    }
+
+    EntityPtr World::instantiatePrefabDef(const AssetNode& def, const glm::vec3& delta, Entity* parent)
+    {
+        // A prefab is intrinsically a Scene container (not a ".ent" reference); its Component blocks
+        // carry only variable overrides, and its Scene block holds the child references.
+        const Transform t = readPrefabTransform(def, delta);
+        EntityPtr entity = createEntity(makeEntityArchetype(1 << EComponentID_Scene), t);
+        entity->name = def.asString();
+        entity->sourceAsset = def.asString(); // prefab id, so it round-trips as a nested "Prefab" ref
+        if (const AssetNode* n = def.find("Name")) entity->name = n->asString();
+
+        for (const AssetNode* comp : def.findAll("Component"))
+            if (int id = componentIdFromName(comp->asString()); id >= 0 && (entity->typeBits & (1 << id)))
+                deserializeComponent(entity, EComponentID(id), *comp);
+
+        reparentEntity(entity, parent); // null resolves to the World root
+
+        if (const AssetNode* sceneNode = findComponentNode(def, "Scene"))
+            instantiateSceneChildren(*sceneNode, delta, entity);
+
+        return entity;
+    }
+
+    EntityPtr World::instantiateNestedPrefab(const AssetNode& ref, const glm::vec3& delta, Entity* parent)
+    {
+        const std::string name = ref.asString();
+
+        if (m_loadingPrefabs.contains(name))
+        {
+            Log::warning("Scene: prefab cycle detected at '" + name + "', skipping");
+            return EntityPtr{};
+        }
+        const std::string* prefabPath = Globals::assetRegistry.findPrefab(name);
+        if (!prefabPath)
+        {
+            Log::warning("Scene: prefab references unknown prefab '" + name + "', skipping");
+            return EntityPtr{};
         }
 
-        const uint16 bits = listedBits | (tmpl ? tmpl->archetype.typeBits : 0);
-        EntityPtr entity = createEntity(makeEntityArchetype(bits), t);
-        entity->sourceAsset = source;
-        entity->spawnTemplate = tmpl; // null when the prefab node has no resolvable source
+        AssetNode doc;
+        std::string error;
+        if (!loadAssetFile(*prefabPath, doc, error))
+        {
+            Log::warning("Scene: nested prefab load failed: " + error);
+            return EntityPtr{};
+        }
+        const AssetNode* def = doc.find("Prefab");
+        if (!def)
+        {
+            Log::warning("Scene: nested prefab '" + name + "' has no Prefab declaration, skipping");
+            return EntityPtr{};
+        }
+
+        // The reference node places the instance; its children sit relative to that placement (the
+        // definition's own root position is its local origin, so subtract it).
+        const Transform place = readPrefabTransform(ref, delta);
+        glm::vec3 defRootPos(0.0f);
+        if (const AssetNode* p = def->find("Position")) defRootPos = p->asVec3();
+        const glm::vec3 childDelta = place.pos - defRootPos;
+
+        EntityPtr entity = createEntity(makeEntityArchetype(1 << EComponentID_Scene), place);
+        entity->name = name;
+        entity->sourceAsset = name; // round-trips as a nested "Prefab" ref
+        if (const AssetNode* n = def->find("Name")) entity->name = n->asString();
+        if (const AssetNode* n = ref.find("Name"))  entity->name = n->asString();
+
+        // Component variable overrides: the definition's, then the reference node's on top.
+        for (const AssetNode* comp : def->findAll("Component"))
+            if (int id = componentIdFromName(comp->asString()); id >= 0 && (entity->typeBits & (1 << id)))
+                deserializeComponent(entity, EComponentID(id), *comp);
+        for (const AssetNode* comp : ref.findAll("Component"))
+            if (int id = componentIdFromName(comp->asString()); id >= 0 && (entity->typeBits & (1 << id)))
+                deserializeComponent(entity, EComponentID(id), *comp);
+
+        reparentEntity(entity, parent);
+
+        m_loadingPrefabs.insert(name);
+        if (const AssetNode* sceneNode = findComponentNode(*def, "Scene"))
+            instantiateSceneChildren(*sceneNode, childDelta, entity);
+        m_loadingPrefabs.erase(name);
+
+        return entity;
+    }
+
+    EntityPtr World::instantiatePrefabNode(const AssetNode& node, const glm::vec3& delta, Entity* parent)
+    {
+        const Transform t = readPrefabTransform(node, delta);
+        const std::string token = node.asString(); // ".ent" template this entity references
+
+        // Every prefab entity references a registered ".ent" template; the component SET always comes
+        // from the template. Unknown references are warned about and skipped.
+        auto it = m_spawnTemplates.find(token);
+        if (it == m_spawnTemplates.end())
+        {
+            Log::warning("Scene: prefab references unknown entity '" + token + "', skipping");
+            return EntityPtr{};
+        }
+        const SpawnTemplate* tmpl = it->second.get();
+
+        EntityPtr entity = createEntity(tmpl->archetype, t);
+        entity->name = token;
+        entity->sourceAsset = token; // re-resolves this reference on the next load
+        entity->spawnTemplate = tmpl;
+        applySpawnInfos(*tmpl, entity, t);
+
         if (const AssetNode* n = node.find("Name")) entity->name = n->asString();
 
-        // Rebuild the RenderNode from the source template (mirrors spawn()).
-        if (tmpl && tmpl->container && hasComponent<RenderComponent>(entity))
-        {
-            const glm::quat rot = glm::normalize(t.quat * tmpl->localTransform.quat);
-            const Transform xf(t.pos + tmpl->localTransform.pos, t.scale * tmpl->localTransform.scale, rot);
-            getComponent<RenderComponent>(entity)->node = tmpl->container->spawnNodeForIdx(tmpl->nodeIdx, xf);
-        }
-
-        // Restore each present component's intrinsic data.
+        // Apply per-component variable overrides authored in the editor. Each component's serialize/
+        // deserialize only touches listed variables, so this patches tweaks on top of the template.
         for (const AssetNode* comp : node.findAll("Component"))
-            if (int id = componentIdFromName(comp->asString()); id >= 0 && (bits & (1 << id)))
+            if (int id = componentIdFromName(comp->asString()); id >= 0 && (entity->typeBits & (1 << id)))
                 deserializeComponent(entity, EComponentID(id), *comp);
 
         // Hook into the scene graph / ownership: scene entities go under the World root, loose roots
@@ -200,9 +335,9 @@ namespace Scene
         else if (hasComponent<SceneComponent>(entity))
             reparentEntity(entity, nullptr); // resolves to the World root
 
-        if (const AssetNode* childrenNode = node.find("Children"))
-            for (const AssetNode* childNode : childrenNode->findAll("Entity"))
-                instantiatePrefabNode(*childNode, delta, entity);
+        // Child references are nested directly inside the Scene component block.
+        if (const AssetNode* sceneNode = findComponentNode(node, "Scene"))
+            instantiateSceneChildren(*sceneNode, delta, entity);
 
         return entity;
     }
@@ -219,20 +354,25 @@ namespace Scene
             return roots;
         }
 
-        const std::vector<const AssetNode*> entityNodes = doc.findAll("Entity");
-        if (entityNodes.empty())
+        const std::vector<const AssetNode*> prefabNodes = doc.findAll("Prefab");
+        if (prefabNodes.empty())
         {
-            Log::warning("Scene: prefab '" + path + "' contained no Entity declarations");
+            Log::warning("Scene: prefab '" + path + "' contained no Prefab declarations");
             return roots;
         }
 
         // Offset the whole hierarchy so its first root lands where the prefab was dropped.
         glm::vec3 firstPos(0.0f);
-        if (const AssetNode* p = entityNodes[0]->find("Position")) firstPos = p->asVec3();
+        if (const AssetNode* p = prefabNodes[0]->find("Position")) firstPos = p->asVec3();
         const glm::vec3 delta = base.pos - firstPos;
 
-        for (const AssetNode* en : entityNodes)
-            roots.push_back(instantiatePrefabNode(*en, delta, nullptr));
+        for (const AssetNode* pn : prefabNodes)
+        {
+            const std::string name = pn->asString();
+            m_loadingPrefabs.insert(name); // guard self/cyclic nested references
+            roots.push_back(instantiatePrefabDef(*pn, delta, nullptr));
+            m_loadingPrefabs.erase(name);
+        }
         return roots;
     }
 

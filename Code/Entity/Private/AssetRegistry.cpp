@@ -20,7 +20,7 @@ namespace Scene
     // Extensions scanned for declarations. Both parse with the same grammar; the declaration
     // keyword (not the extension) decides what kind of object is registered, so a file of either
     // extension may contain any mix of declarations.
-    static constexpr const char* s_assetExtensions[] = { ".oc", ".ent" };
+    static constexpr const char* s_assetExtensions[] = { ".oc", ".ent", ".pre" };
 
     static bool isAssetFile(const std::filesystem::path& path)
     {
@@ -50,6 +50,7 @@ namespace Scene
     {
         m_objectContainers.clear();
         m_entities.clear();
+        m_prefabs.clear();
         m_fileObjects.clear();
     }
 
@@ -120,6 +121,19 @@ namespace Scene
                 else
                     fileObjects.push_back(name);
             }
+            else if (iequals(decl.key, "Prefab"))
+            {
+                const std::string name = decl.asString(0);
+                if (name.empty())
+                {
+                    Log::warning("AssetRegistry: unnamed Prefab in " + path);
+                    continue;
+                }
+                if (!m_prefabs.try_emplace(name, path).second)
+                    Log::warning("AssetRegistry: duplicate Prefab '" + name + "' (keeping first), in " + path);
+                else
+                    fileObjects.push_back(name);
+            }
             else
             {
                 Log::warning("AssetRegistry: unknown declaration '" + decl.key + "' in " + path);
@@ -137,6 +151,17 @@ namespace Scene
     {
         const auto it = m_entities.find(name);
         return it != m_entities.end() ? &it->second : nullptr;
+    }
+
+    const std::string* AssetRegistry::findPrefab(const std::string& name) const
+    {
+        const auto it = m_prefabs.find(name);
+        return it != m_prefabs.end() ? &it->second : nullptr;
+    }
+
+    void AssetRegistry::addPrefab(const std::string& name, const std::string& path)
+    {
+        m_prefabs.insert_or_assign(name, path);
     }
 
     const std::vector<std::string>* AssetRegistry::findObjectsForFile(const std::string& fileName) const

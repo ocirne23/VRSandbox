@@ -6,6 +6,7 @@ import Core.Transform;
 
 import RendererVK;
 import Entity;
+import Entity.Component;
 
 import File.AssetParser;
 import Entity.ObjectDescription;
@@ -51,25 +52,43 @@ export namespace Scene
     private:
 
         // Everything needed to spawn a named object without touching its asset desc again: the
-        // entity archetype (alloc size + component mask), the resolved container + node, and the
-        // baked local transform. Built once per name and reused on every spawn.
+        // entity archetype (alloc size + component mask) plus each spawnable component's cached
+        // SpawnInfo. Built once per name and reused on every spawn.
         struct SpawnTemplate
         {
-            ObjectContainer* container = nullptr;          // null = entity carries no RenderComponent
-            NodeSpawnIdx nodeIdx = NodeSpawnIdx_ROOT;
             EntityArchetype archetype;                     // alloc size + component mask, computed once
-            Transform localTransform;                      // applied on top of the spawn's base transform
-            std::string filePath;                          // ".ent" file this template was built from
+            // One slot per set bit in archetype.typeBits, in component-id order: a type-erased
+            // <Component>::SpawnInfo whose concrete type is implied by the bit it lines up with
+            // (cast via spawnComponent). Null where a present component has no spawn step.
+            std::vector<std::shared_ptr<void>> spawnInfos;
         };
 
         ObjectContainer* loadContainer(const ObjectContainerDesc& desc);
         void registerTemplate(const EntityDesc& desc);
 
-        // Recursively instantiates one prefab "Entity" node (and its children), offsetting positions by
-        // `delta` and parenting under `parent` (nullptr = a top-level root).
+        // Runs each component's cached spawn step (the spawnInfos parallel to archetype.typeBits) on a
+        // freshly created entity, composing the per-component local transform onto `base`.
+        void applySpawnInfos(const SpawnTemplate& tmpl, Entity* entity, const Transform& base) const;
+
+        // Instantiates a prefab "Prefab" definition node (a Scene container holding child references),
+        // parenting under `parent` (nullptr = the World root). Used for the top-level prefab and for
+        // nested ones (whose definition is loaded from another .pre).
+        EntityPtr instantiatePrefabDef(const AssetNode& def, const glm::vec3& delta, Entity* parent);
+
+        // Resolves a nested "Prefab <name>" reference to its registered .pre, loads that definition,
+        // and instantiates it under `parent`, placed by the reference node's transform.
+        EntityPtr instantiateNestedPrefab(const AssetNode& ref, const glm::vec3& delta, Entity* parent);
+
+        // Instantiates the "Entity"/"Prefab" children declared inside a Scene component block under
+        // `parent`, offsetting positions by `delta`.
+        void instantiateSceneChildren(const AssetNode& sceneNode, const glm::vec3& delta, Entity* parent);
+
+        // Recursively instantiates one prefab "Entity" reference node (and its children), offsetting
+        // positions by `delta` and parenting under `parent` (nullptr = a top-level root).
         EntityPtr instantiatePrefabNode(const AssetNode& node, const glm::vec3& delta, Entity* parent);
 
         std::unordered_map<std::string, std::unique_ptr<ObjectContainer>> m_containers;
         std::unordered_map<std::string, std::unique_ptr<SpawnTemplate>> m_spawnTemplates;
+        std::unordered_set<std::string> m_loadingPrefabs; // names on the current load stack (cycle guard)
     };
 }
