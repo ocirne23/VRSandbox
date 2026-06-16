@@ -4,5 +4,10 @@ Entity sponza
 		Node ROOT
 		Position 0, 0, 0
 		Rotation -180, 0, 0
-	Component DummyComponent
-		Name "Something"
+		
+Entity sponza2
+	Component RenderNode
+		ObjectContainer sponza
+		Node ROOT
+		Position 0, 0, 0
+		Rotation -180, 90, 0

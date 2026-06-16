@@ -20,6 +20,7 @@ private:
 	void renderDirectoryTree(const std::filesystem::path& dir);
 	void renderContentGrid();
 	void renderContentList();
+	void acceptPrefabDrop();
 	void renderContextMenu(const std::filesystem::path& p);
 	void navigateTo(const std::filesystem::path& path);
 	void navigateUp();

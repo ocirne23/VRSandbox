@@ -1,52 +1,52 @@
 export module UI.SceneView;
 
 import Core;
+import Core.Transform;
+import Entity;
+import Entity.Component;
+import Entity.Registry;
 
-export struct SceneNode
-{
-	std::string name;
-	bool enabled = true;
-	uint64 entityId = 0;          // 0 = no bound entity
-	SceneNode* parent = nullptr;
-	std::vector<std::unique_ptr<SceneNode>> children;
-};
-
+// Entity-backed scene hierarchy panel. There is no persistent UI tree: every frame the panel renders
+// straight from Globals::entityRegistry, so it is always in sync with the live entities. SceneComponent
+// entities live under a synthetic "World" node and can hold children; entities without one ("loose")
+// are listed as siblings of World and are always leaves, but can still be dragged under a scene entity
+// to become its child. Mutations (create / delete / reparent / rename) are deferred until after the
+// tree is walked.
 export class SceneView
 {
 public:
 
 	void render();
 
-	SceneNode* addNode(SceneNode* parent, std::string name);
-	void       removeNode(SceneNode* node);
-	SceneNode* duplicateNode(SceneNode* node);
-
-	SceneNode*       getSelected() const  { return m_selected; }
-	void             setSelected(SceneNode* node) { m_selected = node; }
+	Entity* getSelected() const          { return m_selected; }
+	void    setSelected(Entity* entity)  { m_selected = entity; }
 
 private:
 
 	void renderToolbar();
-	void renderNode(SceneNode& node);
-	void renderContextMenu(SceneNode* node);   // nullptr = empty-space menu
-	void beginRename(SceneNode* node);
-	void deleteNode(SceneNode* node);
-	void reparentNode(SceneNode* node, SceneNode* newParent);
+	void renderWorld();
+	void renderEntityNode(Entity* entity);  // scene entity (recurses children) or loose leaf
+	void renderContextMenu(Entity* entity);
+	void beginRename(Entity* entity);
 
-	std::vector<std::unique_ptr<SceneNode>>& containerOf(SceneNode* node);
+	bool dragSourceFor(Entity* entity);     // returns true while this entity is being dragged
+	void dropTargetReparentUnder(Entity* parent); // accepts a dragged scene entity, reparents under `parent`
 
-	std::vector<std::unique_ptr<SceneNode>> m_roots;
+	void applyPendingMutations();
 
-	SceneNode* m_selected          = nullptr;
-	SceneNode* m_renamingNode      = nullptr;
-	bool       m_focusRenameNext   = false;
-	char       m_renameBuffer[256] = {};
-	char       m_searchBuffer[256] = {};
-	int        m_entityCounter     = 0;
+	Entity* m_selected       = nullptr;
+	Entity* m_renamingEntity = nullptr;
+	bool    m_focusRenameNext = false;
+	bool    m_worldOpen       = true;
+	char    m_renameBuffer[256] = {};
+	char    m_searchBuffer[256] = {};
+	int     m_entityCounter   = 0;
 
-	// Deferred mutations (safe to apply after the full tree render)
-	SceneNode* m_pendingDelete          = nullptr;
-	bool       m_hasPendingReparent     = false;
-	SceneNode* m_pendingReparentNode    = nullptr;
-	SceneNode* m_pendingReparentTarget  = nullptr;  // nullptr → move to root
+	// Deferred mutations (applied after the full tree render, never mid-walk).
+	Entity* m_pendingDelete         = nullptr;
+	bool    m_hasPendingReparent    = false;
+	Entity* m_pendingReparentChild  = nullptr;
+	Entity* m_pendingReparentTarget = nullptr;  // nullptr → World root
+	bool    m_hasPendingCreate      = false;
+	Entity* m_pendingCreateParent   = nullptr;  // nullptr → new root, else new child of this
 };

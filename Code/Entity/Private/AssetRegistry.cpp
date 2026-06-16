@@ -1,7 +1,7 @@
-module Scene.AssetRegistry;
+module Entity.AssetRegistry;
 
 import Core.Log;
-import Scene.AssetParser;
+import File.AssetParser;
 
 namespace Scene
 {

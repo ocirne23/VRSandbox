@@ -1,7 +1,7 @@
-export module Scene.AssetRegistry;
+export module Entity.AssetRegistry;
 
 import Core;
-import Scene.ObjectDescription;
+import Entity.ObjectDescription;
 
 export namespace Scene
 {

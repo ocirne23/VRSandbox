@@ -1,4 +1,4 @@
-export module Scene.fwd;
+export module Entity.fwd;
 
 export extern "C++"
 {

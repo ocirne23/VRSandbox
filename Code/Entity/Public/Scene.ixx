@@ -1,4 +1,4 @@
-export module Scene.Scene;
+export module Entity.Scene;
 
 export class Scene
 {

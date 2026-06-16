@@ -25,17 +25,6 @@ void UI::initialize()
     m_assetBrowser.initialize();
 
     Log::info("UI initialized");
-    Log::verbose("Demo scene hierarchy seeded");
-
-    // Seed demo scene hierarchy
-    SceneNode* world  = m_sceneView.addNode(nullptr, "World");
-    SceneNode* lights = m_sceneView.addNode(world,   "Lights");
-                        m_sceneView.addNode(lights,  "DirectionalLight");
-                        m_sceneView.addNode(lights,  "PointLight");
-    SceneNode* geo    = m_sceneView.addNode(world,   "Geometry");
-                        m_sceneView.addNode(geo,     "StaticMesh_0");
-                        m_sceneView.addNode(geo,     "StaticMesh_1");
-                        m_sceneView.addNode(nullptr, "Camera");
 }
 
 struct LinkInfo

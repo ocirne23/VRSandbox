@@ -4,6 +4,7 @@ import Core;
 import Core.Transform;
 import Entity.Component;
 import Entity.Allocator;
+import Entity.Registry;
 
 EntityArchetype makeEntityArchetype(uint16 typeBits)
 {
@@ -21,6 +22,7 @@ EntityPtr createEntity(const EntityArchetype& archetype, const Transform& transf
     entity->typeBits = archetype.typeBits;
 
     constructInlineComponents(entity);
+    Globals::entityRegistry.registerEntity(entity);
     return EntityPtr(entity); // refCount 1
 }
 
@@ -31,6 +33,7 @@ EntityPtr createEntity(uint16 typeBits, const Transform& transform)
 
 void destroyEntity(Entity* entity)
 {
+    Globals::entityRegistry.unregisterEntity(entity);
     const uint32 size = getEntityAllocSize(entity->typeBits);
     destructInlineComponents(entity);
     entity->~Entity();

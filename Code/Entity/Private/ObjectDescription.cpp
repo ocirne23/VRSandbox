@@ -1,4 +1,4 @@
-module Scene.ObjectDescription;
+module Entity.ObjectDescription;
 
 namespace Scene
 {

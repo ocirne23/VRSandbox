@@ -18,7 +18,18 @@ import RendererVK;
 import Entity;
 import Entity.Component;
 
-import Scene.World;
+import Entity.World;
+
+// Renders an entity's RenderComponent (if any) and recurses through its SceneComponent children, so a
+// loaded prefab hierarchy draws every nested mesh, not just its root.
+static void renderEntityTree(Renderer& renderer, Entity* entity)
+{
+    if (RenderComponent* render = getComponent<RenderComponent>(entity))
+        renderer.renderNode(render->node);
+    if (SceneComponent* sc = getComponent<SceneComponent>(entity))
+        for (const EntityPtr& child : sc->children)
+            renderEntityTree(renderer, child);
+}
 
 int main()
 {
@@ -34,7 +45,7 @@ int main()
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED, EVr::ENABLED); // ENABLED DISABLED
+    renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED, EVr::DISABLED); // ENABLED DISABLED
 
     VrInput& vrInput = Globals::vrInput;
     vrInput.initialize(renderer.getVrSession());
@@ -192,14 +203,17 @@ int main()
         for (const UI::AssetDrop& drop : ui.takeAssetDrops())
         {
             const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), drop.screenPos);
-            for (EntityPtr& spawned : world.spawnAssetFile(drop.path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))))
-                entities.push_back(std::move(spawned));
+            const Transform base(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+            std::vector<EntityPtr> spawned = drop.path.ends_with(".pre")
+                ? world.loadPrefab(drop.path, base)
+                : world.spawnAssetFile(drop.path, base);
+            for (EntityPtr& e : spawned)
+                entities.push_back(std::move(e));
         }
 
         const Frustum& frustum = renderer.beginFrame(camera);
         for (const EntityPtr& entity : entities)
-            if (RenderComponent* render = getComponent<RenderComponent>(entity))
-                renderer.renderNode(render->node);
+            renderEntityTree(renderer, entity);
 
 		for (auto& light : spawnedLights)
 		{

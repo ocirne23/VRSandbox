@@ -1,4 +1,4 @@
-module Scene.Scene;
+module Entity.Scene;
 
 bool Scene::initialize()
 {

@@ -1,12 +1,14 @@
-export module Scene.World;
+export module Entity.World;
 
 import Core;
+import Core.glm;
 import Core.Transform;
 
 import RendererVK;
 import Entity;
 
-import Scene.ObjectDescription;
+import File.AssetParser;
+import Entity.ObjectDescription;
 
 export namespace Scene
 {
@@ -35,6 +37,12 @@ export namespace Scene
         // spawned by name. Returns a handle per spawned entity; empty if the file isn't known.
         std::vector<EntityPtr> spawnAssetFile(const std::string& path, const Transform& base);
 
+        // Loads a prefab (.pre) hierarchy saved from the editor and instantiates it, re-spawning each
+        // entity's source ".ent" (mesh/RenderNode) and rebuilding the parent/child structure. The whole
+        // hierarchy is offset so its first root lands at `base`. Returns the owning handle(s) to the
+        // top-level entit(ies); scene-component roots are also registered with the EntityRegistry.
+        std::vector<EntityPtr> loadPrefab(const std::string& path, const Transform& base);
+
         // Returns the ObjectContainer registered under name, loading it on first use.
         ObjectContainer* getOrLoadContainer(const std::string& name);
 
@@ -51,12 +59,17 @@ export namespace Scene
             NodeSpawnIdx nodeIdx = NodeSpawnIdx_ROOT;
             EntityArchetype archetype;                     // alloc size + component mask, computed once
             Transform localTransform;                      // applied on top of the spawn's base transform
+            std::string filePath;                          // ".ent" file this template was built from
         };
 
         ObjectContainer* loadContainer(const ObjectContainerDesc& desc);
         void registerTemplate(const EntityDesc& desc);
 
+        // Recursively instantiates one prefab "Entity" node (and its children), offsetting positions by
+        // `delta` and parenting under `parent` (nullptr = a top-level root).
+        EntityPtr instantiatePrefabNode(const AssetNode& node, const glm::vec3& delta, Entity* parent);
+
         std::unordered_map<std::string, std::unique_ptr<ObjectContainer>> m_containers;
-        std::unordered_map<std::string, SpawnTemplate> m_spawnTemplates;
+        std::unordered_map<std::string, std::unique_ptr<SpawnTemplate>> m_spawnTemplates;
     };
 }

@@ -44,3 +44,12 @@ std::string FileSystem::readFileStr(const std::string& path)
     file.read(fileContent.data(), fileSize);
     return fileContent;
 }
+
+bool FileSystem::writeFileStr(const std::string& path, const std::string& content)
+{
+    std::ofstream file(path, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+        return false;
+    file.write(content.data(), content.size());
+    return file.good();
+}

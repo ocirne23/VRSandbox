@@ -1,8 +1,10 @@
 module UI.PropertiesPanel;
 
 import Core.imgui;
+import Core.glm;
+import Entity.Component;
 
-void PropertiesPanel::render(SceneNode* selected)
+void PropertiesPanel::render(Entity* selected)
 {
 	if (!selected)
 	{
@@ -10,40 +12,53 @@ void PropertiesPanel::render(SceneNode* selected)
 		return;
 	}
 
-	// ---- Name ---------------------------------------------------------------
+	SceneComponent* sc = getComponent<SceneComponent>(selected);
+
+	// ---- Entity -------------------------------------------------------------
 	if (ImGui::CollapsingHeader("Entity", ImGuiTreeNodeFlags_DefaultOpen))
 	{
-		char nameBuf[256];
-		strncpy_s(nameBuf, sizeof(nameBuf), selected->name.c_str(), sizeof(nameBuf) - 1);
-		nameBuf[sizeof(nameBuf) - 1] = '\0';
-
 		ImGui::AlignTextToFramePadding();
 		ImGui::Text("Name");
 		ImGui::SameLine(80.0f);
 		ImGui::SetNextItemWidth(-1.0f);
-		if (ImGui::InputText("##pp_name", nameBuf, sizeof(nameBuf), ImGuiInputTextFlags_EnterReturnsTrue))
 		{
-			if (nameBuf[0] != '\0')
+			char nameBuf[256];
+			strncpy_s(nameBuf, sizeof(nameBuf), selected->name.c_str(), sizeof(nameBuf) - 1);
+			nameBuf[sizeof(nameBuf) - 1] = '\0';
+			if (ImGui::InputText("##pp_name", nameBuf, sizeof(nameBuf), ImGuiInputTextFlags_EnterReturnsTrue))
 				selected->name = nameBuf;
 		}
 
-		ImGui::AlignTextToFramePadding();
-		ImGui::Text("Enabled");
-		ImGui::SameLine(80.0f);
-		ImGui::Checkbox("##pp_enabled", &selected->enabled);
-
-		if (selected->entityId != 0)
+		if (sc)
 		{
 			ImGui::AlignTextToFramePadding();
-			ImGui::Text("Entity ID");
+			ImGui::Text("Enabled");
 			ImGui::SameLine(80.0f);
-			ImGui::TextDisabled("0x%llX", static_cast<unsigned long long>(selected->entityId));
+			ImGui::Checkbox("##pp_enabled", &sc->enabled);
 		}
 	}
 
-	// ---- Transform placeholder ----------------------------------------------
+	// ---- Transform ----------------------------------------------------------
 	if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
 	{
-		ImGui::TextDisabled("Not yet implemented");
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("Position");
+		ImGui::SameLine(80.0f);
+		ImGui::SetNextItemWidth(-1.0f);
+		ImGui::DragFloat3("##pp_pos", &selected->pos.x, 0.05f);
+
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("Scale");
+		ImGui::SameLine(80.0f);
+		ImGui::SetNextItemWidth(-1.0f);
+		ImGui::DragFloat("##pp_scale", &selected->scale, 0.01f, 0.0001f, 10000.0f);
+
+		glm::vec3 euler = glm::degrees(glm::eulerAngles(selected->rot));
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("Rotation");
+		ImGui::SameLine(80.0f);
+		ImGui::SetNextItemWidth(-1.0f);
+		if (ImGui::DragFloat3("##pp_rot", &euler.x, 0.5f))
+			selected->rot = glm::quat(glm::radians(euler));
 	}
 }

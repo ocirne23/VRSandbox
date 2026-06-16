@@ -1,8 +1,8 @@
-export module Scene.ObjectDescription;
+export module Entity.ObjectDescription;
 
 import Core;
 import Core.glm;
-import Scene.AssetParser;
+import File.AssetParser;
 
 export namespace Scene
 {
@@ -49,6 +49,7 @@ export namespace Scene
     struct EntityDesc
     {
         std::string name;
+        std::string filePath;                // path of the ".ent" file this entity was declared in
         std::vector<ComponentDesc> components;
 
         const ComponentDesc* findComponent(std::string_view type) const;

@@ -1,6 +1,8 @@
 module UI.AssetBrowser;
 
 import Core.imgui;
+import Entity;
+import Entity.Prefab;
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -25,7 +27,7 @@ static bool isShaderFile(const std::filesystem::path& p)
 static bool isSceneFile(const std::filesystem::path& p)
 {
 	const auto ext = p.extension().string();
-	return ext == ".scene" || ext == ".prefab";
+	return ext == ".scene" || ext == ".prefab" || ext == ".pre";
 }
 
 // Asset description files parsed by the Scene library (.oc = ObjectContainer, .ent = Entity).
@@ -35,10 +37,12 @@ static bool isObjectFile(const std::filesystem::path& p)
 	return ext == ".oc" || ext == ".ent";
 }
 
-// Only entities (.ent) can be spawned into the scene; ObjectContainers (.oc) are dependency-only.
+// Entities (.ent) and prefabs (.pre) can be dragged into the viewport to spawn; ObjectContainers
+// (.oc) are dependency-only.
 static bool isSpawnableFile(const std::filesystem::path& p)
 {
-	return p.extension().string() == ".ent";
+	const auto ext = p.extension().string();
+	return ext == ".ent" || ext == ".pre";
 }
 
 static const char* fileIcon(const std::filesystem::path& p)
@@ -149,7 +153,27 @@ void AssetBrowser::render()
 		renderContentList();
 	else
 		renderContentGrid();
+	acceptPrefabDrop();
 	ImGui::EndChild();
+}
+
+// Dropping an entity dragged from the Scene hierarchy here saves it (and its children) as a ".pre"
+// prefab in the current folder. The payload "SV_ENTITY" is an Entity* set by the Scene panel.
+void AssetBrowser::acceptPrefabDrop()
+{
+	const ImVec2 mn = ImGui::GetWindowPos();
+	const ImVec2 mx = ImVec2(mn.x + ImGui::GetWindowSize().x, mn.y + ImGui::GetWindowSize().y);
+	if (!ImGui::BeginDragDropTargetCustom(ImRect(mn, mx), ImGui::GetID("##ab_prefab_drop")))
+		return;
+	if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SV_ENTITY"))
+	{
+		Entity* entity = *static_cast<Entity**>(payload->Data);
+		const std::string name = entity->name.empty() ? std::string("Prefab") : entity->name;
+		const std::filesystem::path out = m_currentPath / (name + ".pre");
+		savePrefab(entity, out.string());
+		m_selectedPath = out;
+	}
+	ImGui::EndDragDropTarget();
 }
 
 // ---- Toolbar ---------------------------------------------------------------

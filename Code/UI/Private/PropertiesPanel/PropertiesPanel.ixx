@@ -1,10 +1,10 @@
 export module UI.PropertiesPanel;
 
 import Core;
-import UI.SceneView;
+import Entity;
 
 export class PropertiesPanel
 {
 public:
-	void render(SceneNode* selected);
+	void render(Entity* selected);
 };
