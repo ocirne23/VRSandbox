@@ -293,6 +293,7 @@ void SceneView::applyPendingMutations()
 	{
 		if (m_selected == m_pendingDelete)        m_selected = nullptr;
 		if (m_renamingEntity == m_pendingDelete)  m_renamingEntity = nullptr;
+		m_deletedEntities.emplace_back(m_pendingDelete); // own it until polled, before removeEntity drops the scene-graph ref
 		removeEntity(m_pendingDelete);
 		m_pendingDelete = nullptr;
 	}

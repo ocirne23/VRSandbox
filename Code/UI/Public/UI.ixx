@@ -3,6 +3,7 @@ export module UI;
 import Core;
 import Core.Rect;
 import Core.glm;
+import Entity;
 
 import UI.fwd;
 import UI.imgui_node_editor;
@@ -42,6 +43,10 @@ public:
     };
     // Returns and clears the drops queued since the last call (drain once per frame).
     std::vector<AssetDrop> takeAssetDrops() { return std::move(m_assetDrops); }
+
+    // Entities deleted in the Scene panel since the last call (drain once per frame). Each handle
+    // keeps its entity alive until dropped, so the app can match pointers and release its own handle.
+    std::vector<EntityPtr> takeDeletedEntities() { return m_sceneView.takeDeletedEntities(); }
 
 private:
 

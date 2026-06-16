@@ -199,6 +199,9 @@ int main()
             camera = cameraController.getCamera();
         }
 
+        for (const EntityPtr& deleted : ui.takeDeletedEntities())
+            std::erase_if(entities, [&deleted](const EntityPtr& e) { return e.get() == deleted.get(); });
+
         for (const UI::AssetDrop& drop : ui.takeAssetDrops())
         {
             const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), drop.screenPos);

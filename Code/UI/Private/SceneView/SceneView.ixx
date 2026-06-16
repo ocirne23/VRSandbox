@@ -21,6 +21,11 @@ public:
 	Entity* getSelected() const          { return m_selected; }
 	void    setSelected(Entity* entity)  { m_selected = entity; }
 
+	// Entities deleted via the panel since the last call (drain once per frame, like takeAssetDrops).
+	// The returned handles keep each entity alive until the caller drops them, letting owners outside
+	// the scene graph (e.g. the app's root-entity list) drop their own handle by matching pointers.
+	std::vector<EntityPtr> takeDeletedEntities() { return std::move(m_deletedEntities); }
+
 private:
 
 	void renderToolbar();
@@ -33,6 +38,8 @@ private:
 	void dropTargetReparentUnder(Entity* parent); // accepts a dragged scene entity, reparents under `parent`
 
 	void applyPendingMutations();
+
+	std::vector<EntityPtr> m_deletedEntities; // queued for the app to poll (keeps them alive meanwhile)
 
 	Entity* m_selected       = nullptr;
 	Entity* m_renamingEntity = nullptr;
