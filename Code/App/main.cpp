@@ -78,9 +78,8 @@ int main()
     Scene::World world;
     world.initialize();
 
-    std::vector<EntityPtr> entities;
-    entities.push_back(world.spawn("sponza",    Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
-    entities.push_back(world.spawn("skysphere", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
+    std::vector<EntityPtr> entities = world.loadPrefab("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)

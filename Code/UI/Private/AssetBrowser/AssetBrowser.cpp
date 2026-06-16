@@ -6,35 +6,34 @@ import Entity.Prefab;
 
 // ---- helpers ---------------------------------------------------------------
 
-static bool isImageFile(const std::filesystem::path& p)
+static bool isImageFile(const std::string& ext)
 {
-	const auto ext = p.extension().string();
 	return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga" || ext == ".hdr";
 }
 
-static bool isMeshFile(const std::filesystem::path& p)
+static bool isMeshFile(const std::string& ext)
 {
-	const auto ext = p.extension().string();
 	return ext == ".obj" || ext == ".fbx" || ext == ".gltf" || ext == ".glb" || ext == ".dae";
 }
 
-static bool isShaderFile(const std::filesystem::path& p)
+static bool isShaderFile(const std::string& ext)
 {
-	const auto ext = p.extension().string();
 	return ext == ".glsl" || ext == ".hlsl" || ext == ".vert" || ext == ".frag" || ext == ".comp" || ext == ".spv";
 }
 
-static bool isSceneFile(const std::filesystem::path& p)
+static bool isPrefabFile(const std::string& ext)
 {
-	const auto ext = p.extension().string();
-	return ext == ".scene" || ext == ".prefab" || ext == ".pre";
+	return ext == ".pre";
 }
 
-// Asset description files parsed by the Scene library (.oc = ObjectContainer, .ent = Entity).
-static bool isObjectFile(const std::filesystem::path& p)
+static bool isObjectContainer(const std::string& ext)
 {
-	const auto ext = p.extension().string();
-	return ext == ".oc" || ext == ".ent";
+	return ext == ".oc";
+}
+
+static bool isEntityFile(const std::string& ext)
+{
+	return ext == ".ent";
 }
 
 // Entities (.ent) and prefabs (.pre) can be dragged into the viewport to spawn; ObjectContainers
@@ -48,23 +47,27 @@ static bool isSpawnableFile(const std::filesystem::path& p)
 static const char* fileIcon(const std::filesystem::path& p)
 {
 	if (std::filesystem::is_directory(p)) return "[Dir]";
-	if (isImageFile(p))                  return "[Img]";
-	if (isMeshFile(p))                   return "[Msh]";
-	if (isShaderFile(p))                 return "[Shd]";
-	if (isSceneFile(p))                  return "[Scn]";
-	if (isObjectFile(p))                 return "[Obj]";
+	auto ext = p.extension().string();
+	if (isImageFile(ext))                  return "[Img]";
+	if (isMeshFile(ext))                   return "[Msh]";
+	if (isShaderFile(ext))                 return "[Shd]";
+	if (isPrefabFile(ext))                 return "[Pre]";
+	if (isEntityFile(ext))                 return "[Ent]";
+	if (isObjectContainer(ext))            return "[OC]";
 	return "[Fil]";
 }
 
 static ImVec4 fileColor(const std::filesystem::path& p)
 {
 	if (std::filesystem::is_directory(p)) return ImVec4(1.0f, 0.85f, 0.4f, 1.0f);   // yellow
-	if (isImageFile(p))                   return ImVec4(0.4f, 0.8f,  1.0f, 1.0f);   // cyan
-	if (isMeshFile(p))                    return ImVec4(0.6f, 1.0f,  0.6f, 1.0f);   // green
-	if (isShaderFile(p))                  return ImVec4(1.0f, 0.6f,  0.3f, 1.0f);   // orange
-	if (isSceneFile(p))                   return ImVec4(0.9f, 0.5f,  1.0f, 1.0f);   // purple
-	if (isObjectFile(p))                  return ImVec4(0.5f, 0.9f,  1.0f, 1.0f);   // light blue
-	return ImVec4(0.85f, 0.85f, 0.85f, 1.0f);                                        // grey
+	auto ext = p.extension().string();
+	if (isImageFile(ext))                   return ImVec4(0.4f, 0.8f,  1.0f, 1.0f);   // cyan
+	if (isMeshFile(ext))                    return ImVec4(0.6f, 1.0f,  0.6f, 1.0f);   // green
+	if (isShaderFile(ext))                  return ImVec4(1.0f, 0.6f,  0.3f, 1.0f);   // orange
+	if (isPrefabFile(ext))                  return ImVec4(0.9f, 0.5f,  1.0f, 1.0f);   // purple
+	if (isEntityFile(ext))                  return ImVec4(0.5f, 0.9f,  1.0f, 1.0f);   // light blue
+	if (isObjectContainer(ext))             return ImVec4(0.5f, 1.0f,  0.9f, 1.0f);   // light teal
+	return ImVec4(0.85f, 0.85f, 0.85f, 1.0f);                                         // grey
 }
 
 // Marks the just-submitted item as a drag source carrying an asset file path, so it can be
