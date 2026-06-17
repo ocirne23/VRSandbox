@@ -21,18 +21,27 @@ import Entity.Component;
 import Entity.World;
 
 // Renders an entity's RenderComponent (if any) and recurses through its SceneComponent children, so a
-// loaded prefab hierarchy draws every nested mesh, not just its root.
-static void renderEntityTree(Renderer& renderer, Entity* entity)
+// loaded prefab hierarchy draws every nested mesh, not just its root. Entity transforms are relative
+// to their parent, so `parentWorld` carries the accumulated transform down the tree: each entity's
+// absolute transform is its parent's composed with its own, and the RenderNode adds its mesh offset on
+// top. Roots are walked with an identity parent.
+static void renderEntityTree(Renderer& renderer, Entity* entity, const Transform& parentWorld)
 {
-    if (SceneComponent* sc = getComponent<SceneComponent>(entity))
-    {
-		if (!sc->enabled)
-			return;
-        for (const EntityPtr& child : sc->children)
-            renderEntityTree(renderer, child);
-    }
+    SceneComponent* sc = getComponent<SceneComponent>(entity);
+    if (sc && !sc->enabled)
+        return;
+
+    const Transform world = composeTransform(parentWorld, Transform(entity->pos, entity->scale, entity->rot));
+
     if (RenderComponent* render = getComponent<RenderComponent>(entity))
+    {
+        render->node.getTransform() = composeTransform(world, render->localTransform);
         renderer.renderNode(render->node);
+    }
+
+    if (sc)
+        for (const EntityPtr& child : sc->children)
+            renderEntityTree(renderer, child, world);
 }
 
 int main()
@@ -217,7 +226,8 @@ int main()
             else if (auto* ch = std::get_if<EntityChange::CreateHierarchy>(&change.type))
             {
                 const Transform base(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-                for (EntityPtr& e : world.spawnAssetFile(ch->path, base))
+                // Hierarchy drop: keep the asset's authored position/scale offset (don't anchor at base).
+                for (EntityPtr& e : world.spawnAssetFile(ch->path, base, false))
                 {
                     if (ch->parent && hasComponent<SceneComponent>(ch->parent))
                         reparentEntity(e.get(), ch->parent);   // parent's SceneComponent takes ownership
@@ -239,7 +249,7 @@ int main()
 
         const Frustum& frustum = renderer.beginFrame(camera);
         for (const EntityPtr& entity : entities)
-            renderEntityTree(renderer, entity);
+            renderEntityTree(renderer, entity, Transform());
 
 		for (auto& light : spawnedLights)
 		{

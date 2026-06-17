@@ -59,6 +59,8 @@ public:
     RenderNode spawnNodeForIdx(NodeSpawnIdx idx, const Transform& transform);
     void getRootTransformForIdx(NodeSpawnIdx idx, Transform& transform);
 
+	const std::string& getFilePath() const { return m_filePath; }
+
     // TODO RenderNode cleanup
 
 private:
@@ -83,6 +85,7 @@ private:
         uint16 startIdx = UINT16_MAX;
         uint16 numNodes = UINT16_MAX;
     };
+    std::string m_filePath;
 
     std::vector<NodeInfo> m_nodeInfos;
     std::vector<NodeMeshRange> m_nodeMeshRanges;

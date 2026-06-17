@@ -110,12 +110,22 @@ export struct RenderComponent
     static constexpr EComponentID getId() { return EComponentID_Render; }
     RenderNode node;
 
+    // The mesh's placement relative to its owning entity (baked from the ".ent" RenderNode node). The
+    // entity's own transform is relative to its parent, so the RenderNode's absolute transform is the
+    // accumulated parent chain composed with the entity transform and finally this offset — resolved
+    // each frame while walking the scene tree (see renderEntityTree).
+    Transform localTransform;
+
+    // Editor-only: draw this node's bounding sphere in the viewport (rendering is a future task).
+    bool showBounds = false;
+
     // Cached, parse-once data that makes per-instance spawn a pure lookup. The ObjectContainer is
     // resolved by Scene::World (which owns the containers) when it builds the spawn template; the
     // rest is baked from the entity's ".ent" RenderNode component node.
     struct SpawnInfo
     {
         ObjectContainer* container = nullptr;       // null = nothing to spawn
+        std::string nodePath;                       // For debug/display. nodeIdx is used at runtime for spawning.
         NodeSpawnIdx nodeIdx = NodeSpawnIdx_ROOT;
         Transform localTransform;                   // applied on top of the spawn base transform
     };
@@ -129,6 +139,16 @@ export struct RenderComponent
     void serialize(AssetNode&) const {}
     void deserialize(const AssetNode&) {}
 };
+
+// Composes a child/local transform onto a parent transform with full TRS: the child's local offset is
+// scaled and rotated into the parent's frame, so a parent's rotation/scale carries down to (and orbits)
+// its children. Used to accumulate an entity's absolute transform from its parent chain.
+export Transform composeTransform(const Transform& parent, const Transform& local);
+
+// Returns the cached RenderComponent::SpawnInfo this entity was spawned from (carrying the source
+// ObjectContainer, node path and local transform), or null if the entity has no spawn template or no
+// Render component. The info lives on the entity's spawn template, not on the component itself.
+export const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity);
 
 // Stable text type-name for each inline component, used as the "Component <name>" key in prefabs.
 export constexpr const char* componentTypeName(EComponentID id)

@@ -34,9 +34,11 @@ public:
     // Spawn every object a dropped asset file declares — entities and prefab hierarchies alike — and
     // return an owning handle per top-level root. The file resolves to its declarations via the
     // registry's file map (no re-read; a just-saved file falls back to a single parse). The first
-    // declaration lands at `base`; the rest keep their authored offset from it, and each composes its
-    // own authored rotation/scale onto `base`. A prefab's children come along inside their root.
-    std::vector<EntityPtr> spawnAssetFile(const std::string& path, const Transform& base);
+    // declaration composes its full authored transform (position/rotation/scale) onto `base`. With
+    // overrideDefaultTransform (a viewport drop at the cursor), the first declaration's authored position is
+    // instead cancelled so it lands exactly at `base` and the rest keep their offset from it. A prefab's
+    // children come along inside their root.
+    std::vector<EntityPtr> spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform = true);
 
     // Returns the ObjectContainer registered under name, loading it on first use.
     ObjectContainer* getOrLoadContainer(const std::string& name);

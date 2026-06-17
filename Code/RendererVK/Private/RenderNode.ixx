@@ -23,6 +23,8 @@ public:
         return Globals::rendererVK.getRenderNodeTransform(m_transformIdx);
     }
 
+    inline size_t getNumMeshInstances() const { return m_meshInstances.size(); }
+
     inline const Sphere& getLocalBounds() const { return m_bounds; }
     inline Sphere getWorldBounds() const 
     {

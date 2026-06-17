@@ -150,7 +150,7 @@ std::shared_ptr<RenderComponent::SpawnInfo> World::buildRenderSpawnInfo(const As
         info->nodeIdx = idx;
     else
         Log::warning("Scene: entity '" + ownerName + "' references unknown node '" + nodePath + "', using ROOT");
-
+	info->nodePath = nodePath.empty() ? "ROOT" : nodePath;
     info->localTransform = readNodeTransform(renderNode, glm::vec3(0.0f)); // mesh offset within the entity
     return info;
 }
@@ -279,7 +279,7 @@ const EntitySpawnTemplate* World::getOrBuildTemplate(const std::string& name)
     return nullptr;
 }
 
-std::vector<EntityPtr> World::spawnAssetFile(const std::string& path, const Transform& base)
+std::vector<EntityPtr> World::spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform)
 {
     std::vector<EntityPtr> spawned;
 
@@ -306,15 +306,14 @@ std::vector<EntityPtr> World::spawnAssetFile(const std::string& path, const Tran
     if (templates.empty())
         return spawned;
 
-    // Land the first declaration at `base`; the rest keep their authored offset from it, and each
-    // composes its own authored rotation/scale onto `base`. A plain entity has an identity default
-    // transform, so it simply spawns at `base` (a prefab root instead carries its children along).
-    const glm::vec3 firstPos = templates[0]->defaultTransform.pos;
+    // Compose each declaration's full authored transform onto `base`. When anchoring (a viewport drop),
+    // the first declaration's authored position is cancelled so it lands exactly at `base`, with the
+    // rest keeping their offset from it; otherwise (a hierarchy drop) the authored position is kept too.
+    const glm::vec3 anchor = overrideDefaultTransform ? templates[0]->defaultTransform.pos : glm::vec3(0.0f);
     for (const EntitySpawnTemplate* tmpl : templates)
     {
         const Transform& dt = tmpl->defaultTransform;
-        const glm::quat rot = glm::normalize(base.quat * dt.quat);
-        const Transform rootBase(base.pos + (dt.pos - firstPos), base.scale * dt.scale, rot);
+        const Transform rootBase = composeTransform(base, Transform(dt.pos - anchor, dt.scale, dt.quat));
         spawned.push_back(spawnFromTemplate(*tmpl, rootBase));
     }
     return spawned;

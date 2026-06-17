@@ -6,30 +6,39 @@ import Core.Transform;
 import Entity;
 import RendererVK;
 
-// Composes a component-local transform onto a spawn base: position is additive, rotation and scale
-// multiply (matching how the renderer instances nodes). Shared by the Render and Scene spawn steps.
-static Transform composeSpawnTransform(const Transform& base, const Transform& local)
+Transform composeTransform(const Transform& parent, const Transform& local)
 {
-    const glm::quat rot = glm::normalize(base.quat * local.quat);
-    return Transform(base.pos + local.pos, base.scale * local.scale, rot);
+    // Full TRS: the child's local offset is scaled and rotated into the parent's frame before being
+    // translated, so rotating/scaling the parent orbits its offset children (a proper scene graph).
+    return Transform(
+        parent.pos + parent.quat * (local.pos * parent.scale),
+        parent.scale * local.scale,
+        glm::normalize(parent.quat * local.quat));
 }
 
 void RenderComponent::spawn(const SpawnInfo& info, const Transform& base)
 {
     if (!info.container)
         return;
-    node = info.container->spawnNodeForIdx(info.nodeIdx, composeSpawnTransform(base, info.localTransform));
+    // The mesh offset is kept relative to the entity; the node's absolute transform is resolved each
+    // frame in renderEntityTree. Seed it with the local-composed transform so it's valid before the
+    // first walk (composeTransform with the entity's own — here local — base).
+    localTransform = info.localTransform;
+    node = info.container->spawnNodeForIdx(info.nodeIdx, composeTransform(base, info.localTransform));
 }
 
 void SceneComponent::spawn(const SpawnInfo& info, const Transform& base)
 {
     enabled = info.enabled;
     Entity* self = getEntity();
+    // Spawn each child at its own local transform (relative to this entity) rather than accumulating
+    // `base` into it: the scene graph is now relative, and absolute transforms are composed at render
+    // time by walking the parent chain.
     for (const SpawnInfo::ChildSpawnInfo& child : info.children)
     {
         if (!child.tmpl)
             continue;
-        EntityPtr childEntity = spawnFromTemplate(*child.tmpl, composeSpawnTransform(base, child.localTransform));
+        EntityPtr childEntity = spawnFromTemplate(*child.tmpl, child.localTransform);
         if (!child.name.empty())
             childEntity->name = child.name;
         reparentEntity(childEntity, self); // hands the owning child handle to this entity's children list
@@ -122,6 +131,22 @@ void removeEntity(Entity* entity)
 {
     if (entity)
         detachFromOwner(entity);
+}
+
+const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity)
+{
+    if (!entity->spawnTemplate || !hasComponent<RenderComponent>(entity))
+        return nullptr;
+
+    // spawnInfos is parallel to the set component bits (id order); the Render slot sits past every
+    // lower-id component the entity carries.
+    size_t idx = 0;
+    for (uint16 i = 0; i < uint16(EComponentID_Render); ++i)
+        if (entity->typeBits & (1 << i))
+            ++idx;
+    if (idx >= entity->spawnTemplate->spawnInfos.size())
+        return nullptr;
+    return static_cast<const RenderComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
 }
 
 int componentIdFromName(std::string_view name)

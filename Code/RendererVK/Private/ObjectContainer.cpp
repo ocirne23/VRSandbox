@@ -28,6 +28,8 @@ bool ObjectContainer::initialize(const ISceneData& sceneData, const MaterialOver
 {
     if (!sceneData.isValid())
         return false;
+	m_filePath = sceneData.getFilePath();
+
     Globals::rendererVK.addObjectContainer(this);
 
     TempInitData temp;
