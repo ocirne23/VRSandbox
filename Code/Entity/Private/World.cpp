@@ -21,8 +21,7 @@ bool World::initialize()
     // Only entities are spawnable; the ObjectContainers they reference are loaded on demand.
     for (const auto& [name, desc] : Globals::assetRegistry.getEntities())
         registerTemplate(desc);
-    m_worldRoot = createEntity(uint16(1 << EComponentID_Scene), Transform());
-    m_worldRoot->name = "World";
+
     return true;
 }
 

@@ -108,36 +108,36 @@ std::vector<const AssetNode*> AssetNode::findAll(std::string_view childKey) cons
     return result;
 }
 
-AssetNode& AssetNode::addChild(std::string key)
+AssetNode& AssetNode::addChild(std::string a_key)
 {
     AssetNode node;
-    node.key = std::move(key);
+    node.key = std::move(a_key);
     children.push_back(std::move(node));
     return children.back();
 }
 
-AssetNode& AssetNode::set(std::string key, std::string value)
+AssetNode& AssetNode::set(std::string a_key, std::string value)
 {
-    AssetNode& node = addChild(std::move(key));
+    AssetNode& node = addChild(std::move(a_key));
     node.values.push_back(std::move(value));
     return node;
 }
 
-AssetNode& AssetNode::set(std::string key, float value)
+AssetNode& AssetNode::set(std::string a_key, float value)
 {
     char buf[32];
     auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), value);
-    return set(std::move(key), std::string(buf, ptr));
+    return set(std::move(a_key), std::string(buf, ptr));
 }
 
-AssetNode& AssetNode::set(std::string key, bool value)
+AssetNode& AssetNode::set(std::string a_key, bool value)
 {
-    return set(std::move(key), std::string(value ? "true" : "false"));
+    return set(std::move(a_key), std::string(value ? "true" : "false"));
 }
 
-AssetNode& AssetNode::set(std::string key, const glm::vec3& value)
+AssetNode& AssetNode::set(std::string a_key, const glm::vec3& value)
 {
-    AssetNode& node = addChild(std::move(key));
+    AssetNode& node = addChild(std::move(a_key));
     node.values.resize(3);
     for (int i = 0; i < 3; ++i)
     {

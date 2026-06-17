@@ -189,7 +189,7 @@ int main()
         const double deltaSec = Globals::time.getDeltaSec();
         input.update(deltaSec);
         cameraController.update(deltaSec);
-        ui.update(world, deltaSec);
+        ui.update(entities, deltaSec);
         renderer.setViewportRect(ui.getViewportRect());
 
         Camera camera;

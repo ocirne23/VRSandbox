@@ -231,42 +231,6 @@ void SceneView::renderContextMenu(Entity* entity)
 	ImGui::EndPopup();
 }
 
-void SceneView::renderWorld(World& world)
-{
-	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow
-		| ImGuiTreeNodeFlags_OpenOnDoubleClick
-		| ImGuiTreeNodeFlags_SpanAvailWidth
-		| ImGuiTreeNodeFlags_DefaultOpen;
-
-	//Entity* world = Globals::entityRegistry.getWorldRoot();
-
-	ImGui::SetNextItemOpen(m_worldOpen, ImGuiCond_Always);
-	m_worldOpen = ImGui::TreeNodeEx("World", flags);
-
-	// World is a real SceneComponent entity, so dropping any entity (scene or loose) onto it nests it
-	// directly underneath.
-	//dropTargetReparentUnder(world);
-
-	if (ImGui::BeginPopupContextItem("##sv_world_ctx"))
-	{
-		if (ImGui::MenuItem("Add Entity"))
-		{
-			m_hasPendingCreate    = true;
-			m_pendingCreateParent = nullptr; // createSceneEntity already lands it under World
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::EndPopup();
-	}
-
-	if (m_worldOpen)
-	{
-		if (SceneComponent* sc = getComponent<SceneComponent>(world))
-			for (const EntityPtr& child : sc->children)
-				renderEntityNode(child);
-		ImGui::TreePop();
-	}
-}
-
 void SceneView::applyPendingMutations()
 {
 	if (m_hasPendingCreate)
@@ -275,6 +239,8 @@ void SceneView::applyPendingMutations()
 		EntityPtr created = createSceneEntity(0, Transform(), name.c_str());
 		if (m_pendingCreateParent)
 			reparentEntity(created, m_pendingCreateParent);
+        else
+            m_reparentedEntities.emplace_back(true, created);
 		m_selected = created.get();
 		beginRename(m_selected);
 		m_hasPendingCreate    = false;
@@ -305,7 +271,7 @@ void SceneView::applyPendingMutations()
 	}
 }
 
-void SceneView::render()
+void SceneView::render(const std::vector<EntityPtr>& rootEntities)
 {
 	// Drop stale references to entities destroyed since last frame.
 	//if (m_selected && !isAlive(m_selected))             m_selected = nullptr;
@@ -316,12 +282,9 @@ void SceneView::render()
 
 	ImGui::BeginChild("##sv_tree", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
 
-	renderWorld();
-
-	// Loose entities with no parent sit at the top level alongside World.
-	//for (Entity* entity : Globals::entityRegistry.getAll())
-	//	if (entity->parent == nullptr && !hasComponent<SceneComponent>(entity))
-	//		renderEntityNode(entity);
+	for (Entity* entity : rootEntities)
+		if (entity->parent == nullptr)
+			renderEntityNode(entity);
 
 	const float remainingH = ImGui::GetContentRegionAvail().y;
 	if (remainingH > 0.0f)
@@ -343,7 +306,7 @@ void SceneView::render()
 		if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SV_ENTITY"))
 		{
 			Entity* dragged = *static_cast<Entity**>(payload->Data);
-			if (dragged->parent != nullptr && !hasComponent<SceneComponent>(dragged))
+			if (dragged->parent != nullptr)
 			{
 				m_hasPendingReparent    = true;
 				m_pendingReparentChild  = dragged;

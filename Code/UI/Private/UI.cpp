@@ -53,7 +53,7 @@ bool                 m_FirstFrame = true;    // Flag set for first frame only, s
 ImVector<LinkInfo>   m_Links;                // List of live links. It is dynamic unless you want to create read-only view over nodes.
 int                  m_NextLinkId = 100;
 
-void UI::update(double deltaSec)
+void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
 {
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -155,7 +155,7 @@ void UI::update(double deltaSec)
 
     {
         ImGui::Begin("Scene");
-        m_sceneView.render();
+        m_sceneView.render(rootEntities);
         ImGui::End();
     }
 

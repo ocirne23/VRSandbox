@@ -3,6 +3,7 @@ export module UI.SceneView;
 import Core;
 import Core.Transform;
 import Entity;
+import Entity.World;
 import Entity.Component;
 
 // Entity-backed scene hierarchy panel. There is no persistent UI tree: every frame the panel renders
@@ -15,7 +16,7 @@ export class SceneView
 {
 public:
 
-	void render();
+	void render(const std::vector<EntityPtr>& rootEntities);
 
 	Entity* getSelected() const          { return m_selected; }
 	void    setSelected(Entity* entity)  { m_selected = entity; }
@@ -36,7 +37,6 @@ public:
 private:
 
 	void renderToolbar();
-	void renderWorld(const std::vector<EntityPtr>& rootEntities);
 	void renderEntityNode(Entity* entity);  // scene entity (recurses children) or loose leaf
 	void renderContextMenu(Entity* entity);
 	void beginRename(Entity* entity);

@@ -47,8 +47,6 @@ public:
 
     size_t getNumContainers() const { return m_containers.size(); }
 
-	Entity* getWorldRoot() { return m_worldRoot.get(); }
-
 private:
 
     // Everything needed to spawn a named object without touching its asset desc again: the
@@ -63,8 +61,8 @@ private:
         std::vector<std::shared_ptr<void>> spawnInfos;
     };
 
-    ObjectContainer* loadContainer(const Scene::ObjectContainerDesc& desc);
-    void registerTemplate(const Scene::EntityDesc& desc);
+    ObjectContainer* loadContainer(const ObjectContainerDesc& desc);
+    void registerTemplate(const EntityDesc& desc);
 
     // Runs each component's cached spawn step (the spawnInfos parallel to archetype.typeBits) on a
     // freshly created entity, composing the per-component local transform onto `base`.
@@ -90,5 +88,4 @@ private:
     std::unordered_map<std::string, std::unique_ptr<ObjectContainer>> m_containers;
     std::unordered_map<std::string, std::unique_ptr<SpawnTemplate>> m_spawnTemplates;
     std::unordered_set<std::string> m_loadingPrefabs; // names on the current load stack (cycle guard)
-	EntityPtr m_worldRoot; // the persistent root entity for the scene hierarchy (carries the World SceneComponent)
 };

@@ -26,7 +26,7 @@ public:
     UI(const UI&) = delete;
 
     void initialize();
-    void update(World& world,double deltaSec);
+    void update(const std::vector<EntityPtr>& rootEntities, double deltaSec);
     void render();
 	void setRenderStats(const Renderer::Stats& stats) { m_renderStats = stats; }
 
