@@ -58,17 +58,18 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
 // full overlay.
 static void writeSceneChild(Entity* child, AssetNode& sceneComp)
 {
-    if (Globals::assetRegistry.findPrefab(child->sourceAsset))
+    const std::string& source = entitySourceAsset(child);
+    if (Globals::assetRegistry.findPrefab(source))
     {
         AssetNode& node = sceneComp.addChild("Prefab");
-        node.values.emplace_back(child->sourceAsset);
-        writeOverrides(child, node, child->sourceAsset);
+        node.values.emplace_back(source);
+        writeOverrides(child, node, source);
     }
     else
     {
         AssetNode& node = sceneComp.addChild("Entity");
-        node.values.emplace_back(child->sourceAsset); // ".ent" template this entity references
-        writeEntityBody(child, node, child->sourceAsset);
+        node.values.emplace_back(source); // ".ent" template this entity references
+        writeEntityBody(child, node, source);
     }
 }
 

@@ -38,6 +38,8 @@ export namespace Log
 			detail::g_messages.pop_front();
 		detail::g_messages.push_back({ level, std::string(text) });
 		++detail::g_revision;
+		printf("[%s] %.*s\n", level == Level::Verbose ? "V" : level == Level::Info ? "I" : level == Level::Warning ? "W" : "E",
+			static_cast<int>(text.size()), text.data());
 	}
 
 	inline void verbose(std::string_view text) { log(Level::Verbose, text); }

@@ -6,13 +6,54 @@ import Core.Transform;
 import Entity;
 import RendererVK;
 
+// Composes a component-local transform onto a spawn base: position is additive, rotation and scale
+// multiply (matching how the renderer instances nodes). Shared by the Render and Scene spawn steps.
+static Transform composeSpawnTransform(const Transform& base, const Transform& local)
+{
+    const glm::quat rot = glm::normalize(base.quat * local.quat);
+    return Transform(base.pos + local.pos, base.scale * local.scale, rot);
+}
+
 void RenderComponent::spawn(const SpawnInfo& info, const Transform& base)
 {
     if (!info.container)
         return;
-    const glm::quat rot = glm::normalize(base.quat * info.localTransform.quat);
-    const Transform transform(base.pos + info.localTransform.pos, base.scale * info.localTransform.scale, rot);
-    node = info.container->spawnNodeForIdx(info.nodeIdx, transform);
+    node = info.container->spawnNodeForIdx(info.nodeIdx, composeSpawnTransform(base, info.localTransform));
+}
+
+void SceneComponent::spawn(const SpawnInfo& info, const Transform& base)
+{
+    enabled = info.enabled;
+    Entity* self = getEntity();
+    for (const SpawnInfo::ChildSpawnInfo& child : info.children)
+    {
+        if (!child.tmpl)
+            continue;
+        EntityPtr childEntity = spawnFromTemplate(*child.tmpl, composeSpawnTransform(base, child.localTransform));
+        if (!child.name.empty())
+            childEntity->name = child.name;
+        reparentEntity(childEntity, self); // hands the owning child handle to this entity's children list
+    }
+}
+
+EntityPtr spawnFromTemplate(const EntitySpawnTemplate& tmpl, const Transform& base)
+{
+    EntityPtr entity = createEntity(tmpl.archetype, base);
+    entity->spawnTemplate = &tmpl;
+    entity->name = tmpl.name;
+
+    // spawnInfos is parallel to the set bits of archetype.typeBits (id order): walk the bits and the
+    // slots together, the slot's concrete type implied by the bit it lines up with.
+    size_t idx = 0;
+    for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
+    {
+        if (!(tmpl.archetype.typeBits & (1 << i)))
+            continue;
+        if (const void* info = tmpl.spawnInfos[idx].get())
+            spawnComponent(entity, EComponentID(i), info, base);
+        ++idx;
+    }
+    return entity;
 }
 
 EntityPtr createSceneEntity(uint16 typeBits, const Transform& transform, const char* name)
@@ -119,6 +160,9 @@ void spawnComponent(Entity* entity, EComponentID id, const void* info, const Tra
 {
     switch (id)
     {
+    case EComponentID_Scene:
+        getComponent<SceneComponent>(entity)->spawn(*static_cast<const SceneComponent::SpawnInfo*>(info), base);
+        break;
     case EComponentID_Render:
         getComponent<RenderComponent>(entity)->spawn(*static_cast<const RenderComponent::SpawnInfo*>(info), base);
         break;

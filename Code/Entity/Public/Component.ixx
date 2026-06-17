@@ -36,7 +36,7 @@ export constexpr uint16 ComponentAlignment = 16;
 // Each inline component exposes serialize()/deserialize() over the shared AssetNode text format,
 // driven by the prefab (.pre) serializer. They cover only the component's own intrinsic data: the
 // scene-graph structure (which entity is whose child) and the heavy RenderNode are reconstructed by
-// the prefab loader from Entity::sourceAsset, not from per-component data.
+// the prefab loader from the entity's spawn template (entitySourceAsset), not from per-component data.
 
 export struct SceneComponent
 {
@@ -44,8 +44,28 @@ export struct SceneComponent
 
     Entity* getEntity();
 
+    // Cached, parse-once child references that make spawning a prefab hierarchy a pure lookup:
+    // each ChildSpawnInfo points at the already-resolved spawn template for one child plus its
+    // placement relative to this entity. Built once by Scene::World from the .pre file (mirrors
+    // RenderComponent::SpawnInfo, which holds a resolved ObjectContainer rather than a path).
+    struct SpawnInfo
+    {
+        struct ChildSpawnInfo
+        {
+            const EntitySpawnTemplate* tmpl = nullptr; // resolved child template (.ent or nested prefab)
+            Transform localTransform;                  // placement composed onto the parent's spawn transform
+            std::string name;                          // name override, empty = use the template's
+        };
+        std::vector<ChildSpawnInfo> children;
+        bool enabled = true;
+    };
+
     std::vector<EntityPtr> children;
     bool enabled = true;
+
+    // Spawns each child template under this entity (composing local placement onto `base`) and
+    // applies `info.enabled`. The owning child handles are stored in `children` via reparentEntity.
+    void spawn(const SpawnInfo& info, const Transform& base);
 
     void serialize(AssetNode& out) const { out.set("Enabled", enabled); }
     void deserialize(const AssetNode& in)
@@ -134,6 +154,12 @@ export void deserializeComponent(Entity* entity, EComponentID id, const AssetNod
 // `info` points to the component-specific <Component>::SpawnInfo; its concrete type is implied by
 // `id` and cast accordingly. No-op for components that have no spawn step.
 export void spawnComponent(Entity* entity, EComponentID id, const void* info, const Transform& base);
+
+// Creates an entity from a spawn template at `base`: allocates the archetype, wires the template
+// back-pointer and default name (the template's name), then runs each component's cached spawn step
+// in id order — recursing into child entities for a SceneComponent. Returns the owning handle. This
+// is the single path both World::spawn and prefab instantiation go through.
+export EntityPtr spawnFromTemplate(const EntitySpawnTemplate& tmpl, const Transform& base);
 
 // ---- packing internals ------------------------------------------------------
 

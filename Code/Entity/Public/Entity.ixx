@@ -4,6 +4,8 @@ import Core;
 import Core.glm;
 import Core.Transform;
 
+export struct EntitySpawnTemplate;
+
 // Lightweight entity header. Its components live in memory immediately after this header; which
 // components are present is encoded in typeBits, and each component's byte offset is derived from
 // that mask (see Entity.Component). Entities are created via createEntity() (which allocates the
@@ -21,16 +23,11 @@ export struct Entity
     Entity* parent = nullptr;
     std::string name;
 
-    // Name of the source ".ent" asset this entity was spawned from (set by Scene::World::spawn), or
-    // empty for entities authored directly in the editor. Prefab (.pre) serialization records this so
-    // a saved hierarchy can re-spawn the heavy components (mesh/RenderNode) from the asset on load.
-    std::string sourceAsset;
-
     // Opaque pointer to the Scene::SpawnTemplate this entity was spawned from (set by
     // Scene::World::spawn), or null for editor-authored entities. Stored as void* because the Scene
     // layer sits above Entity and can't be named here; Scene owns the templates (heap-allocated, so the
     // address is stable) and casts this back to its concrete type.
-    const void* spawnTemplate = nullptr;
+    const EntitySpawnTemplate* spawnTemplate = nullptr;
 
     uint16 refCount = 0;
     uint16 typeBits = 0;
@@ -133,6 +130,36 @@ export EntityArchetype makeEntityArchetype(uint16 typeBits);
 // the typeBits form is a convenience that builds the archetype first. Both defined in Entity.cpp.
 export EntityPtr createEntity(const EntityArchetype& archetype, const Transform& transform);
 export EntityPtr createEntity(uint16 typeBits, const Transform& transform);
+
+// Everything needed to spawn a named object without touching its asset desc again: the
+// entity archetype (alloc size + component mask) plus each spawnable component's cached
+// SpawnInfo. Built once per name and reused on every spawn.
+export struct EntitySpawnTemplate
+{
+    EntityArchetype archetype;                     // alloc size + component mask, computed once
+    Transform defaultTransform;                    // baked from the source asset's authored Position/Rotation/Scale
+    // One slot per set bit in archetype.typeBits, in component-id order: a type-erased
+    // <Component>::SpawnInfo whose concrete type is implied by the bit it lines up with
+    // (cast via spawnComponent). Null where a present component has no spawn step.
+    std::vector<std::shared_ptr<void>> spawnInfos;
+
+    // Name of the source ".ent"/prefab asset entities spawned from this template reference. Prefab
+    // (.pre) serialization records it (via Entity::spawnTemplate) so a saved hierarchy can re-spawn
+    // the heavy components (mesh/RenderNode) from the asset on load.
+    std::string sourceAsset;
+
+    // Default display name given to spawned entities (the asset's authored "Name", falling back to
+    // sourceAsset). Per-instance overrides still win — see SceneComponent::SpawnInfo::ChildSpawnInfo.
+    std::string name;
+};
+
+// Source asset name of the entity, read through its spawn template, or an empty string for entities
+// authored directly in the editor (which have no template). See EntitySpawnTemplate::sourceAsset.
+export inline const std::string& entitySourceAsset(const Entity* entity)
+{
+    static const std::string empty;
+    return entity->spawnTemplate ? entity->spawnTemplate->sourceAsset : empty;
+}
 
 // A single entity mutation requested through the editor UI, drained once per frame by the app, which
 // owns the World (the spawner) and the root-entity list. The two Create cases carry the asset path to
