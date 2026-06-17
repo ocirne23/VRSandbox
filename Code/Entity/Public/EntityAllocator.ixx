@@ -2,11 +2,6 @@ export module Entity.Allocator;
 
 import Core;
 
-// Pre-allocates entity memory in large chunks and sub-allocates variable-sized, 16-byte-aligned
-// blocks for individual entities. Freed blocks are recycled through per-size free lists; the chunks
-// themselves are returned to the engine allocator when the EntityAllocator is destroyed. Not
-// thread-safe: entity creation/destruction is expected on a single thread (only the EntityPtr
-// refcount is atomic).
 export class EntityAllocator final
 {
 public:
@@ -23,7 +18,6 @@ private:
     static constexpr uint32 ALIGNMENT = 16;
     static constexpr uint32 CHUNK_SIZE = 1u << 20; // 1 MB
 
-    // Recycled blocks thread an intrusive list through their own (now-unused) storage.
     struct FreeBlock { FreeBlock* next; };
 
     void addChunk(uint32 minSize);

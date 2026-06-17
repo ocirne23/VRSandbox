@@ -116,7 +116,6 @@ namespace
 		ImGui::PopID();
 	}
 
-	// A node in the category tree. Children preserve first-seen order.
 	struct CategoryNode
 	{
 		std::string_view          name;
@@ -166,8 +165,6 @@ void TweakPanel::render()
 		return;
 	}
 
-	// Build a category tree from the '/'-delimited category paths (e.g. "Sky/Sun"),
-	// then render it: top-level nodes as collapsing headers, nested ones as tree nodes.
 	CategoryNode root;
 	for (int i = 0; i < static_cast<int>(vars.size()); ++i)
 	{

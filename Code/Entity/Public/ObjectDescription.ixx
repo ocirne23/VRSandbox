@@ -4,10 +4,6 @@ import Core;
 import Core.glm;
 import File.AssetParser;
 
-
-// Optional material overrides parsed from an ".oc" file's "MaterialOverrides" block. Kept
-// RendererVK-free here (pipeline named as a string, tex indices as -1 = "leave default"); the
-// World translates this into a RendererVK ObjectContainer::MaterialOverrides when loading.
 export struct MaterialOverridesDesc
 {
     bool present = false;
@@ -19,8 +15,6 @@ export struct MaterialOverridesDesc
     int metalRoughnessTexIdx = -1;
 };
 
-// Parsed ".oc" file: describes how to load an ObjectContainer from a model file (Assimp) or a
-// built-in procedural shape ("skysphere", "terrain", "cube", ...).
 export struct ObjectContainerDesc
 {
     std::string name;
@@ -31,10 +25,6 @@ export struct ObjectContainerDesc
     MaterialOverridesDesc materialOverrides;
 };
 
-// Build a typed description from an already-parsed top-level "ObjectContainer" declaration node.
-// Returns false if the node is not an ObjectContainer.
 export bool toObjectContainerDesc(const AssetNode& node, ObjectContainerDesc& out);
 
-// Load + parse + interpret a file in one call. Returns false (with outError) on read failure
-// or when the file contains no ObjectContainer declaration.
 export bool loadObjectContainerDesc(const std::string& path, ObjectContainerDesc& out, std::string& outError);

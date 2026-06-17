@@ -4,10 +4,6 @@ import Core;
 import Core.glm;
 import Core.Camera;
 
-// Thumbstick locomotion for VR: drives the play-space transform (position + yaw) from Globals::vrInput.
-// The renderer composes the headset pose on top of this transform, so this controller only produces the
-// play-space origin/orientation (no pitch/roll — those come from the head). Mirrors FreeFlyCameraController's
-// getCamera() shape so main.cpp can swap between them by VR state.
 export class VRFreeFlyCameraController final
 {
 public:
@@ -29,9 +25,6 @@ public:
     {
         Camera camera;
         camera.position = m_position;
-        // The thumbstick yaw is the play-space turn; keep it solely in playSpaceOrientation. The view
-        // matrix carries position only (identity rotation) so the renderer's camera-rotation base stays
-        // identity and the yaw isn't applied twice. In VR the renderer overrides viewMatrix with the head pose.
         camera.playSpaceOrientation = m_yaw;
         camera.viewMatrix = glm::translate(glm::mat4(1.0f), -m_position);
         return camera;

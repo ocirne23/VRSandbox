@@ -15,8 +15,6 @@ import Entity.ObjectDescription;
 
 bool World::initialize()
 {
-    // Scan so prefabs are resolvable by name. Templates (and the ObjectContainers they reference) are
-    // built lazily on first spawn/reference and cached, so a referenced file is read at most once.
     Globals::assetRegistry.scanDirectory();
     return true;
 }
@@ -90,23 +88,11 @@ EntityPtr World::spawn(const std::string& name, const Transform& base)
 
 void World::reloadPrefabs()
 {
-    // Retire (don't free) the cached templates: live entities still hold raw pointers into them, while a
-    // template can transitively reference another (inline children, nested prefabs), so the whole cache is
-    // invalidated together. The next spawn of any prefab rebuilds it (and its dependencies) from file.
     for (auto& [name, tmpl] : m_templates)
         m_retiredTemplates.push_back(std::move(tmpl));
     m_templates.clear();
 }
 
-// ---- spawn templates -----------------------------------------------------------------------------
-// A declaration (a top-level "Prefab" or a "Scene" child) may carry a RenderNode (a mesh) and/or a
-// Scene block (children to attach on spawn). buildTemplate turns one into an EntitySpawnTemplate. There
-// are two flavours of child under a Scene block: an inline "Entity" (defined fully in place, its
-// template owned by the parent — buildInlineTemplate) and a "Prefab" reference (resolved by name to
-// another .pre file's cached root — getOrBuildPrefabTemplate). Prefab roots are cached by name and
-// read at most once; spawning is then a pure walk of the template tree.
-
-// The "Component <name>" child of a declaration node, or null if absent.
 static const AssetNode* findComponentNode(const AssetNode& node, const char* name)
 {
     for (const AssetNode* comp : node.findAll("Component"))
@@ -128,9 +114,6 @@ static bool keyIs(const AssetNode& node, std::string_view key)
     return true;
 }
 
-// A node's authored placement (Position/Rotation/Scale). The scene graph is relative, so a node's
-// authored transform is taken as-is: for a Scene child it is the placement relative to its parent; for
-// a root prefab it is the placement composed onto the spawn transform. Loading never rebases it.
 static Transform readNodeTransform(const AssetNode& node)
 {
     Transform t;
@@ -169,9 +152,6 @@ std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const Asse
     auto info = std::make_shared<SceneComponent::SpawnInfo>();
     if (const AssetNode* n = sceneNode.find("Enabled")) info->enabled = n->asBool();
 
-    // An "Entity" child is defined fully in place (build its template inline); a "Prefab" child is a
-    // reference resolved by name to another .pre's cached root. Either way authoring order is kept and
-    // the child's own Position/Rotation/Scale becomes its placement relative to this entity.
     for (const AssetNode& child : sceneNode.children)
     {
         std::shared_ptr<const EntitySpawnTemplate> childTmpl;
@@ -199,7 +179,6 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
     const AssetNode* nameNode = node.find("Name");
     tmpl.displayName = nameNode ? nameNode->asString() : node.asString();
 
-    // Resolve each component the declaration carries to its parse-once SpawnInfo, indexed by id.
     uint16 typeBits = 0;
 
     static_assert(EComponentID_Scene == 0);
@@ -218,7 +197,6 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 
-    // One spawn-info slot per set component bit, in id order (null where a present component has none).
     tmpl.archetype = makeEntityArchetype(typeBits);
 }
 
@@ -227,8 +205,6 @@ std::shared_ptr<const EntitySpawnTemplate> World::cacheTemplate(const std::strin
     if (auto it = m_templates.find(name); it != m_templates.end())
         return it->second;
 
-    // Mark in-progress before building so a self/cyclic child reference (resolved while building the
-    // Scene children) is caught by getOrBuildPrefabTemplate rather than recursing forever.
     m_buildingTemplates.insert(name);
     auto tmpl = std::make_shared<EntitySpawnTemplate>();
     tmpl->sourceFile = sourceFile;
@@ -242,9 +218,6 @@ std::shared_ptr<const EntitySpawnTemplate> World::cacheTemplate(const std::strin
 
 std::shared_ptr<const EntitySpawnTemplate> World::buildInlineTemplate(const AssetNode& node)
 {
-    // An inline "Entity" child carries no prefab name or source file of its own (it lives inside its
-    // parent's file), so a re-serialized instance writes "Entity <name>" with its full body. Owned by
-    // the caller's SpawnInfo.
     auto tmpl = std::make_shared<EntitySpawnTemplate>();
     buildTemplate(node, *tmpl);
     return tmpl;
@@ -260,7 +233,6 @@ std::shared_ptr<const EntitySpawnTemplate> World::buildFileTemplate(const std::s
         return nullptr;
     }
 
-    // A .pre file declares a single root prefab: build the template for its first "Prefab".
     for (const AssetNode& decl : doc.children)
         if (keyIs(decl, "Prefab"))
             return cacheTemplate(decl.asString(), path, decl);
@@ -294,10 +266,6 @@ std::shared_ptr<const EntitySpawnTemplate> World::getOrBuildPrefabTemplate(const
 
 EntityPtr World::spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform)
 {
-    // Resolve the dropped file to its single root template: cache-first via the registry's file map
-    // (mapped at scan time, no re-read), falling back to a single parse for a file the registry hasn't
-    // scanned (e.g. a just-saved prefab). The drop payload is an absolute path while the registry keys
-    // by path relative to its scan root (the Assets working dir), so relativize for the lookup.
     std::error_code ec;
     const std::filesystem::path relativePath = std::filesystem::relative(path, ec);
     const std::string fileName = (ec || relativePath.empty()) ? path : relativePath.string();
@@ -307,8 +275,6 @@ EntityPtr World::spawnAssetFile(const std::string& path, const Transform& base, 
     if (!tmpl)
         return EntityPtr{};
 
-    // Compose the root's authored transform onto `base`. When anchoring (a viewport drop) the authored
-    // position is cancelled so it lands exactly at `base`; otherwise (a hierarchy drop) it is kept.
     const Transform& dt = tmpl->defaultTransform;
     const glm::vec3 pos = overrideDefaultTransform ? base.pos : dt.pos;
     return spawnFromTemplate(*tmpl, Transform(pos, dt.scale, dt.quat));

@@ -8,8 +8,6 @@ import RendererVK;
 
 Transform composeTransform(const Transform& parent, const Transform& local)
 {
-    // Full TRS: the child's local offset is scaled and rotated into the parent's frame before being
-    // translated, so rotating/scaling the parent orbits its offset children (a proper scene graph).
     return Transform(
         parent.pos + parent.quat * (local.pos * parent.scale),
         parent.scale * local.scale,
@@ -20,9 +18,6 @@ void RenderComponent::spawn(const SpawnInfo& info, const Transform& base)
 {
     if (!info.container)
         return;
-    // The mesh offset is kept relative to the entity; the node's absolute transform is resolved each
-    // frame in renderEntityTree. Seed it with the local-composed transform so it's valid before the
-    // first walk (composeTransform with the entity's own — here local — base).
     localTransform = info.localTransform;
     node = info.container->spawnNodeForIdx(info.nodeIdx, composeTransform(base, info.localTransform));
 }
@@ -31,9 +26,6 @@ void SceneComponent::spawn(const SpawnInfo& info, const Transform& base)
 {
     enabled = info.enabled;
     Entity* self = getEntity();
-    // Spawn each child at its own local transform (relative to this entity) rather than accumulating
-    // `base` into it: the scene graph is now relative, and absolute transforms are composed at render
-    // time by walking the parent chain.
     for (const SpawnInfo::ChildSpawnInfo& child : info.children)
     {
         if (!child.tmpl)
@@ -51,8 +43,6 @@ EntityPtr spawnFromTemplate(const EntitySpawnTemplate& tmpl, const Transform& ba
     entity->spawnTemplate = &tmpl;
     entity->name = tmpl.displayName;
 
-    // spawnInfos is parallel to the set bits of archetype.typeBits (id order): walk the bits and the
-    // slots together, the slot's concrete type implied by the bit it lines up with.
     size_t idx = 0;
     for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
     {
@@ -73,7 +63,6 @@ EntityPtr createSceneEntity(uint16 typeBits, const Transform& transform, const c
     return entity;
 }
 
-// True if `node` is `ancestor` or sits somewhere below it in the scene tree.
 static bool isSelfOrDescendant(Entity* node, Entity* ancestor)
 {
     for (Entity* p = node; p; p = p->parent)
@@ -82,8 +71,6 @@ static bool isSelfOrDescendant(Entity* node, Entity* ancestor)
     return false;
 }
 
-// Erase the owning handle to `child` from `parent`'s children list (the caller must hold its own
-// reference first if it needs `child` to survive the erase). Only scene entities have children.
 static void detachFromParent(Entity* parent, Entity* child)
 {
     SceneComponent* psc = getComponent<SceneComponent>(parent);
@@ -96,9 +83,6 @@ static void detachFromParent(Entity* parent, Entity* child)
         kids.erase(it);
 }
 
-// Drops whichever owning reference the scene graph holds on `child`: a child is owned by its parent's
-// children list. A top-level entity (the World root, or a loose root) is owned elsewhere (the registry
-// or external code), so there is nothing for the scene graph to drop.
 static void detachFromOwner(Entity* child)
 {
     if (child->parent)
@@ -116,7 +100,6 @@ void reparentEntity(Entity* child, Entity* newParent)
     if (newParent && isSelfOrDescendant(newParent, child))
         return; // would create a cycle
 
-    // Keep `child` alive across the ownership hand-off (the detach below drops its previous owner).
     EntityPtr keepAlive(child);
 
     detachFromOwner(child);
@@ -124,7 +107,6 @@ void reparentEntity(Entity* child, Entity* newParent)
 
     if (newParent)
         getComponent<SceneComponent>(newParent)->children.emplace_back(child);
-    // else: loose entity detached to the top level, owned by whoever held it externally
 }
 
 void removeEntity(Entity* entity)
@@ -138,8 +120,6 @@ const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity)
     if (!entity->spawnTemplate || !hasComponent<RenderComponent>(entity))
         return nullptr;
 
-    // spawnInfos is parallel to the set component bits (id order); the Render slot sits past every
-    // lower-id component the entity carries.
     size_t idx = 0;
     for (uint16 i = 0; i < uint16(EComponentID_Render); ++i)
         if (entity->typeBits & (1 << i))

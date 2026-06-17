@@ -2,8 +2,6 @@ module UI.OutputLog;
 
 import Core.imgui;
 
-// ---- colours per level ------------------------------------------------------
-
 static ImVec4 levelColor(Log::Level level)
 {
 	switch (level)
@@ -28,8 +26,6 @@ static const char* levelLabel(Log::Level level)
 	}
 }
 
-// ---- toggle button helper ---------------------------------------------------
-
 static bool levelToggle(const char* label, bool* active, ImVec4 colour)
 {
 	if (!*active)
@@ -47,11 +43,8 @@ static bool levelToggle(const char* label, bool* active, ImVec4 colour)
 	return clicked;
 }
 
-// ---- OutputLog::render ------------------------------------------------------
-
 void OutputLog::render()
 {
-	// ---- toolbar ------------------------------------------------------------
 	if (ImGui::Button("Clear"))
 		Log::clear();
 
@@ -73,7 +66,6 @@ void OutputLog::render()
 
 	ImGui::Separator();
 
-	// ---- refresh snapshot if log changed ------------------------------------
 	const uint32 rev = Log::getRevision();
 	if (rev != m_cachedRevision)
 	{
@@ -81,15 +73,12 @@ void OutputLog::render()
 		m_cachedRevision = rev;
 	}
 
-	// ---- message list -------------------------------------------------------
 	ImGui::BeginChild("##ol_scroll", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None,
 		ImGuiWindowFlags_HorizontalScrollbar);
 
 	const bool hasFilter = m_filterBuf[0] != '\0';
 
 	ImGuiListClipper clipper;
-	// We'll pre-filter into an index list to feed the clipper properly.
-	// Build a small index array of visible messages.
 	static std::vector<uint32> s_visible; // static to avoid per-frame alloc
 	s_visible.clear();
 	for (uint32 i = 0; i < static_cast<uint32>(m_snapshot.size()); ++i)

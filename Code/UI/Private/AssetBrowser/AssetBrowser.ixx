@@ -14,8 +14,6 @@ public:
 	const std::filesystem::path& getSelectedPath() const { return m_selectedPath; }
 	bool hasSelection() const { return !m_selectedPath.empty(); }
 
-	// Prefab saves requested by dropping a scene entity here since the last call (drained once per frame
-	// by the app, which owns the World and writes the .pre). Each carries an owning handle to the entity.
 	std::vector<EntityChange> takeChanges() { return std::move(m_changes); }
 
 private:
@@ -31,8 +29,6 @@ private:
 	void navigateTo(const std::filesystem::path& path);
 	void navigateUp();
 
-	// True if `path` is the root or lives inside it. The browser never navigates outside the root,
-	// so the Assets folder (set at init) acts as a hard floor.
 	bool isWithinRoot(const std::filesystem::path& path) const;
 
 	std::filesystem::path m_rootPath;

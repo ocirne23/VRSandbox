@@ -21,11 +21,6 @@ import Entity.Prefab;
 
 import Entity.World;
 
-// Renders an entity's RenderComponent (if any) and recurses through its SceneComponent children, so a
-// loaded prefab hierarchy draws every nested mesh, not just its root. Entity transforms are relative
-// to their parent, so `parentWorld` carries the accumulated transform down the tree: each entity's
-// absolute transform is its parent's composed with its own, and the RenderNode adds its mesh offset on
-// top. Roots are walked with an identity parent.
 static void renderEntityTree(Renderer& renderer, Entity* entity, const Transform& parentWorld)
 {
     SceneComponent* sc = getComponent<SceneComponent>(entity);
@@ -64,8 +59,6 @@ int main()
     VrInput& vrInput = Globals::vrInput;
     vrInput.initialize(renderer.getVrSession());
 
-    // Seed the VR play-space after the session exists: STAGE puts y=0 on the physical floor (stand on the
-    // virtual floor), the LOCAL fallback is head-seeded (lift by ~eye height instead).
     VRFreeFlyCameraController vrCameraController;
     vrCameraController.initialize(glm::vec3(-1.0f, renderer.isVrStageSpace() ? 0.0f : 1.0f, 0.0f));
 

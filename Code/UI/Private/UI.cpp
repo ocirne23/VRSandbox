@@ -124,8 +124,6 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         m_hasViewportGainedFocus = isViewportFocused && !m_isViewportFocused;
         m_isViewportFocused = isViewportFocused;
 
-        // Accept assets dragged from the browser. Custom target (no item) so it never steals mouse
-        // input from the camera controls when nothing is being dragged.
         const ImRect dropRect(viewportPos, ImVec2(viewportPos.x + size.x, viewportPos.y + size.y));
         if (ImGui::BeginDragDropTargetCustom(dropRect, ImGui::GetID("##viewport_drop")))
         {
@@ -195,8 +193,6 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         ImGui::Text("gpuMemoryReserved: %.1f MiB", m_renderStats.gpuMemoryReservedBytes * toMiB);
         ImGui::End();
     }
-
-
 
     {
         ImGui::Begin("Content");

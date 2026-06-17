@@ -1,6 +1,5 @@
 module Entity.ObjectDescription;
 
-
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
 
 static bool iequals(std::string_view a, std::string_view b)

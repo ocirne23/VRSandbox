@@ -2,9 +2,6 @@ module UI.SceneView;
 
 import Core.imgui;
 
-// ---- helpers ---------------------------------------------------------------
-
-// Fallback label for an entity with no name set yet (keeps the row from being blank).
 static const char* fallbackLabel(Entity* entity)
 {
 	return "Entity";
@@ -23,7 +20,6 @@ static bool containsCI(const char* haystack, const char* needle)
 	return it != end;
 }
 
-// An entity passes the filter if it or any descendant matches by display label.
 static bool matchesFilter(Entity* entity, const char* filter)
 {
 	if (containsCI(displayLabel(entity), filter))
@@ -34,8 +30,6 @@ static bool matchesFilter(Entity* entity, const char* filter)
 				return true;
 	return false;
 }
-
-// ---- SceneView -------------------------------------------------------------
 
 void SceneView::beginRename(Entity* entity)
 {
@@ -77,7 +71,6 @@ void SceneView::dropTargetReparentUnder(Entity* parent)
 	if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SV_ENTITY"))
 	{
 		Entity* dragged = *static_cast<Entity**>(payload->Data);
-		// Any entity can be reparented; reparentEntity() guards cycles / invalid targets.
 		if (dragged != parent)
 		{
 			m_hasPendingReparent    = true;
@@ -110,11 +103,6 @@ void SceneView::renderEntityNode(Entity* entity)
 	const bool isSelected = (m_selected == entity);
 	const bool isRenaming = (m_renamingEntity == entity);
 
-	// Scene entities render as tree nodes that always show the expand triangle (even with no children
-	// yet) so the triangle reads as "has a SceneComponent / can accept children". Loose entities have
-	// no arrow, so they render as plain Selectables — that way their selection box sits at their own
-	// indent (like their scene siblings) while their label lines up with the siblings' arrow column,
-	// instead of being pushed a further arrow-width to the right.
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow
 		| ImGuiTreeNodeFlags_OpenOnDoubleClick
 		| ImGuiTreeNodeFlags_SpanAvailWidth
@@ -122,7 +110,6 @@ void SceneView::renderEntityNode(Entity* entity)
 	if (isSelected) flags |= ImGuiTreeNodeFlags_Selected;
 	if (isScene && hasFilter) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
 
-	// Dim disabled scene nodes (loose entities have no enabled flag).
 	const bool dimmed = isScene && !sc->enabled;
 	if (dimmed)
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -158,9 +145,6 @@ void SceneView::renderEntityNode(Entity* entity)
 	}
 	else
 	{
-		// NoPadWithHalfSpacing: Selectable otherwise extends its highlight half an ItemSpacing to the
-		// left, which would misalign it from the scene entities' TreeNode highlight. Disabling it lines
-		// the two selection boxes up exactly.
 		ImGui::Selectable(displayLabel(entity), isSelected,
 			ImGuiSelectableFlags_SpanAvailWidth | ImGuiSelectableFlags_NoPadWithHalfSpacing);
 	}
@@ -181,7 +165,6 @@ void SceneView::renderEntityNode(Entity* entity)
 	if (isScene)
 		dropTargetReparentUnder(entity);   // only scene entities can receive children
 
-	// Visibility toggle (scene entities only), right-aligned over the row.
 	if (isScene)
 	{
 		const float btnW = ImGui::GetTextLineHeight() + 4.0f;
@@ -281,9 +264,6 @@ void SceneView::applyPendingMutations()
 
 void SceneView::render(const std::vector<EntityPtr>& rootEntities)
 {
-	// Drop stale references to entities destroyed since last frame.
-	//if (m_selected && !isAlive(m_selected))             m_selected = nullptr;
-	//if (m_renamingEntity && !isAlive(m_renamingEntity)) m_renamingEntity = nullptr;
 
 	renderToolbar();
 	ImGui::Separator();
@@ -304,7 +284,6 @@ void SceneView::render(const std::vector<EntityPtr>& rootEntities)
 		m_selected = nullptr;
 	}
 
-	// Dropping onto empty space also unparents to the top level.
 	if (ImGui::BeginDragDropTargetCustom(
 		ImRect(ImGui::GetWindowPos(),
 			ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowSize().x,

@@ -3,7 +3,6 @@ module Entity.AssetRegistry;
 import Core.Log;
 import File.AssetParser;
 
-
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
 
 static bool iequals(std::string_view a, std::string_view b)
@@ -16,9 +15,6 @@ static bool iequals(std::string_view a, std::string_view b)
     return true;
 }
 
-// Extensions scanned for declarations. Both parse with the same grammar; the declaration
-// keyword (not the extension) decides what kind of object is registered. ".oc" files hold
-// ObjectContainer definitions; ".pre" files hold a single root Prefab.
 static constexpr const char* s_assetExtensions[] = { ".oc", ".pre" };
 
 static bool isAssetFile(const std::filesystem::path& path)
@@ -37,9 +33,6 @@ static std::string toLower(std::string s)
     return s;
 }
 
-// Key for m_fileRoot: the path relative to the scan root, lowercased and lexically normalized
-// (collapses the leading ".\" the directory iterator emits and unifies separators) so a dropped
-// path resolved with std::filesystem::relative matches the scanned entry.
 static std::string fileKey(const std::filesystem::path& path)
 {
     return toLower(path.lexically_normal().string());
@@ -117,7 +110,6 @@ void AssetRegistry::registerFile(const std::string& path)
                 Log::warning("AssetRegistry: duplicate Prefab '" + name + "' (keeping first), in " + path);
                 continue;
             }
-            // A .pre file declares a single root prefab; warn if a second appears in the same file.
             if (!m_fileRoot.try_emplace(fileName, name).second)
                 Log::warning("AssetRegistry: '" + path + "' declares more than one root prefab "
                     "(keeping '" + m_fileRoot[fileName] + "', ignoring '" + name + "')");

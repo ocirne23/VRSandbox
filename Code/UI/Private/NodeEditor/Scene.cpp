@@ -15,7 +15,6 @@ void Scene::initialize()
     config.SettingsFile = nullptr;
     m_nodeEditorContext = ed::CreateEditor(&config);
 
-    // Layout testing...
     
     createNode().initialize(this, ImVec2(100, 100), "Node 1", ENodeStyle_Minimal, 0xFF444444)
         .addInputPin(EPinShape_Flow, "Input A", ImColor(255, 255, 255))

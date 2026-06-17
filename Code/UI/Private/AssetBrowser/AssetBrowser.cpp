@@ -3,8 +3,6 @@ module UI.AssetBrowser;
 import Core.imgui;
 import Entity;
 
-// ---- helpers ---------------------------------------------------------------
-
 static bool isImageFile(const std::string& ext)
 {
 	return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga" || ext == ".hdr";
@@ -30,7 +28,6 @@ static bool isObjectContainer(const std::string& ext)
 	return ext == ".oc";
 }
 
-// Prefabs (.pre) can be dragged into the viewport to spawn; ObjectContainers (.oc) are dependency-only.
 static bool isSpawnableFile(const std::filesystem::path& p)
 {
 	return p.extension() == ".pre";
@@ -60,8 +57,6 @@ static ImVec4 fileColor(const std::filesystem::path& p)
 	return ImVec4(0.85f, 0.85f, 0.85f, 1.0f);                                         // grey
 }
 
-// Marks the just-submitted item as a drag source carrying an asset file path, so it can be
-// dropped onto the Viewport to spawn. Payload "ASSET_FILE" is the null-terminated absolute path.
 static void assetDragSource(const std::filesystem::path& p)
 {
 	if (!isSpawnableFile(p))
@@ -79,7 +74,6 @@ static std::string truncateLabel(const std::string& name, float maxWidth)
 {
 	if (ImGui::CalcTextSize(name.c_str()).x <= maxWidth)
 		return name;
-	// Binary-search for the longest prefix that fits with "..."
 	size_t lo = 0, hi = name.size();
 	while (lo + 1 < hi)
 	{
@@ -92,12 +86,8 @@ static std::string truncateLabel(const std::string& name, float maxWidth)
 	return name.substr(0, lo) + "...";
 }
 
-// ---- AssetBrowser ----------------------------------------------------------
-
 void AssetBrowser::initialize()
 {
-	// The working dir is the Assets folder (FileSystem sets it at startup); make it the root the
-	// browser is confined to. Canonical so descendant checks compare cleanly.
 	std::error_code ec;
 	m_rootPath = std::filesystem::canonical(std::filesystem::current_path(), ec);
 	if (ec)
@@ -122,14 +112,12 @@ void AssetBrowser::render()
 	renderToolbar();
 	ImGui::Separator();
 
-	// Left pane – directory tree
 	ImGui::BeginChild("##ab_left", ImVec2(m_leftPaneWidth, 0.0f), ImGuiChildFlags_Borders);
 	renderDirectoryTree(m_rootPath);
 	ImGui::EndChild();
 
 	ImGui::SameLine();
 
-	// Drag splitter
 	ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.28f, 0.28f, 0.28f, 0.60f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.50f, 0.50f, 0.50f, 0.80f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.50f, 0.50f, 0.50f, 1.00f));
@@ -145,7 +133,6 @@ void AssetBrowser::render()
 
 	ImGui::SameLine();
 
-	// Right pane – content grid or list
 	ImGui::BeginChild("##ab_right", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
 	if (m_listView)
 		renderContentList();
@@ -154,18 +141,11 @@ void AssetBrowser::render()
 	acceptPrefabDrop();
 	ImGui::EndChild();
 
-	// Modal lives at the panel's top level (not inside the child) so OpenPopup/BeginPopupModal share an
-	// ID-stack level. acceptPrefabDrop only raises the flag; the popup is opened and drawn here.
 	renderOverwritePopup();
 }
 
-// Queues a request for the app to write `root` (and its children) as a ".pre" at `path` and refresh
-// templates. Holds its own owning handle so the entity survives the deferred hand-off.
 void AssetBrowser::queueSavePrefab(Entity* root, const std::filesystem::path& path)
 {
-	// The registry and spawn templates key prefab files by path relative to the Assets working dir; the
-	// drop path is absolute (m_currentPath is canonical), so relativize before saving — otherwise the
-	// template bakes an absolute sourceFile that differs from every scanned prefab.
 	std::error_code ec;
 	const std::filesystem::path rel = std::filesystem::relative(path, ec);
 	const std::string savePath = (ec || rel.empty()) ? path.string() : rel.string();
@@ -173,9 +153,6 @@ void AssetBrowser::queueSavePrefab(Entity* root, const std::filesystem::path& pa
 	m_selectedPath = path; // absolute, to match the directory listing for highlight
 }
 
-// Dropping an entity dragged from the Scene hierarchy here saves it (and its children) as a ".pre"
-// prefab in the current folder. The payload "SV_ENTITY" is an Entity* set by the Scene panel. If a
-// prefab file of that name already exists, defer to an overwrite confirmation instead of clobbering it.
 void AssetBrowser::acceptPrefabDrop()
 {
 	const ImVec2 mn = ImGui::GetWindowPos();
@@ -190,7 +167,6 @@ void AssetBrowser::acceptPrefabDrop()
 		std::error_code ec;
 		if (std::filesystem::exists(out, ec))
 		{
-			// Hold the entity alive until the user confirms; the popup is opened next frame in render().
 			m_pendingSaveRoot = EntityPtr(entity);
 			m_pendingSavePath = out;
 			m_openOverwritePopup = true;
@@ -235,11 +211,8 @@ void AssetBrowser::renderOverwritePopup()
 	ImGui::EndPopup();
 }
 
-// ---- Toolbar ---------------------------------------------------------------
-
 void AssetBrowser::renderToolbar()
 {
-	// Up button
 	const bool canGoUp = (m_currentPath != m_rootPath) && m_currentPath.has_parent_path();
 	if (!canGoUp)
 	{
@@ -254,8 +227,6 @@ void AssetBrowser::renderToolbar()
 
 	ImGui::SameLine();
 
-	// Breadcrumb — confined to the root: the root folder, then each segment below it. Ancestors
-	// above the root are never shown, so they can't be navigated to.
 	{
 		const std::string rootLabel = m_rootPath.filename().empty()
 			? m_rootPath.string()
@@ -285,7 +256,6 @@ void AssetBrowser::renderToolbar()
 		}
 	}
 
-	// Search bar + view toggle + icon size slider – right-aligned
 	const float searchWidth  = 180.0f;
 	const float sliderWidth  = 80.0f;
 	const float toggleWidth  = 40.0f;
@@ -314,8 +284,6 @@ void AssetBrowser::renderToolbar()
 			ImGui::SetTooltip("Icon size");
 	}
 }
-
-// ---- Directory tree --------------------------------------------------------
 
 void AssetBrowser::renderDirectoryTree(const std::filesystem::path& dir)
 {
@@ -359,8 +327,6 @@ void AssetBrowser::renderDirectoryTree(const std::filesystem::path& dir)
 	}
 }
 
-// ---- Content grid ----------------------------------------------------------
-
 void AssetBrowser::renderContentGrid()
 {
 	const float cellSize    = m_iconSize + 20.0f;
@@ -375,7 +341,6 @@ void AssetBrowser::renderContentGrid()
 		if (!filter.empty())
 		{
 			const std::string fname = e.path().filename().string();
-			// Case-insensitive substring match
 			auto it = std::search(fname.begin(), fname.end(), filter.begin(), filter.end(),
 				[](char a, char b) { return std::tolower((unsigned char)a) == std::tolower((unsigned char)b); });
 			if (it == fname.end()) continue;
@@ -400,24 +365,20 @@ void AssetBrowser::renderContentGrid()
 
 			ImGui::PushID(name.c_str());
 
-			// Highlight selected item
 			if (isSelected)
 				ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
 			else
 				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
 
-			// Colored icon text inside the button
 			ImGui::PushStyleColor(ImGuiCol_Text, fileColor(p));
 			const bool clicked = ImGui::Button(fileIcon(p), ImVec2(m_iconSize, m_iconSize));
 			ImGui::PopStyleColor(2); // Text + Button
 
 			assetDragSource(p);
 
-			// Selection on single click
 			if (clicked)
 				m_selectedPath = p;
 
-			// Navigate into directory on double-click
 			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
 			{
 				if (entry.is_directory())
@@ -426,7 +387,6 @@ void AssetBrowser::renderContentGrid()
 
 			renderContextMenu(p);
 
-			// File name label (truncated to cell width)
 			const std::string display = truncateLabel(name, cellSize - 4.0f);
 			ImGui::TextUnformatted(display.c_str());
 			if (display != name && ImGui::IsItemHovered())
@@ -437,15 +397,12 @@ void AssetBrowser::renderContentGrid()
 		ImGui::EndTable();
 	}
 
-	// Click on empty space deselects
 	if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
 		&& !ImGui::IsAnyItemHovered())
 	{
 		m_selectedPath.clear();
 	}
 }
-
-// ---- Content list ----------------------------------------------------------
 
 void AssetBrowser::renderContentList()
 {
@@ -507,14 +464,12 @@ void AssetBrowser::renderContentList()
 
 			renderContextMenu(p);
 
-			// Type column
 			ImGui::TableSetColumnIndex(1);
 			if (entry.is_directory())
 				ImGui::TextDisabled("Folder");
 			else
 				ImGui::TextDisabled("%s", p.extension().string().c_str());
 
-			// Size column
 			ImGui::TableSetColumnIndex(2);
 			if (!entry.is_directory())
 			{
@@ -536,15 +491,12 @@ void AssetBrowser::renderContentList()
 		ImGui::EndTable();
 	}
 
-	// Click on empty space deselects
 	if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
 		&& !ImGui::IsAnyItemHovered())
 	{
 		m_selectedPath.clear();
 	}
 }
-
-// ---- Context menu ----------------------------------------------------------
 
 void AssetBrowser::renderContextMenu(const std::filesystem::path& p)
 {
@@ -578,8 +530,6 @@ void AssetBrowser::renderContextMenu(const std::filesystem::path& p)
 
 	ImGui::EndPopup();
 }
-
-// ---- Navigation ------------------------------------------------------------
 
 void AssetBrowser::navigateTo(const std::filesystem::path& path)
 {

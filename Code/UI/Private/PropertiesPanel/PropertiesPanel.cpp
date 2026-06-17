@@ -16,7 +16,6 @@ void PropertiesPanel::render(Entity* selected)
 
 	SceneComponent* sc = getComponent<SceneComponent>(selected);
 
-	// ---- Entity -------------------------------------------------------------
 	if (ImGui::CollapsingHeader("Entity", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::AlignTextToFramePadding();
@@ -49,7 +48,6 @@ void PropertiesPanel::render(Entity* selected)
 		}
 	}
 
-	// ---- Transform ----------------------------------------------------------
 	if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::AlignTextToFramePadding();
@@ -73,7 +71,6 @@ void PropertiesPanel::render(Entity* selected)
 			selected->rot = glm::quat(glm::radians(euler));
 	}
 
-	// ---- Render -------------------------------------------------------------
 	if (RenderComponent* rc = getComponent<RenderComponent>(selected))
 	{
 		if (ImGui::CollapsingHeader("Render", ImGuiTreeNodeFlags_DefaultOpen))

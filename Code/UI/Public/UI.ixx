@@ -35,11 +35,6 @@ public:
     bool hasViewportGainedFocused() const { return m_hasViewportGainedFocus; }
     const Rect& getViewportRect() const { return m_viewportRect; }
 
-    // All entity mutations requested through the UI since the last call (drain once per frame): Scene
-    // panel create/delete/reparent plus assets dropped onto the Viewport (CreateViewport) or the Scene
-    // hierarchy (CreateHierarchy). The app owns the World and its root-entity list, so it applies the
-    // spawns and reconciles ownership against Delete/Reparent. Owning handles inside keep entities
-    // alive across the hand-off.
     std::vector<EntityChange> takeEntityChanges()
     {
         std::vector<EntityChange> changes = m_sceneView.takeChanges();

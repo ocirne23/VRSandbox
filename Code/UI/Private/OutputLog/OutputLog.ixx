@@ -16,7 +16,6 @@ private:
 	bool   m_autoScroll   = true;
 	char   m_filterBuf[256] = {};
 
-	// Cached snapshot – rebuilt whenever Log::revision changes.
 	uint32                   m_cachedRevision = UINT32_MAX;
 	std::vector<Log::Message> m_snapshot;
 };
