@@ -7,21 +7,12 @@ import Core.imgui;
 // Fallback label for an entity with no name set yet (keeps the row from being blank).
 static const char* fallbackLabel(Entity* entity)
 {
-	if (hasComponent<RenderComponent>(entity)) return "Render Entity";
 	return "Entity";
 }
 
 static const char* displayLabel(Entity* entity)
 {
 	return entity->name.empty() ? fallbackLabel(entity) : entity->name.c_str();
-}
-
-static bool isAlive(Entity* entity)
-{
-	for (Entity* e : Globals::entityRegistry.getAll())
-		if (e == entity)
-			return true;
-	return false;
 }
 
 static bool containsCI(const char* haystack, const char* needle)
@@ -240,21 +231,21 @@ void SceneView::renderContextMenu(Entity* entity)
 	ImGui::EndPopup();
 }
 
-void SceneView::renderWorld()
+void SceneView::renderWorld(World& world)
 {
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow
 		| ImGuiTreeNodeFlags_OpenOnDoubleClick
 		| ImGuiTreeNodeFlags_SpanAvailWidth
 		| ImGuiTreeNodeFlags_DefaultOpen;
 
-	Entity* world = Globals::entityRegistry.getWorldRoot();
+	//Entity* world = Globals::entityRegistry.getWorldRoot();
 
 	ImGui::SetNextItemOpen(m_worldOpen, ImGuiCond_Always);
 	m_worldOpen = ImGui::TreeNodeEx("World", flags);
 
 	// World is a real SceneComponent entity, so dropping any entity (scene or loose) onto it nests it
 	// directly underneath.
-	dropTargetReparentUnder(world);
+	//dropTargetReparentUnder(world);
 
 	if (ImGui::BeginPopupContextItem("##sv_world_ctx"))
 	{
@@ -317,8 +308,8 @@ void SceneView::applyPendingMutations()
 void SceneView::render()
 {
 	// Drop stale references to entities destroyed since last frame.
-	if (m_selected && !isAlive(m_selected))             m_selected = nullptr;
-	if (m_renamingEntity && !isAlive(m_renamingEntity)) m_renamingEntity = nullptr;
+	//if (m_selected && !isAlive(m_selected))             m_selected = nullptr;
+	//if (m_renamingEntity && !isAlive(m_renamingEntity)) m_renamingEntity = nullptr;
 
 	renderToolbar();
 	ImGui::Separator();
@@ -328,9 +319,9 @@ void SceneView::render()
 	renderWorld();
 
 	// Loose entities with no parent sit at the top level alongside World.
-	for (Entity* entity : Globals::entityRegistry.getAll())
-		if (entity->parent == nullptr && !hasComponent<SceneComponent>(entity))
-			renderEntityNode(entity);
+	//for (Entity* entity : Globals::entityRegistry.getAll())
+	//	if (entity->parent == nullptr && !hasComponent<SceneComponent>(entity))
+	//		renderEntityNode(entity);
 
 	const float remainingH = ImGui::GetContentRegionAvail().y;
 	if (remainingH > 0.0f)

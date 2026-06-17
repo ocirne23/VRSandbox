@@ -79,7 +79,7 @@ int main()
     std::vector<RendererVKLayout::LightInfo> spawnedLights;
     std::vector<EntityPtr> spawnedLightGeom;
 
-    Scene::World world;
+    World world;
     world.initialize();
 
     std::vector<EntityPtr> entities = world.loadPrefab("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
@@ -189,7 +189,7 @@ int main()
         const double deltaSec = Globals::time.getDeltaSec();
         input.update(deltaSec);
         cameraController.update(deltaSec);
-        ui.update(deltaSec);
+        ui.update(world, deltaSec);
         renderer.setViewportRect(ui.getViewportRect());
 
         Camera camera;

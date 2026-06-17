@@ -4,6 +4,7 @@ import Core;
 import Core.Rect;
 import Core.glm;
 import Entity;
+import Entity.World;
 
 import UI.fwd;
 import UI.imgui_node_editor;
@@ -25,7 +26,7 @@ public:
     UI(const UI&) = delete;
 
     void initialize();
-    void update(double deltaSec);
+    void update(World& world,double deltaSec);
     void render();
 	void setRenderStats(const Renderer::Stats& stats) { m_renderStats = stats; }
 

@@ -4,7 +4,6 @@ import Core;
 import Core.Transform;
 import Entity;
 import Entity.Component;
-import Entity.Registry;
 
 // Entity-backed scene hierarchy panel. There is no persistent UI tree: every frame the panel renders
 // straight from Globals::entityRegistry, so it is always in sync with the live entities. SceneComponent
@@ -37,7 +36,7 @@ public:
 private:
 
 	void renderToolbar();
-	void renderWorld();
+	void renderWorld(const std::vector<EntityPtr>& rootEntities);
 	void renderEntityNode(Entity* entity);  // scene entity (recurses children) or loose leaf
 	void renderContextMenu(Entity* entity);
 	void beginRename(Entity* entity);

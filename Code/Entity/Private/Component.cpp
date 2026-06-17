@@ -4,7 +4,6 @@ import Core;
 import Core.glm;
 import Core.Transform;
 import Entity;
-import Entity.Registry;
 import RendererVK;
 
 void RenderComponent::spawn(const SpawnInfo& info, const Transform& base)
@@ -21,7 +20,6 @@ EntityPtr createSceneEntity(uint16 typeBits, const Transform& transform, const c
     EntityPtr entity = createEntity(typeBits | (1 << EComponentID_Scene), transform);
     if (name)
         entity->name = name;
-    reparentEntity(entity, Globals::entityRegistry.getWorldRoot()); // sits under the World root
     return entity;
 }
 
@@ -61,12 +59,6 @@ void reparentEntity(Entity* child, Entity* newParent)
 {
     if (!child)
         return;
-
-    // A scene entity always lives under the World root, so "no parent" means directly under World.
-    // Loose entities, by contrast, can sit at the top level as siblings of World (newParent stays null).
-    if (!newParent && hasComponent<SceneComponent>(child) && child != Globals::entityRegistry.getWorldRoot())
-        newParent = Globals::entityRegistry.getWorldRoot();
-
     if (child == newParent || child->parent == newParent)
         return;
     if (newParent && !hasComponent<SceneComponent>(newParent))
