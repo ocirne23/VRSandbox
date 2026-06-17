@@ -10,7 +10,6 @@ public:
 	void initialize();
 	void render();
 
-	void setRootPath(const std::filesystem::path& path);
 	const std::filesystem::path& getSelectedPath() const { return m_selectedPath; }
 	bool hasSelection() const { return !m_selectedPath.empty(); }
 
@@ -24,6 +23,10 @@ private:
 	void renderContextMenu(const std::filesystem::path& p);
 	void navigateTo(const std::filesystem::path& path);
 	void navigateUp();
+
+	// True if `path` is the root or lives inside it. The browser never navigates outside the root,
+	// so the Assets folder (set at init) acts as a hard floor.
+	bool isWithinRoot(const std::filesystem::path& path) const;
 
 	std::filesystem::path m_rootPath;
 	std::filesystem::path m_currentPath;

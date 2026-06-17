@@ -106,20 +106,25 @@ static std::string truncateLabel(const std::string& name, float maxWidth)
 
 void AssetBrowser::initialize()
 {
-	m_rootPath = std::filesystem::current_path();
+	// The working dir is the Assets folder (FileSystem sets it at startup); make it the root the
+	// browser is confined to. Canonical so descendant checks compare cleanly.
+	std::error_code ec;
+	m_rootPath = std::filesystem::canonical(std::filesystem::current_path(), ec);
+	if (ec)
+		m_rootPath = std::filesystem::current_path();
 	m_currentPath = m_rootPath;
 }
 
-void AssetBrowser::setRootPath(const std::filesystem::path& path)
+bool AssetBrowser::isWithinRoot(const std::filesystem::path& path) const
 {
 	std::error_code ec;
-	const auto canonical = std::filesystem::canonical(path, ec);
-	if (!ec && std::filesystem::is_directory(canonical, ec))
-	{
-		m_rootPath    = canonical;
-		m_currentPath = canonical;
-		m_selectedPath.clear();
-	}
+	const auto canonical = std::filesystem::weakly_canonical(path, ec);
+	if (ec)
+		return false;
+	const auto rel = std::filesystem::relative(canonical, m_rootPath, ec);
+	if (ec || rel.empty())
+		return false;
+	return *rel.begin() != "..";   // anything starting with ".." escapes the root upward
 }
 
 void AssetBrowser::render()
@@ -198,25 +203,33 @@ void AssetBrowser::renderToolbar()
 
 	ImGui::SameLine();
 
-	// Breadcrumb
+	// Breadcrumb — confined to the root: the root folder, then each segment below it. Ancestors
+	// above the root are never shown, so they can't be navigated to.
 	{
-		std::vector<std::filesystem::path> parts;
-		for (const auto& c : m_currentPath)
-			parts.push_back(c);
+		const std::string rootLabel = m_rootPath.filename().empty()
+			? m_rootPath.string()
+			: m_rootPath.filename().string();
+		ImGui::PushID("##ab_crumb_root");
+		if (ImGui::SmallButton(rootLabel.c_str()))
+			navigateTo(m_rootPath);
+		ImGui::PopID();
 
-		std::filesystem::path accumulated;
-		for (size_t i = 0; i < parts.size(); ++i)
+		std::error_code ec;
+		const std::filesystem::path rel = std::filesystem::relative(m_currentPath, m_rootPath, ec);
+		std::filesystem::path accumulated = m_rootPath;
+		if (!ec && rel != ".")
 		{
-			accumulated /= parts[i];
-			ImGui::PushID(static_cast<int>(i));
-			if (ImGui::SmallButton(parts[i].string().c_str()))
-				navigateTo(accumulated);
-			ImGui::PopID();
-			if (i + 1 < parts.size())
+			int i = 0;
+			for (const auto& part : rel)
 			{
+				accumulated /= part;
 				ImGui::SameLine(0.0f, 2.0f);
 				ImGui::TextDisabled("/");
 				ImGui::SameLine(0.0f, 2.0f);
+				ImGui::PushID(i++);
+				if (ImGui::SmallButton(part.string().c_str()))
+					navigateTo(accumulated);
+				ImGui::PopID();
 			}
 		}
 	}
@@ -510,8 +523,6 @@ void AssetBrowser::renderContextMenu(const std::filesystem::path& p)
 		ImGui::Separator();
 		if (ImGui::MenuItem("Open folder"))
 			navigateTo(p);
-		if (ImGui::MenuItem("Set as root"))
-			setRootPath(p);
 	}
 
 	ImGui::EndPopup();
@@ -522,7 +533,7 @@ void AssetBrowser::renderContextMenu(const std::filesystem::path& p)
 void AssetBrowser::navigateTo(const std::filesystem::path& path)
 {
 	std::error_code ec;
-	if (std::filesystem::is_directory(path, ec))
+	if (std::filesystem::is_directory(path, ec) && isWithinRoot(path))
 	{
 		m_currentPath  = std::filesystem::canonical(path, ec);
 		m_selectedPath.clear();
