@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+  <!--
+    Entity inline components are packed in the bytes that follow the Entity header,
+    in EComponentID order, each gated by a bit in typeBits and aligned to ComponentAlignment (16).
+    The Entity header itself is padded up to 16 before the first component.
+
+    Offsets are reconstructed here exactly like getComponentByteOffset():
+      base        = alignUp(sizeof(Entity), 16)
+      scene  @ base                                   if typeBits & 1
+      zone   @ base + (scene?)                        if typeBits & 2
+      cull   @ base + (scene?) + (zone?)              if typeBits & 4
+      render @ base + (scene?) + (zone?) + (cull?)    if typeBits & 8
+    where each (X?) term is alignUp(sizeof(X), 16) when component X is present, else 0.
+  -->
+
+  <Type Name="Entity">
+    <DisplayString Condition="name._Mypair._Myval2._Myres &gt;= 16">{name._Mypair._Myval2._Bx._Ptr,sb}</DisplayString>
+    <DisplayString>{name._Mypair._Myval2._Bx._Buf,sb}</DisplayString>
+    <Expand>
+      <Item Name="pos">pos</Item>
+      <Item Name="rot">rot</Item>
+      <Item Name="scale">scale</Item>
+      <Item Name="name">name</Item>
+      <Item Name="parent">parent</Item>
+      <Item Name="spawnTemplate">spawnTemplate</Item>
+      <Item Name="refCount">refCount</Item>
+      <Item Name="typeBits">typeBits,x</Item>
+      <Item Name="ecsComponentCount">ecsComponentCount</Item>
+      <Item Name="zoneIdx">zoneIdx</Item>
+
+      <Item Name="[Scene]"  Condition="(typeBits &amp; 0x1) != 0">
+        *(SceneComponent*)((char*)this
+          + ((sizeof(Entity)+15)&amp;~0xF))
+      </Item>
+      <Item Name="[Zone]"   Condition="(typeBits &amp; 0x2) != 0">
+        *(ZoneComponent*)((char*)this
+          + ((sizeof(Entity)+15)&amp;~0xF)
+          + (((typeBits &amp; 0x1) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0))
+      </Item>
+      <Item Name="[Cull]"   Condition="(typeBits &amp; 0x4) != 0">
+        *(CullingComponent*)((char*)this
+          + ((sizeof(Entity)+15)&amp;~0xF)
+          + (((typeBits &amp; 0x1) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
+          + (((typeBits &amp; 0x2) != 0) ? ((sizeof(ZoneComponent)+15)&amp;~0xF) : 0))
+      </Item>
+      <Item Name="[Render]" Condition="(typeBits &amp; 0x8) != 0">
+        *(RenderComponent*)((char*)this
+          + ((sizeof(Entity)+15)&amp;~0xF)
+          + (((typeBits &amp; 0x1) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
+          + (((typeBits &amp; 0x2) != 0) ? ((sizeof(ZoneComponent)+15)&amp;~0xF) : 0)
+          + (((typeBits &amp; 0x4) != 0) ? ((sizeof(CullingComponent)+15)&amp;~0xF) : 0))
+      </Item>
+    </Expand>
+  </Type>
+
+  <!-- EntityPtr forwards to the entity it points at. -->
+  <Type Name="EntityPtr">
+    <SmartPointer Usage="Minimal">m_entity</SmartPointer>
+    <DisplayString Condition="m_entity == 0">null</DisplayString>
+    <DisplayString>{*m_entity}</DisplayString>
+    <Expand>
+      <ExpandedItem Condition="m_entity != 0">m_entity</ExpandedItem>
+    </Expand>
+  </Type>
+
+</AutoVisualizer>

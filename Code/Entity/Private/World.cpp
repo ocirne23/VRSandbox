@@ -21,7 +21,7 @@ bool World::initialize()
     // (and the ObjectContainers they reference are loaded now rather than mid-spawn). Prefabs are
     // built the same way, but lazily on first reference. Both land in the same template cache.
     for (const auto& [name, desc] : Globals::assetRegistry.getEntities())
-        cacheTemplate(name, desc.node);
+        cacheTemplate(name, desc.filePath, desc.node);
 
     return true;
 }
@@ -182,7 +182,6 @@ std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const Asse
 void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
 {
     tmpl.defaultTransform = readNodeTransform(node, glm::vec3(0.0f)); // the declaration's authored placement
-    tmpl.sourceAsset = node.asString();
     const AssetNode* nameNode = node.find("Name");
     tmpl.name = nameNode ? nameNode->asString() : node.asString();
 
@@ -210,7 +209,7 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             tmpl.spawnInfos.push_back(std::move(infos[i]));
 }
 
-const EntitySpawnTemplate* World::cacheTemplate(const std::string& name, const AssetNode& node)
+const EntitySpawnTemplate* World::cacheTemplate(const std::string& name, const std::string& filePath, const AssetNode& node)
 {
     if (auto it = m_templates.find(name); it != m_templates.end())
         return it->second.get();
@@ -219,6 +218,7 @@ const EntitySpawnTemplate* World::cacheTemplate(const std::string& name, const A
     // Scene children) is caught by getOrBuildTemplate rather than recursing forever.
     m_buildingTemplates.insert(name);
     auto tmpl = std::make_unique<EntitySpawnTemplate>();
+    tmpl->sourceAsset = filePath;
     buildTemplate(node, *tmpl);
     m_buildingTemplates.erase(name);
 
@@ -242,7 +242,7 @@ std::vector<const EntitySpawnTemplate*> World::buildFileTemplates(const std::str
     // Build a template for each spawnable declaration (an "Entity" or a "Prefab"), in file order.
     for (const AssetNode& decl : doc.children)
         if (keyIs(decl, "Entity") || keyIs(decl, "Prefab"))
-            if (const EntitySpawnTemplate* tmpl = cacheTemplate(decl.asString(), decl))
+            if (const EntitySpawnTemplate* tmpl = cacheTemplate(decl.asString(), path, decl))
                 templates.push_back(tmpl);
 
     if (templates.empty())
@@ -264,7 +264,7 @@ const EntitySpawnTemplate* World::getOrBuildTemplate(const std::string& name)
     // An entity declaration builds straight from its (already-parsed) node; a prefab reads its file,
     // which builds every declaration in it. Either way the result is cached under `name`.
     if (const EntityDesc* desc = Globals::assetRegistry.findEntity(name))
-        return cacheTemplate(name, desc->node);
+        return cacheTemplate(name, desc->name, desc->node);
 
     if (const std::string* prefabPath = Globals::assetRegistry.findPrefab(name))
     {

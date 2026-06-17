@@ -37,6 +37,7 @@ export struct ObjectContainerDesc
 export struct EntityDesc
 {
     std::string name;
+    std::string filePath;
     AssetNode node;                      // the full "Entity ..." declaration subtree
 };
 

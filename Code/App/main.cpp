@@ -212,9 +212,6 @@ int main()
             camera = cameraController.getCamera();
         }
 
-        // Apply editor UI mutations. The app owns the World and the root-entity list, so it does the
-        // spawning here and reconciles ownership: roots are kept in `entities`, entities parented under
-        // another are owned by that parent's SceneComponent (dropped from the list).
         for (EntityChange& change : ui.takeEntityChanges())
         {
             if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
@@ -236,15 +233,9 @@ int main()
                 }
             }
             else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
-            {
                 std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });
-            }
             else if (auto* rep = std::get_if<EntityChange::Reparent>(&change.type))
-            {
-                // The panel already performed the scene-graph reparent; reconcile only ownership.
-                rep->newParent ? (void)std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); })
-                               : entities.push_back(std::move(rep->entity));
-            }
+                rep->newParent ? (void)std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); }) : entities.push_back(std::move(rep->entity));
         }
 
         const Frustum& frustum = renderer.beginFrame(camera);

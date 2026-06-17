@@ -114,6 +114,7 @@ void AssetRegistry::registerFile(const std::string& path)
                 Log::warning("AssetRegistry: unnamed Entity in " + path);
                 continue;
             }
+            desc.filePath = path;
             const std::string name = desc.name;
             if (!m_entities.try_emplace(desc.name, std::move(desc)).second)
                 Log::warning("AssetRegistry: duplicate Entity '" + decl.asString(0) + "' (keeping first), in " + path);

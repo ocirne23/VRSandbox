@@ -56,7 +56,7 @@ private:
     const EntitySpawnTemplate* getOrBuildTemplate(const std::string& name);
 
     // Builds and caches a template from an already-parsed entity/prefab declaration node.
-    const EntitySpawnTemplate* cacheTemplate(const std::string& name, const AssetNode& node);
+    const EntitySpawnTemplate* cacheTemplate(const std::string& name, const std::string& filePath, const AssetNode& node);
 
     // Reads an asset file once and builds+caches a template for every entity/prefab it declares,
     // returning them in declaration order. The fallback for a dropped file the registry hasn't scanned.
