@@ -277,6 +277,7 @@ bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipeli
         pipelineShaderStageCreateInfos[1].module = overrideFS[i].getModule() ? overrideFS[i].getModule() : defaultFS.getModule();
 
         // Per-variant blend/depth/raster state (mutated in place; the create info points at these structs).
+        pipelineDepthStencilStateCreateInfo.depthTestEnable = variant.depthTest ? vk::True : vk::False;
         pipelineDepthStencilStateCreateInfo.depthWriteEnable = variant.depthWrite ? vk::True : vk::False;
         pipelineColorBlendAttachmentState.blendEnable = variant.blendEnable ? vk::True : vk::False;
         pipelineRasterizationStateCreateInfo.polygonMode = variant.polygonMode;

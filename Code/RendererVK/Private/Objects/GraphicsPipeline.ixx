@@ -29,6 +29,9 @@ export struct PipelineVariant
     // writes; opaque variants (the default) keep blending off and depth writes on.
     bool blendEnable = false;
     bool depthWrite = true;
+    // Gizmo/overlay variants disable the depth test so they draw on top of everything regardless
+    // of scene depth; everything else keeps the layout's depthTestEnable.
+    bool depthTest = true;
     // Wireframe variants set eLine; everything else keeps the solid fill of variant 0.
     vk::PolygonMode polygonMode = vk::PolygonMode::eFill;
 };

@@ -23,16 +23,6 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
     graphicsPipelineLayout.vertexShader.text = FileSystem::readFileStr(graphicsPipelineLayout.vertexShader.debugFilePath);
     graphicsPipelineLayout.fragmentShader.text = FileSystem::readFileStr(graphicsPipelineLayout.fragmentShader.debugFilePath);
 
-    // VR variant: the vertex shader picks u_views[u_viewIndex] via a push constant (one pass per eye)
-    // and the (lit) fragment shader reads the same push constant to select the per-eye view pos + AO.
-    if (m_stereo)
-    {
-        graphicsPipelineLayout.vertexShader.defines.push_back({ "STEREO", "1" });
-        graphicsPipelineLayout.fragmentShader.defines.push_back({ "STEREO", "1" });
-        graphicsPipelineLayout.pushConstantRanges.push_back(vk::PushConstantRange{
-            .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, .offset = 0, .size = sizeof(uint32) });
-    }
-
     // Variant 1 (MeshShaderVariant::LitTransparent): same lit shader, alpha-blended, no depth write.
     graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
         .fragmentShader = ShaderSource{
@@ -67,21 +57,69 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 			.debugFilePath = skyVariantPath,
 		},
 	});
-	// Variant 5 (EPipelineIndex::WireframeTransparent): unlit fragment, drawn as lines, alpha-blended,
-	// no depth write (debug overlay). Reuses the unlit fragment text from the UnlitOpaque variant.
+	// Variants 5-7 (Wireframe + gizmos) all shade by vertex position (debug color).
+	const std::string gizmoVariantPath = "Shaders/instanced_indirect_gizmo.fs.glsl";
+	const std::string gizmoVariantText = FileSystem::readFileStr(gizmoVariantPath);
+	// Variant 5 (EPipelineIndex::WireframeTransparent): tangent-debug color, drawn as lines.
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
 		.fragmentShader = ShaderSource{
-			.text = graphicsPipelineLayout.additionalVariants[1].fragmentShader.text,
-			.debugFilePath = graphicsPipelineLayout.additionalVariants[1].fragmentShader.debugFilePath,
+			.text = gizmoVariantText,
+			.debugFilePath = gizmoVariantPath,
+            .defines = { { "POS_IS_COLOR", "1" } },
 		},
 		.blendEnable = false,
 		.depthWrite = true,
 		.polygonMode = vk::PolygonMode::eLine,
 	});
+	// Variant 6 (EPipelineIndex::GizmoUI): tangent-debug color that stamps the nearest depth. A vertex
+	// shader override (FORCE_NEAR_DEPTH) forces gl_Position.z = 0 (NDC near) without touching x/y/w, so
+	// the shape is unchanged; with depth test+write on it passes eLess against any scene depth (drawn on
+	// top of everything) and writes 0.0 so nothing drawn afterwards beats it. Forcing depth in the vertex
+	// shader (not gl_FragDepth) keeps early-Z intact and leaves the IES fragment interface uniform.
+	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+		.vertexShader = ShaderSource{
+			.text = graphicsPipelineLayout.vertexShader.text,
+			.debugFilePath = graphicsPipelineLayout.vertexShader.debugFilePath,
+			.defines = { { "FORCE_NEAR_DEPTH", "1" }, { "POS_IS_COLOR", "1" } },
+		},
+		.fragmentShader = ShaderSource{
+			.text = gizmoVariantText,
+			.debugFilePath = gizmoVariantPath,
+		},
+		.blendEnable = false,
+		.depthWrite = true,
+		.depthTest = true,
+	});
+	// Variant 7 (EPipelineIndex::GizmoWorld): tangent-debug color, depth tested (occluded by geometry),
+	// alpha-blended, no depth write (world-space gizmo).
+	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+		.fragmentShader = ShaderSource{
+			.text = gizmoVariantText,
+			.debugFilePath = gizmoVariantPath,
+            .defines = { { "POS_IS_COLOR", "1" } },
+		},
+	});
 
-    // The lit-transparent variant reuses the lit fragment text; give it the same STEREO per-eye handling.
+    // VR: every shader in this pipeline selects the per-eye view (u_views[u_viewIndex]) from one push
+    // constant, gated behind STEREO. Define it once across all shader sources (and add the range once)
+    // rather than per-variant; shaders that don't reference STEREO just ignore the define.
     if (m_stereo)
-        graphicsPipelineLayout.additionalVariants[0].fragmentShader.defines.push_back({ "STEREO", "1" });
+    {
+        graphicsPipelineLayout.pushConstantRanges.push_back(vk::PushConstantRange{
+            .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, .offset = 0, .size = sizeof(uint32) });
+
+        auto defineStereo = [](ShaderSource& shader) {
+            if (!shader.text.empty()) // empty = falls back to the default shader, which already gets it
+                shader.defines.push_back({ "STEREO", "1" });
+        };
+        defineStereo(graphicsPipelineLayout.vertexShader);
+        defineStereo(graphicsPipelineLayout.fragmentShader);
+        for (PipelineVariant& variant : graphicsPipelineLayout.additionalVariants)
+        {
+            defineStereo(variant.vertexShader);
+            defineStereo(variant.fragmentShader);
+        }
+    }
 
     auto& bindingDescriptions = graphicsPipelineLayout.vertexLayoutInfo.bindingDescriptions;
     bindingDescriptions.push_back(vk::VertexInputBindingDescription{

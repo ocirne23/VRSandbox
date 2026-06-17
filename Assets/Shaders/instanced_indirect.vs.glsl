@@ -63,6 +63,14 @@ void main()
     // sub-pixel jitter both eyes (per-eye TAA accumulates it just like desktop).
     gl_Position = u_mvp * vec4(out_pos, 1.0);
     gl_Position.xy += u_taaJitter.xy * gl_Position.w; // TAA sub-pixel jitter (clip space)
+#ifdef FORCE_NEAR_DEPTH
+    // GizmoUI: stamp the nearest depth (NDC z = 0 under Vulkan's [0,1] range, eLess compare). Only z is
+    // touched, so x/y/w (and thus the on-screen shape) are unchanged; the gizmo just always wins depth.
+    gl_Position.z = 0.0;
+#endif
+#ifdef POS_IS_COLOR
+    out_pos = in_normal;
+#endif
 }
 
 /*mat3 version

@@ -202,6 +202,7 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
 			puts(preprocessShader.getInfoLog());
 			puts(preprocessShader.getInfoDebugLog());
 			std::cout.flush();
+            assert(false);
 			return false;  // something didn't work
         }
     }
@@ -243,6 +244,7 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
         puts(shader.getInfoLog());
         puts(shader.getInfoDebugLog());
         std::cout.flush();
+        assert(false);
         return false;  // something didn't work
     }
 
@@ -253,6 +255,7 @@ bool Shader::GLSLtoSPV(const vk::ShaderStageFlagBits type, const std::string& so
         puts(program.getInfoLog());
         puts(program.getInfoDebugLog());
         std::cout.flush();
+        assert(false);
         return false;
     }
 
