@@ -1,4 +1,4 @@
-Entity sphere
+Prefab ramp
 	Component RenderNode
 		ObjectContainer baseshapes
-		Node Sphere
+		Node Ramp

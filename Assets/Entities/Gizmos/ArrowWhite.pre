@@ -1,4 +1,4 @@
-Entity SphereRed
+Prefab ArrowWhite
 	Component RenderNode
 		ObjectContainer gizmos
-		Node Sphere1
+		Node Arrow4

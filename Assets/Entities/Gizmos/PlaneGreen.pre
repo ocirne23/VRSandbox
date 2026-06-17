@@ -1,4 +1,4 @@
-Entity SphereWhite
+Prefab PlaneGreen
 	Component RenderNode
 		ObjectContainer gizmos
-		Node Sphere4
+		Node Plane2

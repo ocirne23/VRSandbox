@@ -3,8 +3,8 @@ export module File.AssetParser;
 import Core;
 import Core.glm;
 
-// Generic indentation-structured text asset format, shared by the Scene asset descriptions (.oc/.ent)
-// and the Entity prefab serializer (.pre). Lives in the File library (not Scene) so the Entity library
+// Generic indentation-structured text asset format, shared by the Scene asset descriptions (.oc) and
+// the Entity prefab files/serializer (.pre). Lives in the File library (not Scene) so the Entity library
 // can serialize/deserialize components without depending on Scene.
 
 // One line of a parsed asset file: a key, the values that followed it on the same line, and any

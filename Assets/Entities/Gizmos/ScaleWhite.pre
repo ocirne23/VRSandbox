@@ -1,4 +1,4 @@
-Entity ArchBlue
+Prefab ArrowWhite
 	Component RenderNode
 		ObjectContainer gizmos
-		Node Arch3
+		Node Arrow4

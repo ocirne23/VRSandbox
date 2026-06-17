@@ -1,4 +1,4 @@
-Entity SphereBlue
+Prefab WireSphere
 	Component RenderNode
 		ObjectContainer wireshapes
 		Node Sphere

@@ -10,7 +10,7 @@ import File.FileSystem;
 static void writeSceneChild(Entity* child, AssetNode& sceneComp);
 
 // Writes the name (when it differs from the token already on the node's own line) and transform
-// overrides. `tokenName` is the prefab id or ".ent"/prefab reference written on that line.
+// overrides. `tokenName` is the prefab id or the inline-entity/prefab reference on that line.
 static void writeOverrides(Entity* entity, AssetNode& node, const std::string& tokenName)
 {
     if (!entity->name.empty() && entity->name != tokenName)
@@ -20,10 +20,24 @@ static void writeOverrides(Entity* entity, AssetNode& node, const std::string& t
     node.set("Scale", entity->scale);
 }
 
-// Writes the editor-authored overlay shared by a prefab definition and an entity reference: the
-// overrides above, per-component variable tweaks, and — for the Scene component — the child
-// hierarchy nested inside it. The component SET itself is not written; it is restored from the
-// template (or, for a prefab, is intrinsically Scene) on load.
+// Writes a RenderNode component's intrinsic data (its mesh source) from the entity's spawn info, so an
+// inline entity round-trips its mesh. The mesh-offset transform is written only when non-default.
+static void writeRenderNode(Entity* entity, AssetNode& comp)
+{
+    const RenderComponent::SpawnInfo* si = getRenderSpawnInfo(entity);
+    if (!si || !si->container)
+        return;
+    comp.set("ObjectContainer", si->containerName);
+    comp.set("Node", si->nodePath);
+    const Transform& lt = si->localTransform;
+    if (lt.pos != glm::vec3(0.0f))         comp.set("Position", lt.pos);
+    if (lt.quat != glm::quat(1, 0, 0, 0))  comp.set("Rotation", glm::degrees(glm::eulerAngles(lt.quat)));
+    if (lt.scale != 1.0f)                  comp.set("Scale", lt.scale);
+}
+
+// Writes the editor-authored overlay shared by a prefab definition and an inline entity: the overrides
+// above, each component's intrinsic data (a RenderNode mesh, a Scene block's child hierarchy), and any
+// per-component variable tweaks. The component SET is implied by the data written and restored on load.
 static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& tokenName)
 {
     writeOverrides(entity, node, tokenName);
@@ -39,27 +53,28 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
         comp.values.emplace_back(componentTypeName(id));
         serializeComponent(entity, id, comp); // appends overridable variables as children
 
-        // The Scene component additionally carries the editor-built child hierarchy.
-        if (id == EComponentID_Scene)
+        // RenderNode records its mesh source; Scene carries the editor-built child hierarchy.
+        if (id == EComponentID_Render)
+            writeRenderNode(entity, comp);
+        else if (id == EComponentID_Scene)
             if (SceneComponent* sc = getComponent<SceneComponent>(entity))
                 for (const EntityPtr& child : sc->children)
                     writeSceneChild(child, comp);
 
-        // Drop components with nothing to record (no override variables, no children).
+        // Drop components with nothing to record (no data, no override variables, no children).
         if (comp.children.empty())
             continue;
         node.children.push_back(std::move(comp));
     }
 }
 
-// Writes one Scene-component child. An entity whose source names a registered prefab is a nested
-// prefab instance — written as a `Prefab <name>` reference with only its placement overrides (its
-// contents live in the referenced .pre). Otherwise it is a `Entity <source>` reference with the
-// full overlay.
+// Writes one Scene-component child. A child spawned from a registered prefab is a nested prefab
+// instance — written as a `Prefab <name>` reference with only its placement overrides (its contents
+// live in the referenced .pre). Otherwise it is an inline `Entity <name>` defined fully in place.
 static void writeSceneChild(Entity* child, AssetNode& sceneComp)
 {
-    const std::string& source = entitySourceAsset(child);
-    if (Globals::assetRegistry.findPrefab(source))
+    const std::string& source = entityPrefabName(child); // the prefab name it spawned from, or empty if inline
+    if (!source.empty() && Globals::assetRegistry.findPrefab(source))
     {
         AssetNode& node = sceneComp.addChild("Prefab");
         node.values.emplace_back(source);
@@ -67,9 +82,10 @@ static void writeSceneChild(Entity* child, AssetNode& sceneComp)
     }
     else
     {
+        const std::string token = child->name.empty() ? std::string("Entity") : child->name;
         AssetNode& node = sceneComp.addChild("Entity");
-        node.values.emplace_back(source); // ".ent" template this entity references
-        writeEntityBody(child, node, source);
+        node.values.emplace_back(token);
+        writeEntityBody(child, node, token);
     }
 }
 

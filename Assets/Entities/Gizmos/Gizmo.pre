@@ -1,0 +1,82 @@
+Prefab Gizmo
+	Position 0 0 0
+	Rotation 0 -0 0
+	Scale 1
+	Component Scene
+		Enabled true
+		Entity Arrows
+			Position 0 0 0
+			Rotation 0 -0 0
+			Scale 1
+			Component Scene
+				Enabled true
+				Prefab ArrowRed
+					Position 0 2 0
+					Rotation 0 -0 0
+					Scale 1
+				Prefab ArrowGreen
+					Position 0 0 2
+					Rotation 90 -0 0
+					Scale 1
+				Prefab ArrowBlue
+					Position 2 0 0
+					Rotation 0 -0 -90
+					Scale 1
+		Entity Planes
+			Position 0 0 0
+			Rotation 0 -0 0
+			Scale 1
+			Component Scene
+				Enabled true
+				Prefab PlaneRed
+					Position 2 2 -0.5
+					Rotation 0 90 0
+					Scale 1
+				Prefab PlaneGreen
+					Position -0.5 2 2
+					Rotation 0 -0 0
+					Scale 1
+				Prefab PlaneBlue
+					Position 2 -0.5 2
+					Rotation 0 -0 90
+					Scale 1
+		Entity Arches
+			Position 0 0 0
+			Rotation 0 -0 0
+			Scale 1
+			Component Scene
+				Enabled false
+				Prefab ArchRed
+					Position 1.5 1.5 -0.5
+					Rotation 0 90 0
+					Scale 1.75
+				Prefab ArchGreen
+					Position -0.5 1.5 1.5
+					Rotation 0 -0 0
+					Scale 1.75
+				Prefab ArchBlue
+					Position 1.5 -0.5 1.5
+					Rotation 0 -0 -90
+					Scale 1.75
+		Entity Scale
+			Position 0 0 0
+			Rotation 0 -0 0
+			Scale 1
+			Component Scene
+				Enabled false
+				Prefab ScaleRed
+					Position 0 2 0
+					Rotation 0 -0 0
+					Scale 1
+				Prefab ScaleGreen
+					Position 0 0 2
+					Rotation 90 -0 0
+					Scale 1
+				Prefab ScaleBlue
+					Position 1 0 0
+					Rotation 0 -0 -90
+					Scale 1
+		Prefab SphereWhite
+			Position 0 0 0
+			Rotation 0 -0 0
+			Scale 1

@@ -36,7 +36,7 @@ export constexpr uint16 ComponentAlignment = 16;
 // Each inline component exposes serialize()/deserialize() over the shared AssetNode text format,
 // driven by the prefab (.pre) serializer. They cover only the component's own intrinsic data: the
 // scene-graph structure (which entity is whose child) and the heavy RenderNode are reconstructed by
-// the prefab loader from the entity's spawn template (entitySourceAsset), not from per-component data.
+// the prefab loader from the entity's spawn template (entityPrefabName), not from per-component data.
 
 export struct SceneComponent
 {
@@ -52,7 +52,10 @@ export struct SceneComponent
     {
         struct ChildSpawnInfo
         {
-            const EntitySpawnTemplate* tmpl = nullptr; // resolved child template (.ent or nested prefab)
+            // Either an inline "Entity" child (its template is built from and owned here) or a "Prefab"
+            // reference (a shared handle to the cached template for the referenced .pre's root). shared_ptr
+            // so inline templates live as long as this parent template, which the World caches forever.
+            std::shared_ptr<const EntitySpawnTemplate> tmpl;
             Transform localTransform;                  // placement composed onto the parent's spawn transform
             std::string name;                          // name override, empty = use the template's
         };
@@ -110,7 +113,7 @@ export struct RenderComponent
     static constexpr EComponentID getId() { return EComponentID_Render; }
     RenderNode node;
 
-    // The mesh's placement relative to its owning entity (baked from the ".ent" RenderNode node). The
+    // The mesh's placement relative to its owning entity (baked from the RenderNode component node). The
     // entity's own transform is relative to its parent, so the RenderNode's absolute transform is the
     // accumulated parent chain composed with the entity transform and finally this offset — resolved
     // each frame while walking the scene tree (see renderEntityTree).
@@ -121,10 +124,11 @@ export struct RenderComponent
 
     // Cached, parse-once data that makes per-instance spawn a pure lookup. The ObjectContainer is
     // resolved by Scene::World (which owns the containers) when it builds the spawn template; the
-    // rest is baked from the entity's ".ent" RenderNode component node.
+    // rest is baked from the entity's RenderNode component node.
     struct SpawnInfo
     {
         ObjectContainer* container = nullptr;       // null = nothing to spawn
+        std::string containerName;                  // ObjectContainer reference name, kept for re-serialization
         std::string nodePath;                       // For debug/display. nodeIdx is used at runtime for spawning.
         NodeSpawnIdx nodeIdx = NodeSpawnIdx_ROOT;
         Transform localTransform;                   // applied on top of the spawn base transform
@@ -158,7 +162,7 @@ export constexpr const char* componentTypeName(EComponentID id)
     case EComponentID_Scene:  return "Scene";
     case EComponentID_Zone:   return "Zone";
     case EComponentID_Cull:   return "Cull";
-    case EComponentID_Render: return "Render";
+    case EComponentID_Render: return "RenderNode";
     default:                  return "Unknown";
     }
 }

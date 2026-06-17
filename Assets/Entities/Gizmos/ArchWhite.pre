@@ -1,4 +1,4 @@
-Entity PlaneWhite
+Prefab ArchWhite
 	Component RenderNode
 		ObjectContainer gizmos
-		Node Plane4
+		Node Arch4

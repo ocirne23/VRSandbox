@@ -49,7 +49,7 @@ EntityPtr spawnFromTemplate(const EntitySpawnTemplate& tmpl, const Transform& ba
 {
     EntityPtr entity = createEntity(tmpl.archetype, base);
     entity->spawnTemplate = &tmpl;
-    entity->name = tmpl.name;
+    entity->name = tmpl.displayName;
 
     // spawnInfos is parallel to the set bits of archetype.typeBits (id order): walk the bits and the
     // slots together, the slot's concrete type implied by the bit it lines up with.

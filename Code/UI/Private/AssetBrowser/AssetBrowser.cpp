@@ -2,7 +2,6 @@ module UI.AssetBrowser;
 
 import Core.imgui;
 import Entity;
-import Entity.Prefab;
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -31,17 +30,10 @@ static bool isObjectContainer(const std::string& ext)
 	return ext == ".oc";
 }
 
-static bool isEntityFile(const std::string& ext)
-{
-	return ext == ".ent";
-}
-
-// Entities (.ent) and prefabs (.pre) can be dragged into the viewport to spawn; ObjectContainers
-// (.oc) are dependency-only.
+// Prefabs (.pre) can be dragged into the viewport to spawn; ObjectContainers (.oc) are dependency-only.
 static bool isSpawnableFile(const std::filesystem::path& p)
 {
-	const auto ext = p.extension().string();
-	return ext == ".ent" || ext == ".pre";
+	return p.extension() == ".pre";
 }
 
 static const char* fileIcon(const std::filesystem::path& p)
@@ -52,7 +44,6 @@ static const char* fileIcon(const std::filesystem::path& p)
 	if (isMeshFile(ext))                   return "[Msh]";
 	if (isShaderFile(ext))                 return "[Shd]";
 	if (isPrefabFile(ext))                 return "[Pre]";
-	if (isEntityFile(ext))                 return "[Ent]";
 	if (isObjectContainer(ext))            return "[OC]";
 	return "[Fil]";
 }
@@ -65,7 +56,6 @@ static ImVec4 fileColor(const std::filesystem::path& p)
 	if (isMeshFile(ext))                    return ImVec4(0.6f, 1.0f,  0.6f, 1.0f);   // green
 	if (isShaderFile(ext))                  return ImVec4(1.0f, 0.6f,  0.3f, 1.0f);   // orange
 	if (isPrefabFile(ext))                  return ImVec4(0.9f, 0.5f,  1.0f, 1.0f);   // purple
-	if (isEntityFile(ext))                  return ImVec4(0.5f, 0.9f,  1.0f, 1.0f);   // light blue
 	if (isObjectContainer(ext))             return ImVec4(0.5f, 1.0f,  0.9f, 1.0f);   // light teal
 	return ImVec4(0.85f, 0.85f, 0.85f, 1.0f);                                         // grey
 }
@@ -163,10 +153,29 @@ void AssetBrowser::render()
 		renderContentGrid();
 	acceptPrefabDrop();
 	ImGui::EndChild();
+
+	// Modal lives at the panel's top level (not inside the child) so OpenPopup/BeginPopupModal share an
+	// ID-stack level. acceptPrefabDrop only raises the flag; the popup is opened and drawn here.
+	renderOverwritePopup();
+}
+
+// Queues a request for the app to write `root` (and its children) as a ".pre" at `path` and refresh
+// templates. Holds its own owning handle so the entity survives the deferred hand-off.
+void AssetBrowser::queueSavePrefab(Entity* root, const std::filesystem::path& path)
+{
+	// The registry and spawn templates key prefab files by path relative to the Assets working dir; the
+	// drop path is absolute (m_currentPath is canonical), so relativize before saving — otherwise the
+	// template bakes an absolute sourceFile that differs from every scanned prefab.
+	std::error_code ec;
+	const std::filesystem::path rel = std::filesystem::relative(path, ec);
+	const std::string savePath = (ec || rel.empty()) ? path.string() : rel.string();
+	m_changes.push_back({ EntityChange::SavePrefab{ EntityPtr(root), savePath } });
+	m_selectedPath = path; // absolute, to match the directory listing for highlight
 }
 
 // Dropping an entity dragged from the Scene hierarchy here saves it (and its children) as a ".pre"
-// prefab in the current folder. The payload "SV_ENTITY" is an Entity* set by the Scene panel.
+// prefab in the current folder. The payload "SV_ENTITY" is an Entity* set by the Scene panel. If a
+// prefab file of that name already exists, defer to an overwrite confirmation instead of clobbering it.
 void AssetBrowser::acceptPrefabDrop()
 {
 	const ImVec2 mn = ImGui::GetWindowPos();
@@ -178,10 +187,52 @@ void AssetBrowser::acceptPrefabDrop()
 		Entity* entity = *static_cast<Entity**>(payload->Data);
 		const std::string name = entity->name.empty() ? std::string("Prefab") : entity->name;
 		const std::filesystem::path out = m_currentPath / (name + ".pre");
-		savePrefab(entity, out.string());
-		m_selectedPath = out;
+		std::error_code ec;
+		if (std::filesystem::exists(out, ec))
+		{
+			// Hold the entity alive until the user confirms; the popup is opened next frame in render().
+			m_pendingSaveRoot = EntityPtr(entity);
+			m_pendingSavePath = out;
+			m_openOverwritePopup = true;
+		}
+		else
+		{
+			queueSavePrefab(entity, out);
+		}
 	}
 	ImGui::EndDragDropTarget();
+}
+
+void AssetBrowser::renderOverwritePopup()
+{
+	static const char* popupId = "Overwrite prefab?##ab_overwrite";
+	if (m_openOverwritePopup)
+	{
+		ImGui::OpenPopup(popupId);
+		m_openOverwritePopup = false;
+	}
+
+	const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+	if (!ImGui::BeginPopupModal(popupId, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		return;
+
+	ImGui::Text("\"%s\" already exists.\nOverwrite it?", m_pendingSavePath.filename().string().c_str());
+	ImGui::Separator();
+	if (ImGui::Button("Overwrite", ImVec2(120.0f, 0.0f)))
+	{
+		queueSavePrefab(m_pendingSaveRoot.get(), m_pendingSavePath);
+		m_pendingSaveRoot.release();
+		ImGui::CloseCurrentPopup();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+	{
+		m_pendingSaveRoot.release();
+		ImGui::CloseCurrentPopup();
+	}
+	ImGui::EndPopup();
 }
 
 // ---- Toolbar ---------------------------------------------------------------

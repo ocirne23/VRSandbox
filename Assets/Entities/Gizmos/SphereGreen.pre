@@ -1,0 +1,4 @@
+Prefab SphereGreen
+	Component RenderNode
+		ObjectContainer gizmos
+		Node Sphere2

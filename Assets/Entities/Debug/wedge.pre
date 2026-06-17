@@ -1,4 +1,4 @@
-Entity capsule
+Prefab wedge
 	Component RenderNode
 		ObjectContainer baseshapes
-		Node Capsule
+		Node Wedge

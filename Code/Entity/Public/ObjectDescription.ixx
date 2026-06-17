@@ -31,22 +31,10 @@ export struct ObjectContainerDesc
     MaterialOverridesDesc materialOverrides;
 };
 
-// Parsed ".ent" declaration: just its name plus the raw declaration node. The World builds a spawn
-// template straight from `node` (reading its "Component <type>" blocks), exactly as it does for a
-// ".pre" prefab declaration — entities and prefabs are the same kind of thing.
-export struct EntityDesc
-{
-    std::string name;
-    std::string filePath;
-    AssetNode node;                      // the full "Entity ..." declaration subtree
-};
-
-// Build a typed description from an already-parsed top-level declaration node.
-// Returns false if the node is not the expected kind ("ObjectContainer" / "Entity").
+// Build a typed description from an already-parsed top-level "ObjectContainer" declaration node.
+// Returns false if the node is not an ObjectContainer.
 export bool toObjectContainerDesc(const AssetNode& node, ObjectContainerDesc& out);
-export bool toEntityDesc(const AssetNode& node, EntityDesc& out);
 
 // Load + parse + interpret a file in one call. Returns false (with outError) on read failure
-// or when the file contains no declaration of the expected kind.
+// or when the file contains no ObjectContainer declaration.
 export bool loadObjectContainerDesc(const std::string& path, ObjectContainerDesc& out, std::string& outError);
-export bool loadEntityDesc(const std::string& path, EntityDesc& out, std::string& outError);

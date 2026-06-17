@@ -15,14 +15,9 @@ import Entity.ObjectDescription;
 
 bool World::initialize()
 {
+    // Scan so prefabs are resolvable by name. Templates (and the ObjectContainers they reference) are
+    // built lazily on first spawn/reference and cached, so a referenced file is read at most once.
     Globals::assetRegistry.scanDirectory();
-
-    // Build a spawn template for every entity up front, here, so spawning is a pure lookup afterwards
-    // (and the ObjectContainers they reference are loaded now rather than mid-spawn). Prefabs are
-    // built the same way, but lazily on first reference. Both land in the same template cache.
-    for (const auto& [name, desc] : Globals::assetRegistry.getEntities())
-        cacheTemplate(name, desc.filePath, desc.node);
-
     return true;
 }
 
@@ -88,18 +83,28 @@ ObjectContainer* World::getOrLoadContainer(const std::string& name)
 
 EntityPtr World::spawn(const std::string& name, const Transform& base)
 {
-    // Entities are pre-built (cache hit); a prefab name resolves and builds here. Either way one call.
-    if (const EntitySpawnTemplate* tmpl = getOrBuildTemplate(name))
+    if (std::shared_ptr<const EntitySpawnTemplate> tmpl = getOrBuildPrefabTemplate(name))
         return spawnFromTemplate(*tmpl, base);
     return EntityPtr{};
 }
 
+void World::reloadPrefabs()
+{
+    // Retire (don't free) the cached templates: live entities still hold raw pointers into them, while a
+    // template can transitively reference another (inline children, nested prefabs), so the whole cache is
+    // invalidated together. The next spawn of any prefab rebuilds it (and its dependencies) from file.
+    for (auto& [name, tmpl] : m_templates)
+        m_retiredTemplates.push_back(std::move(tmpl));
+    m_templates.clear();
+}
+
 // ---- spawn templates -----------------------------------------------------------------------------
-// An entity (".ent") and a prefab (".pre") are the same kind of thing: a named entity declaration that
-// may carry a RenderNode (a mesh) and/or a Scene block (children to attach on spawn). Both are turned
-// into an EntitySpawnTemplate by buildTemplate, cached by name, and spawned by spawnFromTemplate.
-// Entity templates are pre-built at init; prefab ones build lazily on first reference. A referenced
-// file is read at most once (it builds every declaration it contains). Spawning is then pure lookup.
+// A declaration (a top-level "Prefab" or a "Scene" child) may carry a RenderNode (a mesh) and/or a
+// Scene block (children to attach on spawn). buildTemplate turns one into an EntitySpawnTemplate. There
+// are two flavours of child under a Scene block: an inline "Entity" (defined fully in place, its
+// template owned by the parent — buildInlineTemplate) and a "Prefab" reference (resolved by name to
+// another .pre file's cached root — getOrBuildPrefabTemplate). Prefab roots are cached by name and
+// read at most once; spawning is then a pure walk of the template tree.
 
 // The "Component <name>" child of a declaration node, or null if absent.
 static const AssetNode* findComponentNode(const AssetNode& node, const char* name)
@@ -123,16 +128,16 @@ static bool keyIs(const AssetNode& node, std::string_view key)
     return true;
 }
 
-// A node's authored placement (Position/Rotation/Scale). Positions are stored relative to `origin`
-// (the owning declaration's own position) so spawning is a pure compose onto the spawn transform.
-static Transform readNodeTransform(const AssetNode& node, const glm::vec3& origin)
+// A node's authored placement (Position/Rotation/Scale). The scene graph is relative, so a node's
+// authored transform is taken as-is: for a Scene child it is the placement relative to its parent; for
+// a root prefab it is the placement composed onto the spawn transform. Loading never rebases it.
+static Transform readNodeTransform(const AssetNode& node)
 {
     Transform t;
     t.scale = 1.0f;
     if (const AssetNode* n = node.find("Position")) t.pos = n->asVec3();
     if (const AssetNode* n = node.find("Rotation")) t.quat = glm::quat(glm::radians(n->asVec3()));
     if (const AssetNode* n = node.find("Scale"))    t.scale = n->asFloat(0, 1.0f);
-    t.pos -= origin;
     return t;
 }
 
@@ -145,6 +150,7 @@ std::shared_ptr<RenderComponent::SpawnInfo> World::buildRenderSpawnInfo(const As
 
     auto info = std::make_shared<RenderComponent::SpawnInfo>();
     info->container = container;
+    info->containerName = containerNode->asString(); // kept so an inline entity re-serializes its mesh
 
     const std::string nodePath = renderNode.find("Node") ? renderNode.find("Node")->asString() : std::string();
     if (nodePath.empty() || nodePath == "ROOT")
@@ -154,28 +160,33 @@ std::shared_ptr<RenderComponent::SpawnInfo> World::buildRenderSpawnInfo(const As
     else
         Log::warning("Scene: entity '" + ownerName + "' references unknown node '" + nodePath + "', using ROOT");
 	info->nodePath = nodePath.empty() ? "ROOT" : nodePath;
-    info->localTransform = readNodeTransform(renderNode, glm::vec3(0.0f)); // mesh offset within the entity
+    info->localTransform = readNodeTransform(renderNode); // mesh offset within the entity
     return info;
 }
 
-std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const AssetNode& sceneNode, const glm::vec3& origin)
+std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const AssetNode& sceneNode)
 {
     auto info = std::make_shared<SceneComponent::SpawnInfo>();
     if (const AssetNode* n = sceneNode.find("Enabled")) info->enabled = n->asBool();
 
-    // Each child references another template by name. The "Entity"/"Prefab" keyword only hints where
-    // it's declared; both resolve identically through getOrBuildTemplate. Authoring order is kept.
+    // An "Entity" child is defined fully in place (build its template inline); a "Prefab" child is a
+    // reference resolved by name to another .pre's cached root. Either way authoring order is kept and
+    // the child's own Position/Rotation/Scale becomes its placement relative to this entity.
     for (const AssetNode& child : sceneNode.children)
     {
-        if (!keyIs(child, "Entity") && !keyIs(child, "Prefab"))
+        std::shared_ptr<const EntitySpawnTemplate> childTmpl;
+        if (keyIs(child, "Entity"))
+            childTmpl = buildInlineTemplate(child);
+        else if (keyIs(child, "Prefab"))
+            childTmpl = getOrBuildPrefabTemplate(child.asString());
+        else
             continue;
-        const EntitySpawnTemplate* childTmpl = getOrBuildTemplate(child.asString());
         if (!childTmpl)
             continue;
 
         SceneComponent::SpawnInfo::ChildSpawnInfo ci;
-        ci.tmpl = childTmpl;
-        ci.localTransform = readNodeTransform(child, origin);
+        ci.tmpl = std::move(childTmpl);
+        ci.localTransform = readNodeTransform(child);
         if (const AssetNode* n = child.find("Name")) ci.name = n->asString();
         info->children.push_back(std::move(ci));
     }
@@ -184,16 +195,16 @@ std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const Asse
 
 void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
 {
-    tmpl.defaultTransform = readNodeTransform(node, glm::vec3(0.0f)); // the declaration's authored placement
+    tmpl.defaultTransform = readNodeTransform(node); // the declaration's authored placement
     const AssetNode* nameNode = node.find("Name");
-    tmpl.name = nameNode ? nameNode->asString() : node.asString();
+    tmpl.displayName = nameNode ? nameNode->asString() : node.asString();
 
     // Resolve each component the declaration carries to its parse-once SpawnInfo, indexed by id.
     uint16 typeBits = 0;
 
     static_assert(EComponentID_Scene == 0);
     if (const AssetNode* sceneNode = findComponentNode(node, "Scene"))
-        if (std::shared_ptr<SceneComponent::SpawnInfo> info = buildSceneSpawnInfo(*sceneNode, tmpl.defaultTransform.pos))
+        if (std::shared_ptr<SceneComponent::SpawnInfo> info = buildSceneSpawnInfo(*sceneNode))
         {
             typeBits |= uint16(1 << EComponentID_Scene);
             tmpl.spawnInfos.emplace_back(std::move(info));
@@ -201,7 +212,7 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
 
     static_assert(EComponentID_Render == 3);
     if (const AssetNode* renderNode = findComponentNode(node, "RenderNode"))
-        if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.sourceAsset))
+        if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.displayName))
         {
             typeBits |= uint16(1 << EComponentID_Render);
             tmpl.spawnInfos.emplace_back(std::move(info));
@@ -211,25 +222,35 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
     tmpl.archetype = makeEntityArchetype(typeBits);
 }
 
-const EntitySpawnTemplate* World::cacheTemplate(const std::string& name, const std::string& filePath, const AssetNode& node)
+std::shared_ptr<const EntitySpawnTemplate> World::cacheTemplate(const std::string& name, const std::string& sourceFile, const AssetNode& node)
 {
     if (auto it = m_templates.find(name); it != m_templates.end())
-        return it->second.get();
+        return it->second;
 
     // Mark in-progress before building so a self/cyclic child reference (resolved while building the
-    // Scene children) is caught by getOrBuildTemplate rather than recursing forever.
+    // Scene children) is caught by getOrBuildPrefabTemplate rather than recursing forever.
     m_buildingTemplates.insert(name);
-    auto tmpl = std::make_unique<EntitySpawnTemplate>();
-    tmpl->sourceAsset = filePath;
+    auto tmpl = std::make_shared<EntitySpawnTemplate>();
+    tmpl->sourceFile = sourceFile;
+    tmpl->prefabName = name; // a registered prefab name, so a re-serialized instance writes "Prefab <name>"
     buildTemplate(node, *tmpl);
     m_buildingTemplates.erase(name);
 
-    const EntitySpawnTemplate* ptr = tmpl.get();
-    m_templates.emplace(name, std::move(tmpl)); // heap-owned: address stays stable for child back-pointers
-    return ptr;
+    m_templates.emplace(name, tmpl); // heap-owned: address stays stable for child back-pointers
+    return tmpl;
 }
 
-const EntitySpawnTemplate* World::buildFileTemplate(const std::string& path)
+std::shared_ptr<const EntitySpawnTemplate> World::buildInlineTemplate(const AssetNode& node)
+{
+    // An inline "Entity" child carries no prefab name or source file of its own (it lives inside its
+    // parent's file), so a re-serialized instance writes "Entity <name>" with its full body. Owned by
+    // the caller's SpawnInfo.
+    auto tmpl = std::make_shared<EntitySpawnTemplate>();
+    buildTemplate(node, *tmpl);
+    return tmpl;
+}
+
+std::shared_ptr<const EntitySpawnTemplate> World::buildFileTemplate(const std::string& path)
 {
     AssetNode doc;
     std::string error;
@@ -239,40 +260,35 @@ const EntitySpawnTemplate* World::buildFileTemplate(const std::string& path)
         return nullptr;
     }
 
-    // A spawnable file declares a single root: build the template for its first "Entity"/"Prefab".
+    // A .pre file declares a single root prefab: build the template for its first "Prefab".
     for (const AssetNode& decl : doc.children)
-        if (keyIs(decl, "Entity") || keyIs(decl, "Prefab"))
+        if (keyIs(decl, "Prefab"))
             return cacheTemplate(decl.asString(), path, decl);
 
-    Log::warning("Scene: asset '" + path + "' declared no spawnable entity or prefab");
+    Log::warning("Scene: asset '" + path + "' declared no prefab");
     return nullptr;
 }
 
-const EntitySpawnTemplate* World::getOrBuildTemplate(const std::string& name)
+std::shared_ptr<const EntitySpawnTemplate> World::getOrBuildPrefabTemplate(const std::string& name)
 {
     if (auto it = m_templates.find(name); it != m_templates.end())
-        return it->second.get(); // cache hit: no asset file touched
+        return it->second; // cache hit: no asset file touched
 
     if (m_buildingTemplates.contains(name))
     {
-        Log::warning("Scene: template cycle detected at '" + name + "', skipping");
+        Log::warning("Scene: prefab cycle detected at '" + name + "', skipping");
         return nullptr;
     }
 
-    // An entity declaration builds straight from its (already-parsed) node; a prefab reads its file,
-    // which builds its single root declaration. Either way the result is cached under `name`.
-    if (const EntityDesc* desc = Globals::assetRegistry.findEntity(name))
-        return cacheTemplate(name, desc->name, desc->node);
-
     if (const std::string* prefabPath = Globals::assetRegistry.findPrefab(name))
     {
-        if (const EntitySpawnTemplate* tmpl = buildFileTemplate(*prefabPath))
+        if (std::shared_ptr<const EntitySpawnTemplate> tmpl = buildFileTemplate(*prefabPath))
             return tmpl; // its declared root name == `name`
         Log::warning("Scene: prefab '" + name + "' not declared in '" + *prefabPath + "', skipping");
         return nullptr;
     }
 
-    Log::warning("Scene: references unknown object '" + name + "', skipping");
+    Log::warning("Scene: references unknown prefab '" + name + "', skipping");
     return nullptr;
 }
 
@@ -287,13 +303,13 @@ EntityPtr World::spawnAssetFile(const std::string& path, const Transform& base, 
     const std::string fileName = (ec || relativePath.empty()) ? path : relativePath.string();
 
     const std::string* rootName = Globals::assetRegistry.findRootForFile(fileName);
-    const EntitySpawnTemplate* tmpl = rootName ? getOrBuildTemplate(*rootName) : buildFileTemplate(fileName);
+    std::shared_ptr<const EntitySpawnTemplate> tmpl = rootName ? getOrBuildPrefabTemplate(*rootName) : buildFileTemplate(fileName);
     if (!tmpl)
         return EntityPtr{};
 
     // Compose the root's authored transform onto `base`. When anchoring (a viewport drop) the authored
     // position is cancelled so it lands exactly at `base`; otherwise (a hierarchy drop) it is kept.
     const Transform& dt = tmpl->defaultTransform;
-    const glm::vec3 pos = overrideDefaultTransform ? glm::vec3(0.0f) : dt.pos;
-    return spawnFromTemplate(*tmpl, composeTransform(base, Transform(pos, dt.scale, dt.quat)));
+    const glm::vec3 pos = overrideDefaultTransform ? base.pos : dt.pos;
+    return spawnFromTemplate(*tmpl, Transform(pos, dt.scale, dt.quat));
 }

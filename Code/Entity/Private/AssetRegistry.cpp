@@ -17,9 +17,9 @@ static bool iequals(std::string_view a, std::string_view b)
 }
 
 // Extensions scanned for declarations. Both parse with the same grammar; the declaration
-// keyword (not the extension) decides what kind of object is registered, so a file of either
-// extension may contain any mix of declarations.
-static constexpr const char* s_assetExtensions[] = { ".oc", ".ent", ".pre" };
+// keyword (not the extension) decides what kind of object is registered. ".oc" files hold
+// ObjectContainer definitions; ".pre" files hold a single root Prefab.
+static constexpr const char* s_assetExtensions[] = { ".oc", ".pre" };
 
 static bool isAssetFile(const std::filesystem::path& path)
 {
@@ -48,7 +48,6 @@ static std::string fileKey(const std::filesystem::path& path)
 void AssetRegistry::clear()
 {
     m_objectContainers.clear();
-    m_entities.clear();
     m_prefabs.clear();
     m_fileRoot.clear();
 }
@@ -90,15 +89,6 @@ void AssetRegistry::registerFile(const std::string& path)
 
     const std::string fileName = fileKey(path);
 
-    // Records `name` as the file's single spawnable root, warning if the file declares a second one.
-    auto setRoot = [&](const std::string& name)
-    {
-        if (m_fileRoot.try_emplace(fileName, name).second)
-            return;
-        Log::warning("AssetRegistry: '" + path + "' declares more than one root entity/prefab "
-            "(keeping '" + m_fileRoot[fileName] + "', ignoring '" + name + "')");
-    };
-
     for (const AssetNode& decl : root.children)
     {
         if (iequals(decl.key, "ObjectContainer"))
@@ -114,23 +104,6 @@ void AssetRegistry::registerFile(const std::string& path)
             if (!m_objectContainers.try_emplace(desc.name, std::move(desc)).second)
                 Log::warning("AssetRegistry: duplicate ObjectContainer '" + decl.asString(0) + "' (keeping first), in " + path);
         }
-        else if (iequals(decl.key, "Entity"))
-        {
-            EntityDesc desc;
-            if (!toEntityDesc(decl, desc))
-                continue;
-            if (desc.name.empty())
-            {
-                Log::warning("AssetRegistry: unnamed Entity in " + path);
-                continue;
-            }
-            desc.filePath = path;
-            const std::string name = desc.name;
-            if (!m_entities.try_emplace(desc.name, std::move(desc)).second)
-                Log::warning("AssetRegistry: duplicate Entity '" + decl.asString(0) + "' (keeping first), in " + path);
-            else
-                setRoot(name);
-        }
         else if (iequals(decl.key, "Prefab"))
         {
             const std::string name = decl.asString(0);
@@ -140,9 +113,14 @@ void AssetRegistry::registerFile(const std::string& path)
                 continue;
             }
             if (!m_prefabs.try_emplace(name, path).second)
+            {
                 Log::warning("AssetRegistry: duplicate Prefab '" + name + "' (keeping first), in " + path);
-            else
-                setRoot(name);
+                continue;
+            }
+            // A .pre file declares a single root prefab; warn if a second appears in the same file.
+            if (!m_fileRoot.try_emplace(fileName, name).second)
+                Log::warning("AssetRegistry: '" + path + "' declares more than one root prefab "
+                    "(keeping '" + m_fileRoot[fileName] + "', ignoring '" + name + "')");
         }
         else
         {
@@ -155,12 +133,6 @@ const ObjectContainerDesc* AssetRegistry::findObjectContainer(const std::string&
 {
     const auto it = m_objectContainers.find(name);
     return it != m_objectContainers.end() ? &it->second : nullptr;
-}
-
-const EntityDesc* AssetRegistry::findEntity(const std::string& name) const
-{
-    const auto it = m_entities.find(name);
-    return it != m_entities.end() ? &it->second : nullptr;
 }
 
 const std::string* AssetRegistry::findPrefab(const std::string& name) const

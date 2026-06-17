@@ -1,4 +1,4 @@
-Entity SphereGreen
+Prefab ScaleBlue
 	Component RenderNode
 		ObjectContainer gizmos
-		Node Sphere2
+		Node Scale3

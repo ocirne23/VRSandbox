@@ -1,0 +1,4 @@
+Prefab PlaneRed
+	Component RenderNode
+		ObjectContainer gizmos
+		Node Plane1

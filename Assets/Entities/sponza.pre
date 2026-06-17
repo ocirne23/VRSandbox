@@ -1,4 +1,4 @@
-Entity sponza
+Prefab sponza
 	Component RenderNode
 		ObjectContainer sponza
 		Node ROOT

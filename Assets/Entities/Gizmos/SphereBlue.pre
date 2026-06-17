@@ -1,4 +1,4 @@
-Entity Arrow2
+Prefab SphereBlue
 	Component RenderNode
 		ObjectContainer gizmos
-		Node Arrow2
+		Node Sphere3

@@ -1,4 +1,4 @@
-Entity wedge
+Prefab cone
 	Component RenderNode
 		ObjectContainer baseshapes
-		Node Wedge
+		Node Cone

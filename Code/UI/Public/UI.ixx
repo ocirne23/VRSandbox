@@ -46,6 +46,10 @@ public:
         changes.insert(changes.end(), std::make_move_iterator(m_viewportChanges.begin()),
                                       std::make_move_iterator(m_viewportChanges.end()));
         m_viewportChanges.clear();
+
+        std::vector<EntityChange> assetChanges = m_assetBrowser.takeChanges();
+        changes.insert(changes.end(), std::make_move_iterator(assetChanges.begin()),
+                                      std::make_move_iterator(assetChanges.end()));
         return changes;
     }
 

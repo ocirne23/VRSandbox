@@ -143,22 +143,34 @@ export struct EntitySpawnTemplate
     // (cast via spawnComponent). Null where a present component has no spawn step.
     std::vector<std::shared_ptr<void>> spawnInfos;
 
-    // Name of the source ".ent"/prefab asset entities spawned from this template reference. Prefab
-    // (.pre) serialization records it (via Entity::spawnTemplate) so a saved hierarchy can re-spawn
-    // the heavy components (mesh/RenderNode) from the asset on load.
-    std::string sourceAsset;
+    // Path of the ".pre" file this template was loaded from, or empty for an inline-entity template
+    // (which lives inside its parent's file rather than its own).
+    std::string sourceFile;
 
-    // Default display name given to spawned entities (the asset's authored "Name", falling back to
-    // sourceAsset). Per-instance overrides still win — see SceneComponent::SpawnInfo::ChildSpawnInfo.
-    std::string name;
+    // Registered prefab name this template is the root of, or empty for an inline-entity template.
+    // Prefab serialization reads it (via Entity::spawnTemplate) to decide whether a child re-serializes
+    // as a "Prefab <name>" reference or an inline "Entity" with its full body.
+    std::string prefabName;
+
+    // Default display name given to spawned entities (the asset's authored "Name", falling back to the
+    // declaration token). Per-instance overrides still win — see SceneComponent::SpawnInfo::ChildSpawnInfo.
+    std::string displayName;
 };
 
-// Source asset name of the entity, read through its spawn template, or an empty string for entities
-// authored directly in the editor (which have no template). See EntitySpawnTemplate::sourceAsset.
-export inline const std::string& entitySourceAsset(const Entity* entity)
+// Registered prefab name the entity was spawned from, read through its spawn template, or an empty
+// string for inline/editor-authored entities (which have no prefab name). See EntitySpawnTemplate.
+export inline const std::string& entityPrefabName(const Entity* entity)
 {
     static const std::string empty;
-    return entity->spawnTemplate ? entity->spawnTemplate->sourceAsset : empty;
+    return entity->spawnTemplate ? entity->spawnTemplate->prefabName : empty;
+}
+
+// Registered prefab name the entity was spawned from, read through its spawn template, or an empty
+// string for inline/editor-authored entities (which have no prefab name). See EntitySpawnTemplate.
+export inline const std::string& entitySourceFile(const Entity* entity)
+{
+    static const std::string empty;
+    return entity->spawnTemplate ? entity->spawnTemplate->sourceFile : empty;
 }
 
 // A single entity mutation requested through the editor UI, drained once per frame by the app, which
@@ -190,5 +202,13 @@ export struct EntityChange
         EntityPtr entity;
         EntityPtr newParent; // nullptr = root
     };
-    std::variant<CreateHierarchy, CreateViewport, Delete, Reparent> type;
+    // An entity subtree dropped onto the asset browser to (over)write as a prefab (.pre) at `path`. The
+    // app writes it and refreshes spawn templates so the change takes effect without a restart. `root`
+    // is an owning handle that keeps the subtree alive across the deferred hand-off.
+    struct SavePrefab
+    {
+        EntityPtr   root;
+        std::string path;
+    };
+    std::variant<CreateHierarchy, CreateViewport, Delete, Reparent, SavePrefab> type;
 };

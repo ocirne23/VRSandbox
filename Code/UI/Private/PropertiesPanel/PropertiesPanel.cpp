@@ -32,12 +32,12 @@ void PropertiesPanel::render(Entity* selected)
 		}
 
 		{
-			const std::string& asset = entitySourceAsset(selected);
+			const std::string& sourceFile = entitySourceFile(selected);
 			ImGui::AlignTextToFramePadding();
 			ImGui::Text("Asset");
 			ImGui::SameLine(80.0f);
 			ImGui::SetNextItemWidth(-1.0f);
-			ImGui::TextWrapped("%s", asset.empty() ? "<none>" : asset.c_str());
+			ImGui::TextWrapped("%s", sourceFile.empty() ? "<inline>" : sourceFile.c_str());
 		}
 
 		if (sc)

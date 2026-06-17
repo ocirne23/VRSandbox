@@ -49,17 +49,6 @@ bool toObjectContainerDesc(const AssetNode& node, ObjectContainerDesc& out)
     return true;
 }
 
-bool toEntityDesc(const AssetNode& node, EntityDesc& out)
-{
-    if (!iequals(node.key, "Entity"))
-        return false;
-
-    out = EntityDesc{};
-    out.name = node.asString(0);
-    out.node = node;
-    return true;
-}
-
 bool loadObjectContainerDesc(const std::string& path, ObjectContainerDesc& out, std::string& outError)
 {
     AssetNode root;
@@ -72,18 +61,4 @@ bool loadObjectContainerDesc(const std::string& path, ObjectContainerDesc& out, 
         return false;
     }
     return toObjectContainerDesc(*top, out);
-}
-
-bool loadEntityDesc(const std::string& path, EntityDesc& out, std::string& outError)
-{
-    AssetNode root;
-    if (!loadAssetFile(path, root, outError))
-        return false;
-    const AssetNode* top = root.find("Entity");
-    if (!top)
-    {
-        outError = "No Entity declaration in: " + path;
-        return false;
-    }
-    return toEntityDesc(*top, out);
 }

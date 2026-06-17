@@ -1,4 +1,4 @@
-Entity ramp
+Prefab cube
 	Component RenderNode
 		ObjectContainer baseshapes
-		Node Ramp
+		Node Cube

@@ -4,12 +4,12 @@ import Core;
 import Entity.ObjectDescription;
 
 
-// Scans the asset tree for asset files (.oc / .ent / .pre), parses every top-level declaration, and
+// Scans the asset tree for asset files (.oc / .pre), parses every top-level declaration, and
 // registers it by the name that follows its keyword (e.g. "ObjectContainer sponza" -> "sponza").
 // Names form a flat reference space per kind: a declaration's name is what other declarations
-// (e.g. an Entity's RenderNode component) refer to. File names need not match declaration names.
-// A spawnable file (.ent / .pre) declares exactly one root entity/prefab; an .oc file may declare
-// any number of ObjectContainers (asset definitions, not spawnable roots).
+// (e.g. a prefab's nested "Prefab <name>" reference) refer to. File names need not match declaration
+// names. A .pre file declares exactly one root prefab; an .oc file may declare any number of
+// ObjectContainers (asset definitions, not spawnable roots).
 export class AssetRegistry final
 {
 public:
@@ -21,7 +21,6 @@ public:
     void clear();
 
     const ObjectContainerDesc* findObjectContainer(const std::string& name) const;
-    const EntityDesc* findEntity(const std::string& name) const;
 
     // File path of the prefab (.pre) registered under `name`, or nullptr if unknown. Lets a
     // nested "Prefab <name>" reference resolve and load another prefab file.
@@ -37,14 +36,12 @@ public:
     const std::string* findRootForFile(const std::string& fileName) const;
 
     const std::unordered_map<std::string, ObjectContainerDesc>& getObjectContainers() const { return m_objectContainers; }
-    const std::unordered_map<std::string, EntityDesc>& getEntities() const { return m_entities; }
 
 private:
 
     void registerFile(const std::string& path);
 
     std::unordered_map<std::string, ObjectContainerDesc> m_objectContainers;
-    std::unordered_map<std::string, EntityDesc> m_entities;
     std::unordered_map<std::string, std::string> m_prefabs; // name -> .pre file path
     std::unordered_map<std::string, std::string> m_fileRoot; // lowercased file name -> root entity/prefab name
 };

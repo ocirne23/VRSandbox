@@ -1,4 +1,4 @@
-Entity PlaneBlue
+Prefab ArrowRed
 	Component RenderNode
 		ObjectContainer gizmos
-		Node Plane3
+		Node Arrow1

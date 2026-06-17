@@ -1,4 +1,4 @@
-Entity cube
+Prefab capsule
 	Component RenderNode
 		ObjectContainer baseshapes
-		Node Cube
+		Node Capsule

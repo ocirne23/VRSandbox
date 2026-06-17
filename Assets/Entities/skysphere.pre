@@ -1,4 +1,4 @@
-Entity skysphere
+Prefab skysphere
 	Component RenderNode
 		ObjectContainer skysphere
 		Node ROOT

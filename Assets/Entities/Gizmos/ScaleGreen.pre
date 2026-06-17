@@ -1,4 +1,4 @@
-Entity Arrow1
+Prefab ScaleGreen
 	Component RenderNode
 		ObjectContainer gizmos
-		Node Arrow1
+		Node Scale2
