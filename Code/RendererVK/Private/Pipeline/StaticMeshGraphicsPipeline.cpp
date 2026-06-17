@@ -67,6 +67,17 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 			.debugFilePath = skyVariantPath,
 		},
 	});
+	// Variant 5 (EPipelineIndex::WireframeTransparent): unlit fragment, drawn as lines, alpha-blended,
+	// no depth write (debug overlay). Reuses the unlit fragment text from the UnlitOpaque variant.
+	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+		.fragmentShader = ShaderSource{
+			.text = graphicsPipelineLayout.additionalVariants[1].fragmentShader.text,
+			.debugFilePath = graphicsPipelineLayout.additionalVariants[1].fragmentShader.debugFilePath,
+		},
+		.blendEnable = false,
+		.depthWrite = true,
+		.polygonMode = vk::PolygonMode::eLine,
+	});
 
     // The lit-transparent variant reuses the lit fragment text; give it the same STEREO per-eye handling.
     if (m_stereo)

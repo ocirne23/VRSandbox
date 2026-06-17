@@ -33,6 +33,7 @@ static RendererVKLayout::EPipelineIndex parsePipeline(const std::string& name)
     if (name == "UnlitOpaque")      return P::UnlitOpaque;
     if (name == "UnlitTransparent") return P::UnlitTransparent;
     if (name == "Sky")              return P::Sky;
+    if (name == "WireframeTransparent") return P::WireframeTransparent;
     return P::LitOpaque;
 }
 

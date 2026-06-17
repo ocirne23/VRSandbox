@@ -29,6 +29,8 @@ export struct PipelineVariant
     // writes; opaque variants (the default) keep blending off and depth writes on.
     bool blendEnable = false;
     bool depthWrite = true;
+    // Wireframe variants set eLine; everything else keeps the solid fill of variant 0.
+    vk::PolygonMode polygonMode = vk::PolygonMode::eFill;
 };
 
 export struct GraphicsPipelineLayout

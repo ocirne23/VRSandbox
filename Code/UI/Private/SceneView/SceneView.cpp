@@ -53,7 +53,7 @@ void SceneView::renderToolbar()
 		m_pendingCreateParent = nullptr;
 	}
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Add a scene entity under World");
+		ImGui::SetTooltip("Add a scene entity");
 
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-1.0f);

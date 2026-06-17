@@ -232,6 +232,7 @@ export namespace RendererVKLayout
         UnlitOpaque    = 2,
         UnlitTransparent = 3,
         Sky            = 4, // analytic sky + sun disc (sky sphere interior)
+        WireframeTransparent = 5, // unlit, line polygon mode, alpha-blended, no depth write (debug overlay)
     };
 
     // MaterialInfo::flags bits.
