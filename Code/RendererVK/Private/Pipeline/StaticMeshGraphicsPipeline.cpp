@@ -34,42 +34,45 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
     });
     // Variant 2 (MeshShaderVariant::UnlitOpaque): unlit opaque.
     const std::string unlitVariantPath = "Shaders/instanced_indirect_unlit.fs.glsl";
+	const std::string unlitVariantText = FileSystem::readFileStr(unlitVariantPath);
     graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
         .fragmentShader = ShaderSource{
-            .text = FileSystem::readFileStr(unlitVariantPath),
+            .text = unlitVariantText,
             .debugFilePath = unlitVariantPath,
         },
     });
 	// Variant 3 (MeshShaderVariant::UnlitTransparent): same unlit shader, alpha-blended, no depth write.
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
 		.fragmentShader = ShaderSource{
-			.text = graphicsPipelineLayout.additionalVariants[0].fragmentShader.text,
-			.debugFilePath = graphicsPipelineLayout.additionalVariants[0].fragmentShader.debugFilePath,
+			.text = unlitVariantText,
+			.debugFilePath = unlitVariantPath,
 		},
 		.blendEnable = true,
 		.depthWrite = false,
 	});
 	// Variant 4 (EPipelineIndex::Sky): analytic sky + sun disc, for the inside of the sky sphere.
 	const std::string skyVariantPath = "Shaders/sky.fs.glsl";
+	const std::string skyVariantText = FileSystem::readFileStr(skyVariantPath);
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
 		.fragmentShader = ShaderSource{
-			.text = FileSystem::readFileStr(skyVariantPath),
+			.text = skyVariantText,
 			.debugFilePath = skyVariantPath,
 		},
 	});
 	// Variants 5-7 (Wireframe + gizmos) all shade by vertex position (debug color).
-	const std::string gizmoVariantPath = "Shaders/instanced_indirect_gizmo.fs.glsl";
-	const std::string gizmoVariantText = FileSystem::readFileStr(gizmoVariantPath);
+    const std::string& gizmoVariantPath = unlitVariantPath;
+	const std::string& gizmoVariantText = unlitVariantText;
 	// Variant 5 (EPipelineIndex::WireframeTransparent): tangent-debug color, drawn as lines.
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
 		.fragmentShader = ShaderSource{
 			.text = gizmoVariantText,
 			.debugFilePath = gizmoVariantPath,
-            .defines = { { "POS_IS_COLOR", "1" } },
+            .defines = { },
 		},
 		.blendEnable = false,
 		.depthWrite = true,
 		.polygonMode = vk::PolygonMode::eLine,
+		.cullMode = vk::CullModeFlagBits::eNone, // wireframe: show every edge, both facings
 	});
 	// Variant 6 (EPipelineIndex::GizmoUI): tangent-debug color that stamps the nearest depth. A vertex
 	// shader override (FORCE_NEAR_DEPTH) forces gl_Position.z = 0 (NDC near) without touching x/y/w, so
@@ -80,7 +83,7 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 		.vertexShader = ShaderSource{
 			.text = graphicsPipelineLayout.vertexShader.text,
 			.debugFilePath = graphicsPipelineLayout.vertexShader.debugFilePath,
-			.defines = { { "FORCE_NEAR_DEPTH", "1" }, { "POS_IS_COLOR", "1" } },
+			.defines = { { "FORCE_NEAR_DEPTH", "1" } },
 		},
 		.fragmentShader = ShaderSource{
 			.text = gizmoVariantText,
@@ -89,6 +92,7 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 		.blendEnable = false,
 		.depthWrite = true,
 		.depthTest = true,
+		.cullMode = vk::CullModeFlagBits::eNone, // gizmo: double-sided so it reads from any angle
 	});
 	// Variant 7 (EPipelineIndex::GizmoWorld): tangent-debug color, depth tested (occluded by geometry),
 	// alpha-blended, no depth write (world-space gizmo).
@@ -96,8 +100,9 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 		.fragmentShader = ShaderSource{
 			.text = gizmoVariantText,
 			.debugFilePath = gizmoVariantPath,
-            .defines = { { "POS_IS_COLOR", "1" } },
+            .defines = { },
 		},
+		.cullMode = vk::CullModeFlagBits::eNone, // gizmo: double-sided so it reads from any angle
 	});
 
     // VR: every shader in this pipeline selects the per-eye view (u_views[u_viewIndex]) from one push

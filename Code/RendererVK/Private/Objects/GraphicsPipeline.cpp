@@ -281,6 +281,7 @@ bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipeli
         pipelineDepthStencilStateCreateInfo.depthWriteEnable = variant.depthWrite ? vk::True : vk::False;
         pipelineColorBlendAttachmentState.blendEnable = variant.blendEnable ? vk::True : vk::False;
         pipelineRasterizationStateCreateInfo.polygonMode = variant.polygonMode;
+        pipelineRasterizationStateCreateInfo.cullMode = variant.cullMode;
         if (variant.blendEnable)
         {
             // Standard "over" alpha blending: src.rgb*src.a + dst.rgb*(1-src.a), keep dst alpha.

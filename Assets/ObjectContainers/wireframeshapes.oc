@@ -1,0 +1,5 @@
+ObjectContainer wireshapes
+	Path "Models/baseshapes.glb"
+	MaterialOverrides
+		PipelineIdx WireframeTransparent
+		ExcludeFromRayTracing true

@@ -68,9 +68,6 @@ void main()
     // touched, so x/y/w (and thus the on-screen shape) are unchanged; the gizmo just always wins depth.
     gl_Position.z = 0.0;
 #endif
-#ifdef POS_IS_COLOR
-    out_pos = in_normal;
-#endif
 }
 
 /*mat3 version

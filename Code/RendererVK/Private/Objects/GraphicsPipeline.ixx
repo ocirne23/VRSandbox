@@ -34,6 +34,9 @@ export struct PipelineVariant
     bool depthTest = true;
     // Wireframe variants set eLine; everything else keeps the solid fill of variant 0.
     vk::PolygonMode polygonMode = vk::PolygonMode::eFill;
+    // Per-variant face culling. Defaults to the back-face culling variant 0 uses; set eFront or eNone
+    // for inverted / double-sided variants (e.g. wireframe and gizmo overlays).
+    vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
 };
 
 export struct GraphicsPipelineLayout

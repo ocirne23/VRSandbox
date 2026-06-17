@@ -1,0 +1,4 @@
+Entity SphereBlue
+	Component RenderNode
+		ObjectContainer wireshapes
+		Node Sphere
