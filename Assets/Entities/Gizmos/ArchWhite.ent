@@ -1,0 +1,4 @@
+Entity ArchWhite
+	Component RenderNode
+		ObjectContainer gizmos
+		Node Arch4

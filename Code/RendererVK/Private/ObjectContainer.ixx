@@ -47,7 +47,7 @@ public:
         bool excludeFromRayTracing = false;
         // Keep the scene's own textures (ignore the texture index overrides above) while still applying
         // the pipeline/ray-tracing overrides. For e.g. the procedural sky sphere's gradient texture.
-        bool useSceneTextures = false;
+        bool useSceneTextures = true;
     };
 
     bool initialize(const ISceneData& sceneData, const MaterialOverrides* pOverrides = nullptr);

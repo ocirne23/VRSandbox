@@ -1,0 +1,4 @@
+Entity PlaneGreen
+	Component RenderNode
+		ObjectContainer gizmos
+		Node Plane2

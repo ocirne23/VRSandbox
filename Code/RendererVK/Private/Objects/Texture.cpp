@@ -117,6 +117,7 @@ bool Texture::initialize(const ITextureData& textureData, bool generateMips, boo
             int numComponents = 0;
             int desiredComponents = 1;
 			stbi_info_from_memory((stbi_uc*)textureData.getPixels(), bufferSize, &width, &height, &desiredComponents);
+            desiredComponents = 4;
             stbi_uc* pixelData = stbi_load_from_memory((stbi_uc*)textureData.getPixels(), bufferSize, &width, &height, &numComponents, desiredComponents);
             if (!pixelData)
             {

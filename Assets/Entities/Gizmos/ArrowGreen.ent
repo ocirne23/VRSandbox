@@ -1,0 +1,4 @@
+Entity Arrow2
+	Component RenderNode
+		ObjectContainer gizmos
+		Node Arrow2

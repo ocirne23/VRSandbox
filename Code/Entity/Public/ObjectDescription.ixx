@@ -13,7 +13,7 @@ export struct MaterialOverridesDesc
     bool present = false;
     std::string pipeline;                // "LitOpaque" / "UnlitOpaque" / "Sky" / ... (empty = default)
     bool excludeFromRayTracing = false;
-    bool useSceneTextures = false;
+    bool useSceneTextures = true;
     int diffuseTexIdx = -1;              // -1 leaves the override default in place
     int normalTexIdx = -1;
     int metalRoughnessTexIdx = -1;
