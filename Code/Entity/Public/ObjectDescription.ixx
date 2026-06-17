@@ -31,27 +31,13 @@ export struct ObjectContainerDesc
     MaterialOverridesDesc materialOverrides;
 };
 
-// One component of an entity. The type names the component; the parsed subtree is kept
-// so callers can read arbitrary properties (Position, Rotation, Name, ...) by key.
-export struct ComponentDesc
-{
-    std::string type;
-    AssetNode node;
-
-    const AssetNode* find(std::string_view key) const { return node.find(key); }
-    const std::string& property(std::string_view key) const;
-    float floatProperty(std::string_view key, float fallback = 0.0f) const;
-    glm::vec3 vec3Property(std::string_view key, const glm::vec3& fallback = glm::vec3(0.0f)) const;
-};
-
-// Parsed ".ent" file: a named entity with an ordered list of components.
+// Parsed ".ent" declaration: just its name plus the raw declaration node. The World builds a spawn
+// template straight from `node` (reading its "Component <type>" blocks), exactly as it does for a
+// ".pre" prefab declaration — entities and prefabs are the same kind of thing.
 export struct EntityDesc
 {
     std::string name;
-    std::string filePath;                // path of the ".ent" file this entity was declared in
-    std::vector<ComponentDesc> components;
-
-    const ComponentDesc* findComponent(std::string_view type) const;
+    AssetNode node;                      // the full "Entity ..." declaration subtree
 };
 
 // Build a typed description from an already-parsed top-level declaration node.

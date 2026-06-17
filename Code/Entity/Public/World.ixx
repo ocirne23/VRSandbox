@@ -31,16 +31,12 @@ public:
     // The caller owns the returned entity: let the handle drop to destroy it.
     EntityPtr spawn(const std::string& name, const Transform& base);
 
-    // Spawn every object declared in a dropped asset file, anchored at base. The file path is
-    // resolved to its declaration names via the registry's file map (no re-reading), then each is
-    // spawned by name. Returns a handle per spawned entity; empty if the file isn't known.
+    // Spawn every object a dropped asset file declares — entities and prefab hierarchies alike — and
+    // return an owning handle per top-level root. The file resolves to its declarations via the
+    // registry's file map (no re-read; a just-saved file falls back to a single parse). The first
+    // declaration lands at `base`; the rest keep their authored offset from it, and each composes its
+    // own authored rotation/scale onto `base`. A prefab's children come along inside their root.
     std::vector<EntityPtr> spawnAssetFile(const std::string& path, const Transform& base);
-
-    // Loads a prefab (.pre) hierarchy saved from the editor and instantiates it, re-spawning each
-    // entity's source ".ent" (mesh/RenderNode) and rebuilding the parent/child structure. The whole
-    // hierarchy is offset so its first root lands at `base`. Returns the owning handle(s) to the
-    // top-level entit(ies); scene-component roots are also registered with the EntityRegistry.
-    std::vector<EntityPtr> loadPrefab(const std::string& path, const Transform& base);
 
     // Returns the ObjectContainer registered under name, loading it on first use.
     ObjectContainer* getOrLoadContainer(const std::string& name);
@@ -50,31 +46,34 @@ public:
 private:
 
     ObjectContainer* loadContainer(const ObjectContainerDesc& desc);
-    void registerTemplate(const EntityDesc& desc);
 
-    // Returns the spawn template for prefab `name`: a cache hit touches no asset file, a miss reads
-    // the registered .pre once (building every prefab it declares). Nested "Prefab <name>" references
-    // resolve through here, so a prefab referenced many times is only read once. Null if unresolved.
-    const EntitySpawnTemplate* getOrBuildPrefabTemplate(const std::string& name);
+    // Returns the spawn template for `name` — an entity (".ent") or a prefab (".pre"), built the same
+    // way. A cache hit touches no asset file; a miss builds from the registry (a prefab read pulls in
+    // every declaration in its file). Nested references resolve through here, so any file is read at
+    // most once. Null if `name` resolves to nothing.
+    const EntitySpawnTemplate* getOrBuildTemplate(const std::string& name);
 
-    // Reads a .pre file once and builds+caches a template for every "Prefab" it declares, returning
-    // them in declaration order. The fallback for a dropped file the registry hasn't scanned.
-    std::vector<const EntitySpawnTemplate*> buildPrefabFileTemplates(const std::string& path);
+    // Builds and caches a template from an already-parsed entity/prefab declaration node.
+    const EntitySpawnTemplate* cacheTemplate(const std::string& name, const AssetNode& node);
 
-    // Builds and caches a prefab template from an already-parsed "Prefab" definition node.
-    const EntitySpawnTemplate* cachePrefabTemplate(const std::string& name, const AssetNode& def);
+    // Reads an asset file once and builds+caches a template for every entity/prefab it declares,
+    // returning them in declaration order. The fallback for a dropped file the registry hasn't scanned.
+    std::vector<const EntitySpawnTemplate*> buildFileTemplates(const std::string& path);
 
-    // Fills `tmpl` (a Scene-archetype container) from a parsed "Prefab" definition: its Scene
-    // component's Enabled flag and child references become a SceneComponent::SpawnInfo.
-    void buildPrefabTemplate(const AssetNode& def, EntitySpawnTemplate& tmpl);
+    // Builds `tmpl` from an entity/prefab declaration node: bakes placement/name/sourceAsset, then the
+    // parse-once SpawnInfo for each component the node declares (a RenderNode mesh, a Scene block of
+    // children, or both). This is the single point where entities and prefabs are turned into templates.
+    void buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl);
 
-    // Resolves the "Entity"/"Prefab" child references inside a Scene component block to their spawn
-    // templates and placements, appending them to `out`. `defOrigin` is the prefab root's authored
-    // position, so child positions are stored relative to it.
-    void buildSceneChildren(const AssetNode& sceneNode, const glm::vec3& defOrigin, SceneComponent::SpawnInfo& out);
+    // Resolves a "RenderNode" component block to a cached RenderComponent::SpawnInfo (its container +
+    // node + local transform), or null if the referenced ObjectContainer can't be loaded.
+    std::shared_ptr<RenderComponent::SpawnInfo> buildRenderSpawnInfo(const AssetNode& renderNode, const std::string& ownerName);
+
+    // Resolves a "Scene" component block to a SceneComponent::SpawnInfo: its Enabled flag plus each
+    // child reference's resolved template and placement (stored relative to `origin`).
+    std::shared_ptr<SceneComponent::SpawnInfo> buildSceneSpawnInfo(const AssetNode& sceneNode, const glm::vec3& origin);
 
     std::unordered_map<std::string, std::unique_ptr<ObjectContainer>> m_containers;
-    std::unordered_map<std::string, std::unique_ptr<EntitySpawnTemplate>> m_spawnTemplates;
-    std::unordered_map<std::string, std::unique_ptr<EntitySpawnTemplate>> m_prefabTemplates; // built-once prefab templates, keyed by prefab name
-    std::unordered_set<std::string> m_loadingPrefabs; // names currently being built (cycle guard)
+    std::unordered_map<std::string, std::unique_ptr<EntitySpawnTemplate>> m_templates; // entity + prefab templates, keyed by name
+    std::unordered_set<std::string> m_buildingTemplates; // names currently being built (cycle guard)
 };

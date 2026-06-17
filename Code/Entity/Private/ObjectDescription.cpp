@@ -13,33 +13,6 @@ static bool iequals(std::string_view a, std::string_view b)
     return true;
 }
 
-const std::string& ComponentDesc::property(std::string_view key) const
-{
-    static const std::string empty;
-    const AssetNode* p = node.find(key);
-    return p ? p->asString() : empty;
-}
-
-float ComponentDesc::floatProperty(std::string_view key, float fallback) const
-{
-    const AssetNode* p = node.find(key);
-    return p ? p->asFloat(0, fallback) : fallback;
-}
-
-glm::vec3 ComponentDesc::vec3Property(std::string_view key, const glm::vec3& fallback) const
-{
-    const AssetNode* p = node.find(key);
-    return p ? p->asVec3(fallback) : fallback;
-}
-
-const ComponentDesc* EntityDesc::findComponent(std::string_view type) const
-{
-    for (const ComponentDesc& component : components)
-        if (iequals(component.type, type))
-            return &component;
-    return nullptr;
-}
-
 bool toObjectContainerDesc(const AssetNode& node, ObjectContainerDesc& out)
 {
     if (!iequals(node.key, "ObjectContainer"))
@@ -83,13 +56,7 @@ bool toEntityDesc(const AssetNode& node, EntityDesc& out)
 
     out = EntityDesc{};
     out.name = node.asString(0);
-    for (const AssetNode* component : node.findAll("Component"))
-    {
-        ComponentDesc desc;
-        desc.type = component->asString(0);
-        desc.node = *component;
-        out.components.push_back(std::move(desc));
-    }
+    out.node = node;
     return true;
 }
 

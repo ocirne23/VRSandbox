@@ -82,7 +82,7 @@ int main()
     World world;
     world.initialize();
 
-    std::vector<EntityPtr> entities = world.loadPrefab("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+    std::vector<EntityPtr> entities = world.spawnAssetFile("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
@@ -206,22 +206,18 @@ int main()
         // Apply editor UI mutations. The app owns the World and the root-entity list, so it does the
         // spawning here and reconciles ownership: roots are kept in `entities`, entities parented under
         // another are owned by that parent's SceneComponent (dropped from the list).
-        auto spawnAsset = [&](const std::string& path, const Transform& base)
-        {
-            return path.ends_with(".pre") ? world.loadPrefab(path, base) : world.spawnAssetFile(path, base);
-        };
         for (EntityChange& change : ui.takeEntityChanges())
         {
             if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
             {
                 const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), cv->screenPos);
-                for (EntityPtr& e : spawnAsset(cv->path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))))
+                for (EntityPtr& e : world.spawnAssetFile(cv->path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))))
                     entities.push_back(std::move(e));
             }
             else if (auto* ch = std::get_if<EntityChange::CreateHierarchy>(&change.type))
             {
                 const Transform base(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-                for (EntityPtr& e : spawnAsset(ch->path, base))
+                for (EntityPtr& e : world.spawnAssetFile(ch->path, base))
                 {
                     if (ch->parent && hasComponent<SceneComponent>(ch->parent))
                         reparentEntity(e.get(), ch->parent);   // parent's SceneComponent takes ownership
