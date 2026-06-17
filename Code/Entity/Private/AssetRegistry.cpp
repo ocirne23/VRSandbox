@@ -37,7 +37,7 @@ static std::string toLower(std::string s)
     return s;
 }
 
-// Key for m_fileObjects: the path relative to the scan root, lowercased and lexically normalized
+// Key for m_fileRoot: the path relative to the scan root, lowercased and lexically normalized
 // (collapses the leading ".\" the directory iterator emits and unifies separators) so a dropped
 // path resolved with std::filesystem::relative matches the scanned entry.
 static std::string fileKey(const std::filesystem::path& path)
@@ -50,7 +50,7 @@ void AssetRegistry::clear()
     m_objectContainers.clear();
     m_entities.clear();
     m_prefabs.clear();
-    m_fileObjects.clear();
+    m_fileRoot.clear();
 }
 
 void AssetRegistry::scanDirectory(const std::string& rootDir)
@@ -69,7 +69,12 @@ void AssetRegistry::scanDirectory(const std::string& rootDir)
     for (const std::filesystem::directory_entry& entry : iter)
     {
         if (entry.is_regular_file(ec) && isAssetFile(entry.path()))
-            registerFile(entry.path().string());
+        {
+            auto path = entry.path().string();
+            const std::filesystem::path relativePath = std::filesystem::relative(path, ec);
+            const std::string filePath = (ec || relativePath.empty()) ? path : relativePath.string();
+            registerFile(filePath);
+        }
     }
 }
 
@@ -84,7 +89,15 @@ void AssetRegistry::registerFile(const std::string& path)
     }
 
     const std::string fileName = fileKey(path);
-    std::vector<std::string>& fileObjects = m_fileObjects[fileName];
+
+    // Records `name` as the file's single spawnable root, warning if the file declares a second one.
+    auto setRoot = [&](const std::string& name)
+    {
+        if (m_fileRoot.try_emplace(fileName, name).second)
+            return;
+        Log::warning("AssetRegistry: '" + path + "' declares more than one root entity/prefab "
+            "(keeping '" + m_fileRoot[fileName] + "', ignoring '" + name + "')");
+    };
 
     for (const AssetNode& decl : root.children)
     {
@@ -98,11 +111,8 @@ void AssetRegistry::registerFile(const std::string& path)
                 Log::warning("AssetRegistry: unnamed ObjectContainer in " + path);
                 continue;
             }
-            const std::string name = desc.name;
             if (!m_objectContainers.try_emplace(desc.name, std::move(desc)).second)
                 Log::warning("AssetRegistry: duplicate ObjectContainer '" + decl.asString(0) + "' (keeping first), in " + path);
-            else
-                fileObjects.push_back(name);
         }
         else if (iequals(decl.key, "Entity"))
         {
@@ -119,7 +129,7 @@ void AssetRegistry::registerFile(const std::string& path)
             if (!m_entities.try_emplace(desc.name, std::move(desc)).second)
                 Log::warning("AssetRegistry: duplicate Entity '" + decl.asString(0) + "' (keeping first), in " + path);
             else
-                fileObjects.push_back(name);
+                setRoot(name);
         }
         else if (iequals(decl.key, "Prefab"))
         {
@@ -132,7 +142,7 @@ void AssetRegistry::registerFile(const std::string& path)
             if (!m_prefabs.try_emplace(name, path).second)
                 Log::warning("AssetRegistry: duplicate Prefab '" + name + "' (keeping first), in " + path);
             else
-                fileObjects.push_back(name);
+                setRoot(name);
         }
         else
         {
@@ -164,8 +174,8 @@ void AssetRegistry::addPrefab(const std::string& name, const std::string& path)
     m_prefabs.insert_or_assign(name, path);
 }
 
-const std::vector<std::string>* AssetRegistry::findObjectsForFile(const std::string& fileName) const
+const std::string* AssetRegistry::findRootForFile(const std::string& fileName) const
 {
-    const auto it = m_fileObjects.find(fileKey(fileName));
-    return it != m_fileObjects.end() ? &it->second : nullptr;
+    const auto it = m_fileRoot.find(fileKey(fileName));
+    return it != m_fileRoot.end() ? &it->second : nullptr;
 }

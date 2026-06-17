@@ -2,6 +2,7 @@ module UI.PropertiesPanel;
 
 import Core.imgui;
 import Core.glm;
+import Entity;
 import Entity.Component;
 import RendererVK;
 
@@ -28,6 +29,15 @@ void PropertiesPanel::render(Entity* selected)
 			nameBuf[sizeof(nameBuf) - 1] = '\0';
 			if (ImGui::InputText("##pp_name", nameBuf, sizeof(nameBuf), ImGuiInputTextFlags_EnterReturnsTrue))
 				selected->name = nameBuf;
+		}
+
+		{
+			const std::string& asset = entitySourceAsset(selected);
+			ImGui::AlignTextToFramePadding();
+			ImGui::Text("Asset");
+			ImGui::SameLine(80.0f);
+			ImGui::SetNextItemWidth(-1.0f);
+			ImGui::TextWrapped("%s", asset.empty() ? "<none>" : asset.c_str());
 		}
 
 		if (sc)

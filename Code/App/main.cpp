@@ -91,7 +91,8 @@ int main()
     World world;
     world.initialize();
 
-    std::vector<EntityPtr> entities = world.spawnAssetFile("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+    std::vector<EntityPtr> entities;
+    entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
@@ -217,20 +218,17 @@ int main()
             if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
             {
                 const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), cv->screenPos);
-                for (EntityPtr& e : world.spawnAssetFile(cv->path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))))
-                    entities.push_back(std::move(e));
+                entities.push_back(world.spawnAssetFile(cv->path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
             }
             else if (auto* ch = std::get_if<EntityChange::CreateHierarchy>(&change.type))
             {
                 const Transform base(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
                 // Hierarchy drop: keep the asset's authored position/scale offset (don't anchor at base).
-                for (EntityPtr& e : world.spawnAssetFile(ch->path, base, false))
-                {
-                    if (ch->parent && hasComponent<SceneComponent>(ch->parent))
-                        reparentEntity(e.get(), ch->parent);   // parent's SceneComponent takes ownership
-                    else
-                        entities.push_back(std::move(e));
-                }
+                EntityPtr e = world.spawnAssetFile(ch->path, base, false);
+                if (ch->parent && hasComponent<SceneComponent>(ch->parent))
+                    reparentEntity(e.get(), ch->parent);   // parent's SceneComponent takes ownership
+                else
+                    entities.push_back(std::move(e));
             }
             else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
                 std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });

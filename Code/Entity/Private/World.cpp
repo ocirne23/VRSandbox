@@ -187,26 +187,25 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
 
     // Resolve each component the declaration carries to its parse-once SpawnInfo, indexed by id.
     uint16 typeBits = 0;
-    std::array<std::shared_ptr<void>, MaxInlineComponentTypes> infos{};
 
+    static_assert(EComponentID_Scene == 0);
+    if (const AssetNode* sceneNode = findComponentNode(node, "Scene"))
+        if (std::shared_ptr<SceneComponent::SpawnInfo> info = buildSceneSpawnInfo(*sceneNode, tmpl.defaultTransform.pos))
+        {
+            typeBits |= uint16(1 << EComponentID_Scene);
+            tmpl.spawnInfos.emplace_back(std::move(info));
+        }
+
+    static_assert(EComponentID_Render == 3);
     if (const AssetNode* renderNode = findComponentNode(node, "RenderNode"))
         if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.sourceAsset))
         {
             typeBits |= uint16(1 << EComponentID_Render);
-            infos[EComponentID_Render] = std::move(info);
+            tmpl.spawnInfos.emplace_back(std::move(info));
         }
-
-    if (const AssetNode* sceneNode = findComponentNode(node, "Scene"))
-    {
-        typeBits |= uint16(1 << EComponentID_Scene);
-        infos[EComponentID_Scene] = buildSceneSpawnInfo(*sceneNode, tmpl.defaultTransform.pos);
-    }
 
     // One spawn-info slot per set component bit, in id order (null where a present component has none).
     tmpl.archetype = makeEntityArchetype(typeBits);
-    for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
-        if (typeBits & (1 << i))
-            tmpl.spawnInfos.push_back(std::move(infos[i]));
 }
 
 const EntitySpawnTemplate* World::cacheTemplate(const std::string& name, const std::string& filePath, const AssetNode& node)
@@ -227,27 +226,23 @@ const EntitySpawnTemplate* World::cacheTemplate(const std::string& name, const s
     return ptr;
 }
 
-std::vector<const EntitySpawnTemplate*> World::buildFileTemplates(const std::string& path)
+const EntitySpawnTemplate* World::buildFileTemplate(const std::string& path)
 {
-    std::vector<const EntitySpawnTemplate*> templates;
-
     AssetNode doc;
     std::string error;
     if (!loadAssetFile(path, doc, error))
     {
         Log::warning("Scene: asset load failed: " + error);
-        return templates;
+        return nullptr;
     }
 
-    // Build a template for each spawnable declaration (an "Entity" or a "Prefab"), in file order.
+    // A spawnable file declares a single root: build the template for its first "Entity"/"Prefab".
     for (const AssetNode& decl : doc.children)
         if (keyIs(decl, "Entity") || keyIs(decl, "Prefab"))
-            if (const EntitySpawnTemplate* tmpl = cacheTemplate(decl.asString(), path, decl))
-                templates.push_back(tmpl);
+            return cacheTemplate(decl.asString(), path, decl);
 
-    if (templates.empty())
-        Log::warning("Scene: asset '" + path + "' declared no spawnable entities or prefabs");
-    return templates;
+    Log::warning("Scene: asset '" + path + "' declared no spawnable entity or prefab");
+    return nullptr;
 }
 
 const EntitySpawnTemplate* World::getOrBuildTemplate(const std::string& name)
@@ -262,15 +257,14 @@ const EntitySpawnTemplate* World::getOrBuildTemplate(const std::string& name)
     }
 
     // An entity declaration builds straight from its (already-parsed) node; a prefab reads its file,
-    // which builds every declaration in it. Either way the result is cached under `name`.
+    // which builds its single root declaration. Either way the result is cached under `name`.
     if (const EntityDesc* desc = Globals::assetRegistry.findEntity(name))
         return cacheTemplate(name, desc->name, desc->node);
 
     if (const std::string* prefabPath = Globals::assetRegistry.findPrefab(name))
     {
-        buildFileTemplates(*prefabPath);
-        if (auto it = m_templates.find(name); it != m_templates.end())
-            return it->second.get();
+        if (const EntitySpawnTemplate* tmpl = buildFileTemplate(*prefabPath))
+            return tmpl; // its declared root name == `name`
         Log::warning("Scene: prefab '" + name + "' not declared in '" + *prefabPath + "', skipping");
         return nullptr;
     }
@@ -279,11 +273,9 @@ const EntitySpawnTemplate* World::getOrBuildTemplate(const std::string& name)
     return nullptr;
 }
 
-std::vector<EntityPtr> World::spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform)
+EntityPtr World::spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform)
 {
-    std::vector<EntityPtr> spawned;
-
-    // Resolve the dropped file to the templates it declares: cache-first via the registry's file map
+    // Resolve the dropped file to its single root template: cache-first via the registry's file map
     // (mapped at scan time, no re-read), falling back to a single parse for a file the registry hasn't
     // scanned (e.g. a just-saved prefab). The drop payload is an absolute path while the registry keys
     // by path relative to its scan root (the Assets working dir), so relativize for the lookup.
@@ -291,30 +283,14 @@ std::vector<EntityPtr> World::spawnAssetFile(const std::string& path, const Tran
     const std::filesystem::path relativePath = std::filesystem::relative(path, ec);
     const std::string fileName = (ec || relativePath.empty()) ? path : relativePath.string();
 
-    std::vector<const EntitySpawnTemplate*> templates;
-    if (const std::vector<std::string>* names = Globals::assetRegistry.findObjectsForFile(fileName))
-    {
-        templates.reserve(names->size());
-        for (const std::string& name : *names)
-            if (const EntitySpawnTemplate* tmpl = getOrBuildTemplate(name))
-                templates.push_back(tmpl);
-    }
-    else
-    {
-        templates = buildFileTemplates(path);
-    }
-    if (templates.empty())
-        return spawned;
+    const std::string* rootName = Globals::assetRegistry.findRootForFile(fileName);
+    const EntitySpawnTemplate* tmpl = rootName ? getOrBuildTemplate(*rootName) : buildFileTemplate(fileName);
+    if (!tmpl)
+        return EntityPtr{};
 
-    // Compose each declaration's full authored transform onto `base`. When anchoring (a viewport drop),
-    // the first declaration's authored position is cancelled so it lands exactly at `base`, with the
-    // rest keeping their offset from it; otherwise (a hierarchy drop) the authored position is kept too.
-    const glm::vec3 anchor = overrideDefaultTransform ? templates[0]->defaultTransform.pos : glm::vec3(0.0f);
-    for (const EntitySpawnTemplate* tmpl : templates)
-    {
-        const Transform& dt = tmpl->defaultTransform;
-        const Transform rootBase = composeTransform(base, Transform(dt.pos - anchor, dt.scale, dt.quat));
-        spawned.push_back(spawnFromTemplate(*tmpl, rootBase));
-    }
-    return spawned;
+    // Compose the root's authored transform onto `base`. When anchoring (a viewport drop) the authored
+    // position is cancelled so it lands exactly at `base`; otherwise (a hierarchy drop) it is kept.
+    const Transform& dt = tmpl->defaultTransform;
+    const glm::vec3 pos = overrideDefaultTransform ? glm::vec3(0.0f) : dt.pos;
+    return spawnFromTemplate(*tmpl, composeTransform(base, Transform(pos, dt.scale, dt.quat)));
 }

@@ -31,14 +31,12 @@ public:
     // The caller owns the returned entity: let the handle drop to destroy it.
     EntityPtr spawn(const std::string& name, const Transform& base);
 
-    // Spawn every object a dropped asset file declares — entities and prefab hierarchies alike — and
-    // return an owning handle per top-level root. The file resolves to its declarations via the
-    // registry's file map (no re-read; a just-saved file falls back to a single parse). The first
-    // declaration composes its full authored transform (position/rotation/scale) onto `base`. With
-    // overrideDefaultTransform (a viewport drop at the cursor), the first declaration's authored position is
-    // instead cancelled so it lands exactly at `base` and the rest keep their offset from it. A prefab's
-    // children come along inside their root.
-    std::vector<EntityPtr> spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform = true);
+    // Spawn the single root a dropped asset file declares — an entity or a prefab hierarchy — and
+    // return its owning handle. The file resolves to its root via the registry's file map (no re-read;
+    // a just-saved file falls back to a single parse). The root composes its authored transform onto
+    // `base`; with overrideDefaultTransform (a viewport drop at the cursor) the authored position is
+    // cancelled so it lands exactly at `base`. A prefab's children come along inside their root.
+    EntityPtr spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform = true);
 
     // Returns the ObjectContainer registered under name, loading it on first use.
     ObjectContainer* getOrLoadContainer(const std::string& name);
@@ -58,9 +56,9 @@ private:
     // Builds and caches a template from an already-parsed entity/prefab declaration node.
     const EntitySpawnTemplate* cacheTemplate(const std::string& name, const std::string& filePath, const AssetNode& node);
 
-    // Reads an asset file once and builds+caches a template for every entity/prefab it declares,
-    // returning them in declaration order. The fallback for a dropped file the registry hasn't scanned.
-    std::vector<const EntitySpawnTemplate*> buildFileTemplates(const std::string& path);
+    // Reads an asset file once and builds+caches the template for the single root entity/prefab it
+    // declares. The fallback for a dropped file the registry hasn't scanned. Null if it declares none.
+    const EntitySpawnTemplate* buildFileTemplate(const std::string& path);
 
     // Builds `tmpl` from an entity/prefab declaration node: bakes placement/name/sourceAsset, then the
     // parse-once SpawnInfo for each component the node declares (a RenderNode mesh, a Scene block of
