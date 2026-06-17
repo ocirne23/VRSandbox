@@ -85,7 +85,15 @@ void SceneView::dropTargetReparentUnder(Entity* parent)
 			m_pendingReparentTarget = parent;
 		}
 	}
+	acceptAssetSpawnPayload(parent);   // also accept asset-browser drops to spawn a child here
 	ImGui::EndDragDropTarget();
+}
+
+void SceneView::acceptAssetSpawnPayload(Entity* parent)
+{
+	if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_FILE"))
+		m_changes.push_back({ EntityChange::CreateHierarchy{
+			std::string(static_cast<const char*>(payload->Data)), EntityPtr(parent) } });
 }
 
 void SceneView::renderEntityNode(Entity* entity)
@@ -238,9 +246,9 @@ void SceneView::applyPendingMutations()
 		const std::string name = "Entity " + std::to_string(++m_entityCounter);
 		EntityPtr created = createSceneEntity(0, Transform(), name.c_str());
 		if (m_pendingCreateParent)
-			reparentEntity(created, m_pendingCreateParent);
-        else
-            m_reparentedEntities.emplace_back(true, created);
+			reparentEntity(created, m_pendingCreateParent);   // parent's SceneComponent owns it; no hand-off
+		else
+			m_changes.push_back({ EntityChange::Reparent{ created, EntityPtr() } }); // new root → app takes ownership
 		m_selected = created.get();
 		beginRename(m_selected);
 		m_hasPendingCreate    = false;
@@ -250,7 +258,7 @@ void SceneView::applyPendingMutations()
 	{
 		if (m_selected == m_pendingDelete)        m_selected = nullptr;
 		if (m_renamingEntity == m_pendingDelete)  m_renamingEntity = nullptr;
-		m_deletedEntities.emplace_back(m_pendingDelete); // own it until polled, before removeEntity drops the scene-graph ref
+		m_changes.push_back({ EntityChange::Delete{ EntityPtr(m_pendingDelete) } }); // own it until polled, before removeEntity drops the scene-graph ref
 		removeEntity(m_pendingDelete);
 		m_pendingDelete = nullptr;
 	}
@@ -261,7 +269,7 @@ void SceneView::applyPendingMutations()
 		Entity* oldParent = child->parent;
 
 		if (oldParent != target)
-			m_reparentedEntities.emplace_back(target == nullptr, EntityPtr(child));
+			m_changes.push_back({ EntityChange::Reparent{ EntityPtr(child), EntityPtr(target) } });
 
 		reparentEntity(child, target);
 
@@ -313,6 +321,7 @@ void SceneView::render(const std::vector<EntityPtr>& rootEntities)
 				m_pendingReparentTarget = nullptr;
 			}
 		}
+		acceptAssetSpawnPayload(nullptr);   // asset dropped on empty space spawns at the World root
 		ImGui::EndDragDropTarget();
 	}
 

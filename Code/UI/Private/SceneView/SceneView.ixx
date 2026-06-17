@@ -21,18 +21,11 @@ public:
 	Entity* getSelected() const          { return m_selected; }
 	void    setSelected(Entity* entity)  { m_selected = entity; }
 
-	// Entities deleted via the panel since the last call (drain once per frame, like takeAssetDrops).
-	// The returned handles keep each entity alive until the caller drops them, letting owners outside
-	// the scene graph (e.g. the app's root-entity list) drop their own handle by matching pointers.
-	std::vector<EntityPtr> takeDeletedEntities() { return std::move(m_deletedEntities); }
-
-	// Entities whose root-status changed via a panel reparent since the last call (drain once per
-	// frame). Each entry is {isRoot, handle}: isRoot == true means it was moved out to the top level
-	// and is now a root, so an external owner (e.g. the app's root-entity list) should TAKE the handle
-	// (the scene graph may not own it otherwise); isRoot == false means it was put under another entity
-	// whose lifecycle now owns it, so that owner should DROP its handle (matched by pointer). The
-	// handle keeps the entity alive across the hand-off either way.
-	std::vector<std::tuple<bool, EntityPtr>> handleReparentedEntities() { return std::move(m_reparentedEntities); }
+	// Mutations made through the panel since the last call (drain once per frame). The panel performs
+	// the scene-graph change itself (create / delete / reparent); each EntityChange reports it to the
+	// app so it can spawn dropped assets (CreateHierarchy) and reconcile its own root-entity list
+	// against Delete/Reparent. The owning handles inside keep entities alive across the hand-off.
+	std::vector<EntityChange> takeChanges() { return std::move(m_changes); }
 
 private:
 
@@ -43,11 +36,11 @@ private:
 
 	bool dragSourceFor(Entity* entity);     // returns true while this entity is being dragged
 	void dropTargetReparentUnder(Entity* parent); // accepts a dragged scene entity, reparents under `parent`
+	void acceptAssetSpawnPayload(Entity* parent); // queues an "ASSET_FILE" drop to spawn under `parent`
 
 	void applyPendingMutations();
 
-	std::vector<EntityPtr> m_deletedEntities;                        // queued for the app to poll (keeps them alive meanwhile)
-	std::vector<std::tuple<bool, EntityPtr>> m_reparentedEntities;   // {isRoot, handle} root-status changes for the app to reconcile
+	std::vector<EntityChange> m_changes;                            // panel mutations queued for the app to drain
 
 	Entity* m_selected       = nullptr;
 	Entity* m_renamingEntity = nullptr;

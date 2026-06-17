@@ -203,19 +203,42 @@ int main()
             camera = cameraController.getCamera();
         }
 
-        for (const EntityPtr& deleted : ui.takeDeletedEntities())
-            std::erase_if(entities, [&deleted](const EntityPtr& e) { return e.get() == deleted.get(); });
-        for (auto& [isRoot, entity] : ui.handleReparentedEntities())
-            isRoot ? entities.push_back(std::move(entity)) : (void)std::erase_if(entities, [&](const EntityPtr& h) { return h == entity; });
-        for (const UI::AssetDrop& drop : ui.takeAssetDrops())
+        // Apply editor UI mutations. The app owns the World and the root-entity list, so it does the
+        // spawning here and reconciles ownership: roots are kept in `entities`, entities parented under
+        // another are owned by that parent's SceneComponent (dropped from the list).
+        auto spawnAsset = [&](const std::string& path, const Transform& base)
         {
-            const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), drop.screenPos);
-            const Transform base(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-            std::vector<EntityPtr> spawned = drop.path.ends_with(".pre")
-                ? world.loadPrefab(drop.path, base)
-                : world.spawnAssetFile(drop.path, base);
-            for (EntityPtr& e : spawned)
-                entities.push_back(std::move(e));
+            return path.ends_with(".pre") ? world.loadPrefab(path, base) : world.spawnAssetFile(path, base);
+        };
+        for (EntityChange& change : ui.takeEntityChanges())
+        {
+            if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
+            {
+                const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), cv->screenPos);
+                for (EntityPtr& e : spawnAsset(cv->path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))))
+                    entities.push_back(std::move(e));
+            }
+            else if (auto* ch = std::get_if<EntityChange::CreateHierarchy>(&change.type))
+            {
+                const Transform base(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+                for (EntityPtr& e : spawnAsset(ch->path, base))
+                {
+                    if (ch->parent && hasComponent<SceneComponent>(ch->parent))
+                        reparentEntity(e.get(), ch->parent);   // parent's SceneComponent takes ownership
+                    else
+                        entities.push_back(std::move(e));
+                }
+            }
+            else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
+            {
+                std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });
+            }
+            else if (auto* rep = std::get_if<EntityChange::Reparent>(&change.type))
+            {
+                // The panel already performed the scene-graph reparent; reconcile only ownership.
+                rep->newParent ? (void)std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); })
+                               : entities.push_back(std::move(rep->entity));
+            }
         }
 
         const Frustum& frustum = renderer.beginFrame(camera);

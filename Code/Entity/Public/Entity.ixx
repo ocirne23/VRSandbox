@@ -133,3 +133,35 @@ export EntityArchetype makeEntityArchetype(uint16 typeBits);
 // the typeBits form is a convenience that builds the archetype first. Both defined in Entity.cpp.
 export EntityPtr createEntity(const EntityArchetype& archetype, const Transform& transform);
 export EntityPtr createEntity(uint16 typeBits, const Transform& transform);
+
+// A single entity mutation requested through the editor UI, drained once per frame by the app, which
+// owns the World (the spawner) and the root-entity list. The two Create cases carry the asset path to
+// spawn (the UI has no World access); Delete/Reparent carry an owning handle that keeps the entity
+// alive across the hand-off so the app can reconcile its own list by matching pointers.
+export struct EntityChange
+{
+    // Asset (mesh or .pre) dropped onto the Scene hierarchy: spawn it and parent under `parent`
+    // (nullptr = a top-level root the app owns). No screen position — placement comes from the parent.
+    struct CreateHierarchy
+    {
+        std::string path;
+        EntityPtr   parent;   // nullptr = World root
+    };
+    // Asset dropped onto the Viewport: spawn it at the world point under `screenPos` as a top-level root.
+    struct CreateViewport
+    {
+        glm::ivec2  screenPos;
+        std::string path;
+    };
+    struct Delete
+    {
+        EntityPtr entity;
+    };
+    // The entity was reparented in the panel; newParent == nullptr means it became a top-level root.
+    struct Reparent
+    {
+        EntityPtr entity;
+        EntityPtr newParent; // nullptr = root
+    };
+    std::variant<CreateHierarchy, CreateViewport, Delete, Reparent> type;
+};

@@ -35,25 +35,19 @@ public:
     bool hasViewportGainedFocused() const { return m_hasViewportGainedFocus; }
     const Rect& getViewportRect() const { return m_viewportRect; }
 
-    // An asset file dropped onto the Viewport from the asset browser. screenPos is the drop point
-    // in screen pixels (same space as getViewportRect()), for the app to unproject into the world.
-    struct AssetDrop
+    // All entity mutations requested through the UI since the last call (drain once per frame): Scene
+    // panel create/delete/reparent plus assets dropped onto the Viewport (CreateViewport) or the Scene
+    // hierarchy (CreateHierarchy). The app owns the World and its root-entity list, so it applies the
+    // spawns and reconciles ownership against Delete/Reparent. Owning handles inside keep entities
+    // alive across the hand-off.
+    std::vector<EntityChange> takeEntityChanges()
     {
-        std::string path;
-        glm::vec2   screenPos;
-    };
-    // Returns and clears the drops queued since the last call (drain once per frame).
-    std::vector<AssetDrop> takeAssetDrops() { return std::move(m_assetDrops); }
-
-    // Entities deleted in the Scene panel since the last call (drain once per frame). Each handle
-    // keeps its entity alive until dropped, so the app can match pointers and release its own handle.
-    std::vector<EntityPtr> takeDeletedEntities() { return m_sceneView.takeDeletedEntities(); }
-
-    // Entities whose root-status changed via a Scene-panel reparent since the last call (drain once
-    // per frame). Each {isRoot, handle}: isRoot == true means it became a top-level root and the app
-    // should take the handle; isRoot == false means it was put under another entity that now owns it,
-    // so the app should drop its handle (matched by pointer).
-    std::vector<std::tuple<bool, EntityPtr>> handleReparentedEntities() { return m_sceneView.handleReparentedEntities(); }
+        std::vector<EntityChange> changes = m_sceneView.takeChanges();
+        changes.insert(changes.end(), std::make_move_iterator(m_viewportChanges.begin()),
+                                      std::make_move_iterator(m_viewportChanges.end()));
+        m_viewportChanges.clear();
+        return changes;
+    }
 
 private:
 
@@ -61,7 +55,7 @@ private:
     bool m_isViewportFocused = false;
     bool m_hasViewportGainedFocus = false;
     Rect m_viewportRect = Rect();
-    std::vector<AssetDrop> m_assetDrops;
+    std::vector<EntityChange> m_viewportChanges;   // assets dropped onto the viewport, drained via takeEntityChanges
 
     ed::EditorContext* m_nodeEditorContext = nullptr;
 

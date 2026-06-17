@@ -133,7 +133,8 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             {
                 const char* droppedPath = static_cast<const char*>(payload->Data);
                 const ImVec2 mouse = ImGui::GetMousePos();
-                m_assetDrops.push_back({ std::string(droppedPath), glm::vec2(mouse.x, mouse.y) });
+                m_viewportChanges.push_back({ EntityChange::CreateViewport{
+                    glm::ivec2(int(mouse.x), int(mouse.y)), std::string(droppedPath) } });
             }
             ImGui::EndDragDropTarget();
         }
