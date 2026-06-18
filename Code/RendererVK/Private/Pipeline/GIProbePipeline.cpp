@@ -235,8 +235,11 @@ void GIProbePipeline::initializeDebug(vk::RenderPass renderPass)
         m_debugSets[i].initialize(m_debugPipeline.getDescriptorSetLayout());
 }
 
-void GIProbePipeline::reloadDebugShaders()
+void GIProbePipeline::reloadDebugShaders(vk::RenderPass renderPass)
 {
+    // sceneColor's render pass is recreated on window resize, so refresh the cached handle rather than
+    // reloading against the (possibly dangling) one captured at initializeDebug().
+    m_debugRenderPass = renderPass;
     if (!m_debugRenderPass)
         return;
     GraphicsPipelineLayout layout; buildDebugLayout(layout);

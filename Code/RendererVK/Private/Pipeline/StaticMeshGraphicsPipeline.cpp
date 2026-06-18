@@ -350,8 +350,11 @@ void StaticMeshGraphicsPipeline::createPreprocessBuffers(uint32 maxUniqueMeshes)
     }
 }
 
-void StaticMeshGraphicsPipeline::reloadShaders(uint32 maxTextures)
+void StaticMeshGraphicsPipeline::reloadShaders(vk::RenderPass renderPass, uint32 maxTextures)
 {
+    // sceneColor's render pass is recreated on window resize, so refresh the cached handle rather than
+    // reloading against the (possibly dangling) one captured at initialize().
+    m_renderPass = renderPass;
     if (!m_renderPass)
         return;
 

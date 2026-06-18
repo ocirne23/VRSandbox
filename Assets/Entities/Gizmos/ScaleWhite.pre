@@ -1,4 +1,4 @@
-Prefab ArrowWhite
+Prefab ScaleWhite
 	Component RenderNode
 		ObjectContainer gizmos
-		Node Arrow4
+		Node Scale4

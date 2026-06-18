@@ -429,7 +429,7 @@ void Renderer::reloadShaders()
         return;
     }
 
-    m_staticMeshGraphicsPipeline.reloadShaders(m_maxTextures);
+    m_staticMeshGraphicsPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass(), m_maxTextures);
     m_gbufferPipeline.reloadShaders(m_perFrameData[m_swapChain.getPrevFrameIdx()].gbuffer);
     m_rtaoPipeline.reloadShaders();
     m_volumetricFogPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
@@ -438,7 +438,7 @@ void Renderer::reloadShaders()
     m_shadowCullComputePipeline.reloadShaders();
     m_shadowMapGraphicsPipeline.reloadShaders(m_maxTextures);
     m_giProbePipeline.reloadShaders(m_maxTextures);
-    m_giProbePipeline.reloadDebugShaders();
+    m_giProbePipeline.reloadDebugShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_taaPipeline.reloadShaders();
     m_eyeAdaptationPipeline.reloadShaders();
     m_compositePipeline.reloadShaders(m_renderPass);

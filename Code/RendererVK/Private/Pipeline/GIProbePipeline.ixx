@@ -73,7 +73,7 @@ public:
     // Debug visualization: instanced cubes at every clipmap probe, drawn into the main color pass.
     // initializeDebug must be called after the main render pass exists.
     void initializeDebug(vk::RenderPass renderPass);
-    void reloadDebugShaders();
+    void reloadDebugShaders(vk::RenderPass renderPass);
     void recordDebugDraw(CommandBuffer& commandBuffer, uint32 frameIdx, Buffer& ubo, float radius, uint32 mode);
 
     Buffer& getTlasInstanceBuffer(uint32 frameIdx) { return m_tlasInstanceBuffer[frameIdx]; }
