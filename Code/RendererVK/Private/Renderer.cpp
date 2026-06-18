@@ -169,12 +169,10 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     _putenv("DISABLE_VULKAN_OBS_CAPTURE=True");
 
     auto rerecordCallback = [this]() { setHaveToRecordCommandBuffers(); };
-
     m_skyParams.registerTweaks();
     m_fogParams.registerTweaks();
     m_rtParams.registerTweaks();
-    m_rtaoParams.registerTweaks(rerecordCallback);
-    if (vr == EVr::ENABLED) m_taaParams.taaFeedback *= 0.5f; // Reduce blur for VR;
+    m_rtaoParams.registerTweaks(rerecordCallback, [this]() { if (Globals::device.getGraphicsQueue().waitIdle() != vk::Result::eSuccess) return; m_rtaoPipeline.reloadShaders(); setHaveToRecordCommandBuffers(); });
     m_taaParams.registerTweaks(rerecordCallback);
     m_postParams.registerTweaks(rerecordCallback);
 
@@ -188,18 +186,16 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     }
     m_vsyncEnabled = (vsync == EVSync::ENABLED);
 
-    // OpenXR phase 1: create the XR instance + system BEFORE the Vulkan instance/device so the runtime
-    // can dictate the required Vulkan extensions and the physical device that drives the HMD.
-    // Instance/Device query Globals::openXR.isEnabled() during their own init. Any failure leaves
-    // isEnabled() false and the engine runs desktop-only.
     if (vr == EVr::ENABLED)
+    {
+        m_taaParams.taaFeedback *= 0.5f; // Reduce blur for VR
         Globals::openXR.initInstanceAndSystem();
+    }
 
     Globals::instance.initialize(window, enableValidationLayers);
     Globals::instance.setBreakOnValidationLayerError(enableValidationLayers);
     Globals::device.initialize();
 
-    // OpenXR phase 2: bind the session to the now-created Vulkan device and build the stereo swapchain.
     if (Globals::openXR.isEnabled())
     {
         if (!Globals::openXR.createSession(Globals::instance.getInstance(), Globals::device.getPhysicalDevice(),
@@ -227,21 +223,15 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
 
     const vk::Extent2D ext = m_swapChain.getLayout().extent;
 
-    // In VR the scene-colour target + forward pass are multiview (one layer per eye); on desktop it's a
-    // plain single-view target. Fixed at init from whether an OpenXR session came up.
     m_sceneViewCount = Globals::openXR.isEnabled() ? 2u : 1u;
 
-    // HDR scene target: the scene stays float (linear radiance, no clipping) all the way to the
-    // composite pass, which does the exposure + tonemap down to the 8-bit swapchain. Created before the
-    // pipelines that draw into its render pass (static mesh/sky, fog apply, GI probe debug) — they must
-    // be built against a render-pass with this format, not the swapchain's.
     for (PerFrameData& perFrame : m_perFrameData)
         perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height, m_sceneViewCount);
     const vk::RenderPass sceneRenderPass = m_perFrameData[0].sceneColor.getRenderPass();
 
     m_maxTextures = Globals::textureManager.getDescriptorCap(); // fixed layout cap; live count grows separately
     m_staticMeshGraphicsPipeline.initialize(sceneRenderPass, m_maxUniqueMeshes, m_maxTextures, m_sceneViewCount > 1);
-    m_rtaoPipeline.initialize(&m_rtaoParams, ext.width, ext.height, m_sceneViewCount);
+    m_rtaoPipeline.initialize(&m_rtaoParams, ext.width, ext.height, m_maxTextures, m_numTextureDescriptors, m_sceneViewCount);
     m_volumetricFogPipeline.initialize();
     m_volumetricFogPipeline.initializeApply(sceneRenderPass, m_sceneViewCount);
     m_taaPipeline.initialize(ext.width, ext.height, m_sceneViewCount);
@@ -261,7 +251,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
         perFrame.shadowMap.initialize();
     }
     m_shadowMapGraphicsPipeline.initialize(m_perFrameData[0].shadowMap, m_maxUniqueMeshes, m_maxTextures);
-    m_gbufferPipeline.initialize(m_perFrameData[0].gbuffer);
+    m_gbufferPipeline.initialize(m_perFrameData[0].gbuffer, m_maxTextures);
 
     vk::Device vkDevice = Globals::device.getDevice();
 
@@ -272,7 +262,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
         for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
         {
             perFrame.staticMeshPipelineDescriptorSet[eye].initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
-            perFrame.gbufferDescriptorSet[eye].initialize(m_gbufferPipeline.getDescriptorSetLayout());
+            perFrame.gbufferDescriptorSet[eye].initialize(m_gbufferPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
         }
         perFrame.compositeDescriptorSet.initialize(m_compositePipeline.getDescriptorSetLayout());
 
@@ -331,7 +321,6 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     }
     createLightGridBuffers();
 
-    // VR: per-eye composite descriptor sets + LDR targets (tonemap each eye's SceneColor layer).
     if (m_sceneViewCount > 1)
     {
         for (uint32 i = 0; i < 2; ++i)
@@ -493,10 +482,14 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         m_numTextureDescriptors = Globals::textureManager.getMaxTextures();
         waitForGpuAndFlushStaging();
         m_giProbePipeline.resizeTextureDescriptors(m_numTextureDescriptors);
+        m_rtaoPipeline.resizeTextureDescriptors(m_numTextureDescriptors);
         for (PerFrameData& perFrame : m_perFrameData)
         {
             for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
+            {
                 perFrame.staticMeshPipelineDescriptorSet[eye].initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
+                perFrame.gbufferDescriptorSet[eye].initialize(m_gbufferPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
+            }
             perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
         }
         setHaveToRecordCommandBuffers();
@@ -1132,6 +1125,11 @@ void Renderer::recordAOInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
         .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(eyeIndex),
         .gbufferSampler = gbuffer.getSampler(),
         .tlas = tlas,
+        .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+        .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
+        .meshInfos = m_meshInfosBuffer,
+        .meshInstances = frameData.inMeshInstancesBuffer,
+        .materialInfos = m_materialInfosBuffer,
     };
     m_rtaoPipeline.record(cb, frameIdx, eyeIndex, aoParams);
 }
@@ -1208,14 +1206,17 @@ void Renderer::recordAO(uint32 frameIdx)
             .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(),
             .gbufferSampler = gbuffer.getSampler(),
             .tlas = tlas,
+            .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+            .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
+            .meshInfos = m_meshInfosBuffer,
+            .meshInstances = frameData.inMeshInstancesBuffer,
+            .materialInfos = m_materialInfosBuffer,
         };
         m_rtaoPipeline.record(cb, frameIdx, 0, aoParams);
     }
     cb.end();
 }
 
-// Volumetric fog compute (scatter + integrate). Like the AO pass it bakes the TLAS handle, so a TLAS
-// rebuild forces a re-record. The apply draw lives in its own secondary CB inside the scene-color pass.
 void Renderer::recordVolumetricFog(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -1378,10 +1379,6 @@ void Renderer::destroyEyeCompositeTargets()
     if (m_eyeDepthImage) { Globals::gpuAllocator.destroyImage(m_eyeDepthImage, m_eyeDepthMem); m_eyeDepthImage = nullptr; m_eyeDepthMem = nullptr; }
 }
 
-// Diffuse global illumination (hardware ray tracing). Re-recorded every frame: it refits the ray-tracing TLAS
-// from the live instance list and rotates the probe ray set (m_frameCounter) / clipmap freshness (prevViewPos)
-// per frame, so unlike the scene passes it cannot be recorded once. Recorded after the shadow + light-grid
-// passes (the trace samples both) and before the main pass (which reads the probe SH).
 bool Renderer::recordGlobalIllum(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];

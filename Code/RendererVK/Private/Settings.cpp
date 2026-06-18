@@ -100,7 +100,7 @@ void RTParams::registerTweaks()
     Tweak::boolean("RT", "RT Sky Radiance", &rtSkyRadiance);
 }
 
-void RTAOParams::registerTweaks(const std::function<void()>& onReRecord)
+void RTAOParams::registerTweaks(const std::function<void()>& onReRecord, const std::function<void()>& onReloadShaders)
 {
     Tweak::boolean("RTAO", "Enabled", &enabled, onReRecord);
     Tweak::intVar("RTAO", "Rays Per Pixel", &rays, 1, 32, 1.0f, onReRecord);
@@ -109,6 +109,7 @@ void RTAOParams::registerTweaks(const std::function<void()>& onReRecord)
     Tweak::floatVar("RTAO", "Intensity", &intensity, 0.0f, 4.0f, 0.01f, onReRecord);
     Tweak::floatVar("RTAO", "Max History", &maxHistory, 0.0f, 1.0f, 0.01f, onReRecord);
     Tweak::intVar("RTAO", "Blur Radius", &blurRadius, 0, 8, 1.0f, onReRecord);
+    Tweak::boolean("RTAO", "Alpha Test", &alphaTest, onReloadShaders);
 }
 
 void TAAParams::registerTweaks(const std::function<void()>& onReRecord)

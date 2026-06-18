@@ -6,8 +6,10 @@ import File.FileSystem;
 import :CommandBuffer;
 import :Device;
 import :Layout;
+import :TextureManager;
+import :Texture;
 
-void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout)
+void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout, uint32 maxTextures)
 {
     layout.vertexShader.debugFilePath = "Shaders/gbuffer.vs.glsl";
     layout.fragmentShader.debugFilePath = "Shaders/gbuffer.fs.glsl";
@@ -22,6 +24,7 @@ void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout)
     auto& attributes = layout.vertexLayoutInfo.attributeDescriptions;
     attributes.push_back(vk::VertexInputAttributeDescription{ .location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(RendererVKLayout::MeshVertex, position) });
     attributes.push_back(vk::VertexInputAttributeDescription{ .location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(RendererVKLayout::MeshVertex, normal) });
+    attributes.push_back(vk::VertexInputAttributeDescription{ .location = 3, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(RendererVKLayout::MeshVertex, texCoord) }); // UV for the alpha-mask discard
     attributes.push_back(vk::VertexInputAttributeDescription{ .location = 4, .binding = 2, .format = vk::Format::eR32Uint, .offset = 0 });
 
     auto& descriptorSetBindings = layout.descriptorSetLayoutBindings;
@@ -29,32 +32,39 @@ void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout)
         .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // transformed instances
         .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // material infos (sky flag)
-        .binding = 2, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // material infos (sky flag in VS, alpha mask in FS)
+        .binding = 2, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment });
+    // Texture array (binding 3 = highest, eVariableDescriptorCount) for the fragment alpha-mask test.
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
+        .binding = 3, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+    layout.descriptorBindingFlags.resize(descriptorSetBindings.size());
+    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
 
     // View index (u_views[viewIndex]); the prepass is rendered once per eye in VR (0 = centre on desktop).
     layout.pushConstantRanges.push_back(vk::PushConstantRange{
         .stageFlags = vk::ShaderStageFlagBits::eVertex, .offset = 0, .size = sizeof(uint32) });
 }
 
-void GBufferPipeline::initialize(const GBuffer& gbuffer)
+void GBufferPipeline::initialize(const GBuffer& gbuffer, uint32 maxTextures)
 {
+    m_maxTextures = maxTextures;
+    m_textureSampler.initialize();
     GraphicsPipelineLayout layout;
-    buildPipelineLayout(layout);
+    buildPipelineLayout(layout, maxTextures);
     m_graphicsPipeline.initialize(gbuffer.getRenderPass(), layout);
 }
 
 void GBufferPipeline::reloadShaders(const GBuffer& gbuffer)
 {
     GraphicsPipelineLayout layout;
-    buildPipelineLayout(layout);
+    buildPipelineLayout(layout, m_maxTextures);
     if (!m_graphicsPipeline.reloadShaders(gbuffer.getRenderPass(), layout))
         printf("GBufferPipeline: shader reload failed, keeping previous pipeline\n");
 }
 
 void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, uint32 viewIndex)
 {
-    std::array<DescriptorSetUpdateInfo, 3> updates{
+    std::vector<DescriptorSetUpdateInfo> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = sizeof(RendererVKLayout::Ubo) } } },
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer,
@@ -62,6 +72,12 @@ void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint
         DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.materialInfoBuffer.getBuffer(), .range = vk::WholeSize } } },
     };
+    // Texture array (binding 3) for the fragment alpha-mask test; same source as the forward/GI passes.
+    DescriptorSetUpdateInfo texUpdate{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler };
+    for (const Texture& tex : Globals::textureManager.getTextures())
+        texUpdate.imageInfos.push_back(vk::DescriptorImageInfo{ .sampler = m_textureSampler.getSampler(), .imageView = tex.getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal });
+    if (!texUpdate.imageInfos.empty())
+        updates.push_back(std::move(texUpdate));
 
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
     vk::DescriptorSet descriptorSet = params.descriptorSet.getDescriptorSet();

@@ -1,6 +1,7 @@
 #version 460
 
 #extension GL_EXT_ray_query : require
+#extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_GOOGLE_include_directive : enable
 
 layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
@@ -11,6 +12,44 @@ layout (binding = 1) uniform sampler2D u_gbufferNormal; // world-space normal (x
 layout (binding = 2) uniform sampler2D u_gbufferDepth;  // hardware depth
 layout (binding = 3) uniform accelerationStructureEXT u_tlas;
 layout (binding = 4, rgba16f) uniform restrict writeonly image2D u_aoOut; // rgb = bent normal, a = AO
+
+// Alpha-masked rays are a compile-time variant (RTAO_ALPHA_TEST injected by the pipeline when the
+// "RTAO/Alpha Test" tweak is on); the opaque path compiles out the geometry fetch + alpha test entirely.
+#ifdef RTAO_ALPHA_TEST
+struct MaterialInfo
+{
+    uint flags;
+    float opacity;
+    uint diffuseNormalTexIdx;
+    uint metalRoughnessTexIdxAlphaMode;
+};
+struct InMeshInfo
+{
+    vec3 center;
+    float radius;
+    uint indexCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint _padding;
+};
+struct InMeshInstance
+{
+    uint renderNodeIdx;
+    uint instanceOffsetIdx;
+    uint meshIdxMaterialIdx;
+    uint pipelineIdxAlphaMode;
+};
+// Geometry for the alpha-masked candidate test. Same buffers/layout the GI trace uses; rt_shadow.inc.glsl
+// supplies the alpha test against them.
+layout (binding = 5, std430) readonly buffer InVertices  { float in_vertices[]; }; // MeshVertex as 12 floats
+layout (binding = 6, std430) readonly buffer InIndices   { uint in_indices[]; };
+layout (binding = 7, std430) readonly buffer InMeshInfos { InMeshInfo in_meshInfos[]; };
+layout (binding = 8, std430) readonly buffer InInstances { InMeshInstance in_instances[]; };
+layout (binding = 9, std430) readonly buffer InMaterials { MaterialInfo in_materialInfos[]; };
+layout (binding = 10) uniform sampler2D u_textures[]; // highest binding: variable descriptor count
+
+#include "rt_shadow.inc.glsl"
+#endif
 
 layout (push_constant) uniform PC
 {
@@ -80,9 +119,20 @@ void main()
         vec3 dir = T * (r * cos(phi)) + B * (r * sin(phi)) + N * sqrt(max(0.0, 1.0 - u.x));
 
         rayQueryEXT rq;
-        rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-            0xFFu, worldPos + N * 0.02, 0.01, dir, pc.radius);
+#ifdef RTAO_ALPHA_TEST
+        // Masked geometry is non-opaque in the TLAS; run the alpha test on candidates, hardware still
+        // auto-commits opaque hits. Terminate-on-first-hit gives the nearest confirmed hit for falloff.
+        rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT, 0xFFu, worldPos + N * 0.02, 0.01, dir, pc.radius);
+        while (rayQueryProceedEXT(rq))
+        {
+            if (rayQueryGetIntersectionTypeEXT(rq, false) == gl_RayQueryCandidateIntersectionTriangleEXT
+                && rtsCandidateBlocks(rq))
+                rayQueryConfirmIntersectionEXT(rq);
+        }
+#else
+        rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFFu, worldPos + N * 0.02, 0.01, dir, pc.radius);
         while (rayQueryProceedEXT(rq)) {}
+#endif
         if (rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionTriangleEXT)
         {
             float t = rayQueryGetIntersectionTEXT(rq, true);

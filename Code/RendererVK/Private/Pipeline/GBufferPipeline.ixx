@@ -7,6 +7,7 @@ import :Buffer;
 import :CommandBuffer;
 import :GraphicsPipeline;
 import :DescriptorSet;
+import :Sampler;
 import :Layout;
 import :GBuffer;
 
@@ -17,7 +18,7 @@ import :GBuffer;
 export class GBufferPipeline final
 {
 public:
-    void initialize(const GBuffer& gbuffer);
+    void initialize(const GBuffer& gbuffer, uint32 maxTextures);
     void reloadShaders(const GBuffer& gbuffer);
 
     struct RecordParams
@@ -37,7 +38,9 @@ public:
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
 
 private:
-    void buildPipelineLayout(GraphicsPipelineLayout& layout);
+    void buildPipelineLayout(GraphicsPipelineLayout& layout, uint32 maxTextures);
 
     GraphicsPipeline m_graphicsPipeline;
+    Sampler m_textureSampler;  // repeat + full-mip sampler for the alpha-mask texture array
+    uint32 m_maxTextures = 0;  // fixed device-limit cap baked into the layout
 };

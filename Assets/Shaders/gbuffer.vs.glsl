@@ -30,9 +30,12 @@ layout (binding = 2, std430) readonly buffer InMaterials { MaterialInfo in_mater
 
 layout (location = 0) in vec3 in_pos;
 layout (location = 1) in vec3 in_normal;
+layout (location = 3) in vec2 in_uv;
 layout (location = 4) in uint inst_idx;
 
 layout (location = 0) out vec3 out_normal; // world-space geometric normal
+layout (location = 1) out vec2 out_uv;
+layout (location = 2) out flat uint out_meshIdxMaterialIdx; // for the fragment alpha-mask discard
 
 vec3 quat_transform(vec3 v, vec4 q)
 {
@@ -50,9 +53,13 @@ void main()
     {
         gl_Position = vec4(0.0, 0.0, 2.0, 1.0); // behind the far plane; clipped
         out_normal = vec3(0.0);
+        out_uv = vec2(0.0);
+        out_meshIdxMaterialIdx = 0u;
         return;
     }
     vec3 worldPos = quat_transform(in_pos * inst.posScale.w, inst.quat) + inst.posScale.xyz;
     out_normal = quat_transform(in_normal, inst.quat);
+    out_uv = in_uv;
+    out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
     gl_Position = u_mvp * vec4(worldPos, 1.0);
 }

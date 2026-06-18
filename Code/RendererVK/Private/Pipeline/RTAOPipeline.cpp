@@ -6,6 +6,8 @@ import File.FileSystem;
 import :Device;
 import :Allocator;
 import :CommandBuffer;
+import :TextureManager;
+import :Texture;
 
 namespace
 {
@@ -44,16 +46,33 @@ namespace
     auto sampledRO(vk::Sampler s, vk::ImageView v) { return vk::DescriptorImageInfo{ .sampler = s, .imageView = v, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal }; }
 }
 
-void RTAOPipeline::buildTraceLayout(ComputePipelineLayout& layout)
+void RTAOPipeline::buildTraceLayout(ComputePipelineLayout& layout, uint32 maxTextures)
 {
     layout.computeShaderDebugFilePath = "Shaders/rtao.cs.glsl";
     layout.computeShaderText = FileSystem::readFileStr(layout.computeShaderDebugFilePath);
+    // Alpha-masked rays are a compile-time variant: the opaque path drops the geometry fetch + alpha test
+    // entirely. Toggling the tweak rebuilds this pipeline (see RTAOParams::registerTweaks onReloadShaders).
+    if (m_pParams && m_pParams->alphaTest)
+        layout.defines.push_back({ "RTAO_ALPHA_TEST", "1" });
+    auto storageBinding = [](uint32 binding) {
+        return vk::DescriptorSetLayoutBinding{ .binding = binding, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute };
+    };
     auto& b = layout.descriptorSetLayoutBindings;
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 1, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 2, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 3, .descriptorType = vk::DescriptorType::eAccelerationStructureKHR, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 4, .descriptorType = vk::DescriptorType::eStorageImage, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
+    // Geometry + materials for the alpha-masked candidate test (binding 5..9), then the variable-count
+    // texture array last (binding 10 = highest, required for eVariableDescriptorCount).
+    b.push_back(storageBinding(5)); // vertices
+    b.push_back(storageBinding(6)); // indices
+    b.push_back(storageBinding(7)); // meshInfos
+    b.push_back(storageBinding(8)); // instances
+    b.push_back(storageBinding(9)); // materials
+    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 10, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eCompute });
+    layout.descriptorBindingFlags.resize(b.size());
+    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(RtaoPC) });
 }
 
@@ -174,18 +193,20 @@ void RTAOPipeline::recreateImages(uint32 fullWidth, uint32 fullHeight)
     (void)Globals::device.getGraphicsQueue().waitIdle();
 }
 
-void RTAOPipeline::initialize(const RTAOParams* pParams, uint32 fullWidth, uint32 fullHeight, uint32 viewCount)
+void RTAOPipeline::initialize(const RTAOParams* pParams, uint32 fullWidth, uint32 fullHeight, uint32 maxTextures, uint32 numTextureDescriptors, uint32 viewCount)
 {
     m_pParams = pParams;
     m_viewCount = viewCount;
-    ComputePipelineLayout traceLayout;    buildTraceLayout(traceLayout);       m_tracePipeline.initialize(traceLayout);
+    m_maxTextures = maxTextures;
+    m_textureSampler.initialize();
+    ComputePipelineLayout traceLayout;    buildTraceLayout(traceLayout, maxTextures); m_tracePipeline.initialize(traceLayout);
     ComputePipelineLayout temporalLayout; buildTemporalLayout(temporalLayout); m_temporalPipeline.initialize(temporalLayout);
     ComputePipelineLayout spatialLayout;  buildSpatialLayout(spatialLayout);   m_spatialPipeline.initialize(spatialLayout);
     for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
     for (uint32 e = 0; e < m_viewCount; ++e)
     {
         const uint32 i = slot(f, e);
-        m_traceSets[i].initialize(m_tracePipeline.getDescriptorSetLayout());
+        m_traceSets[i].initialize(m_tracePipeline.getDescriptorSetLayout(), numTextureDescriptors);
         m_temporalSets[i].initialize(m_temporalPipeline.getDescriptorSetLayout());
         m_spatialSets[i].initialize(m_spatialPipeline.getDescriptorSetLayout());
     }
@@ -210,9 +231,18 @@ void RTAOPipeline::initialize(const RTAOParams* pParams, uint32 fullWidth, uint3
     m_aoSampler = samplerResult.value;
 }
 
+void RTAOPipeline::resizeTextureDescriptors(uint32 numTextureDescriptors)
+{
+    // Variable-count texture binding: only the trace sets are re-allocated with the grown live count; the
+    // layout/pipeline declare the fixed device-limit cap and stay untouched (mirrors the GI probe path).
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+    for (uint32 e = 0; e < m_viewCount; ++e)
+        m_traceSets[slot(f, e)].initialize(m_tracePipeline.getDescriptorSetLayout(), numTextureDescriptors);
+}
+
 void RTAOPipeline::reloadShaders()
 {
-    ComputePipelineLayout traceLayout;    buildTraceLayout(traceLayout);
+    ComputePipelineLayout traceLayout;    buildTraceLayout(traceLayout, m_maxTextures);
     ComputePipelineLayout temporalLayout; buildTemporalLayout(temporalLayout);
     ComputePipelineLayout spatialLayout;  buildSpatialLayout(spatialLayout);
     bool ok = m_tracePipeline.reloadShaders(traceLayout);
@@ -277,12 +307,28 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
 
         DescriptorSet& set = m_traceSets[cur];
         vk::DescriptorSet vkSet = set.getDescriptorSet();
-        std::array<DescriptorSetUpdateInfo, 4> updates{
+        auto bufInfo = [](Buffer& buf) { return vk::DescriptorBufferInfo{ .buffer = buf.getBuffer(), .range = buf.getSize() }; };
+        std::vector<DescriptorSetUpdateInfo> updates{
             DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer, .bufferInfos = { uboInfo } },
             DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferNormalView) } },
             DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferDepthView) } },
             DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_raw.view[cur]) } },
         };
+        // Geometry + texture array (bindings 5..10) only feed the alpha-masked variant; skip them otherwise
+        // (the opaque shader declares neither, and the bindings are PartiallyBound).
+        if (m_pParams->alphaTest)
+        {
+            updates.push_back(DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.vertexBuffer) } });
+            updates.push_back(DescriptorSetUpdateInfo{ .binding = 6, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.indexBuffer) } });
+            updates.push_back(DescriptorSetUpdateInfo{ .binding = 7, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.meshInfos) } });
+            updates.push_back(DescriptorSetUpdateInfo{ .binding = 8, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.meshInstances) } });
+            updates.push_back(DescriptorSetUpdateInfo{ .binding = 9, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.materialInfos) } });
+            DescriptorSetUpdateInfo texUpdate{ .binding = 10, .type = vk::DescriptorType::eCombinedImageSampler };
+            for (const Texture& tex : Globals::textureManager.getTextures())
+                texUpdate.imageInfos.push_back(vk::DescriptorImageInfo{ .sampler = m_textureSampler.getSampler(), .imageView = tex.getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal });
+            if (!texUpdate.imageInfos.empty())
+                updates.push_back(std::move(texUpdate));
+        }
         commandBuffer.cmdUpdateDescriptorSets(traceLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         vk::WriteDescriptorSetAccelerationStructureKHR asInfo{ .accelerationStructureCount = 1, .pAccelerationStructures = &params.tlas };
         vk::WriteDescriptorSet asWrite{ .pNext = &asInfo, .dstSet = vkSet, .dstBinding = 3, .descriptorCount = 1, .descriptorType = vk::DescriptorType::eAccelerationStructureKHR };

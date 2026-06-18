@@ -7,6 +7,7 @@ import :Buffer;
 import :CommandBuffer;
 import :ComputePipeline;
 import :DescriptorSet;
+import :Sampler;
 import :Layout;
 import :Settings;
 
@@ -25,8 +26,11 @@ public:
     RTAOPipeline(const RTAOPipeline&) = delete;
 
     // viewCount > 1 (VR) keeps a separate AO image set + history per eye (record() takes the eye index).
-    void initialize(const RTAOParams* pParams, uint32 fullWidth, uint32 fullHeight, uint32 viewCount = 1);
+    // maxTextures = fixed device-limit cap baked into the trace layout; numTextureDescriptors = live count
+    // for the variable-count texture array (used by the alpha-masked candidate test).
+    void initialize(const RTAOParams* pParams, uint32 fullWidth, uint32 fullHeight, uint32 maxTextures, uint32 numTextureDescriptors, uint32 viewCount = 1);
     void recreateImages(uint32 fullWidth, uint32 fullHeight);
+    void resizeTextureDescriptors(uint32 numTextureDescriptors);
     void reloadShaders();
 
     struct RecordParams
@@ -37,6 +41,12 @@ public:
         vk::ImageView prevGbufferDepthView;  // previous frame (disocclusion)
         vk::Sampler   gbufferSampler;
         vk::AccelerationStructureKHR tlas;
+        // Geometry + materials for the alpha-masked candidate test (only consulted when RTAOParams::alphaTest).
+        Buffer& vertexBuffer;
+        Buffer& indexBuffer;
+        Buffer& meshInfos;
+        Buffer& meshInstances;
+        Buffer& materialInfos;
     };
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params);
 
@@ -64,7 +74,7 @@ private:
         std::array<bool, SLOTS> initialized{};
     };
 
-    void buildTraceLayout(ComputePipelineLayout& layout);
+    void buildTraceLayout(ComputePipelineLayout& layout, uint32 maxTextures);
     void buildTemporalLayout(ComputePipelineLayout& layout);
     void buildSpatialLayout(ComputePipelineLayout& layout);
     void createImageSet(ImageSet& set);
@@ -80,6 +90,8 @@ private:
     std::array<DescriptorSet, SLOTS> m_spatialSets;
 
     const RTAOParams* m_pParams = nullptr;
+    uint32 m_maxTextures = 0; // fixed device-limit cap baked into the trace layout
+    Sampler m_textureSampler; // repeat + full-mip sampler for the alpha-mask texture array
 
     uint32 m_width = 0;  // half-res AO dimensions
     uint32 m_height = 0;
