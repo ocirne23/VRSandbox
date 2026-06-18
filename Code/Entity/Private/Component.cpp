@@ -14,7 +14,7 @@ Transform composeTransform(const Transform& parent, const Transform& local)
         glm::normalize(parent.quat * local.quat));
 }
 
-void RenderComponent::spawn(const SpawnInfo& info, const Transform& base)
+void RenderComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {
     if (!info.container)
         return;
@@ -22,45 +22,33 @@ void RenderComponent::spawn(const SpawnInfo& info, const Transform& base)
     node = info.container->spawnNodeForIdx(info.nodeIdx, composeTransform(base, info.localTransform));
 }
 
-void SceneComponent::spawn(const SpawnInfo& info, const Transform& base)
+void RenderComponent::destroy(Entity& entity, const SpawnInfo& info)
+{
+
+}
+
+RenderComponent::~RenderComponent()
+{
+    __debugbreak();
+}
+
+void SceneComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {
     enabled = info.enabled;
-    Entity* self = getEntity();
     for (const SpawnInfo::ChildSpawnInfo& child : info.children)
     {
         if (!child.tmpl)
             continue;
-        EntityPtr childEntity = spawnFromTemplate(*child.tmpl, child.localTransform);
+        EntityPtr childEntity = createEntity(*child.tmpl, child.localTransform);
         if (!child.name.empty())
             childEntity->name = child.name;
-        reparentEntity(childEntity, self); // hands the owning child handle to this entity's children list
+        reparentEntity(childEntity, &entity); // hands the owning child handle to this entity's children list
     }
 }
 
-EntityPtr spawnFromTemplate(const EntitySpawnTemplate& tmpl, const Transform& base)
+void SceneComponent::destroy(Entity& entity, const SpawnInfo& info)
 {
-    EntityPtr entity = createEntity(tmpl.archetype, base);
-    entity->spawnTemplate = &tmpl;
-    entity->name = tmpl.displayName;
 
-    size_t idx = 0;
-    for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
-    {
-        if (!(tmpl.archetype.typeBits & (1 << i)))
-            continue;
-        if (const void* info = tmpl.spawnInfos[idx].get())
-            spawnComponent(entity, EComponentID(i), info, base);
-        ++idx;
-    }
-    return entity;
-}
-
-EntityPtr createSceneEntity(uint16 typeBits, const Transform& transform, const char* name)
-{
-    EntityPtr entity = createEntity(typeBits | (1 << EComponentID_Scene), transform);
-    if (name)
-        entity->name = name;
-    return entity;
 }
 
 static bool isSelfOrDescendant(Entity* node, Entity* ancestor)
@@ -137,6 +125,52 @@ int componentIdFromName(std::string_view name)
     return -1;
 }
 
+void createComponent(Entity* entity, EComponentID id, const void* info, const Transform& base)
+{
+    switch (id)
+    {
+    case EComponentID_Scene:
+    {
+        SceneComponent* sc = getComponent<SceneComponent>(entity);
+        new (sc) SceneComponent();
+        sc->spawn(*entity, *static_cast<const SceneComponent::SpawnInfo*>(info), base);
+        break;
+    }
+    case EComponentID_Render:
+    {
+        RenderComponent* rc = getComponent<RenderComponent>(entity);
+        new (rc) RenderComponent();
+        rc->spawn(*entity, *static_cast<const RenderComponent::SpawnInfo*>(info), base);
+        break;
+    }
+    default: 
+        __debugbreak();
+    }
+}
+
+void destroyComponent(Entity* entity, EComponentID id, const void* info)
+{
+    switch (id)
+    {
+    case EComponentID_Scene:
+    {
+        SceneComponent* sc = getComponent<SceneComponent>(entity);
+        sc->destroy(*entity, *static_cast<const SceneComponent::SpawnInfo*>(info));
+        sc->~SceneComponent();
+        break;
+    }
+    case EComponentID_Render:
+    {
+        RenderComponent* rc = getComponent<RenderComponent>(entity);
+        rc->destroy(*entity, *static_cast<const RenderComponent::SpawnInfo*>(info));
+        rc->~RenderComponent();
+        break;
+    }
+    default: 
+        __debugbreak();
+    }
+}
+
 void serializeComponent(Entity* entity, EComponentID id, AssetNode& out)
 {
     switch (id)
@@ -159,34 +193,4 @@ void deserializeComponent(Entity* entity, EComponentID id, const AssetNode& in)
     case EComponentID_Render: getComponent<RenderComponent>(entity)->deserialize(in);   break;
     default: break;
     }
-}
-
-void spawnComponent(Entity* entity, EComponentID id, const void* info, const Transform& base)
-{
-    switch (id)
-    {
-    case EComponentID_Scene:
-        getComponent<SceneComponent>(entity)->spawn(*static_cast<const SceneComponent::SpawnInfo*>(info), base);
-        break;
-    case EComponentID_Render:
-        getComponent<RenderComponent>(entity)->spawn(*static_cast<const RenderComponent::SpawnInfo*>(info), base);
-        break;
-    default: break; // components without a spawn step
-    }
-}
-
-void constructInlineComponents(Entity* entity)
-{
-    for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
-        if (entity->typeBits & (1 << i))
-            EntityComponentDetail::inlineConstructors[i](
-                reinterpret_cast<uint8*>(entity) + getComponentByteOffset(entity->typeBits, EComponentID(i)));
-}
-
-void destructInlineComponents(Entity* entity)
-{
-    for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
-        if (entity->typeBits & (1 << i))
-            EntityComponentDetail::inlineDestructors[i](
-                reinterpret_cast<uint8*>(entity) + getComponentByteOffset(entity->typeBits, EComponentID(i)));
 }

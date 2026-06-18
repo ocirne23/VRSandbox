@@ -227,13 +227,7 @@ void SceneView::applyPendingMutations()
 	if (m_hasPendingCreate)
 	{
 		const std::string name = "Entity " + std::to_string(++m_entityCounter);
-		EntityPtr created = createSceneEntity(0, Transform(), name.c_str());
-		if (m_pendingCreateParent)
-			reparentEntity(created, m_pendingCreateParent);   // parent's SceneComponent owns it; no hand-off
-		else
-			m_changes.push_back({ EntityChange::Reparent{ created, EntityPtr() } }); // new root → app takes ownership
-		m_selected = created.get();
-		beginRename(m_selected);
+		m_changes.push_back({ EntityChange::AddSceneEntity{ name, EntityPtr(m_pendingCreateParent) } }); // new root → app takes ownership
 		m_hasPendingCreate    = false;
 		m_pendingCreateParent = nullptr;
 	}

@@ -82,7 +82,7 @@ ObjectContainer* World::getOrLoadContainer(const std::string& name)
 EntityPtr World::spawn(const std::string& name, const Transform& base)
 {
     if (std::shared_ptr<const EntitySpawnTemplate> tmpl = getOrBuildPrefabTemplate(name))
-        return spawnFromTemplate(*tmpl, base);
+        return createEntity(*tmpl, base);
     return EntityPtr{};
 }
 
@@ -277,5 +277,5 @@ EntityPtr World::spawnAssetFile(const std::string& path, const Transform& base, 
 
     const Transform& dt = tmpl->defaultTransform;
     const glm::vec3 pos = overrideDefaultTransform ? base.pos : dt.pos;
-    return spawnFromTemplate(*tmpl, Transform(pos, dt.scale, dt.quat));
+    return createEntity(*tmpl, Transform(pos, dt.scale, dt.quat));
 }

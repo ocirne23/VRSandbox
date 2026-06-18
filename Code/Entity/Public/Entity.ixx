@@ -94,8 +94,7 @@ export struct EntityArchetype
 
 export EntityArchetype makeEntityArchetype(uint16 typeBits);
 
-export EntityPtr createEntity(const EntityArchetype& archetype, const Transform& transform);
-export EntityPtr createEntity(uint16 typeBits, const Transform& transform);
+export EntityPtr createEntity(const EntitySpawnTemplate& tmpl, const Transform& transform);
 
 export struct EntitySpawnTemplate
 {
@@ -131,6 +130,11 @@ export struct EntityChange
         glm::ivec2  screenPos;
         std::string path;
     };
+    struct AddSceneEntity
+    {
+        std::string displayName;
+        EntityPtr parent;
+    };
     struct Delete
     {
         EntityPtr entity;
@@ -145,5 +149,5 @@ export struct EntityChange
         EntityPtr   root;
         std::string path;
     };
-    std::variant<CreateHierarchy, CreateViewport, Delete, Reparent, SavePrefab> type;
+    std::variant<CreateHierarchy, CreateViewport, AddSceneEntity, Delete, Reparent, SavePrefab> type;
 };

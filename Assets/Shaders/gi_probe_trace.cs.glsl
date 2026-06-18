@@ -166,12 +166,7 @@ vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist)
     const uint diffuseTexIdx = in_materialInfos[materialIdx].diffuseNormalTexIdx & 0x0000FFFFu;
     const vec3 albedo = textureLod(u_textures[nonuniformEXT(diffuseTexIdx)], uv, GI_ALBEDO_LOD).rgb;
 
-    // RT sun mode: per-hit sun visibility (one terminate-on-first-hit ray), so shadowed hit points stop
-    // contributing sun bounce; evaluating it at the probe center over-brightens GI (probe centers float
-    // in open air and their visibility was applied to every hit). Backfacing hits skip the ray: the sun
-    // term is NdotL-gated to zero anyway. Cascade mode: override stays unset, hits sample the shadow map.
-    if (u_rtSunShadow > 0.5)
-        g_sunShadowOverride = dot(worldN, u_sunDirection.xyz) <= 0.0 ? 0.0 : sunVisibility(worldPos + worldN * 0.02);
+    g_sunShadowOverride = sunVisibility(worldPos + worldN * 0.02);
     vec3 radiance = giGatherDirect(worldPos, worldN, albedo);
     // Previous-frame indirect at the hit -> multi-bounce (infinite, temporally). The cur SH already holds
     // the carried-forward irradiance for this frame.

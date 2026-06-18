@@ -18,8 +18,15 @@ export enum EComponentID : uint16
     EComponentID_GameLogic = 4,
 };
 
-export constexpr uint16 MaxInlineComponentTypes = 4;
+export void createComponent(Entity* entity, EComponentID id, const void* info, const Transform& base);
+export void destroyComponent(Entity* entity, EComponentID id, const void* info);
+export int componentIdFromName(std::string_view name);
+export void serializeComponent(Entity* entity, EComponentID id, AssetNode& out);
+export void deserializeComponent(Entity* entity, EComponentID id, const AssetNode& in);
+export void reparentEntity(Entity* child, Entity* newParent);
+export void removeEntity(Entity* entity);
 
+export constexpr uint16 MaxInlineComponentTypes = 4;
 export constexpr uint16 ComponentAlignment = 16;
 
 export struct SceneComponent
@@ -43,7 +50,8 @@ export struct SceneComponent
     std::vector<EntityPtr> children;
     bool enabled = true;
 
-    void spawn(const SpawnInfo& info, const Transform& base);
+    void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
+	void destroy(Entity& entity, const SpawnInfo& info);
 
     void serialize(AssetNode& out) const { out.set("Enabled", enabled); }
     void deserialize(const AssetNode& in)
@@ -85,10 +93,11 @@ export struct CullingComponent
 export struct RenderComponent
 {
     static constexpr EComponentID getId() { return EComponentID_Render; }
+
+    ~RenderComponent();
+
     RenderNode node;
-
     Transform localTransform;
-
     bool showBounds = false;
 
     struct SpawnInfo
@@ -100,7 +109,8 @@ export struct RenderComponent
         Transform localTransform;                   // applied on top of the spawn base transform
     };
 
-    void spawn(const SpawnInfo& info, const Transform& base);
+    void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
+    void destroy(Entity& entity, const SpawnInfo& info);
 
     void serialize(AssetNode&) const {}
     void deserialize(const AssetNode&) {}
@@ -122,39 +132,16 @@ export constexpr const char* componentTypeName(EComponentID id)
     }
 }
 
-export int componentIdFromName(std::string_view name);
-
-export void serializeComponent(Entity* entity, EComponentID id, AssetNode& out);
-export void deserializeComponent(Entity* entity, EComponentID id, const AssetNode& in);
-
-export void spawnComponent(Entity* entity, EComponentID id, const void* info, const Transform& base);
-
-export EntityPtr spawnFromTemplate(const EntitySpawnTemplate& tmpl, const Transform& base);
-
 namespace EntityComponentDetail
 {
     template <typename T>
-    constexpr T alignUp(T value, T alignment)
-    {
-        return (value + alignment - 1) & ~(alignment - 1);
-    }
-
-    template <typename T> void construct(void* p) { ::new (p) T(); }
-    template <typename T> void destruct(void* p) { static_cast<T*>(p)->~T(); }
-
-    using ConstructFn = void (*)(void*);
-    using DestructFn  = void (*)(void*);
-
+    constexpr T alignUp(T value, T alignment) { return (value + alignment - 1) & ~(alignment - 1); }
     inline constexpr std::array<uint16, MaxInlineComponentTypes> inlineSizes {
         alignUp(uint16(sizeof(SceneComponent)),   ComponentAlignment),
         alignUp(uint16(sizeof(ZoneComponent)),    ComponentAlignment),
         alignUp(uint16(sizeof(CullingComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(RenderComponent)),  ComponentAlignment),
     };
-    inline constexpr std::array<ConstructFn, MaxInlineComponentTypes> inlineConstructors {
-        &construct<SceneComponent>, &construct<ZoneComponent>, &construct<CullingComponent>, &construct<RenderComponent> };
-    inline constexpr std::array<DestructFn, MaxInlineComponentTypes> inlineDestructors {
-        &destruct<SceneComponent>, &destruct<ZoneComponent>, &destruct<CullingComponent>, &destruct<RenderComponent> };
 
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);
 }
@@ -197,12 +184,3 @@ T* getComponent(Entity* entity)
         return nullptr;
     return reinterpret_cast<T*>(reinterpret_cast<uint8*>(entity) + getComponentByteOffset(entity->typeBits, id));
 }
-
-export void constructInlineComponents(Entity* entity);
-export void destructInlineComponents(Entity* entity);
-
-export EntityPtr createSceneEntity(uint16 typeBits, const Transform& transform, const char* name = nullptr);
-
-export void reparentEntity(Entity* child, Entity* newParent);
-
-export void removeEntity(Entity* entity);

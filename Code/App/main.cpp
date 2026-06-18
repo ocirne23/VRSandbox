@@ -224,6 +224,13 @@ int main()
                 else
                     entities.push_back(std::move(e));
             }
+            else if (auto* as = std::get_if<EntityChange::AddSceneEntity>(&change.type))
+            {
+                EntityPtr e = world.spawnAssetFile("Entities/default.pre", Transform());
+				e->name = as->displayName;
+				reparentEntity(e.get(), as->parent);
+                entities.push_back(std::move(e));
+            }
             else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
                 std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });
             else if (auto* rep = std::get_if<EntityChange::Reparent>(&change.type))
