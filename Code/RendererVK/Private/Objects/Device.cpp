@@ -115,7 +115,9 @@ bool Device::initialize()
     vk::PhysicalDeviceVulkan12Features vk12Features
     {
         .pNext = &vk11Features,
+        .storageBuffer8BitAccess = vk::True,
         .shaderFloat16 = vk::True,
+		.shaderInt8 = vk::True,
         .shaderSampledImageArrayNonUniformIndexing = vk::True,
         // Lets the forward pass's cached draw CB keep its denoised-AO image descriptor refreshed each frame
         // (the AO image is ping-ponged per frame and recreated on resize) without re-recording the CB.
@@ -123,8 +125,11 @@ bool Device::initialize()
         .descriptorBindingPartiallyBound = vk::True, // texture arrays are written up to the live texture count only
         .descriptorBindingVariableDescriptorCount = vk::True,
         .runtimeDescriptorArray = vk::True,
+        .scalarBlockLayout = vk::True,
         .timelineSemaphore = vk::True,
         .bufferDeviceAddress = vk::True, // required by VK_EXT_device_generated_commands (indirect/preprocess buffers are referenced by device address)
+        .vulkanMemoryModel = vk::True,
+        .vulkanMemoryModelDeviceScope = vk::True,
         .shaderOutputViewportIndex = vk::True,
         .shaderOutputLayer = vk::True,
     };

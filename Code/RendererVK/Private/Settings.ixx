@@ -21,7 +21,7 @@ export struct SkyParams
     float sunRolloff = 1.25f;           // sky highlight roll-off: soft-clips the overexposed sun region so its gradient survives (0 = raw hard clip)
     float sunRolloffKnee = 0.75f;       // luminance where compression starts at full roll-off (lower = more range compressed)
     float sunRolloffHeadroom = 6.0f;    // brightness range the shoulder absorbs (higher = brighter values stay distinguishable)
-    float shadowDepthBias = 0.0f;       // sun cascade depth bias
+    float shadowDepthBias = 0.0002f;    // sun cascade depth bias
     float shadowNormalBias = 0.0f;      // sun cascade normal bias (texels)
 
     // Ambient + sky radiance (the non-sun lighting inputs)

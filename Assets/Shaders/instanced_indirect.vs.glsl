@@ -66,7 +66,7 @@ void main()
 #ifdef FORCE_NEAR_DEPTH
     // GizmoUI: stamp the nearest depth (NDC z = 0 under Vulkan's [0,1] range, eLess compare). Only z is
     // touched, so x/y/w (and thus the on-screen shape) are unchanged; the gizmo just always wins depth.
-    gl_Position.z = 0.0;
+    gl_Position.z *= 0.01;
 #endif
 }
 
