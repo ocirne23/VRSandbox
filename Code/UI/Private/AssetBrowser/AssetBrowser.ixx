@@ -24,6 +24,7 @@ private:
 	void renderContentList();
 	void acceptPrefabDrop();
 	void renderOverwritePopup();
+	void renderCyclePopup();
 	void queueSavePrefab(Entity* root, const std::filesystem::path& path);
 	void renderContextMenu(const std::filesystem::path& p);
 	void navigateTo(const std::filesystem::path& path);
@@ -39,6 +40,7 @@ private:
 	EntityPtr             m_pendingSaveRoot;       // entity awaiting overwrite confirmation (kept alive)
 	std::filesystem::path m_pendingSavePath;       // target .pre for the pending save
 	bool                  m_openOverwritePopup = false;
+	bool                  m_openCyclePopup     = false;
 
 	char  m_searchBuf[256] = {};
 	float m_leftPaneWidth  = 220.0f;

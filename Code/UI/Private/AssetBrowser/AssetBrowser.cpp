@@ -2,6 +2,7 @@ module UI.AssetBrowser;
 
 import Core.imgui;
 import Entity;
+import Entity.Prefab;
 
 static bool isImageFile(const std::string& ext)
 {
@@ -142,6 +143,7 @@ void AssetBrowser::render()
 	ImGui::EndChild();
 
 	renderOverwritePopup();
+	renderCyclePopup();
 }
 
 void AssetBrowser::queueSavePrefab(Entity* root, const std::filesystem::path& path)
@@ -165,7 +167,12 @@ void AssetBrowser::acceptPrefabDrop()
 		const std::string name = entity->name.empty() ? std::string("Prefab") : entity->name;
 		const std::filesystem::path out = m_currentPath / (name + ".pre");
 		std::error_code ec;
-		if (std::filesystem::exists(out, ec))
+		if (prefabWouldCycle(entity, name))
+		{
+			m_pendingSavePath = out; // for the message filename
+			m_openCyclePopup = true;
+		}
+		else if (std::filesystem::exists(out, ec))
 		{
 			m_pendingSaveRoot = EntityPtr(entity);
 			m_pendingSavePath = out;
@@ -208,6 +215,29 @@ void AssetBrowser::renderOverwritePopup()
 		m_pendingSaveRoot.release();
 		ImGui::CloseCurrentPopup();
 	}
+	ImGui::EndPopup();
+}
+
+void AssetBrowser::renderCyclePopup()
+{
+	static const char* popupId = "Cannot save prefab##ab_cycle";
+	if (m_openCyclePopup)
+	{
+		ImGui::OpenPopup(popupId);
+		m_openCyclePopup = false;
+	}
+
+	const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+	if (!ImGui::BeginPopupModal(popupId, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		return;
+
+	ImGui::Text("\"%s\" contains an instance of itself.\nSaving it would create a prefab cycle.",
+		m_pendingSavePath.filename().string().c_str());
+	ImGui::Separator();
+	if (ImGui::Button("OK", ImVec2(120.0f, 0.0f)))
+		ImGui::CloseCurrentPopup();
 	ImGui::EndPopup();
 }
 

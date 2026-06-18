@@ -25,6 +25,8 @@ public:
 
     void reloadPrefabs();
 
+    void invalidatePrefab(const std::string& name);
+
     ObjectContainer* getOrLoadContainer(const std::string& name);
 
     size_t getNumContainers() const { return m_containers.size(); }

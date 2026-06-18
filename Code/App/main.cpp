@@ -238,7 +238,7 @@ int main()
                 rep->newParent ? (void)std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); }) : entities.push_back(std::move(rep->entity));
             else if (auto* sp = std::get_if<EntityChange::SavePrefab>(&change.type))
                 if (savePrefab(sp->root.get(), sp->path))
-                    world.reloadPrefabs();
+                    world.invalidatePrefab(std::filesystem::path(sp->path).stem().string());
         }
 
         const Frustum& frustum = renderer.beginFrame(camera);

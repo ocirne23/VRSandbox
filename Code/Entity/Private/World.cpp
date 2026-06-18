@@ -93,6 +93,15 @@ void World::reloadPrefabs()
     m_templates.clear();
 }
 
+void World::invalidatePrefab(const std::string& name)
+{
+    if (auto it = m_templates.find(name); it != m_templates.end())
+    {
+        m_retiredTemplates.push_back(std::move(it->second)); // kept alive for live entities
+        m_templates.erase(it);
+    }
+}
+
 static const AssetNode* findComponentNode(const AssetNode& node, const char* name)
 {
     for (const AssetNode* comp : node.findAll("Component"))

@@ -1,6 +1,7 @@
 module Entity.Prefab;
 
 import Core;
+import Core.Log;
 import Core.glm;
 import Entity.Component;
 import Entity.AssetRegistry;
@@ -77,13 +78,98 @@ static void writeSceneChild(Entity* child, AssetNode& sceneComp)
     }
 }
 
+static bool keyEq(const std::string& a, std::string_view b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (size_t i = 0; i < b.size(); ++i)
+        if ((a[i] | 0x20) != (b[i] | 0x20)) // ASCII lower; keys are human-authored
+            return false;
+    return true;
+}
+
+// Gather every prefab reference (`Prefab <name>`) nested anywhere under `node`. References carry only
+// overrides, never nested declarations, so we don't descend into a reference node itself.
+static void collectAssetPrefabRefs(const AssetNode& node, std::vector<std::string>& out)
+{
+    for (const AssetNode& child : node.children)
+    {
+        if (keyEq(child.key, "Prefab"))
+            out.push_back(child.asString());
+        else
+            collectAssetPrefabRefs(child, out);
+    }
+}
+
+// Does prefab `name` (transitively, via its on-disk file) reach `target`?
+static bool prefabFileReaches(const std::string& name, const std::string& target, std::unordered_set<std::string>& visited)
+{
+    if (name == target)
+        return true;
+    if (!visited.insert(name).second)
+        return false; // already explored (guards against a pre-existing cyclic graph on disk)
+
+    const std::string* path = Globals::assetRegistry.findPrefab(name);
+    if (!path)
+        return false;
+
+    AssetNode doc;
+    std::string error;
+    if (!loadAssetFile(*path, doc, error))
+        return false;
+
+    std::vector<std::string> refs;
+    for (const AssetNode& decl : doc.children)
+        if (keyEq(decl.key, "Prefab"))
+            collectAssetPrefabRefs(decl, refs);
+
+    for (const std::string& ref : refs)
+        if (prefabFileReaches(ref, target, visited))
+            return true;
+    return false;
+}
+
+// Prefab instances serialize as a bare reference (not their subtree), so collect the names they spawn;
+// descend only through inline entities, whose bodies are written out in full.
+static void collectLivePrefabRefs(Entity* entity, std::vector<std::string>& out)
+{
+    SceneComponent* sc = getComponent<SceneComponent>(entity);
+    if (!sc)
+        return;
+    for (const EntityPtr& child : sc->children)
+    {
+        if (child->isPrefabInstance() && !child->getPrefabName().empty())
+            out.push_back(child->getPrefabName());
+        else
+            collectLivePrefabRefs(child.get(), out);
+    }
+}
+
+bool prefabWouldCycle(Entity* root, const std::string& id)
+{
+    std::vector<std::string> refs;
+    collectLivePrefabRefs(root, refs);
+
+    std::unordered_set<std::string> visited;
+    for (const std::string& ref : refs)
+        if (prefabFileReaches(ref, id, visited)) // direct (ref == id) or transitive through ref's file
+            return true;
+    return false;
+}
+
 bool savePrefab(Entity* root, const std::string& path)
 {
     if (!root)
         return false;
+    const std::string id = std::filesystem::path(path).stem().string();
+    if (prefabWouldCycle(root, id))
+    {
+        Log::warning("Prefab: refusing to save '" + id + "' — it contains a prefab instance of itself (cycle)");
+        return false;
+    }
+
     AssetNode doc; // synthetic root; its children are the top-level declarations
     AssetNode& node = doc.addChild("Prefab");
-    const std::string id = std::filesystem::path(path).stem().string();
     node.values.emplace_back(id);
     writeEntityBody(root, node, id);
 
