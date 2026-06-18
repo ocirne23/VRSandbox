@@ -321,6 +321,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
     }
     storeWriteToSampledRead();
 
+    if (blurEnabled)
     { // -------- Pass 3: spatial bilateral blur (read accum[cur], write final[cur]) --------
         transitionToGeneral(cmd, m_final, cur, true);
 
@@ -339,6 +340,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
         SpatialPC pc{ .aoWidth = m_width, .aoHeight = m_height, .radius = m_pParams->blurRadius, .viewIndex = viewIndex };
         cmd.pushConstants(spatialLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
+
+        storeWriteToSampledRead();
     }
-    storeWriteToSampledRead();
 }

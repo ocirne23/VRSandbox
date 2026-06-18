@@ -41,7 +41,12 @@ public:
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params);
 
     // Final denoised AO (half-res) for an eye; sampled by the forward pass with getAOSampler() (linear upsample).
-    vk::ImageView getAOView(uint32 frameIdx, uint32 eye) const { return m_final.view[slot(frameIdx, eye)]; }
+    // With the blur disabled (blurRadius <= 0) the spatial pass is skipped, so the accumulated AO is the output.
+    vk::ImageView getAOView(uint32 frameIdx, uint32 eye) const
+    {
+        const ImageSet& out = (m_pParams && m_pParams->blurRadius > 0) ? m_final : m_accum;
+        return out.view[slot(frameIdx, eye)];
+    }
     vk::Sampler   getAOSampler() const { return m_aoSampler; }
     uint32 getWidth() const  { return m_width; }
     uint32 getHeight() const { return m_height; }
