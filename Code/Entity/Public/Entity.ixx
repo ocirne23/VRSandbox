@@ -3,11 +3,35 @@ export module Entity;
 import Core;
 import Core.glm;
 import Core.Transform;
+import File.fwd;
 
 export struct EntitySpawnTemplate;
+export struct EntityPtr;
 
-export struct Entity
+export enum EEntityFlags : uint8
 {
+    EEntityFlag_PrefabInstance = 1 << 0, // root of a locked prefab instance; cleared by "unpack"
+};
+
+export enum EComponentID : uint16
+{
+    EComponentID_Scene  = 0,
+    EComponentID_Zone   = 1,
+    EComponentID_Cull   = 2,
+    EComponentID_Render = 3,
+
+    EComponentID_GameLogic = 4,
+};
+
+export class Entity
+{
+public:
+
+    static EntityPtr create(const EntitySpawnTemplate& tmpl, const Transform& transform);
+    static void destroy(Entity* entity);
+
+public:
+
     glm::vec3 pos;
     float scale = 1.0f;
     glm::quat rot;
@@ -19,15 +43,27 @@ export struct Entity
     uint16 refCount = 0;
     uint16 typeBits = 0;
     uint8 ecsComponentCount = 0;
-    uint8 zoneIdx = 0;
+    uint8 flags = 0; // EEntityFlags bitmask
 
-    ~Entity()
-    {
-        assert(refCount == 0);
-    }
+    ~Entity() { assert(refCount == 0); }
+
+    void serializeComponent(EComponentID id, AssetNode& out);
+    void deserializeComponent(EComponentID id, const AssetNode& in);
+    void reparentEntity(Entity* newParent);
+
+    bool isPrefabInstance() const { return (flags & EEntityFlag_PrefabInstance) != 0; }
+    void setPrefabInstance(bool on) { flags = on ? uint8(flags | EEntityFlag_PrefabInstance) : uint8(flags & ~EEntityFlag_PrefabInstance); }
+    bool isPrefabLocked() const;
+    Entity* nearestPrefabInstance();
+
+    const std::string& getPrefabName() const;
+    const std::string& getSourceFile() const;
+
+private:
+
+    void createComponent(EComponentID id, const void* info, const Transform& base);
+    void destroyComponent(EComponentID id, const void* info);
 };
-
-export void destroyEntity(Entity* entity);
 
 export struct EntityPtr
 {
@@ -71,7 +107,7 @@ export struct EntityPtr
         if (!m_entity)
             return;
         if (std::atomic_ref<uint16>(m_entity->refCount).fetch_sub(1) == 1)
-            destroyEntity(m_entity);
+            Entity::destroy(m_entity);
         m_entity = nullptr;
     }
 
@@ -94,8 +130,6 @@ export struct EntityArchetype
 
 export EntityArchetype makeEntityArchetype(uint16 typeBits);
 
-export EntityPtr createEntity(const EntitySpawnTemplate& tmpl, const Transform& transform);
-
 export struct EntitySpawnTemplate
 {
     EntityArchetype archetype;
@@ -106,16 +140,16 @@ export struct EntitySpawnTemplate
     std::string displayName;
 };
 
-export inline const std::string& entityPrefabName(const Entity* entity)
+inline const std::string& Entity::getPrefabName() const
 {
     static const std::string empty;
-    return entity->spawnTemplate ? entity->spawnTemplate->prefabName : empty;
+    return spawnTemplate ? spawnTemplate->prefabName : empty;
 }
 
-export inline const std::string& entitySourceFile(const Entity* entity)
+inline const std::string& Entity::getSourceFile() const
 {
     static const std::string empty;
-    return entity->spawnTemplate ? entity->spawnTemplate->sourceFile : empty;
+    return spawnTemplate ? spawnTemplate->sourceFile : empty;
 }
 
 export struct EntityChange

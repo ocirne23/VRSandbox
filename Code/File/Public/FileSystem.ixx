@@ -1,7 +1,8 @@
 export module File.FileSystem;
 
-import Core;
 import File.fwd;
+
+import Core;
 
 export class FileSystem final
 {

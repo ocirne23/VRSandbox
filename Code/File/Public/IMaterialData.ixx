@@ -1,8 +1,9 @@
 export module File.IMaterialData;
 
+import File.fwd;
+
 import Core;
 import Core.glm;
-import File.fwd;
 
 export class IMaterialData
 {

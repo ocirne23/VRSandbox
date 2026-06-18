@@ -44,7 +44,7 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
         AssetNode comp;
         comp.key = "Component";
         comp.values.emplace_back(componentTypeName(id));
-        serializeComponent(entity, id, comp); // appends overridable variables as children
+        entity->serializeComponent(id, comp); // appends overridable variables as children
 
         if (id == EComponentID_Render)
             writeRenderNode(entity, comp);
@@ -61,8 +61,8 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
 
 static void writeSceneChild(Entity* child, AssetNode& sceneComp)
 {
-    const std::string& source = entityPrefabName(child); // the prefab name it spawned from, or empty if inline
-    if (!source.empty() && Globals::assetRegistry.findPrefab(source))
+    const std::string& source = child->getPrefabName(); // the prefab name it spawned from, or empty if inline
+    if (child->isPrefabInstance() && !source.empty() && Globals::assetRegistry.findPrefab(source))
     {
         AssetNode& node = sceneComp.addChild("Prefab");
         node.values.emplace_back(source);

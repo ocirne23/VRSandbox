@@ -8,23 +8,8 @@ import File.AssetParser;
 
 import RendererVK;
 
-export enum EComponentID : uint16
-{
-    EComponentID_Scene  = 0,
-    EComponentID_Zone   = 1,
-    EComponentID_Cull   = 2,
-    EComponentID_Render = 3,
-
-    EComponentID_GameLogic = 4,
-};
-
-export void createComponent(Entity* entity, EComponentID id, const void* info, const Transform& base);
-export void destroyComponent(Entity* entity, EComponentID id, const void* info);
 export int componentIdFromName(std::string_view name);
-export void serializeComponent(Entity* entity, EComponentID id, AssetNode& out);
-export void deserializeComponent(Entity* entity, EComponentID id, const AssetNode& in);
-export void reparentEntity(Entity* child, Entity* newParent);
-export void removeEntity(Entity* entity);
+export void detachFromOwner(Entity* entity);
 
 export constexpr uint16 MaxInlineComponentTypes = 4;
 export constexpr uint16 ComponentAlignment = 16;

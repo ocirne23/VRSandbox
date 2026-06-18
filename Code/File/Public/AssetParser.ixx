@@ -1,5 +1,7 @@
 export module File.AssetParser;
 
+import File.fwd;
+
 import Core;
 import Core.glm;
 

@@ -89,7 +89,7 @@ void SceneView::acceptAssetSpawnPayload(Entity* parent)
 			std::string(static_cast<const char*>(payload->Data)), EntityPtr(parent) } });
 }
 
-void SceneView::renderEntityNode(Entity* entity)
+void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 {
 	const bool hasFilter = m_searchBuffer[0] != '\0';
 	if (hasFilter && !matchesFilter(entity, m_searchBuffer))
@@ -97,6 +97,7 @@ void SceneView::renderEntityNode(Entity* entity)
 
 	SceneComponent* sc = getComponent<SceneComponent>(entity);   // null for loose entities
 	const bool isScene = sc != nullptr;
+	const bool locked = ancestorLocked || entity->isPrefabInstance(); // part of a prefab instance
 
 	ImGui::PushID(entity);
 
@@ -110,9 +111,27 @@ void SceneView::renderEntityNode(Entity* entity)
 	if (isSelected) flags |= ImGuiTreeNodeFlags_Selected;
 	if (isScene && hasFilter) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
 
+	// Prefab instances show in blue (Unity-style); a disabled entity's grey takes precedence.
 	const bool dimmed = isScene && !sc->enabled;
+	int pushedColors = 0;
 	if (dimmed)
+	{
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		++pushedColors;
+	}
+	else if (locked)
+	{
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.62f, 0.95f, 1.0f));
+		++pushedColors;
+	}
+	// A locked prefab instance can't receive a dragged entity, so suppress its hover highlight while an
+	// entity is being dragged — otherwise the highlight wrongly suggests it's a valid drop target.
+	if (locked)
+		if (const ImGuiPayload* dnd = ImGui::GetDragDropPayload(); dnd && dnd->IsDataType("SV_ENTITY"))
+		{
+			ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+			++pushedColors;
+		}
 
 	bool open = false;
 	if (isRenaming)
@@ -149,21 +168,22 @@ void SceneView::renderEntityNode(Entity* entity)
 			ImGuiSelectableFlags_SpanAvailWidth | ImGuiSelectableFlags_NoPadWithHalfSpacing);
 	}
 
-	if (dimmed)
-		ImGui::PopStyleColor();
+	if (pushedColors)
+		ImGui::PopStyleColor(pushedColors);
 
 	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen() && !isRenaming)
 		m_selected = entity;
 
-	if (isSelected && !isRenaming && ImGui::IsKeyPressed(ImGuiKey_F2))
+	if (isSelected && !isRenaming && ImGui::IsKeyPressed(ImGuiKey_F2) && !ancestorLocked)
 		beginRename(entity);
-	if (isSelected && ImGui::IsKeyPressed(ImGuiKey_Delete))
+	if (isSelected && ImGui::IsKeyPressed(ImGuiKey_Delete) && !ancestorLocked)
 		m_pendingDelete = entity;
 
-	renderContextMenu(entity);
-	dragSourceFor(entity);
-	if (isScene)
-		dropTargetReparentUnder(entity);   // only scene entities can receive children
+	renderContextMenu(entity, locked);
+	if (!ancestorLocked)
+		dragSourceFor(entity);             // an internal prefab node can't be dragged out of its instance
+	if (isScene && !locked)
+		dropTargetReparentUnder(entity);   // a locked instance can't receive children
 
 	if (isScene)
 	{
@@ -186,21 +206,36 @@ void SceneView::renderEntityNode(Entity* entity)
 	{
 		if (isScene)
 			for (const EntityPtr& child : sc->children)
-				renderEntityNode(child);
+				renderEntityNode(child, locked);
 		ImGui::TreePop();
 	}
 
 	ImGui::PopID();
 }
 
-void SceneView::renderContextMenu(Entity* entity)
+void SceneView::renderContextMenu(Entity* entity, bool locked)
 {
 	if (!ImGui::BeginPopupContextItem("##sv_node_ctx"))
 		return;
 
 	m_selected = entity;
 
-	if (hasComponent<SceneComponent>(entity))   // only scene entities can hold children
+	// An entity can be edited as a whole (renamed/deleted) unless it's an internal part of a locked
+	// prefab instance — i.e. only when its parent isn't itself locked.
+	const bool canEdit = (entity->parent == nullptr) || !entity->parent->isPrefabLocked();
+
+	if (locked)
+	{
+		if (ImGui::MenuItem("Unpack Prefab"))   // break the link so the instance becomes editable
+		{
+			if (Entity* root = entity->nearestPrefabInstance())
+				root->setPrefabInstance(false);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::Separator();
+	}
+
+	if (hasComponent<SceneComponent>(entity) && !locked)   // a locked instance can't gain children
 	{
 		if (ImGui::MenuItem("Add Child"))
 		{
@@ -210,13 +245,13 @@ void SceneView::renderContextMenu(Entity* entity)
 		}
 		ImGui::Separator();
 	}
-	if (ImGui::MenuItem("Rename", "F2"))
+	if (ImGui::MenuItem("Rename", "F2", false, canEdit))
 	{
 		ImGui::CloseCurrentPopup();
 		beginRename(entity);
 	}
 	ImGui::Separator();
-	if (ImGui::MenuItem("Delete", "Del"))
+	if (ImGui::MenuItem("Delete", "Del", false, canEdit))
 		m_pendingDelete = entity;
 
 	ImGui::EndPopup();
@@ -235,8 +270,8 @@ void SceneView::applyPendingMutations()
 	{
 		if (m_selected == m_pendingDelete)        m_selected = nullptr;
 		if (m_renamingEntity == m_pendingDelete)  m_renamingEntity = nullptr;
-		m_changes.push_back({ EntityChange::Delete{ EntityPtr(m_pendingDelete) } }); // own it until polled, before removeEntity drops the scene-graph ref
-		removeEntity(m_pendingDelete);
+		m_changes.push_back({ EntityChange::Delete{ EntityPtr(m_pendingDelete) } }); // own it until polled, before detachFromOwner drops the scene-graph ref
+		detachFromOwner(m_pendingDelete);
 		m_pendingDelete = nullptr;
 	}
 	if (m_hasPendingReparent)
@@ -248,7 +283,7 @@ void SceneView::applyPendingMutations()
 		if (oldParent != target)
 			m_changes.push_back({ EntityChange::Reparent{ EntityPtr(child), EntityPtr(target) } });
 
-		reparentEntity(child, target);
+		child->reparentEntity(target);
 
 		m_hasPendingReparent    = false;
 		m_pendingReparentChild  = nullptr;
@@ -266,7 +301,7 @@ void SceneView::render(const std::vector<EntityPtr>& rootEntities)
 
 	for (Entity* entity : rootEntities)
 		if (entity->parent == nullptr)
-			renderEntityNode(entity);
+			renderEntityNode(entity, false);
 
 	const float remainingH = ImGui::GetContentRegionAvail().y;
 	if (remainingH > 0.0f)

@@ -21,6 +21,8 @@ public:
 
     EntityPtr spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform = true);
 
+    EntityPtr createEmptyEntity(const std::string& name);
+
     void reloadPrefabs();
 
     ObjectContainer* getOrLoadContainer(const std::string& name);
@@ -49,4 +51,5 @@ private:
     std::unordered_map<std::string, std::shared_ptr<EntitySpawnTemplate>> m_templates; // prefab templates, keyed by name
     std::vector<std::shared_ptr<EntitySpawnTemplate>> m_retiredTemplates; // superseded by reloadPrefabs, kept alive for live entities
     std::unordered_set<std::string> m_buildingTemplates; // prefab names currently being built (cycle guard)
+    std::shared_ptr<EntitySpawnTemplate> m_emptyTemplate; // blank Scene-only template for editable (non-prefab) entities
 };

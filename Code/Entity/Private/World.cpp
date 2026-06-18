@@ -82,7 +82,7 @@ ObjectContainer* World::getOrLoadContainer(const std::string& name)
 EntityPtr World::spawn(const std::string& name, const Transform& base)
 {
     if (std::shared_ptr<const EntitySpawnTemplate> tmpl = getOrBuildPrefabTemplate(name))
-        return createEntity(*tmpl, base);
+        return Entity::create(*tmpl, base);
     return EntityPtr{};
 }
 
@@ -277,5 +277,22 @@ EntityPtr World::spawnAssetFile(const std::string& path, const Transform& base, 
 
     const Transform& dt = tmpl->defaultTransform;
     const glm::vec3 pos = overrideDefaultTransform ? base.pos : dt.pos;
-    return createEntity(*tmpl, Transform(pos, dt.scale, dt.quat));
+    return Entity::create(*tmpl, Transform(pos, dt.scale, dt.quat));
+}
+
+EntityPtr World::createEmptyEntity(const std::string& name)
+{
+    // A blank Scene-only template with no prefabName: Entity::create leaves prefabInstance false, so the
+    // entity is editable and serializes inline. Cached (and kept across reloadPrefabs) so its address
+    // stays stable for the entities that point at it.
+    if (!m_emptyTemplate)
+    {
+        m_emptyTemplate = std::make_shared<EntitySpawnTemplate>();
+        m_emptyTemplate->archetype = makeEntityArchetype(1 << EComponentID_Scene);
+        m_emptyTemplate->spawnInfos.push_back(std::make_shared<SceneComponent::SpawnInfo>());
+        m_emptyTemplate->displayName = "Entity";
+    }
+    EntityPtr entity = Entity::create(*m_emptyTemplate, Transform());
+    entity->name = name;
+    return entity;
 }

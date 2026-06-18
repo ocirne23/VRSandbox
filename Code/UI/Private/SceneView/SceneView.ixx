@@ -20,8 +20,8 @@ public:
 private:
 
 	void renderToolbar();
-	void renderEntityNode(Entity* entity);  // scene entity (recurses children) or loose leaf
-	void renderContextMenu(Entity* entity);
+	void renderEntityNode(Entity* entity, bool ancestorLocked);  // scene entity (recurses children) or loose leaf
+	void renderContextMenu(Entity* entity, bool locked);
 	void beginRename(Entity* entity);
 
 	bool dragSourceFor(Entity* entity);     // returns true while this entity is being dragged

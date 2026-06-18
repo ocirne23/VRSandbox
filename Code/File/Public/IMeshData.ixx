@@ -1,9 +1,10 @@
 export module File.IMeshData;
 
+import File.fwd;
+
 import Core;
 import Core.glm;
 import Core.AABB;
-import File.fwd;
 
 export class IMeshData
 {

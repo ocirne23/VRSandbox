@@ -8,4 +8,5 @@ export extern "C++"
 	class INodeData;
 	class ISceneData;
 	class ITextureData;
+	struct AssetNode;
 }

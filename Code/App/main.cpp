@@ -220,16 +220,17 @@ int main()
                 // Hierarchy drop: keep the asset's authored position/scale offset (don't anchor at base).
                 EntityPtr e = world.spawnAssetFile(ch->path, base, false);
                 if (ch->parent && hasComponent<SceneComponent>(ch->parent))
-                    reparentEntity(e.get(), ch->parent);   // parent's SceneComponent takes ownership
+                    e->reparentEntity(ch->parent);   // parent's SceneComponent takes ownership
                 else
                     entities.push_back(std::move(e));
             }
             else if (auto* as = std::get_if<EntityChange::AddSceneEntity>(&change.type))
             {
-                EntityPtr e = world.spawnAssetFile("Entities/default.pre", Transform());
-				e->name = as->displayName;
-				reparentEntity(e.get(), as->parent);
-                entities.push_back(std::move(e));
+                EntityPtr e = world.createEmptyEntity(as->displayName);
+                if (as->parent && hasComponent<SceneComponent>(as->parent))
+                    e->reparentEntity(as->parent);
+                else
+                    entities.push_back(std::move(e));
             }
             else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
                 std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });

@@ -1,7 +1,8 @@
 export module File.ISceneData;
 
-import Core;
 import File.fwd;
+
+import Core;
 
 export class ISceneData
 {

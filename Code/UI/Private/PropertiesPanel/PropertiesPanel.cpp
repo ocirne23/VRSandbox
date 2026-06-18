@@ -31,7 +31,7 @@ void PropertiesPanel::render(Entity* selected)
 		}
 
 		{
-			const std::string& sourceFile = entitySourceFile(selected);
+			const std::string& sourceFile = selected->getSourceFile();
 			ImGui::AlignTextToFramePadding();
 			ImGui::Text("Asset");
 			ImGui::SameLine(80.0f);

@@ -1,7 +1,8 @@
 export module File.ITextureData;
 
-import Core;
 import File.fwd;
+
+import Core;
 
 export class ITextureData
 {

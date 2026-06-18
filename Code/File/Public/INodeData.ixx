@@ -1,8 +1,9 @@
 export module File.INodeData;
 
+import File.fwd;
+
 import Core;
 import Core.glm;
-import File.fwd;
 
 export class INodeData
 {
