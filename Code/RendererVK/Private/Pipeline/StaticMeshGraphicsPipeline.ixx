@@ -55,20 +55,11 @@ public:
 		uint32 viewIndex = 0; // selects u_views[viewIndex] via push constant (0 = centre/desktop, 1/2 = eyes)
     };
 
-    // stereo = build the VR variant: the shaders get STEREO defined so they read a push-constant view
-    // index (u_views[u_viewIndex]); the pass is rendered once per eye (not multiview).
     void initialize(vk::RenderPass renderPass, uint32 maxUniqueMeshes, uint32 maxTextures, bool stereo = false);
     void reloadShaders(uint32 maxTextures);
-    // Re-sizes the DGC preprocess scratch for a grown unique-mesh capacity (GPU must be idle).
     void resizeMeshCapacity(uint32 maxUniqueMeshes);
-    // updateDescriptors=false skips the (host) descriptor-set write: used for the 2nd VR eye, which
-    // reuses the 1st eye's identical descriptors (re-writing a bound non-UAB set would invalidate the CB).
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, bool updateDescriptors = true);
-    // Refresh the denoised-AO image binding on a descriptor set (call each frame; the draw CB is cached and
-    // the AO image is recreated on resize).
     void updateAODescriptor(vk::DescriptorSet descriptorSet, vk::ImageView aoView, vk::Sampler aoSampler);
-    // Refresh the TLAS binding for ray-traced light shadows (call each frame; the TLAS is rebuilt per frame
-    // and its handle can change).
     void updateTlasDescriptor(vk::DescriptorSet descriptorSet, vk::AccelerationStructureKHR tlas);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
@@ -91,7 +82,5 @@ private:
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_transparentPreprocessBuffers; // transparent pass
 
     void createPreprocessBuffers(uint32 maxUniqueMeshes);
-
-    // Issues one vkCmdExecuteGeneratedCommandsEXT over the given indirect/preprocess buffers.
     void recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes);
 };

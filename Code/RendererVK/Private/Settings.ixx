@@ -125,3 +125,54 @@ export struct PostParams
     // command buffers can be re-recorded.
     void registerTweaks(const std::function<void()>& onReRecord);
 };
+
+export struct RTParams
+{
+    bool rtSunShadow = false;    // sun shadows from TLAS ray queries instead of PCSS cascades (A/B tweak)
+    int  sunShadowRays = 5;     // RT sun shadow rays per pixel
+    bool rtLightShadows = true; // ray-traced shadows for punctual/area/tube lights
+    bool rtSkyRadiance = true;  // ray-traced sky visibility for the sky radiance light (GI probe trace)
+};
+
+export struct Stats
+{
+    uint32 numLights;
+    uint32 maxLights;
+
+    uint32 numMeshInstances;
+    uint32 maxMeshInstances;
+
+    uint32 numInstanceOffsets;
+    uint32 maxInstanceOffsets;
+
+    uint32 numMeshTypes;
+    uint32 maxMeshTypes;
+
+    uint32 numMaterials;
+    uint32 maxMaterials;
+
+    uint32 numRenderNodes;
+    uint32 maxRenderNodes;
+
+    uint32 numTextures;
+    uint32 maxTextures;
+
+    uint64 vertexDataUsedBytes;
+    uint64 maxVertexDataBytes;
+
+    uint64 indexDataUsedBytes;
+    uint64 maxIndexDataBytes;
+
+    uint32 numObjectContainers;
+
+    uint32 numLightGrids;
+    uint32 maxLightGrids;
+
+    uint64 lightGridMemUsageBytes;
+    uint64 maxLightGridMemUsageBytes;
+
+    // Total GPU memory tracked by VMA across all heaps.
+    uint64 gpuMemoryUsedBytes;     // bytes our live allocations occupy
+    uint64 gpuMemoryReservedBytes; // bytes VMA has reserved in blocks (>= used)
+    uint64 gpuMemoryBudgetBytes;   // device-local budget available to the process
+};

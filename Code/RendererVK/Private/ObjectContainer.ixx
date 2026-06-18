@@ -41,13 +41,9 @@ public:
         uint16 diffuseTexIdx = RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX;
         uint16 normalTexIdx = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
         uint16 metalRoughnessTexIdx = UINT16_MAX;
-        RendererVKLayout::EPipelineIndex pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
-        // Exclude this container's geometry from all ray tracing (shadow rays, GI, RTAO): rasterized
-        // normally but never blocks or bounces light. For debug/gizmo geometry like light markers.
         bool excludeFromRayTracing = false;
-        // Keep the scene's own textures (ignore the texture index overrides above) while still applying
-        // the pipeline/ray-tracing overrides. For e.g. the procedural sky sphere's gradient texture.
-        bool useSceneTextures = true;
+        bool useSceneTextures = true; // if false use the above texture indices instead of the material's own scene textures
+        RendererVKLayout::EPipelineIndex pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
     };
 
     bool initialize(const ISceneData& sceneData, const MaterialOverrides* pOverrides = nullptr);

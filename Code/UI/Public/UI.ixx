@@ -28,7 +28,7 @@ public:
     void initialize();
     void update(const std::vector<EntityPtr>& rootEntities, double deltaSec);
     void render();
-	void setRenderStats(const Renderer::Stats& stats) { m_renderStats = stats; }
+	void setRenderStats(const Stats& stats) { m_renderStats = stats; }
 
     bool isViewportGrabbed() const { return m_isViewportGrabbed; }
     bool isViewportFocused() const { return m_isViewportFocused; }
@@ -59,7 +59,7 @@ private:
     ed::EditorContext* m_nodeEditorContext = nullptr;
 
 	NodeEditor::Scene m_scene;
-	Renderer::Stats m_renderStats;
+	Stats m_renderStats;
 	AssetBrowser    m_assetBrowser;
 	SceneView       m_sceneView;
 	PropertiesPanel m_propertiesPanel;

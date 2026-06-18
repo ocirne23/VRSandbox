@@ -66,14 +66,8 @@ public:
 
     bool initialize(Window& window, EValidation validation, EVSync vsync, EVr vr = EVr::DISABLED);
 
-    // True when an OpenXR session is active. XR is otherwise driven entirely inside beginFrame/present.
     bool isVrEnabled() const { return Globals::openXR.isEnabled(); }
-    // True when the VR world space is STAGE (floor-centred); false = LOCAL fallback. Used to seed the
-    // play-space start height (floor vs head-seeded). Only meaningful after initialize().
     bool isVrStageSpace() const { return Globals::openXR.isStageSpace(); }
-
-    // The active VR session as a shared Core interface (IVrSession), or null when VR is off. The Input lib
-    // uses it to build its controller action set without depending on RendererVK. (See Core.VrSession.)
     IVrSession* getVrSession() { return Globals::openXR.isEnabled() ? &Globals::openXR : nullptr; }
 
     const Frustum& beginFrame(const Camera& camera);
@@ -85,9 +79,7 @@ public:
     void addAreaLight(const AreaLight& areaLight);
     void addSpotLight(const SpotLight& spotLight);
     void setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity);
-    // Flat, non-physical minimum ambient radiance (lights otherwise unlit areas; applied once at final shading).
     void setAmbientLight(const glm::vec3& color, float intensity) { m_skyParams.ambientColor = color; m_skyParams.ambientIntensity = intensity; }
-    // Directional sky radiance (moonlight / space light), along the sky up axis, unshadowed.
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
 
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
@@ -103,58 +95,13 @@ public:
 
     void reloadShaders();
 
-    // GI probe debug visualization: instanced cubes at every live probe cell.
     void toggleGiProbeDebug() { m_giProbeDebugEnabled = !m_giProbeDebugEnabled; }
-    // The debug draw is now recorded once with the scene (the mode is baked into its push constant), so a mode
-    // change must force a re-record. Enable/disable is handled per-frame in the primary, so only this needs it.
     void cycleGiProbeDebugMode() { m_giProbeDebugMode ^= 1u; setHaveToRecordCommandBuffers(); } // 0 = irradiance, 1 = cellSize/LOD
 
     void setWindowMinimized(bool minimized);
     void recreateWindowSurface(Window& window);
     void setViewportRect(const Rect& rect) { if (Globals::openXR.isEnabled()) return; if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } } // VR renders full-extent (no editor panel sub-rect)
 
-    struct Stats
-    {
-        uint32 numLights;
-        uint32 maxLights;
-
-		uint32 numMeshInstances;
-		uint32 maxMeshInstances;
-
-        uint32 numInstanceOffsets;
-		uint32 maxInstanceOffsets;
-
-        uint32 numMeshTypes;
-		uint32 maxMeshTypes;
-
-        uint32 numMaterials;
-        uint32 maxMaterials;
-
-		uint32 numRenderNodes;
-        uint32 maxRenderNodes;
-
-        uint32 numTextures;
-        uint32 maxTextures;
-
-        uint64 vertexDataUsedBytes;
-		uint64 maxVertexDataBytes;
-
-		uint64 indexDataUsedBytes;
-		uint64 maxIndexDataBytes;
-
-        uint32 numObjectContainers;
-
-        uint32 numLightGrids;
-		uint32 maxLightGrids;
-
-		uint64 lightGridMemUsageBytes;
-		uint64 maxLightGridMemUsageBytes;
-
-        // Total GPU memory tracked by VMA across all heaps.
-        uint64 gpuMemoryUsedBytes;     // bytes our live allocations occupy
-        uint64 gpuMemoryReservedBytes; // bytes VMA has reserved in blocks (>= used)
-        uint64 gpuMemoryBudgetBytes;   // device-local budget available to the process
-    };
     Stats getStats();
 
 private:
@@ -162,20 +109,13 @@ private:
     CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 
     void recordCommandBuffers();
-    // Per-pass secondary command-buffer recording (each fetches its per-frame data from frameIdx). The scene
-    // passes are recorded once (gated by recordScene in recordCommandBuffers); recordGlobalIllum runs every
-    // frame (it refits the ray-tracing TLAS and rotates the probe ray set).
     void recordIndirectCull(uint32 frameIdx);
     void recordLightGrid(uint32 frameIdx);
     void recordShadowCull(uint32 frameIdx);
     void recordShadowDraw(uint32 frameIdx);
     void recordStaticMesh(uint32 frameIdx);
-    // Records the forward draw (viewport/scissor + bind + DGC execute) into cb for the given eye. Shared
-    // by recordStaticMesh (desktop secondary, eye 0) and the per-eye VR path (recorded inline in the primary).
     void recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordGBuffer(uint32 frameIdx);
-    // Inline per-eye variants (VR): recorded straight into the primary so the per-eye push constant + the
-    // per-eye descriptor sets / image slots apply. The caller manages the surrounding render pass / barriers.
     void recordGBufferInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordAOInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordFogApplyInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
@@ -187,8 +127,6 @@ private:
     void recordTaa(uint32 frameIdx);
     void recordEyeAdaptation(uint32 frameIdx);
     void recordComposite(uint32 frameIdx);
-    // VR: (re)create / destroy the per-eye LDR composite targets (sized to the swapchain extent, reusing
-    // the swapchain render pass so the composite pipeline is shared with the desktop path).
     void createEyeCompositeTargets();
     void destroyEyeCompositeTargets();
     bool recordGlobalIllum(uint32 frameIdx); // returns true if the ray-tracing TLAS handle changed this frame
@@ -205,9 +143,6 @@ private:
     uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
 
-    // Capacity growth: each submits pending staged copies, waits for the GPU to go idle, recreates the
-    // affected buffers at (at least) double the size, restores persistent contents, and forces a command
-    // buffer re-record. Rare events, so the GPU stall is acceptable.
     void waitForGpuAndFlushStaging();
     void growRenderNodeCapacity(uint32 needed);
     void growMeshInstanceCapacity(uint32 needed);
@@ -215,7 +150,6 @@ private:
     void growMaterialCapacity(uint32 needed);
     void growInstanceOffsetCapacity(uint32 needed);
     void growLightGridBuffers(size_t neededGridBytes, uint32 neededTableEntries);
-    // Reads last frame's light grid usage counters and grows the grid/table before they overflow.
     void checkLightGridCapacity();
 
     friend class RenderNode;
@@ -254,16 +188,12 @@ private:
     glm::vec3 m_cameraPos = glm::vec3(0.0f);
     glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
     uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray set each frame
+    uint32 m_fogVolumeCounter = 0;
 
     SkyParams m_skyParams;
     FogParams m_fogParams;
     PostParams m_postParams;
-    uint32 m_fogVolumeCounter = 0;
-
-    bool  m_rtSunShadow = true; // sun shadows from TLAS ray queries instead of PCSS cascades (A/B tweak)
-    int   m_sunShadowRays = 5;   // RT sun shadow rays per pixel
-    bool  m_rtLightShadows = true; // ray-traced shadows for punctual/area/tube lights
-    bool  m_rtSkyRadiance = true;  // ray-traced sky visibility for the sky radiance light (GI probe trace)
+    RTParams m_rtParams;
 
     bool   m_giProbeDebugEnabled = false;
     uint32 m_giProbeDebugMode = 0;
@@ -275,8 +205,7 @@ private:
     bool m_vsyncEnabled = true;
     uint32 m_sceneViewCount = 1; // 2 in VR: SceneColor + forward pass are multiview (one layer per eye)
 
-    // VR: per-eye LDR composite targets. Each eye's SceneColor layer is tonemapped here (TAA bypassed),
-    // then copied into its OpenXR eye swapchain in present(). Reuse m_renderPass (shared depth).
+    // VR: per-eye LDR composite targets
     std::array<vk::Image, 2> m_eyeColorImage{};
     std::array<VmaAllocation, 2> m_eyeColorMem{};
     std::array<vk::ImageView, 2> m_eyeColorView{};
@@ -286,21 +215,17 @@ private:
     vk::ImageView m_eyeDepthView;
     std::array<DescriptorSet, 2> m_vrCompositeDescriptorSet;
 
-    // Live buffer capacities (element counts); grown on demand from the INITIAL_* seeds in Layout.ixx.
     uint32 m_maxRenderNodes = RendererVKLayout::INITIAL_RENDER_NODES;
     uint32 m_maxUniqueMeshes = RendererVKLayout::INITIAL_UNIQUE_MESHES;
     uint32 m_maxUniqueMaterials = RendererVKLayout::INITIAL_UNIQUE_MATERIALS;
     uint32 m_maxInstanceOffsets = RendererVKLayout::INITIAL_INSTANCE_OFFSETS;
     uint32 m_maxInstanceData = RendererVKLayout::INITIAL_INSTANCE_DATA;
-    // Mesh-instance overflow detected mid-frame (possibly from worker threads): the overflowing nodes are
-    // dropped for that frame and the capacity is grown at the next beginFrame (a safe sync point).
+
     uint32 m_pendingMaxInstanceData = 0;
     size_t m_lightGridBufferSize = RendererVKLayout::INITIAL_LIGHT_GRID_BUFFER_SIZE;
     uint32 m_lightTableEntries = RendererVKLayout::INITIAL_LIGHT_TABLE_NUM_ENTRIES;
     uint32 m_maxGiTlasInstances = RendererVKLayout::GI_INITIAL_TLAS_INSTANCES;
-    // Texture-array descriptor sizing: the layouts declare the fixed device-limit cap (m_maxTextures,
-    // set once at init from TextureManager::getDescriptorCap()); the sets are allocated with the live
-    // variable count (m_numTextureDescriptors, re-synced from TextureManager on generation change).
+
     uint32 m_maxTextures = RendererVKLayout::INITIAL_TEXTURES;
     uint32 m_numTextureDescriptors = RendererVKLayout::INITIAL_TEXTURES;
     uint32 m_meshDataGeneration = 0; // last seen MeshDataManager::getGeneration(); change -> re-record
@@ -327,9 +252,7 @@ private:
         GBuffer gbuffer;
         ShadowMap shadowMap;
 
-        // Per-eye in VR (the forward/gbuffer passes are rendered once per eye inline in the primary, so the
-        // two eyes can't share a descriptor set — a host update between the two uses would invalidate it).
-        // Desktop uses index 0 only.
+        // Per-eye in VR
         std::array<DescriptorSet, 2> staticMeshPipelineDescriptorSet;
         std::array<DescriptorSet, 2> gbufferDescriptorSet;
         DescriptorSet compositeDescriptorSet;

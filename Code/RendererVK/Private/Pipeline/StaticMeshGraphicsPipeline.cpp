@@ -177,13 +177,6 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment
     });
-
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InRenderNodeTransforms
-        .binding = 3,
-        .descriptorType = vk::DescriptorType::eStorageBuffer,
-        .descriptorCount = 1,
-        .stageFlags = vk::ShaderStageFlagBits::eVertex
-    });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InMeshInstances
         .binding = 1,
         .descriptorType = vk::DescriptorType::eStorageBuffer,
@@ -195,6 +188,12 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorType = vk::DescriptorType::eStorageBuffer,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InRenderNodeTransforms
+        .binding = 3,
+        .descriptorType = vk::DescriptorType::eStorageBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eVertex
     });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InLightInfos
         .binding = 4,
@@ -214,15 +213,7 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
-    // 18 = the set's highest binding number: required for eVariableDescriptorCount. descriptorCount is
-    // the fixed device-limit cap; the actual array size is supplied per descriptor set allocation, so
-    // texture capacity growth never has to recreate this layout (or the pipeline/DGC state built on it).
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_textures
-        .binding = 18,
-        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-        .descriptorCount = maxTextures,
-        .stageFlags = vk::ShaderStageFlagBits::eFragment
-    });
+    // 7 unused
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_shadowMap (sun CSM, comparison)
         .binding = 8,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
@@ -241,13 +232,12 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
-    for (uint32 binding = 14; binding <= 17; ++binding) // shadow-ray alpha test: vertices/indices/meshInfos/instances
-        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
-            .binding = binding,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .descriptorCount = 1,
-            .stageFlags = vk::ShaderStageFlagBits::eFragment
-        });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_tlas (ray-traced light shadows)
+        .binding = 11,
+        .descriptorType = vk::DescriptorType::eAccelerationStructureKHR,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment
+    });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_gbufferDepth (AO bilateral upsample)
         .binding = 12,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
@@ -260,10 +250,20 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_tlas (ray-traced light shadows)
-        .binding = 11,
-        .descriptorType = vk::DescriptorType::eAccelerationStructureKHR,
-        .descriptorCount = 1,
+    for (uint32 binding = 14; binding <= 17; ++binding) // shadow-ray alpha test: vertices/indices/meshInfos/instances
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
+            .binding = binding,
+            .descriptorType = vk::DescriptorType::eStorageBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment
+        });
+
+
+    // 18 = the set's highest binding number: required for eVariableDescriptorCount.
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_textures
+        .binding = 18,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = maxTextures,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
 
@@ -431,7 +431,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
                 }
             }
         },
-
+        // 7 unused
         DescriptorSetUpdateInfo{
             .binding = 8,
             .type = vk::DescriptorType::eCombinedImageSampler,
@@ -460,6 +460,17 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.giGridDataBuffer.getBuffer(), .range = params.giGridDataBuffer.getSize() } }
         },
         DescriptorSetUpdateInfo{
+            .binding = 12,
+            .type = vk::DescriptorType::eCombinedImageSampler,
+            .imageInfos = {
+                vk::DescriptorImageInfo {
+                    .sampler = params.gbufferSampler,
+                    .imageView = params.gbufferDepthView,
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                }
+            }
+        },
+        DescriptorSetUpdateInfo{
             .binding = 14,
             .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.vertexBuffer.getBuffer(), .range = params.vertexBuffer.getSize() } }
@@ -479,18 +490,6 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.rtMeshInstancesBuffer.getBuffer(), .range = params.rtMeshInstancesBuffer.getSize() } }
         },
-        DescriptorSetUpdateInfo{
-            .binding = 12,
-            .type = vk::DescriptorType::eCombinedImageSampler,
-            .imageInfos = {
-                vk::DescriptorImageInfo {
-                    .sampler = params.gbufferSampler,
-                    .imageView = params.gbufferDepthView,
-                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-                }
-            }
-        },
-
         DescriptorSetUpdateInfo{
             .binding = 18,
             .type = vk::DescriptorType::eCombinedImageSampler,

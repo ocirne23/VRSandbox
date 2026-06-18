@@ -278,6 +278,7 @@ export namespace RendererVKLayout
         uint32 _pad0, _pad1, _pad2;
         FogVolumeInfo volumes[MAX_FOG_VOLUMES];
     };
+    constexpr size_t FOG_VOLUME_HEADER_SIZE = sizeof(RendererVKLayout::FogVolumes) - sizeof(RendererVKLayout::FogVolumeInfo) * RendererVKLayout::MAX_FOG_VOLUMES;
 
     // Unified light record for both point and rectangular area lights. width == 0 marks a point
     // light (direction/rotation unused); width > 0 marks an area light whose quad height is encoded

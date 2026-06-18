@@ -171,10 +171,10 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_skyParams.registerTweaks();
     m_fogParams.registerTweaks();
 
-    Tweak::boolean("RT", "RT Lights", &m_rtLightShadows);
-    Tweak::boolean("RT", "RT Sun", &m_rtSunShadow);
-    Tweak::intVar("RT", "RT Sun Rays", &m_sunShadowRays, 1, 8);
-    Tweak::boolean("RT", "RT Sky Radiance", &m_rtSkyRadiance);
+    Tweak::boolean("RT", "RT Lights", &m_rtParams.rtLightShadows);
+    Tweak::boolean("RT", "RT Sun", &m_rtParams.rtSunShadow);
+    Tweak::intVar("RT", "RT Sun Rays", &m_rtParams.sunShadowRays, 1, 8);
+    Tweak::boolean("RT", "RT Sky Radiance", &m_rtParams.rtSkyRadiance);
 
     Tweak::boolean("RTAO", "Enabled", &m_aoEnabled, [this]() { setHaveToRecordCommandBuffers(); });
 
@@ -461,13 +461,8 @@ void Renderer::setWindowMinimized(bool minimized)
 
 const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 {
-    Globals::openXR.pollEvents(); // advance the OpenXR session state machine (no-op when VR is off)
+    Globals::openXR.pollEvents();
 
-    // When VR is active the headset drives the view: the passed camera supplies the play-space pose, and the
-    // head pose is composed on top. The play-space base orientation is the camera's own world rotation (from
-    // its view matrix) combined with the play-space yaw, so the headset rides on top of BOTH:
-    //   world = T(camPos) * R(camRot) * R(playYaw) * headLocal.
-    // beginFrame() also begins the XR frame (paired with endFrame() in present()).
     Camera camera = cameraIn;
     const glm::quat vrBaseOrientation = glm::quat_cast(glm::inverse(cameraIn.viewMatrix)) * cameraIn.playSpaceOrientation;
     if (Globals::openXR.beginFrame())
@@ -479,11 +474,9 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         camera.position = headPos;
     }
 
-    // Mesh instances overflowed mid-frame last frame (their nodes were dropped for that frame); grow
-    // here where no recording or worker-thread writes are in flight.
+    // Mesh instances overflowed mid-frame last frame
     if (m_pendingMaxInstanceData > m_maxInstanceData)
         growMeshInstanceCapacity(m_pendingMaxInstanceData);
-
     // Last frame's instance count (still live here) outgrew the GI TLAS instance buffers.
     if (m_meshInstanceCounter > m_maxGiTlasInstances)
     {
@@ -493,18 +486,14 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         m_giProbePipeline.resizeTlasInstanceBuffers(m_maxGiTlasInstances);
         printf("Renderer: grew GI TLAS instance capacity to %u\n", m_maxGiTlasInstances);
     }
-
-    // A mesh mega-buffer was reallocated (vertex/index data growth): the cached scene command buffers
-    // bind the old handles, so re-record.
+    // A mesh mega-buffer was reallocated (vertex/index data growth)
     if (Globals::meshDataManager.getGeneration() != m_meshDataGeneration)
     {
         m_meshDataGeneration = Globals::meshDataManager.getGeneration();
         setHaveToRecordCommandBuffers();
     }
 
-    // The live texture count outgrew the variable-count texture-array descriptors: re-allocate the
-    // affected descriptor sets with the new count (the layouts/pipelines declare the fixed cap and
-    // stay untouched).
+    // The live texture count outgrew the variable-count texture-array descriptors
     if (Globals::textureManager.getGeneration() != m_textureGeneration)
     {
         m_textureGeneration = Globals::textureManager.getGeneration();
@@ -550,10 +539,6 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 
     static RendererVKLayout::Ubo ubo;
 
-    // Save last frame's per-view matrices (still in ubo) as the prev matrices for temporal reprojection,
-    // then overwrite. views[VIEW_CENTER] = centre/combined view (the sole desktop view + every shared
-    // world-space pass); in VR views[1]/[2] are the left/right eyes. Desktop leaves [1]/[2] untouched
-    // (never read: the view index pushed to the per-eye passes is always 0 there).
     const uint32 numViews = Globals::openXR.isEnabled() ? RendererVKLayout::NUM_UBO_VIEWS : 1;
     for (uint32 v = 0; v < numViews; ++v)
     {
@@ -597,8 +582,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     const SkyParams& sky = m_skyParams;
     const FogParams& fog = m_fogParams;
 
-    // Earth sea-level scattering coefficients, scaled by the atmosphere tweaks. These drive the sky
-    // raymarch and every indirect sky-light consumer (GI miss rays, fog ambient, surface fallback).
+    // Earth sea-level scattering coefficients, scaled by the atmosphere tweaks.
     ubo.betaRayleigh = glm::vec3(5.802e-6f, 13.558e-6f, 33.1e-6f) * sky.rayleighScatter;
     ubo.rolloffKnee = sky.sunRolloffKnee;
     ubo.betaMie = 3.996e-6f * sky.mieScatter;
@@ -606,19 +590,18 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.sunAngularCos = sky.sunAngularCos;
     // Solar eclipse: fold the moon-covered sun fraction into the UBO sun color so every sun consumer
     // (sky atmosphere, forward lighting, GI trace, volumetric fog, clouds) dims consistently.
-    const float eclipseVisible = sunVisibleFraction(sky.sunDirection, glm::normalize(sky.moonDirection),
-        sky.sunAngularCos, cosf(glm::radians(sky.moonSizeDeg)), sky.sunGlow);
+    const float eclipseVisible = sunVisibleFraction(sky.sunDirection, glm::normalize(sky.moonDirection), sky.sunAngularCos, cosf(glm::radians(sky.moonSizeDeg)), sky.sunGlow);
     ubo.sunColor = sky.sunColor * sky.sunIntensity;
     ubo.eclipseParams = glm::vec4(eclipseVisible, sky.sunRolloffHeadroom, 0.0f, 0.0f);
     ubo.sunGlow = sky.sunGlow;
 
     ubo.skyRadianceColor = sky.skyRadianceColor * sky.skyRadianceIntensity;
-    ubo.rtSkyRadiance = m_rtSkyRadiance ? 1.0f : 0.0f;
+    ubo.rtSkyRadiance = m_rtParams.rtSkyRadiance ? 1.0f : 0.0f;
     ubo.ambientColor = sky.ambientColor * sky.ambientIntensity;
     ubo.skyUp = sky.up;
-    ubo.rtSunShadow = m_rtSunShadow ? 1.0f : 0.0f;
+    ubo.rtSunShadow = m_rtParams.rtSunShadow ? 1.0f : 0.0f;
 
-    if (!m_rtSunShadow)
+    if (!m_rtParams.rtSunShadow)
     {
         const float aspect = (float)viewportSize.x / (float)viewportSize.y;
         glm::mat4 cascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
@@ -628,8 +611,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         ubo.shadowParams = glm::vec3(sky.shadowDepthBias, sky.shadowNormalBias, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION);
     }
 
-    ubo.sunShadowRays = (float)m_sunShadowRays;
-    ubo.rtLightShadows = m_rtLightShadows ? 1.0f : 0.0f;
+    ubo.sunShadowRays = (float)m_rtParams.sunShadowRays;
+    ubo.rtLightShadows = m_rtParams.rtLightShadows ? 1.0f : 0.0f;
     static const Clock::time_point timeStart = Clock::now();
     ubo.timeSeconds = std::chrono::duration<float>(Clock::now() - timeStart).count();
     ubo.cloudCoverage = sky.cloudCoverage;
@@ -760,8 +743,7 @@ void Renderer::present()
     frameData.lightInfosBuffer.flushMappedMemory(m_lightCounter * sizeof(RendererVKLayout::LightInfo));
 
     frameData.mappedFogVolumes.data()->count = m_fogVolumeCounter;
-    constexpr size_t fogVolumesHeaderSize = sizeof(RendererVKLayout::FogVolumes) - sizeof(RendererVKLayout::FogVolumeInfo) * RendererVKLayout::MAX_FOG_VOLUMES;
-    frameData.fogVolumesBuffer.flushMappedMemory(fogVolumesHeaderSize + m_fogVolumeCounter * sizeof(RendererVKLayout::FogVolumeInfo));
+    frameData.fogVolumesBuffer.flushMappedMemory(RendererVKLayout::FOG_VOLUME_HEADER_SIZE + m_fogVolumeCounter * sizeof(RendererVKLayout::FogVolumeInfo));
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_lightGridComputePipeline.update(frameIdx, m_lightCounter);
@@ -780,9 +762,6 @@ void Renderer::present()
 
     m_swapChain.submitCommandBuffer(getCurrentCommandBuffer());
 
-    // VR: copy the per-eye composited LDR images into the eye swapchains and submit to the compositor.
-    // (No-op when VR is off — the two eye images are null then.) Sourced after the submit, before the
-    // desktop present, so the composited frame is available.
     Globals::openXR.endFrame(m_eyeColorImage[0], m_eyeColorImage[1], m_swapChain.getLayout().extent, vk::ImageLayout::ePresentSrcKHR);
 
     if (!m_swapChain.present())
@@ -846,8 +825,7 @@ void Renderer::growMeshInstanceCapacity(uint32 needed)
     // mapped buffer this frame must survive the reallocation. (At the beginFrame call site the counter
     // holds last frame's count and the copy is redundant but harmless.)
     PerFrameData& currentFrameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-    std::vector<RendererVKLayout::InMeshInstance> writtenInstances(
-        currentFrameData.mappedMeshInstances.begin(), currentFrameData.mappedMeshInstances.begin() + m_meshInstanceCounter);
+    std::vector<RendererVKLayout::InMeshInstance> writtenInstances(currentFrameData.mappedMeshInstances.begin(), currentFrameData.mappedMeshInstances.begin() + m_meshInstanceCounter);
 
     for (PerFrameData& perFrame : m_perFrameData)
     {
@@ -1316,11 +1294,6 @@ void Renderer::recordTaa(uint32 frameIdx)
     cb.end();
 }
 
-// Eye adaptation (auto-exposure). Recorded once (re-recorded only on viewport/shader change like the other
-// passes); the runtime tunables + delta time are written to a mapped buffer each frame via updateParams, so
-// the recorded buffer always reads live values. Samples this frame's TAA-resolved colour (covered by the TAA
-// resolved->sampled barrier) and writes the persistent exposure buffer the composite reads. Compute, executed
-// outside any render pass.
 void Renderer::recordEyeAdaptation(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -1603,7 +1576,7 @@ void Renderer::recordCommandBuffers()
         // RT sun shadows replace the cascades entirely (forward pass traces, GI uses per-probe sun rays),
         // so skip the shadow cull + cascade render. The primary CB is re-recorded every frame, so the
         // toggle takes effect immediately; the cached secondary CBs just go unexecuted.
-        if (!m_rtSunShadow)
+        if (!m_rtParams.rtSunShadow)
         {
             vkCommandBuffer.executeCommands(1, &vkShadowCullCommandBuffer);
 
@@ -1888,7 +1861,7 @@ void Renderer::initImgui(Window& window)
     ImGui_ImplVulkan_CreateMainPipeline(&pipeline_create);
 }
 
-Renderer::Stats Renderer::getStats()
+Stats Renderer::getStats()
 {
     Stats stats;
 
