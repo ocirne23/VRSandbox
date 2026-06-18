@@ -168,22 +168,15 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     _putenv("DISABLE_VULKAN_OW_OBS_CAPTURE=True");
     _putenv("DISABLE_VULKAN_OBS_CAPTURE=True");
 
+    auto rerecordCallback = [this]() { setHaveToRecordCommandBuffers(); };
+
     m_skyParams.registerTweaks();
     m_fogParams.registerTweaks();
-
-    Tweak::boolean("RT", "RT Lights", &m_rtParams.rtLightShadows);
-    Tweak::boolean("RT", "RT Sun", &m_rtParams.rtSunShadow);
-    Tweak::intVar("RT", "RT Sun Rays", &m_rtParams.sunShadowRays, 1, 8);
-    Tweak::boolean("RT", "RT Sky Radiance", &m_rtParams.rtSkyRadiance);
-
-    Tweak::boolean("RTAO", "Enabled", &m_aoEnabled, [this]() { setHaveToRecordCommandBuffers(); });
-
-    Tweak::boolean("TAA", "Enabled", &m_taaEnabled, [this]() { setHaveToRecordCommandBuffers(); });
-    Tweak::floatVar("TAA", "History Feedback", &m_taaFeedback, 0.0f, 0.98f, 0.01f, [this]() { setHaveToRecordCommandBuffers(); });
-    if (vr == EVr::ENABLED)
-        m_taaFeedback *= 0.5f; // Reduce blur for VR;
-
-    m_postParams.registerTweaks([this]() { setHaveToRecordCommandBuffers(); });
+    m_rtParams.registerTweaks();
+    m_rtaoParams.registerTweaks(rerecordCallback);
+    if (vr == EVr::ENABLED) m_taaParams.taaFeedback *= 0.5f; // Reduce blur for VR;
+    m_taaParams.registerTweaks(rerecordCallback);
+    m_postParams.registerTweaks(rerecordCallback);
 
     glslang::InitializeProcess();
     const bool enableValidationLayers = (validation == EValidation::ENABLED);
@@ -248,7 +241,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
 
     m_maxTextures = Globals::textureManager.getDescriptorCap(); // fixed layout cap; live count grows separately
     m_staticMeshGraphicsPipeline.initialize(sceneRenderPass, m_maxUniqueMeshes, m_maxTextures, m_sceneViewCount > 1);
-    m_rtaoPipeline.initialize(ext.width, ext.height, m_sceneViewCount);
+    m_rtaoPipeline.initialize(&m_rtaoParams, ext.width, ext.height, m_sceneViewCount);
     m_volumetricFogPipeline.initialize();
     m_volumetricFogPipeline.initializeApply(sceneRenderPass, m_sceneViewCount);
     m_taaPipeline.initialize(ext.width, ext.height, m_sceneViewCount);
@@ -524,13 +517,12 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     glm::mat4 viewMatrix = camera.viewMatrix;
 
     glm::vec2 taaJitterNdc(0.0f);
-    if (m_taaEnabled && viewportSize.x > 0 && viewportSize.y > 0)
+    if (m_taaParams.taaEnabled && viewportSize.x > 0 && viewportSize.y > 0)
     {
-        const uint32 sampleIdx = (m_taaJitterFrame % 16u) + 1u;
+        const uint32 sampleIdx = (m_frameCounter % 16u) + 1u;
         taaJitterNdc.x = (radicalInverse(sampleIdx, 2u) - 0.5f) * 2.0f / (float)viewportSize.x;
         taaJitterNdc.y = (radicalInverse(sampleIdx, 3u) - 0.5f) * 2.0f / (float)viewportSize.y;
     }
-    m_taaJitterFrame++;
 
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -576,7 +568,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         (float)viewportSize.x / (float)swapExtent.width,
         (float)viewportSize.y / (float)swapExtent.height);
     ubo.taaJitter = glm::vec4(taaJitterNdc, 0.0f, 0.0f);
-    ubo.aoParams = glm::vec4(m_aoEnabled ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    ubo.aoParams = glm::vec4(m_rtaoParams.enabled ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
     ubo.frameIndex = m_frameCounter;
 
     const SkyParams& sky = m_skyParams;
@@ -1176,7 +1168,7 @@ void Renderer::recordTaaInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex
         .gbufferDepthView = gbuffer.getDepthView(eyeIndex),
         .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(eyeIndex),
         .gbufferSampler = gbuffer.getSampler(),
-        .feedback = m_taaEnabled ? m_taaFeedback : 0.0f,
+        .feedback = m_taaParams.taaEnabled ? m_taaParams.taaFeedback : 0.0f,
     };
     m_taaPipeline.record(cb, frameIdx, eyeIndex, taaParams);
 }
@@ -1206,7 +1198,7 @@ void Renderer::recordAO(uint32 frameIdx)
     vk::CommandBufferInheritanceInfo inheritance;
     cb.begin(false, &inheritance);
     const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
-    if (m_aoEnabled && m_meshInfoCounter > 0 && tlas)
+    if (m_rtaoParams.enabled && m_meshInfoCounter > 0 && tlas)
     {
         const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
         RTAOPipeline::RecordParams aoParams{
@@ -1288,7 +1280,7 @@ void Renderer::recordTaa(uint32 frameIdx)
         .gbufferDepthView = gbuffer.getDepthView(),
         .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(),
         .gbufferSampler = gbuffer.getSampler(),
-        .feedback = m_taaEnabled ? m_taaFeedback : 0.0f,
+        .feedback = m_taaParams.taaEnabled ? m_taaParams.taaFeedback : 0.0f,
     };
     m_taaPipeline.record(cb, frameIdx, 0, taaParams);
     cb.end();
@@ -1626,7 +1618,7 @@ void Renderer::recordCommandBuffers()
                         recordGBufferInto(commandBuffer, frameIdx, eye);
                     vkCommandBuffer.endRenderPass();
                 }
-                if (m_aoEnabled)
+                if (m_rtaoParams.enabled)
                     recordAOInto(commandBuffer, frameIdx, eye); // compute AO for this eye
 
                 // This eye's forward descriptor set takes this eye's AO + the (per-frame) TLAS.
@@ -1708,7 +1700,7 @@ void Renderer::recordCommandBuffers()
                 vkCommandBuffer.endRenderPass();
             }
             vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
-            if (m_aoEnabled)
+            if (m_rtaoParams.enabled)
                 vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
             // Fog scatter/integrate compute; the primary is re-recorded every frame, so the enable toggle
             // takes effect immediately (the integrated grid was cleared to "no fog" at init when disabled).

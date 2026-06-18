@@ -179,21 +179,15 @@ private:
     AccelerationStructure m_accelStructure;
     GIProbePipeline m_giProbePipeline;
 
-    bool  m_aoEnabled = true;
-    bool  m_taaEnabled = true;
-    float m_taaFeedback = 0.9f;
-    uint32 m_taaJitterFrame = 0;
-
-    uint32 m_blasBuiltCount = 0;
-    glm::vec3 m_cameraPos = glm::vec3(0.0f);
-    glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
-    uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray set each frame
-    uint32 m_fogVolumeCounter = 0;
-
     SkyParams m_skyParams;
     FogParams m_fogParams;
     PostParams m_postParams;
     RTParams m_rtParams;
+    RTAOParams m_rtaoParams;
+    TAAParams m_taaParams;
+
+    glm::vec3 m_cameraPos = glm::vec3(0.0f);
+    glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
 
     bool   m_giProbeDebugEnabled = false;
     uint32 m_giProbeDebugMode = 0;
@@ -210,23 +204,22 @@ private:
     std::array<VmaAllocation, 2> m_eyeColorMem{};
     std::array<vk::ImageView, 2> m_eyeColorView{};
     std::array<vk::Framebuffer, 2> m_eyeFramebuffer{};
+    std::array<DescriptorSet, 2> m_vrCompositeDescriptorSet;
     vk::Image m_eyeDepthImage;
     VmaAllocation m_eyeDepthMem = nullptr;
     vk::ImageView m_eyeDepthView;
-    std::array<DescriptorSet, 2> m_vrCompositeDescriptorSet;
 
     uint32 m_maxRenderNodes = RendererVKLayout::INITIAL_RENDER_NODES;
     uint32 m_maxUniqueMeshes = RendererVKLayout::INITIAL_UNIQUE_MESHES;
     uint32 m_maxUniqueMaterials = RendererVKLayout::INITIAL_UNIQUE_MATERIALS;
     uint32 m_maxInstanceOffsets = RendererVKLayout::INITIAL_INSTANCE_OFFSETS;
     uint32 m_maxInstanceData = RendererVKLayout::INITIAL_INSTANCE_DATA;
-
-    uint32 m_pendingMaxInstanceData = 0;
-    size_t m_lightGridBufferSize = RendererVKLayout::INITIAL_LIGHT_GRID_BUFFER_SIZE;
-    uint32 m_lightTableEntries = RendererVKLayout::INITIAL_LIGHT_TABLE_NUM_ENTRIES;
+    uint32 m_maxTextures = RendererVKLayout::INITIAL_TEXTURES;
     uint32 m_maxGiTlasInstances = RendererVKLayout::GI_INITIAL_TLAS_INSTANCES;
 
-    uint32 m_maxTextures = RendererVKLayout::INITIAL_TEXTURES;
+    size_t m_lightGridBufferSize = RendererVKLayout::INITIAL_LIGHT_GRID_BUFFER_SIZE;
+    uint32 m_lightTableEntries = RendererVKLayout::INITIAL_LIGHT_TABLE_NUM_ENTRIES;
+
     uint32 m_numTextureDescriptors = RendererVKLayout::INITIAL_TEXTURES;
     uint32 m_meshDataGeneration = 0; // last seen MeshDataManager::getGeneration(); change -> re-record
     uint32 m_textureGeneration = 0;  // last seen TextureManager::getGeneration(); change -> rebuild texture-array pipelines
@@ -236,11 +229,15 @@ private:
     std::vector<uint32> m_numInstancesPerMesh;
     std::vector<uint32> m_freeRenderNodeIndexes;
 
+    uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray/taa samples set each frame
     uint32 m_meshInfoCounter = 0;
     uint32 m_materialInfoCounter = 0;
     uint32 m_instanceOffsetCounter = 0;
     uint32 m_meshInstanceCounter = 0;
     uint32 m_lightCounter = 0;
+    uint32 m_fogVolumeCounter = 0;
+    uint32 m_blasBuiltCount = 0;
+    uint32 m_pendingMaxInstanceData = 0;
 
     Buffer m_meshInfosBuffer;
     Buffer m_materialInfosBuffer;

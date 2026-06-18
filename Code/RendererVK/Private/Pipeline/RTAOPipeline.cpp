@@ -174,8 +174,9 @@ void RTAOPipeline::recreateImages(uint32 fullWidth, uint32 fullHeight)
     (void)Globals::device.getGraphicsQueue().waitIdle();
 }
 
-void RTAOPipeline::initialize(uint32 fullWidth, uint32 fullHeight, uint32 viewCount)
+void RTAOPipeline::initialize(const RTAOParams* pParams, uint32 fullWidth, uint32 fullHeight, uint32 viewCount)
 {
+    m_pParams = pParams;
     m_viewCount = viewCount;
     ComputePipelineLayout traceLayout;    buildTraceLayout(traceLayout);       m_tracePipeline.initialize(traceLayout);
     ComputePipelineLayout temporalLayout; buildTemporalLayout(temporalLayout); m_temporalPipeline.initialize(temporalLayout);
@@ -207,13 +208,6 @@ void RTAOPipeline::initialize(uint32 fullWidth, uint32 fullHeight, uint32 viewCo
     auto samplerResult = Globals::device.getDevice().createSampler(samplerInfo);
     assert(samplerResult.result == vk::Result::eSuccess);
     m_aoSampler = samplerResult.value;
-
-    Tweak::intVar("RTAO", "Rays Per Pixel", &m_rays, 1, 32);
-    Tweak::floatVar("RTAO", "Radius", &m_radius, 0.0f, 32.0f);
-    Tweak::floatVar("RTAO", "Power", &m_power, 0.0f, 8.0f);
-    Tweak::floatVar("RTAO", "Intensity", &m_intensity, 0.0f, 4.0f);
-    Tweak::floatVar("RTAO", "Max History", &m_maxHistory, 0.0f, 1.0f);
-    Tweak::intVar("RTAO", "Blur Radius", &m_blurRadius, 0, 8);
 }
 
 void RTAOPipeline::reloadShaders()
@@ -296,12 +290,14 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
 
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, traceLayout, 0, 1, &vkSet, 0, nullptr);
-        RtaoPC pc{ .numRays = uint32(std::max(m_rays, 1)), .radius = m_radius, .power = m_power,
-            .intensity = m_intensity, .aoWidth = m_width, .aoHeight = m_height, .viewIndex = viewIndex };
+        RtaoPC pc{ .numRays = uint32(std::max(m_pParams->rays, 1)), .radius = m_pParams->radius, .power = m_pParams->power,
+            .intensity = m_pParams->intensity, .aoWidth = m_width, .aoHeight = m_height, .viewIndex = viewIndex };
         cmd.pushConstants(traceLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
     storeWriteToSampledRead();
+
+    const bool blurEnabled = m_pParams->blurRadius > 0;
 
     { // -------- Pass 2: temporal accumulate (read raw + history accum[prev], write accum[cur]) --------
         transitionToGeneral(cmd, m_accum, cur, true);
@@ -319,7 +315,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
         commandBuffer.cmdUpdateDescriptorSets(temporalLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_temporalPipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, temporalLayout, 0, 1, &vkSet, 0, nullptr);
-        TemporalPC pc{ .aoWidth = m_width, .aoHeight = m_height, .maxHistory = m_maxHistory, .viewIndex = viewIndex };
+        TemporalPC pc{ .aoWidth = m_width, .aoHeight = m_height, .maxHistory = m_pParams->maxHistory, .viewIndex = viewIndex };
         cmd.pushConstants(temporalLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }
@@ -340,7 +336,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
         commandBuffer.cmdUpdateDescriptorSets(spatialLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_spatialPipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, spatialLayout, 0, 1, &vkSet, 0, nullptr);
-        SpatialPC pc{ .aoWidth = m_width, .aoHeight = m_height, .radius = m_blurRadius, .viewIndex = viewIndex };
+        SpatialPC pc{ .aoWidth = m_width, .aoHeight = m_height, .radius = m_pParams->blurRadius, .viewIndex = viewIndex };
         cmd.pushConstants(spatialLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }

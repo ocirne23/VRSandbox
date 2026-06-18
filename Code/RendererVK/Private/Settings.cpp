@@ -91,3 +91,28 @@ void PostParams::registerTweaks(const std::function<void()>& onReRecord)
     Tweak::floatVar("Post", "Adapt Min EV", &adaptMinEV, -12.0f, 0.0f, 0.1f);
     Tweak::floatVar("Post", "Adapt Max EV", &adaptMaxEV, 0.0f, 12.0f, 0.1f);
 }
+
+void RTParams::registerTweaks()
+{
+    Tweak::boolean("RT", "RT Lights", &rtLightShadows);
+    Tweak::boolean("RT", "RT Sun", &rtSunShadow);
+    Tweak::intVar("RT", "RT Sun Rays", &sunShadowRays, 1, 8);
+    Tweak::boolean("RT", "RT Sky Radiance", &rtSkyRadiance);
+}
+
+void RTAOParams::registerTweaks(const std::function<void()>& onReRecord)
+{
+    Tweak::boolean("RTAO", "Enabled", &enabled, onReRecord);
+    Tweak::intVar("RTAO", "Rays Per Pixel", &rays, 1, 32, 1.0f, onReRecord);
+    Tweak::floatVar("RTAO", "Radius", &radius, 0.0f, 32.0f, 0.01f, onReRecord);
+    Tweak::floatVar("RTAO", "Power", &power, 0.0f, 8.0f, 0.01f, onReRecord);
+    Tweak::floatVar("RTAO", "Intensity", &intensity, 0.0f, 4.0f, 0.01f, onReRecord);
+    Tweak::floatVar("RTAO", "Max History", &maxHistory, 0.0f, 1.0f, 0.01f, onReRecord);
+    Tweak::intVar("RTAO", "Blur Radius", &blurRadius, 0, 8, 1.0f, onReRecord);
+}
+
+void TAAParams::registerTweaks(const std::function<void()>& onReRecord)
+{
+    Tweak::boolean("TAA", "Enabled", &taaEnabled, onReRecord);
+    Tweak::floatVar("TAA", "History Feedback", &taaFeedback, 0.0f, 0.98f, 0.01f, onReRecord);
+}

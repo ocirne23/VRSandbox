@@ -8,6 +8,7 @@ import :CommandBuffer;
 import :ComputePipeline;
 import :DescriptorSet;
 import :Layout;
+import :Settings;
 
 // Screen-space ray-traced ambient occlusion with a temporal-reprojection + spatial denoise.
 // Three half-resolution compute passes per frame, all R16F (images kept in GENERAL, no layout churn):
@@ -24,7 +25,7 @@ public:
     RTAOPipeline(const RTAOPipeline&) = delete;
 
     // viewCount > 1 (VR) keeps a separate AO image set + history per eye (record() takes the eye index).
-    void initialize(uint32 fullWidth, uint32 fullHeight, uint32 viewCount = 1);
+    void initialize(const RTAOParams* pParams, uint32 fullWidth, uint32 fullHeight, uint32 viewCount = 1);
     void recreateImages(uint32 fullWidth, uint32 fullHeight);
     void reloadShaders();
 
@@ -73,14 +74,7 @@ private:
     std::array<DescriptorSet, SLOTS> m_temporalSets;
     std::array<DescriptorSet, SLOTS> m_spatialSets;
 
-    // Tuning (runtime-tweakable; registered with the Tweak system in initialize()). Few rays per frame;
-    // temporal accumulation amortizes them into a clean result.
-    int   m_rays = 8;
-    float m_radius = 1.0f;
-    float m_power = 1.25f;
-    float m_intensity = 1.0f;
-    float m_maxHistory = 0.50f;
-    int   m_blurRadius = 3;
+    const RTAOParams* m_pParams = nullptr;
 
     uint32 m_width = 0;  // half-res AO dimensions
     uint32 m_height = 0;

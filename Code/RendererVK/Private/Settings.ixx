@@ -128,10 +128,33 @@ export struct PostParams
 
 export struct RTParams
 {
-    bool rtSunShadow = false;    // sun shadows from TLAS ray queries instead of PCSS cascades (A/B tweak)
+    bool rtSunShadow = false;   // sun shadows from TLAS ray queries instead of PCSS cascades (A/B tweak)
     int  sunShadowRays = 5;     // RT sun shadow rays per pixel
     bool rtLightShadows = true; // ray-traced shadows for punctual/area/tube lights
     bool rtSkyRadiance = true;  // ray-traced sky visibility for the sky radiance light (GI probe trace)
+
+    void registerTweaks();
+};
+
+export struct RTAOParams
+{
+    bool  enabled = true;
+    int   rays = 3;
+    float radius = 1.0f;
+    float power = 1.5f;
+    float intensity = 1.0f;
+    float maxHistory = 0.99f;
+    int   blurRadius = 0;
+
+    void registerTweaks(const std::function<void()>& onReRecord);
+};
+
+export struct TAAParams
+{
+    bool  taaEnabled = true;
+    float taaFeedback = 0.9f;
+
+    void registerTweaks(const std::function<void()>& onReRecord);
 };
 
 export struct Stats
