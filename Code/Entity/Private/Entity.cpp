@@ -157,3 +157,15 @@ bool Entity::isPrefabLocked() const
             return true;
     return false;
 }
+
+const std::string& Entity::getPrefabName() const
+{
+    static const std::string empty;
+    return spawnTemplate ? spawnTemplate->prefabName : empty;
+}
+
+const std::string& Entity::getSourceFile() const
+{
+    static const std::string empty;
+    return spawnTemplate ? spawnTemplate->sourceFile : empty;
+}

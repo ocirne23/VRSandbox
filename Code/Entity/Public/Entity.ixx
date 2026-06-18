@@ -45,7 +45,6 @@ public:
     uint8 ecsComponentCount = 0;
     uint8 flags = 0; // EEntityFlags bitmask
 
-    ~Entity() { assert(refCount == 0); }
 
     void serializeComponent(EComponentID id, AssetNode& out);
     void deserializeComponent(EComponentID id, const AssetNode& in);
@@ -60,6 +59,9 @@ public:
     const std::string& getSourceFile() const;
 
 private:
+	Entity() = default;
+	Entity(const Entity&) = delete;
+    ~Entity() { assert(refCount == 0); }
 
     void createComponent(EComponentID id, const void* info, const Transform& base);
     void destroyComponent(EComponentID id, const void* info);
@@ -139,18 +141,6 @@ export struct EntitySpawnTemplate
     std::string prefabName;
     std::string displayName;
 };
-
-inline const std::string& Entity::getPrefabName() const
-{
-    static const std::string empty;
-    return spawnTemplate ? spawnTemplate->prefabName : empty;
-}
-
-inline const std::string& Entity::getSourceFile() const
-{
-    static const std::string empty;
-    return spawnTemplate ? spawnTemplate->sourceFile : empty;
-}
 
 export struct EntityChange
 {
