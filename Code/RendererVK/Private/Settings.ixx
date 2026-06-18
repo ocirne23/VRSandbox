@@ -15,7 +15,7 @@ export struct SkyParams
     // Sun
     glm::vec3 sunDirection = glm::normalize(glm::vec3(-0.4f, 0.91f, 0.09f));
     glm::vec3 sunColor = glm::vec3(0.9568f, 1.0f, 0.9214f);
-    float sunIntensity = 3.0f;
+    float sunIntensity = 5.0f;
     float sunAngularCos = 0.99998f;     // cos of the disc radius (1 = disc off)
     float sunGlow = 1.0f;               // sun halo strength (0 = none, ~0.5 subtle, 2 = heavy); HG forward lobe in sky.fs
     float sunRolloff = 1.25f;           // sky highlight roll-off: soft-clips the overexposed sun region so its gradient survives (0 = raw hard clip)
@@ -26,7 +26,7 @@ export struct SkyParams
 
     // Ambient + sky radiance (the non-sun lighting inputs)
     glm::vec3 ambientColor = glm::vec3(1.0f);   // flat non-physical minimum ambient
-    float ambientIntensity = 0.005f;
+    float ambientIntensity = 0.01f;
     glm::vec3 skyRadianceColor = glm::vec3(0.55f, 0.65f, 1.0f); // directional sky radiance (moonlight/space light), along up
     float skyRadianceIntensity = 0.20f;
 
@@ -48,7 +48,7 @@ export struct SkyParams
                                         // suppresses the green horizon band single scattering produces
 
     // Clouds
-    float cloudCoverage = 0.45f;
+    float cloudCoverage = 0.35f;
     float cloudHeight = 6300.0f;        // meters above the viewer (slab base)
     float cloudThickness = 86.0f;    // slab thickness sqrt(m)
     float cloudScale = 0.7f;            // multiplier on the base noise frequency
@@ -58,7 +58,7 @@ export struct SkyParams
     float cloudDensity = 1.58f;          // extinction strength (high = opaque cores)
     float cloudSharpness = 1.0f;       // density remap contrast (high = hard-edged shapes)
     float cloudBaseVar = 0.78f;          // per-column base/top height variation (0 = flat slab)
-    float cloudShading = 0.69f;          // directional sun-shading strength
+    float cloudShading = 2.00f;          // directional sun-shading strength
 
     // Stars
     float starDensity = 0.63f;
@@ -139,7 +139,7 @@ export struct RTParams
 export struct RTAOParams
 {
     bool  enabled = true;
-    int   rays = 3;
+    int   rays = 1;
     float radius = 1.0f;
     float power = 1.5f;
     float intensity = 1.0f;

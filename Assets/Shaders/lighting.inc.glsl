@@ -101,7 +101,7 @@ vec3 giGatherDirect(vec3 pos, vec3 N, vec3 albedo)
     if (sunNdotL > 0.0)
     {
         float sunShadow = (g_sunShadowOverride >= 0.0) ? g_sunShadowOverride : giSunShadow(pos, N);
-        E += u_sunColor.rgb * sunShadow * sunNdotL;
+        E += u_sunColor.rgb * sunShadow * sunNdotL * u_eclipseParams.x;
     }
 
     // The sky radiance light is intentionally absent here: it is injected directly into the probe SH

@@ -169,7 +169,7 @@ vec3 skyRadiance(vec3 dir)
 		dir = normalize(dir - up * (cosUp - 0.02));
 		groundAtten = u_groundParams.rgb;
 	}
-	vec3 radiance = atmosphereScatterCheap(dir, normalize(u_sunDirection.xyz), up, 4) * u_sunColor.rgb;
+	vec3 radiance = atmosphereScatterCheap(dir, normalize(u_sunDirection.xyz), up, 4) * u_sunColor.rgb * u_eclipseParams.x;
 	if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
 		radiance += atmosphereScatterCheap(dir, up, up, 2) * u_skyRadianceColor;
 	return radiance * groundAtten;

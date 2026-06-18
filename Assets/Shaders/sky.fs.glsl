@@ -238,14 +238,13 @@ vec4 clouds(vec3 dir, vec3 up, vec3 sunDir, vec3 sunTint, vec3 skyAmbient)
 	return vec4(col, alpha * smoothstep(0.02, 0.18, cosUp));
 }
 
-// ---------------------------------------------------------------------------------------------
-vec3 adjustSaturation(vec3 color, float saturation) {
-    // Standard luminosity weights for human perception
+vec3 adjustSaturation(vec3 color, float saturation) 
+{ // Standard luminosity weights for human perception
     const vec3 luminosity = vec3(0.2126, 0.7152, 0.0722);
     vec3 grayscale = vec3(dot(color, luminosity));
-    
     return mix(grayscale, color, saturation);
 }
+
 void main()
 {
 	const vec3 dir = normalize(in_pos - u_viewPos);
@@ -314,7 +313,7 @@ void main()
 		// actual sun direction, so they react to where the sun is). Disc size comes from u_moonParams.w.
 		// Drawn before the stars so its disc coverage can occlude them (even the unlit, new-moon part of
 		// the disc blocks the stars behind it). Clouds blend after this, so they occlude it.
-		if (u_cloudParams2.w > 0.0 && u_moonParams.w < 1.0 && !moonCovered)
+		if (u_cloudParams2.w > 0.0 && !moonCovered)
 		{
 			vec3 mT = normalize(cross(moonDir, abs(moonDir.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
 			vec3 mB = cross(moonDir, mT);
@@ -456,7 +455,7 @@ void main()
 		// two), so it is replaced entirely: the blend runs from the grazing-horizon sky color (continuous
 		// with the sky right at the horizon line) into the lit ground, never through black.
 		vec3 grazeDir = normalize(dir - up * (cosUpDir - 0.02));
-		vec3 skyAmb = atmosphereScatterCheap(grazeDir, L, up, 4) * u_sunColor.rgb;
+		vec3 skyAmb = atmosphereScatterCheap(grazeDir, L, up, 4) * u_sunColor.rgb * eclipseFactor;
 		if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
 			skyAmb += atmosphereScatterCheap(grazeDir, up, up, 2) * u_skyRadianceColor;
 		vec3 groundLit = u_groundParams.rgb *
@@ -469,7 +468,7 @@ void main()
 	const vec3 sunTint = (sunSurfaceColor.rgb * atmosTransmittanceToLight(u_cloudParams0.x, L, up) + u_skyRadianceColor) / PI;
 	vec4 cl = clouds(dir, up, L, sunTint, color);
 	color = mix(color, cl.rgb, cl.a);
-
+	/*
 	// Highlight roll-off (u_skySunParams.z): there is no tonemapper, so everything over 1.0 hard-clips
 	// to flat white — the sun disc, its halo and the Mie forward peak all merge into one featureless
 	// circle. Soft-clip the max channel above a knee with an exponential shoulder that asymptotes at 1:
@@ -490,6 +489,6 @@ void main()
 			color *= compressed / lum;
 		}
 	}
-
+	*/
 	out_color = vec4(color, 1.0);
 }

@@ -297,8 +297,6 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
     }
     storeWriteToSampledRead();
 
-    const bool blurEnabled = m_pParams->blurRadius > 0;
-
     { // -------- Pass 2: temporal accumulate (read raw + history accum[prev], write accum[cur]) --------
         transitionToGeneral(cmd, m_accum, cur, true);
 
@@ -321,7 +319,7 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
     }
     storeWriteToSampledRead();
 
-    if (blurEnabled)
+    if (m_pParams->blurRadius > 0)
     { // -------- Pass 3: spatial bilateral blur (read accum[cur], write final[cur]) --------
         transitionToGeneral(cmd, m_final, cur, true);
 

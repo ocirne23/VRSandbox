@@ -223,7 +223,8 @@ void main()
         }
         else
             sunVis = giSunShadow(worldPos, vec3(0.0));
-        vec3 inLight = u_sunColor.rgb * (volPhaseHG(dot(dir, sunDir), g) * sunVis);
+
+        vec3 inLight = atmosTransmittanceToLight(0.0, sunDir, u_skyUp) * u_sunColor.rgb * (volPhaseHG(dot(dir, sunDir), g) * sunVis * u_eclipseParams.x);
 
         // Ambient: GI probe irradiance toward the camera (toggleable; the clipmap lookup is the next
         // biggest cost after the shadow rays), falling back to the analytic sky. For an SH-L1 field the
