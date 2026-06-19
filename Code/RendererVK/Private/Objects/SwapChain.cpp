@@ -1,4 +1,4 @@
-module RendererVK:SwapChain;
+module RendererVK;
 
 import :VK;
 import :Device;

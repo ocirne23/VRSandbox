@@ -1,4 +1,4 @@
-module RendererVK:ObjectContainer;
+module RendererVK;
 
 import Core;
 import Core.Transform;

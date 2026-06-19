@@ -1,4 +1,4 @@
-module RendererVK:Instance;
+module RendererVK;
 
 import Core;
 import Core.SDL;

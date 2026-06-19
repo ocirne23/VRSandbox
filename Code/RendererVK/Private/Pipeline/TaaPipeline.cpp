@@ -1,4 +1,4 @@
-module RendererVK:TaaPipeline;
+module RendererVK;
 
 import Core;
 import File.FileSystem;

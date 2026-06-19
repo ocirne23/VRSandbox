@@ -1,4 +1,4 @@
-module RendererVK:IndirectCullComputePipeline;
+module RendererVK;
 
 import Core;
 import File.FileSystem;

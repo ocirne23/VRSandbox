@@ -40,14 +40,9 @@ import :GraphicsPipeline;
 import :Light;
 import :GpuCrashTracker;
 import :Settings;
+import :RenderNode;
 
 export import Core.fwd;
-
-export class MeshInstance;
-export class MeshData;
-export class ObjectContainer;
-export class RenderNode;
-export struct Frustum;
 
 export enum class EValidation { ENABLED, DISABLED };
 export enum class EVSync { ENABLED, DISABLED };
@@ -225,7 +220,7 @@ private:
     uint32 m_textureGeneration = 0;  // last seen TextureManager::getGeneration(); change -> rebuild texture-array pipelines
 
     std::vector<ObjectContainer*> m_objectContainers;
-    std::vector<Transform> m_renderNodeTransforms;
+    std::vector<Transform>& m_renderNodeTransforms = Globals::renderNodeTransforms;
     std::vector<uint32> m_numInstancesPerMesh;
     std::vector<uint32> m_freeRenderNodeIndexes;
 

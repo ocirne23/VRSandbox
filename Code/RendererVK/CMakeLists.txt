@@ -36,4 +36,3 @@ target_link_libraries(${PROJECT_NAME} PUBLIC Core File vulkan-1
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER Engine)
 
 apply_compile_settings(${PROJECT_NAME})
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_SCAN_FOR_MODULES false)

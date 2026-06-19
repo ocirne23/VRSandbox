@@ -1,4 +1,4 @@
-module RendererVK:AccelerationStructure;
+module RendererVK;
 
 import Core;
 import :VK;

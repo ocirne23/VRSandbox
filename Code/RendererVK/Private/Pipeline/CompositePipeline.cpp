@@ -1,4 +1,4 @@
-module RendererVK:CompositePipeline;
+module RendererVK;
 
 import Core;
 import File.FileSystem;

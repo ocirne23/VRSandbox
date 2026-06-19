@@ -1,4 +1,4 @@
-module RendererVK:GBuffer;
+module RendererVK;
 
 import :VK;
 import :Device;

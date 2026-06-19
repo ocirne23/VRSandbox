@@ -5,7 +5,7 @@ import :VK;
 import :Layout;
 import :Shader;
 
-export class RenderPass;
+class RenderPass;
 
 export struct VertexLayoutInfo
 {

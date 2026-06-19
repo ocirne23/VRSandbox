@@ -1,4 +1,4 @@
-module RendererVK:Device;
+module RendererVK;
 
 import :VK;
 import :Instance;

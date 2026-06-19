@@ -8,7 +8,7 @@ module;
 #include "vma/vk_mem_alloc.h"
 #pragma warning(pop)
 
-module RendererVK:Allocator;
+module RendererVK;
 
 import Core;
 import :VK;

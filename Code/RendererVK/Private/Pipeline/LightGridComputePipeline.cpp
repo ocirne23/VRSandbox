@@ -1,4 +1,4 @@
-module RendererVK:LightGridComputePipeline;
+module RendererVK;
 
 import Core;
 import Core.glm;

@@ -1,4 +1,4 @@
-module RendererVK:RenderPass;
+module RendererVK;
 
 import :VK;
 import :Device;

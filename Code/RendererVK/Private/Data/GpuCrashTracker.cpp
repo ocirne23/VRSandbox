@@ -1,4 +1,4 @@
-module RendererVK:GpuCrashTracker;
+module RendererVK;
 
 import Core;
 import Core.Windows;

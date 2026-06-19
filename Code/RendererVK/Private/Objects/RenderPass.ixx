@@ -2,7 +2,7 @@ export module RendererVK:RenderPass;
 
 import :VK;
 
-export class SwapChain;
+class SwapChain;
 
 export class RenderPass final
 {

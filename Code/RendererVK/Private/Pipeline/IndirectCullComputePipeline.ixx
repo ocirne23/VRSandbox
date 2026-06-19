@@ -10,8 +10,6 @@ import :ComputePipeline;
 import :Layout;
 import :DescriptorSet;
 
-export class ObjectContainer;
-
 export class IndirectCullComputePipeline final
 {
 public:

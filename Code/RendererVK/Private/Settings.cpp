@@ -1,4 +1,4 @@
-module RendererVK:Settings;
+module RendererVK;
 
 import Core;
 import Core.glm;

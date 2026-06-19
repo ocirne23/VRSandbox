@@ -1,4 +1,4 @@
-module RendererVK:Surface;
+module RendererVK;
 
 import Core;
 import Core.SDL;

@@ -1,10 +1,7 @@
 export module RendererVK:Surface;
 
+import Core.fwd;
 import :VK;
-
-export class Instance;
-export class Device;
-export class Window;
 
 export class Surface final
 {

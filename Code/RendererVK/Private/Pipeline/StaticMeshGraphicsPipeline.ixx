@@ -12,10 +12,8 @@ import :DescriptorSet;
 import :Texture;
 import :Sampler;
 
-export class ObjectContainer;
-export class StagingManager;
-export class CommandBuffer;
-export class RenderPass;
+class CommandBuffer;
+class ObjectContainer;
 
 export class StaticMeshGraphicsPipeline final
 {

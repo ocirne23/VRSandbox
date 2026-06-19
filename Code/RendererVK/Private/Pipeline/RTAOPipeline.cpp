@@ -1,4 +1,4 @@
-module RendererVK:RTAOPipeline;
+module RendererVK;
 
 import Core;
 import Core.Tweaks;

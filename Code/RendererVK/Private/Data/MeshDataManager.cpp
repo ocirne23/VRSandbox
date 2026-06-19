@@ -1,4 +1,4 @@
-module RendererVK:MeshDataManager;
+module RendererVK;
 
 import Core;
 import :StagingManager;

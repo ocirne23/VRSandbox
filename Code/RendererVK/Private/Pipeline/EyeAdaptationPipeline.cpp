@@ -1,4 +1,4 @@
-module RendererVK:EyeAdaptationPipeline;
+module RendererVK;
 
 import Core;
 import File.FileSystem;

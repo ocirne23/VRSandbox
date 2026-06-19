@@ -1,4 +1,4 @@
-﻿module RendererVK:Renderer;
+﻿module RendererVK;
 
 import Core;
 import Core.fwd;

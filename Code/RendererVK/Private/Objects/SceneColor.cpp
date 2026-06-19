@@ -1,4 +1,4 @@
-module RendererVK:SceneColor;
+module RendererVK;
 
 import :VK;
 import :Device;

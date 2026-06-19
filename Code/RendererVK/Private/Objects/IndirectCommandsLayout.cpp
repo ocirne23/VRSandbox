@@ -1,4 +1,4 @@
-module RendererVK:IndirectCommandsLayout;
+module RendererVK;
 
 import Core;
 import :Device;

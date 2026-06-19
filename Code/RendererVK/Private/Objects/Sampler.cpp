@@ -1,4 +1,4 @@
-module RendererVK:Sampler;
+module RendererVK;
 
 import :VK;
 import :Device;

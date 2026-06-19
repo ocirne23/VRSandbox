@@ -7,8 +7,6 @@ import :VK;
 import :Device;
 import :Allocator;
 
-export class StagingManager;
-
 export class Texture final
 {
 public:

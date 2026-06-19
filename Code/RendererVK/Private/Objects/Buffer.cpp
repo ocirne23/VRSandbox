@@ -1,4 +1,4 @@
-module RendererVK:Buffer;
+module RendererVK;
 
 import :VK;
 import :Device;

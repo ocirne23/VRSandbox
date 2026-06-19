@@ -1,4 +1,4 @@
-module RendererVK:IndirectExecutionSet;
+module RendererVK;
 
 import Core;
 import :Device;

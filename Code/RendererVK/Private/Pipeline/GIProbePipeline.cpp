@@ -1,4 +1,4 @@
-module RendererVK:GIProbePipeline;
+module RendererVK;
 
 import Core;
 import Core.glm;

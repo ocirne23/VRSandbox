@@ -1,4 +1,4 @@
-module RendererVK:ShaderDatabase;
+module RendererVK;
 
 import Core;
 import Core.Windows;

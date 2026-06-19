@@ -5,8 +5,6 @@ import :VK;
 import :Layout;
 import :Buffer;
 
-export class MeshData;
-
 export class MeshDataManager final
 {
 public:

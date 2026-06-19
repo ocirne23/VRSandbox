@@ -1,4 +1,4 @@
-module RendererVK:ComputePipeline;
+module RendererVK;
 
 import :Device;
 import :Shader;

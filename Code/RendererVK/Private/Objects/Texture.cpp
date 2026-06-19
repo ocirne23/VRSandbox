@@ -1,4 +1,4 @@
-module RendererVK:Texture;
+module RendererVK;
 
 import Core;
 import File.ITextureData;

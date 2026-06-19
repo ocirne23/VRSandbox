@@ -1,4 +1,4 @@
-module RendererVK:GBufferPipeline;
+module RendererVK;
 
 import Core;
 import File.FileSystem;

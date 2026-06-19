@@ -1,4 +1,4 @@
-module RendererVK:CommandBuffer;
+module RendererVK;
 
 import :VK;
 import :Device;

@@ -3,7 +3,7 @@ export module RendererVK:IndirectExecutionSet;
 import Core;
 import :VK;
 
-export class GraphicsPipeline;
+class GraphicsPipeline;
 
 export class IndirectExecutionSet final
 {

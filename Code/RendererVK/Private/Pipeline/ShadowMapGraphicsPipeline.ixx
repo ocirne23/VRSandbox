@@ -11,7 +11,7 @@ import :DescriptorSet;
 import :Sampler;
 import :ShadowMap;
 
-export class CommandBuffer;
+class CommandBuffer;
 
 // Depth-only pipeline that renders the shadow caster list into one cascade of the sun ShadowMap.
 // Mirrors StaticMeshGraphicsPipeline: it consumes the cull's IndirectDrawSequence buffer through

@@ -1,4 +1,4 @@
-module RendererVK:DescriptorSet;
+module RendererVK;
 
 import :Device;
 

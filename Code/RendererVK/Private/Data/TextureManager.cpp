@@ -1,7 +1,7 @@
-module RendererVK:TextureManager;
+module RendererVK;
 
 import File.fwd;
-
+import :TextureManager; // ?
 import :Device;
 
 TextureManager::~TextureManager()

@@ -4,8 +4,7 @@ import Core;
 import :VK;
 import :CommandBuffer;
 
-export class Device;
-export class Surface;
+class Surface;
 
 export class SwapChain final
 {

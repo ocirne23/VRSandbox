@@ -6,8 +6,6 @@ import Core.Camera;
 
 import Input.fwd;
 
-export class MouseListener;
-
 export class FreeFlyCameraController final
 {
 public:

@@ -6,7 +6,7 @@ module;
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
-module RendererVK:OpenXRSession;
+module RendererVK;
 
 import Core;
 import :VK;

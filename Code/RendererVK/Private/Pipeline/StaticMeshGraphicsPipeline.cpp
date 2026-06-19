@@ -1,4 +1,4 @@
-module RendererVK:StaticMeshGraphicsPipeline;
+module RendererVK;
 
 import Core;
 

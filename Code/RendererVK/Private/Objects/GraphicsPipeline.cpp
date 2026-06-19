@@ -1,4 +1,4 @@
-module RendererVK:GraphicsPipeline;
+module RendererVK;
 
 import Core;
 import :VK;

@@ -10,8 +10,6 @@ import :GraphicsPipeline;
 import :DescriptorSet;
 import :Layout;
 
-export class RenderPass;
-
 // Froxel-based volumetric fog (camera-frustum-aligned 3D grid, VOL_FROXEL_* texels, exponential Z slices):
 //   1. scatter   : per froxel, media density (global height fog + noise + local fog volumes) and in-scattered
 //                  light (sun via TLAS ray / cascade tap, GI probe ambient, light-grid lights), temporally

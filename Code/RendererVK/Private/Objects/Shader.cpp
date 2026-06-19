@@ -1,4 +1,4 @@
-module RendererVK:Shader;
+module RendererVK;
 
 import Core;
 import File.FileSystem;

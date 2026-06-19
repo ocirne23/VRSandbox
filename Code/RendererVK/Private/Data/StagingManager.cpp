@@ -1,4 +1,6 @@
-module RendererVK:StagingManager;
+module RendererVK;
+
+import :StagingManager; // ?
 
 import Core;
 import :VK;
