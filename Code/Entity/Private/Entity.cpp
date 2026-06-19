@@ -20,7 +20,7 @@ EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& trans
     entity->scale = transform.scale;
     entity->rot = transform.quat;
 
-    entity->name = tmpl.displayName;
+    entity->displayName = tmpl.displayName;
     entity->spawnTemplate = &tmpl;
     entity->typeBits = tmpl.archetype.typeBits;
     entity->setPrefabInstance(!tmpl.prefabName.empty()); // a registered prefab spawns as a locked instance

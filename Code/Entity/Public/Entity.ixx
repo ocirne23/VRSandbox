@@ -37,7 +37,7 @@ public:
     glm::quat rot;
 
     Entity* parent = nullptr;
-    std::string name;
+    std::string displayName;
     const EntitySpawnTemplate* spawnTemplate = nullptr;
 
     uint16 refCount = 0;

@@ -302,6 +302,6 @@ EntityPtr World::createEmptyEntity(const std::string& name)
         m_emptyTemplate->displayName = "Entity";
     }
     EntityPtr entity = Entity::create(*m_emptyTemplate, Transform());
-    entity->name = name;
+    entity->displayName = name;
     return entity;
 }

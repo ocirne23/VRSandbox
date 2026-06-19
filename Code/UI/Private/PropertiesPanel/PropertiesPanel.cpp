@@ -24,10 +24,10 @@ void PropertiesPanel::render(Entity* selected)
 		ImGui::SetNextItemWidth(-1.0f);
 		{
 			char nameBuf[256];
-			strncpy_s(nameBuf, sizeof(nameBuf), selected->name.c_str(), sizeof(nameBuf) - 1);
+			strncpy_s(nameBuf, sizeof(nameBuf), selected->displayName.c_str(), sizeof(nameBuf) - 1);
 			nameBuf[sizeof(nameBuf) - 1] = '\0';
 			if (ImGui::InputText("##pp_name", nameBuf, sizeof(nameBuf), ImGuiInputTextFlags_EnterReturnsTrue))
-				selected->name = nameBuf;
+				selected->displayName = nameBuf;
 		}
 
 		{

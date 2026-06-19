@@ -4,12 +4,19 @@ import Core.imgui;
 
 static const char* fallbackLabel(Entity* entity)
 {
+    if (entity->spawnTemplate)
+    {
+        if (!entity->spawnTemplate->displayName.empty())
+            return entity->spawnTemplate->displayName.c_str();
+        if (!entity->spawnTemplate->prefabName.empty())
+            return entity->spawnTemplate->prefabName.c_str();
+    }
 	return "Entity";
 }
 
 static const char* displayLabel(Entity* entity)
 {
-	return entity->name.empty() ? fallbackLabel(entity) : entity->name.c_str();
+	return entity->displayName.empty() ? fallbackLabel(entity) : entity->displayName.c_str();
 }
 
 static bool containsCI(const char* haystack, const char* needle)
@@ -35,7 +42,7 @@ void SceneView::beginRename(Entity* entity)
 {
 	m_renamingEntity  = entity;
 	m_focusRenameNext = true;
-	strncpy_s(m_renameBuffer, sizeof(m_renameBuffer), entity->name.c_str(), sizeof(m_renameBuffer) - 1);
+	strncpy_s(m_renameBuffer, sizeof(m_renameBuffer), entity->displayName.c_str(), sizeof(m_renameBuffer) - 1);
 	m_renameBuffer[sizeof(m_renameBuffer) - 1] = '\0';
 }
 
@@ -152,7 +159,7 @@ void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 		if (ImGui::InputText("##sv_rename", m_renameBuffer, sizeof(m_renameBuffer),
 			ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
 		{
-			entity->name = m_renameBuffer;
+			entity->displayName = m_renameBuffer;
 			m_renamingEntity = nullptr;
 		}
 		if (!ImGui::IsItemActive() && !ImGui::IsItemFocused() && !m_focusRenameNext)

@@ -12,8 +12,8 @@ static void writeSceneChild(Entity* child, AssetNode& sceneComp);
 
 static void writeOverrides(Entity* entity, AssetNode& node, const std::string& tokenName)
 {
-    if (!entity->name.empty() && entity->name != tokenName)
-        node.set("Name", entity->name);
+    if (!entity->displayName.empty() && entity->displayName != tokenName)
+        node.set("Name", entity->displayName);
     node.set("Position", entity->pos);
     node.set("Rotation", glm::degrees(glm::eulerAngles(entity->rot)));
     node.set("Scale", entity->scale);
@@ -71,7 +71,7 @@ static void writeSceneChild(Entity* child, AssetNode& sceneComp)
     }
     else
     {
-        const std::string token = child->name.empty() ? std::string("Entity") : child->name;
+        const std::string token = child->displayName.empty() ? std::string("Entity") : child->displayName;
         AssetNode& node = sceneComp.addChild("Entity");
         node.values.emplace_back(token);
         writeEntityBody(child, node, token);

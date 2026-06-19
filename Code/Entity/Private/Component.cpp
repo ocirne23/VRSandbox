@@ -40,7 +40,7 @@ void SceneComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfor
             continue;
         EntityPtr childEntity = Entity::create(*child.tmpl, child.localTransform);
         if (!child.name.empty())
-            childEntity->name = child.name;
+            childEntity->displayName = child.name;
         childEntity->reparentEntity(&entity); // hands the owning child handle to this entity's children list
     }
 }
