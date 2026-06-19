@@ -1,4 +1,4 @@
-export module UI.NodeEditor:Link;
+export module UI.NodeEditor.Link;
 
 import UI.imgui_node_editor;
 

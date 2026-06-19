@@ -1,7 +1,7 @@
-module UI.NodeEditor:Scene;
+module UI.NodeEditor.Scene;
 
-import :Node;
-import :Link;
+import UI.NodeEditor.Node;
+import UI.NodeEditor.Link;
 
 using namespace NodeEditor;
 

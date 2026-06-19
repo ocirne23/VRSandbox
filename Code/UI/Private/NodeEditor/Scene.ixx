@@ -1,4 +1,4 @@
-export module UI.NodeEditor:Scene;
+export module UI.NodeEditor.Scene;
 
 import Core;
 

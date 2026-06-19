@@ -1,4 +1,4 @@
-export module UI.NodeEditor:Node;
+export module UI.NodeEditor.Node;
 
 import Core;
 import Core.imgui;

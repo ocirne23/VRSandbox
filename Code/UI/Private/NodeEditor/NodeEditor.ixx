@@ -1,5 +1,5 @@
 export module UI.NodeEditor;
 
-export import :Scene;
-export import :Node;
-export import :Link;
+export import UI.NodeEditor.Scene;
+export import UI.NodeEditor.Node;
+export import UI.NodeEditor.Link;

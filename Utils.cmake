@@ -42,7 +42,8 @@ function(apply_compile_settings target)
 
     set_target_properties(${PROJECT_NAME} PROPERTIES VS_GLOBAL_PublicModuleDirectories "${CMAKE_CURRENT_LIST_DIR}/Public")
     set_target_properties(${PROJECT_NAME} PROPERTIES VS_GLOBAL_AllProjectBMIsArePublic "false")
-
+	set_target_properties(${PROJECT_NAME} PROPERTIES CXX_SCAN_FOR_MODULES true)
+	
     target_link_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/Dependencies/Lib/")
     target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/Dependencies/Include/")
 
