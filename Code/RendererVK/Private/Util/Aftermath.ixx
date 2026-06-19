@@ -1,4 +1,4 @@
-export module RendererVK.Aftermath;
+export module RendererVK:Aftermath;
 
 export import <Aftermath/GFSDK_Aftermath_Defines.h>;
 export import <Aftermath/GFSDK_Aftermath.h>;

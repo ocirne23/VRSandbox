@@ -1,8 +1,7 @@
-export module RendererVK.Device;
+export module RendererVK:Device;
 
 import Core;
-import RendererVK.fwd;
-import RendererVK.VK;
+import :VK;
 
 export class Device final
 {

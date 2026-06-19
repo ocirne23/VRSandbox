@@ -1,8 +1,8 @@
-module RendererVK.ShaderDatabase;
+module RendererVK:ShaderDatabase;
 
 import Core;
 import Core.Windows;
-import RendererVK.Aftermath;
+import :Aftermath;
 
 //*********************************************************
 //

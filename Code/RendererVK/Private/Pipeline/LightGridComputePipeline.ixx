@@ -1,13 +1,13 @@
-export module RendererVK.LightGridComputePipeline;
+export module RendererVK:LightGridComputePipeline;
 
 import Core;
 
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.ComputePipeline;
-import RendererVK.DescriptorSet;
-import RendererVK.Layout;
+import :VK;
+import :Buffer;
+import :CommandBuffer;
+import :ComputePipeline;
+import :DescriptorSet;
+import :Layout;
 
 export class LightGridComputePipeline final
 {

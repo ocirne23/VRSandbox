@@ -1,7 +1,7 @@
-export module RendererVK.IndirectCommandsLayout;
+export module RendererVK:IndirectCommandsLayout;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 export class IndirectCommandsLayout final
 {

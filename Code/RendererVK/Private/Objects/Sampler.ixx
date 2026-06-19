@@ -1,6 +1,6 @@
-export module RendererVK.Sampler;
+export module RendererVK:Sampler;
 
-import RendererVK.VK;
+import :VK;
 
 export class Sampler final
 {

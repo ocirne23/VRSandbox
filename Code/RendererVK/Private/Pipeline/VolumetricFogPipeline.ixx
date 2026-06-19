@@ -1,15 +1,16 @@
-export module RendererVK.VolumetricFogPipeline;
+export module RendererVK:VolumetricFogPipeline;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Allocator;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.ComputePipeline;
-import RendererVK.GraphicsPipeline;
-import RendererVK.DescriptorSet;
-import RendererVK.Layout;
-import RendererVK.fwd;
+import :VK;
+import :Allocator;
+import :Buffer;
+import :CommandBuffer;
+import :ComputePipeline;
+import :GraphicsPipeline;
+import :DescriptorSet;
+import :Layout;
+
+export class RenderPass;
 
 // Froxel-based volumetric fog (camera-frustum-aligned 3D grid, VOL_FROXEL_* texels, exponential Z slices):
 //   1. scatter   : per froxel, media density (global height fog + noise + local fog volumes) and in-scattered

@@ -1,12 +1,13 @@
-export module RendererVK.Texture;
+export module RendererVK:Texture;
 
 import Core;
 import File.fwd;
 
-import RendererVK.fwd;
-import RendererVK.VK;
-import RendererVK.Device;
-import RendererVK.Allocator;
+import :VK;
+import :Device;
+import :Allocator;
+
+export class StagingManager;
 
 export class Texture final
 {

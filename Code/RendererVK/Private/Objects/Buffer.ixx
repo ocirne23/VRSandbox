@@ -1,8 +1,8 @@
-export module RendererVK.Buffer;
+export module RendererVK:Buffer;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Allocator;
+import :VK;
+import :Allocator;
 
 export class Buffer final
 {

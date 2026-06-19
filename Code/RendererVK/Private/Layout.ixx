@@ -1,11 +1,11 @@
-export module RendererVK.Layout;
+export module RendererVK:Layout;
 
 import Core;
 import Core.glm;
 import Core.Frustum;
 import Core.Transform;
 
-import RendererVK.VK;
+import :VK;
 
 export namespace RendererVKLayout
 {

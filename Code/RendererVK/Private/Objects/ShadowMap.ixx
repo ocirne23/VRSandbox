@@ -1,9 +1,9 @@
-export module RendererVK.ShadowMap;
+export module RendererVK:ShadowMap;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Allocator;
-import RendererVK.Layout;
+import :VK;
+import :Allocator;
+import :Layout;
 
 // Cascaded shadow map render target: a single D32 depth image with one array layer per cascade,
 // a depth-only render pass, one framebuffer per cascade layer, and a comparison sampler for PCF

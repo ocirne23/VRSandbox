@@ -9,10 +9,10 @@ struct VmaAllocator_T;
 struct VmaAllocation_T;
 #pragma warning(pop)
 
-export module RendererVK.Allocator;
+export module RendererVK:Allocator;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 // Opaque VMA handles re-exported as aliases, so vk_mem_alloc.h stays out of this interface (and out of
 // every module that imports it). The definitions live in Vma.cpp via VMA_IMPLEMENTATION.

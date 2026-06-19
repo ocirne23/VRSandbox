@@ -1,15 +1,15 @@
-export module RendererVK.RTAOPipeline;
+export module RendererVK:RTAOPipeline;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Allocator;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.ComputePipeline;
-import RendererVK.DescriptorSet;
-import RendererVK.Sampler;
-import RendererVK.Layout;
-import RendererVK.Settings;
+import :VK;
+import :Allocator;
+import :Buffer;
+import :CommandBuffer;
+import :ComputePipeline;
+import :DescriptorSet;
+import :Sampler;
+import :Layout;
+import :Settings;
 
 // Screen-space ray-traced ambient occlusion with a temporal-reprojection + spatial denoise.
 // Three half-resolution compute passes per frame, all R16F (images kept in GENERAL, no layout churn):

@@ -1,10 +1,11 @@
-export module RendererVK.StagingManager;
+export module RendererVK:StagingManager;
 
 import Core;
-import RendererVK.fwd;
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
+import :VK;
+import :Buffer;
+import :CommandBuffer;
+
+export class SwapChain;
 
 export class StagingManager final
 {

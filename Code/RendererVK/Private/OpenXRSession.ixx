@@ -7,12 +7,12 @@ module;
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
-export module RendererVK.OpenXRSession;
+export module RendererVK:OpenXRSession;
 
 import Core;
 import Core.glm;
 import Core.VrSession;
-import RendererVK.VK;
+import :VK;
 
 // Minimal OpenXR session wrapper (Milestone 1: lifecycle + a cleared stereo image to the headset).
 // Owns the XrInstance/system/session/reference-space and a single arraySize=2 swapchain that matches

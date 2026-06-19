@@ -1,6 +1,4 @@
-export module RendererVK.Renderer;
-
-import RendererVK.fwd;
+export module RendererVK:Renderer;
 
 import Core;
 import Core.glm;
@@ -9,50 +7,47 @@ import Core.Transform;
 import Core.Camera;
 import Core.VrSession;
 
-export import RendererVK.VK;
-export import RendererVK.Aftermath;
-export import RendererVK.ShaderDatabase;
-export import RendererVK.ComputePipeline;
-export import RendererVK.IndirectExecutionSet;
-export import RendererVK.IndirectCommandsLayout;
-export import RendererVK.Sampler;
-
-export import RendererVK.Layout;
-export import RendererVK.Instance;
-export import RendererVK.Device;
-export import RendererVK.OpenXRSession;
-export import RendererVK.Allocator;
-export import RendererVK.Surface;
-export import RendererVK.SwapChain;
-export import RendererVK.RenderPass;
-export import RendererVK.Framebuffers;
-export import RendererVK.CommandBuffer;
-export import RendererVK.Buffer;
-export import RendererVK.MeshDataManager;
-export import RendererVK.DescriptorSet;
-export import RendererVK.IndirectCullComputePipeline;
-export import RendererVK.StaticMeshGraphicsPipeline;
-export import RendererVK.LightGridComputePipeline;
-export import RendererVK.ShadowMap;
-export import RendererVK.ShadowCullComputePipeline;
-export import RendererVK.ShadowMapGraphicsPipeline;
-export import RendererVK.AccelerationStructure;
-export import RendererVK.GIProbePipeline;
-export import RendererVK.GBuffer;
-export import RendererVK.GBufferPipeline;
-export import RendererVK.RTAOPipeline;
-export import RendererVK.VolumetricFogPipeline;
-export import RendererVK.SceneColor;
-export import RendererVK.TaaPipeline;
-export import RendererVK.CompositePipeline;
-export import RendererVK.EyeAdaptationPipeline;
-export import RendererVK.GraphicsPipeline;
-export import RendererVK.Light;
-export import RendererVK.GpuCrashTracker;
-export import RendererVK.Settings;
-export import RendererVK.RenderNode;
+import :Layout;
+import :Instance;
+import :Device;
+import :OpenXRSession;
+import :Allocator;
+import :Surface;
+import :SwapChain;
+import :RenderPass;
+import :Framebuffers;
+import :CommandBuffer;
+import :Buffer;
+import :MeshDataManager;
+import :DescriptorSet;
+import :IndirectCullComputePipeline;
+import :StaticMeshGraphicsPipeline;
+import :LightGridComputePipeline;
+import :ShadowMap;
+import :ShadowCullComputePipeline;
+import :ShadowMapGraphicsPipeline;
+import :AccelerationStructure;
+import :GIProbePipeline;
+import :GBuffer;
+import :GBufferPipeline;
+import :RTAOPipeline;
+import :VolumetricFogPipeline;
+import :SceneColor;
+import :TaaPipeline;
+import :CompositePipeline;
+import :EyeAdaptationPipeline;
+import :GraphicsPipeline;
+import :Light;
+import :GpuCrashTracker;
+import :Settings;
 
 export import Core.fwd;
+
+export class MeshInstance;
+export class MeshData;
+export class ObjectContainer;
+export class RenderNode;
+export struct Frustum;
 
 export enum class EValidation { ENABLED, DISABLED };
 export enum class EVSync { ENABLED, DISABLED };
@@ -230,7 +225,7 @@ private:
     uint32 m_textureGeneration = 0;  // last seen TextureManager::getGeneration(); change -> rebuild texture-array pipelines
 
     std::vector<ObjectContainer*> m_objectContainers;
-    std::vector<Transform>& m_renderNodeTransforms = Globals::g_renderNodeTransforms;
+    std::vector<Transform> m_renderNodeTransforms;
     std::vector<uint32> m_numInstancesPerMesh;
     std::vector<uint32> m_freeRenderNodeIndexes;
 

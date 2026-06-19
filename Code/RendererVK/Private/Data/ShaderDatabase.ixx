@@ -1,7 +1,7 @@
-export module RendererVK.ShaderDatabase;
+export module RendererVK:ShaderDatabase;
 
 import Core;
-import RendererVK.Aftermath;
+import :Aftermath;
 
 //*********************************************************
 // Implements a very simple shader database to help demonstrate

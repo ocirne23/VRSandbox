@@ -1,8 +1,8 @@
-module RendererVK.GpuCrashTracker;
+module RendererVK:GpuCrashTracker;
 
 import Core;
 import Core.Windows;
-import RendererVK.Aftermath;
+import :Aftermath;
 
 //*********************************************************
 //

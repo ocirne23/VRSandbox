@@ -1,15 +1,15 @@
-export module RendererVK.GBufferPipeline;
+export module RendererVK:GBufferPipeline;
 
 import Core;
 
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.GraphicsPipeline;
-import RendererVK.DescriptorSet;
-import RendererVK.Sampler;
-import RendererVK.Layout;
-import RendererVK.GBuffer;
+import :VK;
+import :Buffer;
+import :CommandBuffer;
+import :GraphicsPipeline;
+import :DescriptorSet;
+import :Sampler;
+import :Layout;
+import :GBuffer;
 
 // Depth + world-normal prepass. Rasterizes the camera-visible geometry (reusing the camera cull's
 // indirect draw + transformed-instance + instance-index buffers) into a GBuffer (normal color target +

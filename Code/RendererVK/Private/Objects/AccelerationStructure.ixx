@@ -1,9 +1,9 @@
-export module RendererVK.AccelerationStructure;
+export module RendererVK:AccelerationStructure;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.Layout;
+import :VK;
+import :Buffer;
+import :Layout;
 
 // Hardware ray-tracing acceleration structures for GI. One bottom-level AS (BLAS) per unique mesh, built
 // straight from the shared vertex/index mega-buffers; a single top-level AS (TLAS) rebuilt every frame

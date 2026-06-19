@@ -1,15 +1,15 @@
-module RendererVK.GIProbePipeline;
+module RendererVK:GIProbePipeline;
 
 import Core;
 import Core.glm;
 import Core.Tweaks;
 import File.FileSystem;
-import RendererVK.Device;
-import RendererVK.TextureManager;
-import RendererVK.Texture;
-import RendererVK.GraphicsPipeline;
-import RendererVK.RenderPass;
-import RendererVK.Layout;
+import :Device;
+import :TextureManager;
+import :Texture;
+import :GraphicsPipeline;
+import :RenderPass;
+import :Layout;
 
 namespace
 {

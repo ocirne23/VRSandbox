@@ -1,7 +1,7 @@
-export module RendererVK.DescriptorSet;
+export module RendererVK:DescriptorSet;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 export class DescriptorSet final
 {

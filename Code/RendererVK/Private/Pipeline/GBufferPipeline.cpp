@@ -1,13 +1,13 @@
-module RendererVK.GBufferPipeline;
+module RendererVK:GBufferPipeline;
 
 import Core;
 import File.FileSystem;
 
-import RendererVK.CommandBuffer;
-import RendererVK.Device;
-import RendererVK.Layout;
-import RendererVK.TextureManager;
-import RendererVK.Texture;
+import :CommandBuffer;
+import :Device;
+import :Layout;
+import :TextureManager;
+import :Texture;
 
 void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout, uint32 maxTextures)
 {

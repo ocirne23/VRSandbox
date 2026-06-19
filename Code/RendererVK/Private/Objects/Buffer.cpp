@@ -1,9 +1,9 @@
-module RendererVK.Buffer;
+module RendererVK:Buffer;
 
-import RendererVK.VK;
-import RendererVK.Device;
-import RendererVK.Allocator;
-import RendererVK.StagingManager;
+import :VK;
+import :Device;
+import :Allocator;
+import :StagingManager;
 
 Buffer::Buffer() {}
 Buffer::~Buffer()

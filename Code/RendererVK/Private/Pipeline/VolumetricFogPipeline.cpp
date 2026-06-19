@@ -1,11 +1,11 @@
-module RendererVK.VolumetricFogPipeline;
+module RendererVK:VolumetricFogPipeline;
 
 import Core;
 import File.FileSystem;
-import RendererVK.Device;
-import RendererVK.Allocator;
-import RendererVK.CommandBuffer;
-import RendererVK.RenderPass;
+import :Device;
+import :Allocator;
+import :CommandBuffer;
+import :RenderPass;
 
 namespace
 {

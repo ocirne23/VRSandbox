@@ -1,8 +1,8 @@
-module RendererVK.IndirectCommandsLayout;
+module RendererVK:IndirectCommandsLayout;
 
 import Core;
-import RendererVK.Device;
-import RendererVK.Layout;
+import :Device;
+import :Layout;
 
 IndirectCommandsLayout::IndirectCommandsLayout() {}
 IndirectCommandsLayout::~IndirectCommandsLayout()

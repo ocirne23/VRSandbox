@@ -1,10 +1,10 @@
-module RendererVK.CompositePipeline;
+module RendererVK:CompositePipeline;
 
 import Core;
 import File.FileSystem;
 
-import RendererVK.CommandBuffer;
-import RendererVK.Device;
+import :CommandBuffer;
+import :Device;
 
 void CompositePipeline::buildPipelineLayout(GraphicsPipelineLayout& layout)
 {

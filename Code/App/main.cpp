@@ -15,30 +15,30 @@ import Input.VRFreeFlyCameraController;
 import UI;
 
 import RendererVK;
-
 import Entity;
 import Entity.Component;
 import Entity.Prefab;
+
 import Entity.World;
 
-//static void renderEntityTree(Renderer& renderer, Entity* entity, const Transform& parentTransform)
-//{
-//    SceneComponent* sc = getComponent<SceneComponent>(entity);
-//    if (sc && !sc->enabled)
-//        return;
-//
-//    const Transform world = composeTransform(parentTransform, Transform(entity->pos, entity->scale, entity->rot));
-//
-//    if (RenderComponent* render = getComponent<RenderComponent>(entity))
-//    {
-//        render->node.getTransform() = composeTransform(world, render->localTransform);
-//        renderer.renderNode(render->node);
-//    }
-//
-//    if (sc)
-//        for (const EntityPtr& child : sc->children)
-//            renderEntityTree(renderer, child, world);
-//}
+static void renderEntityTree(Renderer& renderer, Entity* entity, const Transform& parentWorld)
+{
+    SceneComponent* sc = getComponent<SceneComponent>(entity);
+    if (sc && !sc->enabled)
+        return;
+
+    const Transform world = composeTransform(parentWorld, Transform(entity->pos, entity->scale, entity->rot));
+
+    if (RenderComponent* render = getComponent<RenderComponent>(entity))
+    {
+        render->node.getTransform() = composeTransform(world, render->localTransform);
+        renderer.renderNode(render->node);
+    }
+
+    if (sc)
+        for (const EntityPtr& child : sc->children)
+            renderEntityTree(renderer, child, world);
+}
 
 int main()
 {
@@ -242,8 +242,8 @@ int main()
         }
 
         const Frustum& frustum = renderer.beginFrame(camera);
-        //for (const EntityPtr& entity : entities)
-        //    renderEntityTree(renderer, entity, Transform());
+        for (const EntityPtr& entity : entities)
+            renderEntityTree(renderer, entity, Transform());
 
 		for (auto& light : spawnedLights)
 		{

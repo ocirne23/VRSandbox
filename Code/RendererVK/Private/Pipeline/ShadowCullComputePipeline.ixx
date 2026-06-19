@@ -1,13 +1,13 @@
-export module RendererVK.ShadowCullComputePipeline;
+export module RendererVK:ShadowCullComputePipeline;
 
 import Core;
 
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.ComputePipeline;
-import RendererVK.Layout;
-import RendererVK.DescriptorSet;
+import :VK;
+import :Buffer;
+import :CommandBuffer;
+import :ComputePipeline;
+import :Layout;
+import :DescriptorSet;
 
 export class ShadowCullComputePipeline final
 {

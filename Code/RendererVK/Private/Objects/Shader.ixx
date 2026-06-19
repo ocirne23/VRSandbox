@@ -1,7 +1,7 @@
-export module RendererVK.Shader;
+export module RendererVK:Shader;
 
 import Core;
-import RendererVK.VK;
+import :VK;
 
 export struct ShaderDefine
 {

@@ -1,8 +1,10 @@
-export module RendererVK.Surface;
+export module RendererVK:Surface;
 
-import Core.fwd;
-import RendererVK.fwd;
-import RendererVK.VK;
+import :VK;
+
+export class Instance;
+export class Device;
+export class Window;
 
 export class Surface final
 {

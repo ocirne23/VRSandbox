@@ -1,11 +1,11 @@
-module RendererVK.Surface;
+module RendererVK:Surface;
 
 import Core;
 import Core.SDL;
 import Core.Window;
-import RendererVK.VK;
-import RendererVK.Instance;
-import RendererVK.Device;
+import :VK;
+import :Instance;
+import :Device;
 
 Surface::Surface() {}
 Surface::~Surface()

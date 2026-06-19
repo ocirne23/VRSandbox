@@ -1,9 +1,9 @@
-module RendererVK.ShadowCullComputePipeline;
+module RendererVK:ShadowCullComputePipeline;
 
 import Core;
 import File.FileSystem;
-import RendererVK.Device;
-import RendererVK.Layout;
+import :Device;
+import :Layout;
 
 ShadowCullComputePipeline::ShadowCullComputePipeline() {}
 ShadowCullComputePipeline::~ShadowCullComputePipeline() {}

@@ -1,8 +1,8 @@
-module RendererVK.AccelerationStructure;
+module RendererVK:AccelerationStructure;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Device;
+import :VK;
+import :Device;
 
 AccelerationStructure::AccelerationStructure() {}
 AccelerationStructure::~AccelerationStructure()

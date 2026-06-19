@@ -1,11 +1,11 @@
-module RendererVK.Shader;
+module RendererVK:Shader;
 
 import Core;
 import File.FileSystem;
-import RendererVK.VK;
-import RendererVK.Device;
-import RendererVK.glslang;
-import RendererVK.Layout;
+import :VK;
+import :Device;
+import :glslang;
+import :Layout;
 
 Shader::Shader() {}
 Shader::~Shader()

@@ -1,13 +1,13 @@
-export module RendererVK.CompositePipeline;
+export module RendererVK:CompositePipeline;
 
 import Core;
 
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.GraphicsPipeline;
-import RendererVK.DescriptorSet;
-import RendererVK.RenderPass;
+import :VK;
+import :Buffer;
+import :CommandBuffer;
+import :GraphicsPipeline;
+import :DescriptorSet;
+import :RenderPass;
 
 // Fullscreen composite: samples the TAA-resolved scene colour and writes it into the swapchain (drawn
 // before ImGui in the swapchain render pass). This is the HDR -> display mapping: exposure and the

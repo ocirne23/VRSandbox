@@ -1,12 +1,12 @@
-module RendererVK.StagingManager;
+module RendererVK:StagingManager;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Device;
-import RendererVK.Allocator;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.SwapChain;
+import :VK;
+import :Device;
+import :Allocator;
+import :Buffer;
+import :CommandBuffer;
+import :SwapChain;
 
 static constexpr size_t STAGING_BUFFER_SIZE = 50 * 1024 * 1024;
 

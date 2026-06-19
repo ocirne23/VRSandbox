@@ -1,14 +1,14 @@
-module RendererVK.Texture;
+module RendererVK:Texture;
 
 import Core;
 import File.ITextureData;
 
-import RendererVK.VK;
-import RendererVK.Allocator;
-import RendererVK.Buffer;
-import RendererVK.StagingManager;
-import RendererVK.stb_image;
-import RendererVK.DDS;
+import :VK;
+import :Allocator;
+import :Buffer;
+import :StagingManager;
+import :stb_image;
+import :DDS;
 
 Texture::Texture()
 {

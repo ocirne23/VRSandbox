@@ -2,7 +2,7 @@ module;
 
 #include <vulkan/vulkan_core.h> // for vkCmdPushDescriptorSetKHR
 
-export module RendererVK.VK;
+export module RendererVK:VK;
 
 export import vulkan_hpp;
 import Core;

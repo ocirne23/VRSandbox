@@ -1,10 +1,10 @@
-module RendererVK.GraphicsPipeline;
+module RendererVK:GraphicsPipeline;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Device;
-import RendererVK.Shader;
-import RendererVK.RenderPass;
+import :VK;
+import :Device;
+import :Shader;
+import :RenderPass;
 
 GraphicsPipeline::GraphicsPipeline() {}
 GraphicsPipeline::~GraphicsPipeline()

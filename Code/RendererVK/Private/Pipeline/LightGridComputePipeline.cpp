@@ -1,10 +1,10 @@
-module RendererVK.LightGridComputePipeline;
+module RendererVK:LightGridComputePipeline;
 
 import Core;
 import Core.glm;
 import File.FileSystem;
-import RendererVK.Allocator;
-import RendererVK.Layout;
+import :Allocator;
+import :Layout;
 
 void LightGridComputePipeline::initialize()
 {

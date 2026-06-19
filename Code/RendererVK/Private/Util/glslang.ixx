@@ -1,4 +1,4 @@
-export module RendererVK.glslang;
+export module RendererVK:glslang;
 
 #pragma warning(disable: 5260)
 export import <glslang/Public/ResourceLimits.h>;

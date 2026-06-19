@@ -1,9 +1,9 @@
-export module RendererVK.Light;
+export module RendererVK:Light;
 
 import Core;
 import Core.glm;
 
-import RendererVK.Layout;
+import :Layout;
 
 export struct PointLight : RendererVKLayout::LightInfo
 {

@@ -1,10 +1,10 @@
-module RendererVK.EyeAdaptationPipeline;
+module RendererVK:EyeAdaptationPipeline;
 
 import Core;
 import File.FileSystem;
-import RendererVK.Device;
-import RendererVK.Allocator;
-import RendererVK.CommandBuffer;
+import :Device;
+import :Allocator;
+import :CommandBuffer;
 
 namespace
 {

@@ -1,13 +1,13 @@
-export module RendererVK.TaaPipeline;
+export module RendererVK:TaaPipeline;
 
 import Core;
-import RendererVK.VK;
-import RendererVK.Allocator;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.ComputePipeline;
-import RendererVK.DescriptorSet;
-import RendererVK.Layout;
+import :VK;
+import :Allocator;
+import :Buffer;
+import :CommandBuffer;
+import :ComputePipeline;
+import :DescriptorSet;
+import :Layout;
 
 // Temporal anti-aliasing resolve. A single full-resolution compute pass per frame reprojects last frame's
 // resolved colour (history) into the current frame via the depth buffer + u_prevMvp, clamps it to the local

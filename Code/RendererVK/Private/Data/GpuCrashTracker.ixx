@@ -1,9 +1,9 @@
-export module RendererVK.GpuCrashTracker;
+export module RendererVK:GpuCrashTracker;
 
 import Core;
 import Core.Windows;
-import RendererVK.Aftermath;
-import RendererVK.ShaderDatabase;
+import :Aftermath;
+import :ShaderDatabase;
 
 //*********************************************************
 //

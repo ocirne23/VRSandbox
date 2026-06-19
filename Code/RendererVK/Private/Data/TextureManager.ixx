@@ -1,10 +1,10 @@
-export module RendererVK.TextureManager;
+export module RendererVK:TextureManager;
 
 import Core;
 import File.fwd;
 
-import RendererVK.Layout;
-import RendererVK.Texture;
+import :Layout;
+import :Texture;
 
 export class TextureManager final
 {

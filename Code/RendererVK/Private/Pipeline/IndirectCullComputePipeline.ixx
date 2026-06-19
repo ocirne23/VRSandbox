@@ -1,15 +1,16 @@
-export module RendererVK.IndirectCullComputePipeline;
+export module RendererVK:IndirectCullComputePipeline;
 
 import Core;
 import Core.Transform;
 
-import RendererVK.VK;
-import RendererVK.Buffer;
-import RendererVK.CommandBuffer;
-import RendererVK.ComputePipeline;
-import RendererVK.Layout;
-import RendererVK.DescriptorSet;
-import RendererVK.fwd;
+import :VK;
+import :Buffer;
+import :CommandBuffer;
+import :ComputePipeline;
+import :Layout;
+import :DescriptorSet;
+
+export class ObjectContainer;
 
 export class IndirectCullComputePipeline final
 {
