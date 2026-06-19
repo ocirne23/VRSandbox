@@ -230,7 +230,7 @@ private:
     uint32 m_textureGeneration = 0;  // last seen TextureManager::getGeneration(); change -> rebuild texture-array pipelines
 
     std::vector<ObjectContainer*> m_objectContainers;
-    std::vector<Transform>& m_renderNodeTransforms = Globals::renderNodeTransforms;
+    std::vector<Transform>& m_renderNodeTransforms = Globals::g_renderNodeTransforms;
     std::vector<uint32> m_numInstancesPerMesh;
     std::vector<uint32> m_freeRenderNodeIndexes;
 

@@ -10,7 +10,7 @@ import RendererVK.Layout;
 
 export namespace Globals
 {
-    std::vector<Transform> renderNodeTransforms;
+    std::vector<Transform> g_renderNodeTransforms;
 }
 
 export class RenderNode final
@@ -19,12 +19,12 @@ public:
 
     inline Transform& getTransform()
     {
-        return Globals::renderNodeTransforms[m_transformIdx];
+        return Globals::g_renderNodeTransforms[m_transformIdx];
     }
 
     inline const Transform& getTransform() const
     {
-        return Globals::renderNodeTransforms[m_transformIdx];
+        return Globals::g_renderNodeTransforms[m_transformIdx];
     }
 
     inline size_t getNumMeshInstances() const { return m_meshInstances.size(); }
