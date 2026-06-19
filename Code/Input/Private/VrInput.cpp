@@ -1,11 +1,15 @@
-module;
+﻿module;
 
 #include <cstdio>
 #include <openxr/openxr.h>
 
-module Input.VrInput;
+module Input;
 
 import Core;
+import Core.glm;
+import Core.VrSession;
+
+import :VrInput;
 
 namespace
 {

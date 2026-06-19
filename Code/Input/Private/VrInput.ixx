@@ -1,8 +1,8 @@
-module;
+﻿module;
 
 #include <openxr/openxr.h>
 
-export module Input.VrInput;
+export module Input:VrInput;
 
 import Core;
 import Core.glm;

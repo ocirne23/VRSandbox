@@ -1,4 +1,4 @@
-export module Input.VRFreeFlyCameraController;
+﻿export module Input:VRFreeFlyCameraController;
 
 import Core;
 import Core.glm;

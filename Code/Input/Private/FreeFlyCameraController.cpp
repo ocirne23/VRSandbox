@@ -1,9 +1,13 @@
-module Input.FreeFlyCameraController;
+﻿module Input;
 
 import Core;
-import Input;
+import Core.glm;
+import Core.Camera;
 import Core.SDL;
 import UI;
+
+import :Input;
+import :FreeFlyCameraController;
 
 FreeFlyCameraController::~FreeFlyCameraController()
 {

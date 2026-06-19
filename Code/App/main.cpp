@@ -9,33 +9,9 @@ import Core.Camera;
 
 import File;
 import Input;
-import Input.VrInput;
-import Input.FreeFlyCameraController;
-import Input.VRFreeFlyCameraController;
 import UI;
-
 import RendererVK;
 import Entity;
-
-
-static void renderEntityTree(Renderer& renderer, Entity* entity, const Transform& parentWorld)
-{
-    SceneComponent* sc = getComponent<SceneComponent>(entity);
-    if (sc && !sc->enabled)
-        return;
-
-    const Transform world = composeTransform(parentWorld, Transform(entity->pos, entity->scale, entity->rot));
-
-    if (RenderComponent* render = getComponent<RenderComponent>(entity))
-    {
-        render->node.getTransform() = composeTransform(world, render->localTransform);
-        renderer.renderNode(render->node);
-    }
-
-    if (sc)
-        for (const EntityPtr& child : sc->children)
-            renderEntityTree(renderer, child, world);
-}
 
 int main()
 {
@@ -240,7 +216,7 @@ int main()
 
         const Frustum& frustum = renderer.beginFrame(camera);
         for (const EntityPtr& entity : entities)
-            renderEntityTree(renderer, entity, Transform());
+            entity->renderTree(renderer, Transform());
 
 		for (auto& light : spawnedLights)
 		{
@@ -255,8 +231,7 @@ int main()
             if (render && frustum.sphereInFrustum(render->node.getWorldBounds()))
                 renderer.renderNode(render->node);
         }
-        //renderer.renderNode(sunLightNode); // This blocks the sun GI...
-        //renderer.addFogVolume({ .pos = {0, 5.5f, 0}, .density = 0.025f, .halfExtents = {12, 6, 6}, .edgeSoftness = 0.4f, .albedo = {1,1,1}, .emissive = 0.00f });
+
         ui.render();
         renderer.present();
         frameCount++;

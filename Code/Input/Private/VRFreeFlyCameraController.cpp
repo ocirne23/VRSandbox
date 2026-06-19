@@ -1,8 +1,11 @@
-module Input.VRFreeFlyCameraController;
+﻿module Input;
 
 import Core;
 import Core.glm;
-import Input.VrInput;
+import Core.Camera;
+
+import :VRFreeFlyCameraController;
+import :VrInput;
 
 void VRFreeFlyCameraController::initialize(glm::vec3 position)
 {

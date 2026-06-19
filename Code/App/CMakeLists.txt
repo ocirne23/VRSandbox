@@ -14,5 +14,4 @@ apply_compile_settings(${PROJECT_NAME})
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/Dependencies/Dll/GFSDK_Aftermath_Lib.x64.dll"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMENT "Copying GFSDK_Aftermath_Lib.x64.dll to output directory")
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>")

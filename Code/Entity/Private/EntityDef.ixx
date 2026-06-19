@@ -4,6 +4,7 @@ import Core;
 import Core.glm;
 import Core.Transform;
 import File.fwd;
+import RendererVK.fwd;
 
 export struct EntitySpawnTemplate;
 export struct EntityPtr;
@@ -49,6 +50,9 @@ public:
     void serializeComponent(EComponentID id, AssetNode& out);
     void deserializeComponent(EComponentID id, const AssetNode& in);
     void reparentEntity(Entity* newParent);
+
+    // Recursively submits this entity's RenderComponent (and its children's) to the renderer.
+    void renderTree(Renderer& renderer, const Transform& parentWorld);
 
     bool isPrefabInstance() const { return (flags & EEntityFlag_PrefabInstance) != 0; }
     void setPrefabInstance(bool on) { flags = on ? uint8(flags | EEntityFlag_PrefabInstance) : uint8(flags & ~EEntityFlag_PrefabInstance); }

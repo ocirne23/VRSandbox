@@ -1,9 +1,12 @@
 module Input;
 
+import Core;
 import Core.SDL;
 import Core.imgui;
 
 import UI;
+
+import :Input;
 
 bool Input::initialize()
 {

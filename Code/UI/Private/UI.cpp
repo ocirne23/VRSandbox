@@ -23,8 +23,6 @@ void UI::initialize()
 
     m_scene.initialize();
     m_assetBrowser.initialize();
-
-    Log::info("UI initialized");
 }
 
 struct LinkInfo

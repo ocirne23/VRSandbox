@@ -6,9 +6,30 @@ import File;
 import :Component;
 import :Allocator;
 
+import RendererVK;
+
 EntityArchetype makeEntityArchetype(uint16 typeBits)
 {
     return EntityArchetype{ uint16(getEntityAllocSize(typeBits)), typeBits };
+}
+
+void Entity::renderTree(Renderer& renderer, const Transform& parentWorld)
+{
+    SceneComponent* sc = getComponent<SceneComponent>(this);
+    if (sc && !sc->enabled)
+        return;
+
+    const Transform world = composeTransform(parentWorld, Transform(pos, scale, rot));
+
+    if (RenderComponent* render = getComponent<RenderComponent>(this))
+    {
+        render->node.getTransform() = composeTransform(world, render->localTransform);
+        renderer.renderNode(render->node);
+    }
+
+    if (sc)
+        for (const EntityPtr& child : sc->children)
+            child->renderTree(renderer, world);
 }
 
 EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& transform)
