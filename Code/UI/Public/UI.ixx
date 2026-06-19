@@ -29,6 +29,8 @@ public:
     void render();
 	void setRenderStats(const Stats& stats) { m_renderStats = stats; }
 
+    Entity* getSelectedEntity() const { return m_sceneView.getSelected(); }
+
     bool isViewportGrabbed() const { return m_isViewportGrabbed; }
     bool isViewportFocused() const { return m_isViewportFocused; }
     bool hasViewportGainedFocused() const { return m_hasViewportGainedFocus; }

@@ -18,19 +18,6 @@ static void writeOverrides(Entity* entity, AssetNode& node, const std::string& t
     node.set("Scale", entity->scale);
 }
 
-static void writeRenderNode(Entity* entity, AssetNode& comp)
-{
-    const RenderComponent::SpawnInfo* si = getRenderSpawnInfo(entity);
-    if (!si || !si->container)
-        return;
-    comp.set("ObjectContainer", si->containerName);
-    comp.set("Node", si->nodePath);
-    const Transform& lt = si->localTransform;
-    if (lt.pos != glm::vec3(0.0f))         comp.set("Position", lt.pos);
-    if (lt.quat != glm::quat(1, 0, 0, 0))  comp.set("Rotation", glm::degrees(glm::eulerAngles(lt.quat)));
-    if (lt.scale != 1.0f)                  comp.set("Scale", lt.scale);
-}
-
 static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& tokenName)
 {
     writeOverrides(entity, node, tokenName);
@@ -47,7 +34,10 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
         entity->serializeComponent(id, comp); // appends overridable variables as children
 
         if (id == EComponentID_Render)
-            writeRenderNode(entity, comp);
+        {
+            if (const RenderComponent::SpawnInfo* si = getRenderSpawnInfo(entity))
+                writeRenderSpawnInfo(*si, comp);
+        }
         else if (id == EComponentID_Scene)
             if (SceneComponent* sc = getComponent<SceneComponent>(entity))
                 for (const EntityPtr& child : sc->children)

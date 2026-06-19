@@ -72,12 +72,14 @@ public:
     void setWindowHasFocus(bool hasFocus)      { m_windowHasFocus = hasFocus; }
     void setWantMouseGrab(bool wantGrab)       { m_wantMousieGrab = wantGrab; }
     void setWantMouseVisible(bool wantVisible) { m_wantMouseVisible = wantVisible; }
+    void setMouseCaptured(bool captured)       { m_mouseCaptured = captured; } // a tool (e.g. gizmo) owns the left-drag
 
     bool isKeyDown(SDL_Scancode key) const { return m_pKeyStates[key]; }
     bool isMouseInWindow() const           { return m_mouseInWindow; }
     bool isWindowHasFocus() const          { return m_windowHasFocus; }
     bool wantMouseGrab() const             { return m_wantMousieGrab; }
     bool wantMouseVisible() const          { return m_wantMouseVisible; }
+    bool isMouseCaptured() const           { return m_mouseCaptured; }
 
     MouseListener* addMouseListener()             { return m_mouseListeners.emplace_back(std::make_unique<MouseListener>()).get(); }
     KeyboardListener* addKeyboardListener()       { return m_keyboardListeners.emplace_back(std::make_unique<KeyboardListener>()).get(); }
@@ -124,6 +126,7 @@ private:
     std::vector<std::unique_ptr<KeyboardListener>> m_keyboardListeners;
     std::vector<std::unique_ptr<SystemEventListener>> m_systemEventListeners;
 
+    bool m_mouseCaptured = false;
     bool m_mouseInWindow = false;
     bool m_windowHasFocus = false;
     bool m_wantMousieGrab = false;

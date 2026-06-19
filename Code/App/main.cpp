@@ -27,7 +27,7 @@ int main()
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::DISABLED, EVSync::DISABLED, EVr::DISABLED); // ENABLED DISABLED
+    renderer.initialize(window, EValidation::DISABLED, EVSync::ENABLED, EVr::DISABLED); // ENABLED DISABLED
 
     VrInput& vrInput = Globals::vrInput;
     vrInput.initialize(renderer.getVrSession());
@@ -61,8 +61,17 @@ int main()
     std::vector<EntityPtr> entities;
     entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
 
+    GizmoController gizmo;
+    gizmo.initialize(world);
+
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
+            if (evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            {
+                if (evt.scancode == SDL_Scancode::SDL_SCANCODE_T) gizmo.setMode(EGizmoMode::Translate);
+                if (evt.scancode == SDL_Scancode::SDL_SCANCODE_R) gizmo.setMode(EGizmoMode::Rotate);
+                if (evt.scancode == SDL_Scancode::SDL_SCANCODE_G) gizmo.setMode(EGizmoMode::Scale);
+            }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_P && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
@@ -180,6 +189,8 @@ int main()
             camera = cameraController.getCamera();
         }
 
+        gizmo.update(camera, ui.getViewportRect(), ui.getSelectedEntity(), deltaSec);
+
         for (EntityChange& change : ui.takeEntityChanges())
         {
             if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
@@ -231,6 +242,9 @@ int main()
             if (render && frustum.sphereInFrustum(render->node.getWorldBounds()))
                 renderer.renderNode(render->node);
         }
+
+        if (gizmo.isVisible())
+            gizmo.getGizmoEntity()->renderTree(renderer, Transform());
 
         ui.render();
         renderer.present();

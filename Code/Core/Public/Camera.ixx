@@ -3,17 +3,22 @@ export module Core.Camera;
 import Core.glm;
 import Core.Rect;
 
+export struct Ray
+{
+    glm::vec3 origin;
+    glm::vec3 dir; // normalized
+};
+
 export struct Camera
 {
 public:
 
-    // Unprojects a viewport-space screen point into the world: a ray through the camera is intersected
-    // with the ground plane (y = 0); if it doesn't hit, the point lands a fixed distance ahead.
-    glm::vec3 screenToWorld(const Rect& viewport, glm::vec2 screenPos) const
+    // Unprojects a viewport-space screen point into a world-space ray through the camera.
+    Ray screenToRay(const Rect& viewport, glm::vec2 screenPos) const
     {
         const glm::vec2 size = glm::vec2(viewport.getSize());
         if (size.x <= 0.0f || size.y <= 0.0f)
-            return position;
+            return Ray{ position, glm::vec3(0.0f, 0.0f, -1.0f) };
 
         const float ndcX = (screenPos.x - viewport.min.x) / size.x * 2.0f - 1.0f;
         const float ndcY = 1.0f - (screenPos.y - viewport.min.y) / size.y * 2.0f;
@@ -23,6 +28,19 @@ public:
         const glm::vec3 viewDir = glm::normalize(glm::vec3(ndcX * tanHalfFov * aspect, ndcY * tanHalfFov, -1.0f));
         const glm::mat4 invView = glm::inverse(viewMatrix);
         const glm::vec3 worldDir = glm::normalize(glm::vec3(invView * glm::vec4(viewDir, 0.0f)));
+        return Ray{ position, worldDir };
+    }
+
+    // Unprojects a viewport-space screen point into the world: a ray through the camera is intersected
+    // with the ground plane (y = 0); if it doesn't hit, the point lands a fixed distance ahead.
+    glm::vec3 screenToWorld(const Rect& viewport, glm::vec2 screenPos) const
+    {
+        const glm::vec2 size = glm::vec2(viewport.getSize());
+        if (size.x <= 0.0f || size.y <= 0.0f)
+            return position;
+
+        const Ray ray = screenToRay(viewport, screenPos);
+        const glm::vec3& worldDir = ray.dir;
 
         if (glm::abs(worldDir.y) > 1e-4f)
         {

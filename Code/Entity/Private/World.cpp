@@ -155,6 +155,18 @@ std::shared_ptr<RenderComponent::SpawnInfo> World::buildRenderSpawnInfo(const As
     return info;
 }
 
+void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out)
+{
+    if (!info.container)
+        return;
+    out.set("ObjectContainer", info.containerName);
+    out.set("Node", info.nodePath);
+    const Transform& lt = info.localTransform;
+    if (lt.pos != glm::vec3(0.0f))         out.set("Position", lt.pos);
+    if (lt.quat != glm::quat(1, 0, 0, 0))  out.set("Rotation", glm::degrees(glm::eulerAngles(lt.quat)));
+    if (lt.scale != 1.0f)                  out.set("Scale", lt.scale);
+}
+
 std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const AssetNode& sceneNode)
 {
     auto info = std::make_shared<SceneComponent::SpawnInfo>();

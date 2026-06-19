@@ -105,6 +105,9 @@ export Transform composeTransform(const Transform& parent, const Transform& loca
 
 export const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity);
 
+// Serializes a render spawn recipe into a "Component RenderNode" node; mirror of World::buildRenderSpawnInfo.
+export void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out);
+
 export constexpr const char* componentTypeName(EComponentID id)
 {
     switch (id)

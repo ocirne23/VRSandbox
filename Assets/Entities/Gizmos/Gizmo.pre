@@ -7,7 +7,7 @@ Prefab Gizmo
 		Entity Arrows
 			Position 0 0 0
 			Rotation 0 -0 0
-			Scale 1
+			Scale 0.22
 			Component Scene
 				Enabled true
 				Prefab ArrowRed
@@ -25,12 +25,12 @@ Prefab Gizmo
 		Entity Planes
 			Position 0 0 0
 			Rotation 0 -0 0
-			Scale 1
+			Scale 0.44
 			Component Scene
 				Enabled true
 				Prefab PlaneRed
 					Position 2 2 -0.5
-					Rotation 0 90 0
+					Rotation 0 89.98022 0
 					Scale 1
 				Prefab PlaneGreen
 					Position -0.5 2 2
@@ -43,12 +43,12 @@ Prefab Gizmo
 		Entity Arches
 			Position 0 0 0
 			Rotation 0 -0 0
-			Scale 1
+			Scale 0.22
 			Component Scene
 				Enabled false
 				Prefab ArchRed
 					Position 1.5 1.5 -0.5
-					Rotation 0 90 0
+					Rotation 0 89.98022 0
 					Scale 1.75
 				Prefab ArchGreen
 					Position -0.5 1.5 1.5
@@ -61,7 +61,7 @@ Prefab Gizmo
 		Entity Scale
 			Position 0 0 0
 			Rotation 0 -0 0
-			Scale 1
+			Scale 0.22
 			Component Scene
 				Enabled false
 				Prefab ScaleRed
@@ -73,10 +73,10 @@ Prefab Gizmo
 					Rotation 90 -0 0
 					Scale 1
 				Prefab ScaleBlue
-					Position 1 0 0
+					Position 2 0 0
 					Rotation 0 -0 -90
 					Scale 1
 		Prefab SphereWhite
 			Position 0 0 0
 			Rotation 0 -0 0
-			Scale 1
+			Scale 0.22
