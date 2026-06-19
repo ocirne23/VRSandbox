@@ -1,9 +1,9 @@
-export module RendererVK:GBuffer;
+export module RendererVK.GBuffer;
 
 import Core;
-import :VK;
-import :Allocator;
-import :Layout;
+import RendererVK.VK;
+import RendererVK.Allocator;
+import RendererVK.Layout;
 
 // Thin G-buffer used to drive screen-space ray-traced AO (and, later, other screen-space effects).
 // One color attachment storing the world-space shading normal (RGBA16F; .a unused for now) plus a

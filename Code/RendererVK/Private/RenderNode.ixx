@@ -1,13 +1,17 @@
-export module RendererVK:RenderNode;
+export module RendererVK.RenderNode;
 
 import Core;
 import Core.glm;
 import Core.Sphere;
 import Core.Transform;
 
-import :Renderer;
-import :Layout;
-import :ObjectContainer;
+import RendererVK.fwd;
+import RendererVK.Layout;
+
+export namespace Globals
+{
+    std::vector<Transform> g_renderNodeTransforms;
+}
 
 export class RenderNode final
 {
@@ -15,12 +19,12 @@ public:
 
     inline Transform& getTransform()
     {
-        return Globals::rendererVK.getRenderNodeTransform(m_transformIdx);
+        return Globals::g_renderNodeTransforms[m_transformIdx];
     }
 
     inline const Transform& getTransform() const
     {
-        return Globals::rendererVK.getRenderNodeTransform(m_transformIdx);
+        return Globals::g_renderNodeTransforms[m_transformIdx];
     }
 
     inline size_t getNumMeshInstances() const { return m_meshInstances.size(); }

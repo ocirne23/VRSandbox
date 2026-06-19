@@ -1,13 +1,13 @@
-module RendererVK:ShadowMapGraphicsPipeline;
+module RendererVK.ShadowMapGraphicsPipeline;
 
 import Core;
 import File.FileSystem;
 
-import :CommandBuffer;
-import :Device;
-import :Layout;
-import :Texture;
-import :TextureManager;
+import RendererVK.CommandBuffer;
+import RendererVK.Device;
+import RendererVK.Layout;
+import RendererVK.Texture;
+import RendererVK.TextureManager;
 
 ShadowMapGraphicsPipeline::ShadowMapGraphicsPipeline() {}
 ShadowMapGraphicsPipeline::~ShadowMapGraphicsPipeline() {}

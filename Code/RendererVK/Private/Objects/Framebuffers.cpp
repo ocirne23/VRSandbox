@@ -1,10 +1,10 @@
-module RendererVK:Framebuffers;
+module RendererVK.Framebuffers;
 
-import :VK;
-import :Device;
-import :Allocator;
-import :RenderPass;
-import :SwapChain;
+import RendererVK.VK;
+import RendererVK.Device;
+import RendererVK.Allocator;
+import RendererVK.RenderPass;
+import RendererVK.SwapChain;
 
 Framebuffers::Framebuffers() {}
 Framebuffers::~Framebuffers()

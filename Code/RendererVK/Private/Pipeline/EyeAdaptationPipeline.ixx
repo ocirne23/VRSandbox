@@ -1,13 +1,14 @@
-export module RendererVK:EyeAdaptationPipeline;
+export module RendererVK.EyeAdaptationPipeline;
 
 import Core;
-import :VK;
-import :Buffer;
-import :CommandBuffer;
-import :ComputePipeline;
-import :DescriptorSet;
-import :Layout;
-import :Settings;
+import Core.glm;
+import RendererVK.VK;
+import RendererVK.Buffer;
+import RendererVK.CommandBuffer;
+import RendererVK.ComputePipeline;
+import RendererVK.DescriptorSet;
+import RendererVK.Layout;
+import RendererVK.Settings;
 
 // Automatic exposure ("eye adaptation"). Two compute passes per frame over the TAA-resolved scene colour:
 //   1. histogram : 256-bin log-luminance histogram of the viewport region (eyeadapt_histogram.cs.glsl).

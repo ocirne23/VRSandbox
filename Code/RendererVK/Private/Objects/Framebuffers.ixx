@@ -1,11 +1,9 @@
-export module RendererVK:Framebuffers;
+export module RendererVK.Framebuffers;
 
 import Core;
-import :VK;
-import :Allocator;
-
-export class RenderPass;
-export class SwapChain;
+import RendererVK.fwd;
+import RendererVK.VK;
+import RendererVK.Allocator;
 
 export class Framebuffers final
 {

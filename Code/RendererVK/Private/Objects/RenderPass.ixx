@@ -1,8 +1,7 @@
-export module RendererVK:RenderPass;
+export module RendererVK.RenderPass;
 
-import :VK;
-
-export class SwapChain;
+import RendererVK.fwd;
+import RendererVK.VK;
 
 export class RenderPass final
 {

@@ -1,4 +1,4 @@
-export module RendererVK:Settings;
+export module RendererVK.Settings;
 
 import Core;
 import Core.glm;

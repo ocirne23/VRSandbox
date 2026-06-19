@@ -1,11 +1,9 @@
-export module RendererVK:SwapChain;
+export module RendererVK.SwapChain;
 
 import Core;
-import :VK;
-import :CommandBuffer;
-
-export class Device;
-export class Surface;
+import RendererVK.fwd;
+import RendererVK.VK;
+import RendererVK.CommandBuffer;
 
 export class SwapChain final
 {

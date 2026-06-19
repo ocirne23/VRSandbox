@@ -1,8 +1,8 @@
-module RendererVK:IndirectExecutionSet;
+module RendererVK.IndirectExecutionSet;
 
 import Core;
-import :Device;
-import :GraphicsPipeline;
+import RendererVK.Device;
+import RendererVK.GraphicsPipeline;
 
 IndirectExecutionSet::IndirectExecutionSet() {}
 IndirectExecutionSet::~IndirectExecutionSet()

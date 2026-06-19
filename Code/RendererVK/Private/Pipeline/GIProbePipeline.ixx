@@ -1,17 +1,17 @@
-export module RendererVK:GIProbePipeline;
+export module RendererVK.GIProbePipeline;
 
 import Core;
 import Core.glm;
 
-import :VK;
-import :Buffer;
-import :CommandBuffer;
-import :ComputePipeline;
-import :GraphicsPipeline;
-import :RenderPass;
-import :DescriptorSet;
-import :Sampler;
-import :Layout;
+import RendererVK.VK;
+import RendererVK.Buffer;
+import RendererVK.CommandBuffer;
+import RendererVK.ComputePipeline;
+import RendererVK.GraphicsPipeline;
+import RendererVK.RenderPass;
+import RendererVK.DescriptorSet;
+import RendererVK.Sampler;
+import RendererVK.Layout;
 
 // Diffuse GI probe system over a single persistent, world-space CASCADED CLIPMAP volume. GI_NUM_CASCADES
 // nested toroidal probe grids (camera-centered, doubling spacing) store SH-L1 irradiance at absolute lattice

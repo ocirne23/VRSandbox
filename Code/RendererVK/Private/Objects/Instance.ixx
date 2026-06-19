@@ -1,9 +1,9 @@
-export module RendererVK:Instance;
+export module RendererVK.Instance;
 
 import Core;
-import :VK;
-
-export class Window;
+import Core.fwd;
+import RendererVK.fwd;
+import RendererVK.VK;
 
 export class Instance final
 {

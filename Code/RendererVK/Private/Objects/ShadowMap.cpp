@@ -1,9 +1,9 @@
-module RendererVK:ShadowMap;
+module RendererVK.ShadowMap;
 
-import :VK;
-import :Device;
-import :Allocator;
-import :CommandBuffer;
+import RendererVK.VK;
+import RendererVK.Device;
+import RendererVK.Allocator;
+import RendererVK.CommandBuffer;
 
 constexpr vk::Format SHADOW_DEPTH_FORMAT = vk::Format::eD32Sfloat;
 

@@ -1,6 +1,7 @@
-module RendererVK:ObjectContainer;
+module RendererVK.ObjectContainer;
 
 import Core;
+import Core.glm;
 import Core.Transform;
 
 import File.ISceneData;
@@ -9,10 +10,10 @@ import File.IMeshData;
 import File.IMaterialData;
 import File.ITextureData;
 
-import :Renderer;
-import :MeshDataManager;
-import :RenderNode;
-import :TextureManager;
+import RendererVK.Renderer;
+import RendererVK.MeshDataManager;
+import RendererVK.RenderNode;
+import RendererVK.TextureManager;
 
 constexpr char NODE_PATH_SEPARATOR = '/';
 constexpr char NODE_CHILD_SEPARATOR = ':';

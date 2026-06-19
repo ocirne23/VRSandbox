@@ -1,13 +1,13 @@
-module RendererVK:RTAOPipeline;
+module RendererVK.RTAOPipeline;
 
 import Core;
 import Core.Tweaks;
 import File.FileSystem;
-import :Device;
-import :Allocator;
-import :CommandBuffer;
-import :TextureManager;
-import :Texture;
+import RendererVK.Device;
+import RendererVK.Allocator;
+import RendererVK.CommandBuffer;
+import RendererVK.TextureManager;
+import RendererVK.Texture;
 
 namespace
 {

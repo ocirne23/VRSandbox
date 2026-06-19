@@ -1,6 +1,6 @@
-module RendererVK:DescriptorSet;
+module RendererVK.DescriptorSet;
 
-import :Device;
+import RendererVK.Device;
 
 DescriptorSet::DescriptorSet() {}
 DescriptorSet::~DescriptorSet() 

@@ -1,9 +1,8 @@
-export module RendererVK:IndirectExecutionSet;
+export module RendererVK.IndirectExecutionSet;
 
 import Core;
-import :VK;
-
-export class GraphicsPipeline;
+import RendererVK.fwd;
+import RendererVK.VK;
 
 export class IndirectExecutionSet final
 {

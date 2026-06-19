@@ -1,21 +1,17 @@
-export module RendererVK:StaticMeshGraphicsPipeline;
+export module RendererVK.StaticMeshGraphicsPipeline;
 
 import Core;
 
-import :VK;
-import :Buffer;
-import :Layout;
-import :GraphicsPipeline;
-import :IndirectExecutionSet;
-import :IndirectCommandsLayout;
-import :DescriptorSet;
-import :Texture;
-import :Sampler;
-
-export class ObjectContainer;
-export class StagingManager;
-export class CommandBuffer;
-export class RenderPass;
+import RendererVK.VK;
+import RendererVK.Buffer;
+import RendererVK.Layout;
+import RendererVK.GraphicsPipeline;
+import RendererVK.IndirectExecutionSet;
+import RendererVK.IndirectCommandsLayout;
+import RendererVK.DescriptorSet;
+import RendererVK.Texture;
+import RendererVK.Sampler;
+import RendererVK.fwd;
 
 export class StaticMeshGraphicsPipeline final
 {

@@ -1,9 +1,9 @@
-module RendererVK:Device;
+module RendererVK.Device;
 
-import :VK;
-import :Instance;
-import :Allocator;
-import :OpenXRSession;
+import RendererVK.VK;
+import RendererVK.Instance;
+import RendererVK.Allocator;
+import RendererVK.OpenXRSession;
 
 Device::Device() {}
 Device::~Device()

@@ -1,4 +1,4 @@
-﻿module RendererVK:Renderer;
+﻿module RendererVK.Renderer;
 
 import Core;
 import Core.fwd;
@@ -12,15 +12,15 @@ import Core.Tweaks;
 import File.FileSystem;
 import File.ITextureData;
 
-import :RenderNode;
-import :VK;
-import :Allocator;
-import :StagingManager;
-import :TextureManager;
-import :MeshDataManager;
-import :glslang;
-import :Layout;
-import :ObjectContainer;
+import RendererVK.RenderNode;
+import RendererVK.VK;
+import RendererVK.Allocator;
+import RendererVK.StagingManager;
+import RendererVK.TextureManager;
+import RendererVK.MeshDataManager;
+import RendererVK.glslang;
+import RendererVK.Layout;
+import RendererVK.ObjectContainer;
 
 // Fits one orthographic light-space view-projection per cascade to the camera's view frustum,
 // stabilized to the shadow-map texel grid to avoid shimmering as the camera moves. Frustum corners

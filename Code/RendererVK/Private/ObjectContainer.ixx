@@ -1,4 +1,4 @@
-export module RendererVK:ObjectContainer;
+export module RendererVK.ObjectContainer;
 
 import Core;
 import Core.glm;
@@ -7,11 +7,10 @@ import Core.fwd;
 
 import File.fwd;
 
-import :Layout;
-import :Buffer;
-import :Texture;
-
-export class RenderNode;
+import RendererVK.fwd;
+import RendererVK.Layout;
+import RendererVK.Buffer;
+import RendererVK.Texture;
 
 export enum NodeSpawnIdx : uint16
 {

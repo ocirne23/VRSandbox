@@ -1,17 +1,16 @@
-export module RendererVK:ShadowMapGraphicsPipeline;
+export module RendererVK.ShadowMapGraphicsPipeline;
 
 import Core;
 
-import :VK;
-import :Buffer;
-import :Layout;
-import :GraphicsPipeline;
-import :IndirectCommandsLayout;
-import :DescriptorSet;
-import :Sampler;
-import :ShadowMap;
-
-export class CommandBuffer;
+import RendererVK.VK;
+import RendererVK.Buffer;
+import RendererVK.Layout;
+import RendererVK.GraphicsPipeline;
+import RendererVK.IndirectCommandsLayout;
+import RendererVK.DescriptorSet;
+import RendererVK.Sampler;
+import RendererVK.ShadowMap;
+import RendererVK.fwd;
 
 // Depth-only pipeline that renders the shadow caster list into one cascade of the sun ShadowMap.
 // Mirrors StaticMeshGraphicsPipeline: it consumes the cull's IndirectDrawSequence buffer through

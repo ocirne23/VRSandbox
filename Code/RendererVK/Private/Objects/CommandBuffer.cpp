@@ -1,7 +1,7 @@
-module RendererVK:CommandBuffer;
+module RendererVK.CommandBuffer;
 
-import :VK;
-import :Device;
+import RendererVK.VK;
+import RendererVK.Device;
 
 CommandBuffer::CommandBuffer() {}
 CommandBuffer::~CommandBuffer()

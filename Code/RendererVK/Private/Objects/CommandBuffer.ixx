@@ -1,7 +1,8 @@
-export module RendererVK:CommandBuffer;
+export module RendererVK.CommandBuffer;
 
 import Core;
-import :VK;
+import RendererVK.fwd;
+import RendererVK.VK;
 
 export struct DescriptorSetUpdateInfo
 {

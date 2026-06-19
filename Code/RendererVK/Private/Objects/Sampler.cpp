@@ -1,7 +1,7 @@
-module RendererVK:Sampler;
+module RendererVK.Sampler;
 
-import :VK;
-import :Device;
+import RendererVK.VK;
+import RendererVK.Device;
 
 Sampler::Sampler()
 {

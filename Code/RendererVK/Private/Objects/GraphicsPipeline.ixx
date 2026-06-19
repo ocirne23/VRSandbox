@@ -1,11 +1,10 @@
-export module RendererVK:GraphicsPipeline;
+export module RendererVK.GraphicsPipeline;
 
 import Core;
-import :VK;
-import :Layout;
-import :Shader;
-
-export class RenderPass;
+import RendererVK.fwd;
+import RendererVK.VK;
+import RendererVK.Layout;
+import RendererVK.Shader;
 
 export struct VertexLayoutInfo
 {

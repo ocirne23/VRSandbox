@@ -8,12 +8,12 @@ module;
 #include "vma/vk_mem_alloc.h"
 #pragma warning(pop)
 
-module RendererVK:Allocator;
+module RendererVK.Allocator;
 
 import Core;
-import :VK;
-import :Instance;
-import :Device;
+import RendererVK.VK;
+import RendererVK.Instance;
+import RendererVK.Device;
 
 Allocator::Allocator() {}
 Allocator::~Allocator()

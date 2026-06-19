@@ -1,9 +1,9 @@
-module RendererVK:SceneColor;
+module RendererVK.SceneColor;
 
-import :VK;
-import :Device;
-import :Allocator;
-import :CommandBuffer;
+import RendererVK.VK;
+import RendererVK.Device;
+import RendererVK.Allocator;
+import RendererVK.CommandBuffer;
 
 namespace
 {

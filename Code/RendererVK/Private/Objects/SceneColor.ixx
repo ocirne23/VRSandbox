@@ -1,8 +1,8 @@
-export module RendererVK:SceneColor;
+export module RendererVK.SceneColor;
 
 import Core;
-import :VK;
-import :Allocator;
+import RendererVK.VK;
+import RendererVK.Allocator;
 
 // Offscreen colour+depth target the lit scene renders into (instead of straight to the swapchain), so the
 // TAA resolve has an isolated image to accumulate. The colour attachment uses the swapchain surface format

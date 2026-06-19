@@ -1,8 +1,8 @@
-export module RendererVK:ComputePipeline;
+export module RendererVK.ComputePipeline;
 
 import Core;
-import :VK;
-import :Shader;
+import RendererVK.VK;
+import RendererVK.Shader;
 
 export struct ComputePipelineLayout
 {

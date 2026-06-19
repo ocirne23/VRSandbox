@@ -1,11 +1,10 @@
-export module RendererVK:MeshDataManager;
+export module RendererVK.MeshDataManager;
 
 import Core;
-import :VK;
-import :Layout;
-import :Buffer;
-
-export class MeshData;
+import RendererVK.fwd;
+import RendererVK.VK;
+import RendererVK.Layout;
+import RendererVK.Buffer;
 
 export class MeshDataManager final
 {

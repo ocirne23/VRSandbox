@@ -1,12 +1,12 @@
-module RendererVK:Instance;
+module RendererVK.Instance;
 
 import Core;
 import Core.SDL;
 import Core.Window;
 
-import :VK;
-import :Device;
-import :OpenXRSession;
+import RendererVK.VK;
+import RendererVK.Device;
+import RendererVK.OpenXRSession;
 
 Instance::Instance() {}
 Instance::~Instance()

@@ -3,7 +3,7 @@ project(RendererVK)
 file(GLOB_RECURSE PROJECT_PRIVATE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/Private/*/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/Private/*.ixx" "${CMAKE_CURRENT_SOURCE_DIR}/Private/*.cpp")
 file(GLOB_RECURSE PROJECT_PUBLIC_FILES  "${CMAKE_CURRENT_SOURCE_DIR}/Public/*/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/Public/*.ixx")
 file(GLOB_RECURSE PROJECT_SHADER_FILES  "${ROOT_DIR}/Assets/Shaders/*.*")
-set(EXTRA_MODULE_FILES "${ROOT_DIR}/Dependencies/Include/vulkan/vulkan.cppm")
+#set(EXTRA_MODULE_FILES "${ROOT_DIR}/Dependencies/Include/vulkan/vulkan.cppm")
 
 add_library(${PROJECT_NAME} STATIC ${PROJECT_PRIVATE_FILES} ${PROJECT_PUBLIC_FILES})
 
@@ -11,7 +11,7 @@ target_sources(${PROJECT_NAME} PRIVATE FILE_SET modules BASE_DIRS "${ROOT_DIR}/D
 target_sources(${PROJECT_NAME} PRIVATE FILE_SET headers BASE_DIRS "${ROOT_DIR}/Assets/Shaders" TYPE HEADERS FILES ${PROJECT_SHADER_FILES})
 
 source_group("Private/Shaders" FILES ${PROJECT_SHADER_FILES})
-source_group("Private/Util" FILES ${EXTRA_MODULE_FILES})
+#source_group("Private/Util" FILES ${EXTRA_MODULE_FILES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Private")
 target_include_directories(${PROJECT_NAME} PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/Public")
@@ -36,4 +36,4 @@ target_link_libraries(${PROJECT_NAME} PUBLIC Core File vulkan-1
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER Engine)
 
 apply_compile_settings(${PROJECT_NAME})
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_SCAN_FOR_MODULES false)
+#set_target_properties(${PROJECT_NAME} PROPERTIES CXX_SCAN_FOR_MODULES false)

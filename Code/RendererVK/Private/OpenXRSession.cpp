@@ -6,10 +6,11 @@ module;
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
-module RendererVK:OpenXRSession;
+module RendererVK.OpenXRSession;
 
 import Core;
-import :VK;
+import Core.glm;
+import RendererVK.VK;
 
 namespace
 {

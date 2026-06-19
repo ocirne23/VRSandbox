@@ -1,8 +1,8 @@
-module RendererVK:RenderPass;
+module RendererVK.RenderPass;
 
-import :VK;
-import :Device;
-import :SwapChain;
+import RendererVK.VK;
+import RendererVK.Device;
+import RendererVK.SwapChain;
 
 RenderPass::RenderPass() {}
 RenderPass::~RenderPass()
