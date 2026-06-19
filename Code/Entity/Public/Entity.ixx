@@ -63,8 +63,8 @@ private:
 	Entity(const Entity&) = delete;
     ~Entity() { assert(refCount == 0); }
 
-    void createComponent(EComponentID id, const void* info, const Transform& base);
-    void destroyComponent(EComponentID id, const void* info);
+    void createComponent(EComponentID id, uint16 componentOffset, const void* info, const Transform& base);
+    void destroyComponent(EComponentID id, uint16 componentOffset, const void* info);
 };
 
 export struct EntityPtr

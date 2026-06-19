@@ -26,9 +26,13 @@ EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& trans
     entity->setPrefabInstance(!tmpl.prefabName.empty()); // a registered prefab spawns as a locked instance
 
     int idx = 0;
+    uint16 offset = EntityComponentDetail::entityBaseOffset;
     for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
         if (entity->typeBits & (1 << i))
-            entity->createComponent(EComponentID(i), tmpl.spawnInfos[idx++].get(), transform);
+        {
+            entity->createComponent(EComponentID(i), offset, tmpl.spawnInfos[idx++].get(), transform);
+            offset += EntityComponentDetail::inlineSizes[i];
+        }
 
     return EntityPtr(entity);
 }
@@ -38,28 +42,32 @@ void Entity::destroy(Entity* entity)
     const uint32 size = getEntityAllocSize(entity->typeBits);
 
     int idx = 0;
+    uint16 offset = EntityComponentDetail::entityBaseOffset;
     for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
         if (entity->typeBits & (1 << i))
-            entity->destroyComponent(EComponentID(i), entity->spawnTemplate->spawnInfos[idx++].get());
+        {
+            entity->destroyComponent(EComponentID(i), offset, entity->spawnTemplate->spawnInfos[idx++].get());
+            offset += EntityComponentDetail::inlineSizes[i];
+        }
 
     entity->~Entity();
     Globals::entityAllocator.deallocate(entity, size);
 }
 
-void Entity::createComponent(EComponentID id, const void* info, const Transform& base)
+void Entity::createComponent(EComponentID id, uint16 componentOffset, const void* info, const Transform& base)
 {
     switch (id)
     {
     case EComponentID_Scene:
     {
-        SceneComponent* sc = getComponent<SceneComponent>(this);
+        SceneComponent* sc = reinterpret_cast<SceneComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
         new (sc) SceneComponent();
         sc->spawn(*this, *static_cast<const SceneComponent::SpawnInfo*>(info), base);
         break;
     }
     case EComponentID_Render:
     {
-        RenderComponent* rc = getComponent<RenderComponent>(this);
+        RenderComponent* rc = reinterpret_cast<RenderComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
         new (rc) RenderComponent();
         rc->spawn(*this, *static_cast<const RenderComponent::SpawnInfo*>(info), base);
         break;
@@ -69,20 +77,20 @@ void Entity::createComponent(EComponentID id, const void* info, const Transform&
     }
 }
 
-void Entity::destroyComponent(EComponentID id, const void* info)
+void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const void* info)
 {
     switch (id)
     {
     case EComponentID_Scene:
     {
-        SceneComponent* sc = getComponent<SceneComponent>(this);
+        SceneComponent* sc = reinterpret_cast<SceneComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
         sc->destroy(*this, *static_cast<const SceneComponent::SpawnInfo*>(info));
         sc->~SceneComponent();
         break;
     }
     case EComponentID_Render:
     {
-        RenderComponent* rc = getComponent<RenderComponent>(this);
+        RenderComponent* rc = reinterpret_cast<RenderComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
         rc->destroy(*this, *static_cast<const RenderComponent::SpawnInfo*>(info));
         rc->~RenderComponent();
         break;
