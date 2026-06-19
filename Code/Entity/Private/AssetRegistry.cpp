@@ -1,7 +1,11 @@
-module Entity.AssetRegistry;
+﻿module Entity;
 
+import Core;
 import Core.Log;
-import File.AssetParser;
+import File;
+
+import :AssetRegistry;
+import :ObjectDescription;
 
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
 

@@ -2,7 +2,17 @@ module;
 
 #include <unordered_map>
 
-module File.SceneData;
+module File;
+
+import Core;
+
+import File.fwd;
+import :SceneData;
+import :Assimp;
+import :MeshData;
+import :TextureData;
+import :MaterialData;
+import :NodeData;
 
 using namespace Assimp;
 

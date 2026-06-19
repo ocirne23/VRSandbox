@@ -1,8 +1,8 @@
-export module Entity.ObjectDescription;
+﻿export module Entity:ObjectDescription;
 
 import Core;
 import Core.glm;
-import File.AssetParser;
+import File;
 
 export struct MaterialOverridesDesc
 {

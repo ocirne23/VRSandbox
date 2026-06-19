@@ -1,6 +1,10 @@
-module File.AssetParser;
+module File;
 
-import File.FileSystem;
+import Core;
+import Core.glm;
+
+import :AssetParser;
+import :FileSystem;
 
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
 

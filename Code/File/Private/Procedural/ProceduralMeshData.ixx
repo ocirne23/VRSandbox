@@ -1,9 +1,9 @@
-export module File.ProceduralMeshData;
+export module File:ProceduralMeshData;
 
 import Core;
 import Core.glm;
 import Core.AABB;
-import File.IMeshData;
+import :IMeshData;
 
 export enum class EProceduralShape
 {

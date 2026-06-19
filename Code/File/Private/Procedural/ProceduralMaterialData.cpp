@@ -1,6 +1,9 @@
-module File.ProceduralMaterialData;
+module File;
 
 import Core;
+import Core.glm;
+
+import :ProceduralMaterialData;
 
 ProceduralMaterialData::ProceduralMaterialData()
 {

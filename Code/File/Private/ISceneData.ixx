@@ -1,4 +1,4 @@
-export module File.ISceneData;
+export module File:ISceneData;
 
 import File.fwd;
 

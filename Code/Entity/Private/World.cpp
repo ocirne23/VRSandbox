@@ -1,17 +1,16 @@
-module Entity.World;
+﻿module Entity;
 
 import Core;
 import Core.glm;
 import Core.Log;
 
 import RendererVK;
-import Entity;
-import Entity.Component;
-import File.ISceneData;
-import File.AssetParser;
+import :Entity;
+import :Component;
+import File;
 
-import Entity.AssetRegistry;
-import Entity.ObjectDescription;
+import :AssetRegistry;
+import :ObjectDescription;
 
 bool World::initialize()
 {

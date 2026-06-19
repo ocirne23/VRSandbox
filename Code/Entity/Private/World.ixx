@@ -1,15 +1,15 @@
-export module Entity.World;
+﻿export module Entity:World;
 
 import Core;
 import Core.glm;
 import Core.Transform;
 
 import RendererVK;
-import Entity;
-import Entity.Component;
+import :Entity;
+import :Component;
 
-import File.AssetParser;
-import Entity.ObjectDescription;
+import File;
+import :ObjectDescription;
 
 export class World final
 {

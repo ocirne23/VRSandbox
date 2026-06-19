@@ -1,10 +1,8 @@
-export module UI.SceneView;
+﻿export module UI.SceneView;
 
 import Core;
 import Core.Transform;
 import Entity;
-import Entity.World;
-import Entity.Component;
 
 export class SceneView
 {
@@ -43,7 +41,7 @@ private:
 	Entity* m_pendingDelete         = nullptr;
 	bool    m_hasPendingReparent    = false;
 	Entity* m_pendingReparentChild  = nullptr;
-	Entity* m_pendingReparentTarget = nullptr;  // nullptr → World root
+	Entity* m_pendingReparentTarget = nullptr;  // nullptr â†’ World root
 	bool    m_hasPendingCreate      = false;
-	Entity* m_pendingCreateParent   = nullptr;  // nullptr → new root, else new child of this
+	Entity* m_pendingCreateParent   = nullptr;  // nullptr â†’ new root, else new child of this
 };

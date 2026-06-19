@@ -1,8 +1,8 @@
-export module File.NodeData;
+export module File:NodeData;
 
 import Core;
 import Core.glm;
-import File.INodeData;
+import :INodeData;
 
 export class aiNode;
 

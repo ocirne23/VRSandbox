@@ -1,4 +1,4 @@
-export module Entity.Allocator;
+﻿export module Entity:Allocator;
 
 import Core;
 

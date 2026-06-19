@@ -1,10 +1,10 @@
-module Entity;
+﻿module Entity;
 
 import Core;
 import Core.Transform;
-import File.AssetParser;
-import Entity.Component;
-import Entity.Allocator;
+import File;
+import :Component;
+import :Allocator;
 
 EntityArchetype makeEntityArchetype(uint16 typeBits)
 {

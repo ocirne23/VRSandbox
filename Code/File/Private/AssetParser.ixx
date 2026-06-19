@@ -1,4 +1,4 @@
-export module File.AssetParser;
+export module File:AssetParser;
 
 import File.fwd;
 

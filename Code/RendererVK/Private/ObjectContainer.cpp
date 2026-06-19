@@ -1,13 +1,9 @@
-module RendererVK;
+﻿module RendererVK;
 
 import Core;
 import Core.Transform;
 
-import File.ISceneData;
-import File.INodeData;
-import File.IMeshData;
-import File.IMaterialData;
-import File.ITextureData;
+import File;
 
 import :Renderer;
 import :MeshDataManager;

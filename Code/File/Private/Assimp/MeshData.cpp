@@ -1,7 +1,11 @@
-module File.MeshData;
+module File;
 
 import Core;
-import File.Assimp;
+import Core.glm;
+import Core.AABB;
+
+import :MeshData;
+import :Assimp;
 
 using namespace Assimp;
 

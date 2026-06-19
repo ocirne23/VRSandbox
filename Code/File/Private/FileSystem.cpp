@@ -1,7 +1,9 @@
-module File.FileSystem;
+module File;
 
 import Core;
 import Core.Windows;
+
+import :FileSystem;
 
 bool FileSystem::initialize()
 {

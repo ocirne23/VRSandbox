@@ -1,4 +1,4 @@
-module Entity.Allocator;
+﻿module Entity;
 
 import Core;
 import Core.Allocator;

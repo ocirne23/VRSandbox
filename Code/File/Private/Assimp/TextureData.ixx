@@ -1,7 +1,7 @@
-export module File.TextureData;
+export module File:TextureData;
 
 import Core;
-import File.ITextureData;
+import :ITextureData;
 
 export struct aiTexture;
 

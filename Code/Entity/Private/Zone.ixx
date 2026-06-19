@@ -1,8 +1,8 @@
-export module Entity.Zone;
+﻿export module Entity:Zone;
 
 import Core;
 import Core.glm;
-import Entity;
+import :Entity;
 
 export struct EntityHash
 {

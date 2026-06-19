@@ -1,13 +1,13 @@
-export module File.ProceduralSceneData;
+export module File:ProceduralSceneData;
 
 import Core;
 
 import File.fwd;
-import File.ISceneData;
-import File.ProceduralMeshData;
-import File.ProceduralTextureData;
-import File.ProceduralMaterialData;
-import File.ProceduralNodeData;
+import :ISceneData;
+import :ProceduralMeshData;
+import :ProceduralTextureData;
+import :ProceduralMaterialData;
+import :ProceduralNodeData;
 
 export std::unique_ptr<ISceneData> createProceduralLoader();
 

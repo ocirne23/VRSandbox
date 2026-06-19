@@ -1,8 +1,8 @@
-export module File.MaterialData;
+export module File:MaterialData;
 
 import Core;
 import Core.glm;
-import File.IMaterialData;
+import :IMaterialData;
 
 export struct aiMaterial;
 export enum aiTextureType : int;

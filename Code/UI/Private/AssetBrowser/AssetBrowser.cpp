@@ -1,8 +1,7 @@
-module UI.AssetBrowser;
+﻿module UI.AssetBrowser;
 
 import Core.imgui;
 import Entity;
-import Entity.Prefab;
 
 static bool isImageFile(const std::string& ext)
 {

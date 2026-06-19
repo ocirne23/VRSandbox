@@ -1,9 +1,9 @@
-export module File.MeshData;
+export module File:MeshData;
 
 import Core;
 import Core.glm;
 import Core.AABB;
-import File.IMeshData;
+import :IMeshData;
 
 export struct aiMesh;
 

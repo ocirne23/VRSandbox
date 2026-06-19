@@ -1,4 +1,4 @@
-export module File.INodeData;
+export module File:INodeData;
 
 import File.fwd;
 

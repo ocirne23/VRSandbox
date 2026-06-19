@@ -1,4 +1,4 @@
-export module File.FileSystem;
+export module File:FileSystem;
 
 import File.fwd;
 

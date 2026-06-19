@@ -1,4 +1,10 @@
-module Entity.ObjectDescription;
+﻿module Entity;
+
+import Core;
+import Core.glm;
+import File;
+
+import :ObjectDescription;
 
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
 

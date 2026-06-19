@@ -1,7 +1,7 @@
-export module Entity.Prefab;
+﻿export module Entity:Prefab;
 
 import Core;
-import Entity;
+import :Entity;
 
 export bool savePrefab(Entity* root, const std::string& path);
 

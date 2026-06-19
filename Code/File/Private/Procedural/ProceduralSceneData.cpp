@@ -1,6 +1,13 @@
-module File.ProceduralSceneData;
+module File;
 
 import Core;
+
+import File.fwd;
+import :ProceduralSceneData;
+import :ProceduralMeshData;
+import :ProceduralTextureData;
+import :ProceduralMaterialData;
+import :ProceduralNodeData;
 
 std::unique_ptr<ISceneData> createProceduralLoader()
 {

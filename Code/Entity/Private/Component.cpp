@@ -1,9 +1,9 @@
-module Entity.Component;
+﻿module Entity;
 
 import Core;
 import Core.glm;
 import Core.Transform;
-import Entity;
+import :Entity;
 import RendererVK;
 
 Transform composeTransform(const Transform& parent, const Transform& local)

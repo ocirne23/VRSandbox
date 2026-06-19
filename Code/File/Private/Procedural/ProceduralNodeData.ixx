@@ -1,8 +1,8 @@
-export module File.ProceduralNodeData;
+export module File:ProceduralNodeData;
 
 import Core;
 import Core.glm;
-import File.INodeData;
+import :INodeData;
 
 export class ProceduralNodeData final : public INodeData
 {

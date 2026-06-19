@@ -1,4 +1,4 @@
-export module File.IMeshData;
+export module File:IMeshData;
 
 import File.fwd;
 

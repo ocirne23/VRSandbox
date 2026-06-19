@@ -1,7 +1,7 @@
-export module Entity.AssetRegistry;
+﻿export module Entity:AssetRegistry;
 
 import Core;
-import Entity.ObjectDescription;
+import :ObjectDescription;
 
 export class AssetRegistry final
 {

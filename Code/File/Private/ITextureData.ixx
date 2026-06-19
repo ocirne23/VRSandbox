@@ -1,4 +1,4 @@
-export module File.ITextureData;
+export module File:ITextureData;
 
 import File.fwd;
 

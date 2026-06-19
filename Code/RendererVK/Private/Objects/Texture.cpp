@@ -1,7 +1,7 @@
-module RendererVK;
+﻿module RendererVK;
 
 import Core;
-import File.ITextureData;
+import File;
 
 import :VK;
 import :Allocator;

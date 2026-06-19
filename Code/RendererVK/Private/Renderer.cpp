@@ -9,8 +9,7 @@ import Core.imgui;
 import Core.Camera;
 import Core.Tweaks;
 
-import File.FileSystem;
-import File.ITextureData;
+import File;
 
 import :RenderNode;
 import :VK;

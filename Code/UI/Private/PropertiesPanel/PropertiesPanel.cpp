@@ -1,9 +1,8 @@
-module UI.PropertiesPanel;
+﻿module UI.PropertiesPanel;
 
 import Core.imgui;
 import Core.glm;
 import Entity;
-import Entity.Component;
 import RendererVK;
 
 void PropertiesPanel::render(Entity* selected)

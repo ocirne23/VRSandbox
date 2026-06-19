@@ -1,4 +1,4 @@
-export module File.IMaterialData;
+export module File:IMaterialData;
 
 import File.fwd;
 

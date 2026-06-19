@@ -1,6 +1,8 @@
-module File.ProceduralTextureData;
+module File;
 
 import Core;
+
+import :ProceduralTextureData;
 
 ProceduralTextureData::ProceduralTextureData()
 {

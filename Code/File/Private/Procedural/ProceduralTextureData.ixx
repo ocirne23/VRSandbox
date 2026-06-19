@@ -1,7 +1,7 @@
-export module File.ProceduralTextureData;
+export module File:ProceduralTextureData;
 
 import Core;
-import File.ITextureData;
+import :ITextureData;
 
 export enum class EProceduralTextureType
 {

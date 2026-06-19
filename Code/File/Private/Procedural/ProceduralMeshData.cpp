@@ -1,7 +1,10 @@
-module File.ProceduralMeshData;
+module File;
 
 import Core;
 import Core.glm;
+import Core.AABB;
+
+import :ProceduralMeshData;
 
 ProceduralMeshData::ProceduralMeshData()
 {

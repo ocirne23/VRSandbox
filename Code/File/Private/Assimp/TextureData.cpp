@@ -1,6 +1,9 @@
-module File.TextureData;
+module File;
 
-import File.Assimp;
+import Core;
+
+import :TextureData;
+import :Assimp;
 
 using namespace Assimp;
 

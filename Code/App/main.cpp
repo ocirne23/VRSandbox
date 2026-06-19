@@ -1,4 +1,4 @@
-import Core;
+﻿import Core;
 import Core.Allocator;
 import Core.Window;
 import Core.SDL;
@@ -7,7 +7,7 @@ import Core.Time;
 import Core.glm;
 import Core.Camera;
 
-import File.FileSystem;
+import File;
 import Input;
 import Input.VrInput;
 import Input.FreeFlyCameraController;
@@ -16,10 +16,7 @@ import UI;
 
 import RendererVK;
 import Entity;
-import Entity.Component;
-import Entity.Prefab;
 
-import Entity.World;
 
 static void renderEntityTree(Renderer& renderer, Entity* entity, const Transform& parentWorld)
 {

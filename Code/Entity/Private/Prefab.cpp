@@ -1,12 +1,11 @@
-module Entity.Prefab;
+﻿module Entity;
 
 import Core;
 import Core.Log;
 import Core.glm;
-import Entity.Component;
-import Entity.AssetRegistry;
-import File.AssetParser;
-import File.FileSystem;
+import :Component;
+import :AssetRegistry;
+import File;
 
 static void writeSceneChild(Entity* child, AssetNode& sceneComp);
 
@@ -164,7 +163,7 @@ bool savePrefab(Entity* root, const std::string& path)
     const std::string id = std::filesystem::path(path).stem().string();
     if (prefabWouldCycle(root, id))
     {
-        Log::warning("Prefab: refusing to save '" + id + "' — it contains a prefab instance of itself (cycle)");
+        Log::warning("Prefab: refusing to save '" + id + "' â€” it contains a prefab instance of itself (cycle)");
         return false;
     }
 

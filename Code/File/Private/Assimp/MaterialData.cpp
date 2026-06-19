@@ -4,9 +4,13 @@ module;
 #include <assimp/GltfMaterial.h>
 #include <cstring>
 
-module File.MaterialData;
+module File;
 
-import File.Assimp;
+import Core;
+import Core.glm;
+
+import :MaterialData;
+import :Assimp;
 
 using namespace Assimp;
 

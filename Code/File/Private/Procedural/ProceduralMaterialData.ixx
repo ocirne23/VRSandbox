@@ -1,8 +1,8 @@
-export module File.ProceduralMaterialData;
+export module File:ProceduralMaterialData;
 
 import Core;
 import Core.glm;
-import File.IMaterialData;
+import :IMaterialData;
 
 export class ProceduralMaterialData final : public IMaterialData
 {

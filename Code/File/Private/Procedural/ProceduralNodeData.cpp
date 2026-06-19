@@ -1,6 +1,9 @@
-module File.ProceduralNodeData;
+module File;
 
 import Core;
+import Core.glm;
+
+import :ProceduralNodeData;
 
 bool ProceduralNodeData::initialize(const char* name, std::vector<uint32> meshIndices)
 {

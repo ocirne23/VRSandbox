@@ -1,7 +1,10 @@
-module File.NodeData;
+module File;
 
 import Core;
-import File.Assimp;
+import Core.glm;
+
+import :NodeData;
+import :Assimp;
 
 std::unique_ptr<INodeData> NodeData::clone() const
 {

@@ -1,14 +1,14 @@
-export module File.SceneData;
+export module File:SceneData;
 
 import Core;
 
 import File.fwd;
-import File.ISceneData;
-import File.Assimp;
-import File.MeshData;
-import File.TextureData;
-import File.MaterialData;
-import File.NodeData;
+import :ISceneData;
+import :Assimp;
+import :MeshData;
+import :TextureData;
+import :MaterialData;
+import :NodeData;
 
 export std::unique_ptr<ISceneData> createAssimpLoader();
 

@@ -1,10 +1,10 @@
-export module Entity.Component;
+﻿export module Entity:Component;
 
-import Entity;
+import :Entity;
 import Core;
 import Core.glm;
 import Core.Transform;
-import File.AssetParser;
+import File;
 
 import RendererVK;
 

@@ -1,10 +1,9 @@
-export module UI;
+﻿export module UI;
 
 import Core;
 import Core.Rect;
 import Core.glm;
 import Entity;
-import Entity.World;
 
 import UI.fwd;
 import UI.imgui_node_editor;

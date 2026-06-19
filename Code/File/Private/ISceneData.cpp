@@ -1,7 +1,9 @@
-module File.ISceneData;
+module File;
 
-import File.SceneData;
-import File.ProceduralSceneData;
+import Core;
+
+import :SceneData;
+import :ProceduralSceneData;
 
 std::unique_ptr<ISceneData> ISceneData::createAssimpLoader()
 {
