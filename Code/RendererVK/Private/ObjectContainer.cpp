@@ -148,9 +148,6 @@ union MaterialFlags
 void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitData& temp, const MaterialOverrides* pOverrides)
 {
     const size_t numMaterials = sceneData.getNumMaterials();
-    // Skinned meshes are deformed per-frame on the GPU; their BLAS would be stale, so they're excluded
-    // from ray tracing (GI / RTAO / RT shadows) for now by forcing every material to instance mask 0.
-    const bool excludeFromRayTracing = sceneData.getSkeleton() != nullptr;
     std::vector<RendererVKLayout::MaterialInfo> materialInfos;
 	temp.textureIdxForMaterialTex.resize(sceneData.getNumTextures(), UINT16_MAX);
     materialInfos.reserve(numMaterials);
@@ -237,9 +234,6 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
                 material.metalRoughnessTexIdx = idx;
             }
         }
-
-        if (excludeFromRayTracing)
-            material.flags |= RendererVKLayout::MATERIAL_FLAG_NO_RAYTRACING;
 
         m_materialNames.push_back(materialData.getName());
     }
@@ -484,7 +478,8 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
         const SkinnedMeshSource& src = m_skinnedMeshes[k];
         const uint16 meshIdx = (uint16)(baseMeshIdx + k);
 
-        renderer.addSkinnedInstance(src.baseVertexOffset, src.skinVertexOffset, outVertexOffsets[k], src.vertexCount, paletteHandle);
+        renderer.addSkinnedInstance(src.baseVertexOffset, src.skinVertexOffset, outVertexOffsets[k], src.vertexCount, paletteHandle,
+            meshIdx, src.firstIndex, src.indexCount);
 
         RendererVKLayout::InMeshInstance& inst = node.m_meshInstances[k];
         inst.renderNodeIdx = node.m_transformIdx;

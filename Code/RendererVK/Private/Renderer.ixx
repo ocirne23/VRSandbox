@@ -88,7 +88,10 @@ public:
     // mesh registers an instance (a per-frame skinning compute dispatch) referencing a palette region.
     uint32 allocateSkinningPalette(uint32 boneCount);
     void setSkinningPalette(uint32 paletteHandle, std::span<const glm::mat4> palette);
-    uint32 addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle);
+    // meshIdx/firstIndex/indexCount identify the output region's MeshInfo so its BLAS can be rebuilt each
+    // frame from the deformed vertices (skinned meshes are ray-traced: GI / RTAO / RT shadows).
+    uint32 addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle,
+        uint32 meshIdx, uint32 firstIndex, uint32 indexCount);
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
     uint32 getNumRenderNodes() const { return (uint32)m_renderNodeTransforms.size(); }
@@ -235,6 +238,7 @@ private:
     std::vector<SkinningPaletteRegion> m_skinningPaletteRegions;
     std::vector<glm::mat4> m_skinningPalettes;   // CPU staging (concatenated per region), uploaded each frame
     std::vector<RendererVKLayout::SkinningPushConstants> m_skinningJobs; // one per skinned mesh instance
+    std::vector<AccelerationStructure::SkinnedBlasBuild> m_skinnedBlasBuilds; // parallel to m_skinningJobs; per-frame BLAS rebuild
     uint32 m_maxSkinningPaletteEntries = RendererVKLayout::INITIAL_SKINNING_PALETTE;
     void growSkinningPaletteCapacity(uint32 needed);
 

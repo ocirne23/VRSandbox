@@ -11,6 +11,10 @@ AccelerationStructure::~AccelerationStructure()
     for (Blas& blas : m_blasList)
         if (blas.handle)
             dev.destroyAccelerationStructureKHR(blas.handle);
+    for (auto& slot : m_skinnedBlas)
+        for (Blas& blas : slot)
+            if (blas.handle)
+                dev.destroyAccelerationStructureKHR(blas.handle);
     for (vk::AccelerationStructureKHR tlas : m_tlas)
         if (tlas)
             dev.destroyAccelerationStructureKHR(tlas);
@@ -25,21 +29,27 @@ void AccelerationStructure::initialize(uint32 maxUniqueMeshes)
     if (m_scratchAlignment == 0)
         m_scratchAlignment = 256;
 
-    m_blasAddressBuffer.initialize(maxUniqueMeshes * sizeof(uint64),
-        vk::BufferUsageFlagBits2::eStorageBuffer,
-        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "AS.blasAddresses");
-    m_mappedBlasAddresses = m_blasAddressBuffer.mapMemory<uint64>();
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+    {
+        m_blasAddressBuffers[f].initialize(maxUniqueMeshes * sizeof(uint64),
+            vk::BufferUsageFlagBits2::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "AS.blasAddresses");
+        m_mappedBlasAddresses[f] = m_blasAddressBuffers[f].mapMemory<uint64>();
+    }
 }
 
 void AccelerationStructure::resizeBlasAddressBuffer(uint32 maxUniqueMeshes)
 {
-    const std::vector<uint64> oldAddresses(m_mappedBlasAddresses.begin(), m_mappedBlasAddresses.end());
-    m_blasAddressBuffer.initialize(maxUniqueMeshes * sizeof(uint64),
-        vk::BufferUsageFlagBits2::eStorageBuffer,
-        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "AS.blasAddresses");
-    m_mappedBlasAddresses = m_blasAddressBuffer.mapMemory<uint64>();
-    memcpy(m_mappedBlasAddresses.data(), oldAddresses.data(), oldAddresses.size() * sizeof(uint64));
-    m_blasAddressBuffer.flushMappedMemory(oldAddresses.size() * sizeof(uint64));
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+    {
+        const std::vector<uint64> oldAddresses(m_mappedBlasAddresses[f].begin(), m_mappedBlasAddresses[f].end());
+        m_blasAddressBuffers[f].initialize(maxUniqueMeshes * sizeof(uint64),
+            vk::BufferUsageFlagBits2::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "AS.blasAddresses");
+        m_mappedBlasAddresses[f] = m_blasAddressBuffers[f].mapMemory<uint64>();
+        memcpy(m_mappedBlasAddresses[f].data(), oldAddresses.data(), oldAddresses.size() * sizeof(uint64));
+        m_blasAddressBuffers[f].flushMappedMemory(oldAddresses.size() * sizeof(uint64));
+    }
 }
 
 void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& outAlignedAddr, vk::DeviceSize needed)
@@ -165,7 +175,9 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
         cmd.buildAccelerationStructuresKHR(buildInfos[i], pRange);
 
         vk::AccelerationStructureDeviceAddressInfoKHR ai{ .accelerationStructure = blas.handle };
-        m_mappedBlasAddresses[firstMesh + i] = dev.getAccelerationStructureAddressKHR(ai);
+        const uint64 blasAddr = dev.getAccelerationStructureAddressKHR(ai);
+        for (auto& mapped : m_mappedBlasAddresses) // static BLAS address is the same for every frame slot
+            mapped[firstMesh + i] = blasAddr;
 
         vk::MemoryBarrier2 b{
             .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
@@ -186,7 +198,103 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
     cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
 
     m_numBlas = std::max(m_numBlas, firstMesh + count);
-    m_blasAddressBuffer.flushMappedMemory(m_blasAddressBuffer.getSize());
+    for (auto& buf : m_blasAddressBuffers)
+        buf.flushMappedMemory(buf.getSize());
+}
+
+void AccelerationStructure::recordBuildSkinnedBlas(vk::CommandBuffer cmd, uint32 frameIdx, Buffer& vertexBuffer, Buffer& indexBuffer,
+    std::span<const SkinnedBlasBuild> builds)
+{
+    if (builds.empty())
+        return;
+
+    vk::Device dev = Globals::device.getDevice();
+    const vk::DeviceAddress vbAddr = vertexBuffer.getDeviceAddress();
+    const vk::DeviceAddress ibAddr = indexBuffer.getDeviceAddress();
+    std::vector<Blas>& slot = m_skinnedBlas[frameIdx];
+    const bool grew = slot.size() < builds.size();
+
+    // Pass 1: build geometry + sizes, find total scratch, (re)allocate BLAS buffers for new entries.
+    const uint32 count = (uint32)builds.size();
+    std::vector<vk::AccelerationStructureGeometryKHR> geoms(count);
+    std::vector<vk::AccelerationStructureBuildGeometryInfoKHR> buildInfos(count);
+    std::vector<vk::AccelerationStructureBuildRangeInfoKHR> ranges(count);
+    std::vector<vk::DeviceSize> scratchOffsets(count);
+    vk::DeviceSize totalScratch = 0;
+    const vk::DeviceSize align = m_scratchAlignment;
+    slot.resize(count);
+    for (uint32 i = 0; i < count; ++i)
+    {
+        const SkinnedBlasBuild& b = builds[i];
+        const uint32 primCount = b.indexCount / 3;
+
+        vk::AccelerationStructureGeometryTrianglesDataKHR tri{
+            .vertexFormat = vk::Format::eR32G32B32Sfloat,
+            .vertexStride = sizeof(RendererVKLayout::MeshVertex),
+            .maxVertex = b.vertexCount - 1u, // exact: a skinned mesh owns a private contiguous region
+            .indexType = vk::IndexType::eUint32,
+        };
+        tri.vertexData.deviceAddress = vbAddr;
+        tri.indexData.deviceAddress = ibAddr;
+        tri.transformData.deviceAddress = 0;
+
+        geoms[i] = vk::AccelerationStructureGeometryKHR{ .geometryType = vk::GeometryTypeKHR::eTriangles, .flags = {} };
+        geoms[i].geometry.triangles = tri;
+        buildInfos[i] = vk::AccelerationStructureBuildGeometryInfoKHR{
+            .type = vk::AccelerationStructureTypeKHR::eBottomLevel,
+            .flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastBuild, // rebuilt every frame
+            .mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+            .geometryCount = 1,
+            .pGeometries = &geoms[i],
+        };
+        uint32 maxPrim = primCount;
+        const vk::AccelerationStructureBuildSizesInfoKHR sizes = dev.getAccelerationStructureBuildSizesKHR(vk::AccelerationStructureBuildTypeKHR::eDevice, buildInfos[i], maxPrim);
+        scratchOffsets[i] = totalScratch;
+        totalScratch += (sizes.buildScratchSize + align - 1) & ~(align - 1);
+
+        // Allocate the BLAS buffer + handle once (geometry size is constant); reused/rebuilt in place after.
+        Blas& blas = slot[i];
+        if (!blas.handle)
+        {
+            blas.buffer.initialize(sizes.accelerationStructureSize,
+                vk::BufferUsageFlagBits2::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
+                vk::MemoryPropertyFlagBits::eDeviceLocal, false, "AS.skinnedBlas");
+            vk::AccelerationStructureCreateInfoKHR ci{ .buffer = blas.buffer.getBuffer(), .size = sizes.accelerationStructureSize, .type = vk::AccelerationStructureTypeKHR::eBottomLevel };
+            auto res = dev.createAccelerationStructureKHR(ci);
+            assert(res.result == vk::Result::eSuccess && "Failed to create skinned BLAS");
+            blas.handle = res.value;
+            vk::AccelerationStructureDeviceAddressInfoKHR ai{ .accelerationStructure = blas.handle };
+            m_mappedBlasAddresses[frameIdx][b.meshIdx] = dev.getAccelerationStructureAddressKHR(ai);
+        }
+
+        ranges[i] = vk::AccelerationStructureBuildRangeInfoKHR{
+            .primitiveCount = primCount,
+            .primitiveOffset = b.firstIndex * (uint32)sizeof(RendererVKLayout::MeshIndex),
+            .firstVertex = b.vertexOffset,
+            .transformOffset = 0,
+        };
+    }
+    if (grew)
+        m_blasAddressBuffers[frameIdx].flushMappedMemory(m_blasAddressBuffers[frameIdx].getSize());
+
+    ensureScratch(m_skinnedBlasScratch[frameIdx], m_skinnedBlasScratchAlignedAddr[frameIdx], totalScratch);
+
+    // Pass 2: rebuild each BLAS in place, serialized with a barrier (each uses a disjoint scratch region).
+    for (uint32 i = 0; i < count; ++i)
+    {
+        buildInfos[i].dstAccelerationStructure = slot[i].handle;
+        buildInfos[i].scratchData.deviceAddress = m_skinnedBlasScratchAlignedAddr[frameIdx] + scratchOffsets[i];
+        const vk::AccelerationStructureBuildRangeInfoKHR* pRange = &ranges[i];
+        cmd.buildAccelerationStructuresKHR(buildInfos[i], pRange);
+
+        vk::MemoryBarrier2 bb{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+            .srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR | vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+            .dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR | vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+        };
+        cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bb });
+    }
 }
 
 bool AccelerationStructure::recordBuildTlas(vk::CommandBuffer cmd, uint32 frameIdx, Buffer& instanceBuffer, uint32 numInstances)

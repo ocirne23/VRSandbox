@@ -139,12 +139,12 @@ export struct RTParams
 export struct RTAOParams
 {
     bool  enabled = true;
-    int   rays = 1;
+    int   rays = 6; //1;
     float radius = 1.0f;
     float power = 1.5f;
     float intensity = 1.0f;
-    float maxHistory = 0.99f;
-    int   blurRadius = 0;
+    float maxHistory = 0.77; //0.99f;
+    int   blurRadius = 2; //0;
     bool  alphaTest = false; // ray-test alpha-masked geometry (vegetation) instead of treating it as solid
 
     void registerTweaks(const std::function<void()>& onReRecord, const std::function<void()>& onReloadShaders);

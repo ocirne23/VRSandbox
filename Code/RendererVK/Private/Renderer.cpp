@@ -969,7 +969,8 @@ void Renderer::setSkinningPalette(uint32 paletteHandle, std::span<const glm::mat
         memcpy(m_skinningPalettes.data() + region.offset, palette.data(), count * sizeof(glm::mat4));
 }
 
-uint32 Renderer::addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle)
+uint32 Renderer::addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle,
+    uint32 meshIdx, uint32 firstIndex, uint32 indexCount)
 {
     assert(paletteHandle < m_skinningPaletteRegions.size());
     RendererVKLayout::SkinningPushConstants job{
@@ -981,6 +982,8 @@ uint32 Renderer::addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOf
     };
     const uint32 handle = (uint32)m_skinningJobs.size();
     m_skinningJobs.push_back(job);
+    m_skinnedBlasBuilds.push_back(AccelerationStructure::SkinnedBlasBuild{
+        .meshIdx = meshIdx, .vertexOffset = outVertexOffset, .vertexCount = vertexCount, .firstIndex = firstIndex, .indexCount = indexCount });
     setHaveToRecordCommandBuffers(); // a new dispatch must be recorded into the skinning command buffer
     return handle;
 }
@@ -1458,6 +1461,12 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
             vkGlobalIllumCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
         };
 
+    // The skinning compute (executed earlier in the primary) wrote the deformed vertices that both the
+    // one-time static build (for skinned output regions) and the per-frame skinned rebuild read.
+    if (!m_skinnedBlasBuilds.empty())
+        fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
+            vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eShaderRead);
+
     // 1. Build BLASes for any meshes added since last frame (one-time per mesh).
     if (m_blasBuiltCount < m_meshInfoCounter)
     {
@@ -1467,6 +1476,17 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         m_blasBuiltCount = m_meshInfoCounter;
 
         m_giProbePipeline.doClear();
+    }
+
+    // 1b. Rebuild skinned meshes' BLASes every frame from this frame's deformed vertices, into this frame's
+    // double-buffered slot (the other slot may still be referenced by the previous frame's in-flight TLAS).
+    if (!m_skinnedBlasBuilds.empty())
+    {
+        m_accelStructure.recordBuildSkinnedBlas(vkGlobalIllumCommandBuffer, frameIdx,
+            Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(), m_skinnedBlasBuilds);
+        // Skinned BLAS builds -> TLAS build reads them.
+        fullBarrier(vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
+            vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eAccelerationStructureReadKHR);
     }
 
     // 2. One-time clear of the persistent probe table/SH (it accumulates across frames thereafter).
@@ -1493,7 +1513,7 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         .renderNodeTransforms = frameData.inRenderNodeTransformsBuffer,
         .meshInstances = frameData.inMeshInstancesBuffer,
         .instanceOffsets = m_instanceOffsetsBuffer,
-        .blasAddresses = m_accelStructure.getBlasAddressBuffer(),
+        .blasAddresses = m_accelStructure.getBlasAddressBuffer(frameIdx),
         .materialInfos = m_materialInfosBuffer,
         .numInstances = numInstances,
     };
