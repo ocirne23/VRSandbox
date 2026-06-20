@@ -30,7 +30,7 @@ int main()
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::DISABLED, EVSync::ENABLED, EVr::DISABLED); // ENABLED DISABLED
+    renderer.initialize(window, EValidation::ENABLED, EVSync::ENABLED, EVr::DISABLED); // ENABLED DISABLED
 
     VrInput& vrInput = Globals::vrInput;
     vrInput.initialize(renderer.getVrSession());
@@ -71,7 +71,7 @@ int main()
     // see it skinned + animated. If the file is absent or has no skeleton, this is silently skipped. The
     // ISceneData and ObjectContainer must outlive the render loop (the AnimationPlayer / RenderNode point
     // into them). preTransformVertices MUST be false for skinning (it would bake away the bones). ---
-    constexpr const char* SKINNED_MODEL_PATH = "Models/character.glb";
+    constexpr const char* SKINNED_MODEL_PATH = "Models/manny1k.glb";
     std::unique_ptr<ISceneData> skinnedScene;
     ObjectContainer skinnedContainer;
     RenderNode skinnedNode;

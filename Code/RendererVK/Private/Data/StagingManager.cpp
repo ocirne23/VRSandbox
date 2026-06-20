@@ -10,7 +10,7 @@ import :Buffer;
 import :CommandBuffer;
 import :SwapChain;
 
-static constexpr size_t STAGING_BUFFER_SIZE = 50 * 1024 * 1024;
+static constexpr size_t STAGING_BUFFER_SIZE = 100 * 1024 * 1024;
 
 StagingManager::StagingManager()
 {
