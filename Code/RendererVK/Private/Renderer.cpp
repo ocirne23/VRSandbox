@@ -237,6 +237,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_eyeAdaptationPipeline.initialize();
     m_compositePipeline.initialize(m_renderPass);
     m_indirectCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
+    m_skinningComputePipeline.initialize(m_maxSkinningPaletteEntries);
     m_lightGridComputePipeline.initialize();
     m_accelStructure.initialize(m_maxUniqueMeshes);
     m_giProbePipeline.initialize(m_maxGiTlasInstances, m_maxTextures, m_numTextureDescriptors);
@@ -257,6 +258,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.indirectCullPipelineDescriptorSet.initialize(m_indirectCullComputePipeline.getDescriptorSetLayout());
+        perFrame.skinningDescriptorSet.initialize(m_skinningComputePipeline.getDescriptorSetLayout());
         perFrame.lightGridPipelineDescriptorSet.initialize(m_lightGridComputePipeline.getDescriptorSetLayout());
         for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
         {
@@ -273,6 +275,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
         perFrame.gbufferCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.aoCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.indirectCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.skinningCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.lightGridCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.imguiCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.shadowCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -422,6 +425,7 @@ void Renderer::reloadShaders()
     m_rtaoPipeline.reloadShaders();
     m_volumetricFogPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_indirectCullComputePipeline.reloadShaders();
+    m_skinningComputePipeline.reloadShaders();
     m_lightGridComputePipeline.reloadShaders();
     m_shadowCullComputePipeline.reloadShaders();
     m_shadowMapGraphicsPipeline.reloadShaders(m_maxTextures);
@@ -730,6 +734,8 @@ void Renderer::present()
     frameData.fogVolumesBuffer.flushMappedMemory(RendererVKLayout::FOG_VOLUME_HEADER_SIZE + m_fogVolumeCounter * sizeof(RendererVKLayout::FogVolumeInfo));
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
+    if (!m_skinningJobs.empty())
+        m_skinningComputePipeline.update(frameIdx, m_skinningPalettes);
     m_lightGridComputePipeline.update(frameIdx, m_lightCounter);
 
     vk::Semaphore waitSemaphore = Globals::stagingManager.update();
@@ -940,6 +946,67 @@ void Renderer::recordIndirectCull(uint32 frameIdx)
         .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
     };
     m_indirectCullComputePipeline.record(cb, frameIdx, m_meshInfoCounter, cullParams);
+    cb.end();
+}
+
+uint32 Renderer::allocateSkinningPalette(uint32 boneCount)
+{
+    const uint32 handle = (uint32)m_skinningPaletteRegions.size();
+    const uint32 offset = (uint32)m_skinningPalettes.size();
+    m_skinningPaletteRegions.push_back({ offset, boneCount });
+    m_skinningPalettes.resize(offset + boneCount, glm::mat4(1.0f)); // identity until first setSkinningPalette
+    if ((uint32)m_skinningPalettes.size() > m_maxSkinningPaletteEntries)
+        growSkinningPaletteCapacity((uint32)m_skinningPalettes.size());
+    return handle;
+}
+
+void Renderer::setSkinningPalette(uint32 paletteHandle, std::span<const glm::mat4> palette)
+{
+    assert(paletteHandle < m_skinningPaletteRegions.size());
+    const SkinningPaletteRegion& region = m_skinningPaletteRegions[paletteHandle];
+    const uint32 count = std::min((uint32)palette.size(), region.boneCount);
+    if (count > 0)
+        memcpy(m_skinningPalettes.data() + region.offset, palette.data(), count * sizeof(glm::mat4));
+}
+
+uint32 Renderer::addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle)
+{
+    assert(paletteHandle < m_skinningPaletteRegions.size());
+    RendererVKLayout::SkinningPushConstants job{
+        .baseVertexOffset = baseVertexOffset,
+        .skinVertexOffset = skinVertexOffset,
+        .outVertexOffset = outVertexOffset,
+        .vertexCount = vertexCount,
+        .paletteOffset = m_skinningPaletteRegions[paletteHandle].offset,
+    };
+    const uint32 handle = (uint32)m_skinningJobs.size();
+    m_skinningJobs.push_back(job);
+    setHaveToRecordCommandBuffers(); // a new dispatch must be recorded into the skinning command buffer
+    return handle;
+}
+
+void Renderer::growSkinningPaletteCapacity(uint32 needed)
+{
+    m_maxSkinningPaletteEntries = growCapacity(m_maxSkinningPaletteEntries, needed);
+    waitForGpuAndFlushStaging();
+    m_skinningComputePipeline.resizePaletteBuffer(m_maxSkinningPaletteEntries);
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew skinning palette capacity to %u\n", m_maxSkinningPaletteEntries);
+}
+
+void Renderer::recordSkinning(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& cb = frameData.skinningCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    SkinningComputePipeline::RecordParams params{
+        .descriptorSet = frameData.skinningDescriptorSet,
+        .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
+        .skinningBuffer = Globals::meshDataManager.getSkinningBuffer(),
+        .jobs = m_skinningJobs,
+    };
+    m_skinningComputePipeline.record(cb, frameIdx, params);
     cb.end();
 }
 
@@ -1485,6 +1552,8 @@ void Renderer::recordCommandBuffers()
     const bool recordScene = !frameData.updated && m_meshInstanceCounter > 0;
     if (recordScene)
     {
+        if (!m_skinningJobs.empty())
+            recordSkinning(frameIdx);
         recordIndirectCull(frameIdx);
         recordLightGrid(frameIdx);
         recordShadowCull(frameIdx);
@@ -1526,6 +1595,7 @@ void Renderer::recordCommandBuffers()
     }
 
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkSkinningCommandBuffer = frameData.skinningCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkLightGridCommandBuffer = frameData.lightGridCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkStaticMeshCommandBuffer = frameData.staticMeshCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkGbufferCommandBuffer = frameData.gbufferCommandBuffer.getCommandBuffer();
@@ -1559,6 +1629,10 @@ void Renderer::recordCommandBuffers()
 
     if (m_meshInstanceCounter > 0)
     {
+        // Skin first: deforms skinned meshes into their output vertex regions, which the cull / G-buffer /
+        // forward / shadow passes then consume as ordinary static geometry.
+        if (!m_skinningJobs.empty())
+            vkCommandBuffer.executeCommands(1, &vkSkinningCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkLightGridCommandBuffer);
         // RT sun shadows replace the cascades entirely (forward pass traces, GI uses per-probe sun rays),

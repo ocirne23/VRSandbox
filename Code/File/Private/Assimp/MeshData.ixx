@@ -3,6 +3,7 @@ export module File:MeshData;
 import Core;
 import Core.glm;
 import Core.AABB;
+import Core.Skeleton;
 import :IMeshData;
 
 export struct aiMesh;
@@ -15,7 +16,8 @@ public:
     MeshData(const MeshData&) = delete;
     MeshData(MeshData&&) = default;
 
-    bool initialize(const aiMesh* pMesh);
+    // pSkeleton (may be null) maps aiBone names to scene bone indices for the skinning influences.
+    bool initialize(const aiMesh* pMesh, const Skeleton* pSkeleton);
     const glm::vec3* getVertices() const override;
     const glm::vec3* getNormals() const override;
     const glm::vec3* getTangents() const override;
@@ -28,9 +30,17 @@ public:
     AABB getAABB() const override;
     const char* getName() const override { return m_pName; }
 
+    bool isSkinned() const override { return !m_boneWeights.empty(); }
+    const glm::uvec4* getBoneIndices() const override { return m_boneIndices.empty() ? nullptr : m_boneIndices.data(); }
+    const glm::vec4* getBoneWeights() const override { return m_boneWeights.empty() ? nullptr : m_boneWeights.data(); }
+
 private:
+
+    void buildBoneInfluences(const Skeleton* pSkeleton);
 
     const char* m_pName = nullptr;
     const aiMesh* m_pMesh = nullptr;
     std::vector<uint32> m_indices;
+    std::vector<glm::uvec4> m_boneIndices; // per-vertex, scene-skeleton bone indices (4 influences)
+    std::vector<glm::vec4> m_boneWeights;  // per-vertex, normalized influence weights (sum ~1)
 };

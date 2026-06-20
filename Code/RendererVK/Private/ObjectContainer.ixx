@@ -55,6 +55,12 @@ public:
     RenderNode spawnNodeForIdx(NodeSpawnIdx idx, const Transform& transform);
     void getRootTransformForIdx(NodeSpawnIdx idx, Transform& transform);
 
+    // True when this container has skeletal/skinned meshes. Spawn such a model with spawnSkinnedNode and
+    // drive it with an AnimationPlayer (setSkinningPalette via the returned RenderNode's palette handle).
+    bool isSkinned() const { return m_isSkinned; }
+    uint32 getNumSkeletonBones() const { return m_numSkeletonBones; }
+    RenderNode spawnSkinnedNode(const Transform& transform);
+
 	const std::string& getFilePath() const { return m_filePath; }
 
     // TODO RenderNode cleanup
@@ -94,6 +100,25 @@ private:
     uint32 m_baseMeshInstanceOffsetsIdx = 0;
     uint16 m_baseMeshInfoIdx = 0;
     uint16 m_baseMaterialInfoIdx = 0;
+
+    // Skinned-mesh source data, captured in initializeMeshes(). Each entry becomes a unique per-instance
+    // output region + MeshInfo when spawnSkinnedNode() is called.
+    struct SkinnedMeshSource
+    {
+        uint32 baseVertexOffset; // bind-pose geometry, MeshVertex units
+        uint32 skinVertexOffset; // influences, SkinningVertex units
+        uint32 vertexCount;
+        uint32 indexCount;
+        uint32 firstIndex;
+        uint16 materialLocalIdx;
+        uint16 pipelineIdx;
+        uint16 alphaMode;
+        Sphere bounds;
+    };
+    std::vector<SkinnedMeshSource> m_skinnedMeshes;
+    bool m_isSkinned = false;
+    uint32 m_numSkeletonBones = 0;
+    uint32 m_skinnedIdentityOffsetIdx = UINT32_MAX; // shared identity per-mesh offset for skinned instances
 
     std::vector<std::string> m_meshNames;
     std::vector<std::string> m_materialNames;

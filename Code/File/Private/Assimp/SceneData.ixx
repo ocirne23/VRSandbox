@@ -1,6 +1,8 @@
 export module File:SceneData;
 
 import Core;
+import Core.Skeleton;
+import Core.Animation;
 
 import File.fwd;
 import :ISceneData;
@@ -36,7 +38,15 @@ public:
 	virtual const IMaterialData* getMaterial(uint32 idx) const override { assert(idx < m_materials.size()); return &m_materials[idx]; }
 	virtual const ITextureData* getTexture(uint32 idx) const override { assert(idx < m_textures.size()); return &m_textures[idx]; }
 
+	const Skeleton* getSkeleton() const override { return m_skeleton.isValid() ? &m_skeleton : nullptr; }
+	uint32 getNumAnimations() const override { return (uint32)m_animations.size(); }
+	const AnimationClip* getAnimation(uint32 idx) const override { assert(idx < m_animations.size()); return &m_animations[idx]; }
+
 private:
+
+	void buildSkeleton();
+	void addBoneRecursive(const aiNode* pNode, int32 parentIdx);
+	void buildAnimations();
 
 	std::string m_filePath;
 	Assimp::Importer m_importer;
@@ -45,4 +55,6 @@ private:
 	std::vector<TextureData> m_textures;
 	std::vector<MaterialData> m_materials;
 	NodeData m_rootNode;
+	Skeleton m_skeleton;
+	std::vector<AnimationClip> m_animations;
 };

@@ -21,6 +21,7 @@ import :Buffer;
 import :MeshDataManager;
 import :DescriptorSet;
 import :IndirectCullComputePipeline;
+import :SkinningComputePipeline;
 import :StaticMeshGraphicsPipeline;
 import :LightGridComputePipeline;
 import :ShadowMap;
@@ -82,6 +83,13 @@ public:
     void setPostParams(const PostParams& post) { m_postParams = post; setHaveToRecordCommandBuffers(); }
     void present();
 
+    // Skinned mesh support (skeletal animation). A palette region holds one bone matrix per skeleton bone
+    // for a skinned node; setSkinningPalette() updates it each frame from an AnimationPlayer. Each skinned
+    // mesh registers an instance (a per-frame skinning compute dispatch) referencing a palette region.
+    uint32 allocateSkinningPalette(uint32 boneCount);
+    void setSkinningPalette(uint32 paletteHandle, std::span<const glm::mat4> palette);
+    uint32 addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle);
+
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
     uint32 getNumRenderNodes() const { return (uint32)m_renderNodeTransforms.size(); }
     uint32 getNumMeshTypes() const { return m_meshInfoCounter; }
@@ -104,6 +112,7 @@ private:
     CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 
     void recordCommandBuffers();
+    void recordSkinning(uint32 frameIdx);
     void recordIndirectCull(uint32 frameIdx);
     void recordLightGrid(uint32 frameIdx);
     void recordShadowCull(uint32 frameIdx);
@@ -161,6 +170,7 @@ private:
 	GpuCrashTracker m_gpuCrashTracker;
 
     IndirectCullComputePipeline m_indirectCullComputePipeline;
+    SkinningComputePipeline m_skinningComputePipeline;
     LightGridComputePipeline m_lightGridComputePipeline;
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
     GBufferPipeline m_gbufferPipeline;
@@ -219,6 +229,15 @@ private:
     uint32 m_meshDataGeneration = 0; // last seen MeshDataManager::getGeneration(); change -> re-record
     uint32 m_textureGeneration = 0;  // last seen TextureManager::getGeneration(); change -> rebuild texture-array pipelines
 
+    // Skinned mesh state. Palette regions and skinning jobs are persistent (set up at spawn); palette
+    // CONTENTS are refreshed each frame via setSkinningPalette and uploaded in present().
+    struct SkinningPaletteRegion { uint32 offset; uint32 boneCount; };
+    std::vector<SkinningPaletteRegion> m_skinningPaletteRegions;
+    std::vector<glm::mat4> m_skinningPalettes;   // CPU staging (concatenated per region), uploaded each frame
+    std::vector<RendererVKLayout::SkinningPushConstants> m_skinningJobs; // one per skinned mesh instance
+    uint32 m_maxSkinningPaletteEntries = RendererVKLayout::INITIAL_SKINNING_PALETTE;
+    void growSkinningPaletteCapacity(uint32 needed);
+
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<Transform>& m_renderNodeTransforms = Globals::renderNodeTransforms;
     std::vector<uint32> m_numInstancesPerMesh;
@@ -249,6 +268,7 @@ private:
         std::array<DescriptorSet, 2> gbufferDescriptorSet;
         DescriptorSet compositeDescriptorSet;
         DescriptorSet indirectCullPipelineDescriptorSet;
+        DescriptorSet skinningDescriptorSet;
         DescriptorSet lightGridPipelineDescriptorSet;
         DescriptorSet shadowCullDescriptorSet;
         DescriptorSet shadowDrawDescriptorSet;
@@ -258,6 +278,7 @@ private:
         CommandBuffer gbufferCommandBuffer;
         CommandBuffer aoCommandBuffer;
         CommandBuffer indirectCullCommandBuffer;
+        CommandBuffer skinningCommandBuffer;
         CommandBuffer lightGridCommandBuffer;
         CommandBuffer imguiCommandBuffer;
         CommandBuffer shadowCullCommandBuffer;

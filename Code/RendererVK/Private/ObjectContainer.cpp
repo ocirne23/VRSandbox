@@ -2,6 +2,8 @@
 
 import Core;
 import Core.Transform;
+import Core.Skeleton;
+import Core.glm;
 
 import File;
 
@@ -48,6 +50,10 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
     std::vector<RendererVKLayout::MeshInfo> meshInfos;
     meshInfos.reserve(numMeshes);
 
+    const Skeleton* pSkeleton = sceneData.getSkeleton();
+    m_isSkinned = pSkeleton != nullptr;
+    m_numSkeletonBones = pSkeleton ? pSkeleton->numBones() : 0;
+
     MeshDataManager& meshDataManager = Globals::meshDataManager;
 	for (uint32 meshIdx = 0; meshIdx < numMeshes; meshIdx++)
 	{
@@ -87,6 +93,37 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
         meshInfo.radius       = sphereBounds.radius;
         meshInfo.center       = sphereBounds.pos;
         meshInfo.firstInstance = 0;
+
+        // Capture skinning source data. The bind-pose base geometry above stays uploaded (and is what the
+        // skinning compute reads); spawnSkinnedNode allocates per-instance output regions that get drawn.
+        if (meshData.isSkinned())
+        {
+            const uint32 numVerts = meshData.getNumVertices();
+            const glm::uvec4* pBoneIndices = meshData.getBoneIndices();
+            const glm::vec4* pBoneWeights = meshData.getBoneWeights();
+            std::vector<RendererVKLayout::SkinningVertex> skinVerts(numVerts);
+            for (uint32 i = 0; i < numVerts; ++i)
+            {
+                skinVerts[i].boneIndices = pBoneIndices[i];
+                skinVerts[i].boneWeights = pBoneWeights[i];
+            }
+            const uint32 skinVertexOffset = (uint32)(meshDataManager.uploadSkinningData(
+                skinVerts.data(), skinVerts.size() * sizeof(RendererVKLayout::SkinningVertex)) / sizeof(RendererVKLayout::SkinningVertex));
+
+            const uint16 materialLocalIdx = (uint16)meshData.getMaterialIndex();
+            SkinnedMeshSource src{
+                .baseVertexOffset = (uint32)meshInfo.vertexOffset,
+                .skinVertexOffset = skinVertexOffset,
+                .vertexCount = numVerts,
+                .indexCount = meshInfo.indexCount,
+                .firstIndex = meshInfo.firstIndex,
+                .materialLocalIdx = materialLocalIdx,
+                .pipelineIdx = (uint16)temp.pipelineAlphaForMaterialIdx[materialLocalIdx].first,
+                .alphaMode = (uint16)temp.pipelineAlphaForMaterialIdx[materialLocalIdx].second,
+                .bounds = sphereBounds,
+            };
+            m_skinnedMeshes.push_back(src);
+        }
     }
 
     m_baseMeshInfoIdx = (uint16)Globals::rendererVK.addMeshInfos(meshInfos);
@@ -111,6 +148,9 @@ union MaterialFlags
 void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitData& temp, const MaterialOverrides* pOverrides)
 {
     const size_t numMaterials = sceneData.getNumMaterials();
+    // Skinned meshes are deformed per-frame on the GPU; their BLAS would be stale, so they're excluded
+    // from ray tracing (GI / RTAO / RT shadows) for now by forcing every material to instance mask 0.
+    const bool excludeFromRayTracing = sceneData.getSkeleton() != nullptr;
     std::vector<RendererVKLayout::MaterialInfo> materialInfos;
 	temp.textureIdxForMaterialTex.resize(sceneData.getNumTextures(), UINT16_MAX);
     materialInfos.reserve(numMaterials);
@@ -197,6 +237,9 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
                 material.metalRoughnessTexIdx = idx;
             }
         }
+
+        if (excludeFromRayTracing)
+            material.flags |= RendererVKLayout::MATERIAL_FLAG_NO_RAYTRACING;
 
         m_materialNames.push_back(materialData.getName());
     }
@@ -385,6 +428,76 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
     {
         node.m_numInstancesPerMesh.emplace_back(pair);
     }
+
+    return node;
+}
+
+RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
+{
+    assert(m_isSkinned && !m_skinnedMeshes.empty() && "spawnSkinnedNode on a non-skinned container");
+
+    Renderer& renderer = Globals::rendererVK;
+    MeshDataManager& meshDataManager = Globals::meshDataManager;
+
+    RenderNode node;
+    node.m_transformIdx = renderer.addRenderNodeTransform(transform);
+
+    // One shared identity per-mesh offset: skinned vertices are produced in armature/model space already,
+    // so the per-instance offset is identity and only the node (root) transform places them in the world.
+    if (m_skinnedIdentityOffsetIdx == UINT32_MAX)
+        m_skinnedIdentityOffsetIdx = renderer.addMeshInstanceOffsets({ RendererVKLayout::MeshInstanceOffset{} });
+
+    // One palette per node, shared by all its skinned meshes (same skeleton).
+    const uint32 paletteHandle = renderer.allocateSkinningPalette(m_numSkeletonBones);
+    node.m_skinnedPaletteHandle = paletteHandle;
+
+    // Reserve a unique output vertex region per skinned mesh and register a MeshInfo pointing at it.
+    std::vector<RendererVKLayout::MeshInfo> meshInfos;
+    std::vector<uint32> outVertexOffsets;
+    meshInfos.reserve(m_skinnedMeshes.size());
+    outVertexOffsets.reserve(m_skinnedMeshes.size());
+    Sphere combinedBounds{ glm::vec3(0.0f), 0.0f };
+    for (const SkinnedMeshSource& src : m_skinnedMeshes)
+    {
+        const uint32 outVertexOffset = (uint32)(meshDataManager.reserveVertexData(
+            (size_t)src.vertexCount * sizeof(RendererVKLayout::MeshVertex)) / sizeof(RendererVKLayout::MeshVertex));
+        outVertexOffsets.push_back(outVertexOffset);
+
+        RendererVKLayout::MeshInfo& mi = meshInfos.emplace_back();
+        mi.indexCount = src.indexCount;
+        mi.firstIndex = src.firstIndex;
+        mi.vertexOffset = (int32)outVertexOffset;
+        mi.center = src.bounds.pos;
+        // Animation deforms the mesh beyond its bind-pose bounds; inflate so it isn't frustum-culled early.
+        mi.radius = src.bounds.radius * 2.0f;
+        mi.firstInstance = 0;
+        Sphere inflated(src.bounds.pos, src.bounds.radius * 2.0f);
+        combinedBounds.combineSphere(inflated);
+    }
+    const uint32 baseMeshIdx = renderer.addMeshInfos(meshInfos);
+
+    node.m_bounds = combinedBounds;
+    node.m_meshInstances.resize(m_skinnedMeshes.size());
+    std::map<uint16, uint16> instancesPerMesh;
+    for (uint32 k = 0; k < (uint32)m_skinnedMeshes.size(); ++k)
+    {
+        const SkinnedMeshSource& src = m_skinnedMeshes[k];
+        const uint16 meshIdx = (uint16)(baseMeshIdx + k);
+
+        renderer.addSkinnedInstance(src.baseVertexOffset, src.skinVertexOffset, outVertexOffsets[k], src.vertexCount, paletteHandle);
+
+        RendererVKLayout::InMeshInstance& inst = node.m_meshInstances[k];
+        inst.renderNodeIdx = node.m_transformIdx;
+        inst.instanceOffsetIdx = m_skinnedIdentityOffsetIdx;
+        inst.meshIdx = meshIdx;
+        inst.materialIdx = m_baseMaterialInfoIdx + src.materialLocalIdx;
+        inst.pipelineIndex = src.pipelineIdx;
+        inst.alphaMode = src.alphaMode;
+        instancesPerMesh[meshIdx] += 1;
+    }
+    node.m_numInstancesPerMesh.reserve(instancesPerMesh.size());
+    for (auto& pair : instancesPerMesh)
+        node.m_numInstancesPerMesh.emplace_back(pair);
 
     return node;
 }

@@ -22,6 +22,12 @@ namespace
     {
         return vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eTransferSrc | vk::BufferUsageFlagBits2::eIndexBuffer | rtUsage();
     }
+    constexpr vk::BufferUsageFlags2 skinningBufferUsage()
+    {
+        // Read-only storage in the skinning compute; transfer dst/src for upload + grow copy.
+        return vk::BufferUsageFlagBits2::eTransferDst | vk::BufferUsageFlagBits2::eTransferSrc
+            | vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eShaderDeviceAddress;
+    }
 }
 
 MeshDataManager::MeshDataManager()
@@ -48,6 +54,10 @@ bool MeshDataManager::initialize(size_t vertexBufSize, size_t indexBufSize)
     // GPU copy that carries contents over on capacity growth.
     m_vertexBuffer.initialize(vertexBufSize, vertexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshVertex");
     m_indexBuffer.initialize(indexBufSize, indexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshIndex");
+
+    // Skinning influences for skeletal meshes; sized lazily on first skinned upload (grows on demand).
+    m_skinningBufSize = RendererVKLayout::INITIAL_SKINNING_DATA;
+    m_skinningBuffer.initialize(m_skinningBufSize, skinningBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshSkinning");
 
     return true;
 }
@@ -100,5 +110,24 @@ size_t MeshDataManager::uploadIndexData(const void* pData, size_t size)
     const size_t offset = m_indexBufOffset;
     Globals::stagingManager.upload(m_indexBuffer.getBuffer(), size, pData, m_indexBufOffset);
     m_indexBufOffset += size;
+    return offset;
+}
+
+size_t MeshDataManager::uploadSkinningData(const void* pData, size_t size)
+{
+    if (m_skinningBufOffset + size > m_skinningBufSize)
+        growBuffer(m_skinningBuffer, m_skinningBufSize, m_skinningBufOffset, m_skinningBufOffset + size, skinningBufferUsage());
+    const size_t offset = m_skinningBufOffset;
+    Globals::stagingManager.upload(m_skinningBuffer.getBuffer(), size, pData, m_skinningBufOffset);
+    m_skinningBufOffset += size;
+    return offset;
+}
+
+size_t MeshDataManager::reserveVertexData(size_t size)
+{
+    if (m_vertexBufOffset + size > m_vertexBufSize)
+        growBuffer(m_vertexBuffer, m_vertexBufSize, m_vertexBufOffset, m_vertexBufOffset + size, vertexBufferUsage());
+    const size_t offset = m_vertexBufOffset;
+    m_vertexBufOffset += size;
     return offset;
 }

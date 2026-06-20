@@ -28,6 +28,11 @@ public:
 
     inline size_t getNumMeshInstances() const { return m_meshInstances.size(); }
 
+    // Valid only for nodes spawned via ObjectContainer::spawnSkinnedNode. Pass to Renderer::setSkinningPalette
+    // each frame with the AnimationPlayer's bone palette. UINT32_MAX for non-skinned nodes.
+    inline bool isSkinned() const { return m_skinnedPaletteHandle != UINT32_MAX; }
+    inline uint32 getSkinnedPaletteHandle() const { return m_skinnedPaletteHandle; }
+
     inline const Sphere& getLocalBounds() const { return m_bounds; }
     inline Sphere getWorldBounds() const 
     {
@@ -41,6 +46,7 @@ private:
     friend class Renderer;
 
     uint32 m_transformIdx = UINT32_MAX;
+    uint32 m_skinnedPaletteHandle = UINT32_MAX;
     Sphere m_bounds;
     std::vector<RendererVKLayout::InMeshInstance> m_meshInstances;
     std::vector<std::pair<uint16, uint16>> m_numInstancesPerMesh;

@@ -6,6 +6,9 @@ import Core.Frustum;
 import Core.Time;
 import Core.glm;
 import Core.Camera;
+import Core.Skeleton;
+import Core.Animation;
+import Core.Tweaks;
 
 import File;
 import Input;
@@ -63,6 +66,38 @@ int main()
 
     GizmoController gizmo;
     gizmo.initialize(world);
+
+    // --- Skinned mesh test (skeletal animation). Drop a rigged glTF/FBX at Assets/Models/character.glb to
+    // see it skinned + animated. If the file is absent or has no skeleton, this is silently skipped. The
+    // ISceneData and ObjectContainer must outlive the render loop (the AnimationPlayer / RenderNode point
+    // into them). preTransformVertices MUST be false for skinning (it would bake away the bones). ---
+    constexpr const char* SKINNED_MODEL_PATH = "Models/character.glb";
+    std::unique_ptr<ISceneData> skinnedScene;
+    ObjectContainer skinnedContainer;
+    RenderNode skinnedNode;
+    AnimationPlayer animPlayer;
+    bool hasSkinned = false;
+    float animSpeed = 1.0f;
+    // Example: programmatically pose a bone by name. Set this to a bone in your rig (e.g. "Head",
+    // "mixamorig:Head"); headEulerDeg drives an additive rotation layered on top of the playing clip.
+    const char* HEAD_BONE_NAME = "head";
+    glm::vec3 headEulerDeg(0.0f);
+    if (std::filesystem::exists(SKINNED_MODEL_PATH))
+    {
+        skinnedScene = ISceneData::createAssimpLoader();
+        if (skinnedScene->initialize(SKINNED_MODEL_PATH, false, false) && skinnedScene->getSkeleton() != nullptr)
+        {
+            skinnedContainer.initialize(*skinnedScene);
+            if (skinnedContainer.isSkinned())
+            {
+                skinnedNode = skinnedContainer.spawnSkinnedNode(Transform(glm::vec3(0.0f, 1.0f, 0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+                animPlayer.initialize(skinnedScene->getSkeleton(), skinnedScene->getNumAnimations() > 0 ? skinnedScene->getAnimation(0) : nullptr);
+                Tweak::floatVar("Animation", "Speed", &animSpeed, 0.0f, 3.0f);
+                Tweak::float3("Animation", "Head Rotation (deg)", &headEulerDeg, 1.0f);
+                hasSkinned = true;
+            }
+        }
+    }
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
@@ -228,6 +263,24 @@ int main()
         const Frustum& frustum = renderer.beginFrame(camera);
         for (const EntityPtr& entity : entities)
             entity->renderTree(renderer, Transform());
+
+        if (hasSkinned)
+        {
+            // Pose the head bone before sampling so the modifier is folded into this frame's palette.
+            // Driven here by a Tweak (Tweaks panel -> Animation -> Head Rotation), additive on top of the
+            // clip. To drive it from another entity instead, derive a delta quaternion from that entity's
+            // rotation, e.g.:
+            //   RenderComponent* rc = getComponent<RenderComponent>(someEntity);
+            //   if (rc) animPlayer.setBoneOffset(HEAD_BONE_NAME, rc->node.getTransform().quat);
+            const glm::quat headRot = glm::quat(glm::radians(headEulerDeg)); // euler (deg) -> quaternion
+            animPlayer.setBoneOffset(HEAD_BONE_NAME, headRot);
+
+            animPlayer.setSpeed(animSpeed);
+            animPlayer.tick((float)deltaSec);
+            renderer.setSkinningPalette(skinnedNode.getSkinnedPaletteHandle(), animPlayer.getPalette());
+            if (frustum.sphereInFrustum(skinnedNode.getWorldBounds()))
+                renderer.renderNode(skinnedNode);
+        }
 
 		for (auto& light : spawnedLights)
 		{

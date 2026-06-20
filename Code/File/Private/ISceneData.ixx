@@ -3,6 +3,8 @@ export module File:ISceneData;
 import File.fwd;
 
 import Core;
+import Core.Skeleton;
+import Core.Animation;
 
 export class ISceneData
 {
@@ -27,4 +29,10 @@ public:
 	virtual const IMeshData* getMesh(uint32 idx) const = 0;
 	virtual const IMaterialData* getMaterial(uint32 idx) const = 0;
 	virtual const ITextureData* getTexture(uint32 idx) const = 0;
+
+	// Skeletal animation. getSkeleton() returns nullptr when the scene has no bones. Animation clips are
+	// resolved against that skeleton (channel bone indices already mapped). Default: none.
+	virtual const Skeleton* getSkeleton() const { return nullptr; }
+	virtual uint32 getNumAnimations() const { return 0; }
+	virtual const AnimationClip* getAnimation(uint32 idx) const { return nullptr; }
 };

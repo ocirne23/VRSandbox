@@ -54,6 +54,7 @@ export import <initializer_list>;
 export import <execution>;
 export import <charconv>;
 export import <new>;
+export import <cmath>;
 
 export template<typename T, size_t N>
 constexpr size_t ARRAY_SIZE(const T(&)[N]) { return N; }
