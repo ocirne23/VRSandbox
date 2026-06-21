@@ -10,15 +10,21 @@ Prefab Gizmo
 			Scale 0.22
 			Component Scene
 				Enabled true
-				Prefab ArrowRed
+				Entity ArrowRed
+					Component Render
+						StaticMesh ArrowRed
 					Position 0 2 0
 					Rotation 0 -0 0
 					Scale 1
-				Prefab ArrowGreen
+				Entity ArrowGreen
+					Component Render
+						StaticMesh ArrowGreen
 					Position 0 0 2
 					Rotation 90 -0 0
 					Scale 1
-				Prefab ArrowBlue
+				Entity ArrowBlue
+					Component Render
+						StaticMesh ArrowBlue
 					Position 2 0 0
 					Rotation 0 -0 -90
 					Scale 1
@@ -28,15 +34,21 @@ Prefab Gizmo
 			Scale 0.44
 			Component Scene
 				Enabled true
-				Prefab PlaneRed
+				Entity PlaneRed
+					Component Render
+						StaticMesh PlaneRed
 					Position 2 2 -0.5
 					Rotation 0 89.98022 0
 					Scale 1
-				Prefab PlaneGreen
+				Entity PlaneGreen
+					Component Render
+						StaticMesh PlaneGreen
 					Position -0.5 2 2
 					Rotation 0 -0 0
 					Scale 1
-				Prefab PlaneBlue
+				Entity PlaneBlue
+					Component Render
+						StaticMesh PlaneBlue
 					Position 2 -0.5 2
 					Rotation 0 -0 90
 					Scale 1
@@ -46,15 +58,21 @@ Prefab Gizmo
 			Scale 0.22
 			Component Scene
 				Enabled false
-				Prefab ArchRed
+				Entity ArchRed
+					Component Render
+						StaticMesh ArchRed
 					Position 1.5 1.5 -0.5
 					Rotation 0 89.98022 0
 					Scale 1.75
-				Prefab ArchGreen
+				Entity ArchGreen
+					Component Render
+						StaticMesh ArchGreen
 					Position -0.5 1.5 1.5
 					Rotation 0 -0 0
 					Scale 1.75
-				Prefab ArchBlue
+				Entity ArchBlue
+					Component Render
+						StaticMesh ArchBlue
 					Position 1.5 -0.5 1.5
 					Rotation 0 -0 -90
 					Scale 1.75
@@ -64,19 +82,27 @@ Prefab Gizmo
 			Scale 0.22
 			Component Scene
 				Enabled false
-				Prefab ScaleRed
+				Entity ScaleRed
+					Component Render
+						StaticMesh ScaleRed
 					Position 0 2 0
 					Rotation 0 -0 0
 					Scale 1
-				Prefab ScaleGreen
+				Entity ScaleGreen
+					Component Render
+						StaticMesh ScaleGreen
 					Position 0 0 2
 					Rotation 90 -0 0
 					Scale 1
-				Prefab ScaleBlue
+				Entity ScaleBlue
+					Component Render
+						StaticMesh ScaleBlue
 					Position 2 0 0
 					Rotation 0 -0 -90
 					Scale 1
-		Prefab SphereWhite
+		Entity SphereWhite
+			Component Render
+				StaticMesh SphereWhite
 			Position 0 0 0
 			Rotation 0 -0 0
 			Scale 0.22

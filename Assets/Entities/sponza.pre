@@ -1,6 +1,5 @@
 Prefab sponza
-	Component RenderNode
-		ObjectContainer sponza
-		Node ROOT
+	Component Render
+		StaticMesh Sponza
 		Position 0, 0, 0
 		Rotation -180, 0, 0

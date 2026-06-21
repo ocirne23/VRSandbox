@@ -134,23 +134,59 @@ static Transform readNodeTransform(const AssetNode& node)
 
 std::shared_ptr<RenderComponent::SpawnInfo> World::buildRenderSpawnInfo(const AssetNode& renderNode, const std::string& ownerName)
 {
-    const AssetNode* containerNode = renderNode.find("ObjectContainer");
-    ObjectContainer* container = containerNode ? getOrLoadContainer(containerNode->asString()) : nullptr;
+    // Preferred form: a named spawnable (StaticMesh/SkinnedMesh) declared in a .oc, which resolves to a
+    // container + node. Falls back to the legacy `ObjectContainer` + `Node` form.
+    const AssetNode* staticNode  = renderNode.find("StaticMesh");
+    const AssetNode* skinnedNode = renderNode.find("SkinnedMesh");
+    const AssetNode* spawnNode   = staticNode ? staticNode : skinnedNode;
+
+    std::string containerName;
+    std::string nodePath;
+    bool skinned = false;
+    std::string spawnableName;
+
+    if (spawnNode)
+    {
+        spawnableName = spawnNode->asString();
+        const SpawnableDesc* desc = Globals::assetRegistry.findSpawnable(spawnableName);
+        if (!desc)
+        {
+            Log::warning("Scene: entity '" + ownerName + "' references unknown mesh '" + spawnableName + "'");
+            return nullptr;
+        }
+        // An explicit ObjectContainer alongside the name disambiguates if the same name exists in several.
+        const AssetNode* containerNode = renderNode.find("ObjectContainer");
+        containerName = containerNode ? containerNode->asString() : desc->containerName;
+        nodePath = desc->node;
+        skinned = desc->skinned;
+    }
+    else if (const AssetNode* containerNode = renderNode.find("ObjectContainer"))
+    {
+        containerName = containerNode->asString();
+        nodePath = renderNode.find("Node") ? renderNode.find("Node")->asString() : std::string();
+    }
+    else
+    {
+        return nullptr;
+    }
+
+    ObjectContainer* container = getOrLoadContainer(containerName);
     if (!container)
         return nullptr;
 
     auto info = std::make_shared<RenderComponent::SpawnInfo>();
     info->container = container;
-    info->containerName = containerNode->asString(); // kept so an inline entity re-serializes its mesh
+    info->containerName = containerName; // kept so an inline entity re-serializes its mesh
+    info->skinned = skinned;
+    info->spawnableName = spawnableName;
 
-    const std::string nodePath = renderNode.find("Node") ? renderNode.find("Node")->asString() : std::string();
     if (nodePath.empty() || nodePath == "ROOT")
         info->nodeIdx = NodeSpawnIdx_ROOT;
     else if (NodeSpawnIdx idx = container->getSpawnIdxForPath(nodePath); idx != NodeSpawnIdx_INVALID)
         info->nodeIdx = idx;
     else
         Log::warning("Scene: entity '" + ownerName + "' references unknown node '" + nodePath + "', using ROOT");
-	info->nodePath = nodePath.empty() ? "ROOT" : nodePath;
+    info->nodePath = nodePath.empty() ? "ROOT" : nodePath;
     info->localTransform = readNodeTransform(renderNode); // mesh offset within the entity
     return info;
 }
@@ -159,8 +195,13 @@ void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out
 {
     if (!info.container)
         return;
-    out.set("ObjectContainer", info.containerName);
-    out.set("Node", info.nodePath);
+    if (!info.spawnableName.empty())
+        out.set(info.skinned ? "SkinnedMesh" : "StaticMesh", info.spawnableName);
+    else
+    {
+        out.set("ObjectContainer", info.containerName);
+        out.set("Node", info.nodePath);
+    }
     const Transform& lt = info.localTransform;
     if (lt.pos != glm::vec3(0.0f))         out.set("Position", lt.pos);
     if (lt.quat != glm::quat(1, 0, 0, 0))  out.set("Rotation", glm::degrees(glm::eulerAngles(lt.quat)));
@@ -210,7 +251,7 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         }
 
     static_assert(EComponentID_Render == 3);
-    if (const AssetNode* renderNode = findComponentNode(node, "RenderNode"))
+    if (const AssetNode* renderNode = findComponentNode(node, "Render"))
         if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.displayName))
         {
             typeBits |= uint16(1 << EComponentID_Render);

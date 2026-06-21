@@ -1,4 +1,0 @@
-Prefab ScaleBlue
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Scale3

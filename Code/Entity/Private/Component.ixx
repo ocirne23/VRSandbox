@@ -92,6 +92,8 @@ export struct RenderComponent
         std::string nodePath;                       // For debug/display. nodeIdx is used at runtime for spawning.
         NodeSpawnIdx nodeIdx = NodeSpawnIdx_ROOT;
         Transform localTransform;                   // applied on top of the spawn base transform
+        bool skinned = false;                       // spawn a skinned node (GPU skinning) instead of a static one
+        std::string spawnableName;                  // set when referenced via StaticMesh/SkinnedMesh (re-serialization)
     };
 
     void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
@@ -115,7 +117,7 @@ export constexpr const char* componentTypeName(EComponentID id)
     case EComponentID_Scene:  return "Scene";
     case EComponentID_Zone:   return "Zone";
     case EComponentID_Cull:   return "Cull";
-    case EComponentID_Render: return "RenderNode";
+    case EComponentID_Render: return "Render";
     default:                  return "Unknown";
     }
 }

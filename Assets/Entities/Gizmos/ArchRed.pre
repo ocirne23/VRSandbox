@@ -1,4 +1,0 @@
-Prefab ArchRed
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Arch1

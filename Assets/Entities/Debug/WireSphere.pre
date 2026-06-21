@@ -1,4 +1,4 @@
 Prefab WireSphere
-	Component RenderNode
+	Component Render
 		ObjectContainer wireshapes
 		Node Sphere

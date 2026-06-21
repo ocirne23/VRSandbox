@@ -1,4 +1,0 @@
-Prefab SphereWhite
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Sphere4

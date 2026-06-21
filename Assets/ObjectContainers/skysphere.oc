@@ -5,3 +5,6 @@ ObjectContainer skysphere
 		PipelineIdx Sky
 		ExcludeFromRayTracing true
 		UseSceneTextures true
+
+StaticMesh skysphere
+	Node ROOT

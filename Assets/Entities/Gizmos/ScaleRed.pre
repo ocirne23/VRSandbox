@@ -1,4 +1,0 @@
-Prefab ScaleRed
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Scale1

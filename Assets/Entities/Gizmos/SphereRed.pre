@@ -1,4 +1,0 @@
-Prefab SphereRed
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Sphere1

@@ -1,4 +1,0 @@
-Prefab ArchBlue
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Arch3

@@ -19,7 +19,11 @@ void RenderComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
     if (!info.container)
         return;
     localTransform = info.localTransform;
-    node = info.container->spawnNodeForIdx(info.nodeIdx, composeTransform(base, info.localTransform));
+    const Transform world = composeTransform(base, info.localTransform);
+    if (info.skinned && info.container->isSkinned())
+        node = info.container->spawnSkinnedNode(world);
+    else
+        node = info.container->spawnNodeForIdx(info.nodeIdx, world);
 }
 
 void RenderComponent::destroy(Entity& entity, const SpawnInfo& info)

@@ -1,4 +1,3 @@
 Prefab plane
-	Component RenderNode
-		ObjectContainer baseshapes
-		Node Plane
+	Component Render
+		StaticMesh Plane

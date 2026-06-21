@@ -1,4 +1,0 @@
-Prefab ArrowBlue
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Arrow3

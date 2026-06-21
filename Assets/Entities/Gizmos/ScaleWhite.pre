@@ -1,4 +1,0 @@
-Prefab ScaleWhite
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Scale4

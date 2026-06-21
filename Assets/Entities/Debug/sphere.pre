@@ -1,4 +1,3 @@
 Prefab sphere
-	Component RenderNode
-		ObjectContainer baseshapes
-		Node Sphere
+	Component Render
+		StaticMesh Sphere

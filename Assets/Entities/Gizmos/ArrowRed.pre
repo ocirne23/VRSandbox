@@ -1,4 +1,0 @@
-Prefab ArrowRed
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Arrow1

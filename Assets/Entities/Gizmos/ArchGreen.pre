@@ -1,4 +1,0 @@
-Prefab ArchGreen
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Arch2

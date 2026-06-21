@@ -1,4 +1,0 @@
-Prefab ScaleGreen
-	Component RenderNode
-		ObjectContainer gizmos
-		Node Scale2

@@ -1,5 +1,4 @@
 Prefab skysphere
-	Component RenderNode
-		ObjectContainer skysphere
-		Node ROOT
+	Component Render
+		StaticMesh skysphere
 		Scale 4000
