@@ -117,12 +117,17 @@ uint hashU(uint x)
 	x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
 	return x;
 }
-// Per-pixel + per-frame white-noise jitter (hash-based rather than IGN: IGN's structured diagonal bands
-// show up as a wavey pattern in wide penumbras; unstructured grain resolves more gracefully under TAA).
+// Spatiotemporal blue-noise-style jitter. The per-pixel seed is *static* across frames (white noise,
+// spatially decorrelated between neighbours); each pixel's offset is then advanced along a low-discrepancy
+// golden-ratio sequence per frame. So the TAA history window accumulates a well-stratified set per pixel
+// (fast, low-variance convergence) instead of N independent white-noise draws. The temporal increment is a
+// distinct irrational from R2_OFFSET (the within-frame per-ray stride) so the two sequences don't resonate.
+#define SHADOW_TEMPORAL_OFFSET vec2(0.5545497, 0.3083158)
 vec2 shadowJitter()
 {
-	const uint seed = hashU((uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u) ^ (u_frameIndex * 0x9e3779b9u));
-	return vec2(float(seed & 0x00FFFFFFu), float(hashU(seed) & 0x00FFFFFFu)) / float(0x01000000u);
+	const uint seed = hashU(uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u);
+	const vec2 base = vec2(float(seed & 0x00FFFFFFu), float(hashU(seed) & 0x00FFFFFFu)) / float(0x01000000u);
+	return fract(base + float(u_frameIndex) * SHADOW_TEMPORAL_OFFSET);
 }
 // 1-4 rays based on the light's apparent size: penumbra noise only matters when the emitter subtends a
 // large solid angle, so distant/small lights stay at a single ray.
@@ -530,39 +535,30 @@ void main()
 	const uint16_t normalTexIdx  = uint16_t((material.diffuseNormalTexIdx & 0xFFFF0000) >> 16);
 	const uint16_t metalRoughnessTexIdx = uint16_t(material.metalRoughnessTexIdxAlphaMode & 0x0000FFFF);
 	const uint16_t alphaMode     = uint16_t((material.metalRoughnessTexIdxAlphaMode & 0xFFFF0000) >> 16);
-
-	float roughness = 0.65;
-	float metalness = 0.0;
-	if (metalRoughnessTexIdx != uint16_t(0xFFFF))
-	{
-		const vec2 metalRoughness = texture(u_textures[metalRoughnessTexIdx], in_uv).bg;
-		metalness = metalRoughness.x;
-		roughness = max(metalRoughness.y, 0.01);
-	}
-
-	const vec3 V  = normalize(u_viewPos - in_pos);
 	const vec2 uv = in_uv; //spomDisplaceUV(uint(normalTexIdx), V);
 
 	const vec4 diffuseSample  = texture(u_textures[diffuseTexIdx], uv);
 	if (alphaMode == ALPHA_MODE_MASK && diffuseSample.a < material.opacity)
 		discard;
+
+	float roughness = 0.65;
+	float metalness = 0.0;
+	if (metalRoughnessTexIdx != uint16_t(0xFFFF))
+	{
+		const vec2 metalRoughness = texture(u_textures[metalRoughnessTexIdx], uv).bg;
+		metalness = metalRoughness.x;
+		roughness = max(metalRoughness.y, 0.01);
+	}
+
+	const vec3 V  = normalize(u_viewPos - in_pos);
 	const vec3 materialColor  = diffuseSample.xyz;
 	const vec3 materialNormal = texture(u_textures[normalTexIdx], uv).xyz;
 	const vec3 specularColor  = mix(vec3(0.04), materialColor, metalness);
-
 	const vec3 N = in_tbn * normalize(materialNormal * 2.0 - 1.0);
 
 	const float roughnessSq = roughness * roughness;
 	const vec3 matColOverPi = materialColor / PI;
 	
-	// Diffuse global illumination: sample the ray-traced SH irradiance probes from the fixed volume.
-	// evalProbeSH returns the cosine-convolved irradiance E(N); Lambertian indirect = albedo/PI * E.
-	// Falls back to a small flat ambient outside the probe volume.
-	// Denoised screen-space AO (half-res, linearly upsampled). gl_FragCoord is in full render-target pixels;
-	// u_screenSize.zw = 1/resolution turns it into the [0,1] UV the AO image was traced in. rgb = bent
-	// normal (average unoccluded direction, world space), a = scalar AO.
-	// RTAO toggle (u_aoParams.x): when off, no occlusion (ao = 1) and the bent normal collapses to N, so
-	// the AO image (which isn't being traced) is never sampled.
 	float ao = 1.0;
 	vec3 bentN = N;
 	if (u_aoParams.x > 0.5)
@@ -575,15 +571,10 @@ void main()
 		bentN = normalize(mix(N, normalize(aoSample.xyz), 0.75));
 	}
 	const vec3 indirectE = evalProbeSH(in_pos, bentN);
-	// Outside the probe volume fall back to the analytic sky: treating it as locally uniform, the
-	// irradiance is PI * skyRadiance, so Lambertian indirect = albedo * skyRadiance — the same energy a
-	// probe traced here would converge to. u_ambientColor is the flat, non-physical minimum (an
-	// isotropic radiance field: diffuse = albedo * radiance), applied once here, never inside GI.
 	const vec3 indirect = (indirectE.x >= 0.0) ? (indirectE / PI) : skyRadiance(bentN);
 	vec3 color = materialColor * (indirect + u_ambientColor) * ao;
 
 	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);
-	//color = mix(color, cascadeDebugColor(getSunCascade(in_pos)), 0.35);
 	const ivec3 gridPos = getGridPos(in_pos);
     uint tableIdx = getTableIdx(gridPos);
 	
@@ -616,16 +607,15 @@ void main()
 		tableIdx = getNextTableIdx(tableIdx);
 	}
 
-	#define GI_DEBUG_VIZ 0
-	#if GI_DEBUG_VIZ == 1
-		color = giDebugColor(in_pos, N);
-	#elif GI_DEBUG_VIZ == 2
-		color = (indirectE.x >= 0.0) ? indirectE / PI : vec3(0.0);
-	#endif
-
 	out_color = vec4(color, min(diffuseSample.a, material.opacity));
 }
 
+//	#define GI_DEBUG_VIZ 0
+//	#if GI_DEBUG_VIZ == 1
+//		color = giDebugColor(in_pos, N);
+//	#elif GI_DEBUG_VIZ == 2
+//		color = (indirectE.x >= 0.0) ? indirectE / PI : vec3(0.0);
+//	#endif
 // Visualize grids
 // color += randomColor(gridMin) * 0.2;
 

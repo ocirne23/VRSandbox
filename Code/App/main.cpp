@@ -87,7 +87,7 @@ int main()
     uint32 currentClip = 0;     // index into the clip library; cycled with B (crossfades)
     // Example: programmatically pose a bone by name. Set this to a bone in your rig (e.g. "Head",
     // "mixamorig:Head"); headEulerDeg drives an additive rotation layered on top of the playing clip.
-    const char* HEAD_BONE_NAME = "head";
+    const char* HEAD_BONE_NAME = "Head";
     glm::vec3 headEulerDeg(0.0f);
     if (std::filesystem::exists(SKINNED_MODEL_PATH))
     {

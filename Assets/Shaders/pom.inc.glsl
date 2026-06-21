@@ -49,11 +49,11 @@ vec2 spomDisplaceUV(uint normalTexIdx, vec3 V)
 
     // ---- Linear ray march ----
     float curLayerDepth = 0.0;
-    vec2  curUV         = uv;
+    vec2  curUV         = in_uv;
     float curSurfDepth  = initSurfDepth;
 
     float prevLayerDepth = 0.0;
-    vec2  prevUV         = uv;
+    vec2  prevUV         = in_uv;
     float prevSurfDepth  = initSurfDepth;
 
     for (int i = 0; i < POM_MAX_STEPS; ++i)

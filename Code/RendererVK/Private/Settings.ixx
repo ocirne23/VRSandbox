@@ -33,7 +33,7 @@ export struct SkyParams
     // Ground plane of the sky sphere (below the horizon): albedo lit by sun + sky. Also tints the
     // ground-bounce fallback in skyRadiance() for downward GI/fog rays.
     glm::vec3 groundColor = glm::vec3(0.0f, 0.17f, 1.0f);
-    float groundIntensity = 1.0f;
+    float groundIntensity = 0.0f;
 
     // Atmosphere scattering: multipliers on the Earth sea-level Rayleigh/Mie coefficients. These drive
     // both the visible sky and (through skyRadiance) the majority of the indirect sky lighting.
