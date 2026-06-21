@@ -3,7 +3,7 @@ export module File:MeshData;
 import Core;
 import Core.glm;
 import Core.AABB;
-import Core.Skeleton;
+import Animation;
 import :IMeshData;
 
 export struct aiMesh;

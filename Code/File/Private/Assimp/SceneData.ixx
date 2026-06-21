@@ -1,8 +1,7 @@
 export module File:SceneData;
 
 import Core;
-import Core.Skeleton;
-import Core.Animation;
+import Animation;
 
 import File.fwd;
 import :ISceneData;
@@ -39,8 +38,9 @@ public:
 	virtual const ITextureData* getTexture(uint32 idx) const override { assert(idx < m_textures.size()); return &m_textures[idx]; }
 
 	const Skeleton* getSkeleton() const override { return m_skeleton.isValid() ? &m_skeleton : nullptr; }
-	uint32 getNumAnimations() const override { return (uint32)m_animations.size(); }
-	const AnimationClip* getAnimation(uint32 idx) const override { assert(idx < m_animations.size()); return &m_animations[idx]; }
+	const AnimationSet* getAnimations() const override { return m_animationSet.numClips() > 0 ? &m_animationSet : nullptr; }
+	uint32 getNumAnimations() const override { return m_animationSet.numClips(); }
+	const AnimationClip* getAnimation(uint32 idx) const override { return m_animationSet.get(idx); }
 
 private:
 
@@ -56,5 +56,5 @@ private:
 	std::vector<MaterialData> m_materials;
 	NodeData m_rootNode;
 	Skeleton m_skeleton;
-	std::vector<AnimationClip> m_animations;
+	AnimationSet m_animationSet;
 };

@@ -6,8 +6,7 @@ module File;
 
 import Core;
 import Core.glm;
-import Core.Skeleton;
-import Core.Animation;
+import Animation;
 
 import File.fwd;
 import :SceneData;
@@ -29,6 +28,62 @@ namespace
             m.a2, m.b2, m.c2, m.d2,
             m.a3, m.b3, m.c3, m.d3,
             m.a4, m.b4, m.c4, m.d4);
+    }
+
+    // Builds one AnimationClip from an Assimp animation, resolving each channel against the given skeleton
+    // BY BONE NAME. Name-based resolution is what lets animations come from a different file than the rig:
+    // the clip's node ordering need not match the skeleton's, only the bone names.
+    AnimationClip buildClip(const aiAnimation* pAnim, const Skeleton& skel)
+    {
+        const double ticksPerSecond = pAnim->mTicksPerSecond != 0.0 ? pAnim->mTicksPerSecond : 25.0;
+
+        AnimationClip clip;
+        clip.name = pAnim->mName.C_Str();
+        clip.duration = (float)(pAnim->mDuration / ticksPerSecond);
+        clip.channels.reserve(pAnim->mNumChannels);
+
+        for (uint32 c = 0; c < pAnim->mNumChannels; ++c)
+        {
+            const aiNodeAnim* pCh = pAnim->mChannels[c];
+            AnimationChannel& channel = clip.channels.emplace_back();
+            channel.boneIndex = skel.findBone(pCh->mNodeName.C_Str());
+
+            channel.positionKeys.reserve(pCh->mNumPositionKeys);
+            for (uint32 k = 0; k < pCh->mNumPositionKeys; ++k)
+            {
+                const aiVectorKey& key = pCh->mPositionKeys[k];
+                channel.positionKeys.push_back({ (float)(key.mTime / ticksPerSecond), glm::vec3(key.mValue.x, key.mValue.y, key.mValue.z) });
+            }
+            channel.rotationKeys.reserve(pCh->mNumRotationKeys);
+            for (uint32 k = 0; k < pCh->mNumRotationKeys; ++k)
+            {
+                const aiQuatKey& key = pCh->mRotationKeys[k];
+                channel.rotationKeys.push_back({ (float)(key.mTime / ticksPerSecond), glm::quat(key.mValue.w, key.mValue.x, key.mValue.y, key.mValue.z) });
+            }
+            channel.scaleKeys.reserve(pCh->mNumScalingKeys);
+            for (uint32 k = 0; k < pCh->mNumScalingKeys; ++k)
+            {
+                const aiVectorKey& key = pCh->mScalingKeys[k];
+                channel.scaleKeys.push_back({ (float)(key.mTime / ticksPerSecond), glm::vec3(key.mValue.x, key.mValue.y, key.mValue.z) });
+            }
+        }
+        return clip;
+    }
+
+    // Adds a clip to a set under a unique name (suffixes _N on collision).
+    void addClipToSet(AnimationSet& set, AnimationClip&& clip, const std::string& desiredName)
+    {
+        std::string name = !desiredName.empty() ? desiredName : (clip.name.empty() ? "anim" : clip.name);
+        if (set.nameToIndex.count(name))
+        {
+            uint32 n = 1;
+            std::string unique;
+            do { unique = name + "_" + std::to_string(n++); } while (set.nameToIndex.count(unique));
+            name = unique;
+        }
+        clip.name = name;
+        set.nameToIndex[name] = (uint32)set.clips.size();
+        set.clips.push_back(std::move(clip));
     }
 }
 
@@ -195,40 +250,46 @@ void SceneData::buildAnimations()
         return;
 
     for (uint32 a = 0; a < m_pScene->mNumAnimations; ++a)
+        addClipToSet(m_animationSet, buildClip(m_pScene->mAnimations[a], m_skeleton), "");
+}
+
+bool ISceneData::loadAnimations(const char* filePath, const Skeleton& targetSkeleton, AnimationSet& outSet, const char* skipName, const char* clipNameOverride)
+{
+    // No graph optimization: node names must survive so channels resolve against targetSkeleton by name.
+    Assimp::Importer importer;
+    const aiScene* pScene = importer.ReadFile(filePath, 0);
+    if (!pScene || pScene->mNumAnimations == 0)
     {
-        const aiAnimation* pAnim = m_pScene->mAnimations[a];
-        const double ticksPerSecond = pAnim->mTicksPerSecond != 0.0 ? pAnim->mTicksPerSecond : 25.0;
-
-        AnimationClip& clip = m_animations.emplace_back();
-        clip.name = pAnim->mName.C_Str();
-        clip.duration = (float)(pAnim->mDuration / ticksPerSecond);
-
-        for (uint32 c = 0; c < pAnim->mNumChannels; ++c)
-        {
-            const aiNodeAnim* pCh = pAnim->mChannels[c];
-            AnimationChannel& channel = clip.channels.emplace_back();
-            channel.boneIndex = m_skeleton.findBone(pCh->mNodeName.C_Str());
-
-            channel.positionKeys.reserve(pCh->mNumPositionKeys);
-            for (uint32 k = 0; k < pCh->mNumPositionKeys; ++k)
-            {
-                const aiVectorKey& key = pCh->mPositionKeys[k];
-                channel.positionKeys.push_back({ (float)(key.mTime / ticksPerSecond), glm::vec3(key.mValue.x, key.mValue.y, key.mValue.z) });
-            }
-            channel.rotationKeys.reserve(pCh->mNumRotationKeys);
-            for (uint32 k = 0; k < pCh->mNumRotationKeys; ++k)
-            {
-                const aiQuatKey& key = pCh->mRotationKeys[k];
-                channel.rotationKeys.push_back({ (float)(key.mTime / ticksPerSecond), glm::quat(key.mValue.w, key.mValue.x, key.mValue.y, key.mValue.z) });
-            }
-            channel.scaleKeys.reserve(pCh->mNumScalingKeys);
-            for (uint32 k = 0; k < pCh->mNumScalingKeys; ++k)
-            {
-                const aiVectorKey& key = pCh->mScalingKeys[k];
-                channel.scaleKeys.push_back({ (float)(key.mTime / ticksPerSecond), glm::vec3(key.mValue.x, key.mValue.y, key.mValue.z) });
-            }
-        }
+        assert(false && "loadAnimations: file has no animations (or failed to load)");
+        return false;
     }
+
+    // Skip any animation whose name contains skipName (e.g. a "TPose" track exported into every file).
+    const bool hasSkip = skipName && *skipName;
+    auto skipped = [&](const aiAnimation* pAnim) {
+        return hasSkip && std::string(pAnim->mName.C_Str()).find(skipName) != std::string::npos;
+    };
+
+    uint32 keptCount = 0;
+    for (uint32 a = 0; a < pScene->mNumAnimations; ++a)
+        if (!skipped(pScene->mAnimations[a]))
+            ++keptCount;
+
+    const std::string stem = std::filesystem::path(filePath).stem().string();
+    const std::string baseName = (clipNameOverride && *clipNameOverride) ? clipNameOverride : stem;
+    const bool multiple = keptCount > 1;
+    uint32 added = 0;
+    for (uint32 a = 0; a < pScene->mNumAnimations; ++a)
+    {
+        const aiAnimation* pAnim = pScene->mAnimations[a];
+        if (skipped(pAnim))
+            continue;
+        // One clip per file is the common case (Mixamo etc.); suffix only when a file keeps several.
+        const std::string name = multiple ? baseName + "_" + std::to_string(added) : baseName;
+        addClipToSet(outSet, buildClip(pAnim, targetSkeleton), name);
+        ++added;
+    }
+    return added > 0;
 }
 
 const IMeshData* SceneData::getMesh(const char* pMeshName) const

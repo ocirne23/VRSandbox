@@ -2,8 +2,8 @@
 
 import Core;
 import Core.Transform;
-import Core.Skeleton;
 import Core.glm;
+import Animation;
 
 import File;
 

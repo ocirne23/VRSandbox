@@ -3,7 +3,7 @@ module File;
 import Core;
 import Core.glm;
 import Core.AABB;
-import Core.Skeleton;
+import Animation;
 
 import :MeshData;
 import :Assimp;

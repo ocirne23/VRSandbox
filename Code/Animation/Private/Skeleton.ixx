@@ -1,4 +1,4 @@
-export module Core.Skeleton;
+export module Animation:Skeleton;
 
 import Core;
 import Core.glm;

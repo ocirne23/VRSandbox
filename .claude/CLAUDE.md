@@ -31,7 +31,7 @@ A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is th
 * int8/uint64-style typedefs from `Core`; glm via `Core.glm`; `assert` is compiled out in non-debug via forceinclude.h
 
 # Projects (folders/libraries)
-Dependency direction: everything imports Core. RendererVK imports File; UI imports RendererVK; Input imports UI; App links all.
+Dependency direction: everything imports Core. Animation imports Core; File imports Animation; RendererVK imports File; UI imports RendererVK; Input imports UI; App links all.
 ## Core
 * Collection of cross library utility classes and functions
 * Wrappers for bigger headers (glm, SDL, imgui, Windows, Vulkan)
@@ -66,6 +66,9 @@ Dependency direction: everything imports Core. RendererVK imports File; UI impor
 * Intended to implement an Entity-Component-System, but mostly unimplemented and currently unused
 ## Scene
 * Intended to manage the scenegraph, but completely unimplemented at this point
+## Animation
+* Skeletal animation runtime (depends only on Core). Partitioned module `Animation` (`import Animation;`): `Animation:Skeleton` (`Skeleton` bone hierarchy), `Animation:Clip` (`AnimationClip`/`AnimationSet` keyframes + `AnimationPlayer`: CPU sampler producing a bone-matrix palette, with crossfade blending, 1D `BlendSpace1D`, and programmatic per-bone posing via `setBoneTransform`/`setBoneOffset`), and `Animation:StateMachine` (`AnimStateMachine`: parameter-driven states/transitions that crossfade an `AnimationPlayer`)
+* File builds `Skeleton`/`AnimationClip` from Assimp; RendererVK consumes the palette for GPU skinning (see skinned-mesh notes)
 ## File
 * Wrappers for assets and file sytem related functionality
 * `ISceneData::createAssimpLoader()` for 3d model files (Assimp), `ISceneData::createProceduralLoader()` to programmatically generate assets (terrain, skysphere, debug shapes)
