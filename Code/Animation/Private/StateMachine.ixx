@@ -46,6 +46,9 @@ public:
     void setBool(const std::string& name, bool v)   { m_bools[name] = v; }
     void setTrigger(const std::string& name)        { m_triggers[name] = true; }
 
+    float getFloat(const std::string& name) const { const auto it = m_floats.find(name); return it == m_floats.end() ? 0.0f : it->second; }
+    bool getBool(const std::string& name) const   { const auto it = m_bools.find(name); return it == m_bools.end() ? false : it->second; }
+
     void update(float deltaSeconds);
 
     StateId getCurrentState() const { return m_current; }

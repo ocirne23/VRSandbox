@@ -11,6 +11,8 @@ import File;
 
 import :AssetRegistry;
 import :ObjectDescription;
+import :AnimationDescription;
+import Animation;
 
 bool World::initialize()
 {
@@ -208,6 +210,34 @@ void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out
     if (lt.scale != 1.0f)                  out.set("Scale", lt.scale);
 }
 
+std::shared_ptr<AnimatorComponent::SpawnInfo> World::buildAnimatorSpawnInfo(const AssetNode& animatorNode, ObjectContainer* siblingContainer, const std::string& ownerName)
+{
+    const AssetNode* nameNode = animatorNode.find("Animator");
+    if (!nameNode)
+        return nullptr;
+    const std::string animatorName = nameNode->asString();
+
+    const AnimatorDesc* desc = Globals::assetRegistry.findAnimator(animatorName);
+    if (!desc)
+    {
+        Log::warning("Scene: entity '" + ownerName + "' references unknown Animator '" + animatorName + "'");
+        return nullptr;
+    }
+    if (!siblingContainer || !siblingContainer->isSkinned() || !siblingContainer->getSkeleton())
+    {
+        Log::warning("Scene: entity '" + ownerName + "' has an Animator but no sibling skinned mesh to drive");
+        return nullptr;
+    }
+
+    auto info = std::make_shared<AnimatorComponent::SpawnInfo>();
+    info->desc = desc;
+    info->skeleton = siblingContainer->getSkeleton();
+    info->animatorName = animatorName;
+    if (const AssetNode* n = animatorNode.find("Enabled"))
+        info->enabled = n->asBool();
+    return info;
+}
+
 std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const AssetNode& sceneNode)
 {
     auto info = std::make_shared<SceneComponent::SpawnInfo>();
@@ -251,10 +281,20 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         }
 
     static_assert(EComponentID_Render == 3);
+    ObjectContainer* renderContainer = nullptr;
     if (const AssetNode* renderNode = findComponentNode(node, "Render"))
         if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.displayName))
         {
+            renderContainer = info->container; // the animator (below) drives this skinned mesh
             typeBits |= uint16(1 << EComponentID_Render);
+            tmpl.spawnInfos.emplace_back(std::move(info));
+        }
+
+    static_assert(EComponentID_Animator == 4);
+    if (const AssetNode* animatorNode = findComponentNode(node, "Animator"))
+        if (std::shared_ptr<AnimatorComponent::SpawnInfo> info = buildAnimatorSpawnInfo(*animatorNode, renderContainer, tmpl.displayName))
+        {
+            typeBits |= uint16(1 << EComponentID_Animator);
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 

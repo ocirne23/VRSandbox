@@ -4,6 +4,7 @@ import Core;
 import Core.glm;
 import Core.Sphere;
 import Core.fwd;
+import Animation;
 
 import File.fwd;
 
@@ -60,6 +61,10 @@ public:
     bool isSkinned() const { return m_isSkinned; }
     uint32 getNumSkeletonBones() const { return m_numSkeletonBones; }
     RenderNode spawnSkinnedNode(const Transform& transform);
+
+    // The container's own copy of the source skeleton (null if not skinned). Animators retarget their
+    // clips against this by bone name.
+    const Skeleton* getSkeleton() const { return m_skeleton.get(); }
 
 	const std::string& getFilePath() const { return m_filePath; }
 
@@ -118,6 +123,7 @@ private:
     std::vector<SkinnedMeshSource> m_skinnedMeshes;
     bool m_isSkinned = false;
     uint32 m_numSkeletonBones = 0;
+    std::unique_ptr<Skeleton> m_skeleton; // copy of the source skeleton (retained for animator retargeting)
     uint32 m_skinnedIdentityOffsetIdx = UINT32_MAX; // shared identity per-mesh offset for skinned instances
 
     std::vector<std::string> m_meshNames;

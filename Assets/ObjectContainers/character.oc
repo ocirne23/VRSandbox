@@ -1,0 +1,9 @@
+# Skinned test character (rig + skin). preTransformVertices MUST stay false so the bones survive.
+ObjectContainer character
+	Path "Test/characterLargeMale.fbx"
+
+# A skinned spawnable: spawning it uses GPU skinning (spawnSkinnedNode). An AnimatorComponent on the same
+# entity drives it. Node is unused for skinned meshes (all skin meshes in the container are spawned).
+SkinnedMesh CharacterMesh
+	Node ROOT
+	Type Humanoid

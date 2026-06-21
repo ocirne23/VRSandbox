@@ -38,6 +38,11 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
             if (const RenderComponent::SpawnInfo* si = getRenderSpawnInfo(entity))
                 writeRenderSpawnInfo(*si, comp);
         }
+        else if (id == EComponentID_Animator)
+        {
+            if (const AnimatorComponent::SpawnInfo* ai = getAnimatorSpawnInfo(entity))
+                writeAnimatorSpawnInfo(*ai, comp);
+        }
         else if (id == EComponentID_Scene)
             if (SceneComponent* sc = getComponent<SceneComponent>(entity))
                 for (const EntityPtr& child : sc->children)

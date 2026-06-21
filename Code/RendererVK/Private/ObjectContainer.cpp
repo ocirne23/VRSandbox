@@ -53,6 +53,10 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
     const Skeleton* pSkeleton = sceneData.getSkeleton();
     m_isSkinned = pSkeleton != nullptr;
     m_numSkeletonBones = pSkeleton ? pSkeleton->numBones() : 0;
+    // ISceneData is typically freed right after the container loads, so keep our own copy of the skeleton
+    // (an AnimatorComponent retargets its clips against it at spawn time).
+    if (pSkeleton)
+        m_skeleton = std::make_unique<Skeleton>(*pSkeleton);
 
     MeshDataManager& meshDataManager = Globals::meshDataManager;
 	for (uint32 meshIdx = 0; meshIdx < numMeshes; meshIdx++)

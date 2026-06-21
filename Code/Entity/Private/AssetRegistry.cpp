@@ -6,6 +6,7 @@ import File;
 
 import :AssetRegistry;
 import :ObjectDescription;
+import :AnimationDescription;
 
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
 
@@ -19,7 +20,7 @@ static bool iequals(std::string_view a, std::string_view b)
     return true;
 }
 
-static constexpr const char* s_assetExtensions[] = { ".oc", ".pre" };
+static constexpr const char* s_assetExtensions[] = { ".oc", ".pre", ".anm", ".apl" };
 
 static bool isAssetFile(const std::filesystem::path& path)
 {
@@ -46,6 +47,8 @@ void AssetRegistry::clear()
 {
     m_objectContainers.clear();
     m_spawnables.clear();
+    m_clips.clear();
+    m_animators.clear();
     m_prefabs.clear();
     m_fileRoot.clear();
 }
@@ -125,6 +128,34 @@ void AssetRegistry::registerFile(const std::string& path)
             if (!m_spawnables.try_emplace(spawnableName, std::move(desc)).second)
                 Log::warning("AssetRegistry: duplicate spawnable '" + spawnableName + "' (keeping first), in " + path);
         }
+        else if (iequals(decl.key, "Animation"))
+        {
+            AnimationClipDesc desc;
+            if (!toAnimationClipDesc(decl, desc))
+                continue;
+            if (desc.name.empty())
+            {
+                Log::warning("AssetRegistry: unnamed Animation in " + path);
+                continue;
+            }
+            const std::string clipName = desc.name;
+            if (!m_clips.try_emplace(clipName, std::move(desc)).second)
+                Log::warning("AssetRegistry: duplicate Animation '" + clipName + "' (keeping first), in " + path);
+        }
+        else if (iequals(decl.key, "Animator"))
+        {
+            AnimatorDesc desc;
+            if (!toAnimatorDesc(decl, desc))
+                continue;
+            if (desc.name.empty())
+            {
+                Log::warning("AssetRegistry: unnamed Animator in " + path);
+                continue;
+            }
+            const std::string animatorName = desc.name;
+            if (!m_animators.try_emplace(animatorName, std::move(desc)).second)
+                Log::warning("AssetRegistry: duplicate Animator '" + animatorName + "' (keeping first), in " + path);
+        }
         else if (iequals(decl.key, "Prefab"))
         {
             const std::string name = decl.asString(0);
@@ -159,6 +190,18 @@ const SpawnableDesc* AssetRegistry::findSpawnable(const std::string& name) const
 {
     const auto it = m_spawnables.find(name);
     return it != m_spawnables.end() ? &it->second : nullptr;
+}
+
+const AnimationClipDesc* AssetRegistry::findClip(const std::string& name) const
+{
+    const auto it = m_clips.find(name);
+    return it != m_clips.end() ? &it->second : nullptr;
+}
+
+const AnimatorDesc* AssetRegistry::findAnimator(const std::string& name) const
+{
+    const auto it = m_animators.find(name);
+    return it != m_animators.end() ? &it->second : nullptr;
 }
 
 const std::string* AssetRegistry::findPrefab(const std::string& name) const

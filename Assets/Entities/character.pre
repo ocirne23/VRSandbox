@@ -1,0 +1,8 @@
+# A skinned, animated character: the Render component spawns the skinned mesh, the Animator component
+# drives it with the CharacterAnimator graph. The fbx is large, so scale the whole entity down.
+Prefab Character
+	Scale 0.005
+	Component Render
+		SkinnedMesh CharacterMesh
+	Component Animator
+		Animator CharacterAnimator

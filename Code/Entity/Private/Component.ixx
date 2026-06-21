@@ -1,17 +1,19 @@
 ﻿export module Entity:Component;
 
 import :Entity;
+import :AnimationDescription;
 import Core;
 import Core.glm;
 import Core.Transform;
 import File;
+import Animation;
 
 import RendererVK;
 
 export int componentIdFromName(std::string_view name);
 export void detachFromOwner(Entity* entity);
 
-export constexpr uint16 MaxInlineComponentTypes = 4;
+export constexpr uint16 MaxInlineComponentTypes = 5;
 export constexpr uint16 ComponentAlignment = 16;
 
 export struct SceneComponent
@@ -103,12 +105,52 @@ export struct RenderComponent
     void deserialize(const AssetNode&) {}
 };
 
+// Drives a sibling skinned RenderComponent: instantiates an AnimationPlayer + AnimStateMachine from a
+// .apl AnimatorDesc, retargets its clips against the rig skeleton, ticks them each frame, and pushes the
+// resulting bone palette to the renderer. Gameplay sets parameters via stateMachine.setFloat/Bool/Trigger.
+export struct AnimatorComponent
+{
+    static constexpr EComponentID getId() { return EComponentID_Animator; }
+
+    ~AnimatorComponent();
+
+    AnimationPlayer player;
+    AnimStateMachine stateMachine;
+    AnimationSet clips;                     // this animator's clip library (retargeted to the rig)
+    std::vector<BlendSpace1D> blendSpaces;  // stable storage referenced by the state machine
+    std::vector<AnimatorDesc::SpeedBinding> stateSpeeds; // playback-speed config per StateId
+    AnimatorDesc::SpeedBinding defaultSpeed;             // animator-wide playback-speed fallback
+    bool enabled = true;
+    bool hasStateMachine = false;
+    bool built = false;
+
+    struct SpawnInfo
+    {
+        const AnimatorDesc* desc = nullptr; // parsed .apl graph (owned by AssetRegistry)
+        const Skeleton* skeleton = nullptr; // rig skeleton from the sibling render mesh's container
+        std::string animatorName;           // kept for re-serialization
+        bool enabled = true;
+    };
+
+    void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
+    void destroy(Entity& entity, const SpawnInfo& info);
+    void update(Entity& entity, Renderer& renderer, float deltaSeconds);
+    float resolvePlaybackSpeed() const; // playback rate for the current state (param-driven or constant)
+
+    void serialize(AssetNode&) const {}
+    void deserialize(const AssetNode&) {}
+};
+
 export Transform composeTransform(const Transform& parent, const Transform& local);
 
 export const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity);
+export const AnimatorComponent::SpawnInfo* getAnimatorSpawnInfo(const Entity* entity);
 
-// Serializes a render spawn recipe into a "Component RenderNode" node; mirror of World::buildRenderSpawnInfo.
+// Serializes a render spawn recipe into a "Component Render" node; mirror of World::buildRenderSpawnInfo.
 export void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out);
+
+// Serializes an animator spawn recipe into a "Component Animator" node.
+export void writeAnimatorSpawnInfo(const AnimatorComponent::SpawnInfo& info, AssetNode& out);
 
 export constexpr const char* componentTypeName(EComponentID id)
 {
@@ -118,6 +160,7 @@ export constexpr const char* componentTypeName(EComponentID id)
     case EComponentID_Zone:   return "Zone";
     case EComponentID_Cull:   return "Cull";
     case EComponentID_Render: return "Render";
+    case EComponentID_Animator: return "Animator";
     default:                  return "Unknown";
     }
 }
@@ -131,6 +174,7 @@ export namespace EntityComponentDetail
         alignUp(uint16(sizeof(ZoneComponent)),    ComponentAlignment),
         alignUp(uint16(sizeof(CullingComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(RenderComponent)),  ComponentAlignment),
+        alignUp(uint16(sizeof(AnimatorComponent)), ComponentAlignment),
     };
 
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);

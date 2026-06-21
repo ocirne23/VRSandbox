@@ -16,12 +16,13 @@ export enum EEntityFlags : uint8
 
 export enum EComponentID : uint16
 {
-    EComponentID_Scene  = 0,
-    EComponentID_Zone   = 1,
-    EComponentID_Cull   = 2,
-    EComponentID_Render = 3,
+    EComponentID_Scene    = 0,
+    EComponentID_Zone     = 1,
+    EComponentID_Cull     = 2,
+    EComponentID_Render   = 3,
+    EComponentID_Animator = 4,
 
-    EComponentID_GameLogic = 4,
+    EComponentID_GameLogic = 5,
 };
 
 export class Entity
@@ -51,8 +52,9 @@ public:
     void deserializeComponent(EComponentID id, const AssetNode& in);
     void reparentEntity(Entity* newParent);
 
-    // Recursively submits this entity's RenderComponent (and its children's) to the renderer.
-    void renderTree(Renderer& renderer, const Transform& parentWorld);
+    // Recursively submits this entity's RenderComponent (and its children's) to the renderer, and ticks any
+    // AnimatorComponent (advancing animation + pushing the skinning palette) with deltaSeconds.
+    void renderTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds = 0.0f);
 
     bool isPrefabInstance() const { return (flags & EEntityFlag_PrefabInstance) != 0; }
     void setPrefabInstance(bool on) { flags = on ? uint8(flags | EEntityFlag_PrefabInstance) : uint8(flags & ~EEntityFlag_PrefabInstance); }

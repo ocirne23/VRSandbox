@@ -47,6 +47,8 @@ private:
 
     std::shared_ptr<RenderComponent::SpawnInfo> buildRenderSpawnInfo(const AssetNode& renderNode, const std::string& ownerName);
 
+    std::shared_ptr<AnimatorComponent::SpawnInfo> buildAnimatorSpawnInfo(const AssetNode& animatorNode, ObjectContainer* siblingContainer, const std::string& ownerName);
+
     std::shared_ptr<SceneComponent::SpawnInfo> buildSceneSpawnInfo(const AssetNode& sceneNode);
 
     std::unordered_map<std::string, std::unique_ptr<ObjectContainer>> m_containers;

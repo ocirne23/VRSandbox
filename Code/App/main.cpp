@@ -66,74 +66,11 @@ int main()
     GizmoController gizmo;
     gizmo.initialize(world);
 
-    // --- Skinned mesh test (skeletal animation). Drop a rigged glTF/FBX at Assets/Models/character.glb to
-    // see it skinned + animated. If the file is absent or has no skeleton, this is silently skipped. The
-    // ISceneData and ObjectContainer must outlive the render loop (the AnimationPlayer / RenderNode point
-    // into them). preTransformVertices MUST be false for skinning (it would bake away the bones). ---
-    constexpr const char* SKINNED_MODEL_PATH = "Test/characterLargeMale.fbx";
-    std::unique_ptr<ISceneData> skinnedScene;
-    ObjectContainer skinnedContainer;
-    RenderNode skinnedNode;
-    AnimationPlayer animPlayer;
-    AnimationSet externalClips;             // clips loaded from separate files (Assets/Anims/*), retargeted to the rig
-    const AnimationSet* clipLib = nullptr;  // active clip library (external set if present, else the model's own)
-    BlendSpace1D animBlend;     // all clips laid along a 0..1 axis; driven by the Blend tweak
-    AnimStateMachine animSM;    // idle <-> locomotion driven by the "speed" parameter (M toggles it on)
-    bool hasSkinned = false;
-    bool blendMode = false;     // N: blend space (parameter-driven), B: single-clip crossfade cycling
-    bool smMode = false;        // M: state machine drives playback
-    float animSpeed = 1.0f;
-    float blendParam = 0.0f;    // blend-space axis / state-machine "speed" (0..1)
-    uint32 currentClip = 0;     // index into the clip library; cycled with B (crossfades)
-    // Example: programmatically pose a bone by name. Set this to a bone in your rig (e.g. "Head",
-    // "mixamorig:Head"); headEulerDeg drives an additive rotation layered on top of the playing clip.
-    const char* HEAD_BONE_NAME = "Head";
-    glm::vec3 headEulerDeg(0.0f);
-    if (std::filesystem::exists(SKINNED_MODEL_PATH))
-    {
-        skinnedScene = ISceneData::createAssimpLoader();
-        if (skinnedScene->initialize(SKINNED_MODEL_PATH, false, false) && skinnedScene->getSkeleton() != nullptr)
-        {
-            skinnedContainer.initialize(*skinnedScene);
-            if (skinnedContainer.isSkinned())
-            {
-                skinnedNode = skinnedContainer.spawnSkinnedNode(Transform(glm::vec3(0.0f, 0.0f, 0.0f), 0.005f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
-                animPlayer.initialize(skinnedScene->getSkeleton());
+    EntityPtr character = world.spawnAssetFile("Entities/character.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+    entities.push_back(character);
+    float charSpeed = 0.0f;
+    Tweak::floatVar("Animation", "Speed", &charSpeed, 0.0f, 1.0f, 0.01f,[&]() { getComponent<AnimatorComponent>(character)->stateMachine.setFloat("speed", charSpeed); });
 
-                // Load animation clips from separate files in Assets/Anims/ (rig + animations split across
-                // files, e.g. Mixamo), retargeted onto this rig's skeleton by bone name. Fall back to any
-                // animations embedded in the model file.
-                if (std::filesystem::is_directory("Test/Anims"))
-                    for (const auto& entry : std::filesystem::directory_iterator("Test/Anims"))
-                        if (entry.is_regular_file())
-                            ISceneData::loadAnimations(entry.path().string().c_str(), *skinnedScene->getSkeleton(), externalClips, "Pose", entry.path().stem().string().c_str());
-                clipLib = externalClips.numClips() > 0 ? &externalClips : skinnedScene->getAnimations();
-
-                animPlayer.setClipLibrary(clipLib); // enables play-by-name + cycling
-                const uint32 numClips = clipLib ? clipLib->numClips() : 0;
-                if (numClips > 0)
-                    animPlayer.play(clipLib->get(0));
-                // Lay every clip along a 0..1 blend axis (idle..walk..run style). Enter with N, drag "Blend".
-                for (uint32 c = 0; c < numClips; ++c)
-                    animBlend.addSample(clipLib->get(c), numClips > 1 ? (float)c / (numClips - 1) : 0.0f);
-                // State machine demo: idle (clip 0) <-> locomotion (the blend space) by the "speed" param.
-                if (numClips >= 2)
-                {
-                    animSM.initialize(&animPlayer);
-                    const AnimStateMachine::StateId idle = animSM.addClipState("idle", clipLib->get(0));
-                    const AnimStateMachine::StateId move = animSM.addBlendState("move", &animBlend, "speed");
-                    animSM.setEntryState(idle);
-                    animSM.addTransition(idle, move, { floatGreater("speed", 0.1f) }, 0.2f);
-                    animSM.addTransition(move, idle, { floatLess("speed", 0.1f) }, 0.2f);
-                }
-                Tweak::floatVar("Animation", "Speed", &animSpeed, 0.0f, 3.0f);
-                if (numClips >= 2)
-                    Tweak::floatVar("Animation", "Blend", &blendParam, 0.0f, 1.0f);
-                Tweak::float3("Animation", "Head Rotation (deg)", &headEulerDeg, 1.0f);
-                hasSkinned = true;
-            }
-        }
-    }
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
@@ -145,38 +82,6 @@ int main()
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_B && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN && hasSkinned)
-            {
-                // B: crossfade to the next single animation clip over 0.25s.
-                const uint32 numClips = clipLib ? clipLib->numClips() : 0;
-                if (numClips > 1)
-                {
-                    blendMode = false;
-                    smMode = false;
-                    currentClip = (currentClip + 1) % numClips;
-                    animPlayer.play(clipLib->get(currentClip), 0.25f);
-                }
-            }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_N && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN && hasSkinned)
-            {
-                // N: crossfade into the 1D blend space; drag the "Blend" tweak to move along its axis.
-                if (clipLib && clipLib->numClips() >= 2)
-                {
-                    blendMode = true;
-                    smMode = false;
-                    animPlayer.playBlendSpace(&animBlend, 0.25f);
-                }
-            }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_M && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN && hasSkinned)
-            {
-                // M: hand control to the state machine. The "Blend" tweak now drives its "speed" parameter
-                // (idle below 0.1, locomotion above), and the state machine crossfades between states.
-                if (clipLib && clipLib->numClips() >= 2)
-                {
-                    smMode = true;
-                    blendMode = false;
-                }
-            }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_P && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.toggleGiProbeDebug();          // P: show/hide GI probe debug cubes
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_O && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
@@ -330,32 +235,8 @@ int main()
 
         const Frustum& frustum = renderer.beginFrame(camera);
         for (const EntityPtr& entity : entities)
-            entity->renderTree(renderer, Transform());
+            entity->renderTree(renderer, Transform(), (float)deltaSec);
 
-        if (hasSkinned)
-        {
-            // Pose the head bone before sampling so the modifier is folded into this frame's palette.
-            // Driven here by a Tweak (Tweaks panel -> Animation -> Head Rotation), additive on top of the
-            // clip. To drive it from another entity instead, derive a delta quaternion from that entity's
-            // rotation, e.g.:
-            //   RenderComponent* rc = getComponent<RenderComponent>(someEntity);
-            //   if (rc) animPlayer.setBoneOffset(HEAD_BONE_NAME, rc->node.getTransform().quat);
-            const glm::quat headRot = glm::quat(glm::radians(headEulerDeg)); // euler (deg) -> quaternion
-            animPlayer.setBoneOffset(HEAD_BONE_NAME, headRot);
-
-            animPlayer.setSpeed(animSpeed);
-            if (smMode)
-            {
-                animSM.setFloat("speed", blendParam); // reuse the Blend tweak as the locomotion speed
-                animSM.update((float)deltaSec);        // fires transitions + sets the blend axis
-            }
-            else if (blendMode)
-                animPlayer.setBlendParameter(blendParam);
-            animPlayer.tick((float)deltaSec);
-            renderer.setSkinningPalette(skinnedNode.getSkinnedPaletteHandle(), animPlayer.getPalette());
-            if (frustum.sphereInFrustum(skinnedNode.getWorldBounds()))
-                renderer.renderNode(skinnedNode);
-        }
 
 		for (auto& light : spawnedLights)
 		{

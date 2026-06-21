@@ -13,13 +13,16 @@ EntityArchetype makeEntityArchetype(uint16 typeBits)
     return EntityArchetype{ uint16(getEntityAllocSize(typeBits)), typeBits };
 }
 
-void Entity::renderTree(Renderer& renderer, const Transform& parentWorld)
+void Entity::renderTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds)
 {
     SceneComponent* sc = getComponent<SceneComponent>(this);
     if (sc && !sc->enabled)
         return;
 
     const Transform world = composeTransform(parentWorld, Transform(pos, scale, rot));
+
+    if (AnimatorComponent* animator = getComponent<AnimatorComponent>(this))
+        animator->update(*this, renderer, deltaSeconds); // advance animation + refresh skinning palette
 
     if (RenderComponent* render = getComponent<RenderComponent>(this))
     {
@@ -29,7 +32,7 @@ void Entity::renderTree(Renderer& renderer, const Transform& parentWorld)
 
     if (sc)
         for (const EntityPtr& child : sc->children)
-            child->renderTree(renderer, world);
+            child->renderTree(renderer, world, deltaSeconds);
 }
 
 EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& transform)
@@ -93,6 +96,13 @@ void Entity::createComponent(EComponentID id, uint16 componentOffset, const void
         rc->spawn(*this, *static_cast<const RenderComponent::SpawnInfo*>(info), base);
         break;
     }
+    case EComponentID_Animator:
+    {
+        AnimatorComponent* ac = reinterpret_cast<AnimatorComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        new (ac) AnimatorComponent();
+        ac->spawn(*this, *static_cast<const AnimatorComponent::SpawnInfo*>(info), base);
+        break;
+    }
     default:
         __debugbreak();
     }
@@ -116,6 +126,13 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
         rc->~RenderComponent();
         break;
     }
+    case EComponentID_Animator:
+    {
+        AnimatorComponent* ac = reinterpret_cast<AnimatorComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        ac->destroy(*this, *static_cast<const AnimatorComponent::SpawnInfo*>(info));
+        ac->~AnimatorComponent();
+        break;
+    }
     default:
         __debugbreak();
     }
@@ -129,6 +146,7 @@ void Entity::serializeComponent(EComponentID id, AssetNode& out)
     case EComponentID_Zone:   getComponent<ZoneComponent>(this)->serialize(out);     break;
     case EComponentID_Cull:   getComponent<CullingComponent>(this)->serialize(out);  break;
     case EComponentID_Render: getComponent<RenderComponent>(this)->serialize(out);   break;
+    case EComponentID_Animator: getComponent<AnimatorComponent>(this)->serialize(out); break;
     default: break;
     }
 }
@@ -141,6 +159,7 @@ void Entity::deserializeComponent(EComponentID id, const AssetNode& in)
     case EComponentID_Zone:   getComponent<ZoneComponent>(this)->deserialize(in);     break;
     case EComponentID_Cull:   getComponent<CullingComponent>(this)->deserialize(in);  break;
     case EComponentID_Render: getComponent<RenderComponent>(this)->deserialize(in);   break;
+    case EComponentID_Animator: getComponent<AnimatorComponent>(this)->deserialize(in); break;
     default: break;
     }
 }
