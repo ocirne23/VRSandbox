@@ -32,6 +32,8 @@ bool toAnimationClipDesc(const AssetNode& node, AnimationClipDesc& out)
     }
     if (const AssetNode* l = node.find("Loop")) out.loop = l->asBool(0, true);
     if (const AssetNode* s = node.find("Skip")) out.skip = s->asString();
+    for (const AssetNode* e : node.findAll("Event"))
+        out.events.emplace_back(e->asString(0), e->asFloat(1)); // name, normalized time
     return true;
 }
 

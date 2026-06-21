@@ -1,5 +1,3 @@
-# Animation clips for the test character. Each is a separate file (Mixamo-style), retargeted onto the rig
-# by bone name at load. Skip "Pose" drops the TPose track exported into every file.
 Animation idle
 	ObjectContainer "Test/Anims/idle.fbx"
 	Loop true
@@ -9,8 +7,18 @@ Animation walk
 	ObjectContainer "Test/Anims/walk.fbx"
 	Loop true
 	Skip "Pose"
+	Event footstep 0.25   # left foot
+	Event footstep 0.75   # right foot
 
 Animation run
 	ObjectContainer "Test/Anims/run.fbx"
 	Loop true
 	Skip "Pose"
+	Event footstep 0.5
+	Event footstep 1.0
+
+Animation attack
+	ObjectContainer "Test/Anims/attack.fbx"
+	Loop false
+	Skip "Pose"
+	Event hit 0.5

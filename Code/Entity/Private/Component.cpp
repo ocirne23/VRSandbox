@@ -6,9 +6,6 @@ import Core.Log;
 import Core.Transform;
 import :Entity;
 import :AnimationDescription;
-import :AssetRegistry;
-import :ObjectDescription;
-import File;
 import Animation;
 import RendererVK;
 
@@ -57,56 +54,13 @@ static AnimCondition toAnimCondition(const AnimatorDesc::Condition& c)
 void AnimatorComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {
     enabled = info.enabled;
-    if (!info.desc || !info.skeleton)
+    if (!info.desc || !info.skeleton || !info.clipSet)
         return;
     const AnimatorDesc& desc = *info.desc;
+    clipSet = info.clipSet; // shared, World-cached library (clips already loaded + retargeted)
 
     player.initialize(info.skeleton);
-
-    // Loads one .anm into this animator's set under `localName` (retargeted by bone name to the rig).
-    auto loadClipDesc = [&](const AnimationClipDesc& anm, const std::string& localName)
-    {
-        std::string sourcePath = anm.source;
-        if (const ObjectContainerDesc* oc = Globals::assetRegistry.findObjectContainer(anm.source))
-            sourcePath = oc->path; // source named a registered container; use its file
-        const char* skip = anm.skip.empty() ? nullptr : anm.skip.c_str();
-        ISceneData::loadAnimations(sourcePath.c_str(), *info.skeleton, clips, skip, localName.c_str());
-    };
-
-    // Explicit `Clip <local> Anim <anm>` declarations are optional: they alias a clip to a local name (or
-    // force-load one nothing references). Anything not declared is lazy-loaded by name below.
-    for (const AnimatorDesc::ClipRef& ref : desc.clips)
-    {
-        if (const AnimationClipDesc* anm = Globals::assetRegistry.findClip(ref.anmName))
-            loadClipDesc(*anm, ref.localName);
-        else
-            Log::warning("Animator '" + desc.name + "': unknown Animation clip '" + ref.anmName + "'");
-    }
-
-    // Resolve a clip by name, lazily loading it from the .anm registry when it wasn't declared with `Clip`.
-    auto ensureClip = [&](const std::string& name)
-    {
-        if (name.empty() || clips.find(name))
-            return;
-        if (const AnimationClipDesc* anm = Globals::assetRegistry.findClip(name))
-            loadClipDesc(*anm, name);
-        else
-            Log::warning("Animator '" + desc.name + "': unknown clip '" + name + "'");
-    };
-
-    // Pre-load every clip referenced by a blend sample or a state BEFORE building blend spaces / states,
-    // since those capture pointers into `clips` (loading more afterwards would reallocate and dangle them).
-    std::unordered_set<std::string> blendNames;
-    for (const AnimatorDesc::BlendSpace& bs : desc.blendSpaces)
-        blendNames.insert(bs.name);
-    for (const AnimatorDesc::BlendSpace& bs : desc.blendSpaces)
-        for (const AnimatorDesc::BlendSample& s : bs.samples)
-            ensureClip(s.clip);
-    for (const AnimatorDesc::State& st : desc.stateMachine.states)
-        if (!blendNames.contains(st.play))
-            ensureClip(st.play);
-
-    player.setClipLibrary(&clips);
+    player.setClipLibrary(clipSet);
 
     // Blend spaces (reserve so the state machine can hold stable pointers into this vector).
     std::unordered_map<std::string, size_t> blendIndex;
@@ -115,7 +69,7 @@ void AnimatorComponent::spawn(Entity& entity, const SpawnInfo& info, const Trans
     {
         BlendSpace1D space;
         for (const AnimatorDesc::BlendSample& s : bs.samples)
-            if (const AnimationClip* c = clips.find(s.clip))
+            if (const AnimationClip* c = clipSet->find(s.clip))
                 space.addSample(c, s.position);
         blendIndex[bs.name] = blendSpaces.size();
         blendSpaces.push_back(std::move(space));
@@ -140,7 +94,7 @@ void AnimatorComponent::spawn(Entity& entity, const SpawnInfo& info, const Trans
             AnimStateMachine::StateId id = AnimStateMachine::INVALID_STATE;
             if (auto it = blendIndex.find(st.play); it != blendIndex.end())
                 id = stateMachine.addBlendState(st.name, &blendSpaces[it->second], desc.blendSpaces[it->second].axisParam);
-            else if (const AnimationClip* c = clips.find(st.play))
+            else if (const AnimationClip* c = clipSet->find(st.play))
                 id = stateMachine.addClipState(st.name, c);
             else
             {
@@ -174,9 +128,9 @@ void AnimatorComponent::spawn(Entity& entity, const SpawnInfo& info, const Trans
             }
         }
     }
-    else if (clips.numClips() > 0)
+    else if (clipSet->numClips() > 0)
     {
-        player.play(clips.get(0)); // no state machine: just play the first clip
+        player.play(clipSet->get(0)); // no state machine: just play the first clip
         if (defaultSpeed.hasConst)
             player.setSpeed(defaultSpeed.value); // no parameters without a state machine, so const only
     }
@@ -208,6 +162,10 @@ void AnimatorComponent::update(Entity& entity, Renderer& renderer, float deltaSe
         player.setSpeed(resolvePlaybackSpeed()); // warp playback rate for the active state
     }
     player.tick(deltaSeconds);
+
+    if (onEvent)
+        for (const std::string& e : player.getFiredEvents()) // notifies crossed this tick
+            onEvent(e);
 
     if (RenderComponent* rc = getComponent<RenderComponent>(&entity); rc && rc->node.isSkinned())
         renderer.setSkinningPalette(rc->node.getSkinnedPaletteHandle(), player.getPalette());

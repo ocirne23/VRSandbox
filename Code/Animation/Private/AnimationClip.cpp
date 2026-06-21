@@ -207,8 +207,24 @@ void AnimationPlayer::sampleForeground(Pose& outPose)
     }
 }
 
+void AnimationPlayer::detectEvents(const AnimationClip* pClip, float prevNorm, float curNorm)
+{
+    if (!pClip || pClip->events.empty())
+        return;
+    const bool wrapped = curNorm < prevNorm; // playback looped past 1.0 this tick
+    for (const AnimationEventKey& e : pClip->events)
+    {
+        const float t = e.normalizedTime;
+        const bool fired = wrapped ? (t > prevNorm || t <= curNorm)  // (prev,1] ∪ [0,cur]
+                                   : (t > prevNorm && t <= curNorm);
+        if (fired)
+            m_firedEvents.push_back(e.name);
+    }
+}
+
 void AnimationPlayer::tick(float deltaSeconds)
 {
+    m_firedEvents.clear();
     if (!m_paused)
     {
         const float dt = deltaSeconds * m_speed;
@@ -216,12 +232,21 @@ void AnimationPlayer::tick(float deltaSeconds)
         {
             const BlendResult br = resolveBlend();
             const float duration = (br.b ? glm::mix(br.a->duration, br.b->duration, br.w) : (br.a ? br.a->duration : 0.0f));
+            const float prevNorm = m_phase;
             if (duration > 1e-6f)
                 m_phase = wrap(m_phase + dt / duration, 1.0f); // phase-normalized so blended clips stay synced
+            // Events come from the dominant bracketing clip (the blend clips share the 0..1 phase).
+            detectEvents((br.b && br.w >= 0.5f) ? br.b : br.a, prevNorm, m_phase);
         }
         else if (m_pClip && m_pClip->duration > 0.0f)
         {
-            m_time = wrap(m_time + dt, m_pClip->duration);
+            const float dur = m_pClip->duration;
+            const float prevNorm = m_time / dur;
+            if (m_pClip->loop)
+                m_time = wrap(m_time + dt, dur);
+            else
+                m_time = glm::clamp(m_time + dt, 0.0f, dur); // one-shot: hold the final frame
+            detectEvents(m_pClip, prevNorm, m_time / dur);
         }
 
         if (m_fade < 1.0f)

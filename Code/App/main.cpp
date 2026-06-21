@@ -1,5 +1,6 @@
 ﻿import Core;
 import Core.Allocator;
+import Core.Log;
 import Core.Window;
 import Core.SDL;
 import Core.Frustum;
@@ -70,6 +71,8 @@ int main()
     entities.push_back(character);
     float charSpeed = 0.0f;
     Tweak::floatVar("Animation", "Speed", &charSpeed, 0.0f, 1.0f, 0.01f,[&]() { getComponent<AnimatorComponent>(character)->stateMachine.setFloat("speed", charSpeed); });
+    if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
+        anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
 
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
@@ -82,6 +85,9 @@ int main()
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+                if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
+                    anim->stateMachine.setTrigger("attack"); // F: one-shot attack (returns to locomotion)
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_P && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.toggleGiProbeDebug();          // P: show/hide GI probe debug cubes
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_O && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)

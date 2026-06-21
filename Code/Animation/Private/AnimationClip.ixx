@@ -18,11 +18,21 @@ export struct AnimationChannel
     std::vector<ScaleKey>    scaleKeys;
 };
 
+// A notify tagged at a normalized time (0..1) in a clip; fired when playback crosses it (see
+// AnimationPlayer::getFiredEvents). Authored in .anm as `Event <name> <normalizedTime>`.
+export struct AnimationEventKey
+{
+    std::string name;
+    float normalizedTime = 0.0f;
+};
+
 export struct AnimationClip
 {
     std::string name;
     float duration = 0.0f; // seconds
     std::vector<AnimationChannel> channels;
+    bool loop = true;                          // false = one-shot: playback clamps + holds the last frame
+    std::vector<AnimationEventKey> events;     // notifies fired as playback crosses them
 };
 
 // A named collection of clips that share one skeleton (e.g. all of a character's animations). Lets an
@@ -86,6 +96,9 @@ public:
 
     void tick(float deltaSeconds);
 
+    // Events whose normalized time was crossed during the most recent tick(). Valid until the next tick().
+    std::span<const std::string> getFiredEvents() const { return m_firedEvents; }
+
     void setSpeed(float speed) { m_speed = speed; }
     void setPaused(bool paused) { m_paused = paused; }
 
@@ -137,6 +150,9 @@ private:
     void sampleForeground(Pose& outPose);
     void blendPose(Pose& inOutA, const Pose& b, float w) const;
     void evaluate();
+    // Appends to m_firedEvents any event of pClip whose normalized time lies in (prevNorm, curNorm],
+    // splitting the interval across 1.0/0.0 when playback wrapped this tick (curNorm < prevNorm).
+    void detectEvents(const AnimationClip* pClip, float prevNorm, float curNorm);
 
     enum class BoneModifierMode : uint8 { None, Override, Additive };
     struct BoneModifier { glm::mat4 transform = glm::mat4(1.0f); BoneModifierMode mode = BoneModifierMode::None; };
@@ -153,6 +169,8 @@ private:
     float m_blendParam = 0.0f;
     float m_speed = 1.0f;
     bool m_paused = false;
+
+    std::vector<std::string> m_firedEvents; // event notifies fired during the last tick()
 
     // Snapshot crossfade: when a new source starts, the outgoing pose is frozen into m_snapshot and the
     // new source is blended in as m_fade ramps 0 -> 1 over m_fadeDuration seconds.

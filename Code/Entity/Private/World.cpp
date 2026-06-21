@@ -210,6 +210,77 @@ void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out
     if (lt.scale != 1.0f)                  out.set("Scale", lt.scale);
 }
 
+const AnimationSet* World::getOrBuildClipSet(const Skeleton* skel, const AnimatorDesc& desc)
+{
+    const std::string key = std::to_string(reinterpret_cast<uintptr_t>(skel)) + "/" + desc.name;
+    if (auto it = m_clipSets.find(key); it != m_clipSets.end())
+        return it->second.get();
+
+    auto set = std::make_unique<AnimationSet>();
+    AnimationSet& clips = *set;
+
+    // Apply the .anm's loop flag + event notifies onto the clip just loaded under `localName`.
+    auto applyClipMeta = [&](const AnimationClipDesc& anm, const std::string& localName)
+    {
+        const auto idxIt = clips.nameToIndex.find(localName);
+        if (idxIt == clips.nameToIndex.end())
+            return;
+        AnimationClip& clip = clips.clips[idxIt->second];
+        clip.loop = anm.loop;
+        clip.events.clear();
+        for (const auto& [name, t] : anm.events)
+            clip.events.push_back({ name, t });
+    };
+
+    // Loads one .anm into the set under `localName` (retargeted by bone name to `skel`).
+    auto loadClipDesc = [&](const AnimationClipDesc& anm, const std::string& localName)
+    {
+        std::string sourcePath = anm.source;
+        if (const ObjectContainerDesc* oc = Globals::assetRegistry.findObjectContainer(anm.source))
+            sourcePath = oc->path; // source named a registered container; use its file
+        const char* skip = anm.skip.empty() ? nullptr : anm.skip.c_str();
+        ISceneData::loadAnimations(sourcePath.c_str(), *skel, clips, skip, localName.c_str());
+        applyClipMeta(anm, localName);
+    };
+
+    // Explicit `Clip <local> Anim <anm>` declarations are optional: they alias a clip to a local name (or
+    // force-load one nothing references). Anything not declared is lazy-loaded by name below.
+    for (const AnimatorDesc::ClipRef& ref : desc.clips)
+    {
+        if (const AnimationClipDesc* anm = Globals::assetRegistry.findClip(ref.anmName))
+            loadClipDesc(*anm, ref.localName);
+        else
+            Log::warning("Animator '" + desc.name + "': unknown Animation clip '" + ref.anmName + "'");
+    }
+
+    // Resolve a clip by name, lazily loading it from the .anm registry when it wasn't declared with `Clip`.
+    auto ensureClip = [&](const std::string& name)
+    {
+        if (name.empty() || clips.find(name))
+            return;
+        if (const AnimationClipDesc* anm = Globals::assetRegistry.findClip(name))
+            loadClipDesc(*anm, name);
+        else
+            Log::warning("Animator '" + desc.name + "': unknown clip '" + name + "'");
+    };
+
+    std::unordered_set<std::string> blendNames;
+    for (const AnimatorDesc::BlendSpace& bs : desc.blendSpaces)
+        blendNames.insert(bs.name);
+    for (const AnimatorDesc::BlendSpace& bs : desc.blendSpaces)
+        for (const AnimatorDesc::BlendSample& s : bs.samples)
+            ensureClip(s.clip);
+    for (const AnimatorDesc::State& st : desc.stateMachine.states)
+        if (!blendNames.contains(st.play))
+            ensureClip(st.play);
+
+    Log::info("Animator '" + desc.name + "': built clip set (" + std::to_string(clips.numClips()) + " clips)");
+
+    const AnimationSet* ptr = set.get();
+    m_clipSets.emplace(key, std::move(set));
+    return ptr;
+}
+
 std::shared_ptr<AnimatorComponent::SpawnInfo> World::buildAnimatorSpawnInfo(const AssetNode& animatorNode, ObjectContainer* siblingContainer, const std::string& ownerName)
 {
     const AssetNode* nameNode = animatorNode.find("Animator");
@@ -232,6 +303,7 @@ std::shared_ptr<AnimatorComponent::SpawnInfo> World::buildAnimatorSpawnInfo(cons
     auto info = std::make_shared<AnimatorComponent::SpawnInfo>();
     info->desc = desc;
     info->skeleton = siblingContainer->getSkeleton();
+    info->clipSet = getOrBuildClipSet(info->skeleton, *desc); // shared, imported once per skeleton+animator
     info->animatorName = animatorName;
     if (const AssetNode* n = animatorNode.find("Enabled"))
         info->enabled = n->asBool();

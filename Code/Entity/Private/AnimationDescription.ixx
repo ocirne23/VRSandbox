@@ -11,8 +11,9 @@ export struct AnimationClipDesc
     std::string name;     // global clip name (referenced from a .apl's `Clip ... Anim <name>`)
     std::string source;   // source file path, or a registered ObjectContainer name
     std::string track;    // track within the source (empty = first kept track)
-    bool loop = true;     // stored for future runtime use (the player currently always loops)
+    bool loop = true;     // false = one-shot (playback clamps + holds the last frame)
     std::string skip;     // ignore tracks whose name contains this (e.g. "TPose")
+    std::vector<std::pair<std::string, float>> events; // notifies: name -> normalized time (0..1)
 };
 
 // .apl — an animator graph: parameters + a clip library + blend spaces + a state machine. Maps 1:1 onto
