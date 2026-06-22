@@ -260,7 +260,12 @@ bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const s
 	m_width = width;
 	m_height = height;
 	m_format = format;
-    m_numMipLevels = generateMips ? m_numMipLevels = (uint32)(std::floor(std::log2(std::max(width, height)))) + 1 : (uint32)imageDataMips.size();
+    // Only synthesize a full mip chain when generating from a single source level (the blit path below).
+    // When the source already carries its own mips (e.g. DDS), use them as-is so the image's mipLevels and
+    // the upload loop stay in lockstep — otherwise the loop reads past imageDataMips and upper levels of the
+    // image are left undefined.
+    const bool generateFromSingle = generateMips && imageDataMips.size() == 1;
+    m_numMipLevels = generateFromSingle ? (uint32)(std::floor(std::log2(std::max(width, height)))) + 1 : (uint32)imageDataMips.size();
 
     vk::ImageCreateInfo imageCreateInfo{
         .imageType = vk::ImageType::e2D,
@@ -307,7 +312,7 @@ bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const s
     }
     m_imageView = createImageViewResult.value;
 
-    if (generateMips && imageDataMips.size() == 1)
+    if (generateFromSingle)
     {
         Globals::stagingManager.uploadImageAndGenerateMipMaps(m_image, m_width, m_height, m_numMipLevels, imageDataMips[0].size(), imageDataMips[0].data());
     }
