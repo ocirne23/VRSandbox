@@ -359,5 +359,13 @@ vk::Semaphore StagingManager::update()
     m_imageCopyRegions.clear();
     m_imageCopyAndMipList.clear();
     m_mappedMemory = m_mappedStagingBuffers[m_currentBuffer];
+
+    // The caller starts memcpy'ing into this buffer immediately (in upload*()), so it must be idle now: its
+    // previous submission may still be reading it on the GPU. Waiting here — before any write — rather than
+    // at the next submit (which happens after those writes) is what prevents the host from racing the copy.
+    result = vkDevice.waitForFences(1, &m_fences[m_currentBuffer], vk::True, UINT64_MAX);
+    if (result != vk::Result::eSuccess)
+        assert(false && "Failed to wait for fence");
+
     return semaphore;
 }

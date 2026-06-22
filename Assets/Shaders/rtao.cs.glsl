@@ -97,6 +97,14 @@ void main()
 
     const vec3 worldPos = worldPosFromDepth(uv, depth);
 
+    // Past the AO max distance the result is always "no occlusion", so skip the ray loop entirely.
+    // (bent normal = surface normal so the forward pass evaluates GI along the surface.)
+    if (pc.maxDistance > 0.0 && length(u_viewPos - worldPos) >= pc.maxDistance)
+    {
+        imageStore(u_aoOut, px, vec4(N, 1.0));
+        return;
+    }
+
     vec3 up = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     vec3 T = normalize(cross(up, N));
     vec3 B = cross(N, T);
