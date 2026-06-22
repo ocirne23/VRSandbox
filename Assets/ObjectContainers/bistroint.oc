@@ -1,0 +1,7 @@
+ObjectContainer BistroInterior
+	Path "BistroInterior.fbx"
+	MergeNodes false
+	PreTransformVertices false
+
+StaticMesh BistroInt
+	Node ROOT

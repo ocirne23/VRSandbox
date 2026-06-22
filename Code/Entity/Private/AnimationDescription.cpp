@@ -27,9 +27,10 @@ bool toAnimationClipDesc(const AssetNode& node, AnimationClipDesc& out)
     if (const AssetNode* src = node.find("ObjectContainer"))
     {
         out.source = src->asString();
-        if (const AssetNode* t = src->find("Track"))
+        if (const AssetNode* t = src->find("Track")) // Track may sit under ObjectContainer ...
             out.track = t->asString();
     }
+    if (const AssetNode* t = node.find("Track")) out.track = t->asString(); // ... or directly under Animation
     if (const AssetNode* l = node.find("Loop")) out.loop = l->asBool(0, true);
     if (const AssetNode* s = node.find("Skip")) out.skip = s->asString();
     for (const AssetNode* e : node.findAll("Event"))

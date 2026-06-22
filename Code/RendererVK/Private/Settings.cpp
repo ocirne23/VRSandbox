@@ -107,6 +107,8 @@ void RTAOParams::registerTweaks(const std::function<void()>& onReRecord, const s
     Tweak::floatVar("RTAO", "Radius", &radius, 0.0f, 32.0f, 0.01f, onReRecord);
     Tweak::floatVar("RTAO", "Power", &power, 0.0f, 8.0f, 0.01f, onReRecord);
     Tweak::floatVar("RTAO", "Intensity", &intensity, 0.0f, 4.0f, 0.01f, onReRecord);
+    Tweak::floatVar("RTAO", "Fade Start", &fadeStart, 0.0f, 200.0f, 0.5f, onReRecord);
+    Tweak::floatVar("RTAO", "Max Distance", &maxDistance, 0.0f, 200.0f, 0.5f, onReRecord);
     Tweak::floatVar("RTAO", "Max History", &maxHistory, 0.0f, 1.0f, 0.01f, onReRecord);
     Tweak::intVar("RTAO", "Blur Radius", &blurRadius, 0, 8, 1.0f, onReRecord);
     Tweak::boolean("RTAO", "Alpha Test", &alphaTest, onReloadShaders);

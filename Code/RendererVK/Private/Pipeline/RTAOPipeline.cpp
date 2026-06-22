@@ -24,7 +24,8 @@ namespace
         uint32 aoWidth;
         uint32 aoHeight;
         uint32 viewIndex;
-        float  _pad2;
+        float  fadeStart;
+        float  maxDistance;
     };
     struct TemporalPC
     {
@@ -337,7 +338,8 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_tracePipeline.getPipeline());
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, traceLayout, 0, 1, &vkSet, 0, nullptr);
         RtaoPC pc{ .numRays = uint32(std::max(m_pParams->rays, 1)), .radius = m_pParams->radius, .power = m_pParams->power,
-            .intensity = m_pParams->intensity, .aoWidth = m_width, .aoHeight = m_height, .viewIndex = viewIndex };
+            .intensity = m_pParams->intensity, .aoWidth = m_width, .aoHeight = m_height, .viewIndex = viewIndex,
+            .fadeStart = m_pParams->fadeStart, .maxDistance = m_pParams->maxDistance };
         cmd.pushConstants(traceLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }

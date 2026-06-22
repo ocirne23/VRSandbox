@@ -59,8 +59,9 @@ layout (push_constant) uniform PC
     float intensity;  // 0 = off, 1 = full
     uint  aoWidth;
     uint  aoHeight;
-    uint  viewIndex;  // view to reconstruct in (0 = centre/desktop, 1 = left eye, 2 = right eye)
-    float _pad2;
+    uint  viewIndex;    // view to reconstruct in (0 = centre/desktop, 1 = left eye, 2 = right eye)
+    float fadeStart;    // distance from camera where AO begins to fade out
+    float maxDistance;  // distance at which AO is fully gone; 0 disables the falloff
 } pc;
 
 // Radical-inverse base-2 -> 2D Hammersley point set.
@@ -146,6 +147,14 @@ void main()
 
     float ao = clamp(1.0 - (occ / float(n)) * pc.intensity, 0.0, 1.0);
     ao = pow(ao, pc.power);
+    // Distance falloff: far-away surfaces get noisy/low-quality AO (radius is fixed in world units, so it
+    // shrinks in screen space with distance), so fade the occlusion back toward 1.0 (no AO) past fadeStart.
+    if (pc.maxDistance > 0.0)
+    {
+        float dist = length(u_viewPos - worldPos);
+        float fade = clamp((dist - pc.fadeStart) / max(pc.maxDistance - pc.fadeStart, 1e-3), 0.0, 1.0);
+        ao = mix(ao, 1.0, fade);
+    }
     // Bent normal = average unoccluded direction; fall back to the surface normal when fully occluded.
     vec3 bentN = (dot(bent, bent) > 1e-8) ? normalize(bent) : N;
     imageStore(u_aoOut, px, vec4(bentN, ao));

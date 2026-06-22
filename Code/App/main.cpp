@@ -62,17 +62,18 @@ int main()
     world.initialize();
 
     std::vector<EntityPtr> entities;
-    entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
+    //entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
+    entities.push_back(world.spawnAssetFile("Entities/BistroScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
 
     GizmoController gizmo;
     gizmo.initialize(world);
-
-    EntityPtr character = world.spawnAssetFile("Entities/character.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
-    entities.push_back(character);
-    float charSpeed = 0.0f;
-    Tweak::floatVar("Animation", "Speed", &charSpeed, 0.0f, 1.0f, 0.01f,[&]() { getComponent<AnimatorComponent>(character)->stateMachine.setFloat("speed", charSpeed); });
-    if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
-        anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
+    EntityPtr character;
+  //  EntityPtr character = world.spawnAssetFile("Entities/character.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+  //  entities.push_back(character);
+  //  float charSpeed = 0.0f;
+  //  Tweak::floatVar("Animation", "Speed", &charSpeed, 0.0f, 1.0f, 0.01f,[&]() { getComponent<AnimatorComponent>(character)->stateMachine.setFloat("speed", charSpeed); });
+  //  if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
+  //      anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
 
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)

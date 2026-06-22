@@ -253,7 +253,7 @@ void SceneData::buildAnimations()
         addClipToSet(m_animationSet, buildClip(m_pScene->mAnimations[a], m_skeleton), "");
 }
 
-bool ISceneData::loadAnimations(const char* filePath, const Skeleton& targetSkeleton, AnimationSet& outSet, const char* skipName, const char* clipNameOverride)
+bool ISceneData::loadAnimations(const char* filePath, const Skeleton& targetSkeleton, AnimationSet& outSet, const char* skipName, const char* clipNameOverride, const char* trackName)
 {
     // No graph optimization: node names must survive so channels resolve against targetSkeleton by name.
     Assimp::Importer importer;
@@ -264,15 +264,22 @@ bool ISceneData::loadAnimations(const char* filePath, const Skeleton& targetSkel
         return false;
     }
 
-    // Skip any animation whose name contains skipName (e.g. a "TPose" track exported into every file).
+    // A track is kept if it isn't skipped (name contains skipName, e.g. a "TPose") and, when trackName is
+    // given, its name contains trackName (selecting one track from a multi-track file).
     const bool hasSkip = skipName && *skipName;
-    auto skipped = [&](const aiAnimation* pAnim) {
-        return hasSkip && std::string(pAnim->mName.C_Str()).find(skipName) != std::string::npos;
+    const bool hasTrack = trackName && *trackName;
+    auto included = [&](const aiAnimation* pAnim) {
+        const std::string name = pAnim->mName.C_Str();
+        if (hasSkip && name.find(skipName) != std::string::npos)
+            return false;
+        if (hasTrack && name.find(trackName) == std::string::npos)
+            return false;
+        return true;
     };
 
     uint32 keptCount = 0;
     for (uint32 a = 0; a < pScene->mNumAnimations; ++a)
-        if (!skipped(pScene->mAnimations[a]))
+        if (included(pScene->mAnimations[a]))
             ++keptCount;
 
     const std::string stem = std::filesystem::path(filePath).stem().string();
@@ -282,7 +289,7 @@ bool ISceneData::loadAnimations(const char* filePath, const Skeleton& targetSkel
     for (uint32 a = 0; a < pScene->mNumAnimations; ++a)
     {
         const aiAnimation* pAnim = pScene->mAnimations[a];
-        if (skipped(pAnim))
+        if (!included(pAnim))
             continue;
         // One clip per file is the common case (Mixamo etc.); suffix only when a file keeps several.
         const std::string name = multiple ? baseName + "_" + std::to_string(added) : baseName;

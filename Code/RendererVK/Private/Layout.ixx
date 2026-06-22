@@ -267,6 +267,8 @@ export namespace RendererVKLayout
     constexpr uint32 MATERIAL_FLAG_NO_RAYTRACING = 1u << 31; // instance mask 0 in the TLAS: invisible to all rays
     constexpr uint32 MATERIAL_FLAG_SKY = 1u << 30; // sky sphere: skipped in the G-buffer prepass so its depth
                                                    // stays at the far plane (TAA reprojects it parallax-free)
+    constexpr uint32 MATERIAL_FLAG_BC5_NORMAL = 1u << 29; // normal map is a two-channel BC5 texture (X/Y only):
+                                                          // the shader reconstructs Z instead of reading .z
 
     struct alignas(16) MaterialInfo
     {

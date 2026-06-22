@@ -10,6 +10,71 @@ import :StagingManager;
 import :stb_image;
 import :DDS;
 
+static vk::Format dxgiToVkFormat(dds::DXGI_FORMAT dxgiFormat, bool sRGB)
+{
+    using DF = dds::DXGI_FORMAT;
+    switch (dxgiFormat)
+    {
+        // Block compressed
+        case DF::DXGI_FORMAT_BC1_TYPELESS:
+        case DF::DXGI_FORMAT_BC1_UNORM:        return sRGB ? vk::Format::eBc1RgbaSrgbBlock : vk::Format::eBc1RgbaUnormBlock;
+        case DF::DXGI_FORMAT_BC1_UNORM_SRGB:   return vk::Format::eBc1RgbaSrgbBlock;
+        case DF::DXGI_FORMAT_BC2_TYPELESS:
+        case DF::DXGI_FORMAT_BC2_UNORM:        return sRGB ? vk::Format::eBc2SrgbBlock : vk::Format::eBc2UnormBlock;
+        case DF::DXGI_FORMAT_BC2_UNORM_SRGB:   return vk::Format::eBc2SrgbBlock;
+        case DF::DXGI_FORMAT_BC3_TYPELESS:
+        case DF::DXGI_FORMAT_BC3_UNORM:        return sRGB ? vk::Format::eBc3SrgbBlock : vk::Format::eBc3UnormBlock;
+        case DF::DXGI_FORMAT_BC3_UNORM_SRGB:   return vk::Format::eBc3SrgbBlock;
+        case DF::DXGI_FORMAT_BC4_TYPELESS:
+        case DF::DXGI_FORMAT_BC4_UNORM:        return vk::Format::eBc4UnormBlock;
+        case DF::DXGI_FORMAT_BC4_SNORM:        return vk::Format::eBc4SnormBlock;
+        case DF::DXGI_FORMAT_BC5_TYPELESS:
+        case DF::DXGI_FORMAT_BC5_UNORM:        return vk::Format::eBc5UnormBlock;
+        case DF::DXGI_FORMAT_BC5_SNORM:        return vk::Format::eBc5SnormBlock;
+        case DF::DXGI_FORMAT_BC6H_TYPELESS:
+        case DF::DXGI_FORMAT_BC6H_UF16:        return vk::Format::eBc6HUfloatBlock;
+        case DF::DXGI_FORMAT_BC6H_SF16:        return vk::Format::eBc6HSfloatBlock;
+        case DF::DXGI_FORMAT_BC7_TYPELESS:
+        case DF::DXGI_FORMAT_BC7_UNORM:        return sRGB ? vk::Format::eBc7SrgbBlock : vk::Format::eBc7UnormBlock;
+        case DF::DXGI_FORMAT_BC7_UNORM_SRGB:   return vk::Format::eBc7SrgbBlock;
+
+        // Uncompressed
+        case DF::DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DF::DXGI_FORMAT_R8G8B8A8_UNORM:   return sRGB ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
+        case DF::DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return vk::Format::eR8G8B8A8Srgb;
+        case DF::DXGI_FORMAT_R8G8B8A8_SNORM:   return vk::Format::eR8G8B8A8Snorm;
+        case DF::DXGI_FORMAT_B8G8R8A8_TYPELESS:
+        case DF::DXGI_FORMAT_B8G8R8A8_UNORM:   return sRGB ? vk::Format::eB8G8R8A8Srgb : vk::Format::eB8G8R8A8Unorm;
+        case DF::DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return vk::Format::eB8G8R8A8Srgb;
+        case DF::DXGI_FORMAT_R8G8_TYPELESS:
+        case DF::DXGI_FORMAT_R8G8_UNORM:       return sRGB ? vk::Format::eR8G8Srgb : vk::Format::eR8G8Unorm;
+        case DF::DXGI_FORMAT_R8G8_SNORM:       return vk::Format::eR8G8Snorm;
+        case DF::DXGI_FORMAT_R8_TYPELESS:
+        case DF::DXGI_FORMAT_R8_UNORM:         return sRGB ? vk::Format::eR8Srgb : vk::Format::eR8Unorm;
+        case DF::DXGI_FORMAT_R8_SNORM:         return vk::Format::eR8Snorm;
+        case DF::DXGI_FORMAT_A8_UNORM:         return vk::Format::eR8Unorm;
+        case DF::DXGI_FORMAT_R16G16B16A16_FLOAT: return vk::Format::eR16G16B16A16Sfloat;
+        case DF::DXGI_FORMAT_R16G16B16A16_UNORM: return vk::Format::eR16G16B16A16Unorm;
+        case DF::DXGI_FORMAT_R16G16B16A16_SNORM: return vk::Format::eR16G16B16A16Snorm;
+        case DF::DXGI_FORMAT_R16G16_FLOAT:     return vk::Format::eR16G16Sfloat;
+        case DF::DXGI_FORMAT_R16G16_UNORM:     return vk::Format::eR16G16Unorm;
+        case DF::DXGI_FORMAT_R16_FLOAT:        return vk::Format::eR16Sfloat;
+        case DF::DXGI_FORMAT_R16_UNORM:        return vk::Format::eR16Unorm;
+        case DF::DXGI_FORMAT_R32G32B32A32_FLOAT: return vk::Format::eR32G32B32A32Sfloat;
+        case DF::DXGI_FORMAT_R32G32_FLOAT:     return vk::Format::eR32G32Sfloat;
+        case DF::DXGI_FORMAT_R32_FLOAT:        return vk::Format::eR32Sfloat;
+        case DF::DXGI_FORMAT_R10G10B10A2_UNORM: return vk::Format::eA2B10G10R10UnormPack32;
+        case DF::DXGI_FORMAT_R11G11B10_FLOAT:  return vk::Format::eB10G11R11UfloatPack32;
+        case DF::DXGI_FORMAT_B5G6R5_UNORM:     return vk::Format::eR5G6B5UnormPack16;
+        case DF::DXGI_FORMAT_B5G5R5A1_UNORM:   return vk::Format::eA1R5G5B5UnormPack16;
+        case DF::DXGI_FORMAT_B4G4R4A4_UNORM:   return vk::Format::eB4G4R4A4UnormPack16;
+
+        default:
+            assert(false && "unsupported DDS/DXGI texture format");
+            return vk::Format::eUndefined;
+    }
+}
+
 Texture::Texture()
 {
 }
@@ -36,13 +101,12 @@ Texture::Texture(Texture&& move)
     move.m_imageView = VK_NULL_HANDLE;
 }
 
-bool Texture::initialize(const char* filePath, bool generateMips)
+bool Texture::initialize(const char* filePath, bool generateMips, bool sRGB)
 {
     std::filesystem::path path(filePath);
     std::vector<uint8> fileData;
     std::vector<std::span<uint8>> imgData; // pixel data per mip level
 
-	bool sRGB = false;
     uint32 width = 0;
     uint32 height = 0;
 	vk::Format format = vk::Format::eUndefined;
@@ -67,12 +131,18 @@ bool Texture::initialize(const char* filePath, bool generateMips)
         }
 
         dds::Header header = dds::read_header(fileData.data(), size);
+        if (!header.is_valid())
+        {
+            assert(false && "Invalid DDS file");
+            return false;
+        }
 
         width = header.width();
         height = header.height();
         numMipLevels = header.mip_levels();
-        //dds::DXGI_FORMAT format = header.format();
-        format = sRGB ? vk::Format::eBc1RgbSrgbBlock : vk::Format::eBc1RgbUnormBlock;
+        format = dxgiToVkFormat(header.format(), sRGB);
+        if (format == vk::Format::eUndefined)
+            return false;
 
         for (uint32 i = 0; i < numMipLevels; i++)
         {
@@ -101,6 +171,17 @@ bool Texture::initialize(const char* filePath, bool generateMips)
 
 bool Texture::initialize(const ITextureData& textureData, bool generateMips, bool sRGB)
 {
+    const ITextureData::Pixel* pPixels = textureData.getPixels();
+    if (!pPixels)
+    {
+		const char* filePath = textureData.getFileName();
+        if (!filePath || *filePath == '\0')
+        {
+			assert(false && "TextureData has no pixel data or file path");
+			return false;
+        }
+        return initialize(filePath, generateMips, sRGB);
+    }
     std::string formatInfo = textureData.getFormatInfo();
     
     int width = textureData.getWidth();

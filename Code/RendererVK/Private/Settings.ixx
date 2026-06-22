@@ -143,6 +143,8 @@ export struct RTAOParams
     float radius = 1.0f;
     float power = 1.5f;
     float intensity = 1.0f;
+    float fadeStart = 30.0f;   // distance from camera (world units) where AO begins to fade out
+    float maxDistance = 60.0f; // distance at which AO is fully gone; 0 disables the falloff
     float maxHistory = 0.77; //0.99f;
     int   blurRadius = 2; //0;
     bool  alphaTest = false; // ray-test alpha-masked geometry (vegetation) instead of treating it as solid

@@ -1,0 +1,18 @@
+Prefab BistroScene
+	Position 0 0 0
+	Rotation 0 -0 0
+	Scale 1
+	Component Scene
+		Enabled true
+		Prefab skysphere
+			Position 0 0 0
+			Rotation 0 -0 0
+			Scale 1
+		Prefab bistroext
+			Position 0 0 0
+			Rotation 0 -0 0
+			Scale 1
+		Prefab bistroint
+			Position 0.020057857 0.024603954 0.09828079
+			Rotation 180 -0 0
+			Scale 1.6

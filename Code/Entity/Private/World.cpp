@@ -239,7 +239,8 @@ const AnimationSet* World::getOrBuildClipSet(const Skeleton* skel, const Animato
         if (const ObjectContainerDesc* oc = Globals::assetRegistry.findObjectContainer(anm.source))
             sourcePath = oc->path; // source named a registered container; use its file
         const char* skip = anm.skip.empty() ? nullptr : anm.skip.c_str();
-        ISceneData::loadAnimations(sourcePath.c_str(), *skel, clips, skip, localName.c_str());
+        const char* track = anm.track.empty() ? nullptr : anm.track.c_str();
+        ISceneData::loadAnimations(sourcePath.c_str(), *skel, clips, skip, localName.c_str(), track);
         applyClipMeta(anm, localName);
     };
 

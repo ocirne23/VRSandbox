@@ -12,6 +12,16 @@ import :SwapChain;
 
 static constexpr size_t STAGING_BUFFER_SIZE = 100 * 1024 * 1024;
 
+// vkCmdCopyBufferToImage requires bufferOffset to be a multiple of the texel block
+// size; 16 bytes covers every supported (block-)compressed format (max BC block = 16B)
+// and the spec's multiple-of-4 rule.
+static constexpr vk::DeviceSize IMAGE_COPY_OFFSET_ALIGNMENT = 16;
+
+static vk::DeviceSize alignUp(vk::DeviceSize value, vk::DeviceSize alignment)
+{
+    return (value + alignment - 1) & ~(alignment - 1);
+}
+
 StagingManager::StagingManager()
 {
 }
@@ -75,6 +85,7 @@ vk::Semaphore StagingManager::upload(vk::Buffer dstBuffer, vk::DeviceSize dataSi
 vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, uint32 mipLevel, vk::DeviceSize dstOffset)
 {
     assert(dataSize <= m_mappedMemory.size());
+    m_currentBufferOffset = alignUp(m_currentBufferOffset, IMAGE_COPY_OFFSET_ALIGNMENT);
     if (m_currentBufferOffset + dataSize > m_mappedMemory.size())
         m_nextUpdateSemaphore = update();
 
@@ -100,6 +111,7 @@ vk::Semaphore StagingManager::uploadImage(vk::Image dstImage, uint32 imageWidth,
 vk::Semaphore StagingManager::uploadImageAndGenerateMipMaps(vk::Image image, uint32 imageWidth, uint32 imageHeight, uint32 numMipLevels, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset)
 {
     assert(dataSize <= m_mappedMemory.size());
+    m_currentBufferOffset = alignUp(m_currentBufferOffset, IMAGE_COPY_OFFSET_ALIGNMENT);
     if (m_currentBufferOffset + dataSize > m_mappedMemory.size())
         m_nextUpdateSemaphore = update();
 

@@ -552,9 +552,21 @@ void main()
 
 	const vec3 V  = normalize(u_viewPos - in_pos);
 	const vec3 materialColor  = diffuseSample.xyz;
-	const vec3 materialNormal = texture(u_textures[normalTexIdx], uv).xyz;
 	const vec3 specularColor  = mix(vec3(0.04), materialColor, metalness);
-	const vec3 N = in_tbn * normalize(materialNormal * 2.0 - 1.0);
+	// Two-channel BC5 normal maps store only X/Y (red/green), so .z reads 0 and would flip the normal
+	// into the surface — reconstruct Z from X/Y. Full RGB(A) normal maps keep their stored Z.
+	const vec3 normalSample = texture(u_textures[normalTexIdx], uv).xyz;
+	vec3 tangentNormal;
+	if ((material.flags & MATERIAL_FLAG_BC5_NORMAL) != 0u)
+	{
+		const vec2 normalXY = normalSample.xy * 2.0 - 1.0;
+		tangentNormal = vec3(normalXY, sqrt(max(1.0 - dot(normalXY, normalXY), 0.0)));
+	}
+	else
+	{
+		tangentNormal = normalize(normalSample * 2.0 - 1.0);
+	}
+	const vec3 N = normalize(in_tbn * tangentNormal);
 
 	const float roughnessSq = roughness * roughness;
 	const vec3 matColOverPi = materialColor / PI;

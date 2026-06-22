@@ -1,0 +1,5 @@
+Prefab bistroint
+	Component Render
+		StaticMesh BistroInt
+		Position 0, 0, 0
+		Rotation 90, 0, 0

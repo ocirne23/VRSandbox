@@ -15,7 +15,7 @@ public:
     Texture(const Texture& copy) = delete;
     Texture(Texture&& move);
 
-    bool initialize(const char* filePath, bool generateMips);
+    bool initialize(const char* filePath, bool generateMips, bool sRGB = false);
     // sRGB: the pixel data is sRGB-encoded color (albedo/emissive) — sample through an Srgb format so
     // the hardware linearizes it. Data textures (normals, metal/roughness) must stay Unorm.
     bool initialize(const ITextureData& textureData, bool generateMips, bool sRGB = false);
@@ -23,6 +23,7 @@ public:
 
     vk::ImageView getImageView() const { return m_imageView; }
     vk::Image getImage() const { return m_image; }
+    vk::Format getFormat() const { return m_format; }
 
 private:
 

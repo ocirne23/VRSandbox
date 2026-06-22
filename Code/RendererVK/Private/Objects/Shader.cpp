@@ -144,6 +144,7 @@ static std::string buildLayoutPreamble()
     def("ALPHA_MODE_BLEND", (uint32)EAlphaMode::Blend, "u");
     def("MATERIAL_FLAG_NO_RAYTRACING", MATERIAL_FLAG_NO_RAYTRACING, "u");
     def("MATERIAL_FLAG_SKY", MATERIAL_FLAG_SKY, "u");
+    def("MATERIAL_FLAG_BC5_NORMAL", MATERIAL_FLAG_BC5_NORMAL, "u");
     return s;
 }
 

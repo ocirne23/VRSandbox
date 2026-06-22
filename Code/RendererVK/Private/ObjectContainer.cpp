@@ -239,6 +239,12 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             }
         }
 
+        // BC5 normal maps store only X/Y, so the shader must reconstruct Z. Flag it from the actual
+        // uploaded format so RGB(A) normal maps keep using their stored Z (works for either convention).
+        const vk::Format normalFormat = Globals::textureManager.getTexture(material.normalTexIdx).getFormat();
+        if (normalFormat == vk::Format::eBc5UnormBlock || normalFormat == vk::Format::eBc5SnormBlock)
+            material.flags |= RendererVKLayout::MATERIAL_FLAG_BC5_NORMAL;
+
         m_materialNames.push_back(materialData.getName());
     }
 
