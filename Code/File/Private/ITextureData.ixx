@@ -20,7 +20,15 @@ public:
     virtual uint32 getHeight() const = 0; // if 0, pixels is a raw data buffer of size width
     virtual const char* getFormatInfo() const = 0;
 
+    // Folder of the scene file (.fbx/.glb) this texture belongs to, used to resolve loose texture files
+    // relative to the model first, before falling back to the asset-root-relative path. Empty by default.
+    void setRootFolder(std::string_view rootFolder) { m_rootFolder = rootFolder; }
+    const std::string& getRootFolder() const { return m_rootFolder; }
+
     static std::unique_ptr<ITextureData> createFallbackDiffuseTexture();
     static std::unique_ptr<ITextureData> createFallbackWhiteTexture();
     static std::unique_ptr<ITextureData> createFallbackNormalTexture();
+
+private:
+    std::string m_rootFolder;
 };

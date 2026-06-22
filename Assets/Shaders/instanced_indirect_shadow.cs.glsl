@@ -83,7 +83,7 @@ void main()
     const vec4 quat                   = quat_multiply(in_renderNodeTransforms[instance.renderNodeIdx].quat, in_instanceOffsets[instance.instanceOffsetIdx].quat);
     const vec4 renderNodePosScale     = in_renderNodeTransforms[instance.renderNodeIdx].posScale;
     const vec4 instanceOffsetPosScale = in_instanceOffsets[instance.instanceOffsetIdx].posScale;
-    const vec4 instancePosScale       = vec4(renderNodePosScale.xyz + quat_transform(instanceOffsetPosScale.xyz, in_renderNodeTransforms[instance.renderNodeIdx].quat),
+    const vec4 instancePosScale       = vec4(renderNodePosScale.xyz + quat_transform(instanceOffsetPosScale.xyz * renderNodePosScale.w, in_renderNodeTransforms[instance.renderNodeIdx].quat),
                                             renderNodePosScale.w * instanceOffsetPosScale.w);
     const vec3 centerOffset           = quat_transform(meshInfo.center * instancePosScale.w, quat);
     const float radius                = meshInfo.radius * instancePosScale.w;

@@ -101,26 +101,19 @@ private:
     std::vector<RendererVKLayout::MeshInstanceOffset> m_meshInstanceOffsets;
     std::vector<Sphere> m_nodeBounds;
     std::vector<Sphere> m_boundsForMeshIdx;
+    // Each node's own world transform relative to the container root, indexed by NodeSpawnIdx. Used by
+    // spawnNodeForIdx to rebase a sub-node's baked (root-relative) offsets into the node's own space.
+    std::vector<Transform> m_nodeRootTransforms;
 
     uint32 m_baseMeshInstanceOffsetsIdx = 0;
     uint16 m_baseMeshInfoIdx = 0;
     uint16 m_baseMaterialInfoIdx = 0;
 
-    // Skinned-mesh source data, captured in initializeMeshes(). Each entry becomes a unique per-instance
-    // output region + MeshInfo when spawnSkinnedNode() is called.
-    struct SkinnedMeshSource
-    {
-        uint32 baseVertexOffset; // bind-pose geometry, MeshVertex units
-        uint32 skinVertexOffset; // influences, SkinningVertex units
-        uint32 vertexCount;
-        uint32 indexCount;
-        uint32 firstIndex;
-        uint16 materialLocalIdx;
-        uint16 pipelineIdx;
-        uint16 alphaMode;
-        Sphere bounds;
-    };
-    std::vector<SkinnedMeshSource> m_skinnedMeshes;
+    // Skinned-mesh source data is captured in initializeMeshes() but owned by the Renderer (like MeshInfo);
+    // this container just keeps the base index + count of its entries there. spawnSkinnedNode() reads them
+    // back and turns each into a unique per-instance output region + MeshInfo.
+    uint32 m_baseSkinnedMeshIdx = UINT32_MAX;
+    uint32 m_numSkinnedMeshes = 0;
     bool m_isSkinned = false;
     uint32 m_numSkeletonBones = 0;
     std::unique_ptr<Skeleton> m_skeleton; // copy of the source skeleton (retained for animator retargeting)

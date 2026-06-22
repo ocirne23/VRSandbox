@@ -1,7 +1,0 @@
-ObjectContainer BistroExterior
-	Path "BistroExterior.fbx"
-	MergeNodes false
-	PreTransformVertices false
-
-StaticMesh BistroExt
-	Node ROOT

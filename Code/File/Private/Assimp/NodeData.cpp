@@ -46,7 +46,11 @@ uint32 NodeData::getMeshIndex(uint32 meshIdx) const
 
 void NodeData::getTransform(glm::vec3& pos, glm::vec3& scale, glm::quat& rot) const
 {
-    m_pNode->mTransformation.Decompose(reinterpret_cast<aiVector3D&>(scale), reinterpret_cast<aiQuaternion&>(rot), reinterpret_cast<aiVector3D&>(pos));
+    // aiQuaternion is laid out w,x,y,z; glm::quat defaults to x,y,z,w in memory, so it can't be aliased
+    // directly. Decompose into a real aiQuaternion, then build the glm::quat by component (w,x,y,z).
+    aiQuaternion q;
+    m_pNode->mTransformation.Decompose(reinterpret_cast<aiVector3D&>(scale), q, reinterpret_cast<aiVector3D&>(pos));
+    rot = glm::quat(q.w, q.x, q.y, q.z);
 }
 
 glm::vec3 NodeData::getPosition() const

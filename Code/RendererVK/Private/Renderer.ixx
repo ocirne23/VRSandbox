@@ -3,6 +3,7 @@ export module RendererVK:Renderer;
 import Core;
 import Core.glm;
 import Core.Rect;
+import Core.Sphere;
 import Core.Transform;
 import Core.Camera;
 import Core.VrSession;
@@ -83,6 +84,22 @@ public:
     void setPostParams(const PostParams& post) { m_postParams = post; setHaveToRecordCommandBuffers(); }
     void present();
 
+    // Per-skinned-mesh source data captured when an ObjectContainer loads (bind-pose geometry + skinning
+    // influences + material/pipeline). Owned by the renderer (like MeshInfo) and referenced by a base index
+    // per container; spawnSkinnedNode() turns each into a unique per-instance output region + MeshInfo.
+    struct SkinnedMeshSource
+    {
+        uint32 baseVertexOffset; // bind-pose geometry, MeshVertex units
+        uint32 skinVertexOffset; // influences, SkinningVertex units
+        uint32 vertexCount;
+        uint32 indexCount;
+        uint32 firstIndex;
+        uint16 materialLocalIdx;
+        uint16 pipelineIdx;
+        uint16 alphaMode;
+        Sphere bounds;
+    };
+
     // Skinned mesh support (skeletal animation). A palette region holds one bone matrix per skeleton bone
     // for a skinned node; setSkinningPalette() updates it each frame from an AnimationPlayer. Each skinned
     // mesh registers an instance (a per-frame skinning compute dispatch) referencing a palette region.
@@ -149,6 +166,9 @@ private:
     uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos);
     uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
+    // Skinned-mesh sources, owned by the renderer and referenced per container by a base index.
+    uint32 addSkinnedMeshSources(const std::vector<SkinnedMeshSource>& sources);
+    const SkinnedMeshSource& getSkinnedMeshSource(uint32 idx) const { return m_skinnedMeshSources[idx]; }
 
     void waitForGpuAndFlushStaging();
     void growRenderNodeCapacity(uint32 needed);
@@ -239,6 +259,7 @@ private:
     std::vector<glm::mat4> m_skinningPalettes;   // CPU staging (concatenated per region), uploaded each frame
     std::vector<RendererVKLayout::SkinningPushConstants> m_skinningJobs; // one per skinned mesh instance
     std::vector<AccelerationStructure::SkinnedBlasBuild> m_skinnedBlasBuilds; // parallel to m_skinningJobs; per-frame BLAS rebuild
+    std::vector<SkinnedMeshSource> m_skinnedMeshSources; // per-container skinned-mesh source data (CPU-only)
     uint32 m_maxSkinningPaletteEntries = RendererVKLayout::INITIAL_SKINNING_PALETTE;
     void growSkinningPaletteCapacity(uint32 needed);
 

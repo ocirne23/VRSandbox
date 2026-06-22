@@ -71,7 +71,7 @@ void main()
     const vec4 quat   = quat_multiply(in_renderNodeTransforms[inst.renderNodeIdx].quat, in_instanceOffsets[inst.instanceOffsetIdx].quat);
     const vec4 rnPS   = in_renderNodeTransforms[inst.renderNodeIdx].posScale;
     const vec4 ioPS   = in_instanceOffsets[inst.instanceOffsetIdx].posScale;
-    const vec3 pos    = rnPS.xyz + quat_transform(ioPS.xyz, in_renderNodeTransforms[inst.renderNodeIdx].quat);
+    const vec3 pos    = rnPS.xyz + quat_transform(ioPS.xyz * rnPS.w, in_renderNodeTransforms[inst.renderNodeIdx].quat);
     const float scale = rnPS.w * ioPS.w;
 
     // Rotation matrix columns (object basis vectors rotated into world), scaled uniformly.

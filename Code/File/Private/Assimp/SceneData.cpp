@@ -70,6 +70,31 @@ namespace
         return clip;
     }
 
+    // Overwrites each animated node's local transform with the value at the start of its animation track.
+    // FBX commonly leaves an animated node's mTransformation at a default (often the origin) and stores its
+    // real placement in the animation channels — so an unskinned mesh on such a node spawns in the wrong
+    // place. Baking frame 0 into mTransformation fixes static (unskinned) placement. Each FBX pivot
+    // sub-node ($AssimpFbx$_Translation/Rotation/Scaling) is its own channel, so baking per node and letting
+    // the graph walk multiply them reconstructs the correct composed pose. Skinned bones are unaffected:
+    // this runs after buildSkeleton() (which already captured the bind pose) and skinned meshes are driven
+    // by the animation palette, not by mTransformation.
+    void bakeFirstFrameRecursive(aiNode* pNode, const std::unordered_map<std::string, const aiNodeAnim*>& channels)
+    {
+        if (auto it = channels.find(pNode->mName.C_Str()); it != channels.end())
+        {
+            const aiNodeAnim* pCh = it->second;
+            aiVector3D translation(0.0f, 0.0f, 0.0f);
+            aiVector3D scaling(1.0f, 1.0f, 1.0f);
+            aiQuaternion rotation; // identity
+            if (pCh->mNumPositionKeys > 0) translation = pCh->mPositionKeys[0].mValue;
+            if (pCh->mNumScalingKeys > 0)  scaling     = pCh->mScalingKeys[0].mValue;
+            if (pCh->mNumRotationKeys > 0) rotation    = pCh->mRotationKeys[0].mValue;
+            pNode->mTransformation = aiMatrix4x4(scaling, rotation, translation);
+        }
+        for (uint32 c = 0; c < pNode->mNumChildren; ++c)
+            bakeFirstFrameRecursive(pNode->mChildren[c], channels);
+    }
+
     // Adds a clip to a set under a unique name (suffixes _N on collision).
     void addClipToSet(AnimationSet& set, AnimationClip&& clip, const std::string& desiredName)
     {
@@ -189,6 +214,20 @@ bool SceneData::initialize(const char* filePath, bool mergeNodes, bool preTransf
         material.setOpacityTexIdx(resolveTexIdx(pMat, aiTextureType_OPACITY));
         // glTF combined metallic-roughness texture (roughness=G, metalness=B)
         material.setMetalRoughnessTexIdx(resolveTexIdx(pMat, aiTextureType_UNKNOWN));
+    }
+
+    // Place animated-but-unskinned nodes at their first animation frame (see bakeFirstFrameRecursive).
+    // Must run after buildSkeleton() so skinned bind poses stay intact, and before the node graph is read.
+    if (m_pScene->mNumAnimations > 0)
+    {
+        std::unordered_map<std::string, const aiNodeAnim*> firstFrameChannels;
+        for (uint32 a = 0; a < m_pScene->mNumAnimations; ++a)
+        {
+            const aiAnimation* pAnim = m_pScene->mAnimations[a];
+            for (uint32 c = 0; c < pAnim->mNumChannels; ++c)
+                firstFrameChannels.try_emplace(pAnim->mChannels[c]->mNodeName.C_Str(), pAnim->mChannels[c]);
+        }
+        bakeFirstFrameRecursive(m_pScene->mRootNode, firstFrameChannels);
     }
 
     m_rootNode.initialize(m_pScene->mRootNode);

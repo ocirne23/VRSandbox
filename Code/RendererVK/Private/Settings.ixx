@@ -26,9 +26,9 @@ export struct SkyParams
 
     // Ambient + sky radiance (the non-sun lighting inputs)
     glm::vec3 ambientColor = glm::vec3(1.0f);   // flat non-physical minimum ambient
-    float ambientIntensity = 0.01f;
+    float ambientIntensity = 0.003f;
     glm::vec3 skyRadianceColor = glm::vec3(0.55f, 0.65f, 1.0f); // directional sky radiance (moonlight/space light), along up
-    float skyRadianceIntensity = 0.20f;
+    float skyRadianceIntensity = 0.10f;
 
     // Ground plane of the sky sphere (below the horizon): albedo lit by sun + sky. Also tints the
     // ground-bounce fallback in skyRadiance() for downward GI/fog rays.
@@ -91,7 +91,7 @@ export struct FogParams
     float heightBase = 0.0f;       // world height where the global fog is densest
     float heightFalloff = 0.40f;   // exponential density falloff above the base (1/m)
     glm::vec3 albedo = glm::vec3(1.0f, 1.0f, 1.0f);
-    float albedoIntensity = 2.0f;  // > 1 is a non-physical gain (emissive-ish fog)
+    float albedoIntensity = 1.0f;  // > 1 is a non-physical gain (emissive-ish fog)
     float anisotropy = 0.15f;      // HG phase g (0 = isotropic, ->1 = forward scattering)
     float range = 1024.0f;         // froxel grid far distance (m)
     float noiseScale = 0.08f;      // density noise frequency (1/m)

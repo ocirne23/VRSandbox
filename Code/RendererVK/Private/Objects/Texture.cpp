@@ -180,6 +180,15 @@ bool Texture::initialize(const ITextureData& textureData, bool generateMips, boo
 			assert(false && "TextureData has no pixel data or file path");
 			return false;
         }
+        // Prefer the file relative to the scene file's folder; fall back to the asset-root-relative path.
+        const std::string& rootFolder = textureData.getRootFolder();
+        if (!rootFolder.empty())
+        {
+            const std::filesystem::path candidate = std::filesystem::path(rootFolder) / filePath;
+            std::error_code ec;
+            if (std::filesystem::exists(candidate, ec))
+                return initialize(candidate.string().c_str(), generateMips, sRGB);
+        }
         return initialize(filePath, generateMips, sRGB);
     }
     std::string formatInfo = textureData.getFormatInfo();

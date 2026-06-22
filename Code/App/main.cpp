@@ -62,18 +62,17 @@ int main()
     world.initialize();
 
     std::vector<EntityPtr> entities;
-    //entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
-    entities.push_back(world.spawnAssetFile("Entities/BistroScene.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
+    entities.push_back(world.spawnAssetFile("Entities/BistroScene.pre", Transform(), false));
 
     GizmoController gizmo;
     gizmo.initialize(world);
     EntityPtr character;
-  //  EntityPtr character = world.spawnAssetFile("Entities/character.pre", Transform(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
-  //  entities.push_back(character);
-  //  float charSpeed = 0.0f;
-  //  Tweak::floatVar("Animation", "Speed", &charSpeed, 0.0f, 1.0f, 0.01f,[&]() { getComponent<AnimatorComponent>(character)->stateMachine.setFloat("speed", charSpeed); });
-  //  if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
-  //      anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
+    character = world.spawnAssetFile("Entities/character.pre", Transform());
+    entities.push_back(character);
+    float charSpeed = 0.0f;
+    Tweak::floatVar("Animation", "Speed", &charSpeed, 0.0f, 1.0f, 0.01f,[&]() { getComponent<AnimatorComponent>(character)->stateMachine.setFloat("speed", charSpeed); });
+    if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
+        anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
 
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
@@ -215,9 +214,7 @@ int main()
             }
             else if (auto* ch = std::get_if<EntityChange::CreateHierarchy>(&change.type))
             {
-                const Transform base(glm::vec3(0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-                // Hierarchy drop: keep the asset's authored position/scale offset (don't anchor at base).
-                EntityPtr e = world.spawnAssetFile(ch->path, base, false);
+                EntityPtr e = world.spawnAssetFile(ch->path, Transform(), false);
                 if (ch->parent && hasComponent<SceneComponent>(ch->parent))
                     e->reparentEntity(ch->parent);   // parent's SceneComponent takes ownership
                 else

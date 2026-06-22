@@ -1876,6 +1876,17 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
     return baseMeshInfoIdx;
 }
 
+uint32 Renderer::addSkinnedMeshSources(const std::vector<SkinnedMeshSource>& sources)
+{
+   // m_meshInfoCounter += (uint32)sources.size();
+   // m_numInstancesPerMesh.resize(m_meshInfoCounter);
+   // assert(m_meshInfoCounter < USHRT_MAX);
+
+    const uint32 baseIdx = (uint32)m_skinnedMeshSources.size();
+    m_skinnedMeshSources.insert(m_skinnedMeshSources.end(), sources.begin(), sources.end());
+    return baseIdx;
+}
+
 uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos)
 {
     const uint32 baseMaterialInfoIdx = m_materialInfoCounter;

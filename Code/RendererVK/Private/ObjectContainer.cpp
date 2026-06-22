@@ -3,8 +3,9 @@
 import Core;
 import Core.Transform;
 import Core.glm;
-import Animation;
+import Core.Log;
 
+import Animation;
 import File;
 
 import :Renderer;
@@ -49,6 +50,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
 
     std::vector<RendererVKLayout::MeshInfo> meshInfos;
     meshInfos.reserve(numMeshes);
+    std::vector<Renderer::SkinnedMeshSource> skinnedSources; // registered with the renderer after the loop
 
     const Skeleton* pSkeleton = sceneData.getSkeleton();
     m_isSkinned = pSkeleton != nullptr;
@@ -115,7 +117,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 skinVerts.data(), skinVerts.size() * sizeof(RendererVKLayout::SkinningVertex)) / sizeof(RendererVKLayout::SkinningVertex));
 
             const uint16 materialLocalIdx = (uint16)meshData.getMaterialIndex();
-            SkinnedMeshSource src{
+            skinnedSources.push_back(Renderer::SkinnedMeshSource{
                 .baseVertexOffset = (uint32)meshInfo.vertexOffset,
                 .skinVertexOffset = skinVertexOffset,
                 .vertexCount = numVerts,
@@ -125,12 +127,16 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 .pipelineIdx = (uint16)temp.pipelineAlphaForMaterialIdx[materialLocalIdx].first,
                 .alphaMode = (uint16)temp.pipelineAlphaForMaterialIdx[materialLocalIdx].second,
                 .bounds = sphereBounds,
-            };
-            m_skinnedMeshes.push_back(src);
+            });
         }
     }
 
     m_baseMeshInfoIdx = (uint16)Globals::rendererVK.addMeshInfos(meshInfos);
+    if (!skinnedSources.empty())
+    {
+        m_numSkinnedMeshes = (uint32)skinnedSources.size();
+        m_baseSkinnedMeshIdx = Globals::rendererVK.addSkinnedMeshSources(skinnedSources);
+    }
 }
 
 union MaterialFlags
@@ -157,6 +163,12 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
     materialInfos.reserve(numMaterials);
     m_materialNames.reserve(numMaterials);
 
+    // Loose texture files are referenced relative to the scene file; record its folder on each texture so
+    // the loader resolves them next to the .fbx/.glb first, then falls back to the asset root.
+    const std::string rootFolder = std::filesystem::path(sceneData.getFilePath()).parent_path().string();
+    for (uint32 texIdx = 0; texIdx < sceneData.getNumTextures(); texIdx++)
+        const_cast<ITextureData*>(sceneData.getTexture(texIdx))->setRootFolder(rootFolder);
+
     for (uint32 materialIdx = 0; materialIdx < numMaterials; materialIdx++)
     {
         const IMaterialData& materialData = *sceneData.getMaterial(materialIdx);
@@ -171,10 +183,13 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
 		material.normalTexIdx  = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
         material.metalRoughnessTexIdx = UINT16_MAX;
 
-		const IMaterialData::EAlphaMode alphaMode = materialData.getAlphaMode();
+        const IMaterialData::EAlphaMode alphaMode = materialData.getAlphaMode();
 		const float opacity    = materialData.getOpacity();
 		//const float opacity    = materialInfos.size() % 2 == 0 ? 0.5f : 1.0f; // testing blend mode by forcing every other material to be blended
-		const bool isBlend     = alphaMode == IMaterialData::EAlphaMode::Blend || (alphaMode == IMaterialData::EAlphaMode::Opaque && opacity < 1.0f);
+		// Trust the resolved alpha mode: glTF reports it explicitly (and per spec an OPAQUE material ignores
+		// its base-color alpha), while getAlphaMode() already infers Blend from opacity for formats that
+		// don't. Don't re-derive blend from opacity here, or explicit-OPAQUE glTF materials render transparent.
+		const bool isBlend     = alphaMode == IMaterialData::EAlphaMode::Blend;
 
 		if (isBlend)
 		{
@@ -241,9 +256,12 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
 
         // BC5 normal maps store only X/Y, so the shader must reconstruct Z. Flag it from the actual
         // uploaded format so RGB(A) normal maps keep using their stored Z (works for either convention).
-        const vk::Format normalFormat = Globals::textureManager.getTexture(material.normalTexIdx).getFormat();
-        if (normalFormat == vk::Format::eBc5UnormBlock || normalFormat == vk::Format::eBc5SnormBlock)
-            material.flags |= RendererVKLayout::MATERIAL_FLAG_BC5_NORMAL;
+        if (material.normalTexIdx != UINT32_MAX)
+        {
+            const vk::Format normalFormat = Globals::textureManager.getTexture(material.normalTexIdx).getFormat();
+            if (normalFormat == vk::Format::eBc5UnormBlock || normalFormat == vk::Format::eBc5SnormBlock)
+                material.flags |= RendererVKLayout::MATERIAL_FLAG_BC5_NORMAL;
+        }
 
         m_materialNames.push_back(materialData.getName());
     }
@@ -284,8 +302,13 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
         pStackNode->getTransform(pos, scale, rot);
 
         const float nonUniformScaleAmount = glm::max(glm::distance(scale.x, scale.y), glm::distance(scale.x, scale.z));
-        assert(nonUniformScaleAmount < 0.0001f && "Non-uniform scaling is not supported");
-        (void)(nonUniformScaleAmount);
+        if (nonUniformScaleAmount > 0.001f)
+        {
+			std::string msg = std::format("Scene: node '{}' in '{}' has non-uniform scale ({}, {}, {}), which is not supported and may cause visual artifacts", pStackNode->getName(), m_filePath, scale.x, scale.y, scale.z);
+            Log::warning(msg);
+        }
+        //assert(nonUniformScaleAmount < 0.0001f && "Non-uniform scaling is not supported");
+        //(void)(nonUniformScaleAmount);
 
         const uint32 numChildren = pStackNode->getNumChildren();
         const uint32 nodeIdx = (uint32)initialStateNodes.size();
@@ -359,9 +382,14 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
             meshBounds.pos = meshBounds.pos * nodeWS.quat;
             meshBounds.pos += nodeWS.pos;
 
+            // Ranges index the mesh-instance arrays (m_nodeInfos / m_meshInstanceOffsets), which hold ONLY
+            // mesh-bearing nodes in DFS order. A subtree's mesh nodes are contiguous there, so a range covers
+            // exactly them; a node-index range would instead pull in interleaved mesh-less nodes (whose
+            // meshInfoIdx is UINT16_MAX), producing a bogus mesh index.
+            const uint16 meshInstanceIdx = (uint16)m_meshInstanceOffsets.size();
             if (m_nodeMeshRanges[i].startIdx == UINT16_MAX)
             {
-                m_nodeMeshRanges[i].startIdx = (uint16)m_nodeBounds.size();
+                m_nodeMeshRanges[i].startIdx = meshInstanceIdx;
                 m_nodeMeshRanges[i].numNodes = 1;
             }
             uint32 parentIdx = (node.parentOffset != 0) ? i - node.parentOffset : UINT16_MAX;
@@ -369,7 +397,7 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
             {
                 if (m_nodeMeshRanges[parentIdx].startIdx == UINT16_MAX)
                 {
-                    m_nodeMeshRanges[parentIdx].startIdx = (uint16)m_nodeBounds.size();
+                    m_nodeMeshRanges[parentIdx].startIdx = meshInstanceIdx;
                     m_nodeMeshRanges[parentIdx].numNodes = 0;
                 }
                 m_nodeMeshRanges[parentIdx].numNodes++;
@@ -381,22 +409,22 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
 
             m_nodePathIdxLookup.emplace(node.path, (uint16)i);
             m_meshInstanceOffsets.emplace_back(nodeWS);
+            // Parallel to m_meshInstanceOffsets: one NodeInfo per mesh instance (not per node).
+            m_nodeInfos.emplace_back(NodeInfo{
+                .meshInfoIdx = node.meshInfoIdx,
+                .materialInfoIdx = node.materialInfoIdx,
+                .pipelineIdx = node.materialInfoIdx != UINT16_MAX ? (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].first : UINT16_MAX,
+                .alphaMode = node.materialInfoIdx != UINT16_MAX ? (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].second : UINT16_MAX
+            });
         }
         else if (i == 0)
         {
             m_nodePathIdxLookup.emplace(node.path, (uint16)i);
         }
         m_nodeBounds.emplace_back(meshBounds);
-
-        NodeInfo nodeInfo{
-            .meshInfoIdx = node.meshInfoIdx,
-            .materialInfoIdx = node.materialInfoIdx,
-            .pipelineIdx = node.materialInfoIdx != UINT16_MAX ? (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].first : UINT16_MAX,
-            .alphaMode = node.materialInfoIdx != UINT16_MAX ? (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].second : UINT16_MAX
-        };
-        m_nodeInfos.emplace_back(nodeInfo);
     }
 
+    m_nodeRootTransforms = std::move(worldSpaceNodes);
     m_baseMeshInstanceOffsetsIdx = Globals::rendererVK.addMeshInstanceOffsets(m_meshInstanceOffsets);
 }
 
@@ -407,14 +435,39 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
 
     RenderNode node;
     node.m_transformIdx = Globals::rendererVK.addRenderNodeTransform(transform);
+
+    // The baked per-instance offsets are relative to the container ROOT, so a sub-node spawned by path
+    // carries its whole ancestor chain (e.g. a Blender group's transform). Rebase those offsets (and the
+    // node bounds) into the node's own space so `transform` places the node's pivot itself, not
+    // pivot * ancestors. ROOT spawns want the container-relative offsets, so they're left untouched.
+    const bool rebase = idx != NodeSpawnIdx_ROOT;
+    const Transform invNode = rebase ? m_nodeRootTransforms[idx].inverse() : Transform();
+
     node.m_bounds = m_nodeBounds[idx];
+    if (rebase)
+    {
+        node.m_bounds.pos = invNode.transformPoint(node.m_bounds.pos);
+        node.m_bounds.radius *= invNode.scale;
+    }
+
+    uint32 rebasedOffsetBase = 0;
+    if (rebase)
+    {
+        std::vector<RendererVKLayout::MeshInstanceOffset> rebasedOffsets;
+        rebasedOffsets.reserve(range.numNodes);
+        for (uint32 i = 0; i < range.numNodes; ++i)
+            rebasedOffsets.emplace_back(invNode * m_meshInstanceOffsets[range.startIdx + i].transform);
+        rebasedOffsetBase = Globals::rendererVK.addMeshInstanceOffsets(rebasedOffsets);
+    }
+
     node.m_meshInstances.resize(range.numNodes);
     for (uint32 i = 0; i < range.numNodes; ++i)
     {
-        const NodeInfo& nodeInfo = m_nodeInfos[range.startIdx + i];
+        const uint32 meshInstanceIdx = range.startIdx + i; // index into the mesh-only NodeInfo / offset arrays
+        const NodeInfo& nodeInfo = m_nodeInfos[meshInstanceIdx];
 
         node.m_meshInstances[i].renderNodeIdx = node.m_transformIdx;
-        node.m_meshInstances[i].instanceOffsetIdx = m_baseMeshInstanceOffsetsIdx + nodeInfo.meshInfoIdx;
+        node.m_meshInstances[i].instanceOffsetIdx = rebase ? (rebasedOffsetBase + i) : (m_baseMeshInstanceOffsetsIdx + meshInstanceIdx);
 
         node.m_meshInstances[i].meshIdx = m_baseMeshInfoIdx + nodeInfo.meshInfoIdx;
         node.m_meshInstances[i].materialIdx = m_baseMaterialInfoIdx + nodeInfo.materialInfoIdx;
@@ -438,7 +491,7 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
 
 RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
 {
-    assert(m_isSkinned && !m_skinnedMeshes.empty() && "spawnSkinnedNode on a non-skinned container");
+    assert(m_isSkinned && m_numSkinnedMeshes > 0 && "spawnSkinnedNode on a non-skinned container");
 
     Renderer& renderer = Globals::rendererVK;
     MeshDataManager& meshDataManager = Globals::meshDataManager;
@@ -458,11 +511,12 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
     // Reserve a unique output vertex region per skinned mesh and register a MeshInfo pointing at it.
     std::vector<RendererVKLayout::MeshInfo> meshInfos;
     std::vector<uint32> outVertexOffsets;
-    meshInfos.reserve(m_skinnedMeshes.size());
-    outVertexOffsets.reserve(m_skinnedMeshes.size());
+    meshInfos.reserve(m_numSkinnedMeshes);
+    outVertexOffsets.reserve(m_numSkinnedMeshes);
     Sphere combinedBounds{ glm::vec3(0.0f), 0.0f };
-    for (const SkinnedMeshSource& src : m_skinnedMeshes)
+    for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
     {
+        const Renderer::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
         const uint32 outVertexOffset = (uint32)(meshDataManager.reserveVertexData(
             (size_t)src.vertexCount * sizeof(RendererVKLayout::MeshVertex)) / sizeof(RendererVKLayout::MeshVertex));
         outVertexOffsets.push_back(outVertexOffset);
@@ -481,15 +535,15 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
     const uint32 baseMeshIdx = renderer.addMeshInfos(meshInfos);
 
     node.m_bounds = combinedBounds;
-    node.m_meshInstances.resize(m_skinnedMeshes.size());
+    node.m_meshInstances.resize(m_numSkinnedMeshes);
     std::map<uint16, uint16> instancesPerMesh;
-    for (uint32 k = 0; k < (uint32)m_skinnedMeshes.size(); ++k)
+    for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
     {
-        const SkinnedMeshSource& src = m_skinnedMeshes[k];
+        const Renderer::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
         const uint16 meshIdx = (uint16)(baseMeshIdx + k);
+        assert(meshIdx < UINT16_MAX);
 
-        renderer.addSkinnedInstance(src.baseVertexOffset, src.skinVertexOffset, outVertexOffsets[k], src.vertexCount, paletteHandle,
-            meshIdx, src.firstIndex, src.indexCount);
+        renderer.addSkinnedInstance(src.baseVertexOffset, src.skinVertexOffset, outVertexOffsets[k], src.vertexCount, paletteHandle, meshIdx, src.firstIndex, src.indexCount);
 
         RendererVKLayout::InMeshInstance& inst = node.m_meshInstances[k];
         inst.renderNodeIdx = node.m_transformIdx;
@@ -502,7 +556,10 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
     }
     node.m_numInstancesPerMesh.reserve(instancesPerMesh.size());
     for (auto& pair : instancesPerMesh)
+    {
+        assert(pair.first != UINT16_MAX);
         node.m_numInstancesPerMesh.emplace_back(pair);
+    }
 
     return node;
 }
