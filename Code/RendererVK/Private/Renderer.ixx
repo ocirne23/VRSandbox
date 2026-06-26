@@ -44,7 +44,7 @@ import :GpuCrashTracker;
 import :Settings;
 import :RenderNode;
 
-export import Core.fwd;
+import Core.fwd;
 
 export enum class EValidation { ENABLED, DISABLED };
 export enum class EVSync { ENABLED, DISABLED };
@@ -54,18 +54,10 @@ export class Renderer final
 {
 public:
 
-    Renderer() {}
+    Renderer() = default;
     ~Renderer();
-    Renderer(const Renderer&) = delete;
-    Renderer(const Renderer&&) = delete;
-    Renderer& operator=(const Renderer&) = delete;
-    Renderer& operator=(const Renderer&&) = delete;
 
     bool initialize(Window& window, EValidation validation, EVSync vsync, EVr vr = EVr::DISABLED);
-
-    bool isVrEnabled() const { return Globals::openXR.isEnabled(); }
-    bool isVrStageSpace() const { return Globals::openXR.isStageSpace(); }
-    IVrSession* getVrSession() { return Globals::openXR.isEnabled() ? &Globals::openXR : nullptr; }
 
     const Frustum& beginFrame(const Camera& camera);
     void renderNodeThreadSafe(const RenderNode& node);
@@ -76,47 +68,24 @@ public:
     void addAreaLight(const AreaLight& areaLight);
     void addSpotLight(const SpotLight& spotLight);
     void setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity);
+    void present();
+
     void setAmbientLight(const glm::vec3& color, float intensity) { m_skyParams.ambientColor = color; m_skyParams.ambientIntensity = intensity; }
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
-
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
     void setPostParams(const PostParams& post) { m_postParams = post; setHaveToRecordCommandBuffers(); }
-    void present();
-
-    // Per-skinned-mesh source data captured when an ObjectContainer loads (bind-pose geometry + skinning
-    // influences + material/pipeline). Owned by the renderer (like MeshInfo) and referenced by a base index
-    // per container; spawnSkinnedNode() turns each into a unique per-instance output region + MeshInfo.
-    struct SkinnedMeshSource
-    {
-        uint32 baseVertexOffset; // bind-pose geometry, MeshVertex units
-        uint32 skinVertexOffset; // influences, SkinningVertex units
-        uint32 vertexCount;
-        uint32 indexCount;
-        uint32 firstIndex;
-        uint16 materialLocalIdx;
-        uint16 pipelineIdx;
-        uint16 alphaMode;
-        Sphere bounds;
-    };
-
-    // Skinned mesh support (skeletal animation). A palette region holds one bone matrix per skeleton bone
-    // for a skinned node; setSkinningPalette() updates it each frame from an AnimationPlayer. Each skinned
-    // mesh registers an instance (a per-frame skinning compute dispatch) referencing a palette region.
-    uint32 allocateSkinningPalette(uint32 boneCount);
-    void setSkinningPalette(uint32 paletteHandle, std::span<const glm::mat4> palette);
-    // meshIdx/firstIndex/indexCount identify the output region's MeshInfo so its BLAS can be rebuilt each
-    // frame from the deformed vertices (skinned meshes are ray-traced: GI / RTAO / RT shadows).
-    uint32 addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle,
-        uint32 meshIdx, uint32 firstIndex, uint32 indexCount);
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
-    uint32 getNumRenderNodes() const { return (uint32)m_renderNodeTransforms.size(); }
     uint32 getNumMeshTypes() const { return m_meshInfoCounter; }
     uint32 getNumMaterials() const { return m_materialInfoCounter; }
     uint32 getCurrentFrameIndex() const { return m_swapChain.getCurrentFrameIndex(); }
 
     void reloadShaders();
+
+    bool isVrEnabled() const { return Globals::openXR.isEnabled(); }
+    bool isVrStageSpace() const { return Globals::openXR.isStageSpace(); }
+    IVrSession* getVrSession() { return Globals::openXR.isEnabled() ? &Globals::openXR : nullptr; }
 
     void toggleGiProbeDebug() { m_giProbeDebugEnabled = !m_giProbeDebugEnabled; }
     void cycleGiProbeDebugMode() { m_giProbeDebugMode ^= 1u; setHaveToRecordCommandBuffers(); } // 0 = irradiance, 1 = cellSize/LOD
@@ -128,6 +97,11 @@ public:
     Stats getStats();
 
 private:
+
+    Renderer(const Renderer&) = delete;
+    Renderer(const Renderer&&) = delete;
+    Renderer& operator=(const Renderer&) = delete;
+    Renderer& operator=(const Renderer&&) = delete;
 
     CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 
@@ -166,9 +140,16 @@ private:
     uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos);
     uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
-    // Skinned-mesh sources, owned by the renderer and referenced per container by a base index.
-    uint32 addSkinnedMeshSources(const std::vector<SkinnedMeshSource>& sources);
-    const SkinnedMeshSource& getSkinnedMeshSource(uint32 idx) const { return m_skinnedMeshSources[idx]; }
+    uint32 addSkinnedMeshSources(const std::vector<RendererVKLayout::SkinnedMeshSource>& sources);
+    const RendererVKLayout::SkinnedMeshSource& getSkinnedMeshSource(uint32 idx) const { return m_skinnedMeshSources[idx]; }
+
+    friend class RenderNode;
+    inline Transform& getRenderNodeTransform(uint32 idx) { return m_renderNodeTransforms[idx]; }
+
+    friend class AnimatorComponent;
+    uint32 allocateSkinningPalette(uint32 boneCount);
+    void setSkinningPalette(uint32 paletteHandle, std::span<const glm::mat4> palette);
+    uint32 addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle, uint32 meshIdx, uint32 firstIndex, uint32 indexCount);
 
     void waitForGpuAndFlushStaging();
     void growRenderNodeCapacity(uint32 needed);
@@ -178,9 +159,6 @@ private:
     void growInstanceOffsetCapacity(uint32 needed);
     void growLightGridBuffers(size_t neededGridBytes, uint32 neededTableEntries);
     void checkLightGridCapacity();
-
-    friend class RenderNode;
-    inline Transform& getRenderNodeTransform(uint32 idx) { return m_renderNodeTransforms[idx]; }
 
 private:
 
@@ -252,6 +230,8 @@ private:
     uint32 m_meshDataGeneration = 0; // last seen MeshDataManager::getGeneration(); change -> re-record
     uint32 m_textureGeneration = 0;  // last seen TextureManager::getGeneration(); change -> rebuild texture-array pipelines
 
+    std::vector<Transform>& m_renderNodeTransforms = Globals::renderNodeTransforms;
+
     // Skinned mesh state. Palette regions and skinning jobs are persistent (set up at spawn); palette
     // CONTENTS are refreshed each frame via setSkinningPalette and uploaded in present().
     struct SkinningPaletteRegion { uint32 offset; uint32 boneCount; };
@@ -259,12 +239,11 @@ private:
     std::vector<glm::mat4> m_skinningPalettes;   // CPU staging (concatenated per region), uploaded each frame
     std::vector<RendererVKLayout::SkinningPushConstants> m_skinningJobs; // one per skinned mesh instance
     std::vector<AccelerationStructure::SkinnedBlasBuild> m_skinnedBlasBuilds; // parallel to m_skinningJobs; per-frame BLAS rebuild
-    std::vector<SkinnedMeshSource> m_skinnedMeshSources; // per-container skinned-mesh source data (CPU-only)
+    std::vector<RendererVKLayout::SkinnedMeshSource> m_skinnedMeshSources; // per-container skinned-mesh source data (CPU-only)
     uint32 m_maxSkinningPaletteEntries = RendererVKLayout::INITIAL_SKINNING_PALETTE;
     void growSkinningPaletteCapacity(uint32 needed);
 
     std::vector<ObjectContainer*> m_objectContainers;
-    std::vector<Transform>& m_renderNodeTransforms = Globals::renderNodeTransforms;
     std::vector<uint32> m_numInstancesPerMesh;
     std::vector<uint32> m_freeRenderNodeIndexes;
 

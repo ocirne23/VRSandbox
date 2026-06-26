@@ -8,8 +8,8 @@ import Core.Time;
 import Core.glm;
 import Core.Camera;
 import Core.Tweaks;
-import Animation;
 
+import Animation;
 import File;
 import Input;
 import UI;

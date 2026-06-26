@@ -50,7 +50,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
 
     std::vector<RendererVKLayout::MeshInfo> meshInfos;
     meshInfos.reserve(numMeshes);
-    std::vector<Renderer::SkinnedMeshSource> skinnedSources; // registered with the renderer after the loop
+    std::vector<RendererVKLayout::SkinnedMeshSource> skinnedSources; // registered with the renderer after the loop
 
     const Skeleton* pSkeleton = sceneData.getSkeleton();
     m_isSkinned = pSkeleton != nullptr;
@@ -117,7 +117,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 skinVerts.data(), skinVerts.size() * sizeof(RendererVKLayout::SkinningVertex)) / sizeof(RendererVKLayout::SkinningVertex));
 
             const uint16 materialLocalIdx = (uint16)meshData.getMaterialIndex();
-            skinnedSources.push_back(Renderer::SkinnedMeshSource{
+            skinnedSources.push_back(RendererVKLayout::SkinnedMeshSource{
                 .baseVertexOffset = (uint32)meshInfo.vertexOffset,
                 .skinVertexOffset = skinVertexOffset,
                 .vertexCount = numVerts,
@@ -516,7 +516,7 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
     Sphere combinedBounds{ glm::vec3(0.0f), 0.0f };
     for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
     {
-        const Renderer::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
+        const RendererVKLayout::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
         const uint32 outVertexOffset = (uint32)(meshDataManager.reserveVertexData(
             (size_t)src.vertexCount * sizeof(RendererVKLayout::MeshVertex)) / sizeof(RendererVKLayout::MeshVertex));
         outVertexOffsets.push_back(outVertexOffset);
@@ -539,7 +539,7 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
     std::map<uint16, uint16> instancesPerMesh;
     for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
     {
-        const Renderer::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
+        const RendererVKLayout::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
         const uint16 meshIdx = (uint16)(baseMeshIdx + k);
         assert(meshIdx < UINT16_MAX);
 

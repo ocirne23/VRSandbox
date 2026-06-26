@@ -4,6 +4,7 @@ import Core;
 import Core.glm;
 import Core.Frustum;
 import Core.Transform;
+import Core.Sphere;
 
 import :VK;
 
@@ -85,6 +86,21 @@ export namespace RendererVKLayout
         uint32 vertexCount;
         uint32 paletteOffset;    // bone palette base, mat4 units
         uint32 _pad0, _pad1, _pad2;
+    };
+    // Per-skinned-mesh source data captured when an ObjectContainer loads (bind-pose geometry + skinning
+    // influences + material/pipeline). Owned by the renderer (like MeshInfo) and referenced by a base index
+    // per container; spawnSkinnedNode() turns each into a unique per-instance output region + MeshInfo.
+    struct SkinnedMeshSource
+    {
+        uint32 baseVertexOffset; // bind-pose geometry, MeshVertex units
+        uint32 skinVertexOffset; // influences, SkinningVertex units
+        uint32 vertexCount;
+        uint32 indexCount;
+        uint32 firstIndex;
+        uint16 materialLocalIdx;
+        uint16 pipelineIdx;
+        uint16 alphaMode;
+        Sphere bounds;
     };
 
     constexpr uint32 SKINNING_THREADS_PER_GROUP = 64;
