@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-typedef struct ScriptVec3 { float x, y, z; } ScriptVec3;
+typedef struct Vec3 { float x, y, z; } Vec3;
 
 // Services the host exposes to scripts. The host fills these in; scripts only call them.
 typedef struct ScriptContext
@@ -20,8 +20,8 @@ typedef struct ScriptContext
     float (*deltaSeconds)(void);
     float (*elapsedSeconds)(void);
     int   (*isKeyDown)(const char* keyName); // e.g. "Space", "A", "Left Shift"
-    void  (*spawnPointLight)(ScriptVec3 position, float range, ScriptVec3 color, float intensity);
-    void  (*setSun)(ScriptVec3 direction, ScriptVec3 color, float intensity);
+    void  (*spawnPointLight)(Vec3 position, float range, Vec3 color, float intensity);
+    void  (*setSun)(Vec3 direction, Vec3 color, float intensity);
 
     // The entity this script is attached to (set by the host before each ScriptUpdate). Null for the
     // global/panel test script. The entity* functions below all take this handle; they no-op / return
@@ -29,21 +29,21 @@ typedef struct ScriptContext
     void* self;
 
     // ---- entity reads ----
-    ScriptVec3  (*entityGetPosition)(void* entity);     // local position
+    Vec3        (*entityGetPosition)(void* entity);     // local position
     float       (*entityGetScale)(void* entity);
-    ScriptVec3  (*entityGetRotation)(void* entity);     // euler degrees
-    ScriptVec3  (*entityGetForward)(void* entity);      // unit vectors in the entity's local frame
-    ScriptVec3  (*entityGetRight)(void* entity);
-    ScriptVec3  (*entityGetUp)(void* entity);
+    Vec3        (*entityGetRotation)(void* entity);     // euler degrees
+    Vec3        (*entityGetForward)(void* entity);      // unit vectors in the entity's local frame
+    Vec3        (*entityGetRight)(void* entity);
+    Vec3        (*entityGetUp)(void* entity);
     const char* (*entityGetName)(void* entity);
     int         (*entityGetEnabled)(void* entity);
     int         (*entityGetChildCount)(void* entity);
     float       (*entityGetBoundsRadius)(void* entity); // world-space render bounds radius (0 if no mesh)
 
     // ---- entity writes ----
-    void (*entitySetPosition)(void* entity, ScriptVec3 position);
+    void (*entitySetPosition)(void* entity, Vec3 position);
     void (*entitySetScale)(void* entity, float scale);
-    void (*entitySetRotation)(void* entity, ScriptVec3 eulerDegrees);
+    void (*entitySetRotation)(void* entity, Vec3 eulerDegrees);
     void (*entitySetEnabled)(void* entity, int enabled);
     void (*entitySetAnimFloat)(void* entity, const char* param, float value);
     void (*entitySetAnimBool)(void* entity, const char* param, int value);

@@ -74,9 +74,9 @@ export std::string defaultValueForType(EDataType type)
         case EDataType::Bool:   return "false";
         case EDataType::Int:    return "0";
         case EDataType::Float:  return "0.0f";
-        case EDataType::Vec3:   return "ScriptVec3{ 0.0f, 0.0f, 0.0f }";
+        case EDataType::Vec3:   return "Vec3{ 0.0f, 0.0f, 0.0f }";
         case EDataType::String: return "\"\"";
-        default:                return "0.0f";
+        default:                return "0.0f";  
     }
 }
 
@@ -126,17 +126,17 @@ export const std::vector<NodeDef>& nodeRegistry()
 
         r.push_back({ "SpawnPointLight", "Spawn Point Light", "Rendering", true,
             { { "", D::Exec, "" },
-              { "position",  D::Vec3,  "ScriptVec3{ 0.0f, 2.0f, 0.0f }" },
+              { "position",  D::Vec3,  "Vec3{ 0.0f, 2.0f, 0.0f }" },
               { "range",     D::Float, "25.0f" },
-              { "color",     D::Vec3,  "ScriptVec3{ 1.0f, 0.6f, 0.2f }" },
+              { "color",     D::Vec3,  "Vec3{ 1.0f, 0.6f, 0.2f }" },
               { "intensity", D::Float, "60.0f" } },
             { { "", D::Exec, "" } },
             "ctx->spawnPointLight($1, $2, $3, $4);\n#0" });
 
         r.push_back({ "SetSun", "Set Sun", "Rendering", true,
             { { "", D::Exec, "" },
-              { "direction", D::Vec3,  "ScriptVec3{ -0.3f, -1.0f, -0.2f }" },
-              { "color",     D::Vec3,  "ScriptVec3{ 1.0f, 1.0f, 1.0f }" },
+              { "direction", D::Vec3,  "Vec3{ -0.3f, -1.0f, -0.2f }" },
+              { "color",     D::Vec3,  "Vec3{ 1.0f, 1.0f, 1.0f }" },
               { "intensity", D::Float, "3.0f" } },
             { { "", D::Exec, "" } },
             "ctx->setSun($1, $2, $3);\n#0" });
@@ -178,7 +178,12 @@ export const std::vector<NodeDef>& nodeRegistry()
         r.push_back({ "MakeVec3", "Make Vec3", "Math", false,
             { { "x", D::Float, "0.0f" }, { "y", D::Float, "0.0f" }, { "z", D::Float, "0.0f" } },
             { { "vec", D::Vec3, "" } },
-            "ScriptVec3{ $0, $1, $2 }" });
+            "Vec3{ $0, $1, $2 }" });
+
+        r.push_back({ "SplitVec3", "Split Vec3", "Math", false,
+            { { "vec", D::Vec3, "" } },
+            { { "x", D::Float, "", 0, "$0.x"}, {"y", D::Float, "", 0, "$0.y"}, {"z", D::Float, "", 0, "$0.z"}}
+            });
 
         r.push_back({ "ConstFloat", "Float", "Constants", false,
             { { "value", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
@@ -203,9 +208,9 @@ export const std::vector<NodeDef>& nodeRegistry()
         // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks).
         r.push_back({ "SetEntity", "Set Entity", "Entity", true,
             { { "", D::Exec, "" },
-              { "Position", D::Vec3,  "ScriptVec3{ 0.0f, 0.0f, 0.0f }" },
+              { "Position", D::Vec3,  "Vec3{ 0.0f, 0.0f, 0.0f }" },
               { "Scale",    D::Float, "1.0f" },
-              { "Rotation", D::Vec3,  "ScriptVec3{ 0.0f, 0.0f, 0.0f }" },
+              { "Rotation", D::Vec3,  "Vec3{ 0.0f, 0.0f, 0.0f }" },
               { "Enabled",  D::Bool,  "true" } },
             { { "", D::Exec, "" } },
             "?1{ctx->entitySetPosition(ctx->self, $1);\n}?2{ctx->entitySetScale(ctx->self, $2);\n}"

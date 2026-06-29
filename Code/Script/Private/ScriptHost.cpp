@@ -28,27 +28,27 @@ namespace
     float thunk_elapsedSeconds(void) { return (float)Globals::time.getElapsedSec(); }
     int thunk_isKeyDown(const char* keyName) { return Globals::input.isKeyDownByName(keyName) ? 1 : 0; }
 
-    void thunk_spawnPointLight(ScriptVec3 position, float range, ScriptVec3 color, float intensity)
+    void thunk_spawnPointLight(Vec3 position, float range, Vec3 color, float intensity)
     {
         Globals::rendererVK.addPointLight(PointLight(glm::vec3(position.x, position.y, position.z), range,
             glm::vec3(color.x, color.y, color.z), intensity));
     }
 
-    void thunk_setSun(ScriptVec3 direction, ScriptVec3 color, float intensity)
+    void thunk_setSun(Vec3 direction, Vec3 color, float intensity)
     {
         Globals::rendererVK.setSunLight(glm::vec3(direction.x, direction.y, direction.z),
             glm::vec3(color.x, color.y, color.z), intensity);
     }
 
     Entity* asEntity(void* e) { return static_cast<Entity*>(e); }
-    ScriptVec3 toScript(const glm::vec3& v) { return ScriptVec3{ v.x, v.y, v.z }; }
+    Vec3 toScript(const glm::vec3& v) { return Vec3{ v.x, v.y, v.z }; }
 
-    ScriptVec3 thunk_entityGetPosition(void* e) { Entity* en = asEntity(e); return en ? toScript(en->pos) : ScriptVec3{ 0, 0, 0 }; }
+    Vec3 thunk_entityGetPosition(void* e) { Entity* en = asEntity(e); return en ? toScript(en->pos) : Vec3{ 0, 0, 0 }; }
     float thunk_entityGetScale(void* e) { Entity* en = asEntity(e); return en ? en->scale : 1.0f; }
-    ScriptVec3 thunk_entityGetRotation(void* e) { Entity* en = asEntity(e); return en ? toScript(glm::degrees(glm::eulerAngles(en->rot))) : ScriptVec3{ 0, 0, 0 }; }
-    ScriptVec3 thunk_entityGetForward(void* e) { Entity* en = asEntity(e); return en ? toScript(en->rot * glm::vec3(0, 0, -1)) : ScriptVec3{ 0, 0, -1 }; }
-    ScriptVec3 thunk_entityGetRight(void* e) { Entity* en = asEntity(e); return en ? toScript(en->rot * glm::vec3(1, 0, 0)) : ScriptVec3{ 1, 0, 0 }; }
-    ScriptVec3 thunk_entityGetUp(void* e) { Entity* en = asEntity(e); return en ? toScript(en->rot * glm::vec3(0, 1, 0)) : ScriptVec3{ 0, 1, 0 }; }
+    Vec3 thunk_entityGetRotation(void* e) { Entity* en = asEntity(e); return en ? toScript(glm::degrees(glm::eulerAngles(en->rot))) : Vec3{ 0, 0, 0 }; }
+    Vec3 thunk_entityGetForward(void* e) { Entity* en = asEntity(e); return en ? toScript(en->rot * glm::vec3(0, 0, -1)) : Vec3{ 0, 0, -1 }; }
+    Vec3 thunk_entityGetRight(void* e) { Entity* en = asEntity(e); return en ? toScript(en->rot * glm::vec3(1, 0, 0)) : Vec3{ 1, 0, 0 }; }
+    Vec3 thunk_entityGetUp(void* e) { Entity* en = asEntity(e); return en ? toScript(en->rot * glm::vec3(0, 1, 0)) : Vec3{ 0, 1, 0 }; }
     const char* thunk_entityGetName(void* e) { Entity* en = asEntity(e); return en ? en->displayName.c_str() : ""; }
 
     int thunk_entityGetEnabled(void* e)
@@ -71,9 +71,9 @@ namespace
         return rc ? rc->node.getWorldBounds().radius : 0.0f;
     }
 
-    void thunk_entitySetPosition(void* e, ScriptVec3 v) { if (Entity* en = asEntity(e)) en->pos = glm::vec3(v.x, v.y, v.z); }
+    void thunk_entitySetPosition(void* e, Vec3 v) { if (Entity* en = asEntity(e)) en->pos = glm::vec3(v.x, v.y, v.z); }
     void thunk_entitySetScale(void* e, float s) { if (Entity* en = asEntity(e)) en->scale = s; }
-    void thunk_entitySetRotation(void* e, ScriptVec3 d) { if (Entity* en = asEntity(e)) en->rot = glm::quat(glm::radians(glm::vec3(d.x, d.y, d.z))); }
+    void thunk_entitySetRotation(void* e, Vec3 d) { if (Entity* en = asEntity(e)) en->rot = glm::quat(glm::radians(glm::vec3(d.x, d.y, d.z))); }
     void thunk_entitySetEnabled(void* e, int enabled) { if (Entity* en = asEntity(e)) if (SceneComponent* sc = getComponent<SceneComponent>(en)) sc->enabled = enabled != 0; }
     void thunk_entitySetAnimFloat(void* e, const char* p, float v) { if (Entity* en = asEntity(e)) if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setFloat(p, v); }
     void thunk_entitySetAnimBool(void* e, const char* p, int v) { if (Entity* en = asEntity(e)) if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setBool(p, v != 0); }

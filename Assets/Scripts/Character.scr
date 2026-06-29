@@ -4,15 +4,23 @@
 SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, float dt)
 {
     (void)dt;
-    ctx->entitySetRotation(ctx->self, ScriptVec3{ 0.0f, (ctx->elapsedSeconds() * 50.0f), 0.0f });
+    ctx->entitySetRotation(ctx->self, Vec3{ 0.0f, (ctx->elapsedSeconds() * 50.0f), 0.0f });
 }
 
 //@graph 1
 //@node 0 EventUpdate 40 60
 //@node 1 SetEntity 520 60
-//@node 2 MakeVec3 300 200
-//@node 3 MulFloat 60 280
-//@node 4 GetElapsedTime -180 280
+//@node 2 MakeVec3 252 108
+//@node 3 MulFloat -32 131
+//@node 4 GetElapsedTime -176 135
+//@pin 1 1 Vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 1 2 1.0f
+//@pin 1 3 Vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 1 4 true
+//@pin 2 0 0.0f
+//@pin 2 1 0.0f
+//@pin 2 2 0.0f
+//@pin 3 0 1.0f
 //@pin 3 1 50.0f
 //@link 0 0 1 0
 //@link 4 0 3 0
