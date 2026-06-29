@@ -54,7 +54,7 @@ export class Renderer final
 {
 public:
 
-    Renderer() = default;
+    Renderer() {}
     ~Renderer();
 
     bool initialize(Window& window, EValidation validation, EVSync vsync, EVr vr = EVr::DISABLED);

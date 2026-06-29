@@ -2,4 +2,4 @@ Prefab sponza
 	Component Render
 		StaticMesh Sponza
 		Position 0, 0, 0
-		Rotation -180, 0, 0
+		Rotation 0, 0, 0

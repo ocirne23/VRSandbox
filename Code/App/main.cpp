@@ -15,6 +15,7 @@ import Input;
 import UI;
 import RendererVK;
 import Entity;
+import Script;
 
 int main()
 {
@@ -62,7 +63,7 @@ int main()
     world.initialize();
 
     std::vector<EntityPtr> entities;
-    entities.push_back(world.spawnAssetFile("Entities/BistroScene.pre", Transform(), false));
+    entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(), false));
 
     GizmoController gizmo;
     gizmo.initialize(world);
@@ -74,6 +75,9 @@ int main()
     if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
         anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
 
+    const std::string scriptPath = "Scripts/Test.cpp";
+    ScriptHost scriptHost;
+    scriptHost.reload(scriptPath); // compile + load the visual script DLL (F6 hot-reloads)
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
@@ -85,6 +89,8 @@ int main()
             }
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+                scriptHost.reload(scriptPath);          // recompile + hot-swap the visual script
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
                     anim->stateMachine.setTrigger("attack"); // F: one-shot attack (returns to locomotion)
@@ -238,6 +244,9 @@ int main()
         }
 
         const Frustum& frustum = renderer.beginFrame(camera);
+
+        scriptHost.tick((float)deltaSec); // after beginFrame so per-frame submissions (lights/sun) land this frame
+
         for (const EntityPtr& entity : entities)
             entity->renderTree(renderer, Transform(), (float)deltaSec);
 
@@ -263,6 +272,7 @@ int main()
         renderer.present();
         frameCount++;
     }
+    scriptHost.shutdown();
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
     return 0;
