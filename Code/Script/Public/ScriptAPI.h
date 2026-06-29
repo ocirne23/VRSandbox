@@ -22,6 +22,32 @@ typedef struct ScriptContext
     int   (*isKeyDown)(const char* keyName); // e.g. "Space", "A", "Left Shift"
     void  (*spawnPointLight)(ScriptVec3 position, float range, ScriptVec3 color, float intensity);
     void  (*setSun)(ScriptVec3 direction, ScriptVec3 color, float intensity);
+
+    // The entity this script is attached to (set by the host before each ScriptUpdate). Null for the
+    // global/panel test script. The entity* functions below all take this handle; they no-op / return
+    // zero when it is null, so entity nodes are safe to use anywhere.
+    void* self;
+
+    // ---- entity reads ----
+    ScriptVec3  (*entityGetPosition)(void* entity);     // local position
+    float       (*entityGetScale)(void* entity);
+    ScriptVec3  (*entityGetRotation)(void* entity);     // euler degrees
+    ScriptVec3  (*entityGetForward)(void* entity);      // unit vectors in the entity's local frame
+    ScriptVec3  (*entityGetRight)(void* entity);
+    ScriptVec3  (*entityGetUp)(void* entity);
+    const char* (*entityGetName)(void* entity);
+    int         (*entityGetEnabled)(void* entity);
+    int         (*entityGetChildCount)(void* entity);
+    float       (*entityGetBoundsRadius)(void* entity); // world-space render bounds radius (0 if no mesh)
+
+    // ---- entity writes ----
+    void (*entitySetPosition)(void* entity, ScriptVec3 position);
+    void (*entitySetScale)(void* entity, float scale);
+    void (*entitySetRotation)(void* entity, ScriptVec3 eulerDegrees);
+    void (*entitySetEnabled)(void* entity, int enabled);
+    void (*entitySetAnimFloat)(void* entity, const char* param, float value);
+    void (*entitySetAnimBool)(void* entity, const char* param, int value);
+    void (*entitySetAnimTrigger)(void* entity, const char* param);
 } ScriptContext;
 
 // Entry points a script DLL exports. ScriptUpdate is required; Init/Shutdown are optional.

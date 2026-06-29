@@ -1,0 +1,20 @@
+#include "ScriptAPI.h"
+#include <cmath>
+
+SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, float dt)
+{
+    (void)dt;
+    ctx->entitySetRotation(ctx->self, ScriptVec3{ 0.0f, (ctx->elapsedSeconds() * 50.0f), 0.0f });
+}
+
+//@graph 1
+//@node 0 EventUpdate 40 60
+//@node 1 SetEntity 520 60
+//@node 2 MakeVec3 300 200
+//@node 3 MulFloat 60 280
+//@node 4 GetElapsedTime -180 280
+//@pin 3 1 50.0f
+//@link 0 0 1 0
+//@link 4 0 3 0
+//@link 3 0 2 1
+//@link 2 0 1 3

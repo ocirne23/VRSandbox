@@ -1,4 +1,4 @@
-﻿module UI.PropertiesPanel;
+module UI.PropertiesPanel;
 
 import Core.imgui;
 import Core.glm;
@@ -115,6 +115,34 @@ void PropertiesPanel::render(Entity* selected)
 			ImGui::Text("Show bounds");
 			ImGui::SameLine(100.0f);
 			ImGui::Checkbox("##pp_show_bounds", &rc->showBounds);
+		}
+	}
+
+	if (ScriptComponent* script = getComponent<ScriptComponent>(selected))
+	{
+		if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			ImGui::AlignTextToFramePadding();
+			ImGui::Text("Script");
+			ImGui::SameLine(80.0f);
+			ImGui::SetNextItemWidth(-1.0f);
+			char scriptBuf[256];
+			strncpy_s(scriptBuf, sizeof(scriptBuf), script->scriptPath.c_str(), sizeof(scriptBuf) - 1);
+			scriptBuf[sizeof(scriptBuf) - 1] = '\0';
+			if (ImGui::InputText("##pp_script", scriptBuf, sizeof(scriptBuf), ImGuiInputTextFlags_EnterReturnsTrue))
+				script->scriptPath = scriptBuf;
+			if (ImGui::BeginDragDropTarget())
+			{
+				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCRIPT_FILE"))
+					script->scriptPath = static_cast<const char*>(payload->Data);
+				ImGui::EndDragDropTarget();
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Type a path or drag a .scr here");
+			ImGui::AlignTextToFramePadding();
+			ImGui::Text("Enabled");
+			ImGui::SameLine(80.0f);
+			ImGui::Checkbox("##pp_script_enabled", &script->enabled);
 		}
 	}
 }

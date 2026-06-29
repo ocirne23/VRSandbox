@@ -13,7 +13,7 @@ import RendererVK;
 export int componentIdFromName(std::string_view name);
 export void detachFromOwner(Entity* entity);
 
-export constexpr uint16 MaxInlineComponentTypes = 5;
+export constexpr uint16 MaxInlineComponentTypes = 6;
 export constexpr uint16 ComponentAlignment = 16;
 
 export struct SceneComponent
@@ -143,6 +143,37 @@ export struct AnimatorComponent
     void deserialize(const AssetNode&) {}
 };
 
+// References a visual script (.scr) the entity runs each frame. The Script library compiles the file on
+// demand and ticks it with this entity as `self`, so the script's Get/Set Entity nodes read and write
+// this entity's fields. Holds no execution state itself (Entity must not depend on the Script library).
+export struct ScriptComponent
+{
+    static constexpr EComponentID getId() { return EComponentID_Script; }
+
+    std::string scriptPath;   // path to the .scr (relative to Assets/, or empty for none)
+    bool enabled = true;
+
+    struct SpawnInfo
+    {
+        std::string scriptPath;
+        bool enabled = true;
+    };
+
+    void spawn(Entity&, const SpawnInfo& info, const Transform&) { scriptPath = info.scriptPath; enabled = info.enabled; }
+    void destroy(Entity&, const SpawnInfo&) {}
+
+    void serialize(AssetNode& out) const
+    {
+        if (!scriptPath.empty()) out.set("Path", scriptPath);
+        if (!enabled)            out.set("Enabled", enabled);
+    }
+    void deserialize(const AssetNode& in)
+    {
+        if (const AssetNode* n = in.find("Path"))    scriptPath = n->asString();
+        if (const AssetNode* n = in.find("Enabled")) enabled = n->asBool();
+    }
+};
+
 export Transform composeTransform(const Transform& parent, const Transform& local);
 
 export const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity);
@@ -163,6 +194,7 @@ export constexpr const char* componentTypeName(EComponentID id)
     case EComponentID_Cull:   return "Cull";
     case EComponentID_Render: return "Render";
     case EComponentID_Animator: return "Animator";
+    case EComponentID_Script: return "Script";
     default:                  return "Unknown";
     }
 }
@@ -177,6 +209,7 @@ export namespace EntityComponentDetail
         alignUp(uint16(sizeof(CullingComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(RenderComponent)),  ComponentAlignment),
         alignUp(uint16(sizeof(AnimatorComponent)), ComponentAlignment),
+        alignUp(uint16(sizeof(ScriptComponent)),  ComponentAlignment),
     };
 
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);

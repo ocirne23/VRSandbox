@@ -75,9 +75,9 @@ int main()
     if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
         anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
 
-    const std::string scriptPath = "Scripts/Graph.cpp"; // the visual-script graph (authored in the Script panel)
+    std::string currentScriptPath = "Scripts/Graph.scr"; // the visual-script graph last compiled (F6 reloads it)
     ScriptHost scriptHost;
-    scriptHost.reload(scriptPath); // compile + load the visual script DLL (F6 hot-reloads)
+    scriptHost.reload(currentScriptPath); // compile + load the visual script DLL
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
@@ -90,7 +90,7 @@ int main()
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                scriptHost.reload(scriptPath);          // recompile + hot-swap the visual script
+                scriptHost.reload(currentScriptPath);   // recompile + hot-swap the current visual script
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
                     anim->stateMachine.setTrigger("attack"); // F: one-shot attack (returns to locomotion)
@@ -197,7 +197,10 @@ int main()
         cameraController.update(deltaSec);
         ui.update(entities, deltaSec);
         for (const std::string& reloadPath : ui.takeScriptReloadRequests()) // Script panel "Compile & Run"
+        {
+            currentScriptPath = reloadPath; // F6 now reloads this one
             scriptHost.reload(reloadPath);
+        }
         renderer.setViewportRect(ui.getViewportRect());
 
         Camera camera;
@@ -247,7 +250,8 @@ int main()
 
         const Frustum& frustum = renderer.beginFrame(camera);
 
-        scriptHost.tick((float)deltaSec); // after beginFrame so per-frame submissions (lights/sun) land this frame
+        scriptHost.tick((float)deltaSec); // global/panel test script (self == null)
+        scriptHost.tickEntities(entities, (float)deltaSec); // per-entity scripts (modify transforms before render)
 
         for (const EntityPtr& entity : entities)
             entity->renderTree(renderer, Transform(), (float)deltaSec);

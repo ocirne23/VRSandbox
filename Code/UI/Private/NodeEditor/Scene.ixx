@@ -23,10 +23,13 @@ public:
 
     void newGraph();                                  // reset to a minimal default graph
     bool loadFromFile(const std::string& path);       // rebuild graph from the //@graph metadata
-    bool saveToFile(const std::string& path);         // write generated .cpp (code + metadata)
+    bool saveToFile(const std::string& path);         // write generated source (code + metadata)
     std::string generateCpp();                        // node graph -> C++ source
 
     const std::string& scriptPath() const { return m_scriptPath; }
+    void setScriptPath(const std::string& path) { m_scriptPath = path; }
+    bool open(const std::string& path) { setScriptPath(path); return loadFromFile(path); } // load + make current
+    bool save() { return saveToFile(m_scriptPath); }                                       // write the current file
 
 private:
 
@@ -44,7 +47,7 @@ private:
 
     bool m_firstFrame = true;
     uint64_t m_idCounter = 1;
-    std::string m_scriptPath = "Scripts/Graph.cpp";
+    std::string m_scriptPath = "Scripts/Graph.scr";
     ImVec2 m_pendingAddPos = ImVec2(0.0f, 0.0f);
 };
 

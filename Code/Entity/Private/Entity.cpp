@@ -103,6 +103,13 @@ void Entity::createComponent(EComponentID id, uint16 componentOffset, const void
         ac->spawn(*this, *static_cast<const AnimatorComponent::SpawnInfo*>(info), base);
         break;
     }
+    case EComponentID_Script:
+    {
+        ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        new (scr) ScriptComponent();
+        scr->spawn(*this, *static_cast<const ScriptComponent::SpawnInfo*>(info), base);
+        break;
+    }
     default:
         __debugbreak();
     }
@@ -133,6 +140,13 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
         ac->~AnimatorComponent();
         break;
     }
+    case EComponentID_Script:
+    {
+        ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        scr->destroy(*this, *static_cast<const ScriptComponent::SpawnInfo*>(info));
+        scr->~ScriptComponent();
+        break;
+    }
     default:
         __debugbreak();
     }
@@ -147,6 +161,7 @@ void Entity::serializeComponent(EComponentID id, AssetNode& out)
     case EComponentID_Cull:   getComponent<CullingComponent>(this)->serialize(out);  break;
     case EComponentID_Render: getComponent<RenderComponent>(this)->serialize(out);   break;
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->serialize(out); break;
+    case EComponentID_Script: getComponent<ScriptComponent>(this)->serialize(out);   break;
     default: break;
     }
 }
@@ -160,6 +175,7 @@ void Entity::deserializeComponent(EComponentID id, const AssetNode& in)
     case EComponentID_Cull:   getComponent<CullingComponent>(this)->deserialize(in);  break;
     case EComponentID_Render: getComponent<RenderComponent>(this)->deserialize(in);   break;
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->deserialize(in); break;
+    case EComponentID_Script: getComponent<ScriptComponent>(this)->deserialize(in);   break;
     default: break;
     }
 }

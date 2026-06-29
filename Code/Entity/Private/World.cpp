@@ -371,6 +371,16 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 
+    static_assert(EComponentID_Script == 5);
+    if (const AssetNode* scriptNode = findComponentNode(node, "Script"))
+    {
+        auto info = std::make_shared<ScriptComponent::SpawnInfo>();
+        if (const AssetNode* n = scriptNode->find("Path"))    info->scriptPath = n->asString();
+        if (const AssetNode* n = scriptNode->find("Enabled")) info->enabled = n->asBool();
+        typeBits |= uint16(1 << EComponentID_Script);
+        tmpl.spawnInfos.emplace_back(std::move(info));
+    }
+
     tmpl.archetype = makeEntityArchetype(typeBits);
 }
 
@@ -462,8 +472,9 @@ EntityPtr World::createEmptyEntity(const std::string& name)
     if (!m_emptyTemplate)
     {
         m_emptyTemplate = std::make_shared<EntitySpawnTemplate>();
-        m_emptyTemplate->archetype = makeEntityArchetype(1 << EComponentID_Scene);
-        m_emptyTemplate->spawnInfos.push_back(std::make_shared<SceneComponent::SpawnInfo>());
+        m_emptyTemplate->archetype = makeEntityArchetype((1 << EComponentID_Scene) | (1 << EComponentID_Script));
+        m_emptyTemplate->spawnInfos.push_back(std::make_shared<SceneComponent::SpawnInfo>());  // id 0
+        m_emptyTemplate->spawnInfos.push_back(std::make_shared<ScriptComponent::SpawnInfo>()); // id 5 (ascending order)
         m_emptyTemplate->displayName = "Entity";
     }
     EntityPtr entity = Entity::create(*m_emptyTemplate, Transform());

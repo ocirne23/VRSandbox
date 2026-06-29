@@ -6,3 +6,5 @@ Prefab Character
 		SkinnedMesh CharacterMesh
 	Component Animator
 		Animator CharacterAnimator
+	Component Script
+		Path "Scripts/Character.scr"

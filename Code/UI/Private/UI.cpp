@@ -146,15 +146,37 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             m_scene.newGraph();
         ImGui::SameLine();
         if (ImGui::Button("Save"))
-            m_scene.saveToFile(m_scene.scriptPath());
+            m_scene.save();
+        ImGui::SameLine();
+        if (ImGui::Button("Save As..."))
+            ImGui::OpenPopup("Save Script As");
         ImGui::SameLine();
         if (ImGui::Button("Compile & Run"))
         {
-            m_scene.saveToFile(m_scene.scriptPath());
+            m_scene.save();
             m_scriptReloadRequests.push_back(m_scene.scriptPath());
         }
         ImGui::SameLine();
-        ImGui::TextDisabled("(right-click canvas to add nodes)");
+        ImGui::TextDisabled("%s  (right-click canvas to add nodes)",
+            std::filesystem::path(m_scene.scriptPath()).filename().string().c_str());
+
+        if (ImGui::BeginPopup("Save Script As"))
+        {
+            static char nameBuf[128] = "MyScript";
+            ImGui::TextUnformatted("File name (saved under Scripts/ as .scr):");
+            ImGui::SetNextItemWidth(220.0f);
+            const bool entered = ImGui::InputText("##saveas", nameBuf, sizeof(nameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::SameLine();
+            if ((ImGui::Button("Save##as") || entered) && nameBuf[0] != '\0')
+            {
+                std::string name = nameBuf;
+                if (!name.ends_with(".scr")) name += ".scr";
+                m_scene.setScriptPath("Scripts/" + name);
+                m_scene.save();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::BeginChild("ScriptCanvas", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_NoMove);
@@ -211,6 +233,16 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         ImGui::Begin("Content");
         m_assetBrowser.render();
         ImGui::End();
+
+        // Route .scr file actions from the asset browser into the Script editor.
+        if (std::string openPath = m_assetBrowser.takeScriptOpenRequest(); !openPath.empty())
+            m_scene.open(openPath);
+        if (std::string createPath = m_assetBrowser.takeScriptCreateRequest(); !createPath.empty())
+        {
+            m_scene.newGraph();
+            m_scene.setScriptPath(createPath);
+            m_scene.save();
+        }
     }
 
     {

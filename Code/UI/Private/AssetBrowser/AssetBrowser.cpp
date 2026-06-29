@@ -1,4 +1,4 @@
-﻿module UI.AssetBrowser;
+module UI.AssetBrowser;
 
 import Core.imgui;
 import Entity;
@@ -28,6 +28,11 @@ static bool isObjectContainer(const std::string& ext)
 	return ext == ".oc";
 }
 
+static bool isScriptFile(const std::string& ext)
+{
+	return ext == ".scr";
+}
+
 static bool isSpawnableFile(const std::filesystem::path& p)
 {
 	return p.extension() == ".pre";
@@ -42,6 +47,7 @@ static const char* fileIcon(const std::filesystem::path& p)
 	if (isShaderFile(ext))                 return "[Shd]";
 	if (isPrefabFile(ext))                 return "[Pre]";
 	if (isObjectContainer(ext))            return "[OC]";
+	if (isScriptFile(ext))                 return "[Scr]";
 	return "[Fil]";
 }
 
@@ -54,18 +60,21 @@ static ImVec4 fileColor(const std::filesystem::path& p)
 	if (isShaderFile(ext))                  return ImVec4(1.0f, 0.6f,  0.3f, 1.0f);   // orange
 	if (isPrefabFile(ext))                  return ImVec4(0.9f, 0.5f,  1.0f, 1.0f);   // purple
 	if (isObjectContainer(ext))             return ImVec4(0.5f, 1.0f,  0.9f, 1.0f);   // light teal
+	if (isScriptFile(ext))                  return ImVec4(0.5f, 1.0f,  0.6f, 1.0f);   // script green
 	return ImVec4(0.85f, 0.85f, 0.85f, 1.0f);                                         // grey
 }
 
 static void assetDragSource(const std::filesystem::path& p)
 {
-	if (!isSpawnableFile(p))
+	const bool spawnable = isSpawnableFile(p);
+	const bool script = p.extension() == ".scr";
+	if (!spawnable && !script)
 		return;
 	if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
 	{
 		const std::string path = p.string();
-		ImGui::SetDragDropPayload("ASSET_FILE", path.c_str(), path.size() + 1);
-		ImGui::Text("Spawn %s", p.filename().string().c_str());
+		ImGui::SetDragDropPayload(spawnable ? "ASSET_FILE" : "SCRIPT_FILE", path.c_str(), path.size() + 1);
+		ImGui::Text(spawnable ? "Spawn %s" : "Assign %s", p.filename().string().c_str());
 		ImGui::EndDragDropSource();
 	}
 }
@@ -139,10 +148,12 @@ void AssetBrowser::render()
 	else
 		renderContentGrid();
 	acceptPrefabDrop();
+	renderNewAssetContextMenu();
 	ImGui::EndChild();
 
 	renderOverwritePopup();
 	renderCyclePopup();
+	renderRenamePopup();
 }
 
 void AssetBrowser::queueSavePrefab(Entity* root, const std::filesystem::path& path)
@@ -412,6 +423,8 @@ void AssetBrowser::renderContentGrid()
 			{
 				if (entry.is_directory())
 					navigateTo(p);
+				else if (isScriptFile(p.extension().string()))
+					m_scriptOpenRequest = p.string();
 			}
 
 			renderContextMenu(p);
@@ -489,7 +502,7 @@ void AssetBrowser::renderContentList()
 			assetDragSource(p);
 
 			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-				if (entry.is_directory()) navigateTo(p);
+				if (entry.is_directory()) navigateTo(p); else if (isScriptFile(p.extension().string())) m_scriptOpenRequest = p.string();
 
 			renderContextMenu(p);
 
@@ -540,6 +553,15 @@ void AssetBrowser::renderContextMenu(const std::filesystem::path& p)
 	if (ImGui::MenuItem("Copy filename"))
 		ImGui::SetClipboardText(p.filename().string().c_str());
 
+	if (ImGui::MenuItem("Rename"))
+	{
+		m_renameTarget = p;
+		const std::string fname = p.filename().string();
+		const size_t n = std::min(fname.size(), sizeof(m_renameBuf) - 1);
+		for (size_t i = 0; i < sizeof(m_renameBuf); ++i) m_renameBuf[i] = i < n ? fname[i] : '\0';
+		m_openRenamePopup = true;
+	}
+
 	ImGui::Separator();
 
 #if defined(_WIN32)
@@ -549,6 +571,13 @@ void AssetBrowser::renderContextMenu(const std::filesystem::path& p)
 		std::system(cmd.c_str());
 	}
 #endif
+
+	if (isScriptFile(p.extension().string()))
+	{
+		ImGui::Separator();
+		if (ImGui::MenuItem("Open Script"))
+			m_scriptOpenRequest = p.string();
+	}
 
 	if (std::filesystem::is_directory(p))
 	{
@@ -575,4 +604,80 @@ void AssetBrowser::navigateUp()
 {
 	if (m_currentPath != m_rootPath && m_currentPath.has_parent_path())
 		navigateTo(m_currentPath.parent_path());
+}
+
+void AssetBrowser::renderNewAssetContextMenu()
+{
+	if (!ImGui::BeginPopupContextWindow("##ab_winctx", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+		return;
+	if (ImGui::MenuItem("New Script"))
+		m_scriptCreateRequest = makeUniqueScriptPath().string();
+	ImGui::EndPopup();
+}
+
+std::filesystem::path AssetBrowser::makeUniqueScriptPath() const
+{
+	std::error_code ec;
+	std::filesystem::path candidate = m_currentPath / "NewScript.scr";
+	if (!std::filesystem::exists(candidate, ec))
+		return candidate;
+	for (int i = 1; i < 1000; ++i)
+	{
+		candidate = m_currentPath / ("NewScript" + std::to_string(i) + ".scr");
+		if (!std::filesystem::exists(candidate, ec))
+			return candidate;
+	}
+	return candidate;
+}
+
+void AssetBrowser::renderRenamePopup()
+{
+	static const char* popupId = "Rename##ab_rename";
+	if (m_openRenamePopup)
+	{
+		ImGui::OpenPopup(popupId);
+		m_openRenamePopup = false;
+	}
+
+	const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+	if (!ImGui::BeginPopupModal(popupId, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		return;
+
+	ImGui::TextUnformatted("New name:");
+	ImGui::SetNextItemWidth(280.0f);
+	const bool entered = ImGui::InputText("##ab_rename_input", m_renameBuf, sizeof(m_renameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+
+	const bool hasName = m_renameBuf[0] != '\0';
+	std::error_code ec;
+	std::filesystem::path dest;
+	bool conflict = false;
+	if (hasName)
+	{
+		dest = m_renameTarget.parent_path() / m_renameBuf;
+		conflict = dest != m_renameTarget && std::filesystem::exists(dest, ec);
+	}
+	if (conflict)
+		ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "A file with that name already exists.");
+
+	ImGui::Separator();
+	const bool confirm = ImGui::Button("Rename", ImVec2(120.0f, 0.0f)) || entered;
+	ImGui::SameLine();
+	const bool cancel = ImGui::Button("Cancel", ImVec2(120.0f, 0.0f));
+
+	if (confirm && hasName && !conflict)
+	{
+		if (dest != m_renameTarget)
+		{
+			std::filesystem::rename(m_renameTarget, dest, ec);
+			if (!ec)
+				m_selectedPath = dest;
+		}
+		ImGui::CloseCurrentPopup();
+	}
+	if (cancel)
+		ImGui::CloseCurrentPopup();
+
+	ImGui::EndPopup();
 }

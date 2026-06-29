@@ -120,6 +120,28 @@ namespace
                 i = j;
             }
             else if (c == '@') { appendEnumToken(out, node); ++i; }
+            // ?k{block}: emit the block (with $-substitution) only if input pin k is connected.
+            else if (c == '?' && i + 1 < tmpl.size() && tmpl[i + 1] >= '0' && tmpl[i + 1] <= '9')
+            {
+                int idx = 0; size_t j = i + 1;
+                while (j < tmpl.size() && tmpl[j] >= '0' && tmpl[j] <= '9') { idx = idx * 10 + (tmpl[j] - '0'); ++j; }
+                if (j < tmpl.size() && tmpl[j] == '{')
+                {
+                    int depth = 1; size_t k = j + 1;
+                    for (; k < tmpl.size() && depth > 0; ++k)
+                    {
+                        if (tmpl[k] == '{') ++depth;
+                        else if (tmpl[k] == '}') { if (--depth == 0) break; }
+                    }
+                    const std::string block = tmpl.substr(j + 1, k - (j + 1));
+                    const auto& inputs = node->getInputPins();
+                    const Pin* in = (idx >= 0 && idx < (int)inputs.size()) ? inputs[idx].get() : nullptr;
+                    if (in && sourceOfInput(links, in))
+                        out += substituteExec(block, node, links, execStack);
+                    i = (k < tmpl.size()) ? k + 1 : k;
+                }
+                else { out += c; ++i; }
+            }
             else { out += c; ++i; }
         }
         return out;
@@ -136,13 +158,21 @@ namespace
         if (!def || dataStack.count(node))
             return "0";
 
-        // A pure data node emits `emit`; an exec node that also produces a value emits `dataEmit`.
-        const std::string& tmpl = def->isExec ? def->dataEmit : def->emit;
-        if (tmpl.empty())
+        // Prefer a per-output expression (multi-output nodes like Get Entity); otherwise a pure data node
+        // emits `emit`, and an exec node that also produces a value emits `dataEmit`.
+        const int outIdx = indexOfPin(node->getOutputPins(), src);
+        const std::string* tmpl = nullptr;
+        if (outIdx >= 0 && outIdx < (int)def->outputs.size() && !def->outputs[outIdx].expr.empty())
+            tmpl = &def->outputs[outIdx].expr;
+        else if (def->isExec)
+            tmpl = def->dataEmit.empty() ? nullptr : &def->dataEmit;
+        else
+            tmpl = def->emit.empty() ? nullptr : &def->emit;
+        if (!tmpl)
             return "0";
 
         dataStack.insert(node);
-        std::string result = substituteData(tmpl, node, links, dataStack);
+        std::string result = substituteData(*tmpl, node, links, dataStack);
         dataStack.erase(node);
         return result;
     }

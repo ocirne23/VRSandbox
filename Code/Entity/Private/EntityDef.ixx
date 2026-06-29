@@ -21,8 +21,7 @@ export enum EComponentID : uint16
     EComponentID_Cull     = 2,
     EComponentID_Render   = 3,
     EComponentID_Animator = 4,
-
-    EComponentID_GameLogic = 5,
+    EComponentID_Script   = 5,
 };
 
 export class Entity
