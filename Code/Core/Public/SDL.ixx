@@ -143,3 +143,14 @@ export constexpr uint32 SDL_INIT_GAMEPAD    = 0x00002000u; /**< `SDL_INIT_GAMEPA
 export constexpr uint32 SDL_INIT_EVENTS     = 0x00004000u;
 export constexpr uint32 SDL_INIT_SENSOR     = 0x00008000u; /**< `SDL_INIT_SENSOR` implies `SDL_INIT_EVENTS` */
 export constexpr uint32 SDL_INIT_CAMERA     = 0x00010000u; /**< `SDL_INIT_CAMERA` implies `SDL_INIT_EVENTS` */
+
+// Maps a human-readable key name (e.g. "Space", "A", "Left Shift", "Escape") to its scancode value.
+// Returns SDL_SCANCODE_UNKNOWN (0) if the name is empty or unrecognised. Names match SDL_GetScancodeName().
+// Returns int rather than SDL_Scancode so it is callable from modules that forward-declare SDL_Scancode
+// (e.g. Input) without the two enum declarations colliding across the module boundary.
+export int scancodeFromName(const char* name)
+{
+    if (name == nullptr || name[0] == '\0')
+        return SDL_SCANCODE_UNKNOWN;
+    return SDL_GetScancodeFromName(name);
+}

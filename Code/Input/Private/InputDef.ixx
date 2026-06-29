@@ -75,6 +75,7 @@ public:
     void setMouseCaptured(bool captured)       { m_mouseCaptured = captured; } // a tool (e.g. gizmo) owns the left-drag
 
     bool isKeyDown(SDL_Scancode key) const { return m_pKeyStates[key]; }
+    bool isKeyDownByName(const char* keyName) const; // resolves the name via Core.SDL scancodeFromName
     bool isMouseInWindow() const           { return m_mouseInWindow; }
     bool isWindowHasFocus() const          { return m_windowHasFocus; }
     bool wantMouseGrab() const             { return m_wantMousieGrab; }

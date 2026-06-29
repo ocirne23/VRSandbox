@@ -140,14 +140,29 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
     }
 
     {
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-
         ImGui::Begin("Script");
-        if (ImGui::IsWindowFocused())
-            m_scene.update(deltaSec);
-        ImGui::End();
 
+        if (ImGui::Button("New"))
+            m_scene.newGraph();
+        ImGui::SameLine();
+        if (ImGui::Button("Save"))
+            m_scene.saveToFile(m_scene.scriptPath());
+        ImGui::SameLine();
+        if (ImGui::Button("Compile & Run"))
+        {
+            m_scene.saveToFile(m_scene.scriptPath());
+            m_scriptReloadRequests.push_back(m_scene.scriptPath());
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(right-click canvas to add nodes)");
+
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::BeginChild("ScriptCanvas", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_NoMove);
+        m_scene.update(deltaSec);
+        ImGui::EndChild();
         ImGui::PopStyleVar(1);
+
+        ImGui::End();
     }
 
     {

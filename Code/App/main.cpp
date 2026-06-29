@@ -75,7 +75,7 @@ int main()
     if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
         anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
 
-    const std::string scriptPath = "Scripts/Test.cpp";
+    const std::string scriptPath = "Scripts/Graph.cpp"; // the visual-script graph (authored in the Script panel)
     ScriptHost scriptHost;
     scriptHost.reload(scriptPath); // compile + load the visual script DLL (F6 hot-reloads)
 
@@ -196,6 +196,8 @@ int main()
         input.update(deltaSec);
         cameraController.update(deltaSec);
         ui.update(entities, deltaSec);
+        for (const std::string& reloadPath : ui.takeScriptReloadRequests()) // Script panel "Compile & Run"
+            scriptHost.reload(reloadPath);
         renderer.setViewportRect(ui.getViewportRect());
 
         Camera camera;

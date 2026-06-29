@@ -19,7 +19,7 @@ typedef struct ScriptContext
     void  (*log)(const char* message);
     float (*deltaSeconds)(void);
     float (*elapsedSeconds)(void);
-    int   (*isKeyDown)(int sdlScancode);
+    int   (*isKeyDown)(const char* keyName); // e.g. "Space", "A", "Left Shift"
     void  (*spawnPointLight)(ScriptVec3 position, float range, ScriptVec3 color, float intensity);
     void  (*setSun)(ScriptVec3 direction, ScriptVec3 color, float intensity);
 } ScriptContext;

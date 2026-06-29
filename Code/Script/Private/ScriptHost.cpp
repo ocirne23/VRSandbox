@@ -22,7 +22,7 @@ namespace
     void thunk_log(const char* message) { Log::info(message ? message : ""); }
     float thunk_deltaSeconds(void) { return (float)Globals::time.getDeltaSec(); }
     float thunk_elapsedSeconds(void) { return (float)Globals::time.getElapsedSec(); }
-    int thunk_isKeyDown(int sdlScancode) { return Globals::input.isKeyDown((SDL_Scancode)sdlScancode) ? 1 : 0; }
+    int thunk_isKeyDown(const char* keyName) { return Globals::input.isKeyDownByName(keyName) ? 1 : 0; }
 
     void thunk_spawnPointLight(ScriptVec3 position, float range, ScriptVec3 color, float intensity)
     {

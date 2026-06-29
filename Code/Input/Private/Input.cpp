@@ -14,6 +14,11 @@ bool Input::initialize()
     return true;
 }
 
+bool Input::isKeyDownByName(const char* keyName) const
+{
+    return m_pKeyStates != nullptr && m_pKeyStates[scancodeFromName(keyName)];
+}
+
 void Input::update_MT(double deltaSec)
 {
     SDL_PumpEvents();

@@ -49,6 +49,14 @@ public:
         return changes;
     }
 
+    // Script paths the Script panel asked the host to (re)compile + hot-reload this frame.
+    std::vector<std::string> takeScriptReloadRequests()
+    {
+        std::vector<std::string> requests = std::move(m_scriptReloadRequests);
+        m_scriptReloadRequests.clear();
+        return requests;
+    }
+
 private:
 
     bool m_isViewportGrabbed = false;
@@ -56,6 +64,7 @@ private:
     bool m_hasViewportGainedFocus = false;
     Rect m_viewportRect = Rect();
     std::vector<EntityChange> m_viewportChanges;   // assets dropped onto the viewport, drained via takeEntityChanges
+    std::vector<std::string> m_scriptReloadRequests; // Script panel compile requests, drained via takeScriptReloadRequests
 
     ed::EditorContext* m_nodeEditorContext = nullptr;
 
