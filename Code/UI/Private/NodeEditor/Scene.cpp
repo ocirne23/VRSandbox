@@ -411,7 +411,6 @@ std::string Scene::generateCpp()
 
     std::string code;
     code += "#include \"ScriptAPI.h\"\n";
-    code += "#include <cmath>\n\n";
     code += "SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt)\n{\n";
 
     if (Node* entry = findEntry())

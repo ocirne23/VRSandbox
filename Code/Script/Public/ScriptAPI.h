@@ -7,12 +7,35 @@
 // and makes CRT mismatches harmless. Vec3 is glm::vec3 (header-only, links nothing) so graph math nodes can
 // use glm operators/functions directly; both sides agree on its 12-byte layout, so the ABI is stable.
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <cmath>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+// Entity handle. In scripts (compiled with /DSCRIPT_BUILD) this is a layout-compatible MIRROR of the engine
+// Entity (Code/Entity/Private/EntityDef.ixx), so script code can read/write self->pos / self->scale /
+// self->rot / self->parent directly instead of only through the ctx->entity* calls.
+//
+// Only the members BEFORE the engine Entity's `std::string displayName` are mirrored: std::string has a
+// different layout under the engine's debug CRT than the script's /MD, which would misalign everything past
+// it. Reach the rest (name, enabled, children, ...) through the ctx->entity* functions. KEEP THESE FIELDS IN
+// SYNC with EntityDef.ixx — the engine static_asserts the offsets (ScriptContext.cpp) so drift fails the build.
+//
+// Host-side this stays a forward declaration: the real engine Entity is the actual type; defining the mirror
+// here would clash with it.
+#ifdef SCRIPT_BUILD
+struct Entity
+{
+    glm::vec3 pos;    // local position
+    float     scale;
+    glm::quat rot;
+    Entity*   parent; // null for a root entity
+};
+#else
 class Entity;
+#endif
 
 // Services the host exposes to scripts. The host fills these in; scripts only call them.
 typedef struct ScriptContext

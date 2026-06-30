@@ -51,12 +51,26 @@ struct CachedScript
     ScriptModule entries;
     void*        module = nullptr; // HMODULE
     std::string  dllPath;
+    std::string  pdbPath;          // program PDB of the loaded build
+    int          pdbSerial = -1;   // monotonic build counter; next build uses pdbSerial+1 for a fresh PDB name
 };
 
 struct ScriptHost::Impl
 {
     std::string vcvarsPath;                                 // cached after first lookup
     std::unordered_map<std::string, CachedScript> scripts;  // keyed by canonical source path
+    std::vector<std::string> pendingPdbDeletes;             // superseded PDBs the debugger still holds; retried later
+
+    // Try to delete every superseded PDB; drop the ones now gone. The VS debugger keeps PDBs cached after a
+    // module unloads, so a just-superseded PDB often can't be deleted until a later build/shutdown.
+    void sweepPendingPdbs()
+    {
+        std::erase_if(pendingPdbDeletes, [](const std::string& p)
+        {
+            std::error_code e; fs::remove(p, e);
+            return !fs::exists(p, e); // removed (or already gone) -> stop tracking it
+        });
+    }
 
     // Locates vcvars64.bat via vswhere (once, then cached). Empty string on failure.
     const std::string& findVcvars()
@@ -100,7 +114,7 @@ struct ScriptHost::Impl
         return vcvarsPath;
     }
 
-    bool compile(const std::string& sourcePath, std::string& outDll, std::string& outErrors)
+    bool compile(const std::string& sourcePath, const fs::path& pdbPath, std::string& outDll, std::string& outErrors)
     {
         const std::string& vcvars = findVcvars();
         if (vcvars.empty()) { outErrors = "MSVC toolchain not found (see log)"; return false; }
@@ -116,22 +130,30 @@ struct ScriptHost::Impl
         // Build to a temp "<stem>.building.dll": the live "<stem>.dll" is file-locked while loaded, so we
         // can't overwrite it directly. getOrLoad frees the old module then renames this temp over it on
         // success, leaving exactly one DLL per script.
-        const std::string base = fs::path(sourcePath).stem().string() + ".building";
+        const std::string stem = fs::path(sourcePath).stem().string();
+        const std::string base = stem + ".building";
         const fs::path dllPath = outDir / (base + ".dll");
         const fs::path objPath = outDir / (base + ".obj");
+        const fs::path compPdb = outDir / (base + ".pdb");  // compiler PDB (temp, discarded)
         const fs::path logPath = outDir / "build.log";
         const fs::path batPath = outDir / "_build.bat";
         const fs::path srcAbs = fs::absolute(sourcePath);
 
+        // /Zi + /Od + /link /DEBUG produce a usable PDB (set breakpoints in the .scr, step, inspect locals).
+        // /Od (no optimization) is deliberate: scripts are tiny, and it keeps locals/line info intact. The
+        // linker writes the PDB to the caller-chosen ping-pong name (absolute path embedded in the DLL), so
+        // a rebuild never targets the PDB the debugger is currently holding open (avoids LNK1201).
         std::string bat;
         bat += "@echo off\r\n";
         bat += "call \"" + vcvars + "\" >nul 2>&1\r\n";
-        bat += "cl /nologo /LD /std:c++20 /MD /O2 /EHsc /arch:AVX2 /wd4100"; // /wd4100: allow unused params (ctx/self/dt)
+        bat += "cl /nologo /LD /std:c++20 /MD /Od /Zi /EHsc /arch:AVX2 /wd4100 /DSCRIPT_BUILD"; // /wd4100: unused params; /DSCRIPT_BUILD: Entity is the layout mirror
         bat += " /I\"" + includeDir.string() + "\"";
         bat += " /I\"" + glmInclude.string() + "\""; // ScriptAPI.h includes <glm/glm.hpp> (Vec3 = glm::vec3)
         bat += " /Fo\"" + objPath.string() + "\"";
+        bat += " /Fd\"" + compPdb.string() + "\"";
         bat += " /Fe\"" + dllPath.string() + "\"";
         bat += " /Tp\"" + srcAbs.string() + "\""; // /Tp: compile as C++ regardless of the .scr extension
+        bat += " /link /DEBUG /INCREMENTAL:NO /PDB:\"" + pdbPath.string() + "\"";
         bat += " > \"" + logPath.string() + "\" 2>&1\r\n";
         {
             std::ofstream f(batPath, std::ios::out | std::ios::binary | std::ios::trunc);
@@ -141,8 +163,9 @@ struct ScriptHost::Impl
 
         const int code = runProcess("cmd.exe /c \"" + batPath.string() + "\"");
 
-        // cl drops <base>.obj and the linker <base>.lib/.exp next to the DLL; clear those intermediates.
-        for (const char* ext : { ".obj", ".lib", ".exp" })
+        // cl drops <base>.obj/.pdb and the linker <base>.lib/.exp next to the DLL; clear those intermediates.
+        // The kept artifacts are "<stem>.dll" (after rename) and "<stem>.pdb".
+        for (const char* ext : { ".obj", ".lib", ".exp", ".pdb" })
         {
             std::error_code e; fs::remove(outDir / (base + ext), e);
         }
@@ -207,8 +230,16 @@ struct ScriptHost::Impl
         }
 
         it = scripts.find(key);
+
+        // Each build writes a FRESH, never-reused program PDB "<stem>.<serial>.pdb". The VS debugger caches
+        // PDBs even after a module unloads, so reusing a name (even ping-ponging two) eventually collides
+        // with a held handle (LNK1201). A monotonic serial guarantees the linker's target is always new.
+        const int serial = (it != scripts.end()) ? it->second.pdbSerial + 1 : 0;
+        const fs::path pdbPath = scriptDllPath(path).parent_path()
+            / (fs::path(path).stem().string() + "." + std::to_string(serial) + ".pdb");
+
         std::string tempDll, errors;
-        if (!compile(path, tempDll, errors))
+        if (!compile(path, pdbPath, tempDll, errors))
         {
             Log::error("Script compile failed (" + path + "):\n" + errors);
             if (it != scripts.end()) return &it->second.entries;             // keep previous build
@@ -246,6 +277,12 @@ struct ScriptHost::Impl
             return &slot.entries;
         }
 
+        if (!slot.pdbPath.empty() && slot.pdbPath != pdbPath.string())
+            pendingPdbDeletes.push_back(slot.pdbPath); // supersede the old PDB; reclaim once the debugger frees it
+        slot.pdbPath = pdbPath.string();
+        slot.pdbSerial = serial;
+        sweepPendingPdbs();
+
         Log::info("Script loaded: " + path);
         return &slot.entries;
     }
@@ -256,8 +293,10 @@ struct ScriptHost::Impl
         {
             if (script.module) FreeLibrary((HMODULE)script.module);
             if (!script.dllPath.empty()) { std::error_code ec; fs::remove(script.dllPath, ec); }
+            if (!script.pdbPath.empty()) { std::error_code ec; fs::remove(script.pdbPath, ec); }
         }
         scripts.clear();
+        sweepPendingPdbs();
     }
 };
 

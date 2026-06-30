@@ -1,5 +1,6 @@
 module;
 
+#include <cstddef>
 #include "ScriptAPI.h"
 
 module Entity;
@@ -19,6 +20,13 @@ import :Component;
 // The Script library is a pure compiler/loader; this file owns the ScriptContext and all the thunks, so
 // the renderer / SDL / animation dependencies live here in Entity (which already imports them) rather
 // than leaking into Script.
+
+// Scripts use a layout mirror of Entity (ScriptAPI.h, /DSCRIPT_BUILD) to read self->pos etc. directly. These
+// assert the real engine layout matches that mirror — if Entity's leading members move, update both.
+static_assert(offsetof(Entity, pos)    == 0,  "ScriptAPI.h Entity mirror out of sync: pos");
+static_assert(offsetof(Entity, scale)  == 12, "ScriptAPI.h Entity mirror out of sync: scale");
+static_assert(offsetof(Entity, rot)    == 16, "ScriptAPI.h Entity mirror out of sync: rot");
+static_assert(offsetof(Entity, parent) == 32, "ScriptAPI.h Entity mirror out of sync: parent");
 
 namespace
 {
