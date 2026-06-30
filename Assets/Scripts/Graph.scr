@@ -1,47 +1,31 @@
 #include "ScriptAPI.h"
 SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt)
 {
-    if ((ctx->isKeyDown("V") != 0))
+    float f3 = 0.0f;
+    for (int i1 = 0; i1 < 10; ++i1)
     {
-    ctx->spawnEntity("Entities/character.pre", glm::vec3{ 0.0f, 0.0f, 0.0f });
+        (f3 += 1.0f)
     }
-    else
-    {
-    }
-    for (int i4 = 0; i4 < 10; ++i4)
-    {
-    ctx->logf("%f", (((float)i4) + 0.42f));
-    }
+    ctx->logf("%f", f3);
 }
 
 //@graph 1
-//@node 0 EventUpdate 40 60
-//@node 1 SpawnEntity 688 196
-//@node 2 IsKeyDown 16 343
-//@node 3 Branch 342 304
-//@node 4 ForLoop 624 416
-//@node 5 Cast 1040 570
-//@node 6 Printf 1527 516
-//@node 7 Add 1303 563
-//@node 8 ConstFloat 912 679
-//@pin 1 1 "Entities/character.pre"
-//@pin 1 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
-//@pin 2 0 "V"
-//@pin 3 1 false
-//@pin 4 1 10
-//@pin 5 0 0.0f
-//@pin 6 1 "%f"
-//@pin 6 2 0.0f
-//@pin 7 0 0.0f
-//@pin 7 1 0.0f
-//@pin 8 0 0.42f
-//@enum 5 1
-//@link 2 0 3 1
-//@link 3 0 1 0
-//@link 0 0 3 0
-//@link 3 2 4 0
-//@link 4 0 6 0
-//@link 4 2 5 0
-//@link 8 0 7 1
-//@link 5 0 7 0
-//@link 7 0 6 2
+//@node 0 EventUpdate 436 128
+//@node 1 ForLoop 582 128
+//@node 2 Increment 1072 112
+//@node 3 Float 615 55
+//@node 4 Printf 1072 228
+//@node 5 ConstFloat 609 -92
+//@pin 1 1 10
+//@pin 2 1 0.0f
+//@pin 2 2 0.0f
+//@pin 3 0 0.0f
+//@pin 4 1 "%f"
+//@pin 4 2 0.0f
+//@pin 5 0 1.0f
+//@link 1 0 2 0
+//@link 1 1 4 0
+//@link 3 0 4 2
+//@link 0 0 1 0
+//@link 5 0 2 2
+//@link 3 0 2 1

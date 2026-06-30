@@ -37,12 +37,27 @@ namespace
         return -1;
     }
 
-    // Can these two pins be linked? Exec only joins exec; an unresolved wildcard accepts any value type;
-    // otherwise the concrete types must match.
+    // The static `expr` template of a node's output pin (empty if none). May carry a HOIST marker.
+    const std::string& outputExprOf(const Pin* outPin)
+    {
+        static const std::string empty;
+        const NodeDef* def = findNodeDef(outPin->node->getTypeId());
+        if (!def) return empty;
+        const int outIdx = indexOfPin(outPin->node->getOutputPins(), outPin);
+        return (outIdx >= 0 && outIdx < (int)def->outputs.size()) ? def->outputs[outIdx].expr : empty;
+    }
+
+    // Can these two pins be linked? Exec only joins exec; the output's read/write capability must cover what
+    // the input requires; an unresolved wildcard accepts any value type, otherwise the concrete types match.
     bool pinsCompatible(const Pin* input, const Pin* output)
     {
         if (input->dataType == EDataType::Exec || output->dataType == EDataType::Exec)
             return input->dataType == EDataType::Exec && output->dataType == EDataType::Exec;
+
+        // Mutability: e.g. a Writable input (writes to its source) can't take a read-only rvalue output.
+        if ((mutableBits(input->mutability) & ~mutableBits(output->mutability)) != 0)
+            return false;
+
         const bool inputWild = input->typeGroup != 0 && input->dataType == EDataType::Wildcard;
         const bool outputWild = output->typeGroup != 0 && output->dataType == EDataType::Wildcard;
         if (inputWild || outputWild)
@@ -65,6 +80,8 @@ namespace
     {
         const std::vector<std::unique_ptr<Link>>& links;
         int tempCounter = 0;
+        std::string         globalDecls;    // HOIST variable declarations, emitted once at the top of the function
+        std::set<const Pin*> globalDeclared; // pins already added to globalDecls (dedups multi-use variables)
     };
 
     std::string emitDataExpr(Codegen& cg, const Pin* inputPin, std::set<const Node*>& dataStack, const HoistMap& hoist);
@@ -172,18 +189,22 @@ namespace
             return "0";
 
         const int outIdx = indexOfPin(node->getOutputPins(), outPin);
-        const std::string* tmpl = nullptr;
+        std::string tmpl;
         if (outIdx >= 0 && outIdx < (int)def->outputs.size() && !def->outputs[outIdx].expr.empty())
-            tmpl = &def->outputs[outIdx].expr;
+        {
+            const std::string& e = def->outputs[outIdx].expr;
+            const auto hp = e.find(HOIST);
+            tmpl = (hp == std::string::npos) ? e : e.substr(hp + 1); // inline-expand only the reference part
+        }
         else if (def->isExec)
-            tmpl = def->dataEmit.empty() ? nullptr : &def->dataEmit;
+            tmpl = def->dataEmit;
         else
-            tmpl = def->emit.empty() ? nullptr : &def->emit;
-        if (!tmpl)
+            tmpl = def->emit;
+        if (tmpl.empty())
             return "0";
 
         dataStack.insert(node);
-        std::string result = substituteData(cg, *tmpl, node, dataStack, hoist);
+        std::string result = substituteData(cg, tmpl, node, dataStack, hoist);
         dataStack.erase(node);
         return result;
     }
@@ -226,7 +247,17 @@ namespace
                 declareHoist(cg, s, hoist, declared, decls);
         }
         std::set<const Node*> dataStack;
-        decls += "const auto " + hoist.at(outPin) + " = " + expandOutput(cg, outPin, dataStack, hoist) + ";\n";
+        const std::string& oexpr = outputExprOf(outPin);
+        const auto hp = oexpr.find(HOIST);
+        if (hp != std::string::npos)
+        {
+            // A variable declaration: emit it once at function scope (not before each consuming statement), so
+            // a variable used across sibling statements / inside and after a loop is declared a single time.
+            if (cg.globalDeclared.insert(outPin).second)
+                cg.globalDecls += substituteData(cg, oexpr.substr(0, hp), outPin->node, dataStack, hoist);
+        }
+        else
+            decls += "const auto " + hoist.at(outPin) + " = " + expandOutput(cg, outPin, dataStack, hoist) + ";\n";
     }
 
     std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack)
@@ -245,10 +276,21 @@ namespace
                 if (pin->dataType != EDataType::Exec)
                     countExpansions(cg, pin.get(), counts, path);
         }
+        // Hoist a data output into a local when it is expanded 2+ times (CSE), OR when its expr carries a
+        // HOIST marker (a forced standalone declaration, e.g. a Var node) — then the local is the reference part.
         HoistMap hoist;
         for (const auto& [pin, count] : counts)
-            if (count >= 2)
+        {
+            const std::string& oexpr = outputExprOf(pin);
+            const auto hp = oexpr.find(HOIST);
+            if (hp != std::string::npos)
+            {
+                std::set<const Node*> ds;
+                hoist[pin] = substituteData(cg, oexpr.substr(hp + 1), pin->node, ds, hoist); // reference, e.g. "f3"
+            }
+            else if (count >= 2)
                 hoist[pin] = "t" + std::to_string(cg.tempCounter++);
+        }
 
         std::string decls;
         {
@@ -259,6 +301,29 @@ namespace
 
         std::string out = decls + substituteExec(cg, def->emit, node, execStack, hoist);
         execStack.erase(node);
+        return out;
+    }
+
+    // Convert the indent-control markers emitted by block nodes into real leading whitespace: \x01 raises
+    // the indent level for subsequent lines, \x02 lowers it (the markers themselves are stripped). Each line
+    // is prefixed with one pad per active level, so nested Branch/ForLoop bodies step in correctly.
+    std::string applyIndent(const std::string& body, const char* pad)
+    {
+        std::string out;
+        int depth = 0;
+        bool atLineStart = true;
+        for (char c : body)
+        {
+            if (c == INDENT_UP)   { ++depth; continue; }
+            if (c == INDENT_DOWN) { if (depth > 0) --depth; continue; }
+            if (atLineStart && c != '\n')
+            {
+                for (int i = 0; i < depth; ++i) out += pad;
+                atLineStart = false;
+            }
+            out += c;
+            if (c == '\n') atLineStart = true;
+        }
         return out;
     }
 
@@ -367,7 +432,9 @@ void Scene::resolveNodeTypes(Node* node)
             if (pin.dataType == resolved) return;
             pin.dataType = resolved;
             pin.color = dataTypeColor(resolved);
-            pin.shape = resolved == EDataType::Exec ? EPinShape_Flow : EPinShape_Circle;
+            pin.shape = resolved == EDataType::Exec ? EPinShape_Flow
+                      : pin.mutability != EMutableType::Readable ? EPinShape_Square // keep writable pins square
+                      : EPinShape_Circle;
             if (pin.type == EPinType_Input && pin.numConnections == 0)
                 pin.defaultValue = defaultValueForType(resolved);
         };
@@ -422,7 +489,8 @@ std::string Scene::generateCpp()
     {
         Codegen cg{ m_links };
         std::set<const Node*> execStack;
-        const std::string body = emitExecChain(cg, entry, execStack);
+        const std::string chain = emitExecChain(cg, entry, execStack); // also collects cg.globalDecls
+        const std::string body = applyIndent(cg.globalDecls + chain, "    "); // variable decls first, at function scope
         if (!body.empty())
             code += indentLines(body, "    ");
     }
@@ -606,17 +674,65 @@ void Scene::update(double deltaSec)
     }
     if (ImGui::BeginPopup("AddNodePopup"))
     {
-        std::string currentCategory;
+        // Group node defs by category (first-seen order), then split the categories across two balanced
+        // columns so the menu doesn't grow into one very tall list.
+        struct Category { std::string name; std::vector<const NodeDef*> defs; };
+        std::vector<Category> categories;
         for (const NodeDef& def : nodeRegistry())
         {
-            if (def.category != currentCategory)
-            {
-                currentCategory = def.category;
-                ImGui::SeparatorText(def.category.c_str());
-            }
-            if (ImGui::MenuItem(def.displayName.c_str()))
-                addNodeOfType(def.typeId, m_pendingAddPos);
+            if (categories.empty() || categories.back().name != def.category)
+                categories.push_back({ def.category, {} });
+            categories.back().defs.push_back(&def);
         }
+
+        int totalRows = 0; // each category costs its items + one header row
+        for (const Category& c : categories) totalRows += (int)c.defs.size() + 1;
+        size_t split = categories.size();
+        for (size_t i = 0, running = 0; i < categories.size(); ++i)
+        {
+            running += categories[i].defs.size() + 1;
+            if ((int)running * 2 >= totalRows) { split = i + 1; break; }
+        }
+
+        // Fixed, content-derived column width. Without this the popup auto-resizes to its content while the
+        // full-width SeparatorText/MenuItems size to the (growing) window — a feedback loop that runs away.
+        float colWidth = 0.0f;
+        for (const Category& c : categories)
+        {
+            const float h = ImGui::CalcTextSize(c.name.c_str()).x;
+            if (h > colWidth) colWidth = h;
+            for (const NodeDef* def : c.defs)
+            {
+                const float w = ImGui::CalcTextSize(def->displayName.c_str()).x;
+                if (w > colWidth) colWidth = w;
+            }
+        }
+        const ImGuiStyle& style = ImGui::GetStyle();
+        colWidth += style.FramePadding.x * 2.0f + style.CellPadding.x * 2.0f + style.ItemSpacing.x + 6.0f;
+
+        auto renderRange = [&](size_t begin, size_t end)
+        {
+            for (size_t i = begin; i < end; ++i)
+            {
+                ImGui::SeparatorText(categories[i].name.c_str());
+                for (const NodeDef* def : categories[i].defs)
+                    if (ImGui::MenuItem(def->displayName.c_str()))
+                        addNodeOfType(def->typeId, m_pendingAddPos);
+            }
+        };
+
+        if (ImGui::BeginTable("##addnodecols", 2, ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_PadOuterX))
+        {
+            ImGui::TableSetupColumn("##a", ImGuiTableColumnFlags_WidthFixed, colWidth);
+            ImGui::TableSetupColumn("##b", ImGuiTableColumnFlags_WidthFixed, colWidth);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            renderRange(0, split);
+            ImGui::TableSetColumnIndex(1);
+            renderRange(split, categories.size());
+            ImGui::EndTable();
+        }
+
         ImGui::EndPopup();
     }
     ed::Resume();

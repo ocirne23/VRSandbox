@@ -15,15 +15,24 @@ Node& Node::initFromDef(ImVec2 initialPos, const NodeDef& def)
 {
     initialize(initialPos, def.displayName, ENodeStyle_Full, 0xFF333333);
     m_typeId = def.typeId;
+    // Writable pins (a value you can assign to) draw as a square to set them apart from read-only circles.
+    auto applyMutability = [](Pin& pin, EMutableType m)
+    {
+        pin.mutability = m;
+        if (m != EMutableType::Readable && pin.shape == EPinShape_Circle)
+            pin.shape = EPinShape_Square;
+    };
     for (const PinDef& pinDef : def.inputs)
     {
         addInput(pinDef.type, pinDef.name, pinDef.defaultValue);
         m_inputPins.back()->typeGroup = pinDef.typeGroup;
+        applyMutability(*m_inputPins.back(), pinDef.mutability);
     }
     for (const PinDef& pinDef : def.outputs)
     {
         addOutput(pinDef.type, pinDef.name);
         m_outputPins.back()->typeGroup = pinDef.typeGroup;
+        applyMutability(*m_outputPins.back(), pinDef.mutability);
     }
     return *this;
 }

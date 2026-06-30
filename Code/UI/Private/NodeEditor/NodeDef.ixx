@@ -5,9 +5,13 @@ import Core;
 namespace NodeEditor
 {
 
+export const char INDENT_UP   = '\x01';
+export const char INDENT_DOWN = '\x02';
+export const char HOIST = '\x03';
+
 // Data carried on a pin / connection. Exec is control flow; the rest are value types.
 // Wildcard is an unresolved generic pin that adopts the concrete type it gets connected to.
-export enum class EDataType : uint8
+export enum EDataType : uint8
 {
     Exec,
     Bool,
@@ -18,6 +22,29 @@ export enum class EDataType : uint8
     Wildcard,
 };
 
+// Read/write capability of a pin's value. On an INPUT it is what the node requires of its source; on an
+// OUTPUT it is what the produced value supports (a plain rvalue is Readable; a variable is ReadWritable).
+// A link is allowed only if the output provides every capability the input requires (see mutableBits).
+export enum class EMutableType : uint8
+{
+    Readable,
+    Writable,
+    ReadWritable
+};
+
+// read = 1, write = 2. A connection output->input is allowed when the output provides every capability the
+// input requires: (inputBits & ~outputBits) == 0.
+export uint8 mutableBits(EMutableType m)
+{
+    switch (m)
+    {
+        case EMutableType::Readable:     return 1;
+        case EMutableType::Writable:     return 2;
+        case EMutableType::ReadWritable: return 3;
+    }
+    return 1;
+}
+
 // One pin on a node definition. defaultValue is the C++ literal used for an unconnected data input.
 // typeGroup > 0 marks a wildcard pin; all pins on a node sharing a group resolve to the same concrete type.
 export struct PinDef
@@ -27,6 +54,7 @@ export struct PinDef
     std::string  defaultValue;
     int          typeGroup = 0;
     std::string  expr;        // for an output pin: its value expression (overrides the node-level emit)
+    EMutableType mutability = EMutableType::Readable; // read/write capability; restricts what may connect here
 };
 
 // A node type the editor can instantiate. `emit` is a C++ template:
@@ -93,15 +121,20 @@ export const std::vector<NodeDef>& nodeRegistry()
             {}, { { "", D::Exec, "" } },
             "#0" });
 
-        r.push_back({ "Branch", "Branch", "Flow", true,
-            { { "", D::Exec, "" }, { "condition", D::Bool, "false" } },
+        r.push_back({ "If", "If", "Flow", true,
+            { { "", D::Exec, "" }, { "condition", D::Bool, "true" } },
+            { { "true", D::Exec, "" }, { "break", D::Exec, "" } },
+            "if ($1)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+
+        r.push_back({ "IfElse", "If Else", "Flow", true,
+            { { "", D::Exec, "" }, { "condition", D::Bool, "true" } },
             { { "true", D::Exec, "" }, { "false", D::Exec, "" }, { "break", D::Exec, "" } },
-            "if ($1)\n{\n#0}\nelse\n{\n#1}\n#2" });
+            "if ($1)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\nelse\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n#2" });
 
         r.push_back({ "ForLoop", "For Loop", "Flow", true,
             { { "", D::Exec, "" }, { "count", D::Int, "10" } },
             { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
-            "for (int i@ = 0; i@ < $1; ++i@)\n{\n#0}\n#1" });
+            "for (int i@ = 0; i@ < $1; ++i@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "\n}\n#1" });
 
         r.push_back({ "Conditional", "Conditional", "Flow", true,
             { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Compare", D::Wildcard, "0.0f", 1 }, { "A", D::Wildcard, "0.0f", 2 }, { "B", D::Wildcard, "0.0f", 2 } },
@@ -158,6 +191,33 @@ export const std::vector<NodeDef>& nodeRegistry()
             {}, { { "seconds", D::Float, "" } },
             "ctx->deltaSeconds()" });
 
+        r.push_back({ "Float", "Var Float", "Variables", false,
+            { { "value", D::Float, "0.0f" }},
+            { { "f@", D::Float, "", 0, std::string("float f@ = $0;\n") + HOIST + "f@", EMutableType::ReadWritable } },
+            "" });
+
+        r.push_back({ "Int", "Var Int", "Variables", false,
+            { { "value", D::Int, "0" }},
+            { { "i@", D::Int, "", 0, std::string("int i@ = $0;\n") + HOIST + "i@", EMutableType::ReadWritable } },
+            "" });
+
+        r.push_back({ "Bool", "Var Bool", "Variables", false,
+            { { "value", D::Bool, "false" }},
+            { { "b@", D::Bool, "", 0, std::string("bool b@ = $0;\n") + HOIST + "b@", EMutableType::ReadWritable } },
+            "" });
+
+        r.push_back({ "ConstFloat", "Const Float", "Variables", false,
+            { { "value", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
+            "$0" });
+
+        r.push_back({ "ConstInt", "Const Int", "Variables", false,
+            { { "value", D::Int, "0" } }, { { "result", D::Int, "" } },
+            "$0" });
+
+		r.push_back({ "ConstBool", "Const Bool", "Variables", false,
+			{ { "value", D::Bool, "false" } }, { { "result", D::Bool, "" } },
+			"$0" });
+
         r.push_back({ "IsKeyDown", "Is Key Down", "Input", false,
             { { "key", D::String, "\"Space\"" } }, { { "down", D::Bool, "" } },
             "(ctx->isKeyDown($0) != 0)" });
@@ -166,6 +226,11 @@ export const std::vector<NodeDef>& nodeRegistry()
         r.push_back({ "Add", "Add", "Math", false,
             { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
             "($0 + $1)" });
+
+        r.push_back({ "Increment", "Increment", "Math", true,
+            { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
+            { { "", D::Exec, "" } },
+            "($1 += $2)" });
 
         r.push_back({ "Sub", "Subtract", "Math", false,
             { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
@@ -226,9 +291,6 @@ export const std::vector<NodeDef>& nodeRegistry()
             { { "vec", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
             "glm::normalize($0)" });
 
-        r.push_back({ "ConstFloat", "Float", "Constants", false,
-            { { "value", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
-            "$0" });
 
         // ---- entity (the script's owning entity, exposed as `self`) ----
         // Get Entity: every readable entity property as a separate output (each output's `expr` field).

@@ -40,6 +40,7 @@ export struct Pin
     EDataType dataType = EDataType::Exec;
     std::string defaultValue;          // C++ literal used for an unconnected data input
     int typeGroup = 0;                 // wildcard pins sharing a group resolve to the same concrete type
+    EMutableType mutability = EMutableType::Readable; // input: required of its source; output: what it provides
     uint8 numConnections = 0;
 
     operator ed::PinId() const { return ed::PinId(this); }
