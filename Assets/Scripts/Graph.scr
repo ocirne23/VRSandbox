@@ -1,31 +1,90 @@
 #include "ScriptAPI.h"
 SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt)
 {
-    float f3 = 0.0f;
-    for (int i1 = 0; i1 < 10; ++i1)
+    int i8 = 41;
+    bool b2 = true;
+    if (i8 < 2)
     {
-        (f3 += 1.0f)
+        b2 = false;
     }
-    ctx->logf("%f", f3);
+    else
+    {
+        for (int i4 = 2; i4 < i8; ++i4)
+        {
+            if ((i8 % (i4 * i4)) == 0)
+            {
+                b2 = false;
+                break;
+            }
+        }
+    }
+    if (b2 == true)
+    {
+        ctx->logf("%i is a prime number\n", i8);
+    }
+    else
+    {
+        ctx->logf("%i is not a prime number", i8);
+    }
 }
 
 //@graph 1
-//@node 0 EventUpdate 436 128
-//@node 1 ForLoop 582 128
-//@node 2 Increment 1072 112
-//@node 3 Float 615 55
-//@node 4 Printf 1072 228
-//@node 5 ConstFloat 609 -92
-//@pin 1 1 10
-//@pin 2 1 0.0f
-//@pin 2 2 0.0f
-//@pin 3 0 0.0f
-//@pin 4 1 "%f"
-//@pin 4 2 0.0f
-//@pin 5 0 1.0f
-//@link 1 0 2 0
+//@node 0 EventUpdate 68 256
+//@node 1 IfElse 240 259
+//@node 2 Bool 272 151
+//@node 3 Set 625 -16
+//@node 4 ForLoop 630 340
+//@node 5 Modulo 1015 515
+//@node 6 Mul 1015 423
+//@node 7 If 1200 371
+//@node 8 Int -96 7
+//@node 9 Set 1505 308
+//@node 10 IfElse 992 115
+//@node 11 Printf 1383 100
+//@node 12 Printf 1383 189
+//@node 13 Break 1696 256
+//@pin 1 1 0.0f
+//@pin 1 2 2
+//@pin 2 0 true
+//@pin 3 1 0.0f
+//@pin 3 2 false
+//@pin 4 1 2
+//@pin 4 2 10
+//@pin 5 0 0
+//@pin 5 1 1.0f
+//@pin 6 0 1.0f
+//@pin 6 1 0
+//@pin 7 1 0.0f
+//@pin 7 2 0
+//@pin 8 0 41
+//@pin 9 1 0.0f
+//@pin 9 2 false
+//@pin 10 1 0.0f
+//@pin 10 2 true
+//@pin 11 1 "%i is a prime number\n"
+//@pin 11 2 0.0f
+//@pin 12 1 "%i is not a prime number"
+//@pin 12 2 0.0f
+//@enum 7 2
+//@enum 10 2
+//@link 1 0 3 0
+//@link 2 0 3 1
+//@link 4 2 6 0
+//@link 4 2 6 1
+//@link 6 0 5 1
+//@link 5 0 7 1
+//@link 8 0 1 1
+//@link 8 0 4 2
+//@link 8 0 5 0
+//@link 2 0 9 1
+//@link 2 0 10 1
+//@link 1 2 10 0
+//@link 8 0 11 2
+//@link 10 0 11 0
+//@link 10 1 12 0
+//@link 8 0 12 2
+//@link 7 0 9 0
+//@link 9 0 13 0
 //@link 1 1 4 0
-//@link 3 0 4 2
+//@link 4 0 7 0
 //@link 0 0 1 0
-//@link 5 0 2 2
-//@link 3 0 2 1

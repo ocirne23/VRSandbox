@@ -38,7 +38,11 @@ namespace
     {
         va_list args;
         va_start(args, message);
-		std::string formattedString = vformat(message ? message : "", std::make_format_args(args));
+        int size_s = std::snprintf(nullptr, 0, message, args) + 1;
+		if (size_s <= 0) { va_end(args); return; }
+		size_t size = static_cast<size_t>(size_s);
+		std::string formattedString(size, '\0');
+		std::vsnprintf(&formattedString[0], size, message, args);
         Log::info(formattedString);
         va_end(args);
     }

@@ -112,32 +112,41 @@ export std::string defaultValueForType(EDataType type)
 export const std::vector<NodeDef>& nodeRegistry()
 {
     static const std::vector<NodeDef> registry = []
-    {
-        using D = EDataType;
-        std::vector<NodeDef> r;
+        {
+            using D = EDataType;
+            std::vector<NodeDef> r;
 
-        // ---- events / control flow ----
-        r.push_back({ "EventUpdate", "Event Update", "Events", true,
-            {}, { { "", D::Exec, "" } },
-            "#0" });
+            // ---- events / control flow ----
+            r.push_back({ "EventUpdate", "Event Update", "Events", true,
+                {}, { { "", D::Exec, "" } },
+                "#0" });
 
-        r.push_back({ "If", "If", "Flow", true,
-            { { "", D::Exec, "" }, { "condition", D::Bool, "true" } },
-            { { "true", D::Exec, "" }, { "break", D::Exec, "" } },
-            "if ($1)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+            r.push_back({ "If", "If", "Flow", true,
+                { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
+                { { "true", D::Exec, "" }, { "break", D::Exec, "" } },
+                "if ($1 @ $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1",
+                { "Less than", "Greater than", "Equals", "Not Equals" },
+                { "<", ">", "==", "!=" } });
 
-        r.push_back({ "IfElse", "If Else", "Flow", true,
-            { { "", D::Exec, "" }, { "condition", D::Bool, "true" } },
-            { { "true", D::Exec, "" }, { "false", D::Exec, "" }, { "break", D::Exec, "" } },
-            "if ($1)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\nelse\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n#2" });
+            r.push_back({ "IfElse", "If Else", "Flow", true,
+                { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
+                { { "true", D::Exec, "" }, { "false", D::Exec, "" }, { "break", D::Exec, "" } },
+                "if ($1 @ $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\nelse\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n#2",
+                { "Less than", "Greater than", "Equals", "Not Equals" },
+                { "<", ">", "==", "!=" } });
 
-        r.push_back({ "ForLoop", "For Loop", "Flow", true,
-            { { "", D::Exec, "" }, { "count", D::Int, "10" } },
-            { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
-            "for (int i@ = 0; i@ < $1; ++i@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "\n}\n#1" });
+            r.push_back({ "ForLoop", "For Loop", "Flow", true,
+                { { "", D::Exec, "" }, { "start", D::Int, "0" }, { "count", D::Int, "10" } },
+                { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
+                "for (int i@ = $1; i@ < $2; ++i@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+
+            r.push_back({ "Break", "Break", "Flow", true,
+                {{ "", D::Exec, "" }}, 
+                {},
+                "break;\n"});
 
         r.push_back({ "Conditional", "Conditional", "Flow", true,
-            { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Compare", D::Wildcard, "0.0f", 1 }, { "A", D::Wildcard, "0.0f", 2 }, { "B", D::Wildcard, "0.0f", 2 } },
+            { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 }, { "A", D::Wildcard, "0.0f", 2 }, { "B", D::Wildcard, "0.0f", 2 } },
             { { "", D::Exec, "" }, { "Result", D::Wildcard, "", 2 } },
             "#0",
             { "Less than", "Greater than", "Equals", "Not Equals" },
@@ -230,7 +239,12 @@ export const std::vector<NodeDef>& nodeRegistry()
         r.push_back({ "Increment", "Increment", "Math", true,
             { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
             { { "", D::Exec, "" } },
-            "($1 += $2)" });
+            "$1 += $2;\n#0" });
+
+        r.push_back({ "Set", "Set", "Math", true,
+            { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
+            { { "", D::Exec, "" } },
+            "$1 = $2;\n#0" });
 
         r.push_back({ "Sub", "Subtract", "Math", false,
             { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
@@ -243,6 +257,10 @@ export const std::vector<NodeDef>& nodeRegistry()
         r.push_back({ "Div", "Divide", "Math", false,
             { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
             "($0 / $1)" });
+
+        r.push_back({ "Modulo", "Modulo", "Math", false,
+            { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+            "($0 % $1)" });
 
         r.push_back({ "Sin", "Sin", "Math", false,
             { { "x", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
@@ -257,9 +275,13 @@ export const std::vector<NodeDef>& nodeRegistry()
             { { "vec", D::Vec3, "" } },
             "glm::vec3{ $0, $1, $2 }" });
 
+        // All three outputs hoist the input into one shared local "glm::vec3 v<idx> = <vec>;" (the input is
+        // evaluated once instead of re-expanded per component) and read v<idx>.x / .y / .z.
         r.push_back({ "SplitVec3", "Split Vec3", "Math", false,
             { { "vec", D::Vec3, "" } },
-            { { "x", D::Float, "", 0, "$0.x"}, {"y", D::Float, "", 0, "$0.y"}, {"z", D::Float, "", 0, "$0.z"}}
+            { { "x", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.x" },
+              { "y", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.y" },
+              { "z", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.z" } }
             });
 
         // ---- vector math (Vec3 is glm::vec3 in compiled scripts, so these use glm operators/functions) ----

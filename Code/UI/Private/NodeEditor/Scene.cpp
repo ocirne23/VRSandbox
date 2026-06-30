@@ -70,16 +70,14 @@ namespace
     // Exec traversal and data resolution keep SEPARATE recursion stacks: a node that sits in the exec
     // flow can still feed its data output into a downstream node (e.g. Conditional), which is not a cycle.
     //
-    // Common-subexpression elimination: per exec statement, any data output pin that would otherwise be
-    // expanded 2+ times (e.g. a Get Entity output read for both .x and .z) is hoisted into a `const auto`
-    // local declared just before the statement, and consumers reference that local.
+    // Hoisting is explicit only: a data output whose expr carries a HOIST marker (e.g. a Var node) is
+    // declared once at function scope and referenced by name; every other data output is expanded inline.
 
-    using HoistMap = std::map<const Pin*, std::string>; // output pin -> local variable name
+    using HoistMap = std::map<const Pin*, std::string>; // HOIST output pin -> variable name it resolves to
 
     struct Codegen
     {
         const std::vector<std::unique_ptr<Link>>& links;
-        int tempCounter = 0;
         std::string         globalDecls;    // HOIST variable declarations, emitted once at the top of the function
         std::set<const Pin*> globalDeclared; // pins already added to globalDecls (dedups multi-use variables)
     };
@@ -219,45 +217,40 @@ namespace
         return expandOutput(cg, src, dataStack, hoist);
     }
 
-    // Dry run mirroring emitDataExpr: tallies how many times each data output pin would be expanded inline.
-    void countExpansions(Codegen& cg, const Pin* inputPin, std::map<const Pin*, int>& counts, std::set<const Node*>& path)
+    // Collects every data output pin reachable (through data nodes) from inputPin, so the HOIST variables a
+    // statement reads can be discovered and declared at function scope.
+    void collectDataOutputs(Codegen& cg, const Pin* inputPin, std::set<const Pin*>& out, std::set<const Node*>& path)
     {
         Pin* src = sourceOfInput(cg.links, inputPin);
         if (!src) return;
         Node* node = src->node;
         if (!findNodeDef(node->getTypeId())) return;
-        counts[src]++;
+        out.insert(src);
         if (path.count(node)) return; // cycle guard
         path.insert(node);
         for (const auto& pin : node->getInputPins())
             if (pin->dataType != EDataType::Exec)
-                countExpansions(cg, pin.get(), counts, path);
+                collectDataOutputs(cg, pin.get(), out, path);
         path.erase(node);
     }
 
-    // Emits `const auto <local> = <expr>;` for a hoisted output pin, declaring its hoisted dependencies first.
-    void declareHoist(Codegen& cg, const Pin* outPin, const HoistMap& hoist, std::set<const Pin*>& declared, std::string& decls)
+    // Emits a HOIST variable's declaration once at function scope, after declaring any HOIST deps it reads.
+    void declareHoist(Codegen& cg, const Pin* outPin, const HoistMap& hoist, std::set<const Pin*>& declared)
     {
-        if (declared.count(outPin)) return;
-        declared.insert(outPin);
+        if (!declared.insert(outPin).second) return;
         for (const auto& pin : outPin->node->getInputPins())
         {
             if (pin->dataType == EDataType::Exec) continue;
             if (Pin* s = sourceOfInput(cg.links, pin.get()); s && hoist.count(s))
-                declareHoist(cg, s, hoist, declared, decls);
+                declareHoist(cg, s, hoist, declared);
         }
-        std::set<const Node*> dataStack;
         const std::string& oexpr = outputExprOf(outPin);
         const auto hp = oexpr.find(HOIST);
-        if (hp != std::string::npos)
+        if (hp != std::string::npos && cg.globalDeclared.insert(outPin).second)
         {
-            // A variable declaration: emit it once at function scope (not before each consuming statement), so
-            // a variable used across sibling statements / inside and after a loop is declared a single time.
-            if (cg.globalDeclared.insert(outPin).second)
-                cg.globalDecls += substituteData(cg, oexpr.substr(0, hp), outPin->node, dataStack, hoist);
+            std::set<const Node*> dataStack;
+            cg.globalDecls += substituteData(cg, oexpr.substr(0, hp), outPin->node, dataStack, hoist);
         }
-        else
-            decls += "const auto " + hoist.at(outPin) + " = " + expandOutput(cg, outPin, dataStack, hoist) + ";\n";
     }
 
     std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack)
@@ -268,18 +261,17 @@ namespace
 
         execStack.insert(node);
 
-        // Hoist data outputs this statement would evaluate 2+ times into locals declared before it.
-        std::map<const Pin*, int> counts;
+        // Map each HOIST-marked data output this statement reads to its variable name, so uses resolve to it
+        // and its declaration is emitted once at function scope (declareHoist). Everything else inlines.
+        std::set<const Pin*> reachable;
         {
             std::set<const Node*> path;
             for (const auto& pin : node->getInputPins())
                 if (pin->dataType != EDataType::Exec)
-                    countExpansions(cg, pin.get(), counts, path);
+                    collectDataOutputs(cg, pin.get(), reachable, path);
         }
-        // Hoist a data output into a local when it is expanded 2+ times (CSE), OR when its expr carries a
-        // HOIST marker (a forced standalone declaration, e.g. a Var node) — then the local is the reference part.
         HoistMap hoist;
-        for (const auto& [pin, count] : counts)
+        for (const Pin* pin : reachable)
         {
             const std::string& oexpr = outputExprOf(pin);
             const auto hp = oexpr.find(HOIST);
@@ -288,18 +280,14 @@ namespace
                 std::set<const Node*> ds;
                 hoist[pin] = substituteData(cg, oexpr.substr(hp + 1), pin->node, ds, hoist); // reference, e.g. "f3"
             }
-            else if (count >= 2)
-                hoist[pin] = "t" + std::to_string(cg.tempCounter++);
         }
-
-        std::string decls;
         {
             std::set<const Pin*> declared;
             for (const auto& [pin, name] : hoist)
-                declareHoist(cg, pin, hoist, declared, decls);
+                declareHoist(cg, pin, hoist, declared);
         }
 
-        std::string out = decls + substituteExec(cg, def->emit, node, execStack, hoist);
+        std::string out = substituteExec(cg, def->emit, node, execStack, hoist);
         execStack.erase(node);
         return out;
     }
