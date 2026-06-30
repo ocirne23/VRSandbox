@@ -1,8 +1,25 @@
 #include "ScriptAPI.h"
 SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt)
 {
+    ctx->entitySetRotation(self, glm::vec3{ 0.0f, (ctx->elapsedSeconds() * 50.0f), 0.0f });
 }
 
 //@graph 1
-//@node 0 EventUpdate 40 60
-//@node 1 GetElapsedTime 48 119
+//@node 0 EventUpdate 116 64
+//@node 1 GetElapsedTime -160 151
+//@node 2 SetEntity 544 86
+//@node 3 MakeVec3 284 135
+//@node 4 Mul -9 160
+//@pin 2 1 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 2 2 1.0f
+//@pin 2 3 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 2 4 true
+//@pin 3 0 0.0f
+//@pin 3 1 0.0f
+//@pin 3 2 0.0f
+//@pin 4 0 0.0f
+//@pin 4 1 50.0f
+//@link 3 0 2 3
+//@link 4 0 3 1
+//@link 1 0 4 0
+//@link 0 0 2 0
