@@ -60,6 +60,7 @@ export struct PinDef
 // A node type the editor can instantiate. `emit` is a C++ template:
 //   $k  -> expression for input pin k (the connected output's expression, else its default literal)
 //   #k  -> the statement block produced by following exec output pin k
+//   ?k  {...} -> conditional block: emit the contents if input pin k is connected, else skip it
 //   @   -> the selected enum option's code token (see enumTokens), unique node idx if no enumTokens provided
 // Data nodes (isExec == false) have no exec pins and `emit` is a single value expression for output 0.
 // A node may also expose `dataEmit`: a value-expression for its data output, used when the node sits
@@ -111,261 +112,258 @@ export std::string defaultValueForType(EDataType type)
 // The full palette of node types. Returned by const ref so pointers into it stay stable.
 export const std::vector<NodeDef>& nodeRegistry()
 {
-    static const std::vector<NodeDef> registry = []
-        {
-            using D = EDataType;
-            std::vector<NodeDef> r;
+    static const std::vector<NodeDef> registry = []{
+    using D = EDataType;
+    std::vector<NodeDef> r;
 
-            // ---- events / control flow ----
-            r.push_back({ "EventUpdate", "Event Update", "Events", true,
-                {}, { { "", D::Exec, "" } },
-                "#0" });
+    // ---- events / control flow ----
+    r.push_back({ "EventUpdate", "Event Update", "Events", true,
+        {}, { { "", D::Exec, "" } },
+        "#0" });
 
-            r.push_back({ "If", "If", "Flow", true,
-                { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
-                { { "true", D::Exec, "" }, { "break", D::Exec, "" } },
-                "if ($1 @ $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1",
-                { "Less than", "Greater than", "Equals", "Not Equals" },
-                { "<", ">", "==", "!=" } });
+    r.push_back({ "If", "If", "Flow", true,
+        { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
+        { { "true", D::Exec, "" }, { "break", D::Exec, "" } },
+        "if ($1 @ $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1",
+        { "Less than", "Greater than", "Equals", "Not Equals" },
+        { "<", ">", "==", "!=" } });
 
-            r.push_back({ "IfElse", "If Else", "Flow", true,
-                { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
-                { { "true", D::Exec, "" }, { "false", D::Exec, "" }, { "break", D::Exec, "" } },
-                "if ($1 @ $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\nelse\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n#2",
-                { "Less than", "Greater than", "Equals", "Not Equals" },
-                { "<", ">", "==", "!=" } });
+    r.push_back({ "IfElse", "If Else", "Flow", true,
+        { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
+        { { "true", D::Exec, "" }, { "false", D::Exec, "" }, { "break", D::Exec, "" } },
+        "if ($1 @ $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\nelse\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n#2",
+        { "Less than", "Greater than", "Equals", "Not Equals" },
+        { "<", ">", "==", "!=" } });
 
-            r.push_back({ "ForLoop", "For Loop", "Flow", true,
-                { { "", D::Exec, "" }, { "start", D::Int, "0" }, { "count", D::Int, "10" } },
-                { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
-                "for (int i@ = $1; i@ < $2; ++i@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+    r.push_back({ "ForLoop", "For Loop", "Flow", true,
+        { { "", D::Exec, "" }, { "start", D::Int, "0" }, { "count", D::Int, "10" } },
+        { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
+        "for (int i@ = $1; i@ < $2; ++i@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
 
-            r.push_back({ "Break", "Break", "Flow", true,
-                {{ "", D::Exec, "" }}, 
-                {},
-                "break;\n"});
+    r.push_back({ "Break", "Break", "Flow", true,
+        {{ "", D::Exec, "" }}, 
+        {},
+        "break;\n"});
 
-        r.push_back({ "Conditional", "Conditional", "Flow", true,
-            { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 }, { "A", D::Wildcard, "0.0f", 2 }, { "B", D::Wildcard, "0.0f", 2 } },
-            { { "", D::Exec, "" }, { "Result", D::Wildcard, "", 2 } },
-            "#0",
-            { "Less than", "Greater than", "Equals", "Not Equals" },
-            { "<", ">", "==", "!=" },
-            "(($1 @ $2) ? $3 : $4)" });
+    r.push_back({ "Conditional", "Conditional", "Flow", true,
+        { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 }, { "A", D::Wildcard, "0.0f", 2 }, { "B", D::Wildcard, "0.0f", 2 } },
+        { { "", D::Exec, "" }, { "Result", D::Wildcard, "", 2 } },
+        "#0",
+        { "Less than", "Greater than", "Equals", "Not Equals" },
+        { "<", ">", "==", "!=" },
+        "(($1 @ $2) ? $3 : $4)" });
 
-        r.push_back({ "Cast", "Cast", "Flow", false,
-            { { "Cast",   D::Wildcard, "0.0f", 1 } },
-            { { "Result", D::Wildcard, "", 2 } },
-            "((@)$0)",
-            { "int", "float", "bool" },
-            { "int", "float", "bool" }
+    r.push_back({ "Cast", "Cast", "Flow", false,
+        { { "Cast",   D::Wildcard, "0.0f", 1 } },
+        { { "Result", D::Wildcard, "", 2 } },
+        "((@)$0)",
+        { "int", "float", "bool" },
+        { "int", "float", "bool" }});
+
+    // ---- variables ----
+    r.push_back({ "Float", "Var Float", "Variables", false,
+        { { "value", D::Float, "0.0f" }},
+        { { "f@", D::Float, "", 0, std::string("float f@ = $0;\n") + HOIST + "f@", EMutableType::ReadWritable } },
+        "" });
+
+    r.push_back({ "Int", "Var Int", "Variables", false,
+        { { "value", D::Int, "0" }},
+        { { "i@", D::Int, "", 0, std::string("int i@ = $0;\n") + HOIST + "i@", EMutableType::ReadWritable } },
+        "" });
+
+    r.push_back({ "Bool", "Var Bool", "Variables", false,
+        { { "value", D::Bool, "false" }},
+        { { "b@", D::Bool, "", 0, std::string("bool b@ = $0;\n") + HOIST + "b@", EMutableType::ReadWritable } },
+        "" });
+
+    r.push_back({ "ConstFloat", "Const Float", "Variables", false,
+        { { "value", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
+        "$0" });
+
+    r.push_back({ "ConstInt", "Const Int", "Variables", false,
+        { { "value", D::Int, "0" } }, { { "result", D::Int, "" } },
+        "$0" });
+
+    r.push_back({ "ConstBool", "Const Bool", "Variables", false,
+        { { "value", D::Bool, "false" } }, { { "result", D::Bool, "" } },
+        "$0" });
+
+    // ---- actions ----
+    r.push_back({ "Print", "Print", "Debug", true,
+        { { "", D::Exec, "" }, { "message", D::String, "\"hello\"" } },
+        { { "", D::Exec, "" } },
+        "ctx->log($1);\n#0" });
+
+    r.push_back({ "Printf", "Printf", "Debug", true,
+        { { "", D::Exec, "" },
+            { "message", D::String, "\"%f\"" },
+            { "message", D::Wildcard, "0.0f", 1 } },
+        { { "", D::Exec, "" } },
+        "ctx->logf($1, $2);\n#0" });
+
+    r.push_back({ "SpawnPointLight", "Spawn Point Light", "Rendering", true,
+        { { "", D::Exec, "" },
+            { "position",  D::Vec3,  "glm::vec3{ 0.0f, 2.0f, 0.0f }" },
+            { "range",     D::Float, "25.0f" },
+            { "color",     D::Vec3,  "glm::vec3{ 1.0f, 0.6f, 0.2f }" },
+            { "intensity", D::Float, "60.0f" } },
+        { { "", D::Exec, "" } },
+        "ctx->spawnPointLight($1, $2, $3, $4);\n#0" });
+
+    r.push_back({ "SetSun", "Set Sun", "Rendering", true,
+        { { "", D::Exec, "" },
+            { "direction", D::Vec3,  "glm::vec3{ -0.3f, -1.0f, -0.2f }" },
+            { "color",     D::Vec3,  "glm::vec3{ 1.0f, 1.0f, 1.0f }" },
+            { "intensity", D::Float, "3.0f" } },
+        { { "", D::Exec, "" } },
+        "ctx->setSun($1, $2, $3);\n#0" });
+
+    // ---- inputs / time ----
+    r.push_back({ "GetElapsedTime", "Get Elapsed Time", "Time", false,
+        {}, { { "seconds", D::Float, "" } },
+        "ctx->elapsedSeconds()" });
+
+    r.push_back({ "GetDeltaTime", "Get Delta Time", "Time", false,
+        {}, { { "seconds", D::Float, "" } },
+        "ctx->deltaSeconds()" });
+
+    r.push_back({ "IsKeyDown", "Is Key Down", "Input", false,
+        { { "key", D::String, "\"Space\"" } }, { { "down", D::Bool, "" } },
+        "(ctx->isKeyDown($0) != 0)" });
+
+    // ---- math ----
+    r.push_back({ "Add", "Add", "Math", false,
+        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "($0 + $1)" });
+
+    r.push_back({ "Increment", "Increment", "Math", true,
+        { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
+        { { "", D::Exec, "" } },
+        "$1 += $2;\n#0" });
+
+    r.push_back({ "Set", "Set", "Math", true,
+        { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
+        { { "", D::Exec, "" } },
+        "$1 = $2;\n#0" });
+
+    r.push_back({ "Sub", "Subtract", "Math", false,
+        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "($0 - $1)" });
+
+    r.push_back({ "Mul", "Multiply", "Math", false,
+        { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "($0 * $1)" });
+
+    r.push_back({ "Div", "Divide", "Math", false,
+        { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "($0 / $1)" });
+
+    r.push_back({ "Modulo", "Modulo", "Math", false,
+        { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "($0 % $1)" });
+
+    r.push_back({ "Sin", "Sin", "Math", false,
+        { { "x", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
+        "sinf($0)" });
+
+    r.push_back({ "Cos", "Cos", "Math", false,
+        { { "x", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
+        "cosf($0)" });
+
+    // ---- vector math ----
+    r.push_back({ "MakeVec3", "Make Vec3", "Math", false,
+        { { "x", D::Float, "0.0f" }, { "y", D::Float, "0.0f" }, { "z", D::Float, "0.0f" } },
+        { { "vec", D::Vec3, "" } },
+        "glm::vec3{ $0, $1, $2 }" });
+
+
+    r.push_back({ "SplitVec3", "Split Vec3", "Math", false,
+        { { "vec", D::Vec3, "" } },
+        { { "x", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.x" },
+            { "y", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.y" },
+            { "z", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.z" } }
         });
 
-        // ---- actions ----
-        r.push_back({ "Print", "Print", "Debug", true,
-            { { "", D::Exec, "" }, { "message", D::String, "\"hello\"" } },
-            { { "", D::Exec, "" } },
-            "ctx->log($1);\n#0" });
+    r.push_back({ "AddVec3", "Add Vec3", "Math", false,
+        { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+        "($0 + $1)" });
 
-        r.push_back({ "Printf", "Printf", "Debug", true,
-            { { "", D::Exec, "" },
-                { "message", D::String, "\"%f\"" },
-                { "message", D::Wildcard, "0.0f", 1 } },
-            { { "", D::Exec, "" } },
-            "ctx->logf($1, $2);\n#0" });
+    r.push_back({ "SubVec3", "Subtract Vec3", "Math", false,
+        { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+        "($0 - $1)" });
 
-        r.push_back({ "SpawnPointLight", "Spawn Point Light", "Rendering", true,
-            { { "", D::Exec, "" },
-              { "position",  D::Vec3,  "glm::vec3{ 0.0f, 2.0f, 0.0f }" },
-              { "range",     D::Float, "25.0f" },
-              { "color",     D::Vec3,  "glm::vec3{ 1.0f, 0.6f, 0.2f }" },
-              { "intensity", D::Float, "60.0f" } },
-            { { "", D::Exec, "" } },
-            "ctx->spawnPointLight($1, $2, $3, $4);\n#0" });
+    r.push_back({ "ScaleVec3", "Scale Vec3", "Math", false,
+        { { "vec", D::Vec3, "" }, { "scale", D::Float, "1.0f" } }, { { "result", D::Vec3, "" } },
+        "($0 * $1)" });
 
-        r.push_back({ "SetSun", "Set Sun", "Rendering", true,
-            { { "", D::Exec, "" },
-              { "direction", D::Vec3,  "glm::vec3{ -0.3f, -1.0f, -0.2f }" },
-              { "color",     D::Vec3,  "glm::vec3{ 1.0f, 1.0f, 1.0f }" },
-              { "intensity", D::Float, "3.0f" } },
-            { { "", D::Exec, "" } },
-            "ctx->setSun($1, $2, $3);\n#0" });
+    r.push_back({ "DotVec3", "Dot", "Math", false,
+        { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Float, "" } },
+        "glm::dot($0, $1)" });
 
-        // ---- inputs / time ----
-        r.push_back({ "GetElapsedTime", "Get Elapsed Time", "Time", false,
-            {}, { { "seconds", D::Float, "" } },
-            "ctx->elapsedSeconds()" });
+    r.push_back({ "CrossVec3", "Cross", "Math", false,
+        { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+        "glm::cross($0, $1)" });
 
-        r.push_back({ "GetDeltaTime", "Get Delta Time", "Time", false,
-            {}, { { "seconds", D::Float, "" } },
-            "ctx->deltaSeconds()" });
+    r.push_back({ "LengthVec3", "Length", "Math", false,
+        { { "vec", D::Vec3, "" } }, { { "result", D::Float, "" } },
+        "glm::length($0)" });
 
-        r.push_back({ "Float", "Var Float", "Variables", false,
-            { { "value", D::Float, "0.0f" }},
-            { { "f@", D::Float, "", 0, std::string("float f@ = $0;\n") + HOIST + "f@", EMutableType::ReadWritable } },
-            "" });
-
-        r.push_back({ "Int", "Var Int", "Variables", false,
-            { { "value", D::Int, "0" }},
-            { { "i@", D::Int, "", 0, std::string("int i@ = $0;\n") + HOIST + "i@", EMutableType::ReadWritable } },
-            "" });
-
-        r.push_back({ "Bool", "Var Bool", "Variables", false,
-            { { "value", D::Bool, "false" }},
-            { { "b@", D::Bool, "", 0, std::string("bool b@ = $0;\n") + HOIST + "b@", EMutableType::ReadWritable } },
-            "" });
-
-        r.push_back({ "ConstFloat", "Const Float", "Variables", false,
-            { { "value", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
-            "$0" });
-
-        r.push_back({ "ConstInt", "Const Int", "Variables", false,
-            { { "value", D::Int, "0" } }, { { "result", D::Int, "" } },
-            "$0" });
-
-		r.push_back({ "ConstBool", "Const Bool", "Variables", false,
-			{ { "value", D::Bool, "false" } }, { { "result", D::Bool, "" } },
-			"$0" });
-
-        r.push_back({ "IsKeyDown", "Is Key Down", "Input", false,
-            { { "key", D::String, "\"Space\"" } }, { { "down", D::Bool, "" } },
-            "(ctx->isKeyDown($0) != 0)" });
-
-        // ---- math ----
-        r.push_back({ "Add", "Add", "Math", false,
-            { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
-            "($0 + $1)" });
-
-        r.push_back({ "Increment", "Increment", "Math", true,
-            { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
-            { { "", D::Exec, "" } },
-            "$1 += $2;\n#0" });
-
-        r.push_back({ "Set", "Set", "Math", true,
-            { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
-            { { "", D::Exec, "" } },
-            "$1 = $2;\n#0" });
-
-        r.push_back({ "Sub", "Subtract", "Math", false,
-            { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
-            "($0 - $1)" });
-
-        r.push_back({ "Mul", "Multiply", "Math", false,
-            { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
-            "($0 * $1)" });
-
-        r.push_back({ "Div", "Divide", "Math", false,
-            { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
-            "($0 / $1)" });
-
-        r.push_back({ "Modulo", "Modulo", "Math", false,
-            { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
-            "($0 % $1)" });
-
-        r.push_back({ "Sin", "Sin", "Math", false,
-            { { "x", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
-            "sinf($0)" });
-
-        r.push_back({ "Cos", "Cos", "Math", false,
-            { { "x", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
-            "cosf($0)" });
-
-        r.push_back({ "MakeVec3", "Make Vec3", "Math", false,
-            { { "x", D::Float, "0.0f" }, { "y", D::Float, "0.0f" }, { "z", D::Float, "0.0f" } },
-            { { "vec", D::Vec3, "" } },
-            "glm::vec3{ $0, $1, $2 }" });
-
-        // All three outputs hoist the input into one shared local "glm::vec3 v<idx> = <vec>;" (the input is
-        // evaluated once instead of re-expanded per component) and read v<idx>.x / .y / .z.
-        r.push_back({ "SplitVec3", "Split Vec3", "Math", false,
-            { { "vec", D::Vec3, "" } },
-            { { "x", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.x" },
-              { "y", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.y" },
-              { "z", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.z" } }
-            });
-
-        // ---- vector math (Vec3 is glm::vec3 in compiled scripts, so these use glm operators/functions) ----
-        r.push_back({ "AddVec3", "Add Vec3", "Math", false,
-            { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
-            "($0 + $1)" });
-
-        r.push_back({ "SubVec3", "Subtract Vec3", "Math", false,
-            { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
-            "($0 - $1)" });
-
-        r.push_back({ "ScaleVec3", "Scale Vec3", "Math", false,
-            { { "vec", D::Vec3, "" }, { "scale", D::Float, "1.0f" } }, { { "result", D::Vec3, "" } },
-            "($0 * $1)" });
-
-        r.push_back({ "DotVec3", "Dot", "Math", false,
-            { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Float, "" } },
-            "glm::dot($0, $1)" });
-
-        r.push_back({ "CrossVec3", "Cross", "Math", false,
-            { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
-            "glm::cross($0, $1)" });
-
-        r.push_back({ "LengthVec3", "Length", "Math", false,
-            { { "vec", D::Vec3, "" } }, { { "result", D::Float, "" } },
-            "glm::length($0)" });
-
-        r.push_back({ "NormalizeVec3", "Normalize", "Math", false,
-            { { "vec", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
-            "glm::normalize($0)" });
+    r.push_back({ "NormalizeVec3", "Normalize", "Math", false,
+        { { "vec", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+        "glm::normalize($0)" });
 
 
-        // ---- entity (the script's owning entity, exposed as `self`) ----
-        // Get Entity: every readable entity property as a separate output (each output's `expr` field).
-        r.push_back({ "GetEntity", "Get Entity", "Entity", false,
-            {},
-            { { "Position",  D::Vec3,   "", 0, "ctx->entityGetPosition(self)" },
-              { "Scale",     D::Float,  "", 0, "ctx->entityGetScale(self)" },
-              { "Rotation",  D::Vec3,   "", 0, "ctx->entityGetRotation(self)" },
-              { "Forward",   D::Vec3,   "", 0, "ctx->entityGetForward(self)" },
-              { "Right",     D::Vec3,   "", 0, "ctx->entityGetRight(self)" },
-              { "Up",        D::Vec3,   "", 0, "ctx->entityGetUp(self)" },
-              { "Name",      D::String, "", 0, "ctx->entityGetName(self)" },
-              { "Enabled",   D::Bool,   "", 0, "(ctx->entityGetEnabled(self) != 0)" },
-              { "Children",  D::Int,    "", 0, "ctx->entityGetChildCount(self)" },
-              { "Bounds R",  D::Float,  "", 0, "ctx->entityGetBoundsRadius(self)" } },
-            "" });
+    // ---- entity (the script's owning entity, exposed as `self`) ----
+    r.push_back({ "GetEntity", "Get Entity", "Entity", false,
+        {},
+        { { "Position",  D::Vec3,   "", 0, "ctx->entityGetPosition(self)" },
+            { "Scale",     D::Float,  "", 0, "ctx->entityGetScale(self)" },
+            { "Rotation",  D::Vec3,   "", 0, "ctx->entityGetRotation(self)" },
+            { "Forward",   D::Vec3,   "", 0, "ctx->entityGetForward(self)" },
+            { "Right",     D::Vec3,   "", 0, "ctx->entityGetRight(self)" },
+            { "Up",        D::Vec3,   "", 0, "ctx->entityGetUp(self)" },
+            { "Name",      D::String, "", 0, "ctx->entityGetName(self)" },
+            { "Enabled",   D::Bool,   "", 0, "(ctx->entityGetEnabled(self) != 0)" },
+            { "Children",  D::Int,    "", 0, "ctx->entityGetChildCount(self)" },
+            { "Bounds R",  D::Float,  "", 0, "ctx->entityGetBoundsRadius(self)" } },
+        "" });
 
-        // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks).
-        r.push_back({ "SetEntity", "Set Entity", "Entity", true,
-            { { "", D::Exec, "" },
-              { "Position", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
-              { "Scale",    D::Float, "1.0f" },
-              { "Rotation", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
-              { "Enabled",  D::Bool,  "true" } },
-            { { "", D::Exec, "" } },
-            "?1{ctx->entitySetPosition(self, $1);\n}?2{ctx->entitySetScale(self, $2);\n}"
-            "?3{ctx->entitySetRotation(self, $3);\n}?4{ctx->entitySetEnabled(self, $4);\n}#0" });
+    // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks).
+    r.push_back({ "SetEntity", "Set Entity", "Entity", true,
+        { { "", D::Exec, "" },
+            { "Position", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
+            { "Scale",    D::Float, "1.0f" },
+            { "Rotation", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
+            { "Enabled",  D::Bool,  "true" } },
+        { { "", D::Exec, "" } },
+        "?1{ctx->entitySetPosition(self, $1);\n}?2{ctx->entitySetScale(self, $2);\n}"
+        "?3{ctx->entitySetRotation(self, $3);\n}?4{ctx->entitySetEnabled(self, $4);\n}#0" });
 
-        // Spawn Entity: queues an asset/prefab to spawn at a world position (drained by App after update).
-        r.push_back({ "SpawnEntity", "Spawn Entity", "Entity", true,
-            { { "", D::Exec, "" },
-              { "asset",    D::String, "\"Entities/character.pre\"" },
-              { "position", D::Vec3,   "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
-            { { "", D::Exec, "" } },
-            "ctx->spawnEntity($1, $2);\n#0" });
+    // Spawn Entity: queues an asset/prefab to spawn at a world position (drained by App after update).
+    r.push_back({ "SpawnEntity", "Spawn Entity", "Entity", true,
+        { { "", D::Exec, "" },
+            { "asset",    D::String, "\"Entities/character.pre\"" },
+            { "position", D::Vec3,   "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
+        { { "", D::Exec, "" } },
+        "ctx->spawnEntity($1, $2);\n#0" });
 
-        // Destroy Entity: queues this script's owning entity (self) for removal.
-        r.push_back({ "DestroyEntity", "Destroy Entity", "Entity", true,
-            { { "", D::Exec, "" } },
-            { { "", D::Exec, "" } },
-            "ctx->destroyEntity(self);\n#0" });
+    // Destroy Entity: queues this script's owning entity (self) for removal.
+    r.push_back({ "DestroyEntity", "Destroy Entity", "Entity", true,
+        { { "", D::Exec, "" } },
+        { { "", D::Exec, "" } },
+        "ctx->destroyEntity(self);\n#0" });
 
-        r.push_back({ "SetAnimFloat", "Set Anim Float", "Entity", true,
-            { { "", D::Exec, "" }, { "param", D::String, "\"speed\"" }, { "value", D::Float, "0.0f" } },
-            { { "", D::Exec, "" } },
-            "ctx->entitySetAnimFloat(self, $1, $2);\n#0" });
+    r.push_back({ "SetAnimFloat", "Set Anim Float", "Entity", true,
+        { { "", D::Exec, "" }, { "param", D::String, "\"speed\"" }, { "value", D::Float, "0.0f" } },
+        { { "", D::Exec, "" } },
+        "ctx->entitySetAnimFloat(self, $1, $2);\n#0" });
 
-        r.push_back({ "SetAnimTrigger", "Set Anim Trigger", "Entity", true,
-            { { "", D::Exec, "" }, { "param", D::String, "\"attack\"" } },
-            { { "", D::Exec, "" } },
-            "ctx->entitySetAnimTrigger(self, $1);\n#0" });
+    r.push_back({ "SetAnimTrigger", "Set Anim Trigger", "Entity", true,
+        { { "", D::Exec, "" }, { "param", D::String, "\"attack\"" } },
+        { { "", D::Exec, "" } },
+        "ctx->entitySetAnimTrigger(self, $1);\n#0" });
 
-        return r;
+    return r;
     }();
     return registry;
 }
