@@ -74,7 +74,7 @@ export std::string defaultValueForType(EDataType type)
         case EDataType::Bool:   return "false";
         case EDataType::Int:    return "0";
         case EDataType::Float:  return "0.0f";
-        case EDataType::Vec3:   return "Vec3{ 0.0f, 0.0f, 0.0f }";
+        case EDataType::Vec3:   return "glm::vec3{ 0.0f, 0.0f, 0.0f }";
         case EDataType::String: return "\"\"";
         default:                return "0.0f";  
     }
@@ -126,17 +126,17 @@ export const std::vector<NodeDef>& nodeRegistry()
 
         r.push_back({ "SpawnPointLight", "Spawn Point Light", "Rendering", true,
             { { "", D::Exec, "" },
-              { "position",  D::Vec3,  "Vec3{ 0.0f, 2.0f, 0.0f }" },
+              { "position",  D::Vec3,  "glm::vec3{ 0.0f, 2.0f, 0.0f }" },
               { "range",     D::Float, "25.0f" },
-              { "color",     D::Vec3,  "Vec3{ 1.0f, 0.6f, 0.2f }" },
+              { "color",     D::Vec3,  "glm::vec3{ 1.0f, 0.6f, 0.2f }" },
               { "intensity", D::Float, "60.0f" } },
             { { "", D::Exec, "" } },
             "ctx->spawnPointLight($1, $2, $3, $4);\n#0" });
 
         r.push_back({ "SetSun", "Set Sun", "Rendering", true,
             { { "", D::Exec, "" },
-              { "direction", D::Vec3,  "Vec3{ -0.3f, -1.0f, -0.2f }" },
-              { "color",     D::Vec3,  "Vec3{ 1.0f, 1.0f, 1.0f }" },
+              { "direction", D::Vec3,  "glm::vec3{ -0.3f, -1.0f, -0.2f }" },
+              { "color",     D::Vec3,  "glm::vec3{ 1.0f, 1.0f, 1.0f }" },
               { "intensity", D::Float, "3.0f" } },
             { { "", D::Exec, "" } },
             "ctx->setSun($1, $2, $3);\n#0" });
@@ -178,12 +178,41 @@ export const std::vector<NodeDef>& nodeRegistry()
         r.push_back({ "MakeVec3", "Make Vec3", "Math", false,
             { { "x", D::Float, "0.0f" }, { "y", D::Float, "0.0f" }, { "z", D::Float, "0.0f" } },
             { { "vec", D::Vec3, "" } },
-            "Vec3{ $0, $1, $2 }" });
+            "glm::vec3{ $0, $1, $2 }" });
 
         r.push_back({ "SplitVec3", "Split Vec3", "Math", false,
             { { "vec", D::Vec3, "" } },
             { { "x", D::Float, "", 0, "$0.x"}, {"y", D::Float, "", 0, "$0.y"}, {"z", D::Float, "", 0, "$0.z"}}
             });
+
+        // ---- vector math (Vec3 is glm::vec3 in compiled scripts, so these use glm operators/functions) ----
+        r.push_back({ "AddVec3", "Add Vec3", "Math", false,
+            { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+            "($0 + $1)" });
+
+        r.push_back({ "SubVec3", "Subtract Vec3", "Math", false,
+            { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+            "($0 - $1)" });
+
+        r.push_back({ "ScaleVec3", "Scale Vec3", "Math", false,
+            { { "vec", D::Vec3, "" }, { "scale", D::Float, "1.0f" } }, { { "result", D::Vec3, "" } },
+            "($0 * $1)" });
+
+        r.push_back({ "DotVec3", "Dot", "Math", false,
+            { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Float, "" } },
+            "glm::dot($0, $1)" });
+
+        r.push_back({ "CrossVec3", "Cross", "Math", false,
+            { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+            "glm::cross($0, $1)" });
+
+        r.push_back({ "LengthVec3", "Length", "Math", false,
+            { { "vec", D::Vec3, "" } }, { { "result", D::Float, "" } },
+            "glm::length($0)" });
+
+        r.push_back({ "NormalizeVec3", "Normalize", "Math", false,
+            { { "vec", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+            "glm::normalize($0)" });
 
         r.push_back({ "ConstFloat", "Float", "Constants", false,
             { { "value", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
@@ -208,13 +237,27 @@ export const std::vector<NodeDef>& nodeRegistry()
         // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks).
         r.push_back({ "SetEntity", "Set Entity", "Entity", true,
             { { "", D::Exec, "" },
-              { "Position", D::Vec3,  "Vec3{ 0.0f, 0.0f, 0.0f }" },
+              { "Position", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
               { "Scale",    D::Float, "1.0f" },
-              { "Rotation", D::Vec3,  "Vec3{ 0.0f, 0.0f, 0.0f }" },
+              { "Rotation", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
               { "Enabled",  D::Bool,  "true" } },
             { { "", D::Exec, "" } },
             "?1{ctx->entitySetPosition(self, $1);\n}?2{ctx->entitySetScale(self, $2);\n}"
             "?3{ctx->entitySetRotation(self, $3);\n}?4{ctx->entitySetEnabled(self, $4);\n}#0" });
+
+        // Spawn Entity: queues an asset/prefab to spawn at a world position (drained by App after update).
+        r.push_back({ "SpawnEntity", "Spawn Entity", "Entity", true,
+            { { "", D::Exec, "" },
+              { "asset",    D::String, "\"Entities/character.pre\"" },
+              { "position", D::Vec3,   "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
+            { { "", D::Exec, "" } },
+            "ctx->spawnEntity($1, $2);\n#0" });
+
+        // Destroy Entity: queues this script's owning entity (self) for removal.
+        r.push_back({ "DestroyEntity", "Destroy Entity", "Entity", true,
+            { { "", D::Exec, "" } },
+            { { "", D::Exec, "" } },
+            "ctx->destroyEntity(self);\n#0" });
 
         r.push_back({ "SetAnimFloat", "Set Anim Float", "Entity", true,
             { { "", D::Exec, "" }, { "param", D::String, "\"speed\"" }, { "value", D::Float, "0.0f" } },

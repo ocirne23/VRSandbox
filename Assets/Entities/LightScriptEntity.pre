@@ -1,0 +1,3 @@
+Prefab LightScriptEntity
+	Component Script
+		Path "Scripts/LightInput.scr"

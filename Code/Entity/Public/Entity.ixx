@@ -8,4 +8,5 @@ export import :AssetRegistry;
 export import :Prefab;
 export import :World;
 export import :Zone;
+export import :ScriptCommands;
 export import :ScriptContext;

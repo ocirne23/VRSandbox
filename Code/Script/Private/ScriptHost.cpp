@@ -32,6 +32,17 @@ namespace
         std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         return content;
     }
+
+    // Canonical cache key for a script. The same file reaches getOrLoad spelled different ways — the prefab
+    // stores a relative "Scripts/Foo.scr", the asset browser hands over an absolute backslash path — so key
+    // by the resolved absolute path. Otherwise a panel reload and the owning entity land in different slots
+    // and the entity never sees the recompile (hot reload silently no-ops).
+    std::string cacheKey(const std::string& path)
+    {
+        std::error_code ec;
+        const fs::path resolved = fs::weakly_canonical(fs::absolute(path), ec);
+        return (ec ? fs::absolute(path) : resolved).string();
+    }
 }
 
 // A loaded module plus the DLL handle/path needed to unload and recompile it.
@@ -44,9 +55,8 @@ struct CachedScript
 
 struct ScriptHost::Impl
 {
-    uint32      buildCounter = 0;
     std::string vcvarsPath;                                 // cached after first lookup
-    std::unordered_map<std::string, CachedScript> scripts;  // keyed by source path
+    std::unordered_map<std::string, CachedScript> scripts;  // keyed by canonical source path
 
     // Locates vcvars64.bat via vswhere (once, then cached). Empty string on failure.
     const std::string& findVcvars()
@@ -97,12 +107,16 @@ struct ScriptHost::Impl
 
         const fs::path assetsDir = fs::current_path();
         const fs::path outDir = assetsDir / "Local" / "Scripts";
-        const fs::path includeDir = assetsDir / "Scripts";         // ScriptAPI.h lives here (copied at build)
+        const fs::path includeDir = assetsDir / "Scripts";                          // ScriptAPI.h lives here (copied at build)
+        const fs::path glmInclude = assetsDir.parent_path() / "Dependencies" / "Include"; // header-only glm for Vec3 math
         std::error_code ec; fs::create_directories(outDir, ec);
 
         if (!fs::exists(sourcePath)) { outErrors = "Script source not found: " + sourcePath; return false; }
 
-        const std::string base = "script_" + std::to_string(buildCounter++);
+        // Build to a temp "<stem>.building.dll": the live "<stem>.dll" is file-locked while loaded, so we
+        // can't overwrite it directly. getOrLoad frees the old module then renames this temp over it on
+        // success, leaving exactly one DLL per script.
+        const std::string base = fs::path(sourcePath).stem().string() + ".building";
         const fs::path dllPath = outDir / (base + ".dll");
         const fs::path objPath = outDir / (base + ".obj");
         const fs::path logPath = outDir / "build.log";
@@ -114,6 +128,7 @@ struct ScriptHost::Impl
         bat += "call \"" + vcvars + "\" >nul 2>&1\r\n";
         bat += "cl /nologo /LD /std:c++20 /MD /O2 /EHsc /arch:AVX2 /wd4100"; // /wd4100: allow unused params (ctx/self/dt)
         bat += " /I\"" + includeDir.string() + "\"";
+        bat += " /I\"" + glmInclude.string() + "\""; // ScriptAPI.h includes <glm/glm.hpp> (Vec3 = glm::vec3)
         bat += " /Fo\"" + objPath.string() + "\"";
         bat += " /Fe\"" + dllPath.string() + "\"";
         bat += " /Tp\"" + srcAbs.string() + "\""; // /Tp: compile as C++ regardless of the .scr extension
@@ -125,52 +140,112 @@ struct ScriptHost::Impl
         }
 
         const int code = runProcess("cmd.exe /c \"" + batPath.string() + "\"");
+
+        // cl drops <base>.obj and the linker <base>.lib/.exp next to the DLL; clear those intermediates.
+        for (const char* ext : { ".obj", ".lib", ".exp" })
+        {
+            std::error_code e; fs::remove(outDir / (base + ext), e);
+        }
+
         if (code != 0)
         {
             const std::string log = readTextFile(logPath);
             outErrors = log.empty() ? ("compiler exited with code " + std::to_string(code)) : log;
+            std::error_code e; fs::remove(dllPath, e); // drop any half-written temp DLL
             return false;
         }
         outDll = dllPath.string();
         return true;
     }
 
+    // The single persistent DLL a script compiles to (matches compile()'s final destination).
+    fs::path scriptDllPath(const std::string& sourcePath) const
+    {
+        return fs::current_path() / "Local" / "Scripts" / (fs::path(sourcePath).stem().string() + ".dll");
+    }
+
+    // LoadLibrary `dll` and resolve the entry points into `slot`, freeing any module it previously held.
+    bool loadDll(CachedScript& slot, const fs::path& dll)
+    {
+        HMODULE m = LoadLibraryA(dll.string().c_str());
+        void* update = m ? (void*)GetProcAddress(m, "ScriptUpdate") : nullptr;
+        if (!update) { if (m) FreeLibrary(m); return false; }
+        if (slot.module) FreeLibrary((HMODULE)slot.module);
+        slot.module = m;
+        slot.dllPath = dll.string();
+        slot.entries.update = update;
+        slot.entries.init = (void*)GetProcAddress(m, "ScriptInit");
+        slot.entries.shutdown = (void*)GetProcAddress(m, "ScriptShutdown");
+        return true;
+    }
+
     const ScriptModule* getOrLoad(const std::string& path, bool forceRecompile)
     {
-        auto it = scripts.find(path);
+        const std::string key = cacheKey(path);
+        auto it = scripts.find(key);
         if (it != scripts.end() && !forceRecompile)
             return &it->second.entries;
 
-        std::string dllPath, errors;
-        if (!compile(path, dllPath, errors))
+        // First load this session and not forced: if an existing DLL's mtime matches the source's (we stamp
+        // it to match after each compile), the source is unchanged since it was built — load it, skip cl.
+        if (!forceRecompile && it == scripts.end())
+        {
+            const fs::path dll = scriptDllPath(path);
+            std::error_code es, ed;
+            const auto srcTime = fs::last_write_time(path, es);
+            const auto dllTime = fs::last_write_time(dll, ed);
+            if (!es && !ed && srcTime == dllTime)
+            {
+                CachedScript& slot = scripts.emplace(key, CachedScript{}).first->second;
+                if (loadDll(slot, dll))
+                {
+                    Log::info("Script unchanged; loaded cached DLL: " + path);
+                    return &slot.entries;
+                }
+                scripts.erase(key); // cached DLL was unusable; fall through and recompile
+            }
+        }
+
+        it = scripts.find(key);
+        std::string tempDll, errors;
+        if (!compile(path, tempDll, errors))
         {
             Log::error("Script compile failed (" + path + "):\n" + errors);
             if (it != scripts.end()) return &it->second.entries;             // keep previous build
-            return &scripts.emplace(path, CachedScript{}).first->second.entries; // cache the failure
+            return &scripts.emplace(key, CachedScript{}).first->second.entries; // cache the failure
         }
 
-        HMODULE newModule = LoadLibraryA(dllPath.c_str());
-        void* update = newModule ? (void*)GetProcAddress(newModule, "ScriptUpdate") : nullptr;
-        if (!update)
+        // Compile succeeded: free the previous build (unlocking its <stem>.dll) and promote the temp DLL
+        // into its place, so each script keeps exactly one DLL on disk.
+        CachedScript& slot = (it != scripts.end()) ? it->second : scripts.emplace(key, CachedScript{}).first->second;
+        if (slot.module) { FreeLibrary((HMODULE)slot.module); slot.module = nullptr; }
+
+        const fs::path finalDll = scriptDllPath(path);
+        std::error_code ec;
+        fs::remove(finalDll, ec);                 // the old build is freed, so this unlinks cleanly
+        fs::rename(tempDll, finalDll, ec);
+        if (ec)
         {
-            Log::error("Script: DLL load/ScriptUpdate failed (" + dllPath + ")");
-            if (newModule) FreeLibrary(newModule);
-            std::error_code ec; fs::remove(dllPath, ec);
-            if (it != scripts.end()) return &it->second.entries;
-            return &scripts.emplace(path, CachedScript{}).first->second.entries;
+            std::error_code e; fs::remove(tempDll, e);
+            Log::error("Script: could not place DLL (" + finalDll.string() + "): " + ec.message());
+            slot.entries = ScriptModule{}; slot.dllPath.clear();
+            return &slot.entries;
         }
 
-        CachedScript& slot = (it != scripts.end()) ? it->second : scripts.emplace(path, CachedScript{}).first->second;
-        if (slot.module) // swap out the previous build
+        // Stamp the DLL with the source's mtime (before loading, while the file is still unlocked) so a
+        // later startup recognises an unchanged script and reuses this DLL instead of recompiling.
+        std::error_code te;
+        const auto srcTime = fs::last_write_time(path, te);
+        if (!te) fs::last_write_time(finalDll, srcTime, te);
+
+        if (!loadDll(slot, finalDll))
         {
-            FreeLibrary((HMODULE)slot.module);
-            if (!slot.dllPath.empty()) { std::error_code ec; fs::remove(slot.dllPath, ec); }
+            Log::error("Script: DLL load/ScriptUpdate failed (" + finalDll.string() + ")");
+            fs::remove(finalDll, ec);
+            slot.entries = ScriptModule{}; slot.dllPath.clear();
+            return &slot.entries;
         }
-        slot.module = newModule;
-        slot.dllPath = dllPath;
-        slot.entries.update = update;
-        slot.entries.init = (void*)GetProcAddress(newModule, "ScriptInit");
-        slot.entries.shutdown = (void*)GetProcAddress(newModule, "ScriptShutdown");
+
         Log::info("Script loaded: " + path);
         return &slot.entries;
     }

@@ -401,6 +401,7 @@ void Scene::newGraph()
     Node& spawn = addNodeOfType("SpawnPointLight", ImVec2(340.0f, 60.0f));
     connectNodes(&entry, 0, &spawn, 0);
     m_firstFrame = true;
+    m_hasBaseline = false;
 }
 
 std::string Scene::generateCpp()
@@ -411,7 +412,7 @@ std::string Scene::generateCpp()
     std::string code;
     code += "#include \"ScriptAPI.h\"\n";
     code += "#include <cmath>\n\n";
-    code += "SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, void* self, float dt)\n{\n";
+    code += "SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt)\n{\n";
 
     if (Node* entry = findEntry())
     {
@@ -475,6 +476,7 @@ bool Scene::saveToFile(const std::string& path)
     if (!file.is_open())
         return false;
     file.write(code.data(), code.size());
+    m_hasBaseline = false; // re-baseline against the just-saved state next frame
     return file.good();
 }
 
@@ -573,6 +575,7 @@ bool Scene::loadFromFile(const std::string& path)
     }
 
     m_firstFrame = true;
+    m_hasBaseline = false; // re-baseline against the freshly loaded graph once it renders
     return !m_nodes.empty();
 }
 
@@ -619,7 +622,23 @@ void Scene::update(double deltaSec)
 
     ed::End();
 
+    // Capture the clean-state baseline once the graph has rendered (node positions are now valid).
+    if (!m_hasBaseline)
+    {
+        m_baselineState = serializeGraph();
+        m_hasBaseline = true;
+    }
+
     m_firstFrame = false;
+}
+
+bool Scene::isDirty()
+{
+    if (!m_hasBaseline)
+        return false; // baseline not captured yet (just loaded) — treat as clean until it settles
+    if (m_nodeEditorContext)
+        ed::SetCurrentEditor(m_nodeEditorContext);
+    return serializeGraph() != m_baselineState;
 }
 
 void Scene::processInteractions()

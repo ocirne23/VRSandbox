@@ -246,6 +246,14 @@ int main()
                     world.invalidatePrefab(std::filesystem::path(sp->path).stem().string());
         }
 
+        // Drain script spawn/destroy requests (queued during the update walk above).
+        for (const ScriptSpawnRequest& req : Globals::scriptSpawnRequests)
+            entities.push_back(world.spawnAssetFile(req.assetPath, Transform(req.position, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
+        Globals::scriptSpawnRequests.clear();
+        for (void* dead : Globals::scriptDestroyRequests)
+            std::erase_if(entities, [&](const EntityPtr& e) { return (void*)e.get() == dead; });
+        Globals::scriptDestroyRequests.clear();
+
         const Frustum& frustum = renderer.beginFrame(camera);
 
         for (const EntityPtr& entity : entities)

@@ -3,6 +3,7 @@ module UI;
 import Core.imgui;
 import Core.Log;
 import Core.glm;
+import Entity;
 
 UI::~UI()
 {
@@ -178,6 +179,35 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             ImGui::EndPopup();
         }
 
+        if (m_openUnsavedScriptPopup)
+        {
+            ImGui::OpenPopup("Unsaved Script Changes");
+            m_openUnsavedScriptPopup = false;
+        }
+        if (ImGui::BeginPopupModal("Unsaved Script Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::Text("'%s' has unsaved changes.",
+                std::filesystem::path(m_scene.scriptPath()).filename().string().c_str());
+            ImGui::Text("Switch to '%s'?",
+                std::filesystem::path(m_pendingScriptOpen).filename().string().c_str());
+            ImGui::Separator();
+            const bool save = ImGui::Button("Save");
+            ImGui::SameLine();
+            const bool discard = ImGui::Button("Discard");
+            ImGui::SameLine();
+            const bool cancel = ImGui::Button("Cancel");
+            if (save)
+                m_scene.save();
+            if (save || discard)
+                m_scene.open(m_pendingScriptOpen);
+            if (save || discard || cancel)
+            {
+                m_pendingScriptOpen.clear();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::BeginChild("ScriptCanvas", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_NoMove);
         m_scene.update(deltaSec);
@@ -197,6 +227,16 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         ImGui::Begin("Properties");
         m_propertiesPanel.render(m_sceneView.getSelected());
         ImGui::End();
+    }
+
+    // When the hierarchy selection changes to an entity carrying a script, make that script active in the
+    // editor (guarded by the unsaved-changes prompt below if the current graph has pending edits).
+    if (Entity* selected = m_sceneView.getSelected(); selected != m_scriptSelectionTracked)
+    {
+        m_scriptSelectionTracked = selected;
+        if (selected)
+            if (ScriptComponent* script = getComponent<ScriptComponent>(selected); script && !script->scriptPath.empty())
+                requestOpenScript(script->scriptPath);
     }
 
     {
@@ -249,6 +289,22 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         ImGui::Begin("Tweaks");
         m_tweakPanel.render();
         ImGui::End();
+    }
+}
+
+void UI::requestOpenScript(const std::string& path)
+{
+    if (path.empty() || path == m_scene.scriptPath())
+        return; // already the active script
+
+    if (m_scene.isDirty())
+    {
+        m_pendingScriptOpen = path;       // defer the switch behind the unsaved-changes prompt
+        m_openUnsavedScriptPopup = true;
+    }
+    else
+    {
+        m_scene.open(path);
     }
 }
 

@@ -66,6 +66,13 @@ private:
     std::vector<EntityChange> m_viewportChanges;   // assets dropped onto the viewport, drained via takeEntityChanges
     std::vector<std::string> m_scriptReloadRequests; // Script panel compile requests, drained via takeScriptReloadRequests
 
+    // Follow the hierarchy selection into the Script editor: when a selected entity has a ScriptComponent,
+    // open its script. m_pendingScriptOpen holds a switch deferred behind the unsaved-changes prompt.
+    void requestOpenScript(const std::string& path);
+    Entity*     m_scriptSelectionTracked = nullptr; // last selection we reacted to (only act on changes)
+    std::string m_pendingScriptOpen;                // script to open once the user resolves unsaved changes
+    bool        m_openUnsavedScriptPopup = false;    // request to open the modal next frame
+
     ed::EditorContext* m_nodeEditorContext = nullptr;
 
 	NodeEditor::Scene m_scene;
