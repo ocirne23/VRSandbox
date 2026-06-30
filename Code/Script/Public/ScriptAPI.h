@@ -23,10 +23,8 @@ typedef struct ScriptContext
     void  (*spawnPointLight)(Vec3 position, float range, Vec3 color, float intensity);
     void  (*setSun)(Vec3 direction, Vec3 color, float intensity);
 
-    // The entity this script is attached to (set by the host before each ScriptUpdate). Null for the
-    // global/panel test script. The entity* functions below all take this handle; they no-op / return
-    // zero when it is null, so entity nodes are safe to use anywhere.
-    void* self;
+    // The entity* functions below take an entity handle, which ScriptUpdate receives as `self` and the
+    // generated code passes through. They no-op / return zero for a null handle, so entity nodes are safe.
 
     // ---- entity reads ----
     Vec3        (*entityGetPosition)(void* entity);     // local position
@@ -48,11 +46,16 @@ typedef struct ScriptContext
     void (*entitySetAnimFloat)(void* entity, const char* param, float value);
     void (*entitySetAnimBool)(void* entity, const char* param, int value);
     void (*entitySetAnimTrigger)(void* entity, const char* param);
+
+#ifdef __cplusplus
+    ScriptContext(); // the engine binds all the function pointers here; scripts never construct one
+#endif
 } ScriptContext;
 
-// Entry points a script DLL exports. ScriptUpdate is required; Init/Shutdown are optional.
+// Entry points a script DLL exports. ScriptUpdate is required; Init/Shutdown are optional. `self` is the
+// entity the script is running on (null for none); entity nodes pass it to the entity* functions.
 typedef void (*ScriptInitFn)(const ScriptContext*);
-typedef void (*ScriptUpdateFn)(const ScriptContext*, float deltaSeconds);
+typedef void (*ScriptUpdateFn)(const ScriptContext*, void* self, float deltaSeconds);
 typedef void (*ScriptShutdownFn)(const ScriptContext*);
 
 #ifdef __cplusplus

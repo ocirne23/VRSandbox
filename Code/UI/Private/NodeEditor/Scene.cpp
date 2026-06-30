@@ -54,9 +54,22 @@ namespace
     //
     // Exec traversal and data resolution keep SEPARATE recursion stacks: a node that sits in the exec
     // flow can still feed its data output into a downstream node (e.g. Conditional), which is not a cycle.
+    //
+    // Common-subexpression elimination: per exec statement, any data output pin that would otherwise be
+    // expanded 2+ times (e.g. a Get Entity output read for both .x and .z) is hoisted into a `const auto`
+    // local declared just before the statement, and consumers reference that local.
 
-    std::string emitDataExpr(const std::vector<std::unique_ptr<Link>>& links, const Pin* inputPin, std::set<const Node*>& dataStack);
-    std::string emitExecChain(const std::vector<std::unique_ptr<Link>>& links, Node* node, std::set<const Node*>& execStack);
+    using HoistMap = std::map<const Pin*, std::string>; // output pin -> local variable name
+
+    struct Codegen
+    {
+        const std::vector<std::unique_ptr<Link>>& links;
+        int tempCounter = 0;
+    };
+
+    std::string emitDataExpr(Codegen& cg, const Pin* inputPin, std::set<const Node*>& dataStack, const HoistMap& hoist);
+    std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack);
+    std::string expandOutput(Codegen& cg, const Pin* outPin, std::set<const Node*>& dataStack, const HoistMap& hoist);
 
     // @ -> the node's selected dropdown-property code token.
     void appendEnumToken(std::string& out, Node* node)
@@ -67,15 +80,14 @@ namespace
             out += def->enumTokens[sel];
     }
 
-    std::string inputExpr(const std::vector<std::unique_ptr<Link>>& links, Node* node, int idx, std::set<const Node*>& dataStack)
+    std::string inputExpr(Codegen& cg, Node* node, int idx, std::set<const Node*>& dataStack, const HoistMap& hoist)
     {
         const auto& inputs = node->getInputPins();
-        return (idx >= 0 && idx < (int)inputs.size()) ? emitDataExpr(links, inputs[idx].get(), dataStack) : "0";
+        return (idx >= 0 && idx < (int)inputs.size()) ? emitDataExpr(cg, inputs[idx].get(), dataStack, hoist) : "0";
     }
 
     // Value-expression template ($k = data input k, @ = enum token). Data resolution threads dataStack.
-    std::string substituteData(const std::string& tmpl, Node* node,
-        const std::vector<std::unique_ptr<Link>>& links, std::set<const Node*>& dataStack)
+    std::string substituteData(Codegen& cg, const std::string& tmpl, Node* node, std::set<const Node*>& dataStack, const HoistMap& hoist)
     {
         std::string out;
         for (size_t i = 0; i < tmpl.size();)
@@ -85,7 +97,7 @@ namespace
             {
                 int idx = 0; size_t j = i + 1;
                 while (j < tmpl.size() && tmpl[j] >= '0' && tmpl[j] <= '9') { idx = idx * 10 + (tmpl[j] - '0'); ++j; }
-                out += inputExpr(links, node, idx, dataStack);
+                out += inputExpr(cg, node, idx, dataStack, hoist);
                 i = j;
             }
             else if (c == '@') { appendEnumToken(out, node); ++i; }
@@ -95,8 +107,7 @@ namespace
     }
 
     // Statement template ($k = data input k via a fresh data recursion, #k = exec continuation k, @ = enum).
-    std::string substituteExec(const std::string& tmpl, Node* node,
-        const std::vector<std::unique_ptr<Link>>& links, std::set<const Node*>& execStack)
+    std::string substituteExec(Codegen& cg, const std::string& tmpl, Node* node, std::set<const Node*>& execStack, const HoistMap& hoist)
     {
         std::string out;
         for (size_t i = 0; i < tmpl.size();)
@@ -109,13 +120,13 @@ namespace
                 if (c == '$')
                 {
                     std::set<const Node*> dataStack; // data resolution is independent of the exec path
-                    out += inputExpr(links, node, idx, dataStack);
+                    out += inputExpr(cg, node, idx, dataStack, hoist);
                 }
                 else
                 {
                     const auto& outputs = node->getOutputPins();
-                    Pin* tgt = (idx >= 0 && idx < (int)outputs.size()) ? targetOfOutput(links, outputs[idx].get()) : nullptr;
-                    out += tgt ? emitExecChain(links, tgt->node, execStack) : std::string();
+                    Pin* tgt = (idx >= 0 && idx < (int)outputs.size()) ? targetOfOutput(cg.links, outputs[idx].get()) : nullptr;
+                    out += tgt ? emitExecChain(cg, tgt->node, execStack) : std::string();
                 }
                 i = j;
             }
@@ -136,8 +147,8 @@ namespace
                     const std::string block = tmpl.substr(j + 1, k - (j + 1));
                     const auto& inputs = node->getInputPins();
                     const Pin* in = (idx >= 0 && idx < (int)inputs.size()) ? inputs[idx].get() : nullptr;
-                    if (in && sourceOfInput(links, in))
-                        out += substituteExec(block, node, links, execStack);
+                    if (in && sourceOfInput(cg.links, in))
+                        out += substituteExec(cg, block, node, execStack, hoist);
                     i = (k < tmpl.size()) ? k + 1 : k;
                 }
                 else { out += c; ++i; }
@@ -147,20 +158,15 @@ namespace
         return out;
     }
 
-    std::string emitDataExpr(const std::vector<std::unique_ptr<Link>>& links, const Pin* inputPin, std::set<const Node*>& dataStack)
+    // Picks the value template for an output pin and substitutes it (per-output expr, else node emit/dataEmit).
+    std::string expandOutput(Codegen& cg, const Pin* outPin, std::set<const Node*>& dataStack, const HoistMap& hoist)
     {
-        Pin* src = sourceOfInput(links, inputPin);
-        if (!src)
-            return inputPin->defaultValue.empty() ? std::string("0") : inputPin->defaultValue;
-
-        Node* node = src->node;
+        Node* node = outPin->node;
         const NodeDef* def = findNodeDef(node->getTypeId());
         if (!def || dataStack.count(node))
             return "0";
 
-        // Prefer a per-output expression (multi-output nodes like Get Entity); otherwise a pure data node
-        // emits `emit`, and an exec node that also produces a value emits `dataEmit`.
-        const int outIdx = indexOfPin(node->getOutputPins(), src);
+        const int outIdx = indexOfPin(node->getOutputPins(), outPin);
         const std::string* tmpl = nullptr;
         if (outIdx >= 0 && outIdx < (int)def->outputs.size() && !def->outputs[outIdx].expr.empty())
             tmpl = &def->outputs[outIdx].expr;
@@ -172,19 +178,81 @@ namespace
             return "0";
 
         dataStack.insert(node);
-        std::string result = substituteData(*tmpl, node, links, dataStack);
+        std::string result = substituteData(cg, *tmpl, node, dataStack, hoist);
         dataStack.erase(node);
         return result;
     }
 
-    std::string emitExecChain(const std::vector<std::unique_ptr<Link>>& links, Node* node, std::set<const Node*>& execStack)
+    std::string emitDataExpr(Codegen& cg, const Pin* inputPin, std::set<const Node*>& dataStack, const HoistMap& hoist)
+    {
+        Pin* src = sourceOfInput(cg.links, inputPin);
+        if (!src)
+            return inputPin->defaultValue.empty() ? std::string("0") : inputPin->defaultValue;
+        if (auto it = hoist.find(src); it != hoist.end())
+            return it->second; // already computed into a local
+        return expandOutput(cg, src, dataStack, hoist);
+    }
+
+    // Dry run mirroring emitDataExpr: tallies how many times each data output pin would be expanded inline.
+    void countExpansions(Codegen& cg, const Pin* inputPin, std::map<const Pin*, int>& counts, std::set<const Node*>& path)
+    {
+        Pin* src = sourceOfInput(cg.links, inputPin);
+        if (!src) return;
+        Node* node = src->node;
+        if (!findNodeDef(node->getTypeId())) return;
+        counts[src]++;
+        if (path.count(node)) return; // cycle guard
+        path.insert(node);
+        for (const auto& pin : node->getInputPins())
+            if (pin->dataType != EDataType::Exec)
+                countExpansions(cg, pin.get(), counts, path);
+        path.erase(node);
+    }
+
+    // Emits `const auto <local> = <expr>;` for a hoisted output pin, declaring its hoisted dependencies first.
+    void declareHoist(Codegen& cg, const Pin* outPin, const HoistMap& hoist, std::set<const Pin*>& declared, std::string& decls)
+    {
+        if (declared.count(outPin)) return;
+        declared.insert(outPin);
+        for (const auto& pin : outPin->node->getInputPins())
+        {
+            if (pin->dataType == EDataType::Exec) continue;
+            if (Pin* s = sourceOfInput(cg.links, pin.get()); s && hoist.count(s))
+                declareHoist(cg, s, hoist, declared, decls);
+        }
+        std::set<const Node*> dataStack;
+        decls += "const auto " + hoist.at(outPin) + " = " + expandOutput(cg, outPin, dataStack, hoist) + ";\n";
+    }
+
+    std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack)
     {
         if (!node) return std::string();
         const NodeDef* def = findNodeDef(node->getTypeId());
         if (!def || execStack.count(node)) return std::string();
 
         execStack.insert(node);
-        std::string out = substituteExec(def->emit, node, links, execStack);
+
+        // Hoist data outputs this statement would evaluate 2+ times into locals declared before it.
+        std::map<const Pin*, int> counts;
+        {
+            std::set<const Node*> path;
+            for (const auto& pin : node->getInputPins())
+                if (pin->dataType != EDataType::Exec)
+                    countExpansions(cg, pin.get(), counts, path);
+        }
+        HoistMap hoist;
+        for (const auto& [pin, count] : counts)
+            if (count >= 2)
+                hoist[pin] = "t" + std::to_string(cg.tempCounter++);
+
+        std::string decls;
+        {
+            std::set<const Pin*> declared;
+            for (const auto& [pin, name] : hoist)
+                declareHoist(cg, pin, hoist, declared, decls);
+        }
+
+        std::string out = decls + substituteExec(cg, def->emit, node, execStack, hoist);
         execStack.erase(node);
         return out;
     }
@@ -343,12 +411,13 @@ std::string Scene::generateCpp()
     std::string code;
     code += "#include \"ScriptAPI.h\"\n";
     code += "#include <cmath>\n\n";
-    code += "SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, float dt)\n{\n    (void)dt;\n";
+    code += "SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, void* self, float dt)\n{\n";
 
     if (Node* entry = findEntry())
     {
+        Codegen cg{ m_links };
         std::set<const Node*> execStack;
-        const std::string body = emitExecChain(m_links, entry, execStack);
+        const std::string body = emitExecChain(cg, entry, execStack);
         if (!body.empty())
             code += indentLines(body, "    ");
     }

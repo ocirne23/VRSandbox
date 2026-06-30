@@ -75,9 +75,7 @@ int main()
     if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
         anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
 
-    std::string currentScriptPath = "Scripts/Graph.scr"; // the visual-script graph last compiled (F6 reloads it)
-    ScriptHost scriptHost;
-    scriptHost.reload(currentScriptPath); // compile + load the visual script DLL
+    std::string currentScriptPath = "Scripts/Graph.scr"; // the visual-script the panel edits (F6 recompiles it)
 
     pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
         {
@@ -90,7 +88,7 @@ int main()
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 renderer.reloadShaders();
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                scriptHost.reload(currentScriptPath);   // recompile + hot-swap the current visual script
+                Globals::scriptHost.getOrLoad(currentScriptPath, true); // recompile; entities using it hot-swap
             if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
                 if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
                     anim->stateMachine.setTrigger("attack"); // F: one-shot attack (returns to locomotion)
@@ -198,8 +196,8 @@ int main()
         ui.update(entities, deltaSec);
         for (const std::string& reloadPath : ui.takeScriptReloadRequests()) // Script panel "Compile & Run"
         {
-            currentScriptPath = reloadPath; // F6 now reloads this one
-            scriptHost.reload(reloadPath);
+            currentScriptPath = reloadPath;
+            Globals::scriptHost.getOrLoad(reloadPath, true); // recompile; entities referencing it hot-swap
         }
         renderer.setViewportRect(ui.getViewportRect());
 
@@ -250,8 +248,8 @@ int main()
 
         const Frustum& frustum = renderer.beginFrame(camera);
 
-        scriptHost.tick((float)deltaSec); // global/panel test script (self == null)
-        scriptHost.tickEntities(entities, (float)deltaSec); // per-entity scripts (modify transforms before render)
+        for (const EntityPtr& entity : entities)
+            entity->update((float)deltaSec); // run per-entity scripts (self), modifying transforms before render
 
         for (const EntityPtr& entity : entities)
             entity->renderTree(renderer, Transform(), (float)deltaSec);
@@ -278,7 +276,7 @@ int main()
         renderer.present();
         frameCount++;
     }
-    scriptHost.shutdown();
+    Globals::scriptHost.shutdown();
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
     return 0;

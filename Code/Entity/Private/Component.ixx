@@ -162,6 +162,10 @@ export struct ScriptComponent
     void spawn(Entity&, const SpawnInfo& info, const Transform&) { scriptPath = info.scriptPath; enabled = info.enabled; }
     void destroy(Entity&, const SpawnInfo&) {}
 
+    // Compiles (on demand) and runs the referenced script with `entity` as its `self`. Defined in
+    // ScriptRuntime.cpp, which owns the ScriptContext + thunks.
+    void update(Entity& entity, float deltaSeconds);
+
     void serialize(AssetNode& out) const
     {
         if (!scriptPath.empty()) out.set("Path", scriptPath);

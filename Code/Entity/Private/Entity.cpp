@@ -13,6 +13,20 @@ EntityArchetype makeEntityArchetype(uint16 typeBits)
     return EntityArchetype{ uint16(getEntityAllocSize(typeBits)), typeBits };
 }
 
+void Entity::update(float deltaSeconds)
+{
+    SceneComponent* sc = getComponent<SceneComponent>(this);
+    if (sc && !sc->enabled)
+        return; // disabled subtree, like renderTree
+
+    if (ScriptComponent* script = getComponent<ScriptComponent>(this))
+        script->update(*this, deltaSeconds);
+
+    if (sc)
+        for (const EntityPtr& child : sc->children)
+            child->update(deltaSeconds);
+}
+
 void Entity::renderTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds)
 {
     SceneComponent* sc = getComponent<SceneComponent>(this);

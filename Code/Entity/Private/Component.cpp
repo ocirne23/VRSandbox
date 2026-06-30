@@ -1,4 +1,8 @@
-﻿module Entity;
+﻿module;
+
+#include "ScriptAPI.h"
+
+module Entity;
 
 import Core;
 import Core.glm;
@@ -6,8 +10,10 @@ import Core.Log;
 import Core.Transform;
 import :Entity;
 import :AnimationDescription;
+import :ScriptContext;
 import Animation;
 import RendererVK;
+import Script;
 
 Transform composeTransform(const Transform& parent, const Transform& local)
 {
@@ -178,6 +184,20 @@ void AnimatorComponent::destroy(Entity& entity, const SpawnInfo& info)
 AnimatorComponent::~AnimatorComponent()
 {
 }
+
+void ScriptComponent::update(Entity& entity, float deltaSeconds)
+{
+    if (!enabled || scriptPath.empty())
+        return;
+
+    const ScriptModule* loaded = Globals::scriptHost.getOrLoad(scriptPath);
+    if (!loaded || !loaded->update)
+        return;
+
+    // self is passed explicitly (the ScriptContext no longer carries it).
+    reinterpret_cast<ScriptUpdateFn>(loaded->update)(&Globals::scriptContext, &entity, deltaSeconds);
+}
+
 
 void SceneComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {

@@ -193,16 +193,16 @@ export const std::vector<NodeDef>& nodeRegistry()
         // Get Entity: every readable entity property as a separate output (each output's `expr` field).
         r.push_back({ "GetEntity", "Get Entity", "Entity", false,
             {},
-            { { "Position",  D::Vec3,   "", 0, "ctx->entityGetPosition(ctx->self)" },
-              { "Scale",     D::Float,  "", 0, "ctx->entityGetScale(ctx->self)" },
-              { "Rotation",  D::Vec3,   "", 0, "ctx->entityGetRotation(ctx->self)" },
-              { "Forward",   D::Vec3,   "", 0, "ctx->entityGetForward(ctx->self)" },
-              { "Right",     D::Vec3,   "", 0, "ctx->entityGetRight(ctx->self)" },
-              { "Up",        D::Vec3,   "", 0, "ctx->entityGetUp(ctx->self)" },
-              { "Name",      D::String, "", 0, "ctx->entityGetName(ctx->self)" },
-              { "Enabled",   D::Bool,   "", 0, "(ctx->entityGetEnabled(ctx->self) != 0)" },
-              { "Children",  D::Int,    "", 0, "ctx->entityGetChildCount(ctx->self)" },
-              { "Bounds R",  D::Float,  "", 0, "ctx->entityGetBoundsRadius(ctx->self)" } },
+            { { "Position",  D::Vec3,   "", 0, "ctx->entityGetPosition(self)" },
+              { "Scale",     D::Float,  "", 0, "ctx->entityGetScale(self)" },
+              { "Rotation",  D::Vec3,   "", 0, "ctx->entityGetRotation(self)" },
+              { "Forward",   D::Vec3,   "", 0, "ctx->entityGetForward(self)" },
+              { "Right",     D::Vec3,   "", 0, "ctx->entityGetRight(self)" },
+              { "Up",        D::Vec3,   "", 0, "ctx->entityGetUp(self)" },
+              { "Name",      D::String, "", 0, "ctx->entityGetName(self)" },
+              { "Enabled",   D::Bool,   "", 0, "(ctx->entityGetEnabled(self) != 0)" },
+              { "Children",  D::Int,    "", 0, "ctx->entityGetChildCount(self)" },
+              { "Bounds R",  D::Float,  "", 0, "ctx->entityGetBoundsRadius(self)" } },
             "" });
 
         // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks).
@@ -213,18 +213,18 @@ export const std::vector<NodeDef>& nodeRegistry()
               { "Rotation", D::Vec3,  "Vec3{ 0.0f, 0.0f, 0.0f }" },
               { "Enabled",  D::Bool,  "true" } },
             { { "", D::Exec, "" } },
-            "?1{ctx->entitySetPosition(ctx->self, $1);\n}?2{ctx->entitySetScale(ctx->self, $2);\n}"
-            "?3{ctx->entitySetRotation(ctx->self, $3);\n}?4{ctx->entitySetEnabled(ctx->self, $4);\n}#0" });
+            "?1{ctx->entitySetPosition(self, $1);\n}?2{ctx->entitySetScale(self, $2);\n}"
+            "?3{ctx->entitySetRotation(self, $3);\n}?4{ctx->entitySetEnabled(self, $4);\n}#0" });
 
         r.push_back({ "SetAnimFloat", "Set Anim Float", "Entity", true,
             { { "", D::Exec, "" }, { "param", D::String, "\"speed\"" }, { "value", D::Float, "0.0f" } },
             { { "", D::Exec, "" } },
-            "ctx->entitySetAnimFloat(ctx->self, $1, $2);\n#0" });
+            "ctx->entitySetAnimFloat(self, $1, $2);\n#0" });
 
         r.push_back({ "SetAnimTrigger", "Set Anim Trigger", "Entity", true,
             { { "", D::Exec, "" }, { "param", D::String, "\"attack\"" } },
             { { "", D::Exec, "" } },
-            "ctx->entitySetAnimTrigger(ctx->self, $1);\n#0" });
+            "ctx->entitySetAnimTrigger(self, $1);\n#0" });
 
         return r;
     }();

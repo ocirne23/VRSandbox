@@ -1,9 +1,8 @@
 #include "ScriptAPI.h"
 #include <cmath>
 
-SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, float dt)
+SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, void* self, float dt)
 {
-    (void)dt;
     ctx->spawnPointLight(Vec3{ 0.0f, 2.0f, 0.0f }, 5.0f, Vec3{ 1.0f, 0.6f, 0.2f }, (((ctx->isKeyDown("B") != 0) == false) ? 25.0f : 5.0f));
 }
 
