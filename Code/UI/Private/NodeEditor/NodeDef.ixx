@@ -103,15 +103,8 @@ export const std::vector<NodeDef>& nodeRegistry()
             { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
             "for (int i@ = 0; i@ < $1; ++i@)\n{\n#0}\n#1" });
 
-        // Compares Cond against Compare with the operator picked from the dropdown; the Result output
-        // yields A when true, B when false. The exec pins are a pass-through so it can sit in the flow,
-        // but Result also works standalone (it is emitted as an inline ternary wherever it is consumed).
-        // Cond/Compare share wildcard group 1; A/B/Result share group 2. Each group adopts the concrete
-        // type plugged into it, so you can compare ints/floats/bools and select values of any matching type.
         r.push_back({ "Conditional", "Conditional", "Flow", true,
-            { { "", D::Exec, "" },
-              { "Cond",    D::Wildcard, "0.0f", 1 }, { "Compare", D::Wildcard, "0.0f", 1 },
-              { "A",       D::Wildcard, "0.0f", 2 }, { "B",       D::Wildcard, "0.0f", 2 } },
+            { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Compare", D::Wildcard, "0.0f", 1 }, { "A", D::Wildcard, "0.0f", 2 }, { "B", D::Wildcard, "0.0f", 2 } },
             { { "", D::Exec, "" }, { "Result", D::Wildcard, "", 2 } },
             "#0",
             { "Less than", "Greater than", "Equals", "Not Equals" },
