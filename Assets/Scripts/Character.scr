@@ -3,8 +3,7 @@
 
 SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, void* self, float dt)
 {
-    const auto t0 = ctx->entityGetRotation(self);
-    ctx->entitySetRotation(self, Vec3{ t0.x, (ctx->elapsedSeconds() * 50.0f), t0.z });
+    ctx->entitySetRotation(self, Vec3{ 0.0f, (ctx->elapsedSeconds() * 50.0f), 0.0f });
 }
 
 //@graph 1
@@ -13,8 +12,6 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, void* self, float dt)
 //@node 2 MakeVec3 252 108
 //@node 3 MulFloat -32 131
 //@node 4 GetElapsedTime -176 135
-//@node 5 GetEntity -176 239
-//@node 6 SplitVec3 -52 279
 //@pin 1 1 Vec3{ 0.0f, 0.0f, 0.0f }
 //@pin 1 2 1.0f
 //@pin 1 3 Vec3{ 0.0f, 0.0f, 0.0f }
@@ -24,11 +21,7 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, void* self, float dt)
 //@pin 2 2 0.0f
 //@pin 3 0 1.0f
 //@pin 3 1 50.0f
-//@pin 6 0 
 //@link 0 0 1 0
 //@link 4 0 3 0
 //@link 3 0 2 1
 //@link 2 0 1 3
-//@link 5 2 6 0
-//@link 6 0 2 0
-//@link 6 2 2 2

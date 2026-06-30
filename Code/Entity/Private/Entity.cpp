@@ -13,31 +13,19 @@ EntityArchetype makeEntityArchetype(uint16 typeBits)
     return EntityArchetype{ uint16(getEntityAllocSize(typeBits)), typeBits };
 }
 
-void Entity::update(float deltaSeconds)
-{
-    SceneComponent* sc = getComponent<SceneComponent>(this);
-    if (sc && !sc->enabled)
-        return; // disabled subtree, like renderTree
-
-    if (ScriptComponent* script = getComponent<ScriptComponent>(this))
-        script->update(*this, deltaSeconds);
-
-    if (sc)
-        for (const EntityPtr& child : sc->children)
-            child->update(deltaSeconds);
-}
-
-void Entity::renderTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds)
+void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds)
 {
     SceneComponent* sc = getComponent<SceneComponent>(this);
     if (sc && !sc->enabled)
         return;
 
-    const Transform world = composeTransform(parentWorld, Transform(pos, scale, rot));
+    if (ScriptComponent* script = getComponent<ScriptComponent>(this))
+        script->update(*this, deltaSeconds);
 
     if (AnimatorComponent* animator = getComponent<AnimatorComponent>(this))
         animator->update(*this, renderer, deltaSeconds); // advance animation + refresh skinning palette
 
+    const Transform world = composeTransform(parentWorld, Transform(pos, scale, rot));
     if (RenderComponent* render = getComponent<RenderComponent>(this))
     {
         render->node.getTransform() = composeTransform(world, render->localTransform);
@@ -46,7 +34,7 @@ void Entity::renderTree(Renderer& renderer, const Transform& parentWorld, float 
 
     if (sc)
         for (const EntityPtr& child : sc->children)
-            child->renderTree(renderer, world, deltaSeconds);
+            child->updateTree(renderer, world, deltaSeconds);
 }
 
 EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& transform)

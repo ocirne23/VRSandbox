@@ -46,18 +46,11 @@ public:
     uint8 ecsComponentCount = 0;
     uint8 flags = 0; // EEntityFlags bitmask
 
+    void update(Renderer& renderer, float deltaSeconds) { updateTree(renderer, Transform(), deltaSeconds); }
 
     void serializeComponent(EComponentID id, AssetNode& out);
     void deserializeComponent(EComponentID id, const AssetNode& in);
     void reparentEntity(Entity* newParent);
-
-    // Runs this entity's ScriptComponent (with itself as the script's `self`) and recurses to children.
-    // Call once per frame before renderTree so script transform writes are reflected in the render.
-    void update(float deltaSeconds);
-
-    // Recursively submits this entity's RenderComponent (and its children's) to the renderer, and ticks any
-    // AnimatorComponent (advancing animation + pushing the skinning palette) with deltaSeconds.
-    void renderTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds = 0.0f);
 
     bool isPrefabInstance() const { return (flags & EEntityFlag_PrefabInstance) != 0; }
     void setPrefabInstance(bool on) { flags = on ? uint8(flags | EEntityFlag_PrefabInstance) : uint8(flags & ~EEntityFlag_PrefabInstance); }
@@ -71,6 +64,8 @@ private:
 	Entity() = default;
 	Entity(const Entity&) = delete;
     ~Entity() { assert(refCount == 0); }
+
+    void updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds = 0.0f);
 
     void createComponent(EComponentID id, uint16 componentOffset, const void* info, const Transform& base);
     void destroyComponent(EComponentID id, uint16 componentOffset, const void* info);

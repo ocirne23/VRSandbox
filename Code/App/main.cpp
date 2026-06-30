@@ -249,11 +249,7 @@ int main()
         const Frustum& frustum = renderer.beginFrame(camera);
 
         for (const EntityPtr& entity : entities)
-            entity->update((float)deltaSec); // run per-entity scripts (self), modifying transforms before render
-
-        for (const EntityPtr& entity : entities)
-            entity->renderTree(renderer, Transform(), (float)deltaSec);
-
+            entity->update(renderer, (float)deltaSec);
 
 		for (auto& light : spawnedLights)
 		{
@@ -270,7 +266,7 @@ int main()
         }
 
         if (gizmo.isVisible())
-            gizmo.getGizmoEntity()->renderTree(renderer, Transform());
+            gizmo.getGizmoEntity()->update(renderer, (float)deltaSec);
 
         ui.render();
         renderer.present();
