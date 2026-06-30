@@ -49,6 +49,7 @@ export class Node
 {
 public:
 
+	Node(uint32 nodeIdx) : m_nodeIdx(nodeIdx) {}
     Node& initialize(ImVec2 initialPos, std::string name, ENodeStyle style, uint32 color);
     Node& initFromDef(ImVec2 initialPos, const NodeDef& def);
     Node& addInput(EDataType dataType, const std::string& name, const std::string& defaultValue);
@@ -56,6 +57,7 @@ public:
 
     void update(double deltaSec, bool firstFrame);
 
+	uint32 getNodeIdx() const { return m_nodeIdx; }
     ed::NodeId getId() const { return ed::NodeId(this); }
     operator ed::NodeId() const { return ed::NodeId(this); }
 
@@ -68,6 +70,7 @@ public:
 
 private:
 
+	uint32 m_nodeIdx;
     ImVec2 m_initialPos;
     uint32 m_color;
     ENodeStyle m_style;

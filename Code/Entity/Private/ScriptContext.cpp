@@ -1,5 +1,6 @@
 module;
 
+#include <cstdarg>
 #include <cstddef>
 #include "ScriptAPI.h"
 
@@ -33,6 +34,14 @@ namespace
     // ---- context thunks -----------------------------------------------------
 
     void thunk_log(const char* message) { Log::info(message ? message : ""); }
+    void thunk_logf(const char* message, ...) 
+    {
+        va_list args;
+        va_start(args, message);
+		std::string formattedString = vformat(message ? message : "", std::make_format_args(args));
+        Log::info(formattedString);
+        va_end(args);
+    }
     float thunk_deltaSeconds(void) { return (float)Globals::time.getDeltaSec(); }
     float thunk_elapsedSeconds(void) { return (float)Globals::time.getElapsedSec(); }
 
@@ -106,6 +115,7 @@ namespace
 ScriptContext::ScriptContext()
 {
     log = &thunk_log;
+    logf = &thunk_logf;
     deltaSeconds = &thunk_deltaSeconds;
     elapsedSeconds = &thunk_elapsedSeconds;
     isKeyDown = &thunk_isKeyDown;

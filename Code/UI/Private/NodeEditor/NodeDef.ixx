@@ -32,7 +32,7 @@ export struct PinDef
 // A node type the editor can instantiate. `emit` is a C++ template:
 //   $k  -> expression for input pin k (the connected output's expression, else its default literal)
 //   #k  -> the statement block produced by following exec output pin k
-//   @   -> the selected enum option's code token (see enumTokens)
+//   @   -> the selected enum option's code token (see enumTokens), unique node idx if no enumTokens provided
 // Data nodes (isExec == false) have no exec pins and `emit` is a single value expression for output 0.
 // A node may also expose `dataEmit`: a value-expression for its data output, used when the node sits
 // in the exec flow (isExec) yet still produces a value pulled by downstream data inputs.
@@ -95,13 +95,13 @@ export const std::vector<NodeDef>& nodeRegistry()
 
         r.push_back({ "Branch", "Branch", "Flow", true,
             { { "", D::Exec, "" }, { "condition", D::Bool, "false" } },
-            { { "true", D::Exec, "" }, { "false", D::Exec, "" } },
-            "if ($1)\n{\n#0}\nelse\n{\n#1}\n" });
+            { { "true", D::Exec, "" }, { "false", D::Exec, "" }, { "break", D::Exec, "" } },
+            "if ($1)\n{\n#0}\nelse\n{\n#1}\n#2" });
 
         r.push_back({ "ForLoop", "For Loop", "Flow", true,
             { { "", D::Exec, "" }, { "count", D::Int, "10" } },
-            { { "body", D::Exec, "" }, { "completed", D::Exec, "" } },
-            "for (int i = 0; i < $1; ++i)\n{\n#0}\n#1" });
+            { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
+            "for (int i@ = 0; i@ < $1; ++i@)\n{\n#0}\n#1" });
 
         // Compares Cond against Compare with the operator picked from the dropdown; the Result output
         // yields A when true, B when false. The exec pins are a pass-through so it can sit in the flow,
@@ -118,11 +118,26 @@ export const std::vector<NodeDef>& nodeRegistry()
             { "<", ">", "==", "!=" },
             "(($1 @ $2) ? $3 : $4)" });
 
+        r.push_back({ "Cast", "Cast", "Flow", false,
+            { { "Cast",   D::Wildcard, "0.0f", 1 } },
+            { { "Result", D::Wildcard, "", 2 } },
+            "((@)$0)",
+            { "int", "float", "bool" },
+            { "int", "float", "bool" }
+        });
+
         // ---- actions ----
         r.push_back({ "Print", "Print", "Debug", true,
             { { "", D::Exec, "" }, { "message", D::String, "\"hello\"" } },
             { { "", D::Exec, "" } },
             "ctx->log($1);\n#0" });
+
+        r.push_back({ "Printf", "Printf", "Debug", true,
+            { { "", D::Exec, "" },
+                { "message", D::String, "\"%f\"" },
+                { "message", D::Wildcard, "0.0f", 1 } },
+            { { "", D::Exec, "" } },
+            "ctx->logf($1, $2);\n#0" });
 
         r.push_back({ "SpawnPointLight", "Spawn Point Light", "Rendering", true,
             { { "", D::Exec, "" },
@@ -155,17 +170,21 @@ export const std::vector<NodeDef>& nodeRegistry()
             "(ctx->isKeyDown($0) != 0)" });
 
         // ---- math ----
-        r.push_back({ "AddFloat", "Add", "Math", false,
-            { { "a", D::Float, "0.0f" }, { "b", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
+        r.push_back({ "Add", "Add", "Math", false,
+            { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
             "($0 + $1)" });
 
-        r.push_back({ "SubFloat", "Subtract", "Math", false,
-            { { "a", D::Float, "0.0f" }, { "b", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
+        r.push_back({ "Sub", "Subtract", "Math", false,
+            { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
             "($0 - $1)" });
 
-        r.push_back({ "MulFloat", "Multiply", "Math", false,
-            { { "a", D::Float, "1.0f" }, { "b", D::Float, "1.0f" } }, { { "result", D::Float, "" } },
+        r.push_back({ "Mul", "Multiply", "Math", false,
+            { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
             "($0 * $1)" });
+
+        r.push_back({ "Div", "Divide", "Math", false,
+            { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+            "($0 / $1)" });
 
         r.push_back({ "Sin", "Sin", "Math", false,
             { { "x", D::Float, "0.0f" } }, { { "result", D::Float, "" } },

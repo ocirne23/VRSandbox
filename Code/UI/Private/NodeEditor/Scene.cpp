@@ -72,9 +72,14 @@ namespace
     std::string expandOutput(Codegen& cg, const Pin* outPin, std::set<const Node*>& dataStack, const HoistMap& hoist);
 
     // @ -> the node's selected dropdown-property code token.
-    void appendEnumToken(std::string& out, Node* node)
+    void appendEnumToken(Codegen& cg, std::string& out, Node* node)
     {
         const NodeDef* def = findNodeDef(node->getTypeId());
+        if (def->enumTokens.empty())
+		{
+			out += std::to_string(node->getNodeIdx());
+			return;
+		}
         const int sel = node->getEnumSelection();
         if (def && sel >= 0 && sel < (int)def->enumTokens.size())
             out += def->enumTokens[sel];
@@ -100,7 +105,7 @@ namespace
                 out += inputExpr(cg, node, idx, dataStack, hoist);
                 i = j;
             }
-            else if (c == '@') { appendEnumToken(out, node); ++i; }
+            else if (c == '@') { appendEnumToken(cg, out, node); ++i; }
             else { out += c; ++i; }
         }
         return out;
@@ -130,7 +135,7 @@ namespace
                 }
                 i = j;
             }
-            else if (c == '@') { appendEnumToken(out, node); ++i; }
+            else if (c == '@') { appendEnumToken(cg, out, node); ++i; }
             // ?k{block}: emit the block (with $-substitution) only if input pin k is connected.
             else if (c == '?' && i + 1 < tmpl.size() && tmpl[i + 1] >= '0' && tmpl[i + 1] <= '9')
             {
@@ -290,7 +295,7 @@ void Scene::initialize()
 
 Node& Scene::createNode()
 {
-    return *m_nodes.emplace_back(std::make_unique<Node>());
+    return *m_nodes.emplace_back(std::make_unique<Node>((uint32)m_nodes.size()));
 }
 
 Node& Scene::addNodeOfType(const std::string& typeId, ImVec2 pos)

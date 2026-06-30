@@ -41,6 +41,7 @@ class Entity;
 typedef struct ScriptContext
 {
     void  (*log)(const char* message);
+    void  (*logf)(const char* message, ...);
     float (*deltaSeconds)(void);
     float (*elapsedSeconds)(void);
     int   (*isKeyDown)(const char* keyName); // e.g. "Space", "A", "Left Shift"
