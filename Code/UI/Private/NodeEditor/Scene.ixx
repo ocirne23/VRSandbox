@@ -42,6 +42,8 @@ private:
     void removeNode(ed::NodeId nodeId);
     void removeMemberPin(Node* node, int index);      // drop a Script Data member + its links
     void pruneIncompatibleLinks(Node* node);          // drop links a member type-change made invalid
+    void applyMemberEdit(const MemberEdit& edit);     // replay a member edit across all Script Data nodes
+    void syncNewMemberNode(Node& newNode);            // seed a new Script Data node from the shared member set
     int  indexOfNode(const Node* node) const;
     std::string serializeGraph();
 

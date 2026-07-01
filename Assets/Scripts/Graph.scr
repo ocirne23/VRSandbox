@@ -1,13 +1,6 @@
 #include "ScriptAPI.h"
-struct ScriptData
-{
-    int counter;
-    bool awa;
-};
-SCRIPT_EXPORT unsigned int ScriptDataSize() { return (unsigned int)sizeof(ScriptData); }
 SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
 {
-    ScriptData* data = (ScriptData*)scriptData;
     int i8 = 41;
     bool b2 = true;
     if (i8 < 2)
@@ -50,11 +43,6 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 //@node 11 Printf 1383 100
 //@node 12 Printf 1383 189
 //@node 13 Break 1696 256
-//@node 14 ScriptData -300 112
-//@node 15 ScriptData 36 -137
-//@member 14 int counter
-//@member 14 bool awa
-//@member 15 float member0
 //@pin 1 1 0.0f
 //@pin 1 2 2
 //@pin 2 0 true

@@ -76,6 +76,13 @@ void Node::eraseOutputPin(int index)
         m_outputPins.erase(m_outputPins.begin() + index);
 }
 
+MemberEdit Node::takeMemberEdit()
+{
+    const MemberEdit e = m_pendingEdit;
+    m_pendingEdit = MemberEdit{};
+    return e;
+}
+
 namespace
 {
     constexpr float kPinIcon = 16.0f;        // reserved square for a pin's shape marker
@@ -246,18 +253,17 @@ void Node::updateDynamic(bool firstFrame)
         ImGui::PushID(i);
         ImGui::SetCursorPosX(nodeLeftX);
 
-        // Type button: click to cycle to the next member type. Retype the pin (color/default) and flag the
-        // change so Scene can drop any now-incompatible links.
+        // Every edit is recorded as an op; Scene applies it to all Script Data nodes so their member sets stay
+        // identical. The pins update when Scene replays the op (same frame), not here.
+
+        // Type button: click to cycle to the next member type.
         if (ImGui::Button(memberTypeToken(pin.dataType), ImVec2(typeBtnW, 0.0f)))
         {
             constexpr int typeCount = (int)(sizeof(memberTypes) / sizeof(memberTypes[0]));
             int idx = 0;
             for (int k = 0; k < typeCount; ++k)
                 if (memberTypes[k] == pin.dataType) { idx = k; break; }
-            const EDataType next = memberTypes[(idx + 1) % typeCount];
-            pin.dataType = next;
-            pin.color = dataTypeColor(next);
-            m_membersDirty = true;
+            m_pendingEdit = { EMemberOp::Retype, i, memberTypes[(idx + 1) % typeCount], "" };
         }
 
         ImGui::SameLine(0.0f, spacing);
@@ -266,11 +272,11 @@ void Node::updateDynamic(bool firstFrame)
             buf[k] = (k + 1 < sizeof(buf) && k < pin.name.size()) ? pin.name[k] : '\0';
         ImGui::SetNextItemWidth(nameW);
         if (ImGui::InputText("##name", buf, sizeof(buf)))
-            pin.name = sanitizeIdentifier(buf);
+            m_pendingEdit = { EMemberOp::Rename, i, pin.dataType, sanitizeIdentifier(buf) };
 
         ImGui::SameLine(0.0f, spacing);
         if (ImGui::Button("x", ImVec2(removeW, 0.0f)))
-            m_memberRemoveRequest = i;
+            m_pendingEdit = { EMemberOp::Remove, i, pin.dataType, "" };
 
         ImGui::SameLine(0.0f, 0.0f);
         ImGui::SetCursorPosX(nodeLeftX + nodeW - kPinIcon);
@@ -283,7 +289,7 @@ void Node::updateDynamic(bool firstFrame)
 
     ImGui::SetCursorPosX(nodeLeftX);
     if (ImGui::Button(addLabel, ImVec2(nodeW, 0.0f)))
-        addMember(EDataType::Float, "member" + std::to_string(m_outputPins.size()));
+        m_pendingEdit = { EMemberOp::Add, -1, EDataType::Float, "" };
 
     ImGui::PopID();
     ed::EndNode();

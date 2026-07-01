@@ -505,6 +505,65 @@ void Scene::removeMemberPin(Node* node, int index)
         resolveNodeTypes(n);
 }
 
+// Replays one member edit on every Script Data node so they all carry the same member set (which becomes the
+// single generated struct). Add/Remove keep counts equal across nodes; Rename/Retype touch the same row on
+// each. Remove and Retype can invalidate links, which are pruned per node.
+void Scene::applyMemberEdit(const MemberEdit& edit)
+{
+    std::vector<Node*> nodes;
+    for (const auto& n : m_nodes)
+        if (n->isDynamic())
+            nodes.push_back(n.get());
+
+    switch (edit.op)
+    {
+        case EMemberOp::Add:
+        {
+            // All nodes are in sync, so their counts match — derive one shared name from the first.
+            const size_t count = nodes.empty() ? 0 : nodes[0]->getOutputPins().size();
+            const std::string name = "member" + std::to_string(count);
+            for (Node* n : nodes)
+                n->addMember(edit.type, name);
+            break;
+        }
+        case EMemberOp::Remove:
+            for (Node* n : nodes)
+                removeMemberPin(n, edit.index); // also drops that member's links
+            break;
+        case EMemberOp::Rename:
+            for (Node* n : nodes)
+                if (edit.index >= 0 && edit.index < (int)n->getOutputPins().size())
+                    n->getOutputPins()[edit.index]->name = edit.name; // links unaffected (codegen keys off name)
+            break;
+        case EMemberOp::Retype:
+            for (Node* n : nodes)
+            {
+                if (edit.index >= 0 && edit.index < (int)n->getOutputPins().size())
+                {
+                    Pin* pin = n->getOutputPins()[edit.index].get();
+                    pin->dataType = edit.type;
+                    pin->color = dataTypeColor(edit.type);
+                }
+                pruneIncompatibleLinks(n); // a type change can invalidate a connected link
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+// A freshly added Script Data node starts empty; seed it from an existing one so it matches the shared set.
+void Scene::syncNewMemberNode(Node& newNode)
+{
+    for (const auto& n : m_nodes)
+        if (n.get() != &newNode && n->isDynamic())
+        {
+            for (const auto& pin : n->getOutputPins())
+                newNode.addMember(pin->dataType, pin->name);
+            return; // every dynamic node holds the same set, so the first is enough
+        }
+}
+
 void Scene::pruneIncompatibleLinks(Node* node)
 {
     std::set<Node*> affected;
@@ -757,16 +816,17 @@ void Scene::update(double deltaSec)
     for (auto& node : m_nodes)
         node->update(deltaSec, m_firstFrame);
 
-    // Apply structural member edits the Script Data node's in-node editor recorded this frame (removing a
-    // member or retyping one), fixing up the links that touch its pins — Scene owns those links.
+    // Apply a structural member edit a Script Data node recorded this frame. It's replayed on every Script
+    // Data node so they share one member set, fixing up the links that touch their pins (Scene owns links).
     for (auto& node : m_nodes)
     {
         if (!node->isDynamic())
             continue;
-        if (const int rm = node->takeMemberRemoveRequest(); rm >= 0)
-            removeMemberPin(node.get(), rm);
-        if (node->takeMembersDirty())
-            pruneIncompatibleLinks(node.get());
+        if (const MemberEdit edit = node->takeMemberEdit(); edit.op != EMemberOp::None)
+        {
+            applyMemberEdit(edit);
+            break; // only one node is edited per frame
+        }
     }
 
     processInteractions();
@@ -826,7 +886,11 @@ void Scene::update(double deltaSec)
                 ImGui::SeparatorText(categories[i].name.c_str());
                 for (const NodeDef* def : categories[i].defs)
                     if (ImGui::MenuItem(def->displayName.c_str()))
-                        addNodeOfType(def->typeId, m_pendingAddPos);
+                    {
+                        Node& added = addNodeOfType(def->typeId, m_pendingAddPos);
+                        if (added.isDynamic())
+                            syncNewMemberNode(added); // keep a new Script Data node in sync with the others
+                    }
             }
         };
 

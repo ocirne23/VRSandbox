@@ -30,6 +30,18 @@ export enum ENodeStyle : uint8
     ENodeStyle_Full,         // All pins underneath title with separator
 };
 
+// A structural edit the Script Data in-node editor recorded this frame. Scene consumes it and replays it on
+// every Script Data node so they all keep the same member set (one shared, generated struct). One op/frame
+// (the user does one thing at a time); the node applies nothing itself.
+export enum class EMemberOp : uint8 { None, Add, Remove, Rename, Retype };
+export struct MemberEdit
+{
+    EMemberOp   op = EMemberOp::None;
+    int         index = -1;               // member row for Remove / Rename / Retype
+    EDataType   type = EDataType::Float;   // new type for Add / Retype
+    std::string name;                      // new name for Rename
+};
+
 export struct Pin
 {
     std::string name;
@@ -62,10 +74,9 @@ public:
     Node& addMember(EDataType type, const std::string& name);
     void  eraseOutputPin(int index);
 
-    // Structural edits the in-node editor recorded this frame, consumed by Scene (which owns the links):
-    // a member to remove, and whether a member's type changed (so incompatible links can be pruned).
-    int  takeMemberRemoveRequest() { const int r = m_memberRemoveRequest; m_memberRemoveRequest = -1; return r; }
-    bool takeMembersDirty()        { const bool d = m_membersDirty; m_membersDirty = false; return d; }
+    // The structural member edit recorded by the in-node editor this frame (op == None if none). Consumed by
+    // Scene, which replays it across every Script Data node and fixes up the links it owns.
+    MemberEdit takeMemberEdit();
 
     void update(double deltaSec, bool firstFrame);
 
@@ -91,8 +102,7 @@ private:
     std::string m_name;
     std::string m_typeId;
     int m_enumSelection = 0;             // index into the node def's enumOptions (dropdown property)
-    int m_memberRemoveRequest = -1;      // Script Data: member index the editor asked to remove this frame
-    bool m_membersDirty = false;         // Script Data: a member's type changed this frame
+    MemberEdit m_pendingEdit;            // Script Data: structural member edit recorded this frame
     std::vector<std::unique_ptr<Pin>> m_inputPins;
     std::vector<std::unique_ptr<Pin>> m_outputPins;
 };
