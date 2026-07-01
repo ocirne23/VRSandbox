@@ -76,92 +76,95 @@ int main()
         anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
 
     std::string currentScriptPath = "Scripts/Graph.scr"; // the visual-script the panel edits (F6 recompiles it)
+    auto keyHandler = [&](const SDL_KeyboardEvent& evt) {
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_W) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "W Down" : "W Up");
 
-    pKeyboardListener->onKeyPressed = [&](const SDL_KeyboardEvent& evt)
+        if (evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
-            if (evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            {
-                if (evt.scancode == SDL_Scancode::SDL_SCANCODE_T) gizmo.setMode(EGizmoMode::Translate);
-                if (evt.scancode == SDL_Scancode::SDL_SCANCODE_R) gizmo.setMode(EGizmoMode::Rotate);
-                if (evt.scancode == SDL_Scancode::SDL_SCANCODE_G) gizmo.setMode(EGizmoMode::Scale);
-            }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                renderer.reloadShaders();
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                Globals::scriptHost.getOrLoad(currentScriptPath, true); // recompile; entities using it hot-swap
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
-                    anim->stateMachine.setTrigger("attack"); // F: one-shot attack (returns to locomotion)
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_P && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                renderer.toggleGiProbeDebug();          // P: show/hide GI probe debug cubes
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_O && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                renderer.cycleGiProbeDebugMode();        // O: cycle irradiance <-> cellSize/LOD color
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_L && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            {
-                renderer.setSunLight(-cameraController.getDirection(), glm::vec3(1.0f), 5.0f); // aim the sun along the camera forward
-            }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            {
-                spawnedLights.resize(0);
-                spawnedLightGeom.resize(0);
-            }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            {
-                spawnedLights.push_back(PointLight{ cameraController.getPosition(), 25.0f, glm::abs(glm::sphericalRand(1.0f)), 50.0f });
-                spawnedLightGeom.push_back(world.spawn("sphere", Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
-            }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            {
-                spawnedLights.push_back(PointLight{ cameraController.getPosition(), 15.0f + glm::linearRand(0.5f, 1.5f), glm::abs(glm::sphericalRand(1.0f)), 30.0f });
-                spawnedLightGeom.push_back(world.spawn("sphere", Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
-            }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            {
-                spawnedLights.push_back(SpotLight{ cameraController.getPosition(), 12.5f, glm::vec3(1.0f, 0.95f, 0.8f), 20.0f, cameraController.getDirection(), glm::radians(25.0f), 0.25f });
-				glm::quat orientation = cameraController.getOrientation();
-				const glm::vec3 camUp = cameraController.getUp();
-				const glm::vec3 camRight = glm::normalize(glm::cross(cameraController.getDirection(), camUp));
-				orientation = glm::angleAxis(glm::radians(90.0f), camRight) * orientation;
-                spawnedLightGeom.push_back(world.spawn("cone", Transform(cameraController.getPosition(), 0.1f, orientation)));
-            }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            {
-                const glm::vec3 dir = cameraController.getDirection();
-                const glm::vec3 camUp = cameraController.getUp();
-                const glm::vec3 up = glm::normalize(camUp);
-                const glm::vec3 ref = glm::abs(up.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
-                const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
-                const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
-                float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-                spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 1.0f, 1.0f), 10.0f, camUp, 1.0f, 1.0f, rotation });
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_T) gizmo.setMode(EGizmoMode::Translate);
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_R) gizmo.setMode(EGizmoMode::Rotate);
+            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_G) gizmo.setMode(EGizmoMode::Scale);
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            renderer.reloadShaders();
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            Globals::scriptHost.getOrLoad(currentScriptPath, true); // recompile; entities using it hot-swap
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
+                anim->stateMachine.setTrigger("attack"); // F: one-shot attack (returns to locomotion)
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_P && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            renderer.toggleGiProbeDebug();          // P: show/hide GI probe debug cubes
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_O && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            renderer.cycleGiProbeDebugMode();        // O: cycle irradiance <-> cellSize/LOD color
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_L && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            renderer.setSunLight(-cameraController.getDirection(), glm::vec3(1.0f), 5.0f); // aim the sun along the camera forward
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            spawnedLights.resize(0);
+            spawnedLightGeom.resize(0);
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            spawnedLights.push_back(PointLight{ cameraController.getPosition(), 25.0f, glm::abs(glm::sphericalRand(1.0f)), 50.0f });
+            spawnedLightGeom.push_back(world.spawn("sphere", Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            spawnedLights.push_back(PointLight{ cameraController.getPosition(), 15.0f + glm::linearRand(0.5f, 1.5f), glm::abs(glm::sphericalRand(1.0f)), 30.0f });
+            spawnedLightGeom.push_back(world.spawn("sphere", Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            spawnedLights.push_back(SpotLight{ cameraController.getPosition(), 12.5f, glm::vec3(1.0f, 0.95f, 0.8f), 20.0f, cameraController.getDirection(), glm::radians(25.0f), 0.25f });
+			glm::quat orientation = cameraController.getOrientation();
+			const glm::vec3 camUp = cameraController.getUp();
+			const glm::vec3 camRight = glm::normalize(glm::cross(cameraController.getDirection(), camUp));
+			orientation = glm::angleAxis(glm::radians(90.0f), camRight) * orientation;
+            spawnedLightGeom.push_back(world.spawn("cone", Transform(cameraController.getPosition(), 0.1f, orientation)));
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            const glm::vec3 dir = cameraController.getDirection();
+            const glm::vec3 camUp = cameraController.getUp();
+            const glm::vec3 up = glm::normalize(camUp);
+            const glm::vec3 ref = glm::abs(up.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+            const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
+            const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
+            float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
+            spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 1.0f, 1.0f), 10.0f, camUp, 1.0f, 1.0f, rotation });
 
-                const glm::quat orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * cameraController.getOrientation();
-				spawnedLightGeom.push_back(world.spawn("plane", Transform(cameraController.getPosition(), 0.5f, orientation)));
-            }
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            {
-                const glm::vec3 dir = cameraController.getDirection();
-                const glm::vec3 camUp = cameraController.getUp();
-                const glm::vec3 up = glm::normalize(camUp);
-                const glm::vec3 ref = glm::abs(up.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
-                const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
-                const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
-                const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-                spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 10.0f, camUp, 0.1f, 1.0f, rotation });
-                const glm::quat orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * cameraController.getOrientation();
-                spawnedLightGeom.push_back(world.spawn("capsule", Transform(cameraController.getPosition(), 0.5f, orientation)));
-            }
+            const glm::quat orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * cameraController.getOrientation();
+			spawnedLightGeom.push_back(world.spawn("plane", Transform(cameraController.getPosition(), 0.5f, orientation)));
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            const glm::vec3 dir = cameraController.getDirection();
+            const glm::vec3 camUp = cameraController.getUp();
+            const glm::vec3 up = glm::normalize(camUp);
+            const glm::vec3 ref = glm::abs(up.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+            const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
+            const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
+            const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
+            spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 10.0f, camUp, 0.1f, 1.0f, rotation });
+            const glm::quat orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * cameraController.getOrientation();
+            spawnedLightGeom.push_back(world.spawn("capsule", Transform(cameraController.getPosition(), 0.5f, orientation)));
+        }
 
-            if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-                for (int i = 0; i < 100; ++i)
-                {
-                    int x = 0; int y = 0;
-					glm::vec3 position = glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f));
-                    spawnedLights.push_back(PointLight{ position,
-                        glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
-                    spawnedLightGeom.push_back(world.spawn("sphere", Transform(position, 0.05f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
-                }
-        };
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+            for (int i = 0; i < 100; ++i)
+            {
+                int x = 0; int y = 0;
+				glm::vec3 position = glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f));
+                spawnedLights.push_back(PointLight{ position,
+                    glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
+                spawnedLightGeom.push_back(world.spawn("sphere", Transform(position, 0.05f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+            }
+    };
+    pKeyboardListener->onKeyPressed  = keyHandler;
+    pKeyboardListener->onKeyReleased = keyHandler;
+
 
     uint32 frameCount = 0;
     uint32 fps = 0;

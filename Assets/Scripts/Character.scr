@@ -9,6 +9,30 @@ SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scrip
     ctx->log("Character On Destroy");
 }
 
+SCRIPT_EXPORT int ScriptEventCount() { return 2; }
+SCRIPT_EXPORT const char* ScriptEventName(int eventIdx)
+{
+    switch (eventIdx)
+    {
+    case 0: return "W Up";
+    case 1: return "W Down";
+    default: return "";
+    }
+}
+SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData)
+{
+    switch (eventIdx) {
+    case 0:
+    {
+        ctx->log("W Up");
+    } break;
+    case 1:
+    {
+        ctx->log("W Down");
+    } break;
+    }
+}
+
 SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
 {
     ctx->entitySetRotation(self, glm::vec3{ 0.0f, (ctx->elapsedSeconds() * 50.0f), 0.0f });
@@ -24,6 +48,11 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@node 6 OnDestroy 2 -112
 //@node 7 Print 144 -204
 //@node 8 Print 144 -108
+//@node 9 OnEvent 23 -388
+//@node 10 Print 304 -384
+//@node 11 Print 304 -316
+//@event 9 W Up
+//@event 9 W Down
 //@pin 2 1 glm::vec3{ 0.0f, 0.0f, 0.0f }
 //@pin 2 2 1.0f
 //@pin 2 3 glm::vec3{ 0.0f, 0.0f, 0.0f }
@@ -35,9 +64,13 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@pin 4 1 50.0f
 //@pin 7 1 "Character On Spawn"
 //@pin 8 1 "Character On Destroy"
+//@pin 10 1 "W Up"
+//@pin 11 1 "W Down"
 //@link 3 0 2 3
 //@link 4 0 3 1
 //@link 1 0 4 0
 //@link 0 0 2 0
 //@link 5 0 7 0
 //@link 6 0 8 0
+//@link 9 0 10 0
+//@link 9 1 11 0

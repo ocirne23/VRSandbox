@@ -106,6 +106,11 @@ export bool isLabelType(std::string_view typeId) { return typeId == "Label"; }
 // double-clicking a link, not from the palette.
 export bool isRerouteType(std::string_view typeId) { return typeId == "Reroute"; }
 
+// The On Event node is special like Script Data: user-defined named entries instead of static pins, each one
+// a plain Exec output. Multiple On Event nodes stay in sync (same entry set); codegen dispatches a fired
+// event name to the matching entry's exec chain (see Scene::generateCpp / applyEventEdit).
+export bool isEventEntryType(std::string_view typeId) { return typeId == "OnEvent"; }
+
 // Serialization token for any pin data type (covers Exec/String too, unlike memberTypeToken).
 export const char* dataTypeToken(EDataType type)
 {
@@ -211,9 +216,9 @@ export const std::vector<NodeDef>& nodeRegistry()
         {}, { { "", D::Exec, "" } },
         "#0" });
 
-    r.push_back({ "OnInputEvent", "On Input Event", "Events", true,
-        {}, { { "W", D::Exec, "" }, { "A", D::Exec, "" }, { "S", D::Exec, "" }, { "D", D::Exec, "" }, { "down", D::Bool, "" } },
-        "#0" });
+    // On Event is special-cased (isEventEntryType): its exec output pins are user-defined named entries,
+    // added/removed/renamed through the editor and fired at runtime by name (ScriptComponent::fireEvent).
+    r.push_back({ "OnEvent", "On Event", "Events", true, {}, {}, "" });
 
     r.push_back({ "If", "If", "Flow", true,
         { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },

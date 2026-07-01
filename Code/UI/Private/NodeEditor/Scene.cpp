@@ -432,6 +432,14 @@ Node* Scene::findScriptData() const
     return nullptr;
 }
 
+Node* Scene::findEventEntry() const
+{
+    for (const auto& node : m_nodes)
+        if (node->isEventNode())
+            return node.get();
+    return nullptr;
+}
+
 void Scene::connectNodes(Node* from, int outIdx, Node* to, int inIdx)
 {
     if (!from || !to) return;
@@ -677,6 +685,51 @@ void Scene::syncNewMemberNode(Node& newNode)
         }
 }
 
+// Replays one entry edit on every On Event node so they all carry the same named-entry set. Mirrors
+// applyMemberEdit; entries have no type to retype, only Add/Remove/Rename.
+void Scene::applyEventEdit(const MemberEdit& edit)
+{
+    std::vector<Node*> nodes;
+    for (const auto& n : m_nodes)
+        if (n->isEventNode())
+            nodes.push_back(n.get());
+
+    switch (edit.op)
+    {
+        case EMemberOp::Add:
+        {
+            const size_t count = nodes.empty() ? 0 : nodes[0]->getOutputPins().size();
+            const std::string name = "Event" + std::to_string(count);
+            for (Node* n : nodes)
+                n->addEventEntry(name);
+            break;
+        }
+        case EMemberOp::Remove:
+            for (Node* n : nodes)
+                removeMemberPin(n, edit.index); // also drops that entry's links
+            break;
+        case EMemberOp::Rename:
+            for (Node* n : nodes)
+                if (edit.index >= 0 && edit.index < (int)n->getOutputPins().size())
+                    n->getOutputPins()[edit.index]->name = edit.name;
+            break;
+        default:
+            break;
+    }
+}
+
+// A freshly added On Event node starts empty; seed it from an existing one so it matches the shared set.
+void Scene::syncNewEventNode(Node& newNode)
+{
+    for (const auto& n : m_nodes)
+        if (n.get() != &newNode && n->isEventNode())
+        {
+            for (const auto& pin : n->getOutputPins())
+                newNode.addEventEntry(pin->name);
+            return; // every On Event node holds the same set, so the first is enough
+        }
+}
+
 void Scene::pruneIncompatibleLinks(Node* node)
 {
     std::set<Node*> affected;
@@ -765,6 +818,46 @@ std::string Scene::generateCpp()
         code += "}\n\n";
     }
 
+    // On Event dispatches a runtime-fired event by index (not name — the host resolves a name to an index via
+    // ScriptEventCount/ScriptEventName and caches it, keeping the fire-time call a plain int compare). The
+    // index is the entry's position among the On Event node's output pins, so it lines up with ScriptEventName.
+    if (Node* eventNode = findEventEntry())
+    {
+        const auto& entries = eventNode->getOutputPins();
+
+        code += "SCRIPT_EXPORT int ScriptEventCount() { return " + std::to_string(entries.size()) + "; }\n";
+        code += "SCRIPT_EXPORT const char* ScriptEventName(int eventIdx)\n{\n    switch (eventIdx)\n    {\n";
+        for (int i = 0; i < (int)entries.size(); ++i)
+            code += "    case " + std::to_string(i) + ": return \"" + entries[i]->name + "\";\n";
+        code += "    default: return \"\";\n    }\n}\n";
+
+        code += "SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData)\n{\n";
+
+        Codegen cg{ m_links };
+        std::string dispatch;
+        dispatch += "switch (eventIdx) {\n";
+        for (int i = 0; i < (int)entries.size(); ++i)
+        {
+            Pin* tgt = realTargetOfOutput(m_links, entries[i].get());
+            if (!tgt) continue;
+            std::set<const Node*> execStack;
+            const std::string chain = emitExecChain(cg, tgt->node, execStack); // also collects cg.globalDecls
+            dispatch += "case " + std::to_string(i) + ":\n{\n" +
+                std::string(1, INDENT_UP) + chain + std::string(1, INDENT_DOWN) + "} break;\n";
+        }
+        dispatch += "}\n";
+
+        std::string bodyRaw;
+        if (dataNode)
+            bodyRaw += "ScriptData* data = (ScriptData*)scriptData;\n";
+        bodyRaw += cg.globalDecls + dispatch;
+        const std::string body = applyIndent(bodyRaw, "    ");
+        if (!body.empty())
+            code += indentLines(body, "    ");
+
+        code += "}\n\n";
+    }
+
     if (Node* entry = findEntry("Update"))
     {
         code += "SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)\n{\n";
@@ -819,6 +912,12 @@ std::string Scene::serializeGraph()
         if (m_nodes[i]->isDynamic())
             for (const auto& pin : m_nodes[i]->getOutputPins())
                 s += "//@member " + std::to_string(i) + " " + memberTypeToken(pin->dataType) + " " + pin->name + "\n";
+
+    // On Event entries (a dynamic node's output pins). Emitted before links for the same reason as members.
+    for (int i = 0; i < (int)m_nodes.size(); ++i)
+        if (m_nodes[i]->isEventNode())
+            for (const auto& pin : m_nodes[i]->getOutputPins())
+                s += "//@event " + std::to_string(i) + " " + pin->name + "\n";
 
     for (int i = 0; i < (int)m_nodes.size(); ++i)
     {
@@ -934,6 +1033,17 @@ bool Scene::loadFromFile(const std::string& path)
         byIndex[ni]->addMember(memberTypeFromToken(typeTok), name);
     }
 
+    // pass 1b2: On Event entries (before links, which reference these output pins by index)
+    for (const std::string& ln : lines)
+    {
+        LineReader r{ ln };
+        if (r.token() != "//@event") continue;
+        const int ni = toInt(r.token());
+        const std::string name = r.rest();
+        if (ni < 0 || ni >= (int)byIndex.size() || !byIndex[ni] || !byIndex[ni]->isEventNode()) continue;
+        byIndex[ni]->addEventEntry(name);
+    }
+
     // pass 1c: Label box size + caption
     for (const std::string& ln : lines)
     {
@@ -1026,6 +1136,18 @@ void Scene::update(double deltaSec)
         }
     }
 
+    // Same as above, for On Event nodes' named entries.
+    for (auto& node : m_nodes)
+    {
+        if (!node->isEventNode())
+            continue;
+        if (const MemberEdit edit = node->takeMemberEdit(); edit.op != EMemberOp::None)
+        {
+            applyEventEdit(edit);
+            break;
+        }
+    }
+
     processInteractions();
 
     for (auto& link : m_links)
@@ -1089,6 +1211,8 @@ void Scene::update(double deltaSec)
                         Node& added = addNodeOfType(def->typeId, m_pendingAddPos);
                         if (added.isDynamic())
                             syncNewMemberNode(added); // keep a new Script Data node in sync with the others
+                        if (added.isEventNode())
+                            syncNewEventNode(added); // keep a new On Event node in sync with the others
                     }
             }
         };

@@ -88,6 +88,17 @@ typedef void (*ScriptOnSpawnFn)(const ScriptContext*, Entity* self, void* script
 typedef void (*ScriptOnDestroyFn)(const ScriptContext*, Entity* self, void* scriptData);
 typedef void (*ScriptUpdateFn)(const ScriptContext*, Entity* self, float deltaSeconds, void* scriptData);
 
+// Optional export: fires an On Event entry by index (e.g. an animation notify). eventIdx is the entry's
+// position among the script's On Event nodes' entries, in declaration order — the host (not the script) is
+// the one that knows event NAMES; it resolves a name to an index via ScriptEventCount/ScriptEventName below
+// and caches it, so no string is passed (or compared) at fire time.
+typedef void (*ScriptOnEventFn)(const ScriptContext*, Entity* self, int eventIdx, void* scriptData);
+
+// Optional exports: the script's On Event entry names, in the same order as the eventIdx OnEvent expects.
+// Absent (or zero count) means the script declares no On Event entries.
+typedef int         (*ScriptEventCountFn)(void);
+typedef const char* (*ScriptEventNameFn)(int eventIdx);
+
 // Optional export: the byte size of the script's persistent ScriptData struct. When present, the host
 // allocates a zeroed block of this size per entity and passes it to ScriptUpdate as `scriptData`. Absent (or
 // zero) means the script keeps no persistent memory. Using sizeof(ScriptData) here lets the compiler settle

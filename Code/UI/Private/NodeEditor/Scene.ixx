@@ -37,6 +37,7 @@ private:
 
     Node* findEntry(const char* nodeName) const;
     Node* findScriptData() const;                     // the Script Data node (persistent members), if any
+    Node* findEventEntry() const;                      // the On Event node (named entries), if any
     void connectNodes(Node* from, int outIdx, Node* to, int inIdx);
     void resolveNodeTypes(Node* node); // propagate concrete types through the node's wildcard pin groups
     void removeNode(ed::NodeId nodeId);
@@ -46,6 +47,8 @@ private:
     void pruneIncompatibleLinks(Node* node);          // drop links a member type-change made invalid
     void applyMemberEdit(const MemberEdit& edit);     // replay a member edit across all Script Data nodes
     void syncNewMemberNode(Node& newNode);            // seed a new Script Data node from the shared member set
+    void applyEventEdit(const MemberEdit& edit);      // replay an entry edit across all On Event nodes
+    void syncNewEventNode(Node& newNode);             // seed a new On Event node from the shared entry set
     int  indexOfNode(const Node* node) const;
     std::string serializeGraph();
 

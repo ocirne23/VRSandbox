@@ -195,8 +195,9 @@ struct ScriptHost::Impl
         void* update = m ? (void*)GetProcAddress(m, "Update") : nullptr;
         void* onSpawn = m ? (void*)GetProcAddress(m, "OnSpawn") : nullptr;
         void* onDestroy = m ? (void*)GetProcAddress(m, "OnDestroy") : nullptr;
+        void* onEvent = m ? (void*)GetProcAddress(m, "OnEvent") : nullptr;
 
-        if (!update && !onSpawn && !onDestroy) { if (m) FreeLibrary(m); return false; }
+        if (!update && !onSpawn && !onDestroy && !onEvent) { if (m) FreeLibrary(m); return false; }
         if (slot.module) FreeLibrary((HMODULE)slot.module);
         slot.module = m;
         slot.dllPath = dll.string();
@@ -204,9 +205,22 @@ struct ScriptHost::Impl
         slot.entries.update = update;
         slot.entries.onSpawn = onSpawn;
         slot.entries.onDestroy = onDestroy;
+        slot.entries.onEvent = onEvent;
         slot.entries.dataSize = 0;
         if (auto sizeFn = (uint32(*)())GetProcAddress(m, "ScriptDataSize"))
             slot.entries.dataSize = sizeFn();
+
+        // Resolve On Event entry names once at load, indexed the same way OnEvent(eventIdx) expects, so the
+        // host maps a fired event name to its index without the script ever seeing a string.
+        slot.entries.eventIndexes.clear();
+        if (auto countFn = (int(*)())GetProcAddress(m, "ScriptEventCount"))
+            if (auto nameFn = (const char*(*)(int))GetProcAddress(m, "ScriptEventName"))
+            {
+                const int count = countFn();
+                slot.entries.eventIndexes.reserve(count > 0 ? count : 0);
+                for (int i = 0; i < count; ++i)
+                    slot.entries.eventIndexes.emplace(nameFn(i), i);
+            }
         return true;
     }
 

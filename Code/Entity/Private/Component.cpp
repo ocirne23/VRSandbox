@@ -11,6 +11,7 @@ import Core.Transform;
 import :Entity;
 import :AnimationDescription;
 import :ScriptContext;
+import :ScriptCommands;
 import Animation;
 import RendererVK;
 import Script;
@@ -169,9 +170,13 @@ void AnimatorComponent::update(Entity& entity, Renderer& renderer, float deltaSe
     }
     player.tick(deltaSeconds);
 
-    if (onEvent)
+    if (!player.getFiredEvents().empty())
+    {
         for (const std::string& e : player.getFiredEvents()) // notifies crossed this tick
-            onEvent(e);
+        {
+            if (onEvent) onEvent(e);
+        }
+    }
 
     if (RenderComponent* rc = getComponent<RenderComponent>(&entity); rc && rc->node.isSkinned())
         renderer.setSkinningPalette(rc->node.getSkinnedPaletteHandle(), player.getPalette());
@@ -191,20 +196,24 @@ void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
 
 	if (info.scriptPath.empty())
 		return;
-    const ScriptModule* loaded = Globals::scriptHost.getOrLoad(info.scriptPath);
-    if (!loaded)
-        return;
-
-    if (loaded->dataSize != scriptDataSize)
     {
-        scriptDataSize = loaded->dataSize;
+        const ScriptModule* loaded = Globals::scriptHost.getOrLoad(info.scriptPath);
+        if (!loaded)
+            return;
+        scriptModule = loaded;
+    }
+
+    if (scriptModule->dataSize != scriptDataSize)
+    {
+        scriptDataSize = scriptModule->dataSize;
         scriptData = scriptDataSize ? std::make_unique<uint8[]>(scriptDataSize) : nullptr;
     }
 
-    scriptModule = loaded;
+    if (scriptModule->onEvent)
+        Globals::scriptEvents.registerListener(scriptModule, &entity, scriptData.get());
 
-	if (loaded->onSpawn)
-		reinterpret_cast<ScriptOnSpawnFn>(loaded->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
+	if (scriptModule->onSpawn)
+		reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
 }
 
 void ScriptComponent::update(Entity& entity, float deltaSeconds)
@@ -214,11 +223,27 @@ void ScriptComponent::update(Entity& entity, float deltaSeconds)
     reinterpret_cast<ScriptUpdateFn>(scriptModule->update)(&Globals::scriptContext, &entity, deltaSeconds, scriptData.get());
 }
 
+void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
+{
+    if (!enabled || !scriptModule || !scriptModule->onEvent)
+        return;
+    auto it = scriptModule->eventIndexes.find(eventName);
+    if (it != scriptModule->eventIndexes.end())
+    {
+        reinterpret_cast<ScriptOnEventFn>(scriptModule->onEvent)(&Globals::scriptContext, &entity, it->second, scriptData.get());
+    }
+}
+
 void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
 {
-    if (!enabled || !scriptModule || !scriptModule->onDestroy)
+    if (!enabled || !scriptModule)
         return;
-    reinterpret_cast<ScriptOnDestroyFn>(scriptModule->onDestroy)(&Globals::scriptContext, &entity, scriptData.get());
+
+    if (scriptModule->onDestroy)
+        reinterpret_cast<ScriptOnDestroyFn>(scriptModule->onDestroy)(&Globals::scriptContext, &entity, scriptData.get());
+
+    if (scriptModule->onEvent)
+        Globals::scriptEvents.unregisterListener(scriptModule, &entity);
 }
 
 void SceneComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)

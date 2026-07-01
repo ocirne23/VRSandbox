@@ -76,6 +76,13 @@ void Node::eraseOutputPin(int index)
         m_outputPins.erase(m_outputPins.begin() + index);
 }
 
+// An On Event entry is a plain (unconnected-source) Exec output: something else fires it by name at runtime.
+Node& Node::addEventEntry(const std::string& name)
+{
+    addOutput(EDataType::Exec, name);
+    return *this;
+}
+
 // A reroute carries one value straight through: an input and an output pin of the same (link) type.
 Node& Node::makeReroute(EDataType type)
 {
@@ -315,6 +322,75 @@ void Node::updateDynamic(bool firstFrame)
     ed::EndNode();
 }
 
+// On Event node: an editable list of named entries. Each row is [name][x] with the entry's Exec output pin
+// on the right edge; something else fires an entry by name at runtime (ScriptComponent::fireEvent).
+void Node::updateEvent(bool firstFrame)
+{
+    if (firstFrame)
+        ed::SetNodePosition(*this, m_initialPos);
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float spacing = style.ItemSpacing.x;
+
+    const float nameW = 110.0f;
+    const float removeW = ImGui::GetFrameHeight();
+    const float rowW = nameW + spacing + removeW + spacing + kPinIcon;
+
+    const float titleW = ImGui::CalcTextSize(m_name.c_str()).x;
+    const char* addLabel = "+ Add Event";
+    const float addW = ImGui::CalcTextSize(addLabel).x + style.FramePadding.x * 2.0f;
+    const float nodeW = fmaxf(fmaxf(rowW, titleW), addW);
+
+    ed::BeginNode(*this);
+    ImGui::PushID(this);
+
+    const ImVec2 nodeOriginScreen = ImGui::GetCursorScreenPos();
+    const float nodeLeftX = ImGui::GetCursorPosX();
+
+    ImGui::SetCursorPosX(nodeLeftX + fmaxf(0.0f, (nodeW - titleW) * 0.5f));
+    ImGui::TextUnformatted(m_name.c_str());
+
+    const float dividerY = ImGui::GetItemRectMax().y + 2.0f;
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(nodeOriginScreen.x, dividerY),
+        ImVec2(nodeOriginScreen.x + nodeW, dividerY), ImColor(255, 255, 255, 40), 1.0f);
+    ImGui::Dummy(ImVec2(nodeW, 4.0f));
+
+    for (int i = 0; i < (int)m_outputPins.size(); ++i)
+    {
+        Pin& pin = *m_outputPins[i];
+        ImGui::PushID(i);
+        ImGui::SetCursorPosX(nodeLeftX);
+
+        // Every edit is recorded as an op; Scene applies it to all On Event nodes so their entry sets stay
+        // identical. The pins update when Scene replays the op (same frame), not here.
+        char buf[64];
+        for (size_t k = 0; k < sizeof(buf); ++k)
+            buf[k] = (k + 1 < sizeof(buf) && k < pin.name.size()) ? pin.name[k] : '\0';
+        ImGui::SetNextItemWidth(nameW);
+        if (ImGui::InputText("##name", buf, sizeof(buf)))
+            m_pendingEdit = { EMemberOp::Rename, i, EDataType::Exec, buf };
+
+        ImGui::SameLine(0.0f, spacing);
+        if (ImGui::Button("x", ImVec2(removeW, 0.0f)))
+            m_pendingEdit = { EMemberOp::Remove, i, EDataType::Exec, "" };
+
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::SetCursorPosX(nodeLeftX + nodeW - kPinIcon);
+        ed::BeginPin(pin, ed::PinKind::Output);
+        drawPinIcon(pin);
+        ed::EndPin();
+
+        ImGui::PopID();
+    }
+
+    ImGui::SetCursorPosX(nodeLeftX);
+    if (ImGui::Button(addLabel, ImVec2(nodeW, 0.0f)))
+        m_pendingEdit = { EMemberOp::Add, -1, EDataType::Exec, "" };
+
+    ImGui::PopID();
+    ed::EndNode();
+}
+
 void Node::updateLabel(bool firstFrame)
 {
     if (firstFrame)
@@ -453,6 +529,11 @@ void Node::update(double /*deltaSec*/, bool firstFrame)
     if (isDynamic())
     {
         updateDynamic(firstFrame);
+        return;
+    }
+    if (isEventNode())
+    {
+        updateEvent(firstFrame);
         return;
     }
     if (isLabel())

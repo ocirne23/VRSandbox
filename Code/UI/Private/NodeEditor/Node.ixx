@@ -82,6 +82,12 @@ public:
     bool isReroute() const { return isRerouteType(m_typeId); }
     Node& makeReroute(EDataType type);
 
+    // On Event node only: its exec output pins are user-named event entries. Uses the same MemberEdit/
+    // takeMemberEdit machinery as Script Data (Scene replays edits across every On Event node); `type` in the
+    // edit is unused here since every entry is Exec.
+    bool isEventNode() const { return isEventEntryType(m_typeId); }
+    Node& addEventEntry(const std::string& name);
+
     // Label (comment box) accessors, used by save/load to persist the caption and box size.
     bool isLabel() const { return isLabelType(m_typeId); }
     const std::string& getLabelText() const { return m_labelText; }
@@ -105,6 +111,7 @@ public:
 private:
 
 	void updateDynamic(bool firstFrame); // in-node editor body for the Script Data node
+	void updateEvent(bool firstFrame);   // in-node editor body for the On Event node
 	void updateLabel(bool firstFrame);   // group/comment box body for the Label node
 	void updateReroute(bool firstFrame); // small draggable dot for the Reroute waypoint
 

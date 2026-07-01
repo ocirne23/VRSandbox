@@ -1,28 +1,16 @@
 #include "ScriptAPI.h"
-struct ScriptData
+SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
 {
-    float W;
-    float A;
-    float S;
-    float D;
-    bool down;
-};
-SCRIPT_EXPORT unsigned int ScriptDataSize() { return (unsigned int)sizeof(ScriptData); }
-SCRIPT_EXPORT void ScriptOnSpawn(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
-{
-    ScriptData* data = (ScriptData*)scriptData;
     ctx->log("hello");
 }
 
-SCRIPT_EXPORT void ScriptOnDestroy(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
+SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scriptData)
 {
-    ScriptData* data = (ScriptData*)scriptData;
     ctx->log("hello");
 }
 
-SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
+SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
 {
-    ScriptData* data = (ScriptData*)scriptData;
     int i8 = 41;
     bool b2 = true;
     if (i8 < 2)
@@ -80,8 +68,6 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 //@node 26 Print -697 256
 //@node 27 OnDestroy -830 320
 //@node 28 Print -692 324
-//@node 29 ScriptData -684 -64
-//@node 30 IfElse -352 -97
 //@labelsize 14 256 117
 //@labeltext 14 Input
 //@labelsize 15 272 229
@@ -95,11 +81,6 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 //@reroute 22 Bool
 //@reroute 23 Int
 //@reroute 24 Int
-//@member 29 float W
-//@member 29 float A
-//@member 29 float S
-//@member 29 float D
-//@member 29 bool down
 //@pin 1 1 0.0f
 //@pin 1 2 2
 //@pin 2 0 true
@@ -133,8 +114,6 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 //@pin 24 0 
 //@pin 26 1 "hello"
 //@pin 28 1 "hello"
-//@pin 30 1 0.0f
-//@pin 30 2 0.0f
 //@enum 7 2
 //@enum 10 2
 //@link 1 0 3 0
@@ -169,4 +148,3 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 //@link 24 0 16 0
 //@link 25 0 26 0
 //@link 27 0 28 0
-//@link 29 0 30 1

@@ -12,7 +12,9 @@ export struct ScriptModule
     void* onSpawn = nullptr;     // ScriptInitFn
     void* update = nullptr;   // ScriptUpdateFn
     void* onDestroy = nullptr; // ScriptShutdownFn
+    void* onEvent = nullptr;  // ScriptOnEventFn (null = script declares no On Event entries)
     uint32 dataSize = 0;      // bytes of persistent ScriptData the script declares (0 = none), from ScriptDataSize()
+    std::unordered_map<std::string, int32> eventIndexes; // EventName -> Idx mapping
 };
 
 // Compiles visual scripts (.scr) to self-contained DLLs via the installed MSVC toolchain and caches them

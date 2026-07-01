@@ -169,6 +169,9 @@ export struct ScriptComponent
     // ScriptRuntime.cpp, which owns the ScriptContext + thunks.
     void update(Entity& entity, float deltaSeconds);
 
+    // Fires a named On Event entry (e.g. an animation notify). No-ops if the script declares no such entry.
+    void fireEvent(Entity& entity, const std::string& eventName);
+
     void serialize(AssetNode& out) const
     {
         //if (scriptModule && scriptModule->scriptPath) out.set("Path", scriptModule->scriptPath);
