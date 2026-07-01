@@ -736,7 +736,11 @@ void ed::Node::GetGroupedNodes(std::vector<Node*>& result, bool append)
     Editor->FindNodesInRect(m_GroupBounds, result, true, false);
 
     for (auto index = firstNodeIndex; index < result.size(); ++index)
+    {
+		if (result[index] == this)
+			continue;
         result[index]->GetGroupedNodes(result, true);
+    }
 }
 
 ImRect ed::Node::GetRegionBounds(NodeRegion region) const

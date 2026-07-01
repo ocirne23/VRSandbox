@@ -78,6 +78,13 @@ public:
     // Scene, which replays it across every Script Data node and fixes up the links it owns.
     MemberEdit takeMemberEdit();
 
+    // Label (comment box) accessors, used by save/load to persist the caption and box size.
+    bool isLabel() const { return isLabelType(m_typeId); }
+    const std::string& getLabelText() const { return m_labelText; }
+    void setLabelText(const std::string& text) { m_labelText = text; }
+    ImVec2 getLabelSize() const { return m_labelSize; }
+    void setLabelSize(ImVec2 size) { m_labelSize = size; }
+
     void update(double deltaSec, bool firstFrame);
 
 	uint32 getNodeIdx() const { return m_nodeIdx; }
@@ -94,6 +101,7 @@ public:
 private:
 
 	void updateDynamic(bool firstFrame); // in-node editor body for the Script Data node
+	void updateLabel(bool firstFrame);   // group/comment box body for the Label node
 
 	uint32 m_nodeIdx;
     ImVec2 m_initialPos;
@@ -103,6 +111,10 @@ private:
     std::string m_typeId;
     int m_enumSelection = 0;             // index into the node def's enumOptions (dropdown property)
     MemberEdit m_pendingEdit;            // Script Data: structural member edit recorded this frame
+    std::string m_labelText = "Label";   // Label: title-bar caption
+    ImVec2 m_labelSize = ImVec2(0.0f, 0.0f); // Label: current group box size (updated as the user resizes)
+    bool m_editingLabel = false;         // Label: title bar is in rename (InputText) mode
+    bool m_labelFocusPending = false;    // Label: focus the rename field on the frame editing begins
     std::vector<std::unique_ptr<Pin>> m_inputPins;
     std::vector<std::unique_ptr<Pin>> m_outputPins;
 };

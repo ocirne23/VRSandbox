@@ -97,6 +97,10 @@ export uint32 dataTypeColor(EDataType type)
 // The Script Data node is special: user-defined members instead of static pins (see nodeRegistry / codegen).
 export bool isScriptDataType(std::string_view typeId) { return typeId == "ScriptData"; }
 
+// The Label node is a resizable comment box (a group). It has no pins and emits no code — it only organizes
+// and documents the graph, and drags any nodes inside it along when moved.
+export bool isLabelType(std::string_view typeId) { return typeId == "Label"; }
+
 // Value types a Script Data member (persistent struct field) may have. String is excluded on purpose: an
 // std::string can't live in the POD block that crosses the script ABI.
 export inline constexpr EDataType memberTypes[] = { EDataType::Int, EDataType::Float, EDataType::Bool, EDataType::Vec3 };
@@ -155,6 +159,11 @@ export const std::vector<NodeDef>& nodeRegistry()
     static const std::vector<NodeDef> registry = []{
     using D = EDataType;
     std::vector<NodeDef> r;
+
+    // ---- organization ----
+    // Comment/label box (isLabelType): a movable, resizable group with an editable caption. Pure annotation,
+    // no pins, no generated code — nodes dragged inside it move with it.
+    r.push_back({ "Label", "Label", "Comment", false, {}, {}, "" });
 
     // ---- events / control flow ----
     r.push_back({ "Update", "Update", "Events", true,

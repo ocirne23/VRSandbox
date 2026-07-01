@@ -295,11 +295,96 @@ void Node::updateDynamic(bool firstFrame)
     ed::EndNode();
 }
 
+void Node::updateLabel(bool firstFrame)
+{
+    if (firstFrame)
+        ed::SetNodePosition(*this, m_initialPos);
+
+    ed::PushStyleVar(ed::StyleVar_NodePadding,     ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ed::PushStyleColor(ed::StyleColor_NodeBg,      ImVec4(1.0f, 1.0f, 1.0f, 0.05f)); // faint fill over the whole box
+    ed::PushStyleColor(ed::StyleColor_NodeBorder,  ImVec4(1.0f, 1.0f, 1.0f, 0.35f)); // the box outline
+    ed::PushStyleColor(ed::StyleColor_GroupBg,     ImVec4(0.0f, 0.0f, 0.0f, 0.0f));   // transparent body (no black box)
+    ed::PushStyleColor(ed::StyleColor_GroupBorder, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));   // node border already frames it
+
+    ImVec2 nodeSize = ed::GetNodeSize(*this);
+    const float headerH = ImGui::GetFrameHeight() + 8.0f;
+    nodeSize.y -= headerH;
+
+    // When the script window isn't visible.. node size explodes for some reason.. work around it by forcing size back down..
+    const float maxSizeChangeHack = 200.0f;
+    if (m_labelSize.x != 0.0f && m_labelSize.y != 0.0f)
+    {
+        if (!firstFrame)
+        {
+            if (nodeSize.x > (m_labelSize.x + maxSizeChangeHack) || nodeSize.y > (m_labelSize.y + maxSizeChangeHack))
+                ed::SetGroupSize(*this, m_labelSize);
+            else
+                m_labelSize = nodeSize;
+        }
+    }
+    else
+    {
+        m_labelSize = ImVec2(220.0f, 140.0f); // initial size
+    }
+
+    ed::BeginNode(*this);
+    ImGui::PushID(this);
+    const ImVec2 headerMin = ImGui::GetCursorScreenPos();
+
+    // Title bar caption, overlaid inside the header strip (drawn via an absolute cursor, so it never adds to
+    // the node's measured height). Plain text keeps the bar grabbable for dragging; double-click to rename.
+    ImGui::SetCursorScreenPos(ImVec2(headerMin.x + 10.0f, headerMin.y + 4.0f));
+    if (m_editingLabel)
+    {
+        char buf[128];
+        for (size_t k = 0; k < sizeof(buf); ++k)
+            buf[k] = (k + 1 < sizeof(buf) && k < m_labelText.size()) ? m_labelText[k] : '\0';
+        ImGui::SetNextItemWidth(fmaxf(m_labelSize.x - 20.0f, 40.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(1.0f, 1.0f, 1.0f, 0.10f));
+        if (m_labelFocusPending) { ImGui::SetKeyboardFocusHere(); m_labelFocusPending = false; }
+        if (ImGui::InputText("##label", buf, sizeof(buf)))
+            m_labelText = buf;
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemDeactivated())
+            m_editingLabel = false; // Enter or focus loss ends the rename
+    }
+    else
+    {
+        ImGui::TextUnformatted(m_labelText.empty() ? " " : m_labelText.c_str());
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        {
+            m_editingLabel = true;
+            m_labelFocusPending = true;
+        }
+    }
+
+    // Divider under the title bar.
+    ImGui::GetWindowDrawList()->AddLine(
+        ImVec2(headerMin.x, headerMin.y + headerH - 1.0f),
+        ImVec2(headerMin.x + m_labelSize.x, headerMin.y + headerH - 1.0f),
+        ImColor(255, 255, 255, 40), 1.0f);
+
+    // Reserve the body exactly headerH below the top (explicit position → no auto-spacing added).
+    ImGui::SetCursorScreenPos(ImVec2(headerMin.x, headerMin.y + headerH));
+    
+    ed::Group(m_labelSize); // the resizable body (uses m_labelSize on the first frame, its own size after)
+
+    ImGui::PopID();
+    ed::EndNode();
+    ed::PopStyleColor(4);
+    ed::PopStyleVar();
+}
+
 void Node::update(double /*deltaSec*/, bool firstFrame)
 {
     if (isDynamic())
     {
         updateDynamic(firstFrame);
+        return;
+    }
+    if (isLabel())
+    {
+        updateLabel(firstFrame);
         return;
     }
 

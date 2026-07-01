@@ -649,6 +649,15 @@ std::string Scene::serializeGraph()
              std::to_string((int)pos.x) + " " + std::to_string((int)pos.y) + "\n";
     }
 
+    // Label boxes: their size and caption (caption is rest-of-line, so it may contain spaces).
+    for (int i = 0; i < (int)m_nodes.size(); ++i)
+        if (m_nodes[i]->isLabel())
+        {
+            const ImVec2 size = m_nodes[i]->getLabelSize();
+            s += "//@labelsize " + std::to_string(i) + " " + std::to_string((int)size.x) + " " + std::to_string((int)size.y) + "\n";
+            s += "//@labeltext " + std::to_string(i) + " " + m_nodes[i]->getLabelText() + "\n";
+        }
+
     // Script Data members (a dynamic node's output pins). Emitted before links so a load recreates them
     // first — links reference these output pins by index.
     for (int i = 0; i < (int)m_nodes.size(); ++i)
@@ -757,6 +766,28 @@ bool Scene::loadFromFile(const std::string& path)
         const std::string name = r.token();
         if (ni < 0 || ni >= (int)byIndex.size() || !byIndex[ni] || !byIndex[ni]->isDynamic()) continue;
         byIndex[ni]->addMember(memberTypeFromToken(typeTok), name);
+    }
+
+    // pass 1c: Label box size + caption
+    for (const std::string& ln : lines)
+    {
+        LineReader r{ ln };
+        const std::string tag = r.token();
+        if (tag == "//@labelsize")
+        {
+            const int ni = toInt(r.token());
+            const int w = toInt(r.token());
+            const int h = toInt(r.token());
+            if (ni >= 0 && ni < (int)byIndex.size() && byIndex[ni] && byIndex[ni]->isLabel())
+                byIndex[ni]->setLabelSize(ImVec2((float)w, (float)h));
+        }
+        else if (tag == "//@labeltext")
+        {
+            const int ni = toInt(r.token());
+            const std::string text = r.rest();
+            if (ni >= 0 && ni < (int)byIndex.size() && byIndex[ni] && byIndex[ni]->isLabel())
+                byIndex[ni]->setLabelText(text);
+        }
     }
 
     // pass 2: links (before defaults, so wildcard groups can resolve from them first)

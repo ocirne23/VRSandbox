@@ -29,20 +29,26 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 }
 
 //@graph 1
-//@node 0 Update 68 256
-//@node 1 IfElse 240 259
-//@node 2 Bool 272 151
-//@node 3 Set 625 -16
-//@node 4 ForLoop 630 340
-//@node 5 Modulo 1015 515
-//@node 6 Mul 1015 423
-//@node 7 If 1200 371
-//@node 8 Int -96 7
-//@node 9 Set 1505 308
-//@node 10 IfElse 992 115
-//@node 11 Printf 1383 100
-//@node 12 Printf 1383 189
-//@node 13 Break 1696 256
+//@node 0 Update -433 526
+//@node 1 IfElse -261 529
+//@node 2 Bool -229 437
+//@node 3 Set 220 286
+//@node 4 ForLoop 129 610
+//@node 5 Modulo 514 785
+//@node 6 Mul 514 693
+//@node 7 If 699 641
+//@node 8 Int -592 279
+//@node 9 Set 1004 578
+//@node 10 IfElse 491 385
+//@node 11 Printf 951 308
+//@node 12 Printf 951 397
+//@node 13 Break 1195 526
+//@node 14 Label -624 224
+//@node 15 Label 928 240
+//@labelsize 14 326 117
+//@labeltext 14 Input
+//@labelsize 15 272 229
+//@labeltext 15 Output
 //@pin 1 1 0.0f
 //@pin 1 2 2
 //@pin 2 0 true
