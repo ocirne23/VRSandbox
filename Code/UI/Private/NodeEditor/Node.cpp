@@ -59,6 +59,23 @@ Node& Node::addOutput(EDataType dataType, const std::string& name)
     return *this;
 }
 
+// A Script Data member is a writable (square), concretely-typed output pin — writable so a Set node can
+// store into the persistent field, and readable so any node can read it.
+Node& Node::addMember(EDataType type, const std::string& name)
+{
+    addOutput(type, name);
+    Pin& pin = *m_outputPins.back();
+    pin.mutability = EMutableType::ReadWritable;
+    pin.shape = EPinShape_Square;
+    return *this;
+}
+
+void Node::eraseOutputPin(int index)
+{
+    if (index >= 0 && index < (int)m_outputPins.size())
+        m_outputPins.erase(m_outputPins.begin() + index);
+}
+
 namespace
 {
     constexpr float kPinIcon = 16.0f;        // reserved square for a pin's shape marker
@@ -164,8 +181,122 @@ namespace
     }
 }
 
+namespace
+{
+    // Keep member names valid C++ identifiers as the user types: strip anything but [A-Za-z0-9_] and don't
+    // let a digit lead. Empty stays empty (the row still renders; codegen just yields a broken field the
+    // compiler flags, which surfaces in the log).
+    std::string sanitizeIdentifier(const char* text)
+    {
+        std::string out;
+        for (const char* p = text; *p; ++p)
+        {
+            const char c = *p;
+            const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+            if (!ok) continue;
+            if (out.empty() && c >= '0' && c <= '9') continue; // no leading digit
+            out += c;
+        }
+        return out;
+    }
+}
+
+// Script Data node: an editable list of persistent members. Each row is [type][name][x] with the member's
+// output pin on the right edge. Structural edits are recorded (m_memberRemoveRequest / m_membersDirty) for
+// Scene to apply, since it owns the links that touch these pins.
+void Node::updateDynamic(bool firstFrame)
+{
+    if (firstFrame)
+        ed::SetNodePosition(*this, m_initialPos);
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float spacing = style.ItemSpacing.x;
+
+    // Column widths: a fixed type button (widest token), a fixed name field, a square remove button, the pin.
+    float typeBtnW = 0.0f;
+    for (EDataType t : memberTypes)
+        typeBtnW = fmaxf(typeBtnW, ImGui::CalcTextSize(memberTypeToken(t)).x);
+    typeBtnW += style.FramePadding.x * 2.0f + 8.0f;
+    const float nameW = 110.0f;
+    const float removeW = ImGui::GetFrameHeight();
+    const float rowW = typeBtnW + spacing + nameW + spacing + removeW + spacing + kPinIcon;
+
+    const float titleW = ImGui::CalcTextSize(m_name.c_str()).x;
+    const char* addLabel = "+ Add Member";
+    const float addW = ImGui::CalcTextSize(addLabel).x + style.FramePadding.x * 2.0f;
+    const float nodeW = fmaxf(fmaxf(rowW, titleW), addW);
+
+    ed::BeginNode(*this);
+    ImGui::PushID(this);
+
+    const ImVec2 nodeOriginScreen = ImGui::GetCursorScreenPos();
+    const float nodeLeftX = ImGui::GetCursorPosX();
+
+    ImGui::SetCursorPosX(nodeLeftX + fmaxf(0.0f, (nodeW - titleW) * 0.5f));
+    ImGui::TextUnformatted(m_name.c_str());
+
+    const float dividerY = ImGui::GetItemRectMax().y + 2.0f;
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(nodeOriginScreen.x, dividerY),
+        ImVec2(nodeOriginScreen.x + nodeW, dividerY), ImColor(255, 255, 255, 40), 1.0f);
+    ImGui::Dummy(ImVec2(nodeW, 4.0f));
+
+    for (int i = 0; i < (int)m_outputPins.size(); ++i)
+    {
+        Pin& pin = *m_outputPins[i];
+        ImGui::PushID(i);
+        ImGui::SetCursorPosX(nodeLeftX);
+
+        // Type button: click to cycle to the next member type. Retype the pin (color/default) and flag the
+        // change so Scene can drop any now-incompatible links.
+        if (ImGui::Button(memberTypeToken(pin.dataType), ImVec2(typeBtnW, 0.0f)))
+        {
+            constexpr int typeCount = (int)(sizeof(memberTypes) / sizeof(memberTypes[0]));
+            int idx = 0;
+            for (int k = 0; k < typeCount; ++k)
+                if (memberTypes[k] == pin.dataType) { idx = k; break; }
+            const EDataType next = memberTypes[(idx + 1) % typeCount];
+            pin.dataType = next;
+            pin.color = dataTypeColor(next);
+            m_membersDirty = true;
+        }
+
+        ImGui::SameLine(0.0f, spacing);
+        char buf[64];
+        for (size_t k = 0; k < sizeof(buf); ++k)
+            buf[k] = (k + 1 < sizeof(buf) && k < pin.name.size()) ? pin.name[k] : '\0';
+        ImGui::SetNextItemWidth(nameW);
+        if (ImGui::InputText("##name", buf, sizeof(buf)))
+            pin.name = sanitizeIdentifier(buf);
+
+        ImGui::SameLine(0.0f, spacing);
+        if (ImGui::Button("x", ImVec2(removeW, 0.0f)))
+            m_memberRemoveRequest = i;
+
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::SetCursorPosX(nodeLeftX + nodeW - kPinIcon);
+        ed::BeginPin(pin, ed::PinKind::Output);
+        drawPinIcon(pin);
+        ed::EndPin();
+
+        ImGui::PopID();
+    }
+
+    ImGui::SetCursorPosX(nodeLeftX);
+    if (ImGui::Button(addLabel, ImVec2(nodeW, 0.0f)))
+        addMember(EDataType::Float, "member" + std::to_string(m_outputPins.size()));
+
+    ImGui::PopID();
+    ed::EndNode();
+}
+
 void Node::update(double /*deltaSec*/, bool firstFrame)
 {
+    if (isDynamic())
+    {
+        updateDynamic(firstFrame);
+        return;
+    }
+
     if (firstFrame)
         ed::SetNodePosition(*this, m_initialPos);
 

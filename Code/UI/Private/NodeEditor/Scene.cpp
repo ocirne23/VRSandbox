@@ -199,10 +199,14 @@ namespace
         return out;
     }
 
-    // Picks the value template for an output pin and substitutes it (per-output expr, else node emit/dataEmit).
+    // Picks the value template for an output pin and substitutes it (per-output expr, else the node emit).
     std::string expandOutput(Codegen& cg, const Pin* outPin, std::set<const Node*>& dataStack, const HoistMap& hoist)
     {
         Node* node = outPin->node;
+        // A Script Data member is a field of the persistent struct: read/written directly through `data`.
+        if (isScriptDataType(node->getTypeId()))
+            return "data->" + outPin->name;
+
         const NodeDef* def = findNodeDef(node->getTypeId());
         if (!def || dataStack.count(node))
             return "0";
@@ -215,10 +219,8 @@ namespace
             const auto hp = e.find(HOIST);
             tmpl = (hp == std::string::npos) ? e : e.substr(hp + 1); // inline-expand only the reference part
         }
-        else if (def->isExec)
-            tmpl = def->dataEmit;
         else
-            tmpl = def->emit;
+            tmpl = def->emit; // pure data node: emit is the value expression
         if (tmpl.empty())
             return "0";
 
@@ -398,6 +400,14 @@ Node* Scene::findEntry() const
     return nullptr;
 }
 
+Node* Scene::findScriptData() const
+{
+    for (const auto& node : m_nodes)
+        if (node->isDynamic())
+            return node.get();
+    return nullptr;
+}
+
 void Scene::connectNodes(Node* from, int outIdx, Node* to, int inIdx)
 {
     if (!from || !to) return;
@@ -474,6 +484,47 @@ void Scene::removeNode(ed::NodeId nodeId)
         resolveNodeTypes(neighbour);
 }
 
+void Scene::removeMemberPin(Node* node, int index)
+{
+    const auto& outs = node->getOutputPins();
+    if (index < 0 || index >= (int)outs.size())
+        return;
+    Pin* pin = outs[index].get();
+
+    std::set<Node*> affected;
+    std::erase_if(m_links, [&](const std::unique_ptr<Link>& link)
+    {
+        Pin* out = link->getOutputId().AsPointer<Pin>();
+        Pin* in = link->getInputId().AsPointer<Pin>();
+        if (out == pin) { if (in) { in->numConnections--; affected.insert(in->node); } return true; }
+        return false;
+    });
+
+    node->eraseOutputPin(index);
+    for (Node* n : affected)
+        resolveNodeTypes(n);
+}
+
+void Scene::pruneIncompatibleLinks(Node* node)
+{
+    std::set<Node*> affected;
+    std::erase_if(m_links, [&](const std::unique_ptr<Link>& link)
+    {
+        Pin* out = link->getOutputId().AsPointer<Pin>();
+        Pin* in = link->getInputId().AsPointer<Pin>();
+        if (out && out->node == node && in && !pinsCompatible(in, out))
+        {
+            in->numConnections--;
+            out->numConnections--;
+            affected.insert(in->node);
+            return true;
+        }
+        return false;
+    });
+    for (Node* n : affected)
+        resolveNodeTypes(n);
+}
+
 void Scene::newGraph()
 {
     m_links.clear();
@@ -492,14 +543,32 @@ std::string Scene::generateCpp()
 
     std::string code;
     code += "#include \"ScriptAPI.h\"\n";
-    code += "SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt)\n{\n";
+
+    // The Script Data node becomes a persistent struct. The host reads its byte size through ScriptDataSize()
+    // (letting the compiler settle padding/alignment) to allocate the block handed back in as `scriptData`.
+    Node* dataNode = findScriptData();
+    if (dataNode)
+    {
+        code += "struct ScriptData\n{\n";
+        for (const auto& pin : dataNode->getOutputPins())
+            if (!pin->name.empty())
+                code += std::string("    ") + memberCppType(pin->dataType) + " " + pin->name + ";\n";
+        code += "};\n";
+        code += "SCRIPT_EXPORT unsigned int ScriptDataSize() { return (unsigned int)sizeof(ScriptData); }\n";
+    }
+
+    code += "SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)\n{\n";
 
     if (Node* entry = findEntry())
     {
         Codegen cg{ m_links };
         std::set<const Node*> execStack;
         const std::string chain = emitExecChain(cg, entry, execStack); // also collects cg.globalDecls
-        const std::string body = applyIndent(cg.globalDecls + chain, "    "); // variable decls first, at function scope
+        std::string bodyRaw;
+        if (dataNode)
+            bodyRaw += "ScriptData* data = (ScriptData*)scriptData;\n"; // members resolve to data->field
+        bodyRaw += cg.globalDecls + chain;                             // variable decls first, at function scope
+        const std::string body = applyIndent(bodyRaw, "    ");
         if (!body.empty())
             code += indentLines(body, "    ");
     }
@@ -520,6 +589,13 @@ std::string Scene::serializeGraph()
         s += "//@node " + std::to_string(i) + " " + node->getTypeId() + " " +
              std::to_string((int)pos.x) + " " + std::to_string((int)pos.y) + "\n";
     }
+
+    // Script Data members (a dynamic node's output pins). Emitted before links so a load recreates them
+    // first — links reference these output pins by index.
+    for (int i = 0; i < (int)m_nodes.size(); ++i)
+        if (m_nodes[i]->isDynamic())
+            for (const auto& pin : m_nodes[i]->getOutputPins())
+                s += "//@member " + std::to_string(i) + " " + memberTypeToken(pin->dataType) + " " + pin->name + "\n";
 
     for (int i = 0; i < (int)m_nodes.size(); ++i)
     {
@@ -612,6 +688,18 @@ bool Scene::loadFromFile(const std::string& path)
         byIndex[idx] = &n;
     }
 
+    // pass 1b: Script Data members (before links, which reference these output pins by index)
+    for (const std::string& ln : lines)
+    {
+        LineReader r{ ln };
+        if (r.token() != "//@member") continue;
+        const int ni = toInt(r.token());
+        const std::string typeTok = r.token();
+        const std::string name = r.token();
+        if (ni < 0 || ni >= (int)byIndex.size() || !byIndex[ni] || !byIndex[ni]->isDynamic()) continue;
+        byIndex[ni]->addMember(memberTypeFromToken(typeTok), name);
+    }
+
     // pass 2: links (before defaults, so wildcard groups can resolve from them first)
     for (const std::string& ln : lines)
     {
@@ -668,6 +756,18 @@ void Scene::update(double deltaSec)
 
     for (auto& node : m_nodes)
         node->update(deltaSec, m_firstFrame);
+
+    // Apply structural member edits the Script Data node's in-node editor recorded this frame (removing a
+    // member or retyping one), fixing up the links that touch its pins — Scene owns those links.
+    for (auto& node : m_nodes)
+    {
+        if (!node->isDynamic())
+            continue;
+        if (const int rm = node->takeMemberRemoveRequest(); rm >= 0)
+            removeMemberPin(node.get(), rm);
+        if (node->takeMembersDirty())
+            pruneIncompatibleLinks(node.get());
+    }
 
     processInteractions();
 

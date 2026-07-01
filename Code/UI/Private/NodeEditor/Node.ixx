@@ -56,6 +56,17 @@ public:
     Node& addInput(EDataType dataType, const std::string& name, const std::string& defaultValue);
     Node& addOutput(EDataType dataType, const std::string& name);
 
+    // Script Data node only: its output pins are user-defined persistent members. A member is a writable,
+    // concretely-typed output pin. eraseOutputPin drops one (Scene fixes up its links first).
+    bool isDynamic() const { return isScriptDataType(m_typeId); }
+    Node& addMember(EDataType type, const std::string& name);
+    void  eraseOutputPin(int index);
+
+    // Structural edits the in-node editor recorded this frame, consumed by Scene (which owns the links):
+    // a member to remove, and whether a member's type changed (so incompatible links can be pruned).
+    int  takeMemberRemoveRequest() { const int r = m_memberRemoveRequest; m_memberRemoveRequest = -1; return r; }
+    bool takeMembersDirty()        { const bool d = m_membersDirty; m_membersDirty = false; return d; }
+
     void update(double deltaSec, bool firstFrame);
 
 	uint32 getNodeIdx() const { return m_nodeIdx; }
@@ -71,6 +82,8 @@ public:
 
 private:
 
+	void updateDynamic(bool firstFrame); // in-node editor body for the Script Data node
+
 	uint32 m_nodeIdx;
     ImVec2 m_initialPos;
     uint32 m_color;
@@ -78,6 +91,8 @@ private:
     std::string m_name;
     std::string m_typeId;
     int m_enumSelection = 0;             // index into the node def's enumOptions (dropdown property)
+    int m_memberRemoveRequest = -1;      // Script Data: member index the editor asked to remove this frame
+    bool m_membersDirty = false;         // Script Data: a member's type changed this frame
     std::vector<std::unique_ptr<Pin>> m_inputPins;
     std::vector<std::unique_ptr<Pin>> m_outputPins;
 };

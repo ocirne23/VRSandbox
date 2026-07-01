@@ -151,6 +151,13 @@ export struct ScriptComponent
     static constexpr EComponentID getId() { return EComponentID_Script; }
 
     std::string scriptPath;   // path to the .scr (relative to Assets/, or empty for none)
+
+    // Persistent per-instance memory handed to the script each tick. Sized to the script's ScriptData struct
+    // (its ScriptDataSize() export) and zero-initialized; (re)allocated lazily in update() once the script is
+    // compiled, and again if a hot-reload changes the size. Empty when the script declares no data.
+    std::unique_ptr<uint8[]> scriptData;
+    uint32 scriptDataSize = 0;
+
     bool enabled = true;
 
     struct SpawnInfo

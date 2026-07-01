@@ -199,6 +199,9 @@ struct ScriptHost::Impl
         slot.entries.update = update;
         slot.entries.init = (void*)GetProcAddress(m, "ScriptInit");
         slot.entries.shutdown = (void*)GetProcAddress(m, "ScriptShutdown");
+        slot.entries.dataSize = 0;
+        if (auto sizeFn = (uint32(*)())GetProcAddress(m, "ScriptDataSize"))
+            slot.entries.dataSize = sizeFn();
         return true;
     }
 

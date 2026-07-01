@@ -36,9 +36,12 @@ public:
 private:
 
     Node* findEntry() const;
+    Node* findScriptData() const;                     // the Script Data node (persistent members), if any
     void connectNodes(Node* from, int outIdx, Node* to, int inIdx);
     void resolveNodeTypes(Node* node); // propagate concrete types through the node's wildcard pin groups
     void removeNode(ed::NodeId nodeId);
+    void removeMemberPin(Node* node, int index);      // drop a Script Data member + its links
+    void pruneIncompatibleLinks(Node* node);          // drop links a member type-change made invalid
     int  indexOfNode(const Node* node) const;
     std::string serializeGraph();
 

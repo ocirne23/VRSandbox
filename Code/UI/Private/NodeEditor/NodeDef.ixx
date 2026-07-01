@@ -63,8 +63,8 @@ export struct PinDef
 //   ?k  {...} -> conditional block: emit the contents if input pin k is connected, else skip it
 //   @   -> the selected enum option's code token (see enumTokens), unique node idx if no enumTokens provided
 // Data nodes (isExec == false) have no exec pins and `emit` is a single value expression for output 0.
-// A node may also expose `dataEmit`: a value-expression for its data output, used when the node sits
-// in the exec flow (isExec) yet still produces a value pulled by downstream data inputs.
+// An exec node that also produces a value (e.g. Conditional) puts that value expression on the data output
+// pin's `expr` (PinDef::expr), since `emit` on an exec node is a statement, not an expression.
 export struct NodeDef
 {
     std::string          typeId;       // stable id stored in the file (no spaces)
@@ -76,7 +76,6 @@ export struct NodeDef
     std::string          emit;
     std::vector<std::string> enumOptions; // dropdown labels for the node's property (empty = no property)
     std::vector<std::string> enumTokens;  // code token per option, parallel to enumOptions, substituted for @
-    std::string          dataEmit;        // value expression for this node's data output (when isExec)
 };
 
 export uint32 dataTypeColor(EDataType type)
@@ -93,6 +92,47 @@ export uint32 dataTypeColor(EDataType type)
         case EDataType::Wildcard: return rgb(150, 150, 150);
     }
     return rgb(200, 200, 200);
+}
+
+// The Script Data node is special: user-defined members instead of static pins (see nodeRegistry / codegen).
+export bool isScriptDataType(std::string_view typeId) { return typeId == "ScriptData"; }
+
+// Value types a Script Data member (persistent struct field) may have. String is excluded on purpose: an
+// std::string can't live in the POD block that crosses the script ABI.
+export inline constexpr EDataType memberTypes[] = { EDataType::Int, EDataType::Float, EDataType::Bool, EDataType::Vec3 };
+
+// C++ type name for a member field, used both for the struct declaration and the in-node type button label.
+export const char* memberCppType(EDataType type)
+{
+    switch (type)
+    {
+        case EDataType::Int:  return "int";
+        case EDataType::Float: return "float";
+        case EDataType::Bool: return "bool";
+        case EDataType::Vec3: return "glm::vec3";
+        default:              return "float";
+    }
+}
+
+// Short token stored in the //@member serialization line (round-trips a member's type).
+export const char* memberTypeToken(EDataType type)
+{
+    switch (type)
+    {
+        case EDataType::Int:  return "int";
+        case EDataType::Float: return "float";
+        case EDataType::Bool: return "bool";
+        case EDataType::Vec3: return "Vec3";
+        default:              return "float";
+    }
+}
+
+export EDataType memberTypeFromToken(std::string_view token)
+{
+    for (EDataType t : memberTypes)
+        if (token == memberTypeToken(t))
+            return t;
+    return EDataType::Float;
 }
 
 // C++ literal used for an unconnected data input of the given type.
@@ -147,11 +187,10 @@ export const std::vector<NodeDef>& nodeRegistry()
 
     r.push_back({ "Conditional", "Conditional", "Flow", true,
         { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 }, { "A", D::Wildcard, "0.0f", 2 }, { "B", D::Wildcard, "0.0f", 2 } },
-        { { "", D::Exec, "" }, { "Result", D::Wildcard, "", 2 } },
+        { { "", D::Exec, "" }, { "Result", D::Wildcard, "", 2, "(($1 @ $2) ? $3 : $4)" } },
         "#0",
         { "Less than", "Greater than", "Equals", "Not Equals" },
-        { "<", ">", "==", "!=" },
-        "(($1 @ $2) ? $3 : $4)" });
+        { "<", ">", "==", "!=" } });
 
     r.push_back({ "Cast", "Cast", "Flow", false,
         { { "Cast",   D::Wildcard, "0.0f", 1 } },
@@ -161,6 +200,11 @@ export const std::vector<NodeDef>& nodeRegistry()
         { "int", "float", "bool" }});
 
     // ---- variables ----
+    // Script Data is special-cased everywhere (isScriptDataType): its output pins are user-defined members
+    // edited in the node, and codegen turns them into a persistent `struct ScriptData`. It carries no static
+    // pins here — the members are added through the editor and serialized as //@member lines.
+    r.push_back({ "ScriptData", "Script Data", "Variables", false, {}, {}, "" });
+
     r.push_back({ "Float", "Var Float", "Variables", false,
         { { "value", D::Float, "0.0f" }},
         { { "f@", D::Float, "", 0, std::string("float f@ = $0;\n") + HOIST + "f@", EMutableType::ReadWritable } },

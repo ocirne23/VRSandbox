@@ -81,9 +81,18 @@ typedef struct ScriptContext
 
 // Entry points a script DLL exports. ScriptUpdate is required; Init/Shutdown are optional. `self` is the
 // entity the script is running on (null for none); entity nodes pass it to the entity* functions.
+// `scriptData` points at the entity's persistent per-instance memory block (or null when the script declares
+// no data). Scripts that use a Script Data node cast it to their generated `ScriptData` struct; the host
+// sizes and zero-inits the block from the script's ScriptDataSize() export (see below).
 typedef void (*ScriptInitFn)(const ScriptContext*);
-typedef void (*ScriptUpdateFn)(const ScriptContext*, Entity* self, float deltaSeconds);
+typedef void (*ScriptUpdateFn)(const ScriptContext*, Entity* self, float deltaSeconds, void* scriptData);
 typedef void (*ScriptShutdownFn)(const ScriptContext*);
+
+// Optional export: the byte size of the script's persistent ScriptData struct. When present, the host
+// allocates a zeroed block of this size per entity and passes it to ScriptUpdate as `scriptData`. Absent (or
+// zero) means the script keeps no persistent memory. Using sizeof(ScriptData) here lets the compiler settle
+// struct padding/alignment, so the host never has to compute layout itself.
+typedef unsigned int (*ScriptDataSizeFn)(void);
 
 #ifdef __cplusplus
 }

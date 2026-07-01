@@ -1,18 +1,15 @@
 #include "ScriptAPI.h"
 SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt)
 {
-    glm::vec3 v3 = ctx->entityGetPosition(self);
-    ctx->spawnPointLight(glm::vec3{ v3.x, v3.y, v3.z }, 5.0f, glm::vec3{ 1.0f, 0.6f, 0.2f }, (((ctx->isKeyDown("B") != 0) == false) ? 15.0f : 5.0f));
+    ctx->spawnPointLight(ctx->entityGetPosition(self), 5.0f, glm::vec3{ 1.0f, 0.6f, 0.2f }, (((ctx->isKeyDown("B") != 0) == false) ? 15.0f : 5.0f));
 }
 
 //@graph 1
 //@node 0 SpawnPointLight 672 292
 //@node 1 IsKeyDown 23 327
 //@node 2 Conditional 333 291
-//@node 3 SplitVec3 256 519
-//@node 4 GetEntity 118 527
-//@node 5 MakeVec3 544 521
-//@node 6 Update -83 192
+//@node 3 GetEntity 512 463
+//@node 4 Update -83 192
 //@pin 0 1 glm::vec3{ 0.0f, 2.0f, 0.0f }
 //@pin 0 2 5.0f
 //@pin 0 3 glm::vec3{ 1.0f, 0.6f, 0.2f }
@@ -22,17 +19,9 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 //@pin 2 2 false
 //@pin 2 3 15.0f
 //@pin 2 4 5.0f
-//@pin 3 0 
-//@pin 5 0 0.0f
-//@pin 5 1 0.0f
-//@pin 5 2 0.0f
 //@enum 2 2
 //@link 2 1 0 4
 //@link 2 0 0 0
 //@link 1 0 2 1
-//@link 4 0 3 0
-//@link 3 0 5 0
-//@link 3 1 5 1
-//@link 3 2 5 2
-//@link 5 0 0 1
-//@link 6 0 2 0
+//@link 4 0 2 0
+//@link 3 0 0 1

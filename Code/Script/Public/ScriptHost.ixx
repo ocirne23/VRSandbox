@@ -10,6 +10,7 @@ export struct ScriptModule
     void* init = nullptr;     // ScriptInitFn
     void* update = nullptr;   // ScriptUpdateFn
     void* shutdown = nullptr; // ScriptShutdownFn
+    uint32 dataSize = 0;      // bytes of persistent ScriptData the script declares (0 = none), from ScriptDataSize()
 };
 
 // Compiles visual scripts (.scr) to self-contained DLLs via the installed MSVC toolchain and caches them

@@ -194,8 +194,16 @@ void ScriptComponent::update(Entity& entity, float deltaSeconds)
     if (!loaded || !loaded->update)
         return;
 
-    // self is passed explicitly (the ScriptContext no longer carries it).
-    reinterpret_cast<ScriptUpdateFn>(loaded->update)(&Globals::scriptContext, &entity, deltaSeconds);
+    // Match the persistent memory block to what the (possibly hot-reloaded) script now declares. make_unique
+    // zero-inits, so a fresh or resized block starts cleared.
+    if (loaded->dataSize != scriptDataSize)
+    {
+        scriptDataSize = loaded->dataSize;
+        scriptData = scriptDataSize ? std::make_unique<uint8[]>(scriptDataSize) : nullptr;
+    }
+
+    // self + the persistent data block are passed explicitly (the ScriptContext carries neither).
+    reinterpret_cast<ScriptUpdateFn>(loaded->update)(&Globals::scriptContext, &entity, deltaSeconds, scriptData.get());
 }
 
 
