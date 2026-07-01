@@ -101,6 +101,35 @@ export bool isScriptDataType(std::string_view typeId) { return typeId == "Script
 // and documents the graph, and drags any nodes inside it along when moved.
 export bool isLabelType(std::string_view typeId) { return typeId == "Label"; }
 
+// The Reroute node is a draggable waypoint on a link: one input + one output pin of the carried type, drawn
+// as a small dot. It emits no code — codegen passes straight through it (see realSourceOfInput). Created by
+// double-clicking a link, not from the palette.
+export bool isRerouteType(std::string_view typeId) { return typeId == "Reroute"; }
+
+// Serialization token for any pin data type (covers Exec/String too, unlike memberTypeToken).
+export const char* dataTypeToken(EDataType type)
+{
+    switch (type)
+    {
+        case EDataType::Exec:     return "Exec";
+        case EDataType::Bool:     return "Bool";
+        case EDataType::Int:      return "Int";
+        case EDataType::Float:    return "Float";
+        case EDataType::Vec3:     return "Vec3";
+        case EDataType::String:   return "String";
+        case EDataType::Wildcard: return "Wild";
+    }
+    return "Float";
+}
+
+export EDataType dataTypeFromToken(std::string_view token)
+{
+    for (int i = 0; i <= (int)EDataType::Wildcard; ++i)
+        if (token == dataTypeToken((EDataType)i))
+            return (EDataType)i;
+    return EDataType::Float;
+}
+
 // Value types a Script Data member (persistent struct field) may have. String is excluded on purpose: an
 // std::string can't live in the POD block that crosses the script ABI.
 export inline constexpr EDataType memberTypes[] = { EDataType::Int, EDataType::Float, EDataType::Bool, EDataType::Vec3 };
@@ -164,6 +193,10 @@ export const std::vector<NodeDef>& nodeRegistry()
     // Comment/label box (isLabelType): a movable, resizable group with an editable caption. Pure annotation,
     // no pins, no generated code — nodes dragged inside it move with it.
     r.push_back({ "Label", "Label", "Comment", false, {}, {}, "" });
+
+    // Reroute waypoint (isRerouteType): pins are added dynamically to match the link it's placed on; created
+    // by double-clicking a link, so it's hidden from the palette.
+    r.push_back({ "Reroute", "Reroute", "", false, {}, {}, "" });
 
     // ---- events / control flow ----
     r.push_back({ "Update", "Update", "Events", true,

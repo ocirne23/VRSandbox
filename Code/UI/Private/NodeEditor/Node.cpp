@@ -76,6 +76,14 @@ void Node::eraseOutputPin(int index)
         m_outputPins.erase(m_outputPins.begin() + index);
 }
 
+// A reroute carries one value straight through: an input and an output pin of the same (link) type.
+Node& Node::makeReroute(EDataType type)
+{
+    addInput(type, "", "");
+    addOutput(type, "");
+    return *this;
+}
+
 MemberEdit Node::takeMemberEdit()
 {
     const MemberEdit e = m_pendingEdit;
@@ -92,6 +100,18 @@ namespace
     bool hasInlineDefault(const Pin& pin)
     {
         return pin.dataType != EDataType::Exec && pin.type == EPinType_Input && pin.numConnections == 0;
+    }
+
+    // Numeric/bool literals are short (~5 chars), so give them a narrow box; strings and vec3s keep the wide one.
+    float defaultFieldWidth(const Pin& pin)
+    {
+        switch (pin.dataType)
+        {
+            case EDataType::Int:
+            case EDataType::Float:
+            case EDataType::Bool: return 52.0f;
+            default:              return kDefaultFieldWidth;
+        }
     }
 
     // Reserves a fixed square and draws the pin's shape into it, registering it as the pin's hit-rect.
@@ -128,7 +148,7 @@ namespace
         if (!pin.name.empty())
             w += (w > 0.0f ? spacing : 0.0f) + ImGui::CalcTextSize(pin.name.c_str()).x;
         if (hasInlineDefault(pin))
-            w += spacing + kDefaultFieldWidth;
+            w += spacing + defaultFieldWidth(pin);
         return w;
     }
 
@@ -159,7 +179,7 @@ namespace
             for (size_t k = 0; k < sizeof(buf); ++k)
                 buf[k] = (k + 1 < sizeof(buf) && k < value.size()) ? value[k] : '\0';
             ImGui::PushID(&pin);
-            ImGui::SetNextItemWidth(kDefaultFieldWidth);
+            ImGui::SetNextItemWidth(defaultFieldWidth(pin));
             if (ImGui::InputText("##v", buf, sizeof(buf)))
                 pin.defaultValue = buf;
             ImGui::PopID();
@@ -375,6 +395,59 @@ void Node::updateLabel(bool firstFrame)
     ed::PopStyleVar();
 }
 
+// Reroute waypoint: a small dot with its input pin on the left edge and output pin on the right edge, leaving
+// the middle grabbable so the node can be dragged. Links route into the left and out of the right.
+void Node::updateReroute(bool firstFrame)
+{
+    if (firstFrame)
+        ed::SetNodePosition(*this, m_initialPos);
+
+    Pin* in  = m_inputPins.empty()  ? nullptr : m_inputPins[0].get();
+    Pin* out = m_outputPins.empty() ? nullptr : m_outputPins[0].get();
+
+    constexpr float w = 18.0f, h = 18.0f; // square + full rounding below => the selection border is a circle
+    ed::PushStyleVar(ed::StyleVar_NodePadding, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ed::PushStyleVar(ed::StyleVar_NodeRounding, w * 0.5f);
+    ed::PushStyleVar(ed::StyleVar_LinkStrength, 0.0f); // let links meet the dot at their true angle, not forced horizontal
+    ed::PushStyleColor(ed::StyleColor_NodeBg,     ImVec4(0.0f, 0.0f, 0.0f, 0.0f)); // no node body — just the dot
+    ed::PushStyleColor(ed::StyleColor_NodeBorder, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ed::BeginNode(*this);
+    ImGui::PushID(this);
+
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(w, h));
+
+    const ImVec2 c(p.x + w * 0.5f, p.y + h * 0.5f);
+    const uint32 col = in ? in->color : 0xFFFFFFFFu;
+    ImGui::GetWindowDrawList()->AddCircleFilled(c, 5.0f, col, 12);
+
+    // Pins pivot at the dot centre (so links meet at the dot) but keep only a tiny hit rect tucked in the far
+    // corner — the whole centre stays draggable as the node body, and the pins are effectively not grabbable.
+    // Overlaid back at the dummy's top-left so their (empty) groups add no height, keeping the bounds square.
+    constexpr float pinW = 2.0f;
+    if (in)
+    {
+        ImGui::SetCursorScreenPos(p);
+        ed::BeginPin(*in, ed::PinKind::Input);
+        ed::PinPivotRect(c, c);
+        ed::PinRect(ImVec2(p.x, p.y), ImVec2(p.x + pinW, p.y + pinW));
+        ed::EndPin();
+    }
+    if (out)
+    {
+        ImGui::SetCursorScreenPos(p);
+        ed::BeginPin(*out, ed::PinKind::Output);
+        ed::PinPivotRect(c, c);
+        ed::PinRect(ImVec2(p.x + w - pinW, p.y), ImVec2(p.x + w, p.y + pinW));
+        ed::EndPin();
+    }
+
+    ImGui::PopID();
+    ed::EndNode();
+    ed::PopStyleColor(2);
+    ed::PopStyleVar(3);
+}
+
 void Node::update(double /*deltaSec*/, bool firstFrame)
 {
     if (isDynamic())
@@ -385,6 +458,11 @@ void Node::update(double /*deltaSec*/, bool firstFrame)
     if (isLabel())
     {
         updateLabel(firstFrame);
+        return;
+    }
+    if (isReroute())
+    {
+        updateReroute(firstFrame);
         return;
     }
 
@@ -477,11 +555,16 @@ void Node::update(double /*deltaSec*/, bool firstFrame)
     }
     ImGui::EndGroup();
 
-    // Divider line beneath the title line, spanning the full node width.
-    const float dividerY = ImGui::GetItemRectMax().y + 2.0f;
-    ImGui::GetWindowDrawList()->AddLine(ImVec2(nodeOriginScreen.x, dividerY),
-        ImVec2(nodeOriginScreen.x + nodeW, dividerY), ImColor(255, 255, 255, 40), 1.0f);
-    ImGui::Dummy(ImVec2(nodeW, 4.0f)); // reserve full width + a little breathing room below the title
+    // Divider + spacing only when there's a body beneath the title. A node that carries nothing but its
+    // title-line exec pins (e.g. Update, Break) stays compact — no line, no gap.
+    const bool hasBody = !dataInputs.empty() || !bodyOutputs.empty() || hasProperty;
+    if (hasBody)
+    {
+        const float dividerY = ImGui::GetItemRectMax().y + 2.0f;
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(nodeOriginScreen.x, dividerY),
+            ImVec2(nodeOriginScreen.x + nodeW, dividerY), ImColor(255, 255, 255, 40), 1.0f);
+        ImGui::Dummy(ImVec2(nodeW, 4.0f)); // reserve full width + a little breathing room below the title
+    }
 
     if (hasProperty)
     {

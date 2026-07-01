@@ -29,26 +29,44 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 }
 
 //@graph 1
-//@node 0 Update -433 526
-//@node 1 IfElse -261 529
-//@node 2 Bool -229 437
-//@node 3 Set 220 286
-//@node 4 ForLoop 129 610
-//@node 5 Modulo 514 785
-//@node 6 Mul 514 693
+//@node 0 Update -98 448
+//@node 1 IfElse -3 499
+//@node 2 Bool 219 439
+//@node 3 Set 592 384
+//@node 4 ForLoop 250 608
+//@node 5 Modulo 519 755
+//@node 6 Mul 519 663
 //@node 7 If 699 641
-//@node 8 Int -592 279
-//@node 9 Set 1004 578
-//@node 10 IfElse 491 385
-//@node 11 Printf 951 308
-//@node 12 Printf 951 397
-//@node 13 Break 1195 526
-//@node 14 Label -624 224
-//@node 15 Label 928 240
-//@labelsize 14 326 117
+//@node 8 Int -368 407
+//@node 9 Set 928 576
+//@node 10 IfElse 592 479
+//@node 11 Printf 919 340
+//@node 12 Printf 919 429
+//@node 13 Break 1056 576
+//@node 14 Label -400 352
+//@node 15 Label 896 272
+//@node 16 Reroute 823 439
+//@node 17 Reroute 823 439
+//@node 18 Reroute 487 471
+//@node 19 Reroute 487 471
+//@node 20 Reroute -57 663
+//@node 21 Reroute -57 663
+//@node 22 Reroute 503 599
+//@node 23 Reroute 631 343
+//@node 24 Reroute 631 343
+//@labelsize 14 256 117
 //@labeltext 14 Input
 //@labelsize 15 272 229
 //@labeltext 15 Output
+//@reroute 16 Int
+//@reroute 17 Int
+//@reroute 18 Bool
+//@reroute 19 Bool
+//@reroute 20 Int
+//@reroute 21 Int
+//@reroute 22 Bool
+//@reroute 23 Int
+//@reroute 24 Int
 //@pin 1 1 0.0f
 //@pin 1 2 2
 //@pin 2 0 true
@@ -71,26 +89,44 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 //@pin 11 2 0.0f
 //@pin 12 1 "%i is not a prime number"
 //@pin 12 2 0.0f
+//@pin 16 0 
+//@pin 17 0 
+//@pin 18 0 
+//@pin 19 0 
+//@pin 20 0 
+//@pin 21 0 
+//@pin 22 0 
+//@pin 23 0 
+//@pin 24 0 
 //@enum 7 2
 //@enum 10 2
 //@link 1 0 3 0
-//@link 2 0 3 1
 //@link 4 2 6 0
 //@link 4 2 6 1
 //@link 6 0 5 1
 //@link 5 0 7 1
 //@link 8 0 1 1
-//@link 8 0 4 2
-//@link 8 0 5 0
-//@link 2 0 9 1
-//@link 2 0 10 1
 //@link 1 2 10 0
-//@link 8 0 11 2
 //@link 10 0 11 0
 //@link 10 1 12 0
-//@link 8 0 12 2
 //@link 7 0 9 0
 //@link 9 0 13 0
 //@link 1 1 4 0
 //@link 4 0 7 0
 //@link 0 0 1 0
+//@link 16 0 11 2
+//@link 17 0 12 2
+//@link 2 0 18 0
+//@link 18 0 10 1
+//@link 2 0 19 0
+//@link 19 0 3 1
+//@link 8 0 20 0
+//@link 20 0 5 0
+//@link 8 0 21 0
+//@link 21 0 4 2
+//@link 2 0 22 0
+//@link 22 0 9 1
+//@link 8 0 23 0
+//@link 23 0 17 0
+//@link 8 0 24 0
+//@link 24 0 16 0

@@ -40,6 +40,8 @@ private:
     void connectNodes(Node* from, int outIdx, Node* to, int inIdx);
     void resolveNodeTypes(Node* node); // propagate concrete types through the node's wildcard pin groups
     void removeNode(ed::NodeId nodeId);
+    void insertReroute(Link* link, ImVec2 canvasPos); // split a link with a draggable reroute waypoint
+    void deleteRerouteChain(Link* link);              // delete a whole routed connection from one of its links
     void removeMemberPin(Node* node, int index);      // drop a Script Data member + its links
     void pruneIncompatibleLinks(Node* node);          // drop links a member type-change made invalid
     void applyMemberEdit(const MemberEdit& edit);     // replay a member edit across all Script Data nodes

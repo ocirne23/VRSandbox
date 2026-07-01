@@ -78,6 +78,10 @@ public:
     // Scene, which replays it across every Script Data node and fixes up the links it owns.
     MemberEdit takeMemberEdit();
 
+    // Reroute waypoint: one input + one output pin of the carried type (added on creation / load).
+    bool isReroute() const { return isRerouteType(m_typeId); }
+    Node& makeReroute(EDataType type);
+
     // Label (comment box) accessors, used by save/load to persist the caption and box size.
     bool isLabel() const { return isLabelType(m_typeId); }
     const std::string& getLabelText() const { return m_labelText; }
@@ -102,6 +106,7 @@ private:
 
 	void updateDynamic(bool firstFrame); // in-node editor body for the Script Data node
 	void updateLabel(bool firstFrame);   // group/comment box body for the Label node
+	void updateReroute(bool firstFrame); // small draggable dot for the Reroute waypoint
 
 	uint32 m_nodeIdx;
     ImVec2 m_initialPos;

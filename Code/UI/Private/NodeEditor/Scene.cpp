@@ -37,6 +37,30 @@ namespace
         return -1;
     }
 
+    // Reroute-transparent traversal for codegen: a Reroute is a pure waypoint (one in, one out), so follow
+    // straight through it to the real source output / real target input.
+    Pin* realSourceOfInput(const std::vector<std::unique_ptr<Link>>& links, const Pin* inputPin)
+    {
+        Pin* src = sourceOfInput(links, inputPin);
+        while (src && isRerouteType(src->node->getTypeId()))
+        {
+            const auto& ins = src->node->getInputPins();
+            src = ins.empty() ? nullptr : sourceOfInput(links, ins[0].get());
+        }
+        return src;
+    }
+
+    Pin* realTargetOfOutput(const std::vector<std::unique_ptr<Link>>& links, const Pin* outputPin)
+    {
+        Pin* tgt = targetOfOutput(links, outputPin);
+        while (tgt && isRerouteType(tgt->node->getTypeId()))
+        {
+            const auto& outs = tgt->node->getOutputPins();
+            tgt = outs.empty() ? nullptr : targetOfOutput(links, outs[0].get());
+        }
+        return tgt;
+    }
+
     // Splits an output pin's value template into an optional hoisted declaration and its reference/inline
     // expression, returning true when a declaration is present. Two forms produce a hoist:
     //   - the pin's own expr carries a HOIST marker: <decl> \x03 <ref>  (e.g. a Var node)
@@ -166,7 +190,7 @@ namespace
                 else
                 {
                     const auto& outputs = node->getOutputPins();
-                    Pin* tgt = (idx >= 0 && idx < (int)outputs.size()) ? targetOfOutput(cg.links, outputs[idx].get()) : nullptr;
+                    Pin* tgt = (idx >= 0 && idx < (int)outputs.size()) ? realTargetOfOutput(cg.links, outputs[idx].get()) : nullptr;
                     out += tgt ? emitExecChain(cg, tgt->node, execStack) : std::string();
                 }
                 i = j;
@@ -188,7 +212,7 @@ namespace
                     const std::string block = tmpl.substr(j + 1, k - (j + 1));
                     const auto& inputs = node->getInputPins();
                     const Pin* in = (idx >= 0 && idx < (int)inputs.size()) ? inputs[idx].get() : nullptr;
-                    if (in && sourceOfInput(cg.links, in))
+                    if (in && realSourceOfInput(cg.links, in))
                         out += substituteExec(cg, block, node, execStack, hoist);
                     i = (k < tmpl.size()) ? k + 1 : k;
                 }
@@ -232,7 +256,7 @@ namespace
 
     std::string emitDataExpr(Codegen& cg, const Pin* inputPin, std::set<const Node*>& dataStack, const HoistMap& hoist)
     {
-        Pin* src = sourceOfInput(cg.links, inputPin);
+        Pin* src = realSourceOfInput(cg.links, inputPin);
         if (!src)
             return inputPin->defaultValue.empty() ? std::string("0") : inputPin->defaultValue;
         if (auto it = hoist.find(src); it != hoist.end())
@@ -244,7 +268,7 @@ namespace
     // statement reads can be discovered and declared at function scope.
     void collectDataOutputs(Codegen& cg, const Pin* inputPin, std::set<const Pin*>& out, std::set<const Node*>& path)
     {
-        Pin* src = sourceOfInput(cg.links, inputPin);
+        Pin* src = realSourceOfInput(cg.links, inputPin);
         if (!src) return;
         Node* node = src->node;
         if (!findNodeDef(node->getTypeId())) return;
@@ -264,7 +288,7 @@ namespace
         for (const auto& pin : outPin->node->getInputPins())
         {
             if (pin->dataType == EDataType::Exec) continue;
-            if (Pin* s = sourceOfInput(cg.links, pin.get()); s && hoist.count(s))
+            if (Pin* s = realSourceOfInput(cg.links, pin.get()); s && hoist.count(s))
                 declareHoist(cg, s, hoist, declared);
         }
         std::string decl, ref;
@@ -467,6 +491,18 @@ void Scene::removeNode(ed::NodeId nodeId)
     Node* node = nodeId.AsPointer<Node>();
     if (!node) return;
 
+    // Deleting a reroute waypoint should keep the connection: capture its immediate source output and target
+    // input so they can be re-linked once the reroute's own links are gone.
+    Node* rejoinFromNode = nullptr; int rejoinFromIdx = -1;
+    Node* rejoinToNode = nullptr;   int rejoinToIdx = -1;
+    if (node->isReroute() && !node->getInputPins().empty() && !node->getOutputPins().empty())
+    {
+        if (Pin* s = sourceOfInput(m_links, node->getInputPins()[0].get()))
+        { rejoinFromNode = s->node; rejoinFromIdx = indexOfPin(s->node->getOutputPins(), s); }
+        if (Pin* d = targetOfOutput(m_links, node->getOutputPins()[0].get()))
+        { rejoinToNode = d->node; rejoinToIdx = indexOfPin(d->node->getInputPins(), d); }
+    }
+
     // Drop any links touching this node's pins, tracking the neighbours so their wildcard types re-resolve.
     std::set<Node*> affected;
     std::erase_if(m_links, [&](const std::unique_ptr<Link>& link)
@@ -480,8 +516,85 @@ void Scene::removeNode(ed::NodeId nodeId)
 
     std::erase_if(m_nodes, [&](const std::unique_ptr<Node>& n) { return n.get() == node; });
 
+    // Re-link across the removed reroute (its endpoints survive as they belong to other nodes).
+    if (rejoinFromNode && rejoinToNode)
+        connectNodes(rejoinFromNode, rejoinFromIdx, rejoinToNode, rejoinToIdx);
+
     for (Node* neighbour : affected)
         resolveNodeTypes(neighbour);
+}
+
+// Splits a link with a reroute waypoint at `canvasPos`: the link becomes source -> reroute -> target, so the
+// connection is preserved but the line now routes through a draggable dot.
+void Scene::insertReroute(Link* link, ImVec2 canvasPos)
+{
+    Pin* out = link->getOutputId().AsPointer<Pin>(); // the source (output) pin
+    Pin* in  = link->getInputId().AsPointer<Pin>();  // the destination (input) pin
+    if (!out || !in)
+        return;
+
+    const EDataType type = out->dataType;
+    const int outIdx = indexOfPin(out->node->getOutputPins(), out);
+    const int inIdx  = indexOfPin(in->node->getInputPins(), in);
+
+    // Remove the original link.
+    out->numConnections--;
+    in->numConnections--;
+    std::erase_if(m_links, [&](const std::unique_ptr<Link>& l) { return l.get() == link; });
+
+    Node& reroute = addNodeOfType("Reroute", canvasPos);
+    reroute.makeReroute(type);
+
+    connectNodes(out->node, outIdx, &reroute, 0);
+    connectNodes(&reroute, 0, in->node, inIdx);
+}
+
+// Removes an entire routed connection given one of its links: gathers every reroute waypoint in the chain
+// (walking reroute-to-reroute through their single in/out links) and erases all of them plus every link that
+// touches them, leaving the real source and target disconnected.
+void Scene::deleteRerouteChain(Link* link)
+{
+    std::set<Node*> reroutes;
+    std::vector<Node*> stack;
+    auto addIfReroute = [&](Pin* pin)
+    {
+        if (pin && pin->node->isReroute() && reroutes.insert(pin->node).second)
+            stack.push_back(pin->node);
+    };
+    addIfReroute(link->getOutputId().AsPointer<Pin>());
+    addIfReroute(link->getInputId().AsPointer<Pin>());
+
+    while (!stack.empty())
+    {
+        Node* r = stack.back(); stack.pop_back();
+        if (!r->getInputPins().empty())
+            addIfReroute(sourceOfInput(m_links, r->getInputPins()[0].get()));
+        if (!r->getOutputPins().empty())
+            addIfReroute(targetOfOutput(m_links, r->getOutputPins()[0].get()));
+    }
+    if (reroutes.empty())
+        return;
+
+    // Drop every link touching a reroute in the chain (plus the triggering link), noting non-reroute
+    // endpoints so their wildcard types can re-resolve once disconnected.
+    std::set<Node*> affected;
+    std::erase_if(m_links, [&](const std::unique_ptr<Link>& l)
+    {
+        Pin* in = l->getInputId().AsPointer<Pin>();
+        Pin* out = l->getOutputId().AsPointer<Pin>();
+        const bool touches = l.get() == link
+            || (in && reroutes.count(in->node)) || (out && reroutes.count(out->node));
+        if (!touches)
+            return false;
+        if (in)  { in->numConnections--;  if (!reroutes.count(in->node))  affected.insert(in->node); }
+        if (out) { out->numConnections--; if (!reroutes.count(out->node)) affected.insert(out->node); }
+        return true;
+    });
+
+    std::erase_if(m_nodes, [&](const std::unique_ptr<Node>& n) { return reroutes.count(n.get()) != 0; });
+
+    for (Node* nb : affected)
+        resolveNodeTypes(nb);
 }
 
 void Scene::removeMemberPin(Node* node, int index)
@@ -658,6 +771,11 @@ std::string Scene::serializeGraph()
             s += "//@labeltext " + std::to_string(i) + " " + m_nodes[i]->getLabelText() + "\n";
         }
 
+    // Reroute waypoints: their carried type, so their pins can be rebuilt before links are restored.
+    for (int i = 0; i < (int)m_nodes.size(); ++i)
+        if (m_nodes[i]->isReroute() && !m_nodes[i]->getInputPins().empty())
+            s += "//@reroute " + std::to_string(i) + " " + dataTypeToken(m_nodes[i]->getInputPins()[0]->dataType) + "\n";
+
     // Script Data members (a dynamic node's output pins). Emitted before links so a load recreates them
     // first — links reference these output pins by index.
     for (int i = 0; i < (int)m_nodes.size(); ++i)
@@ -754,6 +872,17 @@ bool Scene::loadFromFile(const std::string& path)
         Node& n = addNodeOfType(typeId, ImVec2((float)x, (float)y));
         if ((int)byIndex.size() <= idx) byIndex.resize(idx + 1, nullptr);
         byIndex[idx] = &n;
+    }
+
+    // pass 1a: Reroute pins (before links, which reference these pins by index)
+    for (const std::string& ln : lines)
+    {
+        LineReader r{ ln };
+        if (r.token() != "//@reroute") continue;
+        const int ni = toInt(r.token());
+        const std::string typeTok = r.token();
+        if (ni >= 0 && ni < (int)byIndex.size() && byIndex[ni] && byIndex[ni]->isReroute())
+            byIndex[ni]->makeReroute(dataTypeFromToken(typeTok));
     }
 
     // pass 1b: Script Data members (before links, which reference these output pins by index)
@@ -880,6 +1009,8 @@ void Scene::update(double deltaSec)
         std::vector<Category> categories;
         for (const NodeDef& def : nodeRegistry())
         {
+            if (isRerouteType(def.typeId)) // created by double-clicking a link, not from the palette
+                continue;
             if (categories.empty() || categories.back().name != def.category)
                 categories.push_back({ def.category, {} });
             categories.back().defs.push_back(&def);
@@ -946,6 +1077,11 @@ void Scene::update(double deltaSec)
 
     ed::End();
 
+    // Double-click a link to drop a reroute waypoint on it at the cursor (splits it through a draggable dot).
+    if (ed::LinkId doubleClicked = ed::GetDoubleClickedLink())
+        if (Link* link = doubleClicked.AsPointer<Link>())
+            insertReroute(link, ed::ScreenToCanvas(ImGui::GetMousePos()));
+
     // Capture the clean-state baseline once the graph has rendered (node positions are now valid).
     if (!m_hasBaseline)
     {
@@ -1007,22 +1143,28 @@ void Scene::processInteractions()
         {
             if (ed::AcceptDeletedItem())
             {
-                for (auto it = m_links.begin(); it != m_links.end(); ++it)
+                Link* link = deletedLinkId.AsPointer<Link>();
+                if (!link)
+                    continue;
+
+                Pin* pin1 = link->getInputId().AsPointer<Pin>();
+                Pin* pin2 = link->getOutputId().AsPointer<Pin>();
+
+                // Deleting any segment of a routed connection tears down the whole thing: every reroute
+                // waypoint in the chain and all their links (so the source and target end up disconnected).
+                if ((pin1 && pin1->node->isReroute()) || (pin2 && pin2->node->isReroute()))
                 {
-                    if ((*it)->getId() == deletedLinkId)
-                    {
-                        Pin* pin1 = (*it)->getInputId().AsPointer<Pin>();
-                        Pin* pin2 = (*it)->getOutputId().AsPointer<Pin>();
-                        if (pin1) pin1->numConnections--;
-                        if (pin2) pin2->numConnections--;
-                        Node* node1 = pin1 ? pin1->node : nullptr;
-                        Node* node2 = pin2 ? pin2->node : nullptr;
-                        m_links.erase(it);
-                        resolveNodeTypes(node1); // a removed connection may revert a wildcard group
-                        resolveNodeTypes(node2);
-                        break;
-                    }
+                    deleteRerouteChain(link);
+                    continue;
                 }
+
+                if (pin1) pin1->numConnections--;
+                if (pin2) pin2->numConnections--;
+                Node* node1 = pin1 ? pin1->node : nullptr;
+                Node* node2 = pin2 ? pin2->node : nullptr;
+                std::erase_if(m_links, [&](const std::unique_ptr<Link>& l) { return l.get() == link; });
+                resolveNodeTypes(node1); // a removed connection may revert a wildcard group
+                resolveNodeTypes(node2);
             }
         }
 
