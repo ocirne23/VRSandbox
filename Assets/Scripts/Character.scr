@@ -5,7 +5,7 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 }
 
 //@graph 1
-//@node 0 EventUpdate 116 64
+//@node 0 Update 116 64
 //@node 1 GetElapsedTime -160 151
 //@node 2 SetEntity 544 86
 //@node 3 MakeVec3 284 135

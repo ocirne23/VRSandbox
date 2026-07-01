@@ -37,14 +37,35 @@ namespace
         return -1;
     }
 
-    // The static `expr` template of a node's output pin (empty if none). May carry a HOIST marker.
-    const std::string& outputExprOf(const Pin* outPin)
+    // Splits an output pin's value template into an optional hoisted declaration and its reference/inline
+    // expression, returning true when a declaration is present. Two forms produce a hoist:
+    //   - the pin's own expr carries a HOIST marker: <decl> \x03 <ref>  (e.g. a Var node)
+    //   - the pin has a plain expr AND the node's emit carries a HOIST marker: the node emit supplies a
+    //     single declaration shared by all the node's outputs, and the pin expr is the reference into it
+    //     (e.g. SplitVec3 declares `glm::vec3 v@` once, then x/y/z read `v@.x` / `v@.y` / `v@.z`).
+    bool hoistParts(const Pin* outPin, std::string& decl, std::string& ref)
     {
-        static const std::string empty;
+        decl.clear(); ref.clear();
         const NodeDef* def = findNodeDef(outPin->node->getTypeId());
-        if (!def) return empty;
+        if (!def) return false;
         const int outIdx = indexOfPin(outPin->node->getOutputPins(), outPin);
-        return (outIdx >= 0 && outIdx < (int)def->outputs.size()) ? def->outputs[outIdx].expr : empty;
+        if (outIdx < 0 || outIdx >= (int)def->outputs.size()) return false;
+        const std::string& e = def->outputs[outIdx].expr;
+
+        if (const auto hp = e.find(HOIST); hp != std::string::npos)
+        {
+            decl = e.substr(0, hp);
+            ref  = e.substr(hp + 1);
+            return true;
+        }
+        if (!e.empty())
+            if (const auto hp = def->emit.find(HOIST); hp != std::string::npos)
+            {
+                decl = def->emit.substr(0, hp);
+                ref  = e;
+                return true;
+            }
+        return false;
     }
 
     // Can these two pins be linked? Exec only joins exec; the output's read/write capability must cover what
@@ -79,7 +100,7 @@ namespace
     {
         const std::vector<std::unique_ptr<Link>>& links;
         std::string         globalDecls;    // HOIST variable declarations, emitted once at the top of the function
-        std::set<const Pin*> globalDeclared; // pins already added to globalDecls (dedups multi-use variables)
+        std::set<std::string> globalDeclared; // declaration texts already added to globalDecls (dedups shared decls)
     };
 
     std::string emitDataExpr(Codegen& cg, const Pin* inputPin, std::set<const Node*>& dataStack, const HoistMap& hoist);
@@ -244,12 +265,13 @@ namespace
             if (Pin* s = sourceOfInput(cg.links, pin.get()); s && hoist.count(s))
                 declareHoist(cg, s, hoist, declared);
         }
-        const std::string& oexpr = outputExprOf(outPin);
-        const auto hp = oexpr.find(HOIST);
-        if (hp != std::string::npos && cg.globalDeclared.insert(outPin).second)
+        std::string decl, ref;
+        if (hoistParts(outPin, decl, ref))
         {
             std::set<const Node*> dataStack;
-            cg.globalDecls += substituteData(cg, oexpr.substr(0, hp), outPin->node, dataStack, hoist);
+            const std::string text = substituteData(cg, decl, outPin->node, dataStack, hoist);
+            if (cg.globalDeclared.insert(text).second) // dedup by text: SplitVec3's x/y/z share one decl
+                cg.globalDecls += text;
         }
     }
 
@@ -273,12 +295,11 @@ namespace
         HoistMap hoist;
         for (const Pin* pin : reachable)
         {
-            const std::string& oexpr = outputExprOf(pin);
-            const auto hp = oexpr.find(HOIST);
-            if (hp != std::string::npos)
+            std::string decl, ref;
+            if (hoistParts(pin, decl, ref))
             {
                 std::set<const Node*> ds;
-                hoist[pin] = substituteData(cg, oexpr.substr(hp + 1), pin->node, ds, hoist); // reference, e.g. "f3"
+                hoist[pin] = substituteData(cg, ref, pin->node, ds, hoist); // reference, e.g. "f3" or "v3.x"
             }
         }
         {
@@ -372,7 +393,7 @@ int Scene::indexOfNode(const Node* node) const
 Node* Scene::findEntry() const
 {
     for (const auto& node : m_nodes)
-        if (node->getTypeId() == "EventUpdate")
+        if (node->getTypeId() == "Update")
             return node.get();
     return nullptr;
 }

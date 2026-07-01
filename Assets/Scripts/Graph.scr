@@ -29,7 +29,7 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 }
 
 //@graph 1
-//@node 0 EventUpdate 68 256
+//@node 0 Update 68 256
 //@node 1 IfElse 240 259
 //@node 2 Bool 272 151
 //@node 3 Set 625 -16

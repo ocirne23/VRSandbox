@@ -117,7 +117,7 @@ export const std::vector<NodeDef>& nodeRegistry()
     std::vector<NodeDef> r;
 
     // ---- events / control flow ----
-    r.push_back({ "EventUpdate", "Event Update", "Events", true,
+    r.push_back({ "Update", "Update", "Events", true,
         {}, { { "", D::Exec, "" } },
         "#0" });
 
@@ -232,19 +232,36 @@ export const std::vector<NodeDef>& nodeRegistry()
         "(ctx->isKeyDown($0) != 0)" });
 
     // ---- math ----
-    r.push_back({ "Add", "Add", "Math", false,
-        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
-        "($0 + $1)" });
-
-    r.push_back({ "Increment", "Increment", "Math", true,
-        { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
-        { { "", D::Exec, "" } },
-        "$1 += $2;\n#0" });
-
+    // -- mutable math nodes -- 
     r.push_back({ "Set", "Set", "Math", true,
         { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
         { { "", D::Exec, "" } },
         "$1 = $2;\n#0" });
+
+    r.push_back({ "SetAdd", "Set Add", "Math", true,
+        { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
+        { { "", D::Exec, "" } },
+        "$1 += $2;\n#0" });
+
+    r.push_back({ "SetSub", "Set Sub", "Math", true,
+        { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
+        { { "", D::Exec, "" } },
+        "$1 -= $2;\n#0" });
+
+    r.push_back({ "SetMul", "Set Mul", "Math", true,
+        { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
+        { { "", D::Exec, "" } },
+        "$1 *= $2;\n#0" });
+
+    r.push_back({ "SetDiv", "Set Div", "Math", true,
+        { { "", D::Exec, "" }, { "a", D::Wildcard, "0.0f", 1, "", EMutableType::ReadWritable}, {"b", D::Wildcard, "0.0f", 1}},
+        { { "", D::Exec, "" } },
+        "$1 /= $2;\n#0" });
+
+	// -- immutable math nodes --
+    r.push_back({ "Add", "Add", "Math", false,
+        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "($0 + $1)" });
 
     r.push_back({ "Sub", "Subtract", "Math", false,
         { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
@@ -279,10 +296,8 @@ export const std::vector<NodeDef>& nodeRegistry()
 
     r.push_back({ "SplitVec3", "Split Vec3", "Math", false,
         { { "vec", D::Vec3, "" } },
-        { { "x", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.x" },
-            { "y", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.y" },
-            { "z", D::Float, "", 0, std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@.z" } }
-        });
+        { { "x", D::Float, "", 0, "v@.x" }, { "y", D::Float, "", 0, "v@.y" }, { "z", D::Float, "", 0, "v@.z" } },
+        std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@"});
 
     r.push_back({ "AddVec3", "Add Vec3", "Math", false,
         { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
