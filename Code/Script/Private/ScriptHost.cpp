@@ -191,14 +191,19 @@ struct ScriptHost::Impl
     bool loadDll(CachedScript& slot, const fs::path& dll)
     {
         HMODULE m = LoadLibraryA(dll.string().c_str());
-        void* update = m ? (void*)GetProcAddress(m, "ScriptUpdate") : nullptr;
-        if (!update) { if (m) FreeLibrary(m); return false; }
+
+        void* update = m ? (void*)GetProcAddress(m, "Update") : nullptr;
+        void* onSpawn = m ? (void*)GetProcAddress(m, "OnSpawn") : nullptr;
+        void* onDestroy = m ? (void*)GetProcAddress(m, "OnDestroy") : nullptr;
+
+        if (!update && !onSpawn && !onDestroy) { if (m) FreeLibrary(m); return false; }
         if (slot.module) FreeLibrary((HMODULE)slot.module);
         slot.module = m;
         slot.dllPath = dll.string();
+        slot.entries.dllPath = dll.string();
         slot.entries.update = update;
-        slot.entries.init = (void*)GetProcAddress(m, "ScriptInit");
-        slot.entries.shutdown = (void*)GetProcAddress(m, "ScriptShutdown");
+        slot.entries.onSpawn = onSpawn;
+        slot.entries.onDestroy = onDestroy;
         slot.entries.dataSize = 0;
         if (auto sizeFn = (uint32(*)())GetProcAddress(m, "ScriptDataSize"))
             slot.entries.dataSize = sizeFn();
@@ -223,6 +228,7 @@ struct ScriptHost::Impl
             if (!es && !ed && srcTime == dllTime)
             {
                 CachedScript& slot = scripts.emplace(key, CachedScript{}).first->second;
+                slot.entries.scriptPath = path;
                 if (loadDll(slot, dll))
                 {
                     Log::info("Script unchanged; loaded cached DLL: " + path);
@@ -246,12 +252,15 @@ struct ScriptHost::Impl
         {
             Log::error("Script compile failed (" + path + "):\n" + errors);
             if (it != scripts.end()) return &it->second.entries;             // keep previous build
-            return &scripts.emplace(key, CachedScript{}).first->second.entries; // cache the failure
+            ScriptModule* scriptModule = &scripts.emplace(key, CachedScript{}).first->second.entries; // cache the failure
+            scriptModule->scriptPath = path;
+            return scriptModule;
         }
 
         // Compile succeeded: free the previous build (unlocking its <stem>.dll) and promote the temp DLL
         // into its place, so each script keeps exactly one DLL on disk.
         CachedScript& slot = (it != scripts.end()) ? it->second : scripts.emplace(key, CachedScript{}).first->second;
+        slot.entries.scriptPath = path;
         if (slot.module) { FreeLibrary((HMODULE)slot.module); slot.module = nullptr; }
 
         const fs::path finalDll = scriptDllPath(path);

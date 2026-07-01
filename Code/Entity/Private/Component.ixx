@@ -7,6 +7,7 @@ import Core.glm;
 import Core.Transform;
 import File;
 import Animation;
+import Script;
 
 import RendererVK;
 
@@ -150,14 +151,9 @@ export struct ScriptComponent
 {
     static constexpr EComponentID getId() { return EComponentID_Script; }
 
-    std::string scriptPath;   // path to the .scr (relative to Assets/, or empty for none)
-
-    // Persistent per-instance memory handed to the script each tick. Sized to the script's ScriptData struct
-    // (its ScriptDataSize() export) and zero-initialized; (re)allocated lazily in update() once the script is
-    // compiled, and again if a hot-reload changes the size. Empty when the script declares no data.
+    const ScriptModule* scriptModule = nullptr;
     std::unique_ptr<uint8[]> scriptData;
     uint32 scriptDataSize = 0;
-
     bool enabled = true;
 
     struct SpawnInfo
@@ -166,8 +162,8 @@ export struct ScriptComponent
         bool enabled = true;
     };
 
-    void spawn(Entity&, const SpawnInfo& info, const Transform&) { scriptPath = info.scriptPath; enabled = info.enabled; }
-    void destroy(Entity&, const SpawnInfo&) {}
+    void spawn(Entity&, const SpawnInfo& info, const Transform&);
+    void destroy(Entity&, const SpawnInfo&);
 
     // Compiles (on demand) and runs the referenced script with `entity` as its `self`. Defined in
     // ScriptRuntime.cpp, which owns the ScriptContext + thunks.
@@ -175,13 +171,13 @@ export struct ScriptComponent
 
     void serialize(AssetNode& out) const
     {
-        if (!scriptPath.empty()) out.set("Path", scriptPath);
-        if (!enabled)            out.set("Enabled", enabled);
+        //if (scriptModule && scriptModule->scriptPath) out.set("Path", scriptModule->scriptPath);
+        //if (!enabled)                                 out.set("Enabled", enabled);
     }
     void deserialize(const AssetNode& in)
     {
-        if (const AssetNode* n = in.find("Path"))    scriptPath = n->asString();
-        if (const AssetNode* n = in.find("Enabled")) enabled = n->asBool();
+        //if (const AssetNode* n = in.find("Path"))    scriptPath = n->asString();
+        //if (const AssetNode* n = in.find("Enabled")) enabled = n->asBool();
     }
 };
 

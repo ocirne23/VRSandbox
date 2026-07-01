@@ -235,8 +235,9 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
     {
         m_scriptSelectionTracked = selected;
         if (selected)
-            if (ScriptComponent* script = getComponent<ScriptComponent>(selected); script && !script->scriptPath.empty())
-                requestOpenScript(script->scriptPath);
+            if (ScriptComponent* script = getComponent<ScriptComponent>(selected))
+				if (script->scriptModule && script->scriptModule->scriptPath != m_scene.scriptPath())
+					requestOpenScript(script->scriptModule->scriptPath);
     }
 
     {

@@ -416,10 +416,10 @@ int Scene::indexOfNode(const Node* node) const
     return -1;
 }
 
-Node* Scene::findEntry() const
+Node* Scene::findEntry(const char* nodeName) const
 {
     for (const auto& node : m_nodes)
-        if (node->getTypeId() == "Update")
+        if (node->getTypeId() == nodeName)
             return node.get();
     return nullptr;
 }
@@ -729,10 +729,10 @@ std::string Scene::generateCpp()
         code += "SCRIPT_EXPORT unsigned int ScriptDataSize() { return (unsigned int)sizeof(ScriptData); }\n";
     }
 
-    code += "SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)\n{\n";
-
-    if (Node* entry = findEntry())
+    if (Node* entry = findEntry("OnSpawn"))
     {
+        code += "SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)\n{\n";
+
         Codegen cg{ m_links };
         std::set<const Node*> execStack;
         const std::string chain = emitExecChain(cg, entry, execStack); // also collects cg.globalDecls
@@ -743,9 +743,46 @@ std::string Scene::generateCpp()
         const std::string body = applyIndent(bodyRaw, "    ");
         if (!body.empty())
             code += indentLines(body, "    ");
+
+        code += "}\n\n";
     }
 
-    code += "}\n\n";
+    if (Node* entry = findEntry("OnDestroy"))
+    {
+        code += "SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scriptData)\n{\n";
+
+        Codegen cg{ m_links };
+        std::set<const Node*> execStack;
+        const std::string chain = emitExecChain(cg, entry, execStack); // also collects cg.globalDecls
+        std::string bodyRaw;
+        if (dataNode)
+            bodyRaw += "ScriptData* data = (ScriptData*)scriptData;\n"; // members resolve to data->field
+        bodyRaw += cg.globalDecls + chain;                             // variable decls first, at function scope
+        const std::string body = applyIndent(bodyRaw, "    ");
+        if (!body.empty())
+            code += indentLines(body, "    ");
+
+        code += "}\n\n";
+    }
+
+    if (Node* entry = findEntry("Update"))
+    {
+        code += "SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)\n{\n";
+
+        Codegen cg{ m_links };
+        std::set<const Node*> execStack;
+        const std::string chain = emitExecChain(cg, entry, execStack); // also collects cg.globalDecls
+        std::string bodyRaw;
+        if (dataNode)
+            bodyRaw += "ScriptData* data = (ScriptData*)scriptData;\n"; // members resolve to data->field
+        bodyRaw += cg.globalDecls + chain;                             // variable decls first, at function scope
+        const std::string body = applyIndent(bodyRaw, "    ");
+        if (!body.empty())
+            code += indentLines(body, "    ");
+
+        code += "}\n\n";
+    }
+
     code += serializeGraph();
     return code;
 }

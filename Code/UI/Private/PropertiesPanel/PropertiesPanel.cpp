@@ -124,6 +124,7 @@ void PropertiesPanel::render(Entity* selected)
 		{
 			ImGui::AlignTextToFramePadding();
 			ImGui::Text("Script");
+			/*
 			ImGui::SameLine(80.0f);
 			ImGui::SetNextItemWidth(-1.0f);
 			char scriptBuf[256];
@@ -139,7 +140,7 @@ void PropertiesPanel::render(Entity* selected)
 			}
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Type a path or drag a .scr here");
-			ImGui::AlignTextToFramePadding();
+			ImGui::AlignTextToFramePadding();*/
 			ImGui::Text("Enabled");
 			ImGui::SameLine(80.0f);
 			ImGui::Checkbox("##pp_script_enabled", &script->enabled);

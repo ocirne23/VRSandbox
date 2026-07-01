@@ -185,27 +185,41 @@ AnimatorComponent::~AnimatorComponent()
 {
 }
 
-void ScriptComponent::update(Entity& entity, float deltaSeconds)
+void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {
-    if (!enabled || scriptPath.empty())
+	enabled = info.enabled;
+
+	if (info.scriptPath.empty())
+		return;
+    const ScriptModule* loaded = Globals::scriptHost.getOrLoad(info.scriptPath);
+    if (!loaded)
         return;
 
-    const ScriptModule* loaded = Globals::scriptHost.getOrLoad(scriptPath);
-    if (!loaded || !loaded->update)
-        return;
-
-    // Match the persistent memory block to what the (possibly hot-reloaded) script now declares. make_unique
-    // zero-inits, so a fresh or resized block starts cleared.
     if (loaded->dataSize != scriptDataSize)
     {
         scriptDataSize = loaded->dataSize;
         scriptData = scriptDataSize ? std::make_unique<uint8[]>(scriptDataSize) : nullptr;
     }
 
-    // self + the persistent data block are passed explicitly (the ScriptContext carries neither).
-    reinterpret_cast<ScriptUpdateFn>(loaded->update)(&Globals::scriptContext, &entity, deltaSeconds, scriptData.get());
+    scriptModule = loaded;
+
+	if (loaded->onSpawn)
+		reinterpret_cast<ScriptOnSpawnFn>(loaded->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
 }
 
+void ScriptComponent::update(Entity& entity, float deltaSeconds)
+{
+    if (!enabled || !scriptModule || !scriptModule->update)
+        return;
+    reinterpret_cast<ScriptUpdateFn>(scriptModule->update)(&Globals::scriptContext, &entity, deltaSeconds, scriptData.get());
+}
+
+void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
+{
+    if (!enabled || !scriptModule || !scriptModule->onDestroy)
+        return;
+    reinterpret_cast<ScriptOnDestroyFn>(scriptModule->onDestroy)(&Globals::scriptContext, &entity, scriptData.get());
+}
 
 void SceneComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {

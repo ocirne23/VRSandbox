@@ -1,5 +1,15 @@
 #include "ScriptAPI.h"
-SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt)
+SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
+{
+    ctx->log("Character On Spawn");
+}
+
+SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scriptData)
+{
+    ctx->log("Character On Destroy");
+}
+
+SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
 {
     ctx->entitySetRotation(self, glm::vec3{ 0.0f, (ctx->elapsedSeconds() * 50.0f), 0.0f });
 }
@@ -10,6 +20,10 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 //@node 2 SetEntity 544 86
 //@node 3 MakeVec3 284 135
 //@node 4 Mul -9 160
+//@node 5 OnSpawn 0 -208
+//@node 6 OnDestroy 2 -112
+//@node 7 Print 144 -204
+//@node 8 Print 144 -108
 //@pin 2 1 glm::vec3{ 0.0f, 0.0f, 0.0f }
 //@pin 2 2 1.0f
 //@pin 2 3 glm::vec3{ 0.0f, 0.0f, 0.0f }
@@ -19,7 +33,11 @@ SCRIPT_EXPORT void ScriptUpdate(const ScriptContext* ctx, Entity* self, float dt
 //@pin 3 2 0.0f
 //@pin 4 0 0.0f
 //@pin 4 1 50.0f
+//@pin 7 1 "Character On Spawn"
+//@pin 8 1 "Character On Destroy"
 //@link 3 0 2 3
 //@link 4 0 3 1
 //@link 1 0 4 0
 //@link 0 0 2 0
+//@link 5 0 7 0
+//@link 6 0 8 0

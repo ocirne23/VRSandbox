@@ -84,9 +84,9 @@ typedef struct ScriptContext
 // `scriptData` points at the entity's persistent per-instance memory block (or null when the script declares
 // no data). Scripts that use a Script Data node cast it to their generated `ScriptData` struct; the host
 // sizes and zero-inits the block from the script's ScriptDataSize() export (see below).
-typedef void (*ScriptInitFn)(const ScriptContext*);
+typedef void (*ScriptOnSpawnFn)(const ScriptContext*, Entity* self, void* scriptData);
+typedef void (*ScriptOnDestroyFn)(const ScriptContext*, Entity* self, void* scriptData);
 typedef void (*ScriptUpdateFn)(const ScriptContext*, Entity* self, float deltaSeconds, void* scriptData);
-typedef void (*ScriptShutdownFn)(const ScriptContext*);
 
 // Optional export: the byte size of the script's persistent ScriptData struct. When present, the host
 // allocates a zeroed block of this size per entity and passes it to ScriptUpdate as `scriptData`. Absent (or

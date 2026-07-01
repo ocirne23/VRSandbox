@@ -35,7 +35,7 @@ public:
 
 private:
 
-    Node* findEntry() const;
+    Node* findEntry(const char* nodeName) const;
     Node* findScriptData() const;                     // the Script Data node (persistent members), if any
     void connectNodes(Node* from, int outIdx, Node* to, int inIdx);
     void resolveNodeTypes(Node* node); // propagate concrete types through the node's wildcard pin groups

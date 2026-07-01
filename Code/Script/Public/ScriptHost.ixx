@@ -7,9 +7,11 @@ import Core;
 // ScriptContext and casts these. A null `update` marks a script that failed to compile.
 export struct ScriptModule
 {
-    void* init = nullptr;     // ScriptInitFn
+    std::string dllPath;
+    std::string scriptPath;
+    void* onSpawn = nullptr;     // ScriptInitFn
     void* update = nullptr;   // ScriptUpdateFn
-    void* shutdown = nullptr; // ScriptShutdownFn
+    void* onDestroy = nullptr; // ScriptShutdownFn
     uint32 dataSize = 0;      // bytes of persistent ScriptData the script declares (0 = none), from ScriptDataSize()
 };
 

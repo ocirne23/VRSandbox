@@ -203,6 +203,18 @@ export const std::vector<NodeDef>& nodeRegistry()
         {}, { { "", D::Exec, "" } },
         "#0" });
 
+    r.push_back({ "OnSpawn", "On Spawn", "Events", true,
+        {}, { { "", D::Exec, "" } },
+        "#0" });
+
+    r.push_back({ "OnDestroy", "On Destroy", "Events", true,
+        {}, { { "", D::Exec, "" } },
+        "#0" });
+
+    r.push_back({ "OnInputEvent", "On Input Event", "Events", true,
+        {}, { { "W", D::Exec, "" }, { "A", D::Exec, "" }, { "S", D::Exec, "" }, { "D", D::Exec, "" }, { "down", D::Bool, "" } },
+        "#0" });
+
     r.push_back({ "If", "If", "Flow", true,
         { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
         { { "true", D::Exec, "" }, { "break", D::Exec, "" } },
