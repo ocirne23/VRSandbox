@@ -57,6 +57,12 @@ public:
         return requests;
     }
 
+    // Triggers the Script editor's node copy/paste from outside the UI frame (e.g. a global keyboard hook in
+    // main.cpp), mirroring the in-editor Ctrl+C/Ctrl+V shortcut. No-ops while an ImGui text field is being
+    // edited elsewhere, so it doesn't hijack that field's own copy/paste.
+    void copyScriptSelection();
+    void pasteScriptSelection();
+
 private:
 
     bool m_isViewportGrabbed = false;

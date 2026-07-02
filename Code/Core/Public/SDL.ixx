@@ -76,7 +76,12 @@ export const char* SDL_PROP_WINDOW_CREATE_WIN32_HWND_POINTER                  = 
 export const char* SDL_PROP_WINDOW_CREATE_WIN32_PIXEL_FORMAT_HWND_POINTER     = "win32.pixel_format_hwnd"	  ;
 export const char* SDL_PROP_WINDOW_CREATE_X11_WINDOW_NUMBER                   = "x11.window"				  ;
 
-#undef SDL_WINDOW_FULLSCREEN          
+// SDL_KMOD_CTRL is a plain #define (SDL_KMOD_LCTRL | SDL_KMOD_RCTRL); like the props above, #define's don't
+// cross the module boundary, so it's re-exported here as a real typed constant for checking SDL_KeyboardEvent::mod.
+#undef SDL_KMOD_CTRL
+export constexpr uint16 SDL_KMOD_CTRL = 0x0040u | 0x0080u; // SDL_KMOD_LCTRL | SDL_KMOD_RCTRL
+
+#undef SDL_WINDOW_FULLSCREEN
 #undef SDL_WINDOW_OPENGL              
 #undef SDL_WINDOW_OCCLUDED            
 #undef SDL_WINDOW_HIDDEN              

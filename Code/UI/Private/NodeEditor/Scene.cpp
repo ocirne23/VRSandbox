@@ -1441,21 +1441,13 @@ namespace
     }
 }
 
-bool Scene::loadFromFile(const std::string& path)
+// Core //@-tag parser shared by loadFromFile (full replace) and pasteFromClipboard (adds onto the live graph).
+// Node positions are shifted by `offset` as they're created (0,0 for a normal load). Does NOT clear the
+// existing graph or touch first-frame/baseline bookkeeping — callers own that. `byIndex` is filled in,
+// indexed by the snippet's own local //@node indices (0..N-1 for a clipboard paste, whatever a file uses
+// for a full load), so callers can find the newly created nodes afterward (e.g. to select them).
+void Scene::loadLinesIntoGraph(const std::vector<std::string>& lines, ImVec2 offset, std::vector<Node*>& byIndex)
 {
-    std::ifstream file(path, std::ios::in | std::ios::binary);
-    if (!file.is_open())
-        return false;
-
-    std::vector<std::string> lines;
-    std::string line;
-    while (std::getline(file, line))
-        lines.push_back(line);
-
-    m_links.clear();
-    m_nodes.clear();
-    std::vector<Node*> byIndex;
-
     // pass 1: nodes
     for (const std::string& ln : lines)
     {
@@ -1466,7 +1458,7 @@ bool Scene::loadFromFile(const std::string& path)
         const int x = toInt(r.token());
         const int y = toInt(r.token());
         if (!findNodeDef(typeId)) continue;
-        Node& n = addNodeOfType(typeId, ImVec2((float)x, (float)y));
+        Node& n = addNodeOfType(typeId, ImVec2((float)x + offset.x, (float)y + offset.y));
         if ((int)byIndex.size() <= idx) byIndex.resize(idx + 1, nullptr);
         byIndex[idx] = &n;
     }
@@ -1640,10 +1632,208 @@ bool Scene::loadFromFile(const std::string& path)
         if (ni >= 0 && ni < (int)byIndex.size() && byIndex[ni])
             byIndex[ni]->setEnumSelection(sel);
     }
+}
+
+bool Scene::loadFromFile(const std::string& path)
+{
+    std::ifstream file(path, std::ios::in | std::ios::binary);
+    if (!file.is_open())
+        return false;
+
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(file, line))
+        lines.push_back(line);
+
+    m_links.clear();
+    m_nodes.clear();
+    std::vector<Node*> byIndex;
+    loadLinesIntoGraph(lines, ImVec2(0.0f, 0.0f), byIndex);
 
     m_firstFrame = true;
     m_hasBaseline = false; // re-baseline against the freshly loaded graph once it renders
     return !m_nodes.empty();
+}
+
+// Scoped serializeGraph: only `nodes` (with fresh local indices 0..N-1, independent of their position in the
+// live m_nodes) and only `links` (the caller is expected to have already filtered these to ones internal to
+// the selection — see copySelectedToClipboard). Mirrors serializeGraph's per-node-type sections exactly, just
+// keyed by local index instead of indexOfNode, so a paste elsewhere reconstructs the same nodes/links/data.
+std::string Scene::serializeSubset(const std::vector<Node*>& nodes, const std::vector<Link*>& links)
+{
+    std::map<const Node*, int> localIndex;
+    for (int i = 0; i < (int)nodes.size(); ++i)
+        localIndex[nodes[i]] = i;
+
+    std::string s = "//@nodeclip 1\n";
+
+    for (int i = 0; i < (int)nodes.size(); ++i)
+    {
+        const Node* node = nodes[i];
+        const ImVec2 pos = m_nodeEditorContext ? ed::GetNodePosition(node->getId()) : ImVec2(0.0f, 0.0f);
+        s += "//@node " + std::to_string(i) + " " + node->getTypeId() + " " +
+             std::to_string((int)pos.x) + " " + std::to_string((int)pos.y) + "\n";
+    }
+
+    for (int i = 0; i < (int)nodes.size(); ++i)
+        if (nodes[i]->isLabel())
+        {
+            const ImVec2 size = nodes[i]->getLabelSize();
+            s += "//@labelsize " + std::to_string(i) + " " + std::to_string((int)size.x) + " " + std::to_string((int)size.y) + "\n";
+            s += "//@labeltext " + std::to_string(i) + " " + nodes[i]->getLabelText() + "\n";
+        }
+
+    for (int i = 0; i < (int)nodes.size(); ++i)
+        if (nodes[i]->isReroute() && !nodes[i]->getInputPins().empty())
+            s += "//@reroute " + std::to_string(i) + " " + dataTypeToken(nodes[i]->getInputPins()[0]->dataType) + "\n";
+
+    for (int i = 0; i < (int)nodes.size(); ++i)
+        if (nodes[i]->isDynamic())
+            for (const auto& pin : nodes[i]->getOutputPins())
+                s += "//@member " + std::to_string(i) + " " + memberTypeToken(pin->dataType) + " " + pin->name + "\n";
+
+    for (int i = 0; i < (int)nodes.size(); ++i)
+        if (nodes[i]->isEventNode())
+            for (const auto& pin : nodes[i]->getOutputPins())
+                s += "//@event " + std::to_string(i) + " " + pin->name + "\n";
+
+    for (int i = 0; i < (int)nodes.size(); ++i)
+    {
+        const Node* node = nodes[i];
+        if (node->isFunctionInput())
+        {
+            s += "//@funcname " + std::to_string(i) + " " + node->getFunctionName() + "\n";
+            const auto& outs = node->getOutputPins();
+            for (size_t j = 1; j < outs.size(); ++j)
+                s += "//@param " + std::to_string(i) + " " + memberTypeToken(outs[j]->dataType) + " " + outs[j]->name + "\n";
+        }
+        else if (node->isFunctionOutput())
+        {
+            const auto& ins = node->getInputPins();
+            for (size_t j = 1; j < ins.size(); ++j)
+                s += "//@return " + std::to_string(i) + " " + memberTypeToken(ins[j]->dataType) + " " + ins[j]->name + "\n";
+        }
+        else if (node->isFunctionCall())
+        {
+            s += "//@funccall " + std::to_string(i) + " " + node->getFunctionScriptPath() + " " + node->getFunctionName() + "\n";
+            const auto& ins = node->getInputPins();
+            for (size_t j = 1; j < ins.size(); ++j)
+                s += "//@callparam " + std::to_string(i) + " " + memberTypeToken(ins[j]->dataType) + " " + ins[j]->name + "\n";
+            const auto& outs = node->getOutputPins();
+            for (size_t j = 1; j < outs.size(); ++j)
+                s += "//@callret " + std::to_string(i) + " " + memberTypeToken(outs[j]->dataType) + " " + outs[j]->name + "\n";
+        }
+    }
+
+    for (int i = 0; i < (int)nodes.size(); ++i)
+    {
+        const auto& inputs = nodes[i]->getInputPins();
+        for (int j = 0; j < (int)inputs.size(); ++j)
+            if (inputs[j]->dataType != EDataType::Exec)
+                s += "//@pin " + std::to_string(i) + " " + std::to_string(j) + " " + inputs[j]->defaultValue + "\n";
+    }
+
+    for (int i = 0; i < (int)nodes.size(); ++i)
+        if (nodes[i]->getEnumSelection() != 0)
+            s += "//@enum " + std::to_string(i) + " " + std::to_string(nodes[i]->getEnumSelection()) + "\n";
+
+    for (const Link* link : links)
+    {
+        Pin* out = link->getOutputId().AsPointer<Pin>();
+        Pin* in = link->getInputId().AsPointer<Pin>();
+        if (!out || !in) continue;
+        const auto fromIt = localIndex.find(out->node);
+        const auto toIt = localIndex.find(in->node);
+        if (fromIt == localIndex.end() || toIt == localIndex.end()) continue; // not internal to the subset
+        const int fo = indexOfPin(out->node->getOutputPins(), out);
+        const int ti = indexOfPin(in->node->getInputPins(), in);
+        if (fo < 0 || ti < 0) continue;
+        s += "//@link " + std::to_string(fromIt->second) + " " + std::to_string(fo) + " " +
+             std::to_string(toIt->second) + " " + std::to_string(ti) + "\n";
+    }
+
+    return s;
+}
+
+// Copies the current selection to the OS clipboard (so paste also works across different open scripts): every
+// selected node, plus every link where BOTH endpoints are selected. Ctrl+V elsewhere reconstructs the same
+// nodes/links/relative layout via loadLinesIntoGraph.
+void Scene::copySelectedToClipboard()
+{
+    const int selCount = ed::GetSelectedObjectCount();
+    if (selCount <= 0)
+        return;
+    std::vector<ed::NodeId> nodeIds(selCount);
+    const int nodeCount = ed::GetSelectedNodes(nodeIds.data(), selCount);
+
+    std::set<Node*> selected;
+    std::vector<Node*> nodes;
+    for (int i = 0; i < nodeCount; ++i)
+        if (Node* n = nodeIds[i].AsPointer<Node>())
+            if (selected.insert(n).second)
+                nodes.push_back(n);
+    if (nodes.empty())
+        return;
+
+    std::vector<Link*> links;
+    for (const auto& link : m_links)
+    {
+        Pin* out = link->getOutputId().AsPointer<Pin>();
+        Pin* in = link->getInputId().AsPointer<Pin>();
+        if (out && in && selected.count(out->node) && selected.count(in->node))
+            links.push_back(link.get());
+    }
+
+    ImGui::SetClipboardText(serializeSubset(nodes, links).c_str());
+}
+
+// Ctrl+V: reconstructs whatever copySelectedToClipboard last put on the OS clipboard, offsetting every node
+// so the selection's top-left corner lands at `canvasPos` (the mouse), preserving relative positions. Ignores
+// the clipboard if it doesn't hold one of our clippings (e.g. plain text was copied from elsewhere).
+void Scene::pasteFromClipboard(ImVec2 canvasPos)
+{
+    const char* clip = ImGui::GetClipboardText();
+    if (!clip)
+        return;
+    const std::string text(clip);
+    if (text.rfind("//@nodeclip", 0) != 0)
+        return;
+
+    std::vector<std::string> lines;
+    size_t pos = 0;
+    while (pos <= text.size())
+    {
+        const size_t nl = text.find('\n', pos);
+        if (nl == std::string::npos) { lines.push_back(text.substr(pos)); break; }
+        lines.push_back(text.substr(pos, nl - pos));
+        pos = nl + 1;
+    }
+
+    // Offset so the pasted selection's centroid (average node position) lands at the cursor — every node
+    // keeps its position relative to that centroid, so the layout copied is preserved exactly, just recentered.
+    float sumX = 0.0f, sumY = 0.0f;
+    int nodeCount = 0;
+    for (const std::string& ln : lines)
+    {
+        LineReader r{ ln };
+        if (r.token() != "//@node") continue;
+        r.token(); r.token(); // skip index, typeId
+        sumX += (float)toInt(r.token());
+        sumY += (float)toInt(r.token());
+        ++nodeCount;
+    }
+    if (nodeCount == 0)
+        return; // no nodes in the clipping
+
+    const ImVec2 offset = ImVec2(canvasPos.x - sumX / nodeCount, canvasPos.y - sumY / nodeCount);
+
+    std::vector<Node*> byIndex;
+    loadLinesIntoGraph(lines, offset, byIndex);
+
+    ed::ClearSelection();
+    for (Node* n : byIndex)
+        if (n)
+            ed::SelectNode(n->getId(), true);
 }
 
 void Scene::update(double deltaSec)
@@ -1696,6 +1886,45 @@ void Scene::update(double deltaSec)
 
     for (auto& link : m_links)
         link->update(deltaSec, m_firstFrame);
+
+    // Ctrl+C/Ctrl+V: copy the current selection (nodes + internal links) to the OS clipboard and back, so
+    // pasting also works across different open scripts. BeginShortcut() already gates on editor focus.
+    //
+    // ed::Suspend() is required before reading the mouse position here: while the canvas is in its normal
+    // (un-suspended) "local space" rendering mode, the library temporarily overwrites ImGui's own io.MousePos
+    // with the already-canvas-local coordinate (see EnterLocalSpace() in imgui_canvas.cpp), so every node's
+    // internal ImGui widgets see zoomed/panned-correct positions without converting per-widget. Calling
+    // ed::ScreenToCanvas() on that already-local value double-applies the pan/zoom transform. Suspend()
+    // restores the real screen-space mouse position first, matching how the AddNodePopup code below does it.
+    if (ed::BeginShortcut())
+    {
+        if (ed::AcceptCopy())
+            copySelectedToClipboard();
+        if (ed::AcceptPaste())
+        {
+            ed::Suspend();
+            const ImVec2 canvasPos = ed::ScreenToCanvas(ImGui::GetMousePos());
+            ed::Resume();
+            pasteFromClipboard(canvasPos);
+        }
+        ed::EndShortcut();
+    }
+
+    // Same two actions, requested from outside this frame (e.g. main.cpp's global keyboard hook) via
+    // requestCopy()/requestPaste() — consumed here, where mouse position and the canvas transform are valid.
+    if (m_pendingCopyRequest)
+    {
+        m_pendingCopyRequest = false;
+        copySelectedToClipboard();
+    }
+    if (m_pendingPasteRequest)
+    {
+        m_pendingPasteRequest = false;
+        ed::Suspend();
+        const ImVec2 canvasPos = ed::ScreenToCanvas(ImGui::GetMousePos());
+        ed::Resume();
+        pasteFromClipboard(canvasPos);
+    }
 
     // Right-click the canvas to add a node from the palette.
     ed::Suspend();

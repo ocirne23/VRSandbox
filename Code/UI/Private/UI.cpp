@@ -293,6 +293,20 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
     }
 }
 
+void UI::copyScriptSelection()
+{
+    if (ImGui::GetIO().WantTextInput)
+        return; // a text field elsewhere is active — let it handle its own copy instead of hijacking Ctrl+C
+    m_scene.requestCopy();
+}
+
+void UI::pasteScriptSelection()
+{
+    if (ImGui::GetIO().WantTextInput)
+        return; // ditto for paste
+    m_scene.requestPaste();
+}
+
 void UI::requestOpenScript(const std::string& path)
 {
     if (path.empty() || path == m_scene.scriptPath())

@@ -34,6 +34,12 @@ public:
 
     bool isDirty(); // graph changed since it was last loaded/saved (nodes/links/pins/positions differ)
 
+    // Queues a copy/paste for the next update() (which runs inside the editor's own Begin/End, where mouse
+    // position and canvas transform are valid) — lets a caller outside the UI frame, e.g. a global keyboard
+    // hook in main.cpp, trigger the same action as the in-editor Ctrl+C/Ctrl+V shortcut.
+    void requestCopy() { m_pendingCopyRequest = true; }
+    void requestPaste() { m_pendingPasteRequest = true; }
+
 private:
 
     Node* findEntry(const char* nodeName) const;
@@ -74,6 +80,12 @@ private:
     int  indexOfNode(const Node* node) const;
     std::string serializeGraph();
 
+    // ---- copy/paste (Ctrl+C/Ctrl+V), via the OS clipboard so it also works across different open scripts ----
+    std::string serializeSubset(const std::vector<Node*>& nodes, const std::vector<Link*>& links);
+    void loadLinesIntoGraph(const std::vector<std::string>& lines, ImVec2 offset, std::vector<Node*>& byIndex);
+    void copySelectedToClipboard();
+    void pasteFromClipboard(ImVec2 canvasPos);
+
     ed::EditorContext* m_nodeEditorContext = nullptr;
 
     std::vector<std::unique_ptr<Node>> m_nodes;
@@ -85,6 +97,8 @@ private:
     ImVec2 m_pendingAddPos = ImVec2(0.0f, 0.0f);
     ImVec2 m_pendingAddScreenPos = ImVec2(0.0f, 0.0f); // screen-space click pos, so the popup can offset from it
     Pin* m_pendingLinkPin = nullptr; // dangling end of a link dropped on canvas, to auto-connect to the spawned node
+    bool m_pendingCopyRequest = false;  // set by requestCopy(), consumed + cleared at the top of the next update()
+    bool m_pendingPasteRequest = false; // set by requestPaste(), consumed + cleared at the top of the next update()
 
     // Dirty tracking: the serialized graph captured right after a load/save, compared against the live
     // graph to detect unsaved edits. Captured lazily (once the graph has rendered a frame so node
