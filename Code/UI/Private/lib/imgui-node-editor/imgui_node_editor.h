@@ -332,6 +332,12 @@ IMGUI_NODE_EDITOR_API bool Link(LinkId id, PinId startPinId, PinId endPinId, con
 IMGUI_NODE_EDITOR_API void Flow(LinkId linkId, FlowDirection direction = FlowDirection::Forward);
 
 IMGUI_NODE_EDITOR_API bool BeginCreate(const ImVec4& color = ImVec4(1, 1, 1, 1), float thickness = 1.0f);
+// Reassigns which pin an in-progress link-creation drag is FROM. Use this when an app-level interaction
+// determines, mid-drag, that the drag should really be treated as coming from a different pin than the one
+// physically clicked (e.g. re-plugging an existing link by grabbing its destination pin: delete that link,
+// then call this with its source pin so the rest of the drag — preview, hover snapping, accept/reject —
+// behaves exactly like a normal drag started from that source). No-op if no drag is currently in progress.
+IMGUI_NODE_EDITOR_API void RedirectLinkDrag(PinId pinId);
 IMGUI_NODE_EDITOR_API bool QueryNewLink(PinId* startId, PinId* endId);
 IMGUI_NODE_EDITOR_API bool QueryNewLink(PinId* startId, PinId* endId, const ImVec4& color, float thickness = 1.0f);
 IMGUI_NODE_EDITOR_API bool QueryNewNode(PinId* pinId);

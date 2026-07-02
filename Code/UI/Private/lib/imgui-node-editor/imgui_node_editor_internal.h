@@ -1105,6 +1105,15 @@ struct CreateItemAction final : EditorAction
 
     void SetStyle(ImU32 color, float thickness);
 
+    // Reassigns the pin an in-progress drag is FROM, mid-drag (see the continuation-check comment in
+    // Process()). No-op if no drag is active.
+    void RedirectDrag(Pin* pin)
+    {
+        if (!m_IsActive || !pin) return;
+        m_DraggedPin = pin;
+        m_LinkStart  = pin; // so QueryLink() reports the new pin as startId from here on
+    }
+
     bool Begin();
     void End();
 

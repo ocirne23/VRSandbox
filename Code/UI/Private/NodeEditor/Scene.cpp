@@ -1758,6 +1758,30 @@ bool Scene::isDirty()
 
 void Scene::processInteractions()
 {
+    // Re-plugging: grabbing an already-connected input pin picks up that link. Delete it and redirect the
+    // in-progress drag to originate from its source instead, so from that point on — this frame and every
+    // subsequent one, no matter what's currently hovered — it behaves exactly like a normal drag started at
+    // that output pin (same preview, hover snapping, accept/reject path below). Called from both branches
+    // below (hovering a pin vs. hovering empty canvas) so the switch happens the instant the drag starts,
+    // not only once the cursor happens to first reach another pin. A no-op (returns `anchor` unchanged) once
+    // already redirected, since `anchor` is then the source itself (Output), or if it never had a link.
+    auto redirectIfRewiring = [&](Pin* anchor) -> Pin*
+    {
+        if (anchor->type != EPinType_Input) return anchor;
+        Pin* source = sourceOfInput(m_links, anchor);
+        if (!source) return anchor;
+        std::erase_if(m_links, [&](const std::unique_ptr<Link>& link)
+        {
+            if (link->getInputId().AsPointer<Pin>() != anchor) return false;
+            source->numConnections--;
+            anchor->numConnections--;
+            return true;
+        });
+        resolveNodeTypes(anchor->node); // the vacated node may revert a wildcard group
+        ed::RedirectLinkDrag(ed::PinId(source));
+        return source;
+    };
+
     if (ed::BeginCreate())
     {
         ed::PinId pin1Id, pin2Id;
@@ -1765,8 +1789,11 @@ void Scene::processInteractions()
         {
             if (pin1Id && pin2Id && pin1Id != pin2Id)
             {
-                Pin* pin1 = pin1Id.AsPointer<Pin>();
+                // pin1 is always the pin the drag STARTED from (the library's m_LinkStart), pin2 the one
+                // currently under the cursor — regardless of drag direction.
+                Pin* pin1 = redirectIfRewiring(pin1Id.AsPointer<Pin>());
                 Pin* pin2 = pin2Id.AsPointer<Pin>();
+
                 if (pin1->type == EPinType_Output)
                     std::swap(pin1, pin2);
 
@@ -1787,6 +1814,14 @@ void Scene::processInteractions()
                     ed::RejectNewItem();
                 }
             }
+        }
+        else
+        {
+            // Not hovering any pin (empty canvas, or briefly a node body): still check for a rewire so the
+            // redirect fires immediately rather than waiting for the cursor to reach another pin.
+            ed::PinId loosePinId;
+            if (ed::QueryNewNode(&loosePinId) && loosePinId)
+                redirectIfRewiring(loosePinId.AsPointer<Pin>());
         }
     }
     ed::EndCreate();

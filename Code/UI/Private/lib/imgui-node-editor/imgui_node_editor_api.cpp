@@ -255,6 +255,11 @@ bool ax::NodeEditor::BeginCreate(const ImVec4& color, float thickness)
         return false;
 }
 
+void ax::NodeEditor::RedirectLinkDrag(PinId pinId)
+{
+    s_Editor->GetItemCreator().RedirectDrag(s_Editor->FindPin(pinId));
+}
+
 bool ax::NodeEditor::QueryNewLink(PinId* startId, PinId* endId)
 {
     using Result = ax::NodeEditor::Detail::CreateItemAction::Result;

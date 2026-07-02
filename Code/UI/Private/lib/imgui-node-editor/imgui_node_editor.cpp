@@ -4638,7 +4638,12 @@ bool ed::CreateItemAction::Process(const Control& control)
     if (!m_IsActive)
         return false;
 
-    if (m_DraggedPin && control.ActivePin == m_DraggedPin && (m_CurrentStage == Possible))
+    // "Still dragging" is keyed off the drag button physically being held, not off control.ActivePin still
+    // matching m_DraggedPin: RedirectDrag() lets an app-level interaction reassign m_DraggedPin mid-drag (e.g.
+    // re-plugging an existing link by its destination pin redirects to that link's source), and ActivePin —
+    // tied to real ImGui active-id, which never leaves the pin actually clicked — would otherwise never equal
+    // the redirected target, ending the drag the instant it was redirected.
+    if (m_DraggedPin && ImGui::IsMouseDown(Editor->GetConfig().DragButtonIndex) && (m_CurrentStage == Possible))
     {
         const auto draggingFromSource = (m_DraggedPin->m_Kind == PinKind::Output);
 
@@ -4661,8 +4666,9 @@ bool ed::CreateItemAction::Process(const Control& control)
             if (m_UserAction == UserAccept)
                 freePin = control.HotPin;
         }
-        else if (control.BackgroundHot)
-            DropNode();
+        else if (control.BackgroundHot || control.HotNode)
+            DropNode(); // treat hovering a node's body the same as empty canvas — QueryNewNode still reports
+                        // the drag's anchor pin either way (no actual "create node here" prompt if not empty)
         else
             DropNothing();
 
