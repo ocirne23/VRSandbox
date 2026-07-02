@@ -50,6 +50,7 @@ private:
     void syncNewMemberNode(Node& newNode);            // seed a new Script Data node from the shared member set
     void applyEventEdit(const MemberEdit& edit);      // replay an entry edit across all On Event nodes
     void syncNewEventNode(Node& newNode);             // seed a new On Event node from the shared entry set
+    void autoConnectPending(Node& node);               // wire m_pendingLinkPin to node's first matching pin, if any
 
     // ---- functions (imported reusable subgraphs) ----
     using PinSig = std::vector<std::pair<EDataType, std::string>>; // ordered (type, name) list
@@ -83,6 +84,7 @@ private:
     std::string m_scriptPath = "Scripts/Graph.scr";
     ImVec2 m_pendingAddPos = ImVec2(0.0f, 0.0f);
     ImVec2 m_pendingAddScreenPos = ImVec2(0.0f, 0.0f); // screen-space click pos, so the popup can offset from it
+    Pin* m_pendingLinkPin = nullptr; // dangling end of a link dropped on canvas, to auto-connect to the spawned node
 
     // Dirty tracking: the serialized graph captured right after a load/save, compared against the live
     // graph to detect unsaved edits. Captured lazily (once the graph has rendered a frame so node

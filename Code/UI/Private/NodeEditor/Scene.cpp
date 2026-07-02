@@ -862,6 +862,43 @@ void Scene::syncNewEventNode(Node& newNode)
         }
 }
 
+// Dragging a link onto empty canvas opens the add-node popup with m_pendingLinkPin set to its dangling end;
+// once the user picks a node type, this wires that end to the new node's first pin (of the opposite kind)
+// that accepts it, in pin order. Leaves the link unconnected if none does — the node is still created either
+// way. A no-op if the popup was opened normally (right-click), which clears m_pendingLinkPin beforehand.
+void Scene::autoConnectPending(Node& node)
+{
+    Pin* danglingPin = m_pendingLinkPin;
+    m_pendingLinkPin = nullptr; // consumed by this popup selection either way
+    if (!danglingPin)
+        return;
+
+    if (danglingPin->type == EPinType_Output)
+    {
+        const auto& inputs = node.getInputPins();
+        for (int i = 0; i < (int)inputs.size(); ++i)
+            if (inputs[i]->numConnections == 0 && pinsCompatible(inputs[i].get(), danglingPin))
+            {
+                connectNodes(danglingPin->node, indexOfPin(danglingPin->node->getOutputPins(), danglingPin), &node, i);
+                resolveNodeTypes(danglingPin->node);
+                resolveNodeTypes(&node);
+                return;
+            }
+    }
+    else
+    {
+        const auto& outputs = node.getOutputPins();
+        for (int i = 0; i < (int)outputs.size(); ++i)
+            if (pinsCompatible(danglingPin, outputs[i].get()))
+            {
+                connectNodes(&node, i, danglingPin->node, indexOfPin(danglingPin->node->getInputPins(), danglingPin));
+                resolveNodeTypes(&node);
+                resolveNodeTypes(danglingPin->node);
+                return;
+            }
+    }
+}
+
 // Drops an input pin of `node` (and any link feeding it). Mirror of removeMemberPin, which does outputs.
 void Scene::removeInputPin(Node* node, int index)
 {
@@ -1666,6 +1703,7 @@ void Scene::update(double deltaSec)
     {
         m_pendingAddPos = ed::ScreenToCanvas(ImGui::GetMousePos());
         m_pendingAddScreenPos = ImGui::GetMousePos(); // captured once, at the click — not recomputed while open
+        m_pendingLinkPin = nullptr; // plain right-click add, not tied to a dropped link
         m_importFunctions = scanImportableFunctions(); // refresh the importable-function list while it's open
         ImGui::OpenPopup("AddNodePopup");
     }
@@ -1706,6 +1744,7 @@ void Scene::update(double deltaSec)
                             syncNewMemberNode(added); // keep a new Script Data node in sync with the others
                         if (added.isEventNode())
                             syncNewEventNode(added); // keep a new On Event node in sync with the others
+                        autoConnectPending(added); // wire a link dropped here to its first matching pin, if any
                     }
                 ImGui::EndMenu();
             }
@@ -1718,7 +1757,7 @@ void Scene::update(double deltaSec)
         {
             for (const FunctionRef& ref : m_importFunctions)
                 if (ImGui::MenuItem(ref.displayLabel.c_str()))
-                    importFunction(ref, m_pendingAddPos);
+                    autoConnectPending(importFunction(ref, m_pendingAddPos));
             ImGui::EndMenu();
         }
 
@@ -1817,11 +1856,25 @@ void Scene::processInteractions()
         }
         else
         {
-            // Not hovering any pin (empty canvas, or briefly a node body): still check for a rewire so the
-            // redirect fires immediately rather than waiting for the cursor to reach another pin.
+            // Not hovering any pin (empty canvas, or a node body — Process() treats both the same). Still
+            // check for a rewire so the redirect fires immediately rather than waiting for the cursor to
+            // reach another pin; and on the actual drop (mouse release), open the add-node popup with the
+            // dangling end remembered so the picked node gets auto-wired to it (autoConnectPending).
             ed::PinId loosePinId;
             if (ed::QueryNewNode(&loosePinId) && loosePinId)
-                redirectIfRewiring(loosePinId.AsPointer<Pin>());
+            {
+                Pin* danglingPin = redirectIfRewiring(loosePinId.AsPointer<Pin>());
+                if (ed::AcceptNewItem())
+                {
+                    m_pendingLinkPin = danglingPin;
+                    m_pendingAddPos = ed::ScreenToCanvas(ImGui::GetMousePos());
+                    m_pendingAddScreenPos = ImGui::GetMousePos();
+                    m_importFunctions = scanImportableFunctions();
+                    ed::Suspend();
+                    ImGui::OpenPopup("AddNodePopup");
+                    ed::Resume();
+                }
+            }
         }
     }
     ed::EndCreate();
