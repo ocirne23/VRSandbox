@@ -93,6 +93,15 @@ namespace
 			return rc->node.getWorldBounds().radius;
         return 0.0f;
     }
+    Entity* thunk_entityFindChild(Entity* en, const char* name)
+    {
+        if (!en || !name) return nullptr;
+        if (SceneComponent* sc = getComponent<SceneComponent>(en))
+            for (const EntityPtr& child : sc->children)
+                if (child->displayName == name)
+                    return child.get();
+        return nullptr;
+    }
 
     void thunk_entitySetEnabled(Entity* en, int enabled)              { if (SceneComponent* sc = getComponent<SceneComponent>(en)) sc->enabled = enabled != 0; }
     void thunk_entitySetAnimFloat(Entity* en, const char* p, float v) { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setFloat(p, v); }
@@ -124,6 +133,7 @@ ScriptContext::ScriptContext()
     entityGetEnabled = &thunk_entityGetEnabled;
     entityGetChildCount = &thunk_entityGetChildCount;
     entityGetBoundsRadius = &thunk_entityGetBoundsRadius;
+    entityFindChild = &thunk_entityFindChild;
     entitySetEnabled = &thunk_entitySetEnabled;
     entitySetAnimFloat = &thunk_entitySetAnimFloat;
     entitySetAnimBool = &thunk_entitySetAnimBool;

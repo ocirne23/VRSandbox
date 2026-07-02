@@ -21,6 +21,7 @@ export enum EDataType : uint8
     Vec3,
     Quat,
     String,
+    Entity,   // opaque Entity* handle (script-side pointer, never dereferenced by graph code directly)
     Wildcard,
 };
 
@@ -92,6 +93,7 @@ export uint32 dataTypeColor(EDataType type)
         case EDataType::Vec3:   return rgb(255, 215, 80);
         case EDataType::Quat:   return rgb(180, 130, 255);
         case EDataType::String: return rgb(255, 120, 255);
+        case EDataType::Entity: return rgb(255, 150, 60);
         case EDataType::Wildcard: return rgb(150, 150, 150);
     }
     return rgb(200, 200, 200);
@@ -135,6 +137,7 @@ export const char* dataTypeToken(EDataType type)
         case EDataType::Vec3:     return "Vec3";
         case EDataType::Quat:     return "Quat";
         case EDataType::String:   return "String";
+        case EDataType::Entity:   return "Entity";
         case EDataType::Wildcard: return "Wild";
     }
     return "Float";
@@ -197,7 +200,8 @@ export std::string defaultValueForType(EDataType type)
         case EDataType::Vec3:   return "glm::vec3{ 0.0f, 0.0f, 0.0f }";
         case EDataType::Quat:   return "glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f }"; // identity (w,x,y,z)
         case EDataType::String: return "\"\"";
-        default:                return "0.0f";  
+        case EDataType::Entity: return "self";
+        default:                return "0.0f";
     }
 }
 
@@ -532,36 +536,39 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "x", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
         "glm::round($0)" });
 
-    // ---- entity (the script's owning entity, exposed as `self`) ----
-    // Position/Scale/Rotation read straight off the Entity mirror (self->pos/scale/rot) instead of going
-    // through the ABI; Rotation/Forward/Right/Up derive from self->rot with glm:: helpers (see ScriptAPI.h).
+    // ---- entity (defaults to the script's owning entity, `self`, but any node reachable through an Entity
+    // pin can be targeted instead) ----
+    // Position/Scale/Rotation read straight off the Entity mirror ($0->pos/scale/rot) instead of going
+    // through the ABI; Rotation/Forward/Right/Up derive from $0->rot with glm:: helpers (see ScriptAPI.h).
     r.push_back({ "GetEntity", "Get Entity", "Entity", false,
-        {},
-        { { "Position",  D::Vec3,   "", 0, "self->pos" },
-            { "Scale",     D::Float,  "", 0, "self->scale" },
-            { "Rotation",  D::Vec3,   "", 0, "glm::degrees(glm::eulerAngles(self->rot))" },
-            { "Forward",   D::Vec3,   "", 0, "(self->rot * glm::vec3(0.0f, 0.0f, -1.0f))" },
-            { "Right",     D::Vec3,   "", 0, "(self->rot * glm::vec3(1.0f, 0.0f, 0.0f))" },
-            { "Up",        D::Vec3,   "", 0, "(self->rot * glm::vec3(0.0f, 1.0f, 0.0f))" },
-            { "Name",      D::String, "", 0, "ctx->entityGetName(self)" },
-            { "Enabled",   D::Bool,   "", 0, "(ctx->entityGetEnabled(self) != 0)" },
-            { "Children",  D::Int,    "", 0, "ctx->entityGetChildCount(self)" },
-            { "Bounds R",  D::Float,  "", 0, "ctx->entityGetBoundsRadius(self)" } },
+        { { "Entity", D::Entity, "self" } },
+        { { "Position",  D::Vec3,   "", 0, "$0->pos" },
+            { "Scale",     D::Float,  "", 0, "$0->scale" },
+            { "Rotation",  D::Vec3,   "", 0, "glm::degrees(glm::eulerAngles($0->rot))" },
+            { "Forward",   D::Vec3,   "", 0, "($0->rot * glm::vec3(0.0f, 0.0f, -1.0f))" },
+            { "Right",     D::Vec3,   "", 0, "($0->rot * glm::vec3(1.0f, 0.0f, 0.0f))" },
+            { "Up",        D::Vec3,   "", 0, "($0->rot * glm::vec3(0.0f, 1.0f, 0.0f))" },
+            { "Name",      D::String, "", 0, "ctx->entityGetName($0)" },
+            { "Enabled",   D::Bool,   "", 0, "(ctx->entityGetEnabled($0) != 0)" },
+            { "Children",  D::Int,    "", 0, "ctx->entityGetChildCount($0)" },
+            { "Bounds R",  D::Float,  "", 0, "ctx->entityGetBoundsRadius($0)" } },
         "" });
 
     // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks). Position/
     // Scale/Rotation assign straight into the Entity mirror; Rotation converts degrees -> quat with glm::.
     r.push_back({ "SetEntity", "Set Entity", "Entity", true,
         { { "", D::Exec, "" },
+            { "Entity",   D::Entity, "self" },
             { "Position", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
             { "Scale",    D::Float, "1.0f" },
             { "Rotation", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
             { "Enabled",  D::Bool,  "true" } },
         { { "", D::Exec, "" } },
-        "?1{self->pos = $1;\n}?2{self->scale = $2;\n}"
-        "?3{self->rot = glm::quat(glm::radians($3));\n}?4{ctx->entitySetEnabled(self, $4);\n}#0" });
+        "?2{$1->pos = $2;\n}?3{$1->scale = $3;\n}"
+        "?4{$1->rot = glm::quat(glm::radians($4));\n}?5{ctx->entitySetEnabled($1, $5);\n}#0" });
 
-    // Spawn Entity: queues an asset/prefab to spawn at a world position (drained by App after update).
+    // Spawn Entity: queues an asset/prefab to spawn at a world position (drained by App after update). Not
+    // targeted at an existing entity, so it has no Entity input.
     r.push_back({ "SpawnEntity", "Spawn Entity", "Entity", true,
         { { "", D::Exec, "" },
             { "asset",    D::String, "\"Entities/character.pre\"" },
@@ -569,21 +576,31 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "", D::Exec, "" } },
         "ctx->spawnEntity($1, $2);\n#0" });
 
-    // Destroy Entity: queues this script's owning entity (self) for removal.
+    // Destroy Entity: queues the given entity (self by default) for removal.
     r.push_back({ "DestroyEntity", "Destroy Entity", "Entity", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" } },
         { { "", D::Exec, "" } },
-        { { "", D::Exec, "" } },
-        "ctx->destroyEntity(self);\n#0" });
+        "ctx->destroyEntity($1);\n#0" });
 
     r.push_back({ "SetAnimFloat", "Set Anim Float", "Entity", true,
-        { { "", D::Exec, "" }, { "param", D::String, "\"speed\"" }, { "value", D::Float, "0.0f" } },
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "param", D::String, "\"speed\"" }, { "value", D::Float, "0.0f" } },
         { { "", D::Exec, "" } },
-        "ctx->entitySetAnimFloat(self, $1, $2);\n#0" });
+        "ctx->entitySetAnimFloat($1, $2, $3);\n#0" });
 
     r.push_back({ "SetAnimTrigger", "Set Anim Trigger", "Entity", true,
-        { { "", D::Exec, "" }, { "param", D::String, "\"attack\"" } },
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "param", D::String, "\"attack\"" } },
         { { "", D::Exec, "" } },
-        "ctx->entitySetAnimTrigger(self, $1);\n#0" });
+        "ctx->entitySetAnimTrigger($1, $2);\n#0" });
+
+    // Get Child Entity: looks up a direct child by name on the given entity (self by default) and branches
+    // depending on whether it exists; the found child is exposed as an Entity output only valid on the Found
+    // branch (see the emitted `child@` local).
+    r.push_back({ "GetChildEntity", "Get Child Entity", "Entity", true,
+        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Name", D::String, "\"\"" } },
+        { { "Found", D::Exec, "" }, { "Not Found", D::Exec, "" }, { "Child", D::Entity, "", 0, "child@" } },
+        "Entity* child@ = ctx->entityFindChild($1, $2);\n"
+        "if (child@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n"
+        "else\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n" });
 
     return r;
     }();

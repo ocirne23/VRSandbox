@@ -72,6 +72,7 @@ typedef struct ScriptContext
     int         (*entityGetEnabled)(Entity* entity);
     int         (*entityGetChildCount)(Entity* entity);
     float       (*entityGetBoundsRadius)(Entity* entity); // world-space render bounds radius (0 if no mesh)
+    Entity*     (*entityFindChild)(Entity* entity, const char* name); // direct child by name, null if none match
 
     // ---- entity writes ----
     void (*entitySetEnabled)(Entity* entity, int enabled);

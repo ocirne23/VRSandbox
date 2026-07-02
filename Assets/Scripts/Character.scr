@@ -71,58 +71,59 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@graph 1
 //@node 0 Update 462 -112
 //@node 1 GetElapsedTime 224 -25
-//@node 2 SetEntity 784 -106
-//@node 3 MakeVec3 582 -57
-//@node 4 Mul 368 -29
-//@node 5 OnSpawn 0 -208
-//@node 6 OnDestroy 2 -112
-//@node 7 Print 144 -204
-//@node 8 Print 144 -108
-//@node 9 OnEvent 95 -377
-//@node 10 Print 304 -384
-//@node 11 Print 304 -316
-//@node 12 FunctionCall 536 -412
-//@node 13 FunctionCall 536 -316
-//@node 14 Printf 790 -315
-//@node 15 Printf 791 -419
-//@event 9 W Up
-//@event 9 W Down
+//@node 2 MakeVec3 582 -57
+//@node 3 Mul 368 -29
+//@node 4 OnSpawn 0 -208
+//@node 5 OnDestroy 2 -112
+//@node 6 Print 144 -204
+//@node 7 Print 144 -108
+//@node 8 OnEvent 95 -377
+//@node 9 Print 304 -384
+//@node 10 Print 304 -316
+//@node 11 FunctionCall 536 -412
+//@node 12 FunctionCall 536 -316
+//@node 13 Printf 790 -315
+//@node 14 Printf 791 -419
+//@node 15 SetEntity 800 -122
+//@event 8 W Up
+//@event 8 W Down
+//@funccall 11 Scripts/Graph.scr IsPrime
+//@callparam 11 int Number
+//@callret 11 bool Result
 //@funccall 12 Scripts/Graph.scr IsPrime
 //@callparam 12 int Number
 //@callret 12 bool Result
-//@funccall 13 Scripts/Graph.scr IsPrime
-//@callparam 13 int Number
-//@callret 13 bool Result
-//@pin 2 1 glm::vec3{ 0.0f, 0.0f, 0.0f }
-//@pin 2 2 1.0f
-//@pin 2 3 glm::vec3{ 0.0f, 0.0f, 0.0f }
-//@pin 2 4 true
+//@pin 2 0 0.0f
+//@pin 2 1 0.0f
+//@pin 2 2 0.0f
 //@pin 3 0 0.0f
-//@pin 3 1 0.0f
-//@pin 3 2 0.0f
-//@pin 4 0 0.0f
-//@pin 4 1 50.0f
-//@pin 7 1 "Character On Spawn"
-//@pin 8 1 "Character On Destroy"
-//@pin 10 1 "W Up"
-//@pin 11 1 "W Down"
-//@pin 12 1 41
-//@pin 13 1 42
-//@pin 14 1 "42 is %d"
+//@pin 3 1 50.0f
+//@pin 6 1 "Character On Spawn"
+//@pin 7 1 "Character On Destroy"
+//@pin 9 1 "W Up"
+//@pin 10 1 "W Down"
+//@pin 11 1 41
+//@pin 12 1 42
+//@pin 13 1 "42 is %d"
+//@pin 13 2 0.0f
+//@pin 14 1 "41 is %d"
 //@pin 14 2 0.0f
-//@pin 15 1 "41 is %d"
-//@pin 15 2 0.0f
-//@link 3 0 2 3
-//@link 4 0 3 1
-//@link 1 0 4 0
-//@link 0 0 2 0
+//@pin 15 1 self
+//@pin 15 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 15 3 1.0f
+//@pin 15 4 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 15 5 true
+//@link 3 0 2 1
+//@link 1 0 3 0
+//@link 4 0 6 0
 //@link 5 0 7 0
-//@link 6 0 8 0
-//@link 9 0 10 0
-//@link 9 1 11 0
+//@link 8 0 9 0
+//@link 8 1 10 0
+//@link 9 0 11 0
 //@link 10 0 12 0
-//@link 11 0 13 0
-//@link 13 1 14 2
-//@link 13 0 14 0
-//@link 12 1 15 2
-//@link 12 0 15 0
+//@link 12 1 13 2
+//@link 12 0 13 0
+//@link 11 1 14 2
+//@link 11 0 14 0
+//@link 2 0 15 4
+//@link 0 0 15 0
