@@ -35,24 +35,24 @@ public:
 		for (auto it = range.begin(); it != range.end(); ++it)
 		{
 			const Entry& entry = it->second;
-			reinterpret_cast<ScriptOnEventFn>(entry.onEvent)(&Globals::scriptContext, entry.entity, entry.idx, entry.scriptData);
+			reinterpret_cast<ScriptOnEventFn>(entry.script->onEvent)(&Globals::scriptContext, entry.entity, entry.idx, entry.scriptData);
 		}
 	}
 
 private:
 
 	friend class ScriptComponent;
-    void registerListener(const ScriptModule* module, Entity* entity, void* scriptData)
+    void registerListener(const ScriptModule* script, Entity* entity, void* scriptData)
     {
-        for (const auto& [eventName, idx] : module->eventIndexes)
+        for (const auto& [eventName, idx] : script->eventIndexes)
         {
-            m_listeners.insert(eventName, { module->onEvent, entity, scriptData, idx });
+            m_listeners.insert(eventName, { script, entity, scriptData, idx });
         }
     }
 
-    void unregisterListener(const ScriptModule* module, Entity* entity)
+    void unregisterListener(const ScriptModule* script, Entity* entity)
     {
-        for (const auto& [eventName, idx] : module->eventIndexes)
+        for (const auto& [eventName, idx] : script->eventIndexes)
         {
             auto range = m_listeners.equalRange(eventName);
             for (auto it = range.begin(); it != range.end();)
@@ -72,7 +72,7 @@ private:
 
     struct Entry
     {
-		void* onEvent = nullptr;
+        const ScriptModule* script = nullptr;
 		Entity* entity = nullptr;
 		void* scriptData = nullptr;
         int idx;

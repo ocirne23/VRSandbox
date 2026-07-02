@@ -8,6 +8,7 @@ namespace NodeEditor
 export const char INDENT_UP   = '\x01';
 export const char INDENT_DOWN = '\x02';
 export const char HOIST = '\x03';
+export const char ENUM_TOKEN = '\x04';
 
 // Data carried on a pin / connection. Exec is control flow; the rest are value types.
 // Wildcard is an unresolved generic pin that adopts the concrete type it gets connected to.
@@ -61,7 +62,7 @@ export struct PinDef
 //   $k  -> expression for input pin k (the connected output's expression, else its default literal)
 //   #k  -> the statement block produced by following exec output pin k
 //   ?k  {...} -> conditional block: emit the contents if input pin k is connected, else skip it
-//   @   -> the selected enum option's code token (see enumTokens), unique node idx if no enumTokens provided
+//   @   -> replaced with unique node idx
 // Data nodes (isExec == false) have no exec pins and `emit` is a single value expression for output 0.
 // An exec node that also produces a value (e.g. Conditional) puts that value expression on the data output
 // pin's `expr` (PinDef::expr), since `emit` on an exec node is a statement, not an expression.
@@ -75,7 +76,7 @@ export struct NodeDef
     std::vector<PinDef>  outputs;
     std::string          emit;
     std::vector<std::string> enumOptions; // dropdown labels for the node's property (empty = no property)
-    std::vector<std::string> enumTokens;  // code token per option, parallel to enumOptions, substituted for @
+    std::vector<std::string> enumTokens;  // code token per option, parallel to enumOptions, substituted for ENUM_TOKEN
 };
 
 export uint32 dataTypeColor(EDataType type)
@@ -232,17 +233,17 @@ export const std::vector<NodeDef>& nodeRegistry()
     r.push_back({ "If", "If", "Flow", true,
         { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
         { { "true", D::Exec, "" }, { "break", D::Exec, "" } },
-        "if ($1 @ $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1",
+        "if ($1 " + std::string(1, ENUM_TOKEN) + " $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1",
         { "Less than", "Greater than", "Equals", "Not Equals" },
         { "<", ">", "==", "!=" } });
 
     r.push_back({ "IfElse", "If Else", "Flow", true,
         { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
         { { "true", D::Exec, "" }, { "false", D::Exec, "" }, { "break", D::Exec, "" } },
-        "if ($1 @ $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\nelse\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n#2",
+        "if ($1 " + std::string(1, ENUM_TOKEN) + " $2)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\nelse\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n#2",
         { "Less than", "Greater than", "Equals", "Not Equals" },
         { "<", ">", "==", "!=" } });
-
+    
     r.push_back({ "ForLoop", "For Loop", "Flow", true,
         { { "", D::Exec, "" }, { "start", D::Int, "0" }, { "count", D::Int, "10" } },
         { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
@@ -263,7 +264,7 @@ export const std::vector<NodeDef>& nodeRegistry()
     r.push_back({ "Cast", "Cast", "Flow", false,
         { { "Cast",   D::Wildcard, "0.0f", 1 } },
         { { "Result", D::Wildcard, "", 2 } },
-        "((@)$0)",
+        "((" + std::string(1, ENUM_TOKEN) + ")$0)",
         { "int", "float", "bool" },
         { "int", "float", "bool" }});
 

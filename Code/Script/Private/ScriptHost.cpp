@@ -43,6 +43,42 @@ namespace
         const fs::path resolved = fs::weakly_canonical(fs::absolute(path), ec);
         return (ec ? fs::absolute(path) : resolved).string();
     }
+
+    struct PdbScan
+    {
+        int                   maxSerial = -1; // highest serial found on disk (-1 if none)
+        std::vector<fs::path> files;          // every "<stem>.<serial>.pdb" in the directory
+    };
+
+    // Finds every program PDB named "<stem>.<serial>.pdb" (serial = decimal digits) in `dir`. The compiler
+    // PDB "<stem>.building.pdb" is skipped (its middle segment isn't all digits), as is any other script's.
+    PdbScan scanPdbs(const fs::path& dir, const std::string& stem)
+    {
+        PdbScan out;
+        const std::string prefix = stem + ".";
+        std::error_code ec;
+        for (fs::directory_iterator it(dir, ec), end; it != end; it.increment(ec))
+        {
+            if (ec) break;
+            std::error_code fe;
+            if (!it->is_regular_file(fe) || it->path().extension() != ".pdb")
+                continue;
+            const std::string name = it->path().filename().string();
+            if (name.size() < prefix.size() + 5)                         // need at least "<prefix>0.pdb"
+                continue;
+            if (name.compare(0, prefix.size(), prefix) != 0)
+                continue;
+            const std::string mid = name.substr(prefix.size(), name.size() - prefix.size() - 4); // strip ".pdb"
+            int serial = 0;
+            bool digits = !mid.empty();
+            for (char c : mid) { if (c < '0' || c > '9') { digits = false; break; } serial = serial * 10 + (c - '0'); }
+            if (!digits)
+                continue;
+            out.files.push_back(it->path());
+            if (serial > out.maxSerial) out.maxSerial = serial;
+        }
+        return out;
+    }
 }
 
 // A loaded module plus the DLL handle/path needed to unload and recompile it.
@@ -70,6 +106,27 @@ struct ScriptHost::Impl
             std::error_code e; fs::remove(p, e);
             return !fs::exists(p, e); // removed (or already gone) -> stop tracking it
         });
+    }
+
+    // Best-effort deletion of every "<stem>.<serial>.pdb" in `dir` except `keep` (the live PDB, matched by
+    // filename). Includes orphans from earlier runs at any index. Files still locked (typically by the VS
+    // debugger) are queued in pendingPdbDeletes for a later sweep.
+    void retirePdbs(const fs::path& dir, const std::string& stem, const fs::path& keep)
+    {
+        const std::string keepName = keep.filename().string();
+        for (const fs::path& p : scanPdbs(dir, stem).files)
+        {
+            if (p.filename().string() == keepName)
+                continue;
+            std::error_code e; fs::remove(p, e);
+            if (fs::exists(p, e))
+            {
+                const std::string s = p.string();
+                bool tracked = false;
+                for (const std::string& q : pendingPdbDeletes) if (q == s) { tracked = true; break; }
+                if (!tracked) pendingPdbDeletes.push_back(s);
+            }
+        }
     }
 
     // Locates vcvars64.bat via vswhere (once, then cached). Empty string on failure.
@@ -256,10 +313,16 @@ struct ScriptHost::Impl
 
         // Each build writes a FRESH, never-reused program PDB "<stem>.<serial>.pdb". The VS debugger caches
         // PDBs even after a module unloads, so reusing a name (even ping-ponging two) eventually collides
-        // with a held handle (LNK1201). A monotonic serial guarantees the linker's target is always new.
-        const int serial = (it != scripts.end()) ? it->second.pdbSerial + 1 : 0;
-        const fs::path pdbPath = scriptDllPath(path).parent_path()
-            / (fs::path(path).stem().string() + "." + std::to_string(serial) + ".pdb");
+        // with a held handle (LNK1201). Name the new PDB with a serial ABOVE every "<stem>.<N>.pdb" already
+        // on disk — not just the last one this session made: a prior run (or a build whose PDB the debugger
+        // still holds) can leave orphans at any index, and picking max+1 guarantees the linker never targets
+        // a name still open, so a delete that failed earlier can never block this build.
+        const fs::path outDir = scriptDllPath(path).parent_path();
+        const std::string stem = fs::path(path).stem().string();
+        int serial = scanPdbs(outDir, stem).maxSerial + 1;
+        if (it != scripts.end() && it->second.pdbSerial + 1 > serial)
+            serial = it->second.pdbSerial + 1;
+        const fs::path pdbPath = outDir / (stem + "." + std::to_string(serial) + ".pdb");
 
         std::string tempDll, errors;
         if (!compile(path, pdbPath, tempDll, errors))
@@ -297,14 +360,17 @@ struct ScriptHost::Impl
 
         if (!loadDll(slot, finalDll))
         {
-            Log::error("Script: DLL load/ScriptUpdate failed (" + finalDll.string() + ")");
+            Log::info("Script: DLL load failed, no exported symbols (" + finalDll.string() + ")");
             fs::remove(finalDll, ec);
             slot.entries = ScriptModule{}; slot.dllPath.clear();
+            retirePdbs(outDir, stem, pdbPath);
+            sweepPendingPdbs();
             return &slot.entries;
         }
 
-        if (!slot.pdbPath.empty() && slot.pdbPath != pdbPath.string())
-            pendingPdbDeletes.push_back(slot.pdbPath); // supersede the old PDB; reclaim once the debugger frees it
+        // Retire every PDB except the one just loaded: the previous build's plus any orphans left by earlier
+        // runs (higher-indexed included). Ones the debugger still holds get queued for a later sweep.
+        retirePdbs(outDir, stem, pdbPath);
         slot.pdbPath = pdbPath.string();
         slot.pdbSerial = serial;
         sweepPendingPdbs();
@@ -315,11 +381,13 @@ struct ScriptHost::Impl
 
     void unloadAll()
     {
+        const fs::path outDir = fs::current_path() / "Local" / "Scripts";
         for (auto& [path, script] : scripts)
         {
             if (script.module) FreeLibrary((HMODULE)script.module);
             if (!script.dllPath.empty()) { std::error_code ec; fs::remove(script.dllPath, ec); }
-            if (!script.pdbPath.empty()) { std::error_code ec; fs::remove(script.pdbPath, ec); }
+            // Delete this script's PDBs — the live one plus any orphans on disk (keep nothing).
+            retirePdbs(outDir, fs::path(path).stem().string(), fs::path());
         }
         scripts.clear();
         sweepPendingPdbs();

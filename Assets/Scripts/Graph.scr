@@ -4,17 +4,17 @@ static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bo
 
 static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result)
 {
-    int i7 = Number;
+    int i6 = Number;
     bool b1 = true;
-    if (i7 < 2)
+    if (i6 < 2)
     {
         b1 = false;
     }
     else
     {
-        for (int i3 = 2; i3 < ((i7 / 2) - 1); ++i3)
+        for (int i3 = 2; i3 < ((i6 / 2) - 1); ++i3)
         {
-            if ((i7 % i3) == 0)
+            if ((i6 % i3) == 0)
             {
                 b1 = false;
                 break;
@@ -64,7 +64,6 @@ static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bo
 //@reroute 21 Int
 //@funcname 19 IsPrime
 //@param 19 int Number
-//@funcname 20 IsPrime
 //@return 20 bool Result
 //@pin 0 1 0.0f
 //@pin 0 2 2

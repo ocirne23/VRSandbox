@@ -184,15 +184,16 @@ namespace
     std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack);
     std::string expandOutput(Codegen& cg, const Pin* outPin, std::set<const Node*>& dataStack, const HoistMap& hoist);
 
-    // @ -> the node's selected dropdown-property code token.
+    // @ -> unique node idx
+	void appendNodeIdx(Codegen& cg, std::string& out, Node* node)
+	{
+        out += std::to_string(node->getNodeIdx());
+    }
+
+    // ENUM_TOKEN -> the node's selected dropdown-property code token.
     void appendEnumToken(Codegen& cg, std::string& out, Node* node)
     {
         const NodeDef* def = findNodeDef(node->getTypeId());
-        if (def->enumTokens.empty())
-		{
-			out += std::to_string(node->getNodeIdx());
-			return;
-		}
         const int sel = node->getEnumSelection();
         if (def && sel >= 0 && sel < (int)def->enumTokens.size())
             out += def->enumTokens[sel];
@@ -204,7 +205,7 @@ namespace
         return (idx >= 0 && idx < (int)inputs.size()) ? emitDataExpr(cg, inputs[idx].get(), dataStack, hoist) : "0";
     }
 
-    // Value-expression template ($k = data input k, @ = enum token). Data resolution threads dataStack.
+    // Value-expression template ($k = data input k, ENUM_TOKEN = enum token). Data resolution threads dataStack.
     std::string substituteData(Codegen& cg, const std::string& tmpl, Node* node, std::set<const Node*>& dataStack, const HoistMap& hoist)
     {
         std::string out;
@@ -218,13 +219,14 @@ namespace
                 out += inputExpr(cg, node, idx, dataStack, hoist);
                 i = j;
             }
-            else if (c == '@') { appendEnumToken(cg, out, node); ++i; }
+            else if (c == '@') { appendNodeIdx(cg, out, node); ++i; }
+            else if (c == ENUM_TOKEN) { appendEnumToken(cg, out, node); ++i; }
             else { out += c; ++i; }
         }
         return out;
     }
 
-    // Statement template ($k = data input k via a fresh data recursion, #k = exec continuation k, @ = enum).
+    // Statement template ($k = data input k via a fresh data recursion, #k = exec continuation k, ENUM_TOKEN = enum).
     std::string substituteExec(Codegen& cg, const std::string& tmpl, Node* node, std::set<const Node*>& execStack, const HoistMap& hoist)
     {
         std::string out;
@@ -248,7 +250,8 @@ namespace
                 }
                 i = j;
             }
-            else if (c == '@') { appendEnumToken(cg, out, node); ++i; }
+            else if (c == '@') { appendNodeIdx(cg, out, node); ++i; }
+			else if (c == ENUM_TOKEN) { appendEnumToken(cg, out, node); ++i; }
             // ?k{block}: emit the block (with $-substitution) only if input pin k is connected.
             else if (c == '?' && i + 1 < tmpl.size() && tmpl[i + 1] >= '0' && tmpl[i + 1] <= '9')
             {
