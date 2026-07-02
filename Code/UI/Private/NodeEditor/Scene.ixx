@@ -82,6 +82,7 @@ private:
     uint64_t m_idCounter = 1;
     std::string m_scriptPath = "Scripts/Graph.scr";
     ImVec2 m_pendingAddPos = ImVec2(0.0f, 0.0f);
+    ImVec2 m_pendingAddScreenPos = ImVec2(0.0f, 0.0f); // screen-space click pos, so the popup can offset from it
 
     // Dirty tracking: the serialized graph captured right after a load/save, compared against the live
     // graph to detect unsaved edits. Captured lazily (once the graph has rendered a frame so node

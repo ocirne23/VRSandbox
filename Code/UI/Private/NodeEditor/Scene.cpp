@@ -1665,13 +1665,22 @@ void Scene::update(double deltaSec)
     if (ed::ShowBackgroundContextMenu())
     {
         m_pendingAddPos = ed::ScreenToCanvas(ImGui::GetMousePos());
+        m_pendingAddScreenPos = ImGui::GetMousePos(); // captured once, at the click — not recomputed while open
         m_importFunctions = scanImportableFunctions(); // refresh the importable-function list while it's open
         ImGui::OpenPopup("AddNodePopup");
     }
+    // Pin the popup a bit right of the click (ImGuiCond_Always: reasserted every frame it's open, so it can't
+    // land back on the default mouse-cursor position) so it doesn't sit directly on top of whatever pin/link
+    // was under the right-click.
+    ImGui::SetNextWindowPos(ImVec2(m_pendingAddScreenPos.x + 24.0f, m_pendingAddScreenPos.y), ImGuiCond_Always);
+    // A bit of left padding before the menu text/submenu arrows. Pushed for the whole popup's lifetime so
+    // every submenu opened from it (BeginMenu spawns its own window) inherits the same padding.
+    //ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, ImGui::GetStyle().WindowPadding.y));
     if (ImGui::BeginPopup("AddNodePopup"))
     {
-        // Group node defs by category (first-seen order), then split the categories across two balanced
-        // columns so the menu doesn't grow into one very tall list.
+        // Group node defs by category (first-seen order); each category folds into its own submenu (opens on
+        // hover, standard ImGui BeginMenu behavior) so the top-level list stays one line per category instead
+        // of growing into one very tall flat list.
         struct Category { std::string name; std::vector<const NodeDef*> defs; };
         std::vector<Category> categories;
         for (const NodeDef& def : nodeRegistry())
@@ -1683,37 +1692,13 @@ void Scene::update(double deltaSec)
             categories.back().defs.push_back(&def);
         }
 
-        int totalRows = 0; // each category costs its items + one header row
-        for (const Category& c : categories) totalRows += (int)c.defs.size() + 1;
-        size_t split = categories.size();
-        for (size_t i = 0, running = 0; i < categories.size(); ++i)
+        for (const Category& category : categories)
         {
-            running += categories[i].defs.size() + 1;
-            if ((int)running * 2 >= totalRows) { split = i + 1; break; }
-        }
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f, 5.0f));
 
-        // Fixed, content-derived column width. Without this the popup auto-resizes to its content while the
-        // full-width SeparatorText/MenuItems size to the (growing) window — a feedback loop that runs away.
-        float colWidth = 0.0f;
-        for (const Category& c : categories)
-        {
-            const float h = ImGui::CalcTextSize(c.name.c_str()).x;
-            if (h > colWidth) colWidth = h;
-            for (const NodeDef* def : c.defs)
+            if (ImGui::BeginMenu(category.name.c_str()))
             {
-                const float w = ImGui::CalcTextSize(def->displayName.c_str()).x;
-                if (w > colWidth) colWidth = w;
-            }
-        }
-        const ImGuiStyle& style = ImGui::GetStyle();
-        colWidth += style.FramePadding.x * 2.0f + style.CellPadding.x * 2.0f + style.ItemSpacing.x + 6.0f;
-
-        auto renderRange = [&](size_t begin, size_t end)
-        {
-            for (size_t i = begin; i < end; ++i)
-            {
-                ImGui::SeparatorText(categories[i].name.c_str());
-                for (const NodeDef* def : categories[i].defs)
+                for (const NodeDef* def : category.defs)
                     if (ImGui::MenuItem(def->displayName.c_str()))
                     {
                         Node& added = addNodeOfType(def->typeId, m_pendingAddPos);
@@ -1722,32 +1707,24 @@ void Scene::update(double deltaSec)
                         if (added.isEventNode())
                             syncNewEventNode(added); // keep a new On Event node in sync with the others
                     }
+                ImGui::EndMenu();
             }
-        };
 
-        if (ImGui::BeginTable("##addnodecols", 2, ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_PadOuterX))
-        {
-            ImGui::TableSetupColumn("##a", ImGuiTableColumnFlags_WidthFixed, colWidth);
-            ImGui::TableSetupColumn("##b", ImGuiTableColumnFlags_WidthFixed, colWidth);
-            ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0);
-            renderRange(0, split);
-            ImGui::TableSetColumnIndex(1);
-            renderRange(split, categories.size());
-            ImGui::EndTable();
+            ImGui::PopStyleVar();
         }
 
-        // Importable functions defined in other .scr files (full-width section under the palette columns).
-        if (!m_importFunctions.empty())
+        // Importable functions defined in other .scr files, folded the same way.
+        if (!m_importFunctions.empty() && ImGui::BeginMenu("Import Function"))
         {
-            ImGui::SeparatorText("Import Function");
             for (const FunctionRef& ref : m_importFunctions)
                 if (ImGui::MenuItem(ref.displayLabel.c_str()))
                     importFunction(ref, m_pendingAddPos);
+            ImGui::EndMenu();
         }
 
         ImGui::EndPopup();
     }
+    //ImGui::PopStyleVar();
     ed::Resume();
 
     if (m_firstFrame)

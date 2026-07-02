@@ -40,10 +40,19 @@ class Entity;
 // Services the host exposes to scripts. The host fills these in; scripts only call them.
 typedef struct ScriptContext
 {
+    // Per-frame data, refreshed once a frame by update() (see below) before any script runs — plain fields
+    // instead of function pointers so reading them is free of an indirect call.
+    float deltaSeconds;
+    float elapsedSeconds;
+
+    // The active render camera, snapshotted for the frame.
+    glm::vec3 cameraPosition;
+    glm::vec3 cameraDirection; // forward, normalized
+    glm::vec3 cameraUp;        // normalized
+    float     cameraFovDeg;
+
     void  (*log)(const char* message);
     void  (*logf)(const char* message, ...);
-    float (*deltaSeconds)(void);
-    float (*elapsedSeconds)(void);
     int   (*isKeyDown)(const char* keyName); // e.g. "Space", "A", "Left Shift"
     void  (*spawnPointLight)(glm::vec3 position, float range, glm::vec3 color, float intensity);
     void  (*setSun)(glm::vec3 direction, glm::vec3 color, float intensity);
@@ -52,23 +61,19 @@ typedef struct ScriptContext
 
     // The entity* functions below take an entity handle, which ScriptUpdate receives as `self` and the
     // generated code passes through. They no-op / return zero for a null handle, so entity nodes are safe.
+    //
+    // Position/scale/rotation are NOT here: the Entity mirror above already exposes them as plain fields
+    // (self->pos / self->scale / self->rot), so generated code reads/writes them directly and uses glm::
+    // helpers for anything derived (glm::degrees/radians for euler angles, self->rot * axis for a basis
+    // vector, glm::eulerAngles for the reverse) instead of going through the ABI.
 
     // ---- entity reads ----
-    glm::vec3   (*entityGetPosition)(Entity* entity);     // local position
-    float       (*entityGetScale)(Entity* entity);
-    glm::vec3   (*entityGetRotation)(Entity* entity);     // euler degrees
-    glm::vec3   (*entityGetForward)(Entity* entity);      // unit vectors in the entity's local frame
-    glm::vec3   (*entityGetRight)(Entity* entity);
-    glm::vec3   (*entityGetUp)(Entity* entity);
     const char* (*entityGetName)(Entity* entity);
     int         (*entityGetEnabled)(Entity* entity);
     int         (*entityGetChildCount)(Entity* entity);
     float       (*entityGetBoundsRadius)(Entity* entity); // world-space render bounds radius (0 if no mesh)
 
     // ---- entity writes ----
-    void (*entitySetPosition)(Entity* entity, glm::vec3 position);
-    void (*entitySetScale)(Entity* entity, float scale);
-    void (*entitySetRotation)(Entity* entity, glm::vec3 eulerDegrees);
     void (*entitySetEnabled)(Entity* entity, int enabled);
     void (*entitySetAnimFloat)(Entity* entity, const char* param, float value);
     void (*entitySetAnimBool)(Entity* entity, const char* param, int value);
@@ -76,6 +81,12 @@ typedef struct ScriptContext
 
 #ifdef __cplusplus
     ScriptContext(); // the engine binds all the function pointers here; scripts never construct one
+
+    // Refreshes the per-frame fields above. Called once per frame by the host (main.cpp), before any script
+    // runs; scripts never call this themselves. Defined in ScriptContext.cpp (needs Core.Time), so this
+    // header stays dependency-free.
+    void update(float newDeltaSeconds, float newElapsedSeconds,
+        glm::vec3 newCameraPosition, glm::vec3 newCameraDirection, glm::vec3 newCameraUp, float newCameraFovDeg);
 #endif
 } ScriptContext;
 

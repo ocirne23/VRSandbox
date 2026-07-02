@@ -19,6 +19,7 @@ export enum EDataType : uint8
     Int,
     Float,
     Vec3,
+    Quat,
     String,
     Wildcard,
 };
@@ -89,6 +90,7 @@ export uint32 dataTypeColor(EDataType type)
         case EDataType::Int:    return rgb(80, 220, 220);
         case EDataType::Float:  return rgb(140, 255, 140);
         case EDataType::Vec3:   return rgb(255, 215, 80);
+        case EDataType::Quat:   return rgb(180, 130, 255);
         case EDataType::String: return rgb(255, 120, 255);
         case EDataType::Wildcard: return rgb(150, 150, 150);
     }
@@ -131,6 +133,7 @@ export const char* dataTypeToken(EDataType type)
         case EDataType::Int:      return "Int";
         case EDataType::Float:    return "Float";
         case EDataType::Vec3:     return "Vec3";
+        case EDataType::Quat:     return "Quat";
         case EDataType::String:   return "String";
         case EDataType::Wildcard: return "Wild";
     }
@@ -192,6 +195,7 @@ export std::string defaultValueForType(EDataType type)
         case EDataType::Int:    return "0";
         case EDataType::Float:  return "0.0f";
         case EDataType::Vec3:   return "glm::vec3{ 0.0f, 0.0f, 0.0f }";
+        case EDataType::Quat:   return "glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f }"; // identity (w,x,y,z)
         case EDataType::String: return "\"\"";
         default:                return "0.0f";  
     }
@@ -345,17 +349,27 @@ export const std::vector<NodeDef>& nodeRegistry()
         "ctx->setSun($1, $2, $3);\n#0" });
 
     // ---- inputs / time ----
+    // deltaSeconds/elapsedSeconds are plain fields on ScriptContext (refreshed once a frame), not calls.
     r.push_back({ "GetElapsedTime", "Get Elapsed Time", "Time", false,
         {}, { { "seconds", D::Float, "" } },
-        "ctx->elapsedSeconds()" });
+        "ctx->elapsedSeconds" });
 
     r.push_back({ "GetDeltaTime", "Get Delta Time", "Time", false,
         {}, { { "seconds", D::Float, "" } },
-        "ctx->deltaSeconds()" });
+        "ctx->deltaSeconds" });
 
     r.push_back({ "IsKeyDown", "Is Key Down", "Input", false,
         { { "key", D::String, "\"Space\"" } }, { { "down", D::Bool, "" } },
         "(ctx->isKeyDown($0) != 0)" });
+
+    // ---- camera (the active render camera, snapshotted once a frame onto ScriptContext) ----
+    r.push_back({ "GetCamera", "Get Camera", "Camera", false,
+        {},
+        { { "Position",  D::Vec3,  "", 0, "ctx->cameraPosition" },
+            { "Direction", D::Vec3,  "", 0, "ctx->cameraDirection" },
+            { "Up",        D::Vec3,  "", 0, "ctx->cameraUp" },
+            { "Fov",       D::Float, "", 0, "ctx->cameraFovDeg" } },
+        "" });
 
     // ---- math ----
     // -- mutable math nodes -- 
@@ -437,8 +451,11 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "vec", D::Vec3, "" }, { "scale", D::Float, "1.0f" } }, { { "result", D::Vec3, "" } },
         "($0 * $1)" });
 
+    // Dot/Normalize are wildcarded (Vec3 or Quat — glm::dot/normalize support both); Cross stays Vec3-only
+    // (undefined for quaternions).
     r.push_back({ "DotVec3", "Dot", "Math", false,
-        { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Float, "" } },
+        { { "a", D::Wildcard, "glm::vec3{ 0.0f, 0.0f, 0.0f }", 1 }, { "b", D::Wildcard, "glm::vec3{ 0.0f, 0.0f, 0.0f }", 1 } },
+        { { "result", D::Float, "" } },
         "glm::dot($0, $1)" });
 
     r.push_back({ "CrossVec3", "Cross", "Math", false,
@@ -450,26 +467,90 @@ export const std::vector<NodeDef>& nodeRegistry()
         "glm::length($0)" });
 
     r.push_back({ "NormalizeVec3", "Normalize", "Math", false,
-        { { "vec", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+        { { "vec", D::Wildcard, "glm::vec3{ 0.0f, 0.0f, 0.0f }", 1 } },
+        { { "result", D::Wildcard, "", 1 } },
         "glm::normalize($0)" });
 
+    // ---- quaternion math ----
+    r.push_back({ "MakeQuatFromEuler", "Make Quat (Euler)", "Math", false,
+        { { "eulerDeg", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" } }, { { "quat", D::Quat, "" } },
+        "glm::quat(glm::radians($0))" });
+
+    r.push_back({ "QuatToEuler", "Quat To Euler", "Math", false,
+        { { "quat", D::Quat, "" } }, { { "eulerDeg", D::Vec3, "" } },
+        "glm::degrees(glm::eulerAngles($0))" });
+
+    r.push_back({ "QuatFromAxisAngle", "Quat From Axis Angle", "Math", false,
+        { { "axis", D::Vec3, "glm::vec3{ 0.0f, 1.0f, 0.0f }" }, { "angleDeg", D::Float, "0.0f" } },
+        { { "quat", D::Quat, "" } },
+        "glm::angleAxis(glm::radians($1), $0)" });
+
+    r.push_back({ "MulQuat", "Multiply Quat", "Math", false,
+        { { "a", D::Quat, "" }, { "b", D::Quat, "" } }, { { "result", D::Quat, "" } },
+        "($0 * $1)" });
+
+    r.push_back({ "RotateVec3ByQuat", "Rotate Vec3 By Quat", "Math", false,
+        { { "quat", D::Quat, "" }, { "vec", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+        "($0 * $1)" });
+
+    r.push_back({ "InverseQuat", "Inverse Quat", "Math", false,
+        { { "quat", D::Quat, "" } }, { { "result", D::Quat, "" } },
+        "glm::inverse($0)" });
+
+    r.push_back({ "SlerpQuat", "Slerp Quat", "Math", false,
+        { { "a", D::Quat, "" }, { "b", D::Quat, "" }, { "t", D::Float, "0.5f" } }, { { "result", D::Quat, "" } },
+        "glm::slerp($0, $1, $2)" });
+
+    // ---- generic math (wildcard: works with Float/Int/Vec3, whatever the connected type resolves to) ----
+    r.push_back({ "Min", "Min", "Math", false,
+        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "glm::min($0, $1)" });
+
+    r.push_back({ "Max", "Max", "Math", false,
+        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "glm::max($0, $1)" });
+
+    r.push_back({ "Clamp", "Clamp", "Math", false,
+        { { "x", D::Wildcard, "0.0f", 1 }, { "min", D::Wildcard, "0.0f", 1 }, { "max", D::Wildcard, "1.0f", 1 } },
+        { { "result", D::Wildcard, "", 1 } },
+        "glm::clamp($0, $1, $2)" });
+
+    r.push_back({ "Smoothstep", "Smoothstep", "Math", false,
+        { { "edge0", D::Wildcard, "0.0f", 1 }, { "edge1", D::Wildcard, "1.0f", 1 }, { "x", D::Wildcard, "0.5f", 1 } },
+        { { "result", D::Wildcard, "", 1 } },
+        "glm::smoothstep($0, $1, $2)" });
+
+    r.push_back({ "Ceil", "Ceil", "Math", false,
+        { { "x", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "glm::ceil($0)" });
+
+    r.push_back({ "Floor", "Floor", "Math", false,
+        { { "x", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "glm::floor($0)" });
+
+    r.push_back({ "Round", "Round", "Math", false,
+        { { "x", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        "glm::round($0)" });
 
     // ---- entity (the script's owning entity, exposed as `self`) ----
+    // Position/Scale/Rotation read straight off the Entity mirror (self->pos/scale/rot) instead of going
+    // through the ABI; Rotation/Forward/Right/Up derive from self->rot with glm:: helpers (see ScriptAPI.h).
     r.push_back({ "GetEntity", "Get Entity", "Entity", false,
         {},
-        { { "Position",  D::Vec3,   "", 0, "ctx->entityGetPosition(self)" },
-            { "Scale",     D::Float,  "", 0, "ctx->entityGetScale(self)" },
-            { "Rotation",  D::Vec3,   "", 0, "ctx->entityGetRotation(self)" },
-            { "Forward",   D::Vec3,   "", 0, "ctx->entityGetForward(self)" },
-            { "Right",     D::Vec3,   "", 0, "ctx->entityGetRight(self)" },
-            { "Up",        D::Vec3,   "", 0, "ctx->entityGetUp(self)" },
+        { { "Position",  D::Vec3,   "", 0, "self->pos" },
+            { "Scale",     D::Float,  "", 0, "self->scale" },
+            { "Rotation",  D::Vec3,   "", 0, "glm::degrees(glm::eulerAngles(self->rot))" },
+            { "Forward",   D::Vec3,   "", 0, "(self->rot * glm::vec3(0.0f, 0.0f, -1.0f))" },
+            { "Right",     D::Vec3,   "", 0, "(self->rot * glm::vec3(1.0f, 0.0f, 0.0f))" },
+            { "Up",        D::Vec3,   "", 0, "(self->rot * glm::vec3(0.0f, 1.0f, 0.0f))" },
             { "Name",      D::String, "", 0, "ctx->entityGetName(self)" },
             { "Enabled",   D::Bool,   "", 0, "(ctx->entityGetEnabled(self) != 0)" },
             { "Children",  D::Int,    "", 0, "ctx->entityGetChildCount(self)" },
             { "Bounds R",  D::Float,  "", 0, "ctx->entityGetBoundsRadius(self)" } },
         "" });
 
-    // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks).
+    // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks). Position/
+    // Scale/Rotation assign straight into the Entity mirror; Rotation converts degrees -> quat with glm::.
     r.push_back({ "SetEntity", "Set Entity", "Entity", true,
         { { "", D::Exec, "" },
             { "Position", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
@@ -477,8 +558,8 @@ export const std::vector<NodeDef>& nodeRegistry()
             { "Rotation", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
             { "Enabled",  D::Bool,  "true" } },
         { { "", D::Exec, "" } },
-        "?1{ctx->entitySetPosition(self, $1);\n}?2{ctx->entitySetScale(self, $2);\n}"
-        "?3{ctx->entitySetRotation(self, $3);\n}?4{ctx->entitySetEnabled(self, $4);\n}#0" });
+        "?1{self->pos = $1;\n}?2{self->scale = $2;\n}"
+        "?3{self->rot = glm::quat(glm::radians($3));\n}?4{ctx->entitySetEnabled(self, $4);\n}#0" });
 
     // Spawn Entity: queues an asset/prefab to spawn at a world position (drained by App after update).
     r.push_back({ "SpawnEntity", "Spawn Entity", "Entity", true,

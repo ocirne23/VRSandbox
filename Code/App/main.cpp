@@ -208,6 +208,16 @@ int main()
 
         gizmo.update(camera, ui.getViewportRect(), ui.getSelectedEntity(), deltaSec);
 
+        // Refresh the script ABI's per-frame fields (delta/elapsed seconds, camera) once before any script
+        // runs this frame. Forward/up are derived from the inverse view matrix (its -Z / Y columns).
+        {
+            const glm::mat4 camToWorld = glm::inverse(camera.viewMatrix);
+            const glm::vec3 camDir = glm::normalize(-glm::vec3(camToWorld[2]));
+            const glm::vec3 camUp = glm::normalize(glm::vec3(camToWorld[1]));
+            Globals::scriptContext.update((float)deltaSec, (float)Globals::time.getElapsedSec(),
+                camera.position, camDir, camUp, camera.fovDeg);
+        }
+
         for (EntityChange& change : ui.takeEntityChanges())
         {
             if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))

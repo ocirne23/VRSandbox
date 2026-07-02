@@ -9,11 +9,12 @@ export struct ScriptModule
 {
     std::string dllPath;
     std::string scriptPath;
-    void* onSpawn = nullptr;     // ScriptInitFn
-    void* update = nullptr;   // ScriptUpdateFn
+    // Do not cache these pointers, they can get swapped when scripts reload!
+    void* onSpawn = nullptr;   // ScriptInitFn
+    void* update = nullptr;    // ScriptUpdateFn
     void* onDestroy = nullptr; // ScriptShutdownFn
-    void* onEvent = nullptr;  // ScriptOnEventFn (null = script declares no On Event entries)
-    uint32 dataSize = 0;      // bytes of persistent ScriptData the script declares (0 = none), from ScriptDataSize()
+    void* onEvent = nullptr;   // ScriptOnEventFn
+    uint32 dataSize = 0;       // bytes of persistent ScriptData the script declares (0 = none), from ScriptDataSize()
     std::unordered_map<std::string, int32> eventIndexes; // EventName -> Idx mapping
 };
 
