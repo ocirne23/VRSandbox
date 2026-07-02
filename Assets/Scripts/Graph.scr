@@ -1,150 +1,124 @@
 #include "ScriptAPI.h"
-SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
-{
-    ctx->log("hello");
-}
 
-SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scriptData)
-{
-    ctx->log("hello");
-}
+static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result);
 
-SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
+static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result)
 {
-    int i8 = 41;
-    bool b2 = true;
-    if (i8 < 2)
+    int i7 = Number;
+    bool b1 = true;
+    if (i7 < 2)
     {
-        b2 = false;
+        b1 = false;
     }
     else
     {
-        for (int i4 = 2; i4 < i8; ++i4)
+        for (int i3 = 2; i3 < ((i7 / 2) - 1); ++i3)
         {
-            if ((i8 % (i4 * i4)) == 0)
+            if ((i7 % i3) == 0)
             {
-                b2 = false;
+                b1 = false;
                 break;
             }
         }
     }
-    if (b2 == true)
-    {
-        ctx->logf("%i is a prime number\n", i8);
-    }
-    else
-    {
-        ctx->logf("%i is not a prime number", i8);
-    }
+    Result = b1;
 }
 
 //@graph 1
-//@node 0 Update -98 448
-//@node 1 IfElse -3 499
-//@node 2 Bool 219 439
-//@node 3 Set 592 384
-//@node 4 ForLoop 250 608
-//@node 5 Modulo 519 755
-//@node 6 Mul 519 663
-//@node 7 If 699 641
-//@node 8 Int -368 407
-//@node 9 Set 928 576
-//@node 10 IfElse 592 479
-//@node 11 Printf 919 340
-//@node 12 Printf 919 429
-//@node 13 Break 1056 576
-//@node 14 Label -400 352
-//@node 15 Label 896 272
-//@node 16 Reroute 823 439
-//@node 17 Reroute 823 439
-//@node 18 Reroute 487 471
-//@node 19 Reroute 487 471
-//@node 20 Reroute -57 663
-//@node 21 Reroute -57 663
-//@node 22 Reroute 503 599
-//@node 23 Reroute 631 343
-//@node 24 Reroute 631 343
-//@node 25 OnSpawn -816 256
-//@node 26 Print -697 256
-//@node 27 OnDestroy -830 320
-//@node 28 Print -692 324
-//@labelsize 14 256 117
-//@labeltext 14 Input
-//@labelsize 15 272 229
-//@labeltext 15 Output
-//@reroute 16 Int
+//@node 0 IfElse -3 499
+//@node 1 Bool 128 391
+//@node 2 Set 592 384
+//@node 3 ForLoop 250 608
+//@node 4 Modulo 519 695
+//@node 5 If 699 641
+//@node 6 Int -368 407
+//@node 7 Set 928 576
+//@node 8 Break 1056 576
+//@node 9 Label -400 352
+//@node 10 Label 896 272
+//@node 11 Reroute 823 439
+//@node 12 Reroute 823 439
+//@node 13 Reroute 487 471
+//@node 14 Reroute 487 471
+//@node 15 Reroute -169 727
+//@node 16 Reroute 503 599
+//@node 17 Reroute 631 343
+//@node 18 Reroute 631 343
+//@node 19 FunctionInput -706 432
+//@node 20 FunctionOutput 928 349
+//@node 21 Reroute -169 727
+//@node 22 Sub 43 631
+//@node 23 Div -165 631
+//@labelsize 9 256 117
+//@labeltext 9 Input
+//@labelsize 10 272 229
+//@labeltext 10 Output
+//@reroute 11 Int
+//@reroute 12 Int
+//@reroute 13 Bool
+//@reroute 14 Bool
+//@reroute 15 Int
+//@reroute 16 Bool
 //@reroute 17 Int
-//@reroute 18 Bool
-//@reroute 19 Bool
-//@reroute 20 Int
+//@reroute 18 Int
 //@reroute 21 Int
-//@reroute 22 Bool
-//@reroute 23 Int
-//@reroute 24 Int
-//@pin 1 1 0.0f
-//@pin 1 2 2
-//@pin 2 0 true
-//@pin 3 1 0.0f
-//@pin 3 2 false
-//@pin 4 1 2
-//@pin 4 2 10
-//@pin 5 0 0
-//@pin 5 1 1.0f
-//@pin 6 0 1.0f
-//@pin 6 1 0
+//@funcname 19 IsPrime
+//@param 19 int Number
+//@funcname 20 IsPrime
+//@return 20 bool Result
+//@pin 0 1 0.0f
+//@pin 0 2 2
+//@pin 1 0 true
+//@pin 2 1 0.0f
+//@pin 2 2 false
+//@pin 3 1 2
+//@pin 3 2 10
+//@pin 4 0 0
+//@pin 4 1 1.0f
+//@pin 5 1 0.0f
+//@pin 5 2 0
+//@pin 6 0 41
 //@pin 7 1 0.0f
-//@pin 7 2 0
-//@pin 8 0 41
-//@pin 9 1 0.0f
-//@pin 9 2 false
-//@pin 10 1 0.0f
-//@pin 10 2 true
-//@pin 11 1 "%i is a prime number\n"
-//@pin 11 2 0.0f
-//@pin 12 1 "%i is not a prime number"
-//@pin 12 2 0.0f
+//@pin 7 2 false
+//@pin 11 0 
+//@pin 12 0 
+//@pin 13 0 
+//@pin 14 0 
+//@pin 15 0 
 //@pin 16 0 
 //@pin 17 0 
 //@pin 18 0 
-//@pin 19 0 
-//@pin 20 0 
+//@pin 20 1 false
 //@pin 21 0 
-//@pin 22 0 
-//@pin 23 0 
-//@pin 24 0 
-//@pin 26 1 "hello"
-//@pin 28 1 "hello"
-//@enum 7 2
-//@enum 10 2
-//@link 1 0 3 0
-//@link 4 2 6 0
-//@link 4 2 6 1
-//@link 6 0 5 1
-//@link 5 0 7 1
-//@link 8 0 1 1
-//@link 1 2 10 0
-//@link 10 0 11 0
-//@link 10 1 12 0
-//@link 7 0 9 0
-//@link 9 0 13 0
-//@link 1 1 4 0
-//@link 4 0 7 0
-//@link 0 0 1 0
-//@link 16 0 11 2
-//@link 17 0 12 2
-//@link 2 0 18 0
-//@link 18 0 10 1
-//@link 2 0 19 0
-//@link 19 0 3 1
-//@link 8 0 20 0
-//@link 20 0 5 0
-//@link 8 0 21 0
-//@link 21 0 4 2
-//@link 2 0 22 0
-//@link 22 0 9 1
-//@link 8 0 23 0
-//@link 23 0 17 0
-//@link 8 0 24 0
-//@link 24 0 16 0
-//@link 25 0 26 0
-//@link 27 0 28 0
+//@pin 22 0 0.0f
+//@pin 22 1 1
+//@pin 23 0 0.0f
+//@pin 23 1 2
+//@enum 5 2
+//@link 0 0 2 0
+//@link 4 0 5 1
+//@link 6 0 0 1
+//@link 5 0 7 0
+//@link 7 0 8 0
+//@link 0 1 3 0
+//@link 3 0 5 0
+//@link 1 0 13 0
+//@link 1 0 14 0
+//@link 14 0 2 1
+//@link 6 0 15 0
+//@link 15 0 4 0
+//@link 1 0 16 0
+//@link 16 0 7 1
+//@link 6 0 17 0
+//@link 17 0 12 0
+//@link 6 0 18 0
+//@link 18 0 11 0
+//@link 19 0 0 0
+//@link 19 1 6 0
+//@link 0 2 20 0
+//@link 1 0 20 1
+//@link 3 2 4 1
+//@link 6 0 21 0
+//@link 22 0 3 2
+//@link 6 0 23 0
+//@link 23 0 22 0

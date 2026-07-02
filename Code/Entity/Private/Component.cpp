@@ -236,7 +236,7 @@ void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
 
 void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
 {
-    if (!enabled || !scriptModule)
+    if (!scriptModule)
         return;
 
     if (scriptModule->onDestroy)

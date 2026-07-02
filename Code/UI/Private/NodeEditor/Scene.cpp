@@ -61,6 +61,59 @@ namespace
         return tgt;
     }
 
+    // The Function Output that belongs to a given Function Input: the first one reachable by walking exec
+    // links forward from the Input (through branches/loops). Function Output carries no name of its own, so
+    // this reachability is what pairs it to its Input.
+    Node* reachableFunctionOutput(const std::vector<std::unique_ptr<Link>>& links, Node* inputNode)
+    {
+        std::set<Node*> visited;
+        std::vector<Node*> stack{ inputNode };
+        while (!stack.empty())
+        {
+            Node* n = stack.back();
+            stack.pop_back();
+            if (!visited.insert(n).second)
+                continue;
+            if (n != inputNode && n->isFunctionOutput())
+                return n;
+            for (const auto& pin : n->getOutputPins())
+                if (pin->dataType == EDataType::Exec)
+                    if (Pin* tgt = realTargetOfOutput(links, pin.get()))
+                        stack.push_back(tgt->node);
+        }
+        return nullptr;
+    }
+
+    // ---- function codegen naming ----
+    // A generated C++ function is named <fileStem>_<funcName>, sanitized to a valid identifier. The stem
+    // disambiguates same-named functions from different files; codegen dedups by this full name.
+    std::string sanitizeIdent(const std::string& in)
+    {
+        std::string out;
+        for (char c : in)
+        {
+            const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+            out += ok ? c : '_';
+        }
+        if (out.empty() || (out[0] >= '0' && out[0] <= '9'))
+            out = "_" + out;
+        return out;
+    }
+
+    std::string pathStem(const std::string& path)
+    {
+        const size_t slash = path.find_last_of("/\\");
+        const size_t start = (slash == std::string::npos) ? 0 : slash + 1;
+        size_t dot = path.find_last_of('.');
+        if (dot == std::string::npos || dot < start) dot = path.size();
+        return path.substr(start, dot - start);
+    }
+
+    std::string funcCppName(const std::string& scriptPath, const std::string& funcName)
+    {
+        return sanitizeIdent(pathStem(scriptPath) + "_" + funcName);
+    }
+
     // Splits an output pin's value template into an optional hoisted declaration and its reference/inline
     // expression, returning true when a declaration is present. Two forms produce a hoist:
     //   - the pin's own expr carries a HOIST marker: <decl> \x03 <ref>  (e.g. a Var node)
@@ -230,6 +283,15 @@ namespace
         // A Script Data member is a field of the persistent struct: read/written directly through `data`.
         if (isScriptDataType(node->getTypeId()))
             return "data->" + outPin->name;
+        // A Function Input parameter resolves to the generated function's C++ parameter of the same name.
+        if (isFunctionInputType(node->getTypeId()))
+            return outPin->name;
+        // A Function Call return resolves to the local the call wrote it into (declared at the call site).
+        if (isFunctionCallType(node->getTypeId()))
+        {
+            const int o = indexOfPin(node->getOutputPins(), outPin);
+            return "fret" + std::to_string(node->getNodeIdx()) + "_" + std::to_string(o - 1);
+        }
 
         const NodeDef* def = findNodeDef(node->getTypeId());
         if (!def || dataStack.count(node))
@@ -301,6 +363,50 @@ namespace
         }
     }
 
+    // A Function Call statement: declare a local per return value, call the generated C++ function passing the
+    // arg expressions plus those locals by reference, then continue the exec flow. Downstream reads of the
+    // call's data outputs resolve to these same locals (see expandOutput).
+    std::string emitFunctionCallStmt(Codegen& cg, Node* node, std::set<const Node*>& execStack, const HoistMap& hoist)
+    {
+        const auto& inputs = node->getInputPins();
+        const auto& outputs = node->getOutputPins();
+        const std::string cpp = funcCppName(node->getFunctionScriptPath(), node->getFunctionName());
+        const std::string idx = std::to_string(node->getNodeIdx());
+
+        std::string out;
+        for (size_t o = 1; o < outputs.size(); ++o) // outputs[0] is the exec-out pin
+            out += std::string(memberCppType(outputs[o]->dataType)) + " fret" + idx + "_" + std::to_string(o - 1) + ";\n";
+
+        out += cpp + "(ctx, self";
+        for (size_t k = 1; k < inputs.size(); ++k) // inputs[0] is the exec-in pin; the rest are arguments
+        {
+            std::set<const Node*> dataStack;
+            out += ", " + emitDataExpr(cg, inputs[k].get(), dataStack, hoist);
+        }
+        for (size_t o = 1; o < outputs.size(); ++o) // return values passed as out-params (by reference)
+            out += ", fret" + idx + "_" + std::to_string(o - 1);
+        out += ");\n";
+
+        if (!outputs.empty())
+            if (Pin* tgt = realTargetOfOutput(cg.links, outputs[0].get()))
+                out += emitExecChain(cg, tgt->node, execStack);
+        return out;
+    }
+
+    // A Function Output statement: assign each connected return input to the generated function's out-param of
+    // the same name. It has no exec continuation (it's the end of the function body).
+    std::string emitFunctionOutputStmt(Codegen& cg, Node* node, const HoistMap& hoist)
+    {
+        const auto& inputs = node->getInputPins();
+        std::string out;
+        for (size_t j = 1; j < inputs.size(); ++j) // inputs[0] is the exec-in pin
+        {
+            std::set<const Node*> dataStack;
+            out += inputs[j]->name + " = " + emitDataExpr(cg, inputs[j].get(), dataStack, hoist) + ";\n";
+        }
+        return out;
+    }
+
     std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack)
     {
         if (!node) return std::string();
@@ -334,7 +440,10 @@ namespace
                 declareHoist(cg, pin, hoist, declared);
         }
 
-        std::string out = substituteExec(cg, def->emit, node, execStack, hoist);
+        std::string out;
+        if (node->isFunctionCall())        out = emitFunctionCallStmt(cg, node, execStack, hoist);
+        else if (node->isFunctionOutput()) out = emitFunctionOutputStmt(cg, node, hoist);
+        else                               out = substituteExec(cg, def->emit, node, execStack, hoist);
         execStack.erase(node);
         return out;
     }
@@ -509,6 +618,26 @@ void Scene::removeNode(ed::NodeId nodeId)
         { rejoinFromNode = s->node; rejoinFromIdx = indexOfPin(s->node->getOutputPins(), s); }
         if (Pin* d = targetOfOutput(m_links, node->getOutputPins()[0].get()))
         { rejoinToNode = d->node; rejoinToIdx = indexOfPin(d->node->getInputPins(), d); }
+    }
+    else if (!node->isReroute())
+    {
+        // A reroute chain feeding (or fed by) this node is meaningless once the node is gone — delete the
+        // whole waypoint line, not just the segment adjacent to the node. Repeat until no chain remains
+        // (deleteRerouteChain removes links, so re-scan after each).
+        for (;;)
+        {
+            Link* chainLink = nullptr;
+            for (const auto& link : m_links)
+            {
+                Pin* in = link->getInputId().AsPointer<Pin>();
+                Pin* out = link->getOutputId().AsPointer<Pin>();
+                Pin* other = (in && in->node == node) ? out : (out && out->node == node) ? in : nullptr;
+                if (other && other->node->isReroute()) { chainLink = link.get(); break; }
+            }
+            if (!chainLink)
+                break;
+            deleteRerouteChain(chainLink);
+        }
     }
 
     // Drop any links touching this node's pins, tracking the neighbours so their wildcard types re-resolve.
@@ -730,6 +859,158 @@ void Scene::syncNewEventNode(Node& newNode)
         }
 }
 
+// Drops an input pin of `node` (and any link feeding it). Mirror of removeMemberPin, which does outputs.
+void Scene::removeInputPin(Node* node, int index)
+{
+    const auto& ins = node->getInputPins();
+    if (index < 0 || index >= (int)ins.size())
+        return;
+    Pin* pin = ins[index].get();
+
+    std::set<Node*> affected;
+    std::erase_if(m_links, [&](const std::unique_ptr<Link>& link)
+    {
+        Pin* in = link->getInputId().AsPointer<Pin>();
+        Pin* out = link->getOutputId().AsPointer<Pin>();
+        if (in == pin) { if (out) { out->numConnections--; affected.insert(out->node); } return true; }
+        return false;
+    });
+
+    node->eraseInputPin(index);
+    for (Node* n : affected)
+        resolveNodeTypes(n);
+}
+
+// Applies one param/return edit to a single Function Input/Output node (not synced across nodes — each
+// function is independent). Function Input edits its OUTPUT pins (parameters); Function Output edits its
+// INPUT pins (return values). pin 0 is the fixed exec pin, so edited indices are always >= 1.
+void Scene::applyFunctionEdit(Node* node, const MemberEdit& edit)
+{
+    const bool inputSide = node->isFunctionOutput();
+    const auto& pins = inputSide ? node->getInputPins() : node->getOutputPins();
+
+    switch (edit.op)
+    {
+        case EMemberOp::Add:
+        {
+            const int count = (int)pins.size() - 1; // minus the exec pin
+            const std::string name = (inputSide ? "ret" : "arg") + std::to_string(count < 0 ? 0 : count);
+            if (inputSide) node->addReturn(edit.type, name);
+            else           node->addParam(edit.type, name);
+            break;
+        }
+        case EMemberOp::Remove:
+            if (inputSide) removeInputPin(node, edit.index);
+            else           removeMemberPin(node, edit.index);
+            break;
+        case EMemberOp::Rename:
+            if (edit.index >= 1 && edit.index < (int)pins.size())
+                pins[edit.index]->name = edit.name;
+            break;
+        case EMemberOp::Retype:
+            if (edit.index >= 1 && edit.index < (int)pins.size())
+            {
+                Pin* pin = pins[edit.index].get();
+                pin->dataType = edit.type;
+                pin->color = dataTypeColor(edit.type);
+                pin->defaultValue = defaultValueForType(edit.type);
+                // Drop a now-incompatible link on this pin (source->return input, or param output->consumer).
+                std::set<Node*> affected;
+                std::erase_if(m_links, [&](const std::unique_ptr<Link>& link)
+                {
+                    Pin* in = link->getInputId().AsPointer<Pin>();
+                    Pin* out = link->getOutputId().AsPointer<Pin>();
+                    if ((in == pin || out == pin) && in && out && !pinsCompatible(in, out))
+                    {
+                        in->numConnections--; out->numConnections--;
+                        affected.insert(in->node); affected.insert(out->node);
+                        return true;
+                    }
+                    return false;
+                });
+                for (Node* n : affected)
+                    resolveNodeTypes(n);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+// Loads `path` into a throwaway headless Scene and reads the (Function Input, Function Output) pair named
+// `funcName`: params come from the Input node's output pins (after the exec pin), returns from the Output
+// node's input pins. Returns false if the file has no such function.
+bool Scene::readFunctionSignature(const std::string& path, const std::string& funcName,
+                                  PinSig& params, PinSig& returns) const
+{
+    Scene tmp;
+    if (!tmp.loadFromFile(path))
+        return false;
+
+    Node* inputNode = nullptr;
+    for (const auto& node : tmp.m_nodes)
+        if (node->isFunctionInput() && node->getFunctionName() == funcName) { inputNode = node.get(); break; }
+    if (!inputNode)
+        return false;
+
+    const auto& outs = inputNode->getOutputPins();
+    for (size_t i = 1; i < outs.size(); ++i)
+        params.push_back({ outs[i]->dataType, outs[i]->name });
+
+    // The paired Function Output is the one reachable by exec flow from the Input (it carries no name).
+    if (Node* outputNode = reachableFunctionOutput(tmp.m_links, inputNode))
+    {
+        const auto& ins = outputNode->getInputPins();
+        for (size_t i = 1; i < ins.size(); ++i)
+            returns.push_back({ ins[i]->dataType, ins[i]->name });
+    }
+    return true;
+}
+
+// Scans Assets/Scripts for every function defined in any .scr (except the file being edited) so the add-node
+// popup can offer them for import. A function is any Function Input node's name.
+std::vector<Scene::FunctionRef> Scene::scanImportableFunctions() const
+{
+    namespace fs = std::filesystem;
+    std::vector<FunctionRef> refs;
+    std::error_code ec;
+    const fs::path dir = "Scripts";
+    if (!fs::is_directory(dir, ec))
+        return refs;
+
+    for (const auto& entry : fs::directory_iterator(dir, ec))
+    {
+        if (ec || !entry.is_regular_file() || entry.path().extension() != ".scr")
+            continue;
+        const std::string rel = "Scripts/" + entry.path().filename().string();
+        if (rel == m_scriptPath)
+            continue; // don't import yourself
+
+        Scene tmp;
+        if (!tmp.loadFromFile(rel))
+            continue;
+        const std::string stem = entry.path().stem().string();
+        for (const auto& node : tmp.m_nodes)
+            if (node->isFunctionInput() && !node->getFunctionName().empty())
+                refs.push_back({ rel, node->getFunctionName(), stem + ": " + node->getFunctionName() });
+    }
+    return refs;
+}
+
+// Creates a Function Call node mirroring `ref`'s signature (exec in/out + one input per param, one output per
+// return). The node remembers (scriptPath, funcName) so codegen can emit the call and re-read the signature.
+Node& Scene::importFunction(const FunctionRef& ref, ImVec2 pos)
+{
+    PinSig params, returns;
+    readFunctionSignature(ref.scriptPath, ref.funcName, params, returns);
+
+    Node& node = addNodeOfType("FunctionCall", pos);
+    node.setFunctionScriptPath(ref.scriptPath);
+    node.setFunctionName(ref.funcName);
+    node.makeFunctionCall(params, returns);
+    return node;
+}
+
 void Scene::pruneIncompatibleLinks(Node* node)
 {
     std::set<Node*> affected;
@@ -761,6 +1042,107 @@ void Scene::newGraph()
     m_hasBaseline = false;
 }
 
+bool Scene::isFunctionScript() const
+{
+    for (const auto& node : m_nodes)
+        if (node->isFunctionInput())
+            return true;
+    return false;
+}
+
+// Emits a static C++ function for every function this script defines (its Function Input/Output pairs) and
+// for every function reachable through Function Call nodes, transitively across files. Forward declarations
+// are emitted first so ordering and recursion don't matter. A function's body is the exec chain from its
+// Function Input node; its Function Output assigns the return out-params.
+void Scene::emitFunctions(std::string& code)
+{
+    // Owning graph for a referenced path: this Scene for the current file, else a lazily-loaded headless copy.
+    std::map<std::string, std::unique_ptr<Scene>> loaded;
+    auto sceneForPath = [&](const std::string& path) -> Scene*
+    {
+        if (path.empty() || path == m_scriptPath) return this;
+        if (auto it = loaded.find(path); it != loaded.end()) return it->second.get();
+        auto s = std::make_unique<Scene>();
+        Scene* p = s->loadFromFile(path) ? s.get() : nullptr;
+        loaded[path] = p ? std::move(s) : nullptr;
+        return p;
+    };
+
+    struct Discovered { Scene* scene = nullptr; std::string funcName; PinSig params, returns; Node* inputNode = nullptr; };
+    std::map<std::string, Discovered> byCpp; // cppName -> resolved info (inputNode null = couldn't resolve)
+    std::vector<std::pair<std::string, std::string>> worklist; // (scriptPath, funcName) still to resolve
+
+    if (isFunctionScript())
+        for (const auto& node : m_nodes)
+            if (node->isFunctionInput())
+                worklist.push_back({ m_scriptPath, node->getFunctionName() });
+    for (const auto& node : m_nodes)
+        if (node->isFunctionCall())
+            worklist.push_back({ node->getFunctionScriptPath(), node->getFunctionName() });
+
+    while (!worklist.empty())
+    {
+        const auto [path, name] = worklist.back();
+        worklist.pop_back();
+        const std::string cpp = funcCppName(path, name);
+        if (byCpp.count(cpp)) continue;
+
+        Discovered d;
+        Scene* s = sceneForPath(path);
+        if (s)
+        {
+            d.scene = s;
+            d.funcName = name;
+            for (const auto& n : s->m_nodes)
+                if (n->isFunctionInput() && n->getFunctionName() == name) { d.inputNode = n.get(); break; }
+            Node* outputNode = d.inputNode ? reachableFunctionOutput(s->m_links, d.inputNode) : nullptr;
+            if (d.inputNode)
+                for (size_t i = 1; i < d.inputNode->getOutputPins().size(); ++i)
+                    d.params.push_back({ d.inputNode->getOutputPins()[i]->dataType, d.inputNode->getOutputPins()[i]->name });
+            if (outputNode)
+                for (size_t i = 1; i < outputNode->getInputPins().size(); ++i)
+                    d.returns.push_back({ outputNode->getInputPins()[i]->dataType, outputNode->getInputPins()[i]->name });
+            for (const auto& n : s->m_nodes) // nested calls this function makes
+                if (n->isFunctionCall())
+                    worklist.push_back({ n->getFunctionScriptPath(), n->getFunctionName() });
+        }
+        byCpp[cpp] = std::move(d);
+    }
+
+    auto signature = [](const Discovered& d, const std::string& cpp)
+    {
+        std::string s = "void " + cpp + "(const ScriptContext* ctx, Entity* self";
+        for (const auto& [t, n] : d.params)  s += std::string(", ") + memberCppType(t) + " " + n;
+        for (const auto& [t, n] : d.returns) s += std::string(", ") + memberCppType(t) + "& " + n;
+        s += ")";
+        return s;
+    };
+
+    bool any = false;
+    for (const auto& [cpp, d] : byCpp)
+        if (d.inputNode) { code += "static " + signature(d, cpp) + ";\n"; any = true; }
+    if (any) code += "\n";
+
+    for (const auto& [cpp, d] : byCpp)
+    {
+        if (!d.inputNode) continue;
+        code += "static " + signature(d, cpp) + "\n{\n";
+
+        Codegen cg{ d.scene->m_links };
+        std::set<const Node*> execStack;
+        std::string chain;
+        Pin* execOut = d.inputNode->getOutputPins().empty() ? nullptr : d.inputNode->getOutputPins()[0].get();
+        if (execOut)
+            if (Pin* tgt = realTargetOfOutput(cg.links, execOut))
+                chain = emitExecChain(cg, tgt->node, execStack);
+
+        const std::string body = applyIndent(cg.globalDecls + chain, "    ");
+        if (!body.empty())
+            code += indentLines(body, "    ");
+        code += "}\n\n";
+    }
+}
+
 std::string Scene::generateCpp()
 {
     if (m_nodeEditorContext)
@@ -782,7 +1164,14 @@ std::string Scene::generateCpp()
         code += "SCRIPT_EXPORT unsigned int ScriptDataSize() { return (unsigned int)sizeof(ScriptData); }\n";
     }
 
-    if (Node* entry = findEntry("OnSpawn"))
+    // Function definitions (this script's own, plus any it imports) come before the entry points that call
+    // them. A dedicated function script defines functions and nothing else — it emits no entry points.
+    code += "\n";
+    emitFunctions(code);
+
+    const bool functionScript = isFunctionScript();
+
+    if (Node* entry = !functionScript ? findEntry("OnSpawn") : nullptr)
     {
         code += "SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)\n{\n";
 
@@ -800,7 +1189,7 @@ std::string Scene::generateCpp()
         code += "}\n\n";
     }
 
-    if (Node* entry = findEntry("OnDestroy"))
+    if (Node* entry = !functionScript ? findEntry("OnDestroy") : nullptr)
     {
         code += "SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scriptData)\n{\n";
 
@@ -821,7 +1210,7 @@ std::string Scene::generateCpp()
     // On Event dispatches a runtime-fired event by index (not name — the host resolves a name to an index via
     // ScriptEventCount/ScriptEventName and caches it, keeping the fire-time call a plain int compare). The
     // index is the entry's position among the On Event node's output pins, so it lines up with ScriptEventName.
-    if (Node* eventNode = findEventEntry())
+    if (Node* eventNode = !functionScript ? findEventEntry() : nullptr)
     {
         const auto& entries = eventNode->getOutputPins();
 
@@ -858,7 +1247,7 @@ std::string Scene::generateCpp()
         code += "}\n\n";
     }
 
-    if (Node* entry = findEntry("Update"))
+    if (Node* entry = !functionScript ? findEntry("Update") : nullptr)
     {
         code += "SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)\n{\n";
 
@@ -918,6 +1307,38 @@ std::string Scene::serializeGraph()
         if (m_nodes[i]->isEventNode())
             for (const auto& pin : m_nodes[i]->getOutputPins())
                 s += "//@event " + std::to_string(i) + " " + pin->name + "\n";
+
+    // Function boundary + call nodes. All pins are emitted before links so a load recreates them first.
+    // Function Input params are its output pins after the exec pin; Function Output returns are its input
+    // pins after the exec pin; a Function Call stores its target (path + name) and mirrors the signature.
+    for (int i = 0; i < (int)m_nodes.size(); ++i)
+    {
+        const Node* node = m_nodes[i].get();
+        if (node->isFunctionInput())
+        {
+            s += "//@funcname " + std::to_string(i) + " " + node->getFunctionName() + "\n";
+            const auto& outs = node->getOutputPins();
+            for (size_t j = 1; j < outs.size(); ++j)
+                s += "//@param " + std::to_string(i) + " " + memberTypeToken(outs[j]->dataType) + " " + outs[j]->name + "\n";
+        }
+        else if (node->isFunctionOutput())
+        {
+            // No //@funcname: a Function Output has no name — codegen pairs it to its Input by exec reachability.
+            const auto& ins = node->getInputPins();
+            for (size_t j = 1; j < ins.size(); ++j)
+                s += "//@return " + std::to_string(i) + " " + memberTypeToken(ins[j]->dataType) + " " + ins[j]->name + "\n";
+        }
+        else if (node->isFunctionCall())
+        {
+            s += "//@funccall " + std::to_string(i) + " " + node->getFunctionScriptPath() + " " + node->getFunctionName() + "\n";
+            const auto& ins = node->getInputPins();
+            for (size_t j = 1; j < ins.size(); ++j)
+                s += "//@callparam " + std::to_string(i) + " " + memberTypeToken(ins[j]->dataType) + " " + ins[j]->name + "\n";
+            const auto& outs = node->getOutputPins();
+            for (size_t j = 1; j < outs.size(); ++j)
+                s += "//@callret " + std::to_string(i) + " " + memberTypeToken(outs[j]->dataType) + " " + outs[j]->name + "\n";
+        }
+    }
 
     for (int i = 0; i < (int)m_nodes.size(); ++i)
     {
@@ -1044,6 +1465,77 @@ bool Scene::loadFromFile(const std::string& path)
         byIndex[ni]->addEventEntry(name);
     }
 
+    // pass 1b3: Function boundary + call nodes (before links, which reference these pins by index)
+    for (const std::string& ln : lines) // function names first (pairs Input/Output, titles Call)
+    {
+        LineReader r{ ln };
+        if (r.token() != "//@funcname") continue;
+        const int ni = toInt(r.token());
+        const std::string name = r.token();
+        if (ni >= 0 && ni < (int)byIndex.size() && byIndex[ni])
+            byIndex[ni]->setFunctionName(name);
+    }
+    for (const std::string& ln : lines) // Function Input parameters (its output pins)
+    {
+        LineReader r{ ln };
+        if (r.token() != "//@param") continue;
+        const int ni = toInt(r.token());
+        const std::string typeTok = r.token();
+        const std::string name = r.token();
+        if (ni >= 0 && ni < (int)byIndex.size() && byIndex[ni] && byIndex[ni]->isFunctionInput())
+            byIndex[ni]->addParam(memberTypeFromToken(typeTok), name);
+    }
+    for (const std::string& ln : lines) // Function Output returns (its input pins)
+    {
+        LineReader r{ ln };
+        if (r.token() != "//@return") continue;
+        const int ni = toInt(r.token());
+        const std::string typeTok = r.token();
+        const std::string name = r.token();
+        if (ni >= 0 && ni < (int)byIndex.size() && byIndex[ni] && byIndex[ni]->isFunctionOutput())
+            byIndex[ni]->addReturn(memberTypeFromToken(typeTok), name);
+    }
+    {
+        // Function Call: gather each call's signature (file order) then rebuild its pins in one shot. The
+        // signature is stored inline (not re-read from the referenced file) so a load is self-contained.
+        std::map<int, PinSig> callParams, callReturns;
+        std::map<int, std::pair<std::string, std::string>> callTargets; // node -> (scriptPath, funcName)
+        for (const std::string& ln : lines)
+        {
+            LineReader r{ ln };
+            const std::string tag = r.token();
+            if (tag == "//@funccall")
+            {
+                const int ni = toInt(r.token());
+                const std::string path2 = r.token();
+                const std::string name = r.token();
+                callTargets[ni] = { path2, name };
+            }
+            else if (tag == "//@callparam")
+            {
+                const int ni = toInt(r.token());
+                const std::string typeTok = r.token();
+                const std::string name = r.token();
+                callParams[ni].push_back({ memberTypeFromToken(typeTok), name });
+            }
+            else if (tag == "//@callret")
+            {
+                const int ni = toInt(r.token());
+                const std::string typeTok = r.token();
+                const std::string name = r.token();
+                callReturns[ni].push_back({ memberTypeFromToken(typeTok), name });
+            }
+        }
+        for (const auto& [ni, target] : callTargets)
+        {
+            if (ni < 0 || ni >= (int)byIndex.size() || !byIndex[ni] || !byIndex[ni]->isFunctionCall())
+                continue;
+            byIndex[ni]->setFunctionScriptPath(target.first);
+            byIndex[ni]->setFunctionName(target.second);
+            byIndex[ni]->makeFunctionCall(callParams[ni], callReturns[ni]);
+        }
+    }
+
     // pass 1c: Label box size + caption
     for (const std::string& ln : lines)
     {
@@ -1148,6 +1640,18 @@ void Scene::update(double deltaSec)
         }
     }
 
+    // Same as above, for Function Input/Output params & returns (each function is independent, not synced).
+    for (auto& node : m_nodes)
+    {
+        if (!node->isFunctionInput() && !node->isFunctionOutput())
+            continue;
+        if (const MemberEdit edit = node->takeMemberEdit(); edit.op != EMemberOp::None)
+        {
+            applyFunctionEdit(node.get(), edit);
+            break;
+        }
+    }
+
     processInteractions();
 
     for (auto& link : m_links)
@@ -1158,6 +1662,7 @@ void Scene::update(double deltaSec)
     if (ed::ShowBackgroundContextMenu())
     {
         m_pendingAddPos = ed::ScreenToCanvas(ImGui::GetMousePos());
+        m_importFunctions = scanImportableFunctions(); // refresh the importable-function list while it's open
         ImGui::OpenPopup("AddNodePopup");
     }
     if (ImGui::BeginPopup("AddNodePopup"))
@@ -1168,7 +1673,7 @@ void Scene::update(double deltaSec)
         std::vector<Category> categories;
         for (const NodeDef& def : nodeRegistry())
         {
-            if (isRerouteType(def.typeId)) // created by double-clicking a link, not from the palette
+            if (isRerouteType(def.typeId) || isFunctionCallType(def.typeId)) // created by dbl-click / import, not the palette
                 continue;
             if (categories.empty() || categories.back().name != def.category)
                 categories.push_back({ def.category, {} });
@@ -1227,6 +1732,15 @@ void Scene::update(double deltaSec)
             ImGui::TableSetColumnIndex(1);
             renderRange(split, categories.size());
             ImGui::EndTable();
+        }
+
+        // Importable functions defined in other .scr files (full-width section under the palette columns).
+        if (!m_importFunctions.empty())
+        {
+            ImGui::SeparatorText("Import Function");
+            for (const FunctionRef& ref : m_importFunctions)
+                if (ImGui::MenuItem(ref.displayLabel.c_str()))
+                    importFunction(ref, m_pendingAddPos);
         }
 
         ImGui::EndPopup();

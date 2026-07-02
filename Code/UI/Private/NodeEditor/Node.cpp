@@ -91,6 +91,40 @@ Node& Node::makeReroute(EDataType type)
     return *this;
 }
 
+// A function parameter is a plain readable data OUTPUT pin on the Function Input node: the body reads it, and
+// codegen resolves it to the C++ parameter of the generated function.
+Node& Node::addParam(EDataType type, const std::string& name)
+{
+    addOutput(type, name);
+    return *this;
+}
+
+// A function return is a data INPUT pin on the Function Output node: whatever feeds it is assigned to the
+// generated function's out-parameter when the body reaches the Function Output.
+Node& Node::addReturn(EDataType type, const std::string& name)
+{
+    addInput(type, name, defaultValueForType(type));
+    return *this;
+}
+
+void Node::eraseInputPin(int index)
+{
+    if (index >= 0 && index < (int)m_inputPins.size())
+        m_inputPins.erase(m_inputPins.begin() + index);
+}
+
+Node& Node::makeFunctionCall(const std::vector<std::pair<EDataType, std::string>>& params,
+                             const std::vector<std::pair<EDataType, std::string>>& returns)
+{
+    addInput(EDataType::Exec, "", "");            // pin 0: exec in
+    for (const auto& [type, name] : params)
+        addInput(type, name, defaultValueForType(type));
+    addOutput(EDataType::Exec, "");               // pin 0: exec out
+    for (const auto& [type, name] : returns)
+        addOutput(type, name);
+    return *this;
+}
+
 MemberEdit Node::takeMemberEdit()
 {
     const MemberEdit e = m_pendingEdit;
@@ -391,6 +425,136 @@ void Node::updateEvent(bool firstFrame)
     ed::EndNode();
 }
 
+// Function Input / Function Output node: a function-name field plus an editable list of typed pins (the
+// parameters or return values). pin 0 is the fixed exec pin (output for Input, input for Output) that rides
+// the title line; the editable pins follow. Edits are recorded as MemberEdits with absolute pin indices and
+// applied by Scene (which owns the links). inputSide picks which pin list is the editable one.
+void Node::updateFunctionIO(bool firstFrame, bool inputSide)
+{
+    if (firstFrame)
+        ed::SetNodePosition(*this, m_initialPos);
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float spacing = style.ItemSpacing.x;
+    auto& editPins = inputSide ? m_inputPins : m_outputPins;
+
+    float typeBtnW = 0.0f;
+    for (EDataType t : memberTypes)
+        typeBtnW = fmaxf(typeBtnW, ImGui::CalcTextSize(memberTypeToken(t)).x);
+    typeBtnW += style.FramePadding.x * 2.0f + 8.0f;
+    const float nameW = 100.0f;
+    const float removeW = ImGui::GetFrameHeight();
+    const float rowW = kPinIcon + spacing + typeBtnW + spacing + nameW + spacing + removeW;
+
+    const char* title = inputSide ? "Function Output" : "Function Input";
+    const float titleW = ImGui::CalcTextSize(title).x + kPinIcon + spacing;
+    const char* addLabel = inputSide ? "+ Add Return" : "+ Add Param";
+    const float addW = ImGui::CalcTextSize(addLabel).x + style.FramePadding.x * 2.0f;
+    const float nodeW = fmaxf(fmaxf(fmaxf(rowW, titleW), 140.0f), addW);
+
+    ed::BeginNode(*this);
+    ImGui::PushID(this);
+
+    const ImVec2 nodeOriginScreen = ImGui::GetCursorScreenPos();
+    const float nodeLeftX = ImGui::GetCursorPosX();
+
+    // Title line with the fixed exec pin: left (exec-in) for Function Output, right (exec-out) for Function Input.
+    ImGui::BeginGroup();
+    ImGui::SetCursorPosX(nodeLeftX);
+    if (inputSide && !m_inputPins.empty())
+    {
+        ed::BeginPin(*m_inputPins[0], ed::PinKind::Input);
+        drawPinIcon(*m_inputPins[0]);
+        ed::EndPin();
+        ImGui::SameLine(0.0f, spacing);
+    }
+    ImGui::TextUnformatted(title);
+    if (!inputSide && !m_outputPins.empty())
+    {
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::SetCursorPosX(nodeLeftX + nodeW - kPinIcon);
+        ed::BeginPin(*m_outputPins[0], ed::PinKind::Output);
+        drawPinIcon(*m_outputPins[0]);
+        ed::EndPin();
+    }
+    ImGui::EndGroup();
+
+    const float dividerY = ImGui::GetItemRectMax().y + 2.0f;
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(nodeOriginScreen.x, dividerY),
+        ImVec2(nodeOriginScreen.x + nodeW, dividerY), ImColor(255, 255, 255, 40), 1.0f);
+    ImGui::Dummy(ImVec2(nodeW, 4.0f));
+
+    // Function name field — only on Function Input (it names the function). Function Output has no name; it
+    // pairs to the Input whose exec flow reaches it (see Scene codegen), so it needs no identity of its own.
+    if (!inputSide)
+    {
+        char buf[64];
+        for (size_t k = 0; k < sizeof(buf); ++k)
+            buf[k] = (k + 1 < sizeof(buf) && k < m_funcName.size()) ? m_funcName[k] : '\0';
+        ImGui::SetCursorPosX(nodeLeftX);
+        ImGui::SetNextItemWidth(nodeW);
+        ImGui::PushID("fn");
+        if (ImGui::InputText("##fnname", buf, sizeof(buf)))
+            setFunctionName(sanitizeIdentifier(buf));
+        ImGui::PopID();
+    }
+
+    // Editable typed pins (pin 0 is the exec pin, skipped).
+    for (int i = 1; i < (int)editPins.size(); ++i)
+    {
+        Pin& pin = *editPins[i];
+        ImGui::PushID(i);
+        ImGui::SetCursorPosX(nodeLeftX);
+
+        if (inputSide) // Function Output: the return's input pin sits on the left, before the controls.
+        {
+            ed::BeginPin(pin, ed::PinKind::Input);
+            drawPinIcon(pin);
+            ed::EndPin();
+            ImGui::SameLine(0.0f, spacing);
+        }
+
+        if (ImGui::Button(memberTypeToken(pin.dataType), ImVec2(typeBtnW, 0.0f)))
+        {
+            constexpr int typeCount = (int)(sizeof(memberTypes) / sizeof(memberTypes[0]));
+            int idx = 0;
+            for (int k = 0; k < typeCount; ++k)
+                if (memberTypes[k] == pin.dataType) { idx = k; break; }
+            m_pendingEdit = { EMemberOp::Retype, i, memberTypes[(idx + 1) % typeCount], "" };
+        }
+
+        ImGui::SameLine(0.0f, spacing);
+        char buf[64];
+        for (size_t k = 0; k < sizeof(buf); ++k)
+            buf[k] = (k + 1 < sizeof(buf) && k < pin.name.size()) ? pin.name[k] : '\0';
+        ImGui::SetNextItemWidth(nameW);
+        if (ImGui::InputText("##name", buf, sizeof(buf)))
+            m_pendingEdit = { EMemberOp::Rename, i, pin.dataType, sanitizeIdentifier(buf) };
+
+        ImGui::SameLine(0.0f, spacing);
+        if (ImGui::Button("x", ImVec2(removeW, 0.0f)))
+            m_pendingEdit = { EMemberOp::Remove, i, pin.dataType, "" };
+
+        if (!inputSide) // Function Input: the param's output pin sits on the right, after the controls.
+        {
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGui::SetCursorPosX(nodeLeftX + nodeW - kPinIcon);
+            ed::BeginPin(pin, ed::PinKind::Output);
+            drawPinIcon(pin);
+            ed::EndPin();
+        }
+
+        ImGui::PopID();
+    }
+
+    ImGui::SetCursorPosX(nodeLeftX);
+    if (ImGui::Button(addLabel, ImVec2(nodeW, 0.0f)))
+        m_pendingEdit = { EMemberOp::Add, -1, EDataType::Float, "" };
+
+    ImGui::PopID();
+    ed::EndNode();
+}
+
 void Node::updateLabel(bool firstFrame)
 {
     if (firstFrame)
@@ -534,6 +698,16 @@ void Node::update(double /*deltaSec*/, bool firstFrame)
     if (isEventNode())
     {
         updateEvent(firstFrame);
+        return;
+    }
+    if (isFunctionInput())
+    {
+        updateFunctionIO(firstFrame, false);
+        return;
+    }
+    if (isFunctionOutput())
+    {
+        updateFunctionIO(firstFrame, true);
         return;
     }
     if (isLabel())

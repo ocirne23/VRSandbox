@@ -5,6 +5,7 @@ import Core;
 import UI.imgui_node_editor;
 import UI.NodeEditor.Node;
 import UI.NodeEditor.Link;
+import UI.NodeEditor.NodeDef;
 
 namespace NodeEditor
 {
@@ -49,6 +50,26 @@ private:
     void syncNewMemberNode(Node& newNode);            // seed a new Script Data node from the shared member set
     void applyEventEdit(const MemberEdit& edit);      // replay an entry edit across all On Event nodes
     void syncNewEventNode(Node& newNode);             // seed a new On Event node from the shared entry set
+
+    // ---- functions (imported reusable subgraphs) ----
+    using PinSig = std::vector<std::pair<EDataType, std::string>>; // ordered (type, name) list
+
+    struct FunctionRef
+    {
+        std::string scriptPath;   // .scr the function is defined in (relative, e.g. "Scripts/Math.scr")
+        std::string funcName;     // the function's name (its Function Input/Output pair share it)
+        std::string displayLabel; // "<file>: <func>" shown in the import menu
+    };
+
+    void applyFunctionEdit(Node* node, const MemberEdit& edit); // add/remove/rename/retype one param/return
+    void removeInputPin(Node* node, int index);                 // drop an input pin + its links
+    bool readFunctionSignature(const std::string& path, const std::string& funcName,
+                               PinSig& params, PinSig& returns) const; // read a function's I/O from its file
+    std::vector<FunctionRef> scanImportableFunctions() const;   // every function defined in Assets/Scripts/*.scr
+    Node& importFunction(const FunctionRef& ref, ImVec2 pos);   // create a Function Call node for a function
+    void emitFunctions(std::string& code);                      // emit C++ defs for every function used/defined here
+    bool isFunctionScript() const;                              // true if this graph defines a function (Function Input)
+
     int  indexOfNode(const Node* node) const;
     std::string serializeGraph();
 
@@ -67,6 +88,8 @@ private:
     // positions are valid) — m_hasBaseline gates that.
     std::string m_baselineState;
     bool m_hasBaseline = false;
+
+    std::vector<FunctionRef> m_importFunctions; // cached function list, refreshed when the add-node popup opens
 };
 
 } // namespace NodeEditor

@@ -88,6 +88,27 @@ public:
     bool isEventNode() const { return isEventEntryType(m_typeId); }
     Node& addEventEntry(const std::string& name);
 
+    // Function boundary + call nodes. Function Input/Output edit their own typed pins (params/returns) via the
+    // MemberEdit machinery, but are not synced across nodes. A Function Call mirrors an imported function's
+    // signature and remembers which (script, function) it targets.
+    bool isFunctionInput() const  { return isFunctionInputType(m_typeId); }
+    bool isFunctionOutput() const { return isFunctionOutputType(m_typeId); }
+    bool isFunctionCall() const   { return isFunctionCallType(m_typeId); }
+
+    const std::string& getFunctionName() const { return m_funcName; }
+    void setFunctionName(const std::string& name) { m_funcName = name; m_name = name.empty() ? m_name : name; }
+    const std::string& getFunctionScriptPath() const { return m_funcScriptPath; }
+    void setFunctionScriptPath(const std::string& path) { m_funcScriptPath = path; }
+
+    Node& addParam(EDataType type, const std::string& name);  // Function Input: a typed data OUTPUT pin
+    Node& addReturn(EDataType type, const std::string& name); // Function Output: a typed data INPUT pin
+    void  eraseInputPin(int index);
+
+    // Function Call: builds the fixed exec in/out plus one input per param and one output per return, in the
+    // order the signature lists them.
+    Node& makeFunctionCall(const std::vector<std::pair<EDataType, std::string>>& params,
+                           const std::vector<std::pair<EDataType, std::string>>& returns);
+
     // Label (comment box) accessors, used by save/load to persist the caption and box size.
     bool isLabel() const { return isLabelType(m_typeId); }
     const std::string& getLabelText() const { return m_labelText; }
@@ -112,6 +133,7 @@ private:
 
 	void updateDynamic(bool firstFrame); // in-node editor body for the Script Data node
 	void updateEvent(bool firstFrame);   // in-node editor body for the On Event node
+	void updateFunctionIO(bool firstFrame, bool inputSide); // in-node editor for Function Input/Output
 	void updateLabel(bool firstFrame);   // group/comment box body for the Label node
 	void updateReroute(bool firstFrame); // small draggable dot for the Reroute waypoint
 
@@ -123,6 +145,8 @@ private:
     std::string m_typeId;
     int m_enumSelection = 0;             // index into the node def's enumOptions (dropdown property)
     MemberEdit m_pendingEdit;            // Script Data: structural member edit recorded this frame
+    std::string m_funcName;              // Function Input/Output/Call: the function's name (pairs I/O, titles Call)
+    std::string m_funcScriptPath;        // Function Call: the .scr the imported function lives in
     std::string m_labelText = "Label";   // Label: title-bar caption
     ImVec2 m_labelSize = ImVec2(0.0f, 0.0f); // Label: current group box size (updated as the user resizes)
     bool m_editingLabel = false;         // Label: title bar is in rename (InputText) mode

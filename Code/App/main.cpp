@@ -64,16 +64,10 @@ int main()
 
     std::vector<EntityPtr> entities;
     entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(), false));
+    entities.push_back(world.spawnAssetFile("Entities/character.pre", Transform()));
 
     GizmoController gizmo;
     gizmo.initialize(world);
-    EntityPtr character;
-    character = world.spawnAssetFile("Entities/character.pre", Transform());
-    entities.push_back(character);
-    float charSpeed = 0.0f;
-    Tweak::floatVar("Animation", "Speed", &charSpeed, 0.0f, 1.0f, 0.01f,[&]() { getComponent<AnimatorComponent>(character)->stateMachine.setFloat("speed", charSpeed); });
-    if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
-        anim->onEvent = [](const std::string& e) { Log::info("anim event: " + e); }; // footstep / hit notifies
 
     std::string currentScriptPath = "Scripts/Graph.scr"; // the visual-script the panel edits (F6 recompiles it)
     auto keyHandler = [&](const SDL_KeyboardEvent& evt) {
@@ -89,9 +83,6 @@ int main()
             renderer.reloadShaders();
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             Globals::scriptHost.getOrLoad(currentScriptPath, true); // recompile; entities using it hot-swap
-        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-            if (AnimatorComponent* anim = getComponent<AnimatorComponent>(character))
-                anim->stateMachine.setTrigger("attack"); // F: one-shot attack (returns to locomotion)
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_P && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             renderer.toggleGiProbeDebug();          // P: show/hide GI probe debug cubes
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_O && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)

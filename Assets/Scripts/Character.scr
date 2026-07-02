@@ -1,4 +1,29 @@
 #include "ScriptAPI.h"
+
+static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result);
+
+static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result)
+{
+    int i6 = Number;
+    bool b1 = true;
+    if (i6 < 2)
+    {
+        b1 = false;
+    }
+    else
+    {
+        for (int i3 = 2; i3 < ((i6 / 2) - 1); ++i3)
+        {
+            if ((i6 % i3) == 0)
+            {
+                b1 = false;
+                break;
+            }
+        }
+    }
+    Result = b1;
+}
+
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
 {
     ctx->log("Character On Spawn");
@@ -25,10 +50,16 @@ SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx,
     case 0:
     {
         ctx->log("W Up");
+        bool fret12_0;
+        Graph_IsPrime(ctx, self, 41, fret12_0);
+        ctx->logf("41 is %d", fret12_0);
     } break;
     case 1:
     {
         ctx->log("W Down");
+        bool fret13_0;
+        Graph_IsPrime(ctx, self, 42, fret13_0);
+        ctx->logf("42 is %d", fret13_0);
     } break;
     }
 }
@@ -51,8 +82,18 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@node 9 OnEvent 23 -388
 //@node 10 Print 304 -384
 //@node 11 Print 304 -316
+//@node 12 FunctionCall 656 -364
+//@node 13 FunctionCall 656 -268
+//@node 14 Printf 1015 -256
+//@node 15 Printf 1016 -360
 //@event 9 W Up
 //@event 9 W Down
+//@funccall 12 Scripts/Graph.scr IsPrime
+//@callparam 12 int Number
+//@callret 12 bool Result
+//@funccall 13 Scripts/Graph.scr IsPrime
+//@callparam 13 int Number
+//@callret 13 bool Result
 //@pin 2 1 glm::vec3{ 0.0f, 0.0f, 0.0f }
 //@pin 2 2 1.0f
 //@pin 2 3 glm::vec3{ 0.0f, 0.0f, 0.0f }
@@ -66,6 +107,12 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@pin 8 1 "Character On Destroy"
 //@pin 10 1 "W Up"
 //@pin 11 1 "W Down"
+//@pin 12 1 41
+//@pin 13 1 42
+//@pin 14 1 "42 is %d"
+//@pin 14 2 0.0f
+//@pin 15 1 "41 is %d"
+//@pin 15 2 0.0f
 //@link 3 0 2 3
 //@link 4 0 3 1
 //@link 1 0 4 0
@@ -74,3 +121,9 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@link 6 0 8 0
 //@link 9 0 10 0
 //@link 9 1 11 0
+//@link 10 0 12 0
+//@link 11 0 13 0
+//@link 13 1 14 2
+//@link 13 0 14 0
+//@link 12 1 15 2
+//@link 12 0 15 0

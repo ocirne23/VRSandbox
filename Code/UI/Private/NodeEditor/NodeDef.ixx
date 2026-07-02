@@ -111,6 +111,15 @@ export bool isRerouteType(std::string_view typeId) { return typeId == "Reroute";
 // event name to the matching entry's exec chain (see Scene::generateCpp / applyEventEdit).
 export bool isEventEntryType(std::string_view typeId) { return typeId == "OnEvent"; }
 
+// Function boundary + call nodes. A .scr can define multiple named functions; each is a (Function Input,
+// Function Output) pair sharing a function name. Function Input holds a fixed Exec output plus user-defined
+// typed OUTPUT pins (the parameters); Function Output holds a fixed Exec input plus user-defined typed INPUT
+// pins (the return values). A Function Call node (created by importing a function, hidden from the palette)
+// mirrors that signature and, at codegen, expands to a real C++ function call. See Scene::generateCpp.
+export bool isFunctionInputType(std::string_view typeId)  { return typeId == "FunctionInput"; }
+export bool isFunctionOutputType(std::string_view typeId) { return typeId == "FunctionOutput"; }
+export bool isFunctionCallType(std::string_view typeId)   { return typeId == "FunctionCall"; }
+
 // Serialization token for any pin data type (covers Exec/String too, unlike memberTypeToken).
 export const char* dataTypeToken(EDataType type)
 {
@@ -257,6 +266,17 @@ export const std::vector<NodeDef>& nodeRegistry()
         "((@)$0)",
         { "int", "float", "bool" },
         { "int", "float", "bool" }});
+
+    // ---- functions ----
+    // Function boundary nodes (special-cased in codegen). Function Input is the entry: a fixed Exec output
+    // (pin 0) plus user-added typed parameter outputs. Function Output is the exit: a fixed Exec input (pin 0)
+    // plus user-added typed return inputs. Both carry a function name so one .scr can hold several functions.
+    r.push_back({ "FunctionInput",  "Function Input",  "Functions", true, {}, { { "", D::Exec, "" } }, "" });
+    r.push_back({ "FunctionOutput", "Function Output", "Functions", true, { { "", D::Exec, "" } }, {}, "" });
+
+    // Function Call: created by importing a function (hidden from the palette, like Reroute). Its pins are
+    // rebuilt from the referenced function's signature; codegen turns it into a C++ call.
+    r.push_back({ "FunctionCall", "Function Call", "Functions", true, {}, {}, "" });
 
     // ---- variables ----
     // Script Data is special-cased everywhere (isScriptDataType): its output pins are user-defined members
