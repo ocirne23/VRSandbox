@@ -31,8 +31,6 @@ public:
     // The returned pointer is stable until shutdown().
     const ScriptModule* getOrLoad(const std::string& path, bool forceRecompile = false);
 
-    void shutdown();
-
 private:
 
     ScriptHost(const ScriptHost&) = delete;

@@ -247,7 +247,9 @@ export const std::vector<NodeDef>& nodeRegistry()
     r.push_back({ "ForLoop", "For Loop", "Flow", true,
         { { "", D::Exec, "" }, { "start", D::Int, "0" }, { "count", D::Int, "10" } },
         { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
-        "for (int i@ = $1; i@ < $2; ++i@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+        "for (int i@ = $1; i@ " + std::string(1, ENUM_TOKEN) + " $2; ++i@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1",
+        { "Less than", "Less or Equals", "Equals", "Greater or Equals", "Greater than", "Not Equals" },
+        { "<", "<=", "==", ">=", ">", "!=" } });
 
     r.push_back({ "Break", "Break", "Flow", true,
         {{ "", D::Exec, "" }}, 

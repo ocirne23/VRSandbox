@@ -4,17 +4,16 @@ static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bo
 
 static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result)
 {
-    int i6 = Number;
     bool b1 = true;
-    if (i6 < 2)
+    if (Number < 2)
     {
         b1 = false;
     }
     else
     {
-        for (int i3 = 2; i3 < ((i6 / 2) - 1); ++i3)
+        for (int i3 = 2; i3 <= (Number / 2); ++i3)
         {
-            if ((i6 % i3) == 0)
+            if ((Number % i3) == 0)
             {
                 b1 = false;
                 break;
@@ -70,22 +69,22 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 }
 
 //@graph 1
-//@node 0 Update 116 64
-//@node 1 GetElapsedTime -160 151
-//@node 2 SetEntity 544 86
-//@node 3 MakeVec3 284 135
-//@node 4 Mul -9 160
+//@node 0 Update 462 -112
+//@node 1 GetElapsedTime 224 -25
+//@node 2 SetEntity 784 -106
+//@node 3 MakeVec3 582 -57
+//@node 4 Mul 368 -29
 //@node 5 OnSpawn 0 -208
 //@node 6 OnDestroy 2 -112
 //@node 7 Print 144 -204
 //@node 8 Print 144 -108
-//@node 9 OnEvent 23 -388
+//@node 9 OnEvent 95 -377
 //@node 10 Print 304 -384
 //@node 11 Print 304 -316
-//@node 12 FunctionCall 656 -364
-//@node 13 FunctionCall 656 -268
-//@node 14 Printf 1015 -256
-//@node 15 Printf 1016 -360
+//@node 12 FunctionCall 536 -412
+//@node 13 FunctionCall 536 -316
+//@node 14 Printf 790 -315
+//@node 15 Printf 791 -419
 //@event 9 W Up
 //@event 9 W Down
 //@funccall 12 Scripts/Graph.scr IsPrime

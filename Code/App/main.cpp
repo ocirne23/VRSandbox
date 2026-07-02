@@ -274,7 +274,6 @@ int main()
         renderer.present();
         frameCount++;
     }
-    Globals::scriptHost.shutdown();
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
     return 0;

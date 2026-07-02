@@ -401,8 +401,3 @@ const ScriptModule* ScriptHost::getOrLoad(const std::string& path, bool forceRec
 {
     return m_impl->getOrLoad(path, forceRecompile);
 }
-
-void ScriptHost::shutdown()
-{
-    m_impl->unloadAll();
-}

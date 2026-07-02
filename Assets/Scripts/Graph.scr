@@ -4,17 +4,16 @@ static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bo
 
 static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result)
 {
-    int i6 = Number;
     bool b1 = true;
-    if (i6 < 2)
+    if (Number < 2)
     {
         b1 = false;
     }
     else
     {
-        for (int i3 = 2; i3 < ((i6 / 2) - 1); ++i3)
+        for (int i3 = 2; i3 <= (Number / 2); ++i3)
         {
-            if ((i6 % i3) == 0)
+            if ((Number % i3) == 0)
             {
                 b1 = false;
                 break;
@@ -25,46 +24,36 @@ static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bo
 }
 
 //@graph 1
-//@node 0 IfElse -3 499
-//@node 1 Bool 128 391
-//@node 2 Set 592 384
-//@node 3 ForLoop 250 608
-//@node 4 Modulo 519 695
-//@node 5 If 699 641
-//@node 6 Int -368 407
-//@node 7 Set 928 576
-//@node 8 Break 1056 576
-//@node 9 Label -400 352
-//@node 10 Label 896 272
-//@node 11 Reroute 823 439
-//@node 12 Reroute 823 439
-//@node 13 Reroute 487 471
-//@node 14 Reroute 487 471
-//@node 15 Reroute -169 727
-//@node 16 Reroute 503 599
-//@node 17 Reroute 631 343
-//@node 18 Reroute 631 343
-//@node 19 FunctionInput -706 432
-//@node 20 FunctionOutput 928 349
-//@node 21 Reroute -169 727
-//@node 22 Sub 43 631
-//@node 23 Div -165 631
-//@labelsize 9 256 117
-//@labeltext 9 Input
-//@labelsize 10 272 229
-//@labeltext 10 Output
-//@reroute 11 Int
-//@reroute 12 Int
-//@reroute 13 Bool
-//@reroute 14 Bool
-//@reroute 15 Int
-//@reroute 16 Bool
+//@node 0 IfElse 13 467
+//@node 1 Bool 187 343
+//@node 2 Set 565 276
+//@node 3 ForLoop 250 583
+//@node 4 Modulo 512 679
+//@node 5 If 656 640
+//@node 6 Set 885 592
+//@node 7 Break 1008 592
+//@node 8 Label -304 480
+//@node 9 Label 736 240
+//@node 10 Reroute 519 375
+//@node 11 Reroute 519 375
+//@node 12 FunctionInput -290 512
+//@node 13 FunctionOutput 768 317
+//@node 14 Div 27 631
+//@node 15 Reroute 519 375
+//@node 16 Reroute -25 711
+//@node 17 Reroute -25 711
+//@labelsize 8 256 133
+//@labeltext 8 Input
+//@labelsize 9 272 181
+//@labeltext 9 Output
+//@reroute 10 Bool
+//@reroute 11 Bool
+//@reroute 15 Bool
+//@reroute 16 Int
 //@reroute 17 Int
-//@reroute 18 Int
-//@reroute 21 Int
-//@funcname 19 IsPrime
-//@param 19 int Number
-//@return 20 bool Result
+//@funcname 12 IsPrime
+//@param 12 int Number
+//@return 13 bool Result
 //@pin 0 1 0.0f
 //@pin 0 2 2
 //@pin 1 0 true
@@ -76,48 +65,36 @@ static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bo
 //@pin 4 1 1.0f
 //@pin 5 1 0.0f
 //@pin 5 2 0
-//@pin 6 0 41
-//@pin 7 1 0.0f
-//@pin 7 2 false
+//@pin 6 1 0.0f
+//@pin 6 2 false
+//@pin 10 0 
 //@pin 11 0 
-//@pin 12 0 
-//@pin 13 0 
-//@pin 14 0 
+//@pin 13 1 false
+//@pin 14 0 0.0f
+//@pin 14 1 2
 //@pin 15 0 
 //@pin 16 0 
 //@pin 17 0 
-//@pin 18 0 
-//@pin 20 1 false
-//@pin 21 0 
-//@pin 22 0 0.0f
-//@pin 22 1 1
-//@pin 23 0 0.0f
-//@pin 23 1 2
+//@enum 3 1
 //@enum 5 2
 //@link 0 0 2 0
 //@link 4 0 5 1
-//@link 6 0 0 1
-//@link 5 0 7 0
-//@link 7 0 8 0
+//@link 5 0 6 0
+//@link 6 0 7 0
 //@link 0 1 3 0
 //@link 3 0 5 0
-//@link 1 0 13 0
-//@link 1 0 14 0
-//@link 14 0 2 1
-//@link 6 0 15 0
-//@link 15 0 4 0
-//@link 1 0 16 0
-//@link 16 0 7 1
-//@link 6 0 17 0
-//@link 17 0 12 0
-//@link 6 0 18 0
-//@link 18 0 11 0
-//@link 19 0 0 0
-//@link 19 1 6 0
-//@link 0 2 20 0
-//@link 1 0 20 1
+//@link 1 0 10 0
+//@link 10 0 2 1
+//@link 1 0 11 0
+//@link 11 0 6 1
+//@link 12 0 0 0
+//@link 0 2 13 0
 //@link 3 2 4 1
-//@link 6 0 21 0
-//@link 22 0 3 2
-//@link 6 0 23 0
-//@link 23 0 22 0
+//@link 14 0 3 2
+//@link 1 0 15 0
+//@link 15 0 13 1
+//@link 12 1 0 1
+//@link 12 1 16 0
+//@link 16 0 4 0
+//@link 12 1 17 0
+//@link 17 0 14 0
