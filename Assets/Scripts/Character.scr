@@ -1,28 +1,5 @@
 #include "ScriptAPI.h"
 
-static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result);
-
-static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result)
-{
-    bool b1 = true;
-    if (Number < 2)
-    {
-        b1 = false;
-    }
-    else
-    {
-        for (int i3 = 2; i3 <= (Number / 2); ++i3)
-        {
-            if ((Number % i3) == 0)
-            {
-                b1 = false;
-                break;
-            }
-        }
-    }
-    Result = b1;
-}
-
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
 {
     ctx->log("Character On Spawn");
@@ -33,33 +10,17 @@ SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scrip
     ctx->log("Character On Destroy");
 }
 
-SCRIPT_EXPORT int ScriptEventCount() { return 2; }
+SCRIPT_EXPORT int ScriptEventCount() { return 0; }
 SCRIPT_EXPORT const char* ScriptEventName(int eventIdx)
 {
     switch (eventIdx)
     {
-    case 0: return "W Up";
-    case 1: return "W Down";
     default: return "";
     }
 }
 SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData)
 {
     switch (eventIdx) {
-    case 0:
-    {
-        ctx->log("W Up");
-        bool fret12_0;
-        Graph_IsPrime(ctx, self, 41, fret12_0);
-        ctx->logf("41 is %d", fret12_0);
-    } break;
-    case 1:
-    {
-        ctx->log("W Down");
-        bool fret13_0;
-        Graph_IsPrime(ctx, self, 42, fret13_0);
-        ctx->logf("42 is %d", fret13_0);
-    } break;
     }
 }
 
@@ -78,21 +39,7 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@node 6 Print 144 -204
 //@node 7 Print 144 -108
 //@node 8 OnEvent 95 -377
-//@node 9 Print 304 -384
-//@node 10 Print 304 -316
-//@node 11 FunctionCall 536 -412
-//@node 12 FunctionCall 536 -316
-//@node 13 Printf 790 -315
-//@node 14 Printf 791 -419
-//@node 15 SetEntity 800 -122
-//@event 8 W Up
-//@event 8 W Down
-//@funccall 11 Scripts/Graph.scr IsPrime
-//@callparam 11 int Number
-//@callret 11 bool Result
-//@funccall 12 Scripts/Graph.scr IsPrime
-//@callparam 12 int Number
-//@callret 12 bool Result
+//@node 9 SetEntity 800 -122
 //@pin 2 0 0.0f
 //@pin 2 1 0.0f
 //@pin 2 2 0.0f
@@ -100,30 +47,14 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@pin 3 1 50.0f
 //@pin 6 1 "Character On Spawn"
 //@pin 7 1 "Character On Destroy"
-//@pin 9 1 "W Up"
-//@pin 10 1 "W Down"
-//@pin 11 1 41
-//@pin 12 1 42
-//@pin 13 1 "42 is %d"
-//@pin 13 2 0.0f
-//@pin 14 1 "41 is %d"
-//@pin 14 2 0.0f
-//@pin 15 1 self
-//@pin 15 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
-//@pin 15 3 1.0f
-//@pin 15 4 glm::vec3{ 0.0f, 0.0f, 0.0f }
-//@pin 15 5 true
+//@pin 9 1 self
+//@pin 9 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 9 3 1.0f
+//@pin 9 4 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 9 5 true
 //@link 3 0 2 1
 //@link 1 0 3 0
 //@link 4 0 6 0
 //@link 5 0 7 0
-//@link 8 0 9 0
-//@link 8 1 10 0
-//@link 9 0 11 0
-//@link 10 0 12 0
-//@link 12 1 13 2
-//@link 12 0 13 0
-//@link 11 1 14 2
-//@link 11 0 14 0
-//@link 2 0 15 4
-//@link 0 0 15 0
+//@link 2 0 9 4
+//@link 0 0 9 0

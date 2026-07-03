@@ -32,6 +32,7 @@ private:
 
 	Entity* m_selected       = nullptr;
 	Entity* m_renamingEntity = nullptr;
+	bool    m_panelFocused   = false;  // Scene panel (or a child of it) had keyboard focus this frame — gates F2/Delete
 	bool    m_focusRenameNext = false;
 	bool    m_worldOpen       = true;
 	char    m_renameBuffer[256] = {};

@@ -11,7 +11,7 @@ import Core.Transform;
 import :Entity;
 import :AnimationDescription;
 import :ScriptContext;
-import :ScriptCommands;
+import :ScriptEventManager;
 import Animation;
 import RendererVK;
 import Script;
@@ -228,8 +228,8 @@ void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
 {
     if (!enabled || !scriptModule || !scriptModule->onEvent)
         return;
-    auto it = scriptModule->eventIndexes.find(eventName);
-    if (it != scriptModule->eventIndexes.end())
+    auto it = scriptModule->eventKeyToIndex.find(Globals::scriptEvents.getEventKeyForName(eventName));
+    if (it != scriptModule->eventKeyToIndex.end())
     {
         reinterpret_cast<ScriptOnEventFn>(scriptModule->onEvent)(&Globals::scriptContext, &entity, it->second, scriptData.get());
     }

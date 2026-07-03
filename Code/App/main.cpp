@@ -66,6 +66,10 @@ int main()
 
     Globals::physics.initialize();
 
+    // Register the script (re)load hook before any entity (and its ScriptComponent) spawns below — see the
+    // note on ScriptEventManager::initialize for why this can't be done in its constructor.
+    Globals::scriptEvents.initialize();
+
     // Static ground plane so thrown bodies have something to land on (Sponza's floor sits at y=0).
     //PhysicsShape groundShape;
     //groundShape.halfExtents = glm::vec3(100.0f, 0.5f, 100.0f);
@@ -84,6 +88,10 @@ int main()
     std::string currentScriptPath = "Scripts/Graph.scr"; // the visual-script the panel edits (F6 recompiles it)
     auto keyHandler = [&](const SDL_KeyboardEvent& evt) {
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_W) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "W Down" : "W Up");
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_A) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "A Down" : "A Up");
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_S) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "S Down" : "S Up");
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_D) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "D Down" : "D Up");
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_LSHIFT) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "LShift Down" : "LShift Up");
 
         if (evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
@@ -301,10 +309,6 @@ int main()
                     world.invalidatePrefab(std::filesystem::path(sp->path).stem().string());
         }
 
-        // Drain script entity-ownership requests (queued during the update walk above; scripts run mid entity-
-        // tree-walk, so `entities` can't be mutated inline). Spawns and child->root promotions hand over an
-        // already-live, heap-boxed EntityPtr (see the Globals comment in ScriptCommands.ixx for why); root->
-        // child moves (AddChild) just need their now-stale root ref dropped, by raw pointer.
         for (void* boxed : Globals::scriptRootAdditions)
         {
             EntityPtr* box = static_cast<EntityPtr*>(boxed);

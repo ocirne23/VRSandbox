@@ -15,8 +15,16 @@ export struct ScriptModule
     void* onDestroy = nullptr; // ScriptShutdownFn
     void* onEvent = nullptr;   // ScriptOnEventFn
     uint32 dataSize = 0;       // bytes of persistent ScriptData the script declares (0 = none), from ScriptDataSize()
-    std::unordered_map<std::string, int32> eventIndexes; // EventName -> Idx mapping
+	std::vector<std::string> eventNames; // in the order the script declared them
+
+	// Global EventKey -> this script's local OnEvent index (the position its compiled OnEvent switch expects).
+	// Owned/filled by ScriptEventManager in onScriptLoadedCallback and rebuilt on every reload (indices can
+	// shift when events are added/removed/reordered); mutable so it can be written through the const ScriptModule*
+	// the load callback receives. Lets fireEvent translate a fired key into this script's eventIdx with one lookup.
+	mutable std::unordered_map<uint32, int> eventKeyToIndex;
 };
+
+export typedef void(*ScriptLoadedCallback)(const ScriptModule* script, const std::vector<std::string>& oldEventNames);
 
 // Compiles visual scripts (.scr) to self-contained DLLs via the installed MSVC toolchain and caches them
 // by path. Pure compile/load only: it knows nothing about the engine — no renderer, entity or input.
@@ -34,11 +42,27 @@ public:
 
 private:
 
+    void sweepPendingPdbs();
+    void retirePdbs(const std::filesystem::path& dir, const std::string& stem, const std::filesystem::path& keep);
+    const std::string& findVcvars();
+    bool compile(const std::string& sourcePath, const std::filesystem::path& pdbPath, std::string& outDll, std::string& outErrors);
+    std::filesystem::path scriptDllPath(const std::string& sourcePath) const;
+    struct CachedScript;
+    bool loadDll(CachedScript& slot, const std::filesystem::path& dll);
+    void unloadAll();
+
+private:
+
     ScriptHost(const ScriptHost&) = delete;
     ScriptHost& operator=(const ScriptHost&) = delete;
 
-    struct Impl;
-    std::unique_ptr<Impl> m_impl;
+    friend class ScriptEventManager;
+
+    ScriptLoadedCallback m_scriptLoadedCallback = nullptr;
+
+    std::string vcvarsPath;                                 // cached after first lookup
+    std::unordered_map<std::string, CachedScript> scripts;  // keyed by canonical source path
+    std::vector<std::string> pendingPdbDeletes;             // superseded PDBs the debugger still holds; retried later
 };
 
 export namespace Globals

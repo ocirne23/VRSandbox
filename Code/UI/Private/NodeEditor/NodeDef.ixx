@@ -254,7 +254,7 @@ export const std::vector<NodeDef>& nodeRegistry()
     
     r.push_back({ "ForLoop", "For Loop", "Flow", true,
         { { "", D::Exec, "" }, { "start", D::Int, "0" }, { "count", D::Int, "10" } },
-        { { "body", D::Exec, "" }, { "completed", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
+        { { "body", D::Exec, "" }, { "break", D::Exec, "" }, { "idx", D::Int, "", 0, "i@"}},
         "for (int i@ = $1; i@ " + std::string(1, ENUM_TOKEN) + " $2; ++i@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1",
         { "Less than", "Less or Equals", "Equals", "Greater or Equals", "Greater than", "Not Equals" },
         { "<", "<=", "==", ">=", ">", "!=" } });
@@ -266,14 +266,14 @@ export const std::vector<NodeDef>& nodeRegistry()
 
     r.push_back({ "Conditional", "Conditional", "Flow", true,
         { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 }, { "A", D::Wildcard, "0.0f", 2 }, { "B", D::Wildcard, "0.0f", 2 } },
-        { { "", D::Exec, "" }, { "Result", D::Wildcard, "", 2, "(($1 @ $2) ? $3 : $4)" } },
+        { { "", D::Exec, "" }, { "res", D::Wildcard, "", 2, "(($1 @ $2) ? $3 : $4)" } },
         "#0",
         { "Less than", "Greater than", "Equals", "Not Equals" },
         { "<", ">", "==", "!=" } });
 
     r.push_back({ "Cast", "Cast", "Flow", false,
         { { "Cast",   D::Wildcard, "0.0f", 1 } },
-        { { "Result", D::Wildcard, "", 2 } },
+        { { "res", D::Wildcard, "", 2 } },
         "((" + std::string(1, ENUM_TOKEN) + ")$0)",
         { "int", "float", "bool" },
         { "int", "float", "bool" }});
@@ -296,30 +296,30 @@ export const std::vector<NodeDef>& nodeRegistry()
     r.push_back({ "ScriptData", "Script Data", "Variables", false, {}, {}, "" });
 
     r.push_back({ "Float", "Var Float", "Variables", false,
-        { { "value", D::Float, "0.0f" }},
+        { { "val", D::Float, "0.0f" }},
         { { "f@", D::Float, "", 0, std::string("float f@ = $0;\n") + HOIST + "f@", EMutableType::ReadWritable } },
         "" });
 
     r.push_back({ "Int", "Var Int", "Variables", false,
-        { { "value", D::Int, "0" }},
+        { { "val", D::Int, "0" }},
         { { "i@", D::Int, "", 0, std::string("int i@ = $0;\n") + HOIST + "i@", EMutableType::ReadWritable } },
         "" });
 
     r.push_back({ "Bool", "Var Bool", "Variables", false,
-        { { "value", D::Bool, "false" }},
+        { { "val", D::Bool, "false" }},
         { { "b@", D::Bool, "", 0, std::string("bool b@ = $0;\n") + HOIST + "b@", EMutableType::ReadWritable } },
         "" });
 
     r.push_back({ "ConstFloat", "Const Float", "Variables", false,
-        { { "value", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
+        { { "val", D::Float, "0.0f" } }, { { "res", D::Float, "" } },
         "$0" });
 
     r.push_back({ "ConstInt", "Const Int", "Variables", false,
-        { { "value", D::Int, "0" } }, { { "result", D::Int, "" } },
+        { { "val", D::Int, "0" } }, { { "res", D::Int, "" } },
         "$0" });
 
     r.push_back({ "ConstBool", "Const Bool", "Variables", false,
-        { { "value", D::Bool, "false" } }, { { "result", D::Bool, "" } },
+        { { "val", D::Bool, "false" } }, { { "res", D::Bool, "" } },
         "$0" });
 
     // ---- actions ----
@@ -355,11 +355,11 @@ export const std::vector<NodeDef>& nodeRegistry()
     // ---- inputs / time ----
     // deltaSeconds/elapsedSeconds are plain fields on ScriptContext (refreshed once a frame), not calls.
     r.push_back({ "GetElapsedTime", "Get Elapsed Time", "Time", false,
-        {}, { { "seconds", D::Float, "" } },
+        {}, { { "sec", D::Float, "" } },
         "ctx->elapsedSeconds" });
 
     r.push_back({ "GetDeltaTime", "Get Delta Time", "Time", false,
-        {}, { { "seconds", D::Float, "" } },
+        {}, { { "sec", D::Float, "" } },
         "ctx->deltaSeconds" });
 
     r.push_back({ "IsKeyDown", "Is Key Down", "Input", false,
@@ -404,31 +404,31 @@ export const std::vector<NodeDef>& nodeRegistry()
 
 	// -- immutable math nodes --
     r.push_back({ "Add", "Add", "Math", false,
-        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "($0 + $1)" });
 
     r.push_back({ "Sub", "Subtract", "Math", false,
-        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "($0 - $1)" });
 
     r.push_back({ "Mul", "Multiply", "Math", false,
-        { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "($0 * $1)" });
 
     r.push_back({ "Div", "Divide", "Math", false,
-        { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "($0 / $1)" });
 
     r.push_back({ "Modulo", "Modulo", "Math", false,
-        { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "a", D::Wildcard, "1.0f", 1 }, { "b", D::Wildcard, "1.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "($0 % $1)" });
 
     r.push_back({ "Sin", "Sin", "Math", false,
-        { { "x", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
+        { { "x", D::Float, "0.0f" } }, { { "res", D::Float, "" } },
         "sinf($0)" });
 
     r.push_back({ "Cos", "Cos", "Math", false,
-        { { "x", D::Float, "0.0f" } }, { { "result", D::Float, "" } },
+        { { "x", D::Float, "0.0f" } }, { { "res", D::Float, "" } },
         "cosf($0)" });
 
     // ---- vector math ----
@@ -443,36 +443,24 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "x", D::Float, "", 0, "v@.x" }, { "y", D::Float, "", 0, "v@.y" }, { "z", D::Float, "", 0, "v@.z" } },
         std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@"});
 
-    r.push_back({ "AddVec3", "Add Vec3", "Math", false,
-        { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
-        "($0 + $1)" });
-
-    r.push_back({ "SubVec3", "Subtract Vec3", "Math", false,
-        { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
-        "($0 - $1)" });
-
-    r.push_back({ "ScaleVec3", "Scale Vec3", "Math", false,
-        { { "vec", D::Vec3, "" }, { "scale", D::Float, "1.0f" } }, { { "result", D::Vec3, "" } },
-        "($0 * $1)" });
-
     // Dot/Normalize are wildcarded (Vec3 or Quat — glm::dot/normalize support both); Cross stays Vec3-only
     // (undefined for quaternions).
     r.push_back({ "DotVec3", "Dot", "Math", false,
         { { "a", D::Wildcard, "glm::vec3{ 0.0f, 0.0f, 0.0f }", 1 }, { "b", D::Wildcard, "glm::vec3{ 0.0f, 0.0f, 0.0f }", 1 } },
-        { { "result", D::Float, "" } },
+        { { "res", D::Float, "" } },
         "glm::dot($0, $1)" });
 
     r.push_back({ "CrossVec3", "Cross", "Math", false,
-        { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+        { { "a", D::Vec3, "" }, { "b", D::Vec3, "" } }, { { "res", D::Vec3, "" } },
         "glm::cross($0, $1)" });
 
     r.push_back({ "LengthVec3", "Length", "Math", false,
-        { { "vec", D::Vec3, "" } }, { { "result", D::Float, "" } },
+        { { "vec", D::Vec3, "" } }, { { "res", D::Float, "" } },
         "glm::length($0)" });
 
     r.push_back({ "NormalizeVec3", "Normalize", "Math", false,
         { { "vec", D::Wildcard, "glm::vec3{ 0.0f, 0.0f, 0.0f }", 1 } },
-        { { "result", D::Wildcard, "", 1 } },
+        { { "res", D::Wildcard, "", 1 } },
         "glm::normalize($0)" });
 
     // ---- quaternion math ----
@@ -490,50 +478,50 @@ export const std::vector<NodeDef>& nodeRegistry()
         "glm::angleAxis(glm::radians($1), $0)" });
 
     r.push_back({ "MulQuat", "Multiply Quat", "Math", false,
-        { { "a", D::Quat, "" }, { "b", D::Quat, "" } }, { { "result", D::Quat, "" } },
+        { { "a", D::Quat, "" }, { "b", D::Quat, "" } }, { { "res", D::Quat, "" } },
         "($0 * $1)" });
 
     r.push_back({ "RotateVec3ByQuat", "Rotate Vec3 By Quat", "Math", false,
-        { { "quat", D::Quat, "" }, { "vec", D::Vec3, "" } }, { { "result", D::Vec3, "" } },
+        { { "quat", D::Quat, "" }, { "vec", D::Vec3, "" } }, { { "res", D::Vec3, "" } },
         "($0 * $1)" });
 
     r.push_back({ "InverseQuat", "Inverse Quat", "Math", false,
-        { { "quat", D::Quat, "" } }, { { "result", D::Quat, "" } },
+        { { "quat", D::Quat, "" } }, { { "res", D::Quat, "" } },
         "glm::inverse($0)" });
 
     r.push_back({ "SlerpQuat", "Slerp Quat", "Math", false,
-        { { "a", D::Quat, "" }, { "b", D::Quat, "" }, { "t", D::Float, "0.5f" } }, { { "result", D::Quat, "" } },
+        { { "a", D::Quat, "" }, { "b", D::Quat, "" }, { "t", D::Float, "0.5f" } }, { { "res", D::Quat, "" } },
         "glm::slerp($0, $1, $2)" });
 
     // ---- generic math (wildcard: works with Float/Int/Vec3, whatever the connected type resolves to) ----
     r.push_back({ "Min", "Min", "Math", false,
-        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "glm::min($0, $1)" });
 
     r.push_back({ "Max", "Max", "Math", false,
-        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "a", D::Wildcard, "0.0f", 1 }, { "b", D::Wildcard, "0.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "glm::max($0, $1)" });
 
     r.push_back({ "Clamp", "Clamp", "Math", false,
         { { "x", D::Wildcard, "0.0f", 1 }, { "min", D::Wildcard, "0.0f", 1 }, { "max", D::Wildcard, "1.0f", 1 } },
-        { { "result", D::Wildcard, "", 1 } },
+        { { "res", D::Wildcard, "", 1 } },
         "glm::clamp($0, $1, $2)" });
 
     r.push_back({ "Smoothstep", "Smoothstep", "Math", false,
         { { "edge0", D::Wildcard, "0.0f", 1 }, { "edge1", D::Wildcard, "1.0f", 1 }, { "x", D::Wildcard, "0.5f", 1 } },
-        { { "result", D::Wildcard, "", 1 } },
+        { { "res", D::Wildcard, "", 1 } },
         "glm::smoothstep($0, $1, $2)" });
 
     r.push_back({ "Ceil", "Ceil", "Math", false,
-        { { "x", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "x", D::Wildcard, "0.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "glm::ceil($0)" });
 
     r.push_back({ "Floor", "Floor", "Math", false,
-        { { "x", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "x", D::Wildcard, "0.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "glm::floor($0)" });
 
     r.push_back({ "Round", "Round", "Math", false,
-        { { "x", D::Wildcard, "0.0f", 1 } }, { { "result", D::Wildcard, "", 1 } },
+        { { "x", D::Wildcard, "0.0f", 1 } }, { { "res", D::Wildcard, "", 1 } },
         "glm::round($0)" });
 
     // ---- entity (defaults to the script's owning entity, `self`, but any node reachable through an Entity
@@ -584,7 +572,7 @@ export const std::vector<NodeDef>& nodeRegistry()
         "ctx->destroyEntity($1);\n#0" });
 
     r.push_back({ "SetAnimFloat", "Set Anim Float", "Entity", true,
-        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "param", D::String, "\"speed\"" }, { "value", D::Float, "0.0f" } },
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "param", D::String, "\"speed\"" }, { "val", D::Float, "0.0f" } },
         { { "", D::Exec, "" } },
         "ctx->entitySetAnimFloat($1, $2, $3);\n#0" });
 

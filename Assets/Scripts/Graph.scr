@@ -1,26 +1,26 @@
 #include "ScriptAPI.h"
 
-static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result);
+static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int param0, bool& ret0);
 
-static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int Number, bool& Result)
+static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int param0, bool& ret0)
 {
     bool b1 = true;
-    if (Number < 2)
+    if (param0 < 2)
     {
         b1 = false;
     }
     else
     {
-        for (int i3 = 2; i3 <= (Number / 2); ++i3)
+        for (int i3 = 2; i3 <= (param0 / 2); ++i3)
         {
-            if ((Number % i3) == 0)
+            if ((param0 % i3) == 0)
             {
                 b1 = false;
                 break;
             }
         }
     }
-    Result = b1;
+    ret0 = b1;
 }
 
 //@graph 1

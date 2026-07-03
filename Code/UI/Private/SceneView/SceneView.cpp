@@ -181,9 +181,9 @@ void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen() && !isRenaming)
 		m_selected = entity;
 
-	if (isSelected && !isRenaming && ImGui::IsKeyPressed(ImGuiKey_F2) && !ancestorLocked)
+	if (m_panelFocused && isSelected && !isRenaming && ImGui::IsKeyPressed(ImGuiKey_F2) && !ancestorLocked)
 		beginRename(entity);
-	if (isSelected && ImGui::IsKeyPressed(ImGuiKey_Delete) && !ancestorLocked)
+	if (m_panelFocused && isSelected && ImGui::IsKeyPressed(ImGuiKey_Delete) && !ancestorLocked)
 		m_pendingDelete = entity;
 
 	renderContextMenu(entity, locked);
@@ -300,6 +300,10 @@ void SceneView::applyPendingMutations()
 
 void SceneView::render(const std::vector<EntityPtr>& rootEntities)
 {
+	// Keyboard shortcuts (F2 rename, Delete) must only act when this panel owns focus — otherwise pressing
+	// Delete while editing a script in the Node editor would still delete the hierarchy selection. Capture it
+	// here (before BeginChild) so RootAndChildWindows covers the tree's child window too.
+	m_panelFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 
 	renderToolbar();
 	ImGui::Separator();

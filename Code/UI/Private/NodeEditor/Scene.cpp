@@ -286,9 +286,13 @@ namespace
         // A Script Data member is a field of the persistent struct: read/written directly through `data`.
         if (isScriptDataType(node->getTypeId()))
             return "data->" + outPin->name;
-        // A Function Input parameter resolves to the generated function's C++ parameter of the same name.
+        // A Function Input parameter resolves to the generated function's C++ parameter, named by position
+        // (param<k>) — the pin's editable label is display-only and never reaches the code.
         if (isFunctionInputType(node->getTypeId()))
-            return outPin->name;
+        {
+            const int o = indexOfPin(node->getOutputPins(), outPin); // pin 0 is exec-out; params start at 1
+            return "param" + std::to_string(o - 1);
+        }
         // A Function Call return resolves to the local the call wrote it into (declared at the call site).
         if (isFunctionCallType(node->getTypeId()))
         {
@@ -396,16 +400,17 @@ namespace
         return out;
     }
 
-    // A Function Output statement: assign each connected return input to the generated function's out-param of
-    // the same name. It has no exec continuation (it's the end of the function body).
+    // A Function Output statement: assign each connected return input to the generated function's out-param,
+    // named by position (ret<k>) — the pin's editable label is display-only. It has no exec continuation
+    // (it's the end of the function body).
     std::string emitFunctionOutputStmt(Codegen& cg, Node* node, const HoistMap& hoist)
     {
         const auto& inputs = node->getInputPins();
         std::string out;
-        for (size_t j = 1; j < inputs.size(); ++j) // inputs[0] is the exec-in pin
+        for (size_t j = 1; j < inputs.size(); ++j) // inputs[0] is the exec-in pin; returns start at 1
         {
             std::set<const Node*> dataStack;
-            out += inputs[j]->name + " = " + emitDataExpr(cg, inputs[j].get(), dataStack, hoist) + ";\n";
+            out += "ret" + std::to_string(j - 1) + " = " + emitDataExpr(cg, inputs[j].get(), dataStack, hoist) + ";\n";
         }
         return out;
     }
@@ -1149,11 +1154,14 @@ void Scene::emitFunctions(std::string& code)
         byCpp[cpp] = std::move(d);
     }
 
+    // Parameters/returns are named by position (param<k> / ret<k>), matching how the body reads them
+    // (expandOutput / emitFunctionOutputStmt) and how a call passes them (positionally). The pins' editable
+    // labels are purely a node-editor display and deliberately don't reach the generated code.
     auto signature = [](const Discovered& d, const std::string& cpp)
     {
         std::string s = "void " + cpp + "(const ScriptContext* ctx, Entity* self";
-        for (const auto& [t, n] : d.params)  s += std::string(", ") + memberCppType(t) + " " + n;
-        for (const auto& [t, n] : d.returns) s += std::string(", ") + memberCppType(t) + "& " + n;
+        for (size_t i = 0; i < d.params.size(); ++i)  s += std::string(", ") + memberCppType(d.params[i].first) + " param" + std::to_string(i);
+        for (size_t i = 0; i < d.returns.size(); ++i) s += std::string(", ") + memberCppType(d.returns[i].first) + "& ret" + std::to_string(i);
         s += ")";
         return s;
     };
