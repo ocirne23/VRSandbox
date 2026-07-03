@@ -34,7 +34,47 @@ static RendererVKLayout::EPipelineIndex parsePipeline(const std::string& name)
     return P::LitOpaque;
 }
 
-ObjectContainer* World::loadContainer(const ObjectContainerDesc& desc)
+static glm::mat4 nodeLocalTransform(const INodeData& node)
+{
+    glm::vec3 pos, scale;
+    glm::quat rot;
+    node.getTransform(pos, scale, rot);
+    // The renderer flattens node scale to uniform scale.x (ObjectContainer::initializeNodes); collision
+    // must match what is drawn, not the source data.
+    return glm::translate(glm::mat4(1.0f), pos) * glm::mat4_cast(rot) * glm::scale(glm::mat4(1.0f), glm::vec3(scale.x));
+}
+
+static void buildCollisionSourceNode(const INodeData& node, CollisionSource::Node& out)
+{
+    out.name = node.getName();
+    out.localTransform = nodeLocalTransform(node);
+    for (uint32 m = 0; m < node.getNumMeshes(); ++m)
+        out.meshIndices.push_back(node.getMeshIndex(m));
+    out.children.resize(node.getNumChildren());
+    for (uint32 c = 0; c < node.getNumChildren(); ++c)
+        buildCollisionSourceNode(*node.getChild(c), out.children[c]);
+}
+
+// Snapshots the collision-relevant parts of a loaded scene (mesh positions/indices + node tree), so
+// hull/mesh physics shapes never need the source file again.
+static std::shared_ptr<const CollisionSource> buildCollisionSource(const ISceneData& sceneData)
+{
+    auto source = std::make_shared<CollisionSource>();
+    source->meshes.resize(sceneData.getNumMeshes());
+    for (uint32 i = 0; i < sceneData.getNumMeshes(); ++i)
+    {
+        const IMeshData* mesh = sceneData.getMesh(i);
+        if (!mesh)
+            continue;
+        CollisionSource::Mesh& outMesh = source->meshes[i];
+        outMesh.vertices.assign(mesh->getVertices(), mesh->getVertices() + mesh->getNumVertices());
+        outMesh.indices.assign(mesh->getIndices(), mesh->getIndices() + mesh->getNumIndices());
+    }
+    buildCollisionSourceNode(sceneData.getRootNode(), source->root);
+    return source;
+}
+
+ObjectContainer* World::loadContainer(const ObjectContainerDesc& desc, bool captureCollisionSource)
 {
     if (auto it = m_containers.find(desc.name); it != m_containers.end())
         return it->second.get();
@@ -47,6 +87,9 @@ ObjectContainer* World::loadContainer(const ObjectContainerDesc& desc)
         Log::warning("Scene: failed to load '" + desc.path + "' for ObjectContainer '" + desc.name + "'");
         return nullptr;
     }
+
+    if (captureCollisionSource && !m_collisionSources.contains(desc.name))
+        m_collisionSources.emplace(desc.name, buildCollisionSource(*sceneData));
 
     auto container = std::make_unique<ObjectContainer>();
     if (desc.materialOverrides.present)
@@ -71,12 +114,12 @@ ObjectContainer* World::loadContainer(const ObjectContainerDesc& desc)
     return ptr;
 }
 
-ObjectContainer* World::getOrLoadContainer(const std::string& name)
+ObjectContainer* World::getOrLoadContainer(const std::string& name, bool captureCollisionSource)
 {
     if (auto it = m_containers.find(name); it != m_containers.end())
-        return it->second.get();
+        return it->second.get(); // already loaded; a late collision request falls back to getOrLoadCollisionSource
     if (const ObjectContainerDesc* desc = Globals::assetRegistry.findObjectContainer(name))
-        return loadContainer(*desc);
+        return loadContainer(*desc, captureCollisionSource);
     Log::warning("Scene: unknown ObjectContainer reference '" + name + "'");
     return nullptr;
 }
@@ -135,7 +178,7 @@ static Transform readNodeTransform(const AssetNode& node)
     return t;
 }
 
-std::shared_ptr<RenderComponent::SpawnInfo> World::buildRenderSpawnInfo(const AssetNode& renderNode, const std::string& ownerName)
+std::shared_ptr<RenderComponent::SpawnInfo> World::buildRenderSpawnInfo(const AssetNode& renderNode, const std::string& ownerName, bool captureCollisionSource)
 {
     // Preferred form: a named spawnable (StaticMesh/SkinnedMesh) declared in a .oc, which resolves to a
     // container + node. Falls back to the legacy `ObjectContainer` + `Node` form.
@@ -173,7 +216,7 @@ std::shared_ptr<RenderComponent::SpawnInfo> World::buildRenderSpawnInfo(const As
         return nullptr;
     }
 
-    ObjectContainer* container = getOrLoadContainer(containerName);
+    ObjectContainer* container = getOrLoadContainer(containerName, captureCollisionSource);
     if (!container)
         return nullptr;
 
@@ -338,7 +381,110 @@ std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const Asse
     return info;
 }
 
-static std::shared_ptr<PhysicsComponent::SpawnInfo> buildPhysicsSpawnInfo(const AssetNode& physicsNode)
+// Appends a snapshot node subtree's meshes into collision space. Mirrors ObjectContainer's spawn
+// rebasing: a ROOT spawn keeps the scene root's own transform (baked into the render offsets), while a
+// sub-node spawn excludes the start node's transform (the entity transform places the node's pivot).
+static void appendNodeGeometry(const CollisionSource& source, const CollisionSource::Node& node,
+    const glm::mat4& parentTransform, bool skipOwnTransform, PhysicsGeometry& outGeometry)
+{
+    const glm::mat4 transform = skipOwnTransform ? parentTransform : parentTransform * node.localTransform;
+    for (uint32 meshIdx : node.meshIndices)
+    {
+        const CollisionSource::Mesh& mesh = source.meshes[meshIdx];
+        const uint32 baseVertex = uint32(outGeometry.vertices.size());
+        for (const glm::vec3& v : mesh.vertices)
+            outGeometry.vertices.push_back(glm::vec3(transform * glm::vec4(v, 1.0f)));
+        for (uint32 index : mesh.indices)
+            outGeometry.indices.push_back(baseVertex + index);
+    }
+    for (const CollisionSource::Node& child : node.children)
+        appendNodeGeometry(source, child, transform, false, outGeometry);
+}
+
+static const CollisionSource::Node* findNodeByName(const CollisionSource::Node& node, std::string_view name)
+{
+    for (const CollisionSource::Node& child : node.children)
+    {
+        if (name == child.name)
+            return &child;
+        if (const CollisionSource::Node* found = findNodeByName(child, name))
+            return found;
+    }
+    return nullptr;
+}
+
+static PhysicsGeometry buildCollisionGeometry(const CollisionSource& source, const std::string& containerName, const std::string& nodePath)
+{
+    const CollisionSource::Node* startNode = &source.root;
+    if (!nodePath.empty() && nodePath != "ROOT")
+    {
+        if (const CollisionSource::Node* found = findNodeByName(source.root, nodePath.substr(nodePath.find_last_of('/') + 1)))
+            startNode = found;
+        else
+            Log::warning("Physics: node '" + nodePath + "' not found in '" + containerName + "', using ROOT");
+    }
+    PhysicsGeometry geometry;
+    appendNodeGeometry(source, *startNode, glm::mat4(1.0f), startNode != &source.root, geometry);
+    return geometry;
+}
+
+std::shared_ptr<const CollisionSource> World::getOrLoadCollisionSource(const std::string& containerName)
+{
+    if (auto it = m_collisionSources.find(containerName); it != m_collisionSources.end())
+        return it->second;
+
+    // Fallback: the container was loaded before physics needed geometry (or isn't loaded at all),
+    // so the source file is imported once more and the snapshot cached for any further requests.
+    const ObjectContainerDesc* desc = Globals::assetRegistry.findObjectContainer(containerName);
+    if (!desc)
+    {
+        Log::warning("Physics: unknown ObjectContainer '" + containerName + "' for collision geometry");
+        return nullptr;
+    }
+    std::unique_ptr<ISceneData> sceneData = desc->procedural
+        ? ISceneData::createProceduralLoader()
+        : ISceneData::createAssimpLoader();
+    if (!sceneData->initialize(desc->path.c_str(), desc->mergeNodes, desc->preTransformVertices))
+    {
+        Log::warning("Physics: failed to load '" + desc->path + "' for collision geometry");
+        return nullptr;
+    }
+    Log::info("Physics: container '" + containerName + "' re-imported for collision geometry (loaded before physics needed it)");
+
+    std::shared_ptr<const CollisionSource> source = buildCollisionSource(*sceneData);
+    m_collisionSources.emplace(containerName, source);
+    return source;
+}
+
+std::shared_ptr<PhysicsMesh> World::getOrBuildCollisionMesh(const std::string& containerName, const std::string& nodePath)
+{
+    const std::string key = containerName + "|" + nodePath;
+    if (auto it = m_collisionMeshes.find(key); it != m_collisionMeshes.end())
+        return it->second;
+    std::shared_ptr<const CollisionSource> source = getOrLoadCollisionSource(containerName);
+    if (!source)
+        return nullptr;
+    const PhysicsGeometry geometry = buildCollisionGeometry(*source, containerName, nodePath);
+    if (geometry.indices.size() < 3)
+        return nullptr;
+    glm::vec3 boundsMin(FLT_MAX), boundsMax(-FLT_MAX);
+    for (const glm::vec3& v : geometry.vertices)
+    {
+        boundsMin = glm::min(boundsMin, v);
+        boundsMax = glm::max(boundsMax, v);
+    }
+    Log::info(std::format("Physics: collision mesh '{}': {} verts, {} tris, bounds ({:.2f}, {:.2f}, {:.2f}) - ({:.2f}, {:.2f}, {:.2f})",
+        key, geometry.vertices.size(), geometry.indices.size() / 3,
+        boundsMin.x, boundsMin.y, boundsMin.z, boundsMax.x, boundsMax.y, boundsMax.z));
+    auto mesh = std::make_shared<PhysicsMesh>(Globals::physics.createCollisionMesh(geometry.vertices, geometry.indices));
+    if (!mesh->isValid())
+        return nullptr;
+    m_collisionMeshes.emplace(key, mesh);
+    return mesh;
+}
+
+std::shared_ptr<PhysicsComponent::SpawnInfo> World::buildPhysicsSpawnInfo(const AssetNode& physicsNode,
+    const std::string& containerName, const std::string& nodePath, const std::string& ownerName)
 {
     auto info = std::make_shared<PhysicsComponent::SpawnInfo>();
     if (const AssetNode* n = physicsNode.find("Body"))
@@ -353,9 +499,38 @@ static std::shared_ptr<PhysicsComponent::SpawnInfo> buildPhysicsSpawnInfo(const 
         const std::string& type = n->asString();
         if (type == "Sphere")       info->shape.type = EPhysicsShapeType::Sphere;
         else if (type == "Capsule") info->shape.type = EPhysicsShapeType::Capsule;
+        else if (type == "Hull")    info->shape.type = EPhysicsShapeType::Hull;
+        else if (type == "Mesh")    info->shape.type = EPhysicsShapeType::Mesh;
         else                        info->shape.type = EPhysicsShapeType::Box;
     }
     PhysicsShape& shape = info->shape;
+
+    // Hull/Mesh pull their geometry from the sibling render mesh's container.
+    if (shape.type == EPhysicsShapeType::Hull)
+    {
+        if (!containerName.empty())
+            if (std::shared_ptr<const CollisionSource> source = getOrLoadCollisionSource(containerName))
+                shape.hullPoints = buildCollisionGeometry(*source, containerName, nodePath).vertices;
+        if (shape.hullPoints.size() < 4)
+        {
+            Log::warning("Scene: entity '" + ownerName + "' has a Hull physics shape but no render geometry, using Box");
+            shape.type = EPhysicsShapeType::Box;
+        }
+    }
+    else if (shape.type == EPhysicsShapeType::Mesh)
+    {
+        if (!containerName.empty())
+            info->mesh = getOrBuildCollisionMesh(containerName, nodePath);
+        if (info->mesh)
+        {
+            shape.mesh = info->mesh.get();
+        }
+        else
+        {
+            Log::warning("Scene: entity '" + ownerName + "' has a Mesh physics shape but no render geometry, using Box");
+            shape.type = EPhysicsShapeType::Box;
+        }
+    }
     if (const AssetNode* n = physicsNode.find("HalfExtents")) shape.halfExtents = n->asVec3(shape.halfExtents);
     if (const AssetNode* n = physicsNode.find("Radius"))      shape.radius = n->asFloat(0, shape.radius);
     if (const AssetNode* n = physicsNode.find("HalfHeight"))  shape.halfHeight = n->asFloat(0, shape.halfHeight);
@@ -381,6 +556,9 @@ static std::shared_ptr<PhysicsComponent::SpawnInfo> buildPhysicsSpawnInfo(const 
         shape.maskBits = mask;
     }
     if (const AssetNode* n = physicsNode.find("Group"))       shape.groupIndex = n->asInt();
+    if (const AssetNode* n = physicsNode.find("MaxHullVertices")) shape.maxHullVertices = n->asInt(0, shape.maxHullVertices);
+    if (const AssetNode* n = physicsNode.find("Sensor"))        shape.isSensor = n->asBool();
+    if (const AssetNode* n = physicsNode.find("ContactEvents")) shape.contactEvents = n->asBool();
     if (const AssetNode* n = physicsNode.find("Enabled"))     info->enabled = n->asBool();
     return info;
 }
@@ -402,11 +580,23 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         }
 
     static_assert(EComponentID_Render == 3);
+    // A Hull/Mesh physics shape (parsed below) sources its geometry from the render container, so the
+    // collision snapshot is captured while the container's scene data is loaded — one import, not two.
+    const AssetNode* physicsNode = findComponentNode(node, "Physics");
+    bool wantsCollisionGeometry = false;
+    if (physicsNode)
+        if (const AssetNode* n = physicsNode->find("Shape"))
+            wantsCollisionGeometry = n->asString() == "Hull" || n->asString() == "Mesh";
+
     ObjectContainer* renderContainer = nullptr;
+    std::string renderContainerName; // physics hull/mesh shapes (below) source their geometry from here
+    std::string renderNodePath;
     if (const AssetNode* renderNode = findComponentNode(node, "Render"))
-        if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.displayName))
+        if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.displayName, wantsCollisionGeometry))
         {
             renderContainer = info->container; // the animator (below) drives this skinned mesh
+            renderContainerName = info->containerName;
+            renderNodePath = info->nodePath;
             typeBits |= uint16(1 << EComponentID_Render);
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
@@ -430,10 +620,10 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
     }
 
     static_assert(EComponentID_Physics == 6);
-    if (const AssetNode* physicsNode = findComponentNode(node, "Physics"))
+    if (physicsNode) // found above, before the render container load
     {
         typeBits |= uint16(1 << EComponentID_Physics);
-        tmpl.spawnInfos.emplace_back(buildPhysicsSpawnInfo(*physicsNode));
+        tmpl.spawnInfos.emplace_back(buildPhysicsSpawnInfo(*physicsNode, renderContainerName, renderNodePath, tmpl.displayName));
     }
 
     tmpl.archetype = makeEntityArchetype(typeBits);

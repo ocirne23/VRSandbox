@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 # Project Description
-A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is the testbed: it loads Sponza plus debug shapes and a procedural sky sphere, and binds keys for testing (F5 = shader hot-reload, P/O = GI probe debug, L = aim sun along camera, 1-7 = spawn/clear lights, 8/9 = throw physics cubes/spheres).
+A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is the testbed: it loads Sponza plus debug shapes and a procedural sky sphere, and binds keys for testing (F5 = shader hot-reload, P/O = GI probe debug, L = aim sun along camera, 1-7 = spawn/clear lights, 8/9 = throw physics cubes/spheres, 0 = hang a physics chain).
 
 ## Building
 * CMake with Visual Studio 18 2026 generator, build dir is `Build/`
@@ -63,10 +63,11 @@ Dependency direction: everything imports Core. Animation imports Core; File impo
 	* Log (Console output, dummy implementation)
 	* Stats (Random renderer statistics)
 ## Physics
-* Box3D (Erin Catto's 3D engine, C API) wrapped in `module Physics`; depends only on Core, box3d is linked PRIVATE and never leaks into the public surface (body/world ids stored as integer bits)
-* `Globals::physics` (`PhysicsWorld`): `initialize()` once, `update(deltaSec)` per frame (fixed-step accumulator; gravity/paused/timescale/substeps/Hz are Tweak vars under Physics/World), `createBody(PhysicsBodyDesc, span<PhysicsShape>)` (Box/Sphere/Capsule; the desc transform's scale is baked into shape dims), `castRayClosest()`
-* `PhysicsBody`: RAII movable body handle, like RenderNode
-* `PhysicsComponent` in Entity: `Component Physics` in .pre files (`Body` Static/Kinematic/Dynamic, `Shape` Box/Sphere/Capsule, `HalfExtents`/`Radius`/`HalfHeight`/`Offset`/`Density`/`Friction`/`Restitution`, see `Assets/Entities/Debug/physicsCube.pre`). Dynamic bodies write the simulated pose back into the entity's local transform each update; kinematic/static bodies follow the entity when it's moved (gizmo/scripts)
+* Box3D (Erin Catto's 3D engine, C API) wrapped in `module Physics`; depends only on Core, box3d is linked PRIVATE and never leaks into the public surface (body/joint/mesh ids stored as integer bits)
+* `Globals::physics` (`PhysicsWorld`): `initialize()` once, `update(deltaSec)` per frame (fixed-step accumulator; gravity/paused/interpolate/timescale/substeps/Hz are Tweak vars under Physics/World), `createBody(PhysicsBodyDesc, span<PhysicsShape>)` (Box/Sphere/Capsule/Hull/Mesh; the desc transform's scale is baked into shape dims), `castRayClosest()`
+* `PhysicsBody`/`PhysicsJoint`/`PhysicsMesh`: RAII movable handles, like RenderNode. Joints (`createDistance/Revolute/Spherical/WeldJoint`) take world-space anchors/axes; `staticBody()` anchors joints to the world. `PhysicsMesh` (triangle BVH) is referenced by Mesh shapes and must outlive them; Hull shapes clone at creation. Mesh colliders only collide on static bodies
+* `PhysicsComponent` in Entity: `Component Physics` in .pre files (`Body` Static/Kinematic/Dynamic, `Shape` Box/Sphere/Capsule/Hull/Mesh, `HalfExtents`/`Radius`/`HalfHeight`/`Offset`/`Density`/`Friction`/`Restitution`/`MaxHullVertices`/`Sensor`/`ContactEvents`, see `Assets/Entities/Debug/physicsCube.pre`). Hull/Mesh shapes source geometry from the sibling render mesh: a `CollisionSource` snapshot (positions/indices + node tree) is captured from the same `ISceneData` the container loads from — one import, not two (re-import only as fallback when the container was loaded before physics needed it). Dynamic bodies write the simulated pose back into the entity's local transform each update, interpolated between fixed steps; kinematic/static bodies follow the entity when it's moved (gizmo/scripts). Sponza has a static mesh collider (sponza.pre)
+* Contact/sensor events: shapes opt in via `ContactEvents`/`Sensor`; `PhysicsWorld::update` drains them per step into `getContactEvents()` (body userData pairs); `dispatchPhysicsContactEvents()` (Entity, called from main loop) invokes `PhysicsComponent::onContact` and fires script On Event entries "Contact Begin"/"Contact End"/"Sensor Begin"/"Sensor End"
 * Collision masking via named layers: `PhysicsLayers::bit(name)` allocates one of 64 category bits on first use ("Default" = bit 0); `PhysicsShape` carries `categoryBits`/`maskBits`/`groupIndex`. In .pre: `Layer Debris` + `CollidesWith Default, Player` (or `All`/`None`) + optional `Group <int>`; two shapes collide when each one's mask contains the other's category. `castRayClosest` takes an optional layer mask (default all). Demo: physicsSphere.pre spheres pass through each other
 ## Entity
 * Intended to implement an Entity-Component-System, but mostly unimplemented and currently unused

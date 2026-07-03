@@ -3,3 +3,6 @@ Prefab sponza
 		StaticMesh Sponza
 		Position 0, 0, 0
 		Rotation 0, 0, 0
+	Component Physics
+		Body Static
+		Shape Mesh

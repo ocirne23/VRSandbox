@@ -252,6 +252,9 @@ void PhysicsComponent::spawn(Entity& entity, const SpawnInfo& info, const Transf
     enabled = info.enabled;
     bodyType = info.bodyType;
     lastWorld = base;
+    prevPos = currPos = base.pos;
+    prevRot = currRot = base.quat;
+    lastStep = Globals::physics.getStepCount();
 
     PhysicsBodyDesc desc;
     desc.type = info.bodyType;
@@ -274,6 +277,8 @@ void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
     {
         body.setTransform(world.pos, world.quat);
         lastWorld = world;
+        prevPos = currPos = world.pos;
+        prevRot = currRot = world.quat;
         synced = true;
         return;
     }
@@ -282,7 +287,20 @@ void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
 
     if (bodyType == EPhysicsBodyType::Dynamic)
     {
-        const Transform local = parentWorld.inverse() * Transform(body.getPosition(), world.scale, body.getRotation());
+        // Track the pose per physics step so rendering can interpolate between fixed steps.
+        const uint32 stepCount = Globals::physics.getStepCount();
+        if (stepCount != lastStep)
+        {
+            prevPos = currPos;
+            prevRot = currRot;
+            currPos = body.getPosition();
+            currRot = body.getRotation();
+            lastStep = stepCount;
+        }
+        const float alpha = Globals::physics.getInterpolationAlpha();
+        const glm::vec3 pos = glm::mix(prevPos, currPos, alpha);
+        const glm::quat rot = glm::slerp(prevRot, currRot, alpha);
+        const Transform local = parentWorld.inverse() * Transform(pos, world.scale, rot);
         entity.pos = local.pos;
         entity.rot = local.quat;
     }
@@ -290,6 +308,28 @@ void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
     {
         body.setTransform(world.pos, world.quat); // entity was moved (gizmo/script); the body follows
         lastWorld = world;
+    }
+}
+
+void dispatchPhysicsContactEvents()
+{
+    for (const PhysicsWorld::ContactEvent& evt : Globals::physics.getContactEvents())
+    {
+        Entity* a = static_cast<Entity*>(evt.userDataA);
+        Entity* b = static_cast<Entity*>(evt.userDataB);
+        const char* eventName = evt.sensor ? (evt.begin ? "Sensor Begin" : "Sensor End")
+                                           : (evt.begin ? "Contact Begin" : "Contact End");
+        auto fire = [&](Entity* target, Entity* other)
+        {
+            if (!target)
+                return; // bodies created outside the ECS (ground plane, world static body) have no entity
+            if (PhysicsComponent* pc = getComponent<PhysicsComponent>(target); pc && pc->onContact && other)
+                pc->onContact(*other, evt.begin);
+            if (ScriptComponent* sc = getComponent<ScriptComponent>(target))
+                sc->fireEvent(*target, eventName);
+        };
+        fire(a, b);
+        fire(b, a);
     }
 }
 
@@ -397,7 +437,17 @@ void writePhysicsSpawnInfo(const PhysicsComponent::SpawnInfo& info, AssetNode& o
         out.set("Radius", shape.radius);
         out.set("HalfHeight", shape.halfHeight);
         break;
+    case EPhysicsShapeType::Hull:
+        out.set("Shape", "Hull"); // point cloud re-derived from the render mesh on load
+        if (shape.maxHullVertices != defaults.maxHullVertices)
+            out.addChild("MaxHullVertices").values.emplace_back(std::to_string(shape.maxHullVertices));
+        break;
+    case EPhysicsShapeType::Mesh:
+        out.set("Shape", "Mesh"); // BVH re-derived from the render mesh on load
+        break;
     }
+    if (shape.isSensor)      out.set("Sensor", shape.isSensor);
+    if (shape.contactEvents) out.set("ContactEvents", shape.contactEvents);
     if (shape.offset != defaults.offset)           out.set("Offset", shape.offset);
     if (shape.density != defaults.density)         out.set("Density", shape.density);
     if (shape.friction != defaults.friction)       out.set("Friction", shape.friction);

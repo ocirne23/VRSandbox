@@ -186,24 +186,33 @@ export struct ScriptComponent
 };
 
 // A rigid body simulated by the Physics library. Dynamic bodies drive the entity's transform after
-// each step; kinematic and static bodies follow the entity when it is moved (gizmo, scripts). The
-// entity's world scale is baked into the collision shape at spawn.
+// each step (interpolated between fixed steps); kinematic and static bodies follow the entity when
+// it is moved (gizmo, scripts). The entity's world scale is baked into the collision shape at spawn.
 export struct PhysicsComponent
 {
     static constexpr EComponentID getId() { return EComponentID_Physics; }
 
     PhysicsBody body;
     Transform lastWorld;      // last world transform pushed to a non-dynamic body (change detection)
+    glm::vec3 prevPos, currPos; // body pose at the previous/current physics step (dynamic interpolation)
+    glm::quat prevRot, currRot;
+    uint32 lastStep = 0;
     EPhysicsBodyType bodyType = EPhysicsBodyType::Dynamic;
     bool enabled = true;
     bool synced = false;      // body is teleported to the entity's true world transform on first update
 
+    // Fired by dispatchPhysicsContactEvents for begin/end contact and sensor overlaps involving this
+    // body (the shape must set ContactEvents true, or be a Sensor). C++ gameplay hook; scripts get
+    // the same events as On Event entries ("Contact Begin" etc).
+    std::function<void(Entity& other, bool begin)> onContact;
+
     struct SpawnInfo
     {
         EPhysicsBodyType bodyType = EPhysicsBodyType::Dynamic;
-        PhysicsShape shape;                    // filter bits resolved from the names below at parse time
+        PhysicsShape shape;                    // filter bits / geometry resolved from the fields below at parse time
         std::string layer;                     // named collision layer (category), empty = Default
         std::vector<std::string> collidesWith; // named layers this body collides with ("All"/"None" allowed), empty = all
+        std::shared_ptr<PhysicsMesh> mesh;     // Shape Mesh: keeps the shared collision BVH alive (shape.mesh points at it)
         bool enabled = true;
     };
 
@@ -214,6 +223,12 @@ export struct PhysicsComponent
     void serialize(AssetNode&) const {}
     void deserialize(const AssetNode&) {}
 };
+
+// Maps this frame's physics contact/sensor events (body userData -> Entity*) onto the involved
+// entities: invokes PhysicsComponent::onContact and fires the matching script On Event entry
+// ("Contact Begin"/"Contact End"/"Sensor Begin"/"Sensor End"). Call once per frame after
+// Globals::physics.update().
+export void dispatchPhysicsContactEvents();
 
 export Transform composeTransform(const Transform& parent, const Transform& local);
 

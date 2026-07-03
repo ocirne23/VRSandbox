@@ -59,6 +59,7 @@ int main()
 
     std::vector<RendererVKLayout::LightInfo> spawnedLights;
     std::vector<EntityPtr> spawnedLightGeom;
+    std::vector<PhysicsJoint> spawnedJoints;
 
     World& world = Globals::world;
     world.initialize();
@@ -66,12 +67,12 @@ int main()
     Globals::physics.initialize();
 
     // Static ground plane so thrown bodies have something to land on (Sponza's floor sits at y=0).
-    PhysicsShape groundShape;
-    groundShape.halfExtents = glm::vec3(100.0f, 0.5f, 100.0f);
-    PhysicsBodyDesc groundDesc;
-    groundDesc.type = EPhysicsBodyType::Static;
-    groundDesc.transform = Transform(glm::vec3(0.0f, -0.5f, 0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
-    PhysicsBody groundBody = Globals::physics.createBody(groundDesc, std::span(&groundShape, 1));
+    //PhysicsShape groundShape;
+    //groundShape.halfExtents = glm::vec3(100.0f, 0.5f, 100.0f);
+    //PhysicsBodyDesc groundDesc;
+    //groundDesc.type = EPhysicsBodyType::Static;
+    //groundDesc.transform = Transform(glm::vec3(0.0f, -0.5f, 0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+    //PhysicsBody groundBody = Globals::physics.createBody(groundDesc, std::span(&groundShape, 1));
 
     std::vector<EntityPtr> entities;
     entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(), false));
@@ -161,6 +162,25 @@ int main()
             spawnedLightGeom.push_back(world.spawn("capsule", Transform(cameraController.getPosition(), 0.5f, orientation)));
         }
 
+        // 0: hang a chain of physics cubes in front of the camera (spherical joints, anchored to the world)
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_0 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            const glm::vec3 anchor = cameraController.getPosition() + cameraController.getDirection() * 2.0f;
+            PhysicsBody* prevBody = &Globals::physics.staticBody();
+            glm::vec3 pivot = anchor;
+            for (int i = 0; i < 8; ++i)
+            {
+                const glm::vec3 pos = anchor - glm::vec3(0.0f, 0.35f * float(i) + 0.175f, 0.0f);
+                EntityPtr e = world.spawn("physicsCube", Transform(pos, 0.25f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+                PhysicsComponent* pc = e ? getComponent<PhysicsComponent>(e) : nullptr;
+                if (!pc || !pc->body.isValid())
+                    break;
+                spawnedJoints.push_back(Globals::physics.createSphericalJoint(*prevBody, pc->body, pivot));
+                prevBody = &pc->body;
+                pivot = pos - glm::vec3(0.0f, 0.175f, 0.0f);
+                entities.push_back(std::move(e));
+            }
+        }
         // 8/9: throw a dynamic physics cube/sphere from the camera
         if ((evt.scancode == SDL_Scancode::SDL_SCANCODE_8 || evt.scancode == SDL_Scancode::SDL_SCANCODE_9) && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
@@ -300,6 +320,7 @@ int main()
         Globals::scriptDestroyRequests.clear();
 
         Globals::physics.update(deltaSec); // fixed-step; entities sync to body poses in their update below
+        dispatchPhysicsContactEvents();    // fire onContact hooks + script "Contact/Sensor Begin/End" events
 
         const Frustum& frustum = renderer.beginFrame(camera);
 
