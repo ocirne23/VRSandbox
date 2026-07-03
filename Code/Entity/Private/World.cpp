@@ -34,6 +34,12 @@ static RendererVKLayout::EPipelineIndex parsePipeline(const std::string& name)
     return P::LitOpaque;
 }
 
+// Artist-authored collision proxies: "Col_Wall" collides in place of "Wall" and is never rendered
+// (the renderer applies the same prefix rule in ObjectContainer::initializeNodes).
+static constexpr std::string_view COLLISION_MESH_PREFIX = "Col_";
+
+static bool isCollisionName(std::string_view name) { return name.starts_with(COLLISION_MESH_PREFIX); }
+
 static glm::mat4 nodeLocalTransform(const INodeData& node)
 {
     glm::vec3 pos, scale;
@@ -55,6 +61,14 @@ static void buildCollisionSourceNode(const INodeData& node, CollisionSource::Nod
         buildCollisionSourceNode(*node.getChild(c), out.children[c]);
 }
 
+static void gatherProxiedNames(const CollisionSource::Node& node, std::unordered_set<std::string>& outNames)
+{
+    if (isCollisionName(node.name))
+        outNames.insert(node.name.substr(COLLISION_MESH_PREFIX.size()));
+    for (const CollisionSource::Node& child : node.children)
+        gatherProxiedNames(child, outNames);
+}
+
 // Snapshots the collision-relevant parts of a loaded scene (mesh positions/indices + node tree), so
 // hull/mesh physics shapes never need the source file again.
 static std::shared_ptr<const CollisionSource> buildCollisionSource(const ISceneData& sceneData)
@@ -67,10 +81,14 @@ static std::shared_ptr<const CollisionSource> buildCollisionSource(const ISceneD
         if (!mesh)
             continue;
         CollisionSource::Mesh& outMesh = source->meshes[i];
+        outMesh.name = mesh->getName();
         outMesh.vertices.assign(mesh->getVertices(), mesh->getVertices() + mesh->getNumVertices());
         outMesh.indices.assign(mesh->getIndices(), mesh->getIndices() + mesh->getNumIndices());
+        if (isCollisionName(outMesh.name))
+            source->proxiedNames.insert(outMesh.name.substr(COLLISION_MESH_PREFIX.size()));
     }
     buildCollisionSourceNode(sceneData.getRootNode(), source->root);
+    gatherProxiedNames(source->root, source->proxiedNames);
     return source;
 }
 
@@ -388,9 +406,15 @@ static void appendNodeGeometry(const CollisionSource& source, const CollisionSou
     const glm::mat4& parentTransform, bool skipOwnTransform, PhysicsGeometry& outGeometry)
 {
     const glm::mat4 transform = skipOwnTransform ? parentTransform : parentTransform * node.localTransform;
+    const bool nodeIsProxy = isCollisionName(node.name);
     for (uint32 meshIdx : node.meshIndices)
     {
         const CollisionSource::Mesh& mesh = source.meshes[meshIdx];
+        // "Col_*" proxy meshes always collide; a render mesh is skipped when a proxy exists for its
+        // (or its node's) name — the proxy replaces it.
+        if (!nodeIsProxy && !isCollisionName(mesh.name)
+            && (source.proxiedNames.contains(mesh.name) || source.proxiedNames.contains(node.name)))
+            continue;
         const uint32 baseVertex = uint32(outGeometry.vertices.size());
         for (const glm::vec3& v : mesh.vertices)
             outGeometry.vertices.push_back(glm::vec3(transform * glm::vec4(v, 1.0f)));

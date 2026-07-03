@@ -25,10 +25,15 @@ export struct PhysicsGeometry
 // Stripped CPU snapshot of a container's scene: mesh positions/indices plus the node tree. Captured
 // from the same ISceneData the render container is built from (loadContainer), so the source file is
 // imported once; per-node collision geometry is then derived from this without touching the file.
+//
+// Meshes/nodes named "Col_*" are artist-authored collision proxies: physics collides against them
+// (at their own placement) INSTEAD of the same-named render mesh ("Col_Wall" replaces "Wall"), and
+// the renderer never draws them. Meshes without a proxy collide as themselves.
 export struct CollisionSource
 {
     struct Mesh
     {
+        std::string name;
         std::vector<glm::vec3> vertices;
         std::vector<uint32> indices;
     };
@@ -41,6 +46,7 @@ export struct CollisionSource
     };
     std::vector<Mesh> meshes;
     Node root;
+    std::unordered_set<std::string> proxiedNames; // names that have a "Col_" proxy (prefix stripped)
 };
 
 export class World final

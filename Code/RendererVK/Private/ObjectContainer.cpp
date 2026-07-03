@@ -16,6 +16,11 @@ import :TextureManager;
 constexpr char NODE_PATH_SEPARATOR = '/';
 constexpr char NODE_CHILD_SEPARATOR = ':';
 
+// Meshes named "Col_*" (or sitting on a "Col_*" node) are collision-only proxies: the physics
+// CollisionSource picks them up, rendering skips them (their data is still uploaded so mesh indices
+// stay aligned with the scene, they just never get instanced).
+static constexpr std::string_view COLLISION_MESH_PREFIX = "Col_";
+
 struct ObjectContainer::TempInitData
 {
 	std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>> pipelineAlphaForMaterialIdx;
@@ -322,16 +327,26 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
         node.parentOffset = (uint16)(nodeIdx - parentIdx);
         node.path = isRoot ? pStackNode->getName() : initialStateNodes[parentIdx].path + NODE_PATH_SEPARATOR + pStackNode->getName();
 
-        if (pStackNode->getNumMeshes() > 0)
+        std::vector<uint32> visibleMeshes;
+        const bool nodeIsCollision = std::string_view(pStackNode->getName()).starts_with(COLLISION_MESH_PREFIX);
+        for (uint32 i = 0; i < pStackNode->getNumMeshes(); ++i)
         {
-            node.meshInfoIdx = (uint16)pStackNode->getMeshIndex(0);
+            const uint32 meshIdx = pStackNode->getMeshIndex(i);
+            if (nodeIsCollision || std::string_view(m_meshNames[meshIdx]).starts_with(COLLISION_MESH_PREFIX))
+                continue; // collision-only proxy mesh, never rendered
+            visibleMeshes.push_back(meshIdx);
+        }
+
+        if (!visibleMeshes.empty())
+        {
+            node.meshInfoIdx = (uint16)visibleMeshes[0];
             node.materialInfoIdx = temp.materialIdxForMeshIdx[node.meshInfoIdx];
 
             // If the node has more than 1 mesh, add the remaining meshes as children of the current node
-            if (pStackNode->getNumMeshes() > 1)
-                node.numChildren += (uint16)(pStackNode->getNumMeshes() - 1);
+            if (visibleMeshes.size() > 1)
+                node.numChildren += (uint16)(visibleMeshes.size() - 1);
 
-            for (uint32 i = 1; i < pStackNode->getNumMeshes(); ++i)
+            for (uint32 i = 1; i < (uint32)visibleMeshes.size(); ++i)
             {
                 const uint32 childNodeIdx = (uint32)initialStateNodes.size();
                 LocalSpaceNode& childNode = initialStateNodes.emplace_back();
@@ -340,7 +355,7 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
                 childNode.transform.quat = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
                 childNode.parentOffset = (uint16)(childNodeIdx - nodeIdx);
                 childNode.numChildren = 0;
-				childNode.meshInfoIdx = (uint16)pStackNode->getMeshIndex(i);
+                childNode.meshInfoIdx = (uint16)visibleMeshes[i];
                 childNode.materialInfoIdx = temp.materialIdxForMeshIdx[childNode.meshInfoIdx];
                 childNode.path = initialStateNodes[nodeIdx].path + NODE_CHILD_SEPARATOR + std::to_string(i);
             }
