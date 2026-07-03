@@ -621,6 +621,56 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "", D::Exec, "" } },
         "ctx->entityRemoveChildAt($1, $2);\n#0" });
 
+    // ---- physics (target the entity's PhysicsComponent body; entities without one no-op / read zero) ----
+    r.push_back({ "GetPhysics", "Get Physics", "Physics", false,
+        { { "Entity", D::Entity, "self" } },
+        { { "Velocity", D::Vec3,  "", 0, "ctx->entityGetVelocity($0)" },
+            { "Speed",    D::Float, "", 0, "glm::length(ctx->entityGetVelocity($0))" },
+            { "Has Body", D::Bool,  "", 0, "(ctx->entityHasPhysics($0) != 0)" },
+            { "Awake",    D::Bool,  "", 0, "(ctx->entityIsPhysicsAwake($0) != 0)" } },
+        "" });
+
+    r.push_back({ "SetVelocity", "Set Velocity", "Physics", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "velocity", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
+        { { "", D::Exec, "" } },
+        "ctx->entitySetVelocity($1, $2);\n#0" });
+
+    r.push_back({ "ApplyImpulse", "Apply Impulse", "Physics", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "impulse", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
+        { { "", D::Exec, "" } },
+        "ctx->entityApplyImpulse($1, $2);\n#0" });
+
+    // Teleport Body: moves a DYNAMIC body directly (a dynamic body overwrites the entity transform every
+    // frame, so Set Entity has no lasting effect on it). Kinematic/static bodies follow the entity, so
+    // move those with Set Entity instead; on them this node is a no-op.
+    r.push_back({ "TeleportBody", "Teleport Body", "Physics", true,
+        { { "", D::Exec, "" },
+            { "Entity",   D::Entity, "self" },
+            { "position", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
+            { "rotation", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
+        { { "", D::Exec, "" } },
+        "ctx->entityTeleportPhysics($1, $2, $3);\n#0" });
+
+    // Ray Cast: closest hit against the physics world; the hit outputs are only valid on the Hit branch.
+    r.push_back({ "RayCast", "Ray Cast", "Physics", true,
+        { { "", D::Exec, "" },
+            { "origin",    D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
+            { "direction", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, -1.0f }" },
+            { "maxDist",   D::Float, "100.0f" } },
+        { { "Hit", D::Exec, "" }, { "Miss", D::Exec, "" },
+            { "Point",    D::Vec3,  "", 0, "hitPoint@" },
+            { "Normal",   D::Vec3,  "", 0, "hitNormal@" },
+            { "Distance", D::Float, "", 0, "(hitFraction@ * $3)" } },
+        "glm::vec3 hitPoint@{ 0.0f, 0.0f, 0.0f };\nglm::vec3 hitNormal@{ 0.0f, 0.0f, 0.0f };\nfloat hitFraction@ = 0.0f;\n"
+        "if (ctx->physicsRayCast($1, glm::normalize($2) * $3, &hitPoint@, &hitNormal@, &hitFraction@) != 0)\n{\n"
+        + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\nelse\n{\n"
+        + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n" });
+
+    r.push_back({ "SetGravity", "Set Gravity", "Physics", true,
+        { { "", D::Exec, "" }, { "gravity", D::Vec3, "glm::vec3{ 0.0f, -9.81f, 0.0f }" } },
+        { { "", D::Exec, "" } },
+        "ctx->physicsSetGravity($1);\n#0" });
+
     r.push_back({ "GetParent", "Get Parent", "Entity", false,
         { { "Entity", D::Entity, "self" } },
         { { "Parent", D::Entity, "" } },

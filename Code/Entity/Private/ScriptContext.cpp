@@ -15,6 +15,7 @@ import Core.Sphere;
 import Core.Transform;
 import RendererVK;
 import Animation;
+import Physics;
 import :Entity;
 import :Component;
 import :World;
@@ -152,6 +153,56 @@ namespace
         thunk_entityRemoveChild(parent, thunk_entityGetChildAt(parent, index));
     }
 
+    // ---- physics thunks ----
+
+    PhysicsComponent* physicsOf(Entity* en)
+    {
+        if (!en)
+            return nullptr;
+        PhysicsComponent* pc = getComponent<PhysicsComponent>(en);
+        return (pc && pc->body.isValid()) ? pc : nullptr;
+    }
+
+    void thunk_physicsSetGravity(glm::vec3 gravity) { Globals::physics.setGravity(gravity); }
+
+    int thunk_physicsRayCast(glm::vec3 origin, glm::vec3 translation, glm::vec3* outPoint, glm::vec3* outNormal, float* outFraction)
+    {
+        const PhysicsWorld::RayHit hit = Globals::physics.castRayClosest(origin, translation);
+        if (outPoint)    *outPoint = hit.point;
+        if (outNormal)   *outNormal = hit.normal;
+        if (outFraction) *outFraction = hit.fraction;
+        return hit.hit ? 1 : 0;
+    }
+
+    int thunk_entityHasPhysics(Entity* en)     { return physicsOf(en) ? 1 : 0; }
+    int thunk_entityIsPhysicsAwake(Entity* en) { PhysicsComponent* pc = physicsOf(en); return (pc && pc->body.isAwake()) ? 1 : 0; }
+
+    glm::vec3 thunk_entityGetVelocity(Entity* en)
+    {
+        PhysicsComponent* pc = physicsOf(en);
+        return pc ? pc->body.getLinearVelocity() : glm::vec3(0.0f);
+    }
+
+    void thunk_entitySetVelocity(Entity* en, glm::vec3 velocity)
+    {
+        if (PhysicsComponent* pc = physicsOf(en))
+            pc->body.setLinearVelocity(velocity);
+    }
+
+    void thunk_entityApplyImpulse(Entity* en, glm::vec3 impulse)
+    {
+        if (PhysicsComponent* pc = physicsOf(en))
+            pc->body.applyImpulse(impulse);
+    }
+
+    void thunk_entityTeleportPhysics(Entity* en, glm::vec3 position, glm::vec3 eulerDeg)
+    {
+        PhysicsComponent* pc = physicsOf(en);
+        if (!pc || pc->bodyType != EPhysicsBodyType::Dynamic)
+            return; // kinematic/static bodies follow the entity; move those through the Entity mirror
+        pc->body.setTransform(position, glm::quat(glm::radians(eulerDeg)));
+    }
+
 }
 
 // Binds the ABI function-pointer table to the engine thunks. Globals::scriptContext is constructed at
@@ -186,6 +237,14 @@ ScriptContext::ScriptContext()
     entityAddChild = &thunk_entityAddChild;
     entityRemoveChild = &thunk_entityRemoveChild;
     entityRemoveChildAt = &thunk_entityRemoveChildAt;
+    physicsSetGravity = &thunk_physicsSetGravity;
+    physicsRayCast = &thunk_physicsRayCast;
+    entityHasPhysics = &thunk_entityHasPhysics;
+    entityIsPhysicsAwake = &thunk_entityIsPhysicsAwake;
+    entityGetVelocity = &thunk_entityGetVelocity;
+    entitySetVelocity = &thunk_entitySetVelocity;
+    entityApplyImpulse = &thunk_entityApplyImpulse;
+    entityTeleportPhysics = &thunk_entityTeleportPhysics;
 }
 
 // Refreshes the per-frame fields; called once a frame (main.cpp) before any script runs this frame.

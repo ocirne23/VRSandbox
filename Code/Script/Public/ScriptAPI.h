@@ -86,6 +86,20 @@ typedef struct ScriptContext
     void (*entityRemoveChild)(Entity* parent, Entity* child); // detaches child from parent, becoming a root entity (no-op if child isn't parent's)
     void (*entityRemoveChildAt)(Entity* parent, int index);   // same as entityRemoveChild, by child index
 
+    // ---- physics (appended after the entity block — keep this table append-only so cached script DLLs
+    // compiled against an older layout keep working). The entity* functions target the entity's
+    // PhysicsComponent body and no-op / return zero when there is none.
+    void      (*physicsSetGravity)(glm::vec3 gravity);
+    int       (*physicsRayCast)(glm::vec3 origin, glm::vec3 translation, // ray = origin + translation, 1 on hit
+                                glm::vec3* outPoint, glm::vec3* outNormal, float* outFraction);
+    int       (*entityHasPhysics)(Entity* entity);
+    int       (*entityIsPhysicsAwake)(Entity* entity);
+    glm::vec3 (*entityGetVelocity)(Entity* entity);
+    void      (*entitySetVelocity)(Entity* entity, glm::vec3 velocity);
+    void      (*entityApplyImpulse)(Entity* entity, glm::vec3 impulse); // world space, at the center of mass, wakes the body
+    void      (*entityTeleportPhysics)(Entity* entity, glm::vec3 position, glm::vec3 eulerDeg); // dynamic bodies only;
+                                // kinematic/static bodies follow the entity, so move those via the Entity mirror instead
+
 #ifdef __cplusplus
     ScriptContext(); // the engine binds all the function pointers here; scripts never construct one
 
