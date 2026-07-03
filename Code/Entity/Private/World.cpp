@@ -363,6 +363,24 @@ static std::shared_ptr<PhysicsComponent::SpawnInfo> buildPhysicsSpawnInfo(const 
     if (const AssetNode* n = physicsNode.find("Density"))     shape.density = n->asFloat(0, shape.density);
     if (const AssetNode* n = physicsNode.find("Friction"))    shape.friction = n->asFloat(0, shape.friction);
     if (const AssetNode* n = physicsNode.find("Restitution")) shape.restitution = n->asFloat(0, shape.restitution);
+    if (const AssetNode* n = physicsNode.find("Layer"))
+    {
+        info->layer = n->asString();
+        shape.categoryBits = PhysicsLayers::bit(info->layer);
+    }
+    if (const AssetNode* n = physicsNode.find("CollidesWith"))
+    {
+        uint64 mask = 0;
+        for (size_t i = 0; i < n->numValues(); ++i)
+        {
+            const std::string& name = n->asString(i);
+            if (name == "All")        mask = PhysicsLayers::All;
+            else if (name != "None")  mask |= PhysicsLayers::bit(name);
+            info->collidesWith.push_back(name);
+        }
+        shape.maskBits = mask;
+    }
+    if (const AssetNode* n = physicsNode.find("Group"))       shape.groupIndex = n->asInt();
     if (const AssetNode* n = physicsNode.find("Enabled"))     info->enabled = n->asBool();
     return info;
 }

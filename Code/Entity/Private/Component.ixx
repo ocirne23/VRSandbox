@@ -201,7 +201,9 @@ export struct PhysicsComponent
     struct SpawnInfo
     {
         EPhysicsBodyType bodyType = EPhysicsBodyType::Dynamic;
-        PhysicsShape shape;
+        PhysicsShape shape;                    // filter bits resolved from the names below at parse time
+        std::string layer;                     // named collision layer (category), empty = Default
+        std::vector<std::string> collidesWith; // named layers this body collides with ("All"/"None" allowed), empty = all
         bool enabled = true;
     };
 

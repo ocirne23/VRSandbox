@@ -67,6 +67,7 @@ Dependency direction: everything imports Core. Animation imports Core; File impo
 * `Globals::physics` (`PhysicsWorld`): `initialize()` once, `update(deltaSec)` per frame (fixed-step accumulator; gravity/paused/timescale/substeps/Hz are Tweak vars under Physics/World), `createBody(PhysicsBodyDesc, span<PhysicsShape>)` (Box/Sphere/Capsule; the desc transform's scale is baked into shape dims), `castRayClosest()`
 * `PhysicsBody`: RAII movable body handle, like RenderNode
 * `PhysicsComponent` in Entity: `Component Physics` in .pre files (`Body` Static/Kinematic/Dynamic, `Shape` Box/Sphere/Capsule, `HalfExtents`/`Radius`/`HalfHeight`/`Offset`/`Density`/`Friction`/`Restitution`, see `Assets/Entities/Debug/physicsCube.pre`). Dynamic bodies write the simulated pose back into the entity's local transform each update; kinematic/static bodies follow the entity when it's moved (gizmo/scripts)
+* Collision masking via named layers: `PhysicsLayers::bit(name)` allocates one of 64 category bits on first use ("Default" = bit 0); `PhysicsShape` carries `categoryBits`/`maskBits`/`groupIndex`. In .pre: `Layer Debris` + `CollidesWith Default, Player` (or `All`/`None`) + optional `Group <int>`; two shapes collide when each one's mask contains the other's category. `castRayClosest` takes an optional layer mask (default all). Demo: physicsSphere.pre spheres pass through each other
 ## Entity
 * Intended to implement an Entity-Component-System, but mostly unimplemented and currently unused
 ## Scene

@@ -402,6 +402,9 @@ void writePhysicsSpawnInfo(const PhysicsComponent::SpawnInfo& info, AssetNode& o
     if (shape.density != defaults.density)         out.set("Density", shape.density);
     if (shape.friction != defaults.friction)       out.set("Friction", shape.friction);
     if (shape.restitution != defaults.restitution) out.set("Restitution", shape.restitution);
+    if (!info.layer.empty())                       out.set("Layer", info.layer);
+    if (!info.collidesWith.empty())                out.addChild("CollidesWith").values = info.collidesWith;
+    if (shape.groupIndex != 0)                     out.addChild("Group").values.emplace_back(std::to_string(shape.groupIndex));
     if (!info.enabled)                             out.set("Enabled", info.enabled);
 }
 

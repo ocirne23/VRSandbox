@@ -19,6 +19,29 @@ static glm::quat toGlm(const b3Quat& q) { return glm::quat(q.s, q.v.x, q.v.y, q.
 
 static b3BodyId toBodyId(uint64 handle) { return std::bit_cast<b3BodyId>(handle); }
 
+// Layer name -> category bit registry; index in the vector = bit index. Session-local: bits are only
+// compared against each other at runtime, so allocation order between runs doesn't matter.
+static std::vector<std::string>& layerNames()
+{
+    static std::vector<std::string> names = { "Default" };
+    return names;
+}
+
+uint64 PhysicsLayers::bit(std::string_view name)
+{
+    std::vector<std::string>& names = layerNames();
+    for (size_t i = 0; i < names.size(); ++i)
+        if (names[i] == name)
+            return 1ull << i;
+    if (names.size() >= 64)
+    {
+        Log::warning("Physics: out of collision layer bits, '" + std::string(name) + "' falls back to Default");
+        return 1ull;
+    }
+    names.emplace_back(name);
+    return 1ull << (names.size() - 1);
+}
+
 void PhysicsBody::destroy()
 {
     if (m_handle == 0)
@@ -145,6 +168,9 @@ PhysicsBody PhysicsWorld::createBody(const PhysicsBodyDesc& desc, std::span<cons
         shapeDef.density = shape.density;
         shapeDef.baseMaterial.friction = shape.friction;
         shapeDef.baseMaterial.restitution = shape.restitution;
+        shapeDef.filter.categoryBits = shape.categoryBits;
+        shapeDef.filter.maskBits = shape.maskBits;
+        shapeDef.filter.groupIndex = shape.groupIndex;
 
         const glm::vec3 offset = shape.offset * scale;
         switch (shape.type)
@@ -174,13 +200,16 @@ PhysicsBody PhysicsWorld::createBody(const PhysicsBodyDesc& desc, std::span<cons
     return PhysicsBody(std::bit_cast<uint64>(body));
 }
 
-PhysicsWorld::RayHit PhysicsWorld::castRayClosest(const glm::vec3& origin, const glm::vec3& translation) const
+PhysicsWorld::RayHit PhysicsWorld::castRayClosest(const glm::vec3& origin, const glm::vec3& translation, uint64 maskBits) const
 {
     RayHit outHit;
     if (!m_initialized)
         return outHit;
+    b3QueryFilter filter = b3DefaultQueryFilter();
+    filter.categoryBits = PhysicsLayers::All; // pass every shape's own mask; maskBits alone decides what the ray sees
+    filter.maskBits = maskBits;
     const b3RayResult result = b3World_CastRayClosest(std::bit_cast<b3WorldId>(m_worldHandle),
-        toB3(origin), toB3(translation), b3DefaultQueryFilter());
+        toB3(origin), toB3(translation), filter);
     outHit.hit = result.hit;
     outHit.fraction = result.fraction;
     outHit.point = toGlm(result.point);

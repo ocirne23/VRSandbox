@@ -21,6 +21,16 @@ export enum class EPhysicsShapeType : uint8
     Capsule,
 };
 
+// Named collision layers. A name maps to one of 64 category bits, allocated on first use;
+// "Default" is bit 0 (the categoryBits/maskBits defaults below). Two shapes collide when each one's
+// mask contains the other's category (unless a non-zero matching groupIndex overrides: negative =
+// never collide, positive = always).
+export namespace PhysicsLayers
+{
+    uint64 bit(std::string_view name);
+    constexpr uint64 All = ~0ull;
+}
+
 export struct PhysicsShape
 {
     EPhysicsShapeType type = EPhysicsShapeType::Box;
@@ -31,6 +41,9 @@ export struct PhysicsShape
     float density = 1000.0f;                 // kg/m^3
     float friction = 0.6f;
     float restitution = 0.0f;
+    uint64 categoryBits = 1;                 // the layer(s) this shape is on (bit 0 = "Default")
+    uint64 maskBits = PhysicsLayers::All;    // the layers this shape collides with
+    int groupIndex = 0;                      // box3d collision group override, 0 = none
 };
 
 export struct PhysicsBodyDesc
@@ -104,7 +117,7 @@ public:
         glm::vec3 point = glm::vec3(0.0f);
         glm::vec3 normal = glm::vec3(0.0f);
     };
-    RayHit castRayClosest(const glm::vec3& origin, const glm::vec3& translation) const;
+    RayHit castRayClosest(const glm::vec3& origin, const glm::vec3& translation, uint64 maskBits = PhysicsLayers::All) const;
 
     void setGravity(const glm::vec3& gravity);
 

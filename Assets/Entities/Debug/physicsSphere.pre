@@ -1,4 +1,6 @@
 # A dynamic rigid body sphere (thrown from the camera with key 9 in the App testbed).
+# Collision masking demo: spheres are on the Debris layer and only collide with Default
+# (ground, cubes), so thrown spheres pass through each other.
 Prefab physicsSphere
 	Component Render
 		StaticMesh Sphere
@@ -8,3 +10,5 @@ Prefab physicsSphere
 		Radius 0.5
 		Friction 0.4
 		Restitution 0.4
+		Layer Debris
+		CollidesWith Default
