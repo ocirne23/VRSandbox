@@ -64,3 +64,8 @@ private:
     std::unordered_set<std::string> m_buildingTemplates; // prefab names currently being built (cycle guard)
     std::shared_ptr<EntitySpawnTemplate> m_emptyTemplate; // blank Scene-only template for editable (non-prefab) entities
 };
+
+export namespace Globals
+{
+    World world;
+}

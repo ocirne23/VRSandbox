@@ -56,7 +56,9 @@ typedef struct ScriptContext
     int   (*isKeyDown)(const char* keyName); // e.g. "Space", "A", "Left Shift"
     void  (*spawnPointLight)(glm::vec3 position, float range, glm::vec3 color, float intensity);
     void  (*setSun)(glm::vec3 direction, glm::vec3 color, float intensity);
-    void  (*spawnEntity)(const char* assetPath, glm::vec3 position); // queues an asset/prefab spawn at world position
+    Entity* (*spawnEntity)(const char* assetPath, glm::vec3 position); // spawns an asset/prefab at world position now
+                                                                        // and returns it (added to the scene root
+                                                                        // once this frame's scripts finish running)
     void  (*destroyEntity)(Entity* entity);                          // queues the entity (e.g. self) for removal
 
     // The entity* functions below take an entity handle, which ScriptUpdate receives as `self` and the
@@ -73,12 +75,16 @@ typedef struct ScriptContext
     int         (*entityGetChildCount)(Entity* entity);
     float       (*entityGetBoundsRadius)(Entity* entity); // world-space render bounds radius (0 if no mesh)
     Entity*     (*entityFindChild)(Entity* entity, const char* name); // direct child by name, null if none match
+    Entity*     (*entityGetChildAt)(Entity* entity, int index);       // direct child by index, null if out of range
 
     // ---- entity writes ----
     void (*entitySetEnabled)(Entity* entity, int enabled);
     void (*entitySetAnimFloat)(Entity* entity, const char* param, float value);
     void (*entitySetAnimBool)(Entity* entity, const char* param, int value);
     void (*entitySetAnimTrigger)(Entity* entity, const char* param);
+    void (*entityAddChild)(Entity* parent, Entity* child);    // reparents child under parent (no-op: cycle, or parent has no scene component)
+    void (*entityRemoveChild)(Entity* parent, Entity* child); // detaches child from parent, becoming a root entity (no-op if child isn't parent's)
+    void (*entityRemoveChildAt)(Entity* parent, int index);   // same as entityRemoveChild, by child index
 
 #ifdef __cplusplus
     ScriptContext(); // the engine binds all the function pointers here; scripts never construct one

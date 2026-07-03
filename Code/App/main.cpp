@@ -59,7 +59,7 @@ int main()
     std::vector<RendererVKLayout::LightInfo> spawnedLights;
     std::vector<EntityPtr> spawnedLightGeom;
 
-    World world;
+    World& world = Globals::world;
     world.initialize();
 
     std::vector<EntityPtr> entities;
@@ -257,10 +257,20 @@ int main()
                     world.invalidatePrefab(std::filesystem::path(sp->path).stem().string());
         }
 
-        // Drain script spawn/destroy requests (queued during the update walk above).
-        for (const ScriptSpawnRequest& req : Globals::scriptSpawnRequests)
-            entities.push_back(world.spawnAssetFile(req.assetPath, Transform(req.position, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
-        Globals::scriptSpawnRequests.clear();
+        // Drain script entity-ownership requests (queued during the update walk above; scripts run mid entity-
+        // tree-walk, so `entities` can't be mutated inline). Spawns and child->root promotions hand over an
+        // already-live, heap-boxed EntityPtr (see the Globals comment in ScriptCommands.ixx for why); root->
+        // child moves (AddChild) just need their now-stale root ref dropped, by raw pointer.
+        for (void* boxed : Globals::scriptRootAdditions)
+        {
+            EntityPtr* box = static_cast<EntityPtr*>(boxed);
+            entities.push_back(std::move(*box));
+            delete box;
+        }
+        Globals::scriptRootAdditions.clear();
+        for (void* removed : Globals::scriptRootRemovals)
+            std::erase_if(entities, [&](const EntityPtr& e) { return (void*)e.get() == removed; });
+        Globals::scriptRootRemovals.clear();
         for (void* dead : Globals::scriptDestroyRequests)
             std::erase_if(entities, [&](const EntityPtr& e) { return (void*)e.get() == dead; });
         Globals::scriptDestroyRequests.clear();

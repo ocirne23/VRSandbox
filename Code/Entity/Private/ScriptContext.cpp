@@ -12,10 +12,12 @@ import Core.Log;
 import Core.Time;
 import Core.SDL;
 import Core.Sphere;
+import Core.Transform;
 import RendererVK;
 import Animation;
 import :Entity;
 import :Component;
+import :World;
 
 // Implements the script ABI (ScriptAPI.h) against the engine and drives per-entity script execution.
 // The Script library is a pure compiler/loader; this file owns the ScriptContext and all the thunks, so
@@ -62,10 +64,17 @@ namespace
         Globals::rendererVK.setSunLight(direction, color, intensity);
     }
 
-    void thunk_spawnEntity(const char* assetPath, glm::vec3 position)
+    // Spawns immediately (so the caller can use the result right away, e.g. parent it or set its transform)
+    // and hands the owning reference to App via scriptRootAdditions -- it isn't in `entities` yet, but the
+    // Entity object itself already exists and is safe to read/write/reparent this same frame.
+    Entity* thunk_spawnEntity(const char* assetPath, glm::vec3 position)
     {
-        if (assetPath)
-            Globals::scriptSpawnRequests.push_back({ assetPath, position });
+        if (!assetPath) return nullptr;
+        EntityPtr spawned = Globals::world.spawnAssetFile(assetPath, Transform(position, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+        if (!spawned) return nullptr;
+        Entity* raw = spawned.get();
+        Globals::scriptRootAdditions.push_back(new EntityPtr(std::move(spawned)));
+        return raw;
     }
 
     void thunk_destroyEntity(Entity* e)
@@ -102,11 +111,46 @@ namespace
                     return child.get();
         return nullptr;
     }
+    Entity* thunk_entityGetChildAt(Entity* en, int index)
+    {
+        if (SceneComponent* sc = getComponent<SceneComponent>(en))
+            if (index >= 0 && index < (int)sc->children.size())
+                return sc->children[index].get();
+        return nullptr;
+    }
 
     void thunk_entitySetEnabled(Entity* en, int enabled)              { if (SceneComponent* sc = getComponent<SceneComponent>(en)) sc->enabled = enabled != 0; }
     void thunk_entitySetAnimFloat(Entity* en, const char* p, float v) { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setFloat(p, v); }
     void thunk_entitySetAnimBool(Entity * en, const char* p, int v)   { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setBool(p, v != 0); }
     void thunk_entitySetAnimTrigger(Entity* en, const char* p)        { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setTrigger(p); }
+
+    // Reparents child under parent. If child was previously a root entity (owned directly by App's `entities`
+    // list rather than a SceneComponent), that ref is now stale -- queue it for removal so it isn't updated
+    // twice (once via `entities`, once via parent's descendant chain).
+    void thunk_entityAddChild(Entity* parent, Entity* child)
+    {
+        if (!parent || !child || parent == child) return;
+        const bool wasRoot = (child->parent == nullptr);
+        child->reparentEntity(parent);
+        if (wasRoot && child->parent == parent)
+            Globals::scriptRootRemovals.push_back(child);
+    }
+
+    // Detaches child from parent, making it root again. Claim ownership (heap-boxed, see scriptRootAdditions)
+    // before reparentEntity(nullptr) runs: it only guarantees the entity survives its own call, not any longer,
+    // so without an external ref taken first the entity would be destroyed the instant it's detached.
+    void thunk_entityRemoveChild(Entity* parent, Entity* child)
+    {
+        if (!child || child->parent != parent) return;
+        EntityPtr* box = new EntityPtr(child);
+        child->reparentEntity(nullptr);
+        Globals::scriptRootAdditions.push_back(box);
+    }
+
+    void thunk_entityRemoveChildAt(Entity* parent, int index)
+    {
+        thunk_entityRemoveChild(parent, thunk_entityGetChildAt(parent, index));
+    }
 
 }
 
@@ -134,10 +178,14 @@ ScriptContext::ScriptContext()
     entityGetChildCount = &thunk_entityGetChildCount;
     entityGetBoundsRadius = &thunk_entityGetBoundsRadius;
     entityFindChild = &thunk_entityFindChild;
+    entityGetChildAt = &thunk_entityGetChildAt;
     entitySetEnabled = &thunk_entitySetEnabled;
     entitySetAnimFloat = &thunk_entitySetAnimFloat;
     entitySetAnimBool = &thunk_entitySetAnimBool;
     entitySetAnimTrigger = &thunk_entitySetAnimTrigger;
+    entityAddChild = &thunk_entityAddChild;
+    entityRemoveChild = &thunk_entityRemoveChild;
+    entityRemoveChildAt = &thunk_entityRemoveChildAt;
 }
 
 // Refreshes the per-frame fields; called once a frame (main.cpp) before any script runs this frame.

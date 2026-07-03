@@ -567,14 +567,15 @@ export const std::vector<NodeDef>& nodeRegistry()
         "?2{$1->pos = $2;\n}?3{$1->scale = $3;\n}"
         "?4{$1->rot = glm::quat(glm::radians($4));\n}?5{ctx->entitySetEnabled($1, $5);\n}#0" });
 
-    // Spawn Entity: queues an asset/prefab to spawn at a world position (drained by App after update). Not
-    // targeted at an existing entity, so it has no Entity input.
+    // Spawn Entity: spawns an asset/prefab at a world position immediately and returns it, so it can be used
+    // right away (e.g. AddChild it, or SetEntity its transform) in the same exec chain. Not targeted at an
+    // existing entity, so it has no Entity input.
     r.push_back({ "SpawnEntity", "Spawn Entity", "Entity", true,
         { { "", D::Exec, "" },
             { "asset",    D::String, "\"Entities/character.pre\"" },
             { "position", D::Vec3,   "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
-        { { "", D::Exec, "" } },
-        "ctx->spawnEntity($1, $2);\n#0" });
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "", 0, "spawned@" } },
+        "Entity* spawned@ = ctx->spawnEntity($1, $2);\n#0" });
 
     // Destroy Entity: queues the given entity (self by default) for removal.
     r.push_back({ "DestroyEntity", "Destroy Entity", "Entity", true,
@@ -601,6 +602,39 @@ export const std::vector<NodeDef>& nodeRegistry()
         "Entity* child@ = ctx->entityFindChild($1, $2);\n"
         "if (child@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n"
         "else\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n" });
+
+    // Add Child: reparents Child under Parent (both self by default -- connect real values before using).
+    r.push_back({ "AddChild", "Add Child", "Entity", true,
+        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Child", D::Entity, "self" } },
+        { { "", D::Exec, "" } },
+        "ctx->entityAddChild($1, $2);\n#0" });
+
+    // Remove Child: detaches Child from Parent, making it a root entity (no-op if Child isn't Parent's).
+    r.push_back({ "RemoveChild", "Remove Child", "Entity", true,
+        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Child", D::Entity, "self" } },
+        { { "", D::Exec, "" } },
+        "ctx->entityRemoveChild($1, $2);\n#0" });
+
+    // Remove Child At Index: same as Remove Child, but looks the child up by index instead of by handle.
+    r.push_back({ "RemoveChildIdx", "Remove Child At Index", "Entity", true,
+        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Index", D::Int, "0" } },
+        { { "", D::Exec, "" } },
+        "ctx->entityRemoveChildAt($1, $2);\n#0" });
+
+    r.push_back({ "GetParent", "Get Parent", "Entity", false,
+        { { "Entity", D::Entity, "self" } },
+        { { "Parent", D::Entity, "" } },
+        "$0->parent" });
+
+    r.push_back({ "GetChildCount", "Get Child Count", "Entity", false,
+        { { "Entity", D::Entity, "self" } },
+        { { "Count", D::Int, "" } },
+        "ctx->entityGetChildCount($0)" });
+
+    r.push_back({ "GetChildIdx", "Get Child At Index", "Entity", false,
+        { { "Entity", D::Entity, "self" }, { "Index", D::Int, "0" } },
+        { { "Child", D::Entity, "" } },
+        "ctx->entityGetChildAt($0, $1)" });
 
     return r;
     }();
