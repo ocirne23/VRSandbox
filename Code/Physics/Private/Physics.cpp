@@ -132,7 +132,7 @@ bool PhysicsWorld::initialize()
     Tweak::boolean("Physics/World", "Interpolate", &m_interpolate);
     Tweak::floatVar("Physics/World", "Time Scale", &m_timeScale, 0.0f, 4.0f);
     Tweak::intVar("Physics/World", "Sub Steps", &m_subSteps, 1, 16);
-    Tweak::intVar("Physics/World", "Step Hz", &m_stepHz, 30, 240);
+    Tweak::intVar("Physics/World", "Step Hz", &m_stepHz, 5, 120);
     return true;
 }
 

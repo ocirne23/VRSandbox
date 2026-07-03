@@ -240,7 +240,7 @@ private:
     float m_accumulator = 0.0f;
     float m_timeScale = 1.0f;
     int m_subSteps = 4;
-    int m_stepHz = 60;
+    int m_stepHz = 20;
     uint32 m_stepCount = 0;
     glm::vec3 m_gravity = glm::vec3(0.0f, -9.81f, 0.0f);
     PhysicsBody m_staticBody;
