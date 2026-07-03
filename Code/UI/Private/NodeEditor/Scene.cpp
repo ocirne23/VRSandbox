@@ -323,11 +323,30 @@ namespace
         return result;
     }
 
+    // Wraps a String pin's raw default text (the user edits it without quotes) into a C++ string literal,
+    // escaping backslashes and quotes so arbitrary text stays valid source.
+    std::string quoteStringLiteral(const std::string& raw)
+    {
+        std::string out = "\"";
+        for (char c : raw)
+        {
+            if (c == '\\' || c == '"') out += '\\';
+            out += c;
+        }
+        out += '"';
+        return out;
+    }
+
     std::string emitDataExpr(Codegen& cg, const Pin* inputPin, std::set<const Node*>& dataStack, const HoistMap& hoist)
     {
         Pin* src = realSourceOfInput(cg.links, inputPin);
         if (!src)
+        {
+            // A String pin's default is stored as raw text (no quotes in the editor); make it a literal here.
+            if (inputPin->dataType == EDataType::String)
+                return quoteStringLiteral(inputPin->defaultValue);
             return inputPin->defaultValue.empty() ? std::string("0") : inputPin->defaultValue;
+        }
         if (auto it = hoist.find(src); it != hoist.end())
             return it->second; // already computed into a local
         return expandOutput(cg, src, dataStack, hoist);
@@ -1951,6 +1970,7 @@ void Scene::update(double deltaSec)
     // A bit of left padding before the menu text/submenu arrows. Pushed for the whole popup's lifetime so
     // every submenu opened from it (BeginMenu spawns its own window) inherits the same padding.
     //ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, ImGui::GetStyle().WindowPadding.y));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f, 5.0f));
     if (ImGui::BeginPopup("AddNodePopup"))
     {
         // Group node defs by category (first-seen order); each category folds into its own submenu (opens on
@@ -1969,7 +1989,6 @@ void Scene::update(double deltaSec)
 
         for (const Category& category : categories)
         {
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f, 5.0f));
 
             if (ImGui::BeginMenu(category.name.c_str()))
             {
@@ -1985,8 +2004,6 @@ void Scene::update(double deltaSec)
                     }
                 ImGui::EndMenu();
             }
-
-            ImGui::PopStyleVar();
         }
 
         // Importable functions defined in other .scr files, folded the same way.
@@ -2000,7 +2017,7 @@ void Scene::update(double deltaSec)
 
         ImGui::EndPopup();
     }
-    //ImGui::PopStyleVar();
+    ImGui::PopStyleVar();
     ed::Resume();
 
     if (m_firstFrame)

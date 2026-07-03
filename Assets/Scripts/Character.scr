@@ -10,17 +10,28 @@ SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scrip
     ctx->log("Character On Destroy");
 }
 
-SCRIPT_EXPORT int ScriptEventCount() { return 0; }
+SCRIPT_EXPORT int ScriptEventCount() { return 2; }
 SCRIPT_EXPORT const char* ScriptEventName(int eventIdx)
 {
     switch (eventIdx)
     {
+    case 0: return "W Down";
+    case 1: return "Test";
     default: return "";
     }
 }
 SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData)
 {
     switch (eventIdx) {
+    case 0:
+    {
+        ctx->log("awa");
+        ctx->sendEvent("Test");
+    } break;
+    case 1:
+    {
+        ctx->log("hello");
+    } break;
     }
 }
 
@@ -39,22 +50,33 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@node 6 Print 144 -204
 //@node 7 Print 144 -108
 //@node 8 OnEvent 95 -377
-//@node 9 SetEntity 800 -122
+//@node 9 Print 336 -300
+//@node 10 Print 336 -396
+//@node 11 SendEvent 629 -384
+//@node 12 SetEntity 800 -122
+//@event 8 W Down
+//@event 8 Test
 //@pin 2 0 0.0f
 //@pin 2 1 0.0f
 //@pin 2 2 0.0f
 //@pin 3 0 0.0f
 //@pin 3 1 50.0f
-//@pin 6 1 "Character On Spawn"
-//@pin 7 1 "Character On Destroy"
-//@pin 9 1 self
-//@pin 9 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
-//@pin 9 3 1.0f
-//@pin 9 4 glm::vec3{ 0.0f, 0.0f, 0.0f }
-//@pin 9 5 true
+//@pin 6 1 Character On Spawn
+//@pin 7 1 Character On Destroy
+//@pin 9 1 hello
+//@pin 10 1 awa
+//@pin 11 1 Test
+//@pin 12 1 self
+//@pin 12 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 12 3 1.0f
+//@pin 12 4 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 12 5 true
 //@link 3 0 2 1
 //@link 1 0 3 0
 //@link 4 0 6 0
 //@link 5 0 7 0
-//@link 2 0 9 4
-//@link 0 0 9 0
+//@link 8 1 9 0
+//@link 8 0 10 0
+//@link 10 0 11 0
+//@link 0 0 12 0
+//@link 2 0 12 4

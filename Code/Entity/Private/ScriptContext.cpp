@@ -203,6 +203,19 @@ namespace
         pc->body.setTransform(position, glm::quat(glm::radians(eulerDeg)));
     }
 
+    void thunk_sendEvent(const char* eventName)
+    {
+        if (eventName)
+            Globals::scriptEvents.fireEvent(eventName); // broadcast to every listener of this event
+    }
+    void thunk_sendEventToEntity(Entity* en, const char* eventName)
+    {
+        if (!en || !eventName)
+            return;
+        if (ScriptComponent* sc = getComponent<ScriptComponent>(en))
+            sc->fireEvent(*en, eventName); // targeted: only this entity's script
+    }
+
 }
 
 // Binds the ABI function-pointer table to the engine thunks. Globals::scriptContext is constructed at
@@ -245,6 +258,8 @@ ScriptContext::ScriptContext()
     entitySetVelocity = &thunk_entitySetVelocity;
     entityApplyImpulse = &thunk_entityApplyImpulse;
     entityTeleportPhysics = &thunk_entityTeleportPhysics;
+    sendEvent = &thunk_sendEvent;
+    sendEventToEntity = &thunk_sendEventToEntity;
 }
 
 // Refreshes the per-frame fields; called once a frame (main.cpp) before any script runs this frame.

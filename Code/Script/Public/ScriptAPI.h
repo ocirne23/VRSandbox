@@ -100,6 +100,11 @@ typedef struct ScriptContext
     void      (*entityTeleportPhysics)(Entity* entity, glm::vec3 position, glm::vec3 eulerDeg); // dynamic bodies only;
                                 // kinematic/static bodies follow the entity, so move those via the Entity mirror instead
 
+    // ---- events ---- fire an On Event entry by NAME (the host maps it to each script's local index). sendEvent
+    // reaches every script listening for that event; sendEventToEntity reaches only the given entity's script.
+    void      (*sendEvent)(const char* eventName);
+    void      (*sendEventToEntity)(Entity* entity, const char* eventName);
+
 #ifdef __cplusplus
     ScriptContext(); // the engine binds all the function pointers here; scripts never construct one
 

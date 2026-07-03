@@ -48,7 +48,9 @@ export uint8 mutableBits(EMutableType m)
     return 1;
 }
 
-// One pin on a node definition. defaultValue is the C++ literal used for an unconnected data input.
+// One pin on a node definition. defaultValue is the C++ literal used for an unconnected data input — EXCEPT
+// for a String pin, whose default is stored as raw text (no surrounding quotes; the editor edits it directly)
+// and gets wrapped into a C++ string literal at codegen time (see emitDataExpr).
 // typeGroup > 0 marks a wildcard pin; all pins on a node sharing a group resolve to the same concrete type.
 export struct PinDef
 {
@@ -189,7 +191,8 @@ export EDataType memberTypeFromToken(std::string_view token)
     return EDataType::Float;
 }
 
-// C++ literal used for an unconnected data input of the given type.
+// C++ literal used for an unconnected data input of the given type. A String's default is RAW text (no
+// quotes) — codegen wraps it into a literal (see emitDataExpr) — so its default here is the empty string.
 export std::string defaultValueForType(EDataType type)
 {
     switch (type)
@@ -199,7 +202,7 @@ export std::string defaultValueForType(EDataType type)
         case EDataType::Float:  return "0.0f";
         case EDataType::Vec3:   return "glm::vec3{ 0.0f, 0.0f, 0.0f }";
         case EDataType::Quat:   return "glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f }"; // identity (w,x,y,z)
-        case EDataType::String: return "\"\"";
+        case EDataType::String: return "";
         case EDataType::Entity: return "self";
         default:                return "0.0f";
     }
@@ -215,7 +218,7 @@ export const std::vector<NodeDef>& nodeRegistry()
     // ---- organization ----
     // Comment/label box (isLabelType): a movable, resizable group with an editable caption. Pure annotation,
     // no pins, no generated code — nodes dragged inside it move with it.
-    r.push_back({ "Label", "Label", "Comment", false, {}, {}, "" });
+    r.push_back({ "Label", "Label", "Debug", false, {}, {}, "" });
 
     // Reroute waypoint (isRerouteType): pins are added dynamically to match the link it's placed on; created
     // by double-clicking a link, so it's hidden from the palette.
@@ -324,13 +327,13 @@ export const std::vector<NodeDef>& nodeRegistry()
 
     // ---- actions ----
     r.push_back({ "Print", "Print", "Debug", true,
-        { { "", D::Exec, "" }, { "message", D::String, "\"hello\"" } },
+        { { "", D::Exec, "" }, { "message", D::String, "hello" } },
         { { "", D::Exec, "" } },
         "ctx->log($1);\n#0" });
 
     r.push_back({ "Printf", "Printf", "Debug", true,
         { { "", D::Exec, "" },
-            { "message", D::String, "\"%f\"" },
+            { "message", D::String, "%f" },
             { "message", D::Wildcard, "0.0f", 1 } },
         { { "", D::Exec, "" } },
         "ctx->logf($1, $2);\n#0" });
@@ -362,12 +365,12 @@ export const std::vector<NodeDef>& nodeRegistry()
         {}, { { "sec", D::Float, "" } },
         "ctx->deltaSeconds" });
 
-    r.push_back({ "IsKeyDown", "Is Key Down", "Input", false,
-        { { "key", D::String, "\"Space\"" } }, { { "down", D::Bool, "" } },
+    r.push_back({ "IsKeyDown", "Is Key Down", "Events", false,
+        { { "key", D::String, "Space" } }, { { "down", D::Bool, "" } },
         "(ctx->isKeyDown($0) != 0)" });
 
     // ---- camera (the active render camera, snapshotted once a frame onto ScriptContext) ----
-    r.push_back({ "GetCamera", "Get Camera", "Camera", false,
+    r.push_back({ "GetCamera", "Get Camera", "Rendering", false,
         {},
         { { "Position",  D::Vec3,  "", 0, "ctx->cameraPosition" },
             { "Direction", D::Vec3,  "", 0, "ctx->cameraDirection" },
@@ -560,7 +563,7 @@ export const std::vector<NodeDef>& nodeRegistry()
     // existing entity, so it has no Entity input.
     r.push_back({ "SpawnEntity", "Spawn Entity", "Entity", true,
         { { "", D::Exec, "" },
-            { "asset",    D::String, "\"Entities/character.pre\"" },
+            { "asset",    D::String, "Entities/character.pre" },
             { "position", D::Vec3,   "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
         { { "", D::Exec, "" }, { "Entity", D::Entity, "", 0, "spawned@" } },
         "Entity* spawned@ = ctx->spawnEntity($1, $2);\n#0" });
@@ -572,12 +575,12 @@ export const std::vector<NodeDef>& nodeRegistry()
         "ctx->destroyEntity($1);\n#0" });
 
     r.push_back({ "SetAnimFloat", "Set Anim Float", "Entity", true,
-        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "param", D::String, "\"speed\"" }, { "val", D::Float, "0.0f" } },
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "param", D::String, "speed" }, { "val", D::Float, "0.0f" } },
         { { "", D::Exec, "" } },
         "ctx->entitySetAnimFloat($1, $2, $3);\n#0" });
 
     r.push_back({ "SetAnimTrigger", "Set Anim Trigger", "Entity", true,
-        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "param", D::String, "\"attack\"" } },
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "param", D::String, "attack" } },
         { { "", D::Exec, "" } },
         "ctx->entitySetAnimTrigger($1, $2);\n#0" });
 
@@ -585,7 +588,7 @@ export const std::vector<NodeDef>& nodeRegistry()
     // depending on whether it exists; the found child is exposed as an Entity output only valid on the Found
     // branch (see the emitted `child@` local).
     r.push_back({ "GetChildEntity", "Get Child Entity", "Entity", true,
-        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Name", D::String, "\"\"" } },
+        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Name", D::String, "" } },
         { { "Found", D::Exec, "" }, { "Not Found", D::Exec, "" }, { "Child", D::Entity, "", 0, "child@" } },
         "Entity* child@ = ctx->entityFindChild($1, $2);\n"
         "if (child@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n"
@@ -673,6 +676,18 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "Entity", D::Entity, "self" }, { "Index", D::Int, "0" } },
         { { "Child", D::Entity, "" } },
         "ctx->entityGetChildAt($0, $1)" });
+
+    // Send Event: fires a named On Event entry on every script listening for it (matched by name at runtime).
+    r.push_back({ "SendEvent", "Send Event", "Events", true,
+        { { "", D::Exec, "" }, { "Event", D::String, "" } },
+        { { "", D::Exec, "" } },
+        "ctx->sendEvent($1);\n#0" });
+
+    // Send Event to Entity: same, but delivered only to the given entity's script (self by default).
+    r.push_back({ "SendEventToEntity", "Send Event to Entity", "Events", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "Event", D::String, "" } },
+        { { "", D::Exec, "" } },
+        "ctx->sendEventToEntity($1, $2);\n#0" });
 
     return r;
     }();
