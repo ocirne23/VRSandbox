@@ -16,6 +16,7 @@ import UI;
 import RendererVK;
 import Entity;
 import Script;
+import Physics;
 
 int main()
 {
@@ -61,6 +62,16 @@ int main()
 
     World& world = Globals::world;
     world.initialize();
+
+    Globals::physics.initialize();
+
+    // Static ground plane so thrown bodies have something to land on (Sponza's floor sits at y=0).
+    PhysicsShape groundShape;
+    groundShape.halfExtents = glm::vec3(100.0f, 0.5f, 100.0f);
+    PhysicsBodyDesc groundDesc;
+    groundDesc.type = EPhysicsBodyType::Static;
+    groundDesc.transform = Transform(glm::vec3(0.0f, -0.5f, 0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+    PhysicsBody groundBody = Globals::physics.createBody(groundDesc, std::span(&groundShape, 1));
 
     std::vector<EntityPtr> entities;
     entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(), false));
@@ -150,6 +161,19 @@ int main()
             spawnedLightGeom.push_back(world.spawn("capsule", Transform(cameraController.getPosition(), 0.5f, orientation)));
         }
 
+        // 8/9: throw a dynamic physics cube/sphere from the camera
+        if ((evt.scancode == SDL_Scancode::SDL_SCANCODE_8 || evt.scancode == SDL_Scancode::SDL_SCANCODE_9) && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            const bool cube = evt.scancode == SDL_Scancode::SDL_SCANCODE_8;
+            const glm::vec3 dir = cameraController.getDirection();
+            const Transform spawnAt(cameraController.getPosition() + dir, 0.25f, glm::normalize(cameraController.getOrientation()));
+            if (EntityPtr e = world.spawn(cube ? "physicsCube" : "physicsSphere", spawnAt))
+            {
+                if (PhysicsComponent* pc = getComponent<PhysicsComponent>(e))
+                    pc->body.setLinearVelocity(dir * 12.0f);
+                entities.push_back(std::move(e));
+            }
+        }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             for (int i = 0; i < 100; ++i)
             {
@@ -274,6 +298,8 @@ int main()
         for (void* dead : Globals::scriptDestroyRequests)
             std::erase_if(entities, [&](const EntityPtr& e) { return (void*)e.get() == dead; });
         Globals::scriptDestroyRequests.clear();
+
+        Globals::physics.update(deltaSec); // fixed-step; entities sync to body poses in their update below
 
         const Frustum& frustum = renderer.beginFrame(camera);
 

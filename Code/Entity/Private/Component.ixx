@@ -8,13 +8,14 @@ import Core.Transform;
 import File;
 import Animation;
 import Script;
+import Physics;
 
 import RendererVK;
 
 export int componentIdFromName(std::string_view name);
 export void detachFromOwner(Entity* entity);
 
-export constexpr uint16 MaxInlineComponentTypes = 6;
+export constexpr uint16 MaxInlineComponentTypes = 7;
 export constexpr uint16 ComponentAlignment = 16;
 
 export struct SceneComponent
@@ -184,16 +185,48 @@ export struct ScriptComponent
     }
 };
 
+// A rigid body simulated by the Physics library. Dynamic bodies drive the entity's transform after
+// each step; kinematic and static bodies follow the entity when it is moved (gizmo, scripts). The
+// entity's world scale is baked into the collision shape at spawn.
+export struct PhysicsComponent
+{
+    static constexpr EComponentID getId() { return EComponentID_Physics; }
+
+    PhysicsBody body;
+    Transform lastWorld;      // last world transform pushed to a non-dynamic body (change detection)
+    EPhysicsBodyType bodyType = EPhysicsBodyType::Dynamic;
+    bool enabled = true;
+    bool synced = false;      // body is teleported to the entity's true world transform on first update
+
+    struct SpawnInfo
+    {
+        EPhysicsBodyType bodyType = EPhysicsBodyType::Dynamic;
+        PhysicsShape shape;
+        bool enabled = true;
+    };
+
+    void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
+    void destroy(Entity& entity, const SpawnInfo& info);
+    void update(Entity& entity, const Transform& parentWorld);
+
+    void serialize(AssetNode&) const {}
+    void deserialize(const AssetNode&) {}
+};
+
 export Transform composeTransform(const Transform& parent, const Transform& local);
 
 export const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity);
 export const AnimatorComponent::SpawnInfo* getAnimatorSpawnInfo(const Entity* entity);
+export const PhysicsComponent::SpawnInfo* getPhysicsSpawnInfo(const Entity* entity);
 
 // Serializes a render spawn recipe into a "Component Render" node; mirror of World::buildRenderSpawnInfo.
 export void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out);
 
 // Serializes an animator spawn recipe into a "Component Animator" node.
 export void writeAnimatorSpawnInfo(const AnimatorComponent::SpawnInfo& info, AssetNode& out);
+
+// Serializes a physics spawn recipe into a "Component Physics" node.
+export void writePhysicsSpawnInfo(const PhysicsComponent::SpawnInfo& info, AssetNode& out);
 
 export constexpr const char* componentTypeName(EComponentID id)
 {
@@ -205,6 +238,7 @@ export constexpr const char* componentTypeName(EComponentID id)
     case EComponentID_Render: return "Render";
     case EComponentID_Animator: return "Animator";
     case EComponentID_Script: return "Script";
+    case EComponentID_Physics: return "Physics";
     default:                  return "Unknown";
     }
 }
@@ -220,6 +254,7 @@ export namespace EntityComponentDetail
         alignUp(uint16(sizeof(RenderComponent)),  ComponentAlignment),
         alignUp(uint16(sizeof(AnimatorComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(ScriptComponent)),  ComponentAlignment),
+        alignUp(uint16(sizeof(PhysicsComponent)), ComponentAlignment),
     };
 
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);

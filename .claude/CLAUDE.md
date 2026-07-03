@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 # Project Description
-A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is the testbed: it loads Sponza plus debug shapes and a procedural sky sphere, and binds keys for testing (F5 = shader hot-reload, P/O = GI probe debug, L = aim sun along camera, 1-8 = spawn/clear lights).
+A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is the testbed: it loads Sponza plus debug shapes and a procedural sky sphere, and binds keys for testing (F5 = shader hot-reload, P/O = GI probe debug, L = aim sun along camera, 1-7 = spawn/clear lights, 8/9 = throw physics cubes/spheres).
 
 ## Building
 * CMake with Visual Studio 18 2026 generator, build dir is `Build/`
@@ -13,7 +13,7 @@ A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is th
 * No test suite, no linter. Verifying = it compiles + the user runs it
 * Prefer to let me test out changes myself rather than looking at log output/screen yourself
 * `TestApp` is disabled (its CMakeLists starts with `return()`)
-* Dependencies are prebuilt in `Dependencies/` (Include/Lib/Dll) — Vulkan-Hpp (no exceptions, no constructors), SDL3, ImGui docking branch, Assimp, glslang/shaderc, Nsight Aftermath
+* Dependencies are prebuilt in `Dependencies/` (Include/Lib/Dll) — Vulkan-Hpp (no exceptions, no constructors), SDL3, ImGui docking branch, Assimp, glslang/shaderc, Nsight Aftermath. Exception: box3d is vendored source (`Dependencies/box3d`), built via `add_subdirectory` from `Dependencies/CMakeLists.txt` — added in the root CMakeLists before `add_definitions` so its C sources skip forceinclude.h, with its MSVC runtime overridden to the DLL CRT
 
 ## Style
 * Using exclusively c++20 modules instead of headers. (.ixx instead of .h)
@@ -62,6 +62,11 @@ Dependency direction: everything imports Core. Animation imports Core; File impo
 	* Content (Asset browser, displays filesystem, but can't use for anything yet)
 	* Log (Console output, dummy implementation)
 	* Stats (Random renderer statistics)
+## Physics
+* Box3D (Erin Catto's 3D engine, C API) wrapped in `module Physics`; depends only on Core, box3d is linked PRIVATE and never leaks into the public surface (body/world ids stored as integer bits)
+* `Globals::physics` (`PhysicsWorld`): `initialize()` once, `update(deltaSec)` per frame (fixed-step accumulator; gravity/paused/timescale/substeps/Hz are Tweak vars under Physics/World), `createBody(PhysicsBodyDesc, span<PhysicsShape>)` (Box/Sphere/Capsule; the desc transform's scale is baked into shape dims), `castRayClosest()`
+* `PhysicsBody`: RAII movable body handle, like RenderNode
+* `PhysicsComponent` in Entity: `Component Physics` in .pre files (`Body` Static/Kinematic/Dynamic, `Shape` Box/Sphere/Capsule, `HalfExtents`/`Radius`/`HalfHeight`/`Offset`/`Density`/`Friction`/`Restitution`, see `Assets/Entities/Debug/physicsCube.pre`). Dynamic bodies write the simulated pose back into the entity's local transform each update; kinematic/static bodies follow the entity when it's moved (gizmo/scripts)
 ## Entity
 * Intended to implement an Entity-Component-System, but mostly unimplemented and currently unused
 ## Scene

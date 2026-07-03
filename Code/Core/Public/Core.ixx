@@ -54,6 +54,7 @@ export import <initializer_list>;
 export import <execution>;
 export import <charconv>;
 export import <new>;
+export import <bit>;
 export import <cmath>;
 
 export template<typename T, size_t N>

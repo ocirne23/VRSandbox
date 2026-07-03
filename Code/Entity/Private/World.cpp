@@ -13,6 +13,7 @@ import :AssetRegistry;
 import :ObjectDescription;
 import :AnimationDescription;
 import Animation;
+import Physics;
 
 bool World::initialize()
 {
@@ -337,6 +338,35 @@ std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const Asse
     return info;
 }
 
+static std::shared_ptr<PhysicsComponent::SpawnInfo> buildPhysicsSpawnInfo(const AssetNode& physicsNode)
+{
+    auto info = std::make_shared<PhysicsComponent::SpawnInfo>();
+    if (const AssetNode* n = physicsNode.find("Body"))
+    {
+        const std::string& type = n->asString();
+        if (type == "Static")         info->bodyType = EPhysicsBodyType::Static;
+        else if (type == "Kinematic") info->bodyType = EPhysicsBodyType::Kinematic;
+        else                          info->bodyType = EPhysicsBodyType::Dynamic;
+    }
+    if (const AssetNode* n = physicsNode.find("Shape"))
+    {
+        const std::string& type = n->asString();
+        if (type == "Sphere")       info->shape.type = EPhysicsShapeType::Sphere;
+        else if (type == "Capsule") info->shape.type = EPhysicsShapeType::Capsule;
+        else                        info->shape.type = EPhysicsShapeType::Box;
+    }
+    PhysicsShape& shape = info->shape;
+    if (const AssetNode* n = physicsNode.find("HalfExtents")) shape.halfExtents = n->asVec3(shape.halfExtents);
+    if (const AssetNode* n = physicsNode.find("Radius"))      shape.radius = n->asFloat(0, shape.radius);
+    if (const AssetNode* n = physicsNode.find("HalfHeight"))  shape.halfHeight = n->asFloat(0, shape.halfHeight);
+    if (const AssetNode* n = physicsNode.find("Offset"))      shape.offset = n->asVec3(shape.offset);
+    if (const AssetNode* n = physicsNode.find("Density"))     shape.density = n->asFloat(0, shape.density);
+    if (const AssetNode* n = physicsNode.find("Friction"))    shape.friction = n->asFloat(0, shape.friction);
+    if (const AssetNode* n = physicsNode.find("Restitution")) shape.restitution = n->asFloat(0, shape.restitution);
+    if (const AssetNode* n = physicsNode.find("Enabled"))     info->enabled = n->asBool();
+    return info;
+}
+
 void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
 {
     tmpl.defaultTransform = readNodeTransform(node); // the declaration's authored placement
@@ -379,6 +409,13 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         if (const AssetNode* n = scriptNode->find("Enabled")) info->enabled = n->asBool();
         typeBits |= uint16(1 << EComponentID_Script);
         tmpl.spawnInfos.emplace_back(std::move(info));
+    }
+
+    static_assert(EComponentID_Physics == 6);
+    if (const AssetNode* physicsNode = findComponentNode(node, "Physics"))
+    {
+        typeBits |= uint16(1 << EComponentID_Physics);
+        tmpl.spawnInfos.emplace_back(buildPhysicsSpawnInfo(*physicsNode));
     }
 
     tmpl.archetype = makeEntityArchetype(typeBits);

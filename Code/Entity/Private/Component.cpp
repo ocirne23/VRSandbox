@@ -15,6 +15,7 @@ import :ScriptCommands;
 import Animation;
 import RendererVK;
 import Script;
+import Physics;
 
 Transform composeTransform(const Transform& parent, const Transform& local)
 {
@@ -246,6 +247,52 @@ void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
         Globals::scriptEvents.unregisterListener(scriptModule, &entity);
 }
 
+void PhysicsComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
+{
+    enabled = info.enabled;
+    bodyType = info.bodyType;
+    lastWorld = base;
+
+    PhysicsBodyDesc desc;
+    desc.type = info.bodyType;
+    desc.transform = base; // may be parent-local for child spawns; corrected on the first update
+    desc.userData = &entity;
+    body = Globals::physics.createBody(desc, std::span(&info.shape, 1));
+}
+
+void PhysicsComponent::destroy(Entity& entity, const SpawnInfo& info)
+{
+}
+
+void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
+{
+    if (!body.isValid())
+        return;
+
+    const Transform world = composeTransform(parentWorld, Transform(entity.pos, entity.scale, entity.rot));
+    if (!synced)
+    {
+        body.setTransform(world.pos, world.quat);
+        lastWorld = world;
+        synced = true;
+        return;
+    }
+    if (!enabled)
+        return;
+
+    if (bodyType == EPhysicsBodyType::Dynamic)
+    {
+        const Transform local = parentWorld.inverse() * Transform(body.getPosition(), world.scale, body.getRotation());
+        entity.pos = local.pos;
+        entity.rot = local.quat;
+    }
+    else if (world.pos != lastWorld.pos || world.quat != lastWorld.quat)
+    {
+        body.setTransform(world.pos, world.quat); // entity was moved (gizmo/script); the body follows
+        lastWorld = world;
+    }
+}
+
 void SceneComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {
     enabled = info.enabled;
@@ -309,6 +356,53 @@ const AnimatorComponent::SpawnInfo* getAnimatorSpawnInfo(const Entity* entity)
     if (idx >= entity->spawnTemplate->spawnInfos.size())
         return nullptr;
     return static_cast<const AnimatorComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
+}
+
+const PhysicsComponent::SpawnInfo* getPhysicsSpawnInfo(const Entity* entity)
+{
+    if (!entity->spawnTemplate || !hasComponent<PhysicsComponent>(entity))
+        return nullptr;
+
+    size_t idx = 0;
+    for (uint16 i = 0; i < uint16(EComponentID_Physics); ++i)
+        if (entity->typeBits & (1 << i))
+            ++idx;
+    if (idx >= entity->spawnTemplate->spawnInfos.size())
+        return nullptr;
+    return static_cast<const PhysicsComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
+}
+
+void writePhysicsSpawnInfo(const PhysicsComponent::SpawnInfo& info, AssetNode& out)
+{
+    switch (info.bodyType)
+    {
+    case EPhysicsBodyType::Static:    out.set("Body", "Static");    break;
+    case EPhysicsBodyType::Kinematic: out.set("Body", "Kinematic"); break;
+    case EPhysicsBodyType::Dynamic:   out.set("Body", "Dynamic");   break;
+    }
+    const PhysicsShape& shape = info.shape;
+    const PhysicsShape defaults;
+    switch (shape.type)
+    {
+    case EPhysicsShapeType::Box:
+        out.set("Shape", "Box");
+        out.set("HalfExtents", shape.halfExtents);
+        break;
+    case EPhysicsShapeType::Sphere:
+        out.set("Shape", "Sphere");
+        out.set("Radius", shape.radius);
+        break;
+    case EPhysicsShapeType::Capsule:
+        out.set("Shape", "Capsule");
+        out.set("Radius", shape.radius);
+        out.set("HalfHeight", shape.halfHeight);
+        break;
+    }
+    if (shape.offset != defaults.offset)           out.set("Offset", shape.offset);
+    if (shape.density != defaults.density)         out.set("Density", shape.density);
+    if (shape.friction != defaults.friction)       out.set("Friction", shape.friction);
+    if (shape.restitution != defaults.restitution) out.set("Restitution", shape.restitution);
+    if (!info.enabled)                             out.set("Enabled", info.enabled);
 }
 
 void writeAnimatorSpawnInfo(const AnimatorComponent::SpawnInfo& info, AssetNode& out)
