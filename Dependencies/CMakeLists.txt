@@ -1,7 +1,4 @@
-# box3d is vendored source built as part of the solution (everything else here is prebuilt Include/Lib/Dll).
-# Added from the root before add_definitions so its C sources don't get the engine's forceinclude/warning flags.
-add_subdirectory(box3d)
-
-# box3d defaults to the static CRT; the engine and its prebuilt dependencies use the DLL runtime.
-set_property(TARGET box3d PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
-set_property(TARGET box3d PROPERTY FOLDER Dependencies)
+# Unused: all dependencies are prebuilt into Include/Lib/Dll. box3d source is kept in box3d/ for
+# reference and for rebuilding the prebuilt libs (box3d.lib / box3dd.lib in Lib, headers in
+# Include/box3d) — build it standalone with the DLL CRT ("MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
+# its own CMakeLists defaults to the static CRT) and copy the outputs over.
