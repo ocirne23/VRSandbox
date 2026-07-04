@@ -10,7 +10,7 @@ A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is th
 * T/R/G = gizmo translate/rotate/scale
 * P = GI probe debug cubes, O = cycle probe debug mode, L = aim sun along camera
 * 1 = clear spawned lights, 2/3 = point lights, 4 = spot, 5 = area, 6 = tube, 7 = 100 random point lights
-* 8/9 = throw physics cube/sphere, 0 = hang a physics chain (spherical joints)
+* 8/9 = throw physics cube/sphere (with a positional audio blip), 0 = hang a physics chain (spherical joints)
 * WASD/LShift also fire global script events ("W Down"/"W Up", ...) via `Globals::scriptEvents`; Ctrl+C/V = script node copy/paste
 
 ## Building
@@ -20,7 +20,7 @@ A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is th
 	* Output: `Build/x64/<Config>/App.exe`. Run from anywhere inside the repo; `FileSystem::initialize()` walks up to find `Assets/` and sets it as the working directory, so all asset paths are relative to `Assets/`
 * No test suite, no linter. Verifying = it compiles + the user runs it
 * Prefer to let me test out changes myself rather than looking at log output/screen yourself
-* Dependencies are prebuilt in `Dependencies/` (Include/Lib/Dll) — Vulkan-Hpp (no exceptions, no constructors), SDL3, ImGui docking branch, Assimp, glslang/shaderc, OpenXR loader, Nsight Aftermath. Exception: box3d is vendored source (`Dependencies/box3d`), built via `add_subdirectory` from `Dependencies/CMakeLists.txt` — added in the root CMakeLists before `add_definitions` so its C sources skip forceinclude.h, with its MSVC runtime overridden to the DLL CRT
+* Dependencies are prebuilt in `Dependencies/` (Include/Lib/Dll) — Vulkan-Hpp (no exceptions, no constructors), SDL3, ImGui docking branch, Assimp, glslang/shaderc, OpenXR loader, Nsight Aftermath, box3d, Steam Audio (static, no DLL; phonon(d).lib bundles its pffft/mysofa/zlib deps), miniaudio (single header, no build). box3d and steam-audio source stay vendored under `Dependencies/` for rebuilding the prebuilt libs — recipes in `Dependencies/CMakeLists.txt` (which is otherwise unused; everything links the prebuilt `<name>.lib`/`<name>d.lib` pairs)
 
 ## Style
 * Using exclusively c++20 modules instead of headers. (.ixx instead of .h)
@@ -39,7 +39,7 @@ A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is th
 * int8/uint64-style typedefs from `Core`; glm via `Core.glm`; `assert` is compiled out in non-debug via forceinclude.h
 
 # Projects (folders/libraries)
-Dependency direction (`target_link_libraries`, all public): everything imports Core. `Animation`, `Physics`, `Script`, `Network` depend only on Core; `File` imports Animation; `RendererVK` imports File; `Entity` imports RendererVK + File + Script + Physics; `UI` imports Entity + RendererVK; `Input` imports UI; `App` links all.
+Dependency direction (`target_link_libraries`, all public): everything imports Core. `Animation`, `Physics`, `Script`, `Network`, `Audio` depend only on Core; `File` imports Animation; `RendererVK` imports File; `Entity` imports RendererVK + File + Script + Physics; `UI` imports Entity + RendererVK; `Input` imports UI; `App` links all.
 
 ## Core
 * Collection of cross library utility classes and functions
@@ -98,7 +98,12 @@ Dependency direction (`target_link_libraries`, all public): everything imports C
 * `:Socket`: non-blocking RAII wrappers — `UdpSocket` (big SO_RCVBUF, SIO_UDP_CONNRESET disabled, optional broadcast), `TcpSocket`/`TcpListener` (TCP_NODELAY, `poll()` resolves connects), `TcpMessageStream` (uint32-length-framed messages with partial send/recv buffering), `netResolveHost` (blocking DNS). Winsock initialized lazily on first open
 * `:Reliable`: `NetHost` — symmetric client/server/p2p over one `UdpSocket` (two hosts `connect()`ing to each other resolve the simultaneous handshake, tie-broken on connect salts). Poll model like the rest of the engine: queue with `send(peer, bytes, ENetDelivery, channel)`, per-frame `update(dt)` pumps/retransmits/flushes (messages batched into ≤`maxPacketSize` packets), drain `takeEvents()` (Connected/Disconnected/Message). Deliveries: Unreliable, UnreliableSequenced (stale-dropped), Reliable (ordered + guaranteed, acked via packet seq + 32-bit ack bitfield piggybacked on every packet, RTT-based retransmit, fragments transparently up to `maxMessageSize`) — on up to 8 independent channels (index rides in the message kind byte, zero wire cost) so bulk transfers don't head-of-line-block other reliable streams. 4-way anti-spoof challenge handshake (responder is stateless until the challenge round-trips: `serverSalt = HMAC(hostSecret, addr|salt|flags)`); `NetHostConfig::encrypt` adds ephemeral ECDH P-256 key agreement in the handshake + AES-128-GCM per payload packet (+16B tag, nonce = sender role + implicit 64-bit packet counter; Windows CNG, hardware AES) — secure against spoofing/eavesdropping/tampering, not an active MITM (unauthenticated keys). Keepalives/timeouts, per-peer RTT/loss stats, and live-editable link simulation (`simPacketLoss`/`simLatencyMs`/`simJitterMs`) in `NetHostConfig`
 
-## Animation
+## Audio
+* miniaudio (output device, mixing, node graph, decoding; `MINIAUDIO_IMPLEMENTATION` in Audio.cpp) + Steam Audio (HRTF binaural spatialization, statically linked `phonon(d).lib`), wrapped in `module Audio`; depends only on Core, neither API leaks into the public surface (handles store opaque pointers)
+* `Globals::audio` (`AudioSystem`): `initialize()` opens the default device (48kHz stereo) and creates the Steam Audio context/HRTF; `setListener(pos, forward, up[, velocity])` once per frame from the camera (main.cpp does this next to `scriptContext.update`) — it recomputes every source's HRTF direction, inverse-clamped distance attenuation, and doppler on the game thread (audio thread reads them via atomics). Master volume is a Tweak under Audio/System
+* Mono sounds route ma_sound → per-source custom `BinauralNode` (fixed 256-frame `iplBinauralEffectApply` blocks behind small FIFOs) → endpoint; stereo or `setRelative(true)` sounds play unspatialized. Steam Audio's scene-based occlusion/reflection features are unused so far — only the HRTF direct path
+* `AudioBuffer`/`AudioSource`: RAII movable handles, like PhysicsBody. `loadSound(path)` (WAV/FLAC/MP3, relative to `Assets/`) or `createBuffer(EAudioFormat, pcmBytes, sampleRate)` for procedural sounds (everything converts to f32 internally); buffers must outlive sources playing them (destroying one stops those sources). Sources: play/pause/stop, looping/gain/pitch/position/velocity, `setAttenuation`
+* `playOneShot(buffer, worldPos, gain, pitch)` / `playOneShot2D` = fire-and-forget from an internal 32-source pool (steals the oldest slot when full). Key 8/9 in the App plays a procedural blip at the thrown body's spawn position as a smoke test
 * Skeletal animation runtime (depends only on Core). Partitioned module `Animation` (`import Animation;`): `Animation:Skeleton` (`Skeleton` bone hierarchy), `Animation:Clip` (`AnimationClip`/`AnimationSet` keyframes + `AnimationPlayer`: CPU sampler producing a bone-matrix palette, with crossfade blending, 1D `BlendSpace1D`, and programmatic per-bone posing via `setBoneTransform`/`setBoneOffset`), and `Animation:StateMachine` (`AnimStateMachine`: parameter-driven states/transitions that crossfade an `AnimationPlayer`)
 * File builds `Skeleton`/`AnimationClip` from Assimp; RendererVK consumes the palette for GPU skinning; Entity's `AnimatorComponent` + .apl assets drive it data-driven (World caches retargeted clip sets per skeleton+animator)
 

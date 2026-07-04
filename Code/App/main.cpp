@@ -17,6 +17,7 @@ import RendererVK;
 import Entity;
 import Script;
 import Physics;
+import Audio;
 
 int main()
 {
@@ -66,6 +67,21 @@ int main()
 
     Globals::physics.initialize();
 
+    Globals::audio.initialize();
+
+    // A short procedural sine blip so 3D audio is testable without any sound assets (fired with 8/9).
+    AudioBuffer blipBuffer;
+    {
+        constexpr uint32 sampleRate = 44100;
+        std::vector<int16> samples(sampleRate / 5); // 200ms at 880Hz with a squared fade-out
+        for (size_t i = 0; i < samples.size(); ++i)
+        {
+            const float envelope = 1.0f - float(i) / float(samples.size());
+            samples[i] = int16(sinf(float(i) / float(sampleRate) * 880.0f * 2.0f * glm::pi<float>()) * envelope * envelope * 32000.0f);
+        }
+        blipBuffer = Globals::audio.createBuffer(EAudioFormat::Mono16, std::as_bytes(std::span(samples)), sampleRate);
+    }
+
     // Register the script (re)load hook before any entity (and its ScriptComponent) spawns below — see the
     // note on ScriptEventManager::initialize for why this can't be done in its constructor.
     Globals::scriptEvents.initialize();
@@ -92,6 +108,7 @@ int main()
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_S) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "S Down" : "S Up");
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_D) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "D Down" : "D Up");
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_LSHIFT) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "LShift Down" : "LShift Up");
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_SPACE) Globals::scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "Space Down" : "Space Up");
 
         if (evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
@@ -200,6 +217,7 @@ int main()
                 if (PhysicsComponent* pc = getComponent<PhysicsComponent>(e))
                     pc->body.setLinearVelocity(dir * 12.0f);
                 entities.push_back(std::move(e));
+                Globals::audio.playOneShot(blipBuffer, spawnAt.pos, 1.0f, cube ? 1.0f : 1.5f);
             }
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
@@ -275,6 +293,7 @@ int main()
             const glm::vec3 camUp = glm::normalize(glm::vec3(camToWorld[1]));
             Globals::scriptContext.update((float)deltaSec, (float)Globals::time.getElapsedSec(),
                 camera.position, camDir, camUp, camera.fovDeg);
+            Globals::audio.setListener(camera.position, camDir, camUp);
         }
 
         for (EntityChange& change : ui.takeEntityChanges())
