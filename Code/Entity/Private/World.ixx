@@ -7,6 +7,7 @@ import Core.Transform;
 import RendererVK;
 import Animation;
 import Physics;
+import Audio;
 import :Entity;
 import :Component;
 
@@ -98,6 +99,12 @@ private:
     std::shared_ptr<PhysicsComponent::SpawnInfo> buildPhysicsSpawnInfo(const AssetNode& physicsNode,
         const std::string& containerName, const std::string& nodePath, const std::string& ownerName);
 
+    std::shared_ptr<AudioComponent::SpawnInfo> buildAudioSpawnInfo(const AssetNode& audioNode, const std::string& ownerName);
+
+    // Audio buffer for a sound file, shared between every entity referencing the same path. A failed
+    // load is cached too (as an invalid buffer) so a bad path doesn't retry + re-log every spawn.
+    std::shared_ptr<AudioBuffer> getOrLoadAudioBuffer(const std::string& path);
+
     // Collision source for a container: normally captured during loadContainer; falls back to a
     // one-time re-import if the container was loaded before physics asked (then cached).
     std::shared_ptr<const CollisionSource> getOrLoadCollisionSource(const std::string& containerName);
@@ -107,6 +114,7 @@ private:
     std::unordered_map<std::string, std::shared_ptr<const CollisionSource>> m_collisionSources; // key: container name
     std::unordered_map<std::string, std::shared_ptr<PhysicsMesh>> m_collisionMeshes;            // key: container|node
     std::unordered_map<std::string, std::unique_ptr<AnimationSet>> m_clipSets; // key: skeleton ptr + animator name
+    std::unordered_map<std::string, std::shared_ptr<AudioBuffer>> m_audioBuffers; // key: sound file path
     std::unordered_map<std::string, std::shared_ptr<EntitySpawnTemplate>> m_templates; // prefab templates, keyed by name
     std::vector<std::shared_ptr<EntitySpawnTemplate>> m_retiredTemplates; // superseded by reloadPrefabs, kept alive for live entities
     std::unordered_set<std::string> m_buildingTemplates; // prefab names currently being built (cycle guard)

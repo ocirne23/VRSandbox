@@ -8,3 +8,8 @@ Prefab Character
 		Animator CharacterAnimator
 	Component Script
 		Path "Scripts/Character.scr"
+	Component Audio
+		Sound Bloop
+			Path Sounds/bloop.wav
+		Sound Blip
+			Path Sounds/blip.wav

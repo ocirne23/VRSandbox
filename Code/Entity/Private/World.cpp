@@ -14,6 +14,7 @@ import :ObjectDescription;
 import :AnimationDescription;
 import Animation;
 import Physics;
+import Audio;
 
 bool World::initialize()
 {
@@ -587,6 +588,45 @@ std::shared_ptr<PhysicsComponent::SpawnInfo> World::buildPhysicsSpawnInfo(const 
     return info;
 }
 
+std::shared_ptr<AudioBuffer> World::getOrLoadAudioBuffer(const std::string& path)
+{
+    if (auto it = m_audioBuffers.find(path); it != m_audioBuffers.end())
+        return it->second;
+    auto buffer = std::make_shared<AudioBuffer>(Globals::audio.loadSound(path));
+    m_audioBuffers.emplace(path, buffer);
+    return buffer;
+}
+
+std::shared_ptr<AudioComponent::SpawnInfo> World::buildAudioSpawnInfo(const AssetNode& audioNode, const std::string& ownerName)
+{
+    auto info = std::make_shared<AudioComponent::SpawnInfo>();
+    for (const AssetNode& child : audioNode.children)
+    {
+        if (!keyIs(child, "Sound"))
+            continue;
+        AudioComponent::SoundDesc desc;
+        desc.alias = child.asString();
+        if (const AssetNode* n = child.find("Path"))              desc.path = n->asString();
+        if (const AssetNode* n = child.find("Volume"))            desc.volume = n->asFloat(0, desc.volume);
+        if (const AssetNode* n = child.find("Pitch"))             desc.pitch = n->asFloat(0, desc.pitch);
+        if (const AssetNode* n = child.find("Loop"))              desc.loop = n->asBool();
+        if (const AssetNode* n = child.find("Relative"))          desc.relative = n->asBool();
+        if (const AssetNode* n = child.find("ReferenceDistance")) desc.referenceDistance = n->asFloat(0, desc.referenceDistance);
+        if (const AssetNode* n = child.find("MaxDistance"))       desc.maxDistance = n->asFloat(0, desc.maxDistance);
+        if (const AssetNode* n = child.find("Rolloff"))           desc.rolloff = n->asFloat(0, desc.rolloff);
+        if (desc.alias.empty() || desc.path.empty())
+        {
+            Log::warning("Scene: entity '" + ownerName + "' has an audio Sound entry without an alias or Path, skipping");
+            continue;
+        }
+        desc.buffer = getOrLoadAudioBuffer(desc.path); // may be invalid (load failure logged); alias stays triggerable as a no-op
+        info->sounds.push_back(std::move(desc));
+    }
+    if (info->sounds.empty())
+        return nullptr;
+    return info;
+}
+
 void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
 {
     tmpl.defaultTransform = readNodeTransform(node); // the declaration's authored placement
@@ -649,6 +689,14 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         typeBits |= uint16(1 << EComponentID_Physics);
         tmpl.spawnInfos.emplace_back(buildPhysicsSpawnInfo(*physicsNode, renderContainerName, renderNodePath, tmpl.displayName));
     }
+
+    static_assert(EComponentID_Audio == 7);
+    if (const AssetNode* audioNode = findComponentNode(node, "Audio"))
+        if (std::shared_ptr<AudioComponent::SpawnInfo> info = buildAudioSpawnInfo(*audioNode, tmpl.displayName))
+        {
+            typeBits |= uint16(1 << EComponentID_Audio);
+            tmpl.spawnInfos.emplace_back(std::move(info));
+        }
 
     tmpl.archetype = makeEntityArchetype(typeBits);
 }

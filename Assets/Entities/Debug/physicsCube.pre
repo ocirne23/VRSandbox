@@ -9,3 +9,10 @@ Prefab physicsCube
 		HalfExtents 1.0, 1.0, 1.0
 		Friction 0.6
 		Restitution 0.1
+	Component Audio
+		Sound Blip
+			Path Sounds/blip.wav
+		Sound BlipLow
+			Path Sounds/blip.wav
+			Pitch 0.5
+			Volume 0.8

@@ -35,6 +35,9 @@ void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float 
         renderer.renderNode(render->node);
     }
 
+    if (AudioComponent* audio = getComponent<AudioComponent>(this))
+        audio->update(*this, world); // playing follow-sounds track the entity
+
     if (sc)
         for (const EntityPtr& child : sc->children)
             child->updateTree(renderer, world, deltaSeconds);
@@ -122,6 +125,13 @@ void Entity::createComponent(EComponentID id, uint16 componentOffset, const void
         pc->spawn(*this, *static_cast<const PhysicsComponent::SpawnInfo*>(info), base);
         break;
     }
+    case EComponentID_Audio:
+    {
+        AudioComponent* ac = reinterpret_cast<AudioComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        new (ac) AudioComponent();
+        ac->spawn(*this, *static_cast<const AudioComponent::SpawnInfo*>(info), base);
+        break;
+    }
     default:
         __debugbreak();
     }
@@ -166,6 +176,13 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
         pc->~PhysicsComponent();
         break;
     }
+    case EComponentID_Audio:
+    {
+        AudioComponent* ac = reinterpret_cast<AudioComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        ac->destroy(*this, *static_cast<const AudioComponent::SpawnInfo*>(info));
+        ac->~AudioComponent();
+        break;
+    }
     default:
         __debugbreak();
     }
@@ -182,6 +199,7 @@ void Entity::serializeComponent(EComponentID id, AssetNode& out)
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->serialize(out); break;
     case EComponentID_Script: getComponent<ScriptComponent>(this)->serialize(out);   break;
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->serialize(out);  break;
+    case EComponentID_Audio:  getComponent<AudioComponent>(this)->serialize(out);    break;
     default: break;
     }
 }
@@ -197,6 +215,7 @@ void Entity::deserializeComponent(EComponentID id, const AssetNode& in)
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->deserialize(in); break;
     case EComponentID_Script: getComponent<ScriptComponent>(this)->deserialize(in);   break;
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->deserialize(in);  break;
+    case EComponentID_Audio:  getComponent<AudioComponent>(this)->deserialize(in);    break;
     default: break;
     }
 }

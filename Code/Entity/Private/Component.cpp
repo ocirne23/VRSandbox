@@ -16,6 +16,7 @@ import Animation;
 import RendererVK;
 import Script;
 import Physics;
+import Audio;
 
 Transform composeTransform(const Transform& parent, const Transform& local)
 {
@@ -398,6 +399,87 @@ const AnimatorComponent::SpawnInfo* getAnimatorSpawnInfo(const Entity* entity)
     return static_cast<const AnimatorComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
 }
 
+void AudioComponent::spawn(Entity& entity, const SpawnInfo& spawnInfo, const Transform& base)
+{
+    info = &spawnInfo;
+    voices.resize(spawnInfo.sounds.size());
+}
+
+void AudioComponent::destroy(Entity& entity, const SpawnInfo&)
+{
+    voices.clear(); // AudioSource RAII stops + releases the playing sounds
+}
+
+int AudioComponent::findSound(std::string_view alias) const
+{
+    if (!info)
+        return -1;
+    for (int i = 0; i < (int)info->sounds.size(); ++i)
+        if (info->sounds[i].alias == alias)
+            return i;
+    return -1;
+}
+
+// The entity's world position, composed on demand (updateTree computes world transforms transiently).
+static glm::vec3 worldPositionOf(const Entity& entity)
+{
+    Transform world(entity.pos, entity.scale, entity.rot);
+    for (const Entity* p = entity.parent; p; p = p->parent)
+        world = composeTransform(Transform(p->pos, p->scale, p->rot), world);
+    return world.pos;
+}
+
+bool AudioComponent::trigger(Entity& entity, std::string_view alias, const TriggerOverrides& overrides)
+{
+    const int idx = findSound(alias);
+    if (idx < 0)
+    {
+        Log::warning("Audio: entity '" + entity.displayName + "' has no sound named '" + std::string(alias) + "'");
+        return false;
+    }
+    const SoundDesc& desc = info->sounds[idx];
+    if (!desc.buffer || !desc.buffer->isValid())
+        return false; // load failure already logged by World
+    Voice& voice = voices[idx];
+    if (!voice.source.isValid())
+    {
+        voice.source = Globals::audio.createSource();
+        if (!voice.source.isValid())
+            return false;
+    }
+    if (!voice.bufferSet)
+    {
+        voice.source.setBuffer(*desc.buffer);
+        voice.bufferSet = true;
+    }
+    voice.source.setLooping(desc.loop);
+    voice.source.setGain(overrides.volume.value_or(desc.volume));
+    voice.source.setPitch(overrides.pitch.value_or(desc.pitch));
+    voice.source.setRelative(desc.relative);
+    voice.source.setAttenuation(desc.referenceDistance, desc.maxDistance, desc.rolloff);
+    voice.follow = !overrides.position.has_value();
+    if (voice.follow)
+        voice.source.setPosition(worldPositionOf(entity));
+    else
+        voice.source.setPosition(overrides.position.value());
+    voice.source.play();
+    return true;
+}
+
+void AudioComponent::stopSound(std::string_view alias)
+{
+    for (int i = 0; i < (int)voices.size(); ++i)
+        if ((alias.empty() || (info && info->sounds[i].alias == alias)) && voices[i].source.isValid())
+            voices[i].source.stop();
+}
+
+void AudioComponent::update(Entity& entity, const Transform& world)
+{
+    for (Voice& voice : voices)
+        if (voice.follow && voice.source.isValid() && voice.source.isPlaying())
+            voice.source.setPosition(world.pos);
+}
+
 const PhysicsComponent::SpawnInfo* getPhysicsSpawnInfo(const Entity* entity)
 {
     if (!entity->spawnTemplate || !hasComponent<PhysicsComponent>(entity))
@@ -465,6 +547,38 @@ void writeAnimatorSpawnInfo(const AnimatorComponent::SpawnInfo& info, AssetNode&
     out.set("Animator", info.animatorName);
     if (!info.enabled)
         out.set("Enabled", info.enabled);
+}
+
+const AudioComponent::SpawnInfo* getAudioSpawnInfo(const Entity* entity)
+{
+    if (!entity->spawnTemplate || !hasComponent<AudioComponent>(entity))
+        return nullptr;
+
+    size_t idx = 0;
+    for (uint16 i = 0; i < uint16(EComponentID_Audio); ++i)
+        if (entity->typeBits & (1 << i))
+            ++idx;
+    if (idx >= entity->spawnTemplate->spawnInfos.size())
+        return nullptr;
+    return static_cast<const AudioComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
+}
+
+void writeAudioSpawnInfo(const AudioComponent::SpawnInfo& info, AssetNode& out)
+{
+    const AudioComponent::SoundDesc defaults;
+    for (const AudioComponent::SoundDesc& sound : info.sounds)
+    {
+        AssetNode& node = out.addChild("Sound");
+        node.values.emplace_back(sound.alias);
+        node.set("Path", sound.path);
+        if (sound.volume != defaults.volume)     node.set("Volume", sound.volume);
+        if (sound.pitch != defaults.pitch)       node.set("Pitch", sound.pitch);
+        if (sound.loop != defaults.loop)         node.set("Loop", sound.loop);
+        if (sound.relative != defaults.relative) node.set("Relative", sound.relative);
+        if (sound.referenceDistance != defaults.referenceDistance) node.set("ReferenceDistance", sound.referenceDistance);
+        if (sound.maxDistance != defaults.maxDistance)             node.set("MaxDistance", sound.maxDistance);
+        if (sound.rolloff != defaults.rolloff)                     node.set("Rolloff", sound.rolloff);
+    }
 }
 
 int componentIdFromName(std::string_view name)

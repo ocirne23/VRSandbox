@@ -23,6 +23,7 @@ export enum EComponentID : uint16
     EComponentID_Animator = 4,
     EComponentID_Script   = 5,
     EComponentID_Physics  = 6,
+    EComponentID_Audio    = 7,
 };
 
 export class Entity

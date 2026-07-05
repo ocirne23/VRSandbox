@@ -88,6 +88,11 @@ public:
     bool isEventNode() const { return isEventEntryType(m_typeId); }
     Node& addEventEntry(const std::string& name);
 
+    // Trigger Audio node only: its exec INPUT pins are the target AudioComponent's sound aliases, kept in
+    // front of the data inputs (synced from the entity by Scene::setAudioAliases, not user-edited).
+    bool isTriggerAudio() const { return isTriggerAudioType(m_typeId); }
+    Node& addAudioEntry(const std::string& name);
+
     // Function boundary + call nodes. Function Input/Output edit their own typed pins (params/returns) via the
     // MemberEdit machinery, but are not synced across nodes. A Function Call mirrors an imported function's
     // signature and remembers which (script, function) it targets.

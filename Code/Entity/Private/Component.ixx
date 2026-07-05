@@ -9,13 +9,14 @@ import File;
 import Animation;
 import Script;
 import Physics;
+import Audio;
 
 import RendererVK;
 
 export int componentIdFromName(std::string_view name);
 export void detachFromOwner(Entity* entity);
 
-export constexpr uint16 MaxInlineComponentTypes = 7;
+export constexpr uint16 MaxInlineComponentTypes = 8;
 export constexpr uint16 ComponentAlignment = 16;
 
 export struct SceneComponent
@@ -224,6 +225,65 @@ export struct PhysicsComponent
     void deserialize(const AssetNode&) {}
 };
 
+// A set of named, triggerable sounds ("Component Audio" in .pre files): each Sound entry pairs an
+// alias with a sound file and per-sound playback settings. Gameplay (or the script "Trigger Audio"
+// node, via ctx->entityTriggerAudio) plays one by alias; playing spatial sounds follow the entity
+// unless the trigger supplied an explicit position override.
+export struct AudioComponent
+{
+    static constexpr EComponentID getId() { return EComponentID_Audio; }
+
+    struct SoundDesc
+    {
+        std::string alias;                        // the name gameplay/scripts trigger it by
+        std::string path;                         // sound file, relative to Assets/ (WAV/FLAC/MP3)
+        std::shared_ptr<AudioBuffer> buffer;      // World-cached, shared between entities using the same file
+        float volume = 1.0f;
+        float pitch = 1.0f;
+        bool loop = false;
+        bool relative = false;                    // 2D playback (no spatialization/attenuation)
+        float referenceDistance = 1.0f;           // inverse-clamped attenuation (see AudioSource::setAttenuation)
+        float maxDistance = FLT_MAX;
+        float rolloff = 1.0f;
+    };
+
+    struct SpawnInfo
+    {
+        std::vector<SoundDesc> sounds;
+    };
+
+    // Per-trigger overrides for the authored settings; unset fields keep the SoundDesc values. A set
+    // position pins the sound at that world position instead of following the entity.
+    struct TriggerOverrides
+    {
+        std::optional<glm::vec3> position;
+        std::optional<float> volume;
+        std::optional<float> pitch;
+    };
+
+    struct Voice // playback state per SoundDesc (parallel to info->sounds)
+    {
+        AudioSource source;      // created lazily on first trigger
+        bool bufferSet = false;
+        bool follow = true;      // track the entity's world position while playing
+    };
+
+    const SpawnInfo* info = nullptr;
+    std::vector<Voice> voices;
+
+    bool trigger(Entity& entity, std::string_view alias, const TriggerOverrides& overrides = {});
+    void stopSound(std::string_view alias); // empty alias = stop every sound
+    int findSound(std::string_view alias) const;
+    std::span<const SoundDesc> getSounds() const { return info ? std::span<const SoundDesc>(info->sounds) : std::span<const SoundDesc>(); }
+
+    void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
+    void destroy(Entity& entity, const SpawnInfo& info);
+    void update(Entity& entity, const Transform& world); // playing follow-sounds track the entity
+
+    void serialize(AssetNode&) const {}
+    void deserialize(const AssetNode&) {}
+};
+
 // Maps this frame's physics contact/sensor events (body userData -> Entity*) onto the involved
 // entities: invokes PhysicsComponent::onContact and fires the matching script On Event entry
 // ("Contact Begin"/"Contact End"/"Sensor Begin"/"Sensor End"). Call once per frame after
@@ -235,6 +295,7 @@ export Transform composeTransform(const Transform& parent, const Transform& loca
 export const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity);
 export const AnimatorComponent::SpawnInfo* getAnimatorSpawnInfo(const Entity* entity);
 export const PhysicsComponent::SpawnInfo* getPhysicsSpawnInfo(const Entity* entity);
+export const AudioComponent::SpawnInfo* getAudioSpawnInfo(const Entity* entity);
 
 // Serializes a render spawn recipe into a "Component Render" node; mirror of World::buildRenderSpawnInfo.
 export void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out);
@@ -244,6 +305,9 @@ export void writeAnimatorSpawnInfo(const AnimatorComponent::SpawnInfo& info, Ass
 
 // Serializes a physics spawn recipe into a "Component Physics" node.
 export void writePhysicsSpawnInfo(const PhysicsComponent::SpawnInfo& info, AssetNode& out);
+
+// Serializes an audio spawn recipe into a "Component Audio" node.
+export void writeAudioSpawnInfo(const AudioComponent::SpawnInfo& info, AssetNode& out);
 
 export constexpr const char* componentTypeName(EComponentID id)
 {
@@ -256,6 +320,7 @@ export constexpr const char* componentTypeName(EComponentID id)
     case EComponentID_Animator: return "Animator";
     case EComponentID_Script: return "Script";
     case EComponentID_Physics: return "Physics";
+    case EComponentID_Audio:  return "Audio";
     default:                  return "Unknown";
     }
 }
@@ -272,6 +337,7 @@ export namespace EntityComponentDetail
         alignUp(uint16(sizeof(AnimatorComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(ScriptComponent)),  ComponentAlignment),
         alignUp(uint16(sizeof(PhysicsComponent)), ComponentAlignment),
+        alignUp(uint16(sizeof(AudioComponent)),   ComponentAlignment),
     };
 
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);

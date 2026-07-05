@@ -105,6 +105,13 @@ typedef struct ScriptContext
     void      (*sendEvent)(const char* eventName);
     void      (*sendEventToEntity)(Entity* entity, const char* eventName);
 
+    // ---- audio (appended; keep this table append-only) ---- target the entity's AudioComponent; entities
+    // without one (or without the alias) no-op. overrideMask picks which override arguments replace the
+    // sound's authored settings: 1 = position (also pins the sound there instead of following the entity),
+    // 2 = volume, 4 = pitch. entityStopAudio with a null/empty alias stops every sound on the entity.
+    void      (*entityTriggerAudio)(Entity* entity, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch);
+    void      (*entityStopAudio)(Entity* entity, const char* alias);
+
 #ifdef __cplusplus
     ScriptContext(); // the engine binds all the function pointers here; scripts never construct one
 

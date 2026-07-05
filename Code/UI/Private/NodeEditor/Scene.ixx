@@ -40,6 +40,11 @@ public:
     void requestCopy() { m_pendingCopyRequest = true; }
     void requestPaste() { m_pendingPasteRequest = true; }
 
+    // The sound aliases of the entity that owns the open script (its AudioComponent). Trigger Audio nodes
+    // sync their exec entry pins to this list. null = unknown (no owning entity selected): pins stay as
+    // loaded from the file, so editing a script standalone never strips them.
+    void setAudioAliases(const std::vector<std::string>* aliases);
+
 private:
 
     Node* findEntry(const char* nodeName) const;
@@ -56,6 +61,7 @@ private:
     void syncNewMemberNode(Node& newNode);            // seed a new Script Data node from the shared member set
     void applyEventEdit(const MemberEdit& edit);      // replay an entry edit across all On Event nodes
     void syncNewEventNode(Node& newNode);             // seed a new On Event node from the shared entry set
+    void syncTriggerAudioPins(Node& node);            // reconcile a Trigger Audio node's alias pins with m_audioAliases
     void autoConnectPending(Node& node);               // wire m_pendingLinkPin to node's first matching pin, if any
 
     // ---- functions (imported reusable subgraphs) ----
@@ -107,6 +113,9 @@ private:
     bool m_hasBaseline = false;
 
     std::vector<FunctionRef> m_importFunctions; // cached function list, refreshed when the add-node popup opens
+
+    std::vector<std::string> m_audioAliases; // Trigger Audio entry pins sync to this (see setAudioAliases)
+    bool m_audioAliasesKnown = false;
 };
 
 } // namespace NodeEditor

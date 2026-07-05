@@ -216,6 +216,30 @@ namespace
             sc->fireEvent(*en, eventName); // targeted: only this entity's script
     }
 
+    // ---- audio thunks ----
+
+    void thunk_entityTriggerAudio(Entity* en, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch)
+    {
+        if (!en || !alias)
+            return;
+        AudioComponent* ac = getComponent<AudioComponent>(en);
+        if (!ac)
+            return;
+        AudioComponent::TriggerOverrides overrides;
+        if (overrideMask & 1) overrides.position = position;
+        if (overrideMask & 2) overrides.volume = volume;
+        if (overrideMask & 4) overrides.pitch = pitch;
+        ac->trigger(*en, alias, overrides);
+    }
+
+    void thunk_entityStopAudio(Entity* en, const char* alias)
+    {
+        if (!en)
+            return;
+        if (AudioComponent* ac = getComponent<AudioComponent>(en))
+            ac->stopSound(alias ? alias : "");
+    }
+
 }
 
 // Binds the ABI function-pointer table to the engine thunks. Globals::scriptContext is constructed at
@@ -260,6 +284,8 @@ ScriptContext::ScriptContext()
     entityTeleportPhysics = &thunk_entityTeleportPhysics;
     sendEvent = &thunk_sendEvent;
     sendEventToEntity = &thunk_sendEventToEntity;
+    entityTriggerAudio = &thunk_entityTriggerAudio;
+    entityStopAudio = &thunk_entityStopAudio;
 }
 
 // Refreshes the per-frame fields; called once a frame (main.cpp) before any script runs this frame.

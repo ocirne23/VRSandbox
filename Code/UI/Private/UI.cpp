@@ -208,6 +208,24 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             ImGui::EndPopup();
         }
 
+        // Feed the Trigger Audio nodes the sound aliases of the entity that owns the open script (its
+        // AudioComponent). Unknown while the selection doesn't own the open script, so a script opened
+        // standalone (asset browser) keeps whatever alias pins its file declared.
+        {
+            std::vector<std::string> aliases;
+            bool aliasesKnown = false;
+            if (Entity* selected = m_sceneView.getSelected())
+                if (ScriptComponent* script = getComponent<ScriptComponent>(selected);
+                    script && script->scriptModule && script->scriptModule->scriptPath == m_scene.scriptPath())
+                {
+                    aliasesKnown = true;
+                    if (AudioComponent* audio = getComponent<AudioComponent>(selected))
+                        for (const AudioComponent::SoundDesc& sound : audio->getSounds())
+                            aliases.push_back(sound.alias);
+                }
+            m_scene.setAudioAliases(aliasesKnown ? &aliases : nullptr);
+        }
+
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::BeginChild("ScriptCanvas", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_NoMove);
         m_scene.update(deltaSec);

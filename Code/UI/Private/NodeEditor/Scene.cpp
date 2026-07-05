@@ -150,7 +150,7 @@ namespace
     bool pinsCompatible(const Pin* input, const Pin* output)
     {
         if (input->dataType == EDataType::Exec || output->dataType == EDataType::Exec)
-            return input->dataType == EDataType::Exec && output->dataType == EDataType::Exec;
+            return input->dataType == EDataType::Exec && output->dataType == EDataType::Exec && output->numConnections == 0;
 
         // Mutability: e.g. a Writable input (writes to its source) can't take a read-only rvalue output.
         if ((mutableBits(input->mutability) & ~mutableBits(output->mutability)) != 0)
@@ -181,7 +181,9 @@ namespace
     };
 
     std::string emitDataExpr(Codegen& cg, const Pin* inputPin, std::set<const Node*>& dataStack, const HoistMap& hoist);
-    std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack);
+    // enteredPin = the exec INPUT pin the flow arrived through; only Trigger Audio (whose entry pins select
+    // the sound to play) cares, every other node emits the same statement regardless of entry.
+    std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack, const Pin* enteredPin = nullptr);
     std::string expandOutput(Codegen& cg, const Pin* outPin, std::set<const Node*>& dataStack, const HoistMap& hoist);
 
     // @ -> unique node idx
@@ -246,7 +248,7 @@ namespace
                 {
                     const auto& outputs = node->getOutputPins();
                     Pin* tgt = (idx >= 0 && idx < (int)outputs.size()) ? realTargetOfOutput(cg.links, outputs[idx].get()) : nullptr;
-                    out += tgt ? emitExecChain(cg, tgt->node, execStack) : std::string();
+                    out += tgt ? emitExecChain(cg, tgt->node, execStack, tgt) : std::string();
                 }
                 i = j;
             }
@@ -415,7 +417,55 @@ namespace
 
         if (!outputs.empty())
             if (Pin* tgt = realTargetOfOutput(cg.links, outputs[0].get()))
-                out += emitExecChain(cg, tgt->node, execStack);
+                out += emitExecChain(cg, tgt->node, execStack, tgt);
+        return out;
+    }
+
+    // A Trigger Audio statement: plays the alias whose exec entry pin the flow arrived through. The override
+    // mask is settled at CODEGEN time from which override inputs are connected — unconnected ones pass their
+    // (ignored) defaults, so the sound keeps its authored settings for those.
+    std::string emitTriggerAudioStmt(Codegen& cg, Node* node, std::set<const Node*>& execStack, const HoistMap& hoist, const Pin* enteredPin)
+    {
+        const auto& inputs = node->getInputPins();
+        auto findInput = [&](std::string_view name) -> const Pin*
+        {
+            for (const auto& pin : inputs)
+                if (pin->dataType != EDataType::Exec && pin->name == name)
+                    return pin.get();
+            return nullptr;
+        };
+        const Pin* entityPin = findInput("Entity");
+        const Pin* positionPin = findInput("Position");
+        const Pin* volumePin = findInput("Volume");
+        const Pin* pitchPin = findInput("Pitch");
+
+        std::string alias = enteredPin ? enteredPin->name : std::string();
+        if (alias.empty()) // entry-less reach (shouldn't happen): fall back to the first alias pin
+            for (const auto& pin : inputs)
+                if (pin->dataType == EDataType::Exec && !pin->name.empty()) { alias = pin->name; break; }
+
+        int overrideMask = 0;
+
+        if (positionPin && (positionPin->defaultValue != "default" || realSourceOfInput(cg.links, positionPin))) overrideMask |= 1;
+        if (volumePin && (volumePin->defaultValue != "default" || realSourceOfInput(cg.links, volumePin)))       overrideMask |= 2;
+        if (pitchPin && (pitchPin->defaultValue != "default" || realSourceOfInput(cg.links, pitchPin)))          overrideMask |= 4;
+
+        std::set<const Node*> dataStack;
+        auto expr = [&](const Pin* pin, const char* fallback)
+        {
+            return (pin && pin->defaultValue != "default") ? emitDataExpr(cg, pin, dataStack, hoist) : std::string(fallback);
+        };
+        std::string out = "ctx->entityTriggerAudio(" + expr(entityPin, "self") + ", " + quoteStringLiteral(alias) + ", " +
+            std::to_string(overrideMask) + ", " + expr(positionPin, "glm::vec3(0,0,0)") + ", " +
+            expr(volumePin, "1.0f") + ", " + expr(pitchPin, "1.0f") + ");\n";
+
+        for (const auto& outPin : node->getOutputPins())
+            if (outPin->dataType == EDataType::Exec)
+            {
+                if (Pin* tgt = realTargetOfOutput(cg.links, outPin.get()))
+                    out += emitExecChain(cg, tgt->node, execStack, tgt);
+                break;
+            }
         return out;
     }
 
@@ -434,7 +484,7 @@ namespace
         return out;
     }
 
-    std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack)
+    std::string emitExecChain(Codegen& cg, Node* node, std::set<const Node*>& execStack, const Pin* enteredPin)
     {
         if (!node) return std::string();
         const NodeDef* def = findNodeDef(node->getTypeId());
@@ -470,6 +520,7 @@ namespace
         std::string out;
         if (node->isFunctionCall())        out = emitFunctionCallStmt(cg, node, execStack, hoist);
         else if (node->isFunctionOutput()) out = emitFunctionOutputStmt(cg, node, hoist);
+        else if (node->isTriggerAudio())   out = emitTriggerAudioStmt(cg, node, execStack, hoist, enteredPin);
         else                               out = substituteExec(cg, def->emit, node, execStack, hoist);
         execStack.erase(node);
         return out;
@@ -886,6 +937,44 @@ void Scene::syncNewEventNode(Node& newNode)
         }
 }
 
+// The UI feeds this every frame with the sound aliases of the entity that owns the open script (null while
+// no owning entity is selected, so a standalone-edited script keeps the pins its file declared). Known
+// aliases are reconciled onto every Trigger Audio node immediately; the sync is idempotent and cheap.
+void Scene::setAudioAliases(const std::vector<std::string>* aliases)
+{
+    m_audioAliasesKnown = aliases != nullptr;
+    if (aliases)
+        m_audioAliases = *aliases;
+    if (!m_audioAliasesKnown)
+        return;
+    for (const auto& node : m_nodes)
+        if (node->isTriggerAudio())
+            syncTriggerAudioPins(*node);
+}
+
+// Reconciles one Trigger Audio node's exec entry pins with m_audioAliases: stale aliases are dropped (with
+// their links), missing ones appended. Pins whose alias still exists keep their links untouched.
+void Scene::syncTriggerAudioPins(Node& node)
+{
+    const auto& inputs = node.getInputPins();
+    for (int i = (int)inputs.size() - 1; i >= 0; --i)
+    {
+        const Pin* pin = inputs[i].get();
+        if (pin->dataType != EDataType::Exec)
+            continue;
+        if (std::find(m_audioAliases.begin(), m_audioAliases.end(), pin->name) == m_audioAliases.end())
+            removeInputPin(&node, i);
+    }
+    for (const std::string& alias : m_audioAliases)
+    {
+        bool present = false;
+        for (const auto& pin : node.getInputPins())
+            if (pin->dataType == EDataType::Exec && pin->name == alias) { present = true; break; }
+        if (!present)
+            node.addAudioEntry(alias);
+    }
+}
+
 // Dragging a link onto empty canvas opens the add-node popup with m_pendingLinkPin set to its dangling end;
 // once the user picks a node type, this wires that end to the new node's first pin (of the opposite kind)
 // that accepts it, in pin order. Leaves the link unconnected if none does — the node is still created either
@@ -1201,7 +1290,7 @@ void Scene::emitFunctions(std::string& code)
         Pin* execOut = d.inputNode->getOutputPins().empty() ? nullptr : d.inputNode->getOutputPins()[0].get();
         if (execOut)
             if (Pin* tgt = realTargetOfOutput(cg.links, execOut))
-                chain = emitExecChain(cg, tgt->node, execStack);
+                chain = emitExecChain(cg, tgt->node, execStack, tgt);
 
         const std::string body = applyIndent(cg.globalDecls + chain, "    ");
         if (!body.empty())
@@ -1297,7 +1386,7 @@ std::string Scene::generateCpp()
             Pin* tgt = realTargetOfOutput(m_links, entries[i].get());
             if (!tgt) continue;
             std::set<const Node*> execStack;
-            const std::string chain = emitExecChain(cg, tgt->node, execStack); // also collects cg.globalDecls
+            const std::string chain = emitExecChain(cg, tgt->node, execStack, tgt); // also collects cg.globalDecls
             dispatch += "case " + std::to_string(i) + ":\n{\n" +
                 std::string(1, INDENT_UP) + chain + std::string(1, INDENT_DOWN) + "} break;\n";
         }
@@ -1374,6 +1463,13 @@ std::string Scene::serializeGraph()
         if (m_nodes[i]->isEventNode())
             for (const auto& pin : m_nodes[i]->getOutputPins())
                 s += "//@event " + std::to_string(i) + " " + pin->name + "\n";
+
+    // Trigger Audio alias entries (dynamic exec input pins). Emitted before links for the same reason.
+    for (int i = 0; i < (int)m_nodes.size(); ++i)
+        if (m_nodes[i]->isTriggerAudio())
+            for (const auto& pin : m_nodes[i]->getInputPins())
+                if (pin->dataType == EDataType::Exec)
+                    s += "//@audioentry " + std::to_string(i) + " " + pin->name + "\n";
 
     // Function boundary + call nodes. All pins are emitted before links so a load recreates them first.
     // Function Input params are its output pins after the exec pin; Function Output returns are its input
@@ -1522,6 +1618,17 @@ void Scene::loadLinesIntoGraph(const std::vector<std::string>& lines, ImVec2 off
         const std::string name = r.rest();
         if (ni < 0 || ni >= (int)byIndex.size() || !byIndex[ni] || !byIndex[ni]->isEventNode()) continue;
         byIndex[ni]->addEventEntry(name);
+    }
+
+    // pass 1b2b: Trigger Audio alias entries (before links, which reference these input pins by index)
+    for (const std::string& ln : lines)
+    {
+        LineReader r{ ln };
+        if (r.token() != "//@audioentry") continue;
+        const int ni = toInt(r.token());
+        const std::string name = r.rest();
+        if (ni < 0 || ni >= (int)byIndex.size() || !byIndex[ni] || !byIndex[ni]->isTriggerAudio()) continue;
+        byIndex[ni]->addAudioEntry(name);
     }
 
     // pass 1b3: Function boundary + call nodes (before links, which reference these pins by index)
@@ -1723,6 +1830,12 @@ std::string Scene::serializeSubset(const std::vector<Node*>& nodes, const std::v
         if (nodes[i]->isEventNode())
             for (const auto& pin : nodes[i]->getOutputPins())
                 s += "//@event " + std::to_string(i) + " " + pin->name + "\n";
+
+    for (int i = 0; i < (int)nodes.size(); ++i)
+        if (nodes[i]->isTriggerAudio())
+            for (const auto& pin : nodes[i]->getInputPins())
+                if (pin->dataType == EDataType::Exec)
+                    s += "//@audioentry " + std::to_string(i) + " " + pin->name + "\n";
 
     for (int i = 0; i < (int)nodes.size(); ++i)
     {
@@ -2000,6 +2113,8 @@ void Scene::update(double deltaSec)
                             syncNewMemberNode(added); // keep a new Script Data node in sync with the others
                         if (added.isEventNode())
                             syncNewEventNode(added); // keep a new On Event node in sync with the others
+                        if (added.isTriggerAudio() && m_audioAliasesKnown)
+                            syncTriggerAudioPins(added); // seed the alias entry pins from the owning entity
                         autoConnectPending(added); // wire a link dropped here to its first matching pin, if any
                     }
                 ImGui::EndMenu();

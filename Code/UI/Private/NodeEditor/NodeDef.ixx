@@ -118,6 +118,12 @@ export bool isRerouteType(std::string_view typeId) { return typeId == "Reroute";
 // event name to the matching entry's exec chain (see Scene::generateCpp / applyEventEdit).
 export bool isEventEntryType(std::string_view typeId) { return typeId == "OnEvent"; }
 
+// The Trigger Audio node is special like On Event, but with dynamic exec INPUT pins: one per Sound alias
+// of the target entity's AudioComponent (synced from the selected entity by the UI, serialized as
+// //@audioentry lines). Flow entering an alias pin plays that sound; codegen picks the alias from the
+// entered pin (see emitExecChain's enteredPin).
+export bool isTriggerAudioType(std::string_view typeId) { return typeId == "TriggerAudio"; }
+
 // Function boundary + call nodes. A .scr can define multiple named functions; each is a (Function Input,
 // Function Output) pair sharing a function name. Function Input holds a fixed Exec output plus user-defined
 // typed OUTPUT pins (the parameters); Function Output holds a fixed Exec input plus user-defined typed INPUT
@@ -676,6 +682,26 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "Entity", D::Entity, "self" }, { "Index", D::Int, "0" } },
         { { "Child", D::Entity, "" } },
         "ctx->entityGetChildAt($0, $1)" });
+
+    // ---- audio (target the entity's AudioComponent; entities without one no-op) ----
+    // Trigger Audio is special-cased (isTriggerAudioType): its exec input pins are the alias entries of the
+    // target entity's AudioComponent — flow entering an alias pin plays that sound. The Position/Volume/Pitch
+    // inputs override the sound's authored settings only when connected (a connected Position also pins the
+    // sound at that world position instead of following the entity). Codegen is emitTriggerAudioStmt.
+    r.push_back({ "TriggerAudio", "Trigger Audio", "Audio", true,
+        { { "Entity",   D::Entity, "self" },
+            { "Position", D::Vec3,   "default" },
+            { "Volume",   D::Float,  "default" },
+            { "Pitch",    D::Float,  "default" } },
+        { { "", D::Exec, "" } },
+        "" });
+
+    // Stop Audio: stops a playing sound by alias (looping sounds keep playing until stopped); an empty
+    // alias stops every sound on the entity.
+    r.push_back({ "StopAudio", "Stop Audio", "Audio", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "alias", D::String, "" } },
+        { { "", D::Exec, "" } },
+        "ctx->entityStopAudio($1, $2);\n#0" });
 
     // Send Event: fires a named On Event entry on every script listening for it (matched by name at runtime).
     r.push_back({ "SendEvent", "Send Event", "Events", true,

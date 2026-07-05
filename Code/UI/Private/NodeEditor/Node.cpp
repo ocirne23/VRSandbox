@@ -83,6 +83,18 @@ Node& Node::addEventEntry(const std::string& name)
     return *this;
 }
 
+// A Trigger Audio alias entry is an exec INPUT pin: flow entering it plays that sound. Alias pins sit in
+// front of the node's data inputs (Entity/Position/Volume/Pitch), in AudioComponent order.
+Node& Node::addAudioEntry(const std::string& name)
+{
+    addInput(EDataType::Exec, name, "");
+    size_t pos = 0;
+    while (pos < m_inputPins.size() - 1 && m_inputPins[pos]->dataType == EDataType::Exec)
+        ++pos;
+    std::rotate(m_inputPins.begin() + pos, m_inputPins.end() - 1, m_inputPins.end());
+    return *this;
+}
+
 // A reroute carries one value straight through: an input and an output pin of the same (link) type.
 Node& Node::makeReroute(EDataType type)
 {
@@ -733,16 +745,25 @@ void Node::update(double /*deltaSec*/, bool firstFrame)
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
 
     // A single exec pin rides on the title line (input left, output right). Data pins go in the body
-    // columns; so do exec outputs when there are 2+ of them (e.g. Branch's true/false) so the title
-    // line stays clean.
+    // columns; so do exec pins when there are 2+ of them on that side (e.g. Branch's true/false outputs,
+    // Trigger Audio's alias inputs) so each keeps its label instead of losing it to the title line.
+    int execInputCount = 0;
+    for (const auto& pinPtr : m_inputPins)
+        if (pinPtr->dataType == EDataType::Exec)
+            ++execInputCount;
+
+    // Trigger Audio always body-routes its exec inputs: they are named sound aliases, and the label
+    // matters even when the component declares just one sound.
+    const bool titleInputExecAllowed = execInputCount == 1 && !isTriggerAudio();
+
     Pin* inputExec = nullptr;
-    std::vector<Pin*> dataInputs;
+    std::vector<Pin*> bodyInputs;
     for (const auto& pinPtr : m_inputPins)
     {
-        if (pinPtr->dataType == EDataType::Exec && !inputExec)
+        if (titleInputExecAllowed && pinPtr->dataType == EDataType::Exec && !inputExec)
             inputExec = pinPtr.get();
         else
-            dataInputs.push_back(pinPtr.get());
+            bodyInputs.push_back(pinPtr.get());
     }
 
     int execOutputCount = 0;
@@ -762,7 +783,7 @@ void Node::update(double /*deltaSec*/, bool firstFrame)
 
     // Measure first so the layout is stable on the very first frame (no feedback from GetNodeSize).
     float inputColW = 0.0f;
-    for (Pin* pin : dataInputs)
+    for (Pin* pin : bodyInputs)
         inputColW = fmaxf(inputColW, measureRow(*pin, spacing));
     float outputColW = 0.0f;
     for (Pin* pin : bodyOutputs)
@@ -815,7 +836,7 @@ void Node::update(double /*deltaSec*/, bool firstFrame)
 
     // Divider + spacing only when there's a body beneath the title. A node that carries nothing but its
     // title-line exec pins (e.g. Update, Break) stays compact — no line, no gap.
-    const bool hasBody = !dataInputs.empty() || !bodyOutputs.empty() || hasProperty;
+    const bool hasBody = !bodyInputs.empty() || !bodyOutputs.empty() || hasProperty;
     if (hasBody)
     {
         const float dividerY = ImGui::GetItemRectMax().y + 2.0f;
@@ -836,7 +857,7 @@ void Node::update(double /*deltaSec*/, bool firstFrame)
     const float bodyTopY = ImGui::GetCursorPosY();
 
     // Input column (left), then output column (right) starting back at the same Y.
-    for (Pin* pin : dataInputs)
+    for (Pin* pin : bodyInputs)
         renderInputRow(*pin, nodeLeftX, spacing);
 
     if (!bodyOutputs.empty())
