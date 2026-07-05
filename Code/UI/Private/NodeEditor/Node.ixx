@@ -1,9 +1,9 @@
-export module UI.NodeEditor.Node;
+export module UI:Node;
 
 import Core;
 import Core.imgui;
-import UI.imgui_node_editor;
-import UI.NodeEditor.NodeDef;
+import :imgui_node_editor;
+import :NodeDef;
 
 namespace NodeEditor
 {

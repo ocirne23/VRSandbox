@@ -1,11 +1,12 @@
-module UI.NodeEditor.Scene;
+module UI;
 
 import Core;
 import Core.imgui;
-import UI.imgui_node_editor;
-import UI.NodeEditor.Node;
-import UI.NodeEditor.Link;
-import UI.NodeEditor.NodeDef;
+import :imgui_node_editor;
+import :Node;
+import :Link;
+import :NodeDef;
+import :Scene;
 
 using namespace NodeEditor;
 

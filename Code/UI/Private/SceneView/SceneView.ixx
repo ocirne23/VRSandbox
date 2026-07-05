@@ -1,4 +1,4 @@
-﻿export module UI.SceneView;
+﻿export module UI:SceneView;
 
 import Core;
 import Core.Transform;

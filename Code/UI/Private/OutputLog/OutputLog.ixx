@@ -1,4 +1,4 @@
-export module UI.OutputLog;
+export module UI:OutputLog;
 
 import Core;
 import Core.Log;

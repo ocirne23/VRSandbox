@@ -1,4 +1,4 @@
-export module UI.TweakPanel;
+export module UI:TweakPanel;
 
 import Core;
 

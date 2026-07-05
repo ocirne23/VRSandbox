@@ -1,4 +1,7 @@
-module UI.NodeEditor.Link;
+module UI;
+
+import :imgui_node_editor;
+import :Link;
 
 using namespace NodeEditor;
 

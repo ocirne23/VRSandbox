@@ -1,6 +1,9 @@
-module UI.OutputLog;
+module UI;
 
+import Core;
 import Core.imgui;
+import Core.Log;
+import :OutputLog;
 
 static ImVec4 levelColor(Log::Level level)
 {

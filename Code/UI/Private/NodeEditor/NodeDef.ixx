@@ -1,4 +1,4 @@
-export module UI.NodeEditor.NodeDef;
+export module UI:NodeDef;
 
 import Core;
 

@@ -1,4 +1,4 @@
-export module UI.AssetBrowser;
+export module UI:AssetBrowser;
 
 import Core;
 import Entity;

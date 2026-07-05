@@ -1,7 +1,9 @@
-module UI.AssetBrowser;
+module UI;
 
+import Core;
 import Core.imgui;
 import Entity;
+import :AssetBrowser;
 
 static bool isImageFile(const std::string& ext)
 {

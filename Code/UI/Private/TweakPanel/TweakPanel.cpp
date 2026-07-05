@@ -1,8 +1,10 @@
-module UI.TweakPanel;
+module UI;
 
+import Core;
 import Core.imgui;
 import Core.glm;
 import Core.Tweaks;
+import :TweakPanel;
 
 namespace
 {

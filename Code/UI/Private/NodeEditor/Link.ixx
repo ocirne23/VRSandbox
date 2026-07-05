@@ -1,6 +1,6 @@
-export module UI.NodeEditor.Link;
+export module UI:Link;
 
-import UI.imgui_node_editor;
+import :imgui_node_editor;
 
 namespace NodeEditor
 {

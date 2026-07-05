@@ -1,4 +1,4 @@
-export module UI.PropertiesPanel;
+export module UI:PropertiesPanel;
 
 import Core;
 import Entity;

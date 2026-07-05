@@ -1,9 +1,18 @@
 module UI;
 
+import Core;
 import Core.imgui;
 import Core.Log;
 import Core.glm;
 import Entity;
+
+import :imgui_node_editor;
+import :Scene;
+import :AssetBrowser;
+import :SceneView;
+import :PropertiesPanel;
+import :OutputLog;
+import :TweakPanel;
 
 UI::~UI()
 {

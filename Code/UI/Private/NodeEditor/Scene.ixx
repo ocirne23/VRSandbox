@@ -1,11 +1,11 @@
-export module UI.NodeEditor.Scene;
+export module UI:Scene;
 
 import Core;
 
-import UI.imgui_node_editor;
-import UI.NodeEditor.Node;
-import UI.NodeEditor.Link;
-import UI.NodeEditor.NodeDef;
+import :imgui_node_editor;
+import :Node;
+import :Link;
+import :NodeDef;
 
 namespace NodeEditor
 {

@@ -1,4 +1,10 @@
-module UI.NodeEditor.Node;
+module UI;
+
+import Core;
+import Core.imgui;
+import :imgui_node_editor;
+import :NodeDef;
+import :Node;
 
 using namespace NodeEditor;
 

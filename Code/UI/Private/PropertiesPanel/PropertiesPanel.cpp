@@ -1,9 +1,11 @@
-module UI.PropertiesPanel;
+module UI;
 
+import Core;
 import Core.imgui;
 import Core.glm;
 import Entity;
 import RendererVK;
+import :PropertiesPanel;
 
 void PropertiesPanel::render(Entity* selected)
 {

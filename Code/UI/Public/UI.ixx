@@ -6,13 +6,16 @@ import Core.glm;
 import Entity;
 
 import UI.fwd;
-import UI.imgui_node_editor;
-import UI.NodeEditor;
-import UI.AssetBrowser;
-import UI.SceneView;
-import UI.PropertiesPanel;
-import UI.OutputLog;
-import UI.TweakPanel;
+import :imgui_node_editor;
+import :NodeDef;
+import :Node;
+import :Link;
+import :Scene;
+import :AssetBrowser;
+import :SceneView;
+import :PropertiesPanel;
+import :OutputLog;
+import :TweakPanel;
 
 import RendererVK;
 

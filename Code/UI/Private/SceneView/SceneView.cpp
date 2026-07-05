@@ -1,6 +1,10 @@
-module UI.SceneView;
+module UI;
 
+import Core;
 import Core.imgui;
+import Core.Transform;
+import Entity;
+import :SceneView;
 
 static const char* fallbackLabel(Entity* entity)
 {
