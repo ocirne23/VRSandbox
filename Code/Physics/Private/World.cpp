@@ -9,112 +9,13 @@ import Core.glm;
 import Core.Log;
 import Core.Tweaks;
 
-static_assert(sizeof(b3BodyId) == sizeof(uint64));
-static_assert(sizeof(b3JointId) == sizeof(uint64));
-static_assert(sizeof(b3WorldId) == sizeof(uint32));
-static_assert(sizeof(b3Vec3) == sizeof(glm::vec3));
-
-static b3Vec3 toB3(const glm::vec3& v) { return b3Vec3{ v.x, v.y, v.z }; }
-static b3Quat toB3(const glm::quat& q) { return b3Quat{ { q.x, q.y, q.z }, q.w }; }
-static glm::vec3 toGlm(const b3Vec3& v) { return glm::vec3(v.x, v.y, v.z); }
-static glm::quat toGlm(const b3Quat& q) { return glm::quat(q.s, q.v.x, q.v.y, q.v.z); }
-
-static b3BodyId toBodyId(uint64 handle) { return std::bit_cast<b3BodyId>(handle); }
-
-// b3ContactId is 3 fields (index1/world0/generation) and doesn't fit a single bit_cast-able integer; world0
-// is always this process's one physics world, so it's dropped here and re-supplied from m_worldHandle when
-// unpacking (see PhysicsWorld::getContactPoint). Packing is lossless for index1/generation, so this is valid
-// for as long as box3d itself guarantees the id (until the next world step recycles it).
-static int64 packContactId(b3ContactId id)
-{
-    return (int64)(((uint64)(uint32)id.index1 << 32) | (uint64)id.generation);
-}
-
-// Layer name -> category bit registry; index in the vector = bit index. Session-local: bits are only
-// compared against each other at runtime, so allocation order between runs doesn't matter.
-static std::vector<std::string>& layerNames()
-{
-    static std::vector<std::string> names = { "Default" };
-    return names;
-}
-
-uint64 PhysicsLayers::bit(std::string_view name)
-{
-    std::vector<std::string>& names = layerNames();
-    for (size_t i = 0; i < names.size(); ++i)
-        if (names[i] == name)
-            return 1ull << i;
-    if (names.size() >= 64)
-    {
-        Log::error("Physics: out of collision layer bits, '" + std::string(name) + "' falls back to Default");
-        return 1ull;
-    }
-    names.emplace_back(name);
-    return 1ull << (names.size() - 1);
-}
-
-void PhysicsMesh::destroy()
-{
-    if (m_data == 0)
-        return;
-    b3DestroyMesh(reinterpret_cast<b3MeshData*>(m_data));
-    m_data = 0;
-}
-
-void PhysicsBody::destroy()
-{
-    if (m_handle == 0)
-        return;
-    const b3BodyId id = toBodyId(m_handle);
-    if (b3Body_IsValid(id)) // the world may already be gone at shutdown
-        b3DestroyBody(id);
-    m_handle = 0;
-}
-
-glm::vec3 PhysicsBody::getPosition() const
-{
-    return toGlm(b3Body_GetPosition(toBodyId(m_handle)));
-}
-
-glm::quat PhysicsBody::getRotation() const
-{
-    return toGlm(b3Body_GetRotation(toBodyId(m_handle)));
-}
-
-void PhysicsBody::setTransform(const glm::vec3& pos, const glm::quat& rot)
-{
-    b3Body_SetTransform(toBodyId(m_handle), toB3(pos), toB3(glm::normalize(rot)));
-}
-
-glm::vec3 PhysicsBody::getLinearVelocity() const
-{
-    return toGlm(b3Body_GetLinearVelocity(toBodyId(m_handle)));
-}
-
-void PhysicsBody::setLinearVelocity(const glm::vec3& velocity)
-{
-    b3Body_SetLinearVelocity(toBodyId(m_handle), toB3(velocity));
-}
-
-void PhysicsBody::applyImpulse(const glm::vec3& impulse)
-{
-    b3Body_ApplyLinearImpulseToCenter(toBodyId(m_handle), toB3(impulse), true);
-}
-
-bool PhysicsBody::isAwake() const
-{
-    return b3Body_IsAwake(toBodyId(m_handle));
-}
-
-void PhysicsJoint::destroy()
-{
-    if (m_handle == 0)
-        return;
-    const b3JointId id = std::bit_cast<b3JointId>(m_handle);
-    if (b3Joint_IsValid(id)) // destroying an attached body already destroyed the joint
-        b3DestroyJoint(id, true);
-    m_handle = 0;
-}
+import :World;
+import :Body;
+import :Joint;
+import :Mesh;
+import :Types;
+import :Layers;
+import :Convert;
 
 bool PhysicsWorld::initialize()
 {
@@ -158,7 +59,7 @@ void PhysicsWorld::shutdown()
 // Appends the step's buffered contact/sensor begin/end events (box3d clears them on the next step,
 // so they are drained after every step, not once per frame). End events may reference destroyed
 // shapes and are validated first.
-void appendContactEvents(b3WorldId world, std::vector<PhysicsWorld::ContactEvent>& outEvents)
+static void appendContactEvents(b3WorldId world, std::vector<PhysicsWorld::ContactEvent>& outEvents)
 {
     auto userDataOf = [](b3ShapeId shape) { return b3Body_GetUserData(b3Shape_GetBody(shape)); };
 
