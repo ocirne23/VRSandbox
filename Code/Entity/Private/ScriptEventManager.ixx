@@ -4,6 +4,7 @@ import Core;
 import Core.LPMultiMap;
 
 import :ScriptContext;
+import :Entity;
 import Script;
 
 class Entity;
@@ -41,6 +42,23 @@ public:
 		fireEvent(it->second);
 	}
 
+    std::vector<EntityChange> takeEntityChanges()
+    {
+		std::vector<EntityChange> changes;
+		changes.swap(m_entityChanges);
+		return changes;
+    }
+
+	inline void addDestroyRequest(EntityPtr&& entity)
+	{
+		m_entityChanges.emplace_back(EntityChange::Delete{ std::move(entity) });
+	}
+
+	inline void addReparentRequest(EntityPtr&& entity, EntityPtr&& newParent)
+	{
+		m_entityChanges.emplace_back(EntityChange::Reparent{ std::move(entity), std::move(newParent) });
+	}
+
 private:
 
     void onScriptLoadedCallback(const ScriptModule* script, const std::vector<std::string>& oldNames);
@@ -68,6 +86,8 @@ private:
 
 private:
 
+    std::vector<EntityChange> m_entityChanges;
+
     struct Entry
     {
 		Entity* entity = nullptr;
@@ -84,10 +104,6 @@ private:
 export namespace Globals
 {
     ScriptEventManager scriptEvents;
-
-    std::vector<void*> scriptDestroyRequests; // entities to remove entirely (see ScriptContext::destroyEntity)
-    std::vector<void*> scriptRootRemovals;    // entities that gained a new parent this frame -> drop the stale root ref
-    std::vector<void*> scriptRootAdditions;   // heap-boxed EntityPtr* for entities that (re)became root this frame
 }
 
 inline void ScriptEventManager::initialize()

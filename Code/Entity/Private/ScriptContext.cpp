@@ -74,13 +74,13 @@ namespace
         EntityPtr spawned = Globals::world.spawnAssetFile(assetPath, Transform(position, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
         if (!spawned) return nullptr;
         Entity* raw = spawned.get();
-        Globals::scriptRootAdditions.push_back(new EntityPtr(std::move(spawned)));
+		Globals::scriptEvents.addReparentRequest(std::move(spawned), EntityPtr(nullptr));
         return raw;
     }
 
     void thunk_destroyEntity(Entity* e)
     {
-        Globals::scriptDestroyRequests.push_back(e);
+        Globals::scriptEvents.addDestroyRequest(EntityPtr(e));
     }
 
     const char* thunk_entityGetName(Entity* e) { return e->displayName.c_str(); }
@@ -130,11 +130,8 @@ namespace
     // twice (once via `entities`, once via parent's descendant chain).
     void thunk_entityAddChild(Entity* parent, Entity* child)
     {
-        if (!parent || !child || parent == child) return;
-        const bool wasRoot = (child->parent == nullptr);
-        child->reparentEntity(parent);
-        if (wasRoot && child->parent == parent)
-            Globals::scriptRootRemovals.push_back(child);
+        if (!child || child->parent != parent) return;
+        Globals::scriptEvents.addReparentRequest(EntityPtr(child), EntityPtr(parent));
     }
 
     // Detaches child from parent, making it root again. Claim ownership (heap-boxed, see scriptRootAdditions)
@@ -143,9 +140,7 @@ namespace
     void thunk_entityRemoveChild(Entity* parent, Entity* child)
     {
         if (!child || child->parent != parent) return;
-        EntityPtr* box = new EntityPtr(child);
-        child->reparentEntity(nullptr);
-        Globals::scriptRootAdditions.push_back(box);
+        Globals::scriptEvents.addReparentRequest(EntityPtr(child), EntityPtr(nullptr));
     }
 
     void thunk_entityRemoveChildAt(Entity* parent, int index)

@@ -296,51 +296,42 @@ int main()
             Globals::audio.setListener(camera.position, camDir, camUp);
         }
 
-        for (EntityChange& change : ui.takeEntityChanges())
-        {
-            if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
-            {
-                const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), cv->screenPos);
-                entities.push_back(world.spawnAssetFile(cv->path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
-            }
-            else if (auto* ch = std::get_if<EntityChange::CreateHierarchy>(&change.type))
-            {
-                EntityPtr e = world.spawnAssetFile(ch->path, Transform(), false);
-                if (ch->parent && hasComponent<SceneComponent>(ch->parent))
-                    e->reparentEntity(ch->parent);   // parent's SceneComponent takes ownership
-                else
-                    entities.push_back(std::move(e));
-            }
-            else if (auto* as = std::get_if<EntityChange::AddSceneEntity>(&change.type))
-            {
-                EntityPtr e = world.createEmptyEntity(as->displayName);
-                if (as->parent && hasComponent<SceneComponent>(as->parent))
-                    e->reparentEntity(as->parent);
-                else
-                    entities.push_back(std::move(e));
-            }
-            else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
-                std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });
-            else if (auto* rep = std::get_if<EntityChange::Reparent>(&change.type))
-                rep->newParent ? (void)std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); }) : entities.push_back(std::move(rep->entity));
-            else if (auto* sp = std::get_if<EntityChange::SavePrefab>(&change.type))
-                if (savePrefab(sp->root.get(), sp->path))
-                    world.invalidatePrefab(std::filesystem::path(sp->path).stem().string());
-        }
+		auto handleEntityChange = [&](EntityChange& change)
+			{
+				if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
+				{
+					const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), cv->screenPos);
+					entities.push_back(world.spawnAssetFile(cv->path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
+				}
+				else if (auto* ch = std::get_if<EntityChange::CreateHierarchy>(&change.type))
+				{
+					EntityPtr e = world.spawnAssetFile(ch->path, Transform(), false);
+					if (ch->parent && hasComponent<SceneComponent>(ch->parent))
+						e->reparentEntity(ch->parent);   // parent's SceneComponent takes ownership
+					else
+						entities.push_back(std::move(e));
+				}
+				else if (auto* as = std::get_if<EntityChange::AddSceneEntity>(&change.type))
+				{
+					EntityPtr e = world.createEmptyEntity(as->displayName);
+					if (as->parent && hasComponent<SceneComponent>(as->parent))
+						e->reparentEntity(as->parent);
+					else
+						entities.push_back(std::move(e));
+				}
+				else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
+					std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });
+				else if (auto* rep = std::get_if<EntityChange::Reparent>(&change.type))
+					rep->newParent ? (void)std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); }) : entities.push_back(std::move(rep->entity));
+				else if (auto* sp = std::get_if<EntityChange::SavePrefab>(&change.type))
+					if (savePrefab(sp->root.get(), sp->path))
+						world.invalidatePrefab(std::filesystem::path(sp->path).stem().string());
+			};
 
-        for (void* boxed : Globals::scriptRootAdditions)
-        {
-            EntityPtr* box = static_cast<EntityPtr*>(boxed);
-            entities.push_back(std::move(*box));
-            delete box;
-        }
-        Globals::scriptRootAdditions.clear();
-        for (void* removed : Globals::scriptRootRemovals)
-            std::erase_if(entities, [&](const EntityPtr& e) { return (void*)e.get() == removed; });
-        Globals::scriptRootRemovals.clear();
-        for (void* dead : Globals::scriptDestroyRequests)
-            std::erase_if(entities, [&](const EntityPtr& e) { return (void*)e.get() == dead; });
-        Globals::scriptDestroyRequests.clear();
+        for (EntityChange& change : Globals::scriptEvents.takeEntityChanges())
+            handleEntityChange(change);
+        for (EntityChange& change : ui.takeEntityChanges())
+			handleEntityChange(change);
 
         Globals::physics.update(deltaSec); // fixed-step; entities sync to body poses in their update below
         dispatchPhysicsContactEvents();    // fire onContact hooks + script "Contact/Sensor Begin/End" events

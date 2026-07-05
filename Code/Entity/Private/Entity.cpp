@@ -232,18 +232,19 @@ void Entity::reparentEntity(Entity* newParent)
 {
     if (this == newParent || parent == newParent)
         return;
+
+    EntityPtr keepAlive(this);
+    detachFromOwner(this);
+
     if (newParent && !hasComponent<SceneComponent>(newParent))
         return; // only scene entities can hold children
     if (newParent && isSelfOrDescendant(newParent, this))
         return; // would create a cycle
 
-    EntityPtr keepAlive(this);
-
-    detachFromOwner(this);
     parent = newParent;
 
     if (newParent)
-        getComponent<SceneComponent>(newParent)->children.emplace_back(this);
+        getComponent<SceneComponent>(newParent)->children.emplace_back(std::move(keepAlive));
 }
 
 Entity* Entity::nearestPrefabInstance()
