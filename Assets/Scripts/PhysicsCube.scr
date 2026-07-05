@@ -10,15 +10,18 @@ SCRIPT_EXPORT void OnPhysicsEvent(const ScriptContext* ctx, Entity* self, Entity
     if ((physBegin != 0) == true)
     {
         ctx->entityTriggerAudio(self, "Blip", 2, glm::vec3(0,0,0), 0.5f, 1.0f);
+        ctx->entityApplyImpulse(self, glm::vec3{ 0.0f, 500.5f, 0.0f });
     }
 }
 
 //@graph 1
-//@node 0 OnSpawn 320 -80
-//@node 1 TriggerAudio 480 -89
-//@node 2 OnPhysicsEvent 88 -212
-//@node 3 TriggerAudio 592 -329
-//@node 4 If 320 -269
+//@node 0 OnSpawn 448 16
+//@node 1 TriggerAudio 624 -66
+//@node 2 OnPhysicsEvent 72 -268
+//@node 3 TriggerAudio 624 -284
+//@node 4 If 256 -269
+//@node 5 ApplyImpulse 1118 -259
+//@node 6 MakeVec3 912 -160
 //@audioentry 1 Blip
 //@audioentry 1 Bloop
 //@audioentry 3 Blip
@@ -33,8 +36,15 @@ SCRIPT_EXPORT void OnPhysicsEvent(const ScriptContext* ctx, Entity* self, Entity
 //@pin 3 5 default
 //@pin 4 1 0.0f
 //@pin 4 2 true
+//@pin 5 1 self
+//@pin 5 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 6 0 0.0f
+//@pin 6 1 500.5f
+//@pin 6 2 0.0f
 //@enum 4 2
 //@link 0 0 1 1
 //@link 2 0 4 0
 //@link 2 2 4 1
 //@link 4 0 3 0
+//@link 3 0 5 0
+//@link 6 0 5 2

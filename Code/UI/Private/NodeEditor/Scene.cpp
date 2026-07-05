@@ -2273,11 +2273,19 @@ void Scene::processInteractions()
     // The library's own Delete-key handling (inside BeginDelete/QueryDeletedNode below) requires the canvas
     // to be both focused AND hovered (EditorContext::CanAcceptUserInput()) -- so pressing Delete right after
     // clicking a node, before the mouse drifts back over the canvas, silently does nothing. Queue the current
-    // selection through ed::DeleteNode/DeleteLink instead: that feeds a separate list the library's Accept()
-    // drains unconditionally, so it only needs the window focused, not hovered. !IsAnyItemActive() keeps a
-    // Delete keystroke meant for a node's rename/text field from also deleting the node.
-    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::IsAnyItemActive() &&
-        ImGui::IsKeyPressed(ImGuiKey_Delete))
+    // selection through ed::DeleteNode/DeleteLink instead: that feeds a separate list (m_ManuallyDeletedObjects)
+    // the library's Accept() drains unconditionally, so it only needs the window focused, not hovered.
+    //
+    // Only take this path when the canvas ISN'T hovered: when it is, the library's own interactive check
+    // (CanAcceptUserInput()) fires for the same keypress and takes priority in its Accept()'s if/else-if chain,
+    // leaving our queued entry in m_ManuallyDeletedObjects un-drained. A few frames later, once the library's
+    // action state cycles back to idle, that stale entry gets replayed -- pointing at an object the interactive
+    // path already deleted -- and QueryItem() reads freed memory. Gating on "not hovered" keeps the two paths
+    // mutually exclusive. !IsAnyItemActive() keeps a Delete keystroke meant for a node's rename/text field from
+    // also deleting the node.
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        !ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows) &&
+        !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
     {
         const int selCount = ed::GetSelectedObjectCount();
         if (selCount > 0)
