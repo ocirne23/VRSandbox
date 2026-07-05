@@ -40,6 +40,9 @@ public:
     // The returned pointer is stable until shutdown().
     const ScriptModule* getOrLoad(const std::string& path, bool forceRecompile = false);
 
+	void setCurrentScriptPath(const std::string& path) { m_currentScriptPath = path; }
+	void reloadCurrentScript() { if (!m_currentScriptPath.empty()) getOrLoad(m_currentScriptPath, true); }
+
 private:
 
     void sweepPendingPdbs();
@@ -63,6 +66,8 @@ private:
     std::string vcvarsPath;                                 // cached after first lookup
     std::unordered_map<std::string, CachedScript> scripts;  // keyed by canonical source path
     std::vector<std::string> pendingPdbDeletes;             // superseded PDBs the debugger still holds; retried later
+
+	std::string m_currentScriptPath;                        // the script the editor panel is currently editing (F6 recompiles it)
 };
 
 export namespace Globals

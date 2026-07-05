@@ -9,10 +9,23 @@ Prefab physicsCube
 		HalfExtents 1.0, 1.0, 1.0
 		Friction 0.6
 		Restitution 0.1
+		ContactEvents true
+	Component Script
+		Path "Scripts/PhysicsCube.scr"
 	Component Audio
 		Sound Blip
-			Path Sounds/blip.wav
-		Sound BlipLow
-			Path Sounds/blip.wav
-			Pitch 0.5
-			Volume 0.8
+			Select RandomNoRepeat
+			Path Sounds/blip1.wav
+			Path Sounds/blip2.wav
+			Path Sounds/blip3.wav
+		Sound Bloop
+			Select CycleStartRandom
+			Path Sounds/bloop.wav
+				Pitch 2.0
+				Volume 0.5
+			Path Sounds/bloop.wav
+				Pitch 3.0
+				Volume 0.5
+			Path Sounds/bloop.wav
+				Pitch 4.0
+				Volume 0.5

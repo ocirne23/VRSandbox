@@ -21,9 +21,9 @@ export enum EComponentID : uint16
     EComponentID_Cull     = 2,
     EComponentID_Render   = 3,
     EComponentID_Animator = 4,
-    EComponentID_Script   = 5,
-    EComponentID_Physics  = 6,
-    EComponentID_Audio    = 7,
+    EComponentID_Physics  = 5,
+    EComponentID_Audio    = 6,
+    EComponentID_Script   = 7, // should be last so all other components are available on spawn
 };
 
 export class Entity

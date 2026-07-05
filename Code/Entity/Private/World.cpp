@@ -600,27 +600,40 @@ std::shared_ptr<AudioBuffer> World::getOrLoadAudioBuffer(const std::string& path
 std::shared_ptr<AudioComponent::SpawnInfo> World::buildAudioSpawnInfo(const AssetNode& audioNode, const std::string& ownerName)
 {
     auto info = std::make_shared<AudioComponent::SpawnInfo>();
-    for (const AssetNode& child : audioNode.children)
+    for (const AssetNode& soundNode : audioNode.children)
     {
-        if (!keyIs(child, "Sound"))
+        if (!keyIs(soundNode, "Sound"))
             continue;
-        AudioComponent::SoundDesc desc;
-        desc.alias = child.asString();
-        if (const AssetNode* n = child.find("Path"))              desc.path = n->asString();
-        if (const AssetNode* n = child.find("Volume"))            desc.volume = n->asFloat(0, desc.volume);
-        if (const AssetNode* n = child.find("Pitch"))             desc.pitch = n->asFloat(0, desc.pitch);
-        if (const AssetNode* n = child.find("Loop"))              desc.loop = n->asBool();
-        if (const AssetNode* n = child.find("Relative"))          desc.relative = n->asBool();
-        if (const AssetNode* n = child.find("ReferenceDistance")) desc.referenceDistance = n->asFloat(0, desc.referenceDistance);
-        if (const AssetNode* n = child.find("MaxDistance"))       desc.maxDistance = n->asFloat(0, desc.maxDistance);
-        if (const AssetNode* n = child.find("Rolloff"))           desc.rolloff = n->asFloat(0, desc.rolloff);
-        if (desc.alias.empty() || desc.path.empty())
+        AudioComponent::SoundDesc sound;
+        sound.alias = soundNode.asString();
+        if (const AssetNode* n = soundNode.find("Select"))
+            sound.select = audioSelectFromToken(n->asString());
+
+        // Each `Path` child is one clip; its own child lines (Volume/Pitch/...) are the clip's settings.
+        for (const AssetNode& pathNode : soundNode.children)
+        {
+            if (!keyIs(pathNode, "Path"))
+                continue;
+            AudioComponent::Clip clip;
+            clip.path = pathNode.asString();
+            if (clip.path.empty())
+                continue;
+            if (const AssetNode* n = pathNode.find("Volume"))            clip.volume = n->asFloat(0, clip.volume);
+            if (const AssetNode* n = pathNode.find("Pitch"))             clip.pitch = n->asFloat(0, clip.pitch);
+            if (const AssetNode* n = pathNode.find("Loop"))              clip.loop = n->asBool();
+            if (const AssetNode* n = pathNode.find("Relative"))          clip.relative = n->asBool();
+            if (const AssetNode* n = pathNode.find("ReferenceDistance")) clip.referenceDistance = n->asFloat(0, clip.referenceDistance);
+            if (const AssetNode* n = pathNode.find("MaxDistance"))       clip.maxDistance = n->asFloat(0, clip.maxDistance);
+            if (const AssetNode* n = pathNode.find("Rolloff"))           clip.rolloff = n->asFloat(0, clip.rolloff);
+            clip.buffer = getOrLoadAudioBuffer(clip.path); // may be invalid (load failure logged); alias stays triggerable as a no-op
+            sound.clips.push_back(std::move(clip));
+        }
+        if (sound.alias.empty() || sound.clips.empty())
         {
             Log::warning("Scene: entity '" + ownerName + "' has an audio Sound entry without an alias or Path, skipping");
             continue;
         }
-        desc.buffer = getOrLoadAudioBuffer(desc.path); // may be invalid (load failure logged); alias stays triggerable as a no-op
-        info->sounds.push_back(std::move(desc));
+        info->sounds.push_back(std::move(sound));
     }
     if (info->sounds.empty())
         return nullptr;
@@ -673,7 +686,22 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 
-    static_assert(EComponentID_Script == 5);
+    static_assert(EComponentID_Physics == 5);
+    if (physicsNode) // found above, before the render container load
+    {
+        typeBits |= uint16(1 << EComponentID_Physics);
+        tmpl.spawnInfos.emplace_back(buildPhysicsSpawnInfo(*physicsNode, renderContainerName, renderNodePath, tmpl.displayName));
+    }
+
+    static_assert(EComponentID_Audio == 6);
+    if (const AssetNode* audioNode = findComponentNode(node, "Audio"))
+        if (std::shared_ptr<AudioComponent::SpawnInfo> info = buildAudioSpawnInfo(*audioNode, tmpl.displayName))
+        {
+            typeBits |= uint16(1 << EComponentID_Audio);
+            tmpl.spawnInfos.emplace_back(std::move(info));
+        }
+
+    static_assert(EComponentID_Script == 7);
     if (const AssetNode* scriptNode = findComponentNode(node, "Script"))
     {
         auto info = std::make_shared<ScriptComponent::SpawnInfo>();
@@ -682,21 +710,6 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         typeBits |= uint16(1 << EComponentID_Script);
         tmpl.spawnInfos.emplace_back(std::move(info));
     }
-
-    static_assert(EComponentID_Physics == 6);
-    if (physicsNode) // found above, before the render container load
-    {
-        typeBits |= uint16(1 << EComponentID_Physics);
-        tmpl.spawnInfos.emplace_back(buildPhysicsSpawnInfo(*physicsNode, renderContainerName, renderNodePath, tmpl.displayName));
-    }
-
-    static_assert(EComponentID_Audio == 7);
-    if (const AssetNode* audioNode = findComponentNode(node, "Audio"))
-        if (std::shared_ptr<AudioComponent::SpawnInfo> info = buildAudioSpawnInfo(*audioNode, tmpl.displayName))
-        {
-            typeBits |= uint16(1 << EComponentID_Audio);
-            tmpl.spawnInfos.emplace_back(std::move(info));
-        }
 
     tmpl.archetype = makeEntityArchetype(typeBits);
 }

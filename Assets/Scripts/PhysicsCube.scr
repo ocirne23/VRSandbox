@@ -1,0 +1,46 @@
+#include "ScriptAPI.h"
+
+SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
+{
+    ctx->entityTriggerAudio(self, "Bloop", 0, glm::vec3(0,0,0), 1.0f, 1.0f);
+}
+
+SCRIPT_EXPORT int ScriptEventCount() { return 1; }
+SCRIPT_EXPORT const char* ScriptEventName(int eventIdx)
+{
+    switch (eventIdx)
+    {
+    case 0: return "Contact Begin";
+    default: return "";
+    }
+}
+SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData)
+{
+    switch (eventIdx) {
+    case 0:
+    {
+        ctx->entityTriggerAudio(self, "Blip", 2, glm::vec3(0,0,0), 0.5f, 1.0f);
+    } break;
+    }
+}
+
+//@graph 1
+//@node 0 OnSpawn 320 -80
+//@node 1 TriggerAudio 480 -89
+//@node 2 OnEvent 207 -313
+//@node 3 TriggerAudio 464 -313
+//@event 2 Contact Begin
+//@audioentry 1 Blip
+//@audioentry 1 Bloop
+//@audioentry 3 Blip
+//@audioentry 3 Bloop
+//@pin 1 2 self
+//@pin 1 3 default
+//@pin 1 4 default
+//@pin 1 5 default
+//@pin 3 2 self
+//@pin 3 3 default
+//@pin 3 4 0.5f
+//@pin 3 5 default
+//@link 0 0 1 1
+//@link 2 0 3 0

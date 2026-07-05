@@ -111,13 +111,6 @@ void Entity::createComponent(EComponentID id, uint16 componentOffset, const void
         ac->spawn(*this, *static_cast<const AnimatorComponent::SpawnInfo*>(info), base);
         break;
     }
-    case EComponentID_Script:
-    {
-        ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
-        new (scr) ScriptComponent();
-        scr->spawn(*this, *static_cast<const ScriptComponent::SpawnInfo*>(info), base);
-        break;
-    }
     case EComponentID_Physics:
     {
         PhysicsComponent* pc = reinterpret_cast<PhysicsComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
@@ -130,6 +123,13 @@ void Entity::createComponent(EComponentID id, uint16 componentOffset, const void
         AudioComponent* ac = reinterpret_cast<AudioComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
         new (ac) AudioComponent();
         ac->spawn(*this, *static_cast<const AudioComponent::SpawnInfo*>(info), base);
+        break;
+    }
+    case EComponentID_Script:
+    {
+        ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        new (scr) ScriptComponent();
+        scr->spawn(*this, *static_cast<const ScriptComponent::SpawnInfo*>(info), base);
         break;
     }
     default:
@@ -162,13 +162,6 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
         ac->~AnimatorComponent();
         break;
     }
-    case EComponentID_Script:
-    {
-        ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
-        scr->destroy(*this, *static_cast<const ScriptComponent::SpawnInfo*>(info));
-        scr->~ScriptComponent();
-        break;
-    }
     case EComponentID_Physics:
     {
         PhysicsComponent* pc = reinterpret_cast<PhysicsComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
@@ -181,6 +174,13 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
         AudioComponent* ac = reinterpret_cast<AudioComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
         ac->destroy(*this, *static_cast<const AudioComponent::SpawnInfo*>(info));
         ac->~AudioComponent();
+        break;
+    }
+    case EComponentID_Script:
+    {
+        ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        scr->destroy(*this, *static_cast<const ScriptComponent::SpawnInfo*>(info));
+        scr->~ScriptComponent();
         break;
     }
     default:
@@ -197,9 +197,9 @@ void Entity::serializeComponent(EComponentID id, AssetNode& out)
     case EComponentID_Cull:   getComponent<CullingComponent>(this)->serialize(out);  break;
     case EComponentID_Render: getComponent<RenderComponent>(this)->serialize(out);   break;
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->serialize(out); break;
-    case EComponentID_Script: getComponent<ScriptComponent>(this)->serialize(out);   break;
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->serialize(out);  break;
     case EComponentID_Audio:  getComponent<AudioComponent>(this)->serialize(out);    break;
+    case EComponentID_Script: getComponent<ScriptComponent>(this)->serialize(out);   break;
     default: break;
     }
 }
@@ -213,9 +213,9 @@ void Entity::deserializeComponent(EComponentID id, const AssetNode& in)
     case EComponentID_Cull:   getComponent<CullingComponent>(this)->deserialize(in);  break;
     case EComponentID_Render: getComponent<RenderComponent>(this)->deserialize(in);   break;
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->deserialize(in); break;
-    case EComponentID_Script: getComponent<ScriptComponent>(this)->deserialize(in);   break;
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->deserialize(in);  break;
     case EComponentID_Audio:  getComponent<AudioComponent>(this)->deserialize(in);    break;
+    case EComponentID_Script: getComponent<ScriptComponent>(this)->deserialize(in);   break;
     default: break;
     }
 }

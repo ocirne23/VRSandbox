@@ -277,7 +277,6 @@ bool ScriptHost::loadDll(CachedScript& slot, const fs::path& dll)
         }
     }
 
-
     m_scriptLoadedCallback(&slot.entries, oldEventNames);
 
     return true;

@@ -225,17 +225,31 @@ export struct PhysicsComponent
     void deserialize(const AssetNode&) {}
 };
 
+// How a Sound alias holding several clips picks which one to play on each trigger.
+export enum class EAudioSelect : uint8
+{
+    Single,           // always play clips[0] (a one-clip sound; the default)
+    Random,           // a uniformly random clip each trigger (may repeat)
+    RandomNoRepeat,   // uniformly random, but never the same clip twice in a row
+    Cycle,            // step through the clips in order, wrapping around
+    CycleStartRandom, // Cycle but starting index is randomized
+};
+
+export const char* audioSelectToken(EAudioSelect select);
+export EAudioSelect audioSelectFromToken(std::string_view token);
+
 // A set of named, triggerable sounds ("Component Audio" in .pre files): each Sound entry pairs an
-// alias with a sound file and per-sound playback settings. Gameplay (or the script "Trigger Audio"
-// node, via ctx->entityTriggerAudio) plays one by alias; playing spatial sounds follow the entity
-// unless the trigger supplied an explicit position override.
+// alias with one or more sound-file clips (each with its own playback settings) and a Select mode that
+// picks a clip per trigger. Gameplay (or the script "Trigger Audio" node, via ctx->entityTriggerAudio)
+// plays one by alias; playing spatial sounds follow the entity unless the trigger supplied a position.
 export struct AudioComponent
 {
     static constexpr EComponentID getId() { return EComponentID_Audio; }
 
-    struct SoundDesc
+    // One playable file behind a Sound alias, with its own settings. A `Path` line in the .pre, whose
+    // child lines (Volume/Pitch/...) are these fields.
+    struct Clip
     {
-        std::string alias;                        // the name gameplay/scripts trigger it by
         std::string path;                         // sound file, relative to Assets/ (WAV/FLAC/MP3)
         std::shared_ptr<AudioBuffer> buffer;      // World-cached, shared between entities using the same file
         float volume = 1.0f;
@@ -247,13 +261,20 @@ export struct AudioComponent
         float rolloff = 1.0f;
     };
 
+    struct SoundDesc
+    {
+        std::string alias;                        // the name gameplay/scripts trigger it by
+        EAudioSelect select = EAudioSelect::Single;
+        std::vector<Clip> clips;
+    };
+
     struct SpawnInfo
     {
         std::vector<SoundDesc> sounds;
     };
 
-    // Per-trigger overrides for the authored settings; unset fields keep the SoundDesc values. A set
-    // position pins the sound at that world position instead of following the entity.
+    // Per-trigger overrides for the authored settings; unset fields keep the selected clip's values. A
+    // set position pins the sound at that world position instead of following the entity.
     struct TriggerOverrides
     {
         std::optional<glm::vec3> position;
@@ -263,9 +284,11 @@ export struct AudioComponent
 
     struct Voice // playback state per SoundDesc (parallel to info->sounds)
     {
-        AudioSource source;      // created lazily on first trigger
-        bool bufferSet = false;
-        bool follow = true;      // track the entity's world position while playing
+        AudioSource source;   // created lazily on first trigger
+        int currentClip = -1; // clip index currently loaded into source (-1 = none)
+        int lastClip = -1;    // last clip played, for RandomNoRepeat
+        int cycleNext = -1;   // next clip index for Cycle
+        bool follow = true;   // track the entity's world position while playing
     };
 
     const SpawnInfo* info = nullptr;
@@ -282,6 +305,9 @@ export struct AudioComponent
 
     void serialize(AssetNode&) const {}
     void deserialize(const AssetNode&) {}
+
+private:
+    int selectClip(const SoundDesc& sound, Voice& voice) const;
 };
 
 // Maps this frame's physics contact/sensor events (body userData -> Entity*) onto the involved
@@ -318,9 +344,9 @@ export constexpr const char* componentTypeName(EComponentID id)
     case EComponentID_Cull:   return "Cull";
     case EComponentID_Render: return "Render";
     case EComponentID_Animator: return "Animator";
-    case EComponentID_Script: return "Script";
     case EComponentID_Physics: return "Physics";
     case EComponentID_Audio:  return "Audio";
+    case EComponentID_Script: return "Script";
     default:                  return "Unknown";
     }
 }
@@ -335,10 +361,18 @@ export namespace EntityComponentDetail
         alignUp(uint16(sizeof(CullingComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(RenderComponent)),  ComponentAlignment),
         alignUp(uint16(sizeof(AnimatorComponent)), ComponentAlignment),
-        alignUp(uint16(sizeof(ScriptComponent)),  ComponentAlignment),
         alignUp(uint16(sizeof(PhysicsComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(AudioComponent)),   ComponentAlignment),
+        alignUp(uint16(sizeof(ScriptComponent)),  ComponentAlignment),
     };
+    static_assert(EComponentID_Scene == 0);
+    static_assert(EComponentID_Zone == 1);
+    static_assert(EComponentID_Cull == 2);
+    static_assert(EComponentID_Render == 3);
+    static_assert(EComponentID_Animator == 4);
+    static_assert(EComponentID_Physics == 5);
+    static_assert(EComponentID_Audio == 6);
+    static_assert(EComponentID_Script == 7);
 
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);
 }

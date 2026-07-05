@@ -420,6 +420,28 @@ int AudioComponent::findSound(std::string_view alias) const
     return -1;
 }
 
+const char* audioSelectToken(EAudioSelect select)
+{
+    switch (select)
+    {
+    case EAudioSelect::Random:           return "Random";
+    case EAudioSelect::RandomNoRepeat:   return "RandomNoRepeat";
+    case EAudioSelect::Cycle:            return "Cycle";
+    case EAudioSelect::CycleStartRandom: return "CycleStartRandom";
+    case EAudioSelect::Single:
+    default:                             return "Single";
+    }
+}
+
+EAudioSelect audioSelectFromToken(std::string_view token)
+{
+    if (token == "Random")           return EAudioSelect::Random;
+    if (token == "RandomNoRepeat")   return EAudioSelect::RandomNoRepeat;
+    if (token == "Cycle")            return EAudioSelect::Cycle;
+    if (token == "CycleStartRandom") return EAudioSelect::CycleStartRandom;
+    return EAudioSelect::Single;
+}
+
 // The entity's world position, composed on demand (updateTree computes world transforms transiently).
 static glm::vec3 worldPositionOf(const Entity& entity)
 {
@@ -427,6 +449,46 @@ static glm::vec3 worldPositionOf(const Entity& entity)
     for (const Entity* p = entity.parent; p; p = p->parent)
         world = composeTransform(Transform(p->pos, p->scale, p->rot), world);
     return world.pos;
+}
+
+// Picks the clip to play for this trigger by the sound's Select mode, advancing the voice's selection
+// state. RandomNoRepeat draws uniformly from the clips other than the last one played.
+int AudioComponent::selectClip(const SoundDesc& sound, Voice& voice) const
+{
+    const int count = (int)sound.clips.size();
+    if (count <= 1)
+        return 0;
+    switch (sound.select)
+    {
+    case EAudioSelect::Cycle:
+    {
+        if (voice.cycleNext == -1)
+            voice.cycleNext = 0;
+        const int idx = int(voice.cycleNext % uint32(count));
+        voice.cycleNext = (voice.cycleNext + 1) % uint32(count);
+        return idx;
+    }
+    case EAudioSelect::CycleStartRandom:
+    {
+        if (voice.cycleNext == -1)
+            voice.cycleNext = glm::min(int(glm::linearRand(0.0f, float(count))), count - 1);
+        const int idx = int(voice.cycleNext % uint32(count));
+        voice.cycleNext = (voice.cycleNext + 1) % uint32(count);
+        return idx;
+    }
+    case EAudioSelect::RandomNoRepeat:
+    {
+        if (voice.lastClip < 0)
+            return glm::min(int(glm::linearRand(0.0f, float(count))), count - 1);
+        int idx = glm::min(int(glm::linearRand(0.0f, float(count - 1))), count - 2); // pick among the other clips
+        if (idx >= voice.lastClip)
+            ++idx;
+        return idx;
+    }
+    case EAudioSelect::Random:
+    default:
+        return glm::min(int(glm::linearRand(0.0f, float(count))), count - 1);
+    }
 }
 
 bool AudioComponent::trigger(Entity& entity, std::string_view alias, const TriggerOverrides& overrides)
@@ -437,32 +499,37 @@ bool AudioComponent::trigger(Entity& entity, std::string_view alias, const Trigg
         Log::warning("Audio: entity '" + entity.displayName + "' has no sound named '" + std::string(alias) + "'");
         return false;
     }
-    const SoundDesc& desc = info->sounds[idx];
-    if (!desc.buffer || !desc.buffer->isValid())
-        return false; // load failure already logged by World
+    const SoundDesc& sound = info->sounds[idx];
+    if (sound.clips.empty())
+        return false;
     Voice& voice = voices[idx];
+    const int clipIdx = selectClip(sound, voice);
+    const Clip& clip = sound.clips[clipIdx];
+    if (!clip.buffer || !clip.buffer->isValid())
+        return false; // load failure already logged by World
     if (!voice.source.isValid())
     {
         voice.source = Globals::audio.createSource();
         if (!voice.source.isValid())
             return false;
     }
-    if (!voice.bufferSet)
+    if (voice.currentClip != clipIdx) // reselect the buffer only when the chosen clip changes
     {
-        voice.source.setBuffer(*desc.buffer);
-        voice.bufferSet = true;
+        voice.source.setBuffer(*clip.buffer);
+        voice.currentClip = clipIdx;
     }
-    voice.source.setLooping(desc.loop);
-    voice.source.setGain(overrides.volume.value_or(desc.volume));
-    voice.source.setPitch(overrides.pitch.value_or(desc.pitch));
-    voice.source.setRelative(desc.relative);
-    voice.source.setAttenuation(desc.referenceDistance, desc.maxDistance, desc.rolloff);
+    voice.source.setLooping(clip.loop);
+    voice.source.setGain(overrides.volume.value_or(clip.volume));
+    voice.source.setPitch(overrides.pitch.value_or(clip.pitch));
+    voice.source.setRelative(clip.relative);
+    voice.source.setAttenuation(clip.referenceDistance, clip.maxDistance, clip.rolloff);
     voice.follow = !overrides.position.has_value();
     if (voice.follow)
         voice.source.setPosition(worldPositionOf(entity));
     else
         voice.source.setPosition(overrides.position.value());
     voice.source.play();
+    voice.lastClip = clipIdx;
     return true;
 }
 
@@ -565,19 +632,25 @@ const AudioComponent::SpawnInfo* getAudioSpawnInfo(const Entity* entity)
 
 void writeAudioSpawnInfo(const AudioComponent::SpawnInfo& info, AssetNode& out)
 {
-    const AudioComponent::SoundDesc defaults;
+    const AudioComponent::Clip defaults;
     for (const AudioComponent::SoundDesc& sound : info.sounds)
     {
-        AssetNode& node = out.addChild("Sound");
-        node.values.emplace_back(sound.alias);
-        node.set("Path", sound.path);
-        if (sound.volume != defaults.volume)     node.set("Volume", sound.volume);
-        if (sound.pitch != defaults.pitch)       node.set("Pitch", sound.pitch);
-        if (sound.loop != defaults.loop)         node.set("Loop", sound.loop);
-        if (sound.relative != defaults.relative) node.set("Relative", sound.relative);
-        if (sound.referenceDistance != defaults.referenceDistance) node.set("ReferenceDistance", sound.referenceDistance);
-        if (sound.maxDistance != defaults.maxDistance)             node.set("MaxDistance", sound.maxDistance);
-        if (sound.rolloff != defaults.rolloff)                     node.set("Rolloff", sound.rolloff);
+        AssetNode& soundNode = out.addChild("Sound");
+        soundNode.values.emplace_back(sound.alias);
+        if (sound.select != EAudioSelect::Single)
+            soundNode.set("Select", audioSelectToken(sound.select));
+        for (const AudioComponent::Clip& clip : sound.clips)
+        {
+            AssetNode& pathNode = soundNode.addChild("Path");
+            pathNode.values.emplace_back(clip.path);
+            if (clip.volume != defaults.volume)     pathNode.set("Volume", clip.volume);
+            if (clip.pitch != defaults.pitch)       pathNode.set("Pitch", clip.pitch);
+            if (clip.loop != defaults.loop)         pathNode.set("Loop", clip.loop);
+            if (clip.relative != defaults.relative) pathNode.set("Relative", clip.relative);
+            if (clip.referenceDistance != defaults.referenceDistance) pathNode.set("ReferenceDistance", clip.referenceDistance);
+            if (clip.maxDistance != defaults.maxDistance)             pathNode.set("MaxDistance", clip.maxDistance);
+            if (clip.rolloff != defaults.rolloff)                     pathNode.set("Rolloff", clip.rolloff);
+        }
     }
 }
 
