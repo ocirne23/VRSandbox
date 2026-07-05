@@ -14,6 +14,7 @@ export struct ScriptModule
     void* update = nullptr;    // ScriptUpdateFn
     void* onDestroy = nullptr; // ScriptShutdownFn
     void* onEvent = nullptr;   // ScriptOnEventFn
+    void* onPhysicsEvent = nullptr; // ScriptOnPhysicsEventFn
     uint32 dataSize = 0;       // bytes of persistent ScriptData the script declares (0 = none), from ScriptDataSize()
 	std::vector<std::string> eventNames; // in the order the script declared them
 

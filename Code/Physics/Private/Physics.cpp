@@ -21,6 +21,15 @@ static glm::quat toGlm(const b3Quat& q) { return glm::quat(q.s, q.v.x, q.v.y, q.
 
 static b3BodyId toBodyId(uint64 handle) { return std::bit_cast<b3BodyId>(handle); }
 
+// b3ContactId is 3 fields (index1/world0/generation) and doesn't fit a single bit_cast-able integer; world0
+// is always this process's one physics world, so it's dropped here and re-supplied from m_worldHandle when
+// unpacking (see PhysicsWorld::getContactPoint). Packing is lossless for index1/generation, so this is valid
+// for as long as box3d itself guarantees the id (until the next world step recycles it).
+static int64 packContactId(b3ContactId id)
+{
+    return (int64)(((uint64)(uint32)id.index1 << 32) | (uint64)id.generation);
+}
+
 // Layer name -> category bit registry; index in the vector = bit index. Session-local: bits are only
 // compared against each other at runtime, so allocation order between runs doesn't matter.
 static std::vector<std::string>& layerNames()
@@ -37,7 +46,7 @@ uint64 PhysicsLayers::bit(std::string_view name)
             return 1ull << i;
     if (names.size() >= 64)
     {
-        Log::warning("Physics: out of collision layer bits, '" + std::string(name) + "' falls back to Default");
+        Log::error("Physics: out of collision layer bits, '" + std::string(name) + "' falls back to Default");
         return 1ull;
     }
     names.emplace_back(name);
@@ -157,28 +166,28 @@ void appendContactEvents(b3WorldId world, std::vector<PhysicsWorld::ContactEvent
     for (int i = 0; i < contacts.beginCount; ++i)
     {
         const b3ContactBeginTouchEvent& e = contacts.beginEvents[i];
-        outEvents.push_back({ userDataOf(e.shapeIdA), userDataOf(e.shapeIdB), true, false });
+        outEvents.push_back({ userDataOf(e.shapeIdA), userDataOf(e.shapeIdB), true, false, packContactId(e.contactId) });
     }
     for (int i = 0; i < contacts.endCount; ++i)
     {
         const b3ContactEndTouchEvent& e = contacts.endEvents[i];
         if (!b3Shape_IsValid(e.shapeIdA) || !b3Shape_IsValid(e.shapeIdB))
             continue;
-        outEvents.push_back({ userDataOf(e.shapeIdA), userDataOf(e.shapeIdB), false, false });
+        outEvents.push_back({ userDataOf(e.shapeIdA), userDataOf(e.shapeIdB), false, false, packContactId(e.contactId) });
     }
 
     const b3SensorEvents sensors = b3World_GetSensorEvents(world);
     for (int i = 0; i < sensors.beginCount; ++i)
     {
         const b3SensorBeginTouchEvent& e = sensors.beginEvents[i];
-        outEvents.push_back({ userDataOf(e.sensorShapeId), userDataOf(e.visitorShapeId), true, true });
+        outEvents.push_back({ userDataOf(e.sensorShapeId), userDataOf(e.visitorShapeId), true, true, 0 });
     }
     for (int i = 0; i < sensors.endCount; ++i)
     {
         const b3SensorEndTouchEvent& e = sensors.endEvents[i];
         if (!b3Shape_IsValid(e.sensorShapeId) || !b3Shape_IsValid(e.visitorShapeId))
             continue;
-        outEvents.push_back({ userDataOf(e.sensorShapeId), userDataOf(e.visitorShapeId), false, true });
+        outEvents.push_back({ userDataOf(e.sensorShapeId), userDataOf(e.visitorShapeId), false, true, 0 });
     }
 }
 
@@ -429,6 +438,30 @@ PhysicsWorld::RayHit PhysicsWorld::castRayClosest(const glm::vec3& origin, const
     outHit.point = toGlm(result.point);
     outHit.normal = toGlm(result.normal);
     return outHit;
+}
+
+bool PhysicsWorld::getContactPoint(int64 contactId, glm::vec3& outPoint, glm::vec3& outNormal) const
+{
+    if (!m_initialized || contactId == 0)
+        return false;
+
+    b3ContactId id{};
+    id.index1 = (int32)((uint64)contactId >> 32);
+    id.world0 = std::bit_cast<b3WorldId>(m_worldHandle).index1;
+    id.padding = 0;
+    id.generation = (uint32)((uint64)contactId & 0xffffffffu);
+    if (!b3Contact_IsValid(id))
+        return false;
+
+    const b3ContactData data = b3Contact_GetData(id);
+    if (data.manifoldCount == 0 || data.manifolds[0].pointCount == 0)
+        return false;
+
+    const b3Manifold& manifold = data.manifolds[0];
+    const glm::vec3 comA = toGlm(b3Body_GetWorldCenterOfMass(b3Shape_GetBody(data.shapeIdA)));
+    outPoint = comA + toGlm(manifold.points[0].anchorA);
+    outNormal = toGlm(manifold.normal);
+    return true;
 }
 
 void PhysicsWorld::setGravity(const glm::vec3& gravity)

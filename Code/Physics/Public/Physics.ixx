@@ -217,10 +217,18 @@ public:
     {
         void* userDataA = nullptr;
         void* userDataB = nullptr;
-        bool begin = false;  // begin or end touch
-        bool sensor = false; // sensor overlap instead of a solid contact
+        bool begin = false;   // begin or end touch
+        bool sensor = false;  // sensor overlap instead of a solid contact
+        int64 contactId = 0;  // opaque box3d contact handle (0 for sensor events, which have no manifold);
+                               // pass to getContactPoint() before the next update() call, after which it may
+                               // reference a recycled contact
     };
     std::span<const ContactEvent> getContactEvents() const { return m_contactEvents; }
+
+    // Resolves a ContactEvent::contactId (from THIS frame, before the next update()) to its first manifold
+    // point in world space. Returns false (leaving the outputs untouched) if the contact is stale/gone or
+    // has no manifold point (e.g. purely speculative contact).
+    bool getContactPoint(int64 contactId, glm::vec3& outPoint, glm::vec3& outNormal) const;
 
     void setGravity(const glm::vec3& gravity);
 

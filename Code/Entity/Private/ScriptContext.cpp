@@ -169,6 +169,16 @@ namespace
         return hit.hit ? 1 : 0;
     }
 
+    int thunk_physicsContactGetPoint(long long contactId, glm::vec3* outPoint, glm::vec3* outNormal)
+    {
+        glm::vec3 point(0.0f), normal(0.0f);
+        if (!Globals::physics.getContactPoint(contactId, point, normal))
+            return 0;
+        if (outPoint)  *outPoint = point;
+        if (outNormal) *outNormal = normal;
+        return 1;
+    }
+
     int thunk_entityHasPhysics(Entity* en)     { return physicsOf(en) ? 1 : 0; }
     int thunk_entityIsPhysicsAwake(Entity* en) { PhysicsComponent* pc = physicsOf(en); return (pc && pc->body.isAwake()) ? 1 : 0; }
 
@@ -281,6 +291,7 @@ ScriptContext::ScriptContext()
     sendEventToEntity = &thunk_sendEventToEntity;
     entityTriggerAudio = &thunk_entityTriggerAudio;
     entityStopAudio = &thunk_entityStopAudio;
+    physicsContactGetPoint = &thunk_physicsContactGetPoint;
 }
 
 // Refreshes the per-frame fields; called once a frame (main.cpp) before any script runs this frame.

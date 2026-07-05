@@ -247,8 +247,9 @@ bool ScriptHost::loadDll(CachedScript& slot, const fs::path& dll)
     void* onSpawn = m ? (void*)GetProcAddress(m, "OnSpawn") : nullptr;
     void* onDestroy = m ? (void*)GetProcAddress(m, "OnDestroy") : nullptr;
     void* onEvent = m ? (void*)GetProcAddress(m, "OnEvent") : nullptr;
+    void* onPhysicsEvent = m ? (void*)GetProcAddress(m, "OnPhysicsEvent") : nullptr;
 
-    if (!update && !onSpawn && !onDestroy && !onEvent) { if (m) FreeLibrary(m); return false; }
+    if (!update && !onSpawn && !onDestroy && !onEvent && !onPhysicsEvent) { if (m) FreeLibrary(m); return false; }
     if (slot.module) FreeLibrary((HMODULE)slot.module);
     slot.module = m;
     slot.dllPath = dll.string();
@@ -257,6 +258,7 @@ bool ScriptHost::loadDll(CachedScript& slot, const fs::path& dll)
     slot.entries.onSpawn = onSpawn;
     slot.entries.onDestroy = onDestroy;
     slot.entries.onEvent = onEvent;
+    slot.entries.onPhysicsEvent = onPhysicsEvent;
     slot.entries.dataSize = 0;
     if (auto sizeFn = (uint32(*)())GetProcAddress(m, "ScriptDataSize"))
         slot.entries.dataSize = sizeFn();

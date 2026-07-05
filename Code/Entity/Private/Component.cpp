@@ -236,6 +236,25 @@ void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
     }
 }
 
+void ScriptComponent::fireEvent(Entity& entity, uint32 eventKey)
+{
+    if (!enabled || !scriptModule || !scriptModule->onEvent)
+        return;
+    auto it = scriptModule->eventKeyToIndex.find(eventKey);
+    if (it != scriptModule->eventKeyToIndex.end())
+    {
+        reinterpret_cast<ScriptOnEventFn>(scriptModule->onEvent)(&Globals::scriptContext, &entity, it->second, scriptData.get());
+    }
+}
+
+void ScriptComponent::firePhysicsEvent(Entity& entity, Entity* other, bool begin, bool sensor, int64 contactId)
+{
+    if (!enabled || !scriptModule || !scriptModule->onPhysicsEvent)
+        return;
+    reinterpret_cast<ScriptOnPhysicsEventFn>(scriptModule->onPhysicsEvent)(
+        &Globals::scriptContext, &entity, other, begin ? 1 : 0, sensor ? 1 : 0, contactId, scriptData.get());
+}
+
 void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
 {
     if (!scriptModule)
@@ -318,8 +337,6 @@ void dispatchPhysicsContactEvents()
     {
         Entity* a = static_cast<Entity*>(evt.userDataA);
         Entity* b = static_cast<Entity*>(evt.userDataB);
-        const char* eventName = evt.sensor ? (evt.begin ? "Sensor Begin" : "Sensor End")
-                                           : (evt.begin ? "Contact Begin" : "Contact End");
         auto fire = [&](Entity* target, Entity* other)
         {
             if (!target)
@@ -327,7 +344,7 @@ void dispatchPhysicsContactEvents()
             if (PhysicsComponent* pc = getComponent<PhysicsComponent>(target); pc && pc->onContact && other)
                 pc->onContact(*other, evt.begin);
             if (ScriptComponent* sc = getComponent<ScriptComponent>(target))
-                sc->fireEvent(*target, eventName);
+                sc->firePhysicsEvent(*target, other, evt.begin, evt.sensor, evt.contactId);
         };
         fire(a, b);
         fire(b, a);

@@ -1363,6 +1363,27 @@ std::string Scene::generateCpp()
         code += "}\n\n";
     }
 
+    // On Physics Event: a fixed entry point (unlike On Event, which dispatches user-named entries by index).
+    // Parameter names here (physOther etc.) must match what the OnPhysicsEvent NodeDef's output pins expand to.
+    if (Node* entry = !functionScript ? findEntry("OnPhysicsEvent") : nullptr)
+    {
+        code += "SCRIPT_EXPORT void OnPhysicsEvent(const ScriptContext* ctx, Entity* self, Entity* physOther, "
+                "int physBegin, int physSensor, long long physContactId, void* scriptData)\n{\n";
+
+        Codegen cg{ m_links };
+        std::set<const Node*> execStack;
+        const std::string chain = emitExecChain(cg, entry, execStack); // also collects cg.globalDecls
+        std::string bodyRaw;
+        if (dataNode)
+            bodyRaw += "ScriptData* data = (ScriptData*)scriptData;\n"; // members resolve to data->field
+        bodyRaw += cg.globalDecls + chain;                             // variable decls first, at function scope
+        const std::string body = applyIndent(bodyRaw, "    ");
+        if (!body.empty())
+            code += indentLines(body, "    ");
+
+        code += "}\n\n";
+    }
+
     // On Event dispatches a runtime-fired event by index (not name — the host resolves a name to an index via
     // ScriptEventCount/ScriptEventName and caches it, keeping the fire-time call a plain int compare). The
     // index is the entry's position among the On Event node's output pins, so it lines up with ScriptEventName.
@@ -2247,6 +2268,30 @@ void Scene::processInteractions()
         }
     }
     ed::EndCreate();
+
+    // The library's own Delete-key handling (inside BeginDelete/QueryDeletedNode below) requires the canvas
+    // to be both focused AND hovered (EditorContext::CanAcceptUserInput()) -- so pressing Delete right after
+    // clicking a node, before the mouse drifts back over the canvas, silently does nothing. Queue the current
+    // selection through ed::DeleteNode/DeleteLink instead: that feeds a separate list the library's Accept()
+    // drains unconditionally, so it only needs the window focused, not hovered. !IsAnyItemActive() keeps a
+    // Delete keystroke meant for a node's rename/text field from also deleting the node.
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::IsAnyItemActive() &&
+        ImGui::IsKeyPressed(ImGuiKey_Delete))
+    {
+        const int selCount = ed::GetSelectedObjectCount();
+        if (selCount > 0)
+        {
+            std::vector<ed::NodeId> nodeIds(selCount);
+            const int nodeCount = ed::GetSelectedNodes(nodeIds.data(), selCount);
+            for (int i = 0; i < nodeCount; ++i)
+                ed::DeleteNode(nodeIds[i]);
+
+            std::vector<ed::LinkId> linkIds(selCount);
+            const int linkCount = ed::GetSelectedLinks(linkIds.data(), selCount);
+            for (int i = 0; i < linkCount; ++i)
+                ed::DeleteLink(linkIds[i]);
+        }
+    }
 
     if (ed::BeginDelete())
     {

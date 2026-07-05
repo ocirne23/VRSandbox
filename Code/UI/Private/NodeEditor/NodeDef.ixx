@@ -247,6 +247,20 @@ export const std::vector<NodeDef>& nodeRegistry()
     // added/removed/renamed through the editor and fired at runtime by name (ScriptComponent::fireEvent).
     r.push_back({ "OnEvent", "On Event", "Events", true, {}, {}, "" });
 
+    // On Physics Event: a fixed entry point (like OnSpawn/Update, not a named-entry node like On Event) for
+    // this entity's PhysicsComponent contact/sensor begin/end events (dispatchPhysicsContactEvents /
+    // ScriptComponent::firePhysicsEvent). ContactId feeds Get Contact Point for the world-space hit position,
+    // valid only until the next physics step. Pin names ("physOther" etc) must match the parameter names
+    // Scene::generateCpp gives the generated OnPhysicsEvent function.
+    r.push_back({ "OnPhysicsEvent", "On Physics Event", "Events", true,
+        {},
+        { { "", D::Exec, "" },
+            { "Other",     D::Entity, "", 0, "physOther" },
+            { "Begin",     D::Bool,   "", 0, "(physBegin != 0)" },
+            { "Sensor",    D::Bool,   "", 0, "(physSensor != 0)" },
+            { "ContactId", D::Int,    "", 0, "physContactId" } },
+        "#0" });
+
     r.push_back({ "If", "If", "Flow", true,
         { { "", D::Exec, "" }, { "Cond", D::Wildcard, "0.0f", 1 }, { "Comp", D::Wildcard, "0.0f", 1 } },
         { { "true", D::Exec, "" }, { "break", D::Exec, "" } },
@@ -662,6 +676,17 @@ export const std::vector<NodeDef>& nodeRegistry()
         "if (ctx->physicsRayCast($1, glm::normalize($2) * $3, &hitPoint@, &hitNormal@, &hitFraction@) != 0)\n{\n"
         + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\nelse\n{\n"
         + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n" });
+
+    // Get Contact Point: resolves an On Physics Event node's ContactId to its world-space hit position/normal
+    // (ctx->physicsContactGetPoint). Hit is false (Point/Normal stay zero) for a stale id or a sensor event.
+    r.push_back({ "GetContactPoint", "Get Contact Point", "Physics", false,
+        { { "Contact Id", D::Int, "0" } },
+        { { "Hit",    D::Bool, "", 0, "contactHit@" },
+            { "Point",  D::Vec3, "", 0, "contactPoint@" },
+            { "Normal", D::Vec3, "", 0, "contactNormal@" } },
+        std::string("glm::vec3 contactPoint@{ 0.0f, 0.0f, 0.0f };\nglm::vec3 contactNormal@{ 0.0f, 0.0f, 0.0f };\n"
+            "const bool contactHit@ = (ctx->physicsContactGetPoint($0, &contactPoint@, &contactNormal@) != 0);\n")
+        + HOIST + "contactHit@" });
 
     r.push_back({ "SetGravity", "Set Gravity", "Physics", true,
         { { "", D::Exec, "" }, { "gravity", D::Vec3, "glm::vec3{ 0.0f, -9.81f, 0.0f }" } },

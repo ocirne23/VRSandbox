@@ -173,6 +173,11 @@ export struct ScriptComponent
 
     // Fires a named On Event entry (e.g. an animation notify). No-ops if the script declares no such entry.
     void fireEvent(Entity& entity, const std::string& eventName);
+    void fireEvent(Entity& entity, uint32 eventKey); // Globals::scriptEvents.getEventKeyForName
+
+    // Fires the On Physics Event entry point (see dispatchPhysicsContactEvents). No-ops if the script
+    // declares no such entry. contactId is only valid for the frame it was collected (see PhysicsWorld::getContactPoint).
+    void firePhysicsEvent(Entity& entity, Entity* other, bool begin, bool sensor, int64 contactId);
 
     void serialize(AssetNode& out) const
     {
@@ -204,7 +209,7 @@ export struct PhysicsComponent
 
     // Fired by dispatchPhysicsContactEvents for begin/end contact and sensor overlaps involving this
     // body (the shape must set ContactEvents true, or be a Sensor). C++ gameplay hook; scripts get
-    // the same events as On Event entries ("Contact Begin" etc).
+    // the same events through the "On Physics Event" node.
     std::function<void(Entity& other, bool begin)> onContact;
 
     struct SpawnInfo
@@ -311,9 +316,8 @@ private:
 };
 
 // Maps this frame's physics contact/sensor events (body userData -> Entity*) onto the involved
-// entities: invokes PhysicsComponent::onContact and fires the matching script On Event entry
-// ("Contact Begin"/"Contact End"/"Sensor Begin"/"Sensor End"). Call once per frame after
-// Globals::physics.update().
+// entities: invokes PhysicsComponent::onContact and fires the script's "On Physics Event" entry
+// point (ScriptComponent::firePhysicsEvent). Call once per frame after Globals::physics.update().
 export void dispatchPhysicsContactEvents();
 
 export Transform composeTransform(const Transform& parent, const Transform& local);

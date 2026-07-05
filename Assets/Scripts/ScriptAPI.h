@@ -112,6 +112,12 @@ typedef struct ScriptContext
     void      (*entityTriggerAudio)(Entity* entity, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch);
     void      (*entityStopAudio)(Entity* entity, const char* alias);
 
+    // ---- physics contact queries (appended; keep this table append-only) ---- resolves a contactId from an
+    // On Physics Event node to its first manifold point in world space. Only valid for the frame the event
+    // fired (until the next physics step recycles the contact); returns 0 (outPoint/outNormal untouched) for
+    // a stale id or a sensor event (sensors have no contact manifold).
+    int       (*physicsContactGetPoint)(long long contactId, glm::vec3* outPoint, glm::vec3* outNormal);
+
 #ifdef __cplusplus
     ScriptContext(); // the engine binds all the function pointers here; scripts never construct one
 
@@ -142,6 +148,14 @@ typedef void (*ScriptOnEventFn)(const ScriptContext*, Entity* self, int eventIdx
 // Absent (or zero count) means the script declares no On Event entries.
 typedef int         (*ScriptEventCountFn)(void);
 typedef const char* (*ScriptEventNameFn)(int eventIdx);
+
+// Optional export: fires when this entity's PhysicsComponent takes part in a contact begin/end or sensor
+// begin/end overlap (see dispatchPhysicsContactEvents). A single fixed entry point (like OnSpawn/OnDestroy),
+// not indexed like OnEvent — a script gets one On Physics Event node, not user-named entries. `other` is the
+// entity on the other side of the contact (null if it has none, e.g. a raw static collider); `contactId`
+// identifies the underlying contact for THIS frame only (see ctx->physicsContactGetPoint).
+typedef void (*ScriptOnPhysicsEventFn)(const ScriptContext*, Entity* self, Entity* other, int begin, int sensor,
+    long long contactId, void* scriptData);
 
 // Optional export: the byte size of the script's persistent ScriptData struct. When present, the host
 // allocates a zeroed block of this size per entity and passes it to ScriptUpdate as `scriptData`. Absent (or
