@@ -656,6 +656,15 @@ void Scene::initialize()
     // NavigateButtonIndex stays the default (right-click), which also drives the context menu — a real drag
     // still pans, a near-stationary click still opens the popup (see the ContextMenuAction threshold fix and
     // NavigateAction's added middle-mouse-button support in imgui_node_editor.cpp).
+    //
+    // EnableSmoothZoom: with it off (the library default), NavigateAction::GetNextZoom truncates the wheel
+    // delta to an int before applying it — any accumulated scroll below a full 1.0 step is silently dropped,
+    // every frame, forever. A physical mouse locally almost always clears 1.0 per notch within one frame, so
+    // this goes unnoticed; over Remote Desktop the same notch's sub-events arrive spread across several
+    // frames, so each frame's delta is usually a fraction below 1.0 and gets truncated to zero — scrolling
+    // only "works" once it's fast enough that one frame's accumulated delta happens to clear 1.0. Smooth zoom
+    // scales continuously (powf(power, steps)) instead of truncating, so it has no such threshold to miss.
+    config.EnableSmoothZoom = true;
     m_nodeEditorContext = ed::CreateEditor(&config);
     ed::SetCurrentEditor(m_nodeEditorContext);
 

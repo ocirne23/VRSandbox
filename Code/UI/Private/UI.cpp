@@ -236,7 +236,11 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         }
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        ImGui::BeginChild("ScriptCanvas", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_NoMove);
+        // NoScrollWithMouse/NoScrollbar: otherwise this child can pick up its own scroll offset (e.g. once
+        // its content size ever grows past its visible rect for a frame) and starts eating the mouse wheel
+        // itself before the node editor's own scroll-to-zoom gets a chance to see it.
+        ImGui::BeginChild("ScriptCanvas", ImVec2(0.0f, 0.0f), false,
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoScrollbar);
         m_scene.update(deltaSec);
         ImGui::EndChild();
         ImGui::PopStyleVar(1);
