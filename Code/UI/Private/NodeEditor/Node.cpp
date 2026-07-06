@@ -155,13 +155,15 @@ namespace
     constexpr float kPinIcon = 16.0f;        // reserved square for a pin's shape marker
     constexpr float kColumnGap = 24.0f;      // gap between the input and output columns
     constexpr float kDefaultFieldWidth = 120.0f;
+    constexpr float kVec3FieldWidth = 150.0f; // three drag-float boxes side by side (see renderInputRow)
 
     bool hasInlineDefault(const Pin& pin)
     {
         return pin.dataType != EDataType::Exec && pin.type == EPinType_Input && pin.numConnections == 0;
     }
 
-    // Numeric/bool literals are short (~5 chars), so give them a narrow box; strings and vec3s keep the wide one.
+    // Numeric/bool literals are short (~5 chars), so give them a narrow box; strings keep the wide one; a
+    // Vec3 gets three narrow boxes (x/y/z) side by side.
     float defaultFieldWidth(const Pin& pin)
     {
         switch (pin.dataType)
@@ -169,6 +171,7 @@ namespace
             case EDataType::Int:
             case EDataType::Float:
             case EDataType::Bool: return 52.0f;
+            case EDataType::Vec3: return kVec3FieldWidth;
             default:              return kDefaultFieldWidth;
         }
     }
@@ -230,7 +233,17 @@ namespace
             sameLine();
             ImGui::TextUnformatted(pin.name.c_str());
         }
-        if (hasInlineDefault(pin))
+        if (hasInlineDefault(pin) && pin.dataType == EDataType::Vec3)
+        {
+            sameLine();
+            std::array<float, 3> v = parseVec3Literal(pin.defaultValue);
+            ImGui::PushID(&pin);
+            ImGui::SetNextItemWidth(defaultFieldWidth(pin));
+            if (ImGui::DragFloat3("##v3", v.data(), 0.05f, 0.0f, 0.0f, "%.2f"))
+                pin.defaultValue = formatVec3Literal(v);
+            ImGui::PopID();
+        }
+        else if (hasInlineDefault(pin))
         {
             sameLine();
             char buf[96];
@@ -243,7 +256,17 @@ namespace
             // into the pin. Show the value read-only so it can't be edited into an invalid expression.
             const ImGuiInputTextFlags flags = pin.dataType == EDataType::Entity ? ImGuiInputTextFlags_ReadOnly : 0;
             if (ImGui::InputText("##v", buf, sizeof(buf), flags) && !(flags & ImGuiInputTextFlags_ReadOnly))
-                pin.defaultValue = buf;
+                pin.defaultValue = buf; // echoed live as typed; validated/reformatted once editing ends below
+            // Type-check on commit (not per-keystroke, so partial input like "-" or "3." can still be typed):
+            // reformat into a canonical literal ("3" -> "3.0f", "TRUE" -> "true"), or fall back to the type's
+            // default if what's there doesn't parse as this pin's type. "default" always passes through as-is.
+            if (ImGui::IsItemDeactivatedAfterEdit())
+            {
+                if (auto formatted = formatLiteral(pin.dataType, pin.defaultValue))
+                    pin.defaultValue = *formatted;
+                else
+                    pin.defaultValue = defaultValueForType(pin.dataType);
+            }
             ImGui::PopID();
         }
     }

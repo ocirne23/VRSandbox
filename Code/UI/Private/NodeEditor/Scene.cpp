@@ -345,10 +345,13 @@ namespace
         Pin* src = realSourceOfInput(cg.links, inputPin);
         if (!src)
         {
+            // "default" resolves to this pin's concrete type's engine default literal at codegen time (see
+            // isDefaultToken); otherwise the typed literal is used as-is.
+            const std::string& lit = isDefaultToken(inputPin->defaultValue) ? defaultValueForType(inputPin->dataType) : inputPin->defaultValue;
             // A String pin's default is stored as raw text (no quotes in the editor); make it a literal here.
             if (inputPin->dataType == EDataType::String)
-                return quoteStringLiteral(inputPin->defaultValue);
-            return inputPin->defaultValue.empty() ? std::string("0") : inputPin->defaultValue;
+                return quoteStringLiteral(lit);
+            return lit.empty() ? std::string("0") : lit;
         }
         if (auto it = hoist.find(src); it != hoist.end())
             return it->second; // already computed into a local
@@ -447,14 +450,14 @@ namespace
 
         int overrideMask = 0;
 
-        if (positionPin && (positionPin->defaultValue != "default" || realSourceOfInput(cg.links, positionPin))) overrideMask |= 1;
-        if (volumePin && (volumePin->defaultValue != "default" || realSourceOfInput(cg.links, volumePin)))       overrideMask |= 2;
-        if (pitchPin && (pitchPin->defaultValue != "default" || realSourceOfInput(cg.links, pitchPin)))          overrideMask |= 4;
+        if (positionPin && (!isDefaultToken(positionPin->defaultValue) || realSourceOfInput(cg.links, positionPin))) overrideMask |= 1;
+        if (volumePin && (!isDefaultToken(volumePin->defaultValue) || realSourceOfInput(cg.links, volumePin)))       overrideMask |= 2;
+        if (pitchPin && (!isDefaultToken(pitchPin->defaultValue) || realSourceOfInput(cg.links, pitchPin)))          overrideMask |= 4;
 
         std::set<const Node*> dataStack;
         auto expr = [&](const Pin* pin, const char* fallback)
         {
-            return (pin && pin->defaultValue != "default") ? emitDataExpr(cg, pin, dataStack, hoist) : std::string(fallback);
+            return (pin && !isDefaultToken(pin->defaultValue)) ? emitDataExpr(cg, pin, dataStack, hoist) : std::string(fallback);
         };
         std::string out = "ctx->entityTriggerAudio(" + expr(entityPin, "self") + ", " + quoteStringLiteral(alias) + ", " +
             std::to_string(overrideMask) + ", " + expr(positionPin, "glm::vec3(0,0,0)") + ", " +
@@ -674,7 +677,9 @@ void Scene::resolveNodeTypes(Node* node)
             pin.shape = resolved == EDataType::Exec ? EPinShape_Flow
                       : pin.mutability != EMutableType::Readable ? EPinShape_Square // keep writable pins square
                       : EPinShape_Circle;
-            if (pin.type == EPinType_Input && pin.numConnections == 0)
+            // "default" is valid for any type, so a pin left on that sentinel keeps it across the type
+            // change instead of being reformatted to the new type's concrete default literal.
+            if (pin.type == EPinType_Input && pin.numConnections == 0 && !isDefaultToken(pin.defaultValue))
                 pin.defaultValue = defaultValueForType(resolved);
         };
         for (const auto& pin : node->getInputPins())  if (pin->typeGroup == group) apply(*pin);

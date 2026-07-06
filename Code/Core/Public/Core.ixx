@@ -53,6 +53,7 @@ export import <chrono>;
 export import <initializer_list>;
 export import <execution>;
 export import <charconv>;
+export import <optional>;
 export import <new>;
 export import <bit>;
 export import <cmath>;

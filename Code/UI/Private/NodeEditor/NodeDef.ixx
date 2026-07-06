@@ -214,6 +214,118 @@ export std::string defaultValueForType(EDataType type)
     }
 }
 
+static char lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
+
+static bool iequals(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (lower(a[i]) != lower(b[i]))
+            return false;
+    return true;
+}
+
+// "default" is a sentinel literal accepted in any inline default box, regardless of the pin's type: it
+// means "use this pin's/type's engine default" and stays valid across a wildcard pin's type changing (see
+// resolveNodeTypes) since it is resolved to a concrete literal only at codegen time (see emitDataExpr).
+export bool isDefaultToken(const std::string& text)
+{
+    return iequals(text, "default");
+}
+
+// Canonical C++ float literal for a value (e.g. 5.0f -> "5.0f"). to_chars omits the decimal point for whole
+// numbers (e.g. "5"), but a bare digit-sequence plus an 'f' suffix isn't a valid C++ floating literal
+// (needs a '.' or exponent), so one is added when missing.
+export std::string formatFloatLiteral(float value)
+{
+    char buf[32];
+    const auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), value);
+    std::string formatted(buf, ptr);
+    if (formatted.find_first_of(".eE") == std::string::npos)
+        formatted += ".0";
+    return formatted + "f";
+}
+
+// Parses one float literal token (an optional trailing f/F suffix, otherwise whatever std::from_chars
+// accepts). Used both for a plain Float pin and for each component of a Vec3 pin's literal.
+export bool parseFloatToken(std::string_view text, float& outValue)
+{
+    if (!text.empty() && (text.back() == 'f' || text.back() == 'F'))
+        text.remove_suffix(1);
+    if (text.empty())
+        return false;
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), outValue);
+    return result.ec == std::errc() && result.ptr == text.data() + text.size();
+}
+
+// Extracts the x/y/z components out of a Vec3 pin's default text ("glm::vec3{ x, y, z }") for the inline
+// X/Y/Z boxes. Tolerant of the "default" sentinel and anything else that doesn't parse — falls back to 0.
+export std::array<float, 3> parseVec3Literal(const std::string& text)
+{
+    std::array<float, 3> v{ 0.0f, 0.0f, 0.0f };
+    const size_t open = text.find('{');
+    const size_t close = text.find('}');
+    if (open == std::string::npos || close == std::string::npos || close <= open)
+        return v;
+    std::string_view inner(text.data() + open + 1, close - open - 1);
+    for (int comp = 0; comp < 3; ++comp)
+    {
+        const size_t comma = inner.find(',');
+        std::string_view tok = inner.substr(0, comma);
+        while (!tok.empty() && tok.front() == ' ') tok.remove_prefix(1);
+        while (!tok.empty() && tok.back() == ' ') tok.remove_suffix(1);
+        parseFloatToken(tok, v[comp]);
+        if (comma == std::string_view::npos) break;
+        inner.remove_prefix(comma + 1);
+    }
+    return v;
+}
+
+// Formats three components back into the canonical Vec3 literal (see defaultValueForType).
+export std::string formatVec3Literal(const std::array<float, 3>& v)
+{
+    return "glm::vec3{ " + formatFloatLiteral(v[0]) + ", " + formatFloatLiteral(v[1]) + ", " + formatFloatLiteral(v[2]) + " }";
+}
+
+// Validates and reformats text typed into an inline default box into a canonical literal for `type`
+// (e.g. "3" -> "3.0f", "TRUE" -> "true"). Returns nullopt if the text isn't a valid literal for that type,
+// so the caller can reject the edit instead of committing something that breaks codegen.
+export std::optional<std::string> formatLiteral(EDataType type, const std::string& text)
+{
+    if (isDefaultToken(text))
+        return std::string("default");
+
+    switch (type)
+    {
+        case EDataType::Bool:
+        {
+            if (iequals(text, "true"))  return std::string("true");
+            if (iequals(text, "false")) return std::string("false");
+            return std::nullopt;
+        }
+        case EDataType::Int:
+        {
+            int value = 0;
+            const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+            if (result.ec != std::errc() || result.ptr != text.data() + text.size())
+                return std::nullopt;
+            return std::to_string(value);
+        }
+        case EDataType::Float:
+        {
+            float value = 0.0f;
+            if (!parseFloatToken(text, value))
+                return std::nullopt;
+            return formatFloatLiteral(value);
+        }
+        case EDataType::String:
+            return text; // any raw text is a valid string literal body
+        default:
+            return text; // Vec3/Quat/Entity/Wildcard: free-form expression / fixed value, not validated here
+    }
+}
+
 // The full palette of node types. Returned by const ref so pointers into it stay stable.
 export const std::vector<NodeDef>& nodeRegistry()
 {
