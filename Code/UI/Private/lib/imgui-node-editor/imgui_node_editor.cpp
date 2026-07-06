@@ -3306,6 +3306,7 @@ ed::NavigateAction::NavigateAction(EditorContext* editor, ImGuiEx::Canvas& canva
     m_Scroll(0, 0),
     m_ScrollStart(0, 0),
     m_ScrollDelta(0, 0),
+    m_ActiveButton(-1),
     m_Canvas(canvas),
     m_WindowScreenPos(0, 0),
     m_WindowScreenSize(0, 0),
@@ -3327,12 +3328,23 @@ ed::EditorAction::AcceptResult ed::NavigateAction::Accept(const Control& control
     if (m_IsActive)
         return False;
 
-    if (Editor->CanAcceptUserInput() /*&& !ImGui::IsAnyItemActive()*/ && ImGui::IsMouseDragging(Editor->GetConfig().NavigateButtonIndex, 0.0f))
+    // The configured button (normally right-click) still pans on a real drag; middle-click always pans too,
+    // regardless of config, as an always-on second button. Whichever is actually dragging wins; Process()
+    // keeps tracking that same button (m_ActiveButton) until it's released.
+    const int configuredButton = Editor->GetConfig().NavigateButtonIndex;
+    int draggingButton = -1;
+    if (ImGui::IsMouseDragging(configuredButton, 0.0f))
+        draggingButton = configuredButton;
+    else if (configuredButton != ImGuiMouseButton_Middle && ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f))
+        draggingButton = ImGuiMouseButton_Middle;
+
+    if (Editor->CanAcceptUserInput() /*&& !ImGui::IsAnyItemActive()*/ && draggingButton >= 0)
     {
-        m_IsActive    = true;
-        m_ScrollStart = m_Scroll;
-        m_ScrollDelta = ImGui::GetMouseDragDelta(Editor->GetConfig().NavigateButtonIndex);
-        m_Scroll      = m_ScrollStart - m_ScrollDelta * m_Zoom;
+        m_IsActive     = true;
+        m_ActiveButton = draggingButton;
+        m_ScrollStart  = m_Scroll;
+        m_ScrollDelta  = ImGui::GetMouseDragDelta(m_ActiveButton);
+        m_Scroll       = m_ScrollStart - m_ScrollDelta * m_Zoom;
     }
 
     auto& io = ImGui::GetIO();
@@ -3413,9 +3425,9 @@ bool ed::NavigateAction::Process(const Control& control)
     if (!m_IsActive)
         return false;
 
-    if (ImGui::IsMouseDragging(Editor->GetConfig().NavigateButtonIndex, 0.0f))
+    if (ImGui::IsMouseDragging(m_ActiveButton, 0.0f))
     {
-        m_ScrollDelta = ImGui::GetMouseDragDelta(Editor->GetConfig().NavigateButtonIndex);
+        m_ScrollDelta = ImGui::GetMouseDragDelta(m_ActiveButton);
         m_Scroll      = m_ScrollStart - m_ScrollDelta * m_Zoom;
         m_VisibleRect = GetViewRect();
 //         if (IsActive && Animation.IsPlaying())
@@ -3426,7 +3438,8 @@ bool ed::NavigateAction::Process(const Control& control)
         if (m_Scroll != m_ScrollStart)
             Editor->MakeDirty(SaveReasonFlags::Navigation);
 
-        m_IsActive = false;
+        m_IsActive     = false;
+        m_ActiveButton = -1;
     }
 
     // #TODO: Handle zoom while scrolling
@@ -4246,7 +4259,10 @@ ed::EditorAction::AcceptResult ed::ContextMenuAction::Accept(const Control& cont
 {
     const auto isPressed  = ImGui::IsMouseClicked(Editor->GetConfig().ContextMenuButtonIndex);
     const auto isReleased = ImGui::IsMouseReleased(Editor->GetConfig().ContextMenuButtonIndex);
-    const auto isDragging = ImGui::IsMouseDragging(Editor->GetConfig().ContextMenuButtonIndex, 1);
+    // A 1px threshold made any incidental hand tremor during the click reset m_CandidateMenu below before the
+    // release even happened, silently swallowing the popup. Match ImGui's own default click/drag threshold
+    // (io.MouseDragThreshold, ~6px) so a real click still opens the menu.
+    const auto isDragging = ImGui::IsMouseDragging(Editor->GetConfig().ContextMenuButtonIndex, 6.0f);
 
     if (isPressed || isReleased || isDragging)
     {

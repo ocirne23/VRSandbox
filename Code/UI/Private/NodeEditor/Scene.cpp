@@ -574,6 +574,9 @@ void Scene::initialize()
 {
     ed::Config config;
     config.SettingsFile = nullptr;
+    // NavigateButtonIndex stays the default (right-click), which also drives the context menu — a real drag
+    // still pans, a near-stationary click still opens the popup (see the ContextMenuAction threshold fix and
+    // NavigateAction's added middle-mouse-button support in imgui_node_editor.cpp).
     m_nodeEditorContext = ed::CreateEditor(&config);
     ed::SetCurrentEditor(m_nodeEditorContext);
 

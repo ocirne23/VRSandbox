@@ -835,6 +835,10 @@ struct NavigateAction final: EditorAction
     ImVec2          m_Scroll;
     ImVec2          m_ScrollStart;
     ImVec2          m_ScrollDelta;
+    // Middle mouse always pans in addition to whatever Config.NavigateButtonIndex is set to (normally
+    // right-click); this remembers which button actually started the current drag so Process() keeps
+    // tracking that one instead of re-reading the config button every frame.
+    int             m_ActiveButton;
 
     NavigateAction(EditorContext* editor, ImGuiEx::Canvas& canvas);
 
