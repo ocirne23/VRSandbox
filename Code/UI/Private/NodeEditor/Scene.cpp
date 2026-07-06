@@ -1075,7 +1075,8 @@ void Scene::syncTriggerAudioPins(Node& node)
 // Dragging a link onto empty canvas opens the add-node popup with m_pendingLinkPin set to its dangling end;
 // once the user picks a node type, this wires that end to the new node's first pin (of the opposite kind)
 // that accepts it, in pin order. Leaves the link unconnected if none does — the node is still created either
-// way. A no-op if the popup was opened normally (right-click), which clears m_pendingLinkPin beforehand.
+// way, but pruneOrphanedReroute cleans up a reroute chain left with nothing downstream (see there). A no-op
+// if the popup was opened normally (right-click), which clears m_pendingLinkPin beforehand.
 void Scene::autoConnectPending(Node& node)
 {
     Pin* danglingPin = m_pendingLinkPin;
@@ -1106,6 +1107,29 @@ void Scene::autoConnectPending(Node& node)
                 resolveNodeTypes(danglingPin->node);
                 return;
             }
+    }
+
+    // The new node has no pin compatible with the dropped end, so it stays unconnected — prune it if it's a
+    // dead reroute stub (see pruneOrphanedReroute); a no-op otherwise (e.g. a plain unconnected input pin
+    // freshly dragged out, never routed through anything).
+    pruneOrphanedReroute(danglingPin);
+}
+
+// Deletes an orphaned reroute chain starting at `pin` — an output pin left with no downstream connection
+// (numConnections == 0) after redirectIfRewiring picked up an existing link's input end and dropped the
+// segment immediately below it, or after autoConnectPending failed to find anywhere to reconnect it. Walks
+// upstream through each further reroute that becomes orphaned in turn (removeNode strips a reroute's own
+// remaining link when it's deleted), stopping at the first non-reroute node or one still feeding something
+// else. A no-op if `pin` isn't a dead reroute output to begin with.
+void Scene::pruneOrphanedReroute(Pin* pin)
+{
+    while (pin && pin->node->isReroute() && pin->numConnections == 0)
+    {
+        Node* reroute = pin->node;
+        const auto& inputs = reroute->getInputPins();
+        Pin* upstream = inputs.empty() ? nullptr : sourceOfInput(m_links, inputs[0].get());
+        removeNode(reroute->getId());
+        pin = upstream;
     }
 }
 
@@ -2420,6 +2444,15 @@ void Scene::update(double deltaSec)
         ImGui::EndPopup();
     }
     ImGui::PopStyleVar();
+
+    // The popup was opened by dropping a link on empty canvas (m_pendingLinkPin set) and just closed without
+    // picking anything (Escape / click elsewhere) — autoConnectPending never ran to consume/clear it, so the
+    // dropped end is abandoned outright. Same cleanup as autoConnectPending's own no-match fallthrough.
+    if (!ImGui::IsPopupOpen("AddNodePopup") && m_pendingLinkPin)
+    {
+        pruneOrphanedReroute(m_pendingLinkPin);
+        m_pendingLinkPin = nullptr;
+    }
 
     // Right-click a node for Delete/Copy/Duplicate/Reset.
     ed::NodeId contextNodeId;

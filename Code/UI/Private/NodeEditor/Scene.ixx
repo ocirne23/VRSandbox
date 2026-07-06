@@ -63,6 +63,7 @@ private:
     void syncNewEventNode(Node& newNode);             // seed a new On Event node from the shared entry set
     void syncTriggerAudioPins(Node& node);            // reconcile a Trigger Audio node's alias pins with m_audioAliases
     void autoConnectPending(Node& node);               // wire m_pendingLinkPin to node's first matching pin, if any
+    void pruneOrphanedReroute(Pin* pin);               // walk + delete a reroute chain left with no downstream link
 
     // ---- functions (imported reusable subgraphs) ----
     using PinSig = std::vector<std::pair<EDataType, std::string>>; // ordered (type, name) list
