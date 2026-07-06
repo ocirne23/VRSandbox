@@ -139,7 +139,7 @@ void IndirectCullComputePipeline::update(uint32 frameIdx, uint32 numMeshInstance
     frameData.inIndirectCommandBuffer.flushMappedMemory(vk::WholeSize);
 }
 
-void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& recordParams)
+void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& recordParams)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
@@ -255,9 +255,10 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
         vkCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipeline());
         commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, descriptorSet, computeDescriptorSetUpdateInfos);
         vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
-        const vk::DeviceSize stride = sizeof(RendererVKLayout::IndirectDrawSequence);
-        vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * stride, 0); // opaque
-        vkCommandBuffer.fillBuffer(frameData.outTransparentIndirectCommandBuffer.getBuffer(), 0, numMeshes * stride, 0); // transparent
+        // Clear the full capacity (not just the live mesh count) so the recorded size never depends on
+        // how many meshes are registered — new meshes spawn without a re-record.
+        vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, vk::WholeSize, 0); // opaque
+        vkCommandBuffer.fillBuffer(frameData.outTransparentIndirectCommandBuffer.getBuffer(), 0, vk::WholeSize, 0); // transparent
         {
             vk::MemoryBarrier2 memoryBarrier{
                 .srcStageMask = vk::PipelineStageFlagBits2::eClear,

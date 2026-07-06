@@ -113,7 +113,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_eyeAdaptationPipeline.initialize();
     m_compositePipeline.initialize(m_renderPass);
     m_indirectCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
-    m_skinningComputePipeline.initialize(m_maxSkinningPaletteEntries);
+    m_skinningComputePipeline.initialize(m_maxSkinningPaletteEntries, m_maxSkinningJobs);
     m_lightGridComputePipeline.initialize();
     m_accelStructure.initialize(m_maxUniqueMeshes);
     m_giProbePipeline.initialize(m_maxGiTlasInstances, m_maxTextures, m_numTextureDescriptors);
@@ -184,6 +184,14 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
             vk::BufferUsageFlagBits2::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible, false, "FirstInstances", BufferHostAccess::eSequentialWrite);
         perFrame.mappedFirstInstances = perFrame.inFirstInstancesBuffer.mapMemory<uint32>();
+
+        // Indirect usage: consumed by DGC (sequenceCountAddress) and drawIndexedIndirectCount.
+        perFrame.meshCountBuffer.initialize(sizeof(uint32),
+            vk::BufferUsageFlagBits2::eIndirectBuffer | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "MeshCount", BufferHostAccess::eSequentialWrite);
+        perFrame.mappedMeshCount = perFrame.meshCountBuffer.mapMemory<uint32>();
+        perFrame.mappedMeshCount[0] = 0;
+        perFrame.meshCountBuffer.flushMappedMemory(sizeof(uint32));
 
         perFrame.lightInfosBuffer.initialize(sizeof(RendererVKLayout::LightInfo) * RendererVKLayout::MAX_LIGHTS,
             vk::BufferUsageFlagBits2::eStorageBuffer,
@@ -606,12 +614,14 @@ void Renderer::present()
     frameData.inFirstInstancesBuffer.flushMappedMemory(numMeshInfos * sizeof(uint32));
     frameData.lightInfosBuffer.flushMappedMemory(m_lightCounter * sizeof(RendererVKLayout::LightInfo));
 
+    frameData.mappedMeshCount[0] = m_meshInfoCounter; // DGC sequence count / G-buffer draw count for this frame
+    frameData.meshCountBuffer.flushMappedMemory(sizeof(uint32));
+
     frameData.mappedFogVolumes.data()->count = m_fogVolumeCounter;
     frameData.fogVolumesBuffer.flushMappedMemory(RendererVKLayout::FOG_VOLUME_HEADER_SIZE + m_fogVolumeCounter * sizeof(RendererVKLayout::FogVolumeInfo));
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
-    if (!m_skinningJobs.empty())
-        m_skinningComputePipeline.update(frameIdx, m_skinningPalettes);
+    m_skinningComputePipeline.update(frameIdx, m_skinningPalettes, m_skinningJobs);
     m_lightGridComputePipeline.update(frameIdx, m_lightCounter);
 
     vk::Semaphore waitSemaphore = Globals::stagingManager.update();
@@ -821,7 +831,7 @@ void Renderer::recordIndirectCull(uint32 frameIdx)
         .inMeshInfoBuffer = m_meshInfosBuffer,
         .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
     };
-    m_indirectCullComputePipeline.record(cb, frameIdx, m_meshInfoCounter, cullParams);
+    m_indirectCullComputePipeline.record(cb, frameIdx, cullParams);
     cb.end();
 }
 
@@ -849,7 +859,7 @@ uint32 Renderer::addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOf
     uint32 meshIdx, uint32 firstIndex, uint32 indexCount)
 {
     assert(paletteHandle < m_skinningPaletteRegions.size());
-    RendererVKLayout::SkinningPushConstants job{
+    RendererVKLayout::SkinningJob job{
         .baseVertexOffset = baseVertexOffset,
         .skinVertexOffset = skinVertexOffset,
         .outVertexOffset = outVertexOffset,
@@ -860,7 +870,10 @@ uint32 Renderer::addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOf
     m_skinningJobs.push_back(job);
     m_skinnedBlasBuilds.push_back(AccelerationStructure::SkinnedBlasBuild{
         .meshIdx = meshIdx, .vertexOffset = outVertexOffset, .vertexCount = vertexCount, .firstIndex = firstIndex, .indexCount = indexCount });
-    setHaveToRecordCommandBuffers(); // a new dispatch must be recorded into the skinning command buffer
+    // No re-record needed: the jobs are uploaded per frame and dispatched indirectly; the skinned BLAS
+    // list is consumed by recordGlobalIllum, which re-records every frame.
+    if ((uint32)m_skinningJobs.size() > m_maxSkinningJobs)
+        growSkinningJobCapacity((uint32)m_skinningJobs.size());
     return handle;
 }
 
@@ -873,6 +886,15 @@ void Renderer::growSkinningPaletteCapacity(uint32 needed)
     printf("Renderer: grew skinning palette capacity to %u\n", m_maxSkinningPaletteEntries);
 }
 
+void Renderer::growSkinningJobCapacity(uint32 needed)
+{
+    m_maxSkinningJobs = growCapacity(m_maxSkinningJobs, needed);
+    waitForGpuAndFlushStaging();
+    m_skinningComputePipeline.resizeJobBuffer(m_maxSkinningJobs);
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew skinning job capacity to %u\n", m_maxSkinningJobs);
+}
+
 void Renderer::recordSkinning(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -883,7 +905,6 @@ void Renderer::recordSkinning(uint32 frameIdx)
         .descriptorSet = frameData.skinningDescriptorSet,
         .vertexBuffer = Globals::meshDataManager.getVertexBuffer(),
         .skinningBuffer = Globals::meshDataManager.getSkinningBuffer(),
-        .jobs = m_skinningJobs,
     };
     m_skinningComputePipeline.record(cb, frameIdx, params);
     cb.end();
@@ -926,7 +947,7 @@ void Renderer::recordShadowCull(uint32 frameIdx)
         .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
         .inMaterialInfoBuffer = m_materialInfosBuffer,
     };
-    m_shadowCullComputePipeline.record(cb, frameIdx, m_meshInfoCounter, params);
+    m_shadowCullComputePipeline.record(cb, frameIdx, params);
     cb.end();
 }
 
@@ -954,8 +975,9 @@ void Renderer::recordShadowDraw(uint32 frameIdx)
         .indexBuffer = Globals::meshDataManager.getIndexBuffer(),
         .instanceIdxBuffer = m_shadowCullComputePipeline.getInstanceIdxBuffer(frameIdx),
         .indirectCommandBuffer = m_shadowCullComputePipeline.getIndirectCommandBuffer(frameIdx),
+        .meshCountBuffer = frameData.meshCountBuffer,
     };
-    m_shadowMapGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, params);
+    m_shadowMapGraphicsPipeline.record(cb, frameIdx, params);
     cb.end();
 }
 
@@ -997,6 +1019,7 @@ void Renderer::recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 e
         .meshInstanceBuffer = m_indirectCullComputePipeline.getOutMeshInstancesBuffer(frameIdx),
         .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
         .transparentIndirectCommandBuffer = m_indirectCullComputePipeline.getTransparentIndirectCommandBuffer(frameIdx),
+        .meshCountBuffer = frameData.meshCountBuffer,
         .lightInfosBuffer = frameData.lightInfosBuffer,
         .lightGridsBuffer = frameData.lightGridsBuffer,
         .lightTableBuffer = frameData.lightTableBuffer,
@@ -1011,7 +1034,7 @@ void Renderer::recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 e
         .viewIndex = RendererVKLayout::eyeToViewIndex(eyeIndex, m_sceneViewCount),
     };
     // Each eye has its own descriptor set (per-eye AO + gbuffer depth), so both eyes write their own.
-    m_staticMeshGraphicsPipeline.record(cb, frameIdx, m_meshInfoCounter, drawParams, true);
+    m_staticMeshGraphicsPipeline.record(cb, frameIdx, drawParams, true);
 }
 
 void Renderer::recordGBufferInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
@@ -1040,8 +1063,9 @@ void Renderer::recordGBufferInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeI
         .instanceIdxBuffer = m_indirectCullComputePipeline.getInstanceIdxBuffer(frameIdx),
         .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
         .materialInfoBuffer = m_materialInfosBuffer,
+        .meshCountBuffer = frameData.meshCountBuffer,
     };
-    m_gbufferPipeline.record(cb, frameIdx, m_meshInfoCounter, gbufferParams, RendererVKLayout::eyeToViewIndex(eyeIndex, m_sceneViewCount));
+    m_gbufferPipeline.record(cb, frameIdx, gbufferParams, RendererVKLayout::eyeToViewIndex(eyeIndex, m_sceneViewCount));
 }
 
 void Renderer::recordGBuffer(uint32 frameIdx)
@@ -1448,8 +1472,9 @@ void Renderer::recordCommandBuffers()
     const bool recordScene = !frameData.updated && m_meshInstanceCounter > 0;
     if (recordScene)
     {
-        if (!m_skinningJobs.empty())
-            recordSkinning(frameIdx);
+        // Recorded even with no jobs: the dispatch is indirect (CPU-written dims per frame), so skinned
+        // instances spawned later run without a re-record.
+        recordSkinning(frameIdx);
         recordIndirectCull(frameIdx);
         recordLightGrid(frameIdx);
         recordShadowCull(frameIdx);
@@ -1743,12 +1768,14 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
     m_meshInfosBuffer.appendToBackingStore<RendererVKLayout::MeshInfo>(meshInfos);
 
     if (m_meshInfoCounter > m_maxUniqueMeshes)
-        growUniqueMeshCapacity(m_meshInfoCounter); // re-uploads the full CPU copy
+        growUniqueMeshCapacity(m_meshInfoCounter); // re-uploads the full CPU copy; re-records
+    // Within capacity no re-record is needed: nothing recorded bakes the mesh count (the cull clears fill
+    // whole capacity-sized buffers, DGC reads the count via sequenceCountAddress, the G-buffer draws via
+    // drawIndexedIndirectCount, and new BLASes build per frame in recordGlobalIllum).
     else
         m_meshInfosBuffer.upload(meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
             meshInfos.data(), baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
 
-    setHaveToRecordCommandBuffers();
     return baseMeshInfoIdx;
 }
 
@@ -1768,12 +1795,13 @@ uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialIn
     m_materialInfosBuffer.appendToBackingStore<RendererVKLayout::MaterialInfo>(materialInfos);
 
     if (m_materialInfoCounter > m_maxUniqueMaterials)
-        growMaterialCapacity(m_materialInfoCounter); // re-uploads the full CPU copy
+        growMaterialCapacity(m_materialInfoCounter); // re-uploads the full CPU copy; re-records
+    // Within capacity this is a contents-only upload: every pass binds the whole buffer and nothing
+    // recorded depends on the material count, so no re-record is needed.
     else
         m_materialInfosBuffer.upload(materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
             materialInfos.data(), baseMaterialInfoIdx * sizeof(RendererVKLayout::MaterialInfo));
 
-    setHaveToRecordCommandBuffers();
     return baseMaterialInfoIdx;
 }
 
@@ -1785,12 +1813,13 @@ uint32 Renderer::addMeshInstanceOffsets(const std::vector<RendererVKLayout::Mesh
     m_instanceOffsetsBuffer.appendToBackingStore<RendererVKLayout::MeshInstanceOffset>(meshInstanceOffsets);
 
     if (m_instanceOffsetCounter > m_maxInstanceOffsets)
-        growInstanceOffsetCapacity(m_instanceOffsetCounter); // re-uploads the full CPU copy
+        growInstanceOffsetCapacity(m_instanceOffsetCounter); // re-uploads the full CPU copy; re-records
+    // Within capacity this is a contents-only upload: every pass binds the whole buffer and nothing
+    // recorded depends on the offset count, so no re-record is needed (rebased static spawns hit this).
     else
         m_instanceOffsetsBuffer.upload(meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
             meshInstanceOffsets.data(), baseInstanceOffsetIdx * sizeof(RendererVKLayout::MeshInstanceOffset));
 
-    setHaveToRecordCommandBuffers();
     return baseInstanceOffsetIdx;
 }
 

@@ -34,11 +34,12 @@ public:
         Buffer& indexBuffer;
         Buffer& instanceIdxBuffer;     // vertex binding 2 - shadow cull's compacted instance indices
         Buffer& indirectCommandBuffer; // shadow cull's IndirectDrawSequence buffer (opaque region)
+        Buffer& meshCountBuffer;       // uint32 live mesh count (DGC sequenceCountAddress), CPU-written per frame
     };
 
     void initialize(ShadowMap& shadowMap, uint32 maxUniqueMeshes, uint32 maxTextures);
     void reloadShaders(uint32 maxTextures);
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params);
     // Re-sizes the DGC preprocess scratch for a grown unique-mesh capacity (GPU must be idle).
     void resizeMeshCapacity(uint32 maxUniqueMeshes);
 

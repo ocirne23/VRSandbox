@@ -237,11 +237,13 @@ private:
     struct SkinningPaletteRegion { uint32 offset; uint32 boneCount; };
     std::vector<SkinningPaletteRegion> m_skinningPaletteRegions;
     std::vector<glm::mat4> m_skinningPalettes;   // CPU staging (concatenated per region), uploaded each frame
-    std::vector<RendererVKLayout::SkinningPushConstants> m_skinningJobs; // one per skinned mesh instance
+    std::vector<RendererVKLayout::SkinningJob> m_skinningJobs; // one per skinned mesh instance; uploaded each frame
     std::vector<AccelerationStructure::SkinnedBlasBuild> m_skinnedBlasBuilds; // parallel to m_skinningJobs; per-frame BLAS rebuild
     std::vector<RendererVKLayout::SkinnedMeshSource> m_skinnedMeshSources; // per-container skinned-mesh source data (CPU-only)
     uint32 m_maxSkinningPaletteEntries = RendererVKLayout::INITIAL_SKINNING_PALETTE;
+    uint32 m_maxSkinningJobs = RendererVKLayout::INITIAL_SKINNING_JOBS;
     void growSkinningPaletteCapacity(uint32 needed);
+    void growSkinningJobCapacity(uint32 needed);
 
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<uint32> m_numInstancesPerMesh;
@@ -300,6 +302,10 @@ private:
         Buffer inRenderNodeTransformsBuffer;
         Buffer inMeshInstancesBuffer;
         Buffer inFirstInstancesBuffer;
+        // This frame's unique-mesh count, read on the GPU by the DGC executes (sequenceCountAddress) and
+        // the G-buffer's drawIndexedIndirectCount, so registering new meshes never re-records.
+        Buffer meshCountBuffer;
+        std::span<uint32> mappedMeshCount;
 
         Buffer lightInfosBuffer;
         Buffer lightGridsBuffer;

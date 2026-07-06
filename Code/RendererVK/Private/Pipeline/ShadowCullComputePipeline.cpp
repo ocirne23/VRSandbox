@@ -67,7 +67,7 @@ void ShadowCullComputePipeline::buildComputeLayout(ComputePipelineLayout& comput
     }
 }
 
-void ShadowCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
+void ShadowCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
@@ -100,8 +100,8 @@ void ShadowCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fram
     commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, descriptorSet, updates);
     vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
 
-    const vk::DeviceSize stride = sizeof(RendererVKLayout::IndirectDrawSequence);
-    vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, numMeshes * stride, 0); // clear per-mesh instance counts
+    // Full-capacity clear so the recorded size never depends on the live mesh count (see IndirectCull).
+    vkCommandBuffer.fillBuffer(frameData.outIndirectCommandBuffer.getBuffer(), 0, vk::WholeSize, 0); // clear per-mesh instance counts
     {
         vk::MemoryBarrier2 memoryBarrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eClear,

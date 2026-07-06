@@ -370,7 +370,7 @@ void StaticMeshGraphicsPipeline::reloadShaders(vk::RenderPass renderPass, uint32
     m_indirectExecutionSet.initialize(m_graphicsPipeline);
 }
 
-void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, bool updateDescriptors)
+void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params, bool updateDescriptors)
 {
     std::array<DescriptorSetUpdateInfo, 15> graphicsDescriptorSetUpdateInfos
     {
@@ -522,23 +522,26 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
     vkCommandBuffer.bindVertexBuffers(0, { params.vertexBuffer.getBuffer() }, { 0 });
     vkCommandBuffer.bindVertexBuffers(2, { params.instanceIdxBuffer.getBuffer() }, {0});
     vkCommandBuffer.bindIndexBuffer(params.indexBuffer.getBuffer(), 0, vk::IndexType::eUint32);
-    recordExecuteGeneratedCommands(vkCommandBuffer, params.indirectCommandBuffer, m_preprocessBuffers[frameIdx], numMeshes);
-    recordExecuteGeneratedCommands(vkCommandBuffer, params.transparentIndirectCommandBuffer, m_transparentPreprocessBuffers[frameIdx], numMeshes);
+    recordExecuteGeneratedCommands(vkCommandBuffer, params.indirectCommandBuffer, m_preprocessBuffers[frameIdx], params.meshCountBuffer);
+    recordExecuteGeneratedCommands(vkCommandBuffer, params.transparentIndirectCommandBuffer, m_transparentPreprocessBuffers[frameIdx], params.meshCountBuffer);
 }
 
-void StaticMeshGraphicsPipeline::recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes)
+void StaticMeshGraphicsPipeline::recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, Buffer& meshCountBuffer)
 {
+    // The live sequence count comes from the CPU-written mesh-count buffer (clamped by maxSequenceCount =
+    // the buffer capacity the preprocess scratch was sized for), so registering meshes never re-records.
+    const uint32 maxSequences = (uint32)(indirectCommandBuffer.getSize() / sizeof(RendererVKLayout::IndirectDrawSequence));
     vk::GeneratedCommandsInfoEXT generatedCommandsInfo{
         .shaderStages = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
         .indirectExecutionSet = m_indirectExecutionSet.getHandle(),
         .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
         .indirectAddress = indirectCommandBuffer.getDeviceAddress(),
-        .indirectAddressSize = numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence),
+        .indirectAddressSize = indirectCommandBuffer.getSize(),
         .preprocessAddress = m_preprocessSize > 0 ? preprocessBuffer.getDeviceAddress() : 0,
         .preprocessSize = m_preprocessSize,
-        .maxSequenceCount = numMeshes,
-        .sequenceCountAddress = 0, // exactly maxSequenceCount sequences; empty meshes are no-op draws
-        .maxDrawCount = numMeshes,
+        .maxSequenceCount = maxSequences,
+        .sequenceCountAddress = meshCountBuffer.getDeviceAddress(),
+        .maxDrawCount = maxSequences,
     };
     vkCommandBuffer.executeGeneratedCommandsEXT(vk::False, generatedCommandsInfo);
 }

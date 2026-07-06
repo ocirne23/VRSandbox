@@ -33,6 +33,7 @@ public:
         Buffer& meshInstanceBuffer;
         Buffer& indirectCommandBuffer;            // opaque draw sequences
         Buffer& transparentIndirectCommandBuffer; // transparent draw sequences
+        Buffer& meshCountBuffer;                  // uint32 live mesh count (DGC sequenceCountAddress), CPU-written per frame
 
         Buffer& lightInfosBuffer;
 		Buffer& lightGridsBuffer;
@@ -56,7 +57,7 @@ public:
     void initialize(vk::RenderPass renderPass, uint32 maxUniqueMeshes, uint32 maxTextures, bool stereo = false);
     void reloadShaders(vk::RenderPass renderPass, uint32 maxTextures);
     void resizeMeshCapacity(uint32 maxUniqueMeshes);
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, bool updateDescriptors = true);
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params, bool updateDescriptors = true);
     void updateAODescriptor(vk::DescriptorSet descriptorSet, vk::ImageView aoView, vk::Sampler aoSampler);
     void updateTlasDescriptor(vk::DescriptorSet descriptorSet, vk::AccelerationStructureKHR tlas);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
@@ -80,5 +81,5 @@ private:
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_transparentPreprocessBuffers; // transparent pass
 
     void createPreprocessBuffers(uint32 maxUniqueMeshes);
-    void recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, uint32 numMeshes);
+    void recordExecuteGeneratedCommands(vk::CommandBuffer vkCommandBuffer, Buffer& indirectCommandBuffer, Buffer& preprocessBuffer, Buffer& meshCountBuffer);
 };

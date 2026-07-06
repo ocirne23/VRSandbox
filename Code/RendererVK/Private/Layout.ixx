@@ -76,16 +76,16 @@ export namespace RendererVKLayout
         glm::vec4 boneWeights;
     };
 
-    // Per-dispatch parameters for the skinning compute (one dispatch per skinned mesh instance). Offsets
-    // are in element units (MeshVertex / SkinningVertex / mat4). Kept <= 128 bytes (push-constant limit).
-    struct SkinningPushConstants
+    // Per-skinned-instance job for the skinning compute, uploaded each frame into a std430 SSBO the
+    // shader indexes with gl_WorkGroupID.y (one indirect dispatch covers all jobs — data-driven, no
+    // re-record when instances spawn). Offsets are in element units (MeshVertex / SkinningVertex / mat4).
+    struct SkinningJob
     {
         uint32 baseVertexOffset; // source geometry, MeshVertex units
         uint32 skinVertexOffset; // influences, SkinningVertex units
         uint32 outVertexOffset;  // destination, MeshVertex units
         uint32 vertexCount;
         uint32 paletteOffset;    // bone palette base, mat4 units
-        uint32 _pad0, _pad1, _pad2;
     };
     // Per-skinned-mesh source data captured when an ObjectContainer loads (bind-pose geometry + skinning
     // influences + material/pipeline). Owned by the renderer (like MeshInfo) and referenced by a base index
@@ -110,6 +110,7 @@ export namespace RendererVKLayout
     constexpr size_t INITIAL_INDEX_DATA = 4 * 1024 * 1024 * sizeof(RendererVKLayout::MeshIndex);
     constexpr size_t INITIAL_SKINNING_DATA = 64 * 1024 * sizeof(RendererVKLayout::SkinningVertex);
     constexpr uint32 INITIAL_SKINNING_PALETTE = 1024; // mat4 palette entries across all skinned instances
+    constexpr uint32 INITIAL_SKINNING_JOBS = 64;      // skinned mesh instances (SkinningJob SSBO entries)
 
     // A camera view's matrices grouped contiguously (AoS): one view's data in a single block, so on desktop
     // only views[0] is touched. views[0] = centre/combined view (the sole desktop view; in VR sized to the

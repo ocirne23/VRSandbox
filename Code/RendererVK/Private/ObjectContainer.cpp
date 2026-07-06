@@ -141,6 +141,10 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
     {
         m_numSkinnedMeshes = (uint32)skinnedSources.size();
         m_baseSkinnedMeshIdx = Globals::rendererVK.addSkinnedMeshSources(skinnedSources);
+        // One shared identity per-mesh offset for all skinned instances of this container: skinned
+        // vertices are produced in armature/model space already, so only the node (root) transform places
+        // them in the world. Registered at load time so spawnSkinnedNode stays re-record-free.
+        m_skinnedIdentityOffsetIdx = Globals::rendererVK.addMeshInstanceOffsets({ RendererVKLayout::MeshInstanceOffset{} });
     }
 }
 
@@ -513,11 +517,6 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
 
     RenderNode node;
     node.m_transformIdx = renderer.addRenderNodeTransform(transform);
-
-    // One shared identity per-mesh offset: skinned vertices are produced in armature/model space already,
-    // so the per-instance offset is identity and only the node (root) transform places them in the world.
-    if (m_skinnedIdentityOffsetIdx == UINT32_MAX)
-        m_skinnedIdentityOffsetIdx = renderer.addMeshInstanceOffsets({ RendererVKLayout::MeshInstanceOffset{} });
 
     // One palette per node, shared by all its skinned meshes (same skeleton).
     const uint32 paletteHandle = renderer.allocateSkinningPalette(m_numSkeletonBones);

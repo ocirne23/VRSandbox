@@ -2,7 +2,9 @@
 
 // GPU vertex skinning. Reads a base mesh's vertices + per-vertex bone influences and a bone-matrix
 // palette, writes the deformed vertices (same MeshVertex format, model space) into a per-instance output
-// region of the shared vertex buffer. One dispatch per skinned instance; params come in as push constants.
+// region of the shared vertex buffer. One indirect dispatch covers every skinned instance: the job list
+// lives in a per-frame SSBO and gl_WorkGroupID.y selects the job, so adding/removing skinned instances
+// never re-records the command buffer (dispatch dims come from a CPU-written indirect buffer).
 //
 // MeshVertex is tightly packed at 48 bytes { vec3 position; vec3 normal; vec4 tangent; vec2 texCoord; }.
 // A std430 struct with vec3 members would pad to 64, so the vertex buffer is indexed as a raw float array
@@ -17,36 +19,39 @@ layout(binding = 1, std430) readonly buffer SkinningBuffer { SkinningVertex s_da
 
 layout(binding = 2, std430) readonly buffer PaletteBuffer { mat4 palette[]; };
 
-layout(push_constant) uniform PushConstants
+// Must match RendererVKLayout::SkinningJob. Offsets in element units (MeshVertex / SkinningVertex / mat4).
+struct SkinningJob
 {
-    uint baseVertexOffset; // MeshVertex units
-    uint skinVertexOffset; // SkinningVertex units
-    uint outVertexOffset;  // MeshVertex units
+    uint baseVertexOffset;
+    uint skinVertexOffset;
+    uint outVertexOffset;
     uint vertexCount;
-    uint paletteOffset;    // mat4 units
-} pc;
+    uint paletteOffset;
+};
+layout(binding = 3, std430) readonly buffer JobBuffer { SkinningJob u_jobs[]; };
 
 void main()
 {
+    const SkinningJob job = u_jobs[gl_WorkGroupID.y];
     const uint i = gl_GlobalInvocationID.x;
-    if (i >= pc.vertexCount)
+    if (i >= job.vertexCount)
         return;
 
-    const uint baseF = (pc.baseVertexOffset + i) * 12u;
-    const uint outF  = (pc.outVertexOffset + i) * 12u;
+    const uint baseF = (job.baseVertexOffset + i) * 12u;
+    const uint outF  = (job.outVertexOffset + i) * 12u;
 
     const vec3 pos = vec3(v_data[baseF + 0u], v_data[baseF + 1u], v_data[baseF + 2u]);
     const vec3 nrm = vec3(v_data[baseF + 3u], v_data[baseF + 4u], v_data[baseF + 5u]);
     const vec4 tan = vec4(v_data[baseF + 6u], v_data[baseF + 7u], v_data[baseF + 8u], v_data[baseF + 9u]);
     const vec2 uv  = vec2(v_data[baseF + 10u], v_data[baseF + 11u]);
 
-    const SkinningVertex sv = s_data[pc.skinVertexOffset + i];
+    const SkinningVertex sv = s_data[job.skinVertexOffset + i];
     mat4 skin = mat4(0.0);
     for (int b = 0; b < 4; ++b)
     {
         const float w = sv.boneWeights[b];
         if (w > 0.0)
-            skin += palette[pc.paletteOffset + sv.boneIndices[b]] * w;
+            skin += palette[job.paletteOffset + sv.boneIndices[b]] * w;
     }
 
     const vec3 skPos = (skin * vec4(pos, 1.0)).xyz;

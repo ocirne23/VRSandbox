@@ -31,7 +31,7 @@ public:
 
     void initialize(uint32 maxMeshInstances, uint32 maxUniqueMeshes);
     void reloadShaders();
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params);
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params);
     // Capacity growth (caller must have the GPU idle and re-record command buffers afterwards).
     void resizeInstanceBuffers(uint32 maxMeshInstances);
     void resizeCommandBuffers(uint32 maxUniqueMeshes);

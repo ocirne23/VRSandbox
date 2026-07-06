@@ -13,8 +13,9 @@ import :GBuffer;
 
 // Depth + world-normal prepass. Rasterizes the camera-visible geometry (reusing the camera cull's
 // indirect draw + transformed-instance + instance-index buffers) into a GBuffer (normal color target +
-// depth). No DGC/execution set is needed: a single pipeline draws every mesh via vkCmdDrawIndexedIndirect
-// over the existing IndirectDrawSequence buffer (offset 4 to skip the leading pipelineIndex field).
+// depth). No DGC/execution set is needed: a single pipeline draws every mesh via
+// vkCmdDrawIndexedIndirectCount (count from the CPU-written mesh-count buffer) over the existing
+// IndirectDrawSequence buffer (offset 4 to skip the leading pipelineIndex field).
 export class GBufferPipeline final
 {
 public:
@@ -31,9 +32,10 @@ public:
         Buffer& instanceIdxBuffer;    // per-instance uint -> index into meshInstanceBuffer
         Buffer& indirectCommandBuffer; // IndirectDrawSequence[]; drawn with offset 4, stride 24
         Buffer& materialInfoBuffer;    // MaterialInfo[]; the vertex shader culls MATERIAL_FLAG_SKY instances
+        Buffer& meshCountBuffer;       // uint32 live mesh count (drawIndexedIndirectCount), CPU-written per frame
     };
     // viewIndex selects the view matrices (u_views[viewIndex]); 0 = centre/desktop, 1/2 = the eyes in VR.
-    void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, uint32 viewIndex = 0);
+    void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params, uint32 viewIndex = 0);
 
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
 

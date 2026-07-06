@@ -112,7 +112,7 @@ void ShadowMapGraphicsPipeline::reloadShaders(uint32 maxTextures)
     // No execution set to rebuild: the multiview shadow pass binds its single pipeline directly.
 }
 
-void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params)
+void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params)
 {
     std::array<DescriptorSetUpdateInfo, 3> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
@@ -142,6 +142,8 @@ void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fram
 
     // One multiview execute renders all cascades (gl_ViewIndex selects the layer/matrix).
     // With no execution set, the target pipeline must be supplied via pNext (matches the memory-requirements query).
+    // Live sequence count read from the CPU-written mesh-count buffer (see StaticMeshGraphicsPipeline).
+    const uint32 maxSequences = (uint32)(params.indirectCommandBuffer.getSize() / sizeof(RendererVKLayout::IndirectDrawSequence));
     vk::GeneratedCommandsPipelineInfoEXT pipelineInfo{ .pipeline = m_graphicsPipeline.getPipeline() };
     vk::GeneratedCommandsInfoEXT generatedCommandsInfo{
         .pNext = &pipelineInfo,
@@ -149,12 +151,12 @@ void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fram
         .indirectExecutionSet = VK_NULL_HANDLE, // single pipeline, bound explicitly above (multiview disallows an execution set)
         .indirectCommandsLayout = m_indirectCommandsLayout.getHandle(),
         .indirectAddress = params.indirectCommandBuffer.getDeviceAddress(),
-        .indirectAddressSize = numMeshes * sizeof(RendererVKLayout::IndirectDrawSequence),
+        .indirectAddressSize = params.indirectCommandBuffer.getSize(),
         .preprocessAddress = m_preprocessSize > 0 ? m_preprocessBuffers[frameIdx].getDeviceAddress() : 0,
         .preprocessSize = m_preprocessSize,
-        .maxSequenceCount = numMeshes,
-        .sequenceCountAddress = 0,
-        .maxDrawCount = numMeshes,
+        .maxSequenceCount = maxSequences,
+        .sequenceCountAddress = params.meshCountBuffer.getDeviceAddress(),
+        .maxDrawCount = maxSequences,
     };
     vkCommandBuffer.executeGeneratedCommandsEXT(vk::False, generatedCommandsInfo);
 }

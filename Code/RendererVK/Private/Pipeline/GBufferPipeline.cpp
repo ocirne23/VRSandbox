@@ -62,7 +62,7 @@ void GBufferPipeline::reloadShaders(const GBuffer& gbuffer)
         printf("GBufferPipeline: shader reload failed, keeping previous pipeline\n");
 }
 
-void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 numMeshes, RecordParams& params, uint32 viewIndex)
+void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params, uint32 viewIndex)
 {
     std::vector<DescriptorSetUpdateInfo> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
@@ -91,5 +91,8 @@ void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint
 
     // Reuse the camera-cull IndirectDrawSequence buffer: skip the leading pipelineIndex uint (offset 4),
     // and draw one VkDrawIndexedIndirectCommand per mesh (stride = sizeof(IndirectDrawSequence) = 24).
-    vkCommandBuffer.drawIndexedIndirect(params.indirectCommandBuffer.getBuffer(), 4, numMeshes, sizeof(RendererVKLayout::IndirectDrawSequence));
+    // The draw count comes from the CPU-written mesh-count buffer so registering meshes never re-records.
+    const uint32 maxDrawCount = (uint32)(params.indirectCommandBuffer.getSize() / sizeof(RendererVKLayout::IndirectDrawSequence));
+    vkCommandBuffer.drawIndexedIndirectCount(params.indirectCommandBuffer.getBuffer(), 4,
+        params.meshCountBuffer.getBuffer(), 0, maxDrawCount, sizeof(RendererVKLayout::IndirectDrawSequence));
 }

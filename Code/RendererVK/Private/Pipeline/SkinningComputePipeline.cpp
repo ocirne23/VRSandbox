@@ -9,9 +9,20 @@ import :Layout;
 SkinningComputePipeline::SkinningComputePipeline() {}
 SkinningComputePipeline::~SkinningComputePipeline() {}
 
-void SkinningComputePipeline::initialize(uint32 maxPaletteEntries)
+void SkinningComputePipeline::initialize(uint32 maxPaletteEntries, uint32 maxJobs)
 {
     resizePaletteBuffer(maxPaletteEntries);
+    resizeJobBuffer(maxJobs);
+
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        perFrame.dispatchArgsBuffer.initialize(sizeof(vk::DispatchIndirectCommand),
+            vk::BufferUsageFlagBits2::eIndirectBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "SkinningDispatchArgs", BufferHostAccess::eSequentialWrite);
+        perFrame.mappedDispatchArgs = perFrame.dispatchArgsBuffer.mapMemory<vk::DispatchIndirectCommand>();
+        perFrame.mappedDispatchArgs[0] = vk::DispatchIndirectCommand{ .x = 0, .y = 0, .z = 1 };
+        perFrame.dispatchArgsBuffer.flushMappedMemory(sizeof(vk::DispatchIndirectCommand));
+    }
 
     ComputePipelineLayout computePipelineLayout;
     buildComputeLayout(computePipelineLayout);
@@ -27,6 +38,18 @@ void SkinningComputePipeline::resizePaletteBuffer(uint32 maxPaletteEntries)
             vk::BufferUsageFlagBits2::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible, false, "SkinningPalettes", BufferHostAccess::eSequentialWrite);
         perFrame.mappedPalettes = perFrame.paletteBuffer.mapMemory<glm::mat4>();
+    }
+}
+
+void SkinningComputePipeline::resizeJobBuffer(uint32 maxJobs)
+{
+    m_maxJobs = maxJobs;
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        perFrame.jobBuffer.initialize(maxJobs * sizeof(RendererVKLayout::SkinningJob),
+            vk::BufferUsageFlagBits2::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "SkinningJobs", BufferHostAccess::eSequentialWrite);
+        perFrame.mappedJobs = perFrame.jobBuffer.mapMemory<RendererVKLayout::SkinningJob>();
     }
 }
 
@@ -49,26 +72,38 @@ void SkinningComputePipeline::buildComputeLayout(ComputePipelineLayout& computeP
         .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
     bindings.push_back(vk::DescriptorSetLayoutBinding{ // bone palette
         .binding = 2, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
-
-    computePipelineLayout.pushConstantRanges.push_back(vk::PushConstantRange{
-        .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(RendererVKLayout::SkinningPushConstants) });
+    bindings.push_back(vk::DescriptorSetLayoutBinding{ // skinning jobs
+        .binding = 3, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
 }
 
-void SkinningComputePipeline::update(uint32 frameIdx, std::span<const glm::mat4> palettes)
+void SkinningComputePipeline::update(uint32 frameIdx, std::span<const glm::mat4> palettes, std::span<const RendererVKLayout::SkinningJob> jobs)
 {
-    if (palettes.empty())
-        return;
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    assert(palettes.size() <= frameData.mappedPalettes.size());
-    memcpy(frameData.mappedPalettes.data(), palettes.data(), palettes.size() * sizeof(glm::mat4));
-    frameData.paletteBuffer.flushMappedMemory(palettes.size() * sizeof(glm::mat4));
+    if (!palettes.empty())
+    {
+        assert(palettes.size() <= frameData.mappedPalettes.size());
+        memcpy(frameData.mappedPalettes.data(), palettes.data(), palettes.size() * sizeof(glm::mat4));
+        frameData.paletteBuffer.flushMappedMemory(palettes.size() * sizeof(glm::mat4));
+    }
+
+    uint32 maxGroups = 0;
+    if (!jobs.empty())
+    {
+        assert(jobs.size() <= frameData.mappedJobs.size());
+        memcpy(frameData.mappedJobs.data(), jobs.data(), jobs.size() * sizeof(RendererVKLayout::SkinningJob));
+        frameData.jobBuffer.flushMappedMemory(jobs.size() * sizeof(RendererVKLayout::SkinningJob));
+        for (const RendererVKLayout::SkinningJob& job : jobs)
+            maxGroups = std::max(maxGroups, (job.vertexCount + RendererVKLayout::SKINNING_THREADS_PER_GROUP - 1) / RendererVKLayout::SKINNING_THREADS_PER_GROUP);
+    }
+    frameData.mappedDispatchArgs[0] = vk::DispatchIndirectCommand{ .x = maxGroups, .y = (uint32)jobs.size(), .z = 1 };
+    frameData.dispatchArgsBuffer.flushMappedMemory(sizeof(vk::DispatchIndirectCommand));
 }
 
 void SkinningComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    std::array<DescriptorSetUpdateInfo, 3> updates
+    std::array<DescriptorSetUpdateInfo, 4> updates
     {
         DescriptorSetUpdateInfo {
             .binding = 0, .type = vk::DescriptorType::eStorageBuffer,
@@ -79,6 +114,9 @@ void SkinningComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameI
         DescriptorSetUpdateInfo {
             .binding = 2, .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = frameData.paletteBuffer.getBuffer(), .range = frameData.paletteBuffer.getSize() } } },
+        DescriptorSetUpdateInfo {
+            .binding = 3, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = frameData.jobBuffer.getBuffer(), .range = frameData.jobBuffer.getSize() } } },
     };
 
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();
@@ -87,12 +125,7 @@ void SkinningComputePipeline::record(CommandBuffer& commandBuffer, uint32 frameI
     commandBuffer.cmdUpdateDescriptorSets(m_computePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, descriptorSet, updates);
     vkCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_computePipeline.getPipelineLayout(), 0, 1, &descriptorSet, 0, nullptr);
 
-    for (const RendererVKLayout::SkinningPushConstants& job : params.jobs)
-    {
-        vkCommandBuffer.pushConstants(m_computePipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(job), &job);
-        const uint32 groups = (job.vertexCount + RendererVKLayout::SKINNING_THREADS_PER_GROUP - 1) / RendererVKLayout::SKINNING_THREADS_PER_GROUP;
-        vkCommandBuffer.dispatch(groups, 1, 1);
-    }
+    vkCommandBuffer.dispatchIndirect(frameData.dispatchArgsBuffer.getBuffer(), 0);
 
     // Skinned vertices are consumed as vertex input by the G-buffer / forward / shadow passes.
     vk::MemoryBarrier2 memoryBarrier{
