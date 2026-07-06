@@ -89,8 +89,14 @@ private:
     // ---- copy/paste (Ctrl+C/Ctrl+V), via the OS clipboard so it also works across different open scripts ----
     std::string serializeSubset(const std::vector<Node*>& nodes, const std::vector<Link*>& links);
     void loadLinesIntoGraph(const std::vector<std::string>& lines, ImVec2 offset, std::vector<Node*>& byIndex);
+    void collectSelection(std::vector<Node*>& nodes, std::vector<Link*>& links) const; // every selected node + fully-selected link
+    void pruneDanglingReroutes(std::vector<Node*>& byIndex); // drop a pasted/duplicated reroute missing either link
     void copySelectedToClipboard();
     void pasteFromClipboard(ImVec2 canvasPos);
+
+    // ---- node context menu (right-click a node) ----
+    void duplicateSelection(ed::NodeId clickedId);        // clone clickedId + current selection, offset, select the clones
+    void resetNodeToSpawnDefaults(ed::NodeId nodeId);     // restore input defaults to NodeDef's authored literals + disconnect
 
     ed::EditorContext* m_nodeEditorContext = nullptr;
 
@@ -105,6 +111,9 @@ private:
     Pin* m_pendingLinkPin = nullptr; // dangling end of a link dropped on canvas, to auto-connect to the spawned node
     bool m_pendingCopyRequest = false;  // set by requestCopy(), consumed + cleared at the top of the next update()
     bool m_pendingPasteRequest = false; // set by requestPaste(), consumed + cleared at the top of the next update()
+
+    ed::NodeId m_contextNodeId;                                // node the right-click context menu targets
+    ImVec2 m_nodeContextScreenPos = ImVec2(0.0f, 0.0f);        // screen-space click pos, so the popup can offset from it
 
     // Dirty tracking: the serialized graph captured right after a load/save, compared against the live
     // graph to detect unsaved edits. Captured lazily (once the graph has rendered a frame so node

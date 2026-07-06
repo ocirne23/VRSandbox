@@ -62,6 +62,52 @@ namespace
         return tgt;
     }
 
+    // Like realTargetOfOutput, but also collects every reroute waypoint passed through into `chain` (instead
+    // of skipping straight past them) — used by addReroutesBetweenSelected to decide which waypoints belong
+    // to a copy/paste. Returns the first non-reroute node reached, or nullptr at a dead end or a cyclic chain.
+    Node* traceForwardThroughReroutes(const std::vector<std::unique_ptr<Link>>& links, Pin* outputPin, std::vector<Node*>& chain)
+    {
+        Pin* current = outputPin;
+        std::set<Node*> visited;
+        for (;;)
+        {
+            Pin* next = targetOfOutput(links, current);
+            if (!next) return nullptr;
+            Node* nextNode = next->node;
+            if (!nextNode->isReroute())
+                return nextNode;
+            if (!visited.insert(nextNode).second)
+                return nullptr; // cyclic reroute chain — bail out rather than loop forever
+            chain.push_back(nextNode);
+            if (nextNode->getOutputPins().empty())
+                return nullptr;
+            current = nextNode->getOutputPins()[0].get();
+        }
+    }
+
+    // Extends `selected`/`nodes` with every reroute waypoint sitting on a link chain between two nodes that
+    // are already both selected, so copying "node A to node B" preserves the routing shape instead of
+    // silently dropping the connection: a reroute's two links each have exactly one endpoint on it, so
+    // neither passes the "both ends selected" filter collectSelection applies afterward unless the reroute
+    // is folded into the selection too. A single pass over each originally-selected node's outputs is enough
+    // — the destination side of a qualifying chain is always one of those same originally-selected nodes,
+    // never a reroute newly added by this function.
+    void addReroutesBetweenSelected(std::set<Node*>& selected, std::vector<Node*>& nodes, const std::vector<std::unique_ptr<Link>>& links)
+    {
+        const std::vector<Node*> originalSelection(nodes.begin(), nodes.end());
+        for (Node* node : originalSelection)
+            for (const auto& outPin : node->getOutputPins())
+            {
+                std::vector<Node*> chain;
+                Node* landedOn = traceForwardThroughReroutes(links, outPin.get(), chain);
+                if (!landedOn || chain.empty() || !selected.count(landedOn))
+                    continue;
+                for (Node* reroute : chain)
+                    if (selected.insert(reroute).second)
+                        nodes.push_back(reroute);
+            }
+    }
+
     // The Function Output that belongs to a given Function Input: the first one reachable by walking exec
     // links forward from the Input (through branches/loops). Function Output carries no name of its own, so
     // this reachability is what pairs it to its Input.
@@ -101,6 +147,21 @@ namespace
             if (ok) return true;
         }
         return false;
+    }
+
+    // Splits a clipping's text blob into lines, used by both Ctrl+V and node-context-menu Duplicate.
+    std::vector<std::string> splitLines(const std::string& text)
+    {
+        std::vector<std::string> lines;
+        size_t pos = 0;
+        while (pos <= text.size())
+        {
+            const size_t nl = text.find('\n', pos);
+            if (nl == std::string::npos) { lines.push_back(text.substr(pos)); break; }
+            lines.push_back(text.substr(pos, nl - pos));
+            pos = nl + 1;
+        }
+        return lines;
     }
 
     // ---- function codegen naming ----
@@ -1816,6 +1877,30 @@ void Scene::loadLinesIntoGraph(const std::vector<std::string>& lines, ImVec2 off
     }
 }
 
+// A reroute copied without the node on one end of its link (paste/duplicate only clips links where BOTH
+// endpoints are selected — see collectSelection) comes out of loadLinesIntoGraph missing that connection: an
+// orphaned waypoint routing nothing. Delete those so a paste/duplicate doesn't litter the graph with dead
+// dots. removeNode's own reroute-rejoin logic only fires when BOTH sides are still connected, so this can't
+// accidentally reconnect something that shouldn't be. Nulls out the pruned entries in byIndex so a caller's
+// later "select every pasted node" loop (which already checks for null) skips them.
+void Scene::pruneDanglingReroutes(std::vector<Node*>& byIndex)
+{
+    for (Node*& n : byIndex)
+    {
+        if (!n || !n->isReroute())
+            continue;
+        const auto& inputs = n->getInputPins();
+        const auto& outputs = n->getOutputPins();
+        const bool bothConnected = !inputs.empty() && !outputs.empty() &&
+            inputs[0]->numConnections > 0 && outputs[0]->numConnections > 0;
+        if (!bothConnected)
+        {
+            removeNode(n->getId());
+            n = nullptr;
+        }
+    }
+}
+
 bool Scene::loadFromFile(const std::string& path)
 {
     std::ifstream file(path, std::ios::in | std::ios::binary);
@@ -1943,10 +2028,10 @@ std::string Scene::serializeSubset(const std::vector<Node*>& nodes, const std::v
     return s;
 }
 
-// Copies the current selection to the OS clipboard (so paste also works across different open scripts): every
-// selected node, plus every link where BOTH endpoints are selected. Ctrl+V elsewhere reconstructs the same
-// nodes/links/relative layout via loadLinesIntoGraph.
-void Scene::copySelectedToClipboard()
+// Gathers every currently-selected node (plus any reroute waypoint that sits between two selected nodes —
+// see addReroutesBetweenSelected), and every link where both endpoints are in that set — the same subset
+// copySelectedToClipboard and duplicateSelection each turn into a serialized clipping.
+void Scene::collectSelection(std::vector<Node*>& nodes, std::vector<Link*>& links) const
 {
     const int selCount = ed::GetSelectedObjectCount();
     if (selCount <= 0)
@@ -1955,7 +2040,6 @@ void Scene::copySelectedToClipboard()
     const int nodeCount = ed::GetSelectedNodes(nodeIds.data(), selCount);
 
     std::set<Node*> selected;
-    std::vector<Node*> nodes;
     for (int i = 0; i < nodeCount; ++i)
         if (Node* n = nodeIds[i].AsPointer<Node>())
             if (selected.insert(n).second)
@@ -1963,7 +2047,8 @@ void Scene::copySelectedToClipboard()
     if (nodes.empty())
         return;
 
-    std::vector<Link*> links;
+    addReroutesBetweenSelected(selected, nodes, m_links);
+
     for (const auto& link : m_links)
     {
         Pin* out = link->getOutputId().AsPointer<Pin>();
@@ -1971,6 +2056,17 @@ void Scene::copySelectedToClipboard()
         if (out && in && selected.count(out->node) && selected.count(in->node))
             links.push_back(link.get());
     }
+}
+
+// Copies the current selection to the OS clipboard (so paste also works across different open scripts). Ctrl+V
+// elsewhere reconstructs the same nodes/links/relative layout via loadLinesIntoGraph.
+void Scene::copySelectedToClipboard()
+{
+    std::vector<Node*> nodes;
+    std::vector<Link*> links;
+    collectSelection(nodes, links);
+    if (nodes.empty())
+        return;
 
     ImGui::SetClipboardText(serializeSubset(nodes, links).c_str());
 }
@@ -1987,15 +2083,7 @@ void Scene::pasteFromClipboard(ImVec2 canvasPos)
     if (text.rfind("//@nodeclip", 0) != 0)
         return;
 
-    std::vector<std::string> lines;
-    size_t pos = 0;
-    while (pos <= text.size())
-    {
-        const size_t nl = text.find('\n', pos);
-        if (nl == std::string::npos) { lines.push_back(text.substr(pos)); break; }
-        lines.push_back(text.substr(pos, nl - pos));
-        pos = nl + 1;
-    }
+    std::vector<std::string> lines = splitLines(text);
 
     // Offset so the pasted selection's centroid (average node position) lands at the cursor — every node
     // keeps its position relative to that centroid, so the layout copied is preserved exactly, just recentered.
@@ -2017,11 +2105,79 @@ void Scene::pasteFromClipboard(ImVec2 canvasPos)
 
     std::vector<Node*> byIndex;
     loadLinesIntoGraph(lines, offset, byIndex);
+    pruneDanglingReroutes(byIndex);
 
     ed::ClearSelection();
     for (Node* n : byIndex)
         if (n)
             ed::SelectNode(n->getId(), true);
+}
+
+// Node context menu "Duplicate": clones clickedId plus whatever else is already selected, offset a little
+// from the originals (unlike Ctrl+V, which recenters on the mouse), and selects the clones so they can be
+// dragged into place together. Self-contained — it doesn't touch the OS clipboard.
+void Scene::duplicateSelection(ed::NodeId clickedId)
+{
+    ed::SelectNode(clickedId, true); // fold the right-clicked node into whatever's already selected
+
+    std::vector<Node*> nodes;
+    std::vector<Link*> links;
+    collectSelection(nodes, links);
+    if (nodes.empty())
+        return;
+
+    const std::vector<std::string> lines = splitLines(serializeSubset(nodes, links));
+    constexpr ImVec2 kDuplicateOffset(30.0f, 30.0f);
+
+    std::vector<Node*> byIndex;
+    loadLinesIntoGraph(lines, kDuplicateOffset, byIndex);
+    pruneDanglingReroutes(byIndex);
+
+    ed::ClearSelection();
+    for (Node* n : byIndex)
+        if (n)
+            ed::SelectNode(n->getId(), true);
+}
+
+// Node context menu "Reset": restores every input pin's literal (and, for a wildcard pin, its pin-group type)
+// back to what NodeDef declares, then disconnects the node entirely. Pins are reset by position against
+// def->inputs, which only lines up for a plain NodeDef-spawned node — dynamic-pin node types (Script Data,
+// On Event, Function I/O, Function Call, Reroute, Trigger Audio's synced alias pins) skip the literal reset
+// and just get disconnected.
+void Scene::resetNodeToSpawnDefaults(ed::NodeId nodeId)
+{
+    Node* node = nodeId.AsPointer<Node>();
+    if (!node)
+        return;
+
+    if (const NodeDef* def = findNodeDef(node->getTypeId());
+        def && !node->isDynamic() && !node->isEventNode() && !node->isFunctionInput() &&
+        !node->isFunctionOutput() && !node->isFunctionCall() && !node->isReroute() && !node->isTriggerAudio())
+    {
+        const auto& inputs = node->getInputPins();
+        for (size_t i = 0; i < inputs.size() && i < def->inputs.size(); ++i)
+        {
+            Pin& pin = *inputs[i];
+            const PinDef& pinDef = def->inputs[i];
+            // Set the pin's dataType up front (not just its default) so that when the link deletions below
+            // drain next frame, resolveNodeTypes sees "no change" for this pin and doesn't clobber the
+            // literal just restored here with its own generic defaultValueForType(resolved) reset.
+            pin.dataType = pinDef.type;
+            pin.color = dataTypeColor(pinDef.type);
+            pin.shape = pinDef.type == EDataType::Exec ? EPinShape_Flow
+                      : pin.mutability != EMutableType::Readable ? EPinShape_Square
+                      : EPinShape_Circle;
+            pin.defaultValue = pinDef.defaultValue;
+        }
+    }
+
+    for (const auto& link : m_links)
+    {
+        Pin* in = link->getInputId().AsPointer<Pin>();
+        Pin* out = link->getOutputId().AsPointer<Pin>();
+        if ((in && in->node == node) || (out && out->node == node))
+            ed::DeleteLink(link->getId());
+    }
 }
 
 void Scene::update(double deltaSec)
@@ -2255,6 +2411,31 @@ void Scene::update(double deltaSec)
         ImGui::EndPopup();
     }
     ImGui::PopStyleVar();
+
+    // Right-click a node for Delete/Copy/Duplicate/Reset.
+    ed::NodeId contextNodeId;
+    if (ed::ShowNodeContextMenu(&contextNodeId))
+    {
+        m_contextNodeId = contextNodeId;
+        m_nodeContextScreenPos = ImGui::GetMousePos();
+        ImGui::OpenPopup("NodeContextMenu");
+    }
+    ImGui::SetNextWindowPos(ImVec2(m_nodeContextScreenPos.x + 24.0f, m_nodeContextScreenPos.y), ImGuiCond_Always);
+    if (ImGui::BeginPopup("NodeContextMenu"))
+    {
+        if (ImGui::MenuItem("Delete"))
+            ed::DeleteNode(m_contextNodeId); // queued; drained by processInteractions() next frame
+        if (ImGui::MenuItem("Copy"))
+        {
+            ed::SelectNode(m_contextNodeId, true); // fold into whatever's already selected, don't replace it
+            copySelectedToClipboard();
+        }
+        if (ImGui::MenuItem("Duplicate"))
+            duplicateSelection(m_contextNodeId);
+        if (ImGui::MenuItem("Reset"))
+            resetNodeToSpawnDefaults(m_contextNodeId);
+        ImGui::EndPopup();
+    }
     ed::Resume();
 
     if (m_firstFrame)
