@@ -127,6 +127,7 @@ private:
     // ---- add-node popup search box ----
     char m_addNodeSearchBuf[64] = {}; // cleared + focused each time the popup opens (see IsWindowAppearing)
     int  m_addNodeSearchSelected = 0; // highlighted index into that frame's filtered results list
+    bool m_addNodeSearchWasActive = false; // IsItemActive(), captured after last frame's InputText call
 
     std::vector<std::string> m_audioAliases; // Trigger Audio entry pins sync to this (see setAudioAliases)
     bool m_audioAliasesKnown = false;

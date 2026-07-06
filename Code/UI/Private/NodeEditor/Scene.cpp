@@ -2,6 +2,7 @@ module UI;
 
 import Core;
 import Core.imgui;
+import Core.SDL;
 import :imgui_node_editor;
 import :Node;
 import :Link;
@@ -134,6 +135,20 @@ namespace
     // ---- add-node popup search ----
     char lowerChar(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
 
+    // Focuses the add-node search box AND makes sure SDL is actually ready to feed it text on the very next
+    // keystroke. ImGui only calls SDL_StartTextInput() once its own backend notices a text field is active,
+    // which (per this app's per-frame order — Input::update()'s SDL_PollEvent runs before UI::update()'s
+    // ImGui_ImplSDL3_NewFrame(), the thing that actually calls it) normally lags a full frame behind the
+    // widget gaining focus, silently swallowing whatever's typed during that frame. Calling it here too, the
+    // instant the box is about to become active, closes that gap immediately instead of one frame late.
+    // SDL_GetKeyboardFocus() sidesteps needing this deeply-nested UI code to carry an SDL_Window* around —
+    // there's only ever the one app window anyway.
+    void focusSearchBox()
+    {
+        ImGui::SetKeyboardFocusHere();
+        SDL_StartTextInput(SDL_GetKeyboardFocus());
+    }
+
     // Case-insensitive substring test, used to filter the add-node popup's palette/import-function list.
     bool containsCI(std::string_view haystack, std::string_view needle)
     {
@@ -147,6 +162,21 @@ namespace
             if (ok) return true;
         }
         return false;
+    }
+
+    // Best-effort ImGuiKey -> ASCII char for a letter/digit key, used to reconstruct the keystroke that
+    // switches focus into the add-node search box the same frame it's pressed (see the AddNodePopup body):
+    // SDL only generates text-input events while some text field already has focus, so the very keystroke
+    // that hands focus to the search box never arrives through that path — this rebuilds it directly instead
+    // of losing it. Only handles plain letters/digits (matching the "start typing" detection below); shifted
+    // digit-row symbols ('!', '@', ...) aren't reconstructed since their layout varies.
+    char charForTypingKey(ImGuiKey key, bool shift)
+    {
+        if (key >= ImGuiKey_A && key <= ImGuiKey_Z)
+            return char((shift ? 'A' : 'a') + (key - ImGuiKey_A));
+        if (key >= ImGuiKey_0 && key <= ImGuiKey_9)
+            return char('0' + (key - ImGuiKey_0));
+        return 0;
     }
 
     // Splits a clipping's text blob into lines, used by both Ctrl+V and node-context-menu Duplicate.
@@ -2323,17 +2353,70 @@ void Scene::update(double deltaSec)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f, 5.0f));
     if (ImGui::BeginPopup("AddNodePopup"))
     {
-        // Focus + clear the search box the instant the popup opens (IsWindowAppearing is true exactly that
-        // one frame) so typing filters immediately, no click needed.
+        const bool hadQuery = m_addNodeSearchBuf[0] != '\0';
+        bool justSeededChar = false; // set below when a keystroke seeds the buffer as the box becomes active
         if (ImGui::IsWindowAppearing())
         {
+            // Clear the search box the instant the popup opens (IsWindowAppearing is true exactly that one
+            // frame) and focus it right away, so the popup opens ready to type with no click needed.
             m_addNodeSearchBuf[0] = '\0';
             m_addNodeSearchSelected = 0;
-            ImGui::SetKeyboardFocusHere();
+            focusSearchBox();
+        }
+        else if (hadQuery)
+        {
+            // With a query typed, Up/Down/Enter drive the filtered results list below via raw key checks (see
+            // the "!search.empty()" branch further down), not ImGui's own keyboard nav — so focus must stay
+            // glued to the search box, or typing would stop reaching it. Only reasserted once it's confirmed
+            // lost (last frame's IsItemActive(), captured below) AND nothing else is currently active either:
+            // clicking a result row makes IT briefly active (mouse held down) before returning true on
+            // release, and forcing focus back onto the search box mid-click would cancel that click before it
+            // completes — skip reasserting while any such click is in progress and let it finish naturally.
+            if (!m_addNodeSearchWasActive && !ImGui::IsAnyItemActive())
+                focusSearchBox();
+        }
+        else
+        {
+            // Empty query: leave focus alone so ImGui's own keyboard nav can move Up/Down/Enter through the
+            // plain category tree below (BeginMenu/MenuItem are natively nav-able) — only steal focus back
+            // once the user actually starts typing a letter/digit, so a fresh query still "just works".
+            ImGuiKey typedKey = ImGuiKey_None;
+            for (int k = ImGuiKey_A; k <= ImGuiKey_Z && typedKey == ImGuiKey_None; ++k)
+                if (ImGui::IsKeyPressed((ImGuiKey)k, false)) typedKey = (ImGuiKey)k;
+            for (int k = ImGuiKey_0; k <= ImGuiKey_9 && typedKey == ImGuiKey_None; ++k)
+                if (ImGui::IsKeyPressed((ImGuiKey)k, false)) typedKey = (ImGuiKey)k;
+
+            if (typedKey != ImGuiKey_None)
+            {
+                // The search box is about to become active for the first time this frame, so InputText will
+                // pick up whatever's already in the buffer as its starting content (same trick the pin
+                // default-value boxes rely on) — seed it with the key that triggered the switch so it isn't
+                // silently dropped waiting for SDL's text-input mode to catch up next frame (see
+                // focusSearchBox for why that catch-up now happens immediately anyway, closing this gap too).
+                if (const char c = charForTypingKey(typedKey, ImGui::GetIO().KeyShift))
+                {
+                    m_addNodeSearchBuf[0] = c;
+                    m_addNodeSearchBuf[1] = '\0';
+                    m_addNodeSearchSelected = 0;
+                    justSeededChar = true; // see the ReloadUserBufAndMoveToEnd() call below
+                }
+                focusSearchBox();
+            }
         }
         ImGui::SetNextItemWidth(220.0f);
+        const ImGuiID searchId = ImGui::GetID("##addNodeSearch");
         if (ImGui::InputText("##addNodeSearch", m_addNodeSearchBuf, sizeof(m_addNodeSearchBuf)))
             m_addNodeSearchSelected = 0; // query changed: re-highlight the top result
+        // Activating a text field via code (SetKeyboardFocusHere, just above) selects all of its existing
+        // text by default — same as tabbing into a field. That's exactly wrong here: we just seeded that
+        // text ourselves and want the cursor placed after it, not the whole thing selected (or the very next
+        // keystroke would overwrite it instead of appending). ReloadUserBufAndMoveToEnd is the documented way
+        // to tell an active InputText "the buffer was changed externally, re-sync and put the cursor at the
+        // end" (see imgui_internal.h) instead of leaving whatever selection activation produced.
+        if (justSeededChar)
+            if (ImGuiInputTextState* state = ImGui::GetInputTextState(searchId))
+                state->ReloadUserBufAndMoveToEnd();
+        m_addNodeSearchWasActive = ImGui::IsItemActive(); // read by the hadQuery branch above, next frame
 
         // Spawns a node def or imports a function at the click position and closes the popup — shared by the
         // plain category tree below and the search results list.
