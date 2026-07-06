@@ -801,9 +801,7 @@ EntityPtr World::createEmptyEntity(const std::string& name)
     if (!m_emptyTemplate)
     {
         m_emptyTemplate = std::make_shared<EntitySpawnTemplate>();
-        m_emptyTemplate->archetype = makeEntityArchetype((1 << EComponentID_Scene) | (1 << EComponentID_Script));
-        m_emptyTemplate->spawnInfos.push_back(std::make_shared<SceneComponent::SpawnInfo>());  // id 0
-        m_emptyTemplate->spawnInfos.push_back(std::make_shared<ScriptComponent::SpawnInfo>()); // id 5 (ascending order)
+        m_emptyTemplate->archetype = makeEntityArchetype(0);
         m_emptyTemplate->displayName = "Entity";
     }
     EntityPtr entity = Entity::create(*m_emptyTemplate, Transform());

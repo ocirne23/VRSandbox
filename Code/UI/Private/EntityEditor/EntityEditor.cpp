@@ -115,7 +115,11 @@ bool EntityEditor::isDirty() const
 
 void EntityEditor::refreshDraftsFromEntity()
 {
-	Entity* e = m_editRoot.get();
+	Entity* e = m_selected.get();
+	if (!e)
+		return;
+
+	m_hasScene = hasComponent<SceneComponent>(e);
 
 	m_hasRender = hasComponent<RenderComponent>(e);
 	m_renderDraft = m_hasRender ? *getRenderSpawnInfo(e) : RenderComponent::SpawnInfo{};
@@ -145,6 +149,7 @@ void EntityEditor::refreshDraftsFromEntity()
 void EntityEditor::onOpened(EntityPtr root, const std::string& path)
 {
 	m_editRoot = root;
+	m_selected = root;
 	m_path = path;
 
 	std::string suggested = path;
@@ -159,13 +164,41 @@ void EntityEditor::onOpened(EntityPtr root, const std::string& path)
 
 void EntityEditor::onRespawned(EntityPtr oldEntity, EntityPtr newEntity)
 {
-	if (m_editRoot.get() != oldEntity.get())
-		return; // stale — the tracked entity has already moved on (e.g. closed while this was in flight)
-	m_editRoot = newEntity;
+	// Either or both may match: the respawned node could be the document root, the currently selected
+	// node, or (commonly) both at once.
+	if (m_editRoot.get() == oldEntity.get())
+		m_editRoot = newEntity;
+	if (m_selected.get() == oldEntity.get())
+		m_selected = newEntity;
 	// Deliberately NOT calling refreshDraftsFromEntity() here: the draft state (m_hasX/m_xDraft) is what
 	// drove this respawn and stays authoritative. A component whose builder legitimately returned null
 	// (e.g. Render with no mesh picked yet, Audio with no clips yet) should keep showing what the user
 	// typed so far rather than silently reverting — it just won't be part of the entity until valid.
+}
+
+void EntityEditor::selectEntity(EntityPtr entity)
+{
+	m_selected = entity;
+	refreshDraftsFromEntity();
+}
+
+void EntityEditor::addChild()
+{
+	if (!m_selected || !m_hasScene)
+		return;
+	const std::string name = m_newChildNameBuf[0] ? m_newChildNameBuf : "Entity";
+	m_changes.push_back({ EntityChange::AddSceneEntity{ name, m_selected } });
+}
+
+void EntityEditor::removeChild(Entity* child)
+{
+	if (!child)
+		return;
+	EntityPtr keepAlive(child); // own it until this frame's changes are drained, before detachFromOwner drops the scene-graph ref
+	detachFromOwner(child);
+	if (m_selected.get() == child)
+		selectEntity(m_editRoot);
+	m_changes.push_back({ EntityChange::Delete{ keepAlive } });
 }
 
 void EntityEditor::closeCurrent()
@@ -173,9 +206,10 @@ void EntityEditor::closeCurrent()
 	if (m_editRoot)
 		m_changes.push_back({ EntityChange::Delete{ m_editRoot } });
 	m_editRoot = EntityPtr();
+	m_selected = EntityPtr();
 	m_path.clear();
 	m_baselineText.clear();
-	m_hasRender = m_hasAnimator = m_hasPhysics = m_hasAudio = m_hasScript = false;
+	m_hasScene = m_hasRender = m_hasAnimator = m_hasPhysics = m_hasAudio = m_hasScript = false;
 }
 
 void EntityEditor::doSwitchOpen(const std::string& path)
@@ -333,20 +367,141 @@ void EntityEditor::renderToolbar()
 	}
 }
 
+void EntityEditor::renderTreeNode(Entity* node)
+{
+	ImGui::PushID(node);
+
+	SceneComponent* sc = getComponent<SceneComponent>(node);
+	const bool isLocked = node->isPrefabInstance(); // a "Prefab <name>" reference — edit the source file instead
+	const bool hasChildren = !isLocked && sc && !sc->children.empty();
+	const bool isRoot = (node->parent == nullptr);
+
+	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
+	if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+	if (m_selected.get() == node) flags |= ImGuiTreeNodeFlags_Selected;
+
+	const std::string label = node->displayName.empty() ? std::string("Entity") : node->displayName;
+
+	if (isLocked)
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.62f, 0.95f, 1.0f));
+	const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
+	if (isLocked)
+		ImGui::PopStyleColor();
+
+	if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
+		selectEntity(EntityPtr(node));
+
+	// Drop an existing prefab here to add it as a locked reference child — a locked node can't itself
+	// receive children (matches reparentEntity()'s own rule).
+	if (!isLocked && sc)
+		if (ImGui::BeginDragDropTarget())
+		{
+			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_FILE"))
+				m_changes.push_back({ EntityChange::CreateHierarchy{
+					std::string(static_cast<const char*>(payload->Data)), EntityPtr(node) } });
+			ImGui::EndDragDropTarget();
+		}
+
+	if (ImGui::BeginPopupContextItem("##tree_ctx"))
+	{
+		if (isLocked && ImGui::MenuItem("Unpack Prefab")) // break the link so it becomes an editable inline entity
+			node->setPrefabInstance(false);
+		ImGui::EndPopup();
+	}
+
+	if (!isRoot)
+	{
+		ImGui::SameLine(ImGui::GetWindowWidth() - 28.0f);
+		if (ImGui::SmallButton("x"))
+			m_pendingRemoveChild = node;
+	}
+
+	if (open && hasChildren)
+	{
+		for (EntityPtr& child : sc->children)
+			renderTreeNode(child.get());
+		ImGui::TreePop();
+	}
+
+	ImGui::PopID();
+}
+
+void EntityEditor::renderTree()
+{
+	ImGui::SeparatorText("Hierarchy");
+	ImGui::BeginChild("##ee_tree", ImVec2(0.0f, 150.0f), ImGuiChildFlags_Borders);
+	if (m_editRoot)
+		renderTreeNode(m_editRoot.get());
+	ImGui::EndChild();
+
+	if (m_pendingRemoveChild)
+	{
+		removeChild(m_pendingRemoveChild);
+		m_pendingRemoveChild = nullptr;
+	}
+}
+
 void EntityEditor::renderNameAndTransform()
 {
-	strncpy_s(m_nameBuf, sizeof(m_nameBuf), m_editRoot->displayName.c_str(), sizeof(m_nameBuf) - 1);
+	strncpy_s(m_nameBuf, sizeof(m_nameBuf), m_selected->displayName.c_str(), sizeof(m_nameBuf) - 1);
 	m_nameBuf[sizeof(m_nameBuf) - 1] = '\0';
 	ImGui::SetNextItemWidth(240.0f);
 	if (ImGui::InputText("Name", m_nameBuf, sizeof(m_nameBuf)))
-		m_editRoot->displayName = m_nameBuf;
+		m_selected->displayName = m_nameBuf;
 
-	ImGui::DragFloat3("Position", &m_editRoot->pos.x, 0.05f);
-	ImGui::DragFloat("Scale", &m_editRoot->scale, 0.01f, 0.0001f, 10000.0f);
+	ImGui::DragFloat3("Position", &m_selected->pos.x, 0.05f);
+	ImGui::DragFloat("Scale", &m_selected->scale, 0.01f, 0.0001f, 10000.0f);
 
-	glm::vec3 euler = glm::degrees(glm::eulerAngles(m_editRoot->rot));
+	glm::vec3 euler = glm::degrees(glm::eulerAngles(m_selected->rot));
 	if (ImGui::DragFloat3("Rotation", &euler.x, 0.5f))
-		m_editRoot->rot = glm::quat(glm::radians(euler));
+		m_selected->rot = glm::quat(glm::radians(euler));
+}
+
+void EntityEditor::renderSceneSection()
+{
+	if (!m_hasScene)
+	{
+		if (ImGui::Button("+ Add Scene"))
+		{
+			m_hasScene = true;
+			commitRespawn();
+		}
+		return;
+	}
+
+	if (!ImGui::CollapsingHeader("Scene", ImGuiTreeNodeFlags_DefaultOpen))
+		return;
+	ImGui::PushID("scene");
+
+	SceneComponent* sc = getComponent<SceneComponent>(m_selected.get());
+	if (sc)
+	{
+		bool enabled = sc->enabled;
+		if (ImGui::Checkbox("Enabled", &enabled))
+			sc->enabled = enabled; // direct live mutation — no respawn needed, matches PropertiesPanel
+	}
+
+	ImGui::Separator();
+	ImGui::SetNextItemWidth(160.0f);
+	ImGui::InputTextWithHint("##newchildname", "Child name", m_newChildNameBuf, sizeof(m_newChildNameBuf));
+	ImGui::SameLine();
+	if (ImGui::Button("+ Add Child"))
+		addChild();
+	ImGui::SameLine();
+	ImGui::TextDisabled("(or drag a .pre from Content onto it in the tree above)");
+
+	const bool hasChildren = sc && !sc->children.empty();
+	ImGui::BeginDisabled(hasChildren);
+	if (ImGui::Button("Remove Scene"))
+	{
+		m_hasScene = false;
+		commitRespawn();
+	}
+	ImGui::EndDisabled();
+	if (hasChildren && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("Remove all children first");
+
+	ImGui::PopID();
 }
 
 void EntityEditor::renderRenderSection()
@@ -713,6 +868,7 @@ void EntityEditor::renderScriptSection()
 void EntityEditor::renderComponents()
 {
 	ImGui::SeparatorText("Components");
+	renderSceneSection();
 	renderRenderSection();
 	renderAnimatorSection();
 	renderPhysicsSection();
@@ -722,25 +878,26 @@ void EntityEditor::renderComponents()
 
 void EntityEditor::commitRespawn()
 {
-	if (!m_editRoot)
+	if (!m_selected)
 		return;
 
 	auto tmpl = std::make_shared<EntitySpawnTemplate>();
 	uint16 typeBits = 0;
 	std::vector<std::shared_ptr<void>> infos;
 
-	// Scene (bit 0) — preserved only if the entity already carries one; main.cpp splices its existing
-	// children onto the respawned entity, this editor doesn't build hierarchy itself.
-	if (hasComponent<SceneComponent>(m_editRoot.get()))
+	// Scene (bit 0) — driven by the m_hasScene draft flag (toggled by Add/Remove Scene), not the live
+	// entity's current state. main.cpp splices any existing children from the old entity onto the
+	// respawned one, so they survive even though this editor rebuilds the component set from scratch.
+	if (m_hasScene)
 	{
 		typeBits |= uint16(1 << EComponentID_Scene);
 		auto info = std::make_shared<SceneComponent::SpawnInfo>();
-		if (SceneComponent* sc = getComponent<SceneComponent>(m_editRoot.get()))
+		if (SceneComponent* sc = getComponent<SceneComponent>(m_selected.get()))
 			info->enabled = sc->enabled;
 		infos.push_back(std::move(info));
 	}
 
-	const std::string ownerName = currentId();
+	const std::string ownerName = m_selected->displayName.empty() ? currentId() : m_selected->displayName;
 
 	std::string renderContainerName, renderNodePath;
 	if (m_hasRender)
@@ -876,9 +1033,9 @@ void EntityEditor::commitRespawn()
 
 	tmpl->archetype = makeEntityArchetype(typeBits);
 	tmpl->spawnInfos = std::move(infos);
-	tmpl->displayName = m_editRoot->displayName;
+	tmpl->displayName = m_selected->displayName;
 
-	m_changes.push_back({ EntityChange::RespawnEntity{ m_editRoot, tmpl } });
+	m_changes.push_back({ EntityChange::RespawnEntity{ m_selected, tmpl } });
 }
 
 void EntityEditor::render()
@@ -890,6 +1047,8 @@ void EntityEditor::render()
 		ImGui::TextDisabled("No entity open. Click New, type a path and Open, or drag a .pre file here.");
 	else
 	{
+		renderTree();
+		ImGui::Separator();
 		renderNameAndTransform();
 		ImGui::Separator();
 		renderComponents();

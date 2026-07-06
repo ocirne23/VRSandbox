@@ -37,8 +37,11 @@ private:
 	void renderToolbar();
 	void renderOverwritePopup();
 	void renderUnsavedPopup();
+	void renderTree();
+	void renderTreeNode(Entity* node);
 	void renderNameAndTransform();
 	void renderComponents();
+	void renderSceneSection();
 	void renderRenderSection();
 	void renderAnimatorSection();
 	void renderPhysicsSection();
@@ -56,12 +59,18 @@ private:
 	void rebaseline();
 	std::string currentId() const; // filename stem once saved/opened, else the root's display name
 
-	void refreshDraftsFromEntity(); // re-reads every component's current SpawnInfo from m_editRoot
+	void selectEntity(EntityPtr entity); // switches which entity Name/Transform/Components edits
+	void addChild();                     // creates a blank inline child under m_selected (name box)
+	void removeChild(Entity* child);
 
-	// Assembles a fresh EntitySpawnTemplate from the current draft state and queues a RespawnEntity.
+	void refreshDraftsFromEntity(); // re-reads every component's current SpawnInfo from m_selected
+
+	// Assembles a fresh EntitySpawnTemplate from the current draft state and queues a RespawnEntity for
+	// m_selected (not necessarily the document root — any node in the tree can be edited/respawned).
 	void commitRespawn();
 
-	EntityPtr   m_editRoot;
+	EntityPtr   m_editRoot; // the document's root entity
+	EntityPtr   m_selected; // entity currently shown in Name/Transform/Components (root or a descendant)
 	std::string m_path; // empty until first save/open
 
 	std::string m_baselineText; // serialized text at last load/save, for dirty-tracking
@@ -79,9 +88,10 @@ private:
 	bool        m_openOverwritePopup = false;
 	std::string m_pendingSavePath;
 
-	// --- Component presence + draft state. Drafts hold the real SpawnInfo types directly (they're fully
-	// visible here since Entity.ixx exports :Component) so widgets bind straight to their fields; commit
-	// (Add/Remove, or a field's IsItemDeactivatedAfterEdit) calls commitRespawn(). ---
+	// --- Component presence + draft state, for m_selected. Drafts hold the real SpawnInfo types directly
+	// (they're fully visible here since Entity.ixx exports :Component) so widgets bind straight to their
+	// fields; commit (Add/Remove, or a field's IsItemDeactivatedAfterEdit) calls commitRespawn(). ---
+	bool m_hasScene    = false;
 	bool m_hasRender   = false;
 	bool m_hasAnimator = false;
 	bool m_hasPhysics  = false;
@@ -98,4 +108,7 @@ private:
 
 	char m_renderPickerSearch[128]   = {};
 	char m_animatorPickerSearch[128] = {};
+
+	char m_newChildNameBuf[128] = "Entity";
+	Entity* m_pendingRemoveChild = nullptr; // set while walking the tree, applied after (avoids mutating mid-walk)
 };
