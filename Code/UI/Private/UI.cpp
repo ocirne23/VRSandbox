@@ -96,21 +96,19 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             ImGuiID dock_id_right, dock_id_up, dock_id_left, dock_id_down;
             ImGuiID dock_id_left_top, dock_id_left_bottom;
             ImGuiID dock_id_scene, dock_id_properties;
-            ImGuiID dock_id_content, dock_id_entityEditor;
 
             ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.3f, &dock_id_left, &dock_id_right);
             ImGui::DockBuilderSplitNode(dock_id_right, ImGuiDir_Up, 0.8f, &dock_id_up, &dock_id_down);
-            ImGui::DockBuilderSplitNode(dock_id_left,  ImGuiDir_Up, 0.5f, &dock_id_left_top, &dock_id_left_bottom);
+            ImGui::DockBuilderSplitNode(dock_id_left,  ImGuiDir_Up, 0.8f, &dock_id_left_top, &dock_id_left_bottom);
             ImGui::DockBuilderSplitNode(dock_id_left_top, ImGuiDir_Right, 0.5f, &dock_id_properties, &dock_id_scene);
-            ImGui::DockBuilderSplitNode(dock_id_down, ImGuiDir_Right, 0.45f, &dock_id_entityEditor, &dock_id_content);
 
             ImGui::DockBuilderDockWindow("Scene",      dock_id_scene);
             ImGui::DockBuilderDockWindow("Properties", dock_id_properties);
             ImGui::DockBuilderDockWindow("Stats",      dock_id_left_bottom);
             ImGui::DockBuilderDockWindow("Log",        dock_id_left_bottom);
             ImGui::DockBuilderDockWindow("Tweaks",     dock_id_left_bottom);
-            ImGui::DockBuilderDockWindow("Content",       dock_id_content);
-            ImGui::DockBuilderDockWindow("Entity Editor",  dock_id_entityEditor);
+            ImGui::DockBuilderDockWindow("Content",       dock_id_down);
+            ImGui::DockBuilderDockWindow("Entity Editor",  dock_id_properties);
             ImGui::DockBuilderDockWindow("Script",     dock_id_up);
             ImGui::DockBuilderDockWindow("Viewport",   dock_id_up);
             ImGui::DockBuilderFinish(dockspace_id);
@@ -257,12 +255,6 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         ImGui::End();
     }
 
-    {
-        ImGui::Begin("Properties");
-        m_propertiesPanel.render(m_sceneView.getSelected());
-        ImGui::End();
-    }
-
     // When the hierarchy selection changes to an entity carrying a script, make that script active in the
     // editor (guarded by the unsaved-changes prompt below if the current graph has pending edits).
     if (Entity* selected = m_sceneView.getSelected(); selected != m_scriptSelectionTracked)
@@ -345,6 +337,12 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             ImGui::EndDragDropTarget();
         }
 
+        ImGui::End();
+    }
+
+    {
+        ImGui::Begin("Properties");
+        m_propertiesPanel.render(m_sceneView.getSelected());
         ImGui::End();
     }
 }

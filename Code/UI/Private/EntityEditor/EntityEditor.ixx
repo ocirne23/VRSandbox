@@ -111,4 +111,6 @@ private:
 
 	char m_newChildNameBuf[128] = "Entity";
 	Entity* m_pendingRemoveChild = nullptr; // set while walking the tree, applied after (avoids mutating mid-walk)
+
+	float m_treeHeight = 60.0f; // user-resizable via the drag handle below the hierarchy tree
 };

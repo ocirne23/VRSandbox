@@ -429,10 +429,17 @@ void EntityEditor::renderTreeNode(Entity* node)
 void EntityEditor::renderTree()
 {
 	ImGui::SeparatorText("Hierarchy");
-	ImGui::BeginChild("##ee_tree", ImVec2(0.0f, 150.0f), ImGuiChildFlags_Borders);
+	ImGui::BeginChild("##ee_tree", ImVec2(0.0f, m_treeHeight), ImGuiChildFlags_Borders);
 	if (m_editRoot)
 		renderTreeNode(m_editRoot.get());
 	ImGui::EndChild();
+
+	// Drag handle: a thin invisible strip just below the tree that resizes it vertically.
+	ImGui::InvisibleButton("##ee_tree_resize", ImVec2(-1.0f, 6.0f));
+	if (ImGui::IsItemHovered() || ImGui::IsItemActive())
+		ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+	if (ImGui::IsItemActive())
+		m_treeHeight = std::clamp(m_treeHeight + ImGui::GetIO().MouseDelta.y, 60.0f, 600.0f);
 
 	if (m_pendingRemoveChild)
 	{
@@ -449,12 +456,15 @@ void EntityEditor::renderNameAndTransform()
 	if (ImGui::InputText("Name", m_nameBuf, sizeof(m_nameBuf)))
 		m_selected->displayName = m_nameBuf;
 
-	ImGui::DragFloat3("Position", &m_selected->pos.x, 0.05f);
-	ImGui::DragFloat("Scale", &m_selected->scale, 0.01f, 0.0001f, 10000.0f);
+	if (ImGui::CollapsingHeader("Transform"))
+	{
+		ImGui::DragFloat3("Position", &m_selected->pos.x, 0.05f);
+		ImGui::DragFloat("Scale", &m_selected->scale, 0.01f, 0.0001f, 10000.0f);
 
-	glm::vec3 euler = glm::degrees(glm::eulerAngles(m_selected->rot));
-	if (ImGui::DragFloat3("Rotation", &euler.x, 0.5f))
-		m_selected->rot = glm::quat(glm::radians(euler));
+		glm::vec3 euler = glm::degrees(glm::eulerAngles(m_selected->rot));
+		if (ImGui::DragFloat3("Rotation", &euler.x, 0.5f))
+			m_selected->rot = glm::quat(glm::radians(euler));
+	}
 }
 
 void EntityEditor::renderSceneSection()
