@@ -194,7 +194,7 @@ export namespace RendererVKLayout
 
         glm::vec4 atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
         glm::vec4 groundParams;  // rgb = ground albedo * intensity, w unused
-        glm::vec4 aoParams;      // x = RTAO enabled (0/1), yzw unused
+        glm::vec4 aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

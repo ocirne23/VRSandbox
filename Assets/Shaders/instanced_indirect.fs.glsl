@@ -583,7 +583,7 @@ void main()
 		bentN = normalize(mix(N, normalize(aoSample.xyz), 0.75));
 	}
 	const vec3 indirectE = evalProbeSH(in_pos, bentN);
-	const vec3 indirect = (indirectE.x >= 0.0) ? (indirectE / PI) : skyRadiance(bentN);
+	const vec3 indirect = ((indirectE.x >= 0.0) ? (indirectE / PI) : skyRadiance(bentN)) * u_aoParams.y;
 	vec3 color = materialColor * (indirect + u_ambientColor) * ao;
 
 	color += doSunLight(in_pos, V, N, specularColor, matColOverPi, metalness, roughness, roughnessSq);

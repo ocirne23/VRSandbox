@@ -448,7 +448,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         (float)viewportSize.x / (float)swapExtent.width,
         (float)viewportSize.y / (float)swapExtent.height);
     ubo.taaJitter = glm::vec4(taaJitterNdc, 0.0f, 0.0f);
-    ubo.aoParams = glm::vec4(m_rtaoParams.enabled ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    ubo.aoParams = glm::vec4(m_rtaoParams.enabled ? 1.0f : 0.0f, m_giProbePipeline.getStrength(), 0.0f, 0.0f);
     ubo.frameIndex = m_frameCounter;
 
     const SkyParams& sky = m_skyParams;

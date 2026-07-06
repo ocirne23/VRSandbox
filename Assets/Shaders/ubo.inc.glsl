@@ -81,7 +81,7 @@ layout (binding = UBO_BINDING, std140) uniform UBO
 
     vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
                           // ground-bounce tint for downward GI/fog rays), w unused
-    vec4 u_aoParams;      // x = RTAO enabled (0/1), yzw unused
+    vec4 u_aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
 };
 
 // View index selecting which u_views[] entry the convenience macros / reconstruction helpers read. Defaults

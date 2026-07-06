@@ -79,6 +79,7 @@ public:
     Buffer& getTlasInstanceBuffer(uint32 frameIdx) { return m_tlasInstanceBuffer[frameIdx]; }
     // Persistent GI clipmap SH volume (consumed by the main pass's fragment shader).
     Buffer& getGiGridDataBuffer() { return m_giGridData; }
+    float getStrength() const { return m_giStrength; }
 
 private:
     void buildTlasInstanceLayout(ComputePipelineLayout& layout);
@@ -94,6 +95,7 @@ private:
     int m_giRaysPerProbe = 17;         // gather rays per probe per frame
     float m_giTemporalAlpha = 0.005f;  // per-frame blend toward freshly traced irradiance
     float m_giMaxRayDist = 8.0f;       // gather ray max distance (world units)
+    float m_giStrength = 1.0f;         // multiplier on the sampled probe irradiance at shading time
 
     // Single persistent GI clipmap SH volume: irradiance carries forward in place (toroidal addressing),
     // so there is no prev/cur ping-pong. Read across frames by the fragment shader and read+written by the

@@ -236,7 +236,7 @@ void main()
             amb = evalProbeSH(worldPos, -dir);
         if (amb.x < 0.0)
             amb = skyRadiance(normalize(u_skyUp)) * (PI);
-        inLight += amb / PI + u_ambientColor;
+        inLight += amb * u_aoParams.y / PI + u_ambientColor;
 
         // Local lights from the world-space hash grid cell containing this froxel.
         const bool lightShadows = u_fogParams3.w > 0.5;
