@@ -85,6 +85,24 @@ namespace
         return nullptr;
     }
 
+    // ---- add-node popup search ----
+    char lowerChar(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
+
+    // Case-insensitive substring test, used to filter the add-node popup's palette/import-function list.
+    bool containsCI(std::string_view haystack, std::string_view needle)
+    {
+        if (needle.empty()) return true;
+        if (needle.size() > haystack.size()) return false;
+        for (size_t i = 0; i + needle.size() <= haystack.size(); ++i)
+        {
+            bool ok = true;
+            for (size_t j = 0; j < needle.size() && ok; ++j)
+                ok = lowerChar(haystack[i + j]) == lowerChar(needle[j]);
+            if (ok) return true;
+        }
+        return false;
+    }
+
     // ---- function codegen naming ----
     // A generated C++ function is named <fileStem>_<funcName>, sanitized to a valid identifier. The stem
     // disambiguates same-named functions from different files; codegen dedups by this full name.
@@ -2116,48 +2134,122 @@ void Scene::update(double deltaSec)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f, 5.0f));
     if (ImGui::BeginPopup("AddNodePopup"))
     {
-        // Group node defs by category (first-seen order); each category folds into its own submenu (opens on
-        // hover, standard ImGui BeginMenu behavior) so the top-level list stays one line per category instead
-        // of growing into one very tall flat list.
-        struct Category { std::string name; std::vector<const NodeDef*> defs; };
-        std::vector<Category> categories;
-        for (const NodeDef& def : nodeRegistry())
+        // Focus + clear the search box the instant the popup opens (IsWindowAppearing is true exactly that
+        // one frame) so typing filters immediately, no click needed.
+        if (ImGui::IsWindowAppearing())
         {
-            if (isRerouteType(def.typeId) || isFunctionCallType(def.typeId)) // created by dbl-click / import, not the palette
-                continue;
-            if (categories.empty() || categories.back().name != def.category)
-                categories.push_back({ def.category, {} });
-            categories.back().defs.push_back(&def);
+            m_addNodeSearchBuf[0] = '\0';
+            m_addNodeSearchSelected = 0;
+            ImGui::SetKeyboardFocusHere();
         }
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::InputText("##addNodeSearch", m_addNodeSearchBuf, sizeof(m_addNodeSearchBuf)))
+            m_addNodeSearchSelected = 0; // query changed: re-highlight the top result
 
-        for (const Category& category : categories)
+        // Spawns a node def or imports a function at the click position and closes the popup — shared by the
+        // plain category tree below and the search results list.
+        auto place = [&](const NodeDef* def, const FunctionRef* funcRef)
         {
-
-            if (ImGui::BeginMenu(category.name.c_str()))
+            if (def)
             {
-                for (const NodeDef* def : category.defs)
-                    if (ImGui::MenuItem(def->displayName.c_str()))
-                    {
-                        Node& added = addNodeOfType(def->typeId, m_pendingAddPos);
-                        if (added.isDynamic())
-                            syncNewMemberNode(added); // keep a new Script Data node in sync with the others
-                        if (added.isEventNode())
-                            syncNewEventNode(added); // keep a new On Event node in sync with the others
-                        if (added.isTriggerAudio() && m_audioAliasesKnown)
-                            syncTriggerAudioPins(added); // seed the alias entry pins from the owning entity
-                        autoConnectPending(added); // wire a link dropped here to its first matching pin, if any
-                    }
-                ImGui::EndMenu();
+                Node& added = addNodeOfType(def->typeId, m_pendingAddPos);
+                if (added.isDynamic())
+                    syncNewMemberNode(added); // keep a new Script Data node in sync with the others
+                if (added.isEventNode())
+                    syncNewEventNode(added); // keep a new On Event node in sync with the others
+                if (added.isTriggerAudio() && m_audioAliasesKnown)
+                    syncTriggerAudioPins(added); // seed the alias entry pins from the owning entity
+                autoConnectPending(added); // wire a link dropped here to its first matching pin, if any
+            }
+            else if (funcRef)
+                autoConnectPending(importFunction(*funcRef, m_pendingAddPos));
+            ImGui::CloseCurrentPopup();
+        };
+
+        const std::string_view search(m_addNodeSearchBuf);
+        if (!search.empty())
+        {
+            // A flat, filtered list across every category + importable function. Up/Down move the highlight,
+            // Enter places it; hovering or clicking with the mouse still works too.
+            struct Result { std::string label; const NodeDef* def; const FunctionRef* funcRef; };
+            std::vector<Result> results;
+            for (const NodeDef& def : nodeRegistry())
+            {
+                if (isRerouteType(def.typeId) || isFunctionCallType(def.typeId)) // created by dbl-click / import, not the palette
+                    continue;
+                if (containsCI(def.displayName, search) || containsCI(def.category, search))
+                    results.push_back({ def.category + ": " + def.displayName, &def, nullptr });
+            }
+            for (const FunctionRef& ref : m_importFunctions)
+                if (containsCI(ref.displayLabel, search))
+                    results.push_back({ ref.displayLabel, nullptr, &ref });
+
+            if (results.empty())
+            {
+                ImGui::TextDisabled("No matches");
+            }
+            else
+            {
+                if (m_addNodeSearchSelected < 0) m_addNodeSearchSelected = 0;
+                if (m_addNodeSearchSelected >= (int)results.size()) m_addNodeSearchSelected = (int)results.size() - 1;
+
+                if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) && m_addNodeSearchSelected + 1 < (int)results.size())
+                    ++m_addNodeSearchSelected;
+                if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) && m_addNodeSearchSelected > 0)
+                    --m_addNodeSearchSelected;
+                const bool confirmed = ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter);
+
+                ImGui::BeginChild("##addNodeResults", ImVec2(260.0f, 200.0f), ImGuiChildFlags_Borders);
+                bool placed = false;
+                for (int i = 0; i < (int)results.size() && !placed; ++i)
+                {
+                    const Result& r = results[i];
+                    const bool isSelected = (i == m_addNodeSearchSelected);
+                    if (ImGui::Selectable(r.label.c_str(), isSelected))
+                        { place(r.def, r.funcRef); placed = true; }
+                    if (ImGui::IsItemHovered())
+                        m_addNodeSearchSelected = i;
+                    if (isSelected && confirmed)
+                        { place(r.def, r.funcRef); placed = true; }
+                }
+                ImGui::EndChild();
             }
         }
-
-        // Importable functions defined in other .scr files, folded the same way.
-        if (!m_importFunctions.empty() && ImGui::BeginMenu("Import Function"))
+        else
         {
-            for (const FunctionRef& ref : m_importFunctions)
-                if (ImGui::MenuItem(ref.displayLabel.c_str()))
-                    autoConnectPending(importFunction(ref, m_pendingAddPos));
-            ImGui::EndMenu();
+            // Group node defs by category (first-seen order); each category folds into its own submenu (opens
+            // on hover, standard ImGui BeginMenu behavior) so the top-level list stays one line per category
+            // instead of growing into one very tall flat list.
+            struct Category { std::string name; std::vector<const NodeDef*> defs; };
+            std::vector<Category> categories;
+            for (const NodeDef& def : nodeRegistry())
+            {
+                if (isRerouteType(def.typeId) || isFunctionCallType(def.typeId)) // created by dbl-click / import, not the palette
+                    continue;
+                if (categories.empty() || categories.back().name != def.category)
+                    categories.push_back({ def.category, {} });
+                categories.back().defs.push_back(&def);
+            }
+
+            for (const Category& category : categories)
+            {
+                if (ImGui::BeginMenu(category.name.c_str()))
+                {
+                    for (const NodeDef* def : category.defs)
+                        if (ImGui::MenuItem(def->displayName.c_str()))
+                            place(def, nullptr);
+                    ImGui::EndMenu();
+                }
+            }
+
+            // Importable functions defined in other .scr files, folded the same way.
+            if (!m_importFunctions.empty() && ImGui::BeginMenu("Import Function"))
+            {
+                for (const FunctionRef& ref : m_importFunctions)
+                    if (ImGui::MenuItem(ref.displayLabel.c_str()))
+                        place(nullptr, &ref);
+                ImGui::EndMenu();
+            }
         }
 
         ImGui::EndPopup();

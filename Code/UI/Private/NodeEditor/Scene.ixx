@@ -114,6 +114,10 @@ private:
 
     std::vector<FunctionRef> m_importFunctions; // cached function list, refreshed when the add-node popup opens
 
+    // ---- add-node popup search box ----
+    char m_addNodeSearchBuf[64] = {}; // cleared + focused each time the popup opens (see IsWindowAppearing)
+    int  m_addNodeSearchSelected = 0; // highlighted index into that frame's filtered results list
+
     std::vector<std::string> m_audioAliases; // Trigger Audio entry pins sync to this (see setAudioAliases)
     bool m_audioAliasesKnown = false;
 };
