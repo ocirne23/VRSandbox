@@ -72,6 +72,29 @@ public:
 
     size_t getNumContainers() const { return m_containers.size(); }
 
+    // Entity::create() stores a raw, non-owning pointer to its template (entities normally rely on a
+    // stable owner — World's own template caches — to keep it alive). Ad-hoc templates assembled outside
+    // World (the Entity Editor's respawn-on-edit flow) have no such owner, so they're kept alive here
+    // indefinitely instead (editing sessions create at most a few hundred of these — negligible memory).
+    void keepTemplateAlive(std::shared_ptr<const EntitySpawnTemplate> tmpl) { m_editorTemplates.push_back(std::move(tmpl)); }
+
+    // Component SpawnInfo builders, public so editor tooling (the Entity Editor) can resolve a single
+    // component's spawn recipe from a small ad-hoc AssetNode fragment — the same inputs/outputs a normal
+    // .pre load would produce — without going through a full prefab file. Order matters when used
+    // together: build Render first (captureCollisionSource=true if a Hull/Mesh Physics shape is also
+    // being built) so Physics can derive its geometry from the resulting container.
+    std::shared_ptr<RenderComponent::SpawnInfo> buildRenderSpawnInfo(const AssetNode& renderNode, const std::string& ownerName, bool captureCollisionSource = false);
+
+    // Takes the sibling render container by name (resolved internally via getOrLoadContainer) rather than
+    // a raw ObjectContainer* — passing that pointer across the module boundary tripped an MSVC C++20
+    // modules cross-module mangling bug (unresolved external at link time) that a plain string sidesteps.
+    std::shared_ptr<AnimatorComponent::SpawnInfo> buildAnimatorSpawnInfo(const AssetNode& animatorNode, const std::string& siblingContainerName, const std::string& ownerName);
+
+    std::shared_ptr<PhysicsComponent::SpawnInfo> buildPhysicsSpawnInfo(const AssetNode& physicsNode,
+        const std::string& containerName, const std::string& nodePath, const std::string& ownerName);
+
+    std::shared_ptr<AudioComponent::SpawnInfo> buildAudioSpawnInfo(const AssetNode& audioNode, const std::string& ownerName);
+
 private:
 
     ObjectContainer* loadContainer(const ObjectContainerDesc& desc, bool captureCollisionSource);
@@ -90,16 +113,7 @@ private:
 
     void buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl);
 
-    std::shared_ptr<RenderComponent::SpawnInfo> buildRenderSpawnInfo(const AssetNode& renderNode, const std::string& ownerName, bool captureCollisionSource = false);
-
-    std::shared_ptr<AnimatorComponent::SpawnInfo> buildAnimatorSpawnInfo(const AssetNode& animatorNode, ObjectContainer* siblingContainer, const std::string& ownerName);
-
     std::shared_ptr<SceneComponent::SpawnInfo> buildSceneSpawnInfo(const AssetNode& sceneNode);
-
-    std::shared_ptr<PhysicsComponent::SpawnInfo> buildPhysicsSpawnInfo(const AssetNode& physicsNode,
-        const std::string& containerName, const std::string& nodePath, const std::string& ownerName);
-
-    std::shared_ptr<AudioComponent::SpawnInfo> buildAudioSpawnInfo(const AssetNode& audioNode, const std::string& ownerName);
 
     // Audio buffer for a sound file, shared between every entity referencing the same path. A failed
     // load is cached too (as an invalid buffer) so a bad path doesn't retry + re-log every spawn.
@@ -119,6 +133,7 @@ private:
     std::vector<std::shared_ptr<EntitySpawnTemplate>> m_retiredTemplates; // superseded by reloadPrefabs, kept alive for live entities
     std::unordered_set<std::string> m_buildingTemplates; // prefab names currently being built (cycle guard)
     std::shared_ptr<EntitySpawnTemplate> m_emptyTemplate; // blank Scene-only template for editable (non-prefab) entities
+    std::vector<std::shared_ptr<const EntitySpawnTemplate>> m_editorTemplates; // ad-hoc templates kept alive via keepTemplateAlive()
 };
 
 export namespace Globals

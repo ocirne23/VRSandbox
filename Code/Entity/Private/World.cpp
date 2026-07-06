@@ -345,7 +345,7 @@ const AnimationSet* World::getOrBuildClipSet(const Skeleton* skel, const Animato
     return ptr;
 }
 
-std::shared_ptr<AnimatorComponent::SpawnInfo> World::buildAnimatorSpawnInfo(const AssetNode& animatorNode, ObjectContainer* siblingContainer, const std::string& ownerName)
+std::shared_ptr<AnimatorComponent::SpawnInfo> World::buildAnimatorSpawnInfo(const AssetNode& animatorNode, const std::string& siblingContainerName, const std::string& ownerName)
 {
     const AssetNode* nameNode = animatorNode.find("Animator");
     if (!nameNode)
@@ -358,6 +358,7 @@ std::shared_ptr<AnimatorComponent::SpawnInfo> World::buildAnimatorSpawnInfo(cons
         Log::warning("Scene: entity '" + ownerName + "' references unknown Animator '" + animatorName + "'");
         return nullptr;
     }
+    ObjectContainer* siblingContainer = siblingContainerName.empty() ? nullptr : getOrLoadContainer(siblingContainerName);
     if (!siblingContainer || !siblingContainer->isSkinned() || !siblingContainer->getSkeleton())
     {
         Log::warning("Scene: entity '" + ownerName + "' has an Animator but no sibling skinned mesh to drive");
@@ -665,13 +666,11 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         if (const AssetNode* n = physicsNode->find("Shape"))
             wantsCollisionGeometry = n->asString() == "Hull" || n->asString() == "Mesh";
 
-    ObjectContainer* renderContainer = nullptr;
-    std::string renderContainerName; // physics hull/mesh shapes (below) source their geometry from here
+    std::string renderContainerName; // physics hull/mesh shapes (below), and the animator, source from here
     std::string renderNodePath;
     if (const AssetNode* renderNode = findComponentNode(node, "Render"))
         if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.displayName, wantsCollisionGeometry))
         {
-            renderContainer = info->container; // the animator (below) drives this skinned mesh
             renderContainerName = info->containerName;
             renderNodePath = info->nodePath;
             typeBits |= uint16(1 << EComponentID_Render);
@@ -680,7 +679,7 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
 
     static_assert(EComponentID_Animator == 4);
     if (const AssetNode* animatorNode = findComponentNode(node, "Animator"))
-        if (std::shared_ptr<AnimatorComponent::SpawnInfo> info = buildAnimatorSpawnInfo(*animatorNode, renderContainer, tmpl.displayName))
+        if (std::shared_ptr<AnimatorComponent::SpawnInfo> info = buildAnimatorSpawnInfo(*animatorNode, renderContainerName, tmpl.displayName))
         {
             typeBits |= uint16(1 << EComponentID_Animator);
             tmpl.spawnInfos.emplace_back(std::move(info));

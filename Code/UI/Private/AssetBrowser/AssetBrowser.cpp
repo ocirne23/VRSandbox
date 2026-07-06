@@ -581,6 +581,13 @@ void AssetBrowser::renderContextMenu(const std::filesystem::path& p)
 			m_scriptOpenRequest = p.string();
 	}
 
+	if (isSpawnableFile(p))
+	{
+		ImGui::Separator();
+		if (ImGui::MenuItem("Edit Entity"))
+			m_entityEditRequest = p.string();
+	}
+
 	if (std::filesystem::is_directory(p))
 	{
 		ImGui::Separator();

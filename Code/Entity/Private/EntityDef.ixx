@@ -179,5 +179,18 @@ export struct EntityChange
         EntityPtr   root;
         std::string path;
     };
-    std::variant<CreateHierarchy, CreateViewport, AddSceneEntity, Delete, Reparent, SavePrefab> type;
+    struct OpenPrefabForEdit
+    {
+        std::string path; // .pre to load and unpack for the Prefab Editor
+    };
+    struct NewPrefab
+    {
+        std::string displayName; // blank editable entity, name only (no source file yet)
+    };
+    struct RespawnEntity
+    {
+        EntityPtr oldEntity;
+        std::shared_ptr<const EntitySpawnTemplate> tmpl; // freshly assembled from the entity's edited component set
+    };
+    std::variant<CreateHierarchy, CreateViewport, AddSceneEntity, Delete, Reparent, SavePrefab, OpenPrefabForEdit, NewPrefab, RespawnEntity> type;
 };

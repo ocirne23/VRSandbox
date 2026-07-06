@@ -96,18 +96,21 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             ImGuiID dock_id_right, dock_id_up, dock_id_left, dock_id_down;
             ImGuiID dock_id_left_top, dock_id_left_bottom;
             ImGuiID dock_id_scene, dock_id_properties;
+            ImGuiID dock_id_content, dock_id_entityEditor;
 
             ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.3f, &dock_id_left, &dock_id_right);
             ImGui::DockBuilderSplitNode(dock_id_right, ImGuiDir_Up, 0.8f, &dock_id_up, &dock_id_down);
             ImGui::DockBuilderSplitNode(dock_id_left,  ImGuiDir_Up, 0.5f, &dock_id_left_top, &dock_id_left_bottom);
             ImGui::DockBuilderSplitNode(dock_id_left_top, ImGuiDir_Right, 0.5f, &dock_id_properties, &dock_id_scene);
+            ImGui::DockBuilderSplitNode(dock_id_down, ImGuiDir_Right, 0.45f, &dock_id_entityEditor, &dock_id_content);
 
             ImGui::DockBuilderDockWindow("Scene",      dock_id_scene);
             ImGui::DockBuilderDockWindow("Properties", dock_id_properties);
             ImGui::DockBuilderDockWindow("Stats",      dock_id_left_bottom);
             ImGui::DockBuilderDockWindow("Log",        dock_id_left_bottom);
             ImGui::DockBuilderDockWindow("Tweaks",     dock_id_left_bottom);
-            ImGui::DockBuilderDockWindow("Content",    dock_id_down);
+            ImGui::DockBuilderDockWindow("Content",       dock_id_content);
+            ImGui::DockBuilderDockWindow("Entity Editor",  dock_id_entityEditor);
             ImGui::DockBuilderDockWindow("Script",     dock_id_up);
             ImGui::DockBuilderDockWindow("Viewport",   dock_id_up);
             ImGui::DockBuilderFinish(dockspace_id);
@@ -315,11 +318,33 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             m_scene.setScriptPath(createPath);
             m_scene.save();
         }
+
+        // Route the asset browser's "Edit Entity" action into the Entity Editor.
+        if (std::string editPath = m_assetBrowser.takeEntityEditRequest(); !editPath.empty())
+            m_entityEditor.requestOpen(editPath);
     }
 
     {
         ImGui::Begin("Tweaks");
         m_tweakPanel.render();
+        ImGui::End();
+    }
+
+    {
+        ImGui::Begin("Entity Editor");
+        m_entityEditor.render();
+
+        if (ImGui::BeginDragDropTargetCustom(
+            ImRect(ImGui::GetWindowPos(),
+                ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowSize().x,
+                       ImGui::GetWindowPos().y + ImGui::GetWindowSize().y)),
+            ImGui::GetID("##ee_drop")))
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_FILE"))
+                m_entityEditor.requestOpen(static_cast<const char*>(payload->Data));
+            ImGui::EndDragDropTarget();
+        }
+
         ImGui::End();
     }
 }

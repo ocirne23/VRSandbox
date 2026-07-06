@@ -161,6 +161,19 @@ bool prefabWouldCycle(Entity* root, const std::string& id)
     return false;
 }
 
+std::string serializePrefabText(Entity* root, const std::string& id)
+{
+    if (!root)
+        return {};
+
+    AssetNode doc; // synthetic root; its children are the top-level declarations
+    AssetNode& node = doc.addChild("Prefab");
+    node.values.emplace_back(id);
+    writeEntityBody(root, node, id);
+
+    return writeAssetText(doc);
+}
+
 bool savePrefab(Entity* root, const std::string& path)
 {
     if (!root)
@@ -172,12 +185,7 @@ bool savePrefab(Entity* root, const std::string& path)
         return false;
     }
 
-    AssetNode doc; // synthetic root; its children are the top-level declarations
-    AssetNode& node = doc.addChild("Prefab");
-    node.values.emplace_back(id);
-    writeEntityBody(root, node, id);
-
-    if (!FileSystem::writeFileStr(path, writeAssetText(doc)))
+    if (!FileSystem::writeFileStr(path, serializePrefabText(root, id)))
         return false;
 
     Globals::assetRegistry.addPrefab(id, path);

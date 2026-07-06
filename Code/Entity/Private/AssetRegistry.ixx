@@ -28,6 +28,11 @@ public:
 
     const std::unordered_map<std::string, ObjectContainerDesc>& getObjectContainers() const { return m_objectContainers; }
 
+    // StaticMesh/SkinnedMesh entries by name (Render component mesh picker) and .apl Animator entries
+    // by name (Animator component picker) — for editor tooling (Entity Editor) to offer a searchable list.
+    const std::unordered_map<std::string, SpawnableDesc>& getSpawnables() const { return m_spawnables; }
+    const std::unordered_map<std::string, AnimatorDesc>& getAnimators() const { return m_animators; }
+
 private:
 
     void registerFile(const std::string& path);

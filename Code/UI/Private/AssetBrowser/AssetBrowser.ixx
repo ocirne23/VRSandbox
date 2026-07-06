@@ -20,6 +20,9 @@ public:
 	std::string takeScriptOpenRequest()   { return std::move(m_scriptOpenRequest); }
 	std::string takeScriptCreateRequest() { return std::move(m_scriptCreateRequest); }
 
+	// .pre files: the UI drains this and drives the Entity Editor panel.
+	std::string takeEntityEditRequest() { return std::move(m_entityEditRequest); }
+
 private:
 
 	void renderToolbar();
@@ -46,6 +49,7 @@ private:
 	std::vector<EntityChange> m_changes;          // prefab saves queued for the app to drain
 	std::string           m_scriptOpenRequest;     // .scr the user asked to open (drained by UI)
 	std::string           m_scriptCreateRequest;   // .scr the user asked to create (drained by UI)
+	std::string           m_entityEditRequest;       // .pre the user asked to edit (drained by UI)
 	EntityPtr             m_pendingSaveRoot;       // entity awaiting overwrite confirmation (kept alive)
 	std::filesystem::path m_pendingSavePath;       // target .pre for the pending save
 	bool                  m_openOverwritePopup = false;

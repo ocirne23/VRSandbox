@@ -118,8 +118,47 @@ int main()
         else if (auto* rep = std::get_if<EntityChange::Reparent>(&change.type))
             rep->newParent ? (void)std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); }) : entities.push_back(std::move(rep->entity));
         else if (auto* sp = std::get_if<EntityChange::SavePrefab>(&change.type))
+        {
             if (savePrefab(sp->root.get(), sp->path))
                 world.invalidatePrefab(std::filesystem::path(sp->path).stem().string());
+        }
+        else if (auto* op = std::get_if<EntityChange::OpenPrefabForEdit>(&change.type))
+        {
+            EntityPtr e = world.spawnAssetFile(op->path, Transform(), false);
+            if (e)
+                e->setPrefabInstance(false); // unpack: the Entity Editor edits it freely
+            entities.push_back(e);
+            ui.onOpened(e, op->path);
+        }
+        else if (auto* np = std::get_if<EntityChange::NewPrefab>(&change.type))
+        {
+            EntityPtr e = world.createEmptyEntity(np->displayName);
+            entities.push_back(e);
+            ui.onOpened(e, "");
+        }
+        else if (auto* rs = std::get_if<EntityChange::RespawnEntity>(&change.type))
+        {
+            // Entity::create() only stores a raw, non-owning pointer to the template — keep it alive for
+            // as long as the entity might reference it (World's own template caches do the same for
+            // prefabs; this one is ad-hoc, so nothing else would hold onto it).
+            world.keepTemplateAlive(rs->tmpl);
+
+            Transform t(rs->oldEntity->pos, rs->oldEntity->scale, rs->oldEntity->rot);
+            EntityPtr newEntity = Entity::create(*rs->tmpl, t);
+
+            // Preserve any existing hierarchy the Entity Editor doesn't itself expose/build.
+            if (SceneComponent* oldSc = getComponent<SceneComponent>(rs->oldEntity.get()))
+                if (SceneComponent* newSc = getComponent<SceneComponent>(newEntity.get()))
+                {
+                    newSc->children = std::move(oldSc->children);
+                    for (EntityPtr& child : newSc->children)
+                        child->parent = newEntity.get();
+                }
+
+            std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rs->oldEntity.get(); });
+            entities.push_back(newEntity);
+            ui.onEntityRespawned(rs->oldEntity, newEntity);
+        }
     };
 
     uint32 frameCount = 0;

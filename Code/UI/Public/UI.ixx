@@ -14,6 +14,7 @@ import :Scene;
 import :AssetBrowser;
 import :SceneView;
 import :PropertiesPanel;
+import :EntityEditor;
 import :OutputLog;
 import :TweakPanel;
 
@@ -49,8 +50,16 @@ public:
         std::vector<EntityChange> assetChanges = m_assetBrowser.takeChanges();
         changes.insert(changes.end(), std::make_move_iterator(assetChanges.begin()),
                                       std::make_move_iterator(assetChanges.end()));
+
+        std::vector<EntityChange> entityEditorChanges = m_entityEditor.takeChanges();
+        changes.insert(changes.end(), std::make_move_iterator(entityEditorChanges.begin()),
+                                      std::make_move_iterator(entityEditorChanges.end()));
         return changes;
     }
+
+    // Forwards the entity main.cpp just spawned/respawned for an EntityEditor request into the panel.
+    void onOpened(EntityPtr root, const std::string& path) { m_entityEditor.onOpened(root, path); }
+    void onEntityRespawned(EntityPtr oldEntity, EntityPtr newEntity) { m_entityEditor.onRespawned(oldEntity, newEntity); }
 
     // Script paths the Script panel asked the host to (re)compile + hot-reload this frame.
     std::vector<std::string> takeScriptReloadRequests()
@@ -89,6 +98,7 @@ private:
 	AssetBrowser    m_assetBrowser;
 	SceneView       m_sceneView;
 	PropertiesPanel m_propertiesPanel;
+	EntityEditor    m_entityEditor;
 	OutputLog       m_outputLog;
 	TweakPanel      m_tweakPanel;
 };
