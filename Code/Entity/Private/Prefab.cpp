@@ -53,6 +53,15 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
             if (const AudioComponent::SpawnInfo* ai = getAudioSpawnInfo(entity))
                 writeAudioSpawnInfo(*ai, comp);
         }
+        else if (id == EComponentID_Script)
+        {
+            if (const ScriptComponent::SpawnInfo* si = getScriptSpawnInfo(entity))
+            {
+                if (!si->scriptPath.empty())
+                    comp.set("Path", si->scriptPath);
+                comp.set("Enabled", si->enabled);
+            }
+        }
         else if (id == EComponentID_Scene)
             if (SceneComponent* sc = getComponent<SceneComponent>(entity))
                 for (const EntityPtr& child : sc->children)
@@ -174,7 +183,7 @@ std::string serializePrefabText(Entity* root, const std::string& id)
     return writeAssetText(doc);
 }
 
-bool savePrefab(Entity* root, const std::string& path)
+bool savePrefab(Entity* root, const std::string& path, const std::string& text)
 {
     if (!root)
         return false;
@@ -185,7 +194,7 @@ bool savePrefab(Entity* root, const std::string& path)
         return false;
     }
 
-    if (!FileSystem::writeFileStr(path, serializePrefabText(root, id)))
+    if (!FileSystem::writeFileStr(path, text.empty() ? serializePrefabText(root, id) : text))
         return false;
 
     Globals::assetRegistry.addPrefab(id, path);

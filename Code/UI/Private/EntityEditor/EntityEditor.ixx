@@ -1,6 +1,7 @@
 export module UI:EntityEditor;
 
 import Core;
+import Core.Transform;
 import Entity;
 
 // Panel for defining an entity's components (Render/Animator/Physics/Audio/Script) and saving/loading it
@@ -34,6 +35,9 @@ public:
 
 	std::vector<EntityChange> takeChanges() { return std::move(m_changes); }
 
+	// "Select Prefab" toolbar button: the UI drains this and selects the .pre in the asset browser.
+	std::string takeRevealRequest() { return std::move(m_revealRequest); }
+
 private:
 
 	void renderToolbar();
@@ -66,6 +70,7 @@ private:
 
 	bool isDirty() const;
 	void rebaseline();
+	std::string serializeDocText() const; // document text; Sync off swaps in the transform draft for m_selected
 	std::string currentId() const; // filename stem once saved/opened, else the root's display name
 
 	void selectEntity(EntityPtr entity); // switches which entity Name/Transform/Components edits
@@ -88,7 +93,11 @@ private:
 
 	std::string m_baselineText; // serialized text at last load/save, for dirty-tracking
 
+	bool      m_syncTransform = false; // Transform floats mirror/edit the live entity; off = detached draft that saves as-is
+	Transform m_transformDraft;        // m_selected's transform as shown in the panel, refreshed on selection change
+
 	std::vector<EntityChange> m_changes;
+	std::string m_revealRequest; // .pre to select in the asset browser (drained by UI)
 
 	char m_pathBuf[256] = "Entities/NewEntity.pre";
 	char m_nameBuf[256] = {};
@@ -124,6 +133,8 @@ private:
 	char m_renderPickerSearch[128]     = {}; // container (.oc) name picker
 	char m_renderNodePickerSearch[128] = {}; // node picker, scoped to the currently chosen container
 	char m_animatorPickerSearch[128]  = {};
+	char m_scriptPickerSearch[128]    = {};
+	std::vector<std::string> m_scriptPickerFiles; // .scr paths relative to Assets/, refreshed when the picker opens
 
 	char m_newChildNameBuf[128] = "Entity";
 	Entity* m_pendingRemoveChild = nullptr; // set while walking the tree, applied after (avoids mutating mid-walk)

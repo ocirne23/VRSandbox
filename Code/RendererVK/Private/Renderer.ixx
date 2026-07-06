@@ -143,7 +143,26 @@ private:
     uint32 addSkinnedMeshSources(const std::vector<RendererVKLayout::SkinnedMeshSource>& sources);
     const RendererVKLayout::SkinnedMeshSource& getSkinnedMeshSource(uint32 idx) const { return m_skinnedMeshSources[idx]; }
 
+    // Everything one spawnSkinnedNode allocated (per-instance MeshInfo range, output vertex regions,
+    // palette region, contiguous SkinningJob/SkinnedBlasBuild range), recycled as a unit: destroying the
+    // node parks its bundle (jobs/BLAS deactivated IN PLACE — the per-frame skinned BLAS slots are
+    // positional and sized once, so entries never move) on a per-container free list, and the next
+    // spawnSkinnedNode of the same container reuses it wholesale with zero GPU uploads or re-records.
+    struct SkinnedInstanceBundle
+    {
+        uint32 sourceKey;    // owning container's base SkinnedMeshSource index (free-list key)
+        uint32 baseMeshIdx;  // first MeshInfo of the per-instance range
+        uint32 paletteHandle;
+        uint32 firstJob;     // first entry of the contiguous SkinningJob/SkinnedBlasBuild range
+        uint32 numMeshes;
+    };
+    uint32 acquireSkinnedBundle(uint32 sourceKey); // reactivates + returns a parked bundle, UINT32_MAX if none free
+    uint32 registerSkinnedBundle(const SkinnedInstanceBundle& bundle);
+    void releaseSkinnedBundle(uint32 bundleHandle);
+    const SkinnedInstanceBundle& getSkinnedBundle(uint32 handle) const { return m_skinnedBundles[handle]; }
+
     friend class RenderNode;
+    void freeRenderNode(RenderNode& node);
     inline Transform& getRenderNodeTransform(uint32 idx) { return m_renderNodeTransforms[idx]; }
 
     friend class AnimatorComponent;
@@ -248,6 +267,8 @@ private:
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<uint32> m_numInstancesPerMesh;
     std::vector<uint32> m_freeRenderNodeIndexes;
+    std::vector<SkinnedInstanceBundle> m_skinnedBundles;
+    std::unordered_map<uint32, std::vector<uint32>> m_freeSkinnedBundles; // sourceKey -> parked bundle handles
 
     uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray/taa samples set each frame
     uint32 m_meshInfoCounter = 0;

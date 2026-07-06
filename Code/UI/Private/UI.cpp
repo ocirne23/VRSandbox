@@ -338,6 +338,10 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         }
 
         ImGui::End();
+
+        // Route the entity editor's "Select Prefab" action into the asset browser.
+        if (std::string revealPath = m_entityEditor.takeRevealRequest(); !revealPath.empty())
+            m_assetBrowser.selectFile(revealPath);
     }
 
     {

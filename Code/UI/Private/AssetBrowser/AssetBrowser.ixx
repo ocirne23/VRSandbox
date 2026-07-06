@@ -11,6 +11,8 @@ public:
 	void initialize();
 	void render();
 
+	void selectFile(const std::filesystem::path& path); // navigate to the file's folder and select it
+
 	const std::filesystem::path& getSelectedPath() const { return m_selectedPath; }
 	bool hasSelection() const { return !m_selectedPath.empty(); }
 
@@ -36,7 +38,7 @@ private:
 	void renderNewAssetContextMenu();
 	void queueSavePrefab(Entity* root, const std::filesystem::path& path);
 	void renderContextMenu(const std::filesystem::path& p);
-	std::filesystem::path makeUniqueScriptPath() const;
+	std::filesystem::path makeUniqueAssetPath(const char* stem, const char* ext) const;
 	void navigateTo(const std::filesystem::path& path);
 	void navigateUp();
 

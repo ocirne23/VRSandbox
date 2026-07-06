@@ -72,8 +72,6 @@ public:
 
 	const std::string& getFilePath() const { return m_filePath; }
 
-    // TODO RenderNode cleanup
-
 private:
 
     struct TempInitData;
@@ -108,6 +106,10 @@ private:
     // Each node's own world transform relative to the container root, indexed by NodeSpawnIdx. Used by
     // spawnNodeForIdx to rebase a sub-node's baked (root-relative) offsets into the node's own space.
     std::vector<Transform> m_nodeRootTransforms;
+    // Instance-offset base per NodeSpawnIdx for rebased sub-node spawns (UINT32_MAX = not yet uploaded).
+    // The rebased offsets are immutable and independent of the spawn transform (placement comes from the
+    // per-node transform at cull time), so they're uploaded once and shared by every instance of the idx.
+    std::vector<uint32> m_rebasedOffsetBaseForIdx;
 
     uint32 m_baseMeshInstanceOffsetsIdx = 0;
     uint16 m_baseMeshInfoIdx = 0;

@@ -119,7 +119,7 @@ int main()
             rep->newParent ? (void)std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); }) : entities.push_back(std::move(rep->entity));
         else if (auto* sp = std::get_if<EntityChange::SavePrefab>(&change.type))
         {
-            if (savePrefab(sp->root.get(), sp->path))
+            if (savePrefab(sp->root.get(), sp->path, sp->text))
                 world.invalidatePrefab(std::filesystem::path(sp->path).stem().string());
         }
         else if (auto* op = std::get_if<EntityChange::OpenPrefabForEdit>(&change.type))
@@ -146,7 +146,11 @@ int main()
             world.keepTemplateAlive(rs->tmpl);
 
             Transform t(rs->oldEntity->pos, rs->oldEntity->scale, rs->oldEntity->rot);
-            EntityPtr newEntity = Entity::create(*rs->tmpl, t);
+            // Pre-set the paused flag so component spawn (script OnSpawn) already sees it — the parent
+            // chain isn't linked yet during create, so a paused ancestor can't be discovered there.
+            const uint8 initialFlags = rs->oldEntity->isEditorPausedInTree() ? uint8(EEntityFlag_EditorPaused) : uint8(0);
+            EntityPtr newEntity = Entity::create(*rs->tmpl, t, initialFlags);
+            newEntity->setPrefabInstance(rs->oldEntity->isPrefabInstance()); // keep the editor's unpacked state despite the template's prefabName
 
             // Preserve any existing children (the Entity Editor commits one entity's own component set at
             // a time; whatever was already parented under it stays put).

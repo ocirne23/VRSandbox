@@ -3,7 +3,9 @@
 import Core;
 import :Entity;
 
-export bool savePrefab(Entity* root, const std::string& path);
+// `text` overrides the serialized content when non-empty (still cycle-checked against `root`) — the
+// Entity Editor uses it to save its detached transform draft instead of the live world transform.
+export bool savePrefab(Entity* root, const std::string& path, const std::string& text = {});
 
 // True if saving `root` as prefab `id` would produce a cycle (a descendant is a prefab instance of `id`).
 export bool prefabWouldCycle(Entity* root, const std::string& id);

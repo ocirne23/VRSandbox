@@ -3,6 +3,7 @@ module UI;
 import Core;
 import Core.imgui;
 import Entity;
+import File;
 import :AssetBrowser;
 
 static bool isImageFile(const std::string& ext)
@@ -609,6 +610,16 @@ void AssetBrowser::navigateTo(const std::filesystem::path& path)
 	}
 }
 
+void AssetBrowser::selectFile(const std::filesystem::path& path)
+{
+	std::error_code ec;
+	const std::filesystem::path abs = std::filesystem::canonical(path, ec);
+	if (ec || !abs.has_parent_path())
+		return;
+	navigateTo(abs.parent_path());
+	m_selectedPath = abs;
+}
+
 void AssetBrowser::navigateUp()
 {
 	if (m_currentPath != m_rootPath && m_currentPath.has_parent_path())
@@ -620,19 +631,29 @@ void AssetBrowser::renderNewAssetContextMenu()
 	if (!ImGui::BeginPopupContextWindow("##ab_winctx", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
 		return;
 	if (ImGui::MenuItem("New Script"))
-		m_scriptCreateRequest = makeUniqueScriptPath().string();
+		m_scriptCreateRequest = makeUniqueAssetPath("NewScript", ".scr").string();
+	if (ImGui::MenuItem("New Prefab"))
+	{
+		const std::filesystem::path path = makeUniqueAssetPath("NewPrefab", ".pre");
+		const std::string id = path.stem().string();
+		if (FileSystem::writeFileStr(path.string(), "Prefab " + id + "\n"))
+		{
+			Globals::assetRegistry.addPrefab(id, path.string());
+			m_entityEditRequest = path.string();
+		}
+	}
 	ImGui::EndPopup();
 }
 
-std::filesystem::path AssetBrowser::makeUniqueScriptPath() const
+std::filesystem::path AssetBrowser::makeUniqueAssetPath(const char* stem, const char* ext) const
 {
 	std::error_code ec;
-	std::filesystem::path candidate = m_currentPath / "NewScript.scr";
+	std::filesystem::path candidate = m_currentPath / (std::string(stem) + ext);
 	if (!std::filesystem::exists(candidate, ec))
 		return candidate;
 	for (int i = 1; i < 1000; ++i)
 	{
-		candidate = m_currentPath / ("NewScript" + std::to_string(i) + ".scr");
+		candidate = m_currentPath / (stem + std::to_string(i) + ext);
 		if (!std::filesystem::exists(candidate, ec))
 			return candidate;
 	}

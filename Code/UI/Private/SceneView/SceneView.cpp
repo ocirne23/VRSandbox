@@ -52,15 +52,6 @@ void SceneView::beginRename(Entity* entity)
 
 void SceneView::renderToolbar()
 {
-	if (ImGui::Button("+ Add"))
-	{
-		m_hasPendingCreate    = true;
-		m_pendingCreateParent = nullptr;
-	}
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Add a scene entity");
-
-	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-1.0f);
 	ImGui::InputTextWithHint("##sv_search", "Search...", m_searchBuffer, sizeof(m_searchBuffer));
 }
@@ -246,16 +237,6 @@ void SceneView::renderContextMenu(Entity* entity, bool locked)
 		ImGui::Separator();
 	}
 
-	if (hasComponent<SceneComponent>(entity) && !locked)   // a locked instance can't gain children
-	{
-		if (ImGui::MenuItem("Add Child"))
-		{
-			m_hasPendingCreate    = true;
-			m_pendingCreateParent = entity;
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::Separator();
-	}
 	if (ImGui::MenuItem("Rename", "F2", false, canEdit))
 	{
 		ImGui::CloseCurrentPopup();
@@ -270,13 +251,6 @@ void SceneView::renderContextMenu(Entity* entity, bool locked)
 
 void SceneView::applyPendingMutations()
 {
-	if (m_hasPendingCreate)
-	{
-		const std::string name = "Entity " + std::to_string(++m_entityCounter);
-		m_changes.push_back({ EntityChange::AddSceneEntity{ name, EntityPtr(m_pendingCreateParent) } }); // new root → app takes ownership
-		m_hasPendingCreate    = false;
-		m_pendingCreateParent = nullptr;
-	}
 	if (m_pendingDelete)
 	{
 		if (m_selected == m_pendingDelete)        m_selected = nullptr;

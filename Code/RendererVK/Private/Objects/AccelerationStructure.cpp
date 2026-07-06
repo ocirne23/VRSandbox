@@ -227,6 +227,8 @@ void AccelerationStructure::recordBuildSkinnedBlas(vk::CommandBuffer cmd, uint32
     {
         const SkinnedBlasBuild& b = builds[i];
         const uint32 primCount = b.indexCount / 3;
+        if (primCount == 0)
+            continue; // parked bundle (freed skinned node): keep the slot in place, skip the rebuild
 
         vk::AccelerationStructureGeometryTrianglesDataKHR tri{
             .vertexFormat = vk::Format::eR32G32B32Sfloat,
@@ -282,6 +284,8 @@ void AccelerationStructure::recordBuildSkinnedBlas(vk::CommandBuffer cmd, uint32
     // Pass 2: rebuild each BLAS in place, serialized with a barrier (each uses a disjoint scratch region).
     for (uint32 i = 0; i < count; ++i)
     {
+        if (ranges[i].primitiveCount == 0)
+            continue; // parked bundle, skipped in pass 1
         buildInfos[i].dstAccelerationStructure = slot[i].handle;
         buildInfos[i].scratchData.deviceAddress = m_skinnedBlasScratchAlignedAddr[frameIdx] + scratchOffsets[i];
         const vk::AccelerationStructureBuildRangeInfoKHR* pRange = &ranges[i];

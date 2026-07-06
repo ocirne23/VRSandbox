@@ -12,6 +12,7 @@ export struct EntityPtr;
 export enum EEntityFlags : uint8
 {
     EEntityFlag_PrefabInstance = 1 << 0, // root of a locked prefab instance; cleared by "unpack"
+    EEntityFlag_EditorPaused   = 1 << 1, // open in the Entity Editor: scripts/physics don't update this tree
 };
 
 export enum EComponentID : uint16
@@ -30,7 +31,9 @@ export class Entity
 {
 public:
 
-    static EntityPtr create(const EntitySpawnTemplate& tmpl, const Transform& transform);
+    // initialFlags (EEntityFlags) applies before components spawn, so e.g. EEntityFlag_EditorPaused can
+    // suppress a script's OnSpawn when the Entity Editor respawns a paused entity.
+    static EntityPtr create(const EntitySpawnTemplate& tmpl, const Transform& transform, uint8 initialFlags = 0);
     static void destroy(Entity* entity);
 
 public:
@@ -56,6 +59,17 @@ public:
 
     bool isPrefabInstance() const { return (flags & EEntityFlag_PrefabInstance) != 0; }
     void setPrefabInstance(bool on) { flags = on ? uint8(flags | EEntityFlag_PrefabInstance) : uint8(flags & ~EEntityFlag_PrefabInstance); }
+    bool isEditorPaused() const { return (flags & EEntityFlag_EditorPaused) != 0; }
+    void setEditorPaused(bool on) { flags = on ? uint8(flags | EEntityFlag_EditorPaused) : uint8(flags & ~EEntityFlag_EditorPaused); }
+    // The flag lives on the edited document's root; entry points invoked outside updateTree's propagation
+    // (global script events, physics contact events) must check the whole ancestor chain.
+    bool isEditorPausedInTree() const
+    {
+        for (const Entity* p = this; p; p = p->parent)
+            if (p->isEditorPaused())
+                return true;
+        return false;
+    }
     bool isPrefabLocked() const;
     Entity* nearestPrefabInstance();
 
@@ -67,7 +81,7 @@ private:
 	Entity(const Entity&) = delete;
     ~Entity() { assert(refCount == 0); }
 
-    void updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds = 0.0f);
+    void updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds = 0.0f, bool editorPaused = false);
 
     void createComponent(EComponentID id, uint16 componentOffset, const void* info, const Transform& base);
     void destroyComponent(EComponentID id, uint16 componentOffset, const void* info);
@@ -178,6 +192,7 @@ export struct EntityChange
     {
         EntityPtr   root;
         std::string path;
+        std::string text; // pre-serialized document (Entity Editor's transform draft); empty → serialize root
     };
     struct OpenPrefabForEdit
     {

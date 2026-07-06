@@ -127,6 +127,48 @@ static std::vector<std::string> splitComma(const std::string& s)
 	return out;
 }
 
+// All .scr files under Assets/ (the working directory), as forward-slash paths relative to it — the
+// same form ScriptComponent::scriptPath uses. Assets/Local holds generated script build output, not sources.
+static void gatherScriptFiles(std::vector<std::string>& out)
+{
+	out.clear();
+	std::error_code ec;
+	const std::filesystem::path root = std::filesystem::current_path(ec);
+	for (std::filesystem::recursive_directory_iterator it(root, std::filesystem::directory_options::skip_permission_denied, ec), end; it != end; it.increment(ec))
+	{
+		if (it->is_directory(ec))
+		{
+			if (it->path().filename() == "Local")
+				it.disable_recursion_pending();
+			continue;
+		}
+		if (it->path().extension() != ".scr")
+			continue;
+		out.push_back(std::filesystem::relative(it->path(), root, ec).generic_string());
+	}
+	std::sort(out.begin(), out.end());
+}
+
+// Reads the root transform stored in a .pre file, so the editor's transform draft starts from what the
+// file says rather than wherever the live entity happens to sit in the world.
+static bool readPrefabFileTransform(const std::string& path, Transform& out)
+{
+	AssetNode doc;
+	std::string error;
+	if (path.empty() || !loadAssetFile(path, doc, error))
+		return false;
+	const AssetNode* prefab = doc.find("Prefab");
+	if (!prefab)
+		return false;
+	if (const AssetNode* n = prefab->find("Position"))
+		out.pos = n->asVec3(out.pos);
+	if (const AssetNode* n = prefab->find("Rotation"))
+		out.quat = glm::quat(glm::radians(n->asVec3(glm::degrees(glm::eulerAngles(out.quat)))));
+	if (const AssetNode* n = prefab->find("Scale"))
+		out.scale = n->asFloat(0, out.scale);
+	return true;
+}
+
 std::string EntityEditor::currentId() const
 {
 	if (!m_path.empty())
@@ -134,16 +176,39 @@ std::string EntityEditor::currentId() const
 	return (m_editRoot && !m_editRoot->displayName.empty()) ? m_editRoot->displayName : std::string("NewEntity");
 }
 
+// Serializes the document. With Sync off, the selected node's live transform (which the gizmo/world may
+// have moved) is swapped for the editor's detached draft, so the file keeps what the Transform floats show.
+std::string EntityEditor::serializeDocText() const
+{
+	if (!m_editRoot)
+		return {};
+	Entity* sel = m_selected.get();
+	if (m_syncTransform || !sel)
+		return serializePrefabText(m_editRoot.get(), currentId());
+
+	const glm::vec3 livePos = sel->pos;
+	const float     liveScale = sel->scale;
+	const glm::quat liveRot = sel->rot;
+	sel->pos = m_transformDraft.pos;
+	sel->scale = m_transformDraft.scale;
+	sel->rot = m_transformDraft.quat;
+	std::string text = serializePrefabText(m_editRoot.get(), currentId());
+	sel->pos = livePos;
+	sel->scale = liveScale;
+	sel->rot = liveRot;
+	return text;
+}
+
 void EntityEditor::rebaseline()
 {
-	m_baselineText = m_editRoot ? serializePrefabText(m_editRoot.get(), currentId()) : std::string();
+	m_baselineText = serializeDocText();
 }
 
 bool EntityEditor::isDirty() const
 {
 	if (!m_editRoot)
 		return false;
-	return serializePrefabText(m_editRoot.get(), currentId()) != m_baselineText;
+	return serializeDocText() != m_baselineText;
 }
 
 void EntityEditor::refreshDraftsFromEntity()
@@ -153,6 +218,9 @@ void EntityEditor::refreshDraftsFromEntity()
 		return;
 
 	m_hasScene = hasComponent<SceneComponent>(e);
+	m_transformDraft = Transform(e->pos, e->scale, e->rot);
+	if (e == m_editRoot.get())
+		readPrefabFileTransform(m_path, m_transformDraft); // start from what the file stores, not the world pose
 
 	m_hasRender = hasComponent<RenderComponent>(e);
 	m_renderDraft = m_hasRender ? *getRenderSpawnInfo(e) : RenderComponent::SpawnInfo{};
@@ -168,15 +236,10 @@ void EntityEditor::refreshDraftsFromEntity()
 	m_audioDraft = m_hasAudio ? *getAudioSpawnInfo(e) : AudioComponent::SpawnInfo{};
 
 	m_hasScript = hasComponent<ScriptComponent>(e);
-	m_scriptDraft = ScriptComponent::SpawnInfo{};
+	m_scriptDraft = m_hasScript && getScriptSpawnInfo(e) ? *getScriptSpawnInfo(e) : ScriptComponent::SpawnInfo{};
 	if (m_hasScript)
-	{
 		if (ScriptComponent* sc = getComponent<ScriptComponent>(e))
-		{
-			m_scriptDraft.scriptPath = sc->scriptModule ? sc->scriptModule->scriptPath : std::string();
 			m_scriptDraft.enabled = sc->enabled;
-		}
-	}
 }
 
 void EntityEditor::onOpened(EntityPtr root, const std::string& path)
@@ -184,6 +247,8 @@ void EntityEditor::onOpened(EntityPtr root, const std::string& path)
 	m_editRoot = root;
 	m_selected = root;
 	m_path = path;
+	if (root)
+		root->setEditorPaused(true); // freeze scripts/physics while the document is open
 
 	std::string suggested = path;
 	if (suggested.empty() && root)
@@ -238,6 +303,28 @@ void EntityEditor::closeCurrent()
 {
 	if (m_editRoot)
 	{
+		// Respawned children carry their own copy of the flag (set at create so OnSpawn sees it) — clear the
+		// whole tree, then run any OnSpawn that was suppressed while paused.
+		auto clearPaused = [](auto&& self, Entity* e) -> void
+		{
+			e->setEditorPaused(false);
+			if (SceneComponent* sc = getComponent<SceneComponent>(e))
+				for (const EntityPtr& child : sc->children)
+					self(self, child.get());
+		};
+		clearPaused(clearPaused, m_editRoot.get());
+		if (!m_ownsEntity) // a borrowed scene entity resumes living — not one about to be deleted below
+		{
+			auto firePending = [](auto&& self, Entity* e) -> void
+			{
+				if (ScriptComponent* script = getComponent<ScriptComponent>(e))
+					script->fireOnSpawnIfPending(*e);
+				if (SceneComponent* sc = getComponent<SceneComponent>(e))
+					for (const EntityPtr& child : sc->children)
+						self(self, child.get());
+			};
+			firePending(firePending, m_editRoot.get());
+		}
 		if (m_ownsEntity)
 			m_changes.push_back({ EntityChange::Delete{ m_editRoot } }); // a dedicated entity this editor spawned
 		else if (m_wasPacked)
@@ -273,6 +360,7 @@ void EntityEditor::doSwitchOpenSelected(EntityPtr entity)
 	m_ownsEntity = false;
 	m_wasPacked = entity->isPrefabInstance();
 	entity->setPrefabInstance(false); // unpack: edit it freely, same as opening a prefab by path
+	entity->setEditorPaused(true);    // freeze scripts/physics while the document is open
 
 	m_editRoot = entity;
 	m_selected = entity;
@@ -348,9 +436,22 @@ void EntityEditor::requestClose()
 
 void EntityEditor::queueSave(const std::string& path)
 {
-	m_changes.push_back({ EntityChange::SavePrefab{ m_editRoot, path } });
+	m_changes.push_back({ EntityChange::SavePrefab{ m_editRoot, path, serializeDocText() } });
 	m_path = path;
 	rebaseline();
+
+	// A root respawned before its first save carries an empty sourceFile — respawn it once more so its
+	// template (and the Properties "Asset" field) picks up the file it now lives in.
+	if (m_editRoot && m_editRoot->getSourceFile() != m_path)
+	{
+		const Transform keepDraft = m_transformDraft; // selectEntity refreshes the draft from the live entity
+		EntityPtr prevSelected = m_selected;
+		selectEntity(m_editRoot);
+		commitRespawn();
+		if (prevSelected && prevSelected.get() != m_editRoot.get())
+			selectEntity(prevSelected);
+		m_transformDraft = keepDraft;
+	}
 }
 
 void EntityEditor::trySave(const std::string& path)
@@ -446,13 +547,6 @@ void EntityEditor::renderUnsavedPopup()
 
 void EntityEditor::renderToolbar()
 {
-	if (ImGui::Button("New"))
-	{
-		static int counter = 0;
-		requestNew("NewEntity" + std::to_string(++counter));
-	}
-	ImGui::SameLine();
-
 	const bool canOpenSelected = m_sceneSelection && m_sceneSelection->isPrefabInstance();
 	ImGui::BeginDisabled(!canOpenSelected);
 	if (ImGui::Button("Open Selected"))
@@ -462,11 +556,12 @@ void EntityEditor::renderToolbar()
 		ImGui::SetTooltip("Select a (non-unpacked) prefab instance in the Scene panel first");
 	ImGui::SameLine();
 
-	ImGui::SetNextItemWidth(240.0f);
-	ImGui::InputTextWithHint("##ee_path", "Entities/MyEntity.pre", m_pathBuf, sizeof(m_pathBuf));
-	ImGui::SameLine();
-	if (ImGui::Button("Open"))
-		requestOpen(m_pathBuf);
+	ImGui::BeginDisabled(m_path.empty());
+	if (ImGui::Button("Select Prefab"))
+		m_revealRequest = m_path;
+	ImGui::EndDisabled();
+	if (m_path.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("No .pre file yet — save first");
 	ImGui::SameLine();
 
 	ImGui::BeginDisabled(!m_editRoot);
@@ -575,12 +670,28 @@ void EntityEditor::renderNameAndTransform()
 
 	if (ImGui::CollapsingHeader("Transform"))
 	{
-		ImGui::DragFloat3("Position", &m_selected->pos.x, 0.05f);
-		ImGui::DragFloat("Scale", &m_selected->scale, 0.01f, 0.0001f, 10000.0f);
+		ImGui::Checkbox("Sync", &m_syncTransform);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("On: mirror and edit the live entity's transform.\nOff: these values save to the file as-is, independent of where the entity sits in the world");
+		if (m_syncTransform)
+			m_transformDraft = Transform(m_selected->pos, m_selected->scale, m_selected->rot);
 
-		glm::vec3 euler = glm::degrees(glm::eulerAngles(m_selected->rot));
+		bool edited = ImGui::DragFloat3("Position", &m_transformDraft.pos.x, 0.05f);
+		edited |= ImGui::DragFloat("Scale", &m_transformDraft.scale, 0.01f, 0.0001f, 10000.0f);
+
+		glm::vec3 euler = glm::degrees(glm::eulerAngles(m_transformDraft.quat));
 		if (ImGui::DragFloat3("Rotation", &euler.x, 0.5f))
-			m_selected->rot = glm::quat(glm::radians(euler));
+		{
+			m_transformDraft.quat = glm::quat(glm::radians(euler));
+			edited = true;
+		}
+
+		if (edited && m_syncTransform)
+		{
+			m_selected->pos = m_transformDraft.pos;
+			m_selected->scale = m_transformDraft.scale;
+			m_selected->rot = m_transformDraft.quat;
+		}
 	}
 }
 
@@ -944,7 +1055,8 @@ void EntityEditor::renderAudioSection()
 			if (ImGui::Checkbox("Relative (2D)", &clip.relative)) commitRespawn();
 			ImGui::DragFloat("Reference Distance", &clip.referenceDistance, 0.1f, 0.0f, 10000.0f);
 			if (ImGui::IsItemDeactivatedAfterEdit()) commitRespawn();
-			ImGui::DragFloat("Max Distance", &clip.maxDistance, 1.0f, 0.0f, 1000000.0f);
+			ImGui::DragFloat("Max Distance", &clip.maxDistance, 1.0f, 0.0f, 1000000.0f,
+				clip.maxDistance >= FLT_MAX ? "inf" : "%.3f");
 			if (ImGui::IsItemDeactivatedAfterEdit()) commitRespawn();
 			ImGui::DragFloat("Rolloff", &clip.rolloff, 0.01f, 0.0f, 10.0f);
 			if (ImGui::IsItemDeactivatedAfterEdit()) commitRespawn();
@@ -1011,9 +1123,13 @@ void EntityEditor::renderScriptSection()
 	ImGui::AlignTextToFramePadding();
 	ImGui::Text("Path");
 	ImGui::SameLine(60.0f);
-	ImGui::SetNextItemWidth(-1.0f);
-	inputTextStd("##scriptpath", m_scriptDraft.scriptPath);
-	const bool committed = ImGui::IsItemDeactivatedAfterEdit();
+	const std::string btnLabel = (m_scriptDraft.scriptPath.empty() ? std::string("<pick a script>") : m_scriptDraft.scriptPath) + "##scriptpick";
+	if (ImGui::Button(btnLabel.c_str(), ImVec2(-1.0f, 0.0f)))
+	{
+		ImGui::OpenPopup("##scriptpicker");
+		m_scriptPickerSearch[0] = '\0';
+		gatherScriptFiles(m_scriptPickerFiles);
+	}
 	if (ImGui::BeginDragDropTarget())
 	{
 		if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCRIPT_FILE"))
@@ -1023,8 +1139,26 @@ void EntityEditor::renderScriptSection()
 		}
 		ImGui::EndDragDropTarget();
 	}
-	if (committed)
-		commitRespawn();
+	if (ImGui::BeginPopup("##scriptpicker"))
+	{
+		ImGui::SetNextItemWidth(280.0f);
+		ImGui::InputTextWithHint("##search", "Search...", m_scriptPickerSearch, sizeof(m_scriptPickerSearch));
+		ImGui::Separator();
+		ImGui::BeginChild("##list", ImVec2(280.0f, 200.0f));
+		for (const std::string& path : m_scriptPickerFiles)
+		{
+			if (!containsCI(path, m_scriptPickerSearch))
+				continue;
+			if (ImGui::Selectable(path.c_str(), path == m_scriptDraft.scriptPath))
+			{
+				m_scriptDraft.scriptPath = path;
+				commitRespawn();
+				ImGui::CloseCurrentPopup();
+			}
+		}
+		ImGui::EndChild();
+		ImGui::EndPopup();
+	}
 
 	if (ImGui::Checkbox("Enabled", &m_scriptDraft.enabled))
 		commitRespawn();
@@ -1214,6 +1348,12 @@ void EntityEditor::commitRespawn()
 	tmpl->archetype = makeEntityArchetype(typeBits);
 	tmpl->spawnInfos = std::move(infos);
 	tmpl->displayName = m_selected->displayName;
+	tmpl->sourceFile = m_path; // every node in the document belongs to the open .pre (empty until first save)
+	// Keep the prefab identity across respawns — losing it would break "Open Selected"'s registry lookup
+	// and re-serialize the entity inline instead of as a "Prefab <name>" reference.
+	tmpl->prefabName = (m_selected.get() == m_editRoot.get() && !m_path.empty())
+		? std::filesystem::path(m_path).stem().string()
+		: m_selected->getPrefabName();
 
 	m_changes.push_back({ EntityChange::RespawnEntity{ m_selected, tmpl } });
 }
@@ -1226,7 +1366,7 @@ void EntityEditor::render(Entity* sceneSelection)
 	ImGui::Separator();
 
 	if (!m_editRoot)
-		ImGui::TextDisabled("No entity open. Click New, type a path and Open, or drag a .pre file here.");
+		ImGui::TextDisabled("No entity open.");
 	else
 	{
 		renderTree();

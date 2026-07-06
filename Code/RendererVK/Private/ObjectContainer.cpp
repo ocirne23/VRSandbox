@@ -380,6 +380,7 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
     worldSpaceNodes.resize(numNodes);
 
     m_nodeMeshRanges.resize(numNodes);
+    m_rebasedOffsetBaseForIdx.assign(numNodes, UINT32_MAX);
 
     for (uint32 i = 0; i < numNodes; ++i)
     {
@@ -469,14 +470,20 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
         node.m_bounds.radius *= invNode.scale;
     }
 
+    // Rebased offsets are uploaded once per idx and shared by every instance (see m_rebasedOffsetBaseForIdx).
     uint32 rebasedOffsetBase = 0;
     if (rebase)
     {
-        std::vector<RendererVKLayout::MeshInstanceOffset> rebasedOffsets;
-        rebasedOffsets.reserve(range.numNodes);
-        for (uint32 i = 0; i < range.numNodes; ++i)
-            rebasedOffsets.emplace_back(invNode * m_meshInstanceOffsets[range.startIdx + i].transform);
-        rebasedOffsetBase = Globals::rendererVK.addMeshInstanceOffsets(rebasedOffsets);
+        uint32& cachedBase = m_rebasedOffsetBaseForIdx[idx];
+        if (cachedBase == UINT32_MAX)
+        {
+            std::vector<RendererVKLayout::MeshInstanceOffset> rebasedOffsets;
+            rebasedOffsets.reserve(range.numNodes);
+            for (uint32 i = 0; i < range.numNodes; ++i)
+                rebasedOffsets.emplace_back(invNode * m_meshInstanceOffsets[range.startIdx + i].transform);
+            cachedBase = Globals::rendererVK.addMeshInstanceOffsets(rebasedOffsets);
+        }
+        rebasedOffsetBase = cachedBase;
     }
 
     node.m_meshInstances.resize(range.numNodes);
@@ -513,61 +520,83 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
     assert(m_isSkinned && m_numSkinnedMeshes > 0 && "spawnSkinnedNode on a non-skinned container");
 
     Renderer& renderer = Globals::rendererVK;
-    MeshDataManager& meshDataManager = Globals::meshDataManager;
 
     RenderNode node;
     node.m_transformIdx = renderer.addRenderNodeTransform(transform);
 
-    // One palette per node, shared by all its skinned meshes (same skeleton).
-    const uint32 paletteHandle = renderer.allocateSkinningPalette(m_numSkeletonBones);
-    node.m_skinnedPaletteHandle = paletteHandle;
-
-    // Reserve a unique output vertex region per skinned mesh and register a MeshInfo pointing at it.
-    std::vector<RendererVKLayout::MeshInfo> meshInfos;
-    std::vector<uint32> outVertexOffsets;
-    meshInfos.reserve(m_numSkinnedMeshes);
-    outVertexOffsets.reserve(m_numSkinnedMeshes);
-    Sphere combinedBounds{ glm::vec3(0.0f), 0.0f };
-    for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
+    // A parked bundle from a destroyed skinned node of this container has everything still valid and
+    // identical (MeshInfos, output vertex regions, palette region, skinning jobs), so reuse is free.
+    uint32 bundleHandle = renderer.acquireSkinnedBundle(m_baseSkinnedMeshIdx);
+    if (bundleHandle == UINT32_MAX)
     {
-        const RendererVKLayout::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
-        const uint32 outVertexOffset = (uint32)(meshDataManager.reserveVertexData(
-            (size_t)src.vertexCount * sizeof(RendererVKLayout::MeshVertex)) / sizeof(RendererVKLayout::MeshVertex));
-        outVertexOffsets.push_back(outVertexOffset);
+        MeshDataManager& meshDataManager = Globals::meshDataManager;
 
-        RendererVKLayout::MeshInfo& mi = meshInfos.emplace_back();
-        mi.indexCount = src.indexCount;
-        mi.firstIndex = src.firstIndex;
-        mi.vertexOffset = (int32)outVertexOffset;
-        mi.center = src.bounds.pos;
-        // Animation deforms the mesh beyond its bind-pose bounds; inflate so it isn't frustum-culled early.
-        mi.radius = src.bounds.radius * 2.0f;
-        mi.firstInstance = 0;
-        Sphere inflated(src.bounds.pos, src.bounds.radius * 2.0f);
-        combinedBounds.combineSphere(inflated);
+        // One palette per node, shared by all its skinned meshes (same skeleton).
+        const uint32 paletteHandle = renderer.allocateSkinningPalette(m_numSkeletonBones);
+
+        // Reserve a unique output vertex region per skinned mesh and register a MeshInfo pointing at it.
+        std::vector<RendererVKLayout::MeshInfo> meshInfos;
+        std::vector<uint32> outVertexOffsets;
+        meshInfos.reserve(m_numSkinnedMeshes);
+        outVertexOffsets.reserve(m_numSkinnedMeshes);
+        for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
+        {
+            const RendererVKLayout::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
+            const uint32 outVertexOffset = (uint32)(meshDataManager.reserveVertexData(
+                (size_t)src.vertexCount * sizeof(RendererVKLayout::MeshVertex)) / sizeof(RendererVKLayout::MeshVertex));
+            outVertexOffsets.push_back(outVertexOffset);
+
+            RendererVKLayout::MeshInfo& mi = meshInfos.emplace_back();
+            mi.indexCount = src.indexCount;
+            mi.firstIndex = src.firstIndex;
+            mi.vertexOffset = (int32)outVertexOffset;
+            mi.center = src.bounds.pos;
+            // Animation deforms the mesh beyond its bind-pose bounds; inflate so it isn't frustum-culled early.
+            mi.radius = src.bounds.radius * 2.0f;
+            mi.firstInstance = 0;
+        }
+        const uint32 baseMeshIdx = renderer.addMeshInfos(meshInfos);
+
+        uint32 firstJob = 0;
+        for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
+        {
+            const RendererVKLayout::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
+            const uint16 meshIdx = (uint16)(baseMeshIdx + k);
+            assert(meshIdx < UINT16_MAX);
+            const uint32 jobHandle = renderer.addSkinnedInstance(src.baseVertexOffset, src.skinVertexOffset,
+                outVertexOffsets[k], src.vertexCount, paletteHandle, meshIdx, src.firstIndex, src.indexCount);
+            if (k == 0)
+                firstJob = jobHandle;
+        }
+        bundleHandle = renderer.registerSkinnedBundle(Renderer::SkinnedInstanceBundle{
+            .sourceKey = m_baseSkinnedMeshIdx, .baseMeshIdx = baseMeshIdx, .paletteHandle = paletteHandle,
+            .firstJob = firstJob, .numMeshes = m_numSkinnedMeshes });
     }
-    const uint32 baseMeshIdx = renderer.addMeshInfos(meshInfos);
 
-    node.m_bounds = combinedBounds;
+    const Renderer::SkinnedInstanceBundle& bundle = renderer.getSkinnedBundle(bundleHandle);
+    node.m_skinnedBundleHandle = bundleHandle;
+    node.m_skinnedPaletteHandle = bundle.paletteHandle;
+
+    Sphere combinedBounds{ glm::vec3(0.0f), 0.0f };
     node.m_meshInstances.resize(m_numSkinnedMeshes);
     std::map<uint16, uint16> instancesPerMesh;
     for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
     {
         const RendererVKLayout::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
-        const uint16 meshIdx = (uint16)(baseMeshIdx + k);
-        assert(meshIdx < UINT16_MAX);
-
-        renderer.addSkinnedInstance(src.baseVertexOffset, src.skinVertexOffset, outVertexOffsets[k], src.vertexCount, paletteHandle, meshIdx, src.firstIndex, src.indexCount);
+        // Matches the registered MeshInfo's inflated radius (animation deforms beyond bind-pose bounds).
+        Sphere inflated(src.bounds.pos, src.bounds.radius * 2.0f);
+        combinedBounds.combineSphere(inflated);
 
         RendererVKLayout::InMeshInstance& inst = node.m_meshInstances[k];
         inst.renderNodeIdx = node.m_transformIdx;
         inst.instanceOffsetIdx = m_skinnedIdentityOffsetIdx;
-        inst.meshIdx = meshIdx;
+        inst.meshIdx = (uint16)(bundle.baseMeshIdx + k);
         inst.materialIdx = m_baseMaterialInfoIdx + src.materialLocalIdx;
         inst.pipelineIndex = src.pipelineIdx;
         inst.alphaMode = src.alphaMode;
-        instancesPerMesh[meshIdx] += 1;
+        instancesPerMesh[inst.meshIdx] += 1;
     }
+    node.m_bounds = combinedBounds;
     node.m_numInstancesPerMesh.reserve(instancesPerMesh.size());
     for (auto& pair : instancesPerMesh)
     {

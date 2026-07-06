@@ -37,12 +37,9 @@ private:
 	bool    m_worldOpen       = true;
 	char    m_renameBuffer[256] = {};
 	char    m_searchBuffer[256] = {};
-	int     m_entityCounter   = 0;
 
 	Entity* m_pendingDelete         = nullptr;
 	bool    m_hasPendingReparent    = false;
 	Entity* m_pendingReparentChild  = nullptr;
 	Entity* m_pendingReparentTarget = nullptr;  // nullptr â†’ World root
-	bool    m_hasPendingCreate      = false;
-	Entity* m_pendingCreateParent   = nullptr;  // nullptr â†’ new root, else new child of this
 };

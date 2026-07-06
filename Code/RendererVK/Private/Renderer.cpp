@@ -648,11 +648,85 @@ void Renderer::present()
 
 uint32 Renderer::addRenderNodeTransform(const Transform& transform)
 {
+    if (!m_freeRenderNodeIndexes.empty())
+    {
+        const uint32 renderNodeIdx = m_freeRenderNodeIndexes.back();
+        m_freeRenderNodeIndexes.pop_back();
+        m_renderNodeTransforms[renderNodeIdx] = transform;
+        return renderNodeIdx;
+    }
     const uint32 renderNodeIdx = (uint32)m_renderNodeTransforms.size();
     m_renderNodeTransforms.emplace_back(transform);
     if ((uint32)m_renderNodeTransforms.size() > m_maxRenderNodes)
         growRenderNodeCapacity((uint32)m_renderNodeTransforms.size());
     return renderNodeIdx;
+}
+
+void RenderNode::destroy()
+{
+    if (m_transformIdx == UINT32_MAX && m_skinnedBundleHandle == UINT32_MAX)
+        return;
+    Globals::rendererVK.freeRenderNode(*this);
+}
+
+// No GPU sync needed anywhere in the free path: transforms, mesh instances, skinning jobs and palettes
+// are all re-uploaded into per-frame buffers every frame, so frames still in flight read their own
+// copies and frames recorded from here on simply never reference the freed slots.
+void Renderer::freeRenderNode(RenderNode& node)
+{
+    if (node.m_transformIdx != UINT32_MAX)
+    {
+        m_freeRenderNodeIndexes.push_back(node.m_transformIdx);
+        node.m_transformIdx = UINT32_MAX;
+    }
+    if (node.m_skinnedBundleHandle != UINT32_MAX)
+    {
+        releaseSkinnedBundle(node.m_skinnedBundleHandle);
+        node.m_skinnedBundleHandle = UINT32_MAX;
+    }
+    node.m_skinnedPaletteHandle = UINT32_MAX;
+    node.m_meshInstances.clear();
+    node.m_numInstancesPerMesh.clear();
+}
+
+uint32 Renderer::registerSkinnedBundle(const SkinnedInstanceBundle& bundle)
+{
+    const uint32 handle = (uint32)m_skinnedBundles.size();
+    m_skinnedBundles.push_back(bundle);
+    return handle;
+}
+
+void Renderer::releaseSkinnedBundle(uint32 bundleHandle)
+{
+    const SkinnedInstanceBundle& bundle = m_skinnedBundles[bundleHandle];
+    // Park in place: a zero vertexCount makes the skinning dispatch skip the job, a zero indexCount makes
+    // recordBuildSkinnedBlas skip the rebuild. The entries must keep their positions (see SkinnedInstanceBundle).
+    for (uint32 k = 0; k < bundle.numMeshes; ++k)
+    {
+        m_skinningJobs[bundle.firstJob + k].vertexCount = 0;
+        m_skinnedBlasBuilds[bundle.firstJob + k].indexCount = 0;
+    }
+    m_freeSkinnedBundles[bundle.sourceKey].push_back(bundleHandle);
+}
+
+uint32 Renderer::acquireSkinnedBundle(uint32 sourceKey)
+{
+    const auto it = m_freeSkinnedBundles.find(sourceKey);
+    if (it == m_freeSkinnedBundles.end() || it->second.empty())
+        return UINT32_MAX;
+    const uint32 bundleHandle = it->second.back();
+    it->second.pop_back();
+
+    const SkinnedInstanceBundle& bundle = m_skinnedBundles[bundleHandle];
+    const SkinningPaletteRegion& region = m_skinningPaletteRegions[bundle.paletteHandle];
+    std::fill_n(m_skinningPalettes.begin() + region.offset, region.boneCount, glm::mat4(1.0f)); // bind pose until the first setSkinningPalette
+    for (uint32 k = 0; k < bundle.numMeshes; ++k)
+    {
+        const RendererVKLayout::SkinnedMeshSource& src = m_skinnedMeshSources[bundle.sourceKey + k];
+        m_skinningJobs[bundle.firstJob + k].vertexCount = src.vertexCount;
+        m_skinnedBlasBuilds[bundle.firstJob + k].indexCount = src.indexCount;
+    }
+    return bundleHandle;
 }
 
 namespace
@@ -1874,7 +1948,7 @@ Stats Renderer::getStats()
     stats.numMaterials = m_materialInfoCounter;
     stats.maxMaterials = m_maxUniqueMaterials;
 
-    stats.numRenderNodes = (uint32)m_renderNodeTransforms.size();
+    stats.numRenderNodes = (uint32)(m_renderNodeTransforms.size() - m_freeRenderNodeIndexes.size());
     stats.maxRenderNodes = m_maxRenderNodes;
 
     stats.numTextures = (uint32)Globals::textureManager.getNumTextures();

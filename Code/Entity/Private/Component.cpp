@@ -43,10 +43,6 @@ void RenderComponent::destroy(Entity& entity, const SpawnInfo& info)
 
 }
 
-RenderComponent::~RenderComponent()
-{
-}
-
 static AnimCondition toAnimCondition(const AnimatorDesc::Condition& c)
 {
     using Op = AnimatorDesc::Condition::Op;
@@ -215,19 +211,33 @@ void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
         Globals::scriptEvents.registerListener(scriptModule, &entity, scriptData.get());
 
 	if (scriptModule->onSpawn)
-		reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
+	{
+		if (entity.isEditorPausedInTree())
+			pendingOnSpawn = true;
+		else
+			reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
+	}
+}
+
+void ScriptComponent::fireOnSpawnIfPending(Entity& entity)
+{
+    if (!pendingOnSpawn)
+        return;
+    pendingOnSpawn = false;
+    if (enabled && scriptModule && scriptModule->onSpawn && !entity.isEditorPausedInTree())
+        reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
 }
 
 void ScriptComponent::update(Entity& entity, float deltaSeconds)
 {
-    if (!enabled || !scriptModule || !scriptModule->update)
+    if (!enabled || !scriptModule || !scriptModule->update || entity.isEditorPausedInTree())
         return;
     reinterpret_cast<ScriptUpdateFn>(scriptModule->update)(&Globals::scriptContext, &entity, deltaSeconds, scriptData.get());
 }
 
 void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
 {
-    if (!enabled || !scriptModule || !scriptModule->onEvent)
+    if (!enabled || !scriptModule || !scriptModule->onEvent || entity.isEditorPausedInTree())
         return;
     auto it = scriptModule->eventKeyToIndex.find(Globals::scriptEvents.getEventKeyForName(eventName));
     if (it != scriptModule->eventKeyToIndex.end())
@@ -238,7 +248,7 @@ void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
 
 void ScriptComponent::fireEvent(Entity& entity, uint32 eventKey)
 {
-    if (!enabled || !scriptModule || !scriptModule->onEvent)
+    if (!enabled || !scriptModule || !scriptModule->onEvent || entity.isEditorPausedInTree())
         return;
     auto it = scriptModule->eventKeyToIndex.find(eventKey);
     if (it != scriptModule->eventKeyToIndex.end())
@@ -249,7 +259,7 @@ void ScriptComponent::fireEvent(Entity& entity, uint32 eventKey)
 
 void ScriptComponent::firePhysicsEvent(Entity& entity, Entity* other, bool begin, bool sensor, int64 contactId)
 {
-    if (!enabled || !scriptModule || !scriptModule->onPhysicsEvent)
+    if (!enabled || !scriptModule || !scriptModule->onPhysicsEvent || entity.isEditorPausedInTree())
         return;
     reinterpret_cast<ScriptOnPhysicsEventFn>(scriptModule->onPhysicsEvent)(
         &Globals::scriptContext, &entity, other, begin ? 1 : 0, sensor ? 1 : 0, contactId, scriptData.get());
@@ -414,6 +424,20 @@ const AnimatorComponent::SpawnInfo* getAnimatorSpawnInfo(const Entity* entity)
     if (idx >= entity->spawnTemplate->spawnInfos.size())
         return nullptr;
     return static_cast<const AnimatorComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
+}
+
+const ScriptComponent::SpawnInfo* getScriptSpawnInfo(const Entity* entity)
+{
+    if (!entity->spawnTemplate || !hasComponent<ScriptComponent>(entity))
+        return nullptr;
+
+    size_t idx = 0;
+    for (uint16 i = 0; i < uint16(EComponentID_Script); ++i)
+        if (entity->typeBits & (1 << i))
+            ++idx;
+    if (idx >= entity->spawnTemplate->spawnInfos.size())
+        return nullptr;
+    return static_cast<const ScriptComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
 }
 
 void AudioComponent::spawn(Entity& entity, const SpawnInfo& spawnInfo, const Transform& base)

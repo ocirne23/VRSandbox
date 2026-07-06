@@ -1,31 +1,29 @@
-# A dynamic rigid body cube (thrown from the camera with key 8 in the App testbed).
 Prefab physicsCube
+	Position 0 0 0
+	Rotation 0 -0 0
+	Scale 0.25
 	Component Render
 		ObjectContainer wireshapes
 		Node Cube
+		Type StaticMesh
 	Component Physics
 		Body Dynamic
 		Shape Box
-		HalfExtents 1.0, 1.0, 1.0
-		Friction 0.6
-		Restitution 0.1
+		HalfExtents 1 1 1
 		ContactEvents true
-	Component Script
-		Path "Scripts/PhysicsCube.scr"
+		Restitution 0.1
 	Component Audio
-		Sound Blip
-			Select RandomNoRepeat
-			Path Sounds/blip1.wav
-			Path Sounds/blip2.wav
-			Path Sounds/blip3.wav
 		Sound Bloop
 			Select CycleStartRandom
 			Path Sounds/bloop.wav
-				Pitch 2.0
-				Volume 0.5
+				Volume 0.1
+				Pitch 2
 			Path Sounds/bloop.wav
-				Pitch 3.0
-				Volume 0.5
+				Volume 0.1
+				Pitch 3
 			Path Sounds/bloop.wav
-				Pitch 4.0
-				Volume 0.5
+				Volume 0.1
+				Pitch 4
+	Component Script
+		Path Scripts/PhysicsCube.scr
+		Enabled true

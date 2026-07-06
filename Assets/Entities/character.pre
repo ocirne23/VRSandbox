@@ -1,7 +1,7 @@
 Prefab character
 	Name Character
 	Position 0 0 0
-	Rotation -180 75.70069 -180
+	Rotation 0 -5.792576 0
 	Scale 1
 	Component Scene
 		Enabled true

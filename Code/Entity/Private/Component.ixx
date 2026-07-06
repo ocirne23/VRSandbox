@@ -84,7 +84,7 @@ export struct RenderComponent
 {
     static constexpr EComponentID getId() { return EComponentID_Render; }
 
-    ~RenderComponent();
+    ~RenderComponent() {}
 
     RenderNode node;
     Transform localTransform;
@@ -157,6 +157,7 @@ export struct ScriptComponent
     std::unique_ptr<uint8[]> scriptData;
     uint32 scriptDataSize = 0;
     bool enabled = true;
+    bool pendingOnSpawn = false; // OnSpawn was suppressed (spawned editor-paused); fired when editing ends
 
     struct SpawnInfo
     {
@@ -166,6 +167,9 @@ export struct ScriptComponent
 
     void spawn(Entity&, const SpawnInfo& info, const Transform&);
     void destroy(Entity&, const SpawnInfo&);
+
+    // Runs a suppressed OnSpawn (see pendingOnSpawn). Call after clearing the editor-paused flag.
+    void fireOnSpawnIfPending(Entity& entity);
 
     // Compiles (on demand) and runs the referenced script with `entity` as its `self`. Defined in
     // ScriptRuntime.cpp, which owns the ScriptContext + thunks.
@@ -326,6 +330,7 @@ export const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity
 export const AnimatorComponent::SpawnInfo* getAnimatorSpawnInfo(const Entity* entity);
 export const PhysicsComponent::SpawnInfo* getPhysicsSpawnInfo(const Entity* entity);
 export const AudioComponent::SpawnInfo* getAudioSpawnInfo(const Entity* entity);
+export const ScriptComponent::SpawnInfo* getScriptSpawnInfo(const Entity* entity);
 
 // Serializes a render spawn recipe into a "Component Render" node; mirror of World::buildRenderSpawnInfo.
 export void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out);

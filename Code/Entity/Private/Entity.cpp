@@ -13,26 +13,33 @@ EntityArchetype makeEntityArchetype(uint16 typeBits)
     return EntityArchetype{ uint16(getEntityAllocSize(typeBits)), typeBits };
 }
 
-void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds)
+void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds, bool editorPaused)
 {
     SceneComponent* sc = getComponent<SceneComponent>(this);
     if (sc && !sc->enabled)
         return;
 
-    if (ScriptComponent* script = getComponent<ScriptComponent>(this))
-        script->update(*this, deltaSeconds);
+    editorPaused = editorPaused || isEditorPaused();
+
+    if (!editorPaused)
+        if (ScriptComponent* script = getComponent<ScriptComponent>(this))
+            script->update(*this, deltaSeconds);
 
     if (AnimatorComponent* animator = getComponent<AnimatorComponent>(this))
         animator->update(*this, renderer, deltaSeconds); // advance animation + refresh skinning palette
 
-    if (PhysicsComponent* physics = getComponent<PhysicsComponent>(this))
-        physics->update(*this, parentWorld); // dynamic bodies write the simulated pose into pos/rot
+    if (!editorPaused)
+        if (PhysicsComponent* physics = getComponent<PhysicsComponent>(this))
+            physics->update(*this, parentWorld); // dynamic bodies write the simulated pose into pos/rot
 
     const Transform world = composeTransform(parentWorld, Transform(pos, scale, rot));
     if (RenderComponent* render = getComponent<RenderComponent>(this))
     {
-        render->node.getTransform() = composeTransform(world, render->localTransform);
-        renderer.renderNode(render->node);
+        if (render->node.isValid()) // empty when spawned without a container, or after destroy()
+        {
+            render->node.getTransform() = composeTransform(world, render->localTransform);
+            renderer.renderNode(render->node);
+        }
     }
 
     if (AudioComponent* audio = getComponent<AudioComponent>(this))
@@ -40,10 +47,10 @@ void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float 
 
     if (sc)
         for (const EntityPtr& child : sc->children)
-            child->updateTree(renderer, world, deltaSeconds);
+            child->updateTree(renderer, world, deltaSeconds, editorPaused);
 }
 
-EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& transform)
+EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& transform, uint8 initialFlags)
 {
     void* buffer = Globals::entityAllocator.allocate(tmpl.archetype.allocSize);
 
@@ -55,6 +62,7 @@ EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& trans
     entity->displayName = tmpl.displayName;
     entity->spawnTemplate = &tmpl;
     entity->typeBits = tmpl.archetype.typeBits;
+    entity->flags = initialFlags;
     entity->setPrefabInstance(!tmpl.prefabName.empty()); // a registered prefab spawns as a locked instance
 
     int idx = 0;
