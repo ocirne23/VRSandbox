@@ -1,3 +1,5 @@
 Prefab cone
 	Component Render
-		StaticMesh Cone
+		ObjectContainer baseshapes
+		Node Cone
+		Type StaticMesh

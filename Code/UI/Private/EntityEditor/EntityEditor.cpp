@@ -63,6 +63,39 @@ static bool namePickerButton(const char* popupId, std::string& value, const Map&
 	return changed;
 }
 
+// Same idea as namePickerButton, for a plain list of names rather than a name->desc map (e.g. a single
+// container's node paths, scoped down instead of every spawnable registered engine-wide).
+static bool nodePickerButton(const char* popupId, std::string& value, const std::vector<std::string>& items, char* searchBuf, size_t searchBufSize)
+{
+	bool changed = false;
+	if (ImGui::Button("Pick Node..."))
+	{
+		ImGui::OpenPopup(popupId);
+		searchBuf[0] = '\0';
+	}
+	if (ImGui::BeginPopup(popupId))
+	{
+		ImGui::SetNextItemWidth(220.0f);
+		ImGui::InputTextWithHint("##search", "Search...", searchBuf, searchBufSize);
+		ImGui::Separator();
+		ImGui::BeginChild("##list", ImVec2(220.0f, 200.0f));
+		for (const std::string& name : items)
+		{
+			if (!containsCI(name, searchBuf))
+				continue;
+			if (ImGui::Selectable(name.c_str()))
+			{
+				value = name;
+				changed = true;
+				ImGui::CloseCurrentPopup();
+			}
+		}
+		ImGui::EndChild();
+		ImGui::EndPopup();
+	}
+	return changed;
+}
+
 static std::string joinComma(const std::vector<std::string>& v)
 {
 	std::string out;
@@ -204,12 +237,19 @@ void EntityEditor::removeChild(Entity* child)
 void EntityEditor::closeCurrent()
 {
 	if (m_editRoot)
-		m_changes.push_back({ EntityChange::Delete{ m_editRoot } });
+	{
+		if (m_ownsEntity)
+			m_changes.push_back({ EntityChange::Delete{ m_editRoot } }); // a dedicated entity this editor spawned
+		else if (m_wasPacked)
+			m_editRoot->setPrefabInstance(true); // re-lock a scene entity we borrowed and unpacked to edit
+	}
 	m_editRoot = EntityPtr();
 	m_selected = EntityPtr();
 	m_path.clear();
 	m_baselineText.clear();
 	m_hasScene = m_hasRender = m_hasAnimator = m_hasPhysics = m_hasAudio = m_hasScript = false;
+	m_ownsEntity = true;
+	m_wasPacked = false;
 }
 
 void EntityEditor::doSwitchOpen(const std::string& path)
@@ -224,15 +264,44 @@ void EntityEditor::doSwitchNew(const std::string& name)
 	m_changes.push_back({ EntityChange::NewPrefab{ name } });
 }
 
+void EntityEditor::doSwitchOpenSelected(EntityPtr entity)
+{
+	if (!entity)
+		return;
+	closeCurrent();
+
+	m_ownsEntity = false;
+	m_wasPacked = entity->isPrefabInstance();
+	entity->setPrefabInstance(false); // unpack: edit it freely, same as opening a prefab by path
+
+	m_editRoot = entity;
+	m_selected = entity;
+
+	m_path.clear();
+	if (const std::string* path = Globals::assetRegistry.findPrefab(entity->getPrefabName()))
+		m_path = *path;
+	const std::string suggested = m_path.empty() ? ("Entities/" + entity->getPrefabName() + ".pre") : m_path;
+	strncpy_s(m_pathBuf, sizeof(m_pathBuf), suggested.c_str(), sizeof(m_pathBuf) - 1);
+	m_pathBuf[sizeof(m_pathBuf) - 1] = '\0';
+
+	refreshDraftsFromEntity();
+	rebaseline();
+}
+
+void EntityEditor::doClose()
+{
+	closeCurrent();
+}
+
 void EntityEditor::requestOpen(const std::string& path)
 {
 	if (path.empty())
 		return;
 	if (m_editRoot && isDirty())
 	{
-		m_pendingSwitchIsNew = false;
-		m_pendingSwitchPath  = path;
-		m_openUnsavedPopup   = true;
+		m_pendingSwitch     = PendingSwitch::OpenPath;
+		m_pendingSwitchPath = path;
+		m_openUnsavedPopup  = true;
 		return;
 	}
 	doSwitchOpen(path);
@@ -242,12 +311,39 @@ void EntityEditor::requestNew(const std::string& name)
 {
 	if (m_editRoot && isDirty())
 	{
-		m_pendingSwitchIsNew = true;
+		m_pendingSwitch      = PendingSwitch::New;
 		m_pendingSwitchName  = name;
 		m_openUnsavedPopup   = true;
 		return;
 	}
 	doSwitchNew(name);
+}
+
+void EntityEditor::requestOpenSelected(Entity* entity)
+{
+	if (!entity || !entity->isPrefabInstance() || entity == m_editRoot.get())
+		return;
+	if (m_editRoot && isDirty())
+	{
+		m_pendingSwitch       = PendingSwitch::OpenSelected;
+		m_pendingSwitchEntity = EntityPtr(entity);
+		m_openUnsavedPopup    = true;
+		return;
+	}
+	doSwitchOpenSelected(EntityPtr(entity));
+}
+
+void EntityEditor::requestClose()
+{
+	if (!m_editRoot)
+		return;
+	if (isDirty())
+	{
+		m_pendingSwitch    = PendingSwitch::Close;
+		m_openUnsavedPopup = true;
+		return;
+	}
+	doClose();
 }
 
 void EntityEditor::queueSave(const std::string& path)
@@ -309,10 +405,13 @@ void EntityEditor::renderUnsavedPopup()
 	if (ImGui::BeginPopupModal("Unsaved Entity Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 	{
 		ImGui::Text("The current entity has unsaved changes.");
-		if (m_pendingSwitchIsNew)
-			ImGui::TextUnformatted("Start a new entity anyway?");
-		else
-			ImGui::Text("Switch to '%s'?", m_pendingSwitchPath.c_str());
+		switch (m_pendingSwitch)
+		{
+		case PendingSwitch::New:          ImGui::TextUnformatted("Start a new entity anyway?"); break;
+		case PendingSwitch::OpenSelected: ImGui::TextUnformatted("Switch to the selected entity anyway?"); break;
+		case PendingSwitch::Close:        ImGui::TextUnformatted("Close anyway?"); break;
+		default:                          ImGui::Text("Switch to '%s'?", m_pendingSwitchPath.c_str()); break;
+		}
 		ImGui::Separator();
 		const bool save    = ImGui::Button("Save");
 		ImGui::SameLine();
@@ -324,15 +423,21 @@ void EntityEditor::renderUnsavedPopup()
 			trySave(m_path.empty() ? m_pathBuf : m_path);
 		if (save || discard)
 		{
-			if (m_pendingSwitchIsNew)
-				doSwitchNew(m_pendingSwitchName);
-			else
-				doSwitchOpen(m_pendingSwitchPath);
+			switch (m_pendingSwitch)
+			{
+			case PendingSwitch::New:          doSwitchNew(m_pendingSwitchName); break;
+			case PendingSwitch::OpenPath:      doSwitchOpen(m_pendingSwitchPath); break;
+			case PendingSwitch::OpenSelected:  doSwitchOpenSelected(m_pendingSwitchEntity); break;
+			case PendingSwitch::Close:         doClose(); break;
+			default: break;
+			}
 		}
 		if (save || discard || cancel)
 		{
+			m_pendingSwitch = PendingSwitch::None;
 			m_pendingSwitchPath.clear();
 			m_pendingSwitchName.clear();
+			m_pendingSwitchEntity = EntityPtr();
 			ImGui::CloseCurrentPopup();
 		}
 		ImGui::EndPopup();
@@ -348,6 +453,15 @@ void EntityEditor::renderToolbar()
 	}
 	ImGui::SameLine();
 
+	const bool canOpenSelected = m_sceneSelection && m_sceneSelection->isPrefabInstance();
+	ImGui::BeginDisabled(!canOpenSelected);
+	if (ImGui::Button("Open Selected"))
+		requestOpenSelected(m_sceneSelection);
+	ImGui::EndDisabled();
+	if (!canOpenSelected && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("Select a (non-unpacked) prefab instance in the Scene panel first");
+	ImGui::SameLine();
+
 	ImGui::SetNextItemWidth(240.0f);
 	ImGui::InputTextWithHint("##ee_path", "Entities/MyEntity.pre", m_pathBuf, sizeof(m_pathBuf));
 	ImGui::SameLine();
@@ -358,6 +472,9 @@ void EntityEditor::renderToolbar()
 	ImGui::BeginDisabled(!m_editRoot);
 	if (ImGui::Button("Save"))
 		trySave(m_pathBuf);
+	ImGui::SameLine();
+	if (ImGui::Button("Close"))
+		requestClose();
 	ImGui::EndDisabled();
 
 	if (m_editRoot)
@@ -532,19 +649,63 @@ void EntityEditor::renderRenderSection()
 	ImGui::PushID("render");
 
 	ImGui::AlignTextToFramePadding();
-	ImGui::Text("Mesh");
-	ImGui::SameLine(100.0f);
+	ImGui::Text("Container (.oc)");
+	ImGui::SameLine(120.0f);
 	ImGui::SetNextItemWidth(180.0f);
-	inputTextStd("##mesh", m_renderDraft.spawnableName);
-	const bool nameCommitted = ImGui::IsItemDeactivatedAfterEdit();
+	inputTextStd("##container", m_renderDraft.containerName);
+	const bool containerCommitted = ImGui::IsItemDeactivatedAfterEdit();
 	ImGui::SameLine();
-	const bool picked = namePickerButton("##render_pick", m_renderDraft.spawnableName,
-		Globals::assetRegistry.getSpawnables(), m_renderPickerSearch, sizeof(m_renderPickerSearch));
-	if (nameCommitted || picked)
+	const bool containerPicked = namePickerButton("##render_container_pick", m_renderDraft.containerName,
+		Globals::assetRegistry.getObjectContainers(), m_renderPickerSearch, sizeof(m_renderPickerSearch));
+	if (containerCommitted || containerPicked)
 	{
-		if (const SpawnableDesc* desc = Globals::assetRegistry.findSpawnable(m_renderDraft.spawnableName))
-			m_renderDraft.skinned = desc->skinned;
+		m_renderDraft.nodePath.clear(); // a node picked from the previous container no longer applies
 		commitRespawn();
+	}
+
+	// Node list is scoped to whichever container is currently named above — load it (cheap: cached after
+	// the first time) only once we know the name resolves to something real, so a half-typed name doesn't
+	// spam load-failure warnings every frame.
+	std::vector<std::string> nodePaths;
+	if (!m_renderDraft.containerName.empty() && Globals::assetRegistry.findObjectContainer(m_renderDraft.containerName))
+		if (ObjectContainer* container = Globals::world.getOrLoadContainer(m_renderDraft.containerName))
+			nodePaths = container->getNodePaths();
+
+	ImGui::AlignTextToFramePadding();
+	ImGui::Text("Node");
+	ImGui::SameLine(120.0f);
+	ImGui::SetNextItemWidth(180.0f);
+	inputTextStd("##node", m_renderDraft.nodePath);
+	const bool nodeCommitted = ImGui::IsItemDeactivatedAfterEdit();
+	ImGui::SameLine();
+	ImGui::BeginDisabled(nodePaths.empty());
+	const bool nodePicked = nodePickerButton("##render_node_pick", m_renderDraft.nodePath, nodePaths, m_renderNodePickerSearch, sizeof(m_renderNodePickerSearch));
+	ImGui::EndDisabled();
+	if (nodePaths.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("Enter a valid container name first");
+	if (nodeCommitted || nodePicked)
+		commitRespawn();
+
+	static const char* typeLabels[] = { "StaticMesh", "SkinnedMesh" };
+	int typeIdx = m_renderDraft.skinned ? 1 : 0;
+	ImGui::AlignTextToFramePadding();
+	ImGui::Text("Type");
+	ImGui::SameLine(120.0f);
+	ImGui::SetNextItemWidth(180.0f);
+	if (ImGui::Combo("##type", &typeIdx, typeLabels, 2))
+	{
+		m_renderDraft.skinned = typeIdx == 1;
+		commitRespawn();
+	}
+
+	if (m_renderDraft.skinned)
+	{
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("Rig");
+		ImGui::SameLine(120.0f);
+		ImGui::SetNextItemWidth(180.0f);
+		inputTextStd("##rig", m_renderDraft.rigType);
+		if (ImGui::IsItemDeactivatedAfterEdit()) commitRespawn();
 	}
 
 	ImGui::AlignTextToFramePadding();
@@ -629,6 +790,7 @@ void EntityEditor::renderPhysicsSection()
 		{
 			m_hasPhysics = true;
 			m_physicsDraft = PhysicsComponent::SpawnInfo{};
+			m_physicsDraft.bodyType = EPhysicsBodyType::Static;
 			m_physCollidesWithBuf[0] = '\0';
 			commitRespawn();
 		}
@@ -915,8 +1077,16 @@ void EntityEditor::commitRespawn()
 		AssetNode holder;
 		AssetNode& node = holder.addChild("Component");
 		node.values.emplace_back("Render");
-		if (!m_renderDraft.spawnableName.empty())
-			node.set(m_renderDraft.skinned ? "SkinnedMesh" : "StaticMesh", m_renderDraft.spawnableName);
+		if (!m_renderDraft.containerName.empty())
+		{
+			node.set("ObjectContainer", m_renderDraft.containerName);
+			if (!m_renderDraft.nodePath.empty())
+				node.set("Node", m_renderDraft.nodePath);
+			AssetNode& typeNode = node.addChild("Type");
+			typeNode.values.emplace_back(m_renderDraft.skinned ? "SkinnedMesh" : "StaticMesh");
+			if (m_renderDraft.skinned && !m_renderDraft.rigType.empty())
+				typeNode.addChild("Rig").values.emplace_back(m_renderDraft.rigType);
+		}
 		node.set("Position", m_renderDraft.localTransform.pos);
 		node.set("Rotation", glm::degrees(glm::eulerAngles(m_renderDraft.localTransform.quat)));
 		node.set("Scale", m_renderDraft.localTransform.scale);
@@ -1048,8 +1218,10 @@ void EntityEditor::commitRespawn()
 	m_changes.push_back({ EntityChange::RespawnEntity{ m_selected, tmpl } });
 }
 
-void EntityEditor::render()
+void EntityEditor::render(Entity* sceneSelection)
 {
+	m_sceneSelection = sceneSelection;
+
 	renderToolbar();
 	ImGui::Separator();
 

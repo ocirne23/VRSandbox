@@ -1,0 +1,5 @@
+Prefab "Sponza Scene"
+	Component Scene
+		Enabled true
+		Prefab skysphere
+		Prefab sponza

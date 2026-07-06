@@ -593,6 +593,15 @@ NodeSpawnIdx ObjectContainer::getSpawnIdxForPath(const std::string& nodePath) co
         return NodeSpawnIdx(it->second);
 }
 
+std::vector<std::string> ObjectContainer::getNodePaths() const
+{
+    std::vector<std::string> paths;
+    paths.reserve(m_nodePathIdxLookup.size());
+    for (const auto& kv : m_nodePathIdxLookup)
+        paths.push_back(kv.first);
+    return paths;
+}
+
 RenderNode ObjectContainer::spawnRootNode(const Transform& transform)
 {
     return spawnNodeForIdx(NodeSpawnIdx_ROOT, transform);

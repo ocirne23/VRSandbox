@@ -3,20 +3,3 @@ ObjectContainer baseshapes
 	MaterialOverrides
 		PipelineIdx UnlitOpaque
 		ExcludeFromRayTracing true
-
-StaticMesh ROOT
-	Node ROOT
-StaticMesh Sphere
-	Node Sphere
-StaticMesh Cube
-	Node Cube
-StaticMesh Cone
-	Node Cone
-StaticMesh Plane
-	Node Plane
-StaticMesh Capsule
-	Node Capsule
-StaticMesh Ramp
-	Node Ramp
-StaticMesh Wedge
-	Node Wedge

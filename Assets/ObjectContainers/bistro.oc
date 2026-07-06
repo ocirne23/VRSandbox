@@ -2,6 +2,3 @@ ObjectContainer Bistro
 	Path "Models/Bistro/Bistro.fbx"
 	MergeNodes false
 	PreTransformVertices false
-
-StaticMesh Bistro
-	Node ROOT

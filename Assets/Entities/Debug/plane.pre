@@ -1,3 +1,5 @@
 Prefab plane
 	Component Render
-		StaticMesh Plane
+		ObjectContainer baseshapes
+		Node Plane
+		Type StaticMesh

@@ -1,13 +1,18 @@
-# A skinned, animated character: the Render component spawns the skinned mesh, the Animator component
-# drives it with the CharacterAnimator graph. The fbx is large, so scale the whole entity down.
-Prefab Character
+Prefab character
+	Name Character
+	Position 0 0 0
+	Rotation -180 75.70069 -180
+	Scale 1
+	Component Scene
+		Enabled true
 	Component Render
+		ObjectContainer character
+		Node ROOT
+		Type SkinnedMesh
+			Rig Humanoid
 		Scale 0.005
-		SkinnedMesh CharacterMesh
 	Component Animator
 		Animator CharacterAnimator
-	Component Script
-		Path "Scripts/Character.scr"
 	Component Audio
 		Sound Bloop
 			Path Sounds/bloop.wav

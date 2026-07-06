@@ -120,6 +120,13 @@ AssetNode& AssetNode::addChild(std::string a_key)
     return children.back();
 }
 
+AssetNode& AssetNode::set(std::string a_key, const char* value)
+{
+    AssetNode& node = addChild(std::move(a_key));
+    node.values.push_back(value);
+    return node;
+}
+
 AssetNode& AssetNode::set(std::string a_key, std::string value)
 {
     AssetNode& node = addChild(std::move(a_key));

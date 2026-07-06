@@ -1,3 +1,5 @@
 Prefab sphere
 	Component Render
-		StaticMesh Sphere
+		ObjectContainer baseshapes
+		Node Sphere
+		Type StaticMesh

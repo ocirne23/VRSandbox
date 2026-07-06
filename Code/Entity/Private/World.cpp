@@ -199,51 +199,32 @@ static Transform readNodeTransform(const AssetNode& node)
 
 std::shared_ptr<RenderComponent::SpawnInfo> World::buildRenderSpawnInfo(const AssetNode& renderNode, const std::string& ownerName, bool captureCollisionSource)
 {
-    // Preferred form: a named spawnable (StaticMesh/SkinnedMesh) declared in a .oc, which resolves to a
-    // container + node. Falls back to the legacy `ObjectContainer` + `Node` form.
-    const AssetNode* staticNode  = renderNode.find("StaticMesh");
-    const AssetNode* skinnedNode = renderNode.find("SkinnedMesh");
-    const AssetNode* spawnNode   = staticNode ? staticNode : skinnedNode;
-
-    std::string containerName;
-    std::string nodePath;
-    bool skinned = false;
-    std::string spawnableName;
-
-    if (spawnNode)
-    {
-        spawnableName = spawnNode->asString();
-        const SpawnableDesc* desc = Globals::assetRegistry.findSpawnable(spawnableName);
-        if (!desc)
-        {
-            Log::warning("Scene: entity '" + ownerName + "' references unknown mesh '" + spawnableName + "'");
-            return nullptr;
-        }
-        // An explicit ObjectContainer alongside the name disambiguates if the same name exists in several.
-        const AssetNode* containerNode = renderNode.find("ObjectContainer");
-        containerName = containerNode ? containerNode->asString() : desc->containerName;
-        nodePath = desc->node;
-        skinned = desc->skinned;
-    }
-    else if (const AssetNode* containerNode = renderNode.find("ObjectContainer"))
-    {
-        containerName = containerNode->asString();
-        nodePath = renderNode.find("Node") ? renderNode.find("Node")->asString() : std::string();
-    }
-    else
-    {
+    const AssetNode* containerNode = renderNode.find("ObjectContainer");
+    if (!containerNode)
         return nullptr;
-    }
+    const std::string containerName = containerNode->asString();
+    const std::string nodePath = renderNode.find("Node") ? renderNode.find("Node")->asString() : std::string();
 
     ObjectContainer* container = getOrLoadContainer(containerName, captureCollisionSource);
     if (!container)
         return nullptr;
 
+    // Type defaults from the container itself (skinned iff its source scene had a skeleton) but can be
+    // overridden explicitly — `Type StaticMesh` / `Type SkinnedMesh`, with an optional nested `Rig` token.
+    bool skinned = container->isSkinned();
+    std::string rigType;
+    if (const AssetNode* typeNode = renderNode.find("Type"))
+    {
+        skinned = typeNode->asString() == "SkinnedMesh";
+        if (const AssetNode* rigNode = typeNode->find("Rig"))
+            rigType = rigNode->asString();
+    }
+
     auto info = std::make_shared<RenderComponent::SpawnInfo>();
     info->container = container;
     info->containerName = containerName; // kept so an inline entity re-serializes its mesh
     info->skinned = skinned;
-    info->spawnableName = spawnableName;
+    info->rigType = rigType;
 
     if (nodePath.empty() || nodePath == "ROOT")
         info->nodeIdx = NodeSpawnIdx_ROOT;
@@ -260,13 +241,13 @@ void writeRenderSpawnInfo(const RenderComponent::SpawnInfo& info, AssetNode& out
 {
     if (!info.container)
         return;
-    if (!info.spawnableName.empty())
-        out.set(info.skinned ? "SkinnedMesh" : "StaticMesh", info.spawnableName);
-    else
-    {
-        out.set("ObjectContainer", info.containerName);
-        out.set("Node", info.nodePath);
-    }
+    out.set("ObjectContainer", info.containerName);
+    out.set("Node", info.nodePath);
+    AssetNode& typeNode = out.addChild("Type");
+    typeNode.values.emplace_back(info.skinned ? "SkinnedMesh" : "StaticMesh");
+    if (!info.rigType.empty())
+        typeNode.addChild("Rig").values.emplace_back(info.rigType);
+
     const Transform& lt = info.localTransform;
     if (lt.pos != glm::vec3(0.0f))         out.set("Position", lt.pos);
     if (lt.quat != glm::quat(1, 0, 0, 0))  out.set("Rotation", glm::degrees(glm::eulerAngles(lt.quat)));

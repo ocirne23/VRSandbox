@@ -46,7 +46,6 @@ static std::string fileKey(const std::filesystem::path& path)
 void AssetRegistry::clear()
 {
     m_objectContainers.clear();
-    m_spawnables.clear();
     m_clips.clear();
     m_animators.clear();
     m_prefabs.clear();
@@ -90,9 +89,6 @@ void AssetRegistry::registerFile(const std::string& path)
 
     const std::string fileName = fileKey(path);
 
-    // StaticMesh/SkinnedMesh entries belong to the ObjectContainer declared earlier in the same file.
-    std::string currentContainer;
-
     for (const AssetNode& decl : root.children)
     {
         if (iequals(decl.key, "ObjectContainer"))
@@ -105,28 +101,8 @@ void AssetRegistry::registerFile(const std::string& path)
                 Log::warning("AssetRegistry: unnamed ObjectContainer in " + path);
                 continue;
             }
-            currentContainer = desc.name;
             if (!m_objectContainers.try_emplace(desc.name, std::move(desc)).second)
                 Log::warning("AssetRegistry: duplicate ObjectContainer '" + decl.asString(0) + "' (keeping first), in " + path);
-        }
-        else if (iequals(decl.key, "StaticMesh") || iequals(decl.key, "SkinnedMesh"))
-        {
-            if (currentContainer.empty())
-            {
-                Log::warning("AssetRegistry: '" + decl.key + " " + decl.asString(0) + "' before any ObjectContainer in " + path);
-                continue;
-            }
-            SpawnableDesc desc;
-            if (!toSpawnableDesc(decl, currentContainer, desc))
-                continue;
-            if (desc.name.empty())
-            {
-                Log::warning("AssetRegistry: unnamed " + decl.key + " in " + path);
-                continue;
-            }
-            const std::string spawnableName = desc.name;
-            if (!m_spawnables.try_emplace(spawnableName, std::move(desc)).second)
-                Log::warning("AssetRegistry: duplicate spawnable '" + spawnableName + "' (keeping first), in " + path);
         }
         else if (iequals(decl.key, "Animation"))
         {
@@ -184,12 +160,6 @@ const ObjectContainerDesc* AssetRegistry::findObjectContainer(const std::string&
 {
     const auto it = m_objectContainers.find(name);
     return it != m_objectContainers.end() ? &it->second : nullptr;
-}
-
-const SpawnableDesc* AssetRegistry::findSpawnable(const std::string& name) const
-{
-    const auto it = m_spawnables.find(name);
-    return it != m_spawnables.end() ? &it->second : nullptr;
 }
 
 const AnimationClipDesc* AssetRegistry::findClip(const std::string& name) const

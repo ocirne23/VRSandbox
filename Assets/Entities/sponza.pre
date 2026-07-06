@@ -1,6 +1,8 @@
 Prefab sponza
 	Component Render
-		StaticMesh Sponza
+		ObjectContainer sponza
+		Node ROOT
+		Type StaticMesh
 		Position 0, 0, 0
 		Rotation 0, 0, 0
 	Component Physics

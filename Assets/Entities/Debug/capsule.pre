@@ -1,3 +1,5 @@
 Prefab capsule
 	Component Render
-		StaticMesh Capsule
+		ObjectContainer baseshapes
+		Node Capsule
+		Type StaticMesh

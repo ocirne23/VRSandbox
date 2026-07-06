@@ -1,3 +1,5 @@
 Prefab wedge
 	Component Render
-		StaticMesh Wedge
+		ObjectContainer baseshapes
+		Node Wedge
+		Type StaticMesh

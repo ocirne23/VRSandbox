@@ -1,3 +1,5 @@
 Prefab ramp
 	Component Render
-		StaticMesh Ramp
+		ObjectContainer baseshapes
+		Node Ramp
+		Type StaticMesh

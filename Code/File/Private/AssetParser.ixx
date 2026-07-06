@@ -35,6 +35,7 @@ export struct AssetNode
 
     AssetNode& addChild(std::string key);
     AssetNode& set(std::string key, std::string value);          // single string value
+    AssetNode& set(std::string key, const char* str);            // single string value
     AssetNode& set(std::string key, float value);
     AssetNode& set(std::string key, bool value);
     AssetNode& set(std::string key, const glm::vec3& value);     // "x, y, z"

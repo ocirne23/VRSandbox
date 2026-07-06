@@ -14,8 +14,6 @@ public:
 
     const ObjectContainerDesc* findObjectContainer(const std::string& name) const;
 
-    const SpawnableDesc* findSpawnable(const std::string& name) const;
-
     const AnimationClipDesc* findClip(const std::string& name) const;
 
     const AnimatorDesc* findAnimator(const std::string& name) const;
@@ -28,9 +26,7 @@ public:
 
     const std::unordered_map<std::string, ObjectContainerDesc>& getObjectContainers() const { return m_objectContainers; }
 
-    // StaticMesh/SkinnedMesh entries by name (Render component mesh picker) and .apl Animator entries
-    // by name (Animator component picker) — for editor tooling (Entity Editor) to offer a searchable list.
-    const std::unordered_map<std::string, SpawnableDesc>& getSpawnables() const { return m_spawnables; }
+    // .apl Animator entries by name — for editor tooling (Entity Editor) to offer a searchable list.
     const std::unordered_map<std::string, AnimatorDesc>& getAnimators() const { return m_animators; }
 
 private:
@@ -38,7 +34,6 @@ private:
     void registerFile(const std::string& path);
 
     std::unordered_map<std::string, ObjectContainerDesc> m_objectContainers;
-    std::unordered_map<std::string, SpawnableDesc> m_spawnables; // StaticMesh/SkinnedMesh entries, global by name
     std::unordered_map<std::string, AnimationClipDesc> m_clips;  // .anm Animation entries, global by name
     std::unordered_map<std::string, AnimatorDesc> m_animators;   // .apl Animator entries, global by name
     std::unordered_map<std::string, std::string> m_prefabs; // name -> .pre file path

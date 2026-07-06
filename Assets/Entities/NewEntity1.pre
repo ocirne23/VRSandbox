@@ -4,117 +4,15 @@ Prefab NewEntity1
 	Scale 1
 	Component Scene
 		Enabled true
-		Entity Gizmo
-			Position 0 0 0
-			Rotation 0 -0 0
-			Scale 0.5
-			Component Scene
-				Enabled true
-				Entity Arrows
-					Position 0 0 0
-					Rotation 0 -0 0
-					Scale 0.22
-					Component Scene
-						Enabled true
-						Entity ArrowRed
-							Position 0 2 0
-							Rotation 0 -0 0
-							Scale 1
-							Component Render
-								StaticMesh ArrowRed
-						Entity ArrowGreen
-							Position 0 0 2
-							Rotation 90 -0 0
-							Scale 1
-							Component Render
-								StaticMesh ArrowGreen
-						Entity ArrowBlue
-							Position 2 0 0
-							Rotation 0 -0 -90
-							Scale 1
-							Component Render
-								StaticMesh ArrowBlue
-				Entity Planes
-					Position 0 0 0
-					Rotation 0 -0 0
-					Scale 0.44
-					Component Scene
-						Enabled true
-						Entity PlaneRed
-							Position 2 2 -0.5
-							Rotation 0 89.98022 0
-							Scale 1
-							Component Render
-								StaticMesh PlaneRed
-						Entity PlaneGreen
-							Position -0.5 2 2
-							Rotation 0 -0 0
-							Scale 1
-							Component Render
-								StaticMesh PlaneGreen
-						Entity PlaneBlue
-							Position 2 -0.5 2
-							Rotation 0 -0 90
-							Scale 1
-							Component Render
-								StaticMesh PlaneBlue
-				Entity Arches
-					Position 0 0 0
-					Rotation 0 -0 0
-					Scale 0.22
-					Component Scene
-						Enabled false
-						Entity ArchRed
-							Position 1.5 1.5 -0.5
-							Rotation 0 89.98022 0
-							Scale 1.75
-							Component Render
-								StaticMesh ArchRed
-						Entity ArchGreen
-							Position -0.5 1.5 1.5
-							Rotation 0 -0 0
-							Scale 1.75
-							Component Render
-								StaticMesh ArchGreen
-						Entity ArchBlue
-							Position 1.5 -0.5 1.5
-							Rotation 0 -0 -90
-							Scale 1.75
-							Component Render
-								StaticMesh ArchBlue
-				Entity Scale
-					Position 0 0 0
-					Rotation 0 -0 0
-					Scale 0.22
-					Component Scene
-						Enabled false
-						Entity ScaleRed
-							Position 0 2 0
-							Rotation 0 -0 0
-							Scale 1
-							Component Render
-								StaticMesh ScaleRed
-						Entity ScaleGreen
-							Position 0 0 2
-							Rotation 90 -0 0
-							Scale 1
-							Component Render
-								StaticMesh ScaleGreen
-						Entity ScaleBlue
-							Position 2 0 0
-							Rotation 0 -0 -90
-							Scale 1
-							Component Render
-								StaticMesh ScaleBlue
-				Entity SphereWhite
-					Position 0 0 0
-					Rotation 0 -0 0
-					Scale 0.22
-					Component Render
-						StaticMesh SphereWhite
-			Component Render
-				StaticMesh Plane
 		Entity Entity
-			Position 0 0 0
+			Position 0 3.15 0
 			Rotation 0 -0 0
 			Scale 1
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+	Component Render
+		ObjectContainer sponza
+		Node ROOT
+		Type StaticMesh

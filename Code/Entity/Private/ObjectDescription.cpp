@@ -54,29 +54,6 @@ bool toObjectContainerDesc(const AssetNode& node, ObjectContainerDesc& out)
     return true;
 }
 
-bool toSpawnableDesc(const AssetNode& node, const std::string& containerName, SpawnableDesc& out)
-{
-    const bool skinned = iequals(node.key, "SkinnedMesh");
-    if (!skinned && !iequals(node.key, "StaticMesh"))
-        return false;
-
-    out = SpawnableDesc{};
-    out.name = node.asString(0);
-    out.containerName = containerName;
-    out.skinned = skinned;
-    if (const AssetNode* n = node.find("Node"))
-        out.node = n->asString();
-    if (skinned)
-    {
-        if (const AssetNode* t = node.find("Type"))
-            out.rigType = t->asString();
-        if (const AssetNode* bm = node.find("BoneMapping"))
-            for (const AssetNode& pair : bm->children)
-                out.boneMapping.emplace_back(pair.key, pair.asString(0)); // canonical -> rig bone
-    }
-    return true;
-}
-
 bool loadObjectContainerDesc(const std::string& path, ObjectContainerDesc& out, std::string& outError)
 {
     AssetNode root;

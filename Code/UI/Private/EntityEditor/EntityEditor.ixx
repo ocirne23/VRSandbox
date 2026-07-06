@@ -16,7 +16,9 @@ export class EntityEditor
 {
 public:
 
-	void render();
+	// sceneSelection is the main Scene panel's current selection (not this editor's own tree selection),
+	// used only to gate/drive the "Open Selected" toolbar button.
+	void render(Entity* sceneSelection);
 
 	// Called (via UI) once main.cpp has fulfilled an OpenPrefabForEdit/NewPrefab EntityChange and the
 	// entity actually exists in the world's root list.
@@ -48,9 +50,16 @@ private:
 	void renderAudioSection();
 	void renderScriptSection();
 
+	// Editing an already-live scene entity in place (via "Open Selected") vs. a dedicated one this editor
+	// spawned itself (New / Open by path) — only the latter gets deleted when switching away/closing.
+	void requestOpenSelected(Entity* entity);
+	void requestClose();
+	void doSwitchOpenSelected(EntityPtr entity);
+	void doClose();
+
 	void doSwitchOpen(const std::string& path);
 	void doSwitchNew(const std::string& name);
-	void closeCurrent(); // detaches m_editRoot bookkeeping; still queues its Delete
+	void closeCurrent(); // detaches m_editRoot bookkeeping; deletes it only if this editor owns it
 
 	void trySave(const std::string& path);   // overwrite-confirms if the target file already exists
 	void queueSave(const std::string& path);
@@ -73,6 +82,10 @@ private:
 	EntityPtr   m_selected; // entity currently shown in Name/Transform/Components (root or a descendant)
 	std::string m_path; // empty until first save/open
 
+	Entity* m_sceneSelection = nullptr; // this frame's main Scene panel selection, set at the top of render()
+	bool    m_ownsEntity     = true;    // false when editing an existing scene entity in place ("Open Selected")
+	bool    m_wasPacked      = false;   // was m_editRoot a locked prefab instance before we unpacked it to edit?
+
 	std::string m_baselineText; // serialized text at last load/save, for dirty-tracking
 
 	std::vector<EntityChange> m_changes;
@@ -80,10 +93,12 @@ private:
 	char m_pathBuf[256] = "Entities/NewEntity.pre";
 	char m_nameBuf[256] = {};
 
-	bool        m_pendingSwitchIsNew = false;
-	std::string m_pendingSwitchPath;
-	std::string m_pendingSwitchName;
-	bool        m_openUnsavedPopup = false;
+	enum class PendingSwitch { None, New, OpenPath, OpenSelected, Close };
+	PendingSwitch m_pendingSwitch = PendingSwitch::None;
+	std::string   m_pendingSwitchPath;
+	std::string   m_pendingSwitchName;
+	EntityPtr     m_pendingSwitchEntity;
+	bool          m_openUnsavedPopup = false;
 
 	bool        m_openOverwritePopup = false;
 	std::string m_pendingSavePath;
@@ -106,8 +121,9 @@ private:
 
 	char m_physCollidesWithBuf[256] = {}; // comma-joined display/edit buffer for physicsDraft.collidesWith
 
-	char m_renderPickerSearch[128]   = {};
-	char m_animatorPickerSearch[128] = {};
+	char m_renderPickerSearch[128]     = {}; // container (.oc) name picker
+	char m_renderNodePickerSearch[128] = {}; // node picker, scoped to the currently chosen container
+	char m_animatorPickerSearch[128]  = {};
 
 	char m_newChildNameBuf[128] = "Entity";
 	Entity* m_pendingRemoveChild = nullptr; // set while walking the tree, applied after (avoids mutating mid-walk)

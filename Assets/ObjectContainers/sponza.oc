@@ -2,6 +2,3 @@ ObjectContainer sponza
 	Path "Models/sponza.glb"
 	MergeNodes true
 	PreTransformVertices false
-
-StaticMesh Sponza
-	Node ROOT

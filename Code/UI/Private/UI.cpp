@@ -324,7 +324,7 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
 
     {
         ImGui::Begin("Entity Editor");
-        m_entityEditor.render();
+        m_entityEditor.render(m_sceneView.getSelected());
 
         if (ImGui::BeginDragDropTargetCustom(
             ImRect(ImGui::GetWindowPos(),

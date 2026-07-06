@@ -98,7 +98,7 @@ export struct RenderComponent
         NodeSpawnIdx nodeIdx = NodeSpawnIdx_ROOT;
         Transform localTransform;                   // applied on top of the spawn base transform
         bool skinned = false;                       // spawn a skinned node (GPU skinning) instead of a static one
-        std::string spawnableName;                  // set when referenced via StaticMesh/SkinnedMesh (re-serialization)
+        std::string rigType;                        // skinned only: "Humanoid" / "Generic" (empty = unspecified; informational, not yet consumed)
     };
 
     void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);

@@ -1,3 +1,5 @@
 Prefab cube
 	Component Render
-		StaticMesh Cube
+		ObjectContainer baseshapes
+		Node Cube
+		Type StaticMesh

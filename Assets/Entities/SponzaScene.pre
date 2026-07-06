@@ -1,5 +1,15 @@
-Prefab "Sponza Scene"
+Prefab SponzaScene
+	Name "Sponza Scene"
+	Position 0 0 0
+	Rotation 0 -0 0
+	Scale 1
 	Component Scene
 		Enabled true
 		Prefab skysphere
+			Position 0 0 0
+			Rotation 0 -0 0
+			Scale 1
 		Prefab sponza
+			Position 0 0 0
+			Rotation 0 -0 0
+			Scale 1

@@ -1,6 +1,8 @@
 Prefab Bistro
 	Component Render
-		StaticMesh Bistro
+		ObjectContainer Bistro
+		Node ROOT
+		Type StaticMesh
 		Position 0, 0, 0
 		Rotation 0, 0, 0
 		Scale 0.5

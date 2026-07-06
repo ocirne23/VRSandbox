@@ -10,33 +10,6 @@ SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scrip
     ctx->log("Character On Destroy");
 }
 
-SCRIPT_EXPORT int ScriptEventCount() { return 3; }
-SCRIPT_EXPORT const char* ScriptEventName(int eventIdx)
-{
-    switch (eventIdx)
-    {
-    case 0: return "W Down";
-    case 1: return "Test";
-    case 2: return "W Up";
-    default: return "";
-    }
-}
-SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData)
-{
-    switch (eventIdx) {
-    case 0:
-    {
-        ctx->log("awa");
-        ctx->sendEvent("Test");
-    } break;
-    case 1:
-    {
-        ctx->log("hello");
-        ctx->entityTriggerAudio(self, "Blip", 2, glm::vec3(0,0,0), 0.1f, 1.0f);
-    } break;
-    }
-}
-
 SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
 {
     self->rot = glm::quat(glm::radians(glm::vec3{ 0.0f, (ctx->elapsedSeconds * 50.0f), 0.0f }));
@@ -51,18 +24,7 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@node 5 OnDestroy 2 -112
 //@node 6 Print 144 -204
 //@node 7 Print 144 -108
-//@node 8 OnEvent 95 -473
-//@node 9 Print 343 -380
-//@node 10 Print 336 -492
-//@node 11 SendEvent 597 -492
-//@node 12 SetEntity 800 -122
-//@node 13 ConstFloat 416 -185
-//@node 14 TriggerAudio 608 -409
-//@event 8 W Down
-//@event 8 Test
-//@event 8 W Up
-//@audioentry 14 Bloop
-//@audioentry 14 Blip
+//@node 8 SetEntity 800 -122
 //@pin 2 0 0.0f
 //@pin 2 1 0.0f
 //@pin 2 2 0.0f
@@ -70,26 +32,14 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 //@pin 3 1 50.0f
 //@pin 6 1 Character On Spawn
 //@pin 7 1 Character On Destroy
-//@pin 9 1 hello
-//@pin 10 1 awa
-//@pin 11 1 Test
-//@pin 12 1 self
-//@pin 12 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
-//@pin 12 3 1.0f
-//@pin 12 4 glm::vec3{ 0.0f, 0.0f, 0.0f }
-//@pin 12 5 true
-//@pin 13 0 0.5
-//@pin 14 2 self
-//@pin 14 3 default
-//@pin 14 4 0.1f
-//@pin 14 5 default
+//@pin 8 1 self
+//@pin 8 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 8 3 1.0f
+//@pin 8 4 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 8 5 true
 //@link 3 0 2 1
 //@link 1 0 3 0
 //@link 4 0 6 0
 //@link 5 0 7 0
-//@link 8 1 9 0
-//@link 8 0 10 0
-//@link 10 0 11 0
-//@link 0 0 12 0
-//@link 2 0 12 4
-//@link 9 0 14 1
+//@link 0 0 8 0
+//@link 2 0 8 4

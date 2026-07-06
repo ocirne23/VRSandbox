@@ -12,19 +12,25 @@ Prefab Gizmo
 				Enabled true
 				Entity ArrowRed
 					Component Render
-						StaticMesh ArrowRed
+						ObjectContainer gizmos
+						Node Arrow1
+						Type StaticMesh
 					Position 0 2 0
 					Rotation 0 -0 0
 					Scale 1
 				Entity ArrowGreen
 					Component Render
-						StaticMesh ArrowGreen
+						ObjectContainer gizmos
+						Node Arrow2
+						Type StaticMesh
 					Position 0 0 2
 					Rotation 90 -0 0
 					Scale 1
 				Entity ArrowBlue
 					Component Render
-						StaticMesh ArrowBlue
+						ObjectContainer gizmos
+						Node Arrow3
+						Type StaticMesh
 					Position 2 0 0
 					Rotation 0 -0 -90
 					Scale 1
@@ -36,19 +42,25 @@ Prefab Gizmo
 				Enabled true
 				Entity PlaneRed
 					Component Render
-						StaticMesh PlaneRed
+						ObjectContainer gizmos
+						Node Plane1
+						Type StaticMesh
 					Position 2 2 -0.5
 					Rotation 0 89.98022 0
 					Scale 1
 				Entity PlaneGreen
 					Component Render
-						StaticMesh PlaneGreen
+						ObjectContainer gizmos
+						Node Plane2
+						Type StaticMesh
 					Position -0.5 2 2
 					Rotation 0 -0 0
 					Scale 1
 				Entity PlaneBlue
 					Component Render
-						StaticMesh PlaneBlue
+						ObjectContainer gizmos
+						Node Plane3
+						Type StaticMesh
 					Position 2 -0.5 2
 					Rotation 0 -0 90
 					Scale 1
@@ -60,19 +72,25 @@ Prefab Gizmo
 				Enabled false
 				Entity ArchRed
 					Component Render
-						StaticMesh ArchRed
+						ObjectContainer gizmos
+						Node Arch1
+						Type StaticMesh
 					Position 1.5 1.5 -0.5
 					Rotation 0 89.98022 0
 					Scale 1.75
 				Entity ArchGreen
 					Component Render
-						StaticMesh ArchGreen
+						ObjectContainer gizmos
+						Node Arch2
+						Type StaticMesh
 					Position -0.5 1.5 1.5
 					Rotation 0 -0 0
 					Scale 1.75
 				Entity ArchBlue
 					Component Render
-						StaticMesh ArchBlue
+						ObjectContainer gizmos
+						Node Arch3
+						Type StaticMesh
 					Position 1.5 -0.5 1.5
 					Rotation 0 -0 -90
 					Scale 1.75
@@ -84,25 +102,33 @@ Prefab Gizmo
 				Enabled false
 				Entity ScaleRed
 					Component Render
-						StaticMesh ScaleRed
+						ObjectContainer gizmos
+						Node Scale1
+						Type StaticMesh
 					Position 0 2 0
 					Rotation 0 -0 0
 					Scale 1
 				Entity ScaleGreen
 					Component Render
-						StaticMesh ScaleGreen
+						ObjectContainer gizmos
+						Node Scale2
+						Type StaticMesh
 					Position 0 0 2
 					Rotation 90 -0 0
 					Scale 1
 				Entity ScaleBlue
 					Component Render
-						StaticMesh ScaleBlue
+						ObjectContainer gizmos
+						Node Scale3
+						Type StaticMesh
 					Position 2 0 0
 					Rotation 0 -0 -90
 					Scale 1
 		Entity SphereWhite
 			Component Render
-				StaticMesh SphereWhite
+				ObjectContainer gizmos
+				Node Sphere4
+				Type StaticMesh
 			Position 0 0 0
 			Rotation 0 -0 0
 			Scale 0.22

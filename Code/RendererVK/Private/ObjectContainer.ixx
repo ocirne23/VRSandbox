@@ -51,6 +51,10 @@ public:
     bool isValid() const { return !m_nodeInfos.empty(); }
 
     NodeSpawnIdx getSpawnIdxForPath(const std::string& nodePath) const;
+
+    // All node paths this container knows about — for editor tooling (Entity Editor) to offer a picker
+    // scoped to a single container instead of every spawnable registered engine-wide.
+    std::vector<std::string> getNodePaths() const;
     RenderNode spawnNodeForPath(const std::string& nodePath, const Transform& transform);
     RenderNode spawnRootNode(const Transform& transform);
     RenderNode spawnNodeForIdx(NodeSpawnIdx idx, const Transform& transform);
