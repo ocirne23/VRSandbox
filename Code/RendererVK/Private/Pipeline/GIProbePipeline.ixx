@@ -71,6 +71,8 @@ public:
         glm::vec3 prevViewPos;   // last frame's camera (previous clipmap window, drives probe freshness)
     };
     void recordTrace(CommandBuffer& commandBuffer, uint32 frameIdx, TraceParams& params);
+    // Rewrites one slot of the trace set's texture array (binding 13) with a streamed texture's current view.
+    void updateTextureDescriptor(uint32 frameIdx, uint32 slotIdx, vk::ImageView view);
 
     // Debug visualization: instanced cubes at every clipmap probe, drawn into the main color pass.
     // initializeDebug must be called after the main render pass exists.

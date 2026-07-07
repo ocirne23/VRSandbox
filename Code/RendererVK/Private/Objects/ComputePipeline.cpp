@@ -29,7 +29,12 @@ bool ComputePipeline::initialize(const ComputePipelineLayout& layout)
         .pBindings = layout.descriptorSetLayoutBindings.data(),
     };
     if (!layout.descriptorBindingFlags.empty())
+    {
         layoutInfo.pNext = &bindingFlagsInfo;
+        // Same contract as GraphicsPipeline: any binding flags imply the layout may carry
+        // UPDATE_AFTER_BIND bindings (the pool is created with eUpdateAfterBind).
+        layoutInfo.flags |= vk::DescriptorSetLayoutCreateFlagBits::eUpdateAfterBindPool;
+    }
     auto layoutResult = vkDevice.createDescriptorSetLayout(layoutInfo);
     if (layoutResult.result != vk::Result::eSuccess)
     {

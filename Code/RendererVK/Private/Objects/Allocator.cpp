@@ -136,6 +136,15 @@ void Allocator::flushAllocation(VmaAllocation allocation, vk::DeviceSize offset,
         (void)vmaFlushAllocation(m_allocator, allocation, offset, size);
 }
 
+uint64 Allocator::getAllocationSize(VmaAllocation allocation) const
+{
+    if (!allocation)
+        return 0;
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(m_allocator, allocation, &info);
+    return info.size;
+}
+
 Allocator::MemoryUsage Allocator::getMemoryUsage() const
 {
     MemoryUsage usage{};

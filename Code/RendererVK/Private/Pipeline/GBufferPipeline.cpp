@@ -38,7 +38,7 @@ void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout, uint32
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
         .binding = 3, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     layout.descriptorBindingFlags.resize(descriptorSetBindings.size());
-    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount | vk::DescriptorBindingFlagBits::eUpdateAfterBind;
 
     // View index (u_views[viewIndex]); the prepass is rendered once per eye in VR (0 = centre on desktop).
     layout.pushConstantRanges.push_back(vk::PushConstantRange{
@@ -52,6 +52,15 @@ void GBufferPipeline::initialize(const GBuffer& gbuffer, uint32 maxTextures)
     GraphicsPipelineLayout layout;
     buildPipelineLayout(layout, maxTextures);
     m_graphicsPipeline.initialize(gbuffer.getRenderPass(), layout);
+}
+
+void GBufferPipeline::updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view)
+{
+    // Streamed texture slot rewrite in the cached prepass CB's set (binding 3 is UPDATE_AFTER_BIND).
+    vk::DescriptorImageInfo imageInfo{ .sampler = m_textureSampler.getSampler(), .imageView = view, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 3, .dstArrayElement = slotIdx, .descriptorCount = 1,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
+    Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
 
 void GBufferPipeline::reloadShaders(const GBuffer& gbuffer)

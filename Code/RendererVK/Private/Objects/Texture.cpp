@@ -1,4 +1,8 @@
-﻿module RendererVK;
+﻿module;
+
+#include <cstdio> // fopen_s/_fseeki64/SEEK_SET for the narrowed DDS mip-range read
+
+module RendererVK;
 
 import Core;
 import File;
@@ -7,6 +11,7 @@ import :VK;
 import :Allocator;
 import :Buffer;
 import :StagingManager;
+import :TextureStreamer;
 import :stb_image;
 import :DDS;
 
@@ -96,9 +101,15 @@ Texture::Texture(Texture&& move)
     m_image = move.m_image;
     m_imageMemory = move.m_imageMemory;
     m_imageView = move.m_imageView;
+    m_pStreamingMeta = std::move(move.m_pStreamingMeta);
     move.m_image = VK_NULL_HANDLE;
     move.m_imageMemory = VK_NULL_HANDLE;
     move.m_imageView = VK_NULL_HANDLE;
+}
+
+uint64 Texture::getAllocatedBytes() const
+{
+    return Globals::gpuAllocator.getAllocationSize(m_imageMemory);
 }
 
 bool Texture::initialize(const char* filePath, bool generateMips, bool sRGB)
@@ -123,14 +134,17 @@ bool Texture::initialize(const char* filePath, bool generateMips, bool sRGB)
             return false;
         }
         const size_t size = std::filesystem::file_size(filePath);
-        fileData.resize(size);
-        if (fread(fileData.data(), 1, size, file.get()) != size)
+
+        // Header first: it lays out the whole mip chain, so the pixel read below can be narrowed to
+        // just the mips this image will actually contain.
+        const size_t headerSize = std::min(size, sizeof(dds::Header));
+        fileData.resize(headerSize);
+        if (fread(fileData.data(), 1, headerSize, file.get()) != headerSize)
         {
             assert(false && "Failed to read file");
             return false;
         }
-
-        dds::Header header = dds::read_header(fileData.data(), size);
+        const dds::Header header = dds::read_header(fileData.data(), headerSize);
         if (!header.is_valid())
         {
             assert(false && "Invalid DDS file");
@@ -144,10 +158,56 @@ bool Texture::initialize(const char* filePath, bool generateMips, bool sRGB)
         if (format == vk::Format::eUndefined)
             return false;
 
-        for (uint32 i = 0; i < numMipLevels; i++)
+        // Plain 2D textures with a mip chain qualify for mip streaming: capture where each mip lives in
+        // the file so the TextureStreamer can re-read arbitrary mip ranges later.
+        if (numMipLevels > 1 && !header.is_cubemap() && !header.is_1d() && !header.is_3d() && header.array_size() == 1)
         {
-            imgData.push_back(std::span(fileData.data() + header.mip_offset(i), header.mip_size(i)));
+            m_pStreamingMeta = std::make_unique<StreamedTextureMeta>();
+            m_pStreamingMeta->filePath = filePath;
+            m_pStreamingMeta->format = format;
+            m_pStreamingMeta->fullWidth = (uint16)width;
+            m_pStreamingMeta->fullHeight = (uint16)height;
+            m_pStreamingMeta->mips.reserve(numMipLevels);
+            for (uint32 i = 0; i < numMipLevels; i++)
+            {
+                m_pStreamingMeta->mips.push_back(TextureMipRange{
+                    .fileOffset = header.mip_offset(i),
+                    .byteSize = (uint32)header.mip_size(i),
+                    .width = (uint16)std::max(1u, width >> i),
+                    .height = (uint16)std::max(1u, height >> i),
+                });
+            }
         }
+
+        // Tail-only initial load: upload just the always-resident low-res tail and let the
+        // TextureStreamer bring higher mips in by priority. Unstreamable textures load everything.
+        uint32 firstMip = 0;
+        if (m_pStreamingMeta && Globals::textureStreamer.isStreamingEnabled())
+        {
+            firstMip = computeStreamTailTop(*m_pStreamingMeta, Globals::textureStreamer.tailMaxDim());
+            m_pStreamingMeta->initialResidentTop = (uint8)firstMip;
+        }
+
+        // Mips of a slice are contiguous in the file: one seek + read covers [firstMip..numMipLevels).
+        const uint64 dataOffset = header.mip_offset(firstMip);
+        const uint64 dataSize = header.mip_offset(numMipLevels - 1) + header.mip_size(numMipLevels - 1) - dataOffset;
+        assert(dataOffset + dataSize <= size && "DDS mip chain exceeds file size");
+        fileData.resize(dataSize);
+        if (_fseeki64(file.get(), (int64)dataOffset, SEEK_SET) != 0
+            || fread(fileData.data(), 1, dataSize, file.get()) != dataSize)
+        {
+            assert(false && "Failed to read file");
+            return false;
+        }
+        uint64 bufferOffset = 0;
+        for (uint32 i = firstMip; i < numMipLevels; i++)
+        {
+            imgData.push_back(std::span(fileData.data() + bufferOffset, header.mip_size(i)));
+            bufferOffset += header.mip_size(i);
+        }
+        width = std::max(1u, width >> firstMip);
+        height = std::max(1u, height >> firstMip);
+        numMipLevels -= firstMip;
     }
     else
     {
@@ -166,7 +226,10 @@ bool Texture::initialize(const char* filePath, bool generateMips, bool sRGB)
         */
     }
 
-	return initialize(width, height, format, imgData, generateMips);
+	// A streamed source's mip layout must stay exactly the file's: never synthesize a chain from it
+	// (a partial-chain DDS whose tail is a single mip would otherwise hit the blit-generate path and
+	// desync the image from the TextureStreamer's bookkeeping).
+	return initialize(width, height, format, imgData, generateMips && !m_pStreamingMeta);
 }
 
 bool Texture::initialize(const ITextureData& textureData, bool generateMips, bool sRGB)
@@ -329,7 +392,7 @@ bool Texture::initialize(uint32 width, uint32 height, vk::Format format, const s
     {
         for (uint32 i = 0; i < m_numMipLevels; i++)
         {
-            Globals::stagingManager.uploadImage(m_image, m_width >> i, m_height >> i, imageDataMips[i].size(), imageDataMips[i].data(), i);
+            Globals::stagingManager.uploadImage(m_image, std::max(1u, m_width >> i), std::max(1u, m_height >> i), imageDataMips[i].size(), imageDataMips[i].data(), i);
         }
     }
 

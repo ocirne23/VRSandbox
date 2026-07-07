@@ -41,6 +41,25 @@ namespace
         }
 
         bool acceptCell(const glm::vec3&, const glm::vec3&) const { return true; }
+
+        // 8 spheres at once; mostly pays for mid-size radii (gameplay queries, queryNearest rings)
+        // where partially-covered cells dominate — huge balls take the fully-inside wholesale path.
+        uint32 test8(const glm::vec3& cellMin, const float* px, const float* py, const float* pz,
+                     const float* pr, const uint32* layers, uint32 layerMask) const
+        {
+            const __m256 x = _mm256_add_ps(_mm256_loadu_ps(px), _mm256_set1_ps(cellMin.x));
+            const __m256 y = _mm256_add_ps(_mm256_loadu_ps(py), _mm256_set1_ps(cellMin.y));
+            const __m256 z = _mm256_add_ps(_mm256_loadu_ps(pz), _mm256_set1_ps(cellMin.z));
+            const __m256 r = _mm256_loadu_ps(pr);
+            __m256 ok = _mm256_cmp_ps(r, _mm256_setzero_ps(), _CMP_GE_OQ); // tombstones fail
+            const __m256 d2 = _mm256_fmadd_ps(x, x, _mm256_fmadd_ps(y, y, _mm256_mul_ps(z, z)));
+            const __m256 rr = _mm256_add_ps(_mm256_set1_ps(radius), r);
+            ok = _mm256_and_ps(ok, _mm256_cmp_ps(d2, _mm256_mul_ps(rr, rr), _CMP_LE_OQ));
+            const __m256i lay = _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(layers)),
+                                                 _mm256_set1_epi32(int(layerMask)));
+            ok = _mm256_andnot_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(lay, _mm256_setzero_si256())), ok);
+            return uint32(_mm256_movemask_ps(ok));
+        }
     };
 
     struct AABBTester // box centered on refPos
@@ -64,6 +83,28 @@ namespace
         }
 
         bool acceptCell(const glm::vec3&, const glm::vec3&) const { return true; }
+
+        // 8 sphere-vs-box tests at once (squared distance from the box to each sphere center).
+        uint32 test8(const glm::vec3& cellMin, const float* px, const float* py, const float* pz,
+                     const float* pr, const uint32* layers, uint32 layerMask) const
+        {
+            const __m256 zero = _mm256_setzero_ps();
+            const __m256 signMask = _mm256_set1_ps(-0.0f);
+            const __m256 x = _mm256_add_ps(_mm256_loadu_ps(px), _mm256_set1_ps(cellMin.x));
+            const __m256 y = _mm256_add_ps(_mm256_loadu_ps(py), _mm256_set1_ps(cellMin.y));
+            const __m256 z = _mm256_add_ps(_mm256_loadu_ps(pz), _mm256_set1_ps(cellMin.z));
+            const __m256 cx = _mm256_max_ps(_mm256_sub_ps(_mm256_andnot_ps(signMask, x), _mm256_set1_ps(half.x)), zero);
+            const __m256 cy = _mm256_max_ps(_mm256_sub_ps(_mm256_andnot_ps(signMask, y), _mm256_set1_ps(half.y)), zero);
+            const __m256 cz = _mm256_max_ps(_mm256_sub_ps(_mm256_andnot_ps(signMask, z), _mm256_set1_ps(half.z)), zero);
+            const __m256 r = _mm256_loadu_ps(pr);
+            __m256 ok = _mm256_cmp_ps(r, zero, _CMP_GE_OQ); // tombstones fail
+            const __m256 d2 = _mm256_fmadd_ps(cx, cx, _mm256_fmadd_ps(cy, cy, _mm256_mul_ps(cz, cz)));
+            ok = _mm256_and_ps(ok, _mm256_cmp_ps(d2, _mm256_mul_ps(r, r), _CMP_LE_OQ));
+            const __m256i lay = _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(layers)),
+                                                 _mm256_set1_epi32(int(layerMask)));
+            ok = _mm256_andnot_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(lay, _mm256_setzero_si256())), ok);
+            return uint32(_mm256_movemask_ps(ok));
+        }
     };
 
     struct FrustumTester // frustum + distance band, both camera-relative (refPos = camera)

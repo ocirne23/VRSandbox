@@ -201,4 +201,13 @@ export struct Stats
     uint64 gpuMemoryUsedBytes;     // bytes our live allocations occupy
     uint64 gpuMemoryReservedBytes; // bytes VMA has reserved in blocks (>= used)
     uint64 gpuMemoryBudgetBytes;   // device-local budget available to the process
+
+    // Texture mip streaming (see TextureStreamer).
+    uint64 textureBudgetBytes;
+    uint64 textureResidentBytes;   // live allocations of streamable textures
+    uint64 texturePinnedBytes;     // unstreamable textures, always fully resident
+    uint64 textureDesiredBytes;    // what the priority pass wants resident
+    uint64 textureTailBytes;       // always-resident mip tails (part of resident)
+    uint32 numStreamableTextures;
+    uint32 numStreamOpsInFlight;
 };

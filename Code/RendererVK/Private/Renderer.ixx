@@ -117,6 +117,12 @@ private:
     CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 
     void recordCommandBuffers();
+    // Rewrites swapped streamed-texture slots in this frame slot's bindless texture arrays (all
+    // consuming pipelines). Called from recordCommandBuffers, where the slot's fence has been waited.
+    void applyPendingTextureDescriptorWrites(uint32 frameIdx);
+    // Texture-streaming priority pass: reports the node's projected screen size to the TextureStreamer
+    // for every material texture its instances sample (called from renderNode/renderNodeThreadSafe).
+    void noteTextureUse(const RenderNode& node, uint32 passMask);
     void recordSkinning(uint32 frameIdx);
     void recordIndirectCull(uint32 frameIdx);
     void recordLightGrid(uint32 frameIdx);
@@ -224,6 +230,7 @@ private:
 
     glm::vec3 m_cameraPos = glm::vec3(0.0f);
     glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
+    float m_mipPixelScale = 0.0f; // viewportHeight / tan(fovY/2): projected diameter px = radius * scale / dist
 
     glm::mat4 m_sunCascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
     uint32 m_numSunCascades = 0;

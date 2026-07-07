@@ -18,6 +18,7 @@ import :VK;
 import :Allocator;
 import :StagingManager;
 import :TextureManager;
+import :TextureStreamer;
 import :MeshDataManager;
 import :glslang;
 import :Layout;
@@ -31,6 +32,7 @@ Renderer::~Renderer()
     {
         assert(false && "Failed to wait for device idle in RendererVK::~RendererVK");
     }
+    Globals::textureStreamer.shutdown(); // stop the disk worker + retire swapped-out images while the device is idle
     destroyEyeCompositeTargets();
     ImGui_ImplVulkan_Shutdown();
 }
@@ -89,6 +91,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_viewportRect.max = glm::ivec2(m_swapChain.getLayout().extent.width, m_swapChain.getLayout().extent.height);
 
     Globals::stagingManager.initialize();
+    Globals::textureStreamer.initialize();
     Globals::meshDataManager.initialize(RendererVKLayout::INITIAL_VERTEX_DATA, RendererVKLayout::INITIAL_INDEX_DATA);
 
     m_renderPass.initialize(m_swapChain);
@@ -248,6 +251,7 @@ void Renderer::recreateWindowSurface(Window& window)
     {
         assert(false && "Failed to wait for device idle in RendererVK::recreateWindowSurface");
     }
+    Globals::textureStreamer.onGpuIdle();
 
     window.getWindowSize(m_windowSize);
     m_swapChain.destroy();
@@ -283,6 +287,7 @@ void Renderer::recreateSwapchain()
     {
         assert(false && "Failed to wait for device idle in RendererVK::recreateSwapchain");
     }
+    Globals::textureStreamer.onGpuIdle();
     printf("recreateSwapchain()\n");
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
@@ -308,6 +313,7 @@ void Renderer::reloadShaders()
         assert(false && "Failed to wait for device idle in RendererVK::reloadShaders");
         return;
     }
+    Globals::textureStreamer.onGpuIdle();
 
     m_staticMeshGraphicsPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass(), m_maxTextures);
     m_gbufferPipeline.reloadShaders(m_perFrameData[m_swapChain.getPrevFrameIdx()].gbuffer);
@@ -413,6 +419,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
     m_cameraPos = camera.position; // drives the GI probe region each frame
+    m_mipPixelScale = (float)std::max(1, viewportSize.y) / std::max(1e-3f, std::tan(glm::radians(camera.fovDeg) * 0.5f));
 
     static RendererVKLayout::Ubo ubo;
 
@@ -540,9 +547,33 @@ void Renderer::renderNodeThreadSafe(const RenderNode& node, uint32 passMask)
     for (auto& pair : node.m_numInstancesPerMesh)
         std::atomic_ref<uint32>(m_numInstancesPerMesh[pair.first]) += pair.second;
 
+    noteTextureUse(node, passMask);
+
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
+}
+
+void Renderer::noteTextureUse(const RenderNode& node, uint32 passMask)
+{
+    if (!Globals::textureStreamer.isStreamingEnabled())
+        return;
+    const Sphere bounds = node.getWorldBounds();
+    const float dist = std::max(0.01f, glm::length(bounds.pos - m_cameraPos) - bounds.radius);
+    const float projPixels = bounds.radius * m_mipPixelScale / dist;
+    float log2P = std::log2(std::max(1.0f, projPixels));
+    if (!(passMask & RendererVKLayout::PASS_MAIN))
+        log2P -= 2.0f; // off-screen (shadow/GI-only) nodes tolerate two mips coarser
+
+    const std::span<const RendererVKLayout::MaterialInfo> materials =
+        m_materialInfosBuffer.getBackingStoreAs<RendererVKLayout::MaterialInfo>();
+    for (const RendererVKLayout::InMeshInstance& instance : node.m_meshInstances)
+    {
+        const RendererVKLayout::MaterialInfo& material = materials[instance.materialIdx];
+        Globals::textureStreamer.noteUse(material.diffuseTexIdx, log2P);
+        Globals::textureStreamer.noteUse(material.normalTexIdx, log2P);
+        Globals::textureStreamer.noteUse(material.metalRoughnessTexIdx, log2P);
+    }
 }
 
 void Renderer::renderNode(const RenderNode& node, uint32 passMask)
@@ -557,6 +588,8 @@ void Renderer::renderNode(const RenderNode& node, uint32 passMask)
 
     for (auto& pair : node.m_numInstancesPerMesh)
         m_numInstancesPerMesh[pair.first] += pair.second;
+
+    noteTextureUse(node, passMask);
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
@@ -641,6 +674,10 @@ void Renderer::present()
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_skinningComputePipeline.update(frameIdx, m_skinningPalettes, m_skinningJobs);
     m_lightGridComputePipeline.update(frameIdx, m_lightCounter);
+
+    // Texture streaming step: folds this frame's priority pass, issues/completes mip streaming ops.
+    // Must run before the staging update so stream-in uploads join this frame's staging batch.
+    Globals::textureStreamer.update();
 
     vk::Semaphore waitSemaphore = Globals::stagingManager.update();
     if (waitSemaphore != VK_NULL_HANDLE)
@@ -770,6 +807,7 @@ void Renderer::waitForGpuAndFlushStaging()
     Globals::stagingManager.flushPending();
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
     assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle during capacity growth");
+    Globals::textureStreamer.onGpuIdle();
 }
 
 void Renderer::growRenderNodeCapacity(uint32 needed)
@@ -1577,10 +1615,44 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     return tlasHandleChanged;
 }
 
+void Renderer::applyPendingTextureDescriptorWrites(uint32 frameIdx)
+{
+    if (Globals::textureStreamer.debugRewriteAllSlots())
+        for (uint16 i = 0; i < (uint16)Globals::textureManager.getNumTextures(); ++i)
+            Globals::textureStreamer.queueDescriptorWrite(i);
+
+    std::span<const uint16> writes = Globals::textureStreamer.getPendingDescriptorWrites(frameIdx);
+    if (writes.empty())
+        return;
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    for (uint16 texIdx : writes)
+    {
+        // Slots beyond the live descriptor count appear when a texture upload outgrew the arrays this
+        // frame; the pending capacity growth re-allocates + fully refills every set, so drop them.
+        if (texIdx >= m_numTextureDescriptors || texIdx >= Globals::textureManager.getNumTextures())
+            continue;
+        const vk::ImageView view = Globals::textureManager.getTexture(texIdx).getImageView();
+        for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
+        {
+            m_staticMeshGraphicsPipeline.updateTextureDescriptor(frameData.staticMeshPipelineDescriptorSet[eye].getDescriptorSet(), texIdx, view);
+            m_gbufferPipeline.updateTextureDescriptor(frameData.gbufferDescriptorSet[eye].getDescriptorSet(), texIdx, view);
+        }
+        m_shadowMapGraphicsPipeline.updateTextureDescriptor(frameData.shadowDrawDescriptorSet.getDescriptorSet(), texIdx, view);
+        m_giProbePipeline.updateTextureDescriptor(frameIdx, texIdx, view);
+        m_rtaoPipeline.updateTextureDescriptor(frameIdx, texIdx, view);
+    }
+    Globals::textureStreamer.clearPendingDescriptorWrites(frameIdx);
+}
+
 void Renderer::recordCommandBuffers()
 {
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
+
+    // Streamed textures: refresh swapped bindless slots in this frame slot's sets before anything
+    // records against them (safe here: acquireNextImage waited this slot's fence, and the texture
+    // arrays are UPDATE_AFTER_BIND for the cached CBs).
+    applyPendingTextureDescriptorWrites(frameIdx);
 
     const bool recordScene = !frameData.updated && m_meshInstanceCounter > 0;
     if (recordScene)
@@ -2022,6 +2094,15 @@ Stats Renderer::getStats()
     stats.gpuMemoryUsedBytes = gpuMem.usedBytes;
     stats.gpuMemoryReservedBytes = gpuMem.reservedBytes;
     stats.gpuMemoryBudgetBytes = gpuMem.budgetBytes;
+
+    const TextureStreamer::StreamerStats streamStats = Globals::textureStreamer.getStats();
+    stats.textureBudgetBytes = streamStats.budgetBytes;
+    stats.textureResidentBytes = streamStats.residentBytes;
+    stats.texturePinnedBytes = streamStats.pinnedBytes;
+    stats.textureDesiredBytes = streamStats.desiredBytes;
+    stats.textureTailBytes = streamStats.tailBytes;
+    stats.numStreamableTextures = streamStats.numStreamable;
+    stats.numStreamOpsInFlight = streamStats.numOpsInFlight;
 
     return stats;
 }

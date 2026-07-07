@@ -49,6 +49,8 @@ public:
         Buffer& materialInfos;
     };
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params);
+    // Rewrites one slot of the trace sets' texture array (binding 10, all eyes) with a streamed texture's current view.
+    void updateTextureDescriptor(uint32 frameIdx, uint32 slotIdx, vk::ImageView view);
 
     // Final denoised AO (half-res) for an eye; sampled by the forward pass with getAOSampler() (linear upsample).
     // With the blur disabled (blurRadius <= 0) the spatial pass is skipped, so the accumulated AO is the output.

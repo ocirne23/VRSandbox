@@ -103,6 +103,7 @@ export struct SpatialCullingConfig
     bool freeze = false;             // stop re-stamping, fly around to inspect the culled set
     float margin = 4.0f;             // frustum inflation masking the one-frame stamp latency
     float nearRadius = 512.0f;       // shadow-caster + ray-tracing relevance range around the camera
+    float nearSlack = 16.0f;         // Near ball inflation; requery only after the camera moves this far (0 = every frame)
     float maxDist = 5000.0f;
     float skinnedRadiusScale = 1.5f; // animation can exceed the bind-pose bounds sphere
 };

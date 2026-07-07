@@ -70,6 +70,9 @@ public:
     };
     MemoryUsage getMemoryUsage() const;
 
+    // Size of a single live allocation (0 for null).
+    uint64 getAllocationSize(VmaAllocation allocation) const;
+
 private:
     VmaAllocator m_allocator = nullptr;
 };

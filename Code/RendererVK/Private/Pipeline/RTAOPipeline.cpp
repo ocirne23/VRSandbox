@@ -73,8 +73,21 @@ void RTAOPipeline::buildTraceLayout(ComputePipelineLayout& layout, uint32 maxTex
     b.push_back(storageBinding(9)); // materials
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 10, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eCompute });
     layout.descriptorBindingFlags.resize(b.size());
-    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount | vk::DescriptorBindingFlagBits::eUpdateAfterBind;
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(RtaoPC) });
+}
+
+void RTAOPipeline::updateTextureDescriptor(uint32 frameIdx, uint32 slotIdx, vk::ImageView view)
+{
+    // Streamed texture slot rewrite in this frame's per-eye trace sets. Binding 10 only feeds the
+    // alpha-masked shader variant, but stale views must never dangle once the old image is destroyed.
+    vk::DescriptorImageInfo imageInfo{ .sampler = m_textureSampler.getSampler(), .imageView = view, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+    for (uint32 eye = 0; eye < m_viewCount; ++eye)
+    {
+        vk::WriteDescriptorSet write{ .dstSet = m_traceSets[slot(frameIdx, eye)].getDescriptorSet(), .dstBinding = 10, .dstArrayElement = slotIdx, .descriptorCount = 1,
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
+        Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
+    }
 }
 
 void RTAOPipeline::buildTemporalLayout(ComputePipelineLayout& layout)

@@ -2,6 +2,7 @@ module RendererVK;
 
 import File.fwd;
 import :TextureManager; // ?
+import :TextureStreamer;
 import :Device;
 
 TextureManager::~TextureManager()
@@ -69,5 +70,10 @@ uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips
 		m_textures.pop_back();
 		return UINT16_MAX;
 	}
+	const uint64 allocatedBytes = m_textures[idx].getAllocatedBytes();
+	if (std::unique_ptr<StreamedTextureMeta> pMeta = m_textures[idx].takeStreamingMeta())
+		Globals::textureStreamer.registerTexture(idx, std::move(*pMeta), allocatedBytes);
+	else
+		Globals::textureStreamer.notePinned(allocatedBytes);
 	return idx;
 }

@@ -43,10 +43,20 @@ void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layo
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // diffuse texture array (alpha-mask discard)
         .binding = 7, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     // The texture array (the set's highest binding) is variable-count: the layout declares the fixed
-    // device-limit cap, the live size comes from the descriptor set allocation.
+    // device-limit cap, the live size comes from the descriptor set allocation. UPDATE_AFTER_BIND so the
+    // TextureStreamer can rewrite swapped slots without re-recording the cached draw CB.
     layout.descriptorBindingFlags.resize(descriptorSetBindings.size());
-    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount | vk::DescriptorBindingFlagBits::eUpdateAfterBind;
     // The cascade is selected per multiview view via gl_ViewIndex, so no push constant is needed.
+}
+
+void ShadowMapGraphicsPipeline::updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view)
+{
+    // Streamed texture slot rewrite in the cached shadow-draw CB's set (binding 7 is UPDATE_AFTER_BIND).
+    vk::DescriptorImageInfo imageInfo{ .sampler = m_sampler.getSampler(), .imageView = view, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 7, .dstArrayElement = slotIdx, .descriptorCount = 1,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
+    Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
 
 void ShadowMapGraphicsPipeline::buildIndirectState(uint32 maxUniqueMeshes)

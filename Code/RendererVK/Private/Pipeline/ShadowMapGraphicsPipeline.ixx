@@ -40,6 +40,8 @@ public:
     void initialize(ShadowMap& shadowMap, uint32 maxUniqueMeshes, uint32 maxTextures);
     void reloadShaders(uint32 maxTextures);
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params);
+    // Rewrites one slot of the texture array (binding 7) with a streamed texture's current view.
+    void updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view);
     // Re-sizes the DGC preprocess scratch for a grown unique-mesh capacity (GPU must be idle).
     void resizeMeshCapacity(uint32 maxUniqueMeshes);
 

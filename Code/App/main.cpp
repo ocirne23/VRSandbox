@@ -95,6 +95,8 @@ int main()
     InputControls controls(gizmo, cameraController, entities, spawnedLights, spawnedLightGeom, spawnedJoints);
 
     Camera camera;
+    glm::dvec3 lastNearQueryPos(1e30); // last camera position the Near visibility ball was stamped at
+    uint32 framesSinceNearQuery = 0;
 
     auto handleEntityChange = [&](EntityChange& change)
     {
@@ -277,7 +279,17 @@ int main()
             }
             spatialIndex.markVisibleSet(ESpatialPass::Main, cullFrustum, cameraPos,
                 cullingConfig.maxDist + cullingConfig.margin, SpatialLayer_Render, occlusion);
-            spatialIndex.markVisibleSphere(ESpatialPass::Near, cameraPos, cullingConfig.nearRadius, SpatialLayer_Render);
+            // The Near ball barely changes frame to frame: inflate it by the slack and requery only
+            // once the camera has moved that far. The frame cap keeps off-screen MOVERS from staying
+            // unstamped too long (they can enter the ball without the camera moving).
+            const float nearSlack = cullingConfig.nearSlack;
+            ++framesSinceNearQuery;
+            if (nearSlack <= 0.0f || glm::distance(lastNearQueryPos, cameraPos) > double(nearSlack) || framesSinceNearQuery >= 30)
+            {
+                spatialIndex.markVisibleSphere(ESpatialPass::Near, cameraPos, cullingConfig.nearRadius + nearSlack, SpatialLayer_Render);
+                lastNearQueryPos = cameraPos;
+                framesSinceNearQuery = 0;
+            }
         }
         Globals::spatialStress.update(glm::dvec3(camera.position), frustum);
 
