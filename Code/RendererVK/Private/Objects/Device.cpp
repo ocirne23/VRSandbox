@@ -239,6 +239,8 @@ bool Device::initialize()
     pfVkDestroyAccelerationStructureKHR = (PFN_vkDestroyAccelerationStructureKHR)m_device.getProcAddr("vkDestroyAccelerationStructureKHR");
     pfVkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)m_device.getProcAddr("vkCmdBuildAccelerationStructuresKHR");
     pfVkGetAccelerationStructureDeviceAddressKHR = (PFN_vkGetAccelerationStructureDeviceAddressKHR)m_device.getProcAddr("vkGetAccelerationStructureDeviceAddressKHR");
+    pfVkCmdCopyAccelerationStructureKHR = (PFN_vkCmdCopyAccelerationStructureKHR)m_device.getProcAddr("vkCmdCopyAccelerationStructureKHR");
+    pfVkCmdWriteAccelerationStructuresPropertiesKHR = (PFN_vkCmdWriteAccelerationStructuresPropertiesKHR)m_device.getProcAddr("vkCmdWriteAccelerationStructuresPropertiesKHR");
 
     m_graphicsQueue = m_device.getQueue(m_graphicsQueueIndex, 0);
     if (!m_graphicsQueue)

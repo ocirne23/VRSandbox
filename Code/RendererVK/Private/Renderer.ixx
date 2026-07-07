@@ -349,6 +349,13 @@ private:
     uint32 m_fogVolumeCounter = 0;
     uint32 m_blasBuiltCount = 0;
     uint32 m_pendingMaxInstanceData = 0;
+    // Set by a within-capacity contents-only upload into m_meshInfosBuffer / m_materialInfosBuffer /
+    // m_instanceOffsetsBuffer (addMeshInfos, setMeshStreamedIn/Out, addMaterialInfos, addMeshInstanceOffsets).
+    // These buffers are shared, not per-frame-in-flight, and are read full-range every frame by GI/RTAO
+    // compute and the draw passes; present() drains the GPU once before flushing staging if this is set, so
+    // the queued copy never races an in-flight frame's read. See waitForGpuAndFlushStaging for the
+    // analogous grow (over-capacity) path.
+    bool m_sharedBufferNeedSync = false;
 
     Buffer m_meshInfosBuffer;
     Buffer m_materialInfosBuffer;

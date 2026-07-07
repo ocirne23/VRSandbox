@@ -39,8 +39,23 @@ public:
     // vertex/index buffers with each mesh's exact vertex count (maxVertex must be tight — see the
     // comment in the implementation). Aliased and streamed-out (indexCount 0) meshes are skipped; the
     // address-fill pass afterwards refreshes every aliased mesh's entry from its target.
+    // allowCompaction: builds carry eAllowCompaction and record a compacted-size query for
+    // recordCompaction to consume.
     void recordBuildBlas(vk::CommandBuffer cmd, Buffer& vertexBuffer, Buffer& indexBuffer,
-        const RendererVKLayout::MeshInfo* meshInfos, const uint32* vertexCounts, std::span<const uint32> meshIndices);
+        const RendererVKLayout::MeshInfo* meshInfos, const uint32* vertexCounts, std::span<const uint32> meshIndices,
+        bool allowCompaction);
+
+    // BLAS compaction: build-size quotes are conservative worst cases, so freshly built BLASes waste
+    // 30-50% of their memory. Once a build batch's compacted-size query is fence-safe to read
+    // (NUM_FRAMES_IN_FLIGHT recordCompaction calls later), each BLAS is copied into a right-sized buffer
+    // (vkCmdCopyAccelerationStructureKHR eCompact), its address entries are repatched (the per-frame
+    // TLAS rebuild picks the new BLAS up the same frame), and the original retires after another
+    // frames-in-flight window. BLASes rebuilt or evicted in the meantime are skipped by handle compare.
+    // Call once per frame, after the build step and before the TLAS build.
+    void recordCompaction(vk::CommandBuffer cmd);
+
+    uint64 getBlasTotalBytes() const; // current static BLAS memory (excludes skinned + retiring originals)
+    uint64 getCompactionSavedBytes() const { return m_compactionSavedBytes; }
 
     // A skinned mesh's deformed output region. vertexCount/firstIndex/indexCount are known exactly, so the
     // BLAS is built without relying on neighbouring mesh offsets.
@@ -81,8 +96,29 @@ private:
     {
         vk::AccelerationStructureKHR handle = nullptr;
         Buffer buffer;
+        bool compacted = false; // right-sized already (or not worth it); reset on rebuild
     };
     std::vector<Blas> m_blasList;
+
+    // Compaction pipeline state: one query batch per build event, matured by recordCompaction-call
+    // count (the frame-slot fence guarantees the queries executed by then); originals retire the same way.
+    struct CompactionBatch
+    {
+        vk::QueryPool queryPool;
+        std::vector<uint32> meshIndices;
+        std::vector<vk::AccelerationStructureKHR> handles; // as recorded; mismatch = rebuilt/evicted, skip
+        uint32 frameStamp;
+    };
+    std::deque<CompactionBatch> m_compactionBatches;
+    struct RetiredBlas
+    {
+        vk::AccelerationStructureKHR handle;
+        Buffer buffer;
+        uint32 frameStamp;
+    };
+    std::vector<RetiredBlas> m_retiredBlas;
+    uint64 m_compactionSavedBytes = 0;
+    uint32 m_compactionFrame = 0;
     Buffer m_blasScratch;
     vk::DeviceAddress m_blasScratchAlignedAddr = 0;
     // Per frame in flight (skinned BLAS addresses differ between slots; static addresses are written to all).

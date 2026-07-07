@@ -811,6 +811,16 @@ void Renderer::present()
     Globals::textureStreamer.update();
     Globals::meshStreamer.update();
 
+    if (m_sharedBufferNeedSync)
+    {
+        // One or more shared (not per-frame-in-flight) buffers had a within-capacity contents upload
+        // queued this frame; that copy must not race a still-in-flight earlier frame's full-range read of
+        // it (GI/RTAO compute, draw passes). One drain here covers everything queued so far this frame.
+        auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+        assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle before shared buffer upload");
+        m_sharedBufferNeedSync = false;
+    }
+
     vk::Semaphore waitSemaphore = Globals::stagingManager.update();
     if (waitSemaphore != VK_NULL_HANDLE)
 		frameData.primaryCommandBuffer.addWaitSemaphore(waitSemaphore, vk::PipelineStageFlagBits::eAllCommands); // eAllCommands (not just transfer) for GI BLAS
@@ -934,11 +944,15 @@ namespace
 
 void Renderer::waitForGpuAndFlushStaging()
 {
-    // Queued staging copies may target a buffer about to be destroyed; submit them first, then drain
-    // the GPU so every buffer being recreated is no longer in use.
-    Globals::stagingManager.flushPending();
+    // Drain the GPU first: some buffers being grown here (e.g. m_instanceOffsetsBuffer) aren't
+    // per-frame-in-flight, so an already-submitted draw/dispatch may still be reading one while a queued
+    // staging copy is about to write into it (WRITE_AFTER_READ - no fence/semaphore otherwise orders a
+    // fresh copy submission against earlier submissions on the same queue). Flushing pending copies only
+    // after the wait means their vkCmdCopyBuffer/Image writes always land on an idle GPU. This still
+    // happens before any buffer this call preceded gets destroyed/recreated by the caller.
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
     assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle during capacity growth");
+    Globals::stagingManager.flushPending();
     Globals::textureStreamer.onGpuIdle();
     Globals::meshStreamer.onGpuIdle();
 }
@@ -1660,11 +1674,15 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         const bool newMeshes = m_blasBuiltCount < m_meshInfoCounter;
         m_blasBuiltCount = m_meshInfoCounter;
         m_accelStructure.recordBuildBlas(vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
-            m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>().data(), m_meshVertexCounts.data(), buildList);
+            m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>().data(), m_meshVertexCounts.data(), buildList,
+            m_rtParams.blasCompaction);
 
         if (newMeshes)
             m_giProbePipeline.doClear();
     }
+
+    // 1a. Copy-compact BLASes whose size queries matured, and retire replaced originals.
+    m_accelStructure.recordCompaction(vkGlobalIllumCommandBuffer);
 
     // 1b. Rebuild skinned meshes' BLASes every frame from this frame's deformed vertices, into this frame's
     // double-buffered slot (the other slot may still be referenced by the previous frame's in-flight TLAS).
@@ -1957,13 +1975,20 @@ void Renderer::recordCommandBuffers()
                     vkCommandBuffer.endRenderPass();
                 }
 
-                vk::MemoryBarrier2 colorToTaa{ // scene colour -> TAA compute sampled read
+                // Scene colour -> TAA compute sampled read. Explicit image barrier (not a global memory barrier -
+                // see the desktop path below) naming this eye's colour layer so the finalLayout transition at
+                // endRenderPass is actually resolved for the compute read.
+                vk::ImageMemoryBarrier2 colorToTaa{
                     .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
                     .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
                     .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
                     .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+                    .oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                    .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                    .image = sceneColor.getColorImage(),
+                    .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, eye, 1 },
                 };
-                vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &colorToTaa });
+                vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &colorToTaa });
                 recordTaaInto(commandBuffer, frameIdx, eye); // resolve into this eye's history
             }
 
@@ -2041,13 +2066,23 @@ void Renderer::recordCommandBuffers()
                 vkCommandBuffer.executeCommands(1, &vkFogApplyCommandBuffer);
             vkCommandBuffer.endRenderPass();
 
-            vk::MemoryBarrier2 bar{ // color -> TAA barrier
+            // SceneColor's render pass has no 0->EXTERNAL dependency of its own (must stay dependency-identical
+            // to the swapchain pass, see SceneColor.cpp), so its finalLayout->SHADER_READ_ONLY transition at
+            // endRenderPass is only ordered by the implicit (no-access) end dependency. An explicit image
+            // barrier naming the colour image is what actually resolves that transition for TAA's compute read
+            // (a global vk::MemoryBarrier2 was insufficient - validation still saw it as an unsynchronized
+            // layout-transition read). Same-layout SHADER_READ_ONLY->SHADER_READ_ONLY, sync-only.
+            vk::ImageMemoryBarrier2 colorToTaaImg{
                 .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
                 .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
                 .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
                 .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+                .oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                .image = sceneColor.getColorImage(),
+                .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
             };
-            vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
+            vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &colorToTaaImg });
             vkCommandBuffer.executeCommands(1, &vkTaaCommandBuffer);
             // Eye adaptation: reads the resolved colour (TAA barrier above), writes the exposure the composite reads.
             vkCommandBuffer.executeCommands(1, &vkEyeAdaptCommandBuffer);
@@ -2087,6 +2122,7 @@ void Renderer::setMeshStreamedOut(uint16 meshInfoIdx)
     RendererVKLayout::MeshInfo& info = m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>()[meshInfoIdx];
     info.indexCount = 0;
     m_meshInfosBuffer.upload(sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
+    m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
     // The BLAS goes with the mesh data (rebuilt on re-stream); safe because eviction requires the set
     // to have been unreferenced for far longer than any in-flight TLAS.
     m_accelStructure.onMeshEvicted(meshInfoIdx);
@@ -2099,6 +2135,9 @@ void Renderer::setMeshStreamedIn(uint16 meshInfoIdx, int32 vertexOffset, uint32 
     info.firstIndex = firstIndex;
     info.indexCount = indexCount;
     m_meshInfosBuffer.upload(sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
+    // Also covers this set's uploadVertexData/uploadIndexData copies into the shared mega-buffers
+    // (MeshDataManager), always queued by the caller just before this; see present().
+    m_sharedBufferNeedSync = true;
     if (m_accelStructure.getMeshAlias(meshInfoIdx) == meshInfoIdx)
         m_pendingBlasRebuilds.push_back(meshInfoIdx); // built by the next recordGlobalIllum
 }
@@ -2120,8 +2159,11 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
     // whole capacity-sized buffers, DGC reads the count via sequenceCountAddress, the G-buffer draws via
     // drawIndexedIndirectCount, and new BLASes build per frame in recordGlobalIllum).
     else
+    {
         m_meshInfosBuffer.upload(meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
             meshInfos.data(), baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
+        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
+    }
 
     // After the capacity check: the alias buffer is grown by resizeBlasAddressBuffer inside
     // growUniqueMeshCapacity, and setNumMeshes writes identity entries for the new range.
@@ -2150,8 +2192,11 @@ uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialIn
     // Within capacity this is a contents-only upload: every pass binds the whole buffer and nothing
     // recorded depends on the material count, so no re-record is needed.
     else
+    {
         m_materialInfosBuffer.upload(materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
             materialInfos.data(), baseMaterialInfoIdx * sizeof(RendererVKLayout::MaterialInfo));
+        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
+    }
 
     return baseMaterialInfoIdx;
 }
@@ -2168,8 +2213,11 @@ uint32 Renderer::addMeshInstanceOffsets(const std::vector<RendererVKLayout::Mesh
     // Within capacity this is a contents-only upload: every pass binds the whole buffer and nothing
     // recorded depends on the offset count, so no re-record is needed (rebased static spawns hit this).
     else
+    {
         m_instanceOffsetsBuffer.upload(meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
             meshInstanceOffsets.data(), baseInstanceOffsetIdx * sizeof(RendererVKLayout::MeshInstanceOffset));
+        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
+    }
 
     return baseInstanceOffsetIdx;
 }
@@ -2269,6 +2317,9 @@ Stats Renderer::getStats()
     stats.textureTailBytes = streamStats.tailBytes;
     stats.numStreamableTextures = streamStats.numStreamable;
     stats.numStreamOpsInFlight = streamStats.numOpsInFlight;
+
+    stats.blasBytes = m_accelStructure.getBlasTotalBytes();
+    stats.blasCompactionSavedBytes = m_accelStructure.getCompactionSavedBytes();
 
     const MeshStreamer::Stats meshStreamStats = Globals::meshStreamer.getStats();
     stats.meshBudgetBytes = meshStreamStats.budgetBytes;

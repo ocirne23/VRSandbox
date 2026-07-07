@@ -28,6 +28,30 @@ public:
         move.m_mappedData = nullptr;
         move.m_hasBackingStore = false;
     }
+    Buffer& operator=(Buffer&& move)
+    {
+        if (this != &move)
+        {
+            destroy(); // release the current buffer before adopting the moved-in one
+            m_size = move.m_size;
+            m_buffer = move.m_buffer;
+            m_allocation = move.m_allocation;
+            m_mappedData = move.m_mappedData;
+            m_usage = move.m_usage;
+            m_properties = move.m_properties;
+            m_debugName = move.m_debugName;
+            m_hostAccess = move.m_hostAccess;
+            m_backingStore = std::move(move.m_backingStore);
+            m_uploadOffset = move.m_uploadOffset;
+            m_hasBackingStore = move.m_hasBackingStore;
+            move.m_size = 0;
+            move.m_buffer = nullptr;
+            move.m_allocation = nullptr;
+            move.m_mappedData = nullptr;
+            move.m_hasBackingStore = false;
+        }
+        return *this;
+    }
     Buffer(const Buffer&) = delete;
 
     // Requesting a shader-device-address usage allocates the memory with the device-address flag so

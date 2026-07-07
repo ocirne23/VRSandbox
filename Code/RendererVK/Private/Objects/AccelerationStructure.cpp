@@ -11,6 +11,10 @@ AccelerationStructure::~AccelerationStructure()
     for (Blas& blas : m_blasList)
         if (blas.handle)
             dev.destroyAccelerationStructureKHR(blas.handle);
+    for (RetiredBlas& retired : m_retiredBlas)
+        dev.destroyAccelerationStructureKHR(retired.handle);
+    for (CompactionBatch& batch : m_compactionBatches)
+        dev.destroyQueryPool(batch.queryPool);
     for (auto& slot : m_skinnedBlas)
         for (Blas& blas : slot)
             if (blas.handle)
@@ -118,7 +122,8 @@ void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& ou
 }
 
 void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& vertexBuffer, Buffer& indexBuffer,
-    const RendererVKLayout::MeshInfo* meshInfos, const uint32* vertexCounts, std::span<const uint32> meshIndices)
+    const RendererVKLayout::MeshInfo* meshInfos, const uint32* vertexCounts, std::span<const uint32> meshIndices,
+    bool allowCompaction)
 {
     // Only self-aliased meshes with live geometry build a BLAS: LOD-chain levels share their RT level's,
     // and streamed-out meshes (indexCount 0) wait for their re-stream rebuild.
@@ -180,7 +185,8 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
         geoms[i].geometry.triangles = tri;
         buildInfos[i] = vk::AccelerationStructureBuildGeometryInfoKHR{
             .type = vk::AccelerationStructureTypeKHR::eBottomLevel,
-            .flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
+            .flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace
+                | (allowCompaction ? vk::BuildAccelerationStructureFlagBitsKHR::eAllowCompaction : vk::BuildAccelerationStructureFlagBitsKHR{}),
             .mode = vk::BuildAccelerationStructureModeKHR::eBuild,
             .geometryCount = 1,
             .pGeometries = &geoms[i],
@@ -211,6 +217,7 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
             Blas& blas = m_blasList[toBuild[i]];
             if (blas.handle)
                 dev.destroyAccelerationStructureKHR(blas.handle);
+            blas.compacted = false;
             blas.buffer.initialize(sizes[i].accelerationStructureSize,
                 vk::BufferUsageFlagBits2::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
                 vk::MemoryPropertyFlagBits::eDeviceLocal, false, "AS.blas");
@@ -251,6 +258,27 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
             .dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR,
         };
         cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
+
+        // Compacted-size queries for the freshly built BLASes; recordCompaction reads them once the
+        // frame-slot fence guarantees this command buffer executed (a recorded CB is always submitted:
+        // the acquire-failure early-out happens before recordCommandBuffers).
+        if (allowCompaction)
+        {
+            CompactionBatch batch;
+            batch.meshIndices = toBuild;
+            batch.handles.reserve(count);
+            for (uint32 i = 0; i < count; i++)
+                batch.handles.push_back(m_blasList[toBuild[i]].handle);
+            batch.frameStamp = m_compactionFrame;
+            auto poolRes = dev.createQueryPool(vk::QueryPoolCreateInfo{
+                .queryType = vk::QueryType::eAccelerationStructureCompactedSizeKHR, .queryCount = count });
+            assert(poolRes.result == vk::Result::eSuccess && "Failed to create compaction query pool");
+            batch.queryPool = poolRes.value;
+            cmd.resetQueryPool(batch.queryPool, 0, count);
+            cmd.writeAccelerationStructuresPropertiesKHR((uint32)batch.handles.size(), batch.handles.data(),
+                vk::QueryType::eAccelerationStructureCompactedSizeKHR, batch.queryPool, 0);
+            m_compactionBatches.push_back(std::move(batch));
+        }
     }
 
     // Address-fill: every aliased mesh's entry mirrors its target's (per frame slot, so skinned meshes'
@@ -263,6 +291,115 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
 
     for (auto& buf : m_blasAddressBuffers)
         buf.flushMappedMemory(buf.getSize());
+}
+
+void AccelerationStructure::recordCompaction(vk::CommandBuffer cmd)
+{
+    vk::Device dev = Globals::device.getDevice();
+    m_compactionFrame++;
+
+    // Retire originals whose replacement every in-flight TLAS has picked up by now.
+    size_t kept = 0;
+    for (RetiredBlas& retired : m_retiredBlas)
+    {
+        if (m_compactionFrame - retired.frameStamp < RendererVKLayout::NUM_FRAMES_IN_FLIGHT)
+        {
+            m_retiredBlas[kept++] = std::move(retired);
+            continue;
+        }
+        dev.destroyAccelerationStructureKHR(retired.handle);
+        retired.buffer.destroy();
+    }
+    m_retiredBlas.resize(kept);
+
+    // +1 over the frames-in-flight window: a batch stamped in frame F is submitted at F's end, and F's
+    // fence is first waited by beginFrame(F+2) — reading at F+1 would make eWait stall on the live frame.
+    bool recordedCopy = false;
+    while (!m_compactionBatches.empty()
+        && m_compactionFrame - m_compactionBatches.front().frameStamp > RendererVKLayout::NUM_FRAMES_IN_FLIGHT)
+    {
+        CompactionBatch& batch = m_compactionBatches.front();
+        std::vector<uint64> compactedSizes(batch.meshIndices.size());
+        // eWait is a formality: the batch's command buffer completed behind the frame-slot fence.
+        const vk::Result queryResult = dev.getQueryPoolResults(batch.queryPool, 0, (uint32)compactedSizes.size(),
+            compactedSizes.size() * sizeof(uint64), compactedSizes.data(), sizeof(uint64),
+            vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWait);
+        if (queryResult == vk::Result::eSuccess)
+        {
+            for (uint32 i = 0; i < (uint32)batch.meshIndices.size(); i++)
+            {
+                const uint32 meshIdx = batch.meshIndices[i];
+                Blas& blas = m_blasList[meshIdx];
+                if (blas.handle != batch.handles[i]) // rebuilt or evicted since the query: stale result
+                    continue;
+                const uint64 compactedSize = compactedSizes[i];
+                if (compactedSize == 0 || compactedSize >= blas.buffer.getSize())
+                {
+                    blas.compacted = true; // no win; keep as-is
+                    continue;
+                }
+
+                Buffer compactBuffer;
+                compactBuffer.initialize(compactedSize,
+                    vk::BufferUsageFlagBits2::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
+                    vk::MemoryPropertyFlagBits::eDeviceLocal, false, "AS.blasCompact");
+                vk::AccelerationStructureCreateInfoKHR ci{
+                    .buffer = compactBuffer.getBuffer(),
+                    .size = compactedSize,
+                    .type = vk::AccelerationStructureTypeKHR::eBottomLevel,
+                };
+                auto res = dev.createAccelerationStructureKHR(ci);
+                assert(res.result == vk::Result::eSuccess && "Failed to create compacted BLAS");
+
+                cmd.copyAccelerationStructureKHR(vk::CopyAccelerationStructureInfoKHR{
+                    .src = blas.handle, .dst = res.value, .mode = vk::CopyAccelerationStructureModeKHR::eCompact });
+
+                m_compactionSavedBytes += blas.buffer.getSize() - compactedSize;
+                m_retiredBlas.push_back(RetiredBlas{ blas.handle, std::move(blas.buffer), m_compactionFrame });
+                blas.handle = res.value;
+                blas.buffer = std::move(compactBuffer);
+                blas.compacted = true;
+
+                vk::AccelerationStructureDeviceAddressInfoKHR ai{ .accelerationStructure = blas.handle };
+                const uint64 blasAddr = dev.getAccelerationStructureAddressKHR(ai);
+                for (auto& mapped : m_mappedBlasAddresses)
+                    mapped[meshIdx] = blasAddr;
+                recordedCopy = true;
+            }
+        }
+        dev.destroyQueryPool(batch.queryPool);
+        m_compactionBatches.pop_front();
+    }
+
+    if (recordedCopy)
+    {
+        // Aliased LOD levels follow their target's new address, then this frame's TLAS build (later in
+        // the same command buffer) must see the copies completed. Compact copies execute in the
+        // acceleration-structure-build stage (no ray_tracing_maintenance1 = no separate copy stage).
+        for (auto& mapped : m_mappedBlasAddresses)
+            for (uint32 m = 0; m < m_numAliasMeshes; ++m)
+                if (m_mappedMeshAlias[m] != m)
+                    mapped[m] = mapped[m_mappedMeshAlias[m]];
+        for (auto& buf : m_blasAddressBuffers)
+            buf.flushMappedMemory(buf.getSize());
+
+        vk::MemoryBarrier2 bar{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+            .srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR | vk::PipelineStageFlagBits2::eComputeShader,
+            .dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+        };
+        cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
+    }
+}
+
+uint64 AccelerationStructure::getBlasTotalBytes() const
+{
+    uint64 total = 0;
+    for (const Blas& blas : m_blasList)
+        if (blas.handle)
+            total += blas.buffer.getSize();
+    return total;
 }
 
 void AccelerationStructure::recordBuildSkinnedBlas(vk::CommandBuffer cmd, uint32 frameIdx, Buffer& vertexBuffer, Buffer& indexBuffer,

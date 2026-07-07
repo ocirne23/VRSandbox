@@ -76,20 +76,22 @@ bool ShadowMap::initialize(uint32 resolution, uint32 numCascades)
     };
     std::array<vk::SubpassDependency2, 2> dependencies{
         // Wait for prior shader reads of this layer to finish before we overwrite the depth.
+        // Compute included: GI probe trace and volumetric fog sample the cascades from compute.
         vk::SubpassDependency2{
             .srcSubpass = vk::SubpassExternal,
             .dstSubpass = 0,
-            .srcStageMask = vk::PipelineStageFlagBits::eFragmentShader,
+            .srcStageMask = vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eComputeShader,
             .dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
             .srcAccessMask = vk::AccessFlagBits::eShaderRead,
             .dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite,
         },
-        // Make the written depth visible to the lighting fragment shader.
+        // Make the written depth (and the endRenderPass layout transition) visible to the lighting
+        // fragment shader and the compute consumers (GI probe trace, fog scatter).
         vk::SubpassDependency2{
             .srcSubpass = 0,
             .dstSubpass = vk::SubpassExternal,
             .srcStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
-            .dstStageMask = vk::PipelineStageFlagBits::eFragmentShader,
+            .dstStageMask = vk::PipelineStageFlagBits::eFragmentShader | vk::PipelineStageFlagBits::eComputeShader,
             .srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite,
             .dstAccessMask = vk::AccessFlagBits::eShaderRead,
         },

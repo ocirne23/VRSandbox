@@ -134,6 +134,8 @@ export struct RTParams
     bool rtSkyRadiance = true;  // ray-traced sky visibility for the sky radiance light (GI probe trace)
     int  blasLodLevel = 1;      // LOD level whose geometry backs a chain's single shared BLAS (clamped per
                                 // chain; rays don't need per-level fidelity). Applied when containers load.
+    bool blasCompaction = true; // copy-compact static BLASes after build (~30-50% of their memory back);
+                                // applies to BLASes built after a change
 
     void registerTweaks();
 };
@@ -231,6 +233,10 @@ export struct Stats
     uint64 textureTailBytes;       // always-resident mip tails (part of resident)
     uint32 numStreamableTextures;
     uint32 numStreamOpsInFlight;
+
+    // Static BLAS memory (see AccelerationStructure; excludes the per-frame skinned BLASes).
+    uint64 blasBytes;
+    uint64 blasCompactionSavedBytes; // cumulative bytes reclaimed by copy-compaction
 
     // Mesh data streaming (see MeshStreamer).
     uint64 meshBudgetBytes;

@@ -118,3 +118,15 @@ export extern "C" VkDeviceAddress vkGetAccelerationStructureDeviceAddressKHR(VkD
 {
     return pfVkGetAccelerationStructureDeviceAddressKHR(device, pInfo);
 }
+
+export PFN_vkCmdCopyAccelerationStructureKHR pfVkCmdCopyAccelerationStructureKHR = nullptr;
+export extern "C" void vkCmdCopyAccelerationStructureKHR(VkCommandBuffer commandBuffer, const VkCopyAccelerationStructureInfoKHR* pInfo)
+{
+    pfVkCmdCopyAccelerationStructureKHR(commandBuffer, pInfo);
+}
+
+export PFN_vkCmdWriteAccelerationStructuresPropertiesKHR pfVkCmdWriteAccelerationStructuresPropertiesKHR = nullptr;
+export extern "C" void vkCmdWriteAccelerationStructuresPropertiesKHR(VkCommandBuffer commandBuffer, uint32_t accelerationStructureCount, const VkAccelerationStructureKHR* pAccelerationStructures, VkQueryType queryType, VkQueryPool queryPool, uint32_t firstQuery)
+{
+    pfVkCmdWriteAccelerationStructuresPropertiesKHR(commandBuffer, accelerationStructureCount, pAccelerationStructures, queryType, queryPool, firstQuery);
+}

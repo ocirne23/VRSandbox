@@ -114,13 +114,15 @@ bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height,
         .pColorAttachments = &colorRef,
         .pDepthStencilAttachment = &depthRef,
     };
-    // These MUST match the swapchain pass's dependencies (RenderPass.cpp): the static-mesh and GI-debug
-    // pipelines are created against that pass but execute here, and render-pass compatibility (as enforced by
-    // validation) compares subpass dependencies. The colour -> TAA-compute ordering is instead handled by an
-    // explicit barrier after the scene render pass in Renderer::recordCommandBuffers (the finalLayout above
-    // still transitions the colour image to SHADER_READ_ONLY).
+    // The external->0 dependencies below MUST match the swapchain pass's (RenderPass.cpp): the static-mesh
+    // and GI-debug pipelines are created against that pass but execute here, and render-pass compatibility
+    // (as enforced by validation) compares them. The 0->EXTERNAL dependency is NOT part of render-pass
+    // compatibility (only attachment references/formats are), so it's safe to declare independently here -
+    // it's what actually resolves the colour attachment's finalLayout->SHADER_READ_ONLY transition for TAA's
+    // compute read (an explicit barrier in Renderer::recordCommandBuffers alone was not picked up by
+    // synchronization validation for this cross-render-pass-boundary transition).
     const vk::PipelineStageFlags depthStages = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests;
-    std::array<vk::SubpassDependency2, 2> dependencies{
+    std::array<vk::SubpassDependency2, 3> dependencies{
         vk::SubpassDependency2{
             .srcSubpass = vk::SubpassExternal,
             .dstSubpass = 0,
@@ -136,6 +138,14 @@ bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height,
             .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
             .srcAccessMask = vk::AccessFlags(),
             .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+        },
+        vk::SubpassDependency2{ // colour finalLayout transition -> TAA/eye-adapt compute sampled read
+            .srcSubpass = 0,
+            .dstSubpass = vk::SubpassExternal,
+            .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            .dstStageMask = vk::PipelineStageFlagBits::eComputeShader,
+            .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+            .dstAccessMask = vk::AccessFlagBits::eShaderRead,
         },
     };
     vk::RenderPassCreateInfo2 rpInfo{

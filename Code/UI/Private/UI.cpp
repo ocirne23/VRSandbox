@@ -304,6 +304,8 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             m_renderStats.meshStreamableBytes * toMiB, m_renderStats.meshBudgetBytes * toMiB);
         ImGui::Text("meshStream cold: %.1f MiB, sets: %u, evicted: %u", m_renderStats.meshColdBytes * toMiB,
             m_renderStats.numMeshSets, m_renderStats.numEvictedMeshSets);
+        ImGui::Text("static BLAS: %.1f MiB (compaction saved %.1f MiB)", m_renderStats.blasBytes * toMiB,
+            m_renderStats.blasCompactionSavedBytes * toMiB);
         ImGui::Text("meshLOD groups: %u, picks L0-L4: %u/%u/%u/%u/%u", m_renderStats.numMeshLodGroups,
             m_renderStats.lodInstanceCounts[0], m_renderStats.lodInstanceCounts[1], m_renderStats.lodInstanceCounts[2],
             m_renderStats.lodInstanceCounts[3], m_renderStats.lodInstanceCounts[4]);
