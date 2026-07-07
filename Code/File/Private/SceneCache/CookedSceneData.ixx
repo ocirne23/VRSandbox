@@ -20,7 +20,7 @@ import :INodeData;
 export namespace SceneCache
 {
     constexpr uint32 SCENE_CACHE_MAGIC   = 'V' | ('R' << 8) | ('S' << 16) | ('C' << 24);
-    constexpr uint32 SCENE_CACHE_VERSION = 2;
+    constexpr uint32 SCENE_CACHE_VERSION = 3; // v3: JoinIdenticalVertices added to the Assimp import
     constexpr uint32 MAX_COOKED_LOD_LEVELS = 7; // generated levels beyond LOD0 the format can hold
 
     struct CookedHeader

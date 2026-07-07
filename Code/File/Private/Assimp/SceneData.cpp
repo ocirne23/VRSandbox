@@ -137,7 +137,11 @@ bool SceneData::initialize(const char* filePath, bool mergeNodes, bool preTransf
         // LimitBoneWeights caps influences to 4/vertex; PopulateArmatureData fills aiBone::mNode/mArmature.
         optimizationFlags |= aiProcess_LimitBoneWeights | aiProcess_PopulateArmatureData;
     //aiProcess_MakeLeftHanded
-    m_pScene = m_importer.ReadFile(filePath, aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_FlipUVs | aiProcess_GenBoundingBoxes | aiProcess_CalcTangentSpace | optimizationFlags);
+    // JoinIdenticalVertices is load-bearing: FBX exports commonly arrive as unindexed triangle soup
+    // (every triangle carries 3 unique vertices — Bistro is ~3.5x duplicated). Welding restores real
+    // connectivity, without which meshopt_simplify treats every vertex as complex and LOD generation
+    // stalls at level 0 — and it cuts vertex memory by the same factor.
+    m_pScene = m_importer.ReadFile(filePath, aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_GenNormals | aiProcess_FlipUVs | aiProcess_GenBoundingBoxes | aiProcess_CalcTangentSpace | optimizationFlags);
     if (!m_pScene)
     {
         assert(false && "Failed to load scene");
