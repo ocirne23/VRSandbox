@@ -650,7 +650,7 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
 		node.m_meshInstances[i].pipelineIndex = nodeInfo.pipelineIdx;
 		node.m_meshInstances[i].alphaMode = nodeInfo.alphaMode;
         if (nodeInfo.lodGroupIdx != UINT32_MAX)
-            node.m_lodInstances.emplace_back(i, nodeInfo.lodGroupIdx);
+            node.m_lodInstances.push_back(RenderNode::LodInstance{ i, nodeInfo.lodGroupIdx });
     }
 
     std::map<uint16, uint16> instancesPerMesh;

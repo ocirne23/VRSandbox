@@ -124,13 +124,16 @@ private:
         uint32 opId = 0;           // id of the in-flight op (stale completions are dropped)
     };
 
-    // A disk-read request for mips [targetTop..numMips) of one texture (contiguous in the file), and
-    // its result. The worker thread only does CRT file IO into a plain buffer; every Vulkan/allocator
-    // interaction stays on the main thread in update().
+    // A disk-read request for mips [targetTop..dataMipEnd) of one texture (contiguous in the file), and
+    // its result. With GPU mip copies enabled, promotions read only the mips the live image lacks
+    // (dataMipEnd = residentTop at issue time); the rest is copied out of the old image on the GPU.
+    // The worker thread only does CRT file IO into a plain buffer; every Vulkan/allocator interaction
+    // stays on the main thread in update().
     struct StreamRequest
     {
         uint16 texIdx = 0;
         uint8 targetTop = 0;
+        uint8 dataMipEnd = 0;
         uint32 opId = 0;
         uint64 fileOffset = 0;
         uint32 byteCount = 0;
@@ -140,6 +143,7 @@ private:
     {
         uint16 texIdx = 0;
         uint8 targetTop = 0;
+        uint8 dataMipEnd = 0;
         uint32 opId = 0;
         uint32 byteCount = 0;
         std::unique_ptr<uint8[]> data;
@@ -155,6 +159,11 @@ private:
 
     void workerRun(std::stop_token stopToken);
     void applyCompletion(StreamCompletion&& completion);
+    // Replaces the live image with one spanning [targetTop..numMips): uploads mips [targetTop..dataMipEnd)
+    // from pMipData, GPU-copies [dataMipEnd..numMips) out of the old image, swaps, queues the descriptor
+    // rewrite, and parks the old image for deferred destruction. Demotions pass pMipData == nullptr with
+    // dataMipEnd == targetTop (pure GPU copy, no disk data).
+    bool swapResidency(uint16 texIdx, StreamState& state, uint8 targetTop, const uint8* pMipData, uint8 dataMipEnd);
     void issueOps();
 
     std::vector<StreamState> m_states; // indexed by texture idx; numMips == 0 => not streamed
@@ -185,6 +194,7 @@ private:
     int  m_tailMaxDim = 128;
     int  m_maxOpsInFlight = 4;
     float m_maxMBPerFrame = 24.0f; // issued read volume per frame; keeps stream-ins well under the staging buffer
+    bool m_gpuMipCopies = true;    // copy surviving mips old->new on the GPU (demotions skip the disk entirely)
     bool m_debugRewriteAllSlots = false;
     float m_mipBias = 0.0f;            // global quality knob: +1 = one mip level coarser everywhere
     float m_texelRatio = 1.0f;         // texels wanted per projected pixel (tiling textures want > 1)

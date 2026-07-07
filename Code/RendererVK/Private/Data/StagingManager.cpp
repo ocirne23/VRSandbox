@@ -134,9 +134,16 @@ vk::Semaphore StagingManager::uploadImageAndGenerateMipMaps(vk::Image image, uin
     return m_semaphores[m_currentBuffer];
 }
 
+vk::Semaphore StagingManager::copyImageMips(vk::Image srcImage, vk::Image dstImage, uint32 dstBaseMip, std::vector<vk::ImageCopy>&& regions)
+{
+    assert(!regions.empty());
+    m_imageMipCopyList.push_back(ImageMipCopy{ srcImage, dstImage, dstBaseMip, std::move(regions) });
+    return m_semaphores[m_currentBuffer];
+}
+
 vk::Semaphore StagingManager::update()
 {
-    if (m_bufferCopyRegions.empty() && m_imageCopyRegions.empty() && m_imageCopyAndMipList.empty())
+    if (m_bufferCopyRegions.empty() && m_imageCopyRegions.empty() && m_imageCopyAndMipList.empty() && m_imageMipCopyList.empty())
     {
         vk::Semaphore semaphore = m_nextUpdateSemaphore;
         m_nextUpdateSemaphore = VK_NULL_HANDLE;
@@ -198,6 +205,57 @@ vk::Semaphore StagingManager::update()
                 .baseArrayLayer = 0,
                 .layerCount = 1
             }
+        };
+        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &postCopyBarrier });
+    }
+
+    for (const ImageMipCopy& mipCopy : m_imageMipCopyList)
+    {
+        // The source is a streamed texture's replaced image: every mip sits in eShaderReadOnlyOptimal,
+        // and the srcStage covers everything that may still be sampling it from earlier submissions on
+        // this queue (fragment forward/G-buffer/shadow + compute GI/RTAO, incl. their ray queries). It
+        // is never transitioned back — nothing samples it after this frame's descriptor swap, and it is
+        // deferred-destroyed by the TextureStreamer.
+        std::array<vk::ImageMemoryBarrier2, 2> preCopyBarriers{
+            vk::ImageMemoryBarrier2{
+                .srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader | vk::PipelineStageFlagBits2::eComputeShader,
+                .srcAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+                .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+                .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+                .oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+                .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+                .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
+                .image = mipCopy.srcImage,
+                .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, vk::RemainingMipLevels, 0, 1 }
+            },
+            vk::ImageMemoryBarrier2{
+                .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+                .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+                .oldLayout = vk::ImageLayout::eUndefined,
+                .newLayout = vk::ImageLayout::eTransferDstOptimal,
+                .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+                .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
+                .image = mipCopy.dstImage,
+                .subresourceRange = { vk::ImageAspectFlagBits::eColor, mipCopy.dstBaseMip, (uint32)mipCopy.regions.size(), 0, 1 }
+            },
+        };
+        vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = (uint32)preCopyBarriers.size(), .pImageMemoryBarriers = preCopyBarriers.data() });
+
+        vkCommandBuffer.copyImage(mipCopy.srcImage, vk::ImageLayout::eTransferSrcOptimal,
+            mipCopy.dstImage, vk::ImageLayout::eTransferDstOptimal, (uint32)mipCopy.regions.size(), mipCopy.regions.data());
+
+        vk::ImageMemoryBarrier2 postCopyBarrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader | vk::PipelineStageFlagBits2::eComputeShader,
+            .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+            .oldLayout = vk::ImageLayout::eTransferDstOptimal,
+            .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+            .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
+            .image = mipCopy.dstImage,
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, mipCopy.dstBaseMip, (uint32)mipCopy.regions.size(), 0, 1 }
         };
         vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &postCopyBarrier });
     }
@@ -358,6 +416,7 @@ vk::Semaphore StagingManager::update()
     m_bufferCopyRegions.clear();
     m_imageCopyRegions.clear();
     m_imageCopyAndMipList.clear();
+    m_imageMipCopyList.clear();
     m_mappedMemory = m_mappedStagingBuffers[m_currentBuffer];
 
     // The caller starts memcpy'ing into this buffer immediately (in upload*()), so it must be idle now: its

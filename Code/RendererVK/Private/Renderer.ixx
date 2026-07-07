@@ -136,8 +136,9 @@ private:
     void noteTextureUse(const RenderNode& node, uint32 passMask);
     // Per-instance mesh LOD selection: redirects a node's LOD-chained instances (freshly copied into
     // this frame's mapped instance buffer at instances[]) to the level their projected size wants,
-    // keeping the per-mesh instance counts in step. threadSafe = called from renderNodeThreadSafe.
-    void selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshInstance* instances, bool threadSafe);
+    // keeping the per-mesh instance counts in step. Off-screen nodes (no PASS_MAIN in passMask) take
+    // two levels coarser. threadSafe = called from renderNodeThreadSafe.
+    void selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshInstance* instances, uint32 passMask, bool threadSafe);
     void recordSkinning(uint32 frameIdx);
     void recordIndirectCull(uint32 frameIdx);
     void recordLightGrid(uint32 frameIdx);

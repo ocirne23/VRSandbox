@@ -110,7 +110,14 @@ private:
     Sphere m_bounds;
     std::vector<RendererVKLayout::InMeshInstance> m_meshInstances;
     std::vector<std::pair<uint16, uint16>> m_numInstancesPerMesh;
-    // Instances with a LOD chain: (index into m_meshInstances, Renderer mesh-LOD-group index). The
-    // stored instance references the LOD0 mesh; Renderer::selectMeshLods redirects per frame.
-    std::vector<std::pair<uint32, uint32>> m_lodInstances;
+    // Instances with a LOD chain. The stored instance references the LOD0 mesh; Renderer::selectMeshLods
+    // redirects per frame. lastLevel is the selection history for hysteresis — mutable because selection
+    // runs on const nodes (each node is rendered by exactly one thread per frame, so this is race-free).
+    struct LodInstance
+    {
+        uint32 instanceIdx = 0;
+        uint32 lodGroupIdx = 0;
+        mutable uint8 lastLevel = 0;
+    };
+    std::vector<LodInstance> m_lodInstances;
 };

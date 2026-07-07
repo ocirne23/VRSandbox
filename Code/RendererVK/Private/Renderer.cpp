@@ -555,7 +555,7 @@ void Renderer::renderNodeThreadSafe(const RenderNode& node, uint32 passMask)
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
     if (!node.m_lodInstances.empty() && m_lodParams.enabled)
-        selectMeshLods(node, frameData.mappedMeshInstances.data() + startIdx, true);
+        selectMeshLods(node, frameData.mappedMeshInstances.data() + startIdx, passMask, true);
 }
 
 void Renderer::noteTextureUse(const RenderNode& node, uint32 passMask)
@@ -599,20 +599,22 @@ void Renderer::renderNode(const RenderNode& node, uint32 passMask)
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
     if (!node.m_lodInstances.empty() && m_lodParams.enabled)
-        selectMeshLods(node, frameData.mappedMeshInstances.data() + startIdx, false);
+        selectMeshLods(node, frameData.mappedMeshInstances.data() + startIdx, passMask, false);
 }
 
-void Renderer::selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshInstance* instances, bool threadSafe)
+void Renderer::selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshInstance* instances, uint32 passMask, bool threadSafe)
 {
     const Transform& nodeTransform = Globals::renderNodeTransforms[node.m_transformIdx];
     const std::span<const RendererVKLayout::MeshInstanceOffset> offsets =
         m_instanceOffsetsBuffer.getBackingStoreAs<RendererVKLayout::MeshInstanceOffset>();
     const int forceLod = m_lodParams.forceLod;
+    // Off-screen nodes (shadow/GI passes only) tolerate two levels coarser, like the texture mip bias.
+    const float passBias = (passMask & RendererVKLayout::PASS_MAIN) ? 0.0f : 2.0f;
 
-    for (const auto& [instanceIdx, groupIdx] : node.m_lodInstances)
+    for (const RenderNode::LodInstance& lod : node.m_lodInstances)
     {
-        const MeshLodGroup& group = m_meshLodGroups[groupIdx];
-        RendererVKLayout::InMeshInstance& instance = instances[instanceIdx];
+        const MeshLodGroup& group = m_meshLodGroups[lod.lodGroupIdx];
+        RendererVKLayout::InMeshInstance& instance = instances[lod.instanceIdx];
 
         int level;
         if (forceLod >= 0)
@@ -628,9 +630,19 @@ void Renderer::selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshIn
             const float radius = group.radius * offset.scale * nodeTransform.scale;
             const float dist = std::max(0.01f, glm::length(worldCenter - m_cameraPos) - radius);
             const float projPixels = std::max(1.0f, radius * m_mipPixelScale / dist);
-            level = (int)std::floor(std::log2(std::max(1.0f, m_lodParams.fullResPixels / projPixels)));
-            level = std::clamp(level + m_lodParams.bias, 0, (int)group.numLods - 1);
+            const float lodF = std::log2(std::max(1.0f, m_lodParams.fullResPixels / projPixels))
+                + (float)m_lodParams.bias + passBias;
+            level = (int)lodF;
+            // Hysteresis: hold the previous level until the continuous value clearly crosses a level
+            // boundary, so an instance parked on one can't flip-flop between frames.
+            const int lastLevel = (int)lod.lastLevel;
+            if (level > lastLevel && lodF < (float)lastLevel + 1.0f + m_lodParams.hysteresis)
+                level = lastLevel;
+            else if (level < lastLevel && lodF > (float)lastLevel - m_lodParams.hysteresis)
+                level = lastLevel;
+            level = std::clamp(level, 0, (int)group.numLods - 1);
         }
+        lod.lastLevel = (uint8)level;
 
         // The copied instance references the LOD0 mesh; redirect it and keep the per-mesh counts
         // (which renderNode accumulated for LOD0) in step so the cull's instance buckets stay exact.

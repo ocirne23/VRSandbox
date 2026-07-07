@@ -21,6 +21,11 @@ public:
     vk::Semaphore upload(vk::Buffer dstBuffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
     vk::Semaphore uploadImage(vk::Image dstImage, uint32 imageWidth, uint32 imageHeight, vk::DeviceSize dataSize, const void* data, uint32 mipLevel, vk::DeviceSize dstOffset = 0);
     vk::Semaphore uploadImageAndGenerateMipMaps(vk::Image image, uint32 imageWidth, uint32 imageHeight, uint32 numMipLevels, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset = 0);
+    // GPU image->image mip copies (texture streaming residency swaps): src is a retired streamed image
+    // whose mips are all eShaderReadOnlyOptimal and which nothing samples after this frame's swap; the
+    // dst mips [dstBaseMip..dstBaseMip + regions.size()) are freshly created (eUndefined) and end up
+    // eShaderReadOnlyOptimal. Executed in update()'s batch alongside the staged uploads.
+    vk::Semaphore copyImageMips(vk::Image srcImage, vk::Image dstImage, uint32 dstBaseMip, std::vector<vk::ImageCopy>&& regions);
     vk::Semaphore update();
     // Submits any queued copies now so their destination buffers can be destroyed (capacity growth).
     // The signal semaphore is kept as m_nextUpdateSemaphore so the next update() consumes it.
@@ -50,6 +55,14 @@ private:
         uint32 width, height, numMips;
     };
     std::vector<UploadAndMip> m_imageCopyAndMipList;
+    struct ImageMipCopy
+    {
+        vk::Image srcImage;
+        vk::Image dstImage;
+        uint32 dstBaseMip;
+        std::vector<vk::ImageCopy> regions; // contiguous dst mips starting at dstBaseMip
+    };
+    std::vector<ImageMipCopy> m_imageMipCopyList;
     std::span<uint8> m_mappedMemory;
 };
 

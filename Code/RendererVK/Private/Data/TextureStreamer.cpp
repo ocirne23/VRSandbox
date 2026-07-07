@@ -23,6 +23,7 @@ bool TextureStreamer::initialize()
     Tweak::floatVar("Streaming", "Texel ratio", &m_texelRatio, 0.25f, 4.0f);
     Tweak::intVar("Streaming", "Max ops in flight", &m_maxOpsInFlight, 0, 32);
     Tweak::floatVar("Streaming", "Max MB/frame", &m_maxMBPerFrame, 1.0f, 64.0f);
+    Tweak::boolean("Streaming", "GPU mip copies", &m_gpuMipCopies);
     Tweak::intVar("Streaming", "Demote hysteresis frames", &m_demoteHysteresisFrames, 1, 600);
     Tweak::intVar("Streaming", "Decay frames", &m_decayFrames, 1, 3600);
     Tweak::boolean("Streaming", "Debug rewrite all slots", &m_debugRewriteAllSlots);
@@ -82,6 +83,7 @@ void TextureStreamer::workerRun(std::stop_token stopToken)
         StreamCompletion completion;
         completion.texIdx = request.texIdx;
         completion.targetTop = request.targetTop;
+        completion.dataMipEnd = request.dataMipEnd;
         completion.opId = request.opId;
         completion.byteCount = request.byteCount;
         completion.data = std::unique_ptr<uint8[]>(new uint8[request.byteCount]);
@@ -173,9 +175,19 @@ void TextureStreamer::applyCompletion(StreamCompletion&& completion)
     if (targetTop == state.residentTop)
         return;
 
-    // Build the replacement image spanning mips [targetTop..numMips) and upload every level from the
-    // read block (it joins this frame's staging batch; the primary CB waits the staging semaphore, and
-    // the per-mip upload path transitions each level Undefined -> TransferDst -> ShaderReadOnly).
+    if (!swapResidency(completion.texIdx, state, targetTop, completion.data.get(), completion.dataMipEnd))
+        state.failed = true;
+}
+
+bool TextureStreamer::swapResidency(uint16 texIdx, StreamState& state, uint8 targetTop, const uint8* pMipData, uint8 dataMipEnd)
+{
+    assert(targetTop != state.residentTop);
+    assert(dataMipEnd >= state.residentTop && "GPU-copied mips must exist in the old image");
+
+    // Build the replacement image spanning mips [targetTop..numMips). Freshly read mips join this
+    // frame's staging batch (the per-mip upload path transitions each level Undefined -> TransferDst ->
+    // ShaderReadOnly); the rest is GPU-copied out of the old image in the same batch. The primary CB
+    // waits the staging semaphore, so this frame's rendering samples a fully populated image.
     const uint32 numMips = (uint32)state.numMips - targetTop;
     const vk::ImageCreateInfo imageCreateInfo{
         .imageType = vk::ImageType::e2D,
@@ -192,10 +204,7 @@ void TextureStreamer::applyCompletion(StreamCompletion&& completion)
     vk::Image image;
     VmaAllocation memory = nullptr;
     if (!Globals::gpuAllocator.createImage(imageCreateInfo, image, memory, "TextureStreamed"))
-    {
-        state.failed = true;
-        return;
-    }
+        return false;
     const vk::ImageViewCreateInfo viewInfo{
         .image = image,
         .viewType = vk::ImageViewType::e2D,
@@ -207,31 +216,47 @@ void TextureStreamer::applyCompletion(StreamCompletion&& completion)
     if (viewResult.result != vk::Result::eSuccess)
     {
         Globals::gpuAllocator.destroyImage(image, memory);
-        state.failed = true;
-        return;
+        return false;
     }
 
     uint64 bufferOffset = 0;
-    for (uint32 i = 0; i < numMips; i++)
+    for (uint32 i = targetTop; i < dataMipEnd; i++)
     {
-        const TextureMipRange& mip = state.meta.mips[targetTop + i];
-        Globals::stagingManager.uploadImage(image, mip.width, mip.height, mip.byteSize, completion.data.get() + bufferOffset, i);
+        const TextureMipRange& mip = state.meta.mips[i];
+        Globals::stagingManager.uploadImage(image, mip.width, mip.height, mip.byteSize, pMipData + bufferOffset, i - targetTop);
         bufferOffset += mip.byteSize;
+    }
+
+    Texture& texture = Globals::textureManager.getTextureMutable(texIdx);
+    if (dataMipEnd < state.numMips)
+    {
+        std::vector<vk::ImageCopy> regions;
+        regions.reserve(state.numMips - dataMipEnd);
+        for (uint32 i = dataMipEnd; i < state.numMips; i++)
+        {
+            const TextureMipRange& mip = state.meta.mips[i];
+            regions.push_back(vk::ImageCopy{
+                .srcSubresource = { vk::ImageAspectFlagBits::eColor, i - state.residentTop, 0, 1 },
+                .dstSubresource = { vk::ImageAspectFlagBits::eColor, i - targetTop, 0, 1 },
+                .extent = { mip.width, mip.height, 1 },
+            });
+        }
+        Globals::stagingManager.copyImageMips(texture.getImage(), image, (uint32)(dataMipEnd - targetTop), std::move(regions));
     }
 
     // Swap into the live Texture; the old image keeps servicing the frames still in flight and is
     // destroyed NUM_FRAMES_IN_FLIGHT streamer frames later.
     RetiredImage retired{ .swapFrame = m_frameCounter };
-    Globals::textureManager.getTextureMutable(completion.texIdx)
-        .adoptStreamedImage(image, memory, viewResult.value, numMips, retired.image, retired.memory, retired.view);
+    texture.adoptStreamedImage(image, memory, viewResult.value, numMips, retired.image, retired.memory, retired.view);
     m_retiredImages.push_back(retired);
 
-    const uint64 newresidentBytes = Globals::gpuAllocator.getAllocationSize(memory);
-    m_residentBytes = m_residentBytes - state.residentBytes + newresidentBytes;
-    state.residentBytes = newresidentBytes;
+    const uint64 newResidentBytes = Globals::gpuAllocator.getAllocationSize(memory);
+    m_residentBytes = m_residentBytes - state.residentBytes + newResidentBytes;
+    state.residentBytes = newResidentBytes;
     state.residentTop = targetTop;
 
-    queueDescriptorWrite(completion.texIdx);
+    queueDescriptorWrite(texIdx);
+    return true;
 }
 
 void TextureStreamer::issueOps()
@@ -243,11 +268,13 @@ void TextureStreamer::issueOps()
     uint64 bytesLeft = (uint64)((double)m_maxMBPerFrame * 1024.0 * 1024.0);
     bool issuedAny = false;
 
-    auto tryIssue = [&](uint32 texIdx, StreamState& state) -> bool
+    // dataMipEnd = end of the disk-read mip range [targetTop..dataMipEnd); the rest comes from the old
+    // image via GPU copies (see swapResidency).
+    auto tryIssue = [&](uint32 texIdx, StreamState& state, uint8 dataMipEnd) -> bool
     {
         if (m_numOpsInFlight >= (uint32)std::max(0, m_maxOpsInFlight))
             return false;
-        const uint64 readBytes = state.bytesFromMip[state.targetTop];
+        const uint64 readBytes = state.bytesFromMip[state.targetTop] - state.bytesFromMip[dataMipEnd];
         if (readBytes > bytesLeft && issuedAny)
             return false; // over this frame's IO volume; the first op of a frame may always go
         bytesLeft -= std::min(bytesLeft, readBytes);
@@ -262,6 +289,7 @@ void TextureStreamer::issueOps()
             m_requests.push_back(StreamRequest{
                 .texIdx = (uint16)texIdx,
                 .targetTop = state.targetTop,
+                .dataMipEnd = dataMipEnd,
                 .opId = state.opId,
                 .fileOffset = state.meta.mips[state.targetTop].fileOffset,
                 .byteCount = (uint32)readBytes,
@@ -271,13 +299,22 @@ void TextureStreamer::issueOps()
         return true;
     };
 
-    // Demotions first: they free memory and never need budget headroom.
-    for (uint32 texIdx = 0; texIdx < (uint32)m_states.size(); ++texIdx)
+    // Demotions first: they free memory and never need budget headroom. With GPU copies they skip the
+    // disk entirely — the surviving mips are copied out of the old image right here, synchronously.
+    uint32 demotionsLeft = (uint32)std::max(0, m_maxOpsInFlight);
+    for (uint32 texIdx = 0; texIdx < (uint32)m_states.size() && demotionsLeft > 0; ++texIdx)
     {
         StreamState& state = m_states[texIdx];
         if (state.numMips == 0 || state.opInFlight || state.failed || state.targetTop <= state.residentTop)
             continue;
-        tryIssue(texIdx, state);
+        if (m_gpuMipCopies)
+        {
+            demotionsLeft--;
+            if (!swapResidency((uint16)texIdx, state, state.targetTop, nullptr, state.targetTop))
+                state.failed = true;
+        }
+        else
+            tryIssue(texIdx, state, state.numMips);
     }
     // Promotions ordered by how much resolution the priority pass wants (lowest desiredTop = biggest on
     // screen sharpens first, cheaper reads breaking ties), and only while the committed ledger (resident
@@ -301,7 +338,8 @@ void TextureStreamer::issueOps()
         const uint64 growBytes = state.bytesFromMip[state.targetTop] - state.bytesFromMip[state.residentTop];
         if (m_committedBytes + growBytes > availBytes)
             continue;
-        if (tryIssue(texIdx, state))
+        // With GPU copies, read only the mips the live image lacks; the rest is copied at apply time.
+        if (tryIssue(texIdx, state, m_gpuMipCopies ? state.residentTop : state.numMips))
             m_committedBytes += growBytes;
     }
 
