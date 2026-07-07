@@ -215,6 +215,39 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 .alphaMode = (uint16)temp.pipelineAlphaForMaterialIdx[materialLocalIdx].second,
                 .bounds = sphereBounds,
             });
+
+            // Skinned LOD chain, generated from the bind pose (skinned scenes bypass the cooked cache, so
+            // this always runs at load): index-only levels over the source vertex ordering, which every
+            // instance's deformed output region preserves — one chain serves all instances at all levels.
+            if (lodParams.generate && numIndices >= (uint32)lodParams.minIndices)
+            {
+                RendererVKLayout::SkinnedMeshSource& skinnedSrc = skinnedSources.back();
+                const float reduction = std::clamp(lodParams.generateReduction, 0.05f, 0.75f);
+                std::vector<uint32> lodIndices(numIndices);
+                uint32 prevIndexCount = numIndices;
+                float targetF = (float)numIndices;
+                const float meshScale = meshopt_simplifyScale(&vertices[0].position.x, vertices.size(), sizeof(RendererVKLayout::MeshVertex));
+                for (int level = 1; level <= lodParams.generateLevels && level < (int)RendererVKLayout::MAX_MESH_LODS; ++level)
+                {
+                    targetF *= reduction;
+                    const size_t targetIndexCount = std::max<size_t>(12, ((size_t)targetF) / 3 * 3);
+                    if (targetIndexCount >= prevIndexCount)
+                        break;
+                    const float targetError = 0.01f * (float)(1u << (level - 1));
+                    float resultError = 0.0f;
+                    const size_t resultCount = meshopt_simplify(lodIndices.data(), pIndices, numIndices,
+                        &vertices[0].position.x, vertices.size(), sizeof(RendererVKLayout::MeshVertex),
+                        targetIndexCount, targetError, 0, &resultError);
+                    if (resultCount < 3 || resultCount >= (size_t)((float)prevIndexCount * 0.9f))
+                        break;
+                    skinnedSrc.lodFirstIndex[skinnedSrc.numLodLevels] = (uint32)(meshDataManager.uploadIndexData(
+                        lodIndices.data(), resultCount * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
+                    skinnedSrc.lodIndexCount[skinnedSrc.numLodLevels] = (uint32)resultCount;
+                    skinnedSrc.lodError[skinnedSrc.numLodLevels] = std::max(resultError * meshScale, 1e-7f);
+                    skinnedSrc.numLodLevels++;
+                    prevIndexCount = (uint32)resultCount;
+                }
+            }
         }
 
         // meshopt-generated LOD chain over the same vertices: each level keeps generateReduction of the
@@ -782,8 +815,13 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
         const uint32 paletteHandle = renderer.allocateSkinningPalette(m_numSkeletonBones);
 
         // Reserve a unique output vertex region per skinned mesh and register a MeshInfo pointing at it.
+        // Level 0 MeshInfos come first (so bundle.baseMeshIdx + k indexing holds), the meshes' LOD-level
+        // infos are appended after: index-only ranges over the SAME per-instance output region.
         std::vector<RendererVKLayout::MeshInfo> meshInfos;
+        std::vector<RendererVKLayout::MeshInfo> lodLevelInfos;
         std::vector<uint32> meshVertexCounts;
+        std::vector<uint32> lodLevelVertexCounts;
+        std::vector<uint32> lodLevelStart(m_numSkinnedMeshes, 0); // per mesh: first entry in lodLevelInfos
         std::vector<uint32> outVertexOffsets;
         meshInfos.reserve(m_numSkinnedMeshes);
         meshVertexCounts.reserve(m_numSkinnedMeshes);
@@ -804,23 +842,70 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
             // Animation deforms the mesh beyond its bind-pose bounds; inflate so it isn't frustum-culled early.
             mi.radius = src.bounds.radius * 2.0f;
             mi.firstInstance = 0;
+
+            lodLevelStart[k] = (uint32)lodLevelInfos.size();
+            for (uint32 j = 0; j < src.numLodLevels; ++j)
+            {
+                RendererVKLayout::MeshInfo lodInfo = mi;
+                lodInfo.indexCount = src.lodIndexCount[j];
+                lodInfo.firstIndex = src.lodFirstIndex[j];
+                lodLevelInfos.push_back(lodInfo);
+                lodLevelVertexCounts.push_back(src.vertexCount);
+            }
         }
-        const uint32 baseMeshIdx = renderer.addMeshInfos(meshInfos, meshVertexCounts);
+        meshInfos.insert(meshInfos.end(), lodLevelInfos.begin(), lodLevelInfos.end());
+        meshVertexCounts.insert(meshVertexCounts.end(), lodLevelVertexCounts.begin(), lodLevelVertexCounts.end());
+        const uint32 baseMeshIdx = renderer.addMeshInfos(meshInfos, meshVertexCounts, true /*skinnedOutputs*/);
+
+        // LOD groups per instance mesh (each instance has its own MeshInfos). addMeshLodGroup also aliases
+        // every level onto the chain's RT level, whose index range the per-frame skinned BLAS then uses.
+        std::vector<uint32> lodGroupForMesh(m_numSkinnedMeshes, UINT32_MAX);
+        for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
+        {
+            const RendererVKLayout::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
+            if (src.numLodLevels == 0)
+                continue;
+            MeshLodGroup group;
+            group.numLods = (uint8)(1 + src.numLodLevels);
+            group.meshIdx[0] = (uint16)(baseMeshIdx + k);
+            for (uint32 j = 0; j < src.numLodLevels; ++j)
+            {
+                group.meshIdx[j + 1] = (uint16)(baseMeshIdx + m_numSkinnedMeshes + lodLevelStart[k] + j);
+                group.errors[j + 1] = src.lodError[j];
+            }
+            group.center = src.bounds.pos;
+            group.radius = src.bounds.radius * 2.0f; // matches the inflated MeshInfo radius
+            lodGroupForMesh[k] = renderer.addMeshLodGroup(group);
+        }
 
         uint32 firstJob = 0;
+        std::vector<uint32> blasIndexCounts(m_numSkinnedMeshes);
         for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
         {
             const RendererVKLayout::SkinnedMeshSource& src = renderer.getSkinnedMeshSource(m_baseSkinnedMeshIdx + k);
             const uint16 meshIdx = (uint16)(baseMeshIdx + k);
             assert(meshIdx < UINT16_MAX);
+            // The per-frame skinned BLAS builds at the chain's RT level (cheaper rebuild); hit shaders
+            // fetch geometry through the aliased RT meshIdx the TLAS writer packs into sbtOffset.
+            const uint16 rtMeshIdx = renderer.getRtMeshAlias(meshIdx);
+            uint32 blasFirstIndex = src.firstIndex;
+            uint32 blasIndexCount = src.indexCount;
+            if (rtMeshIdx != meshIdx)
+            {
+                const uint32 rtLevel = rtMeshIdx - (uint16)(baseMeshIdx + m_numSkinnedMeshes + lodLevelStart[k]); // level - 1
+                blasFirstIndex = src.lodFirstIndex[rtLevel];
+                blasIndexCount = src.lodIndexCount[rtLevel];
+            }
+            blasIndexCounts[k] = blasIndexCount;
             const uint32 jobHandle = renderer.addSkinnedInstance(src.baseVertexOffset, src.skinVertexOffset,
-                outVertexOffsets[k], src.vertexCount, paletteHandle, meshIdx, src.firstIndex, src.indexCount);
+                outVertexOffsets[k], src.vertexCount, paletteHandle, rtMeshIdx, blasFirstIndex, blasIndexCount);
             if (k == 0)
                 firstJob = jobHandle;
         }
         bundleHandle = renderer.registerSkinnedBundle(Renderer::SkinnedInstanceBundle{
             .sourceKey = m_baseSkinnedMeshIdx, .baseMeshIdx = baseMeshIdx, .paletteHandle = paletteHandle,
-            .firstJob = firstJob, .numMeshes = m_numSkinnedMeshes });
+            .firstJob = firstJob, .numMeshes = m_numSkinnedMeshes,
+            .lodGroupForMesh = std::move(lodGroupForMesh), .blasIndexCounts = std::move(blasIndexCounts) });
     }
 
     const Renderer::SkinnedInstanceBundle& bundle = renderer.getSkinnedBundle(bundleHandle);
@@ -845,6 +930,8 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
         inst.pipelineIndex = src.pipelineIdx;
         inst.alphaMode = src.alphaMode;
         instancesPerMesh[inst.meshIdx] += 1;
+        if (bundle.lodGroupForMesh[k] != UINT32_MAX)
+            node.m_lodInstances.push_back(RenderNode::LodInstance{ k, bundle.lodGroupForMesh[k] });
     }
     node.m_bounds = combinedBounds;
     node.m_numInstancesPerMesh.reserve(instancesPerMesh.size());

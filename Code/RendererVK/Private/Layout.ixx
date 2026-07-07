@@ -112,6 +112,13 @@ export namespace RendererVKLayout
         uint16 pipelineIdx;
         uint16 alphaMode;
         Sphere bounds;
+        // meshopt-generated LOD chain (bind pose, index-only): the skinning compute preserves the source
+        // vertex ordering in every instance's deformed output region, so these index ranges can draw any
+        // instance at any level. lod*[j] = level j+1; errors in mesh-local units like MeshLodGroup.
+        uint8  numLodLevels = 0;
+        uint32 lodFirstIndex[MAX_MESH_LODS - 1] = {};
+        uint32 lodIndexCount[MAX_MESH_LODS - 1] = {};
+        float  lodError[MAX_MESH_LODS - 1] = {};
     };
 
     constexpr uint32 SKINNING_THREADS_PER_GROUP = 64;

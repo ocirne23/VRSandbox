@@ -925,7 +925,9 @@ uint32 Renderer::acquireSkinnedBundle(uint32 sourceKey)
     {
         const RendererVKLayout::SkinnedMeshSource& src = m_skinnedMeshSources[bundle.sourceKey + k];
         m_skinningJobs[bundle.firstJob + k].vertexCount = src.vertexCount;
-        m_skinnedBlasBuilds[bundle.firstJob + k].indexCount = src.indexCount;
+        // The bundle's recorded count, NOT src.indexCount: the skinned BLAS was created (and its buffer
+        // sized) for the chain's RT level, which may be coarser than level 0.
+        m_skinnedBlasBuilds[bundle.firstJob + k].indexCount = bundle.blasIndexCounts[k];
     }
     return bundleHandle;
 }
@@ -1670,7 +1672,13 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         std::vector<uint32> buildList = std::move(m_pendingBlasRebuilds);
         m_pendingBlasRebuilds.clear();
         for (uint32 meshIdx = m_blasBuiltCount; meshIdx < m_meshInfoCounter; ++meshIdx)
-            buildList.push_back(meshIdx);
+        {
+            // Skinned output regions never build static BLASes: their data is uninitialized until the
+            // skinning compute runs, and their address entries are owned per frame slot by the skinned
+            // rebuild — a static build entering compaction would clobber them with a garbage BLAS.
+            if (!m_meshIsSkinnedOutput[meshIdx])
+                buildList.push_back(meshIdx);
+        }
         const bool newMeshes = m_blasBuiltCount < m_meshInfoCounter;
         m_blasBuiltCount = m_meshInfoCounter;
         m_accelStructure.recordBuildBlas(vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
@@ -2142,13 +2150,14 @@ void Renderer::setMeshStreamedIn(uint16 meshInfoIdx, int32 vertexOffset, uint32 
         m_pendingBlasRebuilds.push_back(meshInfoIdx); // built by the next recordGlobalIllum
 }
 
-uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos, std::span<const uint32> vertexCounts)
+uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos, std::span<const uint32> vertexCounts, bool skinnedOutputs)
 {
     assert(vertexCounts.size() == meshInfos.size() && "one exact vertex count per MeshInfo");
     const uint32 baseMeshInfoIdx = m_meshInfoCounter;
     m_meshInfoCounter += (uint32)meshInfos.size();
     m_numInstancesPerMesh.resize(m_meshInfoCounter);
     m_meshVertexCounts.insert(m_meshVertexCounts.end(), vertexCounts.begin(), vertexCounts.end());
+    m_meshIsSkinnedOutput.resize(m_meshInfoCounter, skinnedOutputs ? 1 : 0);
     assert(m_meshInfoCounter < USHRT_MAX);
 
     m_meshInfosBuffer.appendToBackingStore<RendererVKLayout::MeshInfo>(meshInfos);

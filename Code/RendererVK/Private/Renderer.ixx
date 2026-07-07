@@ -187,7 +187,11 @@ private:
     uint32 addRenderNodeTransform(const Transform& transform);
     // vertexCounts: exact per-MeshInfo vertex count (parallel to meshInfos) — the BLAS builder needs a
     // tight maxVertex per mesh and offsets are no longer monotonic with the mesh streamer's free-list.
-    uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos, std::span<const uint32> vertexCounts);
+    // skinnedOutputs: MeshInfos pointing at per-instance skinned output regions — excluded from the
+    // one-time static BLAS builds (and thus compaction): their regions are uninitialized until the
+    // skinning compute runs, and their addresses are owned per frame slot by the skinned BLAS rebuild.
+    uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos, std::span<const uint32> vertexCounts, bool skinnedOutputs = false);
+    uint16 getRtMeshAlias(uint16 meshIdx) const { return (uint16)m_accelStructure.getMeshAlias(meshIdx); }
     uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
     uint32 addMeshLodGroup(const MeshLodGroup& group)
@@ -211,10 +215,13 @@ private:
     struct SkinnedInstanceBundle
     {
         uint32 sourceKey;    // owning container's base SkinnedMeshSource index (free-list key)
-        uint32 baseMeshIdx;  // first MeshInfo of the per-instance range
+        uint32 baseMeshIdx;  // first MeshInfo of the per-instance range (level 0s; LOD levels follow)
         uint32 paletteHandle;
         uint32 firstJob;     // first entry of the contiguous SkinningJob/SkinnedBlasBuild range
         uint32 numMeshes;
+        std::vector<uint32> lodGroupForMesh; // per mesh: MeshLodGroup idx (UINT32_MAX = no chain)
+        std::vector<uint32> blasIndexCounts; // per mesh: the skinned BLAS's index count (its RT level's,
+                                             // restored on unpark — src.indexCount would be level 0's)
     };
     uint32 acquireSkinnedBundle(uint32 sourceKey); // reactivates + returns a parked bundle, UINT32_MAX if none free
     uint32 registerSkinnedBundle(const SkinnedInstanceBundle& bundle);
@@ -333,6 +340,7 @@ private:
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<uint32> m_numInstancesPerMesh;
     std::vector<uint32> m_meshVertexCounts;    // exact per-MeshInfo vertex count (BLAS maxVertex)
+    std::vector<uint8> m_meshIsSkinnedOutput;  // per MeshInfo: skinned output region (no static BLAS build)
     std::vector<uint32> m_pendingBlasRebuilds; // re-streamed meshes awaiting a BLAS rebuild in recordGlobalIllum
     std::vector<MeshLodGroup> m_meshLodGroups;
     std::array<uint32, RendererVKLayout::MAX_MESH_LODS> m_lodInstanceCounts{}; // per-level picks this frame (stats)
