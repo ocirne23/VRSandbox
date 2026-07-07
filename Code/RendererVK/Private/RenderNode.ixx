@@ -98,6 +98,7 @@ private:
         m_bounds = other.m_bounds;
         m_meshInstances = std::move(other.m_meshInstances);
         m_numInstancesPerMesh = std::move(other.m_numInstancesPerMesh);
+        m_lodInstances = std::move(other.m_lodInstances);
         other.m_transformIdx = UINT32_MAX;
         other.m_skinnedPaletteHandle = UINT32_MAX;
         other.m_skinnedBundleHandle = UINT32_MAX;
@@ -109,4 +110,7 @@ private:
     Sphere m_bounds;
     std::vector<RendererVKLayout::InMeshInstance> m_meshInstances;
     std::vector<std::pair<uint16, uint16>> m_numInstancesPerMesh;
+    // Instances with a LOD chain: (index into m_meshInstances, Renderer mesh-LOD-group index). The
+    // stored instance references the LOD0 mesh; Renderer::selectMeshLods redirects per frame.
+    std::vector<std::pair<uint32, uint32>> m_lodInstances;
 };

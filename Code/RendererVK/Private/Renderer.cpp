@@ -52,6 +52,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_rtaoParams.registerTweaks(rerecordCallback, [this]() { if (Globals::device.getGraphicsQueue().waitIdle() != vk::Result::eSuccess) return; m_rtaoPipeline.reloadShaders(); setHaveToRecordCommandBuffers(); });
     m_taaParams.registerTweaks(rerecordCallback);
     m_postParams.registerTweaks(rerecordCallback);
+    m_lodParams.registerTweaks();
 
     glslang::InitializeProcess();
     const bool enableValidationLayers = (validation == EValidation::ENABLED);
@@ -397,6 +398,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 
     m_meshInstanceCounter = 0;
     memset(m_numInstancesPerMesh.data(), 0, m_numInstancesPerMesh.size() * sizeof(m_numInstancesPerMesh[0]));
+    m_lodInstanceCounts.fill(0);
 
     const glm::ivec2 viewportSize = m_viewportRect.getSize();
     // In VR the "centre view" (used for culling, GI region, shadow cascade fit, and the shared screen-space
@@ -552,6 +554,8 @@ void Renderer::renderNodeThreadSafe(const RenderNode& node, uint32 passMask)
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
+    if (!node.m_lodInstances.empty() && m_lodParams.enabled)
+        selectMeshLods(node, frameData.mappedMeshInstances.data() + startIdx, true);
 }
 
 void Renderer::noteTextureUse(const RenderNode& node, uint32 passMask)
@@ -594,6 +598,59 @@ void Renderer::renderNode(const RenderNode& node, uint32 passMask)
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
+    if (!node.m_lodInstances.empty() && m_lodParams.enabled)
+        selectMeshLods(node, frameData.mappedMeshInstances.data() + startIdx, false);
+}
+
+void Renderer::selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshInstance* instances, bool threadSafe)
+{
+    const Transform& nodeTransform = Globals::renderNodeTransforms[node.m_transformIdx];
+    const std::span<const RendererVKLayout::MeshInstanceOffset> offsets =
+        m_instanceOffsetsBuffer.getBackingStoreAs<RendererVKLayout::MeshInstanceOffset>();
+    const int forceLod = m_lodParams.forceLod;
+
+    for (const auto& [instanceIdx, groupIdx] : node.m_lodInstances)
+    {
+        const MeshLodGroup& group = m_meshLodGroups[groupIdx];
+        RendererVKLayout::InMeshInstance& instance = instances[instanceIdx];
+
+        int level;
+        if (forceLod >= 0)
+        {
+            level = std::min(forceLod, (int)group.numLods - 1);
+        }
+        else
+        {
+            // Same projected-size metric as the texture streamer: each halving of the on-screen
+            // diameter below fullResPixels drops one level (triangle density scales with area).
+            const Transform& offset = offsets[instance.instanceOffsetIdx].transform;
+            const glm::vec3 worldCenter = nodeTransform.transformPoint(offset.transformPoint(group.center));
+            const float radius = group.radius * offset.scale * nodeTransform.scale;
+            const float dist = std::max(0.01f, glm::length(worldCenter - m_cameraPos) - radius);
+            const float projPixels = std::max(1.0f, radius * m_mipPixelScale / dist);
+            level = (int)std::floor(std::log2(std::max(1.0f, m_lodParams.fullResPixels / projPixels)));
+            level = std::clamp(level + m_lodParams.bias, 0, (int)group.numLods - 1);
+        }
+
+        // The copied instance references the LOD0 mesh; redirect it and keep the per-mesh counts
+        // (which renderNode accumulated for LOD0) in step so the cull's instance buckets stay exact.
+        const uint16 chosenMeshIdx = group.meshIdx[level];
+        if (chosenMeshIdx != instance.meshIdx)
+        {
+            if (threadSafe)
+            {
+                std::atomic_ref<uint32>(m_numInstancesPerMesh[instance.meshIdx]).fetch_sub(1, std::memory_order_relaxed);
+                std::atomic_ref<uint32>(m_numInstancesPerMesh[chosenMeshIdx]).fetch_add(1, std::memory_order_relaxed);
+            }
+            else
+            {
+                m_numInstancesPerMesh[instance.meshIdx]--;
+                m_numInstancesPerMesh[chosenMeshIdx]++;
+            }
+            instance.meshIdx = chosenMeshIdx;
+        }
+        std::atomic_ref<uint32>(m_lodInstanceCounts[level]).fetch_add(1, std::memory_order_relaxed);
+    }
 }
 
 void Renderer::addLightInfo(const RendererVKLayout::LightInfo& light)
@@ -2103,6 +2160,11 @@ Stats Renderer::getStats()
     stats.textureTailBytes = streamStats.tailBytes;
     stats.numStreamableTextures = streamStats.numStreamable;
     stats.numStreamOpsInFlight = streamStats.numOpsInFlight;
+
+    stats.numMeshLodGroups = (uint32)m_meshLodGroups.size();
+    static_assert(sizeof(stats.lodInstanceCounts) == sizeof(uint32) * RendererVKLayout::MAX_MESH_LODS);
+    for (uint32 i = 0; i < RendererVKLayout::MAX_MESH_LODS; ++i)
+        stats.lodInstanceCounts[i] = m_lodInstanceCounts[i];
 
     return stats;
 }

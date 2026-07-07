@@ -32,6 +32,8 @@ export namespace RendererVKLayout
     // Mesh/material indices are stored as uint16 in InMeshInstance, so growth clamps to this.
     constexpr uint32 MESH_MATERIAL_INDEX_LIMIT = USHRT_MAX
         - 1;
+    // Max levels in a mesh LOD chain (level 0 = full resolution), authored or meshopt-generated.
+    constexpr uint32 MAX_MESH_LODS = 5;
     constexpr size_t MAX_LIGHTS = USHRT_MAX - 1;
     // Sun shadow cascaded shadow maps.
     constexpr uint32 NUM_SHADOW_CASCADES = 6;

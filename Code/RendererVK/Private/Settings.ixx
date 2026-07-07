@@ -160,6 +160,22 @@ export struct TAAParams
     void registerTweaks(const std::function<void()>& onReRecord);
 };
 
+// Mesh LOD chains (authored "LodN_*" meshes and/or meshopt-generated) — the TweakPanel's "LOD" category.
+// Selection runs per instance at renderNode time; generate/generateLevels/minIndices are read at
+// ObjectContainer load, so they only affect containers loaded after a change.
+export struct MeshLodParams
+{
+    bool  enabled = true;         // per-instance LOD selection (off = everything renders LOD0)
+    float fullResPixels = 256.0f; // projected diameter (px) above which LOD0 is used; each halving drops one level
+    int   bias = 0;               // levels added to every selection (positive = coarser)
+    int   forceLod = -1;          // >= 0: clamp every LOD instance to this level (debug)
+    bool  generate = true;        // meshopt-generate chains for static meshes without authored LODs
+    int   generateLevels = 3;     // max generated levels beyond LOD0 (quarter the triangles per level)
+    int   minIndices = 1536;      // don't generate for meshes below this index count
+
+    void registerTweaks();
+};
+
 export struct Stats
 {
     uint32 numLights;
@@ -210,4 +226,8 @@ export struct Stats
     uint64 textureTailBytes;       // always-resident mip tails (part of resident)
     uint32 numStreamableTextures;
     uint32 numStreamOpsInFlight;
+
+    // Mesh LOD (see MeshLodParams / Renderer::selectMeshLods).
+    uint32 numMeshLodGroups;
+    uint32 lodInstanceCounts[5];   // LOD instances rendered per selected level this frame (MAX_MESH_LODS)
 };

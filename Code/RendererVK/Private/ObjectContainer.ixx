@@ -87,6 +87,7 @@ private:
         uint16 materialInfoIdx = UINT16_MAX;
         uint16 pipelineIdx = 0;
         uint16 alphaMode = 0;
+        uint32 lodGroupIdx = UINT32_MAX; // Renderer mesh-LOD-group index (UINT32_MAX = no LOD chain)
     };
 
     struct NodeMeshRange

@@ -50,6 +50,17 @@ export enum class EValidation { ENABLED, DISABLED };
 export enum class EVSync { ENABLED, DISABLED };
 export enum class EVr { ENABLED, DISABLED };
 
+// One mesh LOD chain: global mesh indices per level ([0] = full resolution) sharing one set of local
+// bounds (used for the projected-size selection). Registered by ObjectContainer at load, referenced by
+// RenderNode::m_lodInstances, applied per frame by Renderer::selectMeshLods.
+export struct MeshLodGroup
+{
+    uint16 meshIdx[RendererVKLayout::MAX_MESH_LODS] = {};
+    uint8 numLods = 0;
+    glm::vec3 center = glm::vec3(0.0f); // LOD0 local bounds
+    float radius = 0.0f;
+};
+
 export class Renderer final
 {
 public:
@@ -123,6 +134,10 @@ private:
     // Texture-streaming priority pass: reports the node's projected screen size to the TextureStreamer
     // for every material texture its instances sample (called from renderNode/renderNodeThreadSafe).
     void noteTextureUse(const RenderNode& node, uint32 passMask);
+    // Per-instance mesh LOD selection: redirects a node's LOD-chained instances (freshly copied into
+    // this frame's mapped instance buffer at instances[]) to the level their projected size wants,
+    // keeping the per-mesh instance counts in step. threadSafe = called from renderNodeThreadSafe.
+    void selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshInstance* instances, bool threadSafe);
     void recordSkinning(uint32 frameIdx);
     void recordIndirectCull(uint32 frameIdx);
     void recordLightGrid(uint32 frameIdx);
@@ -157,6 +172,8 @@ private:
     uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos);
     uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
+    uint32 addMeshLodGroup(const MeshLodGroup& group) { m_meshLodGroups.push_back(group); return (uint32)m_meshLodGroups.size() - 1; }
+    const MeshLodParams& getLodParams() const { return m_lodParams; }
     uint32 addSkinnedMeshSources(const std::vector<RendererVKLayout::SkinnedMeshSource>& sources);
     const RendererVKLayout::SkinnedMeshSource& getSkinnedMeshSource(uint32 idx) const { return m_skinnedMeshSources[idx]; }
 
@@ -231,6 +248,7 @@ private:
     glm::vec3 m_cameraPos = glm::vec3(0.0f);
     glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
     float m_mipPixelScale = 0.0f; // viewportHeight / tan(fovY/2): projected diameter px = radius * scale / dist
+    MeshLodParams m_lodParams;
 
     glm::mat4 m_sunCascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
     uint32 m_numSunCascades = 0;
@@ -288,6 +306,8 @@ private:
 
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<uint32> m_numInstancesPerMesh;
+    std::vector<MeshLodGroup> m_meshLodGroups;
+    std::array<uint32, RendererVKLayout::MAX_MESH_LODS> m_lodInstanceCounts{}; // per-level picks this frame (stats)
     std::vector<uint32> m_freeRenderNodeIndexes;
     std::vector<SkinnedInstanceBundle> m_skinnedBundles;
     std::unordered_map<uint32, std::vector<uint32>> m_freeSkinnedBundles; // sourceKey -> parked bundle handles

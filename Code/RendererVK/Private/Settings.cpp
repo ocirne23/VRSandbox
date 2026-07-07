@@ -119,3 +119,14 @@ void TAAParams::registerTweaks(const std::function<void()>& onReRecord)
     Tweak::boolean("TAA", "Enabled", &taaEnabled, onReRecord);
     Tweak::floatVar("TAA", "History Feedback", &taaFeedback, 0.0f, 0.98f, 0.01f, onReRecord);
 }
+
+void MeshLodParams::registerTweaks()
+{
+    Tweak::boolean("LOD", "Enabled", &enabled);
+    Tweak::floatVar("LOD", "Full-res pixels", &fullResPixels, 16.0f, 2048.0f, 1.0f);
+    Tweak::intVar("LOD", "Bias", &bias, -4, 4);
+    Tweak::intVar("LOD", "Force LOD", &forceLod, -1, 4);
+    Tweak::boolean("LOD", "Generate LODs", &generate);
+    Tweak::intVar("LOD", "Generated levels", &generateLevels, 1, 4);
+    Tweak::intVar("LOD", "Min indices", &minIndices, 96, 65536);
+}

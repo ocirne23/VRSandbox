@@ -20,3 +20,9 @@
 # 3. lib.exe-merge phonon.lib + pffft.lib + mysofa.lib + zlibstatic.lib per config into
 #    Lib/phonon.lib / Lib/phonond.lib, and copy src/core/phonon.h + the generated
 #    build-x64/src/core/phonon_version.h to Include/phonon.
+#
+# meshoptimizer source is kept in meshoptimizer/ (v0.24, demo/tools/js trimmed). Rebuilding
+# Lib/meshoptimizer(d).lib: configure its own CMakeLists with the DLL CRT
+# ("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"), build the meshoptimizer
+# target in Release + Debug, copy the .libs over (Debug -> meshoptimizerd.lib) and src/meshoptimizer.h
+# to Include/meshoptimizer.

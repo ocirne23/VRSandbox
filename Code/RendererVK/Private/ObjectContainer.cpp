@@ -1,4 +1,8 @@
-﻿module RendererVK;
+﻿module;
+
+#include <meshoptimizer/meshoptimizer.h> // LOD chain generation for meshes without authored LODs
+
+module RendererVK;
 
 import Core;
 import Core.Transform;
@@ -21,11 +25,34 @@ constexpr char NODE_CHILD_SEPARATOR = ':';
 // stay aligned with the scene, they just never get instanced).
 static constexpr std::string_view COLLISION_MESH_PREFIX = "Col_";
 
+// Meshes (or nodes) named "LodN_*" form authored LOD chains: "Lod0_house"/"Lod1_house"/... group under
+// the logical name "house" (a plain "house" mesh may also serve as level 0). Levels above 0 are never
+// instanced directly; Renderer::selectMeshLods redirects instances to them by projected size, and a
+// "Lod0_*" node is also reachable by its logical name in path lookups.
+static bool parseLodName(std::string_view name, uint32& outLevel, std::string_view& outLogicalName)
+{
+    if (name.size() < 5 || (name[0] != 'L' && name[0] != 'l') || (name[1] != 'O' && name[1] != 'o') || (name[2] != 'D' && name[2] != 'd'))
+        return false;
+    size_t i = 3;
+    if (name[i] < '0' || name[i] > '9')
+        return false;
+    uint32 level = 0;
+    while (i < name.size() && name[i] >= '0' && name[i] <= '9')
+        level = level * 10 + (name[i++] - '0');
+    if (i >= name.size() || name[i] != '_' || i + 1 >= name.size())
+        return false;
+    outLevel = level;
+    outLogicalName = name.substr(i + 1);
+    return true;
+}
+
 struct ObjectContainer::TempInitData
 {
 	std::vector<std::pair<RendererVKLayout::EPipelineIndex, RendererVKLayout::EAlphaMode>> pipelineAlphaForMaterialIdx;
     std::vector<uint16> materialIdxForMeshIdx;
     std::vector<uint16> textureIdxForMaterialTex;
+    std::vector<bool> meshIsLodVariant;      // level > 0 member of an authored chain: never instanced
+    std::vector<uint32> lodGroupForMeshIdx;  // per local mesh: Renderer LOD group (UINT32_MAX = none)
 };
 
 bool ObjectContainer::initialize(const ISceneData& sceneData, const MaterialOverrides* pOverrides)
@@ -56,6 +83,47 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
     std::vector<RendererVKLayout::MeshInfo> meshInfos;
     meshInfos.reserve(numMeshes);
     std::vector<RendererVKLayout::SkinnedMeshSource> skinnedSources; // registered with the renderer after the loop
+
+    // Authored LOD chains: pre-scan the mesh names so chain membership is known before upload (chain
+    // members are excluded from meshopt generation, level > 0 members from instancing).
+    struct AuthoredLods { uint16 levels[RendererVKLayout::MAX_MESH_LODS]; }; // local mesh idx per level
+    std::unordered_map<std::string, AuthoredLods> authoredLods;
+    std::unordered_map<std::string, uint16> meshIdxByName;
+    std::vector<bool> inAuthoredChain(numMeshes, false);
+    temp.meshIsLodVariant.assign(numMeshes, false);
+    temp.lodGroupForMeshIdx.assign(numMeshes, UINT32_MAX);
+    for (uint32 meshIdx = 0; meshIdx < numMeshes; meshIdx++)
+        meshIdxByName.try_emplace(sceneData.getMesh(meshIdx)->getName(), (uint16)meshIdx);
+    for (uint32 meshIdx = 0; meshIdx < numMeshes; meshIdx++)
+    {
+        uint32 level;
+        std::string_view logicalName;
+        if (!parseLodName(sceneData.getMesh(meshIdx)->getName(), level, logicalName) || level >= RendererVKLayout::MAX_MESH_LODS)
+            continue;
+        auto [it, inserted] = authoredLods.try_emplace(std::string(logicalName));
+        if (inserted)
+            std::fill(std::begin(it->second.levels), std::end(it->second.levels), (uint16)UINT16_MAX);
+        it->second.levels[level] = (uint16)meshIdx;
+        if (level > 0)
+            temp.meshIsLodVariant[meshIdx] = true;
+    }
+    for (auto& [logicalName, lods] : authoredLods)
+    {
+        // A plain "house" mesh serves as level 0 when no "Lod0_house" exists.
+        if (lods.levels[0] == UINT16_MAX)
+            if (auto it = meshIdxByName.find(logicalName); it != meshIdxByName.end())
+                lods.levels[0] = it->second;
+        for (uint16 idx : lods.levels)
+            if (idx != UINT16_MAX)
+                inAuthoredChain[idx] = true;
+    }
+
+    // meshopt-generated LOD chains: extra index-only MeshInfos over the same vertex ranges, appended
+    // after the source meshes (filled during the upload loop below).
+    struct GeneratedChain { uint16 baseMeshIdx; uint16 firstExtraIdx; uint8 numLevels; };
+    std::vector<RendererVKLayout::MeshInfo> generatedLodInfos;
+    std::vector<GeneratedChain> generatedChains;
+    const MeshLodParams& lodParams = Globals::rendererVK.getLodParams();
 
     const Skeleton* pSkeleton = sceneData.getSkeleton();
     m_isSkinned = pSkeleton != nullptr;
@@ -134,9 +202,74 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 .bounds = sphereBounds,
             });
         }
+
+        // meshopt-generated LOD chain: quarter the triangles per level over the same vertices (matches
+        // the selector's per-level halving of the projected diameter, since density scales with area).
+        const bool isColMesh = std::string_view(m_meshNames[meshIdx]).starts_with(COLLISION_MESH_PREFIX);
+        if (lodParams.generate && !meshData.isSkinned() && !isColMesh && !inAuthoredChain[meshIdx]
+            && numIndices >= (uint32)lodParams.minIndices)
+        {
+            std::vector<uint32> lodIndices(numIndices);
+            uint32 prevIndexCount = numIndices;
+            uint8 numLevels = 0;
+            for (int level = 1; level <= lodParams.generateLevels && level < (int)RendererVKLayout::MAX_MESH_LODS; ++level)
+            {
+                const size_t targetIndexCount = std::max<size_t>(12, ((size_t)numIndices >> (2 * level)) / 3 * 3);
+                if (targetIndexCount >= prevIndexCount)
+                    break;
+                const float targetError = 0.01f * (float)(1u << (level - 1));
+                const size_t resultCount = meshopt_simplify(lodIndices.data(), pIndices, numIndices,
+                    &vertices[0].position.x, vertices.size(), sizeof(RendererVKLayout::MeshVertex),
+                    targetIndexCount, targetError, 0, nullptr);
+                if (resultCount < 3 || resultCount >= (size_t)((float)prevIndexCount * 0.9f))
+                    break; // simplification stalled; deeper levels won't gain anything
+                RendererVKLayout::MeshInfo lodInfo = meshInfo; // same vertices + bounds
+                lodInfo.indexCount = (uint32)resultCount;
+                lodInfo.firstIndex = (uint32)(meshDataManager.uploadIndexData(lodIndices.data(), resultCount * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
+                if (numLevels == 0)
+                    generatedChains.push_back(GeneratedChain{ (uint16)meshIdx, (uint16)generatedLodInfos.size(), 0 });
+                generatedLodInfos.push_back(lodInfo);
+                generatedChains.back().numLevels = ++numLevels;
+                prevIndexCount = (uint32)resultCount;
+            }
+        }
     }
 
+    const uint32 numSourceMeshes = (uint32)meshInfos.size();
+    meshInfos.insert(meshInfos.end(), generatedLodInfos.begin(), generatedLodInfos.end());
+
     m_baseMeshInfoIdx = (uint16)Globals::rendererVK.addMeshInfos(meshInfos);
+
+    // Register the LOD chains now that global mesh indices are known; the base mesh's NodeInfo picks
+    // the group up in initializeNodes.
+    for (const GeneratedChain& chain : generatedChains)
+    {
+        MeshLodGroup group;
+        group.numLods = (uint8)(chain.numLevels + 1);
+        group.meshIdx[0] = (uint16)(m_baseMeshInfoIdx + chain.baseMeshIdx);
+        for (uint8 k = 0; k < chain.numLevels; ++k)
+            group.meshIdx[k + 1] = (uint16)(m_baseMeshInfoIdx + numSourceMeshes + chain.firstExtraIdx + k);
+        group.center = m_boundsForMeshIdx[chain.baseMeshIdx].pos;
+        group.radius = m_boundsForMeshIdx[chain.baseMeshIdx].radius;
+        temp.lodGroupForMeshIdx[chain.baseMeshIdx] = Globals::rendererVK.addMeshLodGroup(group);
+    }
+    for (const auto& [logicalName, lods] : authoredLods)
+    {
+        if (lods.levels[0] == UINT16_MAX)
+        {
+            Log::warning(std::format("Scene: LOD chain '{}' in '{}' has no level 0 ('Lod0_{}' or plain '{}'); ignoring", logicalName, m_filePath, logicalName, logicalName));
+            continue;
+        }
+        MeshLodGroup group;
+        for (uint16 localIdx : lods.levels) // ascending level order; missing levels compact down
+            if (localIdx != UINT16_MAX)
+                group.meshIdx[group.numLods++] = (uint16)(m_baseMeshInfoIdx + localIdx);
+        if (group.numLods < 2)
+            continue; // a lone Lod0_ mesh is just a regular mesh
+        group.center = m_boundsForMeshIdx[lods.levels[0]].pos;
+        group.radius = m_boundsForMeshIdx[lods.levels[0]].radius;
+        temp.lodGroupForMeshIdx[lods.levels[0]] = Globals::rendererVK.addMeshLodGroup(group);
+    }
     if (!skinnedSources.empty())
     {
         m_numSkinnedMeshes = (uint32)skinnedSources.size();
@@ -333,11 +466,16 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
 
         std::vector<uint32> visibleMeshes;
         const bool nodeIsCollision = std::string_view(pStackNode->getName()).starts_with(COLLISION_MESH_PREFIX);
+        uint32 nodeLodLevel = 0;
+        std::string_view nodeLodLogicalName;
+        const bool nodeIsLodVariant = parseLodName(pStackNode->getName(), nodeLodLevel, nodeLodLogicalName) && nodeLodLevel > 0;
         for (uint32 i = 0; i < pStackNode->getNumMeshes(); ++i)
         {
             const uint32 meshIdx = pStackNode->getMeshIndex(i);
             if (nodeIsCollision || std::string_view(m_meshNames[meshIdx]).starts_with(COLLISION_MESH_PREFIX))
                 continue; // collision-only proxy mesh, never rendered
+            if (nodeIsLodVariant || temp.meshIsLodVariant[meshIdx])
+                continue; // LOD level > 0: only reachable through its chain's level-0 instance
             visibleMeshes.push_back(meshIdx);
         }
 
@@ -381,6 +519,17 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
 
     m_nodeMeshRanges.resize(numNodes);
     m_rebasedOffsetBaseForIdx.assign(numNodes, UINT32_MAX);
+
+    // A "Lod0_X" leaf is also reachable as "X" (spawnables/prefabs reference the logical name).
+    auto registerPathWithLodAlias = [this](const std::string& path, uint16 nodeIdx)
+    {
+        m_nodePathIdxLookup.emplace(path, nodeIdx);
+        const size_t leafStart = path.find_last_of(NODE_PATH_SEPARATOR) + 1; // npos + 1 == 0: whole path is the leaf
+        uint32 lodLevel;
+        std::string_view logicalName;
+        if (parseLodName(std::string_view(path).substr(leafStart), lodLevel, logicalName) && lodLevel == 0)
+            m_nodePathIdxLookup.try_emplace(path.substr(0, leafStart) + std::string(logicalName), nodeIdx);
+    };
 
     for (uint32 i = 0; i < numNodes; ++i)
     {
@@ -427,19 +576,20 @@ void ObjectContainer::initializeNodes(const ISceneData& sceneData, TempInitData&
                 parentIdx = (initialStateNodes[parentIdx].parentOffset != 0) ? parentIdx - initialStateNodes[parentIdx].parentOffset : UINT16_MAX;
             }
 
-            m_nodePathIdxLookup.emplace(node.path, (uint16)i);
+            registerPathWithLodAlias(node.path, (uint16)i);
             m_meshInstanceOffsets.emplace_back(nodeWS);
             // Parallel to m_meshInstanceOffsets: one NodeInfo per mesh instance (not per node).
             m_nodeInfos.emplace_back(NodeInfo{
                 .meshInfoIdx = node.meshInfoIdx,
                 .materialInfoIdx = node.materialInfoIdx,
                 .pipelineIdx = node.materialInfoIdx != UINT16_MAX ? (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].first : UINT16_MAX,
-                .alphaMode = node.materialInfoIdx != UINT16_MAX ? (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].second : UINT16_MAX
+                .alphaMode = node.materialInfoIdx != UINT16_MAX ? (uint16)temp.pipelineAlphaForMaterialIdx[node.materialInfoIdx].second : UINT16_MAX,
+                .lodGroupIdx = temp.lodGroupForMeshIdx[node.meshInfoIdx]
             });
         }
         else if (i == 0)
         {
-            m_nodePathIdxLookup.emplace(node.path, (uint16)i);
+            registerPathWithLodAlias(node.path, (uint16)i);
         }
         m_nodeBounds.emplace_back(meshBounds);
     }
@@ -499,6 +649,8 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
         node.m_meshInstances[i].materialIdx = m_baseMaterialInfoIdx + nodeInfo.materialInfoIdx;
 		node.m_meshInstances[i].pipelineIndex = nodeInfo.pipelineIdx;
 		node.m_meshInstances[i].alphaMode = nodeInfo.alphaMode;
+        if (nodeInfo.lodGroupIdx != UINT32_MAX)
+            node.m_lodInstances.emplace_back(i, nodeInfo.lodGroupIdx);
     }
 
     std::map<uint16, uint16> instancesPerMesh;
