@@ -325,9 +325,11 @@ namespace
                 continue;
 
             // Same policy as the runtime path in ObjectContainer::initializeMeshes, plus a vertex-cache
-            // pass on each level (free at cook time).
+            // pass on each level (free at cook time). The simplify error is kept per level (scaled to
+            // mesh-local units) — the renderer's screen-space-error selection projects it into pixels.
             const uint32* pIndices = meshData.getIndices();
             const glm::vec3* pPositions = meshData.getVertices();
+            const float meshScale = meshopt_simplifyScale(&pPositions[0].x, numVertices, sizeof(glm::vec3));
             lodIndices.resize(numIndices);
             uint32 prevIndexCount = numIndices;
             float targetF = (float)numIndices;
@@ -339,12 +341,14 @@ namespace
                 if (targetIndexCount >= prevIndexCount)
                     break;
                 const float targetError = 0.01f * (float)(1u << (level - 1));
+                float resultError = 0.0f;
                 const size_t resultCount = meshopt_simplify(lodIndices.data(), pIndices, numIndices,
-                    &pPositions[0].x, numVertices, sizeof(glm::vec3), targetIndexCount, targetError, 0, nullptr);
+                    &pPositions[0].x, numVertices, sizeof(glm::vec3), targetIndexCount, targetError, 0, &resultError);
                 if (resultCount < 3 || resultCount >= (size_t)((float)prevIndexCount * 0.9f))
                     break;
                 meshopt_optimizeVertexCache(lodIndices.data(), lodIndices.data(), resultCount, numVertices);
                 ctx.blob.write(lodIndices.data(), resultCount * sizeof(uint32));
+                cooked.lodErrors[cooked.numLodLevels] = resultError * meshScale;
                 cooked.lodIndexCounts[cooked.numLodLevels++] = (uint32)resultCount;
                 prevIndexCount = (uint32)resultCount;
             }

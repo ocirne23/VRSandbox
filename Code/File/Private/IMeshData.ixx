@@ -35,4 +35,7 @@ public:
     // meshopt-generates chains at load instead).
     virtual uint32 getNumLodLevels() const { return 0; }
     virtual const uint32* getLodIndices(uint32 /*level*/, uint32& outNumIndices) const { outNumIndices = 0; return nullptr; }
+    // Geometric deviation of the level from LOD0 in mesh-local units (meshopt simplify error x mesh
+    // extents); drives the renderer's screen-space-error LOD selection.
+    virtual float getLodError(uint32 /*level*/) const { return 0.0f; }
 };

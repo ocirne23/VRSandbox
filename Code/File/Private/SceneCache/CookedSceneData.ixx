@@ -20,7 +20,7 @@ import :INodeData;
 export namespace SceneCache
 {
     constexpr uint32 SCENE_CACHE_MAGIC   = 'V' | ('R' << 8) | ('S' << 16) | ('C' << 24);
-    constexpr uint32 SCENE_CACHE_VERSION = 3; // v3: JoinIdenticalVertices added to the Assimp import
+    constexpr uint32 SCENE_CACHE_VERSION = 4; // v4: per-LOD-level simplify errors baked into CookedMesh
     constexpr uint32 MAX_COOKED_LOD_LEVELS = 7; // generated levels beyond LOD0 the format can hold
 
     struct CookedHeader
@@ -51,8 +51,10 @@ export namespace SceneCache
         float aabbMax[3];
         uint32 numLodLevels;
         uint32 lodIndexCounts[MAX_COOKED_LOD_LEVELS];
+        float lodErrors[MAX_COOKED_LOD_LEVELS]; // per level: geometric deviation from LOD0 (mesh-local units)
+        uint32 pad;
     };
-    static_assert(sizeof(CookedMesh) == 128);
+    static_assert(sizeof(CookedMesh) == 160);
 
     struct CookedMaterial
     {
@@ -111,6 +113,7 @@ public:
 
     uint32 getNumLodLevels() const override { return m_pMesh->numLodLevels; }
     const uint32* getLodIndices(uint32 level, uint32& outNumIndices) const override;
+    float getLodError(uint32 level) const override { return level < m_pMesh->numLodLevels ? m_pMesh->lodErrors[level] : 0.0f; }
 
 private:
     friend class CookedSceneData;

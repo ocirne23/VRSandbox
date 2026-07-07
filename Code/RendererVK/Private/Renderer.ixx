@@ -59,6 +59,11 @@ export struct MeshLodGroup
     uint8 numLods = 0;
     glm::vec3 center = glm::vec3(0.0f); // LOD0 local bounds
     float radius = 0.0f;
+    // Geometric deviation of each level from LOD0 in mesh-local units (meshopt simplify error x mesh
+    // extents), 0 for level 0. Drives screen-space-error selection: a level is usable when its error
+    // projects below "LOD/Max error (px)". All-zero (authored chains without error data) falls back to
+    // the projected-size metric.
+    float errors[RendererVKLayout::MAX_MESH_LODS] = {};
 };
 
 export class Renderer final

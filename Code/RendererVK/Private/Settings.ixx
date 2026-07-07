@@ -166,9 +166,10 @@ export struct TAAParams
 export struct MeshLodParams
 {
     bool  enabled = true;         // per-instance LOD selection (off = everything renders LOD0)
-    float fullResPixels = 256.0f; // projected diameter (px) above which LOD0 is used; each halving drops one level
-    int   bias = 0;               // levels added to every selection (positive = coarser)
-    float hysteresis = 0.25f;     // fraction of a level the continuous LOD value must overshoot a boundary before switching
+    float maxErrorPixels = 0.5f;  // screen-space error budget: coarsest level whose geometric deviation projects below this is used (generated chains carry per-level meshopt errors)
+    float fullResPixels = 256.0f; // FALLBACK metric for chains without error data (authored LodN_): projected diameter (px) above which LOD0 is used; each halving drops one level
+    int   bias = 0;               // coarseness bias: doubles the error budget per step (fallback: levels added)
+    float hysteresis = 0.25f;     // switch dead-band: fraction of the error budget (fallback: fraction of a level) a change must overshoot before switching
     int   forceLod = -1;          // >= 0: clamp every LOD instance to this level (debug)
     bool  generate = true;        // meshopt-generate chains for static meshes without authored LODs
     int   generateLevels = 4;     // max generated levels beyond LOD0

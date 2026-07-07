@@ -122,6 +122,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
     // after the source meshes (filled during the upload loop below).
     struct GeneratedChain { uint16 baseMeshIdx; uint16 firstExtraIdx; uint8 numLevels; };
     std::vector<RendererVKLayout::MeshInfo> generatedLodInfos;
+    std::vector<float> generatedLodErrors; // parallel to generatedLodInfos: deviation from LOD0, mesh-local units
     std::vector<GeneratedChain> generatedChains;
     const MeshLodParams& lodParams = Globals::rendererVK.getLodParams();
 
@@ -222,6 +223,9 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 if (level == 0)
                     generatedChains.push_back(GeneratedChain{ (uint16)meshIdx, (uint16)generatedLodInfos.size(), 0 });
                 generatedLodInfos.push_back(lodInfo);
+                // Floor at a tiny epsilon: errors[1] > 0 is what routes the group onto the
+                // screen-space-error selection path.
+                generatedLodErrors.push_back(std::max(meshData.getLodError(level), 1e-7f));
                 generatedChains.back().numLevels++;
             }
         }
@@ -233,6 +237,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
             uint32 prevIndexCount = numIndices;
             uint8 numLevels = 0;
             float targetF = (float)numIndices;
+            const float meshScale = meshopt_simplifyScale(&vertices[0].position.x, vertices.size(), sizeof(RendererVKLayout::MeshVertex));
             for (int level = 1; level <= lodParams.generateLevels && level < (int)RendererVKLayout::MAX_MESH_LODS; ++level)
             {
                 targetF *= reduction;
@@ -240,9 +245,10 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 if (targetIndexCount >= prevIndexCount)
                     break;
                 const float targetError = 0.01f * (float)(1u << (level - 1));
+                float resultError = 0.0f;
                 const size_t resultCount = meshopt_simplify(lodIndices.data(), pIndices, numIndices,
                     &vertices[0].position.x, vertices.size(), sizeof(RendererVKLayout::MeshVertex),
-                    targetIndexCount, targetError, 0, nullptr);
+                    targetIndexCount, targetError, 0, &resultError);
                 if (resultCount < 3 || resultCount >= (size_t)((float)prevIndexCount * 0.9f))
                     break; // simplification stalled; deeper levels won't gain anything
                 RendererVKLayout::MeshInfo lodInfo = meshInfo; // same vertices + bounds
@@ -251,6 +257,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 if (numLevels == 0)
                     generatedChains.push_back(GeneratedChain{ (uint16)meshIdx, (uint16)generatedLodInfos.size(), 0 });
                 generatedLodInfos.push_back(lodInfo);
+                generatedLodErrors.push_back(std::max(resultError * meshScale, 1e-7f));
                 generatedChains.back().numLevels = ++numLevels;
                 prevIndexCount = (uint32)resultCount;
             }
@@ -270,7 +277,10 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
         group.numLods = (uint8)(chain.numLevels + 1);
         group.meshIdx[0] = (uint16)(m_baseMeshInfoIdx + chain.baseMeshIdx);
         for (uint8 k = 0; k < chain.numLevels; ++k)
+        {
             group.meshIdx[k + 1] = (uint16)(m_baseMeshInfoIdx + numSourceMeshes + chain.firstExtraIdx + k);
+            group.errors[k + 1] = generatedLodErrors[chain.firstExtraIdx + k];
+        }
         group.center = m_boundsForMeshIdx[chain.baseMeshIdx].pos;
         group.radius = m_boundsForMeshIdx[chain.baseMeshIdx].radius;
         temp.lodGroupForMeshIdx[chain.baseMeshIdx] = Globals::rendererVK.addMeshLodGroup(group);

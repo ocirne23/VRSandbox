@@ -608,8 +608,13 @@ void Renderer::selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshIn
     const std::span<const RendererVKLayout::MeshInstanceOffset> offsets =
         m_instanceOffsetsBuffer.getBackingStoreAs<RendererVKLayout::MeshInstanceOffset>();
     const int forceLod = m_lodParams.forceLod;
-    // Off-screen nodes (shadow/GI passes only) tolerate two levels coarser, like the texture mip bias.
-    const float passBias = (passMask & RendererVKLayout::PASS_MAIN) ? 0.0f : 2.0f;
+    const bool mainPass = (passMask & RendererVKLayout::PASS_MAIN) != 0;
+    // Off-screen (shadow/GI-only) nodes tolerate coarser geometry, like the texture mip bias: 4x the
+    // error threshold (~2 levels, errors roughly double per level) / +2 levels on the fallback metric.
+    const float errorThreshold = std::max(0.01f, m_lodParams.maxErrorPixels)
+        * std::exp2((float)m_lodParams.bias) * (mainPass ? 1.0f : 4.0f);
+    const float passBias = mainPass ? 0.0f : 2.0f;
+    const float hysteresis = m_lodParams.hysteresis;
 
     for (const RenderNode::LodInstance& lod : node.m_lodInstances)
     {
@@ -623,24 +628,47 @@ void Renderer::selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshIn
         }
         else
         {
-            // Same projected-size metric as the texture streamer: each halving of the on-screen
-            // diameter below fullResPixels drops one level (triangle density scales with area).
             const Transform& offset = offsets[instance.instanceOffsetIdx].transform;
             const glm::vec3 worldCenter = nodeTransform.transformPoint(offset.transformPoint(group.center));
-            const float radius = group.radius * offset.scale * nodeTransform.scale;
+            const float instanceScale = offset.scale * nodeTransform.scale;
+            const float radius = group.radius * instanceScale;
             const float dist = std::max(0.01f, glm::length(worldCenter - m_cameraPos) - radius);
-            const float projPixels = std::max(1.0f, radius * m_mipPixelScale / dist);
-            const float lodF = std::log2(std::max(1.0f, m_lodParams.fullResPixels / projPixels))
-                + (float)m_lodParams.bias + passBias;
-            level = (int)lodF;
-            // Hysteresis: hold the previous level until the continuous value clearly crosses a level
-            // boundary, so an instance parked on one can't flip-flop between frames.
-            const int lastLevel = (int)lod.lastLevel;
-            if (level > lastLevel && lodF < (float)lastLevel + 1.0f + m_lodParams.hysteresis)
-                level = lastLevel;
-            else if (level < lastLevel && lodF > (float)lastLevel - m_lodParams.hysteresis)
-                level = lastLevel;
-            level = std::clamp(level, 0, (int)group.numLods - 1);
+            const float pixelsPerUnit = m_mipPixelScale / dist;
+
+            if (group.errors[1] > 0.0f)
+            {
+                // Screen-space error: use the coarsest level whose geometric deviation from LOD0 still
+                // projects below the pixel threshold. The error scales with the object itself, so small
+                // props hold full detail up close while large meshes shed triangles early — object size
+                // needs no separate tuning.
+                auto pickLevel = [&](float threshold)
+                {
+                    int picked = 0;
+                    while (picked + 1 < (int)group.numLods && group.errors[picked + 1] * instanceScale * pixelsPerUnit <= threshold)
+                        ++picked;
+                    return picked;
+                };
+                // Hysteresis band: hold the previous level while it sits between the conservative and
+                // permissive picks, so an instance parked near a boundary can't flip-flop.
+                const int finest = pickLevel(errorThreshold / (1.0f + hysteresis));
+                const int coarsest = pickLevel(errorThreshold * (1.0f + hysteresis));
+                level = std::clamp((int)lod.lastLevel, finest, coarsest);
+            }
+            else
+            {
+                // No per-level error data (authored LodN_ chains): projected-size metric — each halving
+                // of the on-screen diameter below fullResPixels drops one level (density ~ area).
+                const float projPixels = std::max(1.0f, radius * pixelsPerUnit);
+                const float lodF = std::log2(std::max(1.0f, m_lodParams.fullResPixels / projPixels))
+                    + (float)m_lodParams.bias + passBias;
+                level = (int)lodF;
+                const int lastLevel = (int)lod.lastLevel;
+                if (level > lastLevel && lodF < (float)lastLevel + 1.0f + hysteresis)
+                    level = lastLevel;
+                else if (level < lastLevel && lodF > (float)lastLevel - hysteresis)
+                    level = lastLevel;
+                level = std::clamp(level, 0, (int)group.numLods - 1);
+            }
         }
         lod.lastLevel = (uint8)level;
 
