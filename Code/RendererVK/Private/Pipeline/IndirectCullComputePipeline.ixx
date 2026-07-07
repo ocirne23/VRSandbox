@@ -26,6 +26,7 @@ public:
         Buffer& inMeshInstanceOffsetsBuffer;  // 3
         Buffer& inMeshInfoBuffer;             // 4
         Buffer& inFirstInstancesBuffer;       // 5
+        Buffer& inNodePassMasksBuffer;        // 10
     };
 
     void initialize(uint32 maxMeshInstances, uint32 maxUniqueMeshes);

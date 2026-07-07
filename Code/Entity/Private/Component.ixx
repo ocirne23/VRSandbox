@@ -205,6 +205,8 @@ export struct PhysicsComponent
     static constexpr EComponentID getId() { return EComponentID_Physics; }
 
     PhysicsBody body;
+    SpatialOccluder occluder; // static mesh colliders feed the CPU occlusion buffer (synced in update)
+    std::shared_ptr<const OccluderData> occluderData; // shared object-space triangles behind `occluder`
     Transform lastWorld;      // last world transform pushed to a non-dynamic body (change detection)
     glm::vec3 prevPos, currPos; // body pose at the previous/current physics step (dynamic interpolation)
     glm::quat prevRot, currRot;
@@ -225,6 +227,7 @@ export struct PhysicsComponent
         std::string layer;                     // named collision layer (category), empty = Default
         std::vector<std::string> collidesWith; // named layers this body collides with ("All"/"None" allowed), empty = all
         std::shared_ptr<PhysicsMesh> mesh;     // Shape Mesh: keeps the shared collision BVH alive (shape.mesh points at it)
+        std::shared_ptr<const OccluderData> occluders; // Shape Mesh + Static: occlusion-culling occluder triangles
         bool enabled = true;
     };
 

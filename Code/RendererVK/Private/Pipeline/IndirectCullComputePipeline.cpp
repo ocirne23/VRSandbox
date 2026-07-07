@@ -128,6 +128,12 @@ void IndirectCullComputePipeline::buildComputeLayout(ComputePipelineLayout& comp
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
     });
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // InNodePassMasksBuffer
+        .binding = 10,
+        .descriptorType = vk::DescriptorType::eStorageBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eCompute
+    });
 }
 
 void IndirectCullComputePipeline::update(uint32 frameIdx, uint32 numMeshInstances)
@@ -143,7 +149,7 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    std::array<DescriptorSetUpdateInfo, 10> computeDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 11> computeDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo { // UBO
             .binding = 0,
@@ -243,6 +249,16 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
                 vk::DescriptorBufferInfo {
                     .buffer = frameData.outTransparentIndirectCommandBuffer.getBuffer(),
                     .range = frameData.outTransparentIndirectCommandBuffer.getSize(),
+                }
+            }
+        },
+        DescriptorSetUpdateInfo { // InNodePassMasksBuffer
+            .binding = 10,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inNodePassMasksBuffer.getBuffer(),
+                    .range = recordParams.inNodePassMasksBuffer.getSize(),
                 }
             }
         }

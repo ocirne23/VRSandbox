@@ -13,7 +13,12 @@ import :Layout;
 
 namespace
 {
-    struct TlasInstancePC { uint32 numInstances; };
+    struct TlasInstancePC
+    {
+        glm::vec3 viewPos;
+        float maxRange; // instances whose origin is further out get TLAS mask 0
+        uint32 numInstances;
+    };
     struct TracePC
     {
         uint32 frameIndex;
@@ -56,6 +61,7 @@ void GIProbePipeline::initialize(uint32 maxTlasInstances, uint32 maxTextures, ui
     Tweak::floatVar("RT/GI", "Temporal Alpha", &m_giTemporalAlpha, 0.0f, 0.05f, 0.001f);
     Tweak::floatVar("RT/GI", "Max Ray Distance", &m_giMaxRayDist, 0.0f, 128.0f);
     Tweak::floatVar("RT/GI", "Strength", &m_giStrength, 0.0f, 4.0f, 0.01f);
+    Tweak::floatVar("RT/GI", "TLAS Range", &m_tlasRange, 16.0f, 100'000.0f, 10.0f);
 }
 
 void GIProbePipeline::resizeTlasInstanceBuffers(uint32 maxTlasInstances)
@@ -88,7 +94,7 @@ void GIProbePipeline::buildTlasInstanceLayout(ComputePipelineLayout& layout)
 {
     layout.computeShaderDebugFilePath = "Shaders/gi_tlas_instances.cs.glsl";
     layout.computeShaderText = FileSystem::readFileStr(layout.computeShaderDebugFilePath);
-    for (uint32 b = 0; b <= 5; ++b)
+    for (uint32 b = 0; b <= 6; ++b)
         layout.descriptorSetLayoutBindings.push_back(storageBinding(b));
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(TlasInstancePC) });
 }
@@ -143,19 +149,20 @@ void GIProbePipeline::recordTlasInstances(CommandBuffer& commandBuffer, uint32 f
     vk::DescriptorSet vkSet = set.getDescriptorSet();
 
     auto bufInfo = [](Buffer& buf) { return vk::DescriptorBufferInfo{ .buffer = buf.getBuffer(), .range = buf.getSize() }; };
-    std::array<DescriptorSetUpdateInfo, 6> updates{
+    std::array<DescriptorSetUpdateInfo, 7> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.renderNodeTransforms) } },
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.meshInstances) } },
         DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.instanceOffsets) } },
         DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.blasAddresses) } },
         DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_tlasInstanceBuffer[frameIdx]) } },
         DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.materialInfos) } },
+        DescriptorSetUpdateInfo{ .binding = 6, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.nodePassMasks) } },
     };
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
     commandBuffer.cmdUpdateDescriptorSets(m_tlasInstancePipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, vkSet, updates);
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_tlasInstancePipeline.getPipeline());
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_tlasInstancePipeline.getPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
-    TlasInstancePC pc{ .numInstances = params.numInstances };
+    TlasInstancePC pc{ .viewPos = params.viewPos, .maxRange = m_tlasRange, .numInstances = params.numInstances };
     cmd.pushConstants(m_tlasInstancePipeline.getPipelineLayout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
     cmd.dispatch((params.numInstances + 63) / 64, 1, 1);
 }

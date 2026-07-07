@@ -6,7 +6,7 @@ import Core;
 // into contiguous per-cell ranges (CellRecord.staticStart/staticCount), so queries iterate them
 // linearly and the 8-wide SIMD testers get transpose-free loads. Entries promote in after not
 // changing for N frames (they stay in the dynamic lists until a rebuild consumes them) and
-// demote by tombstoning (negative radius Ã¢â‚¬â€ fails every test in place); budgeted per-level
+// demote by tombstoning (negative radius - fails every test in place); budgeted per-level
 // rebuilds drop tombstones and merge pending promotions back into sorted order.
 struct StaticStore
 {

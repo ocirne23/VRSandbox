@@ -40,8 +40,14 @@ layout (binding = 2, std430) readonly buffer InMeshInstanceOffsetsBuffer  { InMe
 layout (binding = 3, std430) readonly buffer InBlasAddressesBuffer        { uvec2 in_blasAddresses[]; }; // uint64 split lo/hi per mesh
 layout (binding = 4, std430) writeonly buffer OutTlasInstancesBuffer      { TlasInstance out_instances[]; };
 layout (binding = 5, std430) readonly buffer InMaterialInfosBuffer        { MaterialInfo in_materialInfos[]; };
+layout (binding = 6, std430) readonly buffer InNodePassMasksBuffer        { uint in_nodePassMasks[]; };
 
-layout (push_constant) uniform PushConstants { uint numInstances; } pc;
+layout (push_constant) uniform PushConstants
+{
+    vec3 viewPos;
+    float maxRange; // instances whose origin is further out get mask 0 (bounds the TLAS build)
+    uint numInstances;
+} pc;
 
 vec3 quat_transform(vec3 v, vec4 q)
 {
@@ -113,7 +119,13 @@ void main()
     const uint materialIdx = inst.meshIdxMaterialIdx >> 16;
     const bool noRT = materialIdx < uint(in_materialInfos.length())
                    && (in_materialInfos[materialIdx].flags & MATERIAL_FLAG_NO_RAYTRACING) != 0u;
-    const uint mask = (hasBlas && finiteXform && !noRT) ? 0xFFu : 0x00u;
+    // GI or shadow relevance keeps the instance hittable: probes/RTAO trace the GI set, and the
+    // rt-sun-shadow mode needs shadow-relevant casters present too.
+    const bool inRtSet = (in_nodePassMasks[inst.renderNodeIdx] & (PASS_GI | PASS_SHADOW)) != 0u;
+    // Range bound: rays never reach past the GI clipmap + max ray distance, so distant geometry
+    // only bloats the TLAS build (origin-distance test: cheap, conservative via the RT/GI tweak).
+    const bool inRange = distance(pos, pc.viewPos) <= pc.maxRange;
+    const uint mask = (hasBlas && finiteXform && !noRT && inRtSet && inRange) ? 0xFFu : 0x00u;
     o.instanceCustomIndexAndMask = (id & 0x00FFFFFFu) | (mask << 24);       // custom = instance idx
 
     out_instances[id] = o;

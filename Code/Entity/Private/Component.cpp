@@ -302,6 +302,9 @@ void PhysicsComponent::spawn(Entity& entity, const SpawnInfo& info, const Transf
     desc.transform = base; // may be parent-local for child spawns; corrected on the first update
     desc.userData = &entity;
     body = Globals::physics.createBody(desc, std::span(&info.shape, 1));
+
+    if (info.bodyType == EPhysicsBodyType::Static)
+        occluderData = info.occluders; // registered on the first update, once the true world transform is known
 }
 
 void PhysicsComponent::destroy(Entity& entity, const SpawnInfo& info)
@@ -321,6 +324,8 @@ void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
         prevPos = currPos = world.pos;
         prevRot = currRot = world.quat;
         synced = true;
+        if (occluderData)
+            occluder = SpatialOccluder(Globals::occlusionBuffer.addOccluder(occluderData, world));
         return;
     }
     if (!enabled)
@@ -349,6 +354,8 @@ void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
     {
         body.setTransform(world.pos, world.quat); // entity was moved (gizmo/script); the body follows
         lastWorld = world;
+        if (occluderData)
+            occluder = SpatialOccluder(Globals::occlusionBuffer.addOccluder(occluderData, world)); // re-bake at the new pose
     }
 }
 

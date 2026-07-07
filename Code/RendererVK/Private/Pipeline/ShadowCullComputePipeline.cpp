@@ -56,7 +56,7 @@ void ShadowCullComputePipeline::buildComputeLayout(ComputePipelineLayout& comput
     computePipelineLayout.computeShaderText = FileSystem::readFileStr(computePipelineLayout.computeShaderDebugFilePath);
 
     auto& b = computePipelineLayout.descriptorSetLayoutBindings;
-    for (uint32 i = 0; i <= 9; i++)
+    for (uint32 i = 0; i <= 10; i++)
     {
         b.push_back(vk::DescriptorSetLayoutBinding{
             .binding = i,
@@ -71,7 +71,7 @@ void ShadowCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fram
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    std::array<DescriptorSetUpdateInfo, 10> updates{
+    std::array<DescriptorSetUpdateInfo, 11> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = params.ubo.getSize() } } },
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer,
@@ -92,6 +92,8 @@ void ShadowCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fram
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = frameData.outIndirectCommandBuffer.getBuffer(), .range = frameData.outIndirectCommandBuffer.getSize() } } },
         DescriptorSetUpdateInfo{ .binding = 9, .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inMaterialInfoBuffer.getBuffer(), .range = params.inMaterialInfoBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 10, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inNodePassMasksBuffer.getBuffer(), .range = params.inNodePassMasksBuffer.getSize() } } },
     };
 
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();

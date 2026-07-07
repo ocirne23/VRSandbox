@@ -4,6 +4,8 @@ import Core;
 import Core.BitRangeAllocator;
 import :Types;
 
+constexpr uint32 NumSpatialPasses = uint32(ESpatialPass::Count);
+
 // Module-internal SoA storage for every registered entry. Slots come from a BitRangeAllocator so
 // indices stay low and dense; positions are stored relative to the owning cell's min corner
 // (bounded by the cell size, so float keeps full precision at planet-scale coordinates) split
@@ -69,7 +71,7 @@ public:
     std::vector<uint32> next, prev;      // intrusive per-cell doubly-linked list
     std::vector<uint32> layerMask;
     std::vector<uint32> gen;
-    std::vector<uint32> lastVisibleFrame;
+    std::array<std::vector<uint32>, NumSpatialPasses> lastVisible; // stamp generation per pass
     std::vector<uint32> lastMoveFrame;
     std::vector<uint32> storeIdx; // StaticTier: slot in the level's StaticStore, UINT32_MAX = pending
     std::vector<uint8> level;
@@ -86,7 +88,8 @@ private:
         next.resize(m_capacity); prev.resize(m_capacity);
         layerMask.resize(m_capacity);
         gen.resize(m_capacity);
-        lastVisibleFrame.resize(m_capacity);
+        for (std::vector<uint32>& pass : lastVisible)
+            pass.resize(m_capacity);
         lastMoveFrame.resize(m_capacity);
         storeIdx.resize(m_capacity);
         level.resize(m_capacity);

@@ -92,6 +92,11 @@ layout (binding = 9, std430) writeonly buffer OutTransparentIndirectCommandBuffe
     OutIndirectCommand out_transparentIndirectCommands[];
 };
 
+layout (binding = 10, std430) readonly buffer InNodePassMasksBuffer
+{
+    uint in_nodePassMasks[]; // per render node, written at push time (PASS_* bits)
+};
+
 vec3 quat_transform(vec3 v, vec4 q)
 {
     return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
@@ -125,6 +130,8 @@ void main()
     //debugPrintfEXT("instanceIdx %d\n", gl_GlobalInvocationID.x);
     const uint instanceIdx        = gl_GlobalInvocationID.x;
     const InMeshInstance instance = in_instances[instanceIdx];
+    if ((in_nodePassMasks[instance.renderNodeIdx] & PASS_MAIN) == 0u)
+        return; // pushed for shadows/GI only
     const uint16_t meshIdx        = uint16_t(instance.meshIdxMaterialIdx & 0x0000FFFF);
     const InMeshInfo meshInfo     = in_meshInfos[meshIdx];
 

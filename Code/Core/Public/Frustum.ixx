@@ -58,6 +58,19 @@ export struct Frustum
         }
     }
 
+    // Vulkan zero-to-one depth variant: the near plane is row z alone (0 <= z), not w + z.
+    // Matches the plane extraction the GPU shadow cull uses on the sun cascade matrices.
+    void fromMatrixZO(const glm::mat4& matrix)
+    {
+        fromMatrix(matrix);
+        planes[BACK].x = matrix[0].z;
+        planes[BACK].y = matrix[1].z;
+        planes[BACK].z = matrix[2].z;
+        planes[BACK].w = matrix[3].z;
+        const float length = sqrtf(planes[BACK].x * planes[BACK].x + planes[BACK].y * planes[BACK].y + planes[BACK].z * planes[BACK].z);
+        planes[BACK] /= length;
+    }
+
     inline bool sphereInFrustum(const glm::vec3& pos, float radius) const
     {
         for (uint32 i = 0; i < 6; ++i)

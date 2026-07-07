@@ -52,6 +52,7 @@ int main()
 
     SpatialIndex& spatialIndex = Globals::spatialIndex;
     spatialIndex.initialize();
+    Globals::occlusionBuffer.initialize();
     Globals::spatialStress.initialize();
 
     Globals::scriptHost.setCurrentScriptPath("Scripts/Graph.scr");
@@ -267,9 +268,16 @@ int main()
             const glm::dvec3 cameraPos = glm::dvec3(camera.position);
             Frustum cullFrustum = rebaseFrustum(frustum, cameraPos);
             inflateFrustum(cullFrustum, cullingConfig.margin);
-            const float safeRadius = cullingConfig.mode == int(ESpatialCullMode::SafeCull) ? cullingConfig.safeRadius : 0.0f;
-            spatialIndex.markVisibleSet(cullFrustum, cameraPos, cullingConfig.maxDist + cullingConfig.margin,
-                SpatialLayer_Render, nullptr, safeRadius);
+            IOcclusionTester* occlusion = nullptr;
+            if (Globals::occlusionBuffer.isEnabled())
+            {
+                const glm::mat4 viewProjRelCamera = renderer.getCenterViewProj() * glm::translate(glm::mat4(1.0f), camera.position);
+                Globals::occlusionBuffer.render(viewProjRelCamera, cameraPos);
+                occlusion = &Globals::occlusionBuffer;
+            }
+            spatialIndex.markVisibleSet(ESpatialPass::Main, cullFrustum, cameraPos,
+                cullingConfig.maxDist + cullingConfig.margin, SpatialLayer_Render, occlusion);
+            spatialIndex.markVisibleSphere(ESpatialPass::Near, cameraPos, cullingConfig.nearRadius, SpatialLayer_Render);
         }
         Globals::spatialStress.update(glm::dvec3(camera.position), frustum);
 

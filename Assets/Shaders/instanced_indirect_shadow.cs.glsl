@@ -30,6 +30,7 @@ layout (binding = 6, std430) writeonly buffer OutMeshInstancesBuffer       { Out
 layout (binding = 7, std430) writeonly buffer OutMeshInstanceIndexesBuffer { uint                 out_meshInstanceIndexes[]; };
 layout (binding = 8, std430) writeonly buffer OutIndirectCommandBuffer     { OutIndirectCommand   out_indirectCommands[]; };
 layout (binding = 9, std430) readonly buffer InMaterialInfos               { MaterialInfo         in_materialInfos[]; };
+layout (binding = 10, std430) readonly buffer InNodePassMasksBuffer        { uint                 in_nodePassMasks[]; };
 
 vec3 quat_transform(vec3 v, vec4 q) { return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); }
 vec4 quat_multiply(vec4 q, vec4 p)
@@ -77,6 +78,8 @@ void main()
 {
     const uint instanceIdx        = gl_GlobalInvocationID.x;
     const InMeshInstance instance = in_instances[instanceIdx];
+    if ((in_nodePassMasks[instance.renderNodeIdx] & PASS_SHADOW) == 0u)
+        return; // not shadow-relevant this frame
     const uint16_t meshIdx        = uint16_t(instance.meshIdxMaterialIdx & 0x0000FFFF);
     const InMeshInfo meshInfo     = in_meshInfos[meshIdx];
 

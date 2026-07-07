@@ -47,6 +47,8 @@ public:
         Buffer& instanceOffsets;
         Buffer& blasAddresses;   // mesh idx -> uint64 BLAS device address
         Buffer& materialInfos;   // MATERIAL_FLAG_NO_RAYTRACING -> instance mask 0
+        Buffer& nodePassMasks;   // nodes without PASS_GI|PASS_SHADOW -> instance mask 0
+        glm::vec3 viewPos;       // TLAS range bound center (camera)
         uint32 numInstances;
     };
     void recordTlasInstances(CommandBuffer& commandBuffer, uint32 frameIdx, TlasInstanceParams& params);
@@ -96,6 +98,7 @@ private:
     float m_giTemporalAlpha = 0.005f;  // per-frame blend toward freshly traced irradiance
     float m_giMaxRayDist = 8.0f;       // gather ray max distance (world units)
     float m_giStrength = 1.0f;         // multiplier on the sampled probe irradiance at shading time
+    float m_tlasRange = 512.0f;        // TLAS instance range bound around the camera (origin distance)
 
     // Single persistent GI clipmap SH volume: irradiance carries forward in place (toroidal addressing),
     // so there is no prev/cur ping-pong. Read across frames by the fragment shader and read+written by the

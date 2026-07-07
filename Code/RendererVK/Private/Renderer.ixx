@@ -60,8 +60,10 @@ public:
     bool initialize(Window& window, EValidation validation, EVSync vsync, EVr vr = EVr::DISABLED);
 
     const Frustum& beginFrame(const Camera& camera);
-    void renderNodeThreadSafe(const RenderNode& node);
-    void renderNode(const RenderNode& node);
+    // passMask (RendererVKLayout::PASS_* bits) selects which culled passes may draw/trace the node
+    // this frame: main view, sun shadows, ray tracing (GI/RTAO/RT shadows).
+    void renderNodeThreadSafe(const RenderNode& node, uint32 passMask = RendererVKLayout::PASS_ALL);
+    void renderNode(const RenderNode& node, uint32 passMask = RendererVKLayout::PASS_ALL);
     void addLightInfo(const RendererVKLayout::LightInfo& light);
     void addFogVolume(const RendererVKLayout::FogVolumeInfo& fogVolume);
     void addPointLight(const PointLight& light);
@@ -82,6 +84,15 @@ public:
     uint32 getCurrentFrameIndex() const { return m_swapChain.getCurrentFrameIndex(); }
 
     void reloadShaders();
+
+    // Sun cascade matrices computed by beginFrame, for CPU-side shadow-caster queries.
+    // Zero cascades when RT sun shadows replace the cascade maps.
+    uint32 getNumSunCascades() const { return m_numSunCascades; }
+    const glm::mat4* getSunCascadeViewProj() const { return m_sunCascadeViewProj; }
+
+    // The culling view-projection beginFrame built (VR: head-centred two-eye union), for CPU-side
+    // occlusion rasterization against the same view the GPU cull uses.
+    const glm::mat4& getCenterViewProj() const { return m_centerViewProj; }
 
     bool isVrEnabled() const { return Globals::openXR.isEnabled(); }
     bool isVrStageSpace() const { return Globals::openXR.isStageSpace(); }
@@ -214,6 +225,10 @@ private:
     glm::vec3 m_cameraPos = glm::vec3(0.0f);
     glm::vec3 m_giPrevCameraPos = glm::vec3(0.0f); // last frame's camera; drives GI clipmap probe freshness
 
+    glm::mat4 m_sunCascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
+    uint32 m_numSunCascades = 0;
+    glm::mat4 m_centerViewProj = glm::mat4(1.0f);
+
     bool   m_giProbeDebugEnabled = false;
     uint32 m_giProbeDebugMode = 0;
     float  m_giProbeDebugRadius = 0.12f;
@@ -321,6 +336,7 @@ private:
         bool updated = false;
         Buffer ubo;
         Buffer inRenderNodeTransformsBuffer;
+        Buffer inNodePassMasksBuffer; // uint per render node: PASS_* bits, written at push time
         Buffer inMeshInstancesBuffer;
         Buffer inFirstInstancesBuffer;
         // This frame's unique-mesh count, read on the GPU by the DGC executes (sequenceCountAddress) and
@@ -334,6 +350,7 @@ private:
 
         RendererVKLayout::Ubo* mappedUniformBuffer = nullptr;
         std::span<RendererVKLayout::RenderNodeTransform> mappedRenderNodeTransforms;
+        std::span<uint32> mappedNodePassMasks;
         std::span<RendererVKLayout::InMeshInstance> mappedMeshInstances;
         std::span<uint32> mappedFirstInstances;
 

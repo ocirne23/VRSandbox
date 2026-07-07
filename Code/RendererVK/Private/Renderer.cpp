@@ -173,6 +173,11 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
             vk::MemoryPropertyFlagBits::eHostVisible, false, "RenderNodeTransforms", BufferHostAccess::eSequentialWrite);
         perFrame.mappedRenderNodeTransforms = perFrame.inRenderNodeTransformsBuffer.mapMemory<RendererVKLayout::RenderNodeTransform>();
 
+        perFrame.inNodePassMasksBuffer.initialize(m_maxRenderNodes * sizeof(uint32),
+            vk::BufferUsageFlagBits2::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "NodePassMasks", BufferHostAccess::eSequentialWrite);
+        perFrame.mappedNodePassMasks = perFrame.inNodePassMasksBuffer.mapMemory<uint32>();
+
         // Kept cached/random: growMeshInstanceCapacity reads the existing mapping to preserve in-flight
         // instances across a resize, so this buffer must stay CPU-readable.
         perFrame.inMeshInstancesBuffer.initialize(m_maxInstanceData * sizeof(RendererVKLayout::InMeshInstance),
@@ -423,6 +428,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     centerView.invMvp = glm::inverse(centerView.mvp);
     centerView.viewPos = glm::vec4(camera.position, 1.0f);
     ubo.frustum.fromMatrix(centerView.mvp);
+    m_centerViewProj = centerView.mvp;
 
     if (Globals::openXR.isEnabled())
     {
@@ -476,12 +482,14 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     if (!m_rtParams.rtSunShadow)
     {
         const float aspect = (float)viewportSize.x / (float)viewportSize.y;
-        glm::mat4 cascadeViewProj[RendererVKLayout::NUM_SHADOW_CASCADES];
-        computeSunCascades(camera, aspect, sky.sunDirection, cascadeViewProj);
+        computeSunCascades(camera, aspect, sky.sunDirection, m_sunCascadeViewProj);
+        m_numSunCascades = RendererVKLayout::NUM_SHADOW_CASCADES;
         for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
-            ubo.cascadeViewProj[c] = cascadeViewProj[c];
+            ubo.cascadeViewProj[c] = m_sunCascadeViewProj[c];
         ubo.shadowParams = glm::vec3(sky.shadowDepthBias, sky.shadowNormalBias, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION);
     }
+    else
+        m_numSunCascades = 0;
 
     ubo.sunShadowRays = (float)m_rtParams.sunShadowRays;
     ubo.rtLightShadows = m_rtParams.rtLightShadows ? 1.0f : 0.0f;
@@ -515,7 +523,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     return ubo.frustum;
 }
 
-void Renderer::renderNodeThreadSafe(const RenderNode& node)
+void Renderer::renderNodeThreadSafe(const RenderNode& node, uint32 passMask)
 {
     const uint32 numInstances = (uint32)node.m_meshInstances.size();
     const uint32 startIdx = std::atomic_ref<uint32>(m_meshInstanceCounter).fetch_add(numInstances);
@@ -533,10 +541,11 @@ void Renderer::renderNodeThreadSafe(const RenderNode& node)
         std::atomic_ref<uint32>(m_numInstancesPerMesh[pair.first]) += pair.second;
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
+    frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
 }
 
-void Renderer::renderNode(const RenderNode& node)
+void Renderer::renderNode(const RenderNode& node, uint32 passMask)
 {
     const uint32 numInstances = (uint32)node.m_meshInstances.size();
     const uint32 startIdx = m_meshInstanceCounter;
@@ -550,6 +559,7 @@ void Renderer::renderNode(const RenderNode& node)
         m_numInstancesPerMesh[pair.first] += pair.second;
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
+    frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
 }
 
@@ -600,7 +610,14 @@ void Renderer::present()
     assert(frameData.mappedFirstInstances.size() >= m_meshInfoCounter);
     assert(m_renderNodeTransforms.size() == 0 || Globals::textureManager.getNumTextures() > 0 && "Attempting to render object without any textures loaded!");
 
-    memcpy(frameData.mappedRenderNodeTransforms.data(), m_renderNodeTransforms.data(), m_renderNodeTransforms.size() * sizeof(m_renderNodeTransforms[0]));
+    // Sparse transform upload: only slots that changed since this frame-in-flight last consumed them.
+    std::vector<uint32>& transformDirtyList = Globals::renderNodeDirtyLists[frameIdx];
+    for (const uint32 idx : transformDirtyList)
+    {
+        memcpy(&frameData.mappedRenderNodeTransforms[idx], &m_renderNodeTransforms[idx], sizeof(Transform));
+        Globals::renderNodeDirtyBits[idx] &= uint8(~(1u << frameIdx));
+    }
+    transformDirtyList.clear();
     uint32 instanceCounter = 0;
     const uint32 numMeshInfos = (uint32)m_numInstancesPerMesh.size();
     for (uint32 meshIdx = 0; meshIdx < numMeshInfos; ++meshIdx)
@@ -610,6 +627,7 @@ void Renderer::present()
     }
 
     frameData.inRenderNodeTransformsBuffer.flushMappedMemory(m_renderNodeTransforms.size() * sizeof(m_renderNodeTransforms[0]));
+    frameData.inNodePassMasksBuffer.flushMappedMemory(m_renderNodeTransforms.size() * sizeof(uint32));
     frameData.inMeshInstancesBuffer.flushMappedMemory(m_meshInstanceCounter * sizeof(RendererVKLayout::InMeshInstance));
     frameData.inFirstInstancesBuffer.flushMappedMemory(numMeshInfos * sizeof(uint32));
     frameData.lightInfosBuffer.flushMappedMemory(m_lightCounter * sizeof(RendererVKLayout::LightInfo));
@@ -653,10 +671,13 @@ uint32 Renderer::addRenderNodeTransform(const Transform& transform)
         const uint32 renderNodeIdx = m_freeRenderNodeIndexes.back();
         m_freeRenderNodeIndexes.pop_back();
         m_renderNodeTransforms[renderNodeIdx] = transform;
+        markRenderNodeTransformDirty(renderNodeIdx);
         return renderNodeIdx;
     }
     const uint32 renderNodeIdx = (uint32)m_renderNodeTransforms.size();
     m_renderNodeTransforms.emplace_back(transform);
+    Globals::renderNodeDirtyBits.push_back(0);
+    markRenderNodeTransformDirty(renderNodeIdx);
     if ((uint32)m_renderNodeTransforms.size() > m_maxRenderNodes)
         growRenderNodeCapacity((uint32)m_renderNodeTransforms.size());
     return renderNodeIdx;
@@ -669,9 +690,10 @@ void RenderNode::destroy()
     Globals::rendererVK.freeRenderNode(*this);
 }
 
-// No GPU sync needed anywhere in the free path: transforms, mesh instances, skinning jobs and palettes
-// are all re-uploaded into per-frame buffers every frame, so frames still in flight read their own
-// copies and frames recorded from here on simply never reference the freed slots.
+// No GPU sync needed anywhere in the free path: mesh instances, skinning jobs and palettes are
+// re-uploaded into per-frame buffers every frame, transforms upload sparsely on change (dirty on
+// slot reuse), so frames still in flight read their own copies and frames recorded from here on
+// simply never reference the freed slots.
 void Renderer::freeRenderNode(RenderNode& node)
 {
     if (node.m_transformIdx != UINT32_MAX)
@@ -761,7 +783,20 @@ void Renderer::growRenderNodeCapacity(uint32 needed)
             vk::BufferUsageFlagBits2::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible, false, "RenderNodeTransforms", BufferHostAccess::eSequentialWrite);
         perFrame.mappedRenderNodeTransforms = perFrame.inRenderNodeTransformsBuffer.mapMemory<RendererVKLayout::RenderNodeTransform>();
+
+        // No contents to preserve either: masks are rewritten by every renderNode() push, and the grow
+        // happens between frames' pushes (only pushed nodes' instances are ever read).
+        perFrame.inNodePassMasksBuffer.initialize(m_maxRenderNodes * sizeof(uint32),
+            vk::BufferUsageFlagBits2::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "NodePassMasks", BufferHostAccess::eSequentialWrite);
+        perFrame.mappedNodePassMasks = perFrame.inNodePassMasksBuffer.mapMemory<uint32>();
     }
+    // Fresh (empty) GPU buffers: every live slot has to upload again.
+    for (std::vector<uint32>& dirtyList : Globals::renderNodeDirtyLists)
+        dirtyList.clear();
+    std::fill(Globals::renderNodeDirtyBits.begin(), Globals::renderNodeDirtyBits.end(), uint8(0));
+    for (uint32 idx = 0; idx < (uint32)m_renderNodeTransforms.size(); ++idx)
+        markRenderNodeTransformDirty(idx);
     setHaveToRecordCommandBuffers();
     printf("Renderer: grew render node capacity to %u\n", m_maxRenderNodes);
 }
@@ -904,6 +939,7 @@ void Renderer::recordIndirectCull(uint32 frameIdx)
         .inMeshInstanceOffsetsBuffer = m_instanceOffsetsBuffer,
         .inMeshInfoBuffer = m_meshInfosBuffer,
         .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
+        .inNodePassMasksBuffer = frameData.inNodePassMasksBuffer,
     };
     m_indirectCullComputePipeline.record(cb, frameIdx, cullParams);
     cb.end();
@@ -1020,6 +1056,7 @@ void Renderer::recordShadowCull(uint32 frameIdx)
         .inMeshInfoBuffer = m_meshInfosBuffer,
         .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
         .inMaterialInfoBuffer = m_materialInfosBuffer,
+        .inNodePassMasksBuffer = frameData.inNodePassMasksBuffer,
     };
     m_shadowCullComputePipeline.record(cb, frameIdx, params);
     cb.end();
@@ -1489,6 +1526,8 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         .instanceOffsets = m_instanceOffsetsBuffer,
         .blasAddresses = m_accelStructure.getBlasAddressBuffer(frameIdx),
         .materialInfos = m_materialInfosBuffer,
+        .nodePassMasks = frameData.inNodePassMasksBuffer,
+        .viewPos = m_cameraPos,
         .numInstances = numInstances,
     };
     m_giProbePipeline.recordTlasInstances(globalIllumCommandBuffer, frameIdx, tlasParams);

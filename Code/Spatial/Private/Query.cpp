@@ -9,7 +9,7 @@ import Core.glm;
 import Core.Frustum;
 
 // Shared hierarchical traversal: descend the per-level grids top-down through the occupancy
-// masks, classifying each cell's loose bounds (inflated by half a cell Ã¢â‚¬â€ entities extend at most
+// masks, classifying each cell's loose bounds (inflated by half a cell - entities extend at most
 // that far beyond their cell) as outside / intersecting / fully inside. Fully-inside subtrees
 // append their entries without further per-entity tests. All bounds math is float relative to a
 // double reference position, so tests stay exact at planet-scale coordinates.
@@ -128,52 +128,6 @@ namespace
                                                  _mm256_set1_epi32(int(layerMask)));
             ok = _mm256_andnot_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(lay, _mm256_setzero_si256())), ok);
             return uint32(_mm256_movemask_ps(ok));
-        }
-    };
-
-    struct SafeCullTester // frustum Ã¢Ë†Âª camera ball: nearby off-screen casters keep shadows/GI alive
-    {
-        FrustumTester frustumTester;
-        SphereTester sphereTester;
-
-        EIntersect classify(const glm::vec3& cellCenter, const glm::vec3& halfExtent) const
-        {
-            const EIntersect ball = sphereTester.classify(cellCenter, halfExtent);
-            if (ball == EIntersect::Inside)
-                return EIntersect::Inside;
-            const EIntersect frustumResult = frustumTester.classify(cellCenter, halfExtent);
-            if (frustumResult == EIntersect::Inside || (ball == EIntersect::Outside && frustumResult == EIntersect::Outside))
-                return frustumResult;
-            return EIntersect::Intersect;
-        }
-
-        bool testEntity(const glm::vec3& pos, float entityRadius) const
-        {
-            return sphereTester.testEntity(pos, entityRadius) || frustumTester.testEntity(pos, entityRadius);
-        }
-
-        bool acceptCell(const glm::vec3& cellCenter, const glm::vec3& halfExtent) const
-        {
-            return sphereTester.classify(cellCenter, halfExtent) != EIntersect::Outside
-                || frustumTester.acceptCell(cellCenter, halfExtent);
-        }
-
-        uint32 test8(const glm::vec3& cellMin, const float* px, const float* py, const float* pz,
-                     const float* pr, const uint32* layers, uint32 layerMask) const
-        {
-            const __m256 x = _mm256_add_ps(_mm256_loadu_ps(px), _mm256_set1_ps(cellMin.x));
-            const __m256 y = _mm256_add_ps(_mm256_loadu_ps(py), _mm256_set1_ps(cellMin.y));
-            const __m256 z = _mm256_add_ps(_mm256_loadu_ps(pz), _mm256_set1_ps(cellMin.z));
-            const __m256 r = _mm256_loadu_ps(pr);
-            __m256 ok = _mm256_cmp_ps(r, _mm256_setzero_ps(), _CMP_GE_OQ);
-            const __m256 d2 = _mm256_fmadd_ps(x, x, _mm256_fmadd_ps(y, y, _mm256_mul_ps(z, z)));
-            const __m256 rr = _mm256_add_ps(_mm256_set1_ps(sphereTester.radius), r);
-            ok = _mm256_and_ps(ok, _mm256_cmp_ps(d2, _mm256_mul_ps(rr, rr), _CMP_LE_OQ));
-            const __m256i lay = _mm256_and_si256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(layers)),
-                                                 _mm256_set1_epi32(int(layerMask)));
-            ok = _mm256_andnot_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(lay, _mm256_setzero_si256())), ok);
-            return uint32(_mm256_movemask_ps(ok)) // inside the camera ball, or in the frustum
-                 | frustumTester.test8(cellMin, px, py, pz, pr, layers, layerMask);
         }
     };
 
@@ -408,22 +362,36 @@ uint64 SpatialIndex::queryNearest(const glm::dvec3& pos, float maxRadius, uint32
     return found ? best : 0;
 }
 
-void SpatialIndex::markVisibleSet(const Frustum& frustumRelCamera, const glm::dvec3& cameraPos, float maxDist, uint32 layerMask,
-                                  IOcclusionTester* occlusion, float safeRadius)
+void SpatialIndex::markVisibleSet(ESpatialPass pass, const Frustum& frustumRelCamera, const glm::dvec3& cameraPos, float maxDist,
+                                  uint32 layerMask, IOcclusionTester* occlusion)
 {
     const auto start = Clock::now();
-    if (++m_visibleQueryId == 0) // 0 is reserved for never-stamped entries
-        ++m_visibleQueryId;
+    const uint32 passIdx = uint32(pass);
+    if (++m_visibleQueryId[passIdx] == 0) // 0 is reserved for never-stamped entries
+        ++m_visibleQueryId[passIdx];
     uint32 count = 0;
     const auto stamp = [&](uint32 idx, const glm::vec3&)
     {
-        m_pool.lastVisibleFrame[idx] = m_visibleQueryId;
+        m_pool.lastVisible[passIdx][idx] = m_visibleQueryId[passIdx];
         ++count;
     };
-    if (safeRadius > 0.0f)
-        traverse(SafeCullTester{ { frustumRelCamera, occlusion, maxDist }, { safeRadius } }, cameraPos, layerMask, stamp);
-    else
-        traverse(FrustumTester{ frustumRelCamera, occlusion, maxDist }, cameraPos, layerMask, stamp);
-    m_stats.visibleCount = int(count);
-    m_stats.markVisibleMs = std::chrono::duration<float, std::milli>(Clock::now() - start).count();
+    traverse(FrustumTester{ frustumRelCamera, occlusion, maxDist }, cameraPos, layerMask, stamp);
+    m_stats.visiblePerPass[passIdx] = int(count);
+    m_stats.markVisibleMs += std::chrono::duration<float, std::milli>(Clock::now() - start).count();
+}
+
+void SpatialIndex::markVisibleSphere(ESpatialPass pass, const glm::dvec3& center, float radius, uint32 layerMask)
+{
+    const auto start = Clock::now();
+    const uint32 passIdx = uint32(pass);
+    if (++m_visibleQueryId[passIdx] == 0)
+        ++m_visibleQueryId[passIdx];
+    uint32 count = 0;
+    traverse(SphereTester{ radius }, center, layerMask, [&](uint32 idx, const glm::vec3&)
+    {
+        m_pool.lastVisible[passIdx][idx] = m_visibleQueryId[passIdx];
+        ++count;
+    });
+    m_stats.visiblePerPass[passIdx] = int(count);
+    m_stats.markVisibleMs += std::chrono::duration<float, std::milli>(Clock::now() - start).count();
 }

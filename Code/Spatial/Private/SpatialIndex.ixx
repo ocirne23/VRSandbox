@@ -35,17 +35,34 @@ public:
                     std::vector<uint64>& outUserData) const; // broadphase: entries whose bounds cross the segment
     uint64 queryNearest(const glm::dvec3& pos, float maxRadius, uint32 layerMask, uint64 excludeUserData = 0) const;
 
-    // Stamps every entry the frustum reaches (unioned with a camera ball when safeRadius > 0);
-    // updateTree gates its render push on isVisible(). Single consumer by design: each call
-    // invalidates the previous stamp generation.
-    void markVisibleSet(const Frustum& frustumRelCamera, const glm::dvec3& cameraPos, float maxDist, uint32 layerMask,
-                        IOcclusionTester* occlusion = nullptr, float safeRadius = 0.0f);
-    bool isVisible(SpatialHandle handle) const
+    // Per-pass visibility stamps consumed by the render gate; each call invalidates that pass's
+    // previous stamp generation (single consumer per pass by design). Main is the camera frustum
+    // (occlusion-testable); Near is the camera ball that keeps off-screen shadow casters and
+    // ray-traced geometry alive.
+    void markVisibleSet(ESpatialPass pass, const Frustum& frustumRelCamera, const glm::dvec3& cameraPos, float maxDist,
+                        uint32 layerMask, IOcclusionTester* occlusion = nullptr);
+    void markVisibleSphere(ESpatialPass pass, const glm::dvec3& center, float radius, uint32 layerMask);
+
+    bool isVisible(SpatialHandle handle) const // main pass; never-stamped entries count as visible (spawn-pop guard)
     {
         if (!m_pool.isValidAlive(handle))
             return false;
-        const uint32 stamp = m_pool.lastVisibleFrame[handle.idx];
-        return stamp == m_visibleQueryId || stamp == 0; // never-stamped entries render (spawn-pop guard)
+        const uint32 stamp = m_pool.lastVisible[uint32(ESpatialPass::Main)][handle.idx];
+        return stamp == m_visibleQueryId[uint32(ESpatialPass::Main)] || stamp == 0;
+    }
+
+    uint32 getPassMask(SpatialHandle handle) const // SpatialPassBit_* bits
+    {
+        if (!m_pool.isValidAlive(handle))
+            return 0;
+        uint32 mask = 0;
+        for (uint32 p = 0; p < uint32(ESpatialPass::Count); ++p)
+        {
+            const uint32 stamp = m_pool.lastVisible[p][handle.idx];
+            if (stamp == m_visibleQueryId[p] || stamp == 0)
+                mask |= 1u << p;
+        }
+        return mask;
     }
 
     glm::dvec3 getPosition(SpatialHandle handle) const;
@@ -97,7 +114,7 @@ private:
     uint32 m_levelEntityCount[Morton::MaxLevels] = {};
     uint32 m_numLevels = Morton::MaxLevels;
     uint32 m_frameId = 1;
-    uint32 m_visibleQueryId = 0; // stamp generation of the last markVisibleSet, 0 = never stamped
+    uint32 m_visibleQueryId[uint32(ESpatialPass::Count)] = {}; // stamp generation per pass, 0 = never stamped
     uint32 m_promoteCursor = 0;  // round-robin pool scan position for static promotion
     bool m_staticEnabled = true;
     int m_promoteAfterFrames = 60;

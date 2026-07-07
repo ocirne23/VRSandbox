@@ -27,6 +27,7 @@ public:
         Buffer& inMeshInfoBuffer;             // 4
         Buffer& inFirstInstancesBuffer;       // 5
         Buffer& inMaterialInfoBuffer;         // 9 - resolves the alpha-mask texture per caster
+        Buffer& inNodePassMasksBuffer;        // 10
     };
 
     void initialize(uint32 maxMeshInstances, uint32 maxUniqueMeshes);

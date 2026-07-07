@@ -487,6 +487,9 @@ std::shared_ptr<PhysicsMesh> World::getOrBuildCollisionMesh(const std::string& c
     if (!mesh->isValid())
         return nullptr;
     m_collisionMeshes.emplace(key, mesh);
+    // The same flattened geometry doubles as the occlusion-culling occluder source (largest triangles).
+    m_occluderData.emplace(key, OcclusionBuffer::extractOccluders(geometry.vertices, geometry.indices,
+        uint32(Globals::occlusionBuffer.getMaxTriangles())));
     return mesh;
 }
 
@@ -531,6 +534,8 @@ std::shared_ptr<PhysicsComponent::SpawnInfo> World::buildPhysicsSpawnInfo(const 
         if (info->mesh)
         {
             shape.mesh = info->mesh.get();
+            if (auto it = m_occluderData.find(containerName + "|" + nodePath); it != m_occluderData.end())
+                info->occluders = it->second; // static mesh colliders double as occlusion occluders
         }
         else
         {

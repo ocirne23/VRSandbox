@@ -12,6 +12,7 @@ import :Entity;
 import :Component;
 
 import File;
+import Spatial;
 import :ObjectDescription;
 import :AnimationDescription;
 
@@ -127,6 +128,7 @@ private:
     std::unordered_map<std::string, std::unique_ptr<ObjectContainer>> m_containers;
     std::unordered_map<std::string, std::shared_ptr<const CollisionSource>> m_collisionSources; // key: container name
     std::unordered_map<std::string, std::shared_ptr<PhysicsMesh>> m_collisionMeshes;            // key: container|node
+    std::unordered_map<std::string, std::shared_ptr<const OccluderData>> m_occluderData;        // key: container|node
     std::unordered_map<std::string, std::unique_ptr<AnimationSet>> m_clipSets; // key: skeleton ptr + animator name
     std::unordered_map<std::string, std::shared_ptr<AudioBuffer>> m_audioBuffers; // key: sound file path
     std::unordered_map<std::string, std::shared_ptr<EntitySpawnTemplate>> m_templates; // prefab templates, keyed by name

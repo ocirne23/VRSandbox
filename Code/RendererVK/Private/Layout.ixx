@@ -37,6 +37,15 @@ export namespace RendererVKLayout
     constexpr uint32 NUM_SHADOW_CASCADES = 6;
     constexpr uint32 SHADOW_MAP_RESOLUTION = 2048;
 
+    // Per-render-node pass visibility bits (in_nodePassMasks, written at renderNode() push time):
+    // the main indirect cull, shadow cull, and TLAS-instance writer each early-out on their bit, so
+    // one pushed instance list feeds three independently culled passes. Bit order must match the
+    // Spatial library's SpatialPass_* mask (Entity static_asserts it).
+    constexpr uint32 PASS_MAIN   = 1u << 0;
+    constexpr uint32 PASS_SHADOW = 1u << 1;
+    constexpr uint32 PASS_GI     = 1u << 2;
+    constexpr uint32 PASS_ALL    = PASS_MAIN | PASS_SHADOW | PASS_GI;
+
     // Diffuse GI irradiance probes. A single persistent, world-space cascaded clipmap volume: GI_NUM_CASCADES
     // nested toroidal probe grids, each GI_CASCADE_PROBE_DIM^3 probes at a fixed power-of-two spacing
     // (GI_CASCADE_BASE_SPACING << cascade), camera-centered. Probes live at absolute lattice positions

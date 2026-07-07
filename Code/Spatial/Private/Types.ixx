@@ -72,22 +72,37 @@ export inline void inflateFrustum(Frustum& frustum, float margin)
         frustum.planes[i].w += margin;
 }
 
-export enum class ESpatialCullMode : int
+// The two visibility sets the render gate maintains. Main is the camera frustum (the set CPU
+// occlusion culling can shrink further); Near is a camera ball that keeps off-screen shadow
+// casters and ray-traced geometry pushed — the GPU shadow cull and the TLAS range bound do the
+// per-pass refinement from there.
+export enum class ESpatialPass : uint32
 {
-    Off = 0,     // markVisibleSet not run, everything renders
-    StatsOnly,   // visibility query runs for its stats, nothing is gated
-    SafeCull,    // gate on frustum ÃƒÂ¢Ã‹â€ Ã‚Âª camera ball, so nearby off-screen casters keep shadows/GI alive
-    FrustumOnly, // gate on the view frustum alone ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â debug/measurement, breaks off-screen shadows by design
+    Main = 0,
+    Near,
+    Count,
 };
 
-// Live-tweakable culling settings (Spatial/Culling): the App drives markVisibleSet from these and
-// Entity::updateTree gates its render push on mode >= SafeCull.
+// Pass bits as returned by SpatialIndex::getPassMask, bit p == 1 << uint32(ESpatialPass p).
+export constexpr uint32 SpatialPassBit_Main = 1u << 0;
+export constexpr uint32 SpatialPassBit_Near = 1u << 1;
+
+export enum class ESpatialCullMode : int
+{
+    Off = 0,   // no queries, every entity is pushed for all render passes
+    StatsOnly, // the queries run for their stats, nothing is gated
+    Cull,      // main set renders fully; near-only entities are pushed for shadows/ray tracing only
+    MainOnly,  // debug: only the main-frustum set is pushed at all (visibly breaks off-screen shadows/GI)
+};
+
+// Live-tweakable culling settings (Spatial/Culling): the App drives the markVisible* queries from
+// these and Entity::updateTree pushes per-pass masks when mode >= Cull.
 export struct SpatialCullingConfig
 {
     int mode = int(ESpatialCullMode::Off);
     bool freeze = false;             // stop re-stamping, fly around to inspect the culled set
     float margin = 4.0f;             // frustum inflation masking the one-frame stamp latency
-    float safeRadius = 256.0f;       // SafeCull: everything within this range renders regardless
+    float nearRadius = 512.0f;       // shadow-caster + ray-tracing relevance range around the camera
     float maxDist = 5000.0f;
     float skinnedRadiusScale = 1.5f; // animation can exceed the bind-pose bounds sphere
 };
@@ -106,7 +121,7 @@ export struct SpatialStats
     int cellsTested = 0;      // per-frame query counters, reset each commitFrame
     int cellsFullyInside = 0;
     int entityTests = 0;
-    int visibleCount = 0;
+    int visiblePerPass[uint32(ESpatialPass::Count)] = {};
     int staticEntries = 0;
     int staticRebuilds = 0;
     float commitMs = 0.0f;

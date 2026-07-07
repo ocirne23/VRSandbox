@@ -10,6 +10,24 @@ import :Layout;
 export namespace Globals
 {
     std::vector<Transform> renderNodeTransforms;
+
+    // Sparse transform-upload tracking: per slot, one pending-upload bit per frame in flight, plus
+    // the per-frame index lists Renderer::present drains (only changed slots are copied into that
+    // frame's GPU buffer instead of the whole array). Maintained by markRenderNodeTransformDirty.
+    std::vector<uint8> renderNodeDirtyBits;
+    std::array<std::vector<uint32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> renderNodeDirtyLists;
+}
+
+export inline void markRenderNodeTransformDirty(uint32 idx)
+{
+    constexpr uint8 allBits = uint8((1u << RendererVKLayout::NUM_FRAMES_IN_FLIGHT) - 1);
+    uint8& bits = Globals::renderNodeDirtyBits[idx];
+    if (bits == allBits)
+        return;
+    for (uint32 frame = 0; frame < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++frame)
+        if (!(bits & (1u << frame)))
+            Globals::renderNodeDirtyLists[frame].push_back(idx);
+    bits = allBits;
 }
 
 // RAII handle to a spawned renderer instance (movable, like PhysicsBody). Destroying the handle
@@ -37,9 +55,15 @@ public:
     bool isValid() const { return m_transformIdx != UINT32_MAX; }
     void destroy();
 
-    inline Transform& getTransform()
+    // The only write path: unchanged transforms cost one compare, changed ones are queued for
+    // sparse upload (writing through a mutable getTransform would bypass the dirty tracking).
+    inline void setTransform(const Transform& transform)
     {
-        return Globals::renderNodeTransforms[m_transformIdx];
+        Transform& current = Globals::renderNodeTransforms[m_transformIdx];
+        if (current.pos == transform.pos && current.scale == transform.scale && current.quat == transform.quat)
+            return;
+        current = transform;
+        markRenderNodeTransformDirty(m_transformIdx);
     }
 
     inline const Transform& getTransform() const

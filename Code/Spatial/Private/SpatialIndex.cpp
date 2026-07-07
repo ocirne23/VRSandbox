@@ -37,7 +37,8 @@ void SpatialIndex::initialize(const SpatialIndexDesc& desc)
     Tweak::intVar("Spatial/Stats", "Cells tested", &m_stats.cellsTested, 0, INT32_MAX);
     Tweak::intVar("Spatial/Stats", "Cells fully inside", &m_stats.cellsFullyInside, 0, INT32_MAX);
     Tweak::intVar("Spatial/Stats", "Entity tests", &m_stats.entityTests, 0, INT32_MAX);
-    Tweak::intVar("Spatial/Stats", "Visible", &m_stats.visibleCount, 0, INT32_MAX);
+    Tweak::intVar("Spatial/Stats", "Visible main", &m_stats.visiblePerPass[uint32(ESpatialPass::Main)], 0, INT32_MAX);
+    Tweak::intVar("Spatial/Stats", "Visible near", &m_stats.visiblePerPass[uint32(ESpatialPass::Near)], 0, INT32_MAX);
     Tweak::floatVar("Spatial/Stats", "Commit ms", &m_stats.commitMs, 0.0f, FLT_MAX, 0.001f);
     Tweak::floatVar("Spatial/Stats", "Mark visible ms", &m_stats.markVisibleMs, 0.0f, FLT_MAX, 0.001f);
     for (uint32 i = 0; i < m_numLevels; ++i)
@@ -54,11 +55,11 @@ void SpatialIndex::initialize(const SpatialIndexDesc& desc)
     Tweak::intVar("Spatial/Stats", "Static rebuilds", &m_stats.staticRebuilds, 0, INT32_MAX);
     Tweak::floatVar("Spatial/Stats", "Rebuild ms", &m_stats.rebuildMs, 0.0f, FLT_MAX, 0.001f);
 
-    static constexpr std::string_view cullModeNames[] = { "Off", "Stats only", "Safe cull", "Frustum only" };
+    static constexpr std::string_view cullModeNames[] = { "Off", "Stats only", "Cull", "Main only (debug)" };
     Tweak::enumVar("Spatial/Culling", "Mode", &m_culling.mode, cullModeNames);
     Tweak::boolean("Spatial/Culling", "Freeze", &m_culling.freeze);
     Tweak::floatVar("Spatial/Culling", "Margin", &m_culling.margin, 0.0f, 64.0f, 0.1f);
-    Tweak::floatVar("Spatial/Culling", "Safe radius", &m_culling.safeRadius, 0.0f, 4096.0f, 1.0f);
+    Tweak::floatVar("Spatial/Culling", "Near radius", &m_culling.nearRadius, 0.0f, 4096.0f, 1.0f);
     Tweak::floatVar("Spatial/Culling", "Max dist", &m_culling.maxDist, 1.0f, 1'000'000.0f, 10.0f);
     Tweak::floatVar("Spatial/Culling", "Skinned radius scale", &m_culling.skinnedRadiusScale, 1.0f, 4.0f, 0.01f);
 }
@@ -83,7 +84,8 @@ SpatialHandle SpatialIndex::registerEntry(const glm::dvec3& pos, float radius, u
     m_pool.next[idx] = UINT32_MAX;
     m_pool.prev[idx] = UINT32_MAX;
     m_pool.layerMask[idx] = layerMask;
-    m_pool.lastVisibleFrame[idx] = 0; // never stamped: isVisible() reports true until first query
+    for (uint32 p = 0; p < uint32(ESpatialPass::Count); ++p)
+        m_pool.lastVisible[p][idx] = 0; // never stamped: every pass reports visible until first query
     m_pool.lastMoveFrame[idx] = m_frameId;
     m_pool.storeIdx[idx] = UINT32_MAX;
     m_pool.level[idx] = uint8(level);
@@ -174,7 +176,8 @@ void SpatialIndex::commitFrame()
                 m_pool.flags[op.idx] = uint8(opFlags & ~RecordFlag_Unlinked);
                 // counts as visible for the current stamp generation; the next markVisibleSet
                 // (which runs with the entry actually in the index) decides for real
-                m_pool.lastVisibleFrame[op.idx] = m_visibleQueryId;
+                for (uint32 p = 0; p < uint32(ESpatialPass::Count); ++p)
+                    m_pool.lastVisible[p][op.idx] = m_visibleQueryId[p];
             }
             break;
         case PendingOp::Move:
@@ -242,6 +245,7 @@ void SpatialIndex::commitFrame()
     m_stats.cellsTested = 0;
     m_stats.cellsFullyInside = 0;
     m_stats.entityTests = 0;
+    m_stats.markVisibleMs = 0.0f; // markVisible* calls accumulate into it after this commit
     m_stats.commitMs = std::chrono::duration<float, std::milli>(Clock::now() - start).count();
     ++m_frameId;
 }
