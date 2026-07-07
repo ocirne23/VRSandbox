@@ -197,7 +197,42 @@ namespace
         }
     }
 
-    bool convertTextureToDds(const ITextureData& texData, const std::string& resolvedFile, ETexUsage usage, const std::string& outPath)
+    float alphaCoverage(const uint8* pRgba, size_t numPixels, float alphaScale, uint8 cutoff)
+    {
+        size_t covered = 0;
+        const uint8* pA = pRgba + 3;
+        for (size_t i = 0; i < numPixels; ++i, pA += 4)
+            covered += std::min(255.0f, (float)*pA * alphaScale) >= (float)cutoff;
+        return (float)covered / (float)numPixels;
+    }
+
+    // Rescales a mip's alpha so the fraction of texels passing the alpha-test cutoff ("coverage")
+    // matches the full-res image's: plain downsampling averages alpha toward the middle, which makes
+    // alpha-tested foliage thin out and vanish in coarse mips — exactly the mips LOD selection and mip
+    // streaming push distant vegetation onto. Coverage is monotonic in the scale, so a binary search
+    // finds the factor that restores it.
+    void preserveAlphaCoverage(uint8* pRgba, size_t numPixels, uint8 cutoff, float refCoverage)
+    {
+        float lo = 0.25f, hi = 8.0f;
+        for (int i = 0; i < 12; ++i)
+        {
+            const float mid = 0.5f * (lo + hi);
+            if (alphaCoverage(pRgba, numPixels, mid, cutoff) < refCoverage)
+                lo = mid;
+            else
+                hi = mid;
+        }
+        const float scale = 0.5f * (lo + hi);
+        if (std::abs(scale - 1.0f) < 0.01f)
+            return;
+        uint8* pA = pRgba + 3;
+        for (size_t i = 0; i < numPixels; ++i, pA += 4)
+            *pA = (uint8)std::min(255.0f, (float)*pA * scale + 0.5f);
+    }
+
+    // coverageCutoff: alpha-test cutoff of the masked material(s) using this texture, or < 0 when the
+    // texture is never alpha-tested (no coverage preservation).
+    bool convertTextureToDds(const ITextureData& texData, const std::string& resolvedFile, ETexUsage usage, float coverageCutoff, const std::string& outPath)
     {
         const DecodedImage img = decodeTexture(texData, resolvedFile);
         if (!img.pixels || img.width == 0 || img.height == 0)
@@ -212,6 +247,19 @@ namespace
             const size_t numPixels = (size_t)img.width * img.height;
             for (size_t i = 0; i < numPixels; ++i, pA += 4)
                 if (*pA < 250) { format = dds::DXGI_FORMAT::DXGI_FORMAT_BC3_UNORM; break; }
+        }
+
+        // Alpha-tested textures preserve their level-0 coverage per mip; only meaningful when the alpha
+        // channel survives compression (BC3) and the full-res coverage isn't already all-or-nothing.
+        float refCoverage = -1.0f;
+        uint8 cutoff255 = 0;
+        if (usage == ETexUsage::Color && coverageCutoff > 0.0f && coverageCutoff < 1.0f
+            && format == dds::DXGI_FORMAT::DXGI_FORMAT_BC3_UNORM)
+        {
+            cutoff255 = (uint8)std::clamp((int)(coverageCutoff * 255.0f + 0.5f), 1, 255);
+            refCoverage = alphaCoverage(img.pixels.get(), (size_t)img.width * img.height, 1.0f, cutoff255);
+            if (refCoverage <= 0.0f || refCoverage >= 1.0f)
+                refCoverage = -1.0f;
         }
 
         const uint32 numMips = 1 + (uint32)std::floor(std::log2((float)std::max(img.width, img.height)));
@@ -232,6 +280,8 @@ namespace
                     stbir_resize_uint8_srgb(img.pixels.get(), (int)img.width, (int)img.height, 0, mipPixels.data(), (int)mipW, (int)mipH, 0, STBIR_RGBA);
                 else
                     stbir_resize_uint8_linear(img.pixels.get(), (int)img.width, (int)img.height, 0, mipPixels.data(), (int)mipW, (int)mipH, 0, STBIR_4CHANNEL);
+                if (refCoverage >= 0.0f)
+                    preserveAlphaCoverage(mipPixels.data(), (size_t)mipW * mipH, cutoff255, refCoverage);
                 pSrc = mipPixels.data();
             }
             compressMip(pSrc, mipW, mipH, format, fileData);
@@ -362,7 +412,10 @@ namespace
         ctx.textures.resize(numTextures);
 
         // Usage per texture from the material slots the renderer actually samples (first mark wins).
+        // Diffuse textures of alpha-MASKED materials also record the cutoff, so their mips can keep the
+        // full-res alpha coverage (Blend materials want the true averaged alpha, so they don't).
         std::vector<uint8> usage(numTextures, 0xFF);
+        std::vector<float> coverageCutoff(numTextures, -1.0f);
         auto markUsage = [&](uint32 texIdx, ETexUsage use) {
             if (texIdx < numTextures && usage[texIdx] == 0xFF)
                 usage[texIdx] = (uint8)use;
@@ -373,6 +426,12 @@ namespace
             markUsage(material.getDiffuseTexIdx(), ETexUsage::Color);
             markUsage(material.getNormalTexIdx(), ETexUsage::NormalMap);
             markUsage(material.getMetalRoughnessTexIdx(), ETexUsage::Data);
+            if (material.getAlphaMode() == IMaterialData::EAlphaMode::Mask)
+            {
+                const uint32 texIdx = material.getDiffuseTexIdx();
+                if (texIdx < numTextures && coverageCutoff[texIdx] < 0.0f)
+                    coverageCutoff[texIdx] = material.getAlphaCutoff();
+            }
         }
 
         const std::string modelFolder = std::filesystem::path(sourcePath).parent_path().string();
@@ -422,7 +481,7 @@ namespace
                 std::filesystem::create_directories(texFolder, ec);
                 texFolderCreated = true;
             }
-            if (!convertTextureToDds(texData, resolvedFile, (ETexUsage)usage[texIdx], cookedPath))
+            if (!convertTextureToDds(texData, resolvedFile, (ETexUsage)usage[texIdx], coverageCutoff[texIdx], cookedPath))
             {
                 Log::warning(std::format("SceneCache: failed to convert texture '{}' of '{}'; keeping original reference", originalPath, sourcePath));
                 continue;

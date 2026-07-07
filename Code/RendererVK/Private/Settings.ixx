@@ -166,7 +166,7 @@ export struct TAAParams
 export struct MeshLodParams
 {
     bool  enabled = true;         // per-instance LOD selection (off = everything renders LOD0)
-    float maxErrorPixels = 0.5f;  // screen-space error budget: coarsest level whose geometric deviation projects below this is used (generated chains carry per-level meshopt errors)
+    float maxErrorPixels = 0.33f;  // screen-space error budget: coarsest level whose geometric deviation projects below this is used (generated chains carry per-level meshopt errors)
     float fullResPixels = 256.0f; // FALLBACK metric for chains without error data (authored LodN_): projected diameter (px) above which LOD0 is used; each halving drops one level
     int   bias = 0;               // coarseness bias: doubles the error budget per step (fallback: levels added)
     float hysteresis = 0.25f;     // switch dead-band: fraction of the error budget (fallback: fraction of a level) a change must overshoot before switching
