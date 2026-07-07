@@ -98,6 +98,7 @@ void RTParams::registerTweaks()
     Tweak::boolean("RT", "RT Sun", &rtSunShadow);
     Tweak::intVar("RT", "RT Sun Rays", &sunShadowRays, 1, 8);
     Tweak::boolean("RT", "RT Sky Radiance", &rtSkyRadiance);
+    Tweak::intVar("RT", "BLAS LOD level", &blasLodLevel, 0, 4);
 }
 
 void RTAOParams::registerTweaks(const std::function<void()>& onReRecord, const std::function<void()>& onReloadShaders)

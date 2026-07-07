@@ -36,6 +36,10 @@ void AccelerationStructure::initialize(uint32 maxUniqueMeshes)
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "AS.blasAddresses");
         m_mappedBlasAddresses[f] = m_blasAddressBuffers[f].mapMemory<uint64>();
     }
+    m_meshAliasBuffer.initialize(maxUniqueMeshes * sizeof(uint32),
+        vk::BufferUsageFlagBits2::eStorageBuffer,
+        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "AS.meshAlias");
+    m_mappedMeshAlias = m_meshAliasBuffer.mapMemory<uint32>();
 }
 
 void AccelerationStructure::resizeBlasAddressBuffer(uint32 maxUniqueMeshes)
@@ -50,6 +54,53 @@ void AccelerationStructure::resizeBlasAddressBuffer(uint32 maxUniqueMeshes)
         memcpy(m_mappedBlasAddresses[f].data(), oldAddresses.data(), oldAddresses.size() * sizeof(uint64));
         m_blasAddressBuffers[f].flushMappedMemory(oldAddresses.size() * sizeof(uint64));
     }
+    const std::vector<uint32> oldAliases(m_mappedMeshAlias.begin(), m_mappedMeshAlias.end());
+    m_meshAliasBuffer.initialize(maxUniqueMeshes * sizeof(uint32),
+        vk::BufferUsageFlagBits2::eStorageBuffer,
+        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "AS.meshAlias");
+    m_mappedMeshAlias = m_meshAliasBuffer.mapMemory<uint32>();
+    memcpy(m_mappedMeshAlias.data(), oldAliases.data(), oldAliases.size() * sizeof(uint32));
+    m_meshAliasBuffer.flushMappedMemory(oldAliases.size() * sizeof(uint32));
+}
+
+void AccelerationStructure::setNumMeshes(uint32 numMeshes)
+{
+    if (numMeshes <= m_numAliasMeshes)
+        return;
+    assert(numMeshes <= m_mappedMeshAlias.size() && "mesh alias buffer behind capacity growth");
+    for (uint32 m = m_numAliasMeshes; m < numMeshes; ++m)
+        m_mappedMeshAlias[m] = m; // identity: owns its own BLAS until a LOD group aliases it
+    m_numAliasMeshes = numMeshes;
+    m_meshAliasBuffer.flushMappedMemory(m_numAliasMeshes * sizeof(uint32));
+}
+
+void AccelerationStructure::setMeshAlias(uint32 meshIdx, uint32 aliasIdx)
+{
+    assert(meshIdx < m_numAliasMeshes && aliasIdx < m_numAliasMeshes);
+    m_mappedMeshAlias[meshIdx] = aliasIdx;
+    m_meshAliasBuffer.flushMappedMemory(m_numAliasMeshes * sizeof(uint32));
+}
+
+void AccelerationStructure::onMeshEvicted(uint32 meshIdx)
+{
+    if (meshIdx >= m_numAliasMeshes)
+        return;
+    for (auto& mapped : m_mappedBlasAddresses)
+        mapped[meshIdx] = 0;
+    if (m_mappedMeshAlias[meshIdx] == meshIdx && meshIdx < m_blasList.size() && m_blasList[meshIdx].handle)
+    {
+        Globals::device.getDevice().destroyAccelerationStructureKHR(m_blasList[meshIdx].handle);
+        m_blasList[meshIdx].handle = nullptr;
+        m_blasList[meshIdx].buffer.destroy();
+        // Anything aliased to this BLAS (authored-chain levels in other, still-resident sets) must stop
+        // referencing it too — those levels go RT-invisible until this mesh re-streams and rebuilds.
+        for (uint32 m = 0; m < m_numAliasMeshes; ++m)
+            if (m_mappedMeshAlias[m] == meshIdx)
+                for (auto& mapped : m_mappedBlasAddresses)
+                    mapped[m] = 0;
+    }
+    for (auto& buf : m_blasAddressBuffers)
+        buf.flushMappedMemory(buf.getSize());
 }
 
 void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& outAlignedAddr, vk::DeviceSize needed)
@@ -67,19 +118,29 @@ void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& ou
 }
 
 void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& vertexBuffer, Buffer& indexBuffer,
-    const RendererVKLayout::MeshInfo* meshInfos, uint32 firstMesh, uint32 count, uint32 totalVertices)
+    const RendererVKLayout::MeshInfo* meshInfos, const uint32* vertexCounts, std::span<const uint32> meshIndices)
 {
-    if (count == 0)
-        return;
+    // Only self-aliased meshes with live geometry build a BLAS: LOD-chain levels share their RT level's,
+    // and streamed-out meshes (indexCount 0) wait for their re-stream rebuild.
+    std::vector<uint32> toBuild;
+    toBuild.reserve(meshIndices.size());
+    uint32 maxMeshIdx = 0;
+    for (const uint32 meshIdx : meshIndices)
+    {
+        maxMeshIdx = std::max(maxMeshIdx, meshIdx);
+        if (getMeshAlias(meshIdx) == meshIdx && meshInfos[meshIdx].indexCount > 0 && vertexCounts[meshIdx] > 0)
+            toBuild.push_back(meshIdx);
+    }
+    if (m_blasList.size() < (size_t)maxMeshIdx + 1)
+        m_blasList.resize((size_t)maxMeshIdx + 1);
+    m_numBlas = std::max(m_numBlas, maxMeshIdx + (meshIndices.empty() ? 0u : 1u));
 
     vk::Device dev = Globals::device.getDevice();
     const vk::DeviceAddress vbAddr = vertexBuffer.getDeviceAddress();
     const vk::DeviceAddress ibAddr = indexBuffer.getDeviceAddress();
 
-    if (m_blasList.size() < firstMesh + count)
-        m_blasList.resize(firstMesh + count);
-
-    // Pass 1: assemble geometry + build infos, query sizes, find the largest scratch requirement.
+    // Pass 1: assemble geometry + build infos, query sizes, find the total scratch requirement.
+    const uint32 count = (uint32)toBuild.size();
     std::vector<vk::AccelerationStructureGeometryKHR> geoms(count);
     std::vector<vk::AccelerationStructureBuildGeometryInfoKHR> buildInfos(count);
     std::vector<vk::AccelerationStructureBuildRangeInfoKHR> ranges(count);
@@ -89,29 +150,21 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
     const vk::DeviceSize align = m_scratchAlignment;
     for (uint32 i = 0; i < count; i++)
     {
-        const RendererVKLayout::MeshInfo& mi = meshInfos[firstMesh + i];
+        const RendererVKLayout::MeshInfo& mi = meshInfos[toBuild[i]];
         const uint32 primCount = mi.indexCount / 3;
 
-        // This mesh's exact vertex count. Meshes are uploaded sequentially (monotonic vertexOffset), so a
-        // mesh spans up to the next mesh's vertexOffset, and the batch's last mesh up to totalVertices.
         // maxVertex MUST be tight: declaring the whole buffer makes the driver bound the BLAS over every
         // vertex, ballooning its AABB to span the scene and degenerating the BVH (catastrophically slow
-        // ray traversal -> TDR / device lost).
-        const uint32 meshVertexCount = (i + 1u < count)
-            ? (uint32)(meshInfos[firstMesh + i + 1u].vertexOffset - mi.vertexOffset)
-            : (totalVertices - (uint32)mi.vertexOffset);
-        // A zero-span mesh (two meshes sharing a vertexOffset, an empty mesh, or a trailing mesh where
-        // totalVertices == vertexOffset) underflows maxVertex below to 0xFFFFFFFF, making the driver bound
-        // this BLAS over the whole vertex buffer -> ballooning AABB and wild vertex fetches that MMU-fault
-        // during ray traversal. Guard it.
-        assert(meshVertexCount > 0 && "zero-span mesh -> maxVertex underflow");
-
+        // ray traversal -> TDR / device lost). The Renderer tracks every mesh's exact vertex count (the
+        // old next-mesh-offset heuristic broke once LOD levels shared vertex ranges and the streamer's
+        // free-list ended offset monotonicity).
+        //
         // vk::DeviceOrHostAddressConstKHR / AccelerationStructureGeometryDataKHR are unions, which can't
         // be designated-initialized; default-construct then assign the active union member.
         vk::AccelerationStructureGeometryTrianglesDataKHR tri{
             .vertexFormat = vk::Format::eR32G32B32Sfloat,
             .vertexStride = sizeof(RendererVKLayout::MeshVertex),
-            .maxVertex = meshVertexCount - 1u,
+            .maxVertex = vertexCounts[toBuild[i]] - 1u,
             .indexType = vk::IndexType::eUint32,
         };
         tri.vertexData.deviceAddress = vbAddr;
@@ -147,57 +200,67 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
         };
     }
 
-    ensureScratch(m_blasScratch, m_blasScratchAlignedAddr, totalScratch);
-
-    // Pass 2: create and build each BLAS, serialized with a barrier between builds (each also uses a
-    // disjoint scratch region). Serializing removes any concurrent-build interaction as a variable.
-    for (uint32 i = 0; i < count; i++)
+    if (count > 0)
     {
-        Blas& blas = m_blasList[firstMesh + i];
-        if (blas.handle)
-            dev.destroyAccelerationStructureKHR(blas.handle);
-        blas.buffer.initialize(sizes[i].accelerationStructureSize,
-            vk::BufferUsageFlagBits2::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
-            vk::MemoryPropertyFlagBits::eDeviceLocal, false, "AS.blas");
+        ensureScratch(m_blasScratch, m_blasScratchAlignedAddr, totalScratch);
 
-        vk::AccelerationStructureCreateInfoKHR ci{
-            .buffer = blas.buffer.getBuffer(),
-            .size = sizes[i].accelerationStructureSize,
-            .type = vk::AccelerationStructureTypeKHR::eBottomLevel,
-        };
-        auto res = dev.createAccelerationStructureKHR(ci);
-        assert(res.result == vk::Result::eSuccess && "Failed to create BLAS");
-        blas.handle = res.value;
+        // Pass 2: create and build each BLAS, serialized with a barrier between builds (each also uses a
+        // disjoint scratch region). Serializing removes any concurrent-build interaction as a variable.
+        for (uint32 i = 0; i < count; i++)
+        {
+            Blas& blas = m_blasList[toBuild[i]];
+            if (blas.handle)
+                dev.destroyAccelerationStructureKHR(blas.handle);
+            blas.buffer.initialize(sizes[i].accelerationStructureSize,
+                vk::BufferUsageFlagBits2::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits2::eShaderDeviceAddress,
+                vk::MemoryPropertyFlagBits::eDeviceLocal, false, "AS.blas");
 
-        buildInfos[i].dstAccelerationStructure = blas.handle;
-        buildInfos[i].scratchData.deviceAddress = m_blasScratchAlignedAddr + scratchOffsets[i];
-        const vk::AccelerationStructureBuildRangeInfoKHR* pRange = &ranges[i];
-        cmd.buildAccelerationStructuresKHR(buildInfos[i], pRange);
+            vk::AccelerationStructureCreateInfoKHR ci{
+                .buffer = blas.buffer.getBuffer(),
+                .size = sizes[i].accelerationStructureSize,
+                .type = vk::AccelerationStructureTypeKHR::eBottomLevel,
+            };
+            auto res = dev.createAccelerationStructureKHR(ci);
+            assert(res.result == vk::Result::eSuccess && "Failed to create BLAS");
+            blas.handle = res.value;
 
-        vk::AccelerationStructureDeviceAddressInfoKHR ai{ .accelerationStructure = blas.handle };
-        const uint64 blasAddr = dev.getAccelerationStructureAddressKHR(ai);
-        for (auto& mapped : m_mappedBlasAddresses) // static BLAS address is the same for every frame slot
-            mapped[firstMesh + i] = blasAddr;
+            buildInfos[i].dstAccelerationStructure = blas.handle;
+            buildInfos[i].scratchData.deviceAddress = m_blasScratchAlignedAddr + scratchOffsets[i];
+            const vk::AccelerationStructureBuildRangeInfoKHR* pRange = &ranges[i];
+            cmd.buildAccelerationStructuresKHR(buildInfos[i], pRange);
 
-        vk::MemoryBarrier2 b{
+            vk::AccelerationStructureDeviceAddressInfoKHR ai{ .accelerationStructure = blas.handle };
+            const uint64 blasAddr = dev.getAccelerationStructureAddressKHR(ai);
+            for (auto& mapped : m_mappedBlasAddresses) // static BLAS address is the same for every frame slot
+                mapped[toBuild[i]] = blasAddr;
+
+            vk::MemoryBarrier2 b{
+                .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+                .srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR | vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+                .dstStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+                .dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR | vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+            };
+            cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &b });
+        }
+
+        // One barrier so all BLAS builds complete before the TLAS build (or any reads) consume them.
+        vk::MemoryBarrier2 bar{
             .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
-            .srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR | vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+            .srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
             .dstStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
-            .dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR | vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+            .dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR,
         };
-        cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &b });
+        cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
     }
 
-    // One barrier so all BLAS builds complete before the TLAS build (or any reads) consume them.
-    vk::MemoryBarrier2 bar{
-        .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
-        .srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
-        .dstStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
-        .dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR,
-    };
-    cmd.pipelineBarrier2(vk::DependencyInfo{ .memoryBarrierCount = 1, .pMemoryBarriers = &bar });
+    // Address-fill: every aliased mesh's entry mirrors its target's (per frame slot, so skinned meshes'
+    // per-slot addresses stay untouched — they are self-aliased no-ops here). Covers both freshly built
+    // chains and re-stream rebuilds whose aliased levels live in other registration batches.
+    for (auto& mapped : m_mappedBlasAddresses)
+        for (uint32 m = 0; m < m_numAliasMeshes; ++m)
+            if (m_mappedMeshAlias[m] != m)
+                mapped[m] = mapped[m_mappedMeshAlias[m]];
 
-    m_numBlas = std::max(m_numBlas, firstMesh + count);
     for (auto& buf : m_blasAddressBuffers)
         buf.flushMappedMemory(buf.getSize());
 }

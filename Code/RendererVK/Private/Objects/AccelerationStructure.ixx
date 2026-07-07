@@ -20,11 +20,27 @@ public:
     // (GPU must be idle).
     void resizeBlasAddressBuffer(uint32 maxUniqueMeshes);
 
-    // Records BLAS builds for meshes [firstMesh, firstMesh+count) into cmd, reading geometry directly
-    // from the shared vertex/index buffers. totalVertices is the current vertex-buffer fill (in vertices)
-    // and is only used to derive a safe in-bounds maxVertex per mesh. BLASes are built once per mesh.
+    // RT mesh aliasing: a LOD chain shares ONE BLAS (rays don't need per-level fidelity), so every level
+    // aliases the chain's RT level. Aliased meshes never build their own BLAS; their address entries are
+    // filled from the alias target's, and the TLAS-instance writer packs the aliased meshIdx into each
+    // instance's sbtOffset so hit shaders fetch the matching geometry. Grown identity-filled by
+    // setNumMeshes (Renderer::addMeshInfos); addMeshLodGroup points chain levels at the RT level.
+    void setNumMeshes(uint32 numMeshes);
+    void setMeshAlias(uint32 meshIdx, uint32 aliasIdx);
+    uint32 getMeshAlias(uint32 meshIdx) const { return meshIdx < m_numAliasMeshes ? m_mappedMeshAlias[meshIdx] : meshIdx; }
+    Buffer& getMeshAliasBuffer() { return m_meshAliasBuffer; }
+
+    // Mesh streaming eviction: zeroes the mesh's BLAS-address entries (the TLAS writer masks null-BLAS
+    // instances) and, when the mesh owns the BLAS (self-aliased), destroys it and zeroes every entry
+    // aliased to it. Only called for sets cold long enough that no in-flight TLAS references the BLAS.
+    void onMeshEvicted(uint32 meshIdx);
+
+    // Records BLAS builds for the given meshes into cmd, reading geometry directly from the shared
+    // vertex/index buffers with each mesh's exact vertex count (maxVertex must be tight — see the
+    // comment in the implementation). Aliased and streamed-out (indexCount 0) meshes are skipped; the
+    // address-fill pass afterwards refreshes every aliased mesh's entry from its target.
     void recordBuildBlas(vk::CommandBuffer cmd, Buffer& vertexBuffer, Buffer& indexBuffer,
-        const RendererVKLayout::MeshInfo* meshInfos, uint32 firstMesh, uint32 count, uint32 totalVertices);
+        const RendererVKLayout::MeshInfo* meshInfos, const uint32* vertexCounts, std::span<const uint32> meshIndices);
 
     // A skinned mesh's deformed output region. vertexCount/firstIndex/indexCount are known exactly, so the
     // BLAS is built without relying on neighbouring mesh offsets.
@@ -73,6 +89,12 @@ private:
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_blasAddressBuffers;
     std::array<std::span<uint64>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_mappedBlasAddresses;
     uint32 m_numBlas = 0;
+
+    // mesh idx -> mesh idx whose BLAS it uses (identity = owns one). Single-buffered: entries are static
+    // per mesh and written before the mesh can first be instanced.
+    Buffer m_meshAliasBuffer;
+    std::span<uint32> m_mappedMeshAlias;
+    uint32 m_numAliasMeshes = 0;
 
     // Double-buffered skinned BLASes (rebuilt every frame) + per-frame scratch. Allocated lazily/in place.
     std::array<std::vector<Blas>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_skinnedBlas;

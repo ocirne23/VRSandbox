@@ -41,6 +41,10 @@ layout (binding = 3, std430) readonly buffer InBlasAddressesBuffer        { uvec
 layout (binding = 4, std430) writeonly buffer OutTlasInstancesBuffer      { TlasInstance out_instances[]; };
 layout (binding = 5, std430) readonly buffer InMaterialInfosBuffer        { MaterialInfo in_materialInfos[]; };
 layout (binding = 6, std430) readonly buffer InNodePassMasksBuffer        { uint in_nodePassMasks[]; };
+// mesh idx -> the mesh whose BLAS this one shares (identity when it owns its own): a LOD chain keeps a
+// single BLAS at its RT level, so instances of every level reference that BLAS and carry its meshIdx
+// (packed into sbtOffset below) for the hit shaders' attribute fetches.
+layout (binding = 7, std430) readonly buffer InRtMeshAliasBuffer          { uint in_rtMeshAlias[]; };
 
 layout (push_constant) uniform PushConstants
 {
@@ -89,19 +93,23 @@ void main()
     o.row0 = vec4(scale * col0.x, scale * col1.x, scale * col2.x, pos.x);
     o.row1 = vec4(scale * col0.y, scale * col1.y, scale * col2.y, pos.y);
     o.row2 = vec4(scale * col0.z, scale * col1.z, scale * col2.z, pos.z);
+    // The RT mesh: whose BLAS geometry this instance traces against (the chain's shared level).
+    const uint rtMeshIdx = meshIdx < uint(in_rtMeshAlias.length()) ? in_rtMeshAlias[meshIdx] : meshIdx;
+
     // Flags: TriangleFacingCullDisable (0x01) always; ForceOpaque (0x04) for everything except
     // alpha-masked instances, which stay non-opaque so shadow rays can run their alpha test
     // (rt_shadow.inc.glsl). Opaque-flagged rays (RTAO, GI gather) still treat masked geometry as solid.
+    // The sbtOffset bits (unused by ray queries) carry the RT meshIdx so hit shaders fetch the indices
+    // matching the BLAS geometry instead of the raster-selected LOD level's.
     const uint alphaMode = inst.pipelineIdxAlphaMode >> 16;
     const uint instFlags = 0x01u | (alphaMode == ALPHA_MODE_MASK ? 0x00u : 0x04u);
-    o.sbtOffsetAndFlags          = (instFlags << 24);
+    o.sbtOffsetAndFlags          = (instFlags << 24) | (rtMeshIdx & 0x00FFFFFFu);
 
-    // Guard the address lookup: meshIdx = (meshIdxMaterialIdx & 0xFFFF) can be up to 65535, but the BLAS
-    // address buffer only has length() entries. An out-of-bounds read returns a foreign 64-bit value that,
-    // used as a BLAS reference, makes ray traversal chase a wild pointer -> MMU fault. Clamp to a null
-    // reference instead.
-    const bool meshInRange = meshIdx < uint(in_blasAddresses.length());
-    const uvec2 addr = meshInRange ? in_blasAddresses[meshIdx] : uvec2(0u);
+    // Guard the address lookup: meshIdx can be up to 65535, but the BLAS address buffer only has
+    // length() entries. An out-of-bounds read returns a foreign 64-bit value that, used as a BLAS
+    // reference, makes ray traversal chase a wild pointer -> MMU fault. Clamp to a null reference instead.
+    const bool meshInRange = rtMeshIdx < uint(in_blasAddresses.length());
+    const uvec2 addr = meshInRange ? in_blasAddresses[rtMeshIdx] : uvec2(0u);
     o.blasLo = addr.x;
     o.blasHi = addr.y;
 

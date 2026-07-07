@@ -185,10 +185,21 @@ private:
     void addObjectContainer(ObjectContainer* pObjectContainer);
 
     uint32 addRenderNodeTransform(const Transform& transform);
-    uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos);
+    // vertexCounts: exact per-MeshInfo vertex count (parallel to meshInfos) — the BLAS builder needs a
+    // tight maxVertex per mesh and offsets are no longer monotonic with the mesh streamer's free-list.
+    uint32 addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos, std::span<const uint32> vertexCounts);
     uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
-    uint32 addMeshLodGroup(const MeshLodGroup& group) { m_meshLodGroups.push_back(group); return (uint32)m_meshLodGroups.size() - 1; }
+    uint32 addMeshLodGroup(const MeshLodGroup& group)
+    {
+        m_meshLodGroups.push_back(group);
+        // One shared BLAS per chain: every level aliases the RT level's geometry (rays don't need
+        // per-level fidelity), so only that level's BLAS is ever built.
+        const uint8 rtLevel = (uint8)std::clamp(m_rtParams.blasLodLevel, 0, (int)group.numLods - 1);
+        for (uint8 k = 0; k < group.numLods; ++k)
+            m_accelStructure.setMeshAlias(group.meshIdx[k], group.meshIdx[rtLevel]);
+        return (uint32)m_meshLodGroups.size() - 1;
+    }
     uint32 addSkinnedMeshSources(const std::vector<RendererVKLayout::SkinnedMeshSource>& sources);
     const RendererVKLayout::SkinnedMeshSource& getSkinnedMeshSource(uint32 idx) const { return m_skinnedMeshSources[idx]; }
 
@@ -321,6 +332,8 @@ private:
 
     std::vector<ObjectContainer*> m_objectContainers;
     std::vector<uint32> m_numInstancesPerMesh;
+    std::vector<uint32> m_meshVertexCounts;    // exact per-MeshInfo vertex count (BLAS maxVertex)
+    std::vector<uint32> m_pendingBlasRebuilds; // re-streamed meshes awaiting a BLAS rebuild in recordGlobalIllum
     std::vector<MeshLodGroup> m_meshLodGroups;
     std::array<uint32, RendererVKLayout::MAX_MESH_LODS> m_lodInstanceCounts{}; // per-level picks this frame (stats)
     std::vector<uint32> m_freeRenderNodeIndexes;

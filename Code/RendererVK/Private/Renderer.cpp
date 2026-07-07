@@ -1649,17 +1649,21 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
             vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR, vk::AccessFlagBits2::eShaderRead);
 
-    // 1. Build BLASes for any meshes added since last frame (one-time per mesh).
-    if (m_blasBuiltCount < m_meshInfoCounter)
+    // 1. Build BLASes for meshes added since last frame (one-time per mesh; LOD levels alias their
+    // chain's RT-level BLAS and build nothing) plus any re-streamed meshes queued for a rebuild.
+    if (m_blasBuiltCount < m_meshInfoCounter || !m_pendingBlasRebuilds.empty())
     {
-        // Buffer size, not fill level: the mesh streamer's free-list makes "used" non-contiguous, and
-        // totalVertices only has to be a safe upper bound for the per-mesh maxVertex derivation.
-        const uint32 totalVertices = (uint32)(Globals::meshDataManager.getVertexBufSize() / sizeof(RendererVKLayout::MeshVertex));
-        m_accelStructure.recordBuildBlas(vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
-            m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>().data(), m_blasBuiltCount, m_meshInfoCounter - m_blasBuiltCount, totalVertices);
+        std::vector<uint32> buildList = std::move(m_pendingBlasRebuilds);
+        m_pendingBlasRebuilds.clear();
+        for (uint32 meshIdx = m_blasBuiltCount; meshIdx < m_meshInfoCounter; ++meshIdx)
+            buildList.push_back(meshIdx);
+        const bool newMeshes = m_blasBuiltCount < m_meshInfoCounter;
         m_blasBuiltCount = m_meshInfoCounter;
+        m_accelStructure.recordBuildBlas(vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
+            m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>().data(), m_meshVertexCounts.data(), buildList);
 
-        m_giProbePipeline.doClear();
+        if (newMeshes)
+            m_giProbePipeline.doClear();
     }
 
     // 1b. Rebuild skinned meshes' BLASes every frame from this frame's deformed vertices, into this frame's
@@ -1698,6 +1702,7 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         .meshInstances = frameData.inMeshInstancesBuffer,
         .instanceOffsets = m_instanceOffsetsBuffer,
         .blasAddresses = m_accelStructure.getBlasAddressBuffer(frameIdx),
+        .rtMeshAlias = m_accelStructure.getMeshAliasBuffer(),
         .materialInfos = m_materialInfosBuffer,
         .nodePassMasks = frameData.inNodePassMasksBuffer,
         .viewPos = m_cameraPos,
@@ -2082,6 +2087,9 @@ void Renderer::setMeshStreamedOut(uint16 meshInfoIdx)
     RendererVKLayout::MeshInfo& info = m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>()[meshInfoIdx];
     info.indexCount = 0;
     m_meshInfosBuffer.upload(sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
+    // The BLAS goes with the mesh data (rebuilt on re-stream); safe because eviction requires the set
+    // to have been unreferenced for far longer than any in-flight TLAS.
+    m_accelStructure.onMeshEvicted(meshInfoIdx);
 }
 
 void Renderer::setMeshStreamedIn(uint16 meshInfoIdx, int32 vertexOffset, uint32 firstIndex, uint32 indexCount)
@@ -2091,14 +2099,17 @@ void Renderer::setMeshStreamedIn(uint16 meshInfoIdx, int32 vertexOffset, uint32 
     info.firstIndex = firstIndex;
     info.indexCount = indexCount;
     m_meshInfosBuffer.upload(sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
+    if (m_accelStructure.getMeshAlias(meshInfoIdx) == meshInfoIdx)
+        m_pendingBlasRebuilds.push_back(meshInfoIdx); // built by the next recordGlobalIllum
 }
 
-uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos)
+uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos, std::span<const uint32> vertexCounts)
 {
+    assert(vertexCounts.size() == meshInfos.size() && "one exact vertex count per MeshInfo");
     const uint32 baseMeshInfoIdx = m_meshInfoCounter;
     m_meshInfoCounter += (uint32)meshInfos.size();
     m_numInstancesPerMesh.resize(m_meshInfoCounter);
-
+    m_meshVertexCounts.insert(m_meshVertexCounts.end(), vertexCounts.begin(), vertexCounts.end());
     assert(m_meshInfoCounter < USHRT_MAX);
 
     m_meshInfosBuffer.appendToBackingStore<RendererVKLayout::MeshInfo>(meshInfos);
@@ -2111,6 +2122,10 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
     else
         m_meshInfosBuffer.upload(meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
             meshInfos.data(), baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
+
+    // After the capacity check: the alias buffer is grown by resizeBlasAddressBuffer inside
+    // growUniqueMeshCapacity, and setNumMeshes writes identity entries for the new range.
+    m_accelStructure.setNumMeshes(m_meshInfoCounter); // identity RT aliases until a LOD group overrides
 
     return baseMeshInfoIdx;
 }

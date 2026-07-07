@@ -25,9 +25,10 @@ bool rtsCandidateBlocks(rayQueryEXT rq)
 	const int instanceIdx = rayQueryGetIntersectionInstanceCustomIndexEXT(rq, false);
 	if (uint(instanceIdx) >= in_instances.length())
 		return true;
-	const uint meshIdxMat  = in_instances[instanceIdx].meshIdxMaterialIdx;
-	const uint meshIdx     = meshIdxMat & 0x0000FFFFu;
-	const uint materialIdx = meshIdxMat >> 16;
+	// Geometry from the RT meshIdx in the instance's sbtOffset (LOD chains trace one shared BLAS, which
+	// may differ from the raster-selected level the instance references); material from the instance.
+	const uint meshIdx     = rayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetEXT(rq, false);
+	const uint materialIdx = in_instances[instanceIdx].meshIdxMaterialIdx >> 16;
 	if (meshIdx >= in_meshInfos.length() || materialIdx >= in_materialInfos.length())
 		return true;
 	const InMeshInfo mi = in_meshInfos[meshIdx];

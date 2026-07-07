@@ -132,6 +132,8 @@ export struct RTParams
     int  sunShadowRays = 5;     // RT sun shadow rays per pixel
     bool rtLightShadows = true; // ray-traced shadows for punctual/area/tube lights
     bool rtSkyRadiance = true;  // ray-traced sky visibility for the sky radiance light (GI probe trace)
+    int  blasLodLevel = 1;      // LOD level whose geometry backs a chain's single shared BLAS (clamped per
+                                // chain; rays don't need per-level fidelity). Applied when containers load.
 
     void registerTweaks();
 };

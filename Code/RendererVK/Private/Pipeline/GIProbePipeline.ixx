@@ -46,6 +46,7 @@ public:
         Buffer& meshInstances;   // InMeshInstance (cull input) buffer
         Buffer& instanceOffsets;
         Buffer& blasAddresses;   // mesh idx -> uint64 BLAS device address
+        Buffer& rtMeshAlias;     // mesh idx -> RT mesh idx (LOD chains share one BLAS; packed into sbtOffset)
         Buffer& materialInfos;   // MATERIAL_FLAG_NO_RAYTRACING -> instance mask 0
         Buffer& nodePassMasks;   // nodes without PASS_GI|PASS_SHADOW -> instance mask 0
         glm::vec3 viewPos;       // TLAS range bound center (camera)

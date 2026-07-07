@@ -138,9 +138,11 @@ vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist)
     // out of bounds and MMU-fault; treat any out-of-range hit as a miss.
     if (uint(instanceIdx) >= in_instances.length())
         return skyRadiance(dir);
-    const uint meshIdxMat  = in_instances[instanceIdx].meshIdxMaterialIdx;
-    const uint meshIdx     = meshIdxMat & 0x0000FFFFu;
-    const uint materialIdx = meshIdxMat >> 16;
+    // Geometry comes from the RT meshIdx the TLAS writer packed into the instance's sbtOffset (a LOD
+    // chain traces one shared BLAS, which may differ from the raster-selected level the instance
+    // references); the material still comes from the instance.
+    const uint meshIdx     = rayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetEXT(rq, true);
+    const uint materialIdx = in_instances[instanceIdx].meshIdxMaterialIdx >> 16;
     if (meshIdx >= in_meshInfos.length() || materialIdx >= in_materialInfos.length())
         return skyRadiance(dir);
     const InMeshInfo mi    = in_meshInfos[meshIdx];

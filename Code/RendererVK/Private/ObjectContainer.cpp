@@ -82,7 +82,9 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
     const size_t numMeshes = sceneData.getNumMeshes();
 
     std::vector<RendererVKLayout::MeshInfo> meshInfos;
+    std::vector<uint32> meshVertexCounts; // parallel to meshInfos: exact counts for the BLAS builder
     meshInfos.reserve(numMeshes);
+    meshVertexCounts.reserve(numMeshes);
     std::vector<RendererVKLayout::SkinnedMeshSource> skinnedSources; // registered with the renderer after the loop
 
     // Authored LOD chains: pre-scan the mesh names so chain membership is known before upload (chain
@@ -123,7 +125,8 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
     // after the source meshes (filled during the upload loop below).
     struct GeneratedChain { uint16 baseMeshIdx; uint16 firstExtraIdx; uint8 numLevels; };
     std::vector<RendererVKLayout::MeshInfo> generatedLodInfos;
-    std::vector<float> generatedLodErrors; // parallel to generatedLodInfos: deviation from LOD0, mesh-local units
+    std::vector<float> generatedLodErrors;        // parallel to generatedLodInfos: deviation from LOD0, mesh-local units
+    std::vector<uint32> generatedLodVertexCounts; // parallel: the base mesh's count (levels share its vertices)
     std::vector<GeneratedChain> generatedChains;
     const MeshLodParams& lodParams = Globals::rendererVK.getLodParams();
 
@@ -173,6 +176,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
         sphereBounds.pos = bounds.getCenter();
         sphereBounds.radius = bounds.getRadius();
         m_boundsForMeshIdx.push_back(sphereBounds);
+        meshVertexCounts.push_back(meshData.getNumVertices());
 
 		const uint32 numIndices = meshData.getNumIndices();
         const uint32* pIndices = meshData.getIndices();
@@ -235,6 +239,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 // Floor at a tiny epsilon: errors[1] > 0 is what routes the group onto the
                 // screen-space-error selection path.
                 generatedLodErrors.push_back(std::max(meshData.getLodError(level), 1e-7f));
+                generatedLodVertexCounts.push_back(meshData.getNumVertices());
                 generatedChains.back().numLevels++;
             }
         }
@@ -267,6 +272,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                     generatedChains.push_back(GeneratedChain{ (uint16)meshIdx, (uint16)generatedLodInfos.size(), 0 });
                 generatedLodInfos.push_back(lodInfo);
                 generatedLodErrors.push_back(std::max(resultError * meshScale, 1e-7f));
+                generatedLodVertexCounts.push_back((uint32)vertices.size());
                 generatedChains.back().numLevels = ++numLevels;
                 prevIndexCount = (uint32)resultCount;
             }
@@ -275,8 +281,9 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
 
     const uint32 numSourceMeshes = (uint32)meshInfos.size();
     meshInfos.insert(meshInfos.end(), generatedLodInfos.begin(), generatedLodInfos.end());
+    meshVertexCounts.insert(meshVertexCounts.end(), generatedLodVertexCounts.begin(), generatedLodVertexCounts.end());
 
-    m_baseMeshInfoIdx = (uint16)Globals::rendererVK.addMeshInfos(meshInfos);
+    m_baseMeshInfoIdx = (uint16)Globals::rendererVK.addMeshInfos(meshInfos, meshVertexCounts);
 
     // Register the LOD chains now that global mesh indices are known; the base mesh's NodeInfo picks
     // the group up in initializeNodes.
@@ -776,8 +783,10 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
 
         // Reserve a unique output vertex region per skinned mesh and register a MeshInfo pointing at it.
         std::vector<RendererVKLayout::MeshInfo> meshInfos;
+        std::vector<uint32> meshVertexCounts;
         std::vector<uint32> outVertexOffsets;
         meshInfos.reserve(m_numSkinnedMeshes);
+        meshVertexCounts.reserve(m_numSkinnedMeshes);
         outVertexOffsets.reserve(m_numSkinnedMeshes);
         for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
         {
@@ -785,6 +794,7 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
             const uint32 outVertexOffset = (uint32)(meshDataManager.reserveVertexData(
                 (size_t)src.vertexCount * sizeof(RendererVKLayout::MeshVertex)) / sizeof(RendererVKLayout::MeshVertex));
             outVertexOffsets.push_back(outVertexOffset);
+            meshVertexCounts.push_back(src.vertexCount);
 
             RendererVKLayout::MeshInfo& mi = meshInfos.emplace_back();
             mi.indexCount = src.indexCount;
@@ -795,7 +805,7 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
             mi.radius = src.bounds.radius * 2.0f;
             mi.firstInstance = 0;
         }
-        const uint32 baseMeshIdx = renderer.addMeshInfos(meshInfos);
+        const uint32 baseMeshIdx = renderer.addMeshInfos(meshInfos, meshVertexCounts);
 
         uint32 firstJob = 0;
         for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
