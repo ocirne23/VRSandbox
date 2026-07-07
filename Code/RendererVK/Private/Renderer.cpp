@@ -19,6 +19,7 @@ import :Allocator;
 import :StagingManager;
 import :TextureManager;
 import :TextureStreamer;
+import :MeshStreamer;
 import :MeshDataManager;
 import :glslang;
 import :Layout;
@@ -33,6 +34,7 @@ Renderer::~Renderer()
         assert(false && "Failed to wait for device idle in RendererVK::~RendererVK");
     }
     Globals::textureStreamer.shutdown(); // stop the disk worker + retire swapped-out images while the device is idle
+    Globals::meshStreamer.shutdown();
     destroyEyeCompositeTargets();
     ImGui_ImplVulkan_Shutdown();
 }
@@ -53,6 +55,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_taaParams.registerTweaks(rerecordCallback);
     m_postParams.registerTweaks(rerecordCallback);
     m_lodParams.registerTweaks();
+    Globals::meshStreamer.initialize();
 
     glslang::InitializeProcess();
     const bool enableValidationLayers = (validation == EValidation::ENABLED);
@@ -253,6 +256,7 @@ void Renderer::recreateWindowSurface(Window& window)
         assert(false && "Failed to wait for device idle in RendererVK::recreateWindowSurface");
     }
     Globals::textureStreamer.onGpuIdle();
+    Globals::meshStreamer.onGpuIdle();
 
     window.getWindowSize(m_windowSize);
     m_swapChain.destroy();
@@ -289,6 +293,7 @@ void Renderer::recreateSwapchain()
         assert(false && "Failed to wait for device idle in RendererVK::recreateSwapchain");
     }
     Globals::textureStreamer.onGpuIdle();
+    Globals::meshStreamer.onGpuIdle();
     printf("recreateSwapchain()\n");
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_framebuffers.initialize(m_renderPass, m_swapChain);
@@ -315,6 +320,7 @@ void Renderer::reloadShaders()
         return;
     }
     Globals::textureStreamer.onGpuIdle();
+    Globals::meshStreamer.onGpuIdle();
 
     m_staticMeshGraphicsPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass(), m_maxTextures);
     m_gbufferPipeline.reloadShaders(m_perFrameData[m_swapChain.getPrevFrameIdx()].gbuffer);
@@ -342,6 +348,15 @@ void Renderer::setWindowMinimized(bool minimized)
 
 const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 {
+    // This frame slot's fence must be waited BEFORE anything writes its host-visible per-frame buffers
+    // (renderNode instance memcpys, LOD meshIdx redirects, firstInstance prefix sums, sparse transform
+    // uploads) — the wait inside acquireNextImage happens at the END of the CPU frame, after all those
+    // writes. Without this, the CPU scribbles over the slot while frame N-2 still reads it on the GPU;
+    // invisible while per-frame data is byte-identical, but LOD switches change instance meshIdx en
+    // masse and the torn instance/prefix data made the cull's buckets overflow into neighbouring
+    // meshes' draw ranges (one-frame flashes with foreign materials).
+    m_swapChain.waitForFrame(m_swapChain.getCurrentFrameIndex());
+
     Globals::openXR.pollEvents();
 
     Camera camera = cameraIn;
@@ -550,6 +565,8 @@ void Renderer::renderNodeThreadSafe(const RenderNode& node, uint32 passMask)
         std::atomic_ref<uint32>(m_numInstancesPerMesh[pair.first]) += pair.second;
 
     noteTextureUse(node, passMask);
+    for (const RendererVKLayout::InMeshInstance& instance : node.m_meshInstances)
+        Globals::meshStreamer.noteUse(instance.meshIdx);
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
@@ -594,6 +611,8 @@ void Renderer::renderNode(const RenderNode& node, uint32 passMask)
         m_numInstancesPerMesh[pair.first] += pair.second;
 
     noteTextureUse(node, passMask);
+    for (const RendererVKLayout::InMeshInstance& instance : node.m_meshInstances)
+        Globals::meshStreamer.noteUse(instance.meshIdx);
 
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
@@ -674,7 +693,22 @@ void Renderer::selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshIn
 
         // The copied instance references the LOD0 mesh; redirect it and keep the per-mesh counts
         // (which renderNode accumulated for LOD0) in step so the cull's instance buckets stay exact.
-        const uint16 chosenMeshIdx = group.meshIdx[level];
+        // The chosen level is marked used separately: authored chains are independent mesh sets, so the
+        // pre-redirect noteUse in renderNode only covered level 0's.
+        uint16 chosenMeshIdx = group.meshIdx[level];
+        Globals::meshStreamer.noteUse(chosenMeshIdx); // keeps it warm / requests a re-stream if evicted
+        if (!Globals::meshStreamer.isResident(chosenMeshIdx))
+        {
+            // Desired level evicted (streaming back in): render the nearest resident level meanwhile.
+            // Generated chains share one residency (the whole set evicts together), so this only ever
+            // redirects for authored chains; a fully evicted set draws nothing until the re-stream lands.
+            for (int d = 1; d < (int)group.numLods; ++d)
+            {
+                if (level - d >= 0 && Globals::meshStreamer.isResident(group.meshIdx[level - d])) { level -= d; break; }
+                if (level + d < (int)group.numLods && Globals::meshStreamer.isResident(group.meshIdx[level + d])) { level += d; break; }
+            }
+            chosenMeshIdx = group.meshIdx[level];
+        }
         if (chosenMeshIdx != instance.meshIdx)
         {
             if (threadSafe)
@@ -775,6 +809,7 @@ void Renderer::present()
     // Texture streaming step: folds this frame's priority pass, issues/completes mip streaming ops.
     // Must run before the staging update so stream-in uploads join this frame's staging batch.
     Globals::textureStreamer.update();
+    Globals::meshStreamer.update();
 
     vk::Semaphore waitSemaphore = Globals::stagingManager.update();
     if (waitSemaphore != VK_NULL_HANDLE)
@@ -905,6 +940,7 @@ void Renderer::waitForGpuAndFlushStaging()
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
     assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle during capacity growth");
     Globals::textureStreamer.onGpuIdle();
+    Globals::meshStreamer.onGpuIdle();
 }
 
 void Renderer::growRenderNodeCapacity(uint32 needed)
@@ -1616,7 +1652,9 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     // 1. Build BLASes for any meshes added since last frame (one-time per mesh).
     if (m_blasBuiltCount < m_meshInfoCounter)
     {
-        const uint32 totalVertices = (uint32)(Globals::meshDataManager.getVertexBufUsed() / sizeof(RendererVKLayout::MeshVertex));
+        // Buffer size, not fill level: the mesh streamer's free-list makes "used" non-contiguous, and
+        // totalVertices only has to be a safe upper bound for the per-mesh maxVertex derivation.
+        const uint32 totalVertices = (uint32)(Globals::meshDataManager.getVertexBufSize() / sizeof(RendererVKLayout::MeshVertex));
         m_accelStructure.recordBuildBlas(vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
             m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>().data(), m_blasBuiltCount, m_meshInfoCounter - m_blasBuiltCount, totalVertices);
         m_blasBuiltCount = m_meshInfoCounter;
@@ -2039,6 +2077,22 @@ void Renderer::addObjectContainer(ObjectContainer* pObjectContainer)
     m_objectContainers.push_back(pObjectContainer);
 }
 
+void Renderer::setMeshStreamedOut(uint16 meshInfoIdx)
+{
+    RendererVKLayout::MeshInfo& info = m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>()[meshInfoIdx];
+    info.indexCount = 0;
+    m_meshInfosBuffer.upload(sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
+}
+
+void Renderer::setMeshStreamedIn(uint16 meshInfoIdx, int32 vertexOffset, uint32 firstIndex, uint32 indexCount)
+{
+    RendererVKLayout::MeshInfo& info = m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>()[meshInfoIdx];
+    info.vertexOffset = vertexOffset;
+    info.firstIndex = firstIndex;
+    info.indexCount = indexCount;
+    m_meshInfosBuffer.upload(sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
+}
+
 uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos)
 {
     const uint32 baseMeshInfoIdx = m_meshInfoCounter;
@@ -2200,6 +2254,14 @@ Stats Renderer::getStats()
     stats.textureTailBytes = streamStats.tailBytes;
     stats.numStreamableTextures = streamStats.numStreamable;
     stats.numStreamOpsInFlight = streamStats.numOpsInFlight;
+
+    const MeshStreamer::Stats meshStreamStats = Globals::meshStreamer.getStats();
+    stats.meshBudgetBytes = meshStreamStats.budgetBytes;
+    stats.meshStreamableBytes = meshStreamStats.streamableBytes;
+    stats.meshResidentBytes = meshStreamStats.residentBytes;
+    stats.meshColdBytes = meshStreamStats.coldBytes;
+    stats.numMeshSets = meshStreamStats.numSets;
+    stats.numEvictedMeshSets = meshStreamStats.numEvictedSets;
 
     stats.numMeshLodGroups = (uint32)m_meshLodGroups.size();
     static_assert(sizeof(stats.lodInstanceCounts) == sizeof(uint32) * RendererVKLayout::MAX_MESH_LODS);

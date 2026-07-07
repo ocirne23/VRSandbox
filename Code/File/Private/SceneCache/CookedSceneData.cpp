@@ -109,6 +109,24 @@ const char* CookedSceneData::string(uint32 offset) const
     return reinterpret_cast<const char*>(m_blob.data() + header.stringsOffset + offset);
 }
 
+bool CookedSceneData::getMeshStreamSource(uint32 meshIdx, MeshStreamSource& out) const
+{
+    if (meshIdx >= m_meshes.size())
+        return false;
+    const CookedMesh& mesh = *m_meshes[meshIdx].m_pMesh;
+    out.filePath = m_cachePath.c_str();
+    out.positionsOffset = mesh.positionsOffset;
+    out.normalsOffset = mesh.normalsOffset;
+    out.tangentsOffset = mesh.tangentsOffset;
+    out.bitangentsOffset = mesh.bitangentsOffset;
+    out.texCoordsOffset = mesh.texCoordsOffset;
+    out.indicesOffset = mesh.indicesOffset;
+    out.lodIndicesOffset = mesh.lodIndicesOffset;
+    out.numVertices = mesh.numVertices;
+    out.numIndices = mesh.numIndices;
+    return true;
+}
+
 const IMeshData* CookedSceneData::getMesh(const char* pMeshName) const
 {
     for (const CookedMeshData& mesh : m_meshes)
@@ -174,6 +192,7 @@ bool CookedSceneData::load(const std::string& cachePath, const std::string& sour
     }
 
     m_filePath = sourcePath;
+    m_cachePath = cachePath;
     m_nodes = reinterpret_cast<const CookedNode*>(m_blob.data() + header.nodesOffset);
     m_numNodes = header.numNodes;
     m_meshRefs = reinterpret_cast<const uint32*>(m_blob.data() + header.meshRefsOffset);

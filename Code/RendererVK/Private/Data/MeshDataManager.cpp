@@ -1,6 +1,7 @@
 module RendererVK;
 
 import Core;
+import Core.BitRangeAllocator;
 import :StagingManager;
 import :Buffer;
 import :CommandBuffer;
@@ -45,15 +46,18 @@ MeshDataManager::~MeshDataManager()
 
 bool MeshDataManager::initialize(size_t vertexBufSize, size_t indexBufSize)
 {
-    m_vertexBufSize = vertexBufSize;
-    m_indexBufSize = indexBufSize;
+    // Round to whole buckets so the allocators and byte sizes stay in lockstep.
+    m_vertexBufSize = (vertexBufSize + VERTEX_BUCKET_BYTES - 1) / VERTEX_BUCKET_BYTES * VERTEX_BUCKET_BYTES;
+    m_indexBufSize = (indexBufSize + INDEX_BUCKET_BYTES - 1) / INDEX_BUCKET_BYTES * INDEX_BUCKET_BYTES;
+    m_vertexAllocator.resize(uint32(m_vertexBufSize / VERTEX_BUCKET_BYTES));
+    m_indexAllocator.resize(uint32(m_indexBufSize / INDEX_BUCKET_BYTES));
 
     // Extra usage beyond vertex/index: the GI ray tracer builds BLASes directly from these mega-buffers
     // (eAccelerationStructureBuildInputReadOnlyKHR + eShaderDeviceAddress) and fetches hit-triangle
     // attributes from them in the probe-trace compute shader (eStorageBuffer). eTransferSrc enables the
     // GPU copy that carries contents over on capacity growth.
-    m_vertexBuffer.initialize(vertexBufSize, vertexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshVertex");
-    m_indexBuffer.initialize(indexBufSize, indexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshIndex");
+    m_vertexBuffer.initialize(m_vertexBufSize, vertexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshVertex");
+    m_indexBuffer.initialize(m_indexBufSize, indexBufferUsage(), vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshIndex");
 
     // Skinning influences for skeletal meshes; sized lazily on first skinned upload (grows on demand).
     m_skinningBufSize = RendererVKLayout::INITIAL_SKINNING_DATA;
@@ -93,24 +97,60 @@ void MeshDataManager::growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSiz
     printf("MeshDataManager: grew buffer to %zu bytes\n", newSize);
 }
 
+size_t MeshDataManager::allocRange(BitRangeAllocator<false>& allocator, size_t& bufSize, size_t bucketBytes, size_t size,
+    Buffer& buffer, vk::BufferUsageFlags2 usage, size_t& allocatedBytes)
+{
+    const uint32 numBuckets = uint32((size + bucketBytes - 1) / bucketBytes);
+    int bucketStart = allocator.acquireRange(numBuckets);
+    if (bucketStart < 0)
+    {
+        // No contiguous free run: grow the buffer (the whole old range is copied over — it may be
+        // fragmented, so everything allocated must survive) and retry in the fresh tail.
+        growBuffer(buffer, bufSize, bufSize, bufSize + size, usage);
+        allocator.resize(uint32(bufSize / bucketBytes));
+        bucketStart = allocator.acquireRange(numBuckets);
+        assert(bucketStart >= 0 && "Mesh data allocation failed after growth");
+        if (bucketStart < 0)
+            return SIZE_MAX;
+    }
+    allocatedBytes += (size_t)numBuckets * bucketBytes;
+    return (size_t)bucketStart * bucketBytes;
+}
+
 size_t MeshDataManager::uploadVertexData(const void* pData, size_t size)
 {
-    if (m_vertexBufOffset + size > m_vertexBufSize)
-        growBuffer(m_vertexBuffer, m_vertexBufSize, m_vertexBufOffset, m_vertexBufOffset + size, vertexBufferUsage());
-    const size_t offset = m_vertexBufOffset;
-    Globals::stagingManager.upload(m_vertexBuffer.getBuffer(), size, pData, m_vertexBufOffset);
-    m_vertexBufOffset += size;
+    const size_t offset = allocRange(m_vertexAllocator, m_vertexBufSize, VERTEX_BUCKET_BYTES, size,
+        m_vertexBuffer, vertexBufferUsage(), m_vertexBytesAllocated);
+    Globals::stagingManager.upload(m_vertexBuffer.getBuffer(), size, pData, offset);
     return offset;
 }
 
 size_t MeshDataManager::uploadIndexData(const void* pData, size_t size)
 {
-    if (m_indexBufOffset + size > m_indexBufSize)
-        growBuffer(m_indexBuffer, m_indexBufSize, m_indexBufOffset, m_indexBufOffset + size, indexBufferUsage());
-    const size_t offset = m_indexBufOffset;
-    Globals::stagingManager.upload(m_indexBuffer.getBuffer(), size, pData, m_indexBufOffset);
-    m_indexBufOffset += size;
+    const size_t offset = allocRange(m_indexAllocator, m_indexBufSize, INDEX_BUCKET_BYTES, size,
+        m_indexBuffer, indexBufferUsage(), m_indexBytesAllocated);
+    Globals::stagingManager.upload(m_indexBuffer.getBuffer(), size, pData, offset);
     return offset;
+}
+
+size_t MeshDataManager::reserveVertexData(size_t size)
+{
+    return allocRange(m_vertexAllocator, m_vertexBufSize, VERTEX_BUCKET_BYTES, size,
+        m_vertexBuffer, vertexBufferUsage(), m_vertexBytesAllocated);
+}
+
+void MeshDataManager::freeVertexData(size_t offset, size_t size)
+{
+    const uint32 numBuckets = uint32((size + VERTEX_BUCKET_BYTES - 1) / VERTEX_BUCKET_BYTES);
+    m_vertexAllocator.releaseRange(int(offset / VERTEX_BUCKET_BYTES), numBuckets);
+    m_vertexBytesAllocated -= (size_t)numBuckets * VERTEX_BUCKET_BYTES;
+}
+
+void MeshDataManager::freeIndexData(size_t offset, size_t size)
+{
+    const uint32 numBuckets = uint32((size + INDEX_BUCKET_BYTES - 1) / INDEX_BUCKET_BYTES);
+    m_indexAllocator.releaseRange(int(offset / INDEX_BUCKET_BYTES), numBuckets);
+    m_indexBytesAllocated -= (size_t)numBuckets * INDEX_BUCKET_BYTES;
 }
 
 size_t MeshDataManager::uploadSkinningData(const void* pData, size_t size)
@@ -120,14 +160,5 @@ size_t MeshDataManager::uploadSkinningData(const void* pData, size_t size)
     const size_t offset = m_skinningBufOffset;
     Globals::stagingManager.upload(m_skinningBuffer.getBuffer(), size, pData, m_skinningBufOffset);
     m_skinningBufOffset += size;
-    return offset;
-}
-
-size_t MeshDataManager::reserveVertexData(size_t size)
-{
-    if (m_vertexBufOffset + size > m_vertexBufSize)
-        growBuffer(m_vertexBuffer, m_vertexBufSize, m_vertexBufOffset, m_vertexBufOffset + size, vertexBufferUsage());
-    const size_t offset = m_vertexBufOffset;
-    m_vertexBufOffset += size;
     return offset;
 }

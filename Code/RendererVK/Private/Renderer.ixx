@@ -127,6 +127,12 @@ public:
     // cooked files, so they participate in the cache's options hash).
     const MeshLodParams& getLodParams() const { return m_lodParams; }
 
+    // Mesh streaming (MeshStreamer): rewrite one MeshInfo in the CPU backing store + GPU buffer.
+    // Streamed-out meshes keep their bounds but draw zero indices, so the cull's DGC draws, the shadow
+    // pass, and the TLAS-instance writer all become no-ops for them without any re-record.
+    void setMeshStreamedOut(uint16 meshInfoIdx);
+    void setMeshStreamedIn(uint16 meshInfoIdx, int32 vertexOffset, uint32 firstIndex, uint32 indexCount);
+
 private:
 
     Renderer(const Renderer&) = delete;

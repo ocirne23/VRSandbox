@@ -14,6 +14,7 @@ import File;
 
 import :Renderer;
 import :MeshDataManager;
+import :MeshStreamer;
 import :RenderNode;
 import :TextureManager;
 
@@ -126,6 +127,9 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
     std::vector<GeneratedChain> generatedChains;
     const MeshLodParams& lodParams = Globals::rendererVK.getLodParams();
 
+    std::vector<MeshStreamSource> streamSources(numMeshes);
+    std::vector<bool> hasStreamSource(numMeshes, false);
+
     const Skeleton* pSkeleton = sceneData.getSkeleton();
     m_isSkinned = pSkeleton != nullptr;
     m_numSkeletonBones = pSkeleton ? pSkeleton->numBones() : 0;
@@ -141,6 +145,11 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
         RendererVKLayout::MeshInfo& meshInfo = meshInfos.emplace_back();
         m_meshNames.push_back(meshData.getName());
         temp.materialIdxForMeshIdx.push_back((uint16)meshData.getMaterialIndex());
+
+        // Cooked scenes expose the byte ranges each mesh occupies in the cache file; captured here and
+        // registered with the MeshStreamer once global MeshInfo indices exist (below).
+        if (!meshData.isSkinned())
+            hasStreamSource[meshIdx] = sceneData.getMeshStreamSource(meshIdx, streamSources[meshIdx]);
 
         std::vector<RendererVKLayout::MeshVertex> vertices;
         vertices.resize(meshData.getNumVertices());
@@ -285,6 +294,53 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
         group.radius = m_boundsForMeshIdx[chain.baseMeshIdx].radius;
         temp.lodGroupForMeshIdx[chain.baseMeshIdx] = Globals::rendererVK.addMeshLodGroup(group);
     }
+    // Register cooked meshes as streamable sets: one set per source mesh — its generated LOD levels
+    // share the vertex range, so they evict and restore as a unit. Authored LodN_ meshes each carry
+    // their own vertices and register as independent sets through the same loop.
+    {
+        std::unordered_map<uint16, const GeneratedChain*> chainForMesh;
+        for (const GeneratedChain& chain : generatedChains)
+            chainForMesh.emplace(chain.baseMeshIdx, &chain);
+        for (uint32 meshIdx = 0; meshIdx < numMeshes; ++meshIdx)
+        {
+            if (!hasStreamSource[meshIdx])
+                continue;
+            const MeshStreamSource& src = streamSources[meshIdx];
+            const RendererVKLayout::MeshInfo& info = meshInfos[meshIdx];
+            MeshStreamer::MeshSetDesc desc;
+            desc.filePath = src.filePath;
+            desc.numVertices = src.numVertices;
+            desc.vertexByteOffset = (uint64)info.vertexOffset * sizeof(RendererVKLayout::MeshVertex);
+            desc.srcAttributeOffsets[0] = src.positionsOffset;
+            desc.srcAttributeOffsets[1] = src.normalsOffset;
+            desc.srcAttributeOffsets[2] = src.tangentsOffset;
+            desc.srcAttributeOffsets[3] = src.bitangentsOffset;
+            desc.srcAttributeOffsets[4] = src.texCoordsOffset;
+            desc.levels[0] = MeshStreamer::LevelDesc{
+                .meshInfoIdx = (uint16)(m_baseMeshInfoIdx + meshIdx),
+                .indexByteOffset = (uint64)info.firstIndex * sizeof(RendererVKLayout::MeshIndex),
+                .indexCount = info.indexCount,
+                .srcIndicesOffset = src.indicesOffset };
+            desc.numLevels = 1;
+            if (auto it = chainForMesh.find((uint16)meshIdx); it != chainForMesh.end())
+            {
+                uint64 srcOffset = src.lodIndicesOffset; // levels are concatenated in the cache file
+                for (uint8 k = 0; k < it->second->numLevels && desc.numLevels < RendererVKLayout::MAX_MESH_LODS; ++k)
+                {
+                    const uint32 lodInfoIdx = numSourceMeshes + it->second->firstExtraIdx + k;
+                    const RendererVKLayout::MeshInfo& lodInfo = meshInfos[lodInfoIdx];
+                    desc.levels[desc.numLevels++] = MeshStreamer::LevelDesc{
+                        .meshInfoIdx = (uint16)(m_baseMeshInfoIdx + lodInfoIdx),
+                        .indexByteOffset = (uint64)lodInfo.firstIndex * sizeof(RendererVKLayout::MeshIndex),
+                        .indexCount = lodInfo.indexCount,
+                        .srcIndicesOffset = srcOffset };
+                    srcOffset += (uint64)lodInfo.indexCount * sizeof(RendererVKLayout::MeshIndex);
+                }
+            }
+            Globals::meshStreamer.registerMeshSet(desc);
+        }
+    }
+
     for (const auto& [logicalName, lods] : authoredLods)
     {
         if (lods.levels[0] == UINT16_MAX)

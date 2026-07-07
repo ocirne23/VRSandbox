@@ -17,6 +17,20 @@ export struct SceneCookOptions
 	int  lodMinIndices = 32;      // don't generate for meshes below this index count
 };
 
+// Byte ranges a mesh's data occupies in its cooked cache file (see CookedSceneData), so a consumer can
+// re-read it later without keeping the scene loaded — the renderer's mesh streaming uses this to evict
+// cold mesh data from VRAM and re-stream it on demand. Attribute offsets are glm::vec3 arrays of
+// numVertices; indices are uint32. Only cooked scenes provide one (getMeshStreamSource default: false).
+export struct MeshStreamSource
+{
+	const char* filePath = nullptr; // cooked cache file; the string lives as long as the ISceneData
+	uint64 positionsOffset = 0, normalsOffset = 0, tangentsOffset = 0, bitangentsOffset = 0, texCoordsOffset = 0;
+	uint64 indicesOffset = 0;       // LOD0 index array
+	uint64 lodIndicesOffset = 0;    // generated LOD levels, concatenated in level order
+	uint32 numVertices = 0;
+	uint32 numIndices = 0;
+};
+
 export class ISceneData
 {
 public:
@@ -53,6 +67,7 @@ public:
 
 	virtual const IMeshData* getMesh(const char* pMeshName) const = 0;
 	virtual const IMeshData* getMesh(uint32 idx) const = 0;
+	virtual bool getMeshStreamSource(uint32 /*meshIdx*/, MeshStreamSource& /*out*/) const { return false; }
 	virtual const IMaterialData* getMaterial(uint32 idx) const = 0;
 	virtual const ITextureData* getTexture(uint32 idx) const = 0;
 

@@ -15,7 +15,7 @@ export struct SkyParams
     // Sun
     glm::vec3 sunDirection = glm::normalize(glm::vec3(-0.4f, 0.91f, 0.09f));
     glm::vec3 sunColor = glm::vec3(0.9568f, 1.0f, 0.9214f);
-    float sunIntensity = 5.0f;
+    float sunIntensity = 3.0f;
     float sunAngularCos = 0.99998f;     // cos of the disc radius (1 = disc off)
     float sunGlow = 1.0f;               // sun halo strength (0 = none, ~0.5 subtle, 2 = heavy); HG forward lobe in sky.fs
     float sunRolloff = 1.25f;           // sky highlight roll-off: soft-clips the overexposed sun region so its gradient survives (0 = raw hard clip)
@@ -28,7 +28,7 @@ export struct SkyParams
     glm::vec3 ambientColor = glm::vec3(1.0f);   // flat non-physical minimum ambient
     float ambientIntensity = 0.003f;
     glm::vec3 skyRadianceColor = glm::vec3(0.55f, 0.65f, 1.0f); // directional sky radiance (moonlight/space light), along up
-    float skyRadianceIntensity = 0.10f;
+    float skyRadianceIntensity = 0.05f;
 
     // Ground plane of the sky sphere (below the horizon): albedo lit by sun + sky. Also tints the
     // ground-bounce fallback in skyRadiance() for downward GI/fog rays.
@@ -229,6 +229,14 @@ export struct Stats
     uint64 textureTailBytes;       // always-resident mip tails (part of resident)
     uint32 numStreamableTextures;
     uint32 numStreamOpsInFlight;
+
+    // Mesh data streaming (see MeshStreamer).
+    uint64 meshBudgetBytes;
+    uint64 meshStreamableBytes; // registered mesh sets, resident or not
+    uint64 meshResidentBytes;
+    uint64 meshColdBytes;       // resident but unseen long enough to be eviction candidates
+    uint32 numMeshSets;
+    uint32 numEvictedMeshSets;
 
     // Mesh LOD (see MeshLodParams / Renderer::selectMeshLods).
     uint32 numMeshLodGroups;

@@ -225,6 +225,7 @@ public:
 
     const IMeshData* getMesh(const char* pMeshName) const override;
     const IMeshData* getMesh(uint32 idx) const override { assert(idx < m_meshes.size()); return &m_meshes[idx]; }
+    bool getMeshStreamSource(uint32 meshIdx, MeshStreamSource& out) const override;
     const IMaterialData* getMaterial(uint32 idx) const override { assert(idx < m_materials.size()); return &m_materials[idx]; }
     const ITextureData* getTexture(uint32 idx) const override { assert(idx < m_textures.size()); return &m_textures[idx]; }
 
@@ -233,7 +234,8 @@ private:
 
     const char* string(uint32 offset) const;
 
-    std::string m_filePath; // the ORIGINAL source model path (consumers resolve loose files against it)
+    std::string m_filePath;  // the ORIGINAL source model path (consumers resolve loose files against it)
+    std::string m_cachePath; // the .vsc this data came from (handed out as the mesh re-stream source)
     std::vector<uint8> m_blob;
     const SceneCache::CookedNode* m_nodes = nullptr;
     const uint32* m_meshRefs = nullptr;

@@ -300,6 +300,10 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         ImGui::Text("texStream desired: %.1f MiB, tail: %.1f MiB, pinned: %.1f MiB", m_renderStats.textureDesiredBytes * toMiB,
             m_renderStats.textureTailBytes * toMiB, m_renderStats.texturePinnedBytes * toMiB);
         ImGui::Text("texStream streamable: %u, opsInFlight: %u", m_renderStats.numStreamableTextures, m_renderStats.numStreamOpsInFlight);
+        ImGui::Text("meshStream resident: %.1f MiB (of %.1f MiB streamable, %.1f MiB budget)", m_renderStats.meshResidentBytes * toMiB,
+            m_renderStats.meshStreamableBytes * toMiB, m_renderStats.meshBudgetBytes * toMiB);
+        ImGui::Text("meshStream cold: %.1f MiB, sets: %u, evicted: %u", m_renderStats.meshColdBytes * toMiB,
+            m_renderStats.numMeshSets, m_renderStats.numEvictedMeshSets);
         ImGui::Text("meshLOD groups: %u, picks L0-L4: %u/%u/%u/%u/%u", m_renderStats.numMeshLodGroups,
             m_renderStats.lodInstanceCounts[0], m_renderStats.lodInstanceCounts[1], m_renderStats.lodInstanceCounts[2],
             m_renderStats.lodInstanceCounts[3], m_renderStats.lodInstanceCounts[4]);

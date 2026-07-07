@@ -189,7 +189,7 @@ private:
     uint32 m_numStreamable = 0;
     uint32 m_frameCounter = 0;         // incremented once per update()
 
-    int  m_budgetMB = 1024;
+    int  m_budgetMB = 512;
     bool m_enabled = true;
     int  m_tailMaxDim = 128;
     int  m_maxOpsInFlight = 4;

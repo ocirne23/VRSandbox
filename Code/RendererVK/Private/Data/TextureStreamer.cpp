@@ -16,17 +16,17 @@ import :Layout;
 
 bool TextureStreamer::initialize()
 {
-    Tweak::intVar("Streaming", "Budget (MB)", &m_budgetMB, 64, 8192);
-    Tweak::boolean("Streaming", "Enabled", &m_enabled);
-    Tweak::intVar("Streaming", "Tail max dim", &m_tailMaxDim, 32, 512);
-    Tweak::floatVar("Streaming", "Mip bias", &m_mipBias, -4.0f, 4.0f);
-    Tweak::floatVar("Streaming", "Texel ratio", &m_texelRatio, 0.25f, 4.0f);
-    Tweak::intVar("Streaming", "Max ops in flight", &m_maxOpsInFlight, 0, 32);
-    Tweak::floatVar("Streaming", "Max MB/frame", &m_maxMBPerFrame, 1.0f, 64.0f);
-    Tweak::boolean("Streaming", "GPU mip copies", &m_gpuMipCopies);
-    Tweak::intVar("Streaming", "Demote hysteresis frames", &m_demoteHysteresisFrames, 1, 600);
-    Tweak::intVar("Streaming", "Decay frames", &m_decayFrames, 1, 3600);
-    Tweak::boolean("Streaming", "Debug rewrite all slots", &m_debugRewriteAllSlots);
+    Tweak::intVar("Texture Streaming", "Budget (MB)", &m_budgetMB, 64, 8192);
+    Tweak::boolean("Texture Streaming", "Enabled", &m_enabled);
+    Tweak::intVar("Texture Streaming", "Tail max dim", &m_tailMaxDim, 32, 512);
+    Tweak::floatVar("Texture Streaming", "Mip bias", &m_mipBias, -4.0f, 4.0f);
+    Tweak::floatVar("Texture Streaming", "Texel ratio", &m_texelRatio, 0.25f, 4.0f);
+    Tweak::intVar("Texture Streaming", "Max ops in flight", &m_maxOpsInFlight, 0, 32);
+    Tweak::floatVar("Texture Streaming", "Max MB/frame", &m_maxMBPerFrame, 1.0f, 64.0f);
+    Tweak::boolean("Texture Streaming", "GPU mip copies", &m_gpuMipCopies);
+    Tweak::intVar("Texture Streaming", "Demote hysteresis frames", &m_demoteHysteresisFrames, 1, 600);
+    Tweak::intVar("Texture Streaming", "Decay frames", &m_decayFrames, 1, 3600);
+    Tweak::boolean("Texture Streaming", "Debug rewrite all slots", &m_debugRewriteAllSlots);
 
     m_worker = std::jthread([this](std::stop_token stopToken) { workerRun(stopToken); });
     return true;
