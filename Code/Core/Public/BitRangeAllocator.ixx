@@ -22,9 +22,10 @@ public:
         const uint32 newSize = numInts * 64;
         if (m_size <= newSize)
         {
+            const uint32 oldNumInts = (m_size + 63) / 64;
             m_size = newSize;
-            auto newBits = std::make_unique<uint64[]>(numInts);
-            memcpy(newBits.get(), m_pBits.get(), numInts * sizeof(uint64));
+            auto newBits = std::make_unique<uint64[]>(numInts); // value-init: grown tail starts free
+            memcpy(newBits.get(), m_pBits.get(), oldNumInts * sizeof(uint64));
             m_pBits = std::move(newBits);
         }
     }
@@ -47,7 +48,7 @@ public:
 #pragma warning(disable: 4102) // unreferenced label
             retry:
                 const int bitIdx = (int)_tzcnt_u64(~usedBits);
-                const int idx = i * 64 + bitIdx;
+                const int idx = intIdx * 64 + bitIdx;
                 if constexpr (ThreadSafe)
                 {
                     const uint64 old = std::atomic_ref<uint64>(m_pBits[intIdx]).fetch_or(1ull << bitIdx, std::memory_order_relaxed);

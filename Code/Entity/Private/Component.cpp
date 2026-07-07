@@ -1,4 +1,4 @@
-﻿module;
+module;
 
 #include "ScriptAPI.h"
 
@@ -7,6 +7,7 @@ module Entity;
 import Core;
 import Core.glm;
 import Core.Log;
+import Core.Sphere;
 import Core.Transform;
 import :Entity;
 import :AnimationDescription;
@@ -17,6 +18,7 @@ import RendererVK;
 import Script;
 import Physics;
 import Audio;
+import Spatial;
 
 Transform composeTransform(const Transform& parent, const Transform& local)
 {
@@ -36,6 +38,15 @@ void RenderComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
         node = info.container->spawnSkinnedNode(world);
     else
         node = info.container->spawnNodeForIdx(info.nodeIdx, world);
+    if (node.isValid())
+    {
+        const Sphere bounds = node.getWorldBounds();
+        const float radius = node.isSkinned()
+            ? bounds.radius * Globals::spatialIndex.getCullingConfig().skinnedRadiusScale
+            : bounds.radius;
+        spatialEntry = SpatialEntry(Globals::spatialIndex.registerEntry(
+            glm::dvec3(bounds.pos), radius, reinterpret_cast<uint64>(&entity), SpatialLayer_Render));
+    }
 }
 
 void RenderComponent::destroy(Entity& entity, const SpawnInfo& info)

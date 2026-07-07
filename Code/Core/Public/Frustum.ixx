@@ -4,6 +4,13 @@ import Core;
 import Core.glm;
 import Core.Sphere;
 
+export enum class EFrustumTest : uint8
+{
+    Outside,
+    Intersect,
+    Inside,
+};
+
 export struct Frustum
 {
     glm::vec4 planes[6];
@@ -70,5 +77,21 @@ export struct Frustum
             if (glm::dot(glm::vec3(planes[i]), pos) + planes[i].w < 0.0f)
                 return false;
         return true;
+    }
+
+    inline EFrustumTest testAABB(const glm::vec3& center, const glm::vec3& halfExtent) const
+    {
+        EFrustumTest result = EFrustumTest::Inside;
+        for (uint32 i = 0; i < 6; ++i)
+        {
+            const glm::vec3 normal = glm::vec3(planes[i]);
+            const float r = halfExtent.x * glm::abs(normal.x) + halfExtent.y * glm::abs(normal.y) + halfExtent.z * glm::abs(normal.z);
+            const float d = glm::dot(normal, center) + planes[i].w;
+            if (d < -r)
+                return EFrustumTest::Outside;
+            if (d < r)
+                result = EFrustumTest::Intersect;
+        }
+        return result;
     }
 };

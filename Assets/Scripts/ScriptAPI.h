@@ -2,7 +2,7 @@
 
 // ABI shared between the engine host and runtime-compiled visual-script DLLs.
 //
-// Only glm vectors, PODs, floats and raw pointers cross this boundary — no STL, no engine types. That keeps
+// Only glm vectors, PODs, floats and raw pointers cross this boundary â€” no STL, no engine types. That keeps
 // script DLLs self-contained (they link no engine code, so the Globals:: singletons are never duplicated)
 // and makes CRT mismatches harmless. Vec3 is glm::vec3 (header-only, links nothing) so graph math nodes can
 // use glm operators/functions directly; both sides agree on its 12-byte layout, so the ABI is stable.
@@ -21,7 +21,7 @@ extern "C" {
 // Only the members BEFORE the engine Entity's `std::string displayName` are mirrored: std::string has a
 // different layout under the engine's debug CRT than the script's /MD, which would misalign everything past
 // it. Reach the rest (name, enabled, children, ...) through the ctx->entity* functions. KEEP THESE FIELDS IN
-// SYNC with EntityDef.ixx — the engine static_asserts the offsets (ScriptContext.cpp) so drift fails the build.
+// SYNC with EntityDef.ixx â€” the engine static_asserts the offsets (ScriptContext.cpp) so drift fails the build.
 //
 // Host-side this stays a forward declaration: the real engine Entity is the actual type; defining the mirror
 // here would clash with it.
@@ -40,7 +40,7 @@ class Entity;
 // Services the host exposes to scripts. The host fills these in; scripts only call them.
 typedef struct ScriptContext
 {
-    // Per-frame data, refreshed once a frame by update() (see below) before any script runs — plain fields
+    // Per-frame data, refreshed once a frame by update() (see below) before any script runs â€” plain fields
     // instead of function pointers so reading them is free of an indirect call.
     float deltaSeconds;
     float elapsedSeconds;
@@ -86,7 +86,7 @@ typedef struct ScriptContext
     void (*entityRemoveChild)(Entity* parent, Entity* child); // detaches child from parent, becoming a root entity (no-op if child isn't parent's)
     void (*entityRemoveChildAt)(Entity* parent, int index);   // same as entityRemoveChild, by child index
 
-    // ---- physics (appended after the entity block — keep this table append-only so cached script DLLs
+    // ---- physics (appended after the entity block â€” keep this table append-only so cached script DLLs
     // compiled against an older layout keep working). The entity* functions target the entity's
     // PhysicsComponent body and no-op / return zero when there is none.
     void      (*physicsSetGravity)(glm::vec3 gravity);
@@ -118,6 +118,14 @@ typedef struct ScriptContext
     // a stale id or a sensor event (sensors have no contact manifold).
     int       (*physicsContactGetPoint)(long long contactId, glm::vec3* outPoint, glm::vec3* outNormal);
 
+    // ---- spatial queries (appended; keep this table append-only) ---- backed by the SpatialIndex,
+    // so they stay fast with huge entity counts. spatialQueryRadius fills outEntities with every entity
+    // whose render bounds intersect the sphere (up to maxOut) and returns the count written;
+    // spatialGetNearestEntity returns the entity with the nearest origin within maxRadius (null if none),
+    // skipping `exclude` (pass self).
+    int     (*spatialQueryRadius)(glm::vec3 position, float radius, Entity** outEntities, int maxOut);
+    Entity* (*spatialGetNearestEntity)(glm::vec3 position, float maxRadius, Entity* exclude);
+
 #ifdef __cplusplus
     ScriptContext(); // the engine binds all the function pointers here; scripts never construct one
 
@@ -139,7 +147,7 @@ typedef void (*ScriptOnDestroyFn)(const ScriptContext*, Entity* self, void* scri
 typedef void (*ScriptUpdateFn)(const ScriptContext*, Entity* self, float deltaSeconds, void* scriptData);
 
 // Optional export: fires an On Event entry by index (e.g. an animation notify). eventIdx is the entry's
-// position among the script's On Event nodes' entries, in declaration order — the host (not the script) is
+// position among the script's On Event nodes' entries, in declaration order â€” the host (not the script) is
 // the one that knows event NAMES; it resolves a name to an index via ScriptEventCount/ScriptEventName below
 // and caches it, so no string is passed (or compared) at fire time.
 typedef void (*ScriptOnEventFn)(const ScriptContext*, Entity* self, int eventIdx, void* scriptData);
@@ -151,7 +159,7 @@ typedef const char* (*ScriptEventNameFn)(int eventIdx);
 
 // Optional export: fires when this entity's PhysicsComponent takes part in a contact begin/end or sensor
 // begin/end overlap (see dispatchPhysicsContactEvents). A single fixed entry point (like OnSpawn/OnDestroy),
-// not indexed like OnEvent — a script gets one On Physics Event node, not user-named entries. `other` is the
+// not indexed like OnEvent â€” a script gets one On Physics Event node, not user-named entries. `other` is the
 // entity on the other side of the contact (null if it has none, e.g. a raw static collider); `contactId`
 // identifies the underlying contact for THIS frame only (see ctx->physicsContactGetPoint).
 typedef void (*ScriptOnPhysicsEventFn)(const ScriptContext*, Entity* self, Entity* other, int begin, int sensor,

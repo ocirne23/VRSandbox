@@ -1,12 +1,15 @@
-﻿module Entity;
+module Entity;
 
 import Core;
+import Core.glm;
+import Core.Sphere;
 import Core.Transform;
 import File;
 import :Component;
 import :Allocator;
 
 import RendererVK;
+import Spatial;
 
 EntityArchetype makeEntityArchetype(uint16 typeBits)
 {
@@ -38,7 +41,17 @@ void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float 
         if (render->node.isValid()) // empty when spawned without a container, or after destroy()
         {
             render->node.getTransform() = composeTransform(world, render->localTransform);
-            renderer.renderNode(render->node);
+            SpatialIndex& spatialIndex = Globals::spatialIndex;
+            const SpatialCullingConfig& culling = spatialIndex.getCullingConfig();
+            if (render->spatialEntry.isValid())
+            {
+                const Sphere bounds = render->node.getWorldBounds();
+                const float radius = render->node.isSkinned() ? bounds.radius * culling.skinnedRadiusScale : bounds.radius;
+                spatialIndex.updateEntry(render->spatialEntry.handle(), glm::dvec3(bounds.pos), radius);
+            }
+            if (culling.mode < int(ESpatialCullMode::SafeCull) || !render->spatialEntry.isValid()
+                || spatialIndex.isVisible(render->spatialEntry.handle()))
+                renderer.renderNode(render->node);
         }
     }
 

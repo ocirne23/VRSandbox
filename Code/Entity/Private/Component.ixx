@@ -1,4 +1,4 @@
-﻿export module Entity:Component;
+export module Entity:Component;
 
 import :Entity;
 import :AnimationDescription;
@@ -10,6 +10,7 @@ import Animation;
 import Script;
 import Physics;
 import Audio;
+import Spatial;
 
 import RendererVK;
 
@@ -87,6 +88,7 @@ export struct RenderComponent
     ~RenderComponent() {}
 
     RenderNode node;
+    SpatialEntry spatialEntry; // registration in the SpatialIndex, kept in sync by updateTree
     Transform localTransform;
     bool showBounds = false;
 

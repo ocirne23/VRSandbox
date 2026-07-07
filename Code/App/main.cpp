@@ -1,4 +1,4 @@
-﻿import Core;
+import Core;
 import Core.Allocator;
 import Core.Log;
 import Core.Window;
@@ -18,6 +18,7 @@ import Entity;
 import Script;
 import Physics;
 import Audio;
+import Spatial;
 
 import App.InputControls;
 
@@ -48,6 +49,10 @@ int main()
 
     AudioSystem& audio = Globals::audio;
     audio.initialize();
+
+    SpatialIndex& spatialIndex = Globals::spatialIndex;
+    spatialIndex.initialize();
+    Globals::spatialStress.initialize();
 
     Globals::scriptHost.setCurrentScriptPath("Scripts/Graph.scr");
     ScriptEventManager& scriptEvents = Globals::scriptEvents;
@@ -140,13 +145,13 @@ int main()
         }
         else if (auto* rs = std::get_if<EntityChange::RespawnEntity>(&change.type))
         {
-            // Entity::create() only stores a raw, non-owning pointer to the template — keep it alive for
+            // Entity::create() only stores a raw, non-owning pointer to the template â€” keep it alive for
             // as long as the entity might reference it (World's own template caches do the same for
             // prefabs; this one is ad-hoc, so nothing else would hold onto it).
             world.keepTemplateAlive(rs->tmpl);
 
             Transform t(rs->oldEntity->pos, rs->oldEntity->scale, rs->oldEntity->rot);
-            // Pre-set the paused flag so component spawn (script OnSpawn) already sees it — the parent
+            // Pre-set the paused flag so component spawn (script OnSpawn) already sees it â€” the parent
             // chain isn't linked yet during create, so a paused ancestor can't be discovered there.
             const uint8 initialFlags = rs->oldEntity->isEditorPausedInTree() ? uint8(EEntityFlag_EditorPaused) : uint8(0);
             EntityPtr newEntity = Entity::create(*rs->tmpl, t, initialFlags);
@@ -163,7 +168,7 @@ int main()
                 }
 
             // Re-attach where the old entity was: a root (in `entities`) or a child (in its parent's
-            // SceneComponent::children) — replace it in place so siblings/order aren't disturbed.
+            // SceneComponent::children) â€” replace it in place so siblings/order aren't disturbed.
             if (Entity* parent = rs->oldEntity->parent)
             {
                 newEntity->parent = parent;
@@ -254,6 +259,19 @@ int main()
         dispatchPhysicsContactEvents();    // fire onContact hooks + script "Contact/Sensor Begin/End" events
 
         const Frustum& frustum = renderer.beginFrame(camera);
+
+        spatialIndex.commitFrame(); // applies cell moves queued during last frame's entity updates
+        const SpatialCullingConfig& cullingConfig = spatialIndex.getCullingConfig();
+        if (cullingConfig.mode != int(ESpatialCullMode::Off) && !cullingConfig.freeze)
+        {
+            const glm::dvec3 cameraPos = glm::dvec3(camera.position);
+            Frustum cullFrustum = rebaseFrustum(frustum, cameraPos);
+            inflateFrustum(cullFrustum, cullingConfig.margin);
+            const float safeRadius = cullingConfig.mode == int(ESpatialCullMode::SafeCull) ? cullingConfig.safeRadius : 0.0f;
+            spatialIndex.markVisibleSet(cullFrustum, cameraPos, cullingConfig.maxDist + cullingConfig.margin,
+                SpatialLayer_Render, nullptr, safeRadius);
+        }
+        Globals::spatialStress.update(glm::dvec3(camera.position), frustum);
 
         for (const EntityPtr& entity : entities)
             entity->update(renderer, (float)deltaSec);

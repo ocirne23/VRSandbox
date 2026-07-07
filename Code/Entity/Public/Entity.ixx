@@ -7,6 +7,5 @@ export import :ObjectDescription;
 export import :AssetRegistry;
 export import :Prefab;
 export import :World;
-export import :Zone;
 export import :ScriptEventManager;
 export import :ScriptContext;

@@ -16,6 +16,7 @@ import Core.Transform;
 import RendererVK;
 import Animation;
 import Physics;
+import Spatial;
 import :Entity;
 import :Component;
 import :World;
@@ -26,7 +27,7 @@ import :World;
 // than leaking into Script.
 
 // Scripts use a layout mirror of Entity (ScriptAPI.h, /DSCRIPT_BUILD) to read self->pos etc. directly. These
-// assert the real engine layout matches that mirror — if Entity's leading members move, update both.
+// assert the real engine layout matches that mirror Ã¢â‚¬â€ if Entity's leading members move, update both.
 static_assert(offsetof(Entity, pos)    == 0,  "ScriptAPI.h Entity mirror out of sync: pos");
 static_assert(offsetof(Entity, scale)  == 12, "ScriptAPI.h Entity mirror out of sync: scale");
 static_assert(offsetof(Entity, rot)    == 16, "ScriptAPI.h Entity mirror out of sync: rot");
@@ -179,6 +180,24 @@ namespace
         return 1;
     }
 
+    int thunk_sceneQueryRadius(glm::vec3 position, float radius, Entity** outEntities, int maxOut)
+    {
+        if (!outEntities || maxOut <= 0)
+            return 0;
+        static std::vector<uint64> results; // main thread only, like every thunk
+        Globals::spatialIndex.querySphere(glm::dvec3(position), radius, SpatialLayer_Render, results);
+        const int count = glm::min(int(results.size()), maxOut);
+        for (int i = 0; i < count; ++i)
+            outEntities[i] = reinterpret_cast<Entity*>(results[i]);
+        return count;
+    }
+
+    Entity* thunk_sceneGetNearestEntity(glm::vec3 position, float maxRadius, Entity* exclude)
+    {
+        return reinterpret_cast<Entity*>(Globals::spatialIndex.queryNearest(
+            glm::dvec3(position), maxRadius, SpatialLayer_Render, reinterpret_cast<uint64>(exclude)));
+    }
+
     int thunk_entityHasPhysics(Entity* en)     { return physicsOf(en) ? 1 : 0; }
     int thunk_entityIsPhysicsAwake(Entity* en) { PhysicsComponent* pc = physicsOf(en); return (pc && pc->body.isAwake()) ? 1 : 0; }
 
@@ -292,6 +311,8 @@ ScriptContext::ScriptContext()
     entityTriggerAudio = &thunk_entityTriggerAudio;
     entityStopAudio = &thunk_entityStopAudio;
     physicsContactGetPoint = &thunk_physicsContactGetPoint;
+    spatialQueryRadius = &thunk_sceneQueryRadius;
+    spatialGetNearestEntity = &thunk_sceneGetNearestEntity;
 }
 
 // Refreshes the per-frame fields; called once a frame (main.cpp) before any script runs this frame.

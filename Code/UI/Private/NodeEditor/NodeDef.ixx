@@ -48,7 +48,7 @@ export uint8 mutableBits(EMutableType m)
     return 1;
 }
 
-// One pin on a node definition. defaultValue is the C++ literal used for an unconnected data input — EXCEPT
+// One pin on a node definition. defaultValue is the C++ literal used for an unconnected data input â€” EXCEPT
 // for a String pin, whose default is stored as raw text (no surrounding quotes; the editor edits it directly)
 // and gets wrapped into a C++ string literal at codegen time (see emitDataExpr).
 // typeGroup > 0 marks a wildcard pin; all pins on a node sharing a group resolve to the same concrete type.
@@ -104,12 +104,12 @@ export uint32 dataTypeColor(EDataType type)
 // The Script Data node is special: user-defined members instead of static pins (see nodeRegistry / codegen).
 export bool isScriptDataType(std::string_view typeId) { return typeId == "ScriptData"; }
 
-// The Label node is a resizable comment box (a group). It has no pins and emits no code — it only organizes
+// The Label node is a resizable comment box (a group). It has no pins and emits no code â€” it only organizes
 // and documents the graph, and drags any nodes inside it along when moved.
 export bool isLabelType(std::string_view typeId) { return typeId == "Label"; }
 
 // The Reroute node is a draggable waypoint on a link: one input + one output pin of the carried type, drawn
-// as a small dot. It emits no code — codegen passes straight through it (see realSourceOfInput). Created by
+// as a small dot. It emits no code â€” codegen passes straight through it (see realSourceOfInput). Created by
 // double-clicking a link, not from the palette.
 export bool isRerouteType(std::string_view typeId) { return typeId == "Reroute"; }
 
@@ -198,7 +198,7 @@ export EDataType memberTypeFromToken(std::string_view token)
 }
 
 // C++ literal used for an unconnected data input of the given type. A String's default is RAW text (no
-// quotes) — codegen wraps it into a literal (see emitDataExpr) — so its default here is the empty string.
+// quotes) â€” codegen wraps it into a literal (see emitDataExpr) â€” so its default here is the empty string.
 export std::string defaultValueForType(EDataType type)
 {
     switch (type)
@@ -260,7 +260,7 @@ export bool parseFloatToken(std::string_view text, float& outValue)
 }
 
 // Extracts the x/y/z components out of a Vec3 pin's default text ("glm::vec3{ x, y, z }") for the inline
-// X/Y/Z boxes. Tolerant of the "default" sentinel and anything else that doesn't parse — falls back to 0.
+// X/Y/Z boxes. Tolerant of the "default" sentinel and anything else that doesn't parse â€” falls back to 0.
 export std::array<float, 3> parseVec3Literal(const std::string& text)
 {
     std::array<float, 3> v{ 0.0f, 0.0f, 0.0f };
@@ -335,7 +335,7 @@ export const std::vector<NodeDef>& nodeRegistry()
 
     // ---- organization ----
     // Comment/label box (isLabelType): a movable, resizable group with an editable caption. Pure annotation,
-    // no pins, no generated code — nodes dragged inside it move with it.
+    // no pins, no generated code â€” nodes dragged inside it move with it.
     r.push_back({ "Label", "Label", "Debug", false, {}, {}, "" });
 
     // Reroute waypoint (isRerouteType): pins are added dynamically to match the link it's placed on; created
@@ -427,7 +427,7 @@ export const std::vector<NodeDef>& nodeRegistry()
     // ---- variables ----
     // Script Data is special-cased everywhere (isScriptDataType): its output pins are user-defined members
     // edited in the node, and codegen turns them into a persistent `struct ScriptData`. It carries no static
-    // pins here — the members are added through the editor and serialized as //@member lines.
+    // pins here â€” the members are added through the editor and serialized as //@member lines.
     r.push_back({ "ScriptData", "Script Data", "Variables", false, {}, {}, "" });
 
     r.push_back({ "Float", "Var Float", "Variables", false,
@@ -578,7 +578,7 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "x", D::Float, "", 0, "v@.x" }, { "y", D::Float, "", 0, "v@.y" }, { "z", D::Float, "", 0, "v@.z" } },
         std::string("glm::vec3 v@ = $0;\n") + HOIST + "v@"});
 
-    // Dot/Normalize are wildcarded (Vec3 or Quat — glm::dot/normalize support both); Cross stays Vec3-only
+    // Dot/Normalize are wildcarded (Vec3 or Quat â€” glm::dot/normalize support both); Cross stays Vec3-only
     // (undefined for quaternions).
     r.push_back({ "DotVec3", "Dot", "Math", false,
         { { "a", D::Wildcard, "glm::vec3{ 0.0f, 0.0f, 0.0f }", 1 }, { "b", D::Wildcard, "glm::vec3{ 0.0f, 0.0f, 0.0f }", 1 } },
@@ -820,9 +820,30 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "Child", D::Entity, "" } },
         "ctx->entityGetChildAt($0, $1)" });
 
+    // ---- spatial queries (backed by the SpatialIndex) ----
+
+    // Get Nearest Entity: the entity with the nearest origin within Max Radius, skipping Exclude
+    // (self by default, so "the nearest OTHER entity"). Null when nothing is in range.
+    r.push_back({ "SpatialGetNearest", "Get Nearest Entity", "Spatial", false,
+        { { "Position", D::Vec3, "self->pos" }, { "Max Radius", D::Float, "100.0f" }, { "Exclude", D::Entity, "self" } },
+        { { "Entity", D::Entity, "" } },
+        "ctx->spatialGetNearestEntity($0, $1, $2)" });
+
+    // For Each Entity In Radius: runs Each once per entity whose render bounds intersect the sphere
+    // (up to 64); the Entity output is only valid on the Each branch.
+    r.push_back({ "SpatialForEachInRadius", "For Each Entity In Radius", "Spatial", true,
+        { { "", D::Exec, "" },
+            { "Position", D::Vec3,  "self->pos" },
+            { "Radius",   D::Float, "10.0f" } },
+        { { "Each", D::Exec, "" }, { "Done", D::Exec, "" },
+            { "Entity", D::Entity, "", 0, "spatialFound@[spatialIt@]" } },
+        std::string("Entity* spatialFound@[64];\nconst int spatialCount@ = ctx->spatialQueryRadius($1, $2, spatialFound@, 64);\n"
+            "for (int spatialIt@ = 0; spatialIt@ < spatialCount@; ++spatialIt@)\n{\n")
+        + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+
     // ---- audio (target the entity's AudioComponent; entities without one no-op) ----
     // Trigger Audio is special-cased (isTriggerAudioType): its exec input pins are the alias entries of the
-    // target entity's AudioComponent — flow entering an alias pin plays that sound. The Position/Volume/Pitch
+    // target entity's AudioComponent â€” flow entering an alias pin plays that sound. The Position/Volume/Pitch
     // inputs override the sound's authored settings only when connected (a connected Position also pins the
     // sound at that world position instead of following the entity). Codegen is emitTriggerAudioStmt.
     r.push_back({ "TriggerAudio", "Trigger Audio", "Audio", true,
