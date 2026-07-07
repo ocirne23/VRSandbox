@@ -5,12 +5,30 @@ import File.fwd;
 import Core;
 import Animation;
 
+// Cook options for the scene cache (see loadCached / SceneCooker.cpp). All fields participate in the
+// cache's options hash, so changing any of them re-cooks affected scenes on the next load.
+export struct SceneCookOptions
+{
+	bool enableCache = true;      // false = always import directly (no read, no write)
+	bool convertTextures = true;  // convert non-DDS model textures (loose + embedded) to BC .dds for mip streaming
+	bool generateLods = true;     // bake meshopt LOD chains for static meshes without authored LodN_ chains
+	int  lodLevels = 4;           // max generated levels beyond LOD0
+	float lodReduction = 0.25f;   // index-count factor per generated level
+	int  lodMinIndices = 32;      // don't generate for meshes below this index count
+};
+
 export class ISceneData
 {
 public:
 
 	static std::unique_ptr<ISceneData> createAssimpLoader();
 	static std::unique_ptr<ISceneData> createProceduralLoader();
+
+	// Cache-aware load: serves a cooked binary snapshot from Assets/Local/Cooked when it matches the
+	// source file (mtime + size) and options, otherwise imports via Assimp, cooks, and writes it for
+	// next time. Skinned/animated scenes always import directly (never cooked). Returns an initialized
+	// scene, or null on import failure.
+	static std::unique_ptr<ISceneData> loadCached(const char* filePath, bool mergeNodes, bool preTransformVertices, const SceneCookOptions& options);
 
 	// Loads animation clips from a separate file (rig in one file, animations in others) and appends them
 	// to outSet, resolving each channel against targetSkeleton BY BONE NAME (retargeting across files that

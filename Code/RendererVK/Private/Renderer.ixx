@@ -118,6 +118,10 @@ public:
 
     Stats getStats();
 
+    // Read by Entity's World to build scene-cache cook options (LOD generation params are baked into
+    // cooked files, so they participate in the cache's options hash).
+    const MeshLodParams& getLodParams() const { return m_lodParams; }
+
 private:
 
     Renderer(const Renderer&) = delete;
@@ -174,7 +178,6 @@ private:
     uint32 addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos);
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
     uint32 addMeshLodGroup(const MeshLodGroup& group) { m_meshLodGroups.push_back(group); return (uint32)m_meshLodGroups.size() - 1; }
-    const MeshLodParams& getLodParams() const { return m_lodParams; }
     uint32 addSkinnedMeshSources(const std::vector<RendererVKLayout::SkinnedMeshSource>& sources);
     const RendererVKLayout::SkinnedMeshSource& getSkinnedMeshSource(uint32 idx) const { return m_skinnedMeshSources[idx]; }
 

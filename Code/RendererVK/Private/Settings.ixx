@@ -171,8 +171,9 @@ export struct MeshLodParams
     float hysteresis = 0.25f;     // fraction of a level the continuous LOD value must overshoot a boundary before switching
     int   forceLod = -1;          // >= 0: clamp every LOD instance to this level (debug)
     bool  generate = true;        // meshopt-generate chains for static meshes without authored LODs
-    int   generateLevels = 4;     // max generated levels beyond LOD0 (quarter the triangles per level)
-    int   minIndices = 64;        // don't generate for meshes below this index count
+    int   generateLevels = 4;     // max generated levels beyond LOD0
+    float generateReduction = 0.5f; // index-count factor per generated level (0.25 = quarter the triangles)
+    int   minIndices = 32;        // don't generate for meshes below this index count
 
     void registerTweaks();
 };

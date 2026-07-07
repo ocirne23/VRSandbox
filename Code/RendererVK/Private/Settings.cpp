@@ -124,10 +124,11 @@ void MeshLodParams::registerTweaks()
 {
     Tweak::boolean("LOD", "Enabled", &enabled);
     Tweak::floatVar("LOD", "Full-res pixels", &fullResPixels, 16.0f, 4096.0f, 1.0f);
-    Tweak::intVar("LOD", "Bias", &bias, -4, 4);
+    Tweak::intVar("LOD", "Bias", &bias, -6, 6);
     Tweak::floatVar("LOD", "Hysteresis", &hysteresis, 0.0f, 0.9f, 0.01f);
-    Tweak::intVar("LOD", "Force LOD", &forceLod, -1, 4);
+    Tweak::intVar("LOD", "Force LOD", &forceLod, -1, 6);
     Tweak::boolean("LOD", "Generate LODs", &generate);
-    Tweak::intVar("LOD", "Generated levels", &generateLevels, 1, 4);
-    Tweak::intVar("LOD", "Min indices", &minIndices, 96, 65536);
+    Tweak::intVar("LOD", "Generated levels", &generateLevels, 1, 6);
+    Tweak::floatVar("LOD", "Generated reduction", &generateReduction, 0.05f, 0.75f, 0.01f);
+    Tweak::intVar("LOD", "Min indices", &minIndices, 32, 4096);
 }

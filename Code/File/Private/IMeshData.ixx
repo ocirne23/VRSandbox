@@ -29,4 +29,10 @@ public:
     virtual bool isSkinned() const { return false; }
     virtual const glm::uvec4* getBoneIndices() const { return nullptr; }
     virtual const glm::vec4* getBoneWeights() const { return nullptr; }
+
+    // Baked LOD chains (cooked scene cache): index-only levels beyond LOD0 over this mesh's vertices,
+    // pre-simplified at cook time. Level 0 here = the first REDUCED level. Default: none (the renderer
+    // meshopt-generates chains at load instead).
+    virtual uint32 getNumLodLevels() const { return 0; }
+    virtual const uint32* getLodIndices(uint32 /*level*/, uint32& outNumIndices) const { outNumIndices = 0; return nullptr; }
 };

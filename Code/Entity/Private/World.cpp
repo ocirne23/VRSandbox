@@ -93,15 +93,36 @@ static std::shared_ptr<const CollisionSource> buildCollisionSource(const ISceneD
     return source;
 }
 
+// Cook options for the scene cache: the renderer's LOD generation params get baked into the cooked
+// file (and its options hash), so changing the LOD tweaks re-cooks affected scenes on the next load.
+static SceneCookOptions makeSceneCookOptions()
+{
+    const MeshLodParams& lodParams = Globals::rendererVK.getLodParams();
+    SceneCookOptions options;
+    options.generateLods = lodParams.generate;
+    options.lodLevels = lodParams.generateLevels;
+    options.lodReduction = lodParams.generateReduction;
+    options.lodMinIndices = lodParams.minIndices;
+    return options;
+}
+
+static std::unique_ptr<ISceneData> loadSceneData(const ObjectContainerDesc& desc)
+{
+    if (!desc.procedural)
+        return ISceneData::loadCached(desc.path.c_str(), desc.mergeNodes, desc.preTransformVertices, makeSceneCookOptions());
+    std::unique_ptr<ISceneData> sceneData = ISceneData::createProceduralLoader();
+    if (!sceneData->initialize(desc.path.c_str(), desc.mergeNodes, desc.preTransformVertices))
+        sceneData.reset();
+    return sceneData;
+}
+
 ObjectContainer* World::loadContainer(const ObjectContainerDesc& desc, bool captureCollisionSource)
 {
     if (auto it = m_containers.find(desc.name); it != m_containers.end())
         return it->second.get();
 
-    std::unique_ptr<ISceneData> sceneData = desc.procedural
-        ? ISceneData::createProceduralLoader()
-        : ISceneData::createAssimpLoader();
-    if (!sceneData->initialize(desc.path.c_str(), desc.mergeNodes, desc.preTransformVertices))
+    std::unique_ptr<ISceneData> sceneData = loadSceneData(desc);
+    if (!sceneData)
     {
         Log::warning("Scene: failed to load '" + desc.path + "' for ObjectContainer '" + desc.name + "'");
         return nullptr;
@@ -448,10 +469,8 @@ std::shared_ptr<const CollisionSource> World::getOrLoadCollisionSource(const std
         Log::warning("Physics: unknown ObjectContainer '" + containerName + "' for collision geometry");
         return nullptr;
     }
-    std::unique_ptr<ISceneData> sceneData = desc->procedural
-        ? ISceneData::createProceduralLoader()
-        : ISceneData::createAssimpLoader();
-    if (!sceneData->initialize(desc->path.c_str(), desc->mergeNodes, desc->preTransformVertices))
+    std::unique_ptr<ISceneData> sceneData = loadSceneData(*desc);
+    if (!sceneData)
     {
         Log::warning("Physics: failed to load '" + desc->path + "' for collision geometry");
         return nullptr;

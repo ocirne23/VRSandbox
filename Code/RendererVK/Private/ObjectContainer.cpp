@@ -203,18 +203,40 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
             });
         }
 
-        // meshopt-generated LOD chain: quarter the triangles per level over the same vertices (matches
-        // the selector's per-level halving of the projected diameter, since density scales with area).
+        // meshopt-generated LOD chain over the same vertices: each level keeps generateReduction of the
+        // previous level's indices (0.25 pairs naturally with the selector's per-level halving of the
+        // projected diameter, since triangle density scales with area). A cooked scene (see the File
+        // lib's scene cache) carries these levels pre-baked; consume them instead of re-simplifying.
         const bool isColMesh = std::string_view(m_meshNames[meshIdx]).starts_with(COLLISION_MESH_PREFIX);
-        if (lodParams.generate && !meshData.isSkinned() && !isColMesh && !inAuthoredChain[meshIdx]
+        if (const uint32 numBakedLods = meshData.getNumLodLevels(); numBakedLods > 0)
+        {
+            for (uint32 level = 0; level < numBakedLods && level + 1 < RendererVKLayout::MAX_MESH_LODS; ++level)
+            {
+                uint32 numLodIndices = 0;
+                const uint32* pLodIndices = meshData.getLodIndices(level, numLodIndices);
+                if (!pLodIndices || numLodIndices < 3)
+                    break;
+                RendererVKLayout::MeshInfo lodInfo = meshInfo; // same vertices + bounds
+                lodInfo.indexCount = numLodIndices;
+                lodInfo.firstIndex = (uint32)(meshDataManager.uploadIndexData(pLodIndices, numLodIndices * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
+                if (level == 0)
+                    generatedChains.push_back(GeneratedChain{ (uint16)meshIdx, (uint16)generatedLodInfos.size(), 0 });
+                generatedLodInfos.push_back(lodInfo);
+                generatedChains.back().numLevels++;
+            }
+        }
+        else if (lodParams.generate && !meshData.isSkinned() && !isColMesh && !inAuthoredChain[meshIdx]
             && numIndices >= (uint32)lodParams.minIndices)
         {
+            const float reduction = std::clamp(lodParams.generateReduction, 0.05f, 0.75f);
             std::vector<uint32> lodIndices(numIndices);
             uint32 prevIndexCount = numIndices;
             uint8 numLevels = 0;
+            float targetF = (float)numIndices;
             for (int level = 1; level <= lodParams.generateLevels && level < (int)RendererVKLayout::MAX_MESH_LODS; ++level)
             {
-                const size_t targetIndexCount = std::max<size_t>(12, ((size_t)numIndices >> (2 * level)) / 3 * 3);
+                targetF *= reduction;
+                const size_t targetIndexCount = std::max<size_t>(12, ((size_t)targetF) / 3 * 3);
                 if (targetIndexCount >= prevIndexCount)
                     break;
                 const float targetError = 0.01f * (float)(1u << (level - 1));
