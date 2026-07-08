@@ -66,7 +66,7 @@ bool ObjectContainer::initialize(const ISceneData& sceneData, const MaterialOver
 
     TempInitData temp;
     initializeMaterials(sceneData, temp, pOverrides);
-    initializeMeshes(sceneData, temp);
+    initializeMeshes(sceneData, temp, pOverrides);
     initializeNodes(sceneData, temp);
     return true;
 }
@@ -78,7 +78,7 @@ ObjectContainer::~ObjectContainer()
     Globals::rendererVK.removeObjectContainer(this);
 }
 
-void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData& temp)
+void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData& temp, const MaterialOverrides* pOverrides)
 {
     const size_t numMeshes = sceneData.getNumMeshes();
 
@@ -298,6 +298,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
             }
         }
         else if (lodParams.generate && !meshData.isSkinned() && !isColMesh && !inAuthoredChain[meshIdx]
+            && !(pOverrides && pOverrides->disableGeneratedLods)
             && numIndices >= (uint32)lodParams.minIndices)
         {
             const float reduction = std::clamp(lodParams.generateReduction, 0.05f, 0.75f);

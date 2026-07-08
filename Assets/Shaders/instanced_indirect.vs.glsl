@@ -8,6 +8,7 @@
 #include "shared.inc.glsl"
 
 #ifdef OCEAN
+#define OCEAN_SHORE_BINDING 18
 #include "ocean_wave.inc.glsl"
 #endif
 

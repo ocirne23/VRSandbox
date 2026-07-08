@@ -38,8 +38,10 @@ public:
     };
     // viewIndex selects the view matrices (u_views[viewIndex]); 0 = centre/desktop, 1/2 = the eyes in VR.
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params, uint32 viewIndex = 0);
-    // Rewrites one slot of the texture array (binding 4) with a streamed texture's current view.
+    // Rewrites one slot of the texture array (binding 5) with a streamed texture's current view.
     void updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view);
+    // Points the ocean shore water-depth binding (4) at the active ping-pong image (refreshed per frame).
+    void updateOceanShoreDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView shoreView, vk::Sampler shoreSampler);
 
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
 

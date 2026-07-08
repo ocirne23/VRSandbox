@@ -10,6 +10,7 @@ import RendererVK;
 import File;
 
 import :OceanRenderer;
+import :Climate;
 
 namespace Procedural
 {
@@ -60,6 +61,13 @@ namespace Procedural
 		Tweak::floatVar("Ocean/Foam", "Turb spread", &m_foamSpread, 0.0f, 4.0f, 0.05f);
 		Tweak::floatVar("Ocean/Foam", "Foam boost", &m_foamBoost, 0.0f, 2.0f, 0.01f);
 		Tweak::floatVar("Ocean/Foam", "Turbidity", &m_turbidity, 0.0f, 1.0f, 0.01f);
+
+		// Shore interaction: only active while the terrain streamer is enabled (its height field is what
+		// gets baked). Range/scale changes re-bake on the fly; the old map stays active meanwhile.
+		Tweak::boolean("Ocean/Shore", "Shore interaction", &m_shoreEnabled);
+		Tweak::floatVar("Ocean/Shore", "Range (m)", &m_shoreRange, 256.0f, 8192.0f, 32.0f);
+		Tweak::floatVar("Ocean/Shore", "Shoal depth scale", &m_shoalScale, 0.0f, 0.5f, 0.005f);
+		Tweak::floatVar("Ocean/Shore", "Shore foam depth (m)", &m_shoreFoamDepth, 0.0f, 8.0f, 0.05f);
 	}
 
 	void OceanRenderer::rebuildGrid()
@@ -154,8 +162,72 @@ namespace Procedural
 		m_node = std::move(node);
 	}
 
-	void OceanRenderer::update(Renderer& renderer, const Camera& camera)
+	// Shore water-depth bake: a coarse OCEAN_SHORE_RES^2 snapshot of (seaLevel - terrainHeight) covering
+	// m_shoreRange meters around the camera, sampled from the SAME ClimateMaps the terrain streamer
+	// renders from, so the water agrees with the drawn ground. Baked on a worker (std::async — a full
+	// bake is a few hundred thousand fbm evaluations), re-baked when the camera strays a quarter of the
+	// range from the active map's center or any input (range, sea level, terrain config) changes; the
+	// active map keeps working until the replacement lands. Centers snap to the map's texel lattice so
+	// re-bakes never make shore features swim sub-texel.
+	void OceanRenderer::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& terrain)
 	{
+		constexpr uint32 RES = RendererVKLayout::OCEAN_SHORE_RES;
+
+		if (m_bakeFuture.valid() && m_bakeFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+		{
+			std::vector<float> depths = m_bakeFuture.get();
+			renderer.setOceanShoreMap(depths);
+			m_shoreCenter = m_bakePendingCenter;
+			m_shoreActiveRange = m_bakePendingRange;
+			m_shoreBakedSeaLevel = m_bakePendingSeaLevel;
+			m_shoreBakedMaps = m_bakePendingMaps;
+			m_shoreValid = true;
+		}
+
+		if (!m_shoreEnabled || !terrain)
+		{
+			m_shoreValid = false; // params drop to "no map"; the GPU images just sit unused
+			return;
+		}
+
+		if (m_bakeFuture.valid())
+			return; // one bake in flight at a time
+
+		const glm::vec2 camXZ(camera.position.x, camera.position.z);
+		const float range = glm::max(m_shoreRange, 256.0f);
+		const glm::vec2 drift = glm::abs(camXZ - m_shoreCenter);
+		const bool stale = !m_shoreValid
+			|| m_shoreBakedMaps != terrain.get()
+			|| m_shoreActiveRange != range
+			|| m_shoreBakedSeaLevel != m_seaLevel
+			|| glm::max(drift.x, drift.y) > range * 0.25f;
+		if (!stale)
+			return;
+
+		const float texel = range / float(RES);
+		const glm::vec2 center = glm::floor(camXZ / texel + 0.5f) * texel;
+		m_bakePendingCenter = center;
+		m_bakePendingRange = range;
+		m_bakePendingSeaLevel = m_seaLevel;
+		m_bakePendingMaps = terrain.get();
+		const float seaLevel = m_seaLevel;
+		m_bakeFuture = std::async(std::launch::async, [terrain, center, range, seaLevel]() {
+			std::vector<float> depths((size_t)RES * RES);
+			const double texelSize = (double)range / (double)RES;
+			const double x0 = (double)center.x - (double)range * 0.5 + texelSize * 0.5; // texel centers
+			const double z0 = (double)center.y - (double)range * 0.5 + texelSize * 0.5;
+			for (uint32 j = 0; j < RES; ++j)
+				for (uint32 i = 0; i < RES; ++i)
+					depths[(size_t)j * RES + i] = seaLevel - terrain->sampleHeight(x0 + i * texelSize, z0 + j * texelSize);
+			return depths;
+		});
+	}
+
+	void OceanRenderer::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ClimateMaps> terrain)
+	{
+		if (m_enabled)
+			updateShoreMap(renderer, camera, terrain);
+
 		// Push the spectrum/shading params every frame; `enabled` also gates the GPU FFT simulation.
 		OceanParams params;
 		params.enabled = m_enabled;
@@ -182,6 +254,10 @@ namespace Procedural
 		params.foamSpread = m_foamSpread;
 		params.foamBoost = m_foamBoost;
 		params.turbidity = m_turbidity;
+		params.shoreMapCenter = m_shoreCenter;
+		params.shoreMapRange = m_shoreValid ? m_shoreActiveRange : 0.0f;
+		params.shoalScale = m_shoalScale;
+		params.shoreFoamDepth = m_shoreFoamDepth;
 		renderer.setOceanParams(params);
 
 		if (!m_enabled)

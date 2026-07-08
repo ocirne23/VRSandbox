@@ -13,15 +13,15 @@ Sampler::~Sampler()
         Globals::device.getDevice().destroySampler(m_sampler);
 }
 
-bool Sampler::initialize()
+bool Sampler::initialize(vk::SamplerAddressMode addressMode)
 {
     vk::SamplerCreateInfo samplerInfo = {
         .magFilter = vk::Filter::eLinear,
         .minFilter = vk::Filter::eLinear,
         .mipmapMode = vk::SamplerMipmapMode::eLinear,
-        .addressModeU = vk::SamplerAddressMode::eRepeat,
-        .addressModeV = vk::SamplerAddressMode::eRepeat,
-        .addressModeW = vk::SamplerAddressMode::eRepeat,
+        .addressModeU = addressMode,
+        .addressModeV = addressMode,
+        .addressModeW = addressMode,
         .mipLodBias = 0.0f,
         .anisotropyEnable = vk::True,
         .maxAnisotropy = 16,

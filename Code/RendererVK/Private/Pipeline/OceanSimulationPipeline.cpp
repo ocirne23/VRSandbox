@@ -42,6 +42,12 @@ void OceanSimulationPipeline::destroyImages()
     if (m_foamView) vkDevice.destroyImageView(m_foamView);
     Globals::gpuAllocator.destroyImage(m_foamImage, m_foamMemory);
     m_foamView = nullptr; m_foamImage = nullptr; m_foamMemory = nullptr;
+    for (uint32 i = 0; i < 2; ++i)
+    {
+        if (m_shoreView[i]) vkDevice.destroyImageView(m_shoreView[i]);
+        Globals::gpuAllocator.destroyImage(m_shoreImage[i], m_shoreMemory[i]);
+        m_shoreView[i] = nullptr; m_shoreImage[i] = nullptr; m_shoreMemory[i] = nullptr;
+    }
 }
 
 void OceanSimulationPipeline::buildSpectrumLayout(ComputePipelineLayout& layout)
@@ -171,14 +177,44 @@ void OceanSimulationPipeline::createImages()
     assert(foamViewResult.result == vk::Result::eSuccess);
     m_foamView = foamViewResult.value;
 
+    // Shore water-depth ping-pong pair (R32F single mip; CPU floats upload straight in). TransferDst for
+    // the staged full-image replace.
+    for (uint32 i = 0; i < 2; ++i)
+    {
+        vk::ImageCreateInfo shoreInfo{
+            .imageType = vk::ImageType::e2D,
+            .format = vk::Format::eR32Sfloat,
+            .extent = { RendererVKLayout::OCEAN_SHORE_RES, RendererVKLayout::OCEAN_SHORE_RES, 1 },
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = vk::SampleCountFlagBits::e1,
+            .tiling = vk::ImageTiling::eOptimal,
+            .usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
+            .sharingMode = vk::SharingMode::eExclusive,
+            .initialLayout = vk::ImageLayout::eUndefined,
+        };
+        (void)Globals::gpuAllocator.createImage(shoreInfo, m_shoreImage[i], m_shoreMemory[i], "OceanShore");
+        vk::ImageViewCreateInfo shoreViewInfo{
+            .image = m_shoreImage[i],
+            .viewType = vk::ImageViewType::e2D,
+            .format = vk::Format::eR32Sfloat,
+            .subresourceRange = allSubresources(1, 1),
+        };
+        auto shoreViewResult = vkDevice.createImageView(shoreViewInfo);
+        assert(shoreViewResult.result == vk::Result::eSuccess);
+        m_shoreView[i] = shoreViewResult.value;
+    }
+
     // One-time layout init: the spectra live in GENERAL forever; the maps rest in SHADER_READ_ONLY
     // between frames so the draw passes can sample them even before the first simulation ran; the foam
-    // accumulator is cleared to zero (its previous-frame read feeds back into itself).
+    // accumulator is cleared to zero (its previous-frame read feeds back into itself); the shore maps go
+    // straight to SHADER_READ_ONLY (statically bound but never sampled until the first upload sets the
+    // UBO's 1/size flag).
     {
         CommandBuffer init;
         init.initialize(vk::CommandBufferLevel::ePrimary);
         vk::CommandBuffer cmd = init.begin(true);
-        std::array<vk::ImageMemoryBarrier2, 4> barriers;
+        std::array<vk::ImageMemoryBarrier2, 6> barriers;
         for (uint32 i = 0; i < 2; ++i)
         {
             barriers[i] = vk::ImageMemoryBarrier2{
@@ -209,6 +245,18 @@ void OceanSimulationPipeline::createImages()
             .image = m_foamImage,
             .subresourceRange = allSubresources(1, 2),
         };
+        for (uint32 i = 0; i < 2; ++i)
+        {
+            barriers[4 + i] = vk::ImageMemoryBarrier2{
+                .srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe,
+                .dstStageMask = vk::PipelineStageFlagBits2::eVertexShader | vk::PipelineStageFlagBits2::eFragmentShader,
+                .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+                .oldLayout = vk::ImageLayout::eUndefined,
+                .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                .image = m_shoreImage[i],
+                .subresourceRange = allSubresources(1, 1),
+            };
+        }
         cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = (uint32)barriers.size(), .pImageMemoryBarriers = barriers.data() });
 
         const vk::ClearColorValue zero{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } };
@@ -235,7 +283,18 @@ void OceanSimulationPipeline::createImages()
 void OceanSimulationPipeline::initialize()
 {
     m_mapsSampler.initialize(); // repeat + trilinear + aniso: exactly what tiled, mipped water maps want
+    m_shoreSampler.initialize(vk::SamplerAddressMode::eClampToEdge); // world-region snapshot: never tile
     createImages();
+
+    // Shore staging: one host-visible buffer per frame slot — uploadShoreMap writes the slot whose fence
+    // beginFrame just waited, recordShoreUpload copies it in that frame's primary CB.
+    constexpr vk::DeviceSize shoreBytes = (vk::DeviceSize)RendererVKLayout::OCEAN_SHORE_RES * RendererVKLayout::OCEAN_SHORE_RES * sizeof(float);
+    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    {
+        (void)m_shoreStaging[i].initialize(shoreBytes, vk::BufferUsageFlagBits2::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "OceanShoreStaging", BufferHostAccess::eSequentialWrite);
+        m_shoreStagingMapped[i] = m_shoreStaging[i].mapMemory();
+    }
 
     ComputePipelineLayout spectrumLayout;
     buildSpectrumLayout(spectrumLayout);
@@ -258,6 +317,66 @@ void OceanSimulationPipeline::initialize()
         m_assembleSets[i].initialize(m_assemblePipeline.getDescriptorSetLayout());
         m_foamSets[i].initialize(m_foamPipeline.getDescriptorSetLayout());
     }
+}
+
+void OceanSimulationPipeline::uploadShoreMap(std::span<const float> depthTexels, uint32 frameIdx)
+{
+    constexpr uint32 RES = RendererVKLayout::OCEAN_SHORE_RES;
+    assert(depthTexels.size() == (size_t)RES * RES);
+    memcpy(m_shoreStagingMapped[frameIdx].data(), depthTexels.data(), depthTexels.size_bytes());
+    m_shoreStaging[frameIdx].flushMappedMemory(depthTexels.size_bytes());
+    m_shoreUploadSlot = (int)frameIdx;
+}
+
+void OceanSimulationPipeline::recordShoreUpload(CommandBuffer& commandBuffer)
+{
+    if (m_shoreUploadSlot < 0)
+        return;
+    constexpr uint32 RES = RendererVKLayout::OCEAN_SHORE_RES;
+    vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
+    const vk::Image dst = m_shoreImage[m_shoreActive ^ 1u];
+
+    // The inactive image was still sampled by older submissions (vertex + fragment stages) the last time
+    // it was active — the discard transition must execution-depend on those reads (WRITE_AFTER_READ).
+    vk::ImageMemoryBarrier2 toDst{
+        .srcStageMask = vk::PipelineStageFlagBits2::eVertexShader | vk::PipelineStageFlagBits2::eFragmentShader,
+        .srcAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+        .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
+        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .oldLayout = vk::ImageLayout::eUndefined, // full replace: previous contents don't matter
+        .newLayout = vk::ImageLayout::eTransferDstOptimal,
+        .image = dst,
+        .subresourceRange = allSubresources(1, 1),
+    };
+    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &toDst });
+
+    const vk::BufferImageCopy2 region{
+        .imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 },
+        .imageExtent = { RES, RES, 1 },
+    };
+    const vk::CopyBufferToImageInfo2 copyInfo{
+        .srcBuffer = m_shoreStaging[m_shoreUploadSlot].getBuffer(),
+        .dstImage = dst,
+        .dstImageLayout = vk::ImageLayout::eTransferDstOptimal,
+        .regionCount = 1,
+        .pRegions = &region,
+    };
+    cmd.copyBufferToImage2(copyInfo);
+
+    vk::ImageMemoryBarrier2 toSampled{
+        .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
+        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eVertexShader | vk::PipelineStageFlagBits2::eFragmentShader,
+        .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
+        .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+        .image = dst,
+        .subresourceRange = allSubresources(1, 1),
+    };
+    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &toSampled });
+
+    m_shoreUploadSlot = -1;
+    m_shoreFlipPending = true; // activates at the next beginFrame, together with the new UBO center
 }
 
 void OceanSimulationPipeline::reloadShaders()

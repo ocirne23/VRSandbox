@@ -75,6 +75,8 @@ export namespace RendererVKLayout
     // FFT ocean simulation (OceanSimulationPipeline / ocean_*.cs.glsl). Injected into every shader compile.
     constexpr uint32 OCEAN_FFT_SIZE = 512; // FFT grid resolution per cascade (power of two)
     constexpr uint32 OCEAN_CASCADES = 3;   // spectral band-split cascades (different patch sizes)
+    constexpr uint32 OCEAN_SHORE_RES = 2048; // shore water-depth map resolution (CPU-baked from the terrain
+                                             // height field; Renderer::setOceanShoreMap expects RES*RES floats)
 
     struct MeshVertex
     {
@@ -234,13 +236,16 @@ export namespace RendererVKLayout
         glm::vec4 oceanAbsorption; // rgb = water extinction sigma_t (1/m, Beer-Lambert), w = perceptual roughness
         glm::vec4 oceanScatter;    // rgb = in-scatter albedo color, w = scatter intensity
         glm::vec4 oceanFoam;       // rgb = foam albedo, w = Jacobian foam bias (higher = more whitecaps)
-        glm::vec4 oceanParams3;    // xy unused, z = turbulence decay/frame,
+        glm::vec4 oceanParams3;    // xy = shore depth map world center XZ, z = turbulence decay/frame,
                                    // w = vertex displacement mip bias (Detail bias; the clipmap rings carry
                                    // their cell size per vertex, so the mip itself is baked into the mesh)
-        glm::vec4 oceanParams4;    // x unused, y = turbulence spread (diffusion/frame), z unused,
+        glm::vec4 oceanParams4;    // x = 1 / shore map world size (0 = no shore map),
+                                   // y = turbulence spread (diffusion/frame), z = shoal depth scale (per-
+                                   // cascade shoaling: waves fade below depth = scale * patch size),
                                    // w = instant-foam edge width (both thresholds' smoothstep)
         glm::vec4 oceanParams5;    // x = foam boost (turbulence -> fold-threshold relaxation),
-                                   // y = turbidity (entrained-bubble milkiness + roughness), z unused,
+                                   // y = turbidity (entrained-bubble milkiness + roughness),
+                                   // z = shore foam depth (m; surf band width at the waterline, 0 = off),
                                    // w = breaking-crest foam threshold (downward crest accel in g units)
     };
 

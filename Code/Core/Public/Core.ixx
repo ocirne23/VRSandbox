@@ -48,6 +48,7 @@ export import <condition_variable>;
 export import <deque>;
 export import <queue>;
 export import <thread>;
+export import <future>;
 export import <bitset>;
 export import <coroutine>;
 export import <atomic>;

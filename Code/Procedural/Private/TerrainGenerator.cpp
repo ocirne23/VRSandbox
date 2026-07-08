@@ -15,15 +15,15 @@ namespace Procedural
 		const uint32 res = glm::max(1u, params.lod0Res >> params.lod);
 		const uint32 vpr = res + 1; // vertices per row
 		const float  step = params.chunkSize / (float)res;
-		const float  seaLevel = maps.config().seaLevel;
 		const double ox = (double)params.coord.x * (double)params.chunkSize;
 		const double oz = (double)params.coord.y * (double)params.chunkSize;
 
-		// Surface height with the ocean flattened to sea level (flat water; color comes later from a shader).
+		// True surface height, INCLUDING the seabed below sea level: water is the OceanRenderer's job now
+		// (its shore-depth bake samples this same field, and its ray-traced refraction needs the real
+		// bottom to hit — the old max(h, seaLevel) lid read as zero-depth water and co-planed with it).
 		auto surface = [&](float localX, float localZ) -> float
 		{
-			const float h = maps.sampleHeight(ox + (double)localX, oz + (double)localZ);
-			return glm::max(h, seaLevel);
+			return maps.sampleHeight(ox + (double)localX, oz + (double)localZ);
 		};
 
 		out.positions.reserve((size_t)vpr * vpr);

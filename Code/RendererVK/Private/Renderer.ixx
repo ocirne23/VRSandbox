@@ -149,6 +149,12 @@ public:
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
     // Flipping OceanParams::hitLighting rebuilds the ocean fragment variant (GPU idle + shader reload).
     void setOceanParams(const OceanParams& ocean);
+    // Replaces the ocean's shore water-depth map (OCEAN_SHORE_RES^2 floats, meters of water below sea
+    // level, negative = land). Staged into this frame slot's buffer, copied into the inactive ping-pong
+    // image in this frame's primary CB (proper barriers), active next beginFrame together with the
+    // OceanParams shore center/range describing it (pass those via setOceanParams in the same frame).
+    // Cheap: no GPU sync, no command-buffer re-record.
+    void setOceanShoreMap(std::span<const float> depthTexels) { m_oceanSimPipeline.uploadShoreMap(depthTexels, m_swapChain.getCurrentFrameIndex()); }
     void setPostParams(const PostParams& post) { m_postParams = post; setHaveToRecordCommandBuffers(); }
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }

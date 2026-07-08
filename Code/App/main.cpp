@@ -329,7 +329,8 @@ int main()
         }
 
         terrain.update(renderer, camera);
-        ocean.update(renderer, camera);
+        // The terrain's height field feeds the ocean's shore-depth bake (shoaling + surf at the coast).
+        ocean.update(renderer, camera, terrain.activeClimateMaps());
 
         if (gizmo.isVisible())
             gizmo.getGizmoEntity()->update(renderer, (float)deltaSec);

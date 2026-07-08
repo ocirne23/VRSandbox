@@ -297,26 +297,32 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eFragment
         });
-
-
-    // 18 = the set's highest binding number: required for eVariableDescriptorCount.
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_textures
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_oceanShore (terrain water-depth map)
         .binding = 18,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment
+    });
+
+    // 19 = the set's highest binding number: required for eVariableDescriptorCount.
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_textures
+        .binding = 19,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
         .descriptorCount = maxTextures,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
 
-    // Per-binding flags (parallel to descriptorSetBindings): the AO (13) and TLAS (11) bindings are
-    // refreshed after the (cached) draw CB is recorded -> UPDATE_AFTER_BIND; the texture array (18) is
-    // variable-count (allocated at the live texture capacity), only partially written, and UPDATE_AFTER_BIND
-    // so the TextureStreamer can rewrite swapped slots without re-recording the cached draw CBs.
+    // Per-binding flags (parallel to descriptorSetBindings): the AO (13), TLAS (11) and ocean shore (18)
+    // bindings are refreshed after the (cached) draw CB is recorded -> UPDATE_AFTER_BIND; the texture
+    // array (19) is variable-count (allocated at the live texture capacity), only partially written, and
+    // UPDATE_AFTER_BIND so the TextureStreamer can rewrite swapped slots without re-recording the cached
+    // draw CBs.
     graphicsPipelineLayout.descriptorBindingFlags.resize(descriptorSetBindings.size());
     for (size_t i = 0; i < descriptorSetBindings.size(); ++i)
     {
-        if (descriptorSetBindings[i].binding == 11 || descriptorSetBindings[i].binding == 13)
+        if (descriptorSetBindings[i].binding == 11 || descriptorSetBindings[i].binding == 13 || descriptorSetBindings[i].binding == 18)
             graphicsPipelineLayout.descriptorBindingFlags[i] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
-        else if (descriptorSetBindings[i].binding == 18)
+        else if (descriptorSetBindings[i].binding == 19)
             graphicsPipelineLayout.descriptorBindingFlags[i] = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount | vk::DescriptorBindingFlagBits::eUpdateAfterBind;
     }
 }
@@ -325,7 +331,17 @@ void StaticMeshGraphicsPipeline::updateTextureDescriptor(vk::DescriptorSet descr
 {
     // Streamed texture slot rewrite (same recorded-once CB situation as the AO/TLAS bindings above).
     vk::DescriptorImageInfo imageInfo{ .sampler = m_sampler.getSampler(), .imageView = view, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
-    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 18, .dstArrayElement = slotIdx, .descriptorCount = 1,
+    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 19, .dstArrayElement = slotIdx, .descriptorCount = 1,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
+    Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
+}
+
+void StaticMeshGraphicsPipeline::updateOceanShoreDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView shoreView, vk::Sampler shoreSampler)
+{
+    // Refreshed every frame (UPDATE_AFTER_BIND): the shore depth map is a ping-pong pair whose active
+    // image swaps when the CPU re-bakes it, without touching the cached draw CBs.
+    vk::DescriptorImageInfo imageInfo{ .sampler = shoreSampler, .imageView = shoreView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 18, .descriptorCount = 1,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
     Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
@@ -554,7 +570,7 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
             .bufferInfos = { vk::DescriptorBufferInfo { .buffer = params.rtMeshInstancesBuffer.getBuffer(), .range = params.rtMeshInstancesBuffer.getSize() } }
         },
         DescriptorSetUpdateInfo{
-            .binding = 18,
+            .binding = 19,
             .type = vk::DescriptorType::eCombinedImageSampler,
         },
     };

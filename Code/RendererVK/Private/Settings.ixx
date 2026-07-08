@@ -232,6 +232,15 @@ export struct OceanParams
     float turbidity        = 0.4f;  // entrained-bubble strength: milky brightening + extra roughness of
                                     // turbulent water (the wake stays visible after the foam thins)
 
+    // Shore interaction: a CPU-baked water-depth map around the camera (Renderer::setOceanShoreMap,
+    // baked from the terrain height field by Procedural::OceanRenderer) drives fake shoaling — each
+    // cascade's displacement fades out below depth = shoalScale * its patch size, so long swell dies
+    // offshore while chop runs almost to the beach and waves never poke through land — plus a surf/foam
+    // band where the water column vanishes at the waterline. shoreMapRange = 0 = no map (open ocean).
+    glm::vec2 shoreMapCenter = glm::vec2(0.0f); // world XZ center of the baked map
+    float shoreMapRange  = 0.0f;  // world size (m) covered by the baked map; 0 disables shore effects
+    float shoalScale     = 0.05f; // shoaling depth as a fraction of each cascade's patch size
+    float shoreFoamDepth = 1.5f;  // water-column height (m) below which the waterline churns white; 0 = off
 };
 
 export struct Stats

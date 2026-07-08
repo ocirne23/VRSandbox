@@ -561,6 +561,9 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.groundParams = glm::vec4(sky.groundColor * sky.groundIntensity, 0.0f);
 
     const OceanParams& ocean = m_oceanParams;
+    // A freshly uploaded shore map activates here, in the same frame slot as the UBO that carries its
+    // world center — descriptor (refreshed per frame in recordCommandBuffers) and params stay coherent.
+    m_oceanSimPipeline.flipShoreMapIfPending();
     const glm::vec2 windDir = glm::length(ocean.windDirection) > 1e-4f ? glm::normalize(ocean.windDirection) : glm::vec2(1.0f, 0.0f);
     ubo.oceanParams0 = glm::vec4(windDir, ocean.amplitude, ocean.choppiness);
     // Wind clamped just above 0: the JONSWAP 1/U terms must stay finite; the spectrum's wave-age limit
@@ -570,9 +573,10 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanAbsorption = glm::vec4(ocean.absorption, ocean.roughness);
     ubo.oceanScatter = glm::vec4(ocean.scatterColor, ocean.scatterStrength);
     ubo.oceanFoam = glm::vec4(ocean.foamColor, ocean.foamBias);
-    ubo.oceanParams3 = glm::vec4(0.0f, 0.0f, glm::clamp(ocean.foamDecay, 0.0f, 0.999f), glm::clamp(ocean.detailBias, -4.0f, 4.0f));
-    ubo.oceanParams4 = glm::vec4(0.0f, glm::clamp(ocean.foamSpread * 0.25f, 0.0f, 0.95f), 0.0f, glm::max(ocean.foamSoftness, 0.02f));
-    ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), 0.0f, glm::max(ocean.foamBreakAccel, 0.01f));
+    ubo.oceanParams3 = glm::vec4(ocean.shoreMapCenter, glm::clamp(ocean.foamDecay, 0.0f, 0.999f), glm::clamp(ocean.detailBias, -4.0f, 4.0f));
+    ubo.oceanParams4 = glm::vec4(ocean.shoreMapRange > 1.0f ? 1.0f / ocean.shoreMapRange : 0.0f,
+        glm::clamp(ocean.foamSpread * 0.25f, 0.0f, 0.95f), glm::max(ocean.shoalScale, 0.0f), glm::max(ocean.foamSoftness, 0.02f));
+    ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), glm::max(ocean.shoreFoamDepth, 0.0f), glm::max(ocean.foamBreakAccel, 0.01f));
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
@@ -1948,6 +1952,16 @@ void Renderer::recordCommandBuffers()
     // arrays are UPDATE_AFTER_BIND for the cached CBs).
     applyPendingTextureDescriptorWrites(frameIdx);
 
+    // Ocean shore depth map: point this slot's sets at the active ping-pong image (UPDATE_AFTER_BIND,
+    // like the AO/TLAS bindings — a shore re-bake swaps images without re-recording anything).
+    for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
+    {
+        m_staticMeshGraphicsPipeline.updateOceanShoreDescriptor(frameData.staticMeshPipelineDescriptorSet[eye].getDescriptorSet(),
+            m_oceanSimPipeline.getShoreView(), m_oceanSimPipeline.getShoreSampler());
+        m_gbufferPipeline.updateOceanShoreDescriptor(frameData.gbufferDescriptorSet[eye].getDescriptorSet(),
+            m_oceanSimPipeline.getShoreView(), m_oceanSimPipeline.getShoreSampler());
+    }
+
     const bool recordScene = !frameData.updated && m_meshInstanceCounter > 0;
     if (recordScene)
     {
@@ -2021,6 +2035,10 @@ void Renderer::recordCommandBuffers()
 
     CommandBuffer& commandBuffer = frameData.primaryCommandBuffer;
     vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);
+    // Pending ocean shore-map upload: copied here in the primary (re-recorded every frame) because the
+    // destination ping-pong image was sampled by older submissions — the transition needs an execution
+    // dependency on those VS/FS reads, which the StagingManager's fresh-image upload path doesn't emit.
+    m_oceanSimPipeline.recordShoreUpload(commandBuffer);
     { // Sync for ubo copy
         vk::MemoryBarrier2 memoryBarrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eCopy,

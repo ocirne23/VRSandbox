@@ -7,6 +7,8 @@ import Core.Transform;
 
 import RendererVK;
 
+import :Climate;
+
 export namespace Procedural
 {
 	// Render-only procedural ocean, the CPU side of the FFT/Tessendorf water: maintains a camera-following
@@ -33,10 +35,15 @@ export namespace Procedural
 		OceanRenderer& operator=(const OceanRenderer&) = delete;
 
 		void initialize();                                     // registers Tweaks
-		void update(Renderer& renderer, const Camera& camera); // per-frame: push params + render (after beginFrame)
+		// Per-frame: push params + render (after beginFrame). terrain = the streamer's live height field
+		// (TerrainStreamer::activeClimateMaps(), nullptr = no terrain): with it the ocean bakes a coarse
+		// water-depth map around the camera on a worker thread — shallow water fades the waves (fake
+		// shoaling), the waterline grows a surf band, and waves never poke through land.
+		void update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ClimateMaps> terrain = nullptr);
 
 	private:
 		void rebuildGrid();
+		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& terrain);
 
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---
 		bool  m_enabled = false;
@@ -74,6 +81,25 @@ export namespace Procedural
 		float m_foamSpread = 1.2f;   // turbulence diffusion per frame (wake spreads as it lives)
 		float m_foamBoost = 0.67f;    // turbulence -> fold-threshold relaxation (aged-foam amount)
 		float m_turbidity = 0.0f;    // entrained bubbles: milky brightening + roughness of the wake
+
+		// --- Shore interaction (terrain water-depth bake; see updateShoreMap) ---
+		bool  m_shoreEnabled = true;
+		float m_shoreRange = 1024.0f;   // world size (m) the baked map covers, centered on the camera
+		float m_shoalScale = 0.05f;     // waves fade below depth = scale * cascade patch size
+		float m_shoreFoamDepth = 1.5f;  // surf band: water-column height (m) that churns white; 0 = off
+
+		// Bake state: one async bake at a time (std::async); the result ships to the GPU when ready and
+		// the previous map stays active meanwhile. A bake pins its ClimateMaps via the captured shared_ptr.
+		std::future<std::vector<float>> m_bakeFuture;
+		glm::vec2 m_bakePendingCenter = glm::vec2(0.0f); // inputs of the IN-FLIGHT bake
+		float m_bakePendingRange = 0.0f;
+		float m_bakePendingSeaLevel = 0.0f;
+		const ClimateMaps* m_bakePendingMaps = nullptr;  // identity only (never dereferenced)
+		glm::vec2 m_shoreCenter = glm::vec2(0.0f);       // inputs of the ACTIVE (uploaded) map
+		float m_shoreActiveRange = 0.0f;
+		float m_shoreBakedSeaLevel = 0.0f;
+		const ClimateMaps* m_shoreBakedMaps = nullptr;   // identity only (never dereferenced)
+		bool  m_shoreValid = false;
 
 		bool m_gridDirty = true;
 

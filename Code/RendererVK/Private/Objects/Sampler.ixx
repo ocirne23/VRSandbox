@@ -9,7 +9,7 @@ public:
     ~Sampler();
     Sampler(const Sampler&) = delete;
 
-    bool initialize();
+    bool initialize(vk::SamplerAddressMode addressMode = vk::SamplerAddressMode::eRepeat);
 
     vk::Sampler getSampler() const { return m_sampler; }
 

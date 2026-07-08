@@ -30,6 +30,7 @@
 // sky/sun tweaks.
 
 #include "shared.inc.glsl"
+#define OCEAN_SHORE_BINDING 18
 #include "ocean_wave.inc.glsl"
 
 struct MaterialInfo
@@ -66,7 +67,7 @@ layout (binding = 6, std430) readonly buffer InGridTable
 #define TABLE_SIZE_NAME in_tableSize
 #include "light_grid.inc.glsl"
 
-layout (binding = 18) uniform sampler2D u_textures[]; // highest binding in the set: variable descriptor count
+layout (binding = 19) uniform sampler2D u_textures[]; // highest binding in the set: variable descriptor count
 layout (binding = 11) uniform accelerationStructureEXT u_tlas;
 
 // Scene geometry for ray hits (same buffers the TLAS instance records were built from — custom index =
@@ -286,6 +287,24 @@ void main()
     // wake reads as churned water, not a decal), entrained-bubble milkiness, and extra roughness.
     const float turbulence = oceanSampleTurbulence(in_uv, length(fwidth(in_uv)));
     const float foam = oceanInstantFoam(jacobian, accel, turbulence * u_oceanParams5.x);
+
+    // Shoreline surf (needs a shore depth map + "Shore foam depth" > 0): where the swell runs into
+    // vanishing depth the crest occupies most of the remaining water column and churns white (Miche-ish
+    // breaking, H ~ 0.8 d), plus a thin lace right at the waterline. Driven by the LIVE displaced surface
+    // height, so the band surges up the beach and drains back with each wave instead of sitting on a
+    // static depth contour.
+    float shoreFoam = 0.0;
+    const float shoreFoamDepth = u_oceanParams5.z;
+    if (shoreFoamDepth > 0.0)
+    {
+        const float shoreDepth = oceanSampleShoreDepth(in_uv);
+        const float waveH = in_pos.y - u_oceanParams2.w;        // surface height above the calm sea level
+        const float column = max(shoreDepth, 0.0) + waveH;      // instantaneous water column at this pixel
+        const float nearShore = 1.0 - smoothstep(shoreFoamDepth, 4.0 * shoreFoamDepth, shoreDepth);
+        const float bore = max(waveH, 0.0) / max(column, 0.05); // crest fraction of the column (bore front)
+        shoreFoam = nearShore * smoothstep(0.4, 0.8, bore);
+        shoreFoam = max(shoreFoam, 1.0 - smoothstep(0.0, 0.35 * shoreFoamDepth, column)); // waterline lace
+    }
     const float ns = u_oceanParams1.w;
     vec3 N = normalize(vec3(-slope.x * ns, 1.0, -slope.y * ns));
     if (dot(N, V) < 0.0) // grazing/underwater: keep the shading hemisphere consistent
@@ -369,8 +388,9 @@ void main()
     const float Vv = V_SmithGGX(NoV, NoL, alphaF);
     color += sunTint * (D * Vv * NoL * sunVis) * F_Schlick(LoH, 0.02);
 
-    // --- Crest foam: geometry-locked instant foam, threshold-relaxed by the accumulated turbulence ---
-    const float foamW = clamp(foam, 0.0, 1.0);
+    // --- Crest foam (geometry-locked instant foam, threshold-relaxed by the accumulated turbulence)
+    // plus the shoreline surf band ---
+    const float foamW = clamp(max(foam, shoreFoam), 0.0, 1.0);
     if (foamW > 0.003)
         color = mix(color, whitewater, foamW);
 

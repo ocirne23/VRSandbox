@@ -44,6 +44,13 @@ public:
         uint16 metalRoughnessTexIdx = UINT16_MAX;
         bool excludeFromRayTracing = false;
         bool useSceneTextures = true; // if false use the above texture indices instead of the material's own scene textures
+        // Skip meshopt LOD-chain generation for this container's meshes. For containers that ARE a LOD
+        // scheme already (terrain chunks are re-generated per ring distance, the ocean grid is a
+        // clipmap) a generated chain on top only hurts: raster picks a level per frame while ray
+        // tracing shares ONE BLAS at "RT/BLAS LOD level", so refraction/reflection rays hit different
+        // geometry than the rasterizer draws (visible mismatch at the waterline), and simplifying the
+        // ocean's FLAT grid has ~zero geometric error while destroying its per-vertex morph texcoords.
+        bool disableGeneratedLods = false;
         RendererVKLayout::EPipelineIndex pipelineIdx = RendererVKLayout::EPipelineIndex::UnlitOpaque;
     };
 
@@ -75,7 +82,7 @@ public:
 private:
 
     struct TempInitData;
-    void initializeMeshes(const ISceneData& sceneData, TempInitData& temp);
+    void initializeMeshes(const ISceneData& sceneData, TempInitData& temp, const MaterialOverrides* pOverrides);
     void initializeMaterials(const ISceneData& sceneData, TempInitData& temp, const MaterialOverrides* pOverrides);
     void initializeNodes(const ISceneData& sceneData, TempInitData& temp);
 

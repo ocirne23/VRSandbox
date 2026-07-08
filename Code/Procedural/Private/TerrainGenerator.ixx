@@ -17,7 +17,8 @@ export namespace Procedural
 	};
 
 	// Generates one chunk's surface mesh (geometry only). Pure and thread-safe given a shared ClimateMaps.
-	// The height field is sampled in world space and the ocean surface is flattened to sea level, so oceans
-	// render flat and heights agree across chunk/LOD boundaries.
+	// The height field is sampled in world space (so heights agree across chunk/LOD boundaries) and
+	// includes the seabed below sea level — the OceanRenderer draws the water over it and bakes its
+	// shore-depth map from the same field.
 	void generateChunk(const ClimateMaps& maps, const ChunkParams& params, TerrainChunkMesh& out);
 }

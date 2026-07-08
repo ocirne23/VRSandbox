@@ -63,8 +63,10 @@ public:
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params, bool updateDescriptors = true);
     void updateAODescriptor(vk::DescriptorSet descriptorSet, vk::ImageView aoView, vk::Sampler aoSampler);
     void updateTlasDescriptor(vk::DescriptorSet descriptorSet, vk::AccelerationStructureKHR tlas);
-    // Rewrites one slot of the texture array (binding 18) with a streamed texture's current view.
+    // Rewrites one slot of the texture array (binding 19) with a streamed texture's current view.
     void updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view);
+    // Points the ocean shore water-depth binding (18) at the active ping-pong image (refreshed per frame).
+    void updateOceanShoreDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView shoreView, vk::Sampler shoreSampler);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
     // Ocean variant: light refraction/reflection ray hits with the grid lights (OCEAN_HIT_LIGHTS define).
     // Takes effect on the next reloadShaders (the Renderer reloads when the tweak flips).

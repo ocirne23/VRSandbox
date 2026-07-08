@@ -53,6 +53,21 @@ public:
     vk::ImageView getMapsView() const { return m_mapsView; }
     vk::Sampler getMapsSampler() const { return m_mapsSampler.getSampler(); }
 
+    // Shore water-depth map (R32F, OCEAN_SHORE_RES^2, meters below sea level; negative = land), CPU-baked
+    // from the terrain height field around the camera (Procedural::OceanRenderer). Ping-pong pair:
+    // uploadShoreMap stages the texels into this frame slot's staging buffer (fence-waited at beginFrame,
+    // so the CPU write is safe), recordShoreUpload copies them into the INACTIVE image inside the primary
+    // CB with a VS/FS -> transfer -> VS/FS barrier pair (the image WAS sampled by earlier submissions —
+    // fences order the CPU, not the GPU, so the transition needs a real execution dependency), and the
+    // flip is deferred to the next beginFrame so the descriptor swap lands together with the UBO that
+    // carries the new map's world center (the shore binding is UPDATE_AFTER_BIND and refreshed every
+    // frame, so re-bakes never re-record the cached command buffers).
+    void uploadShoreMap(std::span<const float> depthTexels, uint32 frameIdx);
+    void recordShoreUpload(CommandBuffer& commandBuffer); // no-op unless an upload is pending
+    void flipShoreMapIfPending() { if (m_shoreFlipPending) { m_shoreActive ^= 1u; m_shoreFlipPending = false; } }
+    vk::ImageView getShoreView() const { return m_shoreView[m_shoreActive]; }
+    vk::Sampler getShoreSampler() const { return m_shoreSampler.getSampler(); }
+
 private:
     static constexpr uint32 N = RendererVKLayout::OCEAN_FFT_SIZE;
     static constexpr uint32 CASCADES = RendererVKLayout::OCEAN_CASCADES;
@@ -99,5 +114,16 @@ private:
     VmaAllocation m_foamMemory{};
     vk::ImageView m_foamView{};
 
-    Sampler m_mapsSampler; // repeat + trilinear + aniso (the default engine sampler)
+    // Shore water-depth ping-pong pair (see uploadShoreMap). SHADER_READ_ONLY between uploads.
+    vk::Image m_shoreImage[2]{};
+    VmaAllocation m_shoreMemory[2]{};
+    vk::ImageView m_shoreView[2]{};
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_shoreStaging; // host-visible, mapped
+    std::array<std::span<uint8>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_shoreStagingMapped;
+    int  m_shoreUploadSlot = -1; // staging slot holding a not-yet-recorded upload (-1 = none)
+    uint32 m_shoreActive = 0;
+    bool m_shoreFlipPending = false;
+
+    Sampler m_mapsSampler;  // repeat + trilinear + aniso (the default engine sampler)
+    Sampler m_shoreSampler; // clamp-to-edge: the shore map is a world-region snapshot, not a tiling patch
 };

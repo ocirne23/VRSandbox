@@ -32,6 +32,12 @@ export namespace Procedural
 		void initialize();                                     // registers Tweaks + starts the worker thread
 		void update(Renderer& renderer, const Camera& camera); // per-frame: stream, drain, render (call after beginFrame)
 
+		// The live height/climate field, for systems that must agree with the rendered terrain (the
+		// ocean's shore-depth bake). nullptr while terrain rendering is disabled — consumers treat that
+		// as "no terrain" rather than sampling a field that isn't drawn. Thread-safe; the shared_ptr
+		// keeps the maps valid across config rebuilds (workers holding the old maps finish against them).
+		std::shared_ptr<const ClimateMaps> activeClimateMaps() { return m_enabled ? currentMaps() : nullptr; }
+
 	private:
 		struct Request
 		{
@@ -67,19 +73,19 @@ export namespace Procedural
 		bool  m_enabled = false;
 		int   m_seed = 1337;
 		float m_chunkSize = 128.0f;
-		int   m_lod0Res = 64;
+		int   m_lod0Res = 90;
 		int   m_ringRadius = 8;   // max generation range from the camera chunk, in chunks
 		int   m_lodStep = 2;      // chunks of ring distance per extra LOD level
 		int   m_maxLod = 4;
 		float m_seaLevel = 0.0f;
-		float m_skirtDepth = 8.0f;
-		int   m_maxUploadsPerFrame = 4;
+		float m_skirtDepth = 1.0f;
+		int   m_maxUploadsPerFrame = 8;
 
-		float  m_continentAmplitude = 60.0f;
+		float  m_continentAmplitude = 90.0f;
 		float  m_mountainAmplitude = 180.0f;
 		float  m_detailAmplitude = 6.0f;
 		float  m_continentFrequency = 0.0009f;
-		float  m_mountainFrequency = 0.0025f;
+		float  m_mountainFrequency = 0.0015f;
 		float  m_detailFrequency = 0.02f;
 		float  m_climateFrequency = 0.00025f;
 		int    m_continentOctaves = 5;

@@ -5,6 +5,7 @@
 
 #include "shared.inc.glsl"
 #define OCEAN_MAPS_BINDING 3
+#define OCEAN_SHORE_BINDING 4
 #include "ocean_wave.inc.glsl"
 
 // View index (0 = centre/desktop, 1 = left eye, 2 = right eye). The G-buffer is rendered once per eye into
