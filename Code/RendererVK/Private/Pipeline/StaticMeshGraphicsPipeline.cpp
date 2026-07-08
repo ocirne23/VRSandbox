@@ -121,6 +121,11 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 	// double-sided so it still draws when the camera dips below the surface.
 	const std::string oceanVariantPath = "Shaders/ocean.fs.glsl";
 	const std::string oceanVariantText = FileSystem::readFileStr(oceanVariantPath);
+	// OCEAN_HIT_LIGHTS: also evaluate the scene's grid lights at refraction/reflection ray hits
+	// ("Ocean/Shading/Hit lighting" tweak; toggling reloads this pipeline via setOceanParams).
+	std::vector<ShaderDefine> oceanFragDefines;
+	if (m_oceanHitLights)
+		oceanFragDefines.push_back({ "OCEAN_HIT_LIGHTS", "1" });
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
 		.vertexShader = ShaderSource{
 			.text = graphicsPipelineLayout.vertexShader.text,
@@ -130,6 +135,7 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 		.fragmentShader = ShaderSource{
 			.text = oceanVariantText,
 			.debugFilePath = oceanVariantPath,
+			.defines = std::move(oceanFragDefines),
 		},
 		.cullMode = vk::CullModeFlagBits::eNone,
 	});

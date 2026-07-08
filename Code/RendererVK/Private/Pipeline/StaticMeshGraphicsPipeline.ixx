@@ -66,6 +66,9 @@ public:
     // Rewrites one slot of the texture array (binding 18) with a streamed texture's current view.
     void updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
+    // Ocean variant: light refraction/reflection ray hits with the grid lights (OCEAN_HIT_LIGHTS define).
+    // Takes effect on the next reloadShaders (the Renderer reloads when the tweak flips).
+    void setOceanHitLights(bool enabled) { m_oceanHitLights = enabled; }
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
     const IndirectExecutionSet& getIndirectExecutionSet() const { return m_indirectExecutionSet; }
     const IndirectCommandsLayout& getIndirectCommandsLayout() const { return m_indirectCommandsLayout; }
@@ -80,6 +83,7 @@ private:
     Sampler m_sampler;
     vk::RenderPass m_renderPass;
     bool m_stereo = false;
+    bool m_oceanHitLights = false; // OCEAN_HIT_LIGHTS define on the ocean fragment variant
 
     vk::DeviceSize m_preprocessSize = 0;
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;            // opaque pass

@@ -60,6 +60,7 @@ export namespace Procedural
 		glm::vec3 m_scatterColor = glm::vec3(0.012f, 0.08f, 0.085f);
 		float m_scatterStrength = 1.0f;
 		float m_roughness = 0.07f;
+		bool  m_hitLighting = false; // grid lights at refraction/reflection ray hits (pipeline reload on toggle)
 		// Foam & turbulence: one instant-foam response draws the crest foam AND injects the accumulated
 		// turbulence field, which in turn relaxes the fold threshold (aged foam along live geometry) and
 		// makes the wake milky/rough.

@@ -147,7 +147,8 @@ public:
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
-    void setOceanParams(const OceanParams& ocean) { m_oceanParams = ocean; }
+    // Flipping OceanParams::hitLighting rebuilds the ocean fragment variant (GPU idle + shader reload).
+    void setOceanParams(const OceanParams& ocean);
     void setPostParams(const PostParams& post) { m_postParams = post; setHaveToRecordCommandBuffers(); }
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }

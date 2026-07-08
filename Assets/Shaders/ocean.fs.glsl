@@ -41,6 +41,31 @@ struct MaterialInfo
 };
 layout (binding = 2, std430) readonly buffer InMaterialInfos { MaterialInfo in_materialInfos[]; };
 
+// Scene lights: the same world-space light grid the forward pass shades with (bindings shared through
+// the static-mesh pipeline layout).
+struct LightInfo
+{
+    vec3 pos;
+    float range;
+    vec3 color;
+    float width;     // 0 = point light, > 0 = rectangular area light, < 0 = spot
+    vec3 direction;  // area light: up-axis, magnitude = height
+    float rotation;  // area light: rotation of the quad around direction
+};
+layout (binding = 4, std430) readonly buffer InLightInfos { LightInfo in_lightInfos[]; };
+layout (binding = 5, std430) readonly buffer InLightGrid { uint in_gridData[]; };
+layout (binding = 6, std430) readonly buffer InGridTable
+{
+    uint in_numGrids;
+    uint in_gridDataCounter;
+    uint in_tableSize;
+    uint in_gridTable[];
+};
+#define GRID_DATA_NAME  in_gridData
+#define GRID_TABLE_NAME in_gridTable
+#define TABLE_SIZE_NAME in_tableSize
+#include "light_grid.inc.glsl"
+
 layout (binding = 18) uniform sampler2D u_textures[]; // highest binding in the set: variable descriptor count
 layout (binding = 11) uniform accelerationStructureEXT u_tlas;
 
@@ -72,7 +97,8 @@ layout (binding = 10, std430) readonly buffer GiGridData { float gi_gridData[]; 
 #define GI_GRID_DATA_NAME gi_gridData
 #include "gi_probe.inc.glsl"
 
-#include "rt_shadow.inc.glsl" // rtShadowVisibility + the alpha-masked candidate test
+#include "rt_shadow.inc.glsl"       // rtShadowVisibility + the alpha-masked candidate test
+#include "punctual_lights.inc.glsl" // point/spot/area/tube evaluation + RT light shadows (shared with the forward pass)
 
 layout (location = 0) in vec3 in_pos;                       // displaced world position
 layout (location = 1) in mat3 in_tbn;                       // placeholder (normal rebuilt here)
@@ -176,13 +202,43 @@ bool traceScene(vec3 origin, vec3 dir, float tMax, out SceneHit hit)
     return true;
 }
 
-// Diffuse shading of a ray hit: sun (optionally attenuated) + GI probe irradiance (skyRadiance fallback).
-vec3 shadeHit(SceneHit hit, vec3 sunRadiance, vec3 L)
+// Shading of a ray hit: sun (optionally attenuated) + GI probe irradiance (skyRadiance fallback), and —
+// behind the OCEAN_HIT_LIGHTS variant define ("Ocean/Shading/Hit lighting" tweak) — the scene's grid
+// lights, so geometry seen THROUGH the water (refraction) or mirrored in it (reflection) picks up local
+// light. Analytic only: no per-light shadow rays inside what is already a refraction/reflection ray.
+vec3 shadeHit(SceneHit hit, vec3 rayDir, vec3 sunRadiance, vec3 L)
 {
     const vec3 sun = sunRadiance * max(dot(hit.N, L), 0.0);
     const vec3 probeE = evalProbeSH(hit.pos, hit.N);
     const vec3 indirect = (probeE.x >= 0.0 ? probeE / PI : skyRadiance(hit.N)) * u_aoParams.y;
-    return hit.albedo * (sun / PI + indirect + u_ambientColor);
+    vec3 radiance = hit.albedo * (sun / PI + indirect + u_ambientColor);
+
+#ifdef OCEAN_HIT_LIGHTS
+    const vec3 matColOverPi = hit.albedo / PI;
+    const vec3 V = -rayDir;
+    const ivec3 gridPos = getGridPos(hit.pos);
+    uint tableIdx = getTableIdx(gridPos);
+    while (true)
+    {
+        const uint gridIdx = getGridIdx(tableIdx);
+        if (gridIdx == EMPTY_ENTRY)
+            break;
+        const ivec3 gridMin = getGridMin(gridIdx);
+        if (gridMin == gridPos)
+        {
+            const uint numLargeLights = getLargeLightCount(gridIdx);
+            for (uint i = 0; i < min(numLargeLights, MAX_LARGE_LIGHTS_PER_GRID); ++i)
+                radiance += doLight(in_lightInfos[getLargeLightId(gridIdx, i)], hit.pos, V, hit.N, vec3(0.04), matColOverPi, 0.0, 0.7, 0.49);
+            const uint cellOffset = calcCellOffset(gridIdx, gridMin, hit.pos);
+            const uint numLights = getNumLightsForCell(cellOffset);
+            for (uint i = 0; i < min(numLights, MAX_LIGHTCELL_LIGHTS); ++i)
+                radiance += doLight(in_lightInfos[getLightId(cellOffset, i)], hit.pos, V, hit.N, vec3(0.04), matColOverPi, 0.0, 0.7, 0.49);
+            break;
+        }
+        tableIdx = getNextTableIdx(tableIdx);
+    }
+#endif
+    return radiance;
 }
 
 void main()
@@ -256,7 +312,7 @@ void main()
                 // Sun reaching the hit attenuates down the water column above it (Beer-Lambert), then the
                 // view path back attenuates again; plus closed-form homogeneous single-scatter in-scatter.
                 const float sunPath = max(u_oceanParams2.w - hit.pos.y, 0.0) / max(L.y, 0.25);
-                const vec3 hitRadiance = shadeHit(hit, sunTint * sunVis * exp(-sigmaT * sunPath), L);
+                const vec3 hitRadiance = shadeHit(hit, refrDir, sunTint * sunVis * exp(-sigmaT * sunPath), L);
                 const vec3 T = exp(-sigmaT * hit.t);
                 body = hitRadiance * T + inscatter * (1.0 - T);
             }
@@ -274,7 +330,7 @@ void main()
     {
         SceneHit hit;
         if (traceScene(in_pos + N * 0.05, R, 3000.0, hit))
-            reflColor = shadeHit(hit, sunTint, L);
+            reflColor = shadeHit(hit, R, sunTint, L);
     }
     const vec3 reflection = mix(reflColor, ambientSky, reflBlur);
 
@@ -290,8 +346,48 @@ void main()
     color += sunTint * (D * Vv * NoL * sunVis) * F_Schlick(LoH, 0.02);
 
     // --- Crest foam: geometry-locked instant foam, threshold-relaxed by the accumulated turbulence ---
-    if (foam > 0.003)
-        color = mix(color, whitewater, clamp(foam, 0.0, 1.0));
+    const float foamW = clamp(foam, 0.0, 1.0);
+    if (foamW > 0.003)
+        color = mix(color, whitewater, foamW);
+
+    // --- Scene lights: the shared light-grid walk + punctual/area/tube evaluation (RT-shadowed), applied
+    // to the final surface: water responds with the dielectric F0 = 0.02 specular (the light's glint,
+    // widened by the same filtered roughness as the sun) and an in-scatter "diffuse" (light entering the
+    // water and scattering back out); foam patches respond as bright lambertian whitewater instead.
+    {
+        const vec3 matColOverPi = mix(u_oceanScatter.rgb * u_oceanScatter.w, u_oceanFoam.rgb, foamW) / PI;
+        const float lightRough = clamp(mix(alphaF, 0.85, foamW), 0.02, 1.0);
+        const float lightRoughSq = lightRough * lightRough;
+        const vec3 waterSpec = vec3(0.02);
+
+        const ivec3 gridPos = getGridPos(in_pos);
+        uint tableIdx = getTableIdx(gridPos);
+        while (true)
+        {
+            const uint gridIdx = getGridIdx(tableIdx);
+            if (gridIdx == EMPTY_ENTRY)
+                break;
+            const ivec3 gridMin = getGridMin(gridIdx);
+            if (gridMin == gridPos)
+            {
+                const uint numLargeLights = getLargeLightCount(gridIdx);
+                for (uint i = 0; i < min(numLargeLights, MAX_LARGE_LIGHTS_PER_GRID); ++i)
+                {
+                    const LightInfo light = in_lightInfos[getLargeLightId(gridIdx, i)];
+                    color += doLightShadowed(light, in_pos, V, N, waterSpec, matColOverPi, 0.0, lightRough, lightRoughSq);
+                }
+                const uint cellOffset = calcCellOffset(gridIdx, gridMin, in_pos);
+                const uint numLights = getNumLightsForCell(cellOffset);
+                for (uint i = 0; i < min(numLights, MAX_LIGHTCELL_LIGHTS); ++i)
+                {
+                    const LightInfo light = in_lightInfos[getLightId(cellOffset, i)];
+                    color += doLightShadowed(light, in_pos, V, N, waterSpec, matColOverPi, 0.0, lightRough, lightRoughSq);
+                }
+                break;
+            }
+            tableIdx = getNextTableIdx(tableIdx);
+        }
+    }
 
     out_color = vec4(color, 1.0);
 }

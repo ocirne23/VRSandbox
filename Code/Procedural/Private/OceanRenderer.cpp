@@ -47,6 +47,7 @@ namespace Procedural
 		Tweak::color3("Ocean/Shading", "Scatter color", &m_scatterColor);
 		Tweak::floatVar("Ocean/Shading", "Scatter strength", &m_scatterStrength, 0.0f, 4.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shading", "Roughness", &m_roughness, 0.02f, 0.5f, 0.001f);
+		Tweak::boolean("Ocean/Shading", "Hit lighting", &m_hitLighting); // lights on geometry seen through/mirrored in the water
 		Tweak::color3("Ocean/Shading", "Foam color", &m_foamColor);
 		// One instant-foam response (thresholds + softness) draws the crest foam AND injects the
 		// turbulence field; decay/spread shape the wake's life, foam boost/turbidity its look.
@@ -152,6 +153,7 @@ namespace Procedural
 		params.scatterColor = m_scatterColor;
 		params.scatterStrength = m_scatterStrength;
 		params.roughness = m_roughness;
+		params.hitLighting = m_hitLighting;
 		params.foamColor = m_foamColor;
 		params.foamBias = m_foamBias;
 		params.foamBreakAccel = m_foamBreakAccel;

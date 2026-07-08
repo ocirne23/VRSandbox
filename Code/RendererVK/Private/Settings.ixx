@@ -211,6 +211,8 @@ export struct OceanParams
     glm::vec3 scatterColor = glm::vec3(0.012f, 0.08f, 0.085f);
     float scatterStrength  = 1.0f;
     float roughness        = 0.07f; // perceptual micro-roughness (widens the sun glint)
+    bool  hitLighting      = false; // evaluate the scene's grid lights at refraction/reflection ray hits
+                                    // (OCEAN_HIT_LIGHTS shader variant; toggling reloads the pipeline)
     // Foam & turbulence. ONE instant-foam response (oceanInstantFoam) both draws the per-pixel crest
     // foam and injects the accumulated TURBULENCE field (the churn energy breaking leaves behind).
     // Turbulence then drives the wake look: it relaxes the fold threshold (aged foam paints itself along

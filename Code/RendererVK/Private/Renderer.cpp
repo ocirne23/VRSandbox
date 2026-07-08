@@ -349,6 +349,23 @@ void Renderer::reloadShaders()
     printf("Reloaded shaders\n");
 }
 
+void Renderer::setOceanParams(const OceanParams& ocean)
+{
+    // OCEAN_HIT_LIGHTS is a compile-time variant define: flipping the tweak rebuilds the ocean fragment
+    // pipeline (GPU idle first — cached CBs reference the old pipeline; the re-record this queues happens
+    // in present(), so a mid-frame toggle is safe). Same pattern as the RTAO alpha-test tweak.
+    const bool rebuildOceanVariant = ocean.hitLighting != m_oceanParams.hitLighting;
+    m_oceanParams = ocean;
+    if (rebuildOceanVariant)
+    {
+        if (Globals::device.getGraphicsQueue().waitIdle() != vk::Result::eSuccess)
+            return;
+        m_staticMeshGraphicsPipeline.setOceanHitLights(ocean.hitLighting);
+        m_staticMeshGraphicsPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass(), m_maxTextures);
+        setHaveToRecordCommandBuffers();
+    }
+}
+
 void Renderer::setWindowMinimized(bool minimized)
 {
     m_windowMinimized = minimized;
