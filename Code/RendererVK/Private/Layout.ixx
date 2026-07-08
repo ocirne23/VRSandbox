@@ -148,6 +148,11 @@ export namespace RendererVKLayout
         glm::mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
         glm::mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen
         glm::mat4 prevInvMvp; // previous frame's inverse(mvp): reconstruct last frame's world pos
+        glm::mat4 reprojClip; // prevMvp * inverse(mvp), fused on the CPU in double precision: reprojects
+                              // current NDC + depth straight to last frame's clip space. Near-identity at
+                              // any camera position, unlike the world-space round trip through invMvp +
+                              // prevMvp whose float32 error grows with distance from the world origin
+                              // (pixel-scale by ~500 units = temporal-history jitter).
         glm::vec4 viewPos;    // xyz = world position
     };
     constexpr uint32 VIEW_CENTER = 0;  // shared passes + desktop; the eyes are 1 (left) and 2 (right)

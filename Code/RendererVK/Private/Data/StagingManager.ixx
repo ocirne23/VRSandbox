@@ -31,6 +31,18 @@ public:
     // The signal semaphore is kept as m_nextUpdateSemaphore so the next update() consumes it.
     void flushPending() { m_nextUpdateSemaphore = update(); }
 
+    // Call before queuing an upload() into a buffer that is shared (not per-frame-in-flight) and read
+    // full-range every frame by GI/RTAO compute or the draw passes (mesh mega-buffers, MeshInfos,
+    // MaterialInfos, InstanceOffsets). upload()'s ring buffer can implicitly submit (via update()) the
+    // moment it overflows, regardless of caller - so a copy into one of these buffers can go to the GPU
+    // far earlier than whatever call site eventually flushes it, racing an in-flight frame's read with no
+    // synchronization. Draining here, once per frame (cheap no-op on every later call this frame - nothing
+    // new can have been submitted since, until the next resetSharedWriteGate), closes that window
+    // regardless of when the eventual flush happens. Reset once per frame right after that frame's
+    // primary command buffer is submitted (Renderer::present()).
+    void ensureDrainedForSharedWrite();
+    void resetSharedWriteGate() { m_drainedForSharedWrite = false; }
+
 private:
 
     SwapChain* m_swapChain = nullptr;
@@ -64,6 +76,8 @@ private:
     };
     std::vector<ImageMipCopy> m_imageMipCopyList;
     std::span<uint8> m_mappedMemory;
+
+    bool m_drainedForSharedWrite = false;
 };
 
 export namespace Globals

@@ -129,6 +129,10 @@ size_t MeshDataManager::uploadVertexData(const void* pData, size_t size)
 {
     const size_t offset = allocRange(m_vertexAllocator, m_vertexBufSize, VERTEX_BUCKET_BYTES, size,
         m_vertexBuffer, vertexBufferUsage(), m_vertexBytesAllocated);
+    // Shared (not per-frame-in-flight), read full-range every frame by GI probe trace / RTAO / BLAS builds.
+    // See StagingManager::ensureDrainedForSharedWrite: without this, upload()'s ring buffer can implicitly
+    // submit the copy the moment it overflows, racing an in-flight frame's read with no synchronization.
+    Globals::stagingManager.ensureDrainedForSharedWrite();
     Globals::stagingManager.upload(m_vertexBuffer.getBuffer(), size, pData, offset);
     return offset;
 }
@@ -137,6 +141,7 @@ size_t MeshDataManager::uploadIndexData(const void* pData, size_t size)
 {
     const size_t offset = allocRange(m_indexAllocator, m_indexBufSize, INDEX_BUCKET_BYTES, size,
         m_indexBuffer, indexBufferUsage(), m_indexBytesAllocated);
+    Globals::stagingManager.ensureDrainedForSharedWrite(); // see uploadVertexData
     Globals::stagingManager.upload(m_indexBuffer.getBuffer(), size, pData, offset);
     return offset;
 }
@@ -165,6 +170,7 @@ size_t MeshDataManager::uploadSkinningData(const void* pData, size_t size)
 {
     const size_t offset = allocRange(m_skinningAllocator, m_skinningBufSize, SKINNING_BUCKET_BYTES, size,
         m_skinningBuffer, skinningBufferUsage(), m_skinningBytesAllocated);
+    Globals::stagingManager.ensureDrainedForSharedWrite(); // see uploadVertexData
     Globals::stagingManager.upload(m_skinningBuffer.getBuffer(), size, pData, offset);
     return offset;
 }

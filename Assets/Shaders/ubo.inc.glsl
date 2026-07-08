@@ -18,6 +18,8 @@ struct ViewData
     mat4 invMvp;     // inverse(mvp): reconstruct world pos from depth + screen uv
     mat4 prevMvp;    // previous frame's mvp: reproject world pos to last frame's screen
     mat4 prevInvMvp; // previous frame's inverse(mvp): reconstruct last frame's world pos
+    mat4 reprojClip; // prevMvp * inverse(mvp) fused in double precision on the CPU: current NDC + depth
+                     // -> last frame's clip, precision independent of the camera's world position
     vec4 viewPos;    // xyz = world position
 };
 
@@ -112,6 +114,7 @@ int g_viewIndex = 0;
 #define u_invMvp     u_views[g_viewIndex].invMvp
 #define u_prevMvp    u_views[g_viewIndex].prevMvp
 #define u_prevInvMvp u_views[g_viewIndex].prevInvMvp
+#define u_reprojClip u_views[g_viewIndex].reprojClip
 #define u_viewPos    (u_views[g_viewIndex].viewPos.xyz)
 
 #endif

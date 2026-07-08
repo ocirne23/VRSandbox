@@ -141,6 +141,15 @@ vk::Semaphore StagingManager::copyImageMips(vk::Image srcImage, vk::Image dstIma
     return m_semaphores[m_currentBuffer];
 }
 
+void StagingManager::ensureDrainedForSharedWrite()
+{
+    if (m_drainedForSharedWrite)
+        return;
+    auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle before shared buffer write");
+    m_drainedForSharedWrite = true;
+}
+
 vk::Semaphore StagingManager::update()
 {
     if (m_bufferCopyRegions.empty() && m_imageCopyRegions.empty() && m_imageCopyAndMipList.empty() && m_imageMipCopyList.empty())

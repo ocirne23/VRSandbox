@@ -61,9 +61,12 @@ void main()
     // reproject AT the far plane: the reprojection is then purely rotational (parallax-free, correct for
     // content at infinity) and the jittered sky raster still accumulates instead of visibly shaking.
     const bool sky = depth >= 1.0;
-    const vec3 worldPos = worldPosFromDepth(uv, min(depth, 1.0));
+    const vec3 worldPos = worldPosFromDepth(uv, min(depth, 1.0)); // disocclusion test only
     float clipW;
-    const vec2 prevUv = prevScreenUV(worldPos, clipW);
+    // Clip-space reprojection (u_reprojClip): the world-space round trip drifts pixel-scale away from
+    // the world origin, which made TAA fetch history off-target and turned every stochastic input
+    // (jitter accumulation, shadow dither, RTAO, sky clouds) into visible per-frame noise.
+    const vec2 prevUv = prevScreenUVClip(uv, min(depth, 1.0), clipW);
 
     const bool histValid = clipW > 0.0 && insideViewport(prevUv);
     if (!histValid)

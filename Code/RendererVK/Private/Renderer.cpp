@@ -10,6 +10,7 @@ import Core.Frustum;
 import Core.imgui;
 import Core.Camera;
 import Core.Tweaks;
+import Core.Log;
 
 import File;
 
@@ -380,7 +381,11 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     // invisible while per-frame data is byte-identical, but LOD switches change instance meshIdx en
     // masse and the torn instance/prefix data made the cull's buckets overflow into neighbouring
     // meshes' draw ranges (one-frame flashes with foreign materials).
-    m_swapChain.waitForFrame(m_swapChain.getCurrentFrameIndex());
+    if (!m_swapChain.waitForFrame(m_swapChain.getCurrentFrameIndex()))
+    {
+		Log::error("Renderer: failed to wait for frame, recreating swapchain");
+        recreateSwapchain();
+    }
 
     Globals::openXR.pollEvents();
 
@@ -456,7 +461,14 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 
     RendererVKLayout::ViewData& centerView = ubo.views[RendererVKLayout::VIEW_CENTER];
     centerView.mvp = projection * viewMatrix;
-    centerView.invMvp = glm::inverse(centerView.mvp);
+    // Invert in double precision: a float32 inverse of a perspective mvp is ill-conditioned and its
+    // error grows with the camera translation, which shows up as per-frame reconstruction jitter
+    // (sky ray, TAA reprojection, RTAO, fog) away from the world origin.
+    const glm::dmat4 centerInvMvpD = glm::inverse(glm::dmat4(centerView.mvp));
+    centerView.invMvp = glm::mat4(centerInvMvpD);
+    // Fused clip->prev-clip reprojection: the double product cancels the (position-scaled) translations
+    // exactly, leaving a near-identity matrix that survives float32 storage at any camera position.
+    centerView.reprojClip = glm::mat4(glm::dmat4(centerView.prevMvp) * centerInvMvpD);
     centerView.viewPos = glm::vec4(camera.position, 1.0f);
     ubo.frustum.fromMatrix(centerView.mvp);
     m_centerViewProj = centerView.mvp;
@@ -471,7 +483,9 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
             const glm::mat4 eyeProj = Globals::openXR.getEyeProjection(eye, camera.near, camera.far);
             RendererVKLayout::ViewData& v = ubo.views[eye + 1]; // [1] = left eye, [2] = right eye
             v.mvp = eyeProj * eyeView;
-            v.invMvp = glm::inverse(v.mvp);
+            const glm::dmat4 eyeInvMvpD = glm::inverse(glm::dmat4(v.mvp));
+            v.invMvp = glm::mat4(eyeInvMvpD);
+            v.reprojClip = glm::mat4(glm::dmat4(v.prevMvp) * eyeInvMvpD);
             v.viewPos = glm::vec4(eyePos, 1.0f);
         }
     }
@@ -854,16 +868,13 @@ void Renderer::present()
         setHaveToRecordCommandBuffers();
     }
 
-    if (m_sharedBufferNeedSync)
+    if (!m_pendingTextureFrees.empty())
     {
-        // One or more shared (not per-frame-in-flight) buffers had a within-capacity contents upload
-        // queued this frame; that copy must not race a still-in-flight earlier frame's full-range read of
-        // it (GI/RTAO compute, draw passes). One drain here covers everything queued so far this frame.
+        // A container was destroyed this frame; its textures may still be sampled by an in-flight frame,
+        // so drain before freeing them. Their bindless slots rewrite to the fallback in recordCommandBuffers
+        // below, before anything is submitted.
         auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
-        assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle before shared buffer upload");
-        m_sharedBufferNeedSync = false;
-        // Destroyed containers' textures can be freed now that nothing is in flight (their bindless
-        // slots rewrite to the fallback in recordCommandBuffers below, before anything is submitted).
+        assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle before freeing textures");
         processPendingTextureFrees();
     }
 
@@ -880,6 +891,9 @@ void Renderer::present()
     recordCommandBuffers();
 
     m_swapChain.submitCommandBuffer(getCurrentCommandBuffer());
+    // This frame's submission is now new GPU work that could read the shared mesh/material/instance-offset
+    // buffers; any upload into them from here on needs a fresh drain. See StagingManager::ensureDrainedForSharedWrite.
+    Globals::stagingManager.resetSharedWriteGate();
 
     Globals::openXR.endFrame(m_eyeColorImage[0], m_eyeColorImage[1], m_swapChain.getLayout().extent, vk::ImageLayout::ePresentSrcKHR);
 
@@ -2321,14 +2335,11 @@ void Renderer::removeObjectContainer(ObjectContainer* pObjectContainer)
     for (const uint32 groupIdx : container.m_ownedLodGroups)
         m_freeMeshLodGroups.push_back(groupIdx);
 
-    // The images may still be sampled by in-flight frames: destroyed in present() right after the
-    // shared-buffer GPU drain, their bindless slots rewritten to the fallback at the next record.
+    // The images may still be sampled by in-flight frames: destroyed in present() once the GPU has
+    // drained, their bindless slots rewritten to the fallback at the next record.
     m_pendingTextureFrees.insert(m_pendingTextureFrees.end(), container.m_ownedTextures.begin(), container.m_ownedTextures.end());
-
-    // Freed mega-buffer/slot ranges may be recycled by uploads later this frame; forcing the pre-flush
-    // GPU drain in present() guarantees those staging copies never race an in-flight frame's reads of
-    // the old contents (uploads through the free ranges are always staged, never direct).
-    m_sharedBufferNeedSync = true;
+    // Freed mega-buffer/slot ranges may be recycled by an upload later this frame; uploadToSharedBuffer
+    // drains the GPU itself before queuing, so no extra synchronization is needed here for that.
 }
 
 void Renderer::freeMeshInfoRange(uint32 baseMeshInfoIdx, uint32 count)
@@ -2345,9 +2356,8 @@ void Renderer::freeMeshInfoRange(uint32 baseMeshInfoIdx, uint32 count)
         m_meshVertexCounts[i] = 0;
         m_meshIsSkinnedOutput[i] = 0;
     }
-    m_meshInfosBuffer.upload(count * sizeof(RendererVKLayout::MeshInfo), infos.data() + baseMeshInfoIdx,
+    uploadToSharedBuffer(m_meshInfosBuffer, count * sizeof(RendererVKLayout::MeshInfo), infos.data() + baseMeshInfoIdx,
         (size_t)baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
-    m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
     m_accelStructure.onMeshRangeFreed(baseMeshInfoIdx, count);
     std::erase_if(m_pendingBlasRebuilds, [&](uint32 meshIdx) { return meshIdx >= baseMeshInfoIdx && meshIdx < baseMeshInfoIdx + count; });
     m_freeMeshInfoSlots.release(baseMeshInfoIdx, count);
@@ -2384,12 +2394,17 @@ void Renderer::processPendingTextureFrees()
     m_pendingTextureFrees.clear();
 }
 
+void Renderer::uploadToSharedBuffer(Buffer& buffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset)
+{
+    Globals::stagingManager.ensureDrainedForSharedWrite();
+    buffer.upload(dataSize, data, dstOffset);
+}
+
 void Renderer::setMeshStreamedOut(uint16 meshInfoIdx)
 {
     RendererVKLayout::MeshInfo& info = m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>()[meshInfoIdx];
     info.indexCount = 0;
-    m_meshInfosBuffer.upload(sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
-    m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
+    uploadToSharedBuffer(m_meshInfosBuffer, sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
     // The BLAS goes with the mesh data (rebuilt on re-stream); safe because eviction requires the set
     // to have been unreferenced for far longer than any in-flight TLAS.
     m_accelStructure.onMeshEvicted(meshInfoIdx);
@@ -2401,10 +2416,7 @@ void Renderer::setMeshStreamedIn(uint16 meshInfoIdx, int32 vertexOffset, uint32 
     info.vertexOffset = vertexOffset;
     info.firstIndex = firstIndex;
     info.indexCount = indexCount;
-    m_meshInfosBuffer.upload(sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
-    // Also covers this set's uploadVertexData/uploadIndexData copies into the shared mega-buffers
-    // (MeshDataManager), always queued by the caller just before this; see present().
-    m_sharedBufferNeedSync = true;
+    uploadToSharedBuffer(m_meshInfosBuffer, sizeof(info), &info, (size_t)meshInfoIdx * sizeof(info));
     if (m_accelStructure.getMeshAlias(meshInfoIdx) == meshInfoIdx)
         m_pendingBlasRebuilds.push_back(meshInfoIdx); // built by the next recordGlobalIllum
 }
@@ -2429,9 +2441,8 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
             if (!skinnedOutputs && reusedBase + i < m_blasBuiltCount)
                 m_pendingBlasRebuilds.push_back(reusedBase + i);
         }
-        m_meshInfosBuffer.upload(meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
+        uploadToSharedBuffer(m_meshInfosBuffer, meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
             meshInfos.data(), (size_t)reusedBase * sizeof(RendererVKLayout::MeshInfo));
-        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
         return reusedBase;
     }
 
@@ -2450,11 +2461,8 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
     // whole capacity-sized buffers, DGC reads the count via sequenceCountAddress, the G-buffer draws via
     // drawIndexedIndirectCount, and new BLASes build per frame in recordGlobalIllum).
     else
-    {
-        m_meshInfosBuffer.upload(meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
+        uploadToSharedBuffer(m_meshInfosBuffer, meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
             meshInfos.data(), baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
-        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
-    }
 
     // After the capacity check: the alias buffer is grown by resizeBlasAddressBuffer inside
     // growUniqueMeshCapacity, and setNumMeshes writes identity entries for the new range.
@@ -2484,9 +2492,8 @@ uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialIn
     {
         const std::span<RendererVKLayout::MaterialInfo> materials = m_materialInfosBuffer.getBackingStoreAs<RendererVKLayout::MaterialInfo>();
         memcpy(materials.data() + reusedBase, materialInfos.data(), materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo));
-        m_materialInfosBuffer.upload(materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
+        uploadToSharedBuffer(m_materialInfosBuffer, materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
             materialInfos.data(), (size_t)reusedBase * sizeof(RendererVKLayout::MaterialInfo));
-        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
         return reusedBase;
     }
 
@@ -2501,11 +2508,8 @@ uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialIn
     // Within capacity this is a contents-only upload: every pass binds the whole buffer and nothing
     // recorded depends on the material count, so no re-record is needed.
     else
-    {
-        m_materialInfosBuffer.upload(materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
+        uploadToSharedBuffer(m_materialInfosBuffer, materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
             materialInfos.data(), baseMaterialInfoIdx * sizeof(RendererVKLayout::MaterialInfo));
-        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
-    }
 
     return baseMaterialInfoIdx;
 }
@@ -2519,9 +2523,8 @@ uint32 Renderer::addMeshInstanceOffsets(const std::vector<RendererVKLayout::Mesh
     {
         const std::span<RendererVKLayout::MeshInstanceOffset> offsets = m_instanceOffsetsBuffer.getBackingStoreAs<RendererVKLayout::MeshInstanceOffset>();
         memcpy(offsets.data() + reusedBase, meshInstanceOffsets.data(), meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset));
-        m_instanceOffsetsBuffer.upload(meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
+        uploadToSharedBuffer(m_instanceOffsetsBuffer, meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
             meshInstanceOffsets.data(), (size_t)reusedBase * sizeof(RendererVKLayout::MeshInstanceOffset));
-        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
         return reusedBase;
     }
 
@@ -2535,11 +2538,8 @@ uint32 Renderer::addMeshInstanceOffsets(const std::vector<RendererVKLayout::Mesh
     // Within capacity this is a contents-only upload: every pass binds the whole buffer and nothing
     // recorded depends on the offset count, so no re-record is needed (rebased static spawns hit this).
     else
-    {
-        m_instanceOffsetsBuffer.upload(meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
+        uploadToSharedBuffer(m_instanceOffsetsBuffer, meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
             meshInstanceOffsets.data(), baseInstanceOffsetIdx * sizeof(RendererVKLayout::MeshInstanceOffset));
-        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
-    }
 
     return baseInstanceOffsetIdx;
 }

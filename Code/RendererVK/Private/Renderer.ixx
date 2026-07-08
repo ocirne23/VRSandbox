@@ -251,7 +251,9 @@ private:
     // parked skinned bundles) allocated to the free lists. All RenderNodes spawned from the container
     // must have been destroyed first. CPU-side slots recycle immediately; vk objects that in-flight
     // frames may still reference (texture images, static BLASes) are retired and destroyed after the
-    // GPU drain this queues (m_sharedBufferNeedSync / the AS retire queue).
+    // GPU drain queued for them (m_pendingTextureFrees / the AS retire queue) - freed mega-buffer/slot
+    // ranges are safe to recycle immediately since any future upload into them drains the GPU itself
+    // (see uploadToSharedBuffer).
     void removeObjectContainer(ObjectContainer* pObjectContainer);
     // Neutralizes MeshInfo slots (zero indexCount = draws/TLAS writes no-op, like streamed-out meshes),
     // retires their BLASes/aliases and returns the range to the free list.
@@ -262,6 +264,11 @@ private:
     // Destroys textures queued by removeObjectContainer. Caller guarantees the GPU is idle; the freed
     // slots' bindless entries rewrite to the fallback when each frame slot next records.
     void processPendingTextureFrees();
+    // Contents-only upload into a buffer that's shared (not per-frame-in-flight) and read full-range every
+    // frame by GI/RTAO compute and the draw passes (m_meshInfosBuffer, m_materialInfosBuffer,
+    // m_instanceOffsetsBuffer). See StagingManager::ensureDrainedForSharedWrite for why a per-frame-gated
+    // drain here - rather than deferring to a later explicit flush - is what's actually required.
+    void uploadToSharedBuffer(Buffer& buffer, vk::DeviceSize dataSize, const void* data, vk::DeviceSize dstOffset);
 
     uint32 addRenderNodeTransform(const Transform& transform);
     // vertexCounts: exact per-MeshInfo vertex count (parallel to meshInfos) — the BLAS builder needs a
@@ -467,13 +474,6 @@ private:
     uint32 m_fogVolumeCounter = 0;
     uint32 m_blasBuiltCount = 0;
     uint32 m_pendingMaxInstanceData = 0;
-    // Set by a within-capacity contents-only upload into m_meshInfosBuffer / m_materialInfosBuffer /
-    // m_instanceOffsetsBuffer (addMeshInfos, setMeshStreamedIn/Out, addMaterialInfos, addMeshInstanceOffsets).
-    // These buffers are shared, not per-frame-in-flight, and are read full-range every frame by GI/RTAO
-    // compute and the draw passes; present() drains the GPU once before flushing staging if this is set, so
-    // the queued copy never races an in-flight frame's read. See waitForGpuAndFlushStaging for the
-    // analogous grow (over-capacity) path.
-    bool m_sharedBufferNeedSync = false;
 
     Buffer m_meshInfosBuffer;
     Buffer m_materialInfosBuffer;

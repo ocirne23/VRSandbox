@@ -43,7 +43,7 @@ public:
     bool acquireNextImage();
     bool present();
 
-    void waitForFrame(uint32 frameIdx);
+    bool waitForFrame(uint32 frameIdx);
     void submitCommandBuffer(CommandBuffer& commandBuffer);
 
 private:

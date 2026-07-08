@@ -173,14 +173,18 @@ bool SwapChain::acquireNextImage()
     return true;
 }
 
-void SwapChain::waitForFrame(uint32 frameIdx)
+bool SwapChain::waitForFrame(uint32 frameIdx)
 {
     vk::Device vkDevice = Globals::device.getDevice();
     SyncObjects& syncObjects = m_syncObjects[frameIdx];
 
     vk::Result result = vkDevice.waitForFences(1, &syncObjects.inFlight, vk::True, UINT64_MAX);
     if (result != vk::Result::eSuccess)
+    {
         assert(false && "Failed to wait for fence");
+        return false;
+    }
+    return true;
 }
 
 void SwapChain::submitCommandBuffer(CommandBuffer& commandBuffer)

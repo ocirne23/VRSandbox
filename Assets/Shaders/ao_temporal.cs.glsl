@@ -32,10 +32,11 @@ void main()
     const float depth = texture(u_curDepth, uv).r;
     if (depth >= 1.0) { imageStore(u_accumOut, px, raw); return; }
 
-    const vec3 worldPos = worldPosFromDepth(uv, depth);
+    const vec3 worldPos = worldPosFromDepth(uv, depth); // disocclusion test only
 
     float clipW;
-    const vec2 prevUv = prevScreenUV(worldPos, clipW);
+    // Clip-space reprojection: precision independent of the camera's world position (see shared.inc.glsl).
+    const vec2 prevUv = prevScreenUVClip(uv, depth, clipW);
 
     // Bilateral 2x2 history fetch: validate each bilinear tap against its own reprojected position
     // instead of fetching with plain bilinear after a single-point disocclusion test. At silhouettes the

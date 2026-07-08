@@ -68,6 +68,20 @@ vec2 prevScreenUVMat(vec3 worldPos, mat4 prevM, out float clipW)
 }
 vec2 prevScreenUV(vec3 worldPos, out float clipW) { return prevScreenUVMat(worldPos, u_prevMvp, clipW); }
 
+// Reproject a full-frame screen UV + hardware depth to last frame's screen UV entirely in clip space via
+// u_reprojClip (prevMvp * inverse(mvp), fused in double precision on the CPU). Temporal passes must use
+// this instead of worldPosFromDepth + prevScreenUV: that world-space round trip loses precision with the
+// camera's distance from the world origin (pixel-scale history misses by ~500 units = temporal jitter).
+// clipW is the previous clip w scaled by 1/currentW — only its sign is meaningful (> 0 = in front).
+vec2 prevScreenUVClip(vec2 uv, float depth, out float clipW)
+{
+    vec2 vpUv = (uv - u_viewportRect.xy) / u_viewportRect.zw;
+    vec4 prevClip = u_reprojClip * vec4(vpUv.x * 2.0 - 1.0, 1.0 - vpUv.y * 2.0, depth, 1.0);
+    clipW = prevClip.w;
+    vec2 vpPrev = vec2(prevClip.x / prevClip.w * 0.5 + 0.5, 0.5 - prevClip.y / prevClip.w * 0.5);
+    return u_viewportRect.xy + vpPrev * u_viewportRect.zw;
+}
+
 // Atmosphere scattering + skyRadiance() for GI miss rays / fog ambient / surface fallback: the same
 // Rayleigh+Mie model the sky renders with, so indirect sky light follows the atmosphere settings.
 #include "atmosphere.inc.glsl"
