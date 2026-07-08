@@ -204,6 +204,8 @@ export struct OceanParams
     float normalStrength = 1.0f; // artistic scale on the shading slopes
     glm::vec3 cascadeSizes = glm::vec3(384.0f, 47.0f, 6.3f); // FFT patch sizes (m); non-rational ratios hide tiling
     float seaLevel    = 0.0f;   // world Y of the calm water plane
+    float detailBias  = 0.0f;   // bias on the ring-matched vertex displacement mip (negative = finer;
+                                // the clipmap rings carry their cell size per vertex, so 0 is motion-stable)
 
     // Optics: extinction drives Beer-Lambert absorption of the ray-traced refraction (1/m, Jerlov-ish
     // coastal water); scatter is the in-scattered radiance albedo (the water's "color" in deep water).
@@ -230,12 +232,6 @@ export struct OceanParams
     float turbidity        = 0.4f;  // entrained-bubble strength: milky brightening + extra roughness of
                                     // turbulent water (the wake stays visible after the foam thins)
 
-    // Grid cell size as a linear function of view distance (cell = a*dist + b), computed by
-    // Procedural::OceanRenderer from its graded grid so the vertex shaders can pick the Nyquist-safe
-    // displacement mip for the local vertex density (undersampling the maps makes the surface alias,
-    // which reads as waves snapping around as the grid follows the camera).
-    float gridCellA = 0.04f;
-    float gridCellB = 1.2f;
 };
 
 export struct Stats

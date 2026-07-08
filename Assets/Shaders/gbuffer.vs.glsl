@@ -61,15 +61,21 @@ void main()
     }
     vec3 worldPos = quat_transform(in_pos * inst.posScale.w, inst.quat) + inst.posScale.xyz;
     out_normal = quat_transform(in_normal, inst.quat);
-    // Ocean water: displace with the exact same FFT displacement-map samples the forward Ocean variant
-    // uses (same LOD function), so this reference depth/normal — which TAA reprojection and RTAO read —
-    // tracks the drawn waves.
+    // Ocean water: displace with the exact same clipmap morph + FFT displacement-map samples the forward
+    // Ocean variant uses, so this reference depth/normal — which TAA reprojection and RTAO read — tracks
+    // the drawn waves. The texcoord carries (ring cell size, morph weight); see instanced_indirect.vs.
     if ((in_materialInfos[inst.meshIdxMaterialIdx >> 16].flags & MATERIAL_FLAG_OCEAN) != 0u)
     {
+        // Morph in MESH-LOCAL space (exact lattice) then re-transform — identical math to the forward
+        // OCEAN vertex shader (instanced_indirect.vs.glsl), see the comment there.
+        const float ringCell = in_uv.x;
+        const float ringMorph = in_uv.y;
+        vec3 localPos = in_pos;
+        localPos.xz = mix(localPos.xz, floor(localPos.xz / (2.0 * ringCell) + 0.5) * (2.0 * ringCell), ringMorph);
+        worldPos = quat_transform(localPos * inst.posScale.w, inst.quat) + inst.posScale.xyz;
         const vec2 baseXZ = worldPos.xz;
-        const float dist = distance(worldPos, u_viewPos);
-        worldPos += oceanSampleDisplacement(baseXZ, dist);
-        out_normal = oceanSampleNormalLod(baseXZ, dist);
+        worldPos += oceanSampleDisplacement(baseXZ, ringCell, ringMorph);
+        out_normal = oceanSampleNormalLod(baseXZ, ringCell, ringMorph);
     }
     out_uv = in_uv;
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;

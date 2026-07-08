@@ -556,7 +556,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanAbsorption = glm::vec4(ocean.absorption, ocean.roughness);
     ubo.oceanScatter = glm::vec4(ocean.scatterColor, ocean.scatterStrength);
     ubo.oceanFoam = glm::vec4(ocean.foamColor, ocean.foamBias);
-    ubo.oceanParams3 = glm::vec4(ocean.gridCellA, ocean.gridCellB, glm::clamp(ocean.foamDecay, 0.0f, 0.999f), 0.0f);
+    ubo.oceanParams3 = glm::vec4(0.0f, 0.0f, glm::clamp(ocean.foamDecay, 0.0f, 0.999f), glm::clamp(ocean.detailBias, -4.0f, 4.0f));
     ubo.oceanParams4 = glm::vec4(0.0f, glm::clamp(ocean.foamSpread * 0.25f, 0.0f, 0.95f), 0.0f, glm::max(ocean.foamSoftness, 0.02f));
     ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), 0.0f, glm::max(ocean.foamBreakAccel, 0.01f));
 

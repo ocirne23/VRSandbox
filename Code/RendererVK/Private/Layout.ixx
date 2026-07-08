@@ -229,9 +229,9 @@ export namespace RendererVKLayout
         glm::vec4 oceanAbsorption; // rgb = water extinction sigma_t (1/m, Beer-Lambert), w = perceptual roughness
         glm::vec4 oceanScatter;    // rgb = in-scatter albedo color, w = scatter intensity
         glm::vec4 oceanFoam;       // rgb = foam albedo, w = Jacobian foam bias (higher = more whitecaps)
-        glm::vec4 oceanParams3;    // xy = ocean grid cell size as a function of view distance (cell = x*dist + y;
-                                   // drives Nyquist-safe vertex displacement mip selection),
-                                   // z = turbulence decay/frame, w unused
+        glm::vec4 oceanParams3;    // xy unused, z = turbulence decay/frame,
+                                   // w = vertex displacement mip bias (Detail bias; the clipmap rings carry
+                                   // their cell size per vertex, so the mip itself is baked into the mesh)
         glm::vec4 oceanParams4;    // x unused, y = turbulence spread (diffusion/frame), z unused,
                                    // w = instant-foam edge width (both thresholds' smoothstep)
         glm::vec4 oceanParams5;    // x = foam boost (turbulence -> fold-threshold relaxation),

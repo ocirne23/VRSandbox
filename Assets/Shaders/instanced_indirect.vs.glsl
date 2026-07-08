@@ -57,11 +57,22 @@ void main()
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
 
 #ifdef OCEAN
-    // FFT ocean: displace the flat water grid by the simulated displacement maps (world-space UVs, all
-    // cascades). The fragment shader re-derives the shading normal per pixel from the gradient maps using
-    // the undisplaced world XZ passed through out_uv, so the TBN here is just a placeholder.
-    const vec3 basePos = quat_transform(in_pos * inst_scale, inst_quat) + inst_pos;
-    out_pos = basePos + oceanSampleDisplacement(basePos.xz, distance(basePos, u_viewPos));
+    // FFT ocean clipmap: the texcoord carries (ring cell size, morph weight). Over each ring's outer band
+    // the CDLOD morph collapses odd vertices onto the next ring's coarser (2*cell) lattice while the
+    // sampled mip blends +1, so adjacent rings meet exactly. The displaced position samples the maps at
+    // the ring-matched mip (fixed per world position — waves don't morph with camera motion). The fragment
+    // shader re-derives the shading normal per pixel from the (morphed) world XZ in out_uv.
+    // The morph snaps in MESH-LOCAL space: ring vertices are exact lattice multiples there by
+    // construction, so a ring's collapsed edge coincides with the next ring's vertices for ANY node
+    // position (snapping in world space aligned to an absolute lattice the node need not sit on, which
+    // opened gaps at coarse-ring boundaries). floor(x+0.5) instead of round(): odd vertices sit exactly
+    // at .5 and GLSL round() is implementation-defined there.
+    const float ringCell = in_uv.x;
+    const float ringMorph = in_uv.y;
+    vec3 localPos = in_pos;
+    localPos.xz = mix(localPos.xz, floor(localPos.xz / (2.0 * ringCell) + 0.5) * (2.0 * ringCell), ringMorph);
+    const vec3 basePos = quat_transform(localPos * inst_scale, inst_quat) + inst_pos;
+    out_pos = basePos + oceanSampleDisplacement(basePos.xz, ringCell, ringMorph);
     out_tbn = mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0));
     out_uv  = basePos.xz;
 #else

@@ -1,0 +1,19 @@
+#include "ScriptAPI.h"
+
+SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
+{
+    self->pos = ctx->cameraPosition;
+}
+
+//@graph 1
+//@node 0  0 0
+//@node 1 Update 302 -16
+//@node 2 SetEntity 592 -16
+//@node 3 GetCamera 441 11
+//@pin 2 1 self
+//@pin 2 2 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 2 3 1.0f
+//@pin 2 4 glm::vec3{ 0.0f, 0.0f, 0.0f }
+//@pin 2 5 true
+//@link 1 0 2 0
+//@link 3 0 2 2

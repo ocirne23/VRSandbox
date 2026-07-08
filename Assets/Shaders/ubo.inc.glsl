@@ -90,8 +90,8 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_oceanAbsorption; // rgb = water extinction sigma_t (1/m, Beer-Lambert), w = perceptual roughness
     vec4 u_oceanScatter;    // rgb = in-scatter albedo color, w = scatter intensity
     vec4 u_oceanFoam;       // rgb = foam albedo, w = Jacobian foam bias (higher = more whitecaps)
-    vec4 u_oceanParams3;    // xy = grid cell size vs view distance (cell = x*dist + y; Nyquist-safe VS mips),
-                            // z = turbulence decay per frame, w unused
+    vec4 u_oceanParams3;    // xy unused, z = turbulence decay per frame,
+                            // w = vertex displacement mip bias (Detail bias; ring cell size rides per vertex)
     vec4 u_oceanParams4;    // x unused, y = turbulence spread (diffusion/frame), z unused,
                             // w = instant-foam edge width (both thresholds' smoothstep)
     vec4 u_oceanParams5;    // x = foam boost (turbulence -> fold-threshold relaxation),

@@ -139,6 +139,30 @@ float normalVariance(vec3 N)
     return min(0.5 * (dot(dNdx, dNdx) + dot(dNdy, dNdy)), 0.18);
 }
 
+// --- Reflected sky ----------------------------------------------------------------------------------
+// Mirror of sky.fs.glsl's atmosphere core — same step counts (12 sun / 4 sky-radiance vs skyRadiance()'s
+// GI-grade 4 / 2) and the same saturation + eclipse treatment — so the sky reflected in the water matches
+// the sky actually rendered above it. The GI-grade integrator under-samples the long grazing paths water
+// reflections look along (2 midpoint samples land far past the near region where the in-scatter
+// accumulates), which is why u_skyRadianceColor barely registered in reflections. Clouds/stars/moon are
+// not re-marched here (they'd need a sky capture); the sun disc is intentionally absent — the GGX glint
+// is its reflection.
+vec3 adjustSaturation(vec3 color, float saturation)
+{
+    const vec3 luminosity = vec3(0.2126, 0.7152, 0.0722);
+    return mix(vec3(dot(color, luminosity)), color, saturation);
+}
+vec3 reflectedSkyRadiance(vec3 dir)
+{
+    const vec3 up = normalize(u_skyUp);
+    const float eclipse = u_eclipseParams.x;
+    vec3 color = atmosphereScatterCheap(dir, normalize(u_sunDirection.xyz), up, 12) * u_sunColor.rgb;
+    color = adjustSaturation(color, 2.0 * (2.0 - eclipse)) * eclipse; // sky.fs's eclipse saturation push
+    if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
+        color += atmosphereScatterCheap(dir, up, up, 4) * u_skyRadianceColor;
+    return color;
+}
+
 // --- Shared closest-hit trace + shading -------------------------------------------------------------
 struct SceneHit
 {
@@ -325,7 +349,7 @@ void main()
     R.y = max(R.y, 0.02); // keep grazing reflections just above the horizon
     R = normalize(R);
     const float reflBlur = clamp(alphaF * 2.0 - 0.05, 0.0, 0.6);
-    vec3 reflColor = skyRadiance(R);
+    vec3 reflColor = reflectedSkyRadiance(R); // sky-matched atmosphere (skyRadiance() is GI-grade: too few steps at grazing)
     if (alphaF < 0.25)
     {
         SceneHit hit;

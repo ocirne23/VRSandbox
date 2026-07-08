@@ -17,27 +17,29 @@
 #endif
 layout (binding = OCEAN_MAPS_BINDING) uniform sampler2DArray u_oceanMaps;
 
-// Explicit LOD for vertex-shader displacement sampling: pick the mip whose texel matches the LOCAL GRID
-// CELL SIZE (u_oceanParams3.xy: cell = A*dist + B, the analytic spacing of OceanRenderer's graded grid).
-// This band-limits the displacement to what the mesh can represent (Nyquist) — point-sampling finer
-// content aliases the surface, which reads as waves snapping around as the grid follows the camera.
+// Explicit LOD for vertex-shader displacement sampling: pick the mip whose texel matches the vertex's
+// CLIPMAP RING cell size (baked per vertex; OceanRenderer's rings have FIXED cell sizes, so every world
+// position samples a FIXED mip regardless of camera distance — no wave morphing coupled to camera
+// motion). This band-limits the displacement to what the local mesh density can represent (Nyquist) —
+// point-sampling finer content aliases the surface. `morph` blends toward the next ring's mip (+1) over
+// each ring's outer band (the CDLOD boundary morph), so adjacent rings meet exactly. "Ocean/Detail bias"
+// (u_oceanParams3.w) offsets the mip (negative = finer than Nyquist: slight shimmer while moving).
 // Both displacement passes (prepass + forward) MUST use this same function so their positions match.
-float oceanVertexLod(float dist, float patchSize)
+float oceanVertexLod(float cellSize, float morph, float patchSize)
 {
-    const float cellSize = u_oceanParams3.x * dist + u_oceanParams3.y;
-    return max(log2(max(cellSize, 1e-3) * float(OCEAN_FFT_SIZE) / patchSize), 0.0);
+    return max(log2(max(cellSize, 1e-3) * float(OCEAN_FFT_SIZE) / patchSize) + morph + u_oceanParams3.w, 0.0);
 }
 
-// Sum of all cascades' displacement at an undisplaced world XZ. Choppy lambda (u_oceanParams0.w) is
-// applied here so it stays live (the maps store raw Tessendorf Dx/Dz).
-vec3 oceanSampleDisplacement(vec2 worldXZ, float dist)
+// Sum of all cascades' displacement at an undisplaced (morphed) world XZ. Choppy lambda (u_oceanParams0.w)
+// is applied here so it stays live (the maps store raw Tessendorf Dx/Dz).
+vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
 {
     const float chop = u_oceanParams0.w;
     vec3 disp = vec3(0.0);
     for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
         const float L = u_oceanParams2[c];
-        const vec4 d = textureLod(u_oceanMaps, vec3(worldXZ / L, float(c)), oceanVertexLod(dist, L));
+        const vec4 d = textureLod(u_oceanMaps, vec3(worldXZ / L, float(c)), oceanVertexLod(cellSize, morph, L));
         disp += vec3(d.x * chop, d.y, d.z * chop);
     }
     return disp;
@@ -137,7 +139,7 @@ float oceanSampleTurbulence(vec2 worldXZ, float footprint)
 }
 
 // Vertex-shader variant with explicit LOD (the G-buffer prepass writes this as the reference normal).
-vec3 oceanSampleNormalLod(vec2 worldXZ, float dist)
+vec3 oceanSampleNormalLod(vec2 worldXZ, float cellSize, float morph)
 {
     const float chop = u_oceanParams0.w;
     vec2 slopeSum = vec2(0.0);
@@ -145,7 +147,7 @@ vec3 oceanSampleNormalLod(vec2 worldXZ, float dist)
     for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
         const float L = u_oceanParams2[c];
-        const vec4 g = textureLod(u_oceanMaps, vec3(worldXZ / L, float(OCEAN_CASCADES + c)), oceanVertexLod(dist, L));
+        const vec4 g = textureLod(u_oceanMaps, vec3(worldXZ / L, float(OCEAN_CASCADES + c)), oceanVertexLod(cellSize, morph, L));
         slopeSum += g.xy;
         sxx_szz += g.zw;
     }
