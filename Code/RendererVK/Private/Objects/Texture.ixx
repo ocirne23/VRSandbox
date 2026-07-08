@@ -16,6 +16,10 @@ public:
     Texture(const Texture& copy) = delete;
     Texture(Texture&& move);
 
+    // Destroys the vk image/view and resets to the empty state (slot recycling by TextureManager::free;
+    // the caller guarantees no frame in flight still samples the image). Safe on an empty texture.
+    void destroy();
+
     bool initialize(const char* filePath, bool generateMips, bool sRGB = false);
     // sRGB: the pixel data is sRGB-encoded color (albedo/emissive) — sample through an Srgb format so
     // the hardware linearizes it. Data textures (normals, metal/roughness) must stay Unorm.

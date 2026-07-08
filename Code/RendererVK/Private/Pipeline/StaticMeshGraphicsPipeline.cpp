@@ -509,13 +509,13 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
         },
     };
 
-    const std::vector<Texture>& textures = Globals::textureManager.getTextures();
-    for (const Texture& tex : textures)
+    const size_t numTextures = Globals::textureManager.getNumTextures();
+    for (uint16 texIdx = 0; texIdx < (uint16)numTextures; ++texIdx)
     {
         graphicsDescriptorSetUpdateInfos.back().imageInfos.push_back(
             vk::DescriptorImageInfo{
                 .sampler = m_sampler.getSampler(),
-                .imageView = tex.getImageView(),
+                .imageView = Globals::textureManager.getViewForDescriptor(texIdx), // freed slots -> fallback
                 .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
             }
         );

@@ -37,6 +37,13 @@ public:
 	bool initialize(EProceduralShape shape, const char* name = nullptr);
 	bool initializeTerrain(const TerrainParams& params, const char* name = nullptr);
 
+	// Build directly from caller-supplied geometry (e.g. runtime-generated terrain chunks). Arrays are
+	// getNumVertices() long; tangents/bitangents/texCoords may be null (filled with sensible defaults).
+	bool initializeFromGeometry(
+		const glm::vec3* positions, const glm::vec3* normals,
+		const glm::vec3* tangents, const glm::vec3* bitangents, const glm::vec3* texCoords,
+		uint32 numVertices, const uint32* indices, uint32 numIndices, const char* name = nullptr);
+
 	const glm::vec3* getVertices() const override;
 	const glm::vec3* getNormals() const override;
 	const glm::vec3* getTangents() const override;

@@ -24,7 +24,7 @@ export class ObjectContainer final
 {
 public:
 
-    friend class RendererVK;
+    friend class Renderer; // removeObjectContainer tears the bookkeeping below down
     friend class RenderNode;
     friend class IndirectCullComputePipeline;
 
@@ -115,6 +115,22 @@ private:
     uint32 m_baseMeshInstanceOffsetsIdx = 0;
     uint16 m_baseMeshInfoIdx = 0;
     uint16 m_baseMaterialInfoIdx = 0;
+    uint32 m_numMeshInfos = 0; // total MeshInfo slots (source meshes + generated LOD levels)
+
+    // Teardown bookkeeping, consumed by Renderer::removeObjectContainer (~ObjectContainer).
+    enum class EOwnedRange : uint8 { Vertex, Index, Skinning };
+    struct OwnedDataRange
+    {
+        uint64 offset;
+        uint64 size;
+        EOwnedRange kind;
+    };
+    // Mega-buffer uploads this container owns — everything EXCEPT ranges owned by a registered mesh
+    // stream set (re-streams relocate those; the MeshStreamer frees their current ranges at
+    // unregisterSets) and skinned per-instance output regions (owned by the skinned bundles).
+    std::vector<OwnedDataRange> m_ownedDataRanges;
+    std::vector<uint16> m_ownedTextures;  // texture slots uploaded by initializeMaterials
+    std::vector<uint32> m_ownedLodGroups; // static-mesh LOD groups (bundle groups are freed with their bundle)
 
     // Skinned-mesh source data is captured in initializeMeshes() but owned by the Renderer (like MeshInfo);
     // this container just keeps the base index + count of its entries there. spawnSkinnedNode() reads them

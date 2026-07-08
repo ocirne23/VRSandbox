@@ -35,6 +35,7 @@ import :GBufferPipeline;
 import :RTAOPipeline;
 import :VolumetricFogPipeline;
 import :SceneColor;
+import :DebugLinePipeline;
 import :TaaPipeline;
 import :CompositePipeline;
 import :EyeAdaptationPipeline;
@@ -49,6 +50,52 @@ import Core.fwd;
 export enum class EValidation { ENABLED, DISABLED };
 export enum class EVSync { ENABLED, DISABLED };
 export enum class EVr { ENABLED, DISABLED };
+
+// Recycles contiguous slot ranges freed by destroyed ObjectContainers (mesh infos, materials, instance
+// offsets, skinning jobs, ...). Ranges stay sorted and coalesced; allocation is best-fit so small
+// requests don't shred the large holes. All quantities are element counts, not bytes.
+export struct IndexRangeFreeList
+{
+    struct Range { uint32 base; uint32 count; };
+
+    uint32 allocate(uint32 count)
+    {
+        int32 best = -1;
+        for (int32 i = 0; i < (int32)m_ranges.size(); ++i)
+            if (m_ranges[i].count >= count && (best < 0 || m_ranges[i].count < m_ranges[best].count))
+                best = i;
+        if (best < 0)
+            return UINT32_MAX;
+        const uint32 base = m_ranges[best].base;
+        m_ranges[best].base += count;
+        m_ranges[best].count -= count;
+        if (m_ranges[best].count == 0)
+            m_ranges.erase(m_ranges.begin() + best);
+        return base;
+    }
+
+    void release(uint32 base, uint32 count)
+    {
+        if (count == 0)
+            return;
+        auto it = std::lower_bound(m_ranges.begin(), m_ranges.end(), base,
+            [](const Range& range, uint32 b) { return range.base < b; });
+        it = m_ranges.insert(it, Range{ base, count });
+        if (auto next = it + 1; next != m_ranges.end() && it->base + it->count == next->base)
+        {
+            it->count += next->count;
+            m_ranges.erase(next);
+        }
+        if (it != m_ranges.begin() && (it - 1)->base + (it - 1)->count == it->base)
+        {
+            (it - 1)->count += it->count;
+            m_ranges.erase(it);
+        }
+    }
+
+private:
+    std::vector<Range> m_ranges; // sorted by base, no two adjacent
+};
 
 // One mesh LOD chain: global mesh indices per level ([0] = full resolution) sharing one set of local
 // bounds (used for the projected-size selection). Registered by ObjectContainer at load, referenced by
@@ -85,6 +132,13 @@ public:
     void addPointLight(const PointLight& light);
     void addAreaLight(const AreaLight& areaLight);
     void addSpotLight(const SpotLight& spotLight);
+    // World-space debug overlay line for this frame (physics collider wireframes etc.). color is
+    // packed RGBA8 with R in the low byte. Callable any time between two present() calls.
+    void addDebugLine(const glm::vec3& a, const glm::vec3& b, uint32 color)
+    {
+        m_debugLineVerts.push_back({ a, color });
+        m_debugLineVerts.push_back({ b, color });
+    }
     void setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity);
     void present();
 
@@ -167,12 +221,18 @@ private:
     void recordFogApplyInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordTaaInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordGiProbeDebug(uint32 frameIdx);
+    void recordDebugLines(uint32 frameIdx);
     void recordAO(uint32 frameIdx);
     void recordVolumetricFog(uint32 frameIdx);
     void recordFogApply(uint32 frameIdx);
     void recordTaa(uint32 frameIdx);
     void recordEyeAdaptation(uint32 frameIdx);
     void recordComposite(uint32 frameIdx);
+    // Re-allocates the variable-count texture-array descriptors when the live texture count outgrew them
+    // (TextureManager::getGeneration bumped). Runs at beginFrame AND again in present() before recording,
+    // because containers loaded after beginFrame (terrain streaming, mid-frame spawns) upload textures
+    // that this frame's record would otherwise write past the descriptor capacity.
+    void syncTextureDescriptorCapacity();
     void createEyeCompositeTargets();
     void destroyEyeCompositeTargets();
     bool recordGlobalIllum(uint32 frameIdx); // returns true if the ray-tracing TLAS handle changed this frame
@@ -183,6 +243,21 @@ private:
 
     friend class ObjectContainer;
     void addObjectContainer(ObjectContainer* pObjectContainer);
+    // Container teardown (~ObjectContainer): returns every renderer resource the container (and its
+    // parked skinned bundles) allocated to the free lists. All RenderNodes spawned from the container
+    // must have been destroyed first. CPU-side slots recycle immediately; vk objects that in-flight
+    // frames may still reference (texture images, static BLASes) are retired and destroyed after the
+    // GPU drain this queues (m_sharedBufferNeedSync / the AS retire queue).
+    void removeObjectContainer(ObjectContainer* pObjectContainer);
+    // Neutralizes MeshInfo slots (zero indexCount = draws/TLAS writes no-op, like streamed-out meshes),
+    // retires their BLASes/aliases and returns the range to the free list.
+    void freeMeshInfoRange(uint32 baseMeshInfoIdx, uint32 count);
+    // Full teardown of a PARKED bundle (container destruction): frees the per-instance MeshInfo range,
+    // output vertex regions, palette region, skinning-job slots and LOD groups its spawn allocated.
+    void destroySkinnedBundle(uint32 bundleHandle);
+    // Destroys textures queued by removeObjectContainer. Caller guarantees the GPU is idle; the freed
+    // slots' bindless entries rewrite to the fallback when each frame slot next records.
+    void processPendingTextureFrees();
 
     uint32 addRenderNodeTransform(const Transform& transform);
     // vertexCounts: exact per-MeshInfo vertex count (parallel to meshInfos) — the BLAS builder needs a
@@ -196,13 +271,24 @@ private:
     uint32 addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets);
     uint32 addMeshLodGroup(const MeshLodGroup& group)
     {
-        m_meshLodGroups.push_back(group);
+        uint32 groupIdx;
+        if (!m_freeMeshLodGroups.empty())
+        {
+            groupIdx = m_freeMeshLodGroups.back();
+            m_freeMeshLodGroups.pop_back();
+            m_meshLodGroups[groupIdx] = group;
+        }
+        else
+        {
+            m_meshLodGroups.push_back(group);
+            groupIdx = (uint32)m_meshLodGroups.size() - 1;
+        }
         // One shared BLAS per chain: every level aliases the RT level's geometry (rays don't need
         // per-level fidelity), so only that level's BLAS is ever built.
         const uint8 rtLevel = (uint8)std::clamp(m_rtParams.blasLodLevel, 0, (int)group.numLods - 1);
         for (uint8 k = 0; k < group.numLods; ++k)
             m_accelStructure.setMeshAlias(group.meshIdx[k], group.meshIdx[rtLevel]);
-        return (uint32)m_meshLodGroups.size() - 1;
+        return groupIdx;
     }
     uint32 addSkinnedMeshSources(const std::vector<RendererVKLayout::SkinnedMeshSource>& sources);
     const RendererVKLayout::SkinnedMeshSource& getSkinnedMeshSource(uint32 idx) const { return m_skinnedMeshSources[idx]; }
@@ -235,7 +321,11 @@ private:
     friend class AnimatorComponent;
     uint32 allocateSkinningPalette(uint32 boneCount);
     void setSkinningPalette(uint32 paletteHandle, std::span<const glm::mat4> palette);
-    uint32 addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle, uint32 meshIdx, uint32 firstIndex, uint32 indexCount);
+    // A bundle's SkinningJob/SkinnedBlasBuild entries must be one contiguous range (the per-frame
+    // skinned BLAS slots are positional), so the range is allocated as a block — from the free list
+    // (destroyed containers) when one fits, appended otherwise — and filled per mesh afterwards.
+    uint32 allocateSkinningJobRange(uint32 count);
+    void setSkinnedInstance(uint32 jobIdx, uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle, uint32 meshIdx, uint32 firstIndex, uint32 indexCount);
 
     void waitForGpuAndFlushStaging();
     void growRenderNodeCapacity(uint32 needed);
@@ -270,6 +360,8 @@ private:
     EyeAdaptationPipeline m_eyeAdaptationPipeline;
     AccelerationStructure m_accelStructure;
     GIProbePipeline m_giProbePipeline;
+    DebugLinePipeline m_debugLinePipeline;
+    std::vector<DebugLinePipeline::LineVertex> m_debugLineVerts; // CPU staging, drained in present()
 
     SkyParams m_skyParams;
     FogParams m_fogParams;
@@ -348,6 +440,18 @@ private:
     std::vector<SkinnedInstanceBundle> m_skinnedBundles;
     std::unordered_map<uint32, std::vector<uint32>> m_freeSkinnedBundles; // sourceKey -> parked bundle handles
 
+    // Slot recycling for destroyed ObjectContainers: the shared info/offset buffers and CPU arrays are
+    // append-only (holes are never compacted), freed ranges are reused by later containers instead.
+    IndexRangeFreeList m_freeMeshInfoSlots;
+    IndexRangeFreeList m_freeMaterialSlots;
+    IndexRangeFreeList m_freeInstanceOffsetSlots;
+    IndexRangeFreeList m_freeSkinnedSourceSlots;
+    IndexRangeFreeList m_freeSkinningJobSlots;      // freed slots stay inert (vertexCount/indexCount 0)
+    std::vector<uint32> m_freeMeshLodGroups;
+    std::vector<uint32> m_freeSkinningPaletteHandles; // regions reused on exact boneCount match
+    std::vector<uint32> m_freeSkinnedBundleSlots;
+    std::vector<uint16> m_pendingTextureFrees; // images possibly still sampled in flight; freed in present() after the GPU drain
+
     uint32 m_frameCounter = 0; // monotonic; rotates the GI probe ray/taa samples set each frame
     uint32 m_meshInfoCounter = 0;
     uint32 m_materialInfoCounter = 0;
@@ -399,6 +503,7 @@ private:
         CommandBuffer volumetricFogCommandBuffer;
         CommandBuffer fogApplyCommandBuffer;
         CommandBuffer giProbeDebugCommandBuffer;
+        CommandBuffer debugLineCommandBuffer;
         CommandBuffer taaCommandBuffer;
         CommandBuffer eyeAdaptCommandBuffer;
         CommandBuffer compositeCommandBuffer;

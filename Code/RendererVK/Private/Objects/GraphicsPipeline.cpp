@@ -116,7 +116,7 @@ bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipeli
     vk::PipelineInputAssemblyStateCreateInfo pipelineInputAssemblyStateCreateInfo
     {
         .flags = {},
-        .topology = vk::PrimitiveTopology::eTriangleList,
+        .topology = layout.topology,
         .primitiveRestartEnable = vk::False,
     };
     vk::PipelineViewportStateCreateInfo pipelineViewportStateCreateInfo

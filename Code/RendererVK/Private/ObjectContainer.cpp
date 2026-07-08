@@ -73,8 +73,9 @@ bool ObjectContainer::initialize(const ISceneData& sceneData, const MaterialOver
 
 ObjectContainer::~ObjectContainer()
 {
-    // TODO: cleanup
-    // Globals::rendererVK.removeObjectContainer(this);
+    // All RenderNodes spawned from this container must be destroyed first (they reference its meshes;
+    // TerrainStreamer::Resident declares the container before the node for exactly this reason).
+    Globals::rendererVK.removeObjectContainer(this);
 }
 
 void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData& temp)
@@ -180,12 +181,24 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
 
 		const uint32 numIndices = meshData.getNumIndices();
         const uint32* pIndices = meshData.getIndices();
+        const size_t vertexBytes = vertices.size() * sizeof(RendererVKLayout::MeshVertex);
+        const size_t indexBytes = numIndices * sizeof(RendererVKLayout::MeshIndex);
+        const size_t vertexByteOffset = meshDataManager.uploadVertexData(vertices.data(), vertexBytes);
+        const size_t indexByteOffset = meshDataManager.uploadIndexData(pIndices, indexBytes);
         meshInfo.indexCount   = numIndices;
-        meshInfo.vertexOffset = (int32)(meshDataManager.uploadVertexData(vertices.data(), vertices.size() * sizeof(RendererVKLayout::MeshVertex)) / sizeof(RendererVKLayout::MeshVertex));
-        meshInfo.firstIndex   = (uint32)(meshDataManager.uploadIndexData(pIndices, numIndices * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
+        meshInfo.vertexOffset = (int32)(vertexByteOffset / sizeof(RendererVKLayout::MeshVertex));
+        meshInfo.firstIndex   = (uint32)(indexByteOffset / sizeof(RendererVKLayout::MeshIndex));
         meshInfo.radius       = sphereBounds.radius;
         meshInfo.center       = sphereBounds.pos;
         meshInfo.firstInstance = 0;
+
+        // Stream-set meshes' current ranges are freed by the MeshStreamer at teardown; everything else
+        // (procedural/direct imports, skinned bind poses) is recorded here and freed by the container.
+        if (!hasStreamSource[meshIdx])
+        {
+            m_ownedDataRanges.push_back({ vertexByteOffset, vertexBytes, EOwnedRange::Vertex });
+            m_ownedDataRanges.push_back({ indexByteOffset, indexBytes, EOwnedRange::Index });
+        }
 
         // Capture skinning source data. The bind-pose base geometry above stays uploaded (and is what the
         // skinning compute reads); spawnSkinnedNode allocates per-instance output regions that get drawn.
@@ -200,8 +213,10 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                 skinVerts[i].boneIndices = pBoneIndices[i];
                 skinVerts[i].boneWeights = pBoneWeights[i];
             }
-            const uint32 skinVertexOffset = (uint32)(meshDataManager.uploadSkinningData(
-                skinVerts.data(), skinVerts.size() * sizeof(RendererVKLayout::SkinningVertex)) / sizeof(RendererVKLayout::SkinningVertex));
+            const size_t skinBytes = skinVerts.size() * sizeof(RendererVKLayout::SkinningVertex);
+            const size_t skinByteOffset = meshDataManager.uploadSkinningData(skinVerts.data(), skinBytes);
+            const uint32 skinVertexOffset = (uint32)(skinByteOffset / sizeof(RendererVKLayout::SkinningVertex));
+            m_ownedDataRanges.push_back({ skinByteOffset, skinBytes, EOwnedRange::Skinning });
 
             const uint16 materialLocalIdx = (uint16)meshData.getMaterialIndex();
             skinnedSources.push_back(RendererVKLayout::SkinnedMeshSource{
@@ -240,8 +255,10 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                         targetIndexCount, targetError, 0, &resultError);
                     if (resultCount < 3 || resultCount >= (size_t)((float)prevIndexCount * 0.9f))
                         break;
-                    skinnedSrc.lodFirstIndex[skinnedSrc.numLodLevels] = (uint32)(meshDataManager.uploadIndexData(
-                        lodIndices.data(), resultCount * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
+                    const size_t lodIndexBytes = resultCount * sizeof(RendererVKLayout::MeshIndex);
+                    const size_t lodIndexByteOffset = meshDataManager.uploadIndexData(lodIndices.data(), lodIndexBytes);
+                    m_ownedDataRanges.push_back({ lodIndexByteOffset, lodIndexBytes, EOwnedRange::Index });
+                    skinnedSrc.lodFirstIndex[skinnedSrc.numLodLevels] = (uint32)(lodIndexByteOffset / sizeof(RendererVKLayout::MeshIndex));
                     skinnedSrc.lodIndexCount[skinnedSrc.numLodLevels] = (uint32)resultCount;
                     skinnedSrc.lodError[skinnedSrc.numLodLevels] = std::max(resultError * meshScale, 1e-7f);
                     skinnedSrc.numLodLevels++;
@@ -265,7 +282,11 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                     break;
                 RendererVKLayout::MeshInfo lodInfo = meshInfo; // same vertices + bounds
                 lodInfo.indexCount = numLodIndices;
-                lodInfo.firstIndex = (uint32)(meshDataManager.uploadIndexData(pLodIndices, numLodIndices * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
+                const size_t lodIndexBytes = numLodIndices * sizeof(RendererVKLayout::MeshIndex);
+                const size_t lodIndexByteOffset = meshDataManager.uploadIndexData(pLodIndices, lodIndexBytes);
+                lodInfo.firstIndex = (uint32)(lodIndexByteOffset / sizeof(RendererVKLayout::MeshIndex));
+                if (!hasStreamSource[meshIdx])
+                    m_ownedDataRanges.push_back({ lodIndexByteOffset, lodIndexBytes, EOwnedRange::Index });
                 if (level == 0)
                     generatedChains.push_back(GeneratedChain{ (uint16)meshIdx, (uint16)generatedLodInfos.size(), 0 });
                 generatedLodInfos.push_back(lodInfo);
@@ -300,7 +321,11 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
                     break; // simplification stalled; deeper levels won't gain anything
                 RendererVKLayout::MeshInfo lodInfo = meshInfo; // same vertices + bounds
                 lodInfo.indexCount = (uint32)resultCount;
-                lodInfo.firstIndex = (uint32)(meshDataManager.uploadIndexData(lodIndices.data(), resultCount * sizeof(RendererVKLayout::MeshIndex)) / sizeof(RendererVKLayout::MeshIndex));
+                const size_t lodIndexBytes = resultCount * sizeof(RendererVKLayout::MeshIndex);
+                const size_t lodIndexByteOffset = meshDataManager.uploadIndexData(lodIndices.data(), lodIndexBytes);
+                lodInfo.firstIndex = (uint32)(lodIndexByteOffset / sizeof(RendererVKLayout::MeshIndex));
+                if (!hasStreamSource[meshIdx])
+                    m_ownedDataRanges.push_back({ lodIndexByteOffset, lodIndexBytes, EOwnedRange::Index });
                 if (numLevels == 0)
                     generatedChains.push_back(GeneratedChain{ (uint16)meshIdx, (uint16)generatedLodInfos.size(), 0 });
                 generatedLodInfos.push_back(lodInfo);
@@ -317,6 +342,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
     meshVertexCounts.insert(meshVertexCounts.end(), generatedLodVertexCounts.begin(), generatedLodVertexCounts.end());
 
     m_baseMeshInfoIdx = (uint16)Globals::rendererVK.addMeshInfos(meshInfos, meshVertexCounts);
+    m_numMeshInfos = (uint32)meshInfos.size();
 
     // Register the LOD chains now that global mesh indices are known; the base mesh's NodeInfo picks
     // the group up in initializeNodes.
@@ -333,6 +359,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
         group.center = m_boundsForMeshIdx[chain.baseMeshIdx].pos;
         group.radius = m_boundsForMeshIdx[chain.baseMeshIdx].radius;
         temp.lodGroupForMeshIdx[chain.baseMeshIdx] = Globals::rendererVK.addMeshLodGroup(group);
+        m_ownedLodGroups.push_back(temp.lodGroupForMeshIdx[chain.baseMeshIdx]);
     }
     // Register cooked meshes as streamable sets: one set per source mesh — its generated LOD levels
     // share the vertex range, so they evict and restore as a unit. Authored LodN_ meshes each carry
@@ -397,6 +424,7 @@ void ObjectContainer::initializeMeshes(const ISceneData& sceneData, TempInitData
         group.center = m_boundsForMeshIdx[lods.levels[0]].pos;
         group.radius = m_boundsForMeshIdx[lods.levels[0]].radius;
         temp.lodGroupForMeshIdx[lods.levels[0]] = Globals::rendererVK.addMeshLodGroup(group);
+        m_ownedLodGroups.push_back(temp.lodGroupForMeshIdx[lods.levels[0]]);
     }
     if (!skinnedSources.empty())
     {
@@ -501,7 +529,11 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             {
                 uint16& idx = temp.textureIdxForMaterialTex[diffuseTexIdx];
                 if (idx == UINT16_MAX)
+                {
                     idx = Globals::textureManager.upload(*sceneData.getTexture(diffuseTexIdx), true, true);
+                    if (idx != UINT16_MAX)
+                        m_ownedTextures.push_back(idx);
+                }
                 material.diffuseTexIdx = idx;
             }
 
@@ -510,7 +542,11 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             {
                 uint16& idx = temp.textureIdxForMaterialTex[normalTexIdx];
                 if (idx == UINT16_MAX)
+                {
                     idx = Globals::textureManager.upload(*sceneData.getTexture(normalTexIdx), true);
+                    if (idx != UINT16_MAX)
+                        m_ownedTextures.push_back(idx);
+                }
                 material.normalTexIdx = idx;
             }
 
@@ -519,7 +555,11 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             {
                 uint16& idx = temp.textureIdxForMaterialTex[metalRoughnessTexIdx];
                 if (idx == UINT16_MAX)
+                {
                     idx = Globals::textureManager.upload(*sceneData.getTexture(metalRoughnessTexIdx), false);
+                    if (idx != UINT16_MAX)
+                        m_ownedTextures.push_back(idx);
+                }
                 material.metalRoughnessTexIdx = idx;
             }
         }
@@ -878,7 +918,8 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
             lodGroupForMesh[k] = renderer.addMeshLodGroup(group);
         }
 
-        uint32 firstJob = 0;
+        // One contiguous job/BLAS-build range for the bundle (positional per-frame BLAS slots).
+        const uint32 firstJob = renderer.allocateSkinningJobRange(m_numSkinnedMeshes);
         std::vector<uint32> blasIndexCounts(m_numSkinnedMeshes);
         for (uint32 k = 0; k < m_numSkinnedMeshes; ++k)
         {
@@ -897,10 +938,8 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
                 blasIndexCount = src.lodIndexCount[rtLevel];
             }
             blasIndexCounts[k] = blasIndexCount;
-            const uint32 jobHandle = renderer.addSkinnedInstance(src.baseVertexOffset, src.skinVertexOffset,
+            renderer.setSkinnedInstance(firstJob + k, src.baseVertexOffset, src.skinVertexOffset,
                 outVertexOffsets[k], src.vertexCount, paletteHandle, rtMeshIdx, blasFirstIndex, blasIndexCount);
-            if (k == 0)
-                firstJob = jobHandle;
         }
         bundleHandle = renderer.registerSkinnedBundle(Renderer::SkinnedInstanceBundle{
             .sourceKey = m_baseSkinnedMeshIdx, .baseMeshIdx = baseMeshIdx, .paletteHandle = paletteHandle,

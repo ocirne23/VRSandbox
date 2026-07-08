@@ -72,6 +72,16 @@ public:
 
     void setGravity(const glm::vec3& gravity);
 
+    // Collider wireframe debug view. When the "Physics/Debug/Draw colliders" tweak is on, the App calls
+    // debugDraw once per frame with a line sink (keeps Physics free of any renderer dependency); every
+    // shape type (box/sphere/capsule/hull/mesh), plus optionally joints/contacts/AABBs, is decomposed
+    // into world-space segments. Drawing is bounded to "Range" around viewPos (mesh triangles are also
+    // CPU-culled per triangle, so a huge static mesh collider doesn't emit its whole wireframe).
+    // Color is packed RGBA8 with R in the low byte (matches GLSL unpackUnorm4x8).
+    using DebugLineFn = std::function<void(const glm::vec3& a, const glm::vec3& b, uint32 colorRGBA)>;
+    bool isDebugDrawEnabled() const { return m_debugDrawEnabled; }
+    void debugDraw(const glm::vec3& viewPos, const DebugLineFn& line);
+
     // Fixed-step render interpolation: total steps taken, and the fraction [0,1] of the current frame
     // into the next step (1 when interpolation is disabled via the Tweak).
     uint32 getStepCount() const { return m_stepCount; }
@@ -93,6 +103,13 @@ private:
     glm::vec3 m_gravity = glm::vec3(0.0f, -9.81f, 0.0f);
     PhysicsBody m_staticBody;
     std::vector<ContactEvent> m_contactEvents;
+
+    // Debug draw tweaks (Physics/Debug)
+    bool m_debugDrawEnabled = false;
+    bool m_debugDrawJoints = true;
+    bool m_debugDrawContacts = false;
+    bool m_debugDrawBounds = false;
+    float m_debugDrawRange = 64.0f; // draw distance around viewPos (world units)
 };
 
 export namespace Globals

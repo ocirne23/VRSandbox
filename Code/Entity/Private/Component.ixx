@@ -40,6 +40,7 @@ export struct SceneComponent
 
     std::vector<EntityPtr> children;
     bool enabled = true;
+    bool physicsSuspended = false; // subtree bodies pulled from the simulation while disabled (see updateTree)
 
     void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
 	void destroy(Entity& entity, const SpawnInfo& info);
@@ -214,6 +215,7 @@ export struct PhysicsComponent
     EPhysicsBodyType bodyType = EPhysicsBodyType::Dynamic;
     bool enabled = true;
     bool synced = false;      // body is teleported to the entity's true world transform on first update
+    bool suspended = false;   // body removed from the simulation (entity disabled via SceneComponent)
 
     // Fired by dispatchPhysicsContactEvents for begin/end contact and sensor overlaps involving this
     // body (the shape must set ContactEvents true, or be a Sensor). C++ gameplay hook; scripts get
@@ -235,9 +237,17 @@ export struct PhysicsComponent
     void destroy(Entity& entity, const SpawnInfo& info);
     void update(Entity& entity, const Transform& parentWorld);
 
+    // Pulls the body out of the simulation (and drops its occluder) while the entity is disabled via
+    // its SceneComponent; the next update() after re-enable re-adds and resyncs it. See updateTree.
+    void suspendBody();
+
     void serialize(AssetNode&) const {}
     void deserialize(const AssetNode&) {}
 };
+
+// Suspends every PhysicsComponent body in this entity's subtree (used when a SceneComponent disables
+// the tree — updateTree stops reaching it, so the bodies would otherwise keep colliding invisibly).
+export void suspendPhysicsTree(Entity& entity);
 
 // How a Sound alias holding several clips picks which one to play on each trigger.
 export enum class EAudioSelect : uint8

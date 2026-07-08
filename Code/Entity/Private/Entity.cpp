@@ -20,7 +20,18 @@ void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float 
 {
     SceneComponent* sc = getComponent<SceneComponent>(this);
     if (sc && !sc->enabled)
+    {
+        // The pruned subtree's physics bodies would keep colliding invisibly: pull them from the
+        // simulation once. Each body resyncs and re-enables itself in its next update() after re-enable.
+        if (!sc->physicsSuspended)
+        {
+            suspendPhysicsTree(*this);
+            sc->physicsSuspended = true;
+        }
         return;
+    }
+    if (sc)
+        sc->physicsSuspended = false;
 
     editorPaused = editorPaused || isEditorPaused();
 

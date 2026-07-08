@@ -60,6 +60,9 @@ export struct GraphicsPipelineLayout
     float depthBiasSlopeFactor = 0.0f;
     vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
 
+    // Primitive topology for every variant (debug line passes set eLineList).
+    vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList;
+
     // Variant-0 blend/depth state, for fullscreen overlay passes (e.g. the volumetric fog apply, which
     // blends src.rgb + dst.rgb * src.a over the lit scene with depth ignored).
     bool blendEnable = false;

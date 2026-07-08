@@ -64,6 +64,10 @@ public:
     void registerTexture(uint16 texIdx, StreamedTextureMeta&& meta, uint64 residentBytes);
     // Unstreamable textures report their allocation size for stats/budget accounting only.
     void notePinned(uint64 allocatedBytes);
+    // Called by TextureManager::free before the texture is destroyed: drops the slot's streaming state
+    // and accounting, and orphans any in-flight op (its completion is discarded). allocatedBytes is the
+    // live image's allocation size, used to reverse notePinned for unstreamable textures.
+    void unregisterTexture(uint16 texIdx, uint64 allocatedBytes);
 
     // Whether new DDS textures should load tail-only and stream up (checked at Texture load time).
     bool isStreamingEnabled() const { return m_enabled; }

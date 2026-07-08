@@ -43,6 +43,12 @@ bool PhysicsWorld::initialize()
     Tweak::floatVar("Physics/World", "Time Scale", &m_timeScale, 0.0f, 4.0f);
     Tweak::intVar("Physics/World", "Sub Steps", &m_subSteps, 1, 16);
     Tweak::intVar("Physics/World", "Step Hz", &m_stepHz, 5, 120);
+
+    Tweak::boolean("Physics/Debug", "Draw colliders", &m_debugDrawEnabled);
+    Tweak::boolean("Physics/Debug", "Draw joints", &m_debugDrawJoints);
+    Tweak::boolean("Physics/Debug", "Draw contacts", &m_debugDrawContacts);
+    Tweak::boolean("Physics/Debug", "Draw bounds", &m_debugDrawBounds);
+    Tweak::floatVar("Physics/Debug", "Range", &m_debugDrawRange, 4.0f, 1024.0f);
     return true;
 }
 
@@ -363,6 +369,270 @@ bool PhysicsWorld::getContactPoint(int64 contactId, glm::vec3& outPoint, glm::ve
     outPoint = comA + toGlm(manifold.points[0].anchorA);
     outNormal = toGlm(manifold.normal);
     return true;
+}
+
+// ---- Collider wireframe debug draw ----------------------------------------------------------------
+// Everything below decomposes box3d's debug-draw callbacks into world-space line segments pushed
+// through the caller's DebugLineFn, so no renderer types leak into Physics.
+
+namespace
+{
+struct DebugDrawContext
+{
+    const PhysicsWorld::DebugLineFn* line;
+    glm::vec3 viewPos;
+    float rangeSq;
+};
+
+uint32 toRGBA(b3HexColor color) // 0xRRGGBB (material preset in the high byte, ignored) -> RGBA8, R low byte
+{
+    const uint32 c = (uint32)color;
+    return ((c >> 16) & 0xffu) | (((c >> 8) & 0xffu) << 8) | ((c & 0xffu) << 16) | 0xff000000u;
+}
+
+void emit(const DebugDrawContext& ctx, const glm::vec3& a, const glm::vec3& b, uint32 rgba)
+{
+    (*ctx.line)(a, b, rgba);
+}
+
+// Circle of N segments around `axis` at `center`; u/v span its plane.
+void wireCircle(const DebugDrawContext& ctx, const glm::vec3& center, const glm::vec3& u, const glm::vec3& v, float radius, uint32 rgba)
+{
+    constexpr int N = 16;
+    glm::vec3 prev = center + u * radius;
+    for (int i = 1; i <= N; ++i)
+    {
+        const float a = float(i) * (2.0f * 3.14159265f / float(N));
+        const glm::vec3 p = center + (u * cosf(a) + v * sinf(a)) * radius;
+        emit(ctx, prev, p, rgba);
+        prev = p;
+    }
+}
+
+void wireSphere(const DebugDrawContext& ctx, const glm::vec3& center, const glm::quat& rot, float radius, uint32 rgba)
+{
+    const glm::vec3 x = rot * glm::vec3(1.0f, 0.0f, 0.0f);
+    const glm::vec3 y = rot * glm::vec3(0.0f, 1.0f, 0.0f);
+    const glm::vec3 z = rot * glm::vec3(0.0f, 0.0f, 1.0f);
+    wireCircle(ctx, center, y, z, radius, rgba);
+    wireCircle(ctx, center, z, x, radius, rgba);
+    wireCircle(ctx, center, x, y, radius, rgba);
+}
+
+void wireCapsule(const DebugDrawContext& ctx, const glm::vec3& p1, const glm::vec3& p2, float radius, uint32 rgba)
+{
+    const glm::vec3 d = p2 - p1;
+    const float len = glm::length(d);
+    if (len < 1e-6f)
+    {
+        wireSphere(ctx, p1, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), radius, rgba);
+        return;
+    }
+    const glm::vec3 axis = d / len;
+    const glm::vec3 ref = fabsf(axis.y) < 0.99f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+    const glm::vec3 u = glm::normalize(glm::cross(axis, ref));
+    const glm::vec3 v = glm::cross(axis, u);
+    wireCircle(ctx, p1, u, v, radius, rgba);
+    wireCircle(ctx, p2, u, v, radius, rgba);
+    for (int i = 0; i < 4; ++i)
+    {
+        const float a = float(i) * (3.14159265f * 0.5f);
+        const glm::vec3 side = (u * cosf(a) + v * sinf(a)) * radius;
+        emit(ctx, p1 + side, p2 + side, rgba);
+    }
+    // Hemisphere cap arcs in the two planes containing the axis: each arc runs side -> -side,
+    // bulging along +axis at p2 and -axis at p1.
+    constexpr int N = 8;
+    for (int half = 0; half < 2; ++half)
+    {
+        const glm::vec3& side = half == 0 ? u : v;
+        glm::vec3 prevTop = p2 + side * radius;
+        glm::vec3 prevBot = p1 + side * radius;
+        for (int i = 1; i <= N; ++i)
+        {
+            const float a = float(i) * (3.14159265f / float(N));
+            const glm::vec3 c = side * (cosf(a) * radius);
+            const glm::vec3 s = axis * (sinf(a) * radius);
+            const glm::vec3 top = p2 + c + s;
+            const glm::vec3 bot = p1 + c - s;
+            emit(ctx, prevTop, top, rgba);
+            emit(ctx, prevBot, bot, rgba);
+            prevTop = top;
+            prevBot = bot;
+        }
+    }
+}
+
+void wireBounds(const DebugDrawContext& ctx, const glm::vec3& lo, const glm::vec3& hi, uint32 rgba)
+{
+    const glm::vec3 c[8] = {
+        { lo.x, lo.y, lo.z }, { hi.x, lo.y, lo.z }, { hi.x, hi.y, lo.z }, { lo.x, hi.y, lo.z },
+        { lo.x, lo.y, hi.z }, { hi.x, lo.y, hi.z }, { hi.x, hi.y, hi.z }, { lo.x, hi.y, hi.z } };
+    constexpr int e[12][2] = { {0,1},{1,2},{2,3},{3,0}, {4,5},{5,6},{6,7},{7,4}, {0,4},{1,5},{2,6},{3,7} };
+    for (auto& [a, b] : e)
+        emit(ctx, c[a], c[b], rgba);
+}
+
+glm::vec3 xfPoint(const b3WorldTransform& xf, const glm::quat& rot, const glm::vec3& p)
+{
+    return toGlm(xf.p) + rot * p;
+}
+
+void drawHull(const DebugDrawContext& ctx, const b3HullData* hull, const b3WorldTransform& xf, uint32 rgba)
+{
+    const b3Vec3* points = b3GetHullPoints(hull);
+    const b3HullHalfEdge* edges = b3GetHullEdges(hull);
+    if (!points || !edges)
+        return;
+    const glm::quat rot = toGlm(xf.q);
+    for (int i = 0; i < hull->edgeCount; ++i)
+    {
+        const b3HullHalfEdge& e = edges[i];
+        if (i > (int)e.twin)
+            continue; // each edge pair once
+        emit(ctx, xfPoint(xf, rot, toGlm(points[e.origin])), xfPoint(xf, rot, toGlm(points[edges[e.twin].origin])), rgba);
+    }
+}
+
+void drawMesh(const DebugDrawContext& ctx, const b3Mesh& mesh, const b3WorldTransform& xf, uint32 rgba)
+{
+    const b3Vec3* verts = b3GetMeshVertices(mesh.data);
+    const b3MeshTriangle* tris = b3GetMeshTriangles(mesh.data);
+    if (!verts || !tris)
+        return;
+    const glm::quat rot = toGlm(xf.q);
+    const glm::vec3 scale = toGlm(mesh.scale);
+    for (int t = 0; t < mesh.data->triangleCount; ++t)
+    {
+        const glm::vec3 a = xfPoint(xf, rot, toGlm(verts[tris[t].index1]) * scale);
+        const glm::vec3 b = xfPoint(xf, rot, toGlm(verts[tris[t].index2]) * scale);
+        const glm::vec3 c = xfPoint(xf, rot, toGlm(verts[tris[t].index3]) * scale);
+        // A single mesh shape can be huge (Sponza): cull per triangle so only wireframe near the
+        // camera is emitted (the world-level drawingBounds only culls whole shapes).
+        auto distSq = [&ctx](const glm::vec3& p) { const glm::vec3 d = p - ctx.viewPos; return glm::dot(d, d); };
+        if (glm::min(glm::min(distSq(a), distSq(b)), distSq(c)) > ctx.rangeSq)
+            continue;
+        emit(ctx, a, b, rgba);
+        emit(ctx, b, c, rgba);
+        emit(ctx, c, a, rgba);
+    }
+}
+
+bool drawShapeFcn(void* userShape, b3WorldTransform transform, b3HexColor color, void* context)
+{
+    const DebugDrawContext& ctx = *static_cast<const DebugDrawContext*>(context);
+    const b3DebugShape& shape = *static_cast<const b3DebugShape*>(userShape);
+    const uint32 rgba = toRGBA(color);
+    const glm::quat rot = toGlm(transform.q);
+    switch (shape.type)
+    {
+    case b3_sphereShape:
+        wireSphere(ctx, xfPoint(transform, rot, toGlm(shape.sphere->center)), rot, shape.sphere->radius, rgba);
+        break;
+    case b3_capsuleShape:
+        wireCapsule(ctx, xfPoint(transform, rot, toGlm(shape.capsule->center1)), xfPoint(transform, rot, toGlm(shape.capsule->center2)), shape.capsule->radius, rgba);
+        break;
+    case b3_hullShape:
+        drawHull(ctx, shape.hull, transform, rgba);
+        break;
+    case b3_meshShape:
+        drawMesh(ctx, *shape.mesh, transform, rgba);
+        break;
+    default: // compound/height-field: never created by this engine's PhysicsShape set
+        break;
+    }
+    return false; // fully drawn here; skip box3d's own drawing of this shape
+}
+
+void drawSegmentFcn(b3Pos p1, b3Pos p2, b3HexColor color, void* context)
+{
+    const DebugDrawContext& ctx = *static_cast<const DebugDrawContext*>(context);
+    emit(ctx, toGlm(p1), toGlm(p2), toRGBA(color));
+}
+
+void drawTransformFcn(b3WorldTransform transform, void* context)
+{
+    const DebugDrawContext& ctx = *static_cast<const DebugDrawContext*>(context);
+    const glm::vec3 p = toGlm(transform.p);
+    const glm::quat rot = toGlm(transform.q);
+    constexpr float axisLen = 0.25f;
+    emit(ctx, p, p + rot * glm::vec3(axisLen, 0.0f, 0.0f), 0xff0000ffu);
+    emit(ctx, p, p + rot * glm::vec3(0.0f, axisLen, 0.0f), 0xff00ff00u);
+    emit(ctx, p, p + rot * glm::vec3(0.0f, 0.0f, axisLen), 0xffff0000u);
+}
+
+void drawPointFcn(b3Pos p, float size, b3HexColor color, void* context)
+{
+    const DebugDrawContext& ctx = *static_cast<const DebugDrawContext*>(context);
+    const glm::vec3 c = toGlm(p);
+    const float h = glm::max(size, 0.02f) * 0.5f;
+    const uint32 rgba = toRGBA(color);
+    emit(ctx, c - glm::vec3(h, 0.0f, 0.0f), c + glm::vec3(h, 0.0f, 0.0f), rgba);
+    emit(ctx, c - glm::vec3(0.0f, h, 0.0f), c + glm::vec3(0.0f, h, 0.0f), rgba);
+    emit(ctx, c - glm::vec3(0.0f, 0.0f, h), c + glm::vec3(0.0f, 0.0f, h), rgba);
+}
+
+void drawSphereFcn(b3Pos p, float radius, b3HexColor color, float, void* context)
+{
+    const DebugDrawContext& ctx = *static_cast<const DebugDrawContext*>(context);
+    wireSphere(ctx, toGlm(p), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), radius, toRGBA(color));
+}
+
+void drawCapsuleFcn(b3Pos p1, b3Pos p2, float radius, b3HexColor color, float, void* context)
+{
+    const DebugDrawContext& ctx = *static_cast<const DebugDrawContext*>(context);
+    wireCapsule(ctx, toGlm(p1), toGlm(p2), radius, toRGBA(color));
+}
+
+void drawBoundsFcn(b3AABB aabb, b3HexColor color, void* context)
+{
+    const DebugDrawContext& ctx = *static_cast<const DebugDrawContext*>(context);
+    wireBounds(ctx, toGlm(aabb.lowerBound), toGlm(aabb.upperBound), toRGBA(color));
+}
+
+void drawBoxFcn(b3Vec3 extents, b3WorldTransform transform, b3HexColor color, void* context)
+{
+    const DebugDrawContext& ctx = *static_cast<const DebugDrawContext*>(context);
+    const glm::quat rot = toGlm(transform.q);
+    const glm::vec3 e = toGlm(extents);
+    const uint32 rgba = toRGBA(color);
+    glm::vec3 c[8];
+    for (int i = 0; i < 8; ++i)
+        c[i] = xfPoint(transform, rot, glm::vec3(i & 1 ? e.x : -e.x, i & 2 ? e.y : -e.y, i & 4 ? e.z : -e.z));
+    constexpr int edges[12][2] = { {0,1},{2,3},{4,5},{6,7}, {0,2},{1,3},{4,6},{5,7}, {0,4},{1,5},{2,6},{3,7} };
+    for (auto& [a, b] : edges)
+        emit(ctx, c[a], c[b], rgba);
+}
+
+void drawStringFcn(b3Pos, const char*, b3HexColor, void*) {}
+} // namespace
+
+void PhysicsWorld::debugDraw(const glm::vec3& viewPos, const DebugLineFn& line)
+{
+    if (!m_initialized || !m_debugDrawEnabled)
+        return;
+
+    DebugDrawContext ctx{ .line = &line, .viewPos = viewPos, .rangeSq = m_debugDrawRange * m_debugDrawRange };
+
+    b3DebugDraw draw = b3DefaultDebugDraw();
+    draw.DrawShapeFcn = drawShapeFcn;
+    draw.DrawSegmentFcn = drawSegmentFcn;
+    draw.DrawTransformFcn = drawTransformFcn;
+    draw.DrawPointFcn = drawPointFcn;
+    draw.DrawSphereFcn = drawSphereFcn;
+    draw.DrawCapsuleFcn = drawCapsuleFcn;
+    draw.DrawBoundsFcn = drawBoundsFcn;
+    draw.DrawBoxFcn = drawBoxFcn;
+    draw.DrawStringFcn = drawStringFcn;
+    draw.drawingBounds = b3AABB{ toB3(viewPos - glm::vec3(m_debugDrawRange)), toB3(viewPos + glm::vec3(m_debugDrawRange)) };
+    draw.drawShapes = true;
+    draw.drawJoints = m_debugDrawJoints;
+    draw.drawContacts = m_debugDrawContacts;
+    draw.drawContactNormals = m_debugDrawContacts;
+    draw.drawBounds = m_debugDrawBounds;
+    draw.context = &ctx;
+
+    b3World_Draw(std::bit_cast<b3WorldId>(m_worldHandle), &draw, PhysicsLayers::All);
 }
 
 void PhysicsWorld::setGravity(const glm::vec3& gravity)

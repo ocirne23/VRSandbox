@@ -131,12 +131,11 @@ void ShadowMapGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fram
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.meshInstanceBuffer.getBuffer(), .range = params.meshInstanceBuffer.getSize() } } },
         DescriptorSetUpdateInfo{ .binding = 7, .type = vk::DescriptorType::eCombinedImageSampler },
     };
-    const std::vector<Texture>& textures = Globals::textureManager.getTextures();
-    for (const Texture& tex : textures)
+    for (uint16 texIdx = 0; texIdx < (uint16)Globals::textureManager.getNumTextures(); ++texIdx)
     {
         updates[2].imageInfos.push_back(vk::DescriptorImageInfo{
             .sampler = m_sampler.getSampler(),
-            .imageView = tex.getImageView(),
+            .imageView = Globals::textureManager.getViewForDescriptor(texIdx), // freed slots -> fallback
             .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
         });
     }

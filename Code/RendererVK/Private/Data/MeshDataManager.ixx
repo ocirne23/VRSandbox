@@ -34,6 +34,7 @@ private:
 
     friend class ObjectContainer;
     friend class MeshStreamer;
+    friend class Renderer; // container teardown frees ranges recorded by the container/its skinned bundles
     size_t uploadVertexData(const void* pData, size_t size);
     size_t uploadIndexData(const void* pData, size_t size);
     size_t uploadSkinningData(const void* pData, size_t size);
@@ -41,11 +42,13 @@ private:
     // the skinning compute fills it each frame. Returns the byte offset (caller divides by sizeof(MeshVertex)).
     size_t reserveVertexData(size_t size);
 
-    // Returns a range to the free list (mesh streaming eviction). offset/size must exactly match a prior
-    // upload*/reserve* call. The caller is responsible for GPU-lifetime safety: nothing in flight may
-    // still read the range (the MeshStreamer defers frees by NUM_FRAMES_IN_FLIGHT).
+    // Returns a range to the free list (mesh streaming eviction / ObjectContainer teardown). offset/size
+    // must exactly match a prior upload*/reserve* call. The caller is responsible for GPU-lifetime
+    // safety: nothing in flight may still read the range (the MeshStreamer defers frees by
+    // NUM_FRAMES_IN_FLIGHT; container teardown forces the pre-flush GPU drain in present()).
     void freeVertexData(size_t offset, size_t size);
     void freeIndexData(size_t offset, size_t size);
+    void freeSkinningData(size_t offset, size_t size);
 
     // Doubles the buffer until neededSize fits, GPU-copying the used range into the new allocation.
     void growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSize, size_t neededSize, vk::BufferUsageFlags2 usage);
@@ -57,9 +60,11 @@ private:
 
 private:
 
-    // Bucket sizes must be a multiple of the element size (48-byte MeshVertex / 4-byte MeshIndex).
+    // Bucket sizes must be a multiple of the element size (48-byte MeshVertex / 4-byte MeshIndex /
+    // 32-byte SkinningVertex).
     static constexpr size_t VERTEX_BUCKET_BYTES = 64 * sizeof(RendererVKLayout::MeshVertex); // 3 KB
     static constexpr size_t INDEX_BUCKET_BYTES = 256 * sizeof(RendererVKLayout::MeshIndex);  // 1 KB
+    static constexpr size_t SKINNING_BUCKET_BYTES = 64 * sizeof(RendererVKLayout::SkinningVertex); // 2 KB
 
     Buffer m_vertexBuffer;
     Buffer m_indexBuffer;
@@ -72,9 +77,10 @@ private:
 
     BitRangeAllocator<false> m_vertexAllocator{ 0 };
     BitRangeAllocator<false> m_indexAllocator{ 0 };
+    BitRangeAllocator<false> m_skinningAllocator{ 0 };
     size_t m_vertexBytesAllocated = 0; // bucket-rounded
     size_t m_indexBytesAllocated = 0;
-    size_t m_skinningBufOffset = 0;    // skinning stays a bump allocator (small, never streamed)
+    size_t m_skinningBytesAllocated = 0;
 };
 
 export namespace Globals

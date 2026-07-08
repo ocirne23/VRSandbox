@@ -27,6 +27,11 @@ public:
     bool isValid() const { return m_handle != 0; }
     void destroy();
 
+    // Removes/re-adds the body from the simulation entirely (no collision, no queries, no events).
+    // Expensive in box3d; callers should track state and avoid redundant toggles.
+    void setEnabled(bool enabled);
+    bool isEnabled() const;
+
     glm::vec3 getPosition() const;
     glm::quat getRotation() const;
     void setTransform(const glm::vec3& pos, const glm::quat& rot);

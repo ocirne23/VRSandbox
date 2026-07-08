@@ -35,6 +35,17 @@ public:
     // aliased to it. Only called for sets cold long enough that no in-flight TLAS references the BLAS.
     void onMeshEvicted(uint32 meshIdx);
 
+    // Container teardown (Renderer::freeMeshInfoRange): zeroes the freed meshes' address entries in
+    // every frame slot, resets their aliases to identity (slot reuse expects it) and RETIRES self-owned
+    // static BLASes instead of destroying them — unlike streaming eviction there is no cold-frames
+    // guarantee here, an in-flight TLAS may still reference them. recordCompaction destroys retirees
+    // once the frames-in-flight window has passed (matured compaction batches skip them by handle compare).
+    void onMeshRangeFreed(uint32 firstMeshIdx, uint32 count);
+
+    // Skinned-bundle teardown: retires the double-buffered per-job-slot skinned BLASes so a later reuse
+    // of the job slots (different geometry, different size) lazily re-creates them.
+    void freeSkinnedJobSlots(uint32 firstJob, uint32 count);
+
     // Records BLAS builds for the given meshes into cmd, reading geometry directly from the shared
     // vertex/index buffers with each mesh's exact vertex count (maxVertex must be tight — see the
     // comment in the implementation). Aliased and streamed-out (indexCount 0) meshes are skipped; the

@@ -21,6 +21,9 @@ public:
 
 	bool initialize(EProceduralTextureType type, uint32 width = 64, uint32 height = 64);
 
+	// Copy an externally-generated RGBA8 image (e.g. a terrain chunk's biome color map).
+	bool initializeFromPixels(const Pixel* pixels, uint32 width, uint32 height, const char* name = nullptr);
+
 	const char*  getFileName()  const override;
 	const Pixel* getPixels()    const override;
 	uint32       getWidth()     const override;

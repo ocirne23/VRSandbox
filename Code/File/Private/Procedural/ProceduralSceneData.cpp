@@ -85,6 +85,45 @@ bool ProceduralSceneData::initialize(const char* shapeName, bool /*mergeNodes*/,
 	return true;
 }
 
+bool ProceduralSceneData::initializeFromMesh(const MeshGeometryDesc& geometry, const uint8* colorRGBA, uint32 colorWidth, uint32 colorHeight)
+{
+	m_shapeName = geometry.name ? geometry.name : "Mesh";
+
+	ProceduralMeshData& mesh = m_meshes.emplace_back();
+	if (!mesh.initializeFromGeometry(geometry.positions, geometry.normals, geometry.tangents,
+		geometry.bitangents, geometry.texCoords, geometry.numVertices, geometry.indices, geometry.numIndices, m_shapeName.c_str()))
+	{
+		m_meshes.pop_back();
+		return false;
+	}
+
+	ProceduralMaterialData& material = m_materials.emplace_back();
+	[[maybe_unused]] bool matOk = material.initialize("ProceduralMeshMaterial");
+	assert(matOk && "Failed to initialize ProceduralMaterialData");
+
+	// Only build textures when the caller supplies a color map. Otherwise the material keeps its default
+	// UINT32_MAX texture indices, so the renderer resolves it to the shared fallback diffuse/normal textures
+	// (no per-mesh texture upload). Texture 0 = diffuse (color map), texture 1 = flat normal.
+	if (colorRGBA && colorWidth > 0 && colorHeight > 0)
+	{
+		ProceduralTextureData& diffuseTex = m_textures.emplace_back();
+		[[maybe_unused]] bool diffuseOk = diffuseTex.initializeFromPixels(reinterpret_cast<const ITextureData::Pixel*>(colorRGBA), colorWidth, colorHeight, "mesh_diffuse");
+		assert(diffuseOk && "Failed to initialize diffuse ProceduralTextureData");
+
+		ProceduralTextureData& normalTex = m_textures.emplace_back();
+		[[maybe_unused]] bool normalOk = normalTex.initialize(EProceduralTextureType::FlatNormal, 8, 8);
+		assert(normalOk && "Failed to initialize normal ProceduralTextureData");
+
+		material.setDiffuseTexIdx(0);
+		material.setNormalTexIdx(1);
+	}
+
+	m_rootNode.initialize(m_shapeName.c_str(), { 0u });
+
+	m_valid = true;
+	return true;
+}
+
 const IMeshData* ProceduralSceneData::getMesh(const char* pMeshName) const
 {
 	for (const ProceduralMeshData& mesh : m_meshes)

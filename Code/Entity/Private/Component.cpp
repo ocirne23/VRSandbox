@@ -309,12 +309,33 @@ void PhysicsComponent::spawn(Entity& entity, const SpawnInfo& info, const Transf
 
 void PhysicsComponent::destroy(Entity& entity, const SpawnInfo& info)
 {
+    body.destroy(); // removes the collider from the box3d world (shapes die with the body)
+    occluder.reset();
+    occluderData.reset();
+}
+
+void PhysicsComponent::suspendBody()
+{
+    if (!body.isValid() || suspended)
+        return;
+    body.setEnabled(false);
+    suspended = true;
+    occluder.reset(); // an invisible entity must not occlude either
 }
 
 void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
 {
     if (!body.isValid())
         return;
+
+    if (suspended)
+    {
+        // Re-enabled via SceneComponent: put the body back into the simulation and resync it to the
+        // entity's current world transform (the !synced path below also re-registers the occluder).
+        body.setEnabled(true);
+        suspended = false;
+        synced = false;
+    }
 
     const Transform world = composeTransform(parentWorld, Transform(entity.pos, entity.scale, entity.rot));
     if (!synced)
@@ -357,6 +378,15 @@ void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
         if (occluderData)
             occluder = SpatialOccluder(Globals::occlusionBuffer.addOccluder(occluderData, world)); // re-bake at the new pose
     }
+}
+
+void suspendPhysicsTree(Entity& entity)
+{
+    if (PhysicsComponent* pc = getComponent<PhysicsComponent>(&entity))
+        pc->suspendBody();
+    if (SceneComponent* sc = getComponent<SceneComponent>(&entity))
+        for (const EntityPtr& child : sc->children)
+            suspendPhysicsTree(*child);
 }
 
 void dispatchPhysicsContactEvents()

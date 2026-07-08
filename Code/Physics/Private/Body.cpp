@@ -19,6 +19,20 @@ void PhysicsBody::destroy()
     m_handle = 0;
 }
 
+void PhysicsBody::setEnabled(bool enabled)
+{
+    const b3BodyId id = toBodyId(m_handle);
+    if (enabled)
+        b3Body_Enable(id);
+    else
+        b3Body_Disable(id);
+}
+
+bool PhysicsBody::isEnabled() const
+{
+    return b3Body_IsEnabled(toBodyId(m_handle));
+}
+
 glm::vec3 PhysicsBody::getPosition() const
 {
     return toGlm(b3Body_GetPosition(toBodyId(m_handle)));

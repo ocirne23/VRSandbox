@@ -65,7 +65,19 @@ void MeshStreamer::registerMeshSet(const MeshSetDesc& desc)
 {
     assert(desc.numLevels >= 1 && desc.numLevels <= RendererVKLayout::MAX_MESH_LODS);
 
-    MeshSet& set = m_sets.emplace_back();
+    uint32 setIdx;
+    if (!m_freeSetSlots.empty()) // slot of a set unregistered by a destroyed container
+    {
+        setIdx = m_freeSetSlots.back();
+        m_freeSetSlots.pop_back();
+        m_sets[setIdx] = MeshSet{};
+    }
+    else
+    {
+        m_sets.emplace_back();
+        setIdx = (uint32)(m_sets.size() - 1);
+    }
+    MeshSet& set = m_sets[setIdx];
     set.fileId = getFileId(desc.filePath);
     set.numLevels = (uint16)desc.numLevels;
     set.numVertices = desc.numVertices;
@@ -74,7 +86,6 @@ void MeshStreamer::registerMeshSet(const MeshSetDesc& desc)
     set.lastSeenFrame = m_frameCounter;
     set.totalBytes = (uint64)desc.numVertices * sizeof(RendererVKLayout::MeshVertex);
 
-    const uint32 setIdx = (uint32)(m_sets.size() - 1);
     for (uint32 k = 0; k < desc.numLevels; ++k)
     {
         set.levels[k] = desc.levels[k];
@@ -83,6 +94,40 @@ void MeshStreamer::registerMeshSet(const MeshSetDesc& desc)
         if (meshInfoIdx >= m_setForMeshInfo.size())
             m_setForMeshInfo.resize(meshInfoIdx + 1, UINT32_MAX);
         m_setForMeshInfo[meshInfoIdx] = setIdx;
+    }
+}
+
+void MeshStreamer::unregisterSets(uint32 firstMeshInfoIdx, uint32 count)
+{
+    for (uint32 meshInfoIdx = firstMeshInfoIdx; meshInfoIdx < firstMeshInfoIdx + count && meshInfoIdx < (uint32)m_setForMeshInfo.size(); ++meshInfoIdx)
+    {
+        const uint32 setIdx = m_setForMeshInfo[meshInfoIdx];
+        m_setForMeshInfo[meshInfoIdx] = UINT32_MAX;
+        if (setIdx == UINT32_MAX)
+            continue;
+        MeshSet& set = m_sets[setIdx];
+        if (set.removed)
+            continue; // another level of the same set already processed it
+        set.removed = true;
+        if (set.state == EState::Resident)
+        {
+            // Free the CURRENT allocation like an eviction, minus the MeshInfo rewrites — the renderer
+            // neutralizes the whole freed range itself (freeMeshInfoRange).
+            for (uint32 k = 0; k < set.numLevels; ++k)
+                m_deferredFrees.push_back(DeferredFree{
+                    .offset = set.levels[k].indexByteOffset,
+                    .size = (uint64)set.levels[k].indexCount * sizeof(RendererVKLayout::MeshIndex),
+                    .frame = m_frameCounter, .isVertex = false });
+            m_deferredFrees.push_back(DeferredFree{
+                .offset = set.vertexByteOffset,
+                .size = (uint64)set.numVertices * sizeof(RendererVKLayout::MeshVertex),
+                .frame = m_frameCounter, .isVertex = true });
+        }
+        // A slot with a read in flight recycles when its completion drains; the rest can recycle now.
+        if (set.state != EState::StreamingIn)
+            m_freeSetSlots.push_back(setIdx);
+        set.state = EState::Evicted; // keeps stats/eviction passes away from it
+        set.totalBytes = 0;
     }
 }
 
@@ -166,6 +211,13 @@ void MeshStreamer::drainCompletions()
     {
         m_opsInFlight--;
         MeshSet& set = m_sets[completion.setIdx];
+        if (set.removed)
+        {
+            // Unregistered mid-stream (container destroyed): discard the data, recycle the slot now
+            // that the worker can no longer reference it.
+            m_freeSetSlots.push_back(completion.setIdx);
+            continue;
+        }
         if (!completion.ok)
         {
             // Cache file gone/changed mid-run: the set stays evicted (and invisible). It re-cooks on
@@ -222,7 +274,7 @@ void MeshStreamer::issueStreamIns()
             break;
         MeshSet& set = m_sets[setIdx];
         // "Seen this frame while evicted" = an instance wants it back on screen (or in shadows/GI).
-        if (set.state != EState::Evicted || set.failed || set.lastSeenFrame != m_frameCounter)
+        if (set.state != EState::Evicted || set.failed || set.removed || set.lastSeenFrame != m_frameCounter)
             continue;
 
         StreamInRequest request;
@@ -291,7 +343,7 @@ void MeshStreamer::solveEvictions()
     m_stats.residentBytes = residentBytes;
     m_stats.numEvictedSets = 0;
     for (const MeshSet& set : m_sets)
-        m_stats.numEvictedSets += set.state != EState::Resident;
+        m_stats.numEvictedSets += !set.removed && set.state != EState::Resident;
 }
 
 void MeshStreamer::update()
@@ -302,9 +354,11 @@ void MeshStreamer::update()
 
     Stats stats = {};
     stats.budgetBytes = (uint64)m_budgetMB << 20;
-    stats.numSets = (uint32)m_sets.size();
     for (const MeshSet& set : m_sets)
     {
+        if (set.removed)
+            continue;
+        stats.numSets++;
         stats.streamableBytes += set.totalBytes;
         if (set.state != EState::Resident)
         {

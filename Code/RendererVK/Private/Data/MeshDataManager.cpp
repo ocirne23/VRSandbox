@@ -51,6 +51,7 @@ bool MeshDataManager::initialize(size_t vertexBufSize, size_t indexBufSize)
     m_indexBufSize = (indexBufSize + INDEX_BUCKET_BYTES - 1) / INDEX_BUCKET_BYTES * INDEX_BUCKET_BYTES;
     m_vertexAllocator.resize(uint32(m_vertexBufSize / VERTEX_BUCKET_BYTES));
     m_indexAllocator.resize(uint32(m_indexBufSize / INDEX_BUCKET_BYTES));
+    m_skinningAllocator.resize(uint32(RendererVKLayout::INITIAL_SKINNING_DATA / SKINNING_BUCKET_BYTES));
 
     // Extra usage beyond vertex/index: the GI ray tracer builds BLASes directly from these mega-buffers
     // (eAccelerationStructureBuildInputReadOnlyKHR + eShaderDeviceAddress) and fetches hit-triangle
@@ -72,11 +73,18 @@ void MeshDataManager::growBuffer(Buffer& buffer, size_t& bufSize, size_t usedSiz
     while (newSize < neededSize)
         newSize *= 2;
 
-    // Queued staging copies may target the buffer being replaced; submit them, then drain the GPU so
-    // neither the old buffer nor its readers are in flight.
-    Globals::stagingManager.flushPending();
+    // Drain first: this buffer is shared (not per-frame-in-flight) and read full-range every frame by GI
+    // probe trace / RTAO / BLAS builds, so an already-submitted dispatch may still be reading it while a
+    // queued staging copy (from an unrelated uploadVertexData/uploadIndexData earlier this frame) is about
+    // to write into it - WRITE_AFTER_READ, same as Renderer::waitForGpuAndFlushStaging.
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
     assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle in MeshDataManager::growBuffer");
+    // Now safe to submit those queued copies (they target the buffer about to be moved-from/destroyed
+    // below) - then drain again so that submission itself completes before the destroy, avoiding
+    // "buffer currently in use by command buffer" at vkDestroyBuffer.
+    Globals::stagingManager.flushPending();
+    waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle after staging flush in MeshDataManager::growBuffer");
 
     Buffer oldBuffer = std::move(buffer);
     buffer.initialize(newSize, usage, vk::MemoryPropertyFlagBits::eDeviceLocal, false, oldBuffer.getDebugName());
@@ -155,10 +163,15 @@ void MeshDataManager::freeIndexData(size_t offset, size_t size)
 
 size_t MeshDataManager::uploadSkinningData(const void* pData, size_t size)
 {
-    if (m_skinningBufOffset + size > m_skinningBufSize)
-        growBuffer(m_skinningBuffer, m_skinningBufSize, m_skinningBufOffset, m_skinningBufOffset + size, skinningBufferUsage());
-    const size_t offset = m_skinningBufOffset;
-    Globals::stagingManager.upload(m_skinningBuffer.getBuffer(), size, pData, m_skinningBufOffset);
-    m_skinningBufOffset += size;
+    const size_t offset = allocRange(m_skinningAllocator, m_skinningBufSize, SKINNING_BUCKET_BYTES, size,
+        m_skinningBuffer, skinningBufferUsage(), m_skinningBytesAllocated);
+    Globals::stagingManager.upload(m_skinningBuffer.getBuffer(), size, pData, offset);
     return offset;
+}
+
+void MeshDataManager::freeSkinningData(size_t offset, size_t size)
+{
+    const uint32 numBuckets = uint32((size + SKINNING_BUCKET_BYTES - 1) / SKINNING_BUCKET_BYTES);
+    m_skinningAllocator.releaseRange(int(offset / SKINNING_BUCKET_BYTES), numBuckets);
+    m_skinningBytesAllocated -= (size_t)numBuckets * SKINNING_BUCKET_BYTES;
 }

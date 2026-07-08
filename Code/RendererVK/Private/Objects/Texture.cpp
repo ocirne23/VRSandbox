@@ -86,10 +86,20 @@ Texture::Texture()
 
 Texture::~Texture()
 {
+    destroy();
+}
+
+void Texture::destroy()
+{
     vk::Device vkDevice = Globals::device.getDevice();
     if (m_imageView)
         vkDevice.destroyImageView(m_imageView);
     Globals::gpuAllocator.destroyImage(m_image, m_imageMemory);
+    m_image = VK_NULL_HANDLE;
+    m_imageMemory = VK_NULL_HANDLE;
+    m_imageView = VK_NULL_HANDLE;
+    m_width = m_height = m_numMipLevels = 0;
+    m_pStreamingMeta.reset();
 }
 
 Texture::Texture(Texture&& move)

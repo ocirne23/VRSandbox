@@ -3,6 +3,7 @@ export module RendererVK:TextureManager;
 import Core;
 import File.fwd;
 
+import :VK;
 import :Layout;
 import :Texture;
 
@@ -13,6 +14,17 @@ public:
     ~TextureManager();
     //uint16 upload(const std::vector<ITextureData*>& textureData, bool generateMips);
     uint16 upload(const ITextureData& textureData, bool generateMips, bool sRGB = false);
+    // Destroys a texture (ObjectContainer teardown) and recycles its slot for a later upload. The caller
+    // guarantees the GPU is idle (Renderer::processPendingTextureFrees); unregisters from the
+    // TextureStreamer and queues a fallback rewrite of the slot's bindless descriptor entries.
+    void free(uint16 idx);
+    // View for descriptor-array slot idx: freed (not yet recycled) slots substitute the fallback diffuse
+    // so the bindless arrays never reference a destroyed image.
+    vk::ImageView getViewForDescriptor(uint16 idx) const
+    {
+        const vk::ImageView view = m_textures[idx].getImageView();
+        return view ? view : m_textures[RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX].getImageView();
+    }
     const Texture& getTexture(uint16 idx) const { assert(idx < m_textures.size()); return m_textures[idx]; }
     // Mutable access for the TextureStreamer's residency swaps (adoptStreamedImage).
     Texture& getTextureMutable(uint16 idx) { assert(idx < m_textures.size()); return m_textures[idx]; }
@@ -32,6 +44,7 @@ public:
 private:
 
     std::vector<Texture> m_textures;
+    std::vector<uint16> m_freeSlots; // freed by ObjectContainer teardown, recycled by upload()
     uint32 m_maxTextures = RendererVKLayout::INITIAL_TEXTURES;
     uint32 m_generation = 0;
 };

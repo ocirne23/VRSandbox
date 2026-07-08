@@ -29,6 +29,10 @@ export namespace RendererVKLayout
 	constexpr size_t INITIAL_LIGHT_TABLE_NUM_ENTRIES = 64; // must stay a power of 2 for hashing (doubling preserves this)
 
 
+    // Debug line overlay (physics collider wireframes etc.): per-frame vertex capacity of the mapped
+    // line buffer, allocated lazily on first use (16 bytes/vertex). Overflow drops the excess lines.
+    constexpr uint32 MAX_DEBUG_LINE_VERTICES = 2 * 1024 * 1024;
+
     // Mesh/material indices are stored as uint16 in InMeshInstance, so growth clamps to this.
     constexpr uint32 MESH_MATERIAL_INDEX_LIMIT = USHRT_MAX
         - 1;

@@ -33,6 +33,8 @@ Renderer::~Renderer()
     {
         assert(false && "Failed to wait for device idle in RendererVK::~RendererVK");
     }
+    // m_pendingTextureFrees is NOT processed here: ~TextureManager (init_seg XCU4, destroyed before
+    // this XCU3 global) destroys every texture wholesale, pending ones included.
     Globals::textureStreamer.shutdown(); // stop the disk worker + retire swapped-out images while the device is idle
     Globals::meshStreamer.shutdown();
     destroyEyeCompositeTargets();
@@ -125,6 +127,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_accelStructure.initialize(m_maxUniqueMeshes);
     m_giProbePipeline.initialize(m_maxGiTlasInstances, m_maxTextures, m_numTextureDescriptors);
     m_giProbePipeline.initializeDebug(sceneRenderPass);
+    m_debugLinePipeline.initialize(sceneRenderPass);
 
 
     m_shadowCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
@@ -167,6 +170,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
         perFrame.volumetricFogCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.fogApplyCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.giProbeDebugCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.debugLineCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.taaCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.eyeAdaptCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.compositeCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -333,6 +337,7 @@ void Renderer::reloadShaders()
     m_shadowMapGraphicsPipeline.reloadShaders(m_maxTextures);
     m_giProbePipeline.reloadShaders(m_maxTextures);
     m_giProbePipeline.reloadDebugShaders(m_perFrameData[0].sceneColor.getRenderPass());
+    m_debugLinePipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_taaPipeline.reloadShaders();
     m_eyeAdaptationPipeline.reloadShaders();
     m_compositePipeline.reloadShaders(m_renderPass);
@@ -389,25 +394,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         setHaveToRecordCommandBuffers();
     }
 
-    // The live texture count outgrew the variable-count texture-array descriptors
-    if (Globals::textureManager.getGeneration() != m_textureGeneration)
-    {
-        m_textureGeneration = Globals::textureManager.getGeneration();
-        m_numTextureDescriptors = Globals::textureManager.getMaxTextures();
-        waitForGpuAndFlushStaging();
-        m_giProbePipeline.resizeTextureDescriptors(m_numTextureDescriptors);
-        m_rtaoPipeline.resizeTextureDescriptors(m_numTextureDescriptors);
-        for (PerFrameData& perFrame : m_perFrameData)
-        {
-            for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
-            {
-                perFrame.staticMeshPipelineDescriptorSet[eye].initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
-                perFrame.gbufferDescriptorSet[eye].initialize(m_gbufferPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
-            }
-            perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
-        }
-        setHaveToRecordCommandBuffers();
-    }
+    syncTextureDescriptorCapacity();
 
     checkLightGridCapacity();
 
@@ -762,6 +749,7 @@ void Renderer::present()
 {
     if(m_windowMinimized)
     {
+        m_debugLineVerts.clear();
         Globals::openXR.endFrame(nullptr, nullptr, {}, vk::ImageLayout::eUndefined); // balance the begun XR frame
         return;
     }
@@ -802,6 +790,12 @@ void Renderer::present()
     frameData.mappedFogVolumes.data()->count = m_fogVolumeCounter;
     frameData.fogVolumesBuffer.flushMappedMemory(RendererVKLayout::FOG_VOLUME_HEADER_SIZE + m_fogVolumeCounter * sizeof(RendererVKLayout::FogVolumeInfo));
 
+    // Debug overlay lines accumulated since the last present (safe here: this slot's fence was waited
+    // in beginFrame). First use lazily creates the GPU buffers -> re-record to pick up the new pass.
+    if (m_debugLinePipeline.upload(frameIdx, m_debugLineVerts))
+        setHaveToRecordCommandBuffers();
+    m_debugLineVerts.clear();
+
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_skinningComputePipeline.update(frameIdx, m_skinningPalettes, m_skinningJobs);
     m_lightGridComputePipeline.update(frameIdx, m_lightCounter);
@@ -811,6 +805,10 @@ void Renderer::present()
     Globals::textureStreamer.update();
     Globals::meshStreamer.update();
 
+    // Catch texture-array growth from containers loaded AFTER beginFrame (terrain streaming, mid-frame
+    // spawns): without this, this frame's record writes past the descriptor capacity beginFrame sized.
+    syncTextureDescriptorCapacity();
+
     if (m_sharedBufferNeedSync)
     {
         // One or more shared (not per-frame-in-flight) buffers had a within-capacity contents upload
@@ -819,6 +817,9 @@ void Renderer::present()
         auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
         assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle before shared buffer upload");
         m_sharedBufferNeedSync = false;
+        // Destroyed containers' textures can be freed now that nothing is in flight (their bindless
+        // slots rewrite to the fallback in recordCommandBuffers below, before anything is submitted).
+        processPendingTextureFrees();
     }
 
     vk::Semaphore waitSemaphore = Globals::stagingManager.update();
@@ -892,6 +893,13 @@ void Renderer::freeRenderNode(RenderNode& node)
 
 uint32 Renderer::registerSkinnedBundle(const SkinnedInstanceBundle& bundle)
 {
+    if (!m_freeSkinnedBundleSlots.empty())
+    {
+        const uint32 handle = m_freeSkinnedBundleSlots.back();
+        m_freeSkinnedBundleSlots.pop_back();
+        m_skinnedBundles[handle] = bundle;
+        return handle;
+    }
     const uint32 handle = (uint32)m_skinnedBundles.size();
     m_skinnedBundles.push_back(bundle);
     return handle;
@@ -946,17 +954,22 @@ namespace
 
 void Renderer::waitForGpuAndFlushStaging()
 {
-    // Drain the GPU first: some buffers being grown here (e.g. m_instanceOffsetsBuffer) aren't
-    // per-frame-in-flight, so an already-submitted draw/dispatch may still be reading one while a queued
-    // staging copy is about to write into it (WRITE_AFTER_READ - no fence/semaphore otherwise orders a
-    // fresh copy submission against earlier submissions on the same queue). Flushing pending copies only
-    // after the wait means their vkCmdCopyBuffer/Image writes always land on an idle GPU. This still
-    // happens before any buffer this call preceded gets destroyed/recreated by the caller.
+    // Drain first: some buffers being grown here (e.g. m_instanceOffsetsBuffer) aren't per-frame-in-flight,
+    // so an already-submitted draw/dispatch may still be reading one while a queued staging copy is about
+    // to write into it (WRITE_AFTER_READ - no fence/semaphore otherwise orders a fresh copy submission
+    // against earlier submissions on the same queue). Flushing pending copies only after this first wait
+    // means their vkCmdCopyBuffer/Image writes always land on an idle GPU.
     auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
     assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle during capacity growth");
     Globals::stagingManager.flushPending();
+    // Drain again: flushPending() just submitted those copies (targeting the buffer the caller is about to
+    // destroy/recreate) as new GPU work. Without this second wait, destroy() below would race that
+    // submission - "buffer currently in use by command buffer" at vkDestroyBuffer.
+    waitResult = Globals::device.getGraphicsQueue().waitIdle();
+    assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle after staging flush");
     Globals::textureStreamer.onGpuIdle();
     Globals::meshStreamer.onGpuIdle();
+    processPendingTextureFrees();
 }
 
 void Renderer::growRenderNodeCapacity(uint32 needed)
@@ -1134,6 +1147,20 @@ void Renderer::recordIndirectCull(uint32 frameIdx)
 
 uint32 Renderer::allocateSkinningPalette(uint32 boneCount)
 {
+    // The palette store is a bump allocator; freed regions (destroyed containers) are recycled on an
+    // exact boneCount match — same-skeleton respawns, the common case — instead of tracking sub-ranges.
+    for (size_t i = 0; i < m_freeSkinningPaletteHandles.size(); ++i)
+    {
+        const uint32 handle = m_freeSkinningPaletteHandles[i];
+        const SkinningPaletteRegion& region = m_skinningPaletteRegions[handle];
+        if (region.boneCount == boneCount)
+        {
+            m_freeSkinningPaletteHandles[i] = m_freeSkinningPaletteHandles.back();
+            m_freeSkinningPaletteHandles.pop_back();
+            std::fill_n(m_skinningPalettes.begin() + region.offset, boneCount, glm::mat4(1.0f));
+            return handle;
+        }
+    }
     const uint32 handle = (uint32)m_skinningPaletteRegions.size();
     const uint32 offset = (uint32)m_skinningPalettes.size();
     m_skinningPaletteRegions.push_back({ offset, boneCount });
@@ -1152,26 +1179,36 @@ void Renderer::setSkinningPalette(uint32 paletteHandle, std::span<const glm::mat
         memcpy(m_skinningPalettes.data() + region.offset, palette.data(), count * sizeof(glm::mat4));
 }
 
-uint32 Renderer::addSkinnedInstance(uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle,
+uint32 Renderer::allocateSkinningJobRange(uint32 count)
+{
+    uint32 firstJob = m_freeSkinningJobSlots.allocate(count);
+    if (firstJob == UINT32_MAX)
+    {
+        firstJob = (uint32)m_skinningJobs.size();
+        // Value-initialized: vertexCount/indexCount 0 keeps a slot inert until setSkinnedInstance fills it.
+        m_skinningJobs.resize(firstJob + count);
+        m_skinnedBlasBuilds.resize(firstJob + count);
+        if ((uint32)m_skinningJobs.size() > m_maxSkinningJobs)
+            growSkinningJobCapacity((uint32)m_skinningJobs.size());
+    }
+    return firstJob;
+}
+
+void Renderer::setSkinnedInstance(uint32 jobIdx, uint32 baseVertexOffset, uint32 skinVertexOffset, uint32 outVertexOffset, uint32 vertexCount, uint32 paletteHandle,
     uint32 meshIdx, uint32 firstIndex, uint32 indexCount)
 {
     assert(paletteHandle < m_skinningPaletteRegions.size());
-    RendererVKLayout::SkinningJob job{
+    m_skinningJobs[jobIdx] = RendererVKLayout::SkinningJob{
         .baseVertexOffset = baseVertexOffset,
         .skinVertexOffset = skinVertexOffset,
         .outVertexOffset = outVertexOffset,
         .vertexCount = vertexCount,
         .paletteOffset = m_skinningPaletteRegions[paletteHandle].offset,
     };
-    const uint32 handle = (uint32)m_skinningJobs.size();
-    m_skinningJobs.push_back(job);
-    m_skinnedBlasBuilds.push_back(AccelerationStructure::SkinnedBlasBuild{
-        .meshIdx = meshIdx, .vertexOffset = outVertexOffset, .vertexCount = vertexCount, .firstIndex = firstIndex, .indexCount = indexCount });
+    m_skinnedBlasBuilds[jobIdx] = AccelerationStructure::SkinnedBlasBuild{
+        .meshIdx = meshIdx, .vertexOffset = outVertexOffset, .vertexCount = vertexCount, .firstIndex = firstIndex, .indexCount = indexCount };
     // No re-record needed: the jobs are uploaded per frame and dispatched indirectly; the skinned BLAS
     // list is consumed by recordGlobalIllum, which re-records every frame.
-    if ((uint32)m_skinningJobs.size() > m_maxSkinningJobs)
-        growSkinningJobCapacity((uint32)m_skinningJobs.size());
-    return handle;
 }
 
 void Renderer::growSkinningPaletteCapacity(uint32 needed)
@@ -1452,6 +1489,23 @@ void Renderer::recordGiProbeDebug(uint32 frameIdx)
     vkCb.setViewport(0, { viewport });
     vkCb.setScissor(0, { scissor });
     m_giProbePipeline.recordDebugDraw(cb, frameIdx, frameData.ubo, m_giProbeDebugRadius, m_giProbeDebugMode);
+    cb.end();
+}
+
+void Renderer::recordDebugLines(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = frameData.sceneColor.getRenderPass() };
+    CommandBuffer& cb = frameData.debugLineCommandBuffer;
+    vk::CommandBuffer vkCb = cb.begin(false, &inheritance);
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 vpSize = m_viewportRect.getSize();
+    const vk::Viewport viewport{ .x = (float)m_viewportRect.min.x, .y = (float)m_viewportRect.max.y,
+        .width = (float)vpSize.x, .height = -((float)vpSize.y), .minDepth = 0.0f, .maxDepth = 1.0f };
+    const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+    vkCb.setViewport(0, { viewport });
+    vkCb.setScissor(0, { scissor });
+    m_debugLinePipeline.record(cb, frameIdx, frameData.ubo);
     cb.end();
 }
 
@@ -1797,7 +1851,8 @@ void Renderer::applyPendingTextureDescriptorWrites(uint32 frameIdx)
         // frame; the pending capacity growth re-allocates + fully refills every set, so drop them.
         if (texIdx >= m_numTextureDescriptors || texIdx >= Globals::textureManager.getNumTextures())
             continue;
-        const vk::ImageView view = Globals::textureManager.getTexture(texIdx).getImageView();
+        // Freed slots (destroyed container, not yet recycled) resolve to the fallback view.
+        const vk::ImageView view = Globals::textureManager.getViewForDescriptor(texIdx);
         for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
         {
             m_staticMeshGraphicsPipeline.updateTextureDescriptor(frameData.staticMeshPipelineDescriptorSet[eye].getDescriptorSet(), texIdx, view);
@@ -1842,6 +1897,8 @@ void Renderer::recordCommandBuffers()
             recordStaticMesh(frameIdx);
             recordGBuffer(frameIdx);
             recordGiProbeDebug(frameIdx);
+            if (m_debugLinePipeline.hasBuffers())
+                recordDebugLines(frameIdx);
             recordAO(frameIdx);
             recordFogApply(frameIdx);
             recordTaa(frameIdx);
@@ -2070,6 +2127,11 @@ void Renderer::recordCommandBuffers()
             vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
             if (m_giProbeDebugEnabled)
                 vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
+            if (m_debugLinePipeline.hasBuffers())
+            {
+                vk::CommandBuffer vkDebugLineCommandBuffer = frameData.debugLineCommandBuffer.getCommandBuffer();
+                vkCommandBuffer.executeCommands(1, &vkDebugLineCommandBuffer);
+            }
             if (m_fogParams.enabled)
                 vkCommandBuffer.executeCommands(1, &vkFogApplyCommandBuffer);
             vkCommandBuffer.endRenderPass();
@@ -2120,9 +2182,140 @@ void Renderer::setHaveToRecordCommandBuffers()
         perFrame.updated = false;
 }
 
+void Renderer::syncTextureDescriptorCapacity()
+{
+    // The live texture count outgrew the variable-count texture-array descriptors.
+    if (Globals::textureManager.getGeneration() == m_textureGeneration)
+        return;
+    m_textureGeneration = Globals::textureManager.getGeneration();
+    m_numTextureDescriptors = Globals::textureManager.getMaxTextures();
+    waitForGpuAndFlushStaging();
+    m_giProbePipeline.resizeTextureDescriptors(m_numTextureDescriptors);
+    m_rtaoPipeline.resizeTextureDescriptors(m_numTextureDescriptors);
+    for (PerFrameData& perFrame : m_perFrameData)
+    {
+        for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
+        {
+            perFrame.staticMeshPipelineDescriptorSet[eye].initialize(m_staticMeshGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
+            perFrame.gbufferDescriptorSet[eye].initialize(m_gbufferPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
+        }
+        perFrame.shadowDrawDescriptorSet.initialize(m_shadowMapGraphicsPipeline.getDescriptorSetLayout(), m_numTextureDescriptors);
+    }
+    setHaveToRecordCommandBuffers();
+}
+
 void Renderer::addObjectContainer(ObjectContainer* pObjectContainer)
 {
     m_objectContainers.push_back(pObjectContainer);
+}
+
+void Renderer::removeObjectContainer(ObjectContainer* pObjectContainer)
+{
+    std::erase(m_objectContainers, pObjectContainer);
+    ObjectContainer& container = *pObjectContainer;
+
+    // Parked skinned bundles first (they free MeshInfos/output regions that reference the sources).
+    // Every live RenderNode must have been destroyed before the container, so all of its bundles are
+    // parked in m_freeSkinnedBundles by now.
+    if (container.m_baseSkinnedMeshIdx != UINT32_MAX)
+    {
+        if (auto it = m_freeSkinnedBundles.find(container.m_baseSkinnedMeshIdx); it != m_freeSkinnedBundles.end())
+        {
+            for (const uint32 bundleHandle : it->second)
+                destroySkinnedBundle(bundleHandle);
+            m_freeSkinnedBundles.erase(it);
+        }
+        m_freeSkinnedSourceSlots.release(container.m_baseSkinnedMeshIdx, container.m_numSkinnedMeshes);
+    }
+
+    // Streamed mesh sets own their CURRENT mega-buffer ranges (re-streams relocate them); everything
+    // the container uploaded outside a stream set is freed from its own records.
+    if (container.m_numMeshInfos > 0)
+        Globals::meshStreamer.unregisterSets(container.m_baseMeshInfoIdx, container.m_numMeshInfos);
+    for (const ObjectContainer::OwnedDataRange& range : container.m_ownedDataRanges)
+    {
+        switch (range.kind)
+        {
+        case ObjectContainer::EOwnedRange::Vertex:   Globals::meshDataManager.freeVertexData(range.offset, range.size); break;
+        case ObjectContainer::EOwnedRange::Index:    Globals::meshDataManager.freeIndexData(range.offset, range.size); break;
+        case ObjectContainer::EOwnedRange::Skinning: Globals::meshDataManager.freeSkinningData(range.offset, range.size); break;
+        }
+    }
+
+    freeMeshInfoRange(container.m_baseMeshInfoIdx, container.m_numMeshInfos);
+    m_freeMaterialSlots.release(container.m_baseMaterialInfoIdx, (uint32)container.m_materialNames.size());
+
+    m_freeInstanceOffsetSlots.release(container.m_baseMeshInstanceOffsetsIdx, (uint32)container.m_meshInstanceOffsets.size());
+    for (uint32 i = 0; i < (uint32)container.m_rebasedOffsetBaseForIdx.size(); ++i)
+        if (container.m_rebasedOffsetBaseForIdx[i] != UINT32_MAX)
+            m_freeInstanceOffsetSlots.release(container.m_rebasedOffsetBaseForIdx[i], container.m_nodeMeshRanges[i].numNodes);
+    if (container.m_skinnedIdentityOffsetIdx != UINT32_MAX)
+        m_freeInstanceOffsetSlots.release(container.m_skinnedIdentityOffsetIdx, 1);
+
+    for (const uint32 groupIdx : container.m_ownedLodGroups)
+        m_freeMeshLodGroups.push_back(groupIdx);
+
+    // The images may still be sampled by in-flight frames: destroyed in present() right after the
+    // shared-buffer GPU drain, their bindless slots rewritten to the fallback at the next record.
+    m_pendingTextureFrees.insert(m_pendingTextureFrees.end(), container.m_ownedTextures.begin(), container.m_ownedTextures.end());
+
+    // Freed mega-buffer/slot ranges may be recycled by uploads later this frame; forcing the pre-flush
+    // GPU drain in present() guarantees those staging copies never race an in-flight frame's reads of
+    // the old contents (uploads through the free ranges are always staged, never direct).
+    m_sharedBufferNeedSync = true;
+}
+
+void Renderer::freeMeshInfoRange(uint32 baseMeshInfoIdx, uint32 count)
+{
+    if (count == 0)
+        return;
+    // Neutralize the slots: zero indexCount makes the cull's DGC draws, the shadow pass and the TLAS
+    // writer no-ops for any instance still referencing them this frame (a node pushed before the
+    // container died), exactly like streamed-out meshes.
+    const std::span<RendererVKLayout::MeshInfo> infos = m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>();
+    for (uint32 i = baseMeshInfoIdx; i < baseMeshInfoIdx + count; ++i)
+    {
+        infos[i] = RendererVKLayout::MeshInfo{};
+        m_meshVertexCounts[i] = 0;
+        m_meshIsSkinnedOutput[i] = 0;
+    }
+    m_meshInfosBuffer.upload(count * sizeof(RendererVKLayout::MeshInfo), infos.data() + baseMeshInfoIdx,
+        (size_t)baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
+    m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
+    m_accelStructure.onMeshRangeFreed(baseMeshInfoIdx, count);
+    std::erase_if(m_pendingBlasRebuilds, [&](uint32 meshIdx) { return meshIdx >= baseMeshInfoIdx && meshIdx < baseMeshInfoIdx + count; });
+    m_freeMeshInfoSlots.release(baseMeshInfoIdx, count);
+}
+
+void Renderer::destroySkinnedBundle(uint32 bundleHandle)
+{
+    SkinnedInstanceBundle& bundle = m_skinnedBundles[bundleHandle];
+    uint32 numMeshInfos = bundle.numMeshes; // level 0s + the LOD levels appended after them
+    for (uint32 k = 0; k < bundle.numMeshes; ++k)
+    {
+        const RendererVKLayout::SkinnedMeshSource& src = m_skinnedMeshSources[bundle.sourceKey + k];
+        numMeshInfos += src.numLodLevels;
+        // The job entry is parked (vertexCount 0) but keeps its output offset for exactly this purpose.
+        Globals::meshDataManager.freeVertexData(
+            (size_t)m_skinningJobs[bundle.firstJob + k].outVertexOffset * sizeof(RendererVKLayout::MeshVertex),
+            (size_t)src.vertexCount * sizeof(RendererVKLayout::MeshVertex));
+    }
+    freeMeshInfoRange(bundle.baseMeshIdx, numMeshInfos);
+    m_accelStructure.freeSkinnedJobSlots(bundle.firstJob, bundle.numMeshes);
+    m_freeSkinningJobSlots.release(bundle.firstJob, bundle.numMeshes);
+    m_freeSkinningPaletteHandles.push_back(bundle.paletteHandle);
+    for (const uint32 groupIdx : bundle.lodGroupForMesh)
+        if (groupIdx != UINT32_MAX)
+            m_freeMeshLodGroups.push_back(groupIdx);
+    bundle = SkinnedInstanceBundle{ .sourceKey = UINT32_MAX, .baseMeshIdx = 0, .paletteHandle = 0, .firstJob = 0, .numMeshes = 0 };
+    m_freeSkinnedBundleSlots.push_back(bundleHandle);
+}
+
+void Renderer::processPendingTextureFrees()
+{
+    for (const uint16 texIdx : m_pendingTextureFrees)
+        Globals::textureManager.free(texIdx);
+    m_pendingTextureFrees.clear();
 }
 
 void Renderer::setMeshStreamedOut(uint16 meshInfoIdx)
@@ -2153,6 +2346,29 @@ void Renderer::setMeshStreamedIn(uint16 meshInfoIdx, int32 vertexOffset, uint32 
 uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& meshInfos, std::span<const uint32> vertexCounts, bool skinnedOutputs)
 {
     assert(vertexCounts.size() == meshInfos.size() && "one exact vertex count per MeshInfo");
+    if (meshInfos.empty())
+        return m_meshInfoCounter;
+
+    // Reuse a range freed by a destroyed container before growing the counter (holes are never compacted).
+    if (const uint32 reusedBase = m_freeMeshInfoSlots.allocate((uint32)meshInfos.size()); reusedBase != UINT32_MAX)
+    {
+        const std::span<RendererVKLayout::MeshInfo> infos = m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>();
+        memcpy(infos.data() + reusedBase, meshInfos.data(), meshInfos.size() * sizeof(RendererVKLayout::MeshInfo));
+        for (uint32 i = 0; i < (uint32)meshInfos.size(); ++i)
+        {
+            m_meshVertexCounts[reusedBase + i] = vertexCounts[i];
+            m_meshIsSkinnedOutput[reusedBase + i] = skinnedOutputs ? 1 : 0;
+            // Slots below the one-time build watermark won't be caught up by recordGlobalIllum's
+            // counter scan; queue their BLAS builds explicitly (aliases are identity, reset at free).
+            if (!skinnedOutputs && reusedBase + i < m_blasBuiltCount)
+                m_pendingBlasRebuilds.push_back(reusedBase + i);
+        }
+        m_meshInfosBuffer.upload(meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
+            meshInfos.data(), (size_t)reusedBase * sizeof(RendererVKLayout::MeshInfo));
+        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
+        return reusedBase;
+    }
+
     const uint32 baseMeshInfoIdx = m_meshInfoCounter;
     m_meshInfoCounter += (uint32)meshInfos.size();
     m_numInstancesPerMesh.resize(m_meshInfoCounter);
@@ -2183,6 +2399,11 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
 
 uint32 Renderer::addSkinnedMeshSources(const std::vector<RendererVKLayout::SkinnedMeshSource>& sources)
 {
+    if (const uint32 reusedBase = m_freeSkinnedSourceSlots.allocate((uint32)sources.size()); reusedBase != UINT32_MAX)
+    {
+        std::copy(sources.begin(), sources.end(), m_skinnedMeshSources.begin() + reusedBase);
+        return reusedBase;
+    }
     const uint32 baseIdx = (uint32)m_skinnedMeshSources.size();
     m_skinnedMeshSources.insert(m_skinnedMeshSources.end(), sources.begin(), sources.end());
     return baseIdx;
@@ -2190,6 +2411,19 @@ uint32 Renderer::addSkinnedMeshSources(const std::vector<RendererVKLayout::Skinn
 
 uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialInfo>& materialInfos)
 {
+    if (materialInfos.empty())
+        return m_materialInfoCounter;
+
+    if (const uint32 reusedBase = m_freeMaterialSlots.allocate((uint32)materialInfos.size()); reusedBase != UINT32_MAX)
+    {
+        const std::span<RendererVKLayout::MaterialInfo> materials = m_materialInfosBuffer.getBackingStoreAs<RendererVKLayout::MaterialInfo>();
+        memcpy(materials.data() + reusedBase, materialInfos.data(), materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo));
+        m_materialInfosBuffer.upload(materialInfos.size() * sizeof(RendererVKLayout::MaterialInfo),
+            materialInfos.data(), (size_t)reusedBase * sizeof(RendererVKLayout::MaterialInfo));
+        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
+        return reusedBase;
+    }
+
     const uint32 baseMaterialInfoIdx = m_materialInfoCounter;
     m_materialInfoCounter += (uint32)materialInfos.size();
     assert(m_materialInfoCounter < USHRT_MAX);
@@ -2212,6 +2446,19 @@ uint32 Renderer::addMaterialInfos(const std::vector<RendererVKLayout::MaterialIn
 
 uint32 Renderer::addMeshInstanceOffsets(const std::vector<RendererVKLayout::MeshInstanceOffset>& meshInstanceOffsets)
 {
+    if (meshInstanceOffsets.empty())
+        return m_instanceOffsetCounter;
+
+    if (const uint32 reusedBase = m_freeInstanceOffsetSlots.allocate((uint32)meshInstanceOffsets.size()); reusedBase != UINT32_MAX)
+    {
+        const std::span<RendererVKLayout::MeshInstanceOffset> offsets = m_instanceOffsetsBuffer.getBackingStoreAs<RendererVKLayout::MeshInstanceOffset>();
+        memcpy(offsets.data() + reusedBase, meshInstanceOffsets.data(), meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset));
+        m_instanceOffsetsBuffer.upload(meshInstanceOffsets.size() * sizeof(RendererVKLayout::MeshInstanceOffset),
+            meshInstanceOffsets.data(), (size_t)reusedBase * sizeof(RendererVKLayout::MeshInstanceOffset));
+        m_sharedBufferNeedSync = true; // queued copy into the shared buffer; see present()
+        return reusedBase;
+    }
+
     const uint32 baseInstanceOffsetIdx = m_instanceOffsetCounter;
     m_instanceOffsetCounter += (uint32)meshInstanceOffsets.size();
 

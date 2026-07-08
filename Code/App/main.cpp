@@ -21,6 +21,7 @@ import Audio;
 import Spatial;
 
 import App.InputControls;
+import Procedural;
 
 int main()
 {
@@ -58,6 +59,11 @@ int main()
     Globals::scriptHost.setCurrentScriptPath("Scripts/Graph.scr");
     ScriptEventManager& scriptEvents = Globals::scriptEvents;
     scriptEvents.initialize();
+
+    // Procedural terrain: bounded ring of camera-following chunks, generated on a worker thread. Declared
+    // after the renderer so it's destroyed before it (frees RenderNodes/containers while the device lives).
+    Procedural::TerrainStreamer terrain;
+    terrain.initialize();
 
     VrInput& vrInput = Globals::vrInput;
     VRFreeFlyCameraController vrCameraController;
@@ -261,6 +267,13 @@ int main()
         physics.update(deltaSec); // fixed-step; entities sync to body poses in their update below
         dispatchPhysicsContactEvents();    // fire onContact hooks + script "Contact/Sensor Begin/End" events
 
+        // Collider wireframes ("Physics/Debug/Draw colliders" tweak): box3d debug draw decomposed into
+        // world-space lines, pushed to the renderer's per-frame debug line overlay.
+        if (physics.isDebugDrawEnabled())
+            physics.debugDraw(camera.position, [&renderer](const glm::vec3& a, const glm::vec3& b, uint32 color) {
+                renderer.addDebugLine(a, b, color);
+            });
+
         const Frustum& frustum = renderer.beginFrame(camera);
 
         spatialIndex.commitFrame(); // applies cell moves queued during last frame's entity updates
@@ -309,6 +322,8 @@ int main()
             if (render && frustum.sphereInFrustum(render->node.getWorldBounds()))
                 renderer.renderNode(render->node);
         }
+
+        terrain.update(renderer, camera);
 
         if (gizmo.isVisible())
             gizmo.getGizmoEntity()->update(renderer, (float)deltaSec);

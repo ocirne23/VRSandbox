@@ -60,6 +60,37 @@ uint32           ProceduralMeshData::getMaterialIndex() const { return 0; }
 AABB             ProceduralMeshData::getAABB()          const { return m_aabb; }
 const char*      ProceduralMeshData::getName()          const { return m_name.c_str(); }
 
+bool ProceduralMeshData::initializeFromGeometry(
+	const glm::vec3* positions, const glm::vec3* normals,
+	const glm::vec3* tangents, const glm::vec3* bitangents, const glm::vec3* texCoords,
+	uint32 numVertices, const uint32* indices, uint32 numIndices, const char* name)
+{
+	if (!positions || !normals || !indices || numVertices == 0 || numIndices == 0)
+		return false;
+
+	m_name = name ? name : "Mesh";
+	m_vertices.assign(positions, positions + numVertices);
+	m_normals.assign(normals, normals + numVertices);
+
+	if (tangents)   m_tangents.assign(tangents, tangents + numVertices);
+	else            m_tangents.assign(numVertices, glm::vec3(1.0f, 0.0f, 0.0f));
+	if (bitangents) m_bitangents.assign(bitangents, bitangents + numVertices);
+	else            m_bitangents.assign(numVertices, glm::vec3(0.0f, 0.0f, 1.0f));
+	if (texCoords)  m_texCoords.assign(texCoords, texCoords + numVertices);
+	else            m_texCoords.assign(numVertices, glm::vec3(0.0f));
+
+	m_indices.assign(indices, indices + numIndices);
+
+	m_aabb.min = glm::vec3(std::numeric_limits<float>::max());
+	m_aabb.max = glm::vec3(std::numeric_limits<float>::lowest());
+	for (const glm::vec3& v : m_vertices)
+	{
+		m_aabb.min = glm::min(m_aabb.min, v);
+		m_aabb.max = glm::max(m_aabb.max, v);
+	}
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Cube: 6 faces * 4 verts = 24 vertices, 6 faces * 6 indices = 36 indices
 // All vertices in CCW winding order when viewed from outside.

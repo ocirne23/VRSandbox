@@ -3,7 +3,24 @@ export module File:ISceneData;
 import File.fwd;
 
 import Core;
+import Core.glm;
 import Animation;
+
+// Caller-supplied geometry for ISceneData::createMeshScene (e.g. runtime-generated terrain chunks). Arrays
+// are numVertices long; tangents/bitangents/texCoords may be null (defaulted). Pointers are borrowed only
+// for the duration of the call (the scene copies them).
+export struct MeshGeometryDesc
+{
+	const glm::vec3* positions = nullptr;
+	const glm::vec3* normals = nullptr;
+	const glm::vec3* tangents = nullptr;
+	const glm::vec3* bitangents = nullptr;
+	const glm::vec3* texCoords = nullptr;
+	uint32 numVertices = 0;
+	const uint32* indices = nullptr;
+	uint32 numIndices = 0;
+	const char* name = "Mesh";
+};
 
 // Cook options for the scene cache (see loadCached / SceneCooker.cpp). All fields participate in the
 // cache's options hash, so changing any of them re-cooks affected scenes on the next load.
@@ -37,6 +54,12 @@ public:
 
 	static std::unique_ptr<ISceneData> createAssimpLoader();
 	static std::unique_ptr<ISceneData> createProceduralLoader();
+
+	// Wraps caller-supplied geometry as a single-mesh, single-material scene ready for ObjectContainer.
+	// colorRGBA (optional, RGBA8, colorWidth*colorHeight*4 bytes) becomes the material's diffuse texture;
+	// pass null for a fallback checkerboard. Used to turn generated terrain chunks into renderable meshes.
+	static std::unique_ptr<ISceneData> createMeshScene(const MeshGeometryDesc& geometry,
+		const uint8* colorRGBA = nullptr, uint32 colorWidth = 0, uint32 colorHeight = 0);
 
 	// Cache-aware load: serves a cooked binary snapshot from Assets/Local/Cooked when it matches the
 	// source file (mtime + size) and options, otherwise imports via Assimp, cooks, and writes it for

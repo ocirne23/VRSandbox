@@ -4,6 +4,7 @@ import File.fwd;
 import :TextureManager; // ?
 import :TextureStreamer;
 import :Device;
+import :Layout;
 
 TextureManager::~TextureManager()
 {
@@ -47,27 +48,39 @@ uint32 TextureManager::getDescriptorCap() const
 
 uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips, bool sRGB)
 {
-	assert(m_textures.size() < UINT16_MAX && "Too many textures");
-	if ((uint32)m_textures.size() >= m_maxTextures)
+	uint16 idx;
+	if (!m_freeSlots.empty()) // slot freed by a destroyed ObjectContainer
 	{
-		const uint32 maxCapacity = getDescriptorCap();
-		if (m_maxTextures < maxCapacity)
-		{
-			m_maxTextures = std::min(m_maxTextures * 2u, maxCapacity);
-			m_generation++;
-			printf("TextureManager: grew texture capacity to %u\n", m_maxTextures);
-		}
-		else
-		{
-			assert(false && "Texture capacity at device limit");
-		}
+		idx = m_freeSlots.back();
+		m_freeSlots.pop_back();
 	}
-	const uint16 idx = (uint16)m_textures.size();
-	m_textures.emplace_back();
+	else
+	{
+		assert(m_textures.size() < UINT16_MAX && "Too many textures");
+		if ((uint32)m_textures.size() >= m_maxTextures)
+		{
+			const uint32 maxCapacity = getDescriptorCap();
+			if (m_maxTextures < maxCapacity)
+			{
+				m_maxTextures = std::min(m_maxTextures * 2u, maxCapacity);
+				m_generation++;
+				printf("TextureManager: grew texture capacity to %u\n", m_maxTextures);
+			}
+			else
+			{
+				assert(false && "Texture capacity at device limit");
+			}
+		}
+		idx = (uint16)m_textures.size();
+		m_textures.emplace_back();
+	}
 	if (!m_textures[idx].initialize(textureData, generateMips, sRGB))
 	{
 		assert(false && "Failed to initialize texture");
-		m_textures.pop_back();
+		if (idx == (uint16)(m_textures.size() - 1))
+			m_textures.pop_back();
+		else
+			m_freeSlots.push_back(idx);
 		return UINT16_MAX;
 	}
 	const uint64 allocatedBytes = m_textures[idx].getAllocatedBytes();
@@ -75,5 +88,22 @@ uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips
 		Globals::textureStreamer.registerTexture(idx, std::move(*pMeta), allocatedBytes);
 	else
 		Globals::textureStreamer.notePinned(allocatedBytes);
+	// Refresh the slot's bindless entries in every frame slot (recycled slots point at the fallback or a
+	// destroyed image until this applies; fresh slots pick the view up at the next full descriptor fill
+	// anyway, but the queued write makes that independent of a re-record happening).
+	Globals::textureStreamer.queueDescriptorWrite(idx);
 	return idx;
+}
+
+void TextureManager::free(uint16 idx)
+{
+	assert(idx > RendererVKLayout::FALLBACK_NORMAL_TEX_IDX && idx < m_textures.size() && "freeing a fallback texture");
+	Texture& texture = m_textures[idx];
+	if (!texture.getImageView())
+		return; // already freed
+	Globals::textureStreamer.unregisterTexture(idx, texture.getAllocatedBytes());
+	texture.destroy();
+	m_freeSlots.push_back(idx);
+	// Point the slot's bindless entries at the fallback until an upload recycles it.
+	Globals::textureStreamer.queueDescriptorWrite(idx);
 }

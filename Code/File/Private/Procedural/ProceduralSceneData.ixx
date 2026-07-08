@@ -26,6 +26,10 @@ public:
 	ProceduralSceneData(ProceduralSceneData&&) = default;
 
 	bool initialize(const char* shapeName, bool mergeNodes, bool preTransformVertices) override;
+
+	// Assemble a single-mesh scene from caller-supplied geometry + optional RGBA8 diffuse pixels.
+	bool initializeFromMesh(const MeshGeometryDesc& geometry, const uint8* colorRGBA, uint32 colorWidth, uint32 colorHeight);
+
 	bool isValid() const override { return m_valid; }
 
 	const std::string& getFilePath() const override { return m_shapeName; }

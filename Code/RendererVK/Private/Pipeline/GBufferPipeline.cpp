@@ -83,8 +83,8 @@ void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, Reco
     };
     // Texture array (binding 3) for the fragment alpha-mask test; same source as the forward/GI passes.
     DescriptorSetUpdateInfo texUpdate{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler };
-    for (const Texture& tex : Globals::textureManager.getTextures())
-        texUpdate.imageInfos.push_back(vk::DescriptorImageInfo{ .sampler = m_textureSampler.getSampler(), .imageView = tex.getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal });
+    for (uint16 texIdx = 0; texIdx < (uint16)Globals::textureManager.getNumTextures(); ++texIdx)
+        texUpdate.imageInfos.push_back(vk::DescriptorImageInfo{ .sampler = m_textureSampler.getSampler(), .imageView = Globals::textureManager.getViewForDescriptor(texIdx), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal });
     if (!texUpdate.imageInfos.empty())
         updates.push_back(std::move(texUpdate));
 

@@ -43,6 +43,12 @@ public:
 
     void registerMeshSet(const MeshSetDesc& desc);
 
+    // ObjectContainer teardown: unregisters every set whose levels' MeshInfos fall in the given global
+    // range. A resident set's CURRENT mega-buffer ranges (re-streams relocate them, so the container's
+    // load-time records are stale) go on the deferred free list; an in-flight re-stream's completion is
+    // discarded. Set slots recycle for later registrations.
+    void unregisterSets(uint32 firstMeshInfoIdx, uint32 count);
+
     // Called per instance from the renderNode paths (and per selected LOD level): keeps the owning set
     // warm / requests a re-stream when it was evicted. Thread-safe (relaxed atomic store);
     // unregistered/skinned mesh indices are ignored.
@@ -100,6 +106,7 @@ private:
         uint32 lastSeenFrame = 0;
         uint64 totalBytes = 0; // vertex + all levels' index bytes
         bool failed = false;   // re-stream failed (cache gone/changed): stay evicted, don't retry
+        bool removed = false;  // unregistered (container destroyed): inert until the slot recycles
     };
 
     struct StreamInRequest
@@ -139,6 +146,7 @@ private:
     std::vector<std::string> m_files;
     std::vector<MeshSet> m_sets;
     std::vector<uint32> m_setForMeshInfo; // global MeshInfo idx -> set idx (UINT32_MAX = pinned)
+    std::vector<uint32> m_freeSetSlots;   // removed sets, recycled by registerMeshSet
     std::vector<DeferredFree> m_deferredFrees;
     uint32 m_frameCounter = 0;
     uint32 m_opsInFlight = 0;

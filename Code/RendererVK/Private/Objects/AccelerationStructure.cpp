@@ -107,6 +107,42 @@ void AccelerationStructure::onMeshEvicted(uint32 meshIdx)
         buf.flushMappedMemory(buf.getSize());
 }
 
+void AccelerationStructure::onMeshRangeFreed(uint32 firstMeshIdx, uint32 count)
+{
+    for (uint32 meshIdx = firstMeshIdx; meshIdx < firstMeshIdx + count && meshIdx < m_numAliasMeshes; ++meshIdx)
+    {
+        for (auto& mapped : m_mappedBlasAddresses)
+            mapped[meshIdx] = 0;
+        if (m_mappedMeshAlias[meshIdx] == meshIdx && meshIdx < m_blasList.size() && m_blasList[meshIdx].handle)
+        {
+            m_retiredBlas.push_back(RetiredBlas{ m_blasList[meshIdx].handle, std::move(m_blasList[meshIdx].buffer), m_compactionFrame });
+            m_blasList[meshIdx].handle = nullptr;
+            m_blasList[meshIdx].compacted = false;
+        }
+        // Anything aliased to a freed mesh is a LOD level of the same container, freed in the same
+        // range; identity aliases leave the slots ready for reuse by a later addMeshInfos.
+        m_mappedMeshAlias[meshIdx] = meshIdx;
+    }
+    m_meshAliasBuffer.flushMappedMemory(m_numAliasMeshes * sizeof(uint32));
+    for (auto& buf : m_blasAddressBuffers)
+        buf.flushMappedMemory(buf.getSize());
+}
+
+void AccelerationStructure::freeSkinnedJobSlots(uint32 firstJob, uint32 count)
+{
+    for (auto& slot : m_skinnedBlas)
+    {
+        for (uint32 i = firstJob; i < firstJob + count && i < (uint32)slot.size(); ++i)
+        {
+            if (slot[i].handle)
+            {
+                m_retiredBlas.push_back(RetiredBlas{ slot[i].handle, std::move(slot[i].buffer), m_compactionFrame });
+                slot[i].handle = nullptr;
+            }
+        }
+    }
+}
+
 void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& outAlignedAddr, vk::DeviceSize needed)
 {
     const vk::DeviceSize allocSize = needed + m_scratchAlignment;
@@ -412,7 +448,7 @@ void AccelerationStructure::recordBuildSkinnedBlas(vk::CommandBuffer cmd, uint32
     const vk::DeviceAddress vbAddr = vertexBuffer.getDeviceAddress();
     const vk::DeviceAddress ibAddr = indexBuffer.getDeviceAddress();
     std::vector<Blas>& slot = m_skinnedBlas[frameIdx];
-    const bool grew = slot.size() < builds.size();
+    bool wroteAddresses = false;
 
     // Pass 1: build geometry + sizes, find total scratch, (re)allocate BLAS buffers for new entries.
     const uint32 count = (uint32)builds.size();
@@ -467,6 +503,7 @@ void AccelerationStructure::recordBuildSkinnedBlas(vk::CommandBuffer cmd, uint32
             blas.handle = res.value;
             vk::AccelerationStructureDeviceAddressInfoKHR ai{ .accelerationStructure = blas.handle };
             m_mappedBlasAddresses[frameIdx][b.meshIdx] = dev.getAccelerationStructureAddressKHR(ai);
+            wroteAddresses = true; // fresh slot OR a freed job slot re-created for new geometry
         }
 
         ranges[i] = vk::AccelerationStructureBuildRangeInfoKHR{
@@ -476,7 +513,7 @@ void AccelerationStructure::recordBuildSkinnedBlas(vk::CommandBuffer cmd, uint32
             .transformOffset = 0,
         };
     }
-    if (grew)
+    if (wroteAddresses)
         m_blasAddressBuffers[frameIdx].flushMappedMemory(m_blasAddressBuffers[frameIdx].getSize());
 
     ensureScratch(m_skinnedBlasScratch[frameIdx], m_skinnedBlasScratchAlignedAddr[frameIdx], totalScratch);

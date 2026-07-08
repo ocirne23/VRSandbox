@@ -100,6 +100,17 @@ bool ProceduralTextureData::initialize(EProceduralTextureType type, uint32 width
 	return true;
 }
 
+bool ProceduralTextureData::initializeFromPixels(const Pixel* pixels, uint32 width, uint32 height, const char* name)
+{
+	if (!pixels || width == 0 || height == 0)
+		return false;
+	m_fileName = name ? name : "procedural_pixels";
+	m_width = width;
+	m_height = height;
+	m_pixels.assign(pixels, pixels + (size_t)width * height);
+	return true;
+}
+
 const char*  ProceduralTextureData::getFileName()   const { return m_fileName.c_str(); }
 const ProceduralTextureData::Pixel* ProceduralTextureData::getPixels() const { return m_pixels.data(); }
 uint32       ProceduralTextureData::getWidth()      const { return m_width; }

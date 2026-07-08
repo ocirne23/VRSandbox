@@ -140,6 +140,25 @@ void TextureStreamer::notePinned(uint64 allocatedBytes)
     m_pinnedBytes += allocatedBytes;
 }
 
+void TextureStreamer::unregisterTexture(uint16 texIdx, uint64 allocatedBytes)
+{
+    if (texIdx < m_states.size() && m_states[texIdx].numMips != 0)
+    {
+        StreamState& state = m_states[texIdx];
+        if (state.opInFlight)
+            m_numOpsInFlight--; // the completion is dropped by applyCompletion (opInFlight false / slot reset)
+        m_residentBytes -= state.residentBytes;
+        m_tailBytes -= state.tailBytes;
+        m_numStreamable--;
+        state = StreamState{}; // numMips 0 = slot unused; a recycled slot re-registers cleanly
+        // m_desiredBytes/m_committedBytes are recomputed from the states every update().
+    }
+    else
+    {
+        m_pinnedBytes -= std::min(m_pinnedBytes, allocatedBytes);
+    }
+}
+
 void TextureStreamer::noteUse(uint16 texIdx, float log2TexelsAvailable)
 {
     if (texIdx >= m_states.size())
