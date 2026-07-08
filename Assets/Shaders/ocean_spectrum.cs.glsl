@@ -110,6 +110,15 @@ vec2 h0(ivec2 m, uint cascade, float L, float kMin, float kMax, uint which)
     float dk = 6.2831853 / L;
     float amp = sqrt(2.0 * S * dispersionDeriv(k, depth) / k) * dk * u_oceanParams0.z;
 
+    // Wave-age generation limit: wind cannot generate waves whose phase speed much exceeds the wind
+    // itself, but JONSWAP extrapolated below its validity range (U < ~5 m/s) still assigns energy to
+    // fast long swells — leaving visible waves at near-zero wind. Softly suppress components with
+    // c = w/k beyond ~2.5 U: negligible for developed seas (the spectral peak sits inside the limit),
+    // and collapses the sea to glass as the wind dies.
+    const float phaseSpeed = w / k;
+    const float ageRatio = phaseSpeed / (2.5 * U + 0.05);
+    amp *= exp(-(ageRatio * ageRatio) * (ageRatio * ageRatio));
+
     return gaussianPair(m, cascade, which) * (amp / sqrt(2.0));
 }
 

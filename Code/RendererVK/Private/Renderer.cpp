@@ -532,7 +532,9 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     const OceanParams& ocean = m_oceanParams;
     const glm::vec2 windDir = glm::length(ocean.windDirection) > 1e-4f ? glm::normalize(ocean.windDirection) : glm::vec2(1.0f, 0.0f);
     ubo.oceanParams0 = glm::vec4(windDir, ocean.amplitude, ocean.choppiness);
-    ubo.oceanParams1 = glm::vec4(glm::max(ocean.windSpeed, 0.5f), glm::max(ocean.fetchKm, 1.0f) * 1000.0f, glm::max(ocean.depth, 1.0f), ocean.normalStrength);
+    // Wind clamped just above 0: the JONSWAP 1/U terms must stay finite; the spectrum's wave-age limit
+    // (ocean_spectrum.cs.glsl) makes this effectively glassy anyway.
+    ubo.oceanParams1 = glm::vec4(glm::max(ocean.windSpeed, 0.01f), glm::max(ocean.fetchKm, 1.0f) * 1000.0f, glm::max(ocean.depth, 1.0f), ocean.normalStrength);
     ubo.oceanParams2 = glm::vec4(glm::max(ocean.cascadeSizes, glm::vec3(1.0f)), ocean.seaLevel);
     ubo.oceanAbsorption = glm::vec4(ocean.absorption, ocean.roughness);
     ubo.oceanScatter = glm::vec4(ocean.scatterColor, ocean.scatterStrength);
