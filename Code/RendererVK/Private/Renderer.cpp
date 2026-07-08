@@ -116,6 +116,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_maxTextures = Globals::textureManager.getDescriptorCap(); // fixed layout cap; live count grows separately
     m_staticMeshGraphicsPipeline.initialize(sceneRenderPass, m_maxUniqueMeshes, m_maxTextures, m_sceneViewCount > 1);
     m_rtaoPipeline.initialize(&m_rtaoParams, ext.width, ext.height, m_maxTextures, m_numTextureDescriptors, m_sceneViewCount);
+    m_oceanSimPipeline.initialize();
     m_volumetricFogPipeline.initialize();
     m_volumetricFogPipeline.initializeApply(sceneRenderPass, m_sceneViewCount);
     m_taaPipeline.initialize(ext.width, ext.height, m_sceneViewCount);
@@ -162,6 +163,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
         perFrame.aoCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.indirectCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.skinningCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.oceanSimCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.lightGridCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.imguiCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.shadowCullCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -329,6 +331,7 @@ void Renderer::reloadShaders()
     m_staticMeshGraphicsPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass(), m_maxTextures);
     m_gbufferPipeline.reloadShaders(m_perFrameData[m_swapChain.getPrevFrameIdx()].gbuffer);
     m_rtaoPipeline.reloadShaders();
+    m_oceanSimPipeline.reloadShaders();
     m_volumetricFogPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_indirectCullComputePipeline.reloadShaders();
     m_skinningComputePipeline.reloadShaders();
@@ -529,10 +532,14 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     const OceanParams& ocean = m_oceanParams;
     const glm::vec2 windDir = glm::length(ocean.windDirection) > 1e-4f ? glm::normalize(ocean.windDirection) : glm::vec2(1.0f, 0.0f);
     ubo.oceanParams0 = glm::vec4(windDir, ocean.amplitude, ocean.choppiness);
-    ubo.oceanParams1 = glm::vec4(ocean.wavelength, ocean.speed, ocean.seaLevel, ocean.detailScale);
-    ubo.oceanDeepColor = glm::vec4(ocean.deepColor, ocean.roughness);
-    ubo.oceanScatterColor = glm::vec4(ocean.scatterColor, ocean.scatterStrength);
-    ubo.oceanFoamColor = glm::vec4(ocean.foamColor, ocean.foamCoverage);
+    ubo.oceanParams1 = glm::vec4(glm::max(ocean.windSpeed, 0.5f), glm::max(ocean.fetchKm, 1.0f) * 1000.0f, glm::max(ocean.depth, 1.0f), ocean.normalStrength);
+    ubo.oceanParams2 = glm::vec4(glm::max(ocean.cascadeSizes, glm::vec3(1.0f)), ocean.seaLevel);
+    ubo.oceanAbsorption = glm::vec4(ocean.absorption, ocean.roughness);
+    ubo.oceanScatter = glm::vec4(ocean.scatterColor, ocean.scatterStrength);
+    ubo.oceanFoam = glm::vec4(ocean.foamColor, ocean.foamBias);
+    ubo.oceanParams3 = glm::vec4(ocean.gridCellA, ocean.gridCellB, glm::clamp(ocean.foamDecay, 0.0f, 0.999f), 0.0f);
+    ubo.oceanParams4 = glm::vec4(0.0f, glm::clamp(ocean.foamSpread * 0.25f, 0.0f, 0.95f), 0.0f, glm::max(ocean.foamSoftness, 0.02f));
+    ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), 0.0f, glm::max(ocean.foamBreakAccel, 0.01f));
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
@@ -1263,6 +1270,16 @@ void Renderer::recordSkinning(uint32 frameIdx)
     cb.end();
 }
 
+void Renderer::recordOceanSim(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& cb = frameData.oceanSimCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    m_oceanSimPipeline.record(cb, frameIdx, frameData.ubo);
+    cb.end();
+}
+
 void Renderer::recordLightGrid(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -1385,6 +1402,8 @@ void Renderer::recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 e
         .shadowMapDepthSampler = frameData.shadowMap.getDepthSampler(),
         .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
         .gbufferSampler = frameData.gbuffer.getSampler(),
+        .oceanMapsView = m_oceanSimPipeline.getMapsView(),
+        .oceanMapsSampler = m_oceanSimPipeline.getMapsSampler(),
         .viewIndex = RendererVKLayout::eyeToViewIndex(eyeIndex, m_sceneViewCount),
     };
     // Each eye has its own descriptor set (per-eye AO + gbuffer depth), so both eyes write their own.
@@ -1418,6 +1437,8 @@ void Renderer::recordGBufferInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeI
         .indirectCommandBuffer = m_indirectCullComputePipeline.getIndirectCommandBuffer(frameIdx),
         .materialInfoBuffer = m_materialInfosBuffer,
         .meshCountBuffer = frameData.meshCountBuffer,
+        .oceanMapsView = m_oceanSimPipeline.getMapsView(),
+        .oceanMapsSampler = m_oceanSimPipeline.getMapsSampler(),
     };
     m_gbufferPipeline.record(cb, frameIdx, gbufferParams, RendererVKLayout::eyeToViewIndex(eyeIndex, m_sceneViewCount));
 }
@@ -1900,6 +1921,7 @@ void Renderer::recordCommandBuffers()
         // Recorded even with no jobs: the dispatch is indirect (CPU-written dims per frame), so skinned
         // instances spawned later run without a re-record.
         recordSkinning(frameIdx);
+        recordOceanSim(frameIdx); // executed only while an ocean is active (m_oceanParams.enabled)
         recordIndirectCull(frameIdx);
         recordLightGrid(frameIdx);
         recordShadowCull(frameIdx);
@@ -1944,6 +1966,7 @@ void Renderer::recordCommandBuffers()
 
     vk::CommandBuffer vkIndirectCullCommandBuffer = frameData.indirectCullCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkSkinningCommandBuffer = frameData.skinningCommandBuffer.getCommandBuffer();
+    vk::CommandBuffer vkOceanSimCommandBuffer = frameData.oceanSimCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkLightGridCommandBuffer = frameData.lightGridCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkStaticMeshCommandBuffer = frameData.staticMeshCommandBuffer.getCommandBuffer();
     vk::CommandBuffer vkGbufferCommandBuffer = frameData.gbufferCommandBuffer.getCommandBuffer();
@@ -1981,6 +2004,11 @@ void Renderer::recordCommandBuffers()
         // forward / shadow passes then consume as ordinary static geometry.
         if (!m_skinningJobs.empty())
             vkCommandBuffer.executeCommands(1, &vkSkinningCommandBuffer);
+        // FFT ocean simulation (spectrum -> IFFT -> maps + mips); the G-buffer/forward vertex shaders and
+        // the ocean fragment shader sample the maps. Skipped entirely while no ocean is active (the maps
+        // rest in SHADER_READ_ONLY, so the samplers stay valid).
+        if (m_oceanParams.enabled)
+            vkCommandBuffer.executeCommands(1, &vkOceanSimCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkLightGridCommandBuffer);
         // RT sun shadows replace the cascades entirely (forward pass traces, GI uses per-probe sun rays),

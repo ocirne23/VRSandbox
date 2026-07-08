@@ -51,6 +51,9 @@ public:
 		vk::ImageView gbufferDepthView;    // full-res depth (AO bilateral upsample edge weights)
 		vk::Sampler gbufferSampler;
 
+		vk::ImageView oceanMapsView;       // FFT ocean displacement/gradient array (VS displacement + FS shading)
+		vk::Sampler oceanMapsSampler;
+
 		uint32 viewIndex = 0; // selects u_views[viewIndex] via push constant (0 = centre/desktop, 1/2 = eyes)
     };
 

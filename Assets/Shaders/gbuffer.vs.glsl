@@ -4,6 +4,7 @@
 #extension GL_ARB_shading_language_420pack : enable
 
 #include "shared.inc.glsl"
+#define OCEAN_MAPS_BINDING 3
 #include "ocean_wave.inc.glsl"
 
 // View index (0 = centre/desktop, 1 = left eye, 2 = right eye). The G-buffer is rendered once per eye into
@@ -60,14 +61,15 @@ void main()
     }
     vec3 worldPos = quat_transform(in_pos * inst.posScale.w, inst.quat) + inst.posScale.xyz;
     out_normal = quat_transform(in_normal, inst.quat);
-    // Ocean water: displace with the exact same Gerstner field the forward Ocean variant uses (same wave
-    // count), so this reference depth/normal — which TAA reprojection and RTAO read — tracks the drawn waves.
+    // Ocean water: displace with the exact same FFT displacement-map samples the forward Ocean variant
+    // uses (same LOD function), so this reference depth/normal — which TAA reprojection and RTAO read —
+    // tracks the drawn waves.
     if ((in_materialInfos[inst.meshIdxMaterialIdx >> 16].flags & MATERIAL_FLAG_OCEAN) != 0u)
     {
-        vec3 waveDisp, waveN;
-        oceanVertex(worldPos.xz, waveDisp, waveN);
-        worldPos += waveDisp;
-        out_normal = waveN;
+        const vec2 baseXZ = worldPos.xz;
+        const float dist = distance(worldPos, u_viewPos);
+        worldPos += oceanSampleDisplacement(baseXZ, dist);
+        out_normal = oceanSampleNormalLod(baseXZ, dist);
     }
     out_uv = in_uv;
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;

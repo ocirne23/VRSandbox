@@ -83,12 +83,20 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                           // ground-bounce tint for downward GI/fog rays), w unused
     vec4 u_aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
 
-    // Ocean (Gerstner-spectrum water; ocean_wave.inc.glsl + ocean.fs.glsl)
-    vec4 u_oceanParams0;    // xy = wind direction (unit), z = base wave amplitude (m), w = choppiness (0..1)
-    vec4 u_oceanParams1;    // x = base wavelength (m), y = wave speed multiplier, z = sea level (m), w = detail-normal strength
-    vec4 u_oceanDeepColor;  // rgb = deep-water color (linear), w = surface roughness (sun-glint tightness)
-    vec4 u_oceanScatterColor; // rgb = subsurface-scatter tint (crest glow), w = scatter strength
-    vec4 u_oceanFoamColor;  // rgb = foam color (linear), w = foam coverage (Jacobian-fold threshold)
+    // Ocean (FFT/Tessendorf water; ocean_*.cs.glsl simulation + ocean.fs.glsl shading)
+    vec4 u_oceanParams0;    // xy = wind direction (unit), z = spectrum amplitude scale, w = choppiness lambda
+    vec4 u_oceanParams1;    // x = wind speed U10 (m/s), y = fetch (m), z = ocean depth D (m), w = normal strength
+    vec4 u_oceanParams2;    // xyz = cascade FFT patch sizes L0/L1/L2 (m), w = sea level (world Y)
+    vec4 u_oceanAbsorption; // rgb = water extinction sigma_t (1/m, Beer-Lambert), w = perceptual roughness
+    vec4 u_oceanScatter;    // rgb = in-scatter albedo color, w = scatter intensity
+    vec4 u_oceanFoam;       // rgb = foam albedo, w = Jacobian foam bias (higher = more whitecaps)
+    vec4 u_oceanParams3;    // xy = grid cell size vs view distance (cell = x*dist + y; Nyquist-safe VS mips),
+                            // z = turbulence decay per frame, w unused
+    vec4 u_oceanParams4;    // x unused, y = turbulence spread (diffusion/frame), z unused,
+                            // w = instant-foam edge width (both thresholds' smoothstep)
+    vec4 u_oceanParams5;    // x = foam boost (turbulence -> fold-threshold relaxation),
+                            // y = turbidity (entrained-bubble milkiness + roughness), z unused,
+                            // w = breaking-crest foam threshold (downward crest accel in g units)
 };
 
 // View index selecting which u_views[] entry the convenience macros / reconstruction helpers read. Defaults

@@ -1,163 +1,157 @@
 #ifndef OCEAN_WAVE_INC_GLSL
 #define OCEAN_WAVE_INC_GLSL
 
-// Gerstner-spectrum ocean wave field, shared by the displacement passes (instanced_indirect.vs.glsl with
-// OCEAN, the G-buffer prepass gbuffer.vs.glsl) and the water shading (ocean.fs.glsl). One source of truth
-// so the depth the prepass writes, the geometry the forward pass draws, and the normals the fragment
-// shades all agree. Requires ubo.inc.glsl (u_oceanParams0/1, u_timeSeconds); pulled in via shared.inc.glsl.
-//
-// Two layers, following the usual analytic-ocean recipe (cf. Alekseev's "Seascape", iq's ocean shaders):
-//   1. A bank of Gerstner (trochoidal) waves for the large-scale swell + geometry (vertex displacement).
-//      Directions are spread WIDE and decorrelated around the wind (a low-discrepancy fan, not a tight
-//      cone) with per-wave phase offsets, so the crests cross instead of combing into one repeating ridge.
-//   2. A domain-warped value-noise FBM (analytic gradient, per-octave rotated) whose slope perturbs the
-//      shading normal per pixel — this is the random high-frequency ripple that stops the surface reading
-//      as a few smooth blobs. World-space + wind-drifted, so it never swims and never obviously tiles.
+// Sampling helpers for the FFT ocean maps produced by OceanSimulationPipeline (ocean_*.cs.glsl):
+// a 2D array texture with, per cascade c:
+//   layer c                      : displacement (Dx, h, Dz, dDx/dz)
+//   layer   OCEAN_CASCADES + c   : gradients    (dh/dx, dh/dz, dDx/dx, dDz/dz)
+//   layer 2*OCEAN_CASCADES + c   : slope second moments (dhx^2, dhz^2, dhx*dhz, foam [c=0 only])
+// all with a full mip chain. Shared by the raster displacement passes (instanced_indirect.vs.glsl with
+// OCEAN, the G-buffer prepass gbuffer.vs.glsl) and the water shading (ocean.fs.glsl), so the prepass
+// depth, the drawn geometry and the shaded normals all read the exact same wave field. Requires
+// ubo.inc.glsl. The includer may set OCEAN_MAPS_BINDING before including (the G-buffer pipeline binds
+// the maps at a different slot than the forward pipeline).
 
-#define OCEAN_VERT_WAVES 5    // Gerstner waves the vertex displacement passes sum (prepass + forward MUST match)
-#define OCEAN_FRAG_WAVES 6    // Gerstner waves the fragment sums for the base normal
-#define OCEAN_MAX_WAVES  6    // steepness normalisation constant (keeps wave i identical across passes)
-#define OCEAN_DETAIL_OCTAVES 5 // noise octaves layered onto the shading normal
-const float OCEAN_G = 9.81;   // gravity, for the deep-water dispersion relation
+#ifndef OCEAN_MAPS_BINDING
+#define OCEAN_MAPS_BINDING 7
+#endif
+layout (binding = OCEAN_MAPS_BINDING) uniform sampler2DArray u_oceanMaps;
 
-// Integer hash -> [0,1), per-wave (direction/phase jitter).
-float oceanHash(int i)
+// Explicit LOD for vertex-shader displacement sampling: pick the mip whose texel matches the LOCAL GRID
+// CELL SIZE (u_oceanParams3.xy: cell = A*dist + B, the analytic spacing of OceanRenderer's graded grid).
+// This band-limits the displacement to what the mesh can represent (Nyquist) — point-sampling finer
+// content aliases the surface, which reads as waves snapping around as the grid follows the camera.
+// Both displacement passes (prepass + forward) MUST use this same function so their positions match.
+float oceanVertexLod(float dist, float patchSize)
 {
-    uint n = uint(i) * 747796405u + 2891336453u;
-    n = ((n >> ((n >> 28) + 4u)) ^ n) * 277803737u;
-    return float((n >> 22) ^ n) * (1.0 / 4294967295.0);
-}
-// Integer lattice hash -> [0,1) for the value noise (no fract() diagonal-seam correlation).
-float oceanHash2(vec2 p)
-{
-    uvec2 q = uvec2(ivec2(floor(p))) * uvec2(1597334673u, 3812015801u);
-    uint n = (q.x ^ q.y) * 1597334673u;
-    return float(n) * (1.0 / 4294967295.0);
-}
-// Value noise with analytic 2D gradient (iq, "value noise derivatives"): returns vec3(value, d/dx, d/dy).
-// The quintic fade is C2, so the gradient is smooth — no cell creases in the detail normal.
-vec3 oceanNoised(vec2 x)
-{
-    vec2 p = floor(x);
-    vec2 f = fract(x);
-    vec2 u  = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
-    float a = oceanHash2(p);
-    float b = oceanHash2(p + vec2(1.0, 0.0));
-    float c = oceanHash2(p + vec2(0.0, 1.0));
-    float d = oceanHash2(p + vec2(1.0, 1.0));
-    float k1 = b - a, k2 = c - a, k4 = a - b - c + d;
-    return vec3(a + k1 * u.x + k2 * u.y + k4 * u.x * u.y,
-                du.x * (k1 + k4 * u.y),
-                du.y * (k2 + k4 * u.x));
+    const float cellSize = u_oceanParams3.x * dist + u_oceanParams3.y;
+    return max(log2(max(cellSize, 1e-3) * float(OCEAN_FFT_SIZE) / patchSize), 0.0);
 }
 
-// Parameters of Gerstner octave i, derived from the UBO base params (wind dir, amplitude, choppiness,
-// wavelength). Directions are fanned WIDE (+/- ~80 deg) around the wind via the golden-ratio low-discrepancy
-// sequence so successive octaves travel in decorrelated directions (crossing wave trains, no corduroy).
-void oceanWaveParams(int i, out vec2 dir, out float k, out float w, out float amp, out float steep, out float phase0)
+// Sum of all cascades' displacement at an undisplaced world XZ. Choppy lambda (u_oceanParams0.w) is
+// applied here so it stays live (the maps store raw Tessendorf Dx/Dz).
+vec3 oceanSampleDisplacement(vec2 worldXZ, float dist)
 {
-    const float baseAmp = u_oceanParams0.z;
-    const float chop    = u_oceanParams0.w;
-    const float baseLen = max(u_oceanParams1.x, 1.0);
-    const vec2  wind    = u_oceanParams0.xy;
-
-    float len = baseLen * pow(0.63, float(i)); // each octave ~37% shorter (non-harmonic: no exact period)
-    k   = 6.2831853 / len;
-    w   = sqrt(OCEAN_G * k);                    // deep-water dispersion relation, w^2 = g*k
-
-    const float windA = atan(wind.y, wind.x);
-    float spread = (fract(float(i) * 0.6180339887 + 0.5) * 2.0 - 1.0) * 1.4; // +/- ~80 deg, low-discrepancy
-    float ang = windA + spread;
-    dir = vec2(cos(ang), sin(ang));
-
-    // Phillips-spectrum amplitude (Tessendorf 2001, "Simulating Ocean Water"), tempered for the low octave
-    // count, times a cos^2 directional-spreading factor (wave energy biased downwind, crossing swells kept
-    // at a floor so the wide fan survives). Normalised so octave 0 (downwind, base wavelength) == baseAmp.
-    float kp      = 6.2831853 / baseLen;             // peak / base wavenumber
-    float rolloff = pow(kp / k, 1.3);                // Phillips ~1/k^2 energy, tempered to ~1/k^1.3
-    float align   = dot(dir, wind) * 0.5 + 0.5;      // 0 (upwind) .. 1 (downwind)
-    float dirBias = mix(0.35, 1.0, align * align);   // directional spreading, floored to preserve spread
-    amp = baseAmp * rolloff * dirBias;
-
-    // Steepness normalised by k*amp so the horizontal choppiness stays bounded regardless of the spectrum.
-    steep  = chop / max(k * amp * float(OCEAN_MAX_WAVES), 1e-3);
-    phase0 = oceanHash(i) * 6.2831853; // decorrelate the phases so crests don't all align at the origin
-}
-
-// Evaluate the Gerstner field at an undisplaced horizontal world position.
-//   disp     : Gerstner displacement (xz = horizontal choppiness, y = height) to add to the flat surface
-//   nrm      : analytic surface normal (Y-up, normalised) — base (large-scale) normal, detail added in the FS
-//   jacobian : determinant of the horizontal-displacement Jacobian; < ~0 where crests fold over -> foam
-void oceanEval(vec2 worldXZ, int numWaves, out vec3 disp, out vec3 nrm, out float jacobian)
-{
-    disp = vec3(0.0);
-    float nx = 0.0, ny = 1.0, nz = 0.0;
-    float jxx = 0.0, jzz = 0.0, jxz = 0.0;
-    const float t = u_timeSeconds * u_oceanParams1.y;
-
-    for (int i = 0; i < numWaves; ++i)
+    const float chop = u_oceanParams0.w;
+    vec3 disp = vec3(0.0);
+    for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
-        vec2 dir; float k, w, amp, steep, phase0;
-        oceanWaveParams(i, dir, k, w, amp, steep, phase0);
-
-        float phase = k * dot(dir, worldXZ) - w * t + phase0;
-        float c = cos(phase), s = sin(phase);
-
-        disp.x += steep * amp * dir.x * c;
-        disp.z += steep * amp * dir.y * c;
-        disp.y += amp * s;
-
-        float wa = k * amp;
-        nx -= dir.x * wa * c;
-        nz -= dir.y * wa * c;
-        ny -= steep * wa * s;
-
-        float qak = steep * amp * k;
-        jxx -= qak * dir.x * dir.x * s;
-        jzz -= qak * dir.y * dir.y * s;
-        jxz -= qak * dir.x * dir.y * s;
+        const float L = u_oceanParams2[c];
+        const vec4 d = textureLod(u_oceanMaps, vec3(worldXZ / L, float(c)), oceanVertexLod(dist, L));
+        disp += vec3(d.x * chop, d.y, d.z * chop);
     }
-
-    nrm = normalize(vec3(nx, ny, nz));
-    jacobian = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
+    return disp;
 }
 
-// Vertex-side helper: the displacement + coarse normal both raster displacement passes use (identical
-// wave count so the prepass reference depth matches the forward geometry).
-void oceanVertex(vec2 worldXZ, out vec3 disp, out vec3 nrm)
+// Combined surface data for the water fragment shader (implicit-LOD samples: the mip chain prefilters
+// distant slopes, so the far sea reads smooth instead of shimmering):
+//   slope    : chop-corrected surface slope (Tessendorf: eps = grad h / (1 + lambda dD))
+//   jacobian : horizontal-displacement fold J = (1+l dDxx)(1+l dDzz) - (l dDxz)^2 (< ~0.5 = folding crest)
+//   slopeVar : filtered-out slope variance per axis, E[s^2] - E[s]^2 summed over cascades — the LEAN /
+//              Bruneton 2010 term: sub-texel wave detail lost to mip filtering comes back as microfacet
+//              roughness, which is what produces the elongated glittering sun path at distance.
+//   accel    : the surface's vertical acceleration (m/s^2, negative = downward) — with the Jacobian this
+//              drives the instantaneous, geometry-locked crest foam in the water shader
+void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out vec2 slopeVar, out float accel)
 {
-    float jacobian;
-    oceanEval(worldXZ, OCEAN_VERT_WAVES, disp, nrm, jacobian);
-}
-
-// High-frequency detail slope for the shading normal: a domain-warped, per-octave-rotated value-noise FBM,
-// wind-drifted so the ripples move. Returns the world-space height gradient (dh/dx, dh/dz); the fragment
-// tilts the base normal by it. Rotating + scaling the domain each octave (det = 4 -> x2 frequency) keeps
-// the lattices from aligning, and the low-frequency domain warp on the first sample removes any residual
-// grid signature — the result is random, non-tiling ripple detail.
-vec2 oceanDetailSlope(vec2 worldXZ)
-{
-    const float t = u_timeSeconds * u_oceanParams1.y;
-    const mat2 rot = mat2(1.6, 1.2, -1.2, 1.6); // rotate + ~2x scale per octave
-    const vec2 wind = u_oceanParams0.xy;
-
-    // Start a few times finer than the base swell, tied to wavelength so the ripple scale tracks the sea.
-    vec2 p = worldXZ * (6.2831853 / max(u_oceanParams1.x, 1.0)) * 3.0;
-    // Low-frequency domain warp so the noise field wanders (no visible base lattice).
-    p += (vec2(oceanNoised(p * 0.35 + vec2(1.7, 9.2)).x, oceanNoised(p * 0.35 + vec2(6.1, 3.4)).x) - 0.5) * 1.5;
-
-    vec2 slope = vec2(0.0);
-    float amp = 0.5;
-    for (int i = 0; i < OCEAN_DETAIL_OCTAVES; ++i)
+    const float chop = u_oceanParams0.w;
+    vec2 slopeSum = vec2(0.0);
+    vec2 varSum = vec2(0.0);
+    float sxx = 0.0, szz = 0.0, sxz = 0.0;
+    accel = 0.0;
+    for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
-        vec2 drift = wind * (t * (0.5 + 0.28 * float(i)));
-        vec3 n = oceanNoised(p + drift);
-        slope += amp * n.yz;
-        p = rot * p;
-        amp *= 0.55;
+        const vec2 uv = worldXZ / u_oceanParams2[c];
+        const vec4 g = texture(u_oceanMaps, vec3(uv, float(OCEAN_CASCADES + c)));
+        const vec4 d = texture(u_oceanMaps, vec3(uv, float(c)));
+        const vec4 m = texture(u_oceanMaps, vec3(uv, float(2 * OCEAN_CASCADES + c)));
+        slopeSum += g.xy;
+        varSum += max(m.xy - g.xy * g.xy, vec2(0.0)); // E[s^2] - E[s]^2 (0 at mip 0 by construction)
+        sxx += g.z; szz += g.w; sxz += d.w;
+        accel += m.z;
     }
-    return slope;
+    const float jxx = 1.0 + chop * sxx;
+    const float jzz = 1.0 + chop * szz;
+    const float jxz = chop * sxz;
+    jacobian = jxx * jzz - jxz * jxz;
+    // Chop-corrected slope (Tessendorf), with a GENTLE floor and a rational soft limit on the magnitude:
+    // near folds the (1 + lambda dD) terms approach zero and the raw division explodes the slope, which
+    // tips the normal past grazing and shades as harsh dark creases along every crest.
+    slope = slopeSum / max(vec2(jxx, jzz), vec2(0.6));
+    slope /= 1.0 + 0.2 * length(slope);
+    slopeVar = varSum;
+}
+
+// Instantaneous crest foam from the surface's fold Jacobian (Tessendorf) and downward vertical
+// acceleration (Longuet-Higgins breaking criterion). ONE function shared by the water shader (display)
+// and ocean_foam.cs.glsl (turbulence injection) — same thresholds ("Fold bias", "Break accel"), same
+// edge ("Softness"). biasBoost relaxes the fold threshold: the water shader passes the accumulated
+// TURBULENCE scaled by "Foam boost", so energized water foams on ever-milder convergence of the live
+// geometry (dense textured foam in a fresh wake, thinning to streaks along real fold lines as the
+// turbulence decays). The injection passes 0 — only genuine breaking adds energy (no feedback loop).
+float oceanInstantFoam(float jacobian, float accel, float biasBoost)
+{
+    const float softness = max(u_oceanParams4.w, 0.02);
+    const float bias = u_oceanFoam.w + biasBoost;
+    const float fold = 1.0 - smoothstep(bias - softness, bias, jacobian);
+    const float breaking = smoothstep(u_oceanParams5.w, u_oceanParams5.w + softness, -accel / 9.81);
+    return max(fold, breaking);
+}
+
+// Temporally accumulated TURBULENCE field (ocean_foam.cs.glsl, stored in moments[c0].w): the decaying
+// memory of breaking events. The water shader turns it into aged foam (fold-threshold relaxation via
+// oceanInstantFoam's biasBoost), milky entrained-bubble water and extra surface roughness. The field is
+// coarse by design and magnified a LOT near the camera — plain bilinear shows its texels as
+// diamond-shaped gradients, so it is multi-sampled: a 3x3 tent of bilinear taps at 1-texel spacing
+// (fixed reconstruction AA; the real texel-structure removal is the accumulation's own diffusion —
+// "Ocean/Foam/Spread"). Crossfaded to the plain trilinear sample once the pixel footprint reaches
+// mip 1 (minified: the mip chain already filters, and magnification artifacts cannot show).
+// footprint = world size of one pixel.
+float oceanSampleTurbulence(vec2 worldXZ, float footprint)
+{
+    const float L0 = u_oceanParams2.x;
+    const float layer = float(2 * OCEAN_CASCADES); // cascade 0 moments (w = coverage)
+    const float size = float(OCEAN_FFT_SIZE);
+
+    // Screen-matched mip of this map; >= 1 means minification, where trilinear is correct and cheap.
+    const float lod = log2(max(footprint * size / L0, 1e-3));
+    const float trilinear = texture(u_oceanMaps, vec3(worldXZ / L0, layer)).w;
+    if (lod >= 1.0)
+        return trilinear;
+
+    // 3x3 tent (weights 1-2-1 outer product / 16) of bilinear mip-0 taps.
+    const vec2 uv = worldXZ / L0;
+    const vec2 spacing = vec2(1.0 / size);
+    float filtered = 0.0;
+    for (int j = -1; j <= 1; ++j)
+    {
+        for (int i = -1; i <= 1; ++i)
+        {
+            const float w = float((2 - abs(i)) * (2 - abs(j)));
+            filtered += textureLod(u_oceanMaps, vec3(uv + vec2(float(i), float(j)) * spacing, layer), 0.0).w * w;
+        }
+    }
+    filtered *= 1.0 / 16.0;
+
+    return mix(filtered, trilinear, clamp(lod, 0.0, 1.0));
+}
+
+// Vertex-shader variant with explicit LOD (the G-buffer prepass writes this as the reference normal).
+vec3 oceanSampleNormalLod(vec2 worldXZ, float dist)
+{
+    const float chop = u_oceanParams0.w;
+    vec2 slopeSum = vec2(0.0);
+    vec2 sxx_szz = vec2(0.0);
+    for (int c = 0; c < OCEAN_CASCADES; ++c)
+    {
+        const float L = u_oceanParams2[c];
+        const vec4 g = textureLod(u_oceanMaps, vec3(worldXZ / L, float(OCEAN_CASCADES + c)), oceanVertexLod(dist, L));
+        slopeSum += g.xy;
+        sxx_szz += g.zw;
+    }
+    vec2 slope = slopeSum / max(vec2(1.0) + chop * sxx_szz, vec2(0.6));
+    slope /= 1.0 + 0.2 * length(slope); // same fold-over soft limit as oceanSampleSurface
+    return normalize(vec3(-slope.x, 1.0, -slope.y));
 }
 
 #endif

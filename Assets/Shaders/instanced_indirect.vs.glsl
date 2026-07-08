@@ -57,15 +57,12 @@ void main()
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
 
 #ifdef OCEAN
-    // Gerstner-displace the flat water grid into waves in world space, time-animated. The fragment shader
-    // recomputes a finer normal from the undisplaced world XZ passed through out_uv, so this TBN is only a
-    // coarse fallback built from the vertex-level wave normal.
+    // FFT ocean: displace the flat water grid by the simulated displacement maps (world-space UVs, all
+    // cascades). The fragment shader re-derives the shading normal per pixel from the gradient maps using
+    // the undisplaced world XZ passed through out_uv, so the TBN here is just a placeholder.
     const vec3 basePos = quat_transform(in_pos * inst_scale, inst_quat) + inst_pos;
-    vec3 waveDisp, waveN;
-    oceanVertex(basePos.xz, waveDisp, waveN);
-    out_pos = basePos + waveDisp;
-    const vec3 wT = normalize(cross(vec3(0.0, 0.0, 1.0), waveN));
-    out_tbn = mat3(wT, cross(waveN, wT), waveN);
+    out_pos = basePos + oceanSampleDisplacement(basePos.xz, distance(basePos, u_viewPos));
+    out_tbn = mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0));
     out_uv  = basePos.xz;
 #else
     vec3 N = quat_transform(in_normal, inst_quat);

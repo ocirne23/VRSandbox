@@ -72,6 +72,10 @@ export namespace RendererVKLayout
     constexpr uint32 GI_INITIAL_TLAS_INSTANCES = 256; // grown when the instance count exceeds it
     constexpr size_t GI_TLAS_INSTANCE_SIZE = 64;                                         // sizeof(VkAccelerationStructureInstanceKHR)
 
+    // FFT ocean simulation (OceanSimulationPipeline / ocean_*.cs.glsl). Injected into every shader compile.
+    constexpr uint32 OCEAN_FFT_SIZE = 512; // FFT grid resolution per cascade (power of two)
+    constexpr uint32 OCEAN_CASCADES = 3;   // spectral band-split cascades (different patch sizes)
+
     struct MeshVertex
     {
         glm::vec3 position;
@@ -218,12 +222,21 @@ export namespace RendererVKLayout
         glm::vec4 groundParams;  // rgb = ground albedo * intensity, w unused
         glm::vec4 aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
 
-        // Ocean (Gerstner-spectrum water; see ocean_wave.inc.glsl + ocean.fs.glsl / Procedural::OceanRenderer)
-        glm::vec4 oceanParams0;    // xy = wind direction (unit), z = base wave amplitude (m), w = choppiness (0..1)
-        glm::vec4 oceanParams1;    // x = base wavelength (m), y = wave speed multiplier, z = sea level (m), w = detail-normal strength
-        glm::vec4 oceanDeepColor;  // rgb = deep-water color (linear), w = surface roughness (sun-glint tightness)
-        glm::vec4 oceanScatterColor; // rgb = subsurface-scatter tint (crest glow), w = scatter strength
-        glm::vec4 oceanFoamColor;  // rgb = foam color (linear), w = foam coverage (Jacobian-fold threshold)
+        // Ocean (FFT/Tessendorf water; OceanSimulationPipeline + ocean_*.cs.glsl / ocean.fs.glsl)
+        glm::vec4 oceanParams0;    // xy = wind direction (unit), z = spectrum amplitude scale, w = choppiness lambda
+        glm::vec4 oceanParams1;    // x = wind speed U10 (m/s), y = fetch (m), z = ocean depth D (m), w = normal strength
+        glm::vec4 oceanParams2;    // xyz = cascade FFT patch sizes L0/L1/L2 (m), w = sea level (world Y)
+        glm::vec4 oceanAbsorption; // rgb = water extinction sigma_t (1/m, Beer-Lambert), w = perceptual roughness
+        glm::vec4 oceanScatter;    // rgb = in-scatter albedo color, w = scatter intensity
+        glm::vec4 oceanFoam;       // rgb = foam albedo, w = Jacobian foam bias (higher = more whitecaps)
+        glm::vec4 oceanParams3;    // xy = ocean grid cell size as a function of view distance (cell = x*dist + y;
+                                   // drives Nyquist-safe vertex displacement mip selection),
+                                   // z = turbulence decay/frame, w unused
+        glm::vec4 oceanParams4;    // x unused, y = turbulence spread (diffusion/frame), z unused,
+                                   // w = instant-foam edge width (both thresholds' smoothstep)
+        glm::vec4 oceanParams5;    // x = foam boost (turbulence -> fold-threshold relaxation),
+                                   // y = turbidity (entrained-bubble milkiness + roughness), z unused,
+                                   // w = breaking-crest foam threshold (downward crest accel in g units)
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

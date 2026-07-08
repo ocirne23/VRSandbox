@@ -9,15 +9,18 @@ import RendererVK;
 
 export namespace Procedural
 {
-	// Render-only procedural ocean. Maintains one camera-following grid with geometric (clipmap-style) radial
-	// spacing — cell size doubles ~`lodLevels` times from the camera out to the horizon, so the foreground is
-	// finely tessellated while one connected (crack-free) mesh still reaches the horizon. Its vertices are
-	// Gerstner-displaced into animated waves entirely on the GPU by the Ocean pipeline variant, so the CPU
-	// only ever positions one RenderNode. The wave field is world-space and time-animated, so snapping the
-	// grid under the camera keeps the water world-anchored while it follows.
+	// Render-only procedural ocean, the CPU side of the FFT/Tessendorf water: maintains one camera-following
+	// grid with geometric (clipmap-style) radial spacing — cell size doubles ~`lodLevels` times from the
+	// camera out to the horizon, so the foreground is finely tessellated while one connected (crack-free)
+	// mesh still reaches the horizon. Everything else runs on the GPU: OceanSimulationPipeline simulates the
+	// wave spectrum + IFFT into displacement/gradient maps each frame, the Ocean pipeline variant displaces
+	// this grid by them and shades the surface (RT refraction, Beer-Lambert). The CPU only ever positions
+	// one RenderNode; the wave field is world-space, so snapping the grid under the camera keeps the water
+	// world-anchored while it follows.
 	//
-	// All wave/shading parameters are Tweak-backed and pushed to the renderer's UBO each frame via
-	// Renderer::setOceanParams; the grid geometry rebuilds only when its extent/resolution changes.
+	// All spectrum/shading parameters are Tweak-backed and pushed to the renderer each frame via
+	// Renderer::setOceanParams (fully live: the spectrum is re-evaluated on the GPU every frame); the grid
+	// geometry rebuilds only when its extent/resolution changes.
 	class OceanRenderer
 	{
 	public:
@@ -37,22 +40,37 @@ export namespace Procedural
 		float m_seaLevel = 0.0f;
 		float m_extent = 4000.0f;      // half-size the grid reaches toward the horizon (m)
 		int   m_resolution = 256;      // grid vertices per axis
-		int   m_lodLevels = 7;         // geometric detail shells camera->horizon (higher = finer near-camera cells)
-		float m_snap = 4.0f;           // node XZ snap step (m); reduces vertex swim as the grid follows
+		int   m_lodLevels = 8;         // geometric detail shells camera->horizon (higher = finer near-camera cells)
+		// Node XZ snap step (m). Default 0 = follow continuously: on a radially GRADED grid the vertices
+		// can never land back on a fixed world lattice anyway, so snapping only quantizes the (otherwise
+		// smooth) lattice motion into visible discrete jumps.
+		float m_snap = 0.0f;
 
-		// --- Wave spectrum + shading (fed to Renderer::setOceanParams; all live) ---
-		float m_amplitude = 0.55f;
-		float m_choppiness = 0.85f;
-		float m_wavelength = 62.0f;
+		// --- Spectrum (TMA/JONSWAP + finite-depth dispersion) + shading; all live via setOceanParams ---
+		float m_windSpeed = 10.5f;     // U10 (m/s): the main sea-state knob
+		float m_fetchKm = 300.0f;      // wind fetch (km)
+		float m_depth = 100.0f;        // ocean depth (m): finite-depth dispersion + TMA attenuation
 		float m_windAngle = 0.45f;     // radians (XZ heading of the dominant swell)
-		float m_speed = 1.0f;
-		float m_detailScale = 1.0f;
-		float m_roughness = 0.045f;
-		glm::vec3 m_deepColor = glm::vec3(0.0040f, 0.0160f, 0.0290f);
-		glm::vec3 m_scatterColor = glm::vec3(0.020f, 0.14f, 0.13f);
+		float m_amplitude = 1.0f;      // artistic scale on the spectrum (1 = physical)
+		float m_choppiness = 1.1f;     // horizontal displacement lambda
+		float m_normalStrength = 1.0f;
+		glm::vec3 m_cascadeSizes = glm::vec3(384.0f, 47.0f, 6.3f); // FFT patch sizes (m)
+
+		glm::vec3 m_absorption = glm::vec3(0.42f, 0.085f, 0.04f);  // Beer-Lambert extinction (1/m)
+		glm::vec3 m_scatterColor = glm::vec3(0.012f, 0.08f, 0.085f);
 		float m_scatterStrength = 1.0f;
-		glm::vec3 m_foamColor = glm::vec3(0.85f, 0.90f, 0.92f);
-		float m_foamCoverage = 0.42f;
+		float m_roughness = 0.07f;
+		// Foam & turbulence: one instant-foam response draws the crest foam AND injects the accumulated
+		// turbulence field, which in turn relaxes the fold threshold (aged foam along live geometry) and
+		// makes the wake milky/rough.
+		glm::vec3 m_foamColor = glm::vec3(0.88f, 0.92f, 0.94f);
+		float m_foamBias = 0.6f;     // fold threshold (Jacobian below this foams)
+		float m_foamBreakAccel = 0.25f; // breaking threshold (downward crest accel, g units)
+		float m_foamSoftness = 0.5f; // edge width of both thresholds
+		float m_foamDecay = 0.985f;  // turbulence retention per frame (wake persistence)
+		float m_foamSpread = 1.2f;   // turbulence diffusion per frame (wake spreads as it lives)
+		float m_foamBoost = 0.6f;    // turbulence -> fold-threshold relaxation (aged-foam amount)
+		float m_turbidity = 0.4f;    // entrained bubbles: milky brightening + roughness of the wake
 
 		bool m_gridDirty = true;
 

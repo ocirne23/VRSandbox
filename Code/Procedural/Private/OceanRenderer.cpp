@@ -27,23 +27,36 @@ namespace Procedural
 		Tweak::boolean("Ocean", "Enabled", &m_enabled);
 		Tweak::floatVar("Ocean", "Sea level (m)", &m_seaLevel, -500.0f, 500.0f, 0.5f);
 		Tweak::floatVar("Ocean", "Extent (m)", &m_extent, 100.0f, 20000.0f, 10.0f, gridDirty);
-		Tweak::intVar("Ocean", "Resolution", &m_resolution, 16, 1024, 1.0f, gridDirty);
+		Tweak::intVar("Ocean", "Resolution", &m_resolution, 256, 1024, 2.0f, gridDirty);
 		Tweak::intVar("Ocean", "LOD levels", &m_lodLevels, 1, 12, 1.0f, gridDirty);
-		Tweak::floatVar("Ocean", "Grid snap (m)", &m_snap, 0.5f, 64.0f, 0.5f);
+		Tweak::floatVar("Ocean", "Grid snap (m)", &m_snap, 0.0f, 64.0f, 0.5f);
 
-		Tweak::floatVar("Ocean/Waves", "Amplitude (m)", &m_amplitude, 0.0f, 8.0f, 0.01f);
-		Tweak::floatVar("Ocean/Waves", "Choppiness", &m_choppiness, 0.0f, 1.0f, 0.01f);
-		Tweak::floatVar("Ocean/Waves", "Wavelength (m)", &m_wavelength, 4.0f, 400.0f, 1.0f);
+		// TMA/JONSWAP spectrum inputs (Horvath 2015); re-evaluated on the GPU every frame, so all live.
+		Tweak::floatVar("Ocean/Waves", "Wind speed (m/s)", &m_windSpeed, 0.0f, 40.0f, 0.1f);
+		Tweak::floatVar("Ocean/Waves", "Fetch (km)", &m_fetchKm, 1.0f, 2000.0f, 1.0f);
+		Tweak::floatVar("Ocean/Waves", "Depth (m)", &m_depth, 1.0f, 500.0f, 0.5f);
 		Tweak::floatVar("Ocean/Waves", "Wind angle (rad)", &m_windAngle, 0.0f, 6.2831853f, 0.01f);
-		Tweak::floatVar("Ocean/Waves", "Speed", &m_speed, 0.0f, 4.0f, 0.01f);
-		Tweak::floatVar("Ocean/Waves", "Detail normal", &m_detailScale, 0.0f, 4.0f, 0.01f);
+		Tweak::floatVar("Ocean/Waves", "Amplitude scale", &m_amplitude, 0.0f, 4.0f, 0.01f);
+		Tweak::floatVar("Ocean/Waves", "Choppiness", &m_choppiness, 0.0f, 2.5f, 0.01f);
+		Tweak::floatVar("Ocean/Waves", "Normal strength", &m_normalStrength, 0.0f, 4.0f, 0.01f);
+		Tweak::floatVar("Ocean/Waves", "Cascade 0 (m)", &m_cascadeSizes.x, 16.0f, 2000.0f, 1.0f);
+		Tweak::floatVar("Ocean/Waves", "Cascade 1 (m)", &m_cascadeSizes.y, 4.0f, 500.0f, 0.5f);
+		Tweak::floatVar("Ocean/Waves", "Cascade 2 (m)", &m_cascadeSizes.z, 1.0f, 100.0f, 0.1f);
 
-		Tweak::color3("Ocean/Shading", "Deep color", &m_deepColor);
-		Tweak::floatVar("Ocean/Shading", "Roughness", &m_roughness, 0.005f, 0.5f, 0.001f);
+		Tweak::color3("Ocean/Shading", "Absorption (1/m)", &m_absorption);
 		Tweak::color3("Ocean/Shading", "Scatter color", &m_scatterColor);
 		Tweak::floatVar("Ocean/Shading", "Scatter strength", &m_scatterStrength, 0.0f, 4.0f, 0.01f);
+		Tweak::floatVar("Ocean/Shading", "Roughness", &m_roughness, 0.02f, 0.5f, 0.001f);
 		Tweak::color3("Ocean/Shading", "Foam color", &m_foamColor);
-		Tweak::floatVar("Ocean/Shading", "Foam coverage", &m_foamCoverage, 0.0f, 1.0f, 0.01f);
+		// One instant-foam response (thresholds + softness) draws the crest foam AND injects the
+		// turbulence field; decay/spread shape the wake's life, foam boost/turbidity its look.
+		Tweak::floatVar("Ocean/Foam", "Fold bias", &m_foamBias, 0.0f, 1.2f, 0.01f);
+		Tweak::floatVar("Ocean/Foam", "Break accel (g)", &m_foamBreakAccel, 0.05f, 1.5f, 0.01f);
+		Tweak::floatVar("Ocean/Foam", "Softness", &m_foamSoftness, 0.02f, 2.0f, 0.01f);
+		Tweak::floatVar("Ocean/Foam", "Turb decay", &m_foamDecay, 0.5f, 0.999f, 0.001f);
+		Tweak::floatVar("Ocean/Foam", "Turb spread", &m_foamSpread, 0.0f, 4.0f, 0.05f);
+		Tweak::floatVar("Ocean/Foam", "Foam boost", &m_foamBoost, 0.0f, 2.0f, 0.01f);
+		Tweak::floatVar("Ocean/Foam", "Turbidity", &m_turbidity, 0.0f, 1.0f, 0.01f);
 	}
 
 	void OceanRenderer::rebuildGrid()
@@ -123,21 +136,44 @@ namespace Procedural
 
 	void OceanRenderer::update(Renderer& renderer, const Camera& camera)
 	{
-		// Push the wave/shading params every frame — cheap, and harmless when no ocean is drawn.
+		// Push the spectrum/shading params every frame; `enabled` also gates the GPU FFT simulation.
 		OceanParams params;
+		params.enabled = m_enabled;
 		params.windDirection = glm::vec2(std::cos(m_windAngle), std::sin(m_windAngle));
+		params.windSpeed = m_windSpeed;
+		params.fetchKm = m_fetchKm;
+		params.depth = m_depth;
 		params.amplitude = m_amplitude;
 		params.choppiness = m_choppiness;
-		params.wavelength = m_wavelength;
-		params.speed = m_speed;
+		params.normalStrength = m_normalStrength;
+		params.cascadeSizes = m_cascadeSizes;
 		params.seaLevel = m_seaLevel;
-		params.detailScale = m_detailScale;
-		params.deepColor = m_deepColor;
-		params.roughness = m_roughness;
+		params.absorption = m_absorption;
 		params.scatterColor = m_scatterColor;
 		params.scatterStrength = m_scatterStrength;
+		params.roughness = m_roughness;
 		params.foamColor = m_foamColor;
-		params.foamCoverage = m_foamCoverage;
+		params.foamBias = m_foamBias;
+		params.foamBreakAccel = m_foamBreakAccel;
+		params.foamSoftness = m_foamSoftness;
+		params.foamDecay = m_foamDecay;
+		params.foamSpread = m_foamSpread;
+		params.foamBoost = m_foamBoost;
+		params.turbidity = m_turbidity;
+		// Cell size of the graded grid as a linear function of radius (cell = A*r + B), from the same
+		// grading rebuildGrid bakes: grade(t) = extent*(e^{K|t|}-1)/(e^K-1) with K = levels*ln2, so
+		// d(grade)/dvertex = (2K/(N-1)) * (r + extent/(e^K-1)). The vertex shaders use it to sample the
+		// displacement maps at the Nyquist-safe mip for the local vertex density — undersampling instead
+		// aliases the surface, which shows as waves snapping around while the grid follows the camera.
+		{
+			const int   N = glm::clamp(m_resolution, 4, 1024);
+			const int   levels = glm::clamp(m_lodLevels, 1, 12);
+			const float extent = glm::max(m_extent, 2.0f);
+			const float K = float(levels) * 0.6931472f;
+			const float A = 2.0f * K / float(N - 1);
+			params.gridCellA = A;
+			params.gridCellB = A * extent / (std::exp(K) - 1.0f);
+		}
 		renderer.setOceanParams(params);
 
 		if (!m_enabled)

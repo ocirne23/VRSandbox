@@ -33,6 +33,7 @@ import :GIProbePipeline;
 import :GBuffer;
 import :GBufferPipeline;
 import :RTAOPipeline;
+import :OceanSimulationPipeline;
 import :VolumetricFogPipeline;
 import :SceneColor;
 import :DebugLinePipeline;
@@ -210,6 +211,7 @@ private:
     // two levels coarser. threadSafe = called from renderNodeThreadSafe.
     void selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshInstance* instances, uint32 passMask, bool threadSafe);
     void recordSkinning(uint32 frameIdx);
+    void recordOceanSim(uint32 frameIdx);
     void recordIndirectCull(uint32 frameIdx);
     void recordLightGrid(uint32 frameIdx);
     void recordShadowCull(uint32 frameIdx);
@@ -353,6 +355,7 @@ private:
     StaticMeshGraphicsPipeline m_staticMeshGraphicsPipeline;
     GBufferPipeline m_gbufferPipeline;
     RTAOPipeline m_rtaoPipeline;
+    OceanSimulationPipeline m_oceanSimPipeline;
     VolumetricFogPipeline m_volumetricFogPipeline;
     TaaPipeline m_taaPipeline;
     ShadowCullComputePipeline m_shadowCullComputePipeline;
@@ -497,6 +500,7 @@ private:
         CommandBuffer aoCommandBuffer;
         CommandBuffer indirectCullCommandBuffer;
         CommandBuffer skinningCommandBuffer;
+        CommandBuffer oceanSimCommandBuffer;
         CommandBuffer lightGridCommandBuffer;
         CommandBuffer imguiCommandBuffer;
         CommandBuffer shadowCullCommandBuffer;

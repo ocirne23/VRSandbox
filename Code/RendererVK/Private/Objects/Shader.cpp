@@ -146,6 +146,8 @@ static std::string buildLayoutPreamble()
     def("MATERIAL_FLAG_SKY", MATERIAL_FLAG_SKY, "u");
     def("MATERIAL_FLAG_BC5_NORMAL", MATERIAL_FLAG_BC5_NORMAL, "u");
     def("MATERIAL_FLAG_OCEAN", MATERIAL_FLAG_OCEAN, "u");
+    def("OCEAN_FFT_SIZE", OCEAN_FFT_SIZE);
+    def("OCEAN_CASCADES", OCEAN_CASCADES);
     def("PASS_MAIN", PASS_MAIN, "u");
     def("PASS_SHADOW", PASS_SHADOW, "u");
     def("PASS_GI", PASS_GI, "u");

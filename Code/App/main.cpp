@@ -37,7 +37,7 @@ int main()
     cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED, EVr::DISABLED); // ENABLED DISABLED
+    renderer.initialize(window, EValidation::ENABLED, EVSync::ENABLED, EVr::DISABLED); // ENABLED DISABLED
 
     UI& ui = Globals::ui;
     ui.initialize();

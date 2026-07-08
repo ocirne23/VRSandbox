@@ -33,10 +33,12 @@ public:
         Buffer& indirectCommandBuffer; // IndirectDrawSequence[]; drawn with offset 4, stride 24
         Buffer& materialInfoBuffer;    // MaterialInfo[]; the vertex shader culls MATERIAL_FLAG_SKY instances
         Buffer& meshCountBuffer;       // uint32 live mesh count (drawIndexedIndirectCount), CPU-written per frame
+        vk::ImageView oceanMapsView;   // FFT ocean displacement maps (the VS displaces MATERIAL_FLAG_OCEAN instances)
+        vk::Sampler oceanMapsSampler;
     };
     // viewIndex selects the view matrices (u_views[viewIndex]); 0 = centre/desktop, 1/2 = the eyes in VR.
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params, uint32 viewIndex = 0);
-    // Rewrites one slot of the texture array (binding 3) with a streamed texture's current view.
+    // Rewrites one slot of the texture array (binding 4) with a streamed texture's current view.
     void updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view);
 
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }

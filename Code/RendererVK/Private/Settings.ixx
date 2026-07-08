@@ -183,25 +183,57 @@ export struct MeshLodParams
     void registerTweaks();
 };
 
-// Ocean water shading + wave spectrum (Gerstner-spectrum GPU water). The Renderer feeds these into the
-// per-frame UBO (ocean* fields); the geometry + Tweaks live in Procedural::OceanRenderer, which builds one
-// of these each frame and hands it to Renderer::setOceanParams. All UBO-driven, so changes apply live.
+// FFT/Tessendorf ocean: spectrum inputs for the GPU simulation (OceanSimulationPipeline) + water shading.
+// The Renderer feeds these into the per-frame UBO (ocean* fields), which drives BOTH the compute simulation
+// (the TMA spectrum is re-evaluated every frame, so all of it is live) and the surface shading. The grid
+// geometry + Tweaks live in Procedural::OceanRenderer, which builds one of these each frame and hands it to
+// Renderer::setOceanParams.
 export struct OceanParams
 {
-    glm::vec2 windDirection = glm::normalize(glm::vec2(0.8f, 0.35f)); // dominant wave travel direction (XZ)
-    float amplitude   = 0.55f;  // base wave amplitude (m); higher waves derive smaller amplitudes from it
-    float choppiness  = 0.85f;  // Gerstner horizontal steepness (0 = rounded swell, 1 = sharp choppy crests)
-    float wavelength  = 62.0f;  // longest wave's wavelength (m); the spectrum halves it per octave
-    float speed       = 1.0f;   // time multiplier on the (deep-water) wave motion
-    float seaLevel    = 0.0f;   // world Y of the calm water plane
-    float detailScale = 1.0f;   // strength of the per-pixel high-frequency normal detail
+    bool enabled = false;       // gates the per-frame FFT simulation + ocean draw
 
-    glm::vec3 deepColor    = glm::vec3(0.0040f, 0.0160f, 0.0290f); // absorption color seen looking into the water
-    float roughness        = 0.045f; // micro-roughness of the surface (widens the sun glint)
-    glm::vec3 scatterColor = glm::vec3(0.020f, 0.14f, 0.13f);      // subsurface tint glowing through wave crests
+    // Spectrum (TMA = JONSWAP x Kitaigorodskii finite-depth attenuation, Hasselmann directional spreading;
+    // Horvath 2015). Dispersion is finite-depth: w^2 = g k tanh(k D).
+    glm::vec2 windDirection = glm::normalize(glm::vec2(0.8f, 0.35f)); // dominant wave travel direction (XZ)
+    float windSpeed   = 10.5f;  // U10 wind speed (m/s): the main sea-state knob
+    float fetchKm     = 300.0f; // fetch (km): distance the wind has blown over; longer = bigger swell
+    float depth       = 100.0f; // ocean depth D (m): finite-depth dispersion + TMA shallow-water attenuation
+                                // (shallow values like 35 visibly mute the long swell — by design)
+    float amplitude   = 1.0f;   // artistic scale on the spectrum amplitude (1 = physical)
+    float choppiness  = 1.1f;   // horizontal displacement lambda (0 = heightfield only, higher = sharper crests)
+    float normalStrength = 1.0f; // artistic scale on the shading slopes
+    glm::vec3 cascadeSizes = glm::vec3(384.0f, 47.0f, 6.3f); // FFT patch sizes (m); non-rational ratios hide tiling
+    float seaLevel    = 0.0f;   // world Y of the calm water plane
+
+    // Optics: extinction drives Beer-Lambert absorption of the ray-traced refraction (1/m, Jerlov-ish
+    // coastal water); scatter is the in-scattered radiance albedo (the water's "color" in deep water).
+    glm::vec3 absorption   = glm::vec3(0.42f, 0.085f, 0.04f);
+    glm::vec3 scatterColor = glm::vec3(0.012f, 0.08f, 0.085f);
     float scatterStrength  = 1.0f;
-    glm::vec3 foamColor    = glm::vec3(0.85f, 0.90f, 0.92f);
-    float foamCoverage     = 0.42f;  // Jacobian-fold threshold: higher = more crest foam
+    float roughness        = 0.07f; // perceptual micro-roughness (widens the sun glint)
+    // Foam & turbulence. ONE instant-foam response (oceanInstantFoam) both draws the per-pixel crest
+    // foam and injects the accumulated TURBULENCE field (the churn energy breaking leaves behind).
+    // Turbulence then drives the wake look: it relaxes the fold threshold (aged foam paints itself along
+    // the LIVE geometry's convergence lines) and makes the water milky + rough (entrained bubbles).
+    glm::vec3 foamColor    = glm::vec3(0.88f, 0.92f, 0.94f);
+    float foamBias         = 0.6f;  // fold threshold: Jacobian below this is folding (foaming)
+    float foamBreakAccel   = 0.25f; // breaking threshold (Longuet-Higgins): downward crest acceleration
+                                    // above this fraction of g is breaking — what makes LARGE waves foam
+    float foamSoftness     = 0.5f;  // edge width of both thresholds (small = crisp crest lines)
+    float foamDecay        = 0.985f; // turbulence retention per frame (wake persistence)
+    float foamSpread       = 1.2f;  // turbulence diffusion per frame: the wake spreads as it lives (also
+                                    // keeps the stored field free of texel structure)
+    float foamBoost        = 0.6f;  // how much turbulence relaxes the fold threshold: the aged-foam
+                                    // amount in the wake (0 = only actively breaking crests foam)
+    float turbidity        = 0.4f;  // entrained-bubble strength: milky brightening + extra roughness of
+                                    // turbulent water (the wake stays visible after the foam thins)
+
+    // Grid cell size as a linear function of view distance (cell = a*dist + b), computed by
+    // Procedural::OceanRenderer from its graded grid so the vertex shaders can pick the Nyquist-safe
+    // displacement mip for the local vertex density (undersampling the maps makes the surface alias,
+    // which reads as waves snapping around as the grid follows the camera).
+    float gridCellA = 0.04f;
+    float gridCellB = 1.2f;
 };
 
 export struct Stats

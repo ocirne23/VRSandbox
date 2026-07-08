@@ -34,9 +34,11 @@ void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout, uint32
         .binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // material infos (sky flag in VS, alpha mask in FS)
         .binding = 2, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment });
-    // Texture array (binding 3 = highest, eVariableDescriptorCount) for the fragment alpha-mask test.
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // FFT ocean maps (VS displaces MATERIAL_FLAG_OCEAN instances)
+        .binding = 3, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
+    // Texture array (binding 4 = highest, eVariableDescriptorCount) for the fragment alpha-mask test.
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
-        .binding = 3, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+        .binding = 4, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     layout.descriptorBindingFlags.resize(descriptorSetBindings.size());
     layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount | vk::DescriptorBindingFlagBits::eUpdateAfterBind;
 
@@ -56,9 +58,9 @@ void GBufferPipeline::initialize(const GBuffer& gbuffer, uint32 maxTextures)
 
 void GBufferPipeline::updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view)
 {
-    // Streamed texture slot rewrite in the cached prepass CB's set (binding 3 is UPDATE_AFTER_BIND).
+    // Streamed texture slot rewrite in the cached prepass CB's set (binding 4 is UPDATE_AFTER_BIND).
     vk::DescriptorImageInfo imageInfo{ .sampler = m_textureSampler.getSampler(), .imageView = view, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
-    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 3, .dstArrayElement = slotIdx, .descriptorCount = 1,
+    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 4, .dstArrayElement = slotIdx, .descriptorCount = 1,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
     Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
@@ -80,9 +82,11 @@ void GBufferPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, Reco
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.meshInstanceBuffer.getBuffer(), .range = params.meshInstanceBuffer.getSize() } } },
         DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.materialInfoBuffer.getBuffer(), .range = vk::WholeSize } } },
+        DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler, // FFT ocean maps (VS displacement)
+            .imageInfos = { vk::DescriptorImageInfo{ .sampler = params.oceanMapsSampler, .imageView = params.oceanMapsView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal } } },
     };
-    // Texture array (binding 3) for the fragment alpha-mask test; same source as the forward/GI passes.
-    DescriptorSetUpdateInfo texUpdate{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler };
+    // Texture array (binding 4) for the fragment alpha-mask test; same source as the forward/GI passes.
+    DescriptorSetUpdateInfo texUpdate{ .binding = 4, .type = vk::DescriptorType::eCombinedImageSampler };
     for (uint16 texIdx = 0; texIdx < (uint16)Globals::textureManager.getNumTextures(); ++texIdx)
         texUpdate.imageInfos.push_back(vk::DescriptorImageInfo{ .sampler = m_textureSampler.getSampler(), .imageView = Globals::textureManager.getViewForDescriptor(texIdx), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal });
     if (!texUpdate.imageInfos.empty())

@@ -114,11 +114,11 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 			.defines = { { "TERRAIN", "1" } },
 		},
 	});
-	// Variant 9 (EPipelineIndex::Ocean): GPU-animated Gerstner-spectrum water. The shared vertex shader with
-	// OCEAN defined displaces the flat grid into waves (world-space, time-animated) and recomputes the TBN
-	// from the analytic wave normal; a dedicated fragment shader shades the water (Fresnel sky reflection,
-	// sun glint, subsurface crest glow, Jacobian-fold foam). Opaque + depth write (matches the G-buffer
-	// prepass ocean branch); double-sided so it still draws when the camera dips below the surface.
+	// Variant 9 (EPipelineIndex::Ocean): FFT/Tessendorf water. The shared vertex shader with OCEAN defined
+	// displaces the flat grid by the OceanSimulationPipeline's displacement maps (binding 7); a dedicated
+	// fragment shader shades the surface (Fresnel, GGX sun glint, RAY-TRACED refraction with Beer-Lambert
+	// absorption, Jacobian foam). Opaque + depth write (matches the G-buffer prepass ocean branch);
+	// double-sided so it still draws when the camera dips below the surface.
 	const std::string oceanVariantPath = "Shaders/ocean.fs.glsl";
 	const std::string oceanVariantText = FileSystem::readFileStr(oceanVariantPath);
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
@@ -242,7 +242,12 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eFragment
     });
-    // 7 unused
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_oceanMaps (FFT displacement/gradient array)
+        .binding = 7,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment
+    });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_shadowMap (sun CSM, comparison)
         .binding = 8,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
@@ -411,7 +416,7 @@ void StaticMeshGraphicsPipeline::reloadShaders(vk::RenderPass renderPass, uint32
 
 void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params, bool updateDescriptors)
 {
-    std::array<DescriptorSetUpdateInfo, 15> graphicsDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 16> graphicsDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo{
             .binding = 0,
@@ -473,7 +478,17 @@ void StaticMeshGraphicsPipeline::record(CommandBuffer& commandBuffer, uint32 fra
                 }
             }
         },
-        // 7 unused
+        DescriptorSetUpdateInfo{ // FFT ocean displacement/gradient maps (VS displacement + FS shading)
+            .binding = 7,
+            .type = vk::DescriptorType::eCombinedImageSampler,
+            .imageInfos = {
+                vk::DescriptorImageInfo {
+                    .sampler = params.oceanMapsSampler,
+                    .imageView = params.oceanMapsView,
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                }
+            }
+        },
         DescriptorSetUpdateInfo{
             .binding = 8,
             .type = vk::DescriptorType::eCombinedImageSampler,
