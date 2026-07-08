@@ -52,7 +52,11 @@ namespace
             hash = (hash ^ pBytes[i]) * FNV_PRIME;
         return hash;
     }
-    template <typename T> uint64 fnv1a(const T& value, uint64 hash) { return fnv1a(&value, sizeof(T), hash); }
+    // No pointers: for a const char* argument this template outranks the buffer overload above (exact
+    // match vs pointer conversion) and would hash the 8 POINTER bytes — a different, ASLR-randomized
+    // cache name every launch, so nothing was ever reused and stale files piled up.
+    template <typename T> requires (!std::is_pointer_v<T>)
+    uint64 fnv1a(const T& value, uint64 hash) { return fnv1a(&value, sizeof(T), hash); }
 
     uint64 fileMTimeTicks(const std::filesystem::path& path, std::error_code& ec)
     {
@@ -675,7 +679,7 @@ std::unique_ptr<ISceneData> ISceneData::loadCached(const char* filePath, bool me
     // Import options that shape the cooked data feed the header hash; the file NAME only hashes the
     // source path + Assimp options, so LOD/texture option changes re-cook in place instead of piling
     // up stale files (and two .oc's importing one model with different Assimp options don't thrash).
-    uint64 optionsHash = fnv1a(filePath, strlen(filePath));
+    uint64 optionsHash = fnv1a((const void*)filePath, strlen(filePath));
     optionsHash = fnv1a(mergeNodes, optionsHash);
     optionsHash = fnv1a(preTransformVertices, optionsHash);
     const uint64 nameHash = optionsHash;

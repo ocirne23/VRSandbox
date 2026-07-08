@@ -20,7 +20,9 @@ import :INodeData;
 export namespace SceneCache
 {
     constexpr uint32 SCENE_CACHE_MAGIC   = 'V' | ('R' << 8) | ('S' << 16) | ('C' << 24);
-    constexpr uint32 SCENE_CACHE_VERSION = 5; // v5: alpha-coverage-preserving mips for masked textures
+    constexpr uint32 SCENE_CACHE_VERSION = 6; // v6: deterministic cache names (the name hash used to fold
+                                              // in a raw pointer, changing every launch); bumping flushes
+                                              // the junk those runs accumulated via the GC's version check
     constexpr uint32 MAX_COOKED_LOD_LEVELS = 7; // generated levels beyond LOD0 the format can hold
 
     struct CookedHeader
