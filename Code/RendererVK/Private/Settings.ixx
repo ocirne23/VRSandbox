@@ -183,6 +183,27 @@ export struct MeshLodParams
     void registerTweaks();
 };
 
+// Ocean water shading + wave spectrum (Gerstner-spectrum GPU water). The Renderer feeds these into the
+// per-frame UBO (ocean* fields); the geometry + Tweaks live in Procedural::OceanRenderer, which builds one
+// of these each frame and hands it to Renderer::setOceanParams. All UBO-driven, so changes apply live.
+export struct OceanParams
+{
+    glm::vec2 windDirection = glm::normalize(glm::vec2(0.8f, 0.35f)); // dominant wave travel direction (XZ)
+    float amplitude   = 0.55f;  // base wave amplitude (m); higher waves derive smaller amplitudes from it
+    float choppiness  = 0.85f;  // Gerstner horizontal steepness (0 = rounded swell, 1 = sharp choppy crests)
+    float wavelength  = 62.0f;  // longest wave's wavelength (m); the spectrum halves it per octave
+    float speed       = 1.0f;   // time multiplier on the (deep-water) wave motion
+    float seaLevel    = 0.0f;   // world Y of the calm water plane
+    float detailScale = 1.0f;   // strength of the per-pixel high-frequency normal detail
+
+    glm::vec3 deepColor    = glm::vec3(0.0040f, 0.0160f, 0.0290f); // absorption color seen looking into the water
+    float roughness        = 0.045f; // micro-roughness of the surface (widens the sun glint)
+    glm::vec3 scatterColor = glm::vec3(0.020f, 0.14f, 0.13f);      // subsurface tint glowing through wave crests
+    float scatterStrength  = 1.0f;
+    glm::vec3 foamColor    = glm::vec3(0.85f, 0.90f, 0.92f);
+    float foamCoverage     = 0.42f;  // Jacobian-fold threshold: higher = more crest foam
+};
+
 export struct Stats
 {
     uint32 numLights;

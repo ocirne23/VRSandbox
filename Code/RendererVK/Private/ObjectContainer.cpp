@@ -515,6 +515,10 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
                 material.flags |= RendererVKLayout::MATERIAL_FLAG_NO_RAYTRACING;
             if (pOverrides->pipelineIdx == RendererVKLayout::EPipelineIndex::Sky)
                 material.flags |= RendererVKLayout::MATERIAL_FLAG_SKY;
+            // Ocean water: the G-buffer prepass VS Gerstner-displaces flagged instances so the reference
+            // depth/normal it writes match the forward Ocean variant (TAA reprojection, RTAO reads).
+            if (pOverrides->pipelineIdx == RendererVKLayout::EPipelineIndex::Ocean)
+                material.flags |= RendererVKLayout::MATERIAL_FLAG_OCEAN;
         }
         if (pOverrides && !pOverrides->useSceneTextures)
         {

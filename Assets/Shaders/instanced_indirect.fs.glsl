@@ -524,11 +524,50 @@ vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
 	return wsum > 1e-4 ? sum / wsum : texture(u_ao, fullUv);
 }
 
+#ifdef TERRAIN
+// Procedural terrain surface color from world height + slope. No textures: procedural terrain chunks
+// carry none (the material resolves to the shared fallback). NOTE: the height bands assume the default
+// TerrainConfig (sea level ~0, continent/mountain amplitudes) — a later pass should feed sea level /
+// height scale through the UBO so this tracks the tweaks. Slope reads bare rock on steep faces.
+vec3 terrainAlbedo(vec3 worldPos, vec3 N)
+{
+	const vec3 sand  = vec3(0.76, 0.70, 0.50);
+	const vec3 grass = vec3(0.26, 0.42, 0.17);
+	const vec3 rock  = vec3(0.37, 0.34, 0.31);
+	const vec3 snow  = vec3(0.90, 0.93, 0.97);
+
+	const float h = worldPos.y;
+	const float slope = 1.0 - clamp(N.y, 0.0, 1.0);
+
+	// Cheap value noise to break up the otherwise flat height bands.
+	const float n = fract(sin(dot(floor(worldPos.xz * 0.08), vec2(12.9898, 78.233))) * 43758.5453) * 2.0 - 1.0;
+
+	vec3 col = mix(sand, grass, smoothstep(0.5, 6.0 + n * 2.0, h));
+	col = mix(col, rock, smoothstep(55.0 + n * 8.0, 110.0, h));
+	col = mix(col, snow, smoothstep(135.0 + n * 10.0, 185.0, h));
+	col = mix(col, rock, smoothstep(0.45, 0.70, slope)); // steep faces -> bare rock
+	return col;
+}
+#endif
+
 void main()
 {
 #ifdef STEREO
 	g_viewIndex = int(u_viewIndex); // per-eye reconstruction (AO upsample) + view pos
 #endif
+	const vec3 V  = normalize(u_viewPos - in_pos);
+	vec3  materialColor;
+	vec3  N;
+	float roughness;
+	float metalness;
+
+#ifdef TERRAIN
+	// Geometric (interpolated vertex) normal — no normal map for terrain.
+	N = normalize(in_tbn[2]);
+	materialColor = terrainAlbedo(in_pos, N);
+	roughness = 0.92;
+	metalness = 0.0;
+#else
 	const uint16_t materialIdx   = uint16_t((in_meshIdxMaterialIdx & 0xFFFF0000) >> 16);
 	const MaterialInfo material  = in_materialInfos[materialIdx];
 	const uint16_t diffuseTexIdx = uint16_t(material.diffuseNormalTexIdx & 0x0000FFFF);
@@ -541,8 +580,8 @@ void main()
 	if (alphaMode == ALPHA_MODE_MASK && diffuseSample.a < material.opacity)
 		discard;
 
-	float roughness = 0.65;
-	float metalness = 0.0;
+	roughness = 0.65;
+	metalness = 0.0;
 	if (metalRoughnessTexIdx != uint16_t(0xFFFF))
 	{
 		const vec2 metalRoughness = texture(u_textures[metalRoughnessTexIdx], uv).bg;
@@ -550,9 +589,7 @@ void main()
 		roughness = max(metalRoughness.y, 0.01);
 	}
 
-	const vec3 V  = normalize(u_viewPos - in_pos);
-	const vec3 materialColor  = diffuseSample.xyz;
-	const vec3 specularColor  = mix(vec3(0.04), materialColor, metalness);
+	materialColor = diffuseSample.xyz;
 	// Two-channel BC5 normal maps store only X/Y (red/green), so .z reads 0 and would flip the normal
 	// into the surface — reconstruct Z from X/Y. Full RGB(A) normal maps keep their stored Z.
 	const vec3 normalSample = texture(u_textures[normalTexIdx], uv).xyz;
@@ -566,11 +603,13 @@ void main()
 	{
 		tangentNormal = normalize(normalSample * 2.0 - 1.0);
 	}
-	const vec3 N = normalize(in_tbn * tangentNormal);
+	N = normalize(in_tbn * tangentNormal);
+#endif
 
+	const vec3 specularColor  = mix(vec3(0.04), materialColor, metalness);
 	const float roughnessSq = roughness * roughness;
 	const vec3 matColOverPi = materialColor / PI;
-	
+
 	float ao = 1.0;
 	vec3 bentN = N;
 	if (u_aoParams.x > 0.5)
@@ -619,7 +658,11 @@ void main()
 		tableIdx = getNextTableIdx(tableIdx);
 	}
 
+#ifdef TERRAIN
+	out_color = vec4(color, 1.0); // opaque terrain
+#else
 	out_color = vec4(color, min(diffuseSample.a, material.opacity));
+#endif
 }
 
 //	#define GI_DEBUG_VIZ 0

@@ -526,6 +526,14 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.atmosParams = glm::vec4(sky.rayleighHeight, sky.mieHeight, sky.mieExtinction, sky.ozone);
     ubo.groundParams = glm::vec4(sky.groundColor * sky.groundIntensity, 0.0f);
 
+    const OceanParams& ocean = m_oceanParams;
+    const glm::vec2 windDir = glm::length(ocean.windDirection) > 1e-4f ? glm::normalize(ocean.windDirection) : glm::vec2(1.0f, 0.0f);
+    ubo.oceanParams0 = glm::vec4(windDir, ocean.amplitude, ocean.choppiness);
+    ubo.oceanParams1 = glm::vec4(ocean.wavelength, ocean.speed, ocean.seaLevel, ocean.detailScale);
+    ubo.oceanDeepColor = glm::vec4(ocean.deepColor, ocean.roughness);
+    ubo.oceanScatterColor = glm::vec4(ocean.scatterColor, ocean.scatterStrength);
+    ubo.oceanFoamColor = glm::vec4(ocean.foamColor, ocean.foamCoverage);
+
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 
     m_lightCounter = 0;
@@ -808,6 +816,17 @@ void Renderer::present()
     // Catch texture-array growth from containers loaded AFTER beginFrame (terrain streaming, mid-frame
     // spawns): without this, this frame's record writes past the descriptor capacity beginFrame sized.
     syncTextureDescriptorCapacity();
+
+    // Same catch-up for the mesh vertex/index mega-buffers (beginFrame only samples the generation once,
+    // early): a mid-frame container load (terrain streaming spawning a new chunk) can grow them here, via
+    // MeshDataManager::growBuffer destroying the old buffer. Without this, recordCommandBuffers below would
+    // reuse this frame's already-recorded secondary command buffers, which still reference (e.g. via a
+    // baked vkCmdBindIndexBuffer) the now-destroyed old buffer - "invalidated because ... was destroyed".
+    if (Globals::meshDataManager.getGeneration() != m_meshDataGeneration)
+    {
+        m_meshDataGeneration = Globals::meshDataManager.getGeneration();
+        setHaveToRecordCommandBuffers();
+    }
 
     if (m_sharedBufferNeedSync)
     {

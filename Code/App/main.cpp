@@ -65,6 +65,11 @@ int main()
     Procedural::TerrainStreamer terrain;
     terrain.initialize();
 
+    // Procedural ocean: one camera-following graded grid, GPU-displaced into Gerstner waves by the Ocean
+    // pipeline variant. Declared after the renderer so it frees its RenderNode/container before the device.
+    Procedural::OceanRenderer ocean;
+    ocean.initialize();
+
     VrInput& vrInput = Globals::vrInput;
     VRFreeFlyCameraController vrCameraController;
 
@@ -324,6 +329,7 @@ int main()
         }
 
         terrain.update(renderer, camera);
+        ocean.update(renderer, camera);
 
         if (gizmo.isVisible())
             gizmo.getGizmoEntity()->update(renderer, (float)deltaSec);

@@ -273,8 +273,13 @@ namespace Procedural
 			if (!scene)
 				continue;
 
+			// Route the chunk onto the terrain pipeline variant (procedural height/slope albedo). Keep the
+			// material's own texture indices (fallback) — terrain carries no textures.
+			ObjectContainer::MaterialOverrides overrides;
+			overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::TerrainLit;
+			overrides.useSceneTextures = true;
 			auto container = std::make_unique<ObjectContainer>();
-			if (!container->initialize(*scene))
+			if (!container->initialize(*scene, &overrides))
 				continue;
 
 			const Transform transform(

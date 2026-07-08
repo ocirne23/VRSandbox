@@ -145,6 +145,7 @@ static std::string buildLayoutPreamble()
     def("MATERIAL_FLAG_NO_RAYTRACING", MATERIAL_FLAG_NO_RAYTRACING, "u");
     def("MATERIAL_FLAG_SKY", MATERIAL_FLAG_SKY, "u");
     def("MATERIAL_FLAG_BC5_NORMAL", MATERIAL_FLAG_BC5_NORMAL, "u");
+    def("MATERIAL_FLAG_OCEAN", MATERIAL_FLAG_OCEAN, "u");
     def("PASS_MAIN", PASS_MAIN, "u");
     def("PASS_SHADOW", PASS_SHADOW, "u");
     def("PASS_GI", PASS_GI, "u");

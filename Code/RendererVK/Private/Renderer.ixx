@@ -146,6 +146,7 @@ public:
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
+    void setOceanParams(const OceanParams& ocean) { m_oceanParams = ocean; }
     void setPostParams(const PostParams& post) { m_postParams = post; setHaveToRecordCommandBuffers(); }
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }
@@ -365,6 +366,7 @@ private:
 
     SkyParams m_skyParams;
     FogParams m_fogParams;
+    OceanParams m_oceanParams;
     PostParams m_postParams;
     RTParams m_rtParams;
     RTAOParams m_rtaoParams;

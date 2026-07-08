@@ -82,6 +82,13 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
                           // ground-bounce tint for downward GI/fog rays), w unused
     vec4 u_aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
+
+    // Ocean (Gerstner-spectrum water; ocean_wave.inc.glsl + ocean.fs.glsl)
+    vec4 u_oceanParams0;    // xy = wind direction (unit), z = base wave amplitude (m), w = choppiness (0..1)
+    vec4 u_oceanParams1;    // x = base wavelength (m), y = wave speed multiplier, z = sea level (m), w = detail-normal strength
+    vec4 u_oceanDeepColor;  // rgb = deep-water color (linear), w = surface roughness (sun-glint tightness)
+    vec4 u_oceanScatterColor; // rgb = subsurface-scatter tint (crest glow), w = scatter strength
+    vec4 u_oceanFoamColor;  // rgb = foam color (linear), w = foam coverage (Jacobian-fold threshold)
 };
 
 // View index selecting which u_views[] entry the convenience macros / reconstruction helpers read. Defaults

@@ -217,6 +217,13 @@ export namespace RendererVKLayout
         glm::vec4 atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
         glm::vec4 groundParams;  // rgb = ground albedo * intensity, w unused
         glm::vec4 aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
+
+        // Ocean (Gerstner-spectrum water; see ocean_wave.inc.glsl + ocean.fs.glsl / Procedural::OceanRenderer)
+        glm::vec4 oceanParams0;    // xy = wind direction (unit), z = base wave amplitude (m), w = choppiness (0..1)
+        glm::vec4 oceanParams1;    // x = base wavelength (m), y = wave speed multiplier, z = sea level (m), w = detail-normal strength
+        glm::vec4 oceanDeepColor;  // rgb = deep-water color (linear), w = surface roughness (sun-glint tightness)
+        glm::vec4 oceanScatterColor; // rgb = subsurface-scatter tint (crest glow), w = scatter strength
+        glm::vec4 oceanFoamColor;  // rgb = foam color (linear), w = foam coverage (Jacobian-fold threshold)
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};
@@ -300,6 +307,8 @@ export namespace RendererVKLayout
         WireframeTransparent = 5, // tangent-debug color, line polygon mode, alpha-blended, no depth write (debug overlay)
         GizmoUI        = 6, // tangent-debug color, vertex shader forces NDC z=0 (nearest) so it draws on top of everything and nothing draws over it (world UI)
         GizmoWorld     = 7, // tangent-debug color, depth tested, alpha-blended, no depth write (world-space gizmo occluded by geometry)
+        TerrainLit     = 8, // lit opaque, procedural height/slope albedo (no textures) for procedural terrain chunks
+        Ocean          = 9, // GPU-animated Gerstner-spectrum water: vertex displacement + analytic-normal water shading
     };
 
     // MaterialInfo::flags bits.
@@ -308,6 +317,8 @@ export namespace RendererVKLayout
                                                    // stays at the far plane (TAA reprojects it parallax-free)
     constexpr uint32 MATERIAL_FLAG_BC5_NORMAL = 1u << 29; // normal map is a two-channel BC5 texture (X/Y only):
                                                           // the shader reconstructs Z instead of reading .z
+    constexpr uint32 MATERIAL_FLAG_OCEAN = 1u << 28; // ocean water: the G-buffer prepass vertex shader Gerstner-
+                                                     // displaces these instances so depth/normal match the forward pass
 
     struct alignas(16) MaterialInfo
     {

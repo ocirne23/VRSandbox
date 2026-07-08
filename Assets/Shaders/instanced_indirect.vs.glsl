@@ -7,6 +7,10 @@
 
 #include "shared.inc.glsl"
 
+#ifdef OCEAN
+#include "ocean_wave.inc.glsl"
+#endif
+
 #ifdef STEREO
 // VR renders one eye per pass (no multiview here: the forward pass's DGC execution set forbids it), so the
 // view index (1 = left eye, 2 = right eye) is a push constant selecting the per-eye matrices via g_viewIndex.
@@ -50,6 +54,20 @@ void main()
     float inst_scale = inst.posScale.w;
     vec4  inst_quat  = inst.quat;
 
+    out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
+
+#ifdef OCEAN
+    // Gerstner-displace the flat water grid into waves in world space, time-animated. The fragment shader
+    // recomputes a finer normal from the undisplaced world XZ passed through out_uv, so this TBN is only a
+    // coarse fallback built from the vertex-level wave normal.
+    const vec3 basePos = quat_transform(in_pos * inst_scale, inst_quat) + inst_pos;
+    vec3 waveDisp, waveN;
+    oceanVertex(basePos.xz, waveDisp, waveN);
+    out_pos = basePos + waveDisp;
+    const vec3 wT = normalize(cross(vec3(0.0, 0.0, 1.0), waveN));
+    out_tbn = mat3(wT, cross(waveN, wT), waveN);
+    out_uv  = basePos.xz;
+#else
     vec3 N = quat_transform(in_normal, inst_quat);
     vec3 T = quat_transform(in_tangent.xyz, inst_quat);
     vec3 B = cross(N, T) * in_tangent.w;
@@ -57,7 +75,7 @@ void main()
     out_pos = quat_transform(in_pos * inst_scale, inst_quat) + inst_pos;
     out_tbn = mat3(T, B, N);
     out_uv  = in_uv;
-    out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
+#endif
 
     // Per-eye projection in VR (g_viewIndex set above) / centre view on desktop, with the same TAA
     // sub-pixel jitter both eyes (per-eye TAA accumulates it just like desktop).

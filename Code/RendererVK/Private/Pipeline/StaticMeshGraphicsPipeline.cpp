@@ -104,6 +104,35 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 		},
 		.cullMode = vk::CullModeFlagBits::eNone, // gizmo: double-sided so it reads from any angle
 	});
+	// Variant 8 (EPipelineIndex::TerrainLit): same lit shader + lighting as variant 0, but the TERRAIN
+	// define swaps the textured-material albedo for a procedural height/slope color (procedural terrain
+	// chunks carry no textures). Opaque, back-face culled, depth write on (all layout defaults).
+	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+		.fragmentShader = ShaderSource{
+			.text = graphicsPipelineLayout.fragmentShader.text,
+			.debugFilePath = graphicsPipelineLayout.fragmentShader.debugFilePath,
+			.defines = { { "TERRAIN", "1" } },
+		},
+	});
+	// Variant 9 (EPipelineIndex::Ocean): GPU-animated Gerstner-spectrum water. The shared vertex shader with
+	// OCEAN defined displaces the flat grid into waves (world-space, time-animated) and recomputes the TBN
+	// from the analytic wave normal; a dedicated fragment shader shades the water (Fresnel sky reflection,
+	// sun glint, subsurface crest glow, Jacobian-fold foam). Opaque + depth write (matches the G-buffer
+	// prepass ocean branch); double-sided so it still draws when the camera dips below the surface.
+	const std::string oceanVariantPath = "Shaders/ocean.fs.glsl";
+	const std::string oceanVariantText = FileSystem::readFileStr(oceanVariantPath);
+	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+		.vertexShader = ShaderSource{
+			.text = graphicsPipelineLayout.vertexShader.text,
+			.debugFilePath = graphicsPipelineLayout.vertexShader.debugFilePath,
+			.defines = { { "OCEAN", "1" } },
+		},
+		.fragmentShader = ShaderSource{
+			.text = oceanVariantText,
+			.debugFilePath = oceanVariantPath,
+		},
+		.cullMode = vk::CullModeFlagBits::eNone,
+	});
 
     // VR: every shader in this pipeline selects the per-eye view (u_views[u_viewIndex]) from one push
     // constant, gated behind STEREO. Define it once across all shader sources (and add the range once)
