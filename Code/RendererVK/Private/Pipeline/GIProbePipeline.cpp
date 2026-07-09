@@ -61,7 +61,7 @@ void GIProbePipeline::initialize(uint32 maxTlasInstances, uint32 maxTextures, ui
     Tweak::floatVar("RT/GI", "Temporal Alpha", &m_giTemporalAlpha, 0.0f, 0.05f, 0.001f);
     Tweak::floatVar("RT/GI", "Max Ray Distance", &m_giMaxRayDist, 0.0f, 128.0f);
     Tweak::floatVar("RT/GI", "Strength", &m_giStrength, 0.0f, 10.0f, 0.01f);
-    Tweak::floatVar("RT/GI", "TLAS Range", &m_tlasRange, 16.0f, 100'000.0f, 10.0f);
+    Tweak::floatVar("RT/GI", "TLAS Range", &m_tlasRange, 16.0f, 4096.0f, 16.0f);
     Tweak::floatVar("RT/GI", "Vis Variance Floor", &m_visVarianceFloor, 0.0f, 1.0f, 0.01f);
     Tweak::floatVar("RT/GI", "Vis Cheb Power", &m_visChebPower, 1.0f, 6.0f, 0.1f);
     Tweak::floatVar("RT/GI", "Vis Weight Floor", &m_visWeightFloor, 0.0f, 0.25f, 0.005f);

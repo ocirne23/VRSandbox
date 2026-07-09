@@ -133,21 +133,26 @@ float volRayVisibility(vec3 origin, vec3 dir, float tMax)
 // Sun visibility for DISTANT froxels from the baked terrain height cascades: both TLAS rays (instances
 // range-bounded by RT/GI/TLAS Range) and the PCSS cascades run out of data well before a long fog range,
 // leaving far fog uniformly lit. Marching the height map keeps mountains shadowing the fog out to the
-// far cascade's reach, for a few texture taps instead of a full-length ray. Exponential steps; the
-// jittered first step decorrelates the stairstep and the temporal blend integrates it.
-float terrainSunVisibility(vec3 pos, vec3 sunDir, float jitter)
+// far cascade's reach, for a few texture taps instead of a full-length ray. The occlusion test is a SOFT
+// horizon (how far the ray clears the terrain, relative to a penumbra that widens with distance — the
+// sun cone half-angle, u_fogParams4.w): fully deterministic, so unlike a jittered binary march it needs
+// no temporal integration at all — far fog shadows hold perfectly still under camera motion.
+float terrainSunVisibility(vec3 pos, vec3 sunDir)
 {
     if (sunDir.y <= 0.0)
         return 0.0; // sun below the horizon
-    float t = 30.0 * exp2(jitter); // 30-60m first step, ~7.5km reach after 8 scaled steps
-    for (int i = 0; i < 8; ++i)
+    const float spread = max(u_fogParams4.w, 0.015); // penumbra growth per meter along the ray
+    float vis = 1.0;
+    float t = 25.0; // exponential steps, ~12.8km reach
+    for (int i = 0; i < 10; ++i)
     {
         const vec3 p = pos + sunDir * t;
-        if (terrainHeightAt(p.xz) > p.y)
+        vis = min(vis, clamp((p.y - terrainHeightAt(p.xz)) / (t * spread + 4.0), 0.0, 1.0));
+        if (vis <= 0.0)
             return 0.0;
-        t *= 2.2;
+        t *= 2.0;
     }
-    return 1.0;
+    return vis;
 }
 
 // Radiance scattered toward the camera from one grid light: same type encoding (point/spot/rect/tube)
@@ -289,7 +294,7 @@ void main()
         float sunVis;
         if (viewZ > u_fogParams6.y && terrainHeightMapPresent())
         {
-            sunVis = terrainSunVisibility(worldPos, sunDir, jz);
+            sunVis = terrainSunVisibility(worldPos, sunDir);
         }
         else if (u_rtSunShadow > 0.5)
         {
@@ -369,13 +374,17 @@ void main()
     float prevW;
     const vec2 prevFullUv = prevScreenUV(centerPos, prevW);
     const vec2 prevVpUv = (prevFullUv - u_viewportRect.xy) / u_viewportRect.zw;
+    // Accept history up to a couple of froxels OUTSIDE the grid with a clamped lookup: the edge froxel is
+    // a close stand-in, and rejecting outright made the screen border flash fresh (noisy) samples during
+    // every small rotation. Larger overshoots still reject (stretching the edge across the screen is worse).
+    const vec2 margin = vec2(2.0 / float(VOL_FROXEL_X), 2.0 / float(VOL_FROXEL_Y));
     if (prevW > VOL_FOG_NEAR
-        && all(greaterThanEqual(prevVpUv, vec2(0.0))) && all(lessThanEqual(prevVpUv, vec2(1.0))))
+        && all(greaterThanEqual(prevVpUv, -margin)) && all(lessThanEqual(prevVpUv, 1.0 + margin)))
     {
         const float prevSlice = volViewZToSlice(prevW);
         if (prevSlice <= 1.0)
         {
-            const vec4 history = texture(u_history, vec3(prevVpUv, prevSlice));
+            const vec4 history = texture(u_history, vec3(clamp(prevVpUv, vec2(0.0), vec2(1.0)), prevSlice));
             result = mix(result, history, clamp(u_fogParams2.w, 0.0, 0.97));
         }
     }

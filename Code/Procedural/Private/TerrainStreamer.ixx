@@ -78,15 +78,15 @@ export namespace Procedural
 		int   m_seed = 1337;
 		float m_chunkSize = 128.0f;
 		int   m_lod0Res = 90;
-		int   m_ringRadius = 8;   // max generation range from the camera chunk, in chunks
+		int   m_ringRadius = 16;   // max generation range from the camera chunk, in chunks
 		int   m_lodStep = 2;      // chunks of ring distance per extra LOD level
 		int   m_maxLod = 4;
 		float m_seaLevel = 0.0f;
-		float m_skirtDepth = 1.0f;
+		float m_skirtDepth = 5.0f;
 		int   m_maxUploadsPerFrame = 8;
 
-		float  m_continentAmplitude = 90.0f;
-		float  m_mountainAmplitude = 180.0f;
+		float  m_continentAmplitude = 150.0f;
+		float  m_mountainAmplitude = 300.0f;
 		float  m_detailAmplitude = 6.0f;
 		float  m_continentFrequency = 0.0009f;
 		float  m_mountainFrequency = 0.0015f;

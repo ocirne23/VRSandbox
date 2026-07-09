@@ -241,7 +241,13 @@ vec3 shadeHit(SceneHit hit, vec3 rayDir, vec3 sunRadiance, vec3 L)
     if (giCoverage < 1.0) // fade to the sky+ground fallback over the probe field's outer band (no boundary step)
         indirect = mix(skyGroundRadiance(hit.N), indirect, giCoverage);
     indirect *= u_aoParams.y;
-    vec3 radiance = hit.albedo * (sun / PI + indirect + u_ambientColor);
+    // Underwater hits: the ambient/GI reaching the bottom enters at the surface and Beer-Lamberts down
+    // the water column, like the sun path the caller already attenuates. Neither the probes nor the sky
+    // fallback know about the water (the ocean surface is excluded from the TLAS), so without this the
+    // seabed reads open-air-lit at any depth — and since the two sides disagree on how bright that is,
+    // the probe-field boundary showed on shallow water. Above-water hits (reflections) have zero depth.
+    const vec3 ambientAtten = exp(-u_oceanAbsorption.rgb * max(u_oceanParams2.w - hit.pos.y, 0.0));
+    vec3 radiance = hit.albedo * (sun / PI + (indirect + u_ambientColor) * ambientAtten);
 
 #ifdef OCEAN_HIT_LIGHTS
     const vec3 matColOverPi = hit.albedo / PI;
@@ -355,7 +361,27 @@ void main()
         {
             const float minSigma = max(min(sigmaT.r, min(sigmaT.g, sigmaT.b)), 1e-3);
             SceneHit hit;
-            if (traceScene(in_pos, refrDir, min(4.6 / minSigma, 400.0), hit)) // bounded at ~99% extinction
+            bool haveHit = traceScene(in_pos, refrDir, min(4.6 / minSigma, 400.0), hit); // bounded at ~99% extinction
+            if (!haveHit && refrDir.y < -0.02)
+            {
+                // The ray found no geometry — beyond RT/GI/TLAS Range the seabed simply isn't in the TLAS,
+                // which cut the Beer-Lambert body color off at that distance. Approximate the bottom from
+                // the baked terrain height field instead (shore map + fog cascade fallback, valid for many
+                // km): intersect the refracted ray with the water column analytically and shade a flat
+                // ground-albedo pseudo-hit; the absorption/inscatter composition below is identical.
+                float depth = oceanSampleShoreDepth(in_pos.xz);
+                float t = depth / -refrDir.y;
+                depth = oceanSampleShoreDepth(in_pos.xz + refrDir.xz * t); // one refinement for sloped shelves
+                if (depth > 0.0)
+                {
+                    hit.t = clamp(depth / -refrDir.y, 0.0, 4.6 / minSigma);
+                    hit.pos = in_pos + refrDir * hit.t;
+                    hit.N = vec3(0.0, 1.0, 0.0);
+                    hit.albedo = vec3(1.0);
+                    haveHit = true;
+                }
+            }
+            if (haveHit)
             {
                 // Sun reaching the hit attenuates down the water column above it (Beer-Lambert), then the
                 // view path back attenuates again; plus closed-form homogeneous single-scatter in-scatter.

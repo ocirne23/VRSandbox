@@ -94,15 +94,15 @@ export struct FogParams
     bool  enabled = true;
     float density = 0.020f;        // global extinction at the height base (1/m)
     float heightBase = 0.0f;       // world height where the global fog is densest
-    float heightFalloff = 0.40f;   // exponential density falloff above the base (1/m)
-    float terrainFollow = 0.65f;   // fraction of the local terrain height added to the height base (needs a
+    float heightFalloff = 0.33f;   // exponential density falloff above the base (1/m)
+    float terrainFollow = 0.75f;   // fraction of the local terrain height added to the height base (needs a
                                    // terrain height map, see Renderer::setFogTerrainHeightMap): 0 = flat fog,
                                    // 1 = fog hugs the terrain at constant depth; in between it reaches higher
                                    // on mountainsides but still clears the peaks
     glm::vec3 albedo = glm::vec3(1.0f, 1.0f, 1.0f);
     float albedoIntensity = 1.0f;  // > 1 is a non-physical gain (emissive-ish fog)
     float anisotropy = 0.15f;      // HG phase g (0 = isotropic, ->1 = forward scattering)
-    float range = 1024.0f;         // froxel grid far distance (m)
+    float range = 1900.0f;         // froxel grid far distance (m)
     float slicePower = 1.0f;       // froxel Z distribution exponent: 1 = plain exponential slices, < 1
                                    // shifts Z resolution from near to far (worth ~0.7-0.85 at long ranges)
     float terrainShadowDist = 512.0f; // froxels beyond this distance sun-shadow by marching the terrain
@@ -111,7 +111,7 @@ export struct FogParams
     float noiseScale = 0.08f;      // density noise frequency (1/m)
     float noiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
     float windSpeed = 1.5f;        // noise drift (m/s)
-    float temporalBlend = 0.9f;    // history blend weight (jittered Z integration)
+    float temporalBlend = 0.5f;    // history blend weight (jittered Z integration)
     bool  lightShadows = true;     // shadow ray per froxel per grid light (expensive)
     int   sunRays = 1;             // sun shadow rays per froxel (RT sun mode); main perf knob
     float sunSoftness = 0.02f;     // shadow ray cone half-angle (rad); softens + decorrelates the rays
