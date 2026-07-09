@@ -75,7 +75,7 @@ export namespace Procedural
 
 		// --- Tweak-backed configuration (source of truth; ClimateMaps/ChunkParams are built from these) ---
 		bool  m_enabled = false;
-		int   m_seed = 1337;
+		int   m_seed = 62500;
 		float m_chunkSize = 128.0f;
 		int   m_lod0Res = 90;
 		int   m_ringRadius = 16;   // max generation range from the camera chunk, in chunks
@@ -84,6 +84,7 @@ export namespace Procedural
 		float m_seaLevel = 0.0f;
 		float m_skirtDepth = 5.0f;
 		int   m_maxUploadsPerFrame = 8;
+		float m_edgeFadeChunks = 2.0f; // width (in chunks) of the height fade-in band at the generation edge
 
 		float  m_continentAmplitude = 150.0f;
 		float  m_mountainAmplitude = 300.0f;
@@ -97,6 +98,11 @@ export namespace Procedural
 		int    m_detailOctaves = 4;
 		float  m_warpStrength = 40.0f;
 		float  m_lapseRate = 0.0018f;
+		float  m_networkCell = 1200.0f;    // lake lattice spacing (m): smaller = more (and smaller) lakes
+		float  m_lakeCoverage = 0.5f;      // fraction of lattice local-minima that hold a lake
+		float  m_lakeDepth = 8.0f;
+		float  m_fogFrequency = 0.0003f;   // regional fog thickness (fog map channel B)
+		float  m_fogCoverage = 0.5f;
 
 		bool m_configDirty = false; // set by Tweak onChange; consumed at the top of update()
 

@@ -4,6 +4,7 @@ import Core;
 import Core.glm;
 import Core.Camera;
 import Core.SDL;
+import Core.Tweaks;
 import UI;
 
 import :Input;
@@ -21,6 +22,9 @@ void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, g
     m_direction = glm::normalize(lookAt - position);
     m_up = up;
     m_viewMatrix = glm::lookAt(position, lookAt, up);
+
+    // The controller outlives the registration (owned by main for the app's lifetime).
+    Tweak::floatVar("Editor", "Speed", &m_speed, 0.1f, 200.0f, 0.1f);
 
     m_mouseListener = Globals::input.addMouseListener();
     m_mouseListener->onMousePressed = [this](const SDL_MouseButtonEvent& evt)

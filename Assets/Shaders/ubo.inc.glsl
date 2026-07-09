@@ -106,6 +106,10 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // y = turbidity (entrained-bubble milkiness + roughness),
                             // z = shore foam depth (m; surf band width at the waterline, 0 = off),
                             // w = breaking-crest foam threshold (downward crest accel in g units)
+    vec4 u_oceanParams6;    // x = glint mip bias (negative = sharper shading normals),
+                            // y = glint variance filter scale (spec AA + LEAN roughness), zw unused
+    vec4 u_terrainFade;     // TERRAIN variant edge fade: x = fade-start dist, y = fade-end dist
+                            // (radial from camera XZ), z = target height (sea level). y<=x disables.
 };
 
 // View index selecting which u_views[] entry the convenience macros / reconstruction helpers read. Defaults

@@ -57,6 +57,54 @@ namespace Procedural
 		return glm::mix(nx0, nx1, v) * 1.41421356f;
 	}
 
+	glm::vec3 NoiseField::noise2Dd(float x, float y) const
+	{
+		const int32 ix = (int32)std::floor(x);
+		const int32 iy = (int32)std::floor(y);
+		const float fx = x - (float)ix;
+		const float fy = y - (float)iy;
+
+		// Quintic fade + its derivative.
+		const float u = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
+		const float v = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
+		const float du = 30.0f * fx * fx * (fx - 1.0f) * (fx - 1.0f);
+		const float dv = 30.0f * fy * fy * (fy - 1.0f) * (fy - 1.0f);
+
+		const glm::vec2 ga = gradient(ix, iy);
+		const glm::vec2 gb = gradient(ix + 1, iy);
+		const glm::vec2 gc = gradient(ix, iy + 1);
+		const glm::vec2 gd = gradient(ix + 1, iy + 1);
+
+		const float va = ga.x * fx + ga.y * fy;
+		const float vb = gb.x * (fx - 1.0f) + gb.y * fy;
+		const float vc = gc.x * fx + gc.y * (fy - 1.0f);
+		const float vd = gd.x * (fx - 1.0f) + gd.y * (fy - 1.0f);
+		const float k = va - vb - vc + vd;
+
+		const float value = va + u * (vb - va) + v * (vc - va) + u * v * k;
+		const float ddx = ga.x + u * (gb.x - ga.x) + v * (gc.x - ga.x) + u * v * (ga.x - gb.x - gc.x + gd.x)
+			+ du * ((vb - va) + v * k);
+		const float ddy = ga.y + u * (gb.y - ga.y) + v * (gc.y - ga.y) + u * v * (ga.y - gb.y - gc.y + gd.y)
+			+ dv * ((vc - va) + u * k);
+		return glm::vec3(value, ddx, ddy) * 1.41421356f;
+	}
+
+	float NoiseField::fbmEroded(float x, float y, uint32 octaves, float lacunarity, float persistence) const
+	{
+		float sum = 0.0f, amplitude = 1.0f, frequency = 1.0f, norm = 0.0f;
+		glm::vec2 dsum(0.0f);
+		for (uint32 i = 0; i < octaves; ++i)
+		{
+			const glm::vec3 n = noise2Dd(x * frequency, y * frequency);
+			dsum += glm::vec2(n.y, n.z); // accumulated slope (Quilez: unscaled across octaves)
+			sum += amplitude * n.x / (1.0f + glm::dot(dsum, dsum));
+			norm += amplitude;
+			amplitude *= persistence;
+			frequency *= lacunarity;
+		}
+		return norm > 0.0f ? sum / norm : 0.0f;
+	}
+
 	float NoiseField::fbm(float x, float y, uint32 octaves, float lacunarity, float persistence) const
 	{
 		float sum = 0.0f, amplitude = 1.0f, frequency = 1.0f, norm = 0.0f;

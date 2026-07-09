@@ -241,14 +241,20 @@ void main()
     // rising slower than the ground under it). The height is clamped up to the baked sea level so fog
     // rests on the water surface instead of sinking over the seabed.
     float heightBase = u_fogParams0.y;
-    if (u_fogParams3.x > 0.0 && terrainHeightMapPresent())
-        heightBase += u_fogParams3.x * max(terrainHeightAt(worldPos.xz), u_fogParams5.w);
+    float regionMul = 1.0; // baked regional fog-thickness modulation (fog terrain map, packed channel B)
+    if (terrainHeightMapPresent())
+    {
+        if (u_fogParams3.x > 0.0)
+            heightBase += u_fogParams3.x * max(terrainHeightAt(worldPos.xz), u_fogParams5.w);
+        if (u_fogParams6.z > 0.0)
+            regionMul = mix(1.0, terrainClimateAt(worldPos.xz).x, u_fogParams6.z);
+    }
     // Height density = the analytic mean over this slice's segment of the sample ray (see heightFogMean),
     // not a point sample at worldPos.
     const float tScale = 1.0 / max(dot(dir, camFwd), 1e-3);
     const float yA = u_viewPos.y + dir.y * (volSliceToViewZ(float(cell.z) / float(VOL_FROXEL_Z)) * tScale);
     const float yB = u_viewPos.y + dir.y * (volSliceToViewZ(float(cell.z + 1) / float(VOL_FROXEL_Z)) * tScale);
-    const float heightDensity = u_fogParams0.x * heightFogMean(yA, yB, heightBase, u_fogParams0.z);
+    const float heightDensity = u_fogParams0.x * heightFogMean(yA, yB, heightBase, u_fogParams0.z) * regionMul;
 
     // Density noise fades out where one noise wavelength drops under the froxel footprint (sub-froxel
     // noise is pure aliasing the temporal blend turns into shimmer; its mean is 1) and is skipped

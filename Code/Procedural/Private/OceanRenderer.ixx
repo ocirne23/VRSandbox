@@ -52,6 +52,7 @@ export namespace Procedural
 	private:
 		void rebuildGrid();
 		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& terrain);
+		glm::vec2 sampleShoreData(float x, float z) const;          // (water depth, water level) from the CPU shore copy
 		float sampleShoreDepth(float x, float z) const;             // CPU copy of the baked shore map
 		glm::vec3 sampleDisplacement(glm::vec2 worldXZ, float depth) const; // shoal-faded cascade sum from the readback tile
 
@@ -79,6 +80,8 @@ export namespace Procedural
 		glm::vec3 m_scatterColor = glm::vec3(0.047f, 0.1f, 0.15f);
 		float m_scatterStrength = 1.0f;
 		float m_roughness = 0.07f;
+		float m_glintSharpness = 0.75f; // negative mip bias on the FS surface samples: crisper glitter
+		float m_glintFilter = 0.5f;     // scale on the roughness-widening variance (spec AA + LEAN)
 		bool  m_hitLighting = false; // grid lights at refraction/reflection ray hits (pipeline reload on toggle)
 		// Foam & turbulence: one instant-foam response draws the crest foam AND injects the accumulated
 		// turbulence field, which in turn relaxes the fold threshold (aged foam along live geometry) and
@@ -105,7 +108,7 @@ export namespace Procedural
 		glm::vec2 m_shoreCenter = glm::vec2(0.0f); // region of the ACTIVE (uploaded) map
 		float m_shoreActiveRange = 0.0f;
 		bool  m_shoreValid = false;
-		std::vector<float> m_shoreHeights;         // CPU copy of the active map (buoyancy queries)
+		std::vector<float> m_shoreHeights;         // CPU copy of the active map: interleaved (terrain height, water level) pairs
 
 		// CPU copy of the GPU displacement readback tile, refreshed every update() inside the frame's
 		// fence-safe window — sampleWaterHeight can then run at ANY point in the frame (physics updates

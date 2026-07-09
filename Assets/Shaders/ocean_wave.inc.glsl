@@ -17,12 +17,14 @@
 #endif
 layout (binding = OCEAN_MAPS_BINDING) uniform sampler2DArray u_oceanMaps;
 
-// Shore terrain height map (optional; the includer defines OCEAN_SHORE_BINDING to enable it): an R32F
-// snapshot of the raw terrain surface height around the camera (world Y, m), CPU-baked. The water depth
-// is derived live as sea level - height (so sea-level changes need no re-bake); it drives fake shoaling +
-// the shoreline surf band. When the includer also defines TERRAIN_HEIGHT_BINDING, the coarser fog terrain
-// cascades (terrain_height.inc.glsl — the same field over a much larger range) supply the depth beyond
-// this map's reach, so distant coastlines still shoal and waves never poke through far-away land.
+// Shore map (optional; the includer defines OCEAN_SHORE_BINDING to enable it): an RG32F snapshot around
+// the camera, CPU-baked. R = raw terrain surface height (world Y, m); G = the WATER SURFACE LEVEL — sea
+// level over the open ocean, higher where an elevated water table forms lakes/rivers at altitude. The
+// water depth is derived live as water level - height; it drives fake shoaling + the shoreline surf band,
+// and the clipmap lifts its vertices by water level - sea level. When the includer also defines
+// TERRAIN_HEIGHT_BINDING, the coarser fog terrain cascades (terrain_height.inc.glsl — the same terrain
+// height AND water level over a much larger range) supply both beyond this map's reach, so distant
+// coastlines still shoal, far lakes keep their level, and waves never poke through far-away land.
 #ifdef OCEAN_SHORE_BINDING
 layout (binding = OCEAN_SHORE_BINDING) uniform sampler2D u_shoreHeight;
 #endif
@@ -30,15 +32,20 @@ layout (binding = OCEAN_SHORE_BINDING) uniform sampler2D u_shoreHeight;
 #include "terrain_height.inc.glsl"
 #endif
 
-// Water depth (m) at worldXZ. Outside the shore map — or without one (u_oceanParams4.x = 0) — this falls
-// back to the fog terrain cascades, then to the open-ocean depth D; each handover blends over an edge
-// band so leaving a map's region never pops.
-float oceanSampleShoreDepth(vec2 worldXZ)
+// (terrain height, water surface level) at worldXZ. Outside the shore map — or without one
+// (u_oceanParams4.x = 0) — terrain falls back to the fog cascades then the open-ocean bottom, and the
+// water level to sea level; each handover blends over an edge band so leaving a map's region never pops.
+vec2 oceanSampleShoreData(vec2 worldXZ)
 {
-    float depth = u_oceanParams1.z;
+    float height = u_oceanParams2.w - u_oceanParams1.z; // open-ocean bottom: sea level - depth D
+    float level = u_oceanParams2.w;                     // sea level
 #ifdef TERRAIN_HEIGHT_BINDING
     if (terrainHeightMapPresent())
-        depth = u_oceanParams2.w - terrainHeightAt(worldXZ);
+    {
+        const vec4 td = terrainDataAt(worldXZ); // .x = terrain height, .y = water level
+        height = td.x;
+        level = td.y;
+    }
 #endif
 #ifdef OCEAN_SHORE_BINDING
     const float invRange = u_oceanParams4.x;
@@ -48,10 +55,28 @@ float oceanSampleShoreDepth(vec2 worldXZ)
         const vec2 e = min(uv, vec2(1.0) - uv);
         const float inMap = clamp(min(e.x, e.y) * 20.0, 0.0, 1.0);
         if (inMap > 0.0)
-            depth = mix(depth, u_oceanParams2.w - textureLod(u_shoreHeight, uv, 0.0).x, inMap);
+        {
+            const vec2 hw = textureLod(u_shoreHeight, uv, 0.0).xy;
+            height = mix(height, hw.x, inMap);
+            level  = mix(level, hw.y, inMap);
+        }
     }
 #endif
-    return depth;
+    return vec2(height, level);
+}
+
+// Water depth (m) at worldXZ: local water surface minus terrain.
+float oceanSampleShoreDepth(vec2 worldXZ)
+{
+    const vec2 hw = oceanSampleShoreData(worldXZ);
+    return hw.y - hw.x;
+}
+
+// Vertical lift raising the sea-level clipmap onto the local water table (0 over the open ocean). Both
+// displacement passes (prepass + forward) MUST apply this identically, before sampling the displacement.
+float oceanWaterOffset(vec2 worldXZ)
+{
+    return oceanSampleShoreData(worldXZ).y - u_oceanParams2.w;
 }
 
 // Fake shoaling: a cascade's waves fade out once the water is shallower than a fraction of its patch
@@ -115,6 +140,18 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
 //              roughness, which is what produces the elongated glittering sun path at distance.
 //   accel    : the surface's vertical acceleration (m/s^2, negative = downward) — with the Jacobian this
 //              drives the instantaneous, geometry-locked crest foam in the water shader
+// Implicit-LOD sample for the surface-shading reads. The water fragment shader defines
+// OCEAN_SURFACE_SAMPLE_BIAS ("Ocean/Shading/Glint sharpness", negative = finer mips): the shading
+// normal then resolves wave detail the plain trilinear footprint would have filtered away, so the sun
+// glint breaks into crisp glitter instead of following mip-softened blobs — and the LEAN variance
+// below shrinks to match, since it measures exactly what the filtering removed. The bias overload of
+// texture() is fragment-stage-only, so other stages (the foam compute) compile the plain call.
+#ifdef OCEAN_SURFACE_SAMPLE_BIAS
+#define OCEAN_SURFACE_TEX(uvw) texture(u_oceanMaps, uvw, OCEAN_SURFACE_SAMPLE_BIAS)
+#else
+#define OCEAN_SURFACE_TEX(uvw) texture(u_oceanMaps, uvw)
+#endif
+
 void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out vec2 slopeVar, out float accel)
 {
     const float chop = u_oceanParams0.w;
@@ -126,9 +163,9 @@ void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out ve
     for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
         const vec2 uv = worldXZ / u_oceanParams2[c];
-        const vec4 g = texture(u_oceanMaps, vec3(uv, float(OCEAN_CASCADES + c)));
-        const vec4 d = texture(u_oceanMaps, vec3(uv, float(c)));
-        const vec4 m = texture(u_oceanMaps, vec3(uv, float(2 * OCEAN_CASCADES + c)));
+        const vec4 g = OCEAN_SURFACE_TEX(vec3(uv, float(OCEAN_CASCADES + c)));
+        const vec4 d = OCEAN_SURFACE_TEX(vec3(uv, float(c)));
+        const vec4 m = OCEAN_SURFACE_TEX(vec3(uv, float(2 * OCEAN_CASCADES + c)));
         // Shoaling: fade this cascade's contribution with the SAME factor the displacement uses, so the
         // shading (slopes/folds/variance) tracks the flattened shallow-water geometry (variance ~ fade^2).
         const float fade = oceanShoalFade(depth, u_oceanParams2[c]);

@@ -32,6 +32,7 @@
 #include "shared.inc.glsl"
 #define OCEAN_SHORE_BINDING 18
 #define TERRAIN_HEIGHT_BINDING 19
+#define OCEAN_SURFACE_SAMPLE_BIAS (u_oceanParams6.x) // "Glint sharpness": finer shading-normal mips
 #include "ocean_wave.inc.glsl"
 
 struct MaterialInfo
@@ -133,12 +134,16 @@ float F_Schlick(float u, float f0)
     return f0 + (1.0 - f0) * (x2 * x2 * x);
 }
 // Geometric specular AA (Kaplanyan et al. 2016 / Filament): sub-pixel normal variance from screen-space
-// derivatives, added to alpha^2 so the lobe covers it instead of flickering across it.
+// derivatives, added to alpha^2 so the lobe covers it instead of flickering across it. The weight/cap
+// are DELIBERATELY far below the usual 0.5/0.18 for water: the derivatives grow with exactly the
+// pixel-scale normal detail "Glint sharpness" reveals, so a full-strength term re-widens the lobe by
+// what the sharper mips added and silently cancels the knob — and water WANTS a little sub-pixel
+// shimmer (that IS the sparkle; TAA tames the flicker).
 float normalVariance(vec3 N)
 {
     vec3 dNdx = dFdx(N);
     vec3 dNdy = dFdy(N);
-    return min(0.5 * (dot(dNdx, dNdx) + dot(dNdy, dNdy)), 0.18);
+    return min(0.25 * (dot(dNdx, dNdx) + dot(dNdy, dNdy)), 0.03);
 }
 
 // --- Reflected sky ----------------------------------------------------------------------------------
@@ -246,7 +251,7 @@ vec3 shadeHit(SceneHit hit, vec3 rayDir, vec3 sunRadiance, vec3 L)
     // fallback know about the water (the ocean surface is excluded from the TLAS), so without this the
     // seabed reads open-air-lit at any depth — and since the two sides disagree on how bright that is,
     // the probe-field boundary showed on shallow water. Above-water hits (reflections) have zero depth.
-    const vec3 ambientAtten = exp(-u_oceanAbsorption.rgb * max(u_oceanParams2.w - hit.pos.y, 0.0));
+    const vec3 ambientAtten = exp(-u_oceanAbsorption.rgb * max(oceanSampleShoreData(hit.pos.xz).y - hit.pos.y, 0.0)); // depth below the LOCAL water surface (lakes sit above sea level)
     vec3 radiance = hit.albedo * (sun / PI + (indirect + u_ambientColor) * ambientAtten);
 
 #ifdef OCEAN_HIT_LIGHTS
@@ -308,8 +313,9 @@ void main()
     const float shoreFoamDepth = u_oceanParams5.z;
     if (shoreFoamDepth > 0.0)
     {
-        const float shoreDepth = oceanSampleShoreDepth(in_uv);
-        const float waveH = in_pos.y - u_oceanParams2.w;        // surface height above the calm sea level
+        const vec2 shoreHW = oceanSampleShoreData(in_uv);
+        const float shoreDepth = shoreHW.y - shoreHW.x;
+        const float waveH = in_pos.y - shoreHW.y;               // surface height above the LOCAL calm water level
         const float column = max(shoreDepth, 0.0) + waveH;      // instantaneous water column at this pixel
         const float nearShore = 1.0 - smoothstep(shoreFoamDepth, 4.0 * shoreFoamDepth, shoreDepth);
         const float bore = max(waveH, 0.0) / max(column, 0.05); // crest fraction of the column (bore front)
@@ -329,12 +335,14 @@ void main()
 
     // Microfacet roughness = base + geometric specular AA + LEAN filtered slope variance (slope variance
     // maps to alpha^2 ~ 2 sigma^2; Bruneton 2010). This is what stretches the sun glitter toward the
-    // horizon instead of leaving distant water a flat mirror.
+    // horizon instead of leaving distant water a flat mirror. Both variance terms scale with
+    // "Ocean/Shading/Glint filtering" (u_oceanParams6.y): full physical filtering reads soft/blobby up
+    // close, so the default trades a little of it for a visibly tighter, more realistic glint.
     const float perceptualRough = clamp(u_oceanAbsorption.w, 0.02, 1.0);
     const float slopeVariance = 0.5 * (slopeVar.x + slopeVar.y) * (ns * ns);
     // Turbulent water is micro-rough (churned surface + bubbles): scatter the glint in the wake.
     const float alphaSq = perceptualRough * perceptualRough * perceptualRough * perceptualRough
-        + normalVariance(N) + 2.0 * slopeVariance + turbulence * u_oceanParams5.y * 0.35;
+        + (normalVariance(N) + 2.0 * slopeVariance) * u_oceanParams6.y + turbulence * u_oceanParams5.y * 0.35;
     const float alphaF = clamp(sqrt(alphaSq), 0.02, 1.0);
 
     // Sun radiance at the surface (atmosphere-attenuated + eclipse-scaled) + one RT shadow ray so
@@ -385,7 +393,7 @@ void main()
             {
                 // Sun reaching the hit attenuates down the water column above it (Beer-Lambert), then the
                 // view path back attenuates again; plus closed-form homogeneous single-scatter in-scatter.
-                const float sunPath = max(u_oceanParams2.w - hit.pos.y, 0.0) / max(L.y, 0.25);
+                const float sunPath = max(oceanSampleShoreData(hit.pos.xz).y - hit.pos.y, 0.0) / max(L.y, 0.25); // column above the hit, from the LOCAL water surface
                 const vec3 hitRadiance = shadeHit(hit, refrDir, sunTint * sunVis * exp(-sigmaT * sunPath), L);
                 const vec3 T = exp(-sigmaT * hit.t);
                 body = hitRadiance * T + inscatter * (1.0 - T);

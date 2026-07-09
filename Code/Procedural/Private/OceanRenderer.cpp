@@ -50,6 +50,10 @@ namespace Procedural
 		Tweak::color3("Ocean/Shading", "Scatter color", &m_scatterColor);
 		Tweak::floatVar("Ocean/Shading", "Scatter strength", &m_scatterStrength, 0.0f, 4.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shading", "Roughness", &m_roughness, 0.02f, 0.5f, 0.001f);
+		// Sharper sun glints: sharpness biases the shading-normal mips finer (some shimmer past ~1.5),
+		// filtering scales the roughness-widening variance terms (0 = raw sharp GGX, 1 = fully filtered).
+		Tweak::floatVar("Ocean/Shading", "Glint sharpness", &m_glintSharpness, 0.0f, 3.0f, 0.05f);
+		Tweak::floatVar("Ocean/Shading", "Glint filtering", &m_glintFilter, 0.0f, 2.0f, 0.05f);
 		Tweak::boolean("Ocean/Shading", "Hit lighting", &m_hitLighting); // lights on geometry seen through/mirrored in the water
 		Tweak::color3("Ocean/Shading", "Foam color", &m_foamColor);
 		// One instant-foam response (thresholds + softness) draws the crest foam AND injects the
@@ -162,17 +166,18 @@ namespace Procedural
 		m_node = std::move(node);
 	}
 
-	// Shore terrain height bake: an OCEAN_SHORE_RES^2 snapshot of the raw surface height covering
+	// Shore bake: an OCEAN_SHORE_RES^2 snapshot of (terrain height, water level) pairs covering
 	// m_shoreRange meters around the camera (HeightMapBaker, sampled from the SAME ClimateMaps the
 	// terrain streamer renders from, so the water agrees with the drawn ground). The shaders derive the
-	// water depth live as sea level - height, so sea-level changes need no re-bake; beyond this map's
-	// range they fall back to the coarser fog terrain cascades (TerrainStreamer's bake of the same field).
+	// water depth live as water level - height and lift the clipmap by water level - sea level (lakes/
+	// rivers at altitude); beyond this map's range they fall back to the coarser fog terrain cascades
+	// (TerrainStreamer's bake of the same fields).
 	void OceanRenderer::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& terrain)
 	{
 		const bool active = m_shoreEnabled && terrain != nullptr;
 		HeightMapBaker::Baked baked;
 		if (m_shoreBaker.update(baked, active, terrain, glm::vec2(camera.position.x, camera.position.z),
-			glm::vec2(glm::max(m_shoreRange, 256.0f), 0.0f), RendererVKLayout::OCEAN_SHORE_RES, 1))
+			glm::vec2(glm::max(m_shoreRange, 256.0f), 0.0f), RendererVKLayout::OCEAN_SHORE_RES, 1, 2))
 		{
 			renderer.setOceanShoreMap(baked.texels, baked.center, baked.ranges.x);
 			m_shoreHeights = std::move(baked.texels); // CPU copy: sampleShoreDepth (buoyancy) reads this
@@ -209,6 +214,8 @@ namespace Procedural
 		params.scatterColor = m_scatterColor;
 		params.scatterStrength = m_scatterStrength;
 		params.roughness = m_roughness;
+		params.glintSharpness = m_glintSharpness;
+		params.glintFilter = m_glintFilter;
 		params.hitLighting = m_hitLighting;
 		params.foamColor = m_foamColor;
 		params.foamBias = m_foamBias;
@@ -273,22 +280,33 @@ namespace Procedural
 	// open-ocean depth outside the baked region or with no shore data. Mirrors oceanSampleShoreDepth in
 	// ocean_wave.inc.glsl minus the fog-cascade fallback — buoyancy queries only matter near the camera,
 	// well inside the shore map.
-	float OceanRenderer::sampleShoreDepth(float x, float z) const
+	// (water depth, water surface level) at (x, z) from the CPU copy of the baked shore map — the CPU
+	// mirror of the shaders' oceanSampleShoreData. Outside the map: open-ocean depth at sea level.
+	glm::vec2 OceanRenderer::sampleShoreData(float x, float z) const
 	{
 		if (!m_shoreValid || m_shoreHeights.empty() || m_shoreActiveRange <= 1.0f)
-			return m_depth;
+			return glm::vec2(m_depth, m_seaLevel);
 		constexpr uint32 RES = RendererVKLayout::OCEAN_SHORE_RES;
 		const float u = (x - m_shoreCenter.x) / m_shoreActiveRange + 0.5f;
 		const float v = (z - m_shoreCenter.y) / m_shoreActiveRange + 0.5f;
 		if (u <= 0.0f || u >= 1.0f || v <= 0.0f || v >= 1.0f)
-			return m_depth;
+			return glm::vec2(m_depth, m_seaLevel);
 		const float tx = glm::clamp(u * (float)RES - 0.5f, 0.0f, (float)RES - 1.001f);
 		const float tz = glm::clamp(v * (float)RES - 0.5f, 0.0f, (float)RES - 1.001f);
 		const uint32 x0 = (uint32)tx, z0 = (uint32)tz;
 		const float fx = tx - (float)x0, fz = tz - (float)z0;
-		const auto at = [&](uint32 i, uint32 j) { return m_shoreHeights[(size_t)j * RES + i]; };
-		return m_seaLevel - glm::mix(glm::mix(at(x0, z0), at(x0 + 1, z0), fx),
+		const auto at = [&](uint32 i, uint32 j) { // (terrain height, water level) texel pair
+			const float* t = &m_shoreHeights[((size_t)j * RES + i) * 2];
+			return glm::vec2(t[0], t[1]);
+		};
+		const glm::vec2 hw = glm::mix(glm::mix(at(x0, z0), at(x0 + 1, z0), fx),
 			glm::mix(at(x0, z0 + 1), at(x0 + 1, z0 + 1), fx), fz);
+		return glm::vec2(hw.y - hw.x, hw.y);
+	}
+
+	float OceanRenderer::sampleShoreDepth(float x, float z) const
+	{
+		return sampleShoreData(x, z).x;
 	}
 
 	// Shoal-faded sum of all cascades' displacement at an undisplaced world XZ, bilinear-wrapped over
@@ -325,9 +343,10 @@ namespace Procedural
 	{
 		if (!m_enabled || m_dispTile.empty() || m_dispTileRes == 0)
 			return -FLT_MAX;
-		const float depth = sampleShoreDepth(x, z);
+		const glm::vec2 depthLevel = sampleShoreData(x, z);
+		const float depth = depthLevel.x;
 		if (depth <= 0.05f)
-			return -FLT_MAX; // terrain at/above sea level: no water here
+			return -FLT_MAX; // terrain at/above the local water level: no water here
 		// The maps store where the UNDISPLACED grid point ENDS UP; a fixed world column needs the
 		// inverse. A few fixed-point iterations: find p whose displaced position lands on (x, z).
 		const glm::vec2 query(x, z);
@@ -339,6 +358,6 @@ namespace Procedural
 		}
 		float h = sampleDisplacement(p, depth).y;
 		h = glm::max(h, 0.05f - depth); // seabed clamp, mirrors ocean_wave.inc.glsl
-		return m_seaLevel + h;
+		return depthLevel.y + h; // waves ride the LOCAL water surface (lakes sit above sea level)
 	}
 }

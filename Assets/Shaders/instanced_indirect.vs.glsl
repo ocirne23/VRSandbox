@@ -73,7 +73,8 @@ void main()
     const float ringMorph = in_uv.y;
     vec3 localPos = in_pos;
     localPos.xz = mix(localPos.xz, floor(localPos.xz / (2.0 * ringCell) + 0.5) * (2.0 * ringCell), ringMorph);
-    const vec3 basePos = quat_transform(localPos * inst_scale, inst_quat) + inst_pos;
+    vec3 basePos = quat_transform(localPos * inst_scale, inst_quat) + inst_pos;
+    basePos.y += oceanWaterOffset(basePos.xz); // lift onto the local water table (lakes/rivers at altitude)
     out_pos = basePos + oceanSampleDisplacement(basePos.xz, ringCell, ringMorph);
     out_tbn = mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0));
     out_uv  = basePos.xz;
@@ -85,6 +86,18 @@ void main()
     out_pos = quat_transform(in_pos * inst_scale, inst_quat) + inst_pos;
     out_tbn = mat3(T, B, N);
     out_uv  = in_uv;
+#endif
+
+#ifdef TERRAIN
+    // Edge fade: sink chunk vertices toward the target height (sea level) as their horizontal distance from
+    // the camera runs from fade-start to fade-end, so terrain rises out of a flat far edge instead of
+    // popping in at full height at the streaming boundary. Follows the camera every frame (not baked).
+    if (u_terrainFade.y > u_terrainFade.x)
+    {
+        const float d = distance(out_pos.xz, u_viewPos.xz);
+        const float t = clamp((u_terrainFade.y - d) / (u_terrainFade.y - u_terrainFade.x), 0.0, 1.0);
+        out_pos.y = mix(u_terrainFade.z, out_pos.y, t);
+    }
 #endif
 
     // Per-eye projection in VR (g_viewIndex set above) / centre view on desktop, with the same TAA

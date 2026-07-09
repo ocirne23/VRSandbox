@@ -61,6 +61,7 @@ namespace Procedural
 		Tweak::intVar("Terrain", "Uploads/frame", &m_maxUploadsPerFrame, 1, 32, 1.0f);
 		Tweak::floatVar("Terrain", "Sea level (m)", &m_seaLevel, -200.0f, 200.0f, 0.5f, dirty);
 		Tweak::floatVar("Terrain", "Skirt depth (m)", &m_skirtDepth, 0.0f, 64.0f, 0.5f, dirty);
+		Tweak::floatVar("Terrain", "Edge fade (chunks)", &m_edgeFadeChunks, 0.0f, 16.0f, 0.25f); // 0 = off
 		Tweak::boolean("Terrain", "Fog height map", &m_fogMapEnabled); // feeds Fog/Terrain Follow (renderer)
 		Tweak::floatVar("Terrain", "Fog map range (m)", &m_fogMapRange, 256.0f, 8192.0f, 32.0f);
 		Tweak::floatVar("Terrain", "Fog map far range (m)", &m_fogMapFarRange, 1024.0f, 65536.0f, 256.0f);
@@ -77,6 +78,12 @@ namespace Procedural
 		Tweak::intVar("Terrain/Noise", "Detail octaves", &m_detailOctaves, 1, 8, 1.0f, dirty);
 		Tweak::floatVar("Terrain/Noise", "Warp strength (m)", &m_warpStrength, 0.0f, 200.0f, 0.5f, dirty);
 		Tweak::floatVar("Terrain/Noise", "Lapse rate", &m_lapseRate, 0.0f, 0.02f, 0.0001f, dirty);
+
+		Tweak::floatVar("Terrain/Water", "Lake cell (m)", &m_networkCell, 200.0f, 4000.0f, 10.0f, dirty); // lattice spacing: smaller = more lakes
+		Tweak::floatVar("Terrain/Water", "Lake coverage", &m_lakeCoverage, 0.0f, 1.0f, 0.01f, dirty);    // fraction of lattice minima with a lake
+		Tweak::floatVar("Terrain/Water", "Lake depth (m)", &m_lakeDepth, 0.0f, 60.0f, 0.5f, dirty);      // basin carve below the surface
+		Tweak::floatVar("Terrain/Fog", "Fog frequency", &m_fogFrequency, 0.0f, FLT_MAX, 0.0001f, dirty);
+		Tweak::floatVar("Terrain/Fog", "Fog coverage", &m_fogCoverage, 0.0f, 1.0f, 0.01f, dirty); // apply via Fog/Region strength
 
 		rebuildMaps();
 
@@ -101,6 +108,11 @@ namespace Procedural
 		cfg.warpStrength = m_warpStrength;
 		cfg.climateFrequency = m_climateFrequency;
 		cfg.lapseRate = m_lapseRate;
+		cfg.networkCellSize = m_networkCell;
+		cfg.lakeCoverage = m_lakeCoverage;
+		cfg.lakeDepth = m_lakeDepth;
+		cfg.fogFrequency = m_fogFrequency;
+		cfg.fogCoverage = m_fogCoverage;
 
 		auto maps = std::make_shared<const ClimateMaps>(cfg);
 
@@ -165,7 +177,7 @@ namespace Procedural
 		HeightMapBaker::Baked baked;
 		if (m_fogMapBaker.update(baked, active, maps, glm::vec2(camera.position.x, camera.position.z),
 			glm::vec2(glm::max(m_fogMapRange, 256.0f), m_fogMapFarRange),
-			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES))
+			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4)) // RGBA: height, water level, fog thickness, spare
 		{
 			renderer.setFogTerrainHeightMap(baked.texels, baked.center, baked.ranges, maps->config().seaLevel);
 			m_fogMapUploaded = true;
@@ -200,6 +212,19 @@ namespace Procedural
 		const int R = glm::max(1, m_ringRadius);
 		const int lodStep = glm::max(1, m_lodStep);
 		const uint32 maxLod = (uint32)glm::max(0, m_maxLod);
+
+		// Edge fade: terrain heights lerp toward sea level over the outermost m_edgeFadeChunks chunks of the
+		// ring, so chunks rise out of a flat far edge instead of popping in at full height. Applied in the
+		// TERRAIN vertex shader relative to the live camera position (u_terrainFade). endDist sits just past
+		// the visible edge (~R+1 chunks); startDist a band inward.
+		if (m_edgeFadeChunks > 0.0f)
+		{
+			const float edgeDist = (float)(R + 1) * chunkSize;
+			const float band = glm::clamp(m_edgeFadeChunks, 0.25f, (float)R) * chunkSize;
+			renderer.setTerrainFade(edgeDist - band, edgeDist, m_seaLevel);
+		}
+		else
+			renderer.setTerrainFade(0.0f, 0.0f, m_seaLevel); // disabled (endDist <= startDist)
 
 		std::shared_ptr<const ClimateMaps> maps;
 		uint32 generation;

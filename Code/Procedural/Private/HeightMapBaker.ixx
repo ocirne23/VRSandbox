@@ -27,9 +27,14 @@ export namespace Procedural
 		// Polls the in-flight bake and starts a new one when the active map went stale. Returns true when
 		// a completed bake should ship to the renderer (out is filled). active = false drops any finished
 		// bake and invalidates (the caller clears its renderer-side map); maps must be non-null while
-		// active. numCascades <= 2; ranges.y is ignored when numCascades == 1.
+		// active. numCascades <= 2; ranges.y is ignored when numCascades == 1. channels (interleaved per
+		// texel): 1 = terrain height; 2 = + water level (the ocean shore map); 4 = the fog terrain cascades
+		// (4 not 3: RGB32F is not a sampled-image format on most GPUs) — channel 2 packs (fog thickness,
+		// temperature, humidity) as 3x8 bits in the float's exact-integer range (bit-packed values cannot
+		// be bilinearly filtered: shaders fetch this channel nearest, see terrainClimateAt), channel 3 is
+		// spare (0) for a future field.
 		bool update(Baked& out, bool active, const std::shared_ptr<const ClimateMaps>& maps,
-			const glm::vec2& camXZ, glm::vec2 ranges, uint32 res, uint32 numCascades)
+			const glm::vec2& camXZ, glm::vec2 ranges, uint32 res, uint32 numCascades, uint32 channels = 1)
 		{
 			bool shipped = false;
 			if (m_future.valid() && m_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
@@ -70,18 +75,34 @@ export namespace Procedural
 			m_pendingCenter = center;
 			m_pendingRanges = ranges;
 			m_pendingMaps = maps.get();
-			m_future = std::async(std::launch::async, [maps, center, ranges, res, numCascades]() {
-				std::vector<float> heights((size_t)numCascades * res * res);
+			m_future = std::async(std::launch::async, [maps, center, ranges, res, numCascades, channels]() {
+				std::vector<float> heights((size_t)numCascades * res * res * channels);
 				for (uint32 c = 0; c < numCascades; ++c)
 				{
-					float* dst = heights.data() + (size_t)c * res * res;
+					float* dst = heights.data() + (size_t)c * res * res * channels;
 					const double range = (double)ranges[(int)c];
 					const double texelSize = range / (double)res;
 					const double x0 = (double)center.x - range * 0.5 + texelSize * 0.5; // texel centers
 					const double z0 = (double)center.y - range * 0.5 + texelSize * 0.5;
 					for (uint32 j = 0; j < res; ++j)
 						for (uint32 i = 0; i < res; ++i)
-							dst[(size_t)j * res + i] = maps->sampleHeight(x0 + i * texelSize, z0 + j * texelSize);
+						{
+							const double wx = x0 + i * texelSize, wz = z0 + j * texelSize;
+							float* texel = dst + ((size_t)j * res + i) * channels;
+							if (channels > 1)
+								texel[0] = maps->sampleHeightAndWater(wx, wz, texel[1]); // one shared evaluation
+							else
+								texel[0] = maps->sampleHeight(wx, wz);
+							if (channels > 3)
+							{
+								const auto q8 = [](float f) { return (uint32)(glm::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
+								const uint32 packed = q8(maps->sampleFogThickness(wx, wz))
+									| (q8(maps->sampleTemperature(wx, wz)) << 8)
+									| (q8(maps->sampleHumidity(wx, wz)) << 16);
+								texel[2] = (float)packed; // <= 2^24-1: exact in float32
+								texel[3] = 0.0f;          // spare
+							}
+						}
 				}
 				return heights;
 			});

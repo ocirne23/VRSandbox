@@ -8,9 +8,10 @@ import :CommandBuffer;
 import :Sampler;
 import :Layout;
 
-// A CPU-baked, camera-centered world-region snapshot on the GPU: an R32F image (2D, or a 2D array with
-// one layer per cascade) as a ping-pong pair so a re-bake never touches an image in flight. Used for the
-// ocean shore map and the fog terrain height map, both raw terrain surface heights around the camera.
+// A CPU-baked, camera-centered world-region snapshot on the GPU: an R32F or RG32F image (2D, or a 2D
+// array with one layer per cascade) as a ping-pong pair so a re-bake never touches an image in flight.
+// Used for the ocean shore map (RG: terrain height + water level) and the fog terrain height map (R:
+// terrain height), both raw world-space heights around the camera.
 //
 // Flow (all cheap: no GPU sync, no command-buffer re-record):
 //   1. upload()        stages the texels into this frame slot's host-visible buffer (call between
@@ -30,10 +31,11 @@ public:
     ~BakedWorldMap();
     BakedWorldMap(const BakedWorldMap&) = delete;
 
-    void initialize(uint32 resolution, uint32 numLayers, const char* debugName);
+    // channels: 1 = R32F, 2 = RG32F, 4 = RGBA32F (interleaved floats per texel in upload()).
+    void initialize(uint32 resolution, uint32 numLayers, uint32 channels, const char* debugName);
 
     // worldSizes = world meters covered per layer; userParam = one baked value carried with the flip
-    // (the fog map's terrain sea level). texels are layer-major, resolution^2 floats each.
+    // (the fog map's terrain sea level). texels are layer-major, resolution^2 * channels floats each.
     void upload(std::span<const float> texels, const glm::vec2& centerXZ, const glm::vec2& worldSizes, float userParam, uint32 frameIdx);
     void recordUpload(CommandBuffer& commandBuffer); // no-op unless an upload is pending
     void flipIfPending();
@@ -48,6 +50,7 @@ public:
 private:
     uint32 m_resolution = 0;
     uint32 m_numLayers = 0;
+    uint32 m_channels = 1;
 
     vk::Image m_image[2]{};
     VmaAllocation m_memory[2]{};

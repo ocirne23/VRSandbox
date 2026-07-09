@@ -24,10 +24,14 @@ BakedWorldMap::~BakedWorldMap()
     }
 }
 
-void BakedWorldMap::initialize(uint32 resolution, uint32 numLayers, const char* debugName)
+void BakedWorldMap::initialize(uint32 resolution, uint32 numLayers, uint32 channels, const char* debugName)
 {
+    assert(channels == 1 || channels == 2 || channels == 4); // no 3: RGB32F isn't a sampled-image format on most GPUs
     m_resolution = resolution;
     m_numLayers = numLayers;
+    m_channels = channels;
+    const vk::Format format = channels == 4 ? vk::Format::eR32G32B32A32Sfloat
+        : channels == 2 ? vk::Format::eR32G32Sfloat : vk::Format::eR32Sfloat;
     vk::Device vkDevice = Globals::device.getDevice();
     const vk::ImageSubresourceRange allLayers{ vk::ImageAspectFlagBits::eColor, 0, 1, 0, numLayers };
 
@@ -35,7 +39,7 @@ void BakedWorldMap::initialize(uint32 resolution, uint32 numLayers, const char* 
     {
         vk::ImageCreateInfo info{
             .imageType = vk::ImageType::e2D,
-            .format = vk::Format::eR32Sfloat,
+            .format = format,
             .extent = { resolution, resolution, 1 },
             .mipLevels = 1,
             .arrayLayers = numLayers,
@@ -49,7 +53,7 @@ void BakedWorldMap::initialize(uint32 resolution, uint32 numLayers, const char* 
         vk::ImageViewCreateInfo viewInfo{
             .image = m_image[i],
             .viewType = numLayers > 1 ? vk::ImageViewType::e2DArray : vk::ImageViewType::e2D,
-            .format = vk::Format::eR32Sfloat,
+            .format = format,
             .subresourceRange = allLayers,
         };
         auto viewResult = vkDevice.createImageView(viewInfo);
@@ -60,7 +64,7 @@ void BakedWorldMap::initialize(uint32 resolution, uint32 numLayers, const char* 
 
     // One host-visible staging buffer per frame slot: upload() writes the slot whose fence beginFrame
     // just waited, recordUpload() copies it in that frame's primary CB.
-    const vk::DeviceSize bytes = (vk::DeviceSize)numLayers * resolution * resolution * sizeof(float);
+    const vk::DeviceSize bytes = (vk::DeviceSize)numLayers * resolution * resolution * channels * sizeof(float);
     for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
     {
         (void)m_staging[i].initialize(bytes, vk::BufferUsageFlagBits2::eTransferSrc,
@@ -92,7 +96,7 @@ void BakedWorldMap::initialize(uint32 resolution, uint32 numLayers, const char* 
 
 void BakedWorldMap::upload(std::span<const float> texels, const glm::vec2& centerXZ, const glm::vec2& worldSizes, float userParam, uint32 frameIdx)
 {
-    assert(texels.size() == (size_t)m_numLayers * m_resolution * m_resolution);
+    assert(texels.size() == (size_t)m_numLayers * m_resolution * m_resolution * m_channels);
     memcpy(m_stagingMapped[frameIdx].data(), texels.data(), texels.size_bytes());
     m_staging[frameIdx].flushMappedMemory(texels.size_bytes());
     m_uploadSlot = (int)frameIdx;

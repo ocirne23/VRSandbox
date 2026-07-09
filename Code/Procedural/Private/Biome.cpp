@@ -6,12 +6,12 @@ import :Biome;
 
 namespace Procedural
 {
-	EBiome classifyBiome(float temperature, float humidity, float altitude, float seaLevel, float slope01)
+	EBiome classifyBiome(float temperature, float humidity, float altitude, float seaLevel, float slope01, float waterDepth)
 	{
 		const float a = altitude - seaLevel; // height above sea level (meters)
 
-		if (a < 0.0f)
-			return EBiome::Ocean;
+		if (waterDepth > 0.0f || a < 0.0f)
+			return EBiome::Ocean; // submerged: open ocean, or a lake/river water table above the terrain
 		if (a < 1.5f)
 			return EBiome::Beach;
 

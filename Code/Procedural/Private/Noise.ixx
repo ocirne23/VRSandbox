@@ -19,6 +19,15 @@ export namespace Procedural
 		// Single-octave gradient (Perlin-style) noise, output ~[-1, 1], continuous with continuous gradient.
 		float noise2D(float x, float y) const;
 
+		// Same noise with its analytic derivative: (value, d/dx, d/dy). Basis of fbmEroded.
+		glm::vec3 noise2Dd(float x, float y) const;
+
+		// Slope-damped fBm (Musgrave 1989 "The Synthesis and Rendering of Eroded Fractal Terrains";
+		// Quilez's derivative formulation, iquilezles.org/articles/morenoise): each octave is divided by
+		// the accumulated gradient magnitude, so flats collect detail (smooth valley floors) while steep
+		// slopes damp it (eroded hillsides) — the classic cheap erosion look. Output ~[-1, 1].
+		float fbmEroded(float x, float y, uint32 octaves, float lacunarity = 2.0f, float persistence = 0.5f) const;
+
 		// Fractal Brownian motion: sum of octaves, normalized to ~[-1, 1].
 		float fbm(float x, float y, uint32 octaves, float lacunarity = 2.0f, float persistence = 0.5f) const;
 

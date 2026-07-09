@@ -120,8 +120,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_oceanSimPipeline.initialize();
     m_volumetricFogPipeline.initialize();
     m_volumetricFogPipeline.initializeApply(sceneRenderPass, m_sceneViewCount);
-    m_oceanShoreMap.initialize(RendererVKLayout::OCEAN_SHORE_RES, 1, "OceanShore");
-    m_fogTerrainMap.initialize(RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, "FogTerrainHeight");
+    m_oceanShoreMap.initialize(RendererVKLayout::OCEAN_SHORE_RES, 1, 2, "OceanShore"); // RG: terrain height + water level
+    m_fogTerrainMap.initialize(RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4, "FogTerrainHeight"); // RGBA: terrain height, water level, fog thickness, spare
     m_taaPipeline.initialize(ext.width, ext.height, m_sceneViewCount);
     m_eyeAdaptationPipeline.initialize();
     m_compositePipeline.initialize(m_renderPass);
@@ -569,7 +569,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.fogParams4 = glm::vec4((float)fog.sunRays, fog.spatialFilter ? 1.0f : 0.0f, fog.giAmbient ? 1.0f : 0.0f, fog.sunSoftness);
     ubo.fogParams5 = glm::vec4(m_fogTerrainMap.getCenter(),
         fogTerrainSizes.y > 1.0f ? 1.0f / fogTerrainSizes.y : 0.0f, m_fogTerrainMap.getUserParam());
-    ubo.fogParams6 = glm::vec4(glm::clamp(fog.slicePower, 0.25f, 2.0f), fog.terrainShadowDist, 0.0f, 0.0f);
+    ubo.fogParams6 = glm::vec4(glm::clamp(fog.slicePower, 0.25f, 2.0f), fog.terrainShadowDist,
+        glm::clamp(fog.regionStrength, 0.0f, 1.0f), 0.0f); // z: baked regional fog-thickness modulation
 
     ubo.moonParams = glm::vec4(glm::normalize(sky.moonDirection), cosf(glm::radians(sky.moonSizeDeg)));
     ubo.starParams = glm::vec4(sky.starSize, sky.starSizeVar, sky.starBrightness, sky.starColorVar);
@@ -596,6 +597,9 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanParams4 = glm::vec4(shoreMapSize > 1.0f ? 1.0f / shoreMapSize : 0.0f,
         glm::clamp(ocean.foamSpread * 0.25f, 0.0f, 0.95f), glm::max(ocean.shoalScale, 0.0f), glm::max(ocean.foamSoftness, 0.02f));
     ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), glm::max(ocean.shoreFoamDepth, 0.0f), glm::max(ocean.foamBreakAccel, 0.01f));
+    ubo.oceanParams6 = glm::vec4(-glm::clamp(ocean.glintSharpness, 0.0f, 3.0f), glm::max(ocean.glintFilter, 0.0f), 0.0f, 0.0f);
+
+    ubo.terrainFade = m_terrainFade;
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 

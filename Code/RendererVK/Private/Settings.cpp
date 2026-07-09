@@ -75,6 +75,7 @@ void FogParams::registerTweaks()
     Tweak::floatVar("Fog", "Noise Strength", &noiseStrength, 0.0f, 1.0f, 0.01f);
     Tweak::floatVar("Fog", "Wind Speed", &windSpeed, 0.0f, 20.0f);
     Tweak::floatVar("Fog", "Temporal Blend", &temporalBlend, 0.0f, 0.97f, 0.01f);
+    Tweak::floatVar("Fog", "Region strength", &regionStrength, 0.0f, 1.0f, 0.01f);
     Tweak::intVar("Fog/Quality", "Sun Rays", &sunRays, 1, 8);
     Tweak::floatVar("Fog/Quality", "Terrain Shadow Dist", &terrainShadowDist, 32.0f, 8192.0f, 16.0f);
     Tweak::floatVar("Fog/Quality", "Sun Softness", &sunSoftness, 0.0f, 0.2f, 0.005f);

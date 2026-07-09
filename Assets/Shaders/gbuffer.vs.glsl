@@ -76,6 +76,7 @@ void main()
         localPos.xz = mix(localPos.xz, floor(localPos.xz / (2.0 * ringCell) + 0.5) * (2.0 * ringCell), ringMorph);
         worldPos = quat_transform(localPos * inst.posScale.w, inst.quat) + inst.posScale.xyz;
         const vec2 baseXZ = worldPos.xz;
+        worldPos.y += oceanWaterOffset(baseXZ); // water-table lift — identical to the forward pass
         worldPos += oceanSampleDisplacement(baseXZ, ringCell, ringMorph);
         out_normal = oceanSampleNormalLod(baseXZ, ringCell, ringMorph);
     }

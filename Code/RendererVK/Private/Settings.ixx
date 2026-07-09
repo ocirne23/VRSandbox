@@ -21,8 +21,8 @@ export struct SkyParams
     float sunRolloff = 1.25f;           // sky highlight roll-off: soft-clips the overexposed sun region so its gradient survives (0 = raw hard clip)
     float sunRolloffKnee = 0.75f;       // luminance where compression starts at full roll-off (lower = more range compressed)
     float sunRolloffHeadroom = 6.0f;    // brightness range the shoulder absorbs (higher = brighter values stay distinguishable)
-    float shadowDepthBias = 0.0002f;    // sun cascade depth bias
-    float shadowNormalBias = 0.0f;      // sun cascade normal bias (texels)
+    float shadowDepthBias = 0.001f;    // sun cascade depth bias
+    float shadowNormalBias = 1.0f;      // sun cascade normal bias (texels)
 
     // Ambient + sky radiance (the non-sun lighting inputs)
     glm::vec3 ambientColor = glm::vec3(1.0f);   // flat non-physical minimum ambient
@@ -44,7 +44,7 @@ export struct SkyParams
     // both the visible sky and (through skyRadiance) the majority of the indirect sky lighting.
     float rayleighScatter = 1.0f;
     float mieScatter = 1.0f;
-    float scatterBoost = 3.0f;          // in-scatter multiplier: how much sunlight the atmosphere scatters (more = more indirect light)
+    float scatterBoost = 4.0f;          // in-scatter multiplier: how much sunlight the atmosphere scatters (more = more indirect light)
     float mieG = 0.76f;                 // Mie anisotropy (forward-scatter lobe)
     float rayleighHeight = 8500.0f;     // Rayleigh scale height (m): how fast air density falls off
     float mieHeight = 1200.0f;          // Mie scale height (m): how high the haze layer reaches
@@ -108,6 +108,9 @@ export struct FogParams
     float terrainShadowDist = 512.0f; // froxels beyond this distance sun-shadow by marching the terrain
                                    // height map instead of TLAS rays / cascade taps (both run out of data
                                    // at distance — TLAS is range-bounded); needs the terrain fog map
+    float regionStrength = 1.0f;   // how much the baked regional fog-thickness field (fog terrain map
+                                   // channel B, Procedural's ClimateMaps::sampleFogThickness) modulates the
+                                   // height-fog density: 0 = uniform fog, 1 = fully region-driven
     float noiseScale = 0.08f;      // density noise frequency (1/m)
     float noiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
     float windSpeed = 1.5f;        // noise drift (m/s)
@@ -235,6 +238,13 @@ export struct OceanParams
     glm::vec3 scatterColor = glm::vec3(0.012f, 0.08f, 0.085f);
     float scatterStrength  = 1.0f;
     float roughness        = 0.07f; // perceptual micro-roughness (widens the sun glint)
+    // Glint shaping: sharpness is a NEGATIVE mip bias on the fragment shader's surface samples — the
+    // shading normal resolves finer wave detail near the camera, so highlights break into crisp glitter
+    // instead of following mip-softened blobs (the LEAN variance shrinks to match: it measures exactly
+    // what the filtering removed). Filtering scales the roughness-widening variance terms (geometric
+    // spec AA + LEAN); below 1 trades a touch of shimmer for a visibly tighter sun glint.
+    float glintSharpness   = 0.75f; // 0 = trilinear (old look); higher = sharper (some shimmer past ~1.5)
+    float glintFilter      = 0.5f;  // 1 = full variance widening, 0 = none (raw sharp GGX)
     bool  hitLighting      = false; // evaluate the scene's grid lights at refraction/reflection ray hits
                                     // (OCEAN_HIT_LIGHTS shader variant; toggling reloads the pipeline)
     // Foam & turbulence. ONE instant-foam response (oceanInstantFoam) both draws the per-pixel crest

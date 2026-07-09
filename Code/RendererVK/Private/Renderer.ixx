@@ -148,21 +148,28 @@ public:
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
+    // Terrain edge fade (TERRAIN pipeline variant): chunk vertices lerp their height toward targetHeight as
+    // their horizontal distance from the camera runs from startDist to endDist, hiding the streaming
+    // generation-boundary pop-in. endDist <= startDist disables it. Set per frame by the terrain streamer.
+    void setTerrainFade(float startDist, float endDist, float targetHeight) { m_terrainFade = glm::vec4(startDist, endDist, targetHeight, 0.0f); }
     // Flipping OceanParams::hitLighting rebuilds the ocean fragment variant (GPU idle + shader reload).
     void setOceanParams(const OceanParams& ocean);
-    // Replaces the ocean's shore terrain height map (OCEAN_SHORE_RES^2 floats, raw world-space surface
-    // height in meters) covering worldSize meters centered on centerXZ — the shaders derive the water
-    // depth (sea level - height) live, so sea-level changes need no re-bake. Staged ping-pong
-    // (BakedWorldMap): active next frame together with its UBO center/range; no GPU sync, no
-    // command-buffer re-record.
+    // Replaces the ocean's shore map (OCEAN_SHORE_RES^2 RG texel pairs, interleaved floats: R = raw
+    // world-space terrain height, G = water surface level — sea level over the open ocean, higher where
+    // an elevated water table forms lakes/rivers) covering worldSize meters centered on centerXZ. The
+    // shaders derive the water depth live as water level - height, and the ocean clipmap lifts its
+    // vertices by water level - sea level. Staged ping-pong (BakedWorldMap): active next frame together
+    // with its UBO center/range; no GPU sync, no command-buffer re-record.
     void setOceanShoreMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, float worldSize) { m_oceanShoreMap.upload(heightTexels, centerXZ, glm::vec2(worldSize, 0.0f), 0.0f, m_swapChain.getCurrentFrameIndex()); }
     void clearOceanShoreMap() { m_oceanShoreMap.clear(); } // ocean falls back to the fog terrain map / open-ocean depth
-    // Replaces the fog terrain height map (FOG_TERRAIN_CASCADES layers of FOG_TERRAIN_RES^2 floats, raw
-    // world-space surface height in meters, near cascade first) centered on centerXZ; cascade i covers
+    // Replaces the fog terrain map (FOG_TERRAIN_CASCADES layers of FOG_TERRAIN_RES^2 RGBA texel quads,
+    // interleaved floats: R = raw world-space terrain height, G = water surface level, B = regional fog
+    // thickness [0,1], A = spare; near cascade first) centered on centerXZ; cascade i covers
     // cascadeWorldSizes[i] meters (far cascade = same texel count over a larger range, so long-range
-    // terrain data costs no extra memory). The height fog base rises by Fog/Terrain Follow x the local
-    // terrain height (clamped up to seaLevel, so fog rests on the water), and the ocean uses the same
-    // cascades as its shore fallback beyond the shore map. Staged ping-pong like setOceanShoreMap.
+    // data costs no extra memory). The height fog base rises by Fog/Terrain Follow x the local terrain
+    // height (clamped up to seaLevel, so fog rests on the water), Fog/Region strength modulates density
+    // by the fog channel, and the ocean uses the same cascades as its height/water-level fallback beyond
+    // the shore map. Staged ping-pong like setOceanShoreMap.
     void setFogTerrainHeightMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, const glm::vec2& cascadeWorldSizes, float seaLevel) { m_fogTerrainMap.upload(heightTexels, centerXZ, cascadeWorldSizes, seaLevel, m_swapChain.getCurrentFrameIndex()); }
     void clearFogTerrainHeightMap() { m_fogTerrainMap.clear(); } // fog reverts to the flat height base
     // This frame slot's ocean displacement readback: RGBA16F texels (Dx, h, Dz, dDxz), outRes^2 per
@@ -409,6 +416,7 @@ private:
     SkyParams m_skyParams;
     FogParams m_fogParams;
     OceanParams m_oceanParams;
+    glm::vec4 m_terrainFade{ 0.0f }; // see setTerrainFade; (0,0,0,0) = disabled (y<=x)
     PostParams m_postParams;
     RTParams m_rtParams;
     RTAOParams m_rtaoParams;

@@ -250,6 +250,10 @@ export namespace RendererVKLayout
                                    // y = turbidity (entrained-bubble milkiness + roughness),
                                    // z = shore foam depth (m; surf band width at the waterline, 0 = off),
                                    // w = breaking-crest foam threshold (downward crest accel in g units)
+        glm::vec4 oceanParams6;    // x = glint mip bias (negative = sharper shading normals),
+                                   // y = glint variance filter scale (spec AA + LEAN roughness), zw unused
+        glm::vec4 terrainFade;     // TERRAIN variant edge fade: x = fade-start dist, y = fade-end dist
+                                   // (radial from camera XZ), z = target height (sea level). y<=x disables.
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};
