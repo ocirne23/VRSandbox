@@ -1825,14 +1825,13 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
             if (!m_meshIsSkinnedOutput[meshIdx])
                 buildList.push_back(meshIdx);
         }
-        const bool newMeshes = m_blasBuiltCount < m_meshInfoCounter;
         m_blasBuiltCount = m_meshInfoCounter;
         m_accelStructure.recordBuildBlas(frameIdx, vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
             m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>().data(), m_meshVertexCounts.data(), buildList,
             m_rtParams.blasCompaction);
-
-        if (newMeshes)
-            m_giProbePipeline.doClear();
+        // No GI clear here: new meshes (terrain streaming!) leave the persistent probe volume intact.
+        // Stale irradiance around new geometry self-corrects — embedded probes relocate out the next
+        // frame (with a fast history re-sync), the rest re-converge at the temporal blend rate.
     }
 
     // 1a. Copy-compact BLASes whose size queries matured, and retire replaced originals.
