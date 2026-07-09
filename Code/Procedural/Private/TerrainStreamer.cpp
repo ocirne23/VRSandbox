@@ -278,6 +278,11 @@ namespace Procedural
 			ObjectContainer::MaterialOverrides overrides;
 			overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::TerrainLit;
 			overrides.useSceneTextures = true;
+			// Chunks are already LOD'd by the streamer (resolution picked per ring distance), so the
+			// renderer's per-chunk meshopt LOD chains are pure redundant churn: 5x the MeshInfos plus LOD
+			// groups and BLAS-alias sharing, all recreated on every re-LOD. Disable them so each chunk is a
+			// single mesh with one identity-aliased BLAS — far less churn through the mesh/RT free lists.
+			overrides.disableGeneratedLods = true;
 			auto container = std::make_unique<ObjectContainer>();
 			if (!container->initialize(*scene, &overrides))
 				continue;

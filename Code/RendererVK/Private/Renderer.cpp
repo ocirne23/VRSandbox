@@ -499,7 +499,10 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         (float)viewportSize.x / (float)swapExtent.width,
         (float)viewportSize.y / (float)swapExtent.height);
     ubo.taaJitter = glm::vec4(taaJitterNdc, 0.0f, 0.0f);
-    ubo.aoParams = glm::vec4(m_rtaoParams.enabled ? 1.0f : 0.0f, m_giProbePipeline.getStrength(), 0.0f, 0.0f);
+    // RTAO and the GI probe contribution both need the acceleration structures, so both fold in the RT
+    // master toggle; GI additionally gates on its own switch.
+    ubo.aoParams = glm::vec4((m_rtParams.enabled && m_rtaoParams.enabled) ? 1.0f : 0.0f,
+        (m_rtParams.enabled && m_rtParams.giEnabled) ? m_giProbePipeline.getStrength() : 0.0f, 0.0f, 0.0f);
     ubo.frameIndex = m_frameCounter;
 
     const SkyParams& sky = m_skyParams;
@@ -519,12 +522,13 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.sunGlow = sky.sunGlow;
 
     ubo.skyRadianceColor = sky.skyRadianceColor * sky.skyRadianceIntensity;
-    ubo.rtSkyRadiance = m_rtParams.rtSkyRadiance ? 1.0f : 0.0f;
+    ubo.rtSkyRadiance = (m_rtParams.enabled && m_rtParams.rtSkyRadiance) ? 1.0f : 0.0f;
     ubo.ambientColor = sky.ambientColor * sky.ambientIntensity;
     ubo.skyUp = sky.up;
-    ubo.rtSunShadow = m_rtParams.rtSunShadow ? 1.0f : 0.0f;
+    ubo.rtSunShadow = (m_rtParams.enabled && m_rtParams.rtSunShadow) ? 1.0f : 0.0f;
 
-    if (!m_rtParams.rtSunShadow)
+    // Use the effective flag: with RT off (or RT-sun off) the PCSS cascades supply the sun shadow.
+    if (ubo.rtSunShadow < 0.5f)
     {
         const float aspect = (float)viewportSize.x / (float)viewportSize.y;
         computeSunCascades(camera, aspect, sky.sunDirection, m_sunCascadeViewProj);
@@ -537,7 +541,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         m_numSunCascades = 0;
 
     ubo.sunShadowRays = (float)m_rtParams.sunShadowRays;
-    ubo.rtLightShadows = m_rtParams.rtLightShadows ? 1.0f : 0.0f;
+    ubo.rtLightShadows = (m_rtParams.enabled && m_rtParams.rtLightShadows) ? 1.0f : 0.0f;
     static const Clock::time_point timeStart = Clock::now();
     ubo.timeSeconds = std::chrono::duration<float>(Clock::now() - timeStart).count();
     ubo.cloudCoverage = sky.cloudCoverage;
@@ -1496,7 +1500,7 @@ void Renderer::recordAOInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
     PerFrameData& frameData = m_perFrameData[frameIdx];
     GBuffer& gbuffer = frameData.gbuffer;
     const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
-    if (m_meshInfoCounter == 0 || !tlas)
+    if (!m_rtParams.enabled || m_meshInfoCounter == 0 || !tlas) // RT off: tlas is stale, don't trace it
         return;
     const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
     RTAOPipeline::RecordParams aoParams{
@@ -1594,7 +1598,7 @@ void Renderer::recordAO(uint32 frameIdx)
     vk::CommandBufferInheritanceInfo inheritance;
     cb.begin(false, &inheritance);
     const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
-    if (m_rtaoParams.enabled && m_meshInfoCounter > 0 && tlas)
+    if (m_rtParams.enabled && m_rtaoParams.enabled && m_meshInfoCounter > 0 && tlas)
     {
         const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
         RTAOPipeline::RecordParams aoParams{
@@ -1622,7 +1626,7 @@ void Renderer::recordVolumetricFog(uint32 frameIdx)
     vk::CommandBufferInheritanceInfo inheritance;
     cb.begin(false, &inheritance);
     const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
-    if (m_meshInfoCounter > 0 && tlas)
+    if (m_rtParams.enabled && m_meshInfoCounter > 0 && tlas)
     {
         VolumetricFogPipeline::RecordParams params{
             .ubo = frameData.ubo,
@@ -1783,6 +1787,16 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     CommandBuffer& globalIllumCommandBuffer = frameData.globalIllumCommandBuffer;
     vk::CommandBufferInheritanceInfo globalIllumInheritanceInfo;
     vk::CommandBuffer vkGlobalIllumCommandBuffer = globalIllumCommandBuffer.begin(false, &globalIllumInheritanceInfo);
+
+    // RT master toggle off: record an EMPTY GI command buffer (the primary executes it unconditionally) so
+    // no acceleration structures are built/compacted and no rays are traced, and return false so the caller
+    // skips the RT-dependent AO / volumetric-fog passes. Diagnostic A/B for the acceleration-structure churn.
+    if (!m_rtParams.enabled)
+    {
+        globalIllumCommandBuffer.end();
+        return false;
+    }
+
     auto fullBarrier = [&](vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess,
         vk::PipelineStageFlags2 dstStage, vk::AccessFlags2 dstAccess)
         {
@@ -1812,7 +1826,7 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
         }
         const bool newMeshes = m_blasBuiltCount < m_meshInfoCounter;
         m_blasBuiltCount = m_meshInfoCounter;
-        m_accelStructure.recordBuildBlas(vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
+        m_accelStructure.recordBuildBlas(frameIdx, vkGlobalIllumCommandBuffer, Globals::meshDataManager.getVertexBuffer(), Globals::meshDataManager.getIndexBuffer(),
             m_meshInfosBuffer.getBackingStoreAs<RendererVKLayout::MeshInfo>().data(), m_meshVertexCounts.data(), buildList,
             m_rtParams.blasCompaction);
 
@@ -1821,7 +1835,13 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     }
 
     // 1a. Copy-compact BLASes whose size queries matured, and retire replaced originals.
-    m_accelStructure.recordCompaction(vkGlobalIllumCommandBuffer);
+    m_accelStructure.recordCompaction(frameIdx, vkGlobalIllumCommandBuffer);
+
+    // Publish this frame slot's pending static BLAS-address changes (build/compaction/eviction) into its
+    // own fenced address buffer. BEFORE the skinned rebuild, so a slot reused static->skinned keeps the
+    // skinned per-slot address (written next), not a stale static value. Other slots pick up their copies
+    // in their own frames -- static slots are never written here while they may be in flight.
+    m_accelStructure.syncFrameAddresses(frameIdx);
 
     // 1b. Rebuild skinned meshes' BLASes every frame from this frame's deformed vertices, into this frame's
     // double-buffered slot (the other slot may still be referenced by the previous frame's in-flight TLAS).
@@ -1835,7 +1855,7 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     }
 
     // 2. One-time clear of the persistent probe table/SH (it accumulates across frames thereafter).
-    if (m_giProbePipeline.needsClear())
+    if (m_rtParams.giEnabled && m_giProbePipeline.needsClear())
     {
         m_giProbePipeline.recordClearPersistent(globalIllumCommandBuffer);
         m_giProbePipeline.markCleared();
@@ -1885,6 +1905,9 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     // 5. Trace rays per clipmap probe and temporally blend irradiance into the SH. The probe set and
     // its toroidal window are derived from the camera (this frame's u_viewPos in the UBO); probes that
     // scrolled in since last frame (relative to m_giPrevCameraPos) are full-replaced rather than blended.
+    // Gated by the GI toggle — the TLAS built above still serves RTAO and RT shadows when GI is off.
+    if (m_rtParams.giEnabled)
+    {
     GIProbePipeline::TraceParams traceParams{
         .ubo = frameData.ubo,
         .lightInfos = frameData.lightInfosBuffer,
@@ -1907,6 +1930,7 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     // trace (SH write) -> fragment read in the main pass
     fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
         vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderStorageRead);
+    }
 
     globalIllumCommandBuffer.end();
     return tlasHandleChanged;

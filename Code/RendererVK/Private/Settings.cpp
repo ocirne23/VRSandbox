@@ -94,6 +94,8 @@ void PostParams::registerTweaks(const std::function<void()>& onReRecord)
 
 void RTParams::registerTweaks()
 {
+    Tweak::boolean("RT", "Enable RT", &enabled);
+    Tweak::boolean("RT/GI", "Enable GI", &giEnabled);
     Tweak::boolean("RT", "RT Lights", &rtLightShadows);
     Tweak::boolean("RT", "RT Sun", &rtSunShadow);
     Tweak::intVar("RT", "RT Sun Rays", &sunShadowRays, 1, 8);

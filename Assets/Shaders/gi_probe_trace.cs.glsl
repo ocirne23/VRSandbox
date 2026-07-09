@@ -117,10 +117,11 @@ float sunVisibility(vec3 origin)
     return rtShadowVisibility(origin, normalize(u_sunDirection.xyz), 0.05, 1.0e4);
 }
 
-vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist)
+vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist, out float backface)
 {
     const float rayMax = pc.maxRayDist * (cascade + 1);
     hitDist = rayMax; // misses (and out-of-bounds hits) count as open space at the gather range
+    backface = 0.0;   // 1 when the committed hit faces away (ray started inside/behind the geometry)
     rayQueryEXT rq;
     rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsOpaqueEXT, 0xFFu, origin, 0.05, dir, rayMax);
     while (rayQueryProceedEXT(rq)) {}
@@ -163,7 +164,10 @@ vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist)
     const vec3 worldPos = origin + dir * t;
     hitDist = t; // committed surface hit -> actual distance to geometry along this ray
     if (dot(worldN, dir) > 0.0)
+    {
         worldN = -worldN;
+        backface = 1.0;
+    }
 
     const uint diffuseTexIdx = in_materialInfos[materialIdx].diffuseNormalTexIdx & 0x0000FFFFu;
     const vec3 albedo = textureLod(u_textures[nonuniformEXT(diffuseTexIdx)], uv, GI_ALBEDO_LOD).rgb;
@@ -207,12 +211,14 @@ void main()
 
     vec3 c0 = vec3(0.0), c1 = vec3(0.0), c2 = vec3(0.0), c3 = vec3(0.0);
     float distSum = 0.0;
+    float backfaceSum = 0.0;
     for (uint i = 0u; i < N; ++i)
     {
         const vec3 dir = sampleSphere(i, N, jitter);
-        float hitDist;
-        const vec3 radiance = traceRadiance(probeCenter, dir, cascade, hitDist);
+        float hitDist, backface;
+        const vec3 radiance = traceRadiance(probeCenter, dir, cascade, hitDist, backface);
         distSum += hitDist;
+        backfaceSum += backface;
         const vec4 Y = shBasisL1(dir);
         c0 += radiance * (Y.x * wsh);
         c1 += radiance * (Y.y * wsh);
@@ -240,5 +246,5 @@ void main()
     const uint cellBase = giProbeBase(cascade, lc);
     const float alpha = fresh ? 1.0 : pc.temporalAlpha;
     giBlendCell(cellBase, c0, c1, c2, c3, alpha);
-    giBlendMeanDist(cellBase, distSum / float(N), alpha); // mean free-space radius for occlusion at lookup
+    giBlendProbeStats(cellBase, distSum / float(N), backfaceSum / float(N), alpha); // occlusion + embedded-probe stats for lookup
 }

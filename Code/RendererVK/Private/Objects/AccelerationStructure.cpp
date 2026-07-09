@@ -40,6 +40,8 @@ void AccelerationStructure::initialize(uint32 maxUniqueMeshes)
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "AS.blasAddresses");
         m_mappedBlasAddresses[f] = m_blasAddressBuffers[f].mapMemory<uint64>();
     }
+    m_staticBlasAddr.assign(maxUniqueMeshes, 0);
+    m_staticAddrDirtyBits.assign(maxUniqueMeshes, 0);
     m_meshAliasBuffer.initialize(maxUniqueMeshes * sizeof(uint32),
         vk::BufferUsageFlagBits2::eStorageBuffer,
         vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached, false, "AS.meshAlias");
@@ -57,6 +59,11 @@ void AccelerationStructure::resizeBlasAddressBuffer(uint32 maxUniqueMeshes)
         m_mappedBlasAddresses[f] = m_blasAddressBuffers[f].mapMemory<uint64>();
         memcpy(m_mappedBlasAddresses[f].data(), oldAddresses.data(), oldAddresses.size() * sizeof(uint64));
         m_blasAddressBuffers[f].flushMappedMemory(oldAddresses.size() * sizeof(uint64));
+    }
+    if (maxUniqueMeshes > m_staticBlasAddr.size())
+    {
+        m_staticBlasAddr.resize(maxUniqueMeshes, 0);
+        m_staticAddrDirtyBits.resize(maxUniqueMeshes, 0);
     }
     const std::vector<uint32> oldAliases(m_mappedMeshAlias.begin(), m_mappedMeshAlias.end());
     m_meshAliasBuffer.initialize(maxUniqueMeshes * sizeof(uint32),
@@ -85,12 +92,44 @@ void AccelerationStructure::setMeshAlias(uint32 meshIdx, uint32 aliasIdx)
     m_meshAliasBuffer.flushMappedMemory(m_numAliasMeshes * sizeof(uint32));
 }
 
+void AccelerationStructure::markStaticBlasAddr(uint32 meshIdx, uint64 addr)
+{
+    if (meshIdx >= m_staticBlasAddr.size())
+    {
+        m_staticBlasAddr.resize(meshIdx + 1, 0);
+        m_staticAddrDirtyBits.resize(meshIdx + 1, 0);
+    }
+    m_staticBlasAddr[meshIdx] = addr;
+    constexpr uint8 allBits = uint8((1u << RendererVKLayout::NUM_FRAMES_IN_FLIGHT) - 1);
+    uint8& bits = m_staticAddrDirtyBits[meshIdx];
+    if (bits == allBits)
+        return; // already queued for every slot (value updated in place above)
+    for (uint32 f = 0; f < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++f)
+        if (!(bits & (1u << f)))
+            m_staticAddrDirtyLists[f].push_back(meshIdx);
+    bits = allBits;
+}
+
+void AccelerationStructure::syncFrameAddresses(uint32 frameIdx)
+{
+    std::vector<uint32>& list = m_staticAddrDirtyLists[frameIdx];
+    if (list.empty())
+        return;
+    const std::span<uint64> mapped = m_mappedBlasAddresses[frameIdx];
+    for (const uint32 meshIdx : list)
+    {
+        mapped[meshIdx] = m_staticBlasAddr[meshIdx];
+        m_staticAddrDirtyBits[meshIdx] &= uint8(~(1u << frameIdx));
+    }
+    list.clear();
+    m_blasAddressBuffers[frameIdx].flushMappedMemory(m_blasAddressBuffers[frameIdx].getSize());
+}
+
 void AccelerationStructure::onMeshEvicted(uint32 meshIdx)
 {
     if (meshIdx >= m_numAliasMeshes)
         return;
-    for (auto& mapped : m_mappedBlasAddresses)
-        mapped[meshIdx] = 0;
+    markStaticBlasAddr(meshIdx, 0);
     if (m_mappedMeshAlias[meshIdx] == meshIdx && meshIdx < m_blasList.size() && m_blasList[meshIdx].handle)
     {
         Globals::device.getDevice().destroyAccelerationStructureKHR(m_blasList[meshIdx].handle);
@@ -100,19 +139,15 @@ void AccelerationStructure::onMeshEvicted(uint32 meshIdx)
         // referencing it too — those levels go RT-invisible until this mesh re-streams and rebuilds.
         for (uint32 m = 0; m < m_numAliasMeshes; ++m)
             if (m_mappedMeshAlias[m] == meshIdx)
-                for (auto& mapped : m_mappedBlasAddresses)
-                    mapped[m] = 0;
+                markStaticBlasAddr(m, 0);
     }
-    for (auto& buf : m_blasAddressBuffers)
-        buf.flushMappedMemory(buf.getSize());
 }
 
 void AccelerationStructure::onMeshRangeFreed(uint32 firstMeshIdx, uint32 count)
 {
     for (uint32 meshIdx = firstMeshIdx; meshIdx < firstMeshIdx + count && meshIdx < m_numAliasMeshes; ++meshIdx)
     {
-        for (auto& mapped : m_mappedBlasAddresses)
-            mapped[meshIdx] = 0;
+        markStaticBlasAddr(meshIdx, 0);
         if (m_mappedMeshAlias[meshIdx] == meshIdx && meshIdx < m_blasList.size() && m_blasList[meshIdx].handle)
         {
             m_retiredBlas.push_back(RetiredBlas{ m_blasList[meshIdx].handle, std::move(m_blasList[meshIdx].buffer), m_compactionFrame });
@@ -124,8 +159,6 @@ void AccelerationStructure::onMeshRangeFreed(uint32 firstMeshIdx, uint32 count)
         m_mappedMeshAlias[meshIdx] = meshIdx;
     }
     m_meshAliasBuffer.flushMappedMemory(m_numAliasMeshes * sizeof(uint32));
-    for (auto& buf : m_blasAddressBuffers)
-        buf.flushMappedMemory(buf.getSize());
 }
 
 void AccelerationStructure::freeSkinnedJobSlots(uint32 firstJob, uint32 count)
@@ -157,7 +190,7 @@ void AccelerationStructure::ensureScratch(Buffer& scratch, vk::DeviceAddress& ou
     outAlignedAddr = (base + mask) & ~mask;
 }
 
-void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& vertexBuffer, Buffer& indexBuffer,
+void AccelerationStructure::recordBuildBlas(uint32 frameIdx, vk::CommandBuffer cmd, Buffer& vertexBuffer, Buffer& indexBuffer,
     const RendererVKLayout::MeshInfo* meshInfos, const uint32* vertexCounts, std::span<const uint32> meshIndices,
     bool allowCompaction)
 {
@@ -244,7 +277,7 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
 
     if (count > 0)
     {
-        ensureScratch(m_blasScratch, m_blasScratchAlignedAddr, totalScratch);
+        ensureScratch(m_blasScratch[frameIdx], m_blasScratchAlignedAddr[frameIdx], totalScratch);
 
         // Pass 2: create and build each BLAS, serialized with a barrier between builds (each also uses a
         // disjoint scratch region). Serializing removes any concurrent-build interaction as a variable.
@@ -268,14 +301,13 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
             blas.handle = res.value;
 
             buildInfos[i].dstAccelerationStructure = blas.handle;
-            buildInfos[i].scratchData.deviceAddress = m_blasScratchAlignedAddr + scratchOffsets[i];
+            buildInfos[i].scratchData.deviceAddress = m_blasScratchAlignedAddr[frameIdx] + scratchOffsets[i];
             const vk::AccelerationStructureBuildRangeInfoKHR* pRange = &ranges[i];
             cmd.buildAccelerationStructuresKHR(buildInfos[i], pRange);
 
             vk::AccelerationStructureDeviceAddressInfoKHR ai{ .accelerationStructure = blas.handle };
             const uint64 blasAddr = dev.getAccelerationStructureAddressKHR(ai);
-            for (auto& mapped : m_mappedBlasAddresses) // static BLAS address is the same for every frame slot
-                mapped[toBuild[i]] = blasAddr;
+            markStaticBlasAddr(toBuild[i], blasAddr); // published to each frame slot in its own fenced frame
 
             vk::MemoryBarrier2 b{
                 .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
@@ -317,20 +349,20 @@ void AccelerationStructure::recordBuildBlas(vk::CommandBuffer cmd, Buffer& verte
         }
     }
 
-    // Address-fill: every aliased mesh's entry mirrors its target's (per frame slot, so skinned meshes'
-    // per-slot addresses stay untouched — they are self-aliased no-ops here). Covers both freshly built
-    // chains and re-stream rebuilds whose aliased levels live in other registration batches.
-    for (auto& mapped : m_mappedBlasAddresses)
-        for (uint32 m = 0; m < m_numAliasMeshes; ++m)
-            if (m_mappedMeshAlias[m] != m)
-                mapped[m] = mapped[m_mappedMeshAlias[m]];
-
-    for (auto& buf : m_blasAddressBuffers)
-        buf.flushMappedMemory(buf.getSize());
+    // Address-fill: every aliased mesh's entry mirrors its target's authoritative address (skinned meshes
+    // are self-aliased no-ops here). Covers both freshly built chains and re-stream rebuilds whose aliased
+    // levels live in other registration batches. syncFrameAddresses publishes these per slot.
+    for (uint32 m = 0; m < m_numAliasMeshes; ++m)
+        if (m_mappedMeshAlias[m] != m)
+        {
+            const uint32 target = m_mappedMeshAlias[m];
+            markStaticBlasAddr(m, target < m_staticBlasAddr.size() ? m_staticBlasAddr[target] : 0);
+        }
 }
 
-void AccelerationStructure::recordCompaction(vk::CommandBuffer cmd)
+void AccelerationStructure::recordCompaction(uint32 frameIdx, vk::CommandBuffer cmd)
 {
+    (void)frameIdx; // address changes go through markStaticBlasAddr + syncFrameAddresses (per-slot safe)
     vk::Device dev = Globals::device.getDevice();
     m_compactionFrame++;
 
@@ -398,8 +430,10 @@ void AccelerationStructure::recordCompaction(vk::CommandBuffer cmd)
 
                 vk::AccelerationStructureDeviceAddressInfoKHR ai{ .accelerationStructure = blas.handle };
                 const uint64 blasAddr = dev.getAccelerationStructureAddressKHR(ai);
-                for (auto& mapped : m_mappedBlasAddresses)
-                    mapped[meshIdx] = blasAddr;
+                // Do NOT write other frame slots here: their in-flight TLAS-instance compute is reading
+                // them, and this compacted BLAS's copy hasn't executed in those frames yet. Each slot
+                // publishes the new address in its own fenced frame via syncFrameAddresses.
+                markStaticBlasAddr(meshIdx, blasAddr);
                 recordedCopy = true;
             }
         }
@@ -409,15 +443,16 @@ void AccelerationStructure::recordCompaction(vk::CommandBuffer cmd)
 
     if (recordedCopy)
     {
-        // Aliased LOD levels follow their target's new address, then this frame's TLAS build (later in
-        // the same command buffer) must see the copies completed. Compact copies execute in the
-        // acceleration-structure-build stage (no ray_tracing_maintenance1 = no separate copy stage).
-        for (auto& mapped : m_mappedBlasAddresses)
-            for (uint32 m = 0; m < m_numAliasMeshes; ++m)
-                if (m_mappedMeshAlias[m] != m)
-                    mapped[m] = mapped[m_mappedMeshAlias[m]];
-        for (auto& buf : m_blasAddressBuffers)
-            buf.flushMappedMemory(buf.getSize());
+        // Aliased LOD levels follow their target's new address (published per slot by syncFrameAddresses),
+        // then this frame's TLAS build (later in the same command buffer) must see the copies completed.
+        // Compact copies execute in the acceleration-structure-build stage (no ray_tracing_maintenance1 =
+        // no separate copy stage).
+        for (uint32 m = 0; m < m_numAliasMeshes; ++m)
+            if (m_mappedMeshAlias[m] != m)
+            {
+                const uint32 target = m_mappedMeshAlias[m];
+                markStaticBlasAddr(m, target < m_staticBlasAddr.size() ? m_staticBlasAddr[target] : 0);
+            }
 
         vk::MemoryBarrier2 bar{
             .srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,

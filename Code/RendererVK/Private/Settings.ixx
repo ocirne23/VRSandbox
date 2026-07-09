@@ -128,6 +128,10 @@ export struct PostParams
 
 export struct RTParams
 {
+    bool enabled = true;        // master: builds BLAS/TLAS and drives RTAO + all ray-traced shadows.
+                                // Off -> no acceleration structures built at all (sun falls back to PCSS
+                                // cascades, lights unshadowed, RTAO + GI off). Diagnostic A/B switch.
+    bool giEnabled = true;      // GI probe clear/trace + probe indirect contribution (needs enabled)
     bool rtSunShadow = false;   // sun shadows from TLAS ray queries instead of PCSS cascades (A/B tweak)
     int  sunShadowRays = 5;     // RT sun shadow rays per pixel
     bool rtLightShadows = true; // ray-traced shadows for punctual/area/tube lights

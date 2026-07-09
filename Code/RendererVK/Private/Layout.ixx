@@ -59,7 +59,7 @@ export namespace RendererVKLayout
     // place across frames with no hash table, copy, or ping-pong. SH-L1 RGB per probe.
     // The GI_* sizing constants are injected into every shader compile (Shader.cpp buildLayoutPreamble).
     constexpr uint32 GI_SH_STRIDE = 12;                                                  // SH-L1 RGB floats per probe
-    constexpr uint32 GI_PROBE_STRIDE = GI_SH_STRIDE + 1;                                  // SH + 1 mean free-space distance (visibility)
+    constexpr uint32 GI_PROBE_STRIDE = GI_SH_STRIDE + 2;                                  // SH + mean free-space distance + backface-hit fraction
     constexpr uint32 GI_NUM_CASCADES = 4;                                                // nested clipmap levels
     constexpr uint32 GI_CASCADE_PROBE_DIM = 32;                                          // probes per axis per cascade (power of two)
     constexpr uint32 GI_CASCADE_BASE_SPACING = 2;                                        // finest cascade probe spacing, world units (power of two)

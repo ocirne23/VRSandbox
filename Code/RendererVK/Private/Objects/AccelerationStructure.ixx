@@ -52,7 +52,7 @@ public:
     // address-fill pass afterwards refreshes every aliased mesh's entry from its target.
     // allowCompaction: builds carry eAllowCompaction and record a compacted-size query for
     // recordCompaction to consume.
-    void recordBuildBlas(vk::CommandBuffer cmd, Buffer& vertexBuffer, Buffer& indexBuffer,
+    void recordBuildBlas(uint32 frameIdx, vk::CommandBuffer cmd, Buffer& vertexBuffer, Buffer& indexBuffer,
         const RendererVKLayout::MeshInfo* meshInfos, const uint32* vertexCounts, std::span<const uint32> meshIndices,
         bool allowCompaction);
 
@@ -63,7 +63,12 @@ public:
     // TLAS rebuild picks the new BLAS up the same frame), and the original retires after another
     // frames-in-flight window. BLASes rebuilt or evicted in the meantime are skipped by handle compare.
     // Call once per frame, after the build step and before the TLAS build.
-    void recordCompaction(vk::CommandBuffer cmd);
+    void recordCompaction(uint32 frameIdx, vk::CommandBuffer cmd);
+
+    // Flushes this frame slot's pending static BLAS-address changes into its (fenced) address buffer.
+    // Static addresses only ever change from CPU here, in the owning frame — never on an in-flight slot.
+    // Call every frame after recordBuildBlas + recordCompaction and before the TLAS-instance write.
+    void syncFrameAddresses(uint32 frameIdx);
 
     uint64 getBlasTotalBytes() const; // current static BLAS memory (excludes skinned + retiring originals)
     uint64 getCompactionSavedBytes() const { return m_compactionSavedBytes; }
@@ -103,6 +108,10 @@ public:
 private:
     void ensureScratch(Buffer& scratch, vk::DeviceAddress& outAlignedAddr, vk::DeviceSize needed);
 
+    // Records a static BLAS address change: updates the CPU authoritative value and queues the write into
+    // every frame slot's dirty list (each slot applies it in its own fenced frame via syncFrameAddresses).
+    void markStaticBlasAddr(uint32 meshIdx, uint64 addr);
+
     struct Blas
     {
         vk::AccelerationStructureKHR handle = nullptr;
@@ -130,11 +139,23 @@ private:
     std::vector<RetiredBlas> m_retiredBlas;
     uint64 m_compactionSavedBytes = 0;
     uint32 m_compactionFrame = 0;
-    Buffer m_blasScratch;
-    vk::DeviceAddress m_blasScratchAlignedAddr = 0;
-    // Per frame in flight (skinned BLAS addresses differ between slots; static addresses are written to all).
+    // Per frame in flight: static BLAS builds run every frame under mesh streaming, so a shared scratch
+    // could be reallocated (ensureScratch grows it) while an earlier in-flight frame's build still reads
+    // it -> device lost. Per-slot scratch (like the TLAS/skinned scratch below) is fenced by beginFrame.
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_blasScratch;
+    std::array<vk::DeviceAddress, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_blasScratchAlignedAddr{};
+    // Per frame in flight (skinned BLAS addresses differ between slots; static addresses are the same, but
+    // each slot is written only in its own fenced frame — see the authoritative array below).
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_blasAddressBuffers;
     std::array<std::span<uint64>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_mappedBlasAddresses;
+
+    // CPU authoritative static BLAS addresses + per-slot pending sync (mirrors the render-node transform
+    // dirty pattern). Writing an in-flight slot's mapped buffer races its TLAS-instance compute AND can
+    // publish a compacted address whose copy hasn't executed in that frame -> device lost; so all static
+    // address changes land here and each frame drains only its own slot in syncFrameAddresses.
+    std::vector<uint64> m_staticBlasAddr;
+    std::vector<uint8>  m_staticAddrDirtyBits;
+    std::array<std::vector<uint32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_staticAddrDirtyLists;
     uint32 m_numBlas = 0;
 
     // mesh idx -> mesh idx whose BLAS it uses (identity = owns one). Single-buffered: entries are static

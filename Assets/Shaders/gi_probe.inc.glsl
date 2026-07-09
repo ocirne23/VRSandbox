@@ -16,13 +16,22 @@
 
 // GI_SH_STRIDE, GI_NUM_CASCADES, GI_CASCADE_PROBE_DIM and GI_CASCADE_BASE_SPACING are injected by the
 // engine from RendererVKLayout (Layout.ixx).
-#define GI_PROBE_STRIDE (GI_SH_STRIDE + 1) // SH + 1 mean free-space distance (visibility), at word +12
+#define GI_PROBE_STRIDE (GI_SH_STRIDE + 2) // SH + mean free-space distance at word +12 + backface-hit fraction at +13
 
 #ifndef GI_NORMAL_BIAS
 #define GI_NORMAL_BIAS 1.5 // push the sample point along the normal (world units) to limit self-leak
 #endif
 #ifndef GI_NORMAL_BIAS_SPACING
 #define GI_NORMAL_BIAS_SPACING 0.25 // extra normal bias as a fraction of the cascade's probe spacing
+#endif
+// Probes whose gather rays mostly hit backfaces sit inside (or right behind) geometry; their near-black SH
+// would darken every surface in their trilinear footprint. Fade them out of the lookup over this fraction
+// range (dead probes renormalize away; the all-dead case falls through to a coarser cascade).
+#ifndef GI_BACKFACE_DEAD_MIN
+#define GI_BACKFACE_DEAD_MIN 0.15
+#endif
+#ifndef GI_BACKFACE_DEAD_MAX
+#define GI_BACKFACE_DEAD_MAX 0.35
 #endif
 // -----------------------------------------------------------------------------------------------------
 
@@ -61,6 +70,9 @@ uint giProbeBase(int c, ivec3 lc)
 // Mean distance from a probe to surrounding geometry (misses counted as the gather range), i.e. its
 // free-space radius. Used as a single-moment occlusion estimate at lookup time.
 float giProbeMeanDist(uint cellBase) { return GI_GRID_DATA_NAME[cellBase + uint(GI_SH_STRIDE)]; }
+
+// Fraction of the probe's gather rays that hit backfacing geometry (~1 = embedded in a wall/terrain).
+float giProbeBackfaceFrac(uint cellBase) { return GI_GRID_DATA_NAME[cellBase + uint(GI_SH_STRIDE) + 1u]; }
 
 // Raw SH-L1 RGB coefficients of one probe.
 void giReadSH(uint cellBase, out vec3 c0, out vec3 c1, out vec3 c2, out vec3 c3)
@@ -135,6 +147,12 @@ vec3 giSampleCascade(int c, int s, ivec3 base, vec3 frac, vec3 worldPos, vec3 n,
         // geometry is likely between them, so fade the probe out over the outer half of r. r <= 0 means the
         // probe has no distance data yet -> don't occlude.
         uint cellBase = giProbeBase(c, lc);
+
+        // Reject probes embedded in geometry (mostly-backface gather) — their near-black SH is not signal.
+        w *= 1.0 - smoothstep(GI_BACKFACE_DEAD_MIN, GI_BACKFACE_DEAD_MAX, giProbeBackfaceFrac(cellBase));
+        if (w <= 0.0)
+            continue;
+
         float r = giProbeMeanDist(cellBase);
         if (r > 1e-3)
             w *= clamp(1.0 - (len - r) / max(r * 0.5, 1e-3), 0.0, 1.0);
@@ -257,11 +275,13 @@ void giBlendCell(uint cellBase, vec3 c0, vec3 c1, vec3 c2, vec3 c3, float alpha)
     }
 }
 
-// Temporally blend the probe's mean free-space distance (the single-moment occlusion estimate).
-void giBlendMeanDist(uint cellBase, float meanDist, float alpha)
+// Temporally blend the probe's mean free-space distance (the single-moment occlusion estimate) and its
+// backface-hit fraction (the embedded-probe rejection signal).
+void giBlendProbeStats(uint cellBase, float meanDist, float backfaceFrac, float alpha)
 {
-    float prev = GI_GRID_DATA_NAME[cellBase + uint(GI_SH_STRIDE)];
-    GI_GRID_DATA_NAME[cellBase + uint(GI_SH_STRIDE)] = mix(prev, meanDist, alpha);
+    uint  base = cellBase + uint(GI_SH_STRIDE);
+    GI_GRID_DATA_NAME[base]      = mix(GI_GRID_DATA_NAME[base],      meanDist,     alpha);
+    GI_GRID_DATA_NAME[base + 1u] = mix(GI_GRID_DATA_NAME[base + 1u], backfaceFrac, alpha);
 }
 
 #endif // GI_PROBE_WRITE
