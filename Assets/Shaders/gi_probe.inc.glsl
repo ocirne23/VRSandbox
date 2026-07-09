@@ -16,7 +16,7 @@
 
 // GI_SH_STRIDE, GI_NUM_CASCADES, GI_CASCADE_PROBE_DIM and GI_CASCADE_BASE_SPACING are injected by the
 // engine from RendererVKLayout (Layout.ixx).
-#define GI_PROBE_STRIDE (GI_SH_STRIDE + 2) // SH + mean free-space distance at word +12 + backface-hit fraction at +13
+#define GI_PROBE_STRIDE (GI_SH_STRIDE + 5) // SH + mean free-space dist +12, backface fraction +13, relocation offset xyz +14..16
 
 #ifndef GI_NORMAL_BIAS
 #define GI_NORMAL_BIAS 1.5 // push the sample point along the normal (world units) to limit self-leak
@@ -74,6 +74,14 @@ float giProbeMeanDist(uint cellBase) { return GI_GRID_DATA_NAME[cellBase + uint(
 // Fraction of the probe's gather rays that hit backfacing geometry (~1 = embedded in a wall/terrain).
 float giProbeBackfaceFrac(uint cellBase) { return GI_GRID_DATA_NAME[cellBase + uint(GI_SH_STRIDE) + 1u]; }
 
+// Relocation offset: probes embedded in / grazing geometry trace from (and are treated as sitting at)
+// lattice position + offset. Trilinear weights stay on the unmoved lattice.
+vec3 giProbeOffset(uint cellBase)
+{
+    uint b = cellBase + uint(GI_SH_STRIDE) + 2u;
+    return vec3(GI_GRID_DATA_NAME[b], GI_GRID_DATA_NAME[b + 1u], GI_GRID_DATA_NAME[b + 2u]);
+}
+
 // Raw SH-L1 RGB coefficients of one probe.
 void giReadSH(uint cellBase, out vec3 c0, out vec3 c1, out vec3 c2, out vec3 c3)
 {
@@ -130,7 +138,16 @@ vec3 giSampleCascade(int c, int s, ivec3 base, vec3 frac, vec3 worldPos, vec3 n,
         if (w <= 0.0)
             continue;
         ivec3 lc = base + off;
-        vec3 probeWorld = vec3(lc) * float(s);
+        uint cellBase = giProbeBase(c, lc);
+
+        // Reject probes embedded in geometry (mostly-backface gather) — their near-black SH is not signal.
+        w *= 1.0 - smoothstep(GI_BACKFACE_DEAD_MIN, GI_BACKFACE_DEAD_MAX, giProbeBackfaceFrac(cellBase));
+        if (w <= 0.0)
+            continue;
+
+        // Directional terms use the probe's relocated position (where it actually traced from); the
+        // trilinear weights above stay on the unmoved lattice.
+        vec3 probeWorld = vec3(lc) * float(s) + giProbeOffset(cellBase);
 
         vec3 toProbe = probeWorld - worldPos;
         float len = length(toProbe);
@@ -146,13 +163,6 @@ vec3 giSampleCascade(int c, int s, ivec3 base, vec3 frac, vec3 worldPos, vec3 n,
         // Single-moment occlusion: if the surface point lies beyond the probe's mean free-space radius r,
         // geometry is likely between them, so fade the probe out over the outer half of r. r <= 0 means the
         // probe has no distance data yet -> don't occlude.
-        uint cellBase = giProbeBase(c, lc);
-
-        // Reject probes embedded in geometry (mostly-backface gather) — their near-black SH is not signal.
-        w *= 1.0 - smoothstep(GI_BACKFACE_DEAD_MIN, GI_BACKFACE_DEAD_MAX, giProbeBackfaceFrac(cellBase));
-        if (w <= 0.0)
-            continue;
-
         float r = giProbeMeanDist(cellBase);
         if (r > 1e-3)
             w *= clamp(1.0 - (len - r) / max(r * 0.5, 1e-3), 0.0, 1.0);
@@ -282,6 +292,15 @@ void giBlendProbeStats(uint cellBase, float meanDist, float backfaceFrac, float 
     uint  base = cellBase + uint(GI_SH_STRIDE);
     GI_GRID_DATA_NAME[base]      = mix(GI_GRID_DATA_NAME[base],      meanDist,     alpha);
     GI_GRID_DATA_NAME[base + 1u] = mix(GI_GRID_DATA_NAME[base + 1u], backfaceFrac, alpha);
+}
+
+// Store the relocation offset (written unblended — the relocation logic is already iterative).
+void giStoreProbeOffset(uint cellBase, vec3 offset)
+{
+    uint b = cellBase + uint(GI_SH_STRIDE) + 2u;
+    GI_GRID_DATA_NAME[b]      = offset.x;
+    GI_GRID_DATA_NAME[b + 1u] = offset.y;
+    GI_GRID_DATA_NAME[b + 2u] = offset.z;
 }
 
 #endif // GI_PROBE_WRITE

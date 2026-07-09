@@ -204,6 +204,12 @@ void main()
     const ivec3 prevOrigin = giCascadeOrigin(cascade, pc.prevViewPos);
     const bool  fresh = any(lessThan(lc, prevOrigin)) || any(greaterThanEqual(lc, prevOrigin + GI_CASCADE_PROBE_DIM));
 
+    // Relocation: trace from the offset position steered in previous frames (fresh slots hold a scrolled-out
+    // probe's offset -> start back on the lattice).
+    const uint cellBase = giProbeBase(cascade, lc);
+    const vec3 probeOffset = fresh ? vec3(0.0) : giProbeOffset(cellBase);
+    const vec3 probePos    = probeCenter + probeOffset;
+
     const uint N = max(pc.numRays, 1u);
     const float wsh = 4.0 * PI / float(N);
     const uint seed = hashU(id ^ (pc.frameIndex * 0x9e3779b9u));
@@ -212,13 +218,20 @@ void main()
     vec3 c0 = vec3(0.0), c1 = vec3(0.0), c2 = vec3(0.0), c3 = vec3(0.0);
     float distSum = 0.0;
     float backfaceSum = 0.0;
+    float closestBack = 1e30, closestFront = 1e30;
+    vec3  closestBackDir = vec3(0.0), closestFrontDir = vec3(0.0);
     for (uint i = 0u; i < N; ++i)
     {
         const vec3 dir = sampleSphere(i, N, jitter);
         float hitDist, backface;
-        const vec3 radiance = traceRadiance(probeCenter, dir, cascade, hitDist, backface);
+        const vec3 radiance = traceRadiance(probePos, dir, cascade, hitDist, backface);
         distSum += hitDist;
         backfaceSum += backface;
+        if (backface > 0.5)
+        {
+            if (hitDist < closestBack) { closestBack = hitDist; closestBackDir = dir; }
+        }
+        else if (hitDist < closestFront) { closestFront = hitDist; closestFrontDir = dir; }
         const vec4 Y = shBasisL1(dir);
         c0 += radiance * (Y.x * wsh);
         c1 += radiance * (Y.y * wsh);
@@ -234,7 +247,7 @@ void main()
     if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
     {
         const vec3 skyL = normalize(u_skyUp);
-        const float skyVis = u_rtSkyRadiance > 0.5 ? rtShadowVisibility(probeCenter, skyL, 0.05, 1.0e4) : 1.0;
+        const float skyVis = u_rtSkyRadiance > 0.5 ? rtShadowVisibility(probePos, skyL, 0.05, 1.0e4) : 1.0;
         const vec3 cd = u_skyRadianceColor * skyVis;
         const vec4 Ysky = shBasisL1(skyL);
         c0 += cd * Ysky.x;
@@ -243,8 +256,32 @@ void main()
         c3 += cd * Ysky.w;
     }
 
-    const uint cellBase = giProbeBase(cascade, lc);
-    const float alpha = fresh ? 1.0 : pc.temporalAlpha;
+    const float backFrac = backfaceSum / float(N);
+
+    // Relocation update (RTXGI-style, simplified). Embedded probes punch through the closest backface
+    // along the ray that found it; probes grazing a wall back off along the ray that found the closest
+    // frontface; comfortable probes drift home so the offset doesn't fossilize around moved geometry.
+    // Clamped to a fraction of the spacing so the probe stays representative of its trilinear cell.
+    const float minFront = 0.15 * float(spacing);
+    vec3 newOffset = probeOffset;
+    if (backFrac > 0.25 && closestBack < 1e29)
+        newOffset += closestBackDir * (closestBack + minFront * 0.5);
+    else if (closestFront < minFront)
+        newOffset -= closestFrontDir * (minFront - closestFront);
+    else if (closestFront > minFront * 1.5)
+        newOffset *= 0.97;
+    const float maxLen = 0.45 * float(spacing);
+    const float offLen = length(newOffset);
+    if (offLen > maxLen)
+        newOffset *= maxLen / offLen;
+
+    // A probe whose stored backface fraction says "embedded" but whose rays now mostly hit frontfaces has
+    // just escaped via relocation: replace its history (near-black SH from inside the wall) outright.
+    float alpha = fresh ? 1.0 : pc.temporalAlpha;
+    if (!fresh && giProbeBackfaceFrac(cellBase) > GI_BACKFACE_DEAD_MAX && backFrac < GI_BACKFACE_DEAD_MIN)
+        alpha = 1.0;
+
     giBlendCell(cellBase, c0, c1, c2, c3, alpha);
-    giBlendProbeStats(cellBase, distSum / float(N), backfaceSum / float(N), alpha); // occlusion + embedded-probe stats for lookup
+    giBlendProbeStats(cellBase, distSum / float(N), backFrac, alpha); // occlusion + embedded-probe stats for lookup
+    giStoreProbeOffset(cellBase, newOffset);
 }

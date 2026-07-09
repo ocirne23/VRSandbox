@@ -38,7 +38,8 @@ void main()
 
     int   spacing = giCascadeSpacing(cascade);
     ivec3 lc      = giCascadeOrigin(cascade, u_viewPos) + oc;
-    vec3  center  = vec3(lc) * float(spacing);
+    uint  cellBase = giProbeBase(cascade, lc);
+    vec3  center  = vec3(lc) * float(spacing) + giProbeOffset(cellBase);
 
     vec3 corner = CORNERS[IDX[gl_VertexIndex]];
     vec3 world  = center + corner * (pc.u_radius * sqrt(float(spacing)));
@@ -54,6 +55,6 @@ void main()
     }
     else
     {
-        v_color = giEvalCell(giProbeBase(cascade, lc), v_normal) / PI;
+        v_color = giEvalCell(cellBase, v_normal) / PI;
     }
 }
