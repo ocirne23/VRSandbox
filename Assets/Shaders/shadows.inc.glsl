@@ -200,8 +200,13 @@ float sampleSunShadow(vec3 worldPos, vec3 N)
 	vec3 L = normalize(u_sunDirection.xyz);
 	float NdotL = clamp(dot(N, L), 0.0, 1.0);
 	float slope = clamp(sqrt(1.0 - NdotL * NdotL) / max(NdotL, 1e-3), 1.0, 4.0);
-	float depthBias = u_shadowParams.x * slope;
-	float normalScale = u_shadowParams.y * slope;
+	// Distant fragments get progressively larger biases: shadow map depth precision and texel density
+	// drop with distance, so the near-tuned bias starts to acne/leak far out. Ramps 1 -> MAX across the
+	// full cascade range.
+	const float SHADOW_BIAS_DIST_MAX = 6.0;
+	float distScale = mix(0.0, SHADOW_BIAS_DIST_MAX, clamp(dist / cascadeSplit(NUM_SHADOW_CASCADES - 1), 0.0, 1.0));
+	float depthBias = u_shadowParams.x * slope * distScale;
+	float normalScale = u_shadowParams.y * slope * distScale;
 
 	vec4 pa = projectCascade(worldPos, N, cascade, normalScale * cascadeTexelWorldSize(cascade), depthBias);
 	float ditherBase = interleavedGradientNoise(gl_FragCoord.xy);

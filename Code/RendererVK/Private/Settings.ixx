@@ -33,7 +33,7 @@ export struct SkyParams
     // Ground plane of the sky sphere (below the horizon): albedo lit by sun + sky. Also tints the
     // ground-bounce fallback in skyRadiance() for downward GI/fog rays.
     glm::vec3 groundColor = glm::vec3(0.55f, 0.65f, 1.0f);
-    float groundIntensity = 1.0f;
+    float groundIntensity = 0.0f;
     float groundHorizon = 0.25f;  // fraction of every hemisphere treated as sunlit terrain in the
                                   // out-of-GI-range fallback (skyGroundRadiance): up-facing surfaces see
                                   // ground near the horizon on rolling terrain, not a clean sky plane —
@@ -126,14 +126,14 @@ export struct FogParams
 export struct PostParams
 {
     float exposureEV = 0.0f; // exposure in stops; manual exposure, or exposure compensation in auto mode
-    int   tonemapper = 2;    // 0 = off (legacy raw clip), 1 = Reinhard, 2 = ACES, 3 = AgX
+    int   tonemapper = 3;    // 0 = off (legacy raw clip), 1 = Reinhard, 2 = ACES, 3 = AgX
     bool  autoExposure = true; // eye adaptation: drive exposure from scene luminance
     float adaptTau = 3.0f;   // adaptation time constant (s); larger = slower eye
-    float adaptKey = 0.18f;  // target middle-grey luminance
+    float adaptKey = 0.25f;  // target middle-grey luminance
     float adaptMinLogLum = -3.14f; // histogram log2-luminance range
     float adaptMaxLogLum = 4.0f;
     float adaptMinEV = -6.0f; // auto-exposure clamp (stops)
-    float adaptMaxEV = 6.0f;
+    float adaptMaxEV = 0.0f;
 
     // onReRecord is invoked when a tweak that's baked into the composite push constants changes, so the
     // command buffers can be re-recorded.
@@ -167,6 +167,10 @@ export struct RTAOParams
     float intensity = 1.0f;
     float fadeStart = 30.0f;   // distance from camera (world units) where AO begins to fade out
     float maxDistance = 60.0f; // distance at which AO is fully gone; 0 disables the falloff
+    float normalBias = 0.02f;    // constant ray-origin offset along the surface normal (m)
+    float distanceBias = 0.001f; // ray-origin offset toward the camera per meter of view distance: absorbs
+                                 // the depth-reconstruction error (grows with distance, lies along the view
+                                 // ray) that caused self-hit banding on distant sloped terrain
     float maxHistory = 0.77; //0.99f;
     int   blurRadius = 2; //0;
     bool  alphaTest = false; // ray-test alpha-masked geometry (vegetation) instead of treating it as solid

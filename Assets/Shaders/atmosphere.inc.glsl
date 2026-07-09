@@ -182,6 +182,24 @@ vec3 skyRadiance(vec3 dir)
 	return radiance * groundAtten + groundSun;
 }
 
+//vec3 skyRadiance(vec3 dir)
+//{
+//	const vec3 up = normalize(u_skyUp);
+//	vec3 groundAtten = vec3(1.0);
+//	const vec3 sunDir = normalize(u_sunDirection.xyz);
+//
+//	float cosUp = dot(dir, up);
+//	if (cosUp < 0.0)
+//	{
+//		dir = normalize(dir - up * (cosUp - 0.02));
+//		groundAtten = u_groundParams.rgb * atmosTransmittanceToLight(0.0, sunDir, up) * u_sunColor.rgb * (u_eclipseParams.x * max(dot(sunDir, up), 0.0));
+//	}
+//	vec3 radiance = atmosphereScatterCheap(dir, sunDir, up, 4) * u_sunColor.rgb * u_eclipseParams.x;
+//	if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
+//		radiance += atmosphereScatterCheap(dir, up, up, 2) * u_skyRadianceColor;
+//	return radiance * groundAtten;
+//}
+
 // Irradiance/PI stand-in for SURFACE indirect lighting where no GI probe data exists (the out-of-field
 // fallback): a single skyRadiance sample along the normal misses the ground half of a wall's hemisphere
 // entirely, so split the hemisphere by the horizontal-plane form factor (1 - n.up)/2 — a sky sample

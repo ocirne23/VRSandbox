@@ -26,6 +26,8 @@ namespace
         uint32 viewIndex;
         float  fadeStart;
         float  maxDistance;
+        float  normalBias;
+        float  distanceBias;
     };
     struct TemporalPC
     {
@@ -352,7 +354,8 @@ void RTAOPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 
         cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, traceLayout, 0, 1, &vkSet, 0, nullptr);
         RtaoPC pc{ .numRays = uint32(std::max(m_pParams->rays, 1)), .radius = m_pParams->radius, .power = m_pParams->power,
             .intensity = m_pParams->intensity, .aoWidth = m_width, .aoHeight = m_height, .viewIndex = viewIndex,
-            .fadeStart = m_pParams->fadeStart, .maxDistance = m_pParams->maxDistance };
+            .fadeStart = m_pParams->fadeStart, .maxDistance = m_pParams->maxDistance,
+            .normalBias = m_pParams->normalBias, .distanceBias = m_pParams->distanceBias };
         cmd.pushConstants(traceLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
         cmd.dispatch(gx, gy, 1);
     }

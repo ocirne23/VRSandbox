@@ -62,6 +62,8 @@ layout (push_constant) uniform PC
     uint  viewIndex;    // view to reconstruct in (0 = centre/desktop, 1 = left eye, 2 = right eye)
     float fadeStart;    // distance from camera where AO begins to fade out
     float maxDistance;  // distance at which AO is fully gone; 0 disables the falloff
+    float normalBias;   // constant ray-origin offset along the surface normal (m)
+    float distanceBias; // ray-origin offset toward the camera, per meter of view distance
 } pc;
 
 // Radical-inverse base-2 -> 2D Hammersley point set.
@@ -96,14 +98,24 @@ void main()
     const vec3 N = nRaw / nLen;
 
     const vec3 worldPos = worldPosFromDepth(uv, depth);
+    const float viewDist = length(u_viewPos - worldPos);
 
     // Past the AO max distance the result is always "no occlusion", so skip the ray loop entirely.
     // (bent normal = surface normal so the forward pass evaluates GI along the surface.)
-    if (pc.maxDistance > 0.0 && length(u_viewPos - worldPos) >= pc.maxDistance)
+    if (pc.maxDistance > 0.0 && viewDist >= pc.maxDistance)
     {
         imageStore(u_aoOut, px, vec4(N, 1.0));
         return;
     }
+
+    // Ray-origin self-intersection bias. worldPos reconstructs from half-res depth, whose error lies
+    // ALONG THE VIEW RAY and grows with distance — a fixed offset left distant slope pixels starting
+    // under the RT surface (dark banding on sloped terrain). Compensate along V, toward the camera: it
+    // cancels the depth error 1:1 and lifts off the surface plane by only offset*NoV, so grazing walls
+    // are NOT pushed away from their own contact detail (a 1/NoV-scaled NORMAL offset did exactly that
+    // and artifacted flat walls). The small constant normal offset handles triangle self-intersection.
+    const vec3 V = (u_viewPos - worldPos) / max(viewDist, 1e-4);
+    const vec3 rayOrigin = worldPos + N * pc.normalBias + V * min(viewDist * pc.distanceBias, pc.radius * 0.5);
 
     vec3 up = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     vec3 T = normalize(cross(up, N));
@@ -131,7 +143,7 @@ void main()
 #ifdef RTAO_ALPHA_TEST
         // Masked geometry is non-opaque in the TLAS; run the alpha test on candidates, hardware still
         // auto-commits opaque hits. Terminate-on-first-hit gives the nearest confirmed hit for falloff.
-        rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT, 0xFFu, worldPos + N * 0.02, 0.01, dir, pc.radius);
+        rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT, 0xFFu, rayOrigin, 0.01, dir, pc.radius);
         while (rayQueryProceedEXT(rq))
         {
             if (rayQueryGetIntersectionTypeEXT(rq, false) == gl_RayQueryCandidateIntersectionTriangleEXT
@@ -139,7 +151,7 @@ void main()
                 rayQueryConfirmIntersectionEXT(rq);
         }
 #else
-        rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFFu, worldPos + N * 0.02, 0.01, dir, pc.radius);
+        rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFFu, rayOrigin, 0.01, dir, pc.radius);
         while (rayQueryProceedEXT(rq)) {}
 #endif
         if (rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionTriangleEXT)
@@ -159,8 +171,7 @@ void main()
     // shrinks in screen space with distance), so fade the occlusion back toward 1.0 (no AO) past fadeStart.
     if (pc.maxDistance > 0.0)
     {
-        float dist = length(u_viewPos - worldPos);
-        float fade = clamp((dist - pc.fadeStart) / max(pc.maxDistance - pc.fadeStart, 1e-3), 0.0, 1.0);
+        float fade = clamp((viewDist - pc.fadeStart) / max(pc.maxDistance - pc.fadeStart, 1e-3), 0.0, 1.0);
         ao = mix(ao, 1.0, fade);
     }
     // Bent normal = average unoccluded direction; fall back to the surface normal when fully occluded.
