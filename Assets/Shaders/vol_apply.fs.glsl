@@ -37,7 +37,20 @@ void main()
         out_color = vec4(0.0, 0.0, 0.0, 1.0); // inScatter 0, transmittance 1 -> scene unchanged
         return;
     }
-    const float w = clamp(volViewZToSlice(viewZ), 0.0, 1.0);
-    const vec4 fog = texture(u_integrated, vec3(vpUv, w));
+    // Texel z of the integrated volume stores the fog state at slice z's FAR edge, so the matching
+    // texture coordinate sits half a slice below the continuous slice coordinate (texel centers are at
+    // +0.5). Sampling without that shift read fog from half a slice too deep and anchored the linear
+    // reconstruction between slices wrong — one source of view-aligned fog banding.
+    const float s = volViewZToSlice(viewZ) * float(VOL_FROXEL_Z); // continuous slice index
+    // Per-pixel interleaved-gradient dither (+-half a slice, rotated per frame): breaks the residual
+    // Mach banding of the piecewise-linear reconstruction into noise below TAA's threshold.
+    const vec2 px = gl_FragCoord.xy + 5.588238 * float(u_frameIndex & 63u);
+    const float ign = fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y));
+    const float w = clamp((s - 0.5 + (ign - 0.5)) / float(VOL_FROXEL_Z), 0.0, 1.0);
+    vec4 fog = texture(u_integrated, vec3(vpUv, w));
+    // Inside the first slice there is no "before fog" texel to lerp from: fade the fog in linearly so
+    // very near geometry isn't over-fogged by the first slice's full accumulation.
+    if (s < 1.0)
+        fog = mix(vec4(0.0, 0.0, 0.0, 1.0), fog, max(s, 0.0));
     out_color = vec4(fog.rgb, fog.a);
 }

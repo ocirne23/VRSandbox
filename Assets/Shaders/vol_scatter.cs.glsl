@@ -101,6 +101,26 @@ float fogNoise(vec3 worldPos)
     return valueNoise(p) * 0.667 + valueNoise(p * 2.37 + vec3(17.3)) * 0.333;
 }
 
+// Mean of the exponential height profile exp(-max(y - base, 0) * falloff) over one slice's ray segment,
+// in closed form. A point sample (even jittered + temporally blended) only converges to this mean after
+// many frames — while the camera moves the history is short, and the partially-converged per-slice means
+// disagree, which reads as view-aligned density layers sweeping with the camera. The analytic mean is
+// exact every frame, so the height fog profile is layer-free even with zero history (only the lighting
+// stays stochastic).
+float heightFogMean(float yA, float yB, float base, float falloff)
+{
+    const float y0 = min(yA, yB) - base;
+    const float y1 = max(yA, yB) - base;
+    if (falloff * max(y1, 0.0) < 1e-4)
+        return 1.0; // whole segment at/below the base (or no falloff): full density
+    const float dy = y1 - y0;
+    if (dy < 1e-3)
+        return exp(-max(y0, 0.0) * falloff); // near-horizontal segment: point sample is exact
+    const float a0 = max(y0, 0.0), a1 = max(y1, 0.0);
+    const float belowFrac = clamp(-y0 / dy, 0.0, 1.0); // fraction of the segment below the base (density 1)
+    return belowFrac + (exp(-a0 * falloff) - exp(-a1 * falloff)) / (falloff * dy);
+}
+
 // Hard visibility ray against opaque TLAS geometry (alpha-masked detail is irrelevant at fog frequency).
 float volRayVisibility(vec3 origin, vec3 dir, float tMax)
 {
@@ -218,7 +238,12 @@ void main()
     float heightBase = u_fogParams0.y;
     if (u_fogParams3.x > 0.0 && terrainHeightMapPresent())
         heightBase += u_fogParams3.x * max(terrainHeightAt(worldPos.xz), u_fogParams5.w);
-    const float heightDensity = u_fogParams0.x * exp(-max(worldPos.y - heightBase, 0.0) * u_fogParams0.z);
+    // Height density = the analytic mean over this slice's segment of the sample ray (see heightFogMean),
+    // not a point sample at worldPos.
+    const float tScale = 1.0 / max(dot(dir, camFwd), 1e-3);
+    const float yA = u_viewPos.y + dir.y * (volSliceToViewZ(float(cell.z) / float(VOL_FROXEL_Z)) * tScale);
+    const float yB = u_viewPos.y + dir.y * (volSliceToViewZ(float(cell.z + 1) / float(VOL_FROXEL_Z)) * tScale);
+    const float heightDensity = u_fogParams0.x * heightFogMean(yA, yB, heightBase, u_fogParams0.z);
 
     // Density noise fades out where one noise wavelength drops under the froxel footprint (sub-froxel
     // noise is pure aliasing the temporal blend turns into shimmer; its mean is 1) and is skipped
