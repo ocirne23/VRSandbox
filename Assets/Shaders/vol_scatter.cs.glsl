@@ -174,15 +174,27 @@ void main()
     if (any(greaterThanEqual(cell, ivec3(VOL_FROXEL_X, VOL_FROXEL_Y, VOL_FROXEL_Z))))
         return;
 
-    // Per-froxel, per-frame jitter of the Z sample point; the temporal blend integrates it over time.
-    const uint seed = hashU(uint(cell.x) ^ hashU(uint(cell.y) * 7919u ^ hashU(uint(cell.z) * 31u ^ (u_frameIndex * 0x9e3779b9u))));
-    const float jz = hashToFloat(seed);
+    // Low-discrepancy temporal sampling: an R3 sequence (generalized golden ratio) strides each froxel's
+    // sample point evenly through its FULL 3D footprint over frames, offset per froxel by a spatial hash
+    // so neighbors stay decorrelated for the integrate pass's spatial filter. Per-frame white noise here
+    // converged fine standing still, but boiled under camera motion: reprojection resampling cuts the
+    // effective history to a few frames, and a few white-noise samples have high variance where a few
+    // stratified ones don't. The XY jitter additionally integrates the froxel's whole footprint, so
+    // world-frequency detail (noise wisps, shadow edges) stops crawling as froxel centers slide with
+    // the camera.
+    const uint spatialSeed = hashU(uint(cell.x) ^ hashU(uint(cell.y) * 7919u ^ hashU(uint(cell.z) * 31u)));
+    const float fseq = float(u_frameIndex & 1023u);
+    const float jx = fract(hashToFloat(spatialSeed)               + fseq * 0.8191725134);
+    const float jy = fract(hashToFloat(spatialSeed ^ 0x68bc21ebu) + fseq * 0.6710436067);
+    const float jz = fract(hashToFloat(spatialSeed ^ 0x02e5be93u) + fseq * 0.5497004779);
 
-    const vec2 vpUv = (vec2(cell.xy) + 0.5) / vec2(VOL_FROXEL_X, VOL_FROXEL_Y);
+    const vec2 vpUv = (vec2(cell.xy) + vec2(jx, jy)) / vec2(VOL_FROXEL_X, VOL_FROXEL_Y);
     const float viewZ = volSliceToViewZ((float(cell.z) + jz) / float(VOL_FROXEL_Z));
 
     // World position: unproject the viewport-local UV at two depths for the ray, scale by view depth.
-    // mvp/invMvp are unjittered (the TAA jitter only applies to rasterization).
+    // mvp/invMvp are unjittered (the TAA jitter only applies to rasterization). A second, UNJITTERED
+    // froxel-center ray feeds the temporal reprojection below — reprojecting the jittered sample point
+    // would smear the per-frame jitter into the history lookup itself.
     const vec4 clipNdc = vec4(vpUv.x * 2.0 - 1.0, 1.0 - vpUv.y * 2.0, 0.0, 0.0);
     vec4 pN = u_invMvp * vec4(clipNdc.xy, 0.1, 1.0); pN.xyz /= pN.w;
     vec4 pF = u_invMvp * vec4(clipNdc.xy, 0.9, 1.0); pF.xyz /= pF.w;
@@ -191,6 +203,12 @@ void main()
     vec4 cF = u_invMvp * vec4(0.0, 0.0, 0.9, 1.0); cF.xyz /= cF.w;
     const vec3 camFwd = normalize(cF.xyz - cN.xyz);
     const vec3 worldPos = u_viewPos + dir * (viewZ / max(dot(dir, camFwd), 1e-3));
+
+    const vec2 centerUv = (vec2(cell.xy) + 0.5) / vec2(VOL_FROXEL_X, VOL_FROXEL_Y);
+    const vec2 centerNdc = vec2(centerUv.x * 2.0 - 1.0, 1.0 - centerUv.y * 2.0);
+    vec4 qN = u_invMvp * vec4(centerNdc, 0.1, 1.0); qN.xyz /= qN.w;
+    vec4 qF = u_invMvp * vec4(centerNdc, 0.9, 1.0); qF.xyz /= qF.w;
+    const vec3 centerDir = normalize(qF.xyz - qN.xyz);
 
     // ---- Media density + scattering albedo ------------------------------------------------------------
     // Terrain-following height fog: raise the base by a fraction of the local terrain height, so fog pools
@@ -258,9 +276,11 @@ void main()
             sunVis = 0.0;
             for (uint r = 0u; r < numRays; ++r)
             {
-                const uint rSeed = hashU(seed ^ (r * 0x68bc21ebu));
-                const float ang = hashToFloat(rSeed) * 2.0 * PI;
-                const float rad = sqrt(hashToFloat(rSeed ^ 0x9e3779b9u)) * softness;
+                // R2-sequence cone samples (same reasoning as the position jitter: stratified over the
+                // temporal blend window, so the penumbra stays smooth under camera motion).
+                const uint rSeed = hashU(spatialSeed ^ (r * 0x68bc21ebu));
+                const float ang = fract(hashToFloat(rSeed) + fseq * 0.7548776662) * 2.0 * PI;
+                const float rad = sqrt(fract(hashToFloat(rSeed ^ 0x9e3779b9u) + fseq * 0.5698402910)) * softness;
                 const vec3 rayDir = normalize(sunDir + (t1 * cos(ang) + t2 * sin(ang)) * rad);
                 sunVis += volRayVisibility(worldPos, rayDir, 1.0e4);
             }
@@ -313,10 +333,9 @@ void main()
     }
 
     // ---- Temporal blend against last frame's reprojected froxel ---------------------------------------
-    // Reproject from the UNJITTERED froxel center: reprojecting the jittered sample point would smear the
-    // per-frame jitter into the history lookup itself (a second noise source on top of the lighting).
+    // Reproject from the UNJITTERED froxel center (centerDir, not the jittered sample ray).
     const float centerViewZ = volSliceToViewZ((float(cell.z) + 0.5) / float(VOL_FROXEL_Z));
-    const vec3 centerPos = u_viewPos + dir * (centerViewZ / max(dot(dir, camFwd), 1e-3));
+    const vec3 centerPos = u_viewPos + centerDir * (centerViewZ / max(dot(centerDir, camFwd), 1e-3));
     float prevW;
     const vec2 prevFullUv = prevScreenUV(centerPos, prevW);
     const vec2 prevVpUv = (prevFullUv - u_viewportRect.xy) / u_viewportRect.zw;
