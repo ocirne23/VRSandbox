@@ -158,21 +158,46 @@ vec3 atmosphereScatterCheap(vec3 dir, vec3 lightDir, vec3 up, int steps)
 // Sky radiance for indirect lighting (GI miss rays, fog ambient, surface fallback): a cheap, low-step
 // version of the exact same scatter integral the sky renders with, sourced by the sun plus the
 // directional sky-radiance light (moonlight / space light, along u_skyUp). Below the horizon a
-// graze-direction sample scaled by a ground albedo stands in for the sunlit ground bounce.
+// Lambertian ground stands in: a graze-direction sky sample scaled by the ground albedo (the sky's
+// bounce) PLUS the sun's direct contribution albedo/PI * E_sun — the dominant daytime term. Without the
+// sun term, downward GI rays and the out-of-field ambient fallback sat well below the brightness of the
+// sunlit ground the probes actually see.
 vec3 skyRadiance(vec3 dir)
 {
 	const vec3 up = normalize(u_skyUp);
 	vec3 groundAtten = vec3(1.0);
+	vec3 groundSun = vec3(0.0);
 	float cosUp = dot(dir, up);
 	if (cosUp < 0.0)
 	{
 		dir = normalize(dir - up * (cosUp - 0.02));
 		groundAtten = u_groundParams.rgb;
+		const vec3 sunDir = normalize(u_sunDirection.xyz);
+		groundSun = u_groundParams.rgb * atmosTransmittanceToLight(0.0, sunDir, up) * u_sunColor.rgb
+			* (u_eclipseParams.x * max(dot(sunDir, up), 0.0) / PI);
 	}
 	vec3 radiance = atmosphereScatterCheap(dir, normalize(u_sunDirection.xyz), up, 4) * u_sunColor.rgb * u_eclipseParams.x;
 	if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
 		radiance += atmosphereScatterCheap(dir, up, up, 2) * u_skyRadianceColor;
-	return radiance * groundAtten;
+	return radiance * groundAtten + groundSun;
+}
+
+// Irradiance/PI stand-in for SURFACE indirect lighting where no GI probe data exists (the out-of-field
+// fallback): a single skyRadiance sample along the normal misses the ground half of a wall's hemisphere
+// entirely, so split the hemisphere by the horizontal-plane form factor (1 - n.up)/2 — a sky sample
+// along n (raised to a graze for side/down normals) blended with the sunlit-ground radiance. The plane
+// form factor is zero for up-facing surfaces, but on rolling terrain part of the hemisphere above the
+// horizon is OTHER sunlit terrain, not sky — exactly what the probes integrate — so the ground fraction
+// is floored at u_groundParams.w ("Sky/Ground Horizon"). This is what makes the fallback track the
+// probes' "sky + sunlit ground bounce" instead of sky only.
+vec3 skyGroundRadiance(vec3 n)
+{
+	const vec3 up = normalize(u_skyUp);
+	const float cosUp = dot(n, up);
+	const float groundF = mix(0.5 - 0.5 * cosUp, 1.0, u_groundParams.w);
+	const vec3 skyL = skyRadiance(cosUp < 0.02 ? normalize(n - up * (cosUp - 0.05)) : n);
+	const vec3 groundL = skyRadiance(-up);
+	return mix(skyL, groundL, groundF);
 }
 
 #endif

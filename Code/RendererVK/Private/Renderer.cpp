@@ -576,7 +576,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.nebulaParams = glm::vec4(sky.nebulaIntensity, sky.nebulaScale, sky.nebulaBandWidth, sky.nebulaDust);
     ubo.nebulaAxis = glm::vec4(glm::normalize(sky.nebulaAxis), 0.0f);
     ubo.atmosParams = glm::vec4(sky.rayleighHeight, sky.mieHeight, sky.mieExtinction, sky.ozone);
-    ubo.groundParams = glm::vec4(sky.groundColor * sky.groundIntensity, 0.0f);
+    ubo.groundParams = glm::vec4(sky.groundColor * sky.groundIntensity, glm::clamp(sky.groundHorizon, 0.0f, 1.0f));
 
     const OceanParams& ocean = m_oceanParams;
     // A freshly uploaded shore map activates here, in the same frame slot as the UBO that carries its

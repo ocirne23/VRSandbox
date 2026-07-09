@@ -16,6 +16,7 @@ void SkyParams::registerTweaks()
     Tweak::color3("Sky", "Ambient", &ambientColor, &ambientIntensity, 0.0f, 0.2f, 0.001f);
     Tweak::color3("Sky", "Sky Radiance", &skyRadianceColor, &skyRadianceIntensity, 0.0f, 1.2f, 0.001f);
     Tweak::color3("Sky", "Ground Albedo", &groundColor, &groundIntensity, 0.0f, 2.0f, 0.01f);
+    Tweak::floatVar("Sky", "Ground Horizon", &groundHorizon, 0.0f, 0.5f, 0.01f);
     Tweak::floatVar("Sky/Sun", "Sun Angle Cos", &sunAngularCos, 0.9995f, 1.0f, 0.000001f);
     Tweak::floatVar("Sky/Sun", "Sun Glow", &sunGlow, 0.0, 5.0f, 0.01f);
     Tweak::floatVar("Sky/Sun", "SunCasc D Bias", &shadowDepthBias, 0.0f, 0.005f, 0.0001f);

@@ -84,7 +84,8 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
 
     vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
-                          // ground-bounce tint for downward GI/fog rays), w unused
+                          // ground-bounce tint for downward GI/fog rays), w = horizon terrain fraction
+                          // (skyGroundRadiance: fraction of every hemisphere treated as sunlit ground)
     vec4 u_aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
     vec4 u_giVisParams;   // x = Chebyshev variance floor (fraction of spacing), y = Chebyshev power, z = probe weight floor, w = mean scale (footprint widening)
 

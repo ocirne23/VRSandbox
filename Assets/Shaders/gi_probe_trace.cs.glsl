@@ -176,9 +176,10 @@ vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist, out fl
     vec3 radiance = giGatherDirect(worldPos, worldN, albedo);
     // Previous-frame indirect at the hit -> multi-bounce (infinite, temporally). The cur SH already holds
     // the carried-forward irradiance for this frame.
-    vec3 prevE = evalProbeSH(worldPos, worldN);
-    if (prevE.x >= 0.0)
-        radiance += albedo * (prevE / PI);
+    float giCov;
+    vec3 prevE = evalProbeSHCoverage(worldPos, worldN, giCov);
+    if (prevE.x >= 0.0) // fade the multi-bounce with coverage so traced hits near the field's edge don't step
+        radiance += albedo * (prevE / PI) * giCov;
     return radiance;
 }
 

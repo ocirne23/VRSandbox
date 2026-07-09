@@ -235,8 +235,12 @@ bool traceScene(vec3 origin, vec3 dir, float tMax, out SceneHit hit)
 vec3 shadeHit(SceneHit hit, vec3 rayDir, vec3 sunRadiance, vec3 L)
 {
     const vec3 sun = sunRadiance * max(dot(hit.N, L), 0.0);
-    const vec3 probeE = evalProbeSH(hit.pos, hit.N);
-    const vec3 indirect = (probeE.x >= 0.0 ? probeE / PI : skyRadiance(hit.N)) * u_aoParams.y;
+    float giCoverage;
+    const vec3 probeE = evalProbeSHCoverage(hit.pos, hit.N, giCoverage);
+    vec3 indirect = probeE.x >= 0.0 ? probeE / PI : vec3(0.0);
+    if (giCoverage < 1.0) // fade to the sky+ground fallback over the probe field's outer band (no boundary step)
+        indirect = mix(skyGroundRadiance(hit.N), indirect, giCoverage);
+    indirect *= u_aoParams.y;
     vec3 radiance = hit.albedo * (sun / PI + indirect + u_ambientColor);
 
 #ifdef OCEAN_HIT_LIGHTS

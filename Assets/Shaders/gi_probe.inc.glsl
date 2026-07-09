@@ -232,8 +232,13 @@ vec3 giBiasedSample(vec3 worldPos, vec3 n, int s)
     return worldPos + n * (GI_NORMAL_BIAS + GI_NORMAL_BIAS_SPACING * float(s));
 }
 
-vec3 evalProbeSH(vec3 worldPos, vec3 n)
+// coverage = 1 deep inside the probe field, falling to 0 over the OUTERMOST cascade's edge band (and 0
+// where no cascade covers the point). Callers blend their ambient fallback in by it — without the fade,
+// leaving the probe field dropped the bounce light in a single step, which read as a bright square zone
+// around the camera at the last cascade's window face.
+vec3 evalProbeSHCoverage(vec3 worldPos, vec3 n, out float coverage)
 {
+    coverage = 1.0;
     for (int c = 0; c < GI_NUM_CASCADES; ++c)
     {
         vec3  p = giBiasedSample(worldPos, n, giCascadeSpacing(c));
@@ -254,9 +259,16 @@ vec3 evalProbeSH(vec3 worldPos, vec3 n)
         vec3  cellInWin = vec3(base - origin);
         vec3  distCells = min(cellInWin, vec3(GI_CASCADE_PROBE_DIM - 2) - cellInWin);
         float edge = min(min(distCells.x, distCells.y), distCells.z);
+        if (c == GI_NUM_CASCADES - 1)
+        {
+            // Outermost cascade: there is nothing coarser to fade into, so fade the COVERAGE instead
+            // (wider band than the inter-cascade one — this hands over to a fallback, not to more data).
+            coverage = clamp(edge / (float(GI_CASCADE_PROBE_DIM) * 0.2), 0.0, 1.0);
+            return E0;
+        }
         float band = float(GI_CASCADE_PROBE_DIM) * 0.1;
         float fade = clamp(edge / band, 0.0, 1.0);
-        if (fade >= 1.0 || c == GI_NUM_CASCADES - 1)
+        if (fade >= 1.0)
             return E0;
 
         vec3  p2 = giBiasedSample(worldPos, n, giCascadeSpacing(c + 1));
@@ -269,7 +281,14 @@ vec3 evalProbeSH(vec3 worldPos, vec3 n)
             return E0;
         return mix(E1, E0, fade);
     }
+    coverage = 0.0;
     return vec3(-1.0);
+}
+
+vec3 evalProbeSH(vec3 worldPos, vec3 n)
+{
+    float coverage;
+    return evalProbeSHCoverage(worldPos, n, coverage);
 }
 
 // Debug visualization: hue = cascade (red=0 finest .. yellow=coarsest), brightness checkerboarded per probe.

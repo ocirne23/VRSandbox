@@ -228,7 +228,7 @@ export namespace RendererVKLayout
                                  // the sky divides it back out for the unoccluded disc/corona), zw unused
 
         glm::vec4 atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
-        glm::vec4 groundParams;  // rgb = ground albedo * intensity, w unused
+        glm::vec4 groundParams;  // rgb = ground albedo * intensity, w = horizon terrain fraction (fallback ambient)
         glm::vec4 aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
         glm::vec4 giVisParams;   // x = Chebyshev variance floor (fraction of spacing), y = Chebyshev power, z = probe weight floor, w = mean scale (footprint widening)
 
@@ -359,7 +359,7 @@ export namespace RendererVKLayout
     // Volumetric fog froxel grid (view-frustum-aligned 3D textures).
     constexpr uint32 VOL_FROXEL_X = 160;
     constexpr uint32 VOL_FROXEL_Y = 90;
-    constexpr uint32 VOL_FROXEL_Z = 64;
+    constexpr uint32 VOL_FROXEL_Z = 128;
     constexpr uint32 MAX_FOG_VOLUMES = 256;
     constexpr uint32 FOG_TERRAIN_RES = 512;     // fog terrain height map resolution per cascade (CPU-baked around
                                                 // the camera; setFogTerrainHeightMap expects CASCADES*RES*RES floats)
