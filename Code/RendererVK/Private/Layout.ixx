@@ -215,6 +215,7 @@ export namespace RendererVKLayout
         glm::vec4 fogParams3; // x = terrain follow fraction, y = 1 / near terrain map world size (0 = no map), z = enabled, w = light shadow rays
         glm::vec4 fogParams4; // x = sun shadow rays, y = spatial filter, z = GI ambient, w = sun shadow softness (rad)
         glm::vec4 fogParams5; // xy = terrain height map world center XZ (shared by both cascades), z = 1 / far cascade world size (0 = near only), w = baked terrain sea level
+        glm::vec4 fogParams6; // x = slice power (Z distribution exponent), y = terrain shadow distance (m), zw = unused
 
         glm::vec4 moonParams; // xyz = normalized direction towards the moon, w = cos of the moon disc radius
 

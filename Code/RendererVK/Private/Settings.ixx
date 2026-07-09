@@ -98,6 +98,11 @@ export struct FogParams
     float albedoIntensity = 1.0f;  // > 1 is a non-physical gain (emissive-ish fog)
     float anisotropy = 0.15f;      // HG phase g (0 = isotropic, ->1 = forward scattering)
     float range = 1024.0f;         // froxel grid far distance (m)
+    float slicePower = 1.0f;       // froxel Z distribution exponent: 1 = plain exponential slices, < 1
+                                   // shifts Z resolution from near to far (worth ~0.7-0.85 at long ranges)
+    float terrainShadowDist = 512.0f; // froxels beyond this distance sun-shadow by marching the terrain
+                                   // height map instead of TLAS rays / cascade taps (both run out of data
+                                   // at distance — TLAS is range-bounded); needs the terrain fog map
     float noiseScale = 0.08f;      // density noise frequency (1/m)
     float noiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
     float windSpeed = 1.5f;        // noise drift (m/s)

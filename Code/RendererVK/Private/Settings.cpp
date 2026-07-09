@@ -69,11 +69,13 @@ void FogParams::registerTweaks()
     Tweak::color3("Fog", "Albedo", &albedo, &albedoIntensity);
     Tweak::floatVar("Fog", "Anisotropy", &anisotropy, -0.9f, 0.95f, 0.01f);
     Tweak::floatVar("Fog", "Range", &range, 32.0f, 4096.0f, 32.0f);
+    Tweak::floatVar("Fog", "Slice Power", &slicePower, 0.4f, 1.5f, 0.01f);
     Tweak::floatVar("Fog", "Noise Scale", &noiseScale, 0.005f, 1.0f, 0.005f);
     Tweak::floatVar("Fog", "Noise Strength", &noiseStrength, 0.0f, 1.0f, 0.01f);
     Tweak::floatVar("Fog", "Wind Speed", &windSpeed, 0.0f, 20.0f);
     Tweak::floatVar("Fog", "Temporal Blend", &temporalBlend, 0.0f, 0.97f, 0.01f);
     Tweak::intVar("Fog/Quality", "Sun Rays", &sunRays, 1, 8);
+    Tweak::floatVar("Fog/Quality", "Terrain Shadow Dist", &terrainShadowDist, 32.0f, 8192.0f, 16.0f);
     Tweak::floatVar("Fog/Quality", "Sun Softness", &sunSoftness, 0.0f, 0.2f, 0.005f);
     Tweak::boolean("Fog/Quality", "Spatial Filter", &spatialFilter);
     Tweak::boolean("Fog/Quality", "GI Ambient", &giAmbient);

@@ -569,6 +569,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.fogParams4 = glm::vec4((float)fog.sunRays, fog.spatialFilter ? 1.0f : 0.0f, fog.giAmbient ? 1.0f : 0.0f, fog.sunSoftness);
     ubo.fogParams5 = glm::vec4(m_fogTerrainMap.getCenter(),
         fogTerrainSizes.y > 1.0f ? 1.0f / fogTerrainSizes.y : 0.0f, m_fogTerrainMap.getUserParam());
+    ubo.fogParams6 = glm::vec4(glm::clamp(fog.slicePower, 0.25f, 2.0f), fog.terrainShadowDist, 0.0f, 0.0f);
 
     ubo.moonParams = glm::vec4(glm::normalize(sky.moonDirection), cosf(glm::radians(sky.moonSizeDeg)));
     ubo.starParams = glm::vec4(sky.starSize, sky.starSizeVar, sky.starBrightness, sky.starColorVar);

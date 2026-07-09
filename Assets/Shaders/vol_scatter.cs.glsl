@@ -110,6 +110,26 @@ float volRayVisibility(vec3 origin, vec3 dir, float tMax)
     return rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionTriangleEXT ? 0.0 : 1.0;
 }
 
+// Sun visibility for DISTANT froxels from the baked terrain height cascades: both TLAS rays (instances
+// range-bounded by RT/GI/TLAS Range) and the PCSS cascades run out of data well before a long fog range,
+// leaving far fog uniformly lit. Marching the height map keeps mountains shadowing the fog out to the
+// far cascade's reach, for a few texture taps instead of a full-length ray. Exponential steps; the
+// jittered first step decorrelates the stairstep and the temporal blend integrates it.
+float terrainSunVisibility(vec3 pos, vec3 sunDir, float jitter)
+{
+    if (sunDir.y <= 0.0)
+        return 0.0; // sun below the horizon
+    float t = 30.0 * exp2(jitter); // 30-60m first step, ~7.5km reach after 8 scaled steps
+    for (int i = 0; i < 8; ++i)
+    {
+        const vec3 p = pos + sunDir * t;
+        if (terrainHeightAt(p.xz) > p.y)
+            return 0.0;
+        t *= 2.2;
+    }
+    return 1.0;
+}
+
 // Radiance scattered toward the camera from one grid light: same type encoding (point/spot/rect/tube)
 // and falloff as the surface path, but with the HG phase in place of the NdotL/BRDF.
 vec3 volLightScatter(LightInfo light, vec3 pos, vec3 viewDir, float g, bool shadowRays)
@@ -180,8 +200,17 @@ void main()
     float heightBase = u_fogParams0.y;
     if (u_fogParams3.x > 0.0 && terrainHeightMapPresent())
         heightBase += u_fogParams3.x * max(terrainHeightAt(worldPos.xz), u_fogParams5.w);
-    const float noiseMul = max(1.0 + u_fogParams2.y * (fogNoise(worldPos) * 2.0 - 1.0), 0.0);
-    float density = u_fogParams0.x * exp(-max(worldPos.y - heightBase, 0.0) * u_fogParams0.z) * noiseMul;
+    const float heightDensity = u_fogParams0.x * exp(-max(worldPos.y - heightBase, 0.0) * u_fogParams0.z);
+
+    // Density noise fades out where one noise wavelength drops under the froxel footprint (sub-froxel
+    // noise is pure aliasing the temporal blend turns into shimmer; its mean is 1) and is skipped
+    // entirely where there is no medium to modulate — sky/above-fog froxels pay nothing.
+    float noiseMul = 1.0;
+    const float noiseWavelength = 1.0 / max(u_fogParams2.x, 1e-4);
+    const float noiseAmp = u_fogParams2.y * (1.0 - smoothstep(40.0 * noiseWavelength, 80.0 * noiseWavelength, viewZ));
+    if (noiseAmp > 0.001 && (heightDensity > 1e-7 || in_numFogVolumes > 0u))
+        noiseMul = max(1.0 + noiseAmp * (fogNoise(worldPos) * 2.0 - 1.0), 0.0);
+    float density = heightDensity * noiseMul;
     vec3 albedoWeighted = u_fogParams1.rgb * density;
     vec3 emissive = vec3(0.0);
 
@@ -210,9 +239,16 @@ void main()
         // Sun, with either TLAS shadow rays or a single cascade tap (matching the surface shadow mode).
         // Multiple rays are jittered in a cone (sun softness) per froxel per frame; together with the
         // temporal blend this turns the binary visibility into a smooth penumbra instead of blotches.
+        // Beyond the terrain shadow distance both sources run out of data (TLAS range bound / cascade
+        // extent) — distant froxels march the terrain height cascades instead: cheaper than the ray,
+        // and mountains actually shadow far fog.
         const vec3 sunDir = normalize(u_sunDirection.xyz);
         float sunVis;
-        if (u_rtSunShadow > 0.5)
+        if (viewZ > u_fogParams6.y && terrainHeightMapPresent())
+        {
+            sunVis = terrainSunVisibility(worldPos, sunDir, jz);
+        }
+        else if (u_rtSunShadow > 0.5)
         {
             const uint numRays = max(uint(u_fogParams4.x), 1u);
             const float softness = u_fogParams4.w;
