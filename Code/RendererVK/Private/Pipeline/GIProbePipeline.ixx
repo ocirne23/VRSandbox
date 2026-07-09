@@ -85,6 +85,9 @@ public:
     // Persistent GI clipmap SH volume (consumed by the main pass's fragment shader).
     Buffer& getGiGridDataBuffer() { return m_giGridData; }
     float getStrength() const { return m_giStrength; }
+    // x = Chebyshev variance floor (fraction of probe spacing), y = Chebyshev power, z = probe weight
+    // floor, w = mean scale. Uploaded to the frame UBO (u_giVisParams) for every probe-sampling shader.
+    glm::vec4 getVisibilityParams() const { return glm::vec4(m_visVarianceFloor, m_visChebPower, m_visWeightFloor, m_visMeanScale); }
 
 private:
     void buildTlasInstanceLayout(ComputePipelineLayout& layout);
@@ -102,6 +105,16 @@ private:
     float m_giMaxRayDist = 8.0f;       // gather ray max distance (world units)
     float m_giStrength = 2.5f;         // multiplier on the sampled probe irradiance at shading time
     float m_tlasRange = 512.0f;        // TLAS instance range bound around the camera (origin distance)
+
+    // SH-L1 depth visibility (Chebyshev) lookup tuning. Higher variance floor / lower power = softer,
+    // temporally stabler occlusion edges (the L1 depth estimate wobbles with the per-frame ray jitter);
+    // lower floor / higher power = sharper leak blocking.
+    float m_visVarianceFloor = 0.3f;   // min std-dev as a fraction of the cascade's probe spacing
+    float m_visChebPower = 2.0f;       // exponent on the Chebyshev weight (DDGI uses 3)
+    float m_visWeightFloor = 0.01f;    // occluded probes keep this much weight (0 = hard cutoff)
+    float m_visMeanScale = 2.5f;      // scales the reconstructed mean distance before the Chebyshev test:
+                                       // > 1 widens each probe's visible footprint (more overlap/smoothing),
+                                       // countering the L1 blur's distance underestimate at grazing angles
 
     // Single persistent GI clipmap SH volume: irradiance carries forward in place (toroidal addressing),
     // so there is no prev/cur ping-pong. Read across frames by the fragment shader and read+written by the

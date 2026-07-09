@@ -16,7 +16,13 @@
 
 // GI_SH_STRIDE, GI_NUM_CASCADES, GI_CASCADE_PROBE_DIM and GI_CASCADE_BASE_SPACING are injected by the
 // engine from RendererVKLayout (Layout.ixx).
-#define GI_PROBE_STRIDE (GI_SH_STRIDE + 5) // SH + mean free-space dist +12, backface fraction +13, relocation offset xyz +14..16
+// Per-probe layout (words): SH-L1 RGB 0..11, SH-L1 mean depth +12..15, SH-L1 mean depth^2 +16..19,
+// backface-hit fraction +20, relocation offset xyz +21..23.
+#define GI_PROBE_STRIDE (GI_SH_STRIDE + 12)
+#define GI_DEPTH_BASE    uint(GI_SH_STRIDE)       // dist SH-L1 (scalar, 4 coeffs)
+#define GI_DEPTH2_BASE   (uint(GI_SH_STRIDE) + 4u) // dist^2 SH-L1
+#define GI_BACKFACE_OFS  (uint(GI_SH_STRIDE) + 8u)
+#define GI_OFFSET_OFS    (uint(GI_SH_STRIDE) + 9u)
 
 #ifndef GI_NORMAL_BIAS
 #define GI_NORMAL_BIAS 1.5 // push the sample point along the normal (world units) to limit self-leak
@@ -32,6 +38,12 @@
 #endif
 #ifndef GI_BACKFACE_DEAD_MAX
 #define GI_BACKFACE_DEAD_MAX 0.35
+#endif
+// Depth values are clamped to this many probe spacings before SH projection AND at lookup: visibility only
+// matters within a trilinear cell (+ bias/offset headroom), and capping keeps miss rays (rayMax) from
+// swamping the variance. The lookup queries at cap*0.95 max so fully-open probes always pass the test.
+#ifndef GI_DEPTH_CAP_SPACING
+#define GI_DEPTH_CAP_SPACING 3.0
 #endif
 // -----------------------------------------------------------------------------------------------------
 
@@ -67,18 +79,28 @@ uint giProbeBase(int c, ivec3 lc)
     return (uint(c) * uint(GI_CASCADE_PROBES) + giSlotLinear(lc)) * uint(GI_PROBE_STRIDE);
 }
 
-// Mean distance from a probe to surrounding geometry (misses counted as the gather range), i.e. its
-// free-space radius. Used as a single-moment occlusion estimate at lookup time.
-float giProbeMeanDist(uint cellBase) { return GI_GRID_DATA_NAME[cellBase + uint(GI_SH_STRIDE)]; }
+// SH-L1 projections of the probe's hit distance and squared hit distance (misses counted as the depth
+// cap). Directional visibility: reconstructing at the probe->surface direction gives the mean and second
+// moment of the distance to geometry that way, for a Chebyshev occlusion test at lookup time.
+void giReadDepthSH(uint cellBase, out vec4 dsh, out vec4 d2sh)
+{
+    uint b = cellBase + GI_DEPTH_BASE;
+    dsh  = vec4(GI_GRID_DATA_NAME[b],      GI_GRID_DATA_NAME[b + 1u], GI_GRID_DATA_NAME[b + 2u], GI_GRID_DATA_NAME[b + 3u]);
+    d2sh = vec4(GI_GRID_DATA_NAME[b + 4u], GI_GRID_DATA_NAME[b + 5u], GI_GRID_DATA_NAME[b + 6u], GI_GRID_DATA_NAME[b + 7u]);
+}
+
+// Band-limited reconstruction of a scalar SH-L1 function at a direction (no cosine convolution — this is
+// the raw function estimate, unlike irradiance).
+float giEvalDepth(vec4 c, vec3 d) { return dot(c, shBasisL1(d)); }
 
 // Fraction of the probe's gather rays that hit backfacing geometry (~1 = embedded in a wall/terrain).
-float giProbeBackfaceFrac(uint cellBase) { return GI_GRID_DATA_NAME[cellBase + uint(GI_SH_STRIDE) + 1u]; }
+float giProbeBackfaceFrac(uint cellBase) { return GI_GRID_DATA_NAME[cellBase + GI_BACKFACE_OFS]; }
 
 // Relocation offset: probes embedded in / grazing geometry trace from (and are treated as sitting at)
 // lattice position + offset. Trilinear weights stay on the unmoved lattice.
 vec3 giProbeOffset(uint cellBase)
 {
-    uint b = cellBase + uint(GI_SH_STRIDE) + 2u;
+    uint b = cellBase + GI_OFFSET_OFS;
     return vec3(GI_GRID_DATA_NAME[b], GI_GRID_DATA_NAME[b + 1u], GI_GRID_DATA_NAME[b + 2u]);
 }
 
@@ -123,7 +145,8 @@ bool giCascadeFits(int c, vec3 p, out ivec3 base, out ivec3 origin, out int s, o
 // Trilinear irradiance from one cascade's 8 nearest probes, with DDGI-style backface weighting (probes
 // behind the surface are faded out to limit light leaking through thin geometry). totalW returns the
 // summed weight so the caller can detect the all-backfaced case and fall through to a coarser cascade.
-vec3 giSampleCascade(int c, int s, ivec3 base, vec3 frac, vec3 worldPos, vec3 n, out float totalW)
+// samplePos is the normal-BIASED query point (giBiasedSample), not the raw surface position.
+vec3 giSampleCascade(int c, int s, ivec3 base, vec3 frac, vec3 samplePos, vec3 n, out float totalW)
 {
     // Blend the raw SH-L1 coefficients (not per-probe irradiance) and clamp once at the end. The cosine
     // convolution's max(0) is a per-probe nonlinearity; applying it after interpolation avoids the kinks
@@ -149,23 +172,40 @@ vec3 giSampleCascade(int c, int s, ivec3 base, vec3 frac, vec3 worldPos, vec3 n,
         // trilinear weights above stay on the unmoved lattice.
         vec3 probeWorld = vec3(lc) * float(s) + giProbeOffset(cellBase);
 
-        vec3 toProbe = probeWorld - worldPos;
+        vec3 toProbe = probeWorld - samplePos;
         float len = length(toProbe);
         if (len > 1e-4)
         {
+            vec3 dirToProbe = toProbe / len;
+
             // Smooth backface fade (linear in the half-angle term, not squared): still suppresses probes
             // behind the surface to limit leaking, but with gentler position-dependent modulation so flat
             // surfaces don't ripple as the per-probe direction sweeps across them.
-            float wn = dot(n, toProbe / len) * 0.5 + 0.5;
-            w *= wn;
-        }
+            w *= dot(n, dirToProbe) * 0.5 + 0.5;
 
-        // Single-moment occlusion: if the surface point lies beyond the probe's mean free-space radius r,
-        // geometry is likely between them, so fade the probe out over the outer half of r. r <= 0 means the
-        // probe has no distance data yet -> don't occlude.
-        float r = giProbeMeanDist(cellBase);
-        if (r > 1e-3)
-            w *= clamp(1.0 - (len - r) / max(r * 0.5, 1e-3), 0.0, 1.0);
+            // Directional visibility (DDGI-style Chebyshev on SH-L1 depth): reconstruct the probe's mean
+            // and second-moment distance toward the surface; when the surface lies beyond the mean, the
+            // variance bounds how likely it is still visible. mean2 == 0 means no depth data yet (freshly
+            // cleared buffer) -> don't occlude. The variance floor softens the blurry L1 reconstruction.
+            vec4 dsh, d2sh;
+            giReadDepthSH(cellBase, dsh, d2sh);
+            float cap   = GI_DEPTH_CAP_SPACING * float(s);
+            // Mean scale (u_giVisParams.w, > 1) widens each probe's visible footprint: the blurry L1
+            // reconstruction underestimates distance at grazing angles, shrinking the un-occluded region
+            // around a probe; scaling the mean pushes the occlusion boundary back out (more overlap).
+            float mean  = clamp(giEvalDepth(dsh, -dirToProbe) * u_giVisParams.w, 0.0, cap);
+            float mean2 = giEvalDepth(d2sh, -dirToProbe);
+            float d = min(len, cap * 0.95);
+            if (mean2 > 1e-3 && d > mean)
+            {
+                // u_giVisParams: x = variance floor (fraction of spacing), y = power, z = weight floor.
+                float minDev   = u_giVisParams.x * float(s);
+                float variance = max(mean2 - mean * mean, minDev * minDev);
+                float delta    = d - mean;
+                float cheb     = variance / (variance + delta * delta);
+                w *= max(pow(cheb, u_giVisParams.y), u_giVisParams.z);
+            }
+        }
         if (w <= 0.0)
             continue;
 
@@ -202,7 +242,11 @@ vec3 evalProbeSH(vec3 worldPos, vec3 n)
             continue;
 
         float w0;
-        vec3 E0 = giSampleCascade(c, s, base, frac, worldPos, n, w0);
+        // Weight/visibility terms measure from the biased point (DDGI surface bias): querying from the
+        // raw surface point puts the Chebyshev direction exactly in the wall plane, where the blurry L1
+        // depth reconstruction underestimates distance and false-occludes everything lateral to a probe
+        // (bright probe-footprint circles on walls).
+        vec3 E0 = giSampleCascade(c, s, base, frac, p, n, w0);
         if (w0 <= 1e-4)
             continue; // every probe backfaced -> try a coarser (differently-aligned) cascade
 
@@ -220,7 +264,7 @@ vec3 evalProbeSH(vec3 worldPos, vec3 n)
         if (!giCascadeFits(c + 1, p2, base2, origin2, s2, frac2))
             return E0;
         float w1;
-        vec3 E1 = giSampleCascade(c + 1, s2, base2, frac2, worldPos, n, w1);
+        vec3 E1 = giSampleCascade(c + 1, s2, base2, frac2, p2, n, w1);
         if (w1 <= 1e-4)
             return E0;
         return mix(E1, E0, fade);
@@ -285,19 +329,24 @@ void giBlendCell(uint cellBase, vec3 c0, vec3 c1, vec3 c2, vec3 c3, float alpha)
     }
 }
 
-// Temporally blend the probe's mean free-space distance (the single-moment occlusion estimate) and its
+// Temporally blend the probe's SH-L1 depth moments (the Chebyshev visibility estimate) and its
 // backface-hit fraction (the embedded-probe rejection signal).
-void giBlendProbeStats(uint cellBase, float meanDist, float backfaceFrac, float alpha)
+void giBlendProbeStats(uint cellBase, vec4 dsh, vec4 d2sh, float backfaceFrac, float alpha)
 {
-    uint  base = cellBase + uint(GI_SH_STRIDE);
-    GI_GRID_DATA_NAME[base]      = mix(GI_GRID_DATA_NAME[base],      meanDist,     alpha);
-    GI_GRID_DATA_NAME[base + 1u] = mix(GI_GRID_DATA_NAME[base + 1u], backfaceFrac, alpha);
+    uint b = cellBase + GI_DEPTH_BASE;
+    for (uint k = 0u; k < 4u; ++k)
+    {
+        GI_GRID_DATA_NAME[b + k]      = mix(GI_GRID_DATA_NAME[b + k],      dsh[k],  alpha);
+        GI_GRID_DATA_NAME[b + 4u + k] = mix(GI_GRID_DATA_NAME[b + 4u + k], d2sh[k], alpha);
+    }
+    uint bf = cellBase + GI_BACKFACE_OFS;
+    GI_GRID_DATA_NAME[bf] = mix(GI_GRID_DATA_NAME[bf], backfaceFrac, alpha);
 }
 
 // Store the relocation offset (written unblended — the relocation logic is already iterative).
 void giStoreProbeOffset(uint cellBase, vec3 offset)
 {
-    uint b = cellBase + uint(GI_SH_STRIDE) + 2u;
+    uint b = cellBase + GI_OFFSET_OFS;
     GI_GRID_DATA_NAME[b]      = offset.x;
     GI_GRID_DATA_NAME[b + 1u] = offset.y;
     GI_GRID_DATA_NAME[b + 2u] = offset.z;

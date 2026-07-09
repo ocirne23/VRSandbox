@@ -84,6 +84,7 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
                           // ground-bounce tint for downward GI/fog rays), w unused
     vec4 u_aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
+    vec4 u_giVisParams;   // x = Chebyshev variance floor (fraction of spacing), y = Chebyshev power, z = probe weight floor, w = mean scale (footprint widening)
 
     // Ocean (FFT/Tessendorf water; ocean_*.cs.glsl simulation + ocean.fs.glsl shading)
     vec4 u_oceanParams0;    // xy = wind direction (unit), z = spectrum amplitude scale, w = choppiness lambda

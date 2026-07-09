@@ -503,6 +503,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     // master toggle; GI additionally gates on its own switch.
     ubo.aoParams = glm::vec4((m_rtParams.enabled && m_rtaoParams.enabled) ? 1.0f : 0.0f,
         (m_rtParams.enabled && m_rtParams.giEnabled) ? m_giProbePipeline.getStrength() : 0.0f, 0.0f, 0.0f);
+    ubo.giVisParams = m_giProbePipeline.getVisibilityParams();
     ubo.frameIndex = m_frameCounter;
 
     const SkyParams& sky = m_skyParams;

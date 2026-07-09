@@ -216,7 +216,8 @@ void main()
     const vec2 jitter = vec2(hashToFloat(seed), hashToFloat(seed ^ 0x9e3779b9u));
 
     vec3 c0 = vec3(0.0), c1 = vec3(0.0), c2 = vec3(0.0), c3 = vec3(0.0);
-    float distSum = 0.0;
+    vec4  dsh = vec4(0.0), d2sh = vec4(0.0); // SH-L1 depth moments for Chebyshev visibility at lookup
+    const float depthCap = GI_DEPTH_CAP_SPACING * float(spacing);
     float backfaceSum = 0.0;
     float closestBack = 1e30, closestFront = 1e30;
     vec3  closestBackDir = vec3(0.0), closestFrontDir = vec3(0.0);
@@ -225,7 +226,6 @@ void main()
         const vec3 dir = sampleSphere(i, N, jitter);
         float hitDist, backface;
         const vec3 radiance = traceRadiance(probePos, dir, cascade, hitDist, backface);
-        distSum += hitDist;
         backfaceSum += backface;
         if (backface > 0.5)
         {
@@ -237,6 +237,9 @@ void main()
         c1 += radiance * (Y.y * wsh);
         c2 += radiance * (Y.z * wsh);
         c3 += radiance * (Y.w * wsh);
+        const float dc = min(hitDist, depthCap);
+        dsh  += Y * (dc * wsh);
+        d2sh += Y * (dc * dc * wsh);
     }
 
     // Sky radiance (moonlight / space light): a directional delta light can't be hit by gather rays, so
@@ -262,26 +265,40 @@ void main()
     // along the ray that found it; probes grazing a wall back off along the ray that found the closest
     // frontface; comfortable probes drift home so the offset doesn't fossilize around moved geometry.
     // Clamped to a fraction of the spacing so the probe stays representative of its trilinear cell.
+    // closestFront/closestBack are minima over few jittered rays — very noisy estimators — so every
+    // steering step except the discrete punch-through is damped: raw per-frame corrections make the probe
+    // position (and with it the whole Chebyshev visibility field) wobble frame to frame.
     const float minFront = 0.15 * float(spacing);
     vec3 newOffset = probeOffset;
     if (backFrac > 0.25 && closestBack < 1e29)
-        newOffset += closestBackDir * (closestBack + minFront * 0.5);
+        newOffset += closestBackDir * (closestBack + minFront * 0.5); // escape is all-or-nothing: full step
     else if (closestFront < minFront)
-        newOffset -= closestFrontDir * (minFront - closestFront);
+        newOffset -= closestFrontDir * (0.5 * (minFront - closestFront));
     else if (closestFront > minFront * 1.5)
-        newOffset *= 0.97;
+        newOffset *= 0.99;
     const float maxLen = 0.45 * float(spacing);
     const float offLen = length(newOffset);
     if (offLen > maxLen)
         newOffset *= maxLen / offLen;
 
-    // A probe whose stored backface fraction says "embedded" but whose rays now mostly hit frontfaces has
-    // just escaped via relocation: replace its history (near-black SH from inside the wall) outright.
     float alpha = fresh ? 1.0 : pc.temporalAlpha;
-    if (!fresh && giProbeBackfaceFrac(cellBase) > GI_BACKFACE_DEAD_MAX && backFrac < GI_BACKFACE_DEAD_MIN)
-        alpha = 1.0;
+    if (!fresh)
+    {
+        // The stored moments were traced from the old position: after a relocation step, blend faster in
+        // proportion to how far the probe moved so the depth/irradiance history re-syncs in a few frames
+        // instead of ~1/temporalAlpha frames of parallax-wrong Chebyshev data.
+        const float moved = length(newOffset - probeOffset);
+        alpha = max(alpha, 0.5 * clamp(moved / (0.25 * float(spacing)), 0.0, 1.0));
+
+        // A probe whose stored backface fraction says "embedded" but whose rays now mostly hit frontfaces
+        // has just escaped: flush the near-black inside-the-wall history quickly — but softly (a hard
+        // alpha-1 replace would stamp a single noisy N-ray snapshot that then persists for ~1/alpha
+        // frames). This refires for a few frames while the stored fraction descends, averaging the reset.
+        if (giProbeBackfaceFrac(cellBase) > GI_BACKFACE_DEAD_MAX && backFrac < GI_BACKFACE_DEAD_MIN)
+            alpha = max(alpha, 0.35);
+    }
 
     giBlendCell(cellBase, c0, c1, c2, c3, alpha);
-    giBlendProbeStats(cellBase, distSum / float(N), backFrac, alpha); // occlusion + embedded-probe stats for lookup
+    giBlendProbeStats(cellBase, dsh, d2sh, backFrac, alpha); // depth moments + embedded-probe stats for lookup
     giStoreProbeOffset(cellBase, newOffset);
 }

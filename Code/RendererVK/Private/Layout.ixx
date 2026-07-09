@@ -59,7 +59,7 @@ export namespace RendererVKLayout
     // place across frames with no hash table, copy, or ping-pong. SH-L1 RGB per probe.
     // The GI_* sizing constants are injected into every shader compile (Shader.cpp buildLayoutPreamble).
     constexpr uint32 GI_SH_STRIDE = 12;                                                  // SH-L1 RGB floats per probe
-    constexpr uint32 GI_PROBE_STRIDE = GI_SH_STRIDE + 5;                                  // SH + mean free-space dist + backface fraction + relocation offset xyz
+    constexpr uint32 GI_PROBE_STRIDE = GI_SH_STRIDE + 12;                                 // SH + SH-L1 depth + depth^2 + backface fraction + relocation offset xyz
     constexpr uint32 GI_NUM_CASCADES = 4;                                                // nested clipmap levels
     constexpr uint32 GI_CASCADE_PROBE_DIM = 32;                                          // probes per axis per cascade (power of two)
     constexpr uint32 GI_CASCADE_BASE_SPACING = 2;                                        // finest cascade probe spacing, world units (power of two)
@@ -228,6 +228,7 @@ export namespace RendererVKLayout
         glm::vec4 atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
         glm::vec4 groundParams;  // rgb = ground albedo * intensity, w unused
         glm::vec4 aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
+        glm::vec4 giVisParams;   // x = Chebyshev variance floor (fraction of spacing), y = Chebyshev power, z = probe weight floor, w = mean scale (footprint widening)
 
         // Ocean (FFT/Tessendorf water; OceanSimulationPipeline + ocean_*.cs.glsl / ocean.fs.glsl)
         glm::vec4 oceanParams0;    // xy = wind direction (unit), z = spectrum amplitude scale, w = choppiness lambda
