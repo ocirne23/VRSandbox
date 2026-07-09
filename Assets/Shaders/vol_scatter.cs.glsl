@@ -53,7 +53,8 @@ layout (binding = 6, std430) readonly buffer InFogVolumes
 layout (binding = 7) uniform sampler3D u_history;
 layout (binding = 8, rgba16f) uniform writeonly image3D u_outScatter;
 layout (binding = 9, std430) readonly buffer GiGridData { float gi_gridData[]; };
-layout (binding = 10) uniform sampler2D u_terrainHeight; // CPU-baked surface height around the camera (world Y, m)
+#define TERRAIN_HEIGHT_BINDING 10
+#include "terrain_height.inc.glsl"
 
 // Light grid (read) + giSquareFalloff/giSunShadow from the shared lighting helpers.
 #define GRID_DATA_NAME  in_gridData
@@ -174,10 +175,11 @@ void main()
     // ---- Media density + scattering albedo ------------------------------------------------------------
     // Terrain-following height fog: raise the base by a fraction of the local terrain height, so fog pools
     // in valleys, reaches partway up mountainsides and clears the peaks (follow < 1 keeps the fog top
-    // rising slower than the ground under it).
+    // rising slower than the ground under it). The height is clamped up to the baked sea level so fog
+    // rests on the water surface instead of sinking over the seabed.
     float heightBase = u_fogParams0.y;
-    if (u_fogParams3.y > 0.0)
-        heightBase += u_fogParams3.x * texture(u_terrainHeight, (worldPos.xz - u_fogParams5.xy) * u_fogParams3.y + 0.5).r;
+    if (u_fogParams3.x > 0.0 && terrainHeightMapPresent())
+        heightBase += u_fogParams3.x * max(terrainHeightAt(worldPos.xz), u_fogParams5.w);
     const float noiseMul = max(1.0 + u_fogParams2.y * (fogNoise(worldPos) * 2.0 - 1.0), 0.0);
     float density = u_fogParams0.x * exp(-max(worldPos.y - heightBase, 0.0) * u_fogParams0.z) * noiseMul;
     vec3 albedoWeighted = u_fogParams1.rgb * density;

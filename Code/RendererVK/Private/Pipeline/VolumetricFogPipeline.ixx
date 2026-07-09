@@ -8,7 +8,6 @@ import :CommandBuffer;
 import :ComputePipeline;
 import :GraphicsPipeline;
 import :DescriptorSet;
-import :Sampler;
 import :Layout;
 
 // Froxel-based volumetric fog (camera-frustum-aligned 3D grid, VOL_FROXEL_* texels, exponential Z slices):
@@ -55,19 +54,11 @@ public:
     // render pass and set the viewport/scissor. eye selects the per-eye depth/projection (0 = desktop/left).
     void recordApply(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const ApplyParams& params);
 
-    // Terrain height map (R32F, FOG_TERRAIN_RES^2, world-space surface height in meters), CPU-baked around
-    // the camera (Procedural::TerrainStreamer): the scatter pass raises the height-fog base by a fraction
-    // of it (Fog/Terrain Follow), so fog pools in valleys and clears the peaks. Same ping-pong scheme as
-    // the ocean shore map (OceanSimulationPipeline::uploadShoreMap): staged into the frame slot's buffer,
-    // copied into the INACTIVE image inside the primary CB, flipped at the next updateUBO together with
-    // the UBO center/size (binding 10 is UPDATE_AFTER_BIND, refreshed per frame — no re-record).
-    void uploadTerrainMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, float worldSize, uint32 frameIdx);
-    void recordTerrainUpload(CommandBuffer& commandBuffer); // no-op unless an upload is pending
-    void flipTerrainMapIfPending();
-    void clearTerrainMap() { m_terrainWorldSize = 0.0f; } // shader stops sampling; the images just sit unused
-    void updateTerrainDescriptor(uint32 frameIdx); // points this slot's scatter set at the active image
-    glm::vec2 getTerrainMapCenter() const { return m_terrainCenter; }
-    float getTerrainMapWorldSize() const { return m_terrainWorldSize; }
+    // Points this slot's scatter set at the fog terrain height map (Renderer's BakedWorldMap; binding 10
+    // is UPDATE_AFTER_BIND and refreshed every frame, so a re-bake's ping-pong flip never re-records the
+    // cached fog CB). The scatter pass raises the height-fog base by a fraction of the local terrain
+    // height (Fog/Terrain Follow), so fog pools in valleys and clears the peaks.
+    void updateTerrainDescriptor(uint32 frameIdx, vk::ImageView terrainView, vk::Sampler terrainSampler);
 
 private:
     struct ImageSet
@@ -97,19 +88,4 @@ private:
     ImageSet m_scatter;    // per-froxel in-scatter/extinction; previous frame's image is the temporal history
     ImageSet m_integrated; // accumulated in-scatter + transmittance per slice
     vk::Sampler m_sampler;
-
-    // Terrain height ping-pong pair (see uploadTerrainMap). SHADER_READ_ONLY between uploads.
-    vk::Image m_terrainImage[2]{};
-    VmaAllocation m_terrainMemory[2]{};
-    vk::ImageView m_terrainView[2]{};
-    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_terrainStaging; // host-visible, mapped
-    std::array<std::span<uint8>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_terrainStagingMapped;
-    Sampler m_terrainSampler; // clamp-to-edge: a world-region snapshot, not a tiling patch
-    int m_terrainUploadSlot = -1; // staging slot holding a not-yet-recorded upload (-1 = none)
-    uint32 m_terrainActive = 0;
-    bool m_terrainFlipPending = false;
-    glm::vec2 m_terrainCenter = glm::vec2(0.0f); // active map center/size (updateUBO reads these)
-    float m_terrainWorldSize = 0.0f;             // 0 = no map
-    glm::vec2 m_terrainPendingCenter = glm::vec2(0.0f); // center/size of the staged (not yet flipped) map
-    float m_terrainPendingSize = 0.0f;
 };

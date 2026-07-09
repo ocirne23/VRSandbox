@@ -35,6 +35,7 @@ import :GBufferPipeline;
 import :RTAOPipeline;
 import :OceanSimulationPipeline;
 import :VolumetricFogPipeline;
+import :BakedWorldMap;
 import :SceneColor;
 import :DebugLinePipeline;
 import :TaaPipeline;
@@ -149,19 +150,21 @@ public:
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
     // Flipping OceanParams::hitLighting rebuilds the ocean fragment variant (GPU idle + shader reload).
     void setOceanParams(const OceanParams& ocean);
-    // Replaces the ocean's shore water-depth map (OCEAN_SHORE_RES^2 floats, meters of water below sea
-    // level, negative = land). Staged into this frame slot's buffer, copied into the inactive ping-pong
-    // image in this frame's primary CB (proper barriers), active next beginFrame together with the
-    // OceanParams shore center/range describing it (pass those via setOceanParams in the same frame).
-    // Cheap: no GPU sync, no command-buffer re-record.
-    void setOceanShoreMap(std::span<const float> depthTexels) { m_oceanSimPipeline.uploadShoreMap(depthTexels, m_swapChain.getCurrentFrameIndex()); }
-    // Replaces the volumetric fog's terrain height map (FOG_TERRAIN_RES^2 floats, world-space surface
-    // height in meters) covering worldSize meters centered on centerXZ: the height fog base rises by
-    // Fog/Terrain Follow x the local terrain height, so fog pools in valleys, reaches up mountainsides
-    // and clears the peaks. Same staged ping-pong scheme as setOceanShoreMap (active next frame together
-    // with its UBO center/size; no GPU sync, no command-buffer re-record).
-    void setFogTerrainHeightMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, float worldSize) { m_volumetricFogPipeline.uploadTerrainMap(heightTexels, centerXZ, worldSize, m_swapChain.getCurrentFrameIndex()); }
-    void clearFogTerrainHeightMap() { m_volumetricFogPipeline.clearTerrainMap(); } // fog reverts to the flat height base
+    // Replaces the ocean's shore terrain height map (OCEAN_SHORE_RES^2 floats, raw world-space surface
+    // height in meters) covering worldSize meters centered on centerXZ — the shaders derive the water
+    // depth (sea level - height) live, so sea-level changes need no re-bake. Staged ping-pong
+    // (BakedWorldMap): active next frame together with its UBO center/range; no GPU sync, no
+    // command-buffer re-record.
+    void setOceanShoreMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, float worldSize) { m_oceanShoreMap.upload(heightTexels, centerXZ, glm::vec2(worldSize, 0.0f), 0.0f, m_swapChain.getCurrentFrameIndex()); }
+    void clearOceanShoreMap() { m_oceanShoreMap.clear(); } // ocean falls back to the fog terrain map / open-ocean depth
+    // Replaces the fog terrain height map (FOG_TERRAIN_CASCADES layers of FOG_TERRAIN_RES^2 floats, raw
+    // world-space surface height in meters, near cascade first) centered on centerXZ; cascade i covers
+    // cascadeWorldSizes[i] meters (far cascade = same texel count over a larger range, so long-range
+    // terrain data costs no extra memory). The height fog base rises by Fog/Terrain Follow x the local
+    // terrain height (clamped up to seaLevel, so fog rests on the water), and the ocean uses the same
+    // cascades as its shore fallback beyond the shore map. Staged ping-pong like setOceanShoreMap.
+    void setFogTerrainHeightMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, const glm::vec2& cascadeWorldSizes, float seaLevel) { m_fogTerrainMap.upload(heightTexels, centerXZ, cascadeWorldSizes, seaLevel, m_swapChain.getCurrentFrameIndex()); }
+    void clearFogTerrainHeightMap() { m_fogTerrainMap.clear(); } // fog reverts to the flat height base
     // This frame slot's ocean displacement readback: RGBA16F texels (Dx, h, Dz, dDxz), outRes^2 per
     // cascade, cascades packed consecutively. Safe to read between beginFrame (fence waited) and
     // present (slot resubmits) — copy it out inside that window (Procedural::OceanRenderer does, for
@@ -388,6 +391,11 @@ private:
     RTAOPipeline m_rtaoPipeline;
     OceanSimulationPipeline m_oceanSimPipeline;
     VolumetricFogPipeline m_volumetricFogPipeline;
+    // CPU-baked terrain height snapshots around the camera (raw surface height, world meters). The shore
+    // map drives the ocean's shoaling/surf/waterline; the fog terrain map (2 cascades) drives the fog's
+    // terrain-following height base AND is the ocean's coarse fallback outside the shore map's range.
+    BakedWorldMap m_oceanShoreMap;
+    BakedWorldMap m_fogTerrainMap;
     TaaPipeline m_taaPipeline;
     ShadowCullComputePipeline m_shadowCullComputePipeline;
     ShadowMapGraphicsPipeline m_shadowMapGraphicsPipeline;

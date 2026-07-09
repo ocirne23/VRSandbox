@@ -120,6 +120,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_oceanSimPipeline.initialize();
     m_volumetricFogPipeline.initialize();
     m_volumetricFogPipeline.initializeApply(sceneRenderPass, m_sceneViewCount);
+    m_oceanShoreMap.initialize(RendererVKLayout::OCEAN_SHORE_RES, 1, "OceanShore");
+    m_fogTerrainMap.initialize(RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, "FogTerrainHeight");
     m_taaPipeline.initialize(ext.width, ext.height, m_sceneViewCount);
     m_eyeAdaptationPipeline.initialize();
     m_compositePipeline.initialize(m_renderPass);
@@ -553,18 +555,20 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.skySunParams = glm::vec4(sky.scatterBoost, sky.mieG, sky.sunRolloff, sky.starDensity);
 
     // A freshly uploaded fog terrain height map activates here, in the same frame slot as the UBO that
-    // carries its world center/size — descriptor (refreshed per frame in recordCommandBuffers) and params
-    // stay coherent.
-    m_volumetricFogPipeline.flipTerrainMapIfPending();
-    const float fogTerrainSize = m_volumetricFogPipeline.getTerrainMapWorldSize();
+    // carries its world center/sizes — descriptors (refreshed per frame in recordCommandBuffers) and
+    // params stay coherent. Presence (fogParams3.y) is independent of Terrain Follow: the ocean also
+    // reads these cascades as its shore-map fallback.
+    m_fogTerrainMap.flipIfPending();
+    const glm::vec2 fogTerrainSizes = m_fogTerrainMap.getWorldSizes();
     ubo.fogParams0 = glm::vec4(fog.density, fog.heightBase, fog.heightFalloff * fog.heightFalloff, fog.range);
     ubo.fogParams1 = glm::vec4(fog.albedo * fog.albedoIntensity, fog.anisotropy);
     ubo.fogParams2 = glm::vec4(fog.noiseScale, fog.noiseStrength, fog.windSpeed, fog.temporalBlend);
     ubo.fogParams3 = glm::vec4(glm::clamp(fog.terrainFollow, 0.0f, 1.0f),
-        (fogTerrainSize > 1.0f && fog.terrainFollow > 0.0f) ? 1.0f / fogTerrainSize : 0.0f,
+        fogTerrainSizes.x > 1.0f ? 1.0f / fogTerrainSizes.x : 0.0f,
         fog.enabled ? 1.0f : 0.0f, fog.lightShadows ? 1.0f : 0.0f);
     ubo.fogParams4 = glm::vec4((float)fog.sunRays, fog.spatialFilter ? 1.0f : 0.0f, fog.giAmbient ? 1.0f : 0.0f, fog.sunSoftness);
-    ubo.fogParams5 = glm::vec4(m_volumetricFogPipeline.getTerrainMapCenter(), 0.0f, 0.0f);
+    ubo.fogParams5 = glm::vec4(m_fogTerrainMap.getCenter(),
+        fogTerrainSizes.y > 1.0f ? 1.0f / fogTerrainSizes.y : 0.0f, m_fogTerrainMap.getUserParam());
 
     ubo.moonParams = glm::vec4(glm::normalize(sky.moonDirection), cosf(glm::radians(sky.moonSizeDeg)));
     ubo.starParams = glm::vec4(sky.starSize, sky.starSizeVar, sky.starBrightness, sky.starColorVar);
@@ -576,7 +580,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     const OceanParams& ocean = m_oceanParams;
     // A freshly uploaded shore map activates here, in the same frame slot as the UBO that carries its
     // world center — descriptor (refreshed per frame in recordCommandBuffers) and params stay coherent.
-    m_oceanSimPipeline.flipShoreMapIfPending();
+    m_oceanShoreMap.flipIfPending();
+    const float shoreMapSize = m_oceanShoreMap.getWorldSizes().x;
     const glm::vec2 windDir = glm::length(ocean.windDirection) > 1e-4f ? glm::normalize(ocean.windDirection) : glm::vec2(1.0f, 0.0f);
     ubo.oceanParams0 = glm::vec4(windDir, ocean.amplitude, ocean.choppiness);
     // Wind clamped just above 0: the JONSWAP 1/U terms must stay finite; the spectrum's wave-age limit
@@ -586,8 +591,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanAbsorption = glm::vec4(ocean.absorption, ocean.roughness);
     ubo.oceanScatter = glm::vec4(ocean.scatterColor, ocean.scatterStrength);
     ubo.oceanFoam = glm::vec4(ocean.foamColor, ocean.foamBias);
-    ubo.oceanParams3 = glm::vec4(ocean.shoreMapCenter, glm::clamp(ocean.foamDecay, 0.0f, 0.999f), glm::clamp(ocean.detailBias, -4.0f, 4.0f));
-    ubo.oceanParams4 = glm::vec4(ocean.shoreMapRange > 1.0f ? 1.0f / ocean.shoreMapRange : 0.0f,
+    ubo.oceanParams3 = glm::vec4(m_oceanShoreMap.getCenter(), glm::clamp(ocean.foamDecay, 0.0f, 0.999f), glm::clamp(ocean.detailBias, -4.0f, 4.0f));
+    ubo.oceanParams4 = glm::vec4(shoreMapSize > 1.0f ? 1.0f / shoreMapSize : 0.0f,
         glm::clamp(ocean.foamSpread * 0.25f, 0.0f, 0.95f), glm::max(ocean.shoalScale, 0.0f), glm::max(ocean.foamSoftness, 0.02f));
     ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), glm::max(ocean.shoreFoamDepth, 0.0f), glm::max(ocean.foamBreakAccel, 0.01f));
 
@@ -1984,19 +1989,22 @@ void Renderer::recordCommandBuffers()
     // arrays are UPDATE_AFTER_BIND for the cached CBs).
     applyPendingTextureDescriptorWrites(frameIdx);
 
-    // Ocean shore depth map: point this slot's sets at the active ping-pong image (UPDATE_AFTER_BIND,
-    // like the AO/TLAS bindings — a shore re-bake swaps images without re-recording anything).
+    // Baked terrain height maps (ocean shore + fog terrain cascades): point this slot's sets at the
+    // active ping-pong images (UPDATE_AFTER_BIND, like the AO/TLAS bindings — a re-bake swaps images
+    // without re-recording anything). The ocean passes read BOTH: the fog cascades are their coarse
+    // fallback outside the shore map's range.
     for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
     {
         m_staticMeshGraphicsPipeline.updateOceanShoreDescriptor(frameData.staticMeshPipelineDescriptorSet[eye].getDescriptorSet(),
-            m_oceanSimPipeline.getShoreView(), m_oceanSimPipeline.getShoreSampler());
+            m_oceanShoreMap.getView(), m_oceanShoreMap.getSampler());
+        m_staticMeshGraphicsPipeline.updateTerrainHeightDescriptor(frameData.staticMeshPipelineDescriptorSet[eye].getDescriptorSet(),
+            m_fogTerrainMap.getView(), m_fogTerrainMap.getSampler());
         m_gbufferPipeline.updateOceanShoreDescriptor(frameData.gbufferDescriptorSet[eye].getDescriptorSet(),
-            m_oceanSimPipeline.getShoreView(), m_oceanSimPipeline.getShoreSampler());
+            m_oceanShoreMap.getView(), m_oceanShoreMap.getSampler());
+        m_gbufferPipeline.updateTerrainHeightDescriptor(frameData.gbufferDescriptorSet[eye].getDescriptorSet(),
+            m_fogTerrainMap.getView(), m_fogTerrainMap.getSampler());
     }
-
-    // Fog terrain height map: point this slot's scatter set at the active ping-pong image (UPDATE_AFTER_BIND,
-    // same scheme as the ocean shore map — a re-bake swaps images without re-recording the cached fog CB).
-    m_volumetricFogPipeline.updateTerrainDescriptor(frameIdx);
+    m_volumetricFogPipeline.updateTerrainDescriptor(frameIdx, m_fogTerrainMap.getView(), m_fogTerrainMap.getSampler());
 
     const bool recordScene = !frameData.updated && m_meshInstanceCounter > 0;
     if (recordScene)
@@ -2071,13 +2079,12 @@ void Renderer::recordCommandBuffers()
 
     CommandBuffer& commandBuffer = frameData.primaryCommandBuffer;
     vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);
-    // Pending ocean shore-map upload: copied here in the primary (re-recorded every frame) because the
-    // destination ping-pong image was sampled by older submissions — the transition needs an execution
-    // dependency on those VS/FS reads, which the StagingManager's fresh-image upload path doesn't emit.
-    m_oceanSimPipeline.recordShoreUpload(commandBuffer);
-    // Fog terrain height map upload: same reasoning (the destination ping-pong image was sampled by the
-    // fog scatter compute in older submissions).
-    m_volumetricFogPipeline.recordTerrainUpload(commandBuffer);
+    // Pending baked-map uploads (ocean shore + fog terrain): copied here in the primary (re-recorded
+    // every frame) because the destination ping-pong images were sampled by older submissions — the
+    // transitions need an execution dependency on those reads, which the StagingManager's fresh-image
+    // upload path doesn't emit.
+    m_oceanShoreMap.recordUpload(commandBuffer);
+    m_fogTerrainMap.recordUpload(commandBuffer);
     { // Sync for ubo copy
         vk::MemoryBarrier2 memoryBarrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eCopy,

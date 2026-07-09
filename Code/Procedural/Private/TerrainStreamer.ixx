@@ -10,6 +10,7 @@ import RendererVK;
 import :Climate;
 import :TerrainGenerator;
 import :TerrainChunk;
+import :HeightMapBaker;
 
 export namespace Procedural
 {
@@ -99,17 +100,12 @@ export namespace Procedural
 
 		bool m_configDirty = false; // set by Tweak onChange; consumed at the top of update()
 
-		// --- Fog terrain height map (volumetric fog terrain-following; see updateFogHeightMap) ---
+		// --- Fog terrain height map (volumetric fog terrain-following + ocean shore fallback) ---
 		bool  m_fogMapEnabled = true;
-		float m_fogMapRange = 2048.0f;  // world size (m) the baked map covers, centered on the camera
-		std::future<std::vector<float>> m_fogBakeFuture; // one async bake at a time, like the ocean shore map
-		glm::vec2 m_fogBakePendingCenter = glm::vec2(0.0f); // inputs of the IN-FLIGHT bake
-		float m_fogBakePendingRange = 0.0f;
-		const ClimateMaps* m_fogBakePendingMaps = nullptr;  // identity only (never dereferenced)
-		glm::vec2 m_fogMapCenter = glm::vec2(0.0f);         // inputs of the ACTIVE (uploaded) map
-		float m_fogMapActiveRange = 0.0f;
-		const ClimateMaps* m_fogMapBakedMaps = nullptr;     // identity only (never dereferenced)
-		bool  m_fogMapValid = false;
+		float m_fogMapRange = 2048.0f;     // near cascade world size (m), centered on the camera
+		float m_fogMapFarRange = 16384.0f; // far cascade world size (m; same texel count, coarser texels)
+		HeightMapBaker m_fogMapBaker;
+		bool  m_fogMapUploaded = false;    // a map is live in the renderer (cleared on disable)
 
 		// --- Threading ---
 		std::thread             m_worker;

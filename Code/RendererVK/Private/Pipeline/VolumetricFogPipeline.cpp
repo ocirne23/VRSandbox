@@ -118,12 +118,6 @@ VolumetricFogPipeline::~VolumetricFogPipeline()
     destroyImageSet(m_integrated);
     if (m_sampler)
         Globals::device.getDevice().destroySampler(m_sampler);
-    for (uint32 i = 0; i < 2; ++i)
-    {
-        if (m_terrainView[i]) Globals::device.getDevice().destroyImageView(m_terrainView[i]);
-        Globals::gpuAllocator.destroyImage(m_terrainImage[i], m_terrainMemory[i]);
-        m_terrainView[i] = nullptr; m_terrainImage[i] = nullptr; m_terrainMemory[i] = nullptr;
-    }
 }
 
 void VolumetricFogPipeline::initialize()
@@ -139,49 +133,8 @@ void VolumetricFogPipeline::initialize()
     createImageSet(m_scatter);
     createImageSet(m_integrated);
 
-    // Terrain height ping-pong pair (R32F single mip; CPU floats upload straight in). TransferDst for
-    // the staged full-image replace.
-    vk::Device vkDevice = Globals::device.getDevice();
-    for (uint32 i = 0; i < 2; ++i)
-    {
-        vk::ImageCreateInfo terrainInfo{
-            .imageType = vk::ImageType::e2D,
-            .format = vk::Format::eR32Sfloat,
-            .extent = { RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_RES, 1 },
-            .mipLevels = 1,
-            .arrayLayers = 1,
-            .samples = vk::SampleCountFlagBits::e1,
-            .tiling = vk::ImageTiling::eOptimal,
-            .usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
-            .sharingMode = vk::SharingMode::eExclusive,
-            .initialLayout = vk::ImageLayout::eUndefined,
-        };
-        (void)Globals::gpuAllocator.createImage(terrainInfo, m_terrainImage[i], m_terrainMemory[i], "FogTerrainHeight");
-        vk::ImageViewCreateInfo terrainViewInfo{
-            .image = m_terrainImage[i],
-            .viewType = vk::ImageViewType::e2D,
-            .format = vk::Format::eR32Sfloat,
-            .subresourceRange = { .aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 },
-        };
-        auto terrainViewResult = vkDevice.createImageView(terrainViewInfo);
-        assert(terrainViewResult.result == vk::Result::eSuccess);
-        m_terrainView[i] = terrainViewResult.value;
-    }
-    m_terrainSampler.initialize(vk::SamplerAddressMode::eClampToEdge);
-    // Terrain staging: one host-visible buffer per frame slot — uploadTerrainMap writes the slot whose
-    // fence beginFrame just waited, recordTerrainUpload copies it in that frame's primary CB.
-    constexpr vk::DeviceSize terrainBytes = (vk::DeviceSize)RendererVKLayout::FOG_TERRAIN_RES * RendererVKLayout::FOG_TERRAIN_RES * sizeof(float);
-    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
-    {
-        (void)m_terrainStaging[i].initialize(terrainBytes, vk::BufferUsageFlagBits2::eTransferSrc,
-            vk::MemoryPropertyFlagBits::eHostVisible, false, "FogTerrainStaging", BufferHostAccess::eSequentialWrite);
-        m_terrainStagingMapped[i] = m_terrainStaging[i].mapMemory();
-    }
-
     // One-time UNDEFINED -> GENERAL (images stay in GENERAL forever) + clear: the scatter history must read
     // zeros on the first frame, and the integrated grid must hold "no fog" (transmittance 1) while disabled.
-    // The terrain height maps go straight to SHADER_READ_ONLY (statically bound but never sampled until the
-    // UBO's 1/size flag is set by the first upload).
     CommandBuffer init;
     init.initialize(vk::CommandBufferLevel::ePrimary);
     vk::CommandBuffer cmd = init.begin(true);
@@ -198,16 +151,6 @@ void VolumetricFogPipeline::initialize()
                 .image = s->image[i],
                 .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
             });
-    for (uint32 i = 0; i < 2; ++i)
-        bars.push_back(vk::ImageMemoryBarrier2{
-            .srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe,
-            .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-            .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
-            .oldLayout = vk::ImageLayout::eUndefined,
-            .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-            .image = m_terrainImage[i],
-            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
-        });
     cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = (uint32)bars.size(), .pImageMemoryBarriers = bars.data() });
     const vk::ImageSubresourceRange fullRange{ vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 };
     for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
@@ -364,83 +307,11 @@ void VolumetricFogPipeline::recordApply(CommandBuffer& commandBuffer, uint32 fra
     cmd.draw(3, 1, 0, 0);
 }
 
-void VolumetricFogPipeline::uploadTerrainMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, float worldSize, uint32 frameIdx)
-{
-    constexpr uint32 RES = RendererVKLayout::FOG_TERRAIN_RES;
-    assert(heightTexels.size() == (size_t)RES * RES);
-    memcpy(m_terrainStagingMapped[frameIdx].data(), heightTexels.data(), heightTexels.size_bytes());
-    m_terrainStaging[frameIdx].flushMappedMemory(heightTexels.size_bytes());
-    m_terrainUploadSlot = (int)frameIdx;
-    m_terrainPendingCenter = centerXZ;
-    m_terrainPendingSize = worldSize;
-}
-
-void VolumetricFogPipeline::recordTerrainUpload(CommandBuffer& commandBuffer)
-{
-    if (m_terrainUploadSlot < 0)
-        return;
-    constexpr uint32 RES = RendererVKLayout::FOG_TERRAIN_RES;
-    vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
-    const vk::Image dst = m_terrainImage[m_terrainActive ^ 1u];
-
-    // The inactive image was still sampled by older submissions (the scatter compute) the last time it was
-    // active — the discard transition must execution-depend on those reads (WRITE_AFTER_READ).
-    vk::ImageMemoryBarrier2 toDst{
-        .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-        .srcAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
-        .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .oldLayout = vk::ImageLayout::eUndefined, // full replace: previous contents don't matter
-        .newLayout = vk::ImageLayout::eTransferDstOptimal,
-        .image = dst,
-        .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
-    };
-    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &toDst });
-
-    const vk::BufferImageCopy2 region{
-        .imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 },
-        .imageExtent = { RES, RES, 1 },
-    };
-    const vk::CopyBufferToImageInfo2 copyInfo{
-        .srcBuffer = m_terrainStaging[m_terrainUploadSlot].getBuffer(),
-        .dstImage = dst,
-        .dstImageLayout = vk::ImageLayout::eTransferDstOptimal,
-        .regionCount = 1,
-        .pRegions = &region,
-    };
-    cmd.copyBufferToImage2(copyInfo);
-
-    vk::ImageMemoryBarrier2 toSampled{
-        .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-        .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
-        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
-        .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-        .image = dst,
-        .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
-    };
-    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &toSampled });
-
-    m_terrainUploadSlot = -1;
-    m_terrainFlipPending = true; // activates at the next updateUBO, together with the new center/size
-}
-
-void VolumetricFogPipeline::flipTerrainMapIfPending()
-{
-    if (!m_terrainFlipPending)
-        return;
-    m_terrainActive ^= 1u;
-    m_terrainCenter = m_terrainPendingCenter;
-    m_terrainWorldSize = m_terrainPendingSize;
-    m_terrainFlipPending = false;
-}
-
-void VolumetricFogPipeline::updateTerrainDescriptor(uint32 frameIdx)
+void VolumetricFogPipeline::updateTerrainDescriptor(uint32 frameIdx, vk::ImageView terrainView, vk::Sampler terrainSampler)
 {
     // Points the terrain height binding (10, UPDATE_AFTER_BIND) at the active ping-pong image; refreshed
     // every frame so a CPU re-bake swaps images without re-recording the cached fog CB.
-    vk::DescriptorImageInfo imageInfo{ .sampler = m_terrainSampler.getSampler(), .imageView = m_terrainView[m_terrainActive], .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+    vk::DescriptorImageInfo imageInfo{ .sampler = terrainSampler, .imageView = terrainView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
     vk::WriteDescriptorSet write{ .dstSet = m_scatterSets[frameIdx].getDescriptorSet(), .dstBinding = 10, .descriptorCount = 1,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
     Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);

@@ -9,6 +9,7 @@
 
 #ifdef OCEAN
 #define OCEAN_SHORE_BINDING 18
+#define TERRAIN_HEIGHT_BINDING 19
 #include "ocean_wave.inc.glsl"
 #endif
 

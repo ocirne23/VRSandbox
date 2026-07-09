@@ -31,6 +31,7 @@
 
 #include "shared.inc.glsl"
 #define OCEAN_SHORE_BINDING 18
+#define TERRAIN_HEIGHT_BINDING 19
 #include "ocean_wave.inc.glsl"
 
 struct MaterialInfo
@@ -67,7 +68,7 @@ layout (binding = 6, std430) readonly buffer InGridTable
 #define TABLE_SIZE_NAME in_tableSize
 #include "light_grid.inc.glsl"
 
-layout (binding = 19) uniform sampler2D u_textures[]; // highest binding in the set: variable descriptor count
+layout (binding = 20) uniform sampler2D u_textures[]; // highest binding in the set: variable descriptor count
 layout (binding = 11) uniform accelerationStructureEXT u_tlas;
 
 // Scene geometry for ray hits (same buffers the TLAS instance records were built from — custom index =

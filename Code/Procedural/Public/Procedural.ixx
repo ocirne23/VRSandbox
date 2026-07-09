@@ -5,5 +5,6 @@ export import :Biome;
 export import :Climate;
 export import :TerrainChunk;
 export import :TerrainGenerator;
+export import :HeightMapBaker;
 export import :TerrainStreamer;
 export import :OceanRenderer;

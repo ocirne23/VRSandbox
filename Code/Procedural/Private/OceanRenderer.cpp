@@ -162,66 +162,29 @@ namespace Procedural
 		m_node = std::move(node);
 	}
 
-	// Shore water-depth bake: a coarse OCEAN_SHORE_RES^2 snapshot of (seaLevel - terrainHeight) covering
-	// m_shoreRange meters around the camera, sampled from the SAME ClimateMaps the terrain streamer
-	// renders from, so the water agrees with the drawn ground. Baked on a worker (std::async — a full
-	// bake is a few hundred thousand fbm evaluations), re-baked when the camera strays a quarter of the
-	// range from the active map's center or any input (range, sea level, terrain config) changes; the
-	// active map keeps working until the replacement lands. Centers snap to the map's texel lattice so
-	// re-bakes never make shore features swim sub-texel.
+	// Shore terrain height bake: an OCEAN_SHORE_RES^2 snapshot of the raw surface height covering
+	// m_shoreRange meters around the camera (HeightMapBaker, sampled from the SAME ClimateMaps the
+	// terrain streamer renders from, so the water agrees with the drawn ground). The shaders derive the
+	// water depth live as sea level - height, so sea-level changes need no re-bake; beyond this map's
+	// range they fall back to the coarser fog terrain cascades (TerrainStreamer's bake of the same field).
 	void OceanRenderer::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& terrain)
 	{
-		constexpr uint32 RES = RendererVKLayout::OCEAN_SHORE_RES;
-
-		if (m_bakeFuture.valid() && m_bakeFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+		const bool active = m_shoreEnabled && terrain != nullptr;
+		HeightMapBaker::Baked baked;
+		if (m_shoreBaker.update(baked, active, terrain, glm::vec2(camera.position.x, camera.position.z),
+			glm::vec2(glm::max(m_shoreRange, 256.0f), 0.0f), RendererVKLayout::OCEAN_SHORE_RES, 1))
 		{
-			std::vector<float> depths = m_bakeFuture.get();
-			renderer.setOceanShoreMap(depths);
-			m_shoreDepths = std::move(depths); // CPU copy: sampleShoreDepth (buoyancy) reads this
-			m_shoreCenter = m_bakePendingCenter;
-			m_shoreActiveRange = m_bakePendingRange;
-			m_shoreBakedSeaLevel = m_bakePendingSeaLevel;
-			m_shoreBakedMaps = m_bakePendingMaps;
+			renderer.setOceanShoreMap(baked.texels, baked.center, baked.ranges.x);
+			m_shoreHeights = std::move(baked.texels); // CPU copy: sampleShoreDepth (buoyancy) reads this
+			m_shoreCenter = baked.center;
+			m_shoreActiveRange = baked.ranges.x;
 			m_shoreValid = true;
 		}
-
-		if (!m_shoreEnabled || !terrain)
+		if (!active && m_shoreValid)
 		{
-			m_shoreValid = false; // params drop to "no map"; the GPU images just sit unused
-			return;
+			renderer.clearOceanShoreMap(); // the shaders fall back to the fog terrain cascades / open ocean
+			m_shoreValid = false;
 		}
-
-		if (m_bakeFuture.valid())
-			return; // one bake in flight at a time
-
-		const glm::vec2 camXZ(camera.position.x, camera.position.z);
-		const float range = glm::max(m_shoreRange, 256.0f);
-		const glm::vec2 drift = glm::abs(camXZ - m_shoreCenter);
-		const bool stale = !m_shoreValid
-			|| m_shoreBakedMaps != terrain.get()
-			|| m_shoreActiveRange != range
-			|| m_shoreBakedSeaLevel != m_seaLevel
-			|| glm::max(drift.x, drift.y) > range * 0.25f;
-		if (!stale)
-			return;
-
-		const float texel = range / float(RES);
-		const glm::vec2 center = glm::floor(camXZ / texel + 0.5f) * texel;
-		m_bakePendingCenter = center;
-		m_bakePendingRange = range;
-		m_bakePendingSeaLevel = m_seaLevel;
-		m_bakePendingMaps = terrain.get();
-		const float seaLevel = m_seaLevel;
-		m_bakeFuture = std::async(std::launch::async, [terrain, center, range, seaLevel]() {
-			std::vector<float> depths((size_t)RES * RES);
-			const double texelSize = (double)range / (double)RES;
-			const double x0 = (double)center.x - (double)range * 0.5 + texelSize * 0.5; // texel centers
-			const double z0 = (double)center.y - (double)range * 0.5 + texelSize * 0.5;
-			for (uint32 j = 0; j < RES; ++j)
-				for (uint32 i = 0; i < RES; ++i)
-					depths[(size_t)j * RES + i] = seaLevel - terrain->sampleHeight(x0 + i * texelSize, z0 + j * texelSize);
-			return depths;
-		});
 	}
 
 	void OceanRenderer::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ClimateMaps> terrain)
@@ -255,8 +218,6 @@ namespace Procedural
 		params.foamSpread = m_foamSpread;
 		params.foamBoost = m_foamBoost;
 		params.turbidity = m_turbidity;
-		params.shoreMapCenter = m_shoreCenter;
-		params.shoreMapRange = m_shoreValid ? m_shoreActiveRange : 0.0f;
 		params.shoalScale = m_shoalScale;
 		params.shoreFoamDepth = m_shoreFoamDepth;
 		renderer.setOceanParams(params);
@@ -308,11 +269,13 @@ namespace Procedural
 		return std::bit_cast<float>(o);
 	}
 
-	// Water depth (m) at (x, z) from the CPU shore-map copy; the open-ocean depth outside the baked
-	// region or with no shore data (mirrors oceanSampleShoreDepth in ocean_wave.inc.glsl).
+	// Water depth (m) at (x, z) from the CPU shore height-map copy (depth = live sea level - height); the
+	// open-ocean depth outside the baked region or with no shore data. Mirrors oceanSampleShoreDepth in
+	// ocean_wave.inc.glsl minus the fog-cascade fallback — buoyancy queries only matter near the camera,
+	// well inside the shore map.
 	float OceanRenderer::sampleShoreDepth(float x, float z) const
 	{
-		if (!m_shoreValid || m_shoreDepths.empty() || m_shoreActiveRange <= 1.0f)
+		if (!m_shoreValid || m_shoreHeights.empty() || m_shoreActiveRange <= 1.0f)
 			return m_depth;
 		constexpr uint32 RES = RendererVKLayout::OCEAN_SHORE_RES;
 		const float u = (x - m_shoreCenter.x) / m_shoreActiveRange + 0.5f;
@@ -323,8 +286,8 @@ namespace Procedural
 		const float tz = glm::clamp(v * (float)RES - 0.5f, 0.0f, (float)RES - 1.001f);
 		const uint32 x0 = (uint32)tx, z0 = (uint32)tz;
 		const float fx = tx - (float)x0, fz = tz - (float)z0;
-		const auto at = [&](uint32 i, uint32 j) { return m_shoreDepths[(size_t)j * RES + i]; };
-		return glm::mix(glm::mix(at(x0, z0), at(x0 + 1, z0), fx),
+		const auto at = [&](uint32 i, uint32 j) { return m_shoreHeights[(size_t)j * RES + i]; };
+		return m_seaLevel - glm::mix(glm::mix(at(x0, z0), at(x0 + 1, z0), fx),
 			glm::mix(at(x0, z0 + 1), at(x0 + 1, z0 + 1), fx), fz);
 	}
 

@@ -47,7 +47,7 @@ layout (binding = 6, std430) readonly buffer InGridTable
     uint in_gridTable[];
 };
 
-layout (binding = 19) uniform sampler2D u_textures[]; // highest binding in the set: variable descriptor count
+layout (binding = 20) uniform sampler2D u_textures[]; // highest binding in the set: variable descriptor count
 layout (binding = 8) uniform sampler2DArrayShadow u_shadowMap;      // comparison sampler (hardware PCF)
 layout (binding = 9) uniform sampler2DArray u_shadowMapDepth;       // raw depth (PCSS blocker search)
 layout (binding = 13) uniform sampler2D u_ao;                       // denoised half-res screen-space AO (bilateral upsample)

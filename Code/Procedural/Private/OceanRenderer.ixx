@@ -8,6 +8,7 @@ import Core.Transform;
 import RendererVK;
 
 import :Climate;
+import :HeightMapBaker;
 
 export namespace Procedural
 {
@@ -91,25 +92,20 @@ export namespace Procedural
 		float m_foamBoost = 0.67f;    // turbulence -> fold-threshold relaxation (aged-foam amount)
 		float m_turbidity = 0.0f;    // entrained bubbles: milky brightening + roughness of the wake
 
-		// --- Shore interaction (terrain water-depth bake; see updateShoreMap) ---
+		// --- Shore interaction (terrain height bake; see updateShoreMap) ---
 		bool  m_shoreEnabled = true;
 		float m_shoreRange = 1024.0f;   // world size (m) the baked map covers, centered on the camera
 		float m_shoalScale = 0.05f;     // waves fade below depth = scale * cascade patch size
 		float m_shoreFoamDepth = 1.5f;  // surf band: water-column height (m) that churns white; 0 = off
 
-		// Bake state: one async bake at a time (std::async); the result ships to the GPU when ready and
-		// the previous map stays active meanwhile. A bake pins its ClimateMaps via the captured shared_ptr.
-		std::future<std::vector<float>> m_bakeFuture;
-		glm::vec2 m_bakePendingCenter = glm::vec2(0.0f); // inputs of the IN-FLIGHT bake
-		float m_bakePendingRange = 0.0f;
-		float m_bakePendingSeaLevel = 0.0f;
-		const ClimateMaps* m_bakePendingMaps = nullptr;  // identity only (never dereferenced)
-		glm::vec2 m_shoreCenter = glm::vec2(0.0f);       // inputs of the ACTIVE (uploaded) map
+		// Bake state (HeightMapBaker: async, one bake at a time; the active map keeps working until the
+		// replacement lands). The map stores raw terrain heights; depth = live sea level - height, so
+		// sea-level changes need no re-bake.
+		HeightMapBaker m_shoreBaker;
+		glm::vec2 m_shoreCenter = glm::vec2(0.0f); // region of the ACTIVE (uploaded) map
 		float m_shoreActiveRange = 0.0f;
-		float m_shoreBakedSeaLevel = 0.0f;
-		const ClimateMaps* m_shoreBakedMaps = nullptr;   // identity only (never dereferenced)
 		bool  m_shoreValid = false;
-		std::vector<float> m_shoreDepths;                // CPU copy of the active map (buoyancy queries)
+		std::vector<float> m_shoreHeights;         // CPU copy of the active map (buoyancy queries)
 
 		// CPU copy of the GPU displacement readback tile, refreshed every update() inside the frame's
 		// fence-safe window — sampleWaterHeight can then run at ANY point in the frame (physics updates

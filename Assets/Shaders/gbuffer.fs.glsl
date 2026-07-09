@@ -19,7 +19,7 @@ struct MaterialInfo
     uint metalRoughnessTexIdxAlphaMode;
 };
 layout (binding = 2, std430) readonly buffer InMaterials { MaterialInfo in_materialInfos[]; };
-layout (binding = 5) uniform sampler2D u_textures[]; // 3/4 = ocean maps/shore (vertex stage); 5 = highest, variable count
+layout (binding = 6) uniform sampler2D u_textures[]; // 3/4/5 = ocean maps/shore height/fog terrain (vertex stage); 6 = highest, variable count
 
 void main()
 {

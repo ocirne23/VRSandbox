@@ -17,17 +17,29 @@
 #endif
 layout (binding = OCEAN_MAPS_BINDING) uniform sampler2DArray u_oceanMaps;
 
-// Shore water-depth map (optional; the includer defines OCEAN_SHORE_BINDING to enable it): an R32F
-// snapshot of the terrain height field around the camera, baked on the CPU (meters of water below the
-// calm sea surface; negative = land above sea level). Drives fake shoaling + the shoreline surf band.
+// Shore terrain height map (optional; the includer defines OCEAN_SHORE_BINDING to enable it): an R32F
+// snapshot of the raw terrain surface height around the camera (world Y, m), CPU-baked. The water depth
+// is derived live as sea level - height (so sea-level changes need no re-bake); it drives fake shoaling +
+// the shoreline surf band. When the includer also defines TERRAIN_HEIGHT_BINDING, the coarser fog terrain
+// cascades (terrain_height.inc.glsl — the same field over a much larger range) supply the depth beyond
+// this map's reach, so distant coastlines still shoal and waves never poke through far-away land.
 #ifdef OCEAN_SHORE_BINDING
-layout (binding = OCEAN_SHORE_BINDING) uniform sampler2D u_oceanShore;
+layout (binding = OCEAN_SHORE_BINDING) uniform sampler2D u_shoreHeight;
+#endif
+#ifdef TERRAIN_HEIGHT_BINDING
+#include "terrain_height.inc.glsl"
 #endif
 
-// Water depth (m) at worldXZ. Outside the baked region — or without a map (u_oceanParams4.x = 0) — this
-// returns the open-ocean depth D, blended over the map's outer 5% so leaving the region never pops.
+// Water depth (m) at worldXZ. Outside the shore map — or without one (u_oceanParams4.x = 0) — this falls
+// back to the fog terrain cascades, then to the open-ocean depth D; each handover blends over an edge
+// band so leaving a map's region never pops.
 float oceanSampleShoreDepth(vec2 worldXZ)
 {
+    float depth = u_oceanParams1.z;
+#ifdef TERRAIN_HEIGHT_BINDING
+    if (terrainHeightMapPresent())
+        depth = u_oceanParams2.w - terrainHeightAt(worldXZ);
+#endif
 #ifdef OCEAN_SHORE_BINDING
     const float invRange = u_oceanParams4.x;
     if (invRange > 0.0)
@@ -36,10 +48,10 @@ float oceanSampleShoreDepth(vec2 worldXZ)
         const vec2 e = min(uv, vec2(1.0) - uv);
         const float inMap = clamp(min(e.x, e.y) * 20.0, 0.0, 1.0);
         if (inMap > 0.0)
-            return mix(u_oceanParams1.z, textureLod(u_oceanShore, uv, 0.0).x, inMap);
+            depth = mix(depth, u_oceanParams2.w - textureLod(u_shoreHeight, uv, 0.0).x, inMap);
     }
 #endif
-    return u_oceanParams1.z;
+    return depth;
 }
 
 // Fake shoaling: a cascade's waves fade out once the water is shallower than a fraction of its patch

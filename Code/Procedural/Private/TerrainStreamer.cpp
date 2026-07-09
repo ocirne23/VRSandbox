@@ -63,6 +63,7 @@ namespace Procedural
 		Tweak::floatVar("Terrain", "Skirt depth (m)", &m_skirtDepth, 0.0f, 64.0f, 0.5f, dirty);
 		Tweak::boolean("Terrain", "Fog height map", &m_fogMapEnabled); // feeds Fog/Terrain Follow (renderer)
 		Tweak::floatVar("Terrain", "Fog map range (m)", &m_fogMapRange, 256.0f, 8192.0f, 32.0f);
+		Tweak::floatVar("Terrain", "Fog map far range (m)", &m_fogMapFarRange, 1024.0f, 65536.0f, 256.0f);
 
 		Tweak::floatVar("Terrain/Noise", "Continent amp (m)", &m_continentAmplitude, 0.0f, 400.0f, 1.0f, dirty);
 		Tweak::floatVar("Terrain/Noise", "Mountain amp (m)", &m_mountainAmplitude, 0.0f, 800.0f, 1.0f, dirty);
@@ -151,70 +152,29 @@ namespace Procedural
 		}
 	}
 
-	// Fog terrain height bake: a coarse FOG_TERRAIN_RES^2 snapshot of the surface height (clamped to sea
-	// level, so fog rests on the water instead of sinking over deep ocean) covering m_fogMapRange meters
-	// around the camera, sampled from the SAME ClimateMaps the chunks render from. The volumetric fog
-	// raises its height-fog base by Fog/Terrain Follow x this height, so fog pools in valleys, reaches up
-	// mountainsides and clears the peaks. Same async single-bake scheme as the ocean shore map: baked on
-	// a worker (std::async), re-baked when the camera strays a quarter of the range from the active map's
-	// center or any input changes; centers snap to the texel lattice so re-bakes never swim sub-texel.
+	// Fog terrain height map: FOG_TERRAIN_CASCADES snapshots of the raw surface height around the camera
+	// (HeightMapBaker, sampled from the SAME ClimateMaps the chunks render from) — a near cascade over
+	// m_fogMapRange meters at fine texels and a far cascade over m_fogMapFarRange at the same resolution
+	// (coarse texels are fine at fog distances, so long-range terrain data costs no extra memory). The
+	// volumetric fog raises its height-fog base by Fog/Terrain Follow x this height (clamped up to sea
+	// level in the shader, so fog rests on the water), and the ocean reads the same cascades as its
+	// shore-map fallback.
 	void TerrainStreamer::updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& maps)
 	{
-		constexpr uint32 RES = RendererVKLayout::FOG_TERRAIN_RES;
 		const bool active = m_fogMapEnabled && maps != nullptr;
-
-		if (m_fogBakeFuture.valid() && m_fogBakeFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+		HeightMapBaker::Baked baked;
+		if (m_fogMapBaker.update(baked, active, maps, glm::vec2(camera.position.x, camera.position.z),
+			glm::vec2(glm::max(m_fogMapRange, 256.0f), m_fogMapFarRange),
+			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES))
 		{
-			std::vector<float> heights = m_fogBakeFuture.get();
-			if (active) // a bake finishing after terrain/fog map got disabled is dropped
-			{
-				renderer.setFogTerrainHeightMap(heights, m_fogBakePendingCenter, m_fogBakePendingRange);
-				m_fogMapCenter = m_fogBakePendingCenter;
-				m_fogMapActiveRange = m_fogBakePendingRange;
-				m_fogMapBakedMaps = m_fogBakePendingMaps;
-				m_fogMapValid = true;
-			}
+			renderer.setFogTerrainHeightMap(baked.texels, baked.center, baked.ranges, maps->config().seaLevel);
+			m_fogMapUploaded = true;
 		}
-
-		if (!active)
+		if (!active && m_fogMapUploaded)
 		{
-			if (m_fogMapValid)
-			{
-				renderer.clearFogTerrainHeightMap(); // fog reverts to the flat height base
-				m_fogMapValid = false;
-			}
-			return;
+			renderer.clearFogTerrainHeightMap(); // fog reverts to the flat base; the ocean loses its fallback
+			m_fogMapUploaded = false;
 		}
-
-		if (m_fogBakeFuture.valid())
-			return; // one bake in flight at a time
-
-		const glm::vec2 camXZ(camera.position.x, camera.position.z);
-		const float range = glm::max(m_fogMapRange, 256.0f);
-		const glm::vec2 drift = glm::abs(camXZ - m_fogMapCenter);
-		const bool stale = !m_fogMapValid
-			|| m_fogMapBakedMaps != maps.get()
-			|| m_fogMapActiveRange != range
-			|| glm::max(drift.x, drift.y) > range * 0.25f;
-		if (!stale)
-			return;
-
-		const float texel = range / float(RES);
-		const glm::vec2 center = glm::floor(camXZ / texel + 0.5f) * texel;
-		m_fogBakePendingCenter = center;
-		m_fogBakePendingRange = range;
-		m_fogBakePendingMaps = maps.get();
-		m_fogBakeFuture = std::async(std::launch::async, [maps, center, range]() {
-			std::vector<float> heights((size_t)RES * RES);
-			const float seaLevel = maps->config().seaLevel;
-			const double texelSize = (double)range / (double)RES;
-			const double x0 = (double)center.x - (double)range * 0.5 + texelSize * 0.5; // texel centers
-			const double z0 = (double)center.y - (double)range * 0.5 + texelSize * 0.5;
-			for (uint32 j = 0; j < RES; ++j)
-				for (uint32 i = 0; i < RES; ++i)
-					heights[(size_t)j * RES + i] = glm::max(maps->sampleHeight(x0 + i * texelSize, z0 + j * texelSize), seaLevel);
-			return heights;
-		});
 	}
 
 	void TerrainStreamer::update(Renderer& renderer, const Camera& camera)

@@ -7,9 +7,10 @@
 //   u_fogParams1: rgb = fog albedo * intensity (scattering tint; > 1 = non-physical gain), w = phase anisotropy g
 //   u_fogParams2: x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal history weight
 //   u_fogParams3: x = terrain follow (fraction of the terrain height added to the height fog base),
-//                 y = 1 / terrain height map world size (0 = no map), z = enabled, w = light shadow rays (> 0.5)
+//                 y = 1 / near terrain map world size (0 = no map), z = enabled, w = light shadow rays (> 0.5)
 //   u_fogParams4: x = sun shadow rays per froxel, y = spatial filter (> 0.5), z = GI ambient (> 0.5), w = sun shadow cone half-angle (rad)
-//   u_fogParams5: xy = terrain height map world center XZ, zw = unused
+//   u_fogParams5: xy = terrain height map world center XZ (shared by both cascades),
+//                 z = 1 / far cascade world size (0 = near only), w = baked terrain sea level (fog clamp floor)
 
 #ifndef VOL_FOG_INC_GLSL
 #define VOL_FOG_INC_GLSL

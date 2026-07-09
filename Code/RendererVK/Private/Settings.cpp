@@ -68,7 +68,7 @@ void FogParams::registerTweaks()
     Tweak::floatVar("Fog", "Terrain Follow", &terrainFollow, 0.0f, 1.0f, 0.01f);
     Tweak::color3("Fog", "Albedo", &albedo, &albedoIntensity);
     Tweak::floatVar("Fog", "Anisotropy", &anisotropy, -0.9f, 0.95f, 0.01f);
-    Tweak::floatVar("Fog", "Range", &range, 1.0f, 1024.0f);
+    Tweak::floatVar("Fog", "Range", &range, 32.0f, 4096.0f, 32.0f);
     Tweak::floatVar("Fog", "Noise Scale", &noiseScale, 0.005f, 1.0f, 0.005f);
     Tweak::floatVar("Fog", "Noise Strength", &noiseStrength, 0.0f, 1.0f, 0.01f);
     Tweak::floatVar("Fog", "Wind Speed", &windSpeed, 0.0f, 20.0f);
