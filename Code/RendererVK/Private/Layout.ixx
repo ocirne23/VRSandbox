@@ -212,8 +212,9 @@ export namespace RendererVKLayout
         glm::vec4 fogParams0; // x = global density (1/m), y = height base, z = height falloff (1/m), w = range (m)
         glm::vec4 fogParams1; // rgb = fog albedo * intensity (> 1 = non-physical gain), w = phase anisotropy g
         glm::vec4 fogParams2; // x = noise scale (1/m), y = noise strength, z = wind speed (m/s), w = temporal blend
-        glm::vec4 fogParams3; // xy = unused, z = enabled, w = light shadow rays
+        glm::vec4 fogParams3; // x = terrain follow fraction, y = 1 / terrain map world size (0 = no map), z = enabled, w = light shadow rays
         glm::vec4 fogParams4; // x = sun shadow rays, y = spatial filter, z = GI ambient, w = sun shadow softness (rad)
+        glm::vec4 fogParams5; // xy = terrain height map world center XZ, zw = unused
 
         glm::vec4 moonParams; // xyz = normalized direction towards the moon, w = cos of the moon disc radius
 
@@ -359,6 +360,8 @@ export namespace RendererVKLayout
     constexpr uint32 VOL_FROXEL_Y = 90;
     constexpr uint32 VOL_FROXEL_Z = 64;
     constexpr uint32 MAX_FOG_VOLUMES = 256;
+    constexpr uint32 FOG_TERRAIN_RES = 512; // fog terrain height map resolution (CPU-baked around the camera;
+                                            // Renderer::setFogTerrainHeightMap expects RES*RES floats)
 
     // Local participating-media box, submitted per frame like lights (Renderer::addFogVolume). Density adds
     // to the global fog inside the box, fading out over the outer edgeSoftness fraction of each half extent.

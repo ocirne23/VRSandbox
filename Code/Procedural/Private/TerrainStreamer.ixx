@@ -68,6 +68,9 @@ export namespace Procedural
 		void rebuildMaps();                             // (re)builds ClimateMaps from the tweak-backed config
 		void clearResidents();
 		std::shared_ptr<const ClimateMaps> currentMaps();
+		// Bakes/refreshes the fog terrain height map around the camera (Renderer::setFogTerrainHeightMap);
+		// maps == nullptr means "no terrain" and clears the map. See the .cpp for the bake scheme.
+		void updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& maps);
 
 		// --- Tweak-backed configuration (source of truth; ClimateMaps/ChunkParams are built from these) ---
 		bool  m_enabled = false;
@@ -95,6 +98,18 @@ export namespace Procedural
 		float  m_lapseRate = 0.0018f;
 
 		bool m_configDirty = false; // set by Tweak onChange; consumed at the top of update()
+
+		// --- Fog terrain height map (volumetric fog terrain-following; see updateFogHeightMap) ---
+		bool  m_fogMapEnabled = true;
+		float m_fogMapRange = 2048.0f;  // world size (m) the baked map covers, centered on the camera
+		std::future<std::vector<float>> m_fogBakeFuture; // one async bake at a time, like the ocean shore map
+		glm::vec2 m_fogBakePendingCenter = glm::vec2(0.0f); // inputs of the IN-FLIGHT bake
+		float m_fogBakePendingRange = 0.0f;
+		const ClimateMaps* m_fogBakePendingMaps = nullptr;  // identity only (never dereferenced)
+		glm::vec2 m_fogMapCenter = glm::vec2(0.0f);         // inputs of the ACTIVE (uploaded) map
+		float m_fogMapActiveRange = 0.0f;
+		const ClimateMaps* m_fogMapBakedMaps = nullptr;     // identity only (never dereferenced)
+		bool  m_fogMapValid = false;
 
 		// --- Threading ---
 		std::thread             m_worker;

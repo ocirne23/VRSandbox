@@ -552,11 +552,19 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.cloudParams2 = glm::vec4(sky.cloudDensity, sky.cloudSharpness, sky.cloudBaseVar, sky.moonBrightness);
     ubo.skySunParams = glm::vec4(sky.scatterBoost, sky.mieG, sky.sunRolloff, sky.starDensity);
 
+    // A freshly uploaded fog terrain height map activates here, in the same frame slot as the UBO that
+    // carries its world center/size — descriptor (refreshed per frame in recordCommandBuffers) and params
+    // stay coherent.
+    m_volumetricFogPipeline.flipTerrainMapIfPending();
+    const float fogTerrainSize = m_volumetricFogPipeline.getTerrainMapWorldSize();
     ubo.fogParams0 = glm::vec4(fog.density, fog.heightBase, fog.heightFalloff * fog.heightFalloff, fog.range);
     ubo.fogParams1 = glm::vec4(fog.albedo * fog.albedoIntensity, fog.anisotropy);
     ubo.fogParams2 = glm::vec4(fog.noiseScale, fog.noiseStrength, fog.windSpeed, fog.temporalBlend);
-    ubo.fogParams3 = glm::vec4(0.0f, 0.0f, fog.enabled ? 1.0f : 0.0f, fog.lightShadows ? 1.0f : 0.0f);
+    ubo.fogParams3 = glm::vec4(glm::clamp(fog.terrainFollow, 0.0f, 1.0f),
+        (fogTerrainSize > 1.0f && fog.terrainFollow > 0.0f) ? 1.0f / fogTerrainSize : 0.0f,
+        fog.enabled ? 1.0f : 0.0f, fog.lightShadows ? 1.0f : 0.0f);
     ubo.fogParams4 = glm::vec4((float)fog.sunRays, fog.spatialFilter ? 1.0f : 0.0f, fog.giAmbient ? 1.0f : 0.0f, fog.sunSoftness);
+    ubo.fogParams5 = glm::vec4(m_volumetricFogPipeline.getTerrainMapCenter(), 0.0f, 0.0f);
 
     ubo.moonParams = glm::vec4(glm::normalize(sky.moonDirection), cosf(glm::radians(sky.moonSizeDeg)));
     ubo.starParams = glm::vec4(sky.starSize, sky.starSizeVar, sky.starBrightness, sky.starColorVar);
@@ -1986,6 +1994,10 @@ void Renderer::recordCommandBuffers()
             m_oceanSimPipeline.getShoreView(), m_oceanSimPipeline.getShoreSampler());
     }
 
+    // Fog terrain height map: point this slot's scatter set at the active ping-pong image (UPDATE_AFTER_BIND,
+    // same scheme as the ocean shore map — a re-bake swaps images without re-recording the cached fog CB).
+    m_volumetricFogPipeline.updateTerrainDescriptor(frameIdx);
+
     const bool recordScene = !frameData.updated && m_meshInstanceCounter > 0;
     if (recordScene)
     {
@@ -2063,6 +2075,9 @@ void Renderer::recordCommandBuffers()
     // destination ping-pong image was sampled by older submissions — the transition needs an execution
     // dependency on those VS/FS reads, which the StagingManager's fresh-image upload path doesn't emit.
     m_oceanSimPipeline.recordShoreUpload(commandBuffer);
+    // Fog terrain height map upload: same reasoning (the destination ping-pong image was sampled by the
+    // fog scatter compute in older submissions).
+    m_volumetricFogPipeline.recordTerrainUpload(commandBuffer);
     { // Sync for ubo copy
         vk::MemoryBarrier2 memoryBarrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eCopy,

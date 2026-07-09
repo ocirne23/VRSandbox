@@ -155,6 +155,13 @@ public:
     // OceanParams shore center/range describing it (pass those via setOceanParams in the same frame).
     // Cheap: no GPU sync, no command-buffer re-record.
     void setOceanShoreMap(std::span<const float> depthTexels) { m_oceanSimPipeline.uploadShoreMap(depthTexels, m_swapChain.getCurrentFrameIndex()); }
+    // Replaces the volumetric fog's terrain height map (FOG_TERRAIN_RES^2 floats, world-space surface
+    // height in meters) covering worldSize meters centered on centerXZ: the height fog base rises by
+    // Fog/Terrain Follow x the local terrain height, so fog pools in valleys, reaches up mountainsides
+    // and clears the peaks. Same staged ping-pong scheme as setOceanShoreMap (active next frame together
+    // with its UBO center/size; no GPU sync, no command-buffer re-record).
+    void setFogTerrainHeightMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, float worldSize) { m_volumetricFogPipeline.uploadTerrainMap(heightTexels, centerXZ, worldSize, m_swapChain.getCurrentFrameIndex()); }
+    void clearFogTerrainHeightMap() { m_volumetricFogPipeline.clearTerrainMap(); } // fog reverts to the flat height base
     // This frame slot's ocean displacement readback: RGBA16F texels (Dx, h, Dz, dDxz), outRes^2 per
     // cascade, cascades packed consecutively. Safe to read between beginFrame (fence waited) and
     // present (slot resubmits) — copy it out inside that window (Procedural::OceanRenderer does, for

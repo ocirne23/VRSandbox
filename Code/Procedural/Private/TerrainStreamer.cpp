@@ -61,6 +61,8 @@ namespace Procedural
 		Tweak::intVar("Terrain", "Uploads/frame", &m_maxUploadsPerFrame, 1, 32, 1.0f);
 		Tweak::floatVar("Terrain", "Sea level (m)", &m_seaLevel, -200.0f, 200.0f, 0.5f, dirty);
 		Tweak::floatVar("Terrain", "Skirt depth (m)", &m_skirtDepth, 0.0f, 64.0f, 0.5f, dirty);
+		Tweak::boolean("Terrain", "Fog height map", &m_fogMapEnabled); // feeds Fog/Terrain Follow (renderer)
+		Tweak::floatVar("Terrain", "Fog map range (m)", &m_fogMapRange, 256.0f, 8192.0f, 32.0f);
 
 		Tweak::floatVar("Terrain/Noise", "Continent amp (m)", &m_continentAmplitude, 0.0f, 400.0f, 1.0f, dirty);
 		Tweak::floatVar("Terrain/Noise", "Mountain amp (m)", &m_mountainAmplitude, 0.0f, 800.0f, 1.0f, dirty);
@@ -149,6 +151,72 @@ namespace Procedural
 		}
 	}
 
+	// Fog terrain height bake: a coarse FOG_TERRAIN_RES^2 snapshot of the surface height (clamped to sea
+	// level, so fog rests on the water instead of sinking over deep ocean) covering m_fogMapRange meters
+	// around the camera, sampled from the SAME ClimateMaps the chunks render from. The volumetric fog
+	// raises its height-fog base by Fog/Terrain Follow x this height, so fog pools in valleys, reaches up
+	// mountainsides and clears the peaks. Same async single-bake scheme as the ocean shore map: baked on
+	// a worker (std::async), re-baked when the camera strays a quarter of the range from the active map's
+	// center or any input changes; centers snap to the texel lattice so re-bakes never swim sub-texel.
+	void TerrainStreamer::updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& maps)
+	{
+		constexpr uint32 RES = RendererVKLayout::FOG_TERRAIN_RES;
+		const bool active = m_fogMapEnabled && maps != nullptr;
+
+		if (m_fogBakeFuture.valid() && m_fogBakeFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+		{
+			std::vector<float> heights = m_fogBakeFuture.get();
+			if (active) // a bake finishing after terrain/fog map got disabled is dropped
+			{
+				renderer.setFogTerrainHeightMap(heights, m_fogBakePendingCenter, m_fogBakePendingRange);
+				m_fogMapCenter = m_fogBakePendingCenter;
+				m_fogMapActiveRange = m_fogBakePendingRange;
+				m_fogMapBakedMaps = m_fogBakePendingMaps;
+				m_fogMapValid = true;
+			}
+		}
+
+		if (!active)
+		{
+			if (m_fogMapValid)
+			{
+				renderer.clearFogTerrainHeightMap(); // fog reverts to the flat height base
+				m_fogMapValid = false;
+			}
+			return;
+		}
+
+		if (m_fogBakeFuture.valid())
+			return; // one bake in flight at a time
+
+		const glm::vec2 camXZ(camera.position.x, camera.position.z);
+		const float range = glm::max(m_fogMapRange, 256.0f);
+		const glm::vec2 drift = glm::abs(camXZ - m_fogMapCenter);
+		const bool stale = !m_fogMapValid
+			|| m_fogMapBakedMaps != maps.get()
+			|| m_fogMapActiveRange != range
+			|| glm::max(drift.x, drift.y) > range * 0.25f;
+		if (!stale)
+			return;
+
+		const float texel = range / float(RES);
+		const glm::vec2 center = glm::floor(camXZ / texel + 0.5f) * texel;
+		m_fogBakePendingCenter = center;
+		m_fogBakePendingRange = range;
+		m_fogBakePendingMaps = maps.get();
+		m_fogBakeFuture = std::async(std::launch::async, [maps, center, range]() {
+			std::vector<float> heights((size_t)RES * RES);
+			const float seaLevel = maps->config().seaLevel;
+			const double texelSize = (double)range / (double)RES;
+			const double x0 = (double)center.x - (double)range * 0.5 + texelSize * 0.5; // texel centers
+			const double z0 = (double)center.y - (double)range * 0.5 + texelSize * 0.5;
+			for (uint32 j = 0; j < RES; ++j)
+				for (uint32 i = 0; i < RES; ++i)
+					heights[(size_t)j * RES + i] = glm::max(maps->sampleHeight(x0 + i * texelSize, z0 + j * texelSize), seaLevel);
+			return heights;
+		});
+	}
+
 	void TerrainStreamer::update(Renderer& renderer, const Camera& camera)
 	{
 		if (m_configDirty)
@@ -162,6 +230,7 @@ namespace Procedural
 		{
 			if (!m_residents.empty() || !m_pending.empty())
 				clearResidents();
+			updateFogHeightMap(renderer, camera, nullptr); // no terrain -> no terrain-following fog
 			return;
 		}
 
@@ -179,6 +248,8 @@ namespace Procedural
 			maps = m_maps;
 			generation = m_generation;
 		}
+
+		updateFogHeightMap(renderer, camera, maps);
 
 		// --- Desired ring + enqueue any chunk that is neither resident nor already in flight.
 		// desired      = the exact (coord,lod) keys we want resident.

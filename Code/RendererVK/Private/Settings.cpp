@@ -65,6 +65,7 @@ void FogParams::registerTweaks()
     Tweak::floatVar("Fog", "Global Density", &density, 0.0f, 1.0f, 0.001f);
     Tweak::floatVar("Fog", "Height Base", &heightBase, -200.0f, 500.0f);
     Tweak::floatVar("Fog", "Height Falloff", &heightFalloff, 0.0f, 1.0f, 0.002f);
+    Tweak::floatVar("Fog", "Terrain Follow", &terrainFollow, 0.0f, 1.0f, 0.01f);
     Tweak::color3("Fog", "Albedo", &albedo, &albedoIntensity);
     Tweak::floatVar("Fog", "Anisotropy", &anisotropy, -0.9f, 0.95f, 0.01f);
     Tweak::floatVar("Fog", "Range", &range, 1.0f, 1024.0f);

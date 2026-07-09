@@ -90,6 +90,10 @@ export struct FogParams
     float density = 0.020f;        // global extinction at the height base (1/m)
     float heightBase = 0.0f;       // world height where the global fog is densest
     float heightFalloff = 0.40f;   // exponential density falloff above the base (1/m)
+    float terrainFollow = 0.65f;   // fraction of the local terrain height added to the height base (needs a
+                                   // terrain height map, see Renderer::setFogTerrainHeightMap): 0 = flat fog,
+                                   // 1 = fog hugs the terrain at constant depth; in between it reaches higher
+                                   // on mountainsides but still clears the peaks
     glm::vec3 albedo = glm::vec3(1.0f, 1.0f, 1.0f);
     float albedoIntensity = 1.0f;  // > 1 is a non-physical gain (emissive-ish fog)
     float anisotropy = 0.15f;      // HG phase g (0 = isotropic, ->1 = forward scattering)
