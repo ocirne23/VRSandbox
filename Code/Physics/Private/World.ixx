@@ -50,6 +50,15 @@ public:
     };
     RayHit castRayClosest(const glm::vec3& origin, const glm::vec3& translation, uint64 maskBits = PhysicsLayers::All) const;
 
+    // Buoyancy: with a water surface set (the App wires the ocean's CPU height field), every dynamic
+    // body gets probe-based buoyancy + drag before each fixed step — bodies denser than water sink,
+    // lighter ones float and bob in the swell, tilted floaters right themselves (per-probe forces
+    // torque the body for free). fn(x, z) returns the water surface world Y at that column, or
+    // -FLT_MAX where there is no water. Density/drag are Tweaks under Physics/Buoyancy. An empty
+    // function disables the pass entirely.
+    using WaterSurfaceFn = std::function<float(float x, float z)>;
+    void setWaterSurface(WaterSurfaceFn fn) { m_waterSurface = std::move(fn); }
+
     // Contact/sensor begin/end events collected during update() (this frame's steps), reported as the
     // colliding bodies' userData pointers (Entity* for component-spawned bodies, null otherwise).
     // For sensor events userDataA is the sensor's body.
@@ -91,6 +100,8 @@ public:
 
 private:
 
+    void applyBuoyancy(); // per fixed step, before b3World_Step (box3d clears forces every step)
+
     uint32 m_worldHandle = 0; // b3WorldId bits
     bool m_initialized = false;
     bool m_paused = false;
@@ -103,6 +114,12 @@ private:
     glm::vec3 m_gravity = glm::vec3(0.0f, -9.81f, 0.0f);
     PhysicsBody m_staticBody;
     std::vector<ContactEvent> m_contactEvents;
+
+    // Buoyancy (see setWaterSurface)
+    WaterSurfaceFn m_waterSurface;
+    float m_waterDensity = 1000.0f;  // kg/m^3: fresh water; shapes denser than this sink
+    float m_waterLinearDrag = 3.0f;  // 1/s: drag on each submerged probe's point velocity
+    std::vector<uint64> m_buoyancyShapes; // per-step overlap scratch (b3StoreShapeId bits)
 
     // Debug draw tweaks (Physics/Debug)
     bool m_debugDrawEnabled = false;

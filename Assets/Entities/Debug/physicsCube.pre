@@ -12,6 +12,7 @@ Prefab physicsCube
 		HalfExtents 1 1 1
 		ContactEvents true
 		Restitution 0.1
+		Density 400
 	Component Audio
 		Sound Bloop
 			Select CycleStartRandom

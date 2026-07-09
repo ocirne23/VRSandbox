@@ -41,9 +41,18 @@ export namespace Procedural
 		// shoaling), the waterline grows a surf band, and waves never poke through land.
 		void update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ClimateMaps> terrain = nullptr);
 
+		// Water surface world Y at (x, z), CPU-evaluated from the GPU displacement readback (mirrors the
+		// vertex shader's cascade sum, shoaling fade and seabed clamp; ~2 frames of latency — invisible
+		// for physics). Returns -FLT_MAX where there is no water: ocean disabled, readback not primed,
+		// or terrain at/above sea level per the shore bake. This is the buoyancy height field the App
+		// wires into PhysicsWorld::setWaterSurface; keys 8/9's cubes bob in the swell through it.
+		float sampleWaterHeight(float x, float z) const;
+
 	private:
 		void rebuildGrid();
 		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& terrain);
+		float sampleShoreDepth(float x, float z) const;             // CPU copy of the baked shore map
+		glm::vec3 sampleDisplacement(glm::vec2 worldXZ, float depth) const; // shoal-faded cascade sum from the readback tile
 
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---
 		bool  m_enabled = false;
@@ -65,7 +74,7 @@ export namespace Procedural
 		float m_normalStrength = 1.0f;
 		glm::vec3 m_cascadeSizes = glm::vec3(384.0f, 47.0f, 6.3f); // FFT patch sizes (m)
 
-		glm::vec3 m_absorption = glm::vec3(0.42f, 0.085f, 0.04f);  // Beer-Lambert extinction (1/m)
+		glm::vec3 m_absorption = glm::vec3(0.897f, 0.082f, 0.15f);  // Beer-Lambert extinction (1/m)
 		glm::vec3 m_scatterColor = glm::vec3(0.047f, 0.1f, 0.15f);
 		float m_scatterStrength = 1.0f;
 		float m_roughness = 0.07f;
@@ -100,6 +109,13 @@ export namespace Procedural
 		float m_shoreBakedSeaLevel = 0.0f;
 		const ClimateMaps* m_shoreBakedMaps = nullptr;   // identity only (never dereferenced)
 		bool  m_shoreValid = false;
+		std::vector<float> m_shoreDepths;                // CPU copy of the active map (buoyancy queries)
+
+		// CPU copy of the GPU displacement readback tile, refreshed every update() inside the frame's
+		// fence-safe window — sampleWaterHeight can then run at ANY point in the frame (physics updates
+		// before beginFrame) without racing the GPU rewriting the slot's readback buffer.
+		std::vector<uint16> m_dispTile;                  // RGBA16F texels, res^2 per cascade
+		uint32 m_dispTileRes = 0;
 
 		bool m_gridDirty = true;
 

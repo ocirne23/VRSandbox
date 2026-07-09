@@ -155,6 +155,16 @@ public:
     // OceanParams shore center/range describing it (pass those via setOceanParams in the same frame).
     // Cheap: no GPU sync, no command-buffer re-record.
     void setOceanShoreMap(std::span<const float> depthTexels) { m_oceanSimPipeline.uploadShoreMap(depthTexels, m_swapChain.getCurrentFrameIndex()); }
+    // This frame slot's ocean displacement readback: RGBA16F texels (Dx, h, Dz, dDxz), outRes^2 per
+    // cascade, cascades packed consecutively. Safe to read between beginFrame (fence waited) and
+    // present (slot resubmits) — copy it out inside that window (Procedural::OceanRenderer does, for
+    // the buoyancy water-height queries); contents are ~2 frames old and only refresh while the ocean
+    // simulates.
+    std::span<const uint16> getOceanDisplacementReadback(uint32& outRes) const
+    {
+        outRes = OceanSimulationPipeline::READBACK_RES;
+        return m_oceanSimPipeline.getDisplacementReadback(m_swapChain.getCurrentFrameIndex());
+    }
     void setPostParams(const PostParams& post) { m_postParams = post; setHaveToRecordCommandBuffers(); }
 
     uint32 getNumMeshInstances() const { return m_meshInstanceCounter; }

@@ -177,6 +177,7 @@ namespace Procedural
 		{
 			std::vector<float> depths = m_bakeFuture.get();
 			renderer.setOceanShoreMap(depths);
+			m_shoreDepths = std::move(depths); // CPU copy: sampleShoreDepth (buoyancy) reads this
 			m_shoreCenter = m_bakePendingCenter;
 			m_shoreActiveRange = m_bakePendingRange;
 			m_shoreBakedSeaLevel = m_bakePendingSeaLevel;
@@ -278,5 +279,103 @@ namespace Procedural
 		m_node.setTransform(Transform(glm::vec3(px, m_seaLevel, pz), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
 
 		renderer.renderNode(m_node, RendererVKLayout::PASS_MAIN);
+
+		// Refresh the CPU copy of the GPU displacement readback inside this frame's fence-safe window
+		// (the slot's buffer is stable between beginFrame and present, and physics updates BEFORE
+		// beginFrame — so buoyancy must query an owned copy, not the live buffer).
+		uint32 tileRes = 0;
+		const std::span<const uint16> tile = renderer.getOceanDisplacementReadback(tileRes);
+		m_dispTile.assign(tile.begin(), tile.end());
+		m_dispTileRes = tileRes;
+	}
+
+	// FP16 -> FP32 (readback texels are RGBA16F). Fabian Giesen's half_to_float_fast: rebias the
+	// exponent in float position; the multiply trick renormalizes subnormals.
+	static float halfToFloat(uint16 h)
+	{
+		const uint32 shiftedExp = 0x7C00u << 13;
+		uint32 o = (uint32)(h & 0x7FFFu) << 13;
+		const uint32 exp = shiftedExp & o;
+		o += (127u - 15u) << 23;
+		if (exp == shiftedExp)
+			o += (128u - 16u) << 23; // inf/nan stays inf/nan
+		else if (exp == 0)
+		{
+			o += 1u << 23;
+			o = std::bit_cast<uint32>(std::bit_cast<float>(o) - std::bit_cast<float>((113u << 23)));
+		}
+		o |= (uint32)(h & 0x8000u) << 16;
+		return std::bit_cast<float>(o);
+	}
+
+	// Water depth (m) at (x, z) from the CPU shore-map copy; the open-ocean depth outside the baked
+	// region or with no shore data (mirrors oceanSampleShoreDepth in ocean_wave.inc.glsl).
+	float OceanRenderer::sampleShoreDepth(float x, float z) const
+	{
+		if (!m_shoreValid || m_shoreDepths.empty() || m_shoreActiveRange <= 1.0f)
+			return m_depth;
+		constexpr uint32 RES = RendererVKLayout::OCEAN_SHORE_RES;
+		const float u = (x - m_shoreCenter.x) / m_shoreActiveRange + 0.5f;
+		const float v = (z - m_shoreCenter.y) / m_shoreActiveRange + 0.5f;
+		if (u <= 0.0f || u >= 1.0f || v <= 0.0f || v >= 1.0f)
+			return m_depth;
+		const float tx = glm::clamp(u * (float)RES - 0.5f, 0.0f, (float)RES - 1.001f);
+		const float tz = glm::clamp(v * (float)RES - 0.5f, 0.0f, (float)RES - 1.001f);
+		const uint32 x0 = (uint32)tx, z0 = (uint32)tz;
+		const float fx = tx - (float)x0, fz = tz - (float)z0;
+		const auto at = [&](uint32 i, uint32 j) { return m_shoreDepths[(size_t)j * RES + i]; };
+		return glm::mix(glm::mix(at(x0, z0), at(x0 + 1, z0), fx),
+			glm::mix(at(x0, z0 + 1), at(x0 + 1, z0 + 1), fx), fz);
+	}
+
+	// Shoal-faded sum of all cascades' displacement at an undisplaced world XZ, bilinear-wrapped over
+	// the readback tile — the CPU mirror of oceanSampleDisplacement (at the readback mip's band limit).
+	glm::vec3 OceanRenderer::sampleDisplacement(glm::vec2 worldXZ, float depth) const
+	{
+		const uint32 res = m_dispTileRes;
+		const float shoal = glm::max(m_shoalScale, 0.0f);
+		glm::vec3 disp(0.0f);
+		for (uint32 c = 0; c < RendererVKLayout::OCEAN_CASCADES; ++c)
+		{
+			const float L = glm::max(m_cascadeSizes[c], 1.0f);
+			const float fade = glm::smoothstep(0.0f, glm::max(shoal * L, 0.01f), depth);
+			if (fade <= 0.0f)
+				continue;
+			// Bilinear with wrap (the FFT patch tiles); texel centers at integer + 0.5.
+			const glm::vec2 t = glm::fract(glm::vec2(worldXZ.x, worldXZ.y) / L) * (float)res - 0.5f;
+			const int x0 = (int)std::floor(t.x), z0 = (int)std::floor(t.y);
+			const float fx = t.x - (float)x0, fz = t.y - (float)z0;
+			const size_t layer = (size_t)c * res * res;
+			const auto fetch = [&](int i, int j) {
+				const uint32 xi = (uint32)(i + (int)res) % res, zi = (uint32)(j + (int)res) % res;
+				const uint16* texel = &m_dispTile[(layer + (size_t)zi * res + xi) * 4];
+				return glm::vec3(halfToFloat(texel[0]), halfToFloat(texel[1]), halfToFloat(texel[2])); // Dx, h, Dz
+			};
+			const glm::vec3 s = glm::mix(glm::mix(fetch(x0, z0), fetch(x0 + 1, z0), fx),
+				glm::mix(fetch(x0, z0 + 1), fetch(x0 + 1, z0 + 1), fx), fz);
+			disp += glm::vec3(s.x * m_choppiness, s.y, s.z * m_choppiness) * fade;
+		}
+		return disp;
+	}
+
+	float OceanRenderer::sampleWaterHeight(float x, float z) const
+	{
+		if (!m_enabled || m_dispTile.empty() || m_dispTileRes == 0)
+			return -FLT_MAX;
+		const float depth = sampleShoreDepth(x, z);
+		if (depth <= 0.05f)
+			return -FLT_MAX; // terrain at/above sea level: no water here
+		// The maps store where the UNDISPLACED grid point ENDS UP; a fixed world column needs the
+		// inverse. A few fixed-point iterations: find p whose displaced position lands on (x, z).
+		const glm::vec2 query(x, z);
+		glm::vec2 p = query;
+		for (int i = 0; i < 2; ++i)
+		{
+			const glm::vec3 d = sampleDisplacement(p, depth);
+			p = query - glm::vec2(d.x, d.z);
+		}
+		float h = sampleDisplacement(p, depth).y;
+		h = glm::max(h, 0.05f - depth); // seabed clamp, mirrors ocean_wave.inc.glsl
+		return m_seaLevel + h;
 	}
 }

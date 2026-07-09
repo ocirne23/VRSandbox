@@ -12,3 +12,4 @@ Prefab physicsSphere
 		HalfExtents 1 1 1
 		Friction 0.4
 		Restitution 0.4
+		Density 300

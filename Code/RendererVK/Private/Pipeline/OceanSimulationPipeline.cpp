@@ -296,6 +296,18 @@ void OceanSimulationPipeline::initialize()
         m_shoreStagingMapped[i] = m_shoreStaging[i].mapMemory();
     }
 
+    // Displacement readback: per frame slot, GPU-written (transfer dst), host-read for buoyancy.
+    // Coherent so the fence wait alone makes the copy visible (no invalidate path in Buffer).
+    // Zeroed so pre-first-simulation reads decode as flat water instead of garbage waves.
+    constexpr vk::DeviceSize readbackBytes = (vk::DeviceSize)READBACK_RES * READBACK_RES * CASCADES * 4 * sizeof(uint16);
+    for (uint32 i = 0; i < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++i)
+    {
+        (void)m_readbackBuffers[i].initialize(readbackBytes, vk::BufferUsageFlagBits2::eTransferDst,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, false, "OceanReadback");
+        m_readbackMapped[i] = m_readbackBuffers[i].mapMemory();
+        memset(m_readbackMapped[i].data(), 0, m_readbackMapped[i].size());
+    }
+
     ComputePipelineLayout spectrumLayout;
     buildSpectrumLayout(spectrumLayout);
     m_spectrumPipeline.initialize(spectrumLayout);
@@ -566,6 +578,40 @@ void OceanSimulationPipeline::record(CommandBuffer& commandBuffer, uint32 frameI
                 .subresourceRange = { vk::ImageAspectFlagBits::eColor, mip, 1, 0, MAPS_LAYERS },
             };
             cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &dstToSrc });
+        }
+
+        // ---- CPU readback: displacement layers' mip READBACK_MIP -> this slot's host buffer (buoyancy).
+        // The mip chain left every level TransferSrcOptimal, so the copy slots in before the final
+        // transition; the host barrier pairs with beginFrame's fence wait on this slot. ----
+        {
+            // The mip-chain barriers only chained Blit->Blit; the buffer copy reads in the COPY stage.
+            vk::ImageMemoryBarrier2 blitToCopy{
+                .srcStageMask = vk::PipelineStageFlagBits2::eBlit,
+                .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+                .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
+                .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+                .oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+                .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+                .image = m_mapsImage,
+                .subresourceRange = { vk::ImageAspectFlagBits::eColor, READBACK_MIP, 1, 0, CASCADES },
+            };
+            cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &blitToCopy });
+
+            const vk::BufferImageCopy region{
+                .imageSubresource = { vk::ImageAspectFlagBits::eColor, READBACK_MIP, 0, CASCADES },
+                .imageExtent = { READBACK_RES, READBACK_RES, 1 },
+            };
+            cmd.copyImageToBuffer(m_mapsImage, vk::ImageLayout::eTransferSrcOptimal,
+                m_readbackBuffers[frameIdx].getBuffer(), 1, &region);
+            vk::BufferMemoryBarrier2 toHost{
+                .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
+                .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+                .dstStageMask = vk::PipelineStageFlagBits2::eHost,
+                .dstAccessMask = vk::AccessFlagBits2::eHostRead,
+                .buffer = m_readbackBuffers[frameIdx].getBuffer(),
+                .size = vk::WholeSize,
+            };
+            cmd.pipelineBarrier2(vk::DependencyInfo{ .bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &toHost });
         }
 
         vk::ImageMemoryBarrier2 toSampled{

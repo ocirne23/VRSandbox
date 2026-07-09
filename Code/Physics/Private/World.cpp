@@ -44,6 +44,9 @@ bool PhysicsWorld::initialize()
     Tweak::intVar("Physics/World", "Sub Steps", &m_subSteps, 1, 16);
     Tweak::intVar("Physics/World", "Step Hz", &m_stepHz, 5, 120);
 
+    Tweak::floatVar("Physics/Buoyancy", "Density (kg/m3)", &m_waterDensity, 0.0f, 3000.0f, 10.0f);
+    Tweak::floatVar("Physics/Buoyancy", "Linear drag", &m_waterLinearDrag, 0.0f, 20.0f, 0.1f);
+
     Tweak::boolean("Physics/Debug", "Draw colliders", &m_debugDrawEnabled);
     Tweak::boolean("Physics/Debug", "Draw joints", &m_debugDrawJoints);
     Tweak::boolean("Physics/Debug", "Draw contacts", &m_debugDrawContacts);
@@ -112,6 +115,8 @@ void PhysicsWorld::update(double deltaSec)
     int steps = 0;
     while (m_accumulator >= step && steps < maxCatchUpSteps)
     {
+        if (m_waterSurface)
+            applyBuoyancy(); // box3d clears applied forces every step, so this runs per step
         b3World_Step(world, step, m_subSteps);
         ++m_stepCount;
         appendContactEvents(world, m_contactEvents);
@@ -120,6 +125,64 @@ void PhysicsWorld::update(double deltaSec)
     }
     if (m_accumulator >= step)
         m_accumulator = 0.0f; // drop the remainder after a hitch instead of spiraling
+}
+
+void PhysicsWorld::applyBuoyancy()
+{
+    // Probe-based buoyancy: every dynamic shape near the water splits its world AABB into a 2x2x2 grid
+    // of probes; each probe carries its share of the shape's EXACT volume (box3d mass data / density),
+    // scaled by how deep it sits, as an anti-gravity force at the probe point — Archimedes, and since
+    // the force applies off-center, righting torque and tumbling damping emerge for free — plus a drag
+    // force against the probe's point velocity (which damps rotation the same way). Broadphase does the
+    // body iteration (box3d has no body-list API): one whole-world AABB overlap, dynamics filtered, and
+    // a one-sample early out per shape keeps dry bodies at a single water query.
+    const b3WorldId world = std::bit_cast<b3WorldId>(m_worldHandle);
+
+    m_buoyancyShapes.clear();
+    constexpr float B = 1e9f;
+    const b3AABB everything{ { -B, -B, -B }, { B, B, B } };
+    b3World_OverlapAABB(world, everything, b3DefaultQueryFilter(),
+        [](b3ShapeId shape, void* context) {
+            static_cast<std::vector<uint64>*>(context)->push_back(b3StoreShapeId(shape));
+            return true;
+        }, &m_buoyancyShapes);
+
+    for (const uint64 shapeBits : m_buoyancyShapes)
+    {
+        const b3ShapeId shape = b3LoadShapeId(shapeBits);
+        const b3BodyId body = b3Shape_GetBody(shape);
+        if (b3Body_GetType(body) != b3_dynamicBody || b3Shape_IsSensor(shape))
+            continue;
+        const float density = b3Shape_GetDensity(shape);
+        if (density <= 0.0f)
+            continue;
+
+        const b3AABB aabb = b3Shape_GetAABB(shape);
+        // Early out: whole shape above the local surface (1m margin covers the wave slope across the AABB).
+        const float waterAtCenter = m_waterSurface(
+            (aabb.lowerBound.x + aabb.upperBound.x) * 0.5f, (aabb.lowerBound.z + aabb.upperBound.z) * 0.5f);
+        if (aabb.lowerBound.y > waterAtCenter + 1.0f)
+            continue;
+
+        const float volume = b3Shape_ComputeMassData(shape).mass / density;
+        const float cellVolume = volume * (1.0f / 8.0f);
+        const float cellHeight = glm::max((aabb.upperBound.y - aabb.lowerBound.y) * 0.5f, 0.01f);
+        const glm::vec3 lo = toGlm(aabb.lowerBound), hi = toGlm(aabb.upperBound);
+        for (uint32 i = 0; i < 8; ++i)
+        {
+            const glm::vec3 probe = glm::mix(lo, hi,
+                glm::vec3(0.25f) + 0.5f * glm::vec3(float(i & 1u), float((i >> 1) & 1u), float((i >> 2) & 1u)));
+            const float waterY = m_waterSurface(probe.x, probe.z);
+            const float submerged = glm::clamp((waterY - probe.y) / cellHeight + 0.5f, 0.0f, 1.0f);
+            if (submerged <= 0.0f)
+                continue;
+            const float displacedMass = m_waterDensity * cellVolume * submerged;
+            glm::vec3 force = -m_gravity * displacedMass; // Archimedes: weight of the displaced water, upward
+            const glm::vec3 pointVel = toGlm(b3Body_GetWorldPointVelocity(body, toB3(probe)));
+            force -= pointVel * (displacedMass * m_waterLinearDrag);
+            b3Body_ApplyForce(body, toB3(force), toB3(probe), true);
+        }
+    }
 }
 
 float PhysicsWorld::getInterpolationAlpha() const

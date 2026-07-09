@@ -69,6 +69,9 @@ int main()
     // pipeline variant. Declared after the renderer so it frees its RenderNode/container before the device.
     Procedural::OceanRenderer ocean;
     ocean.initialize();
+    // Buoyancy: dynamic bodies float in the ocean (keys 8/9's cubes/spheres bob in the swell). The ocean
+    // CPU-samples its GPU displacement readback; -FLT_MAX where there is no water gates the whole pass.
+    physics.setWaterSurface([&ocean](float x, float z) { return ocean.sampleWaterHeight(x, z); });
 
     VrInput& vrInput = Globals::vrInput;
     VRFreeFlyCameraController vrCameraController;
@@ -341,5 +344,6 @@ int main()
     }
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
+    physics.setWaterSurface({}); // the callback captures the stack-local ocean; drop it before it dies
     return 0;
 }

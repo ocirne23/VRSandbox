@@ -68,6 +68,20 @@ public:
     vk::ImageView getShoreView() const { return m_shoreView[m_shoreActive]; }
     vk::Sampler getShoreSampler() const { return m_shoreSampler.getSampler(); }
 
+    // CPU displacement readback (buoyancy): each simulated frame copies the displacement layers' mip
+    // READBACK_MIP into that frame slot's host-visible buffer — a coarse tile is all physics needs (the
+    // swell moves bodies; sub-texel chop doesn't). Read the CURRENT slot only after beginFrame's fence
+    // wait and only until that slot resubmits (Procedural::OceanRenderer copies it out right away);
+    // contents are frame N-2's ocean, imperceptible for bobbing. Texels are RGBA16F (Dx, h, Dz, dDxz),
+    // READBACK_RES^2 per cascade, cascades packed consecutively.
+    static constexpr uint32 READBACK_MIP = 2;
+    static constexpr uint32 READBACK_RES = RendererVKLayout::OCEAN_FFT_SIZE >> READBACK_MIP;
+    std::span<const uint16> getDisplacementReadback(uint32 frameIdx) const
+    {
+        const std::span<uint8> mapped = m_readbackMapped[frameIdx];
+        return { reinterpret_cast<const uint16*>(mapped.data()), mapped.size() / sizeof(uint16) };
+    }
+
 private:
     static constexpr uint32 N = RendererVKLayout::OCEAN_FFT_SIZE;
     static constexpr uint32 CASCADES = RendererVKLayout::OCEAN_CASCADES;
@@ -123,6 +137,10 @@ private:
     int  m_shoreUploadSlot = -1; // staging slot holding a not-yet-recorded upload (-1 = none)
     uint32 m_shoreActive = 0;
     bool m_shoreFlipPending = false;
+
+    // Displacement readback (see getDisplacementReadback). Host-visible + coherent, persistently mapped.
+    std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_readbackBuffers;
+    std::array<std::span<uint8>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_readbackMapped;
 
     Sampler m_mapsSampler;  // repeat + trilinear + aniso (the default engine sampler)
     Sampler m_shoreSampler; // clamp-to-edge: the shore map is a world-region snapshot, not a tiling patch
