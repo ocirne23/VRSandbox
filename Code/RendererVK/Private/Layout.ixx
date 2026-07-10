@@ -75,8 +75,10 @@ export namespace RendererVKLayout
     // FFT ocean simulation (OceanSimulationPipeline / ocean_*.cs.glsl). Injected into every shader compile.
     constexpr uint32 OCEAN_FFT_SIZE = 512; // FFT grid resolution per cascade (power of two)
     constexpr uint32 OCEAN_CASCADES = 3;   // spectral band-split cascades (different patch sizes)
-    constexpr uint32 OCEAN_SHORE_RES = 2048; // shore water-depth map resolution (CPU-baked from the terrain
-                                             // height field; Renderer::setOceanShoreMap expects RES*RES floats)
+    constexpr uint32 OCEAN_SHORE_RES = 1024; // shore map resolution (CPU-baked; RES*RES RGBA texels: terrain
+                                             // height, water level, flow dir, spare). Halved from 2048 when
+                                             // the map went RG->RGBA so its memory stayed flat (~0.5m -> 1m
+                                             // texels over the default 1km range)
 
     struct MeshVertex
     {
@@ -253,7 +255,8 @@ export namespace RendererVKLayout
         glm::vec4 oceanParams6;    // x = glint mip bias (negative = sharper shading normals),
                                    // y = glint variance filter scale (spec AA + LEAN roughness), zw unused
         glm::vec4 terrainFade;     // TERRAIN variant edge fade: x = fade-start dist, y = fade-end dist
-                                   // (radial from camera XZ), z = target height (sea level). y<=x disables.
+                                   // (radial from camera XZ), z = target height (sea level), w = extra drop
+                                   // below z at the edge (avoids z-fighting the ocean). y<=x disables.
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

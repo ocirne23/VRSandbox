@@ -165,7 +165,7 @@ bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipeli
         .flags = {},
         .depthTestEnable = layout.depthTestEnable ? vk::True : vk::False,
         .depthWriteEnable = layout.depthWriteEnable ? vk::True : vk::False,
-        .depthCompareOp = vk::CompareOp::eLess,
+        .depthCompareOp = layout.depthCompareOp,
         .depthBoundsTestEnable = vk::False,
         .stencilTestEnable = vk::False,
         //	.front = stencilOpState,

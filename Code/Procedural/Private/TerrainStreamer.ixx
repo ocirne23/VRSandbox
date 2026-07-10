@@ -7,7 +7,7 @@ import Core.Transform;
 
 import RendererVK;
 
-import :Climate;
+import :TerrainSampler;
 import :TerrainGenerator;
 import :TerrainChunk;
 import :HeightMapBaker;
@@ -37,7 +37,7 @@ export namespace Procedural
 		// ocean's shore-depth bake). nullptr while terrain rendering is disabled — consumers treat that
 		// as "no terrain" rather than sampling a field that isn't drawn. Thread-safe; the shared_ptr
 		// keeps the maps valid across config rebuilds (workers holding the old maps finish against them).
-		std::shared_ptr<const ClimateMaps> activeClimateMaps() { return m_enabled ? currentMaps() : nullptr; }
+		std::shared_ptr<const ITerrainSampler> activeClimateMaps() { return m_enabled ? currentMaps() : nullptr; }
 
 	private:
 		struct Request
@@ -45,7 +45,7 @@ export namespace Procedural
 			uint64 key = 0;
 			uint32 generation = 0;
 			ChunkParams params;
-			std::shared_ptr<const ClimateMaps> maps;
+			std::shared_ptr<const ITerrainSampler> maps;
 		};
 
 		struct Result
@@ -66,15 +66,16 @@ export namespace Procedural
 		};
 
 		void workerLoop();
-		void rebuildMaps();                             // (re)builds ClimateMaps from the tweak-backed config
+		void rebuildMaps();                             // (re)builds the active generator from the tweak-backed config
 		void clearResidents();
-		std::shared_ptr<const ClimateMaps> currentMaps();
+		std::shared_ptr<const ITerrainSampler> currentMaps();
 		// Bakes/refreshes the fog terrain height map around the camera (Renderer::setFogTerrainHeightMap);
 		// maps == nullptr means "no terrain" and clears the map. See the .cpp for the bake scheme.
-		void updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& maps);
+		void updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& maps);
 
-		// --- Tweak-backed configuration (source of truth; ClimateMaps/ChunkParams are built from these) ---
+		// --- Tweak-backed configuration (source of truth; the generator/ChunkParams are built from these) ---
 		bool  m_enabled = false;
+		int   m_generator = 1;  // 0 = V1 Climate (continents + lakes), 1 = V2 Biome (biome field first)
 		int   m_seed = 62500;
 		float m_chunkSize = 128.0f;
 		int   m_lod0Res = 90;
@@ -101,17 +102,45 @@ export namespace Procedural
 		float  m_networkCell = 1200.0f;    // lake lattice spacing (m): smaller = more (and smaller) lakes
 		float  m_lakeCoverage = 0.5f;      // fraction of lattice local-minima that hold a lake
 		float  m_lakeDepth = 8.0f;
-		float  m_fogFrequency = 0.0003f;   // regional fog thickness (fog map channel B)
+		float  m_fogFrequency = 0.0003f;   // regional fog thickness (fog map channel B; V1 only)
 		float  m_fogCoverage = 0.5f;
+
+		// --- V2 (biome-first) generator ---
+		float  m_v2BiomeSize = 512.0f;    // typical biome extent (m)
+		float  m_v2BiomeRes = 4.0f;       // biome-field texels across one biome (texel = size/resolution)
+		float  m_v2BiomeBlend = 1.0f;      // blend width in texels: gradient width of ALL derived fields
+		float  m_v2BorderWarp = 350.0f;    // domain warp on the biome lookup (wiggly borders)
+		float  m_v2OceanFraction = 0.32f;  // fraction of the world that is Ocean
+		float  m_v2ContinentFreq = 0.00004f; // continent/ocean scale (~25km: few, huge oceans)
+		float  m_v2InlandRise = 120.0f;    // altitude gain (m) from coast to deep inland
+		float  m_v2OceanDeepen = 40.0f;    // extra seabed depth (m) toward mid-ocean
+		float  m_v2TempLapse = 0.0012f;    // temperature drop per meter of altitude (snowy peaks)
+		float  m_v2ClimateBandAmp = 0.25f; // continent-scale hot/cold band strength
+		float  m_v2HeightScale = 1.0f;     // global multiplier on the biome height table
+		float  m_v2AltitudeTexel = 64.0f;  // altitude map texel size (m): between biome map and fine fields
+		float  m_v2AltitudeAmp = 60.0f;    // large-scale rolling-relief swing (m)
+		float  m_v2AltitudeFreq = 0.0002f; // relief noise frequency (cycles/m)
+		float  m_v2PeakAmp = 250.0f;       // fantasy peak height (m); per-biome relief scale damps flats
+		float  m_v2PeakThreshold = 0.5f;   // ridged-field value where peaks start (higher = rarer ranges)
+		float  m_v2PeakSharpness = 1.8f;   // peak curve power (higher = steeper)
+		float  m_v2PeakFreq = 0.00025f;    // range placement scale (~4km: more, smaller ranges)
+		float  m_v2MtnDetailAmp = 90.0f;   // altitude-masked ridge detail on mountains (m)
+		float  m_v2MtnDetailFreq = 0.004f; // ridge detail scale (~250m features)
+		float  m_v2MtnMaskStart = 20.0f;   // altitude above sea (m) where mountain detail fades in
+		float  m_v2MtnMaskFull = 120.0f;   // altitude where it reaches full amplitude
+		bool   m_v2Erosion = false;         // pass 3: water accumulation + erosion (rivers/lakes via humidity)
+		float  m_v2ErosionStrength = 6.0f; // max channel carve depth (m)
+		float  m_v2ErosionRegion = 2048.0f;// simulation tile size (m); rivers stay within a tile
 
 		bool m_configDirty = false; // set by Tweak onChange; consumed at the top of update()
 
-		// --- Fog terrain height map (volumetric fog terrain-following + ocean shore fallback) ---
-		bool  m_fogMapEnabled = true;
-		float m_fogMapRange = 2048.0f;     // near cascade world size (m), centered on the camera
-		float m_fogMapFarRange = 16384.0f; // far cascade world size (m; same texel count, coarser texels)
-		HeightMapBaker m_fogMapBaker;
-		bool  m_fogMapUploaded = false;    // a map is live in the renderer (cleared on disable)
+		// --- Shared terrain-data map (fog terrain-following + regional thickness, ocean shore fallback,
+		// terrain coloring; height / water level / fog|falloff|temp|hum / altitude per texel) ---
+		bool  m_terrainMapEnabled = true;
+		float m_terrainMapRange = 2048.0f;     // near cascade world size (m), centered on the camera
+		float m_terrainMapFarRange = 16384.0f; // far cascade world size (m; same texel count, coarser texels)
+		HeightMapBaker m_terrainMapBaker;
+		bool  m_terrainMapUploaded = false;    // a map is live in the renderer (cleared on disable)
 
 		// --- Threading ---
 		std::thread             m_worker;
@@ -120,7 +149,7 @@ export namespace Procedural
 		std::deque<Request>     m_requests;
 		std::vector<Result>     m_results;      // filled by worker, drained on the main thread
 		std::vector<Result>     m_readyBacklog; // main-thread only: generated chunks over the per-frame upload cap
-		std::shared_ptr<const ClimateMaps> m_maps;
+		std::shared_ptr<const ITerrainSampler> m_maps;
 		uint32                  m_generation = 0;
 		bool                    m_running = false;
 

@@ -217,22 +217,26 @@ void main()
     const float viewZ = volSliceToViewZ((float(cell.z) + jz) / float(VOL_FROXEL_Z));
 
     // World position: unproject the viewport-local UV at two depths for the ray, scale by view depth.
-    // mvp/invMvp are unjittered (the TAA jitter only applies to rasterization). A second, UNJITTERED
-    // froxel-center ray feeds the temporal reprojection below — reprojecting the jittered sample point
-    // would smear the per-frame jitter into the history lookup itself.
+    // REVERSED-Z: NDC z runs near = 1 to far = 0, so the "near" unproject point uses the HIGHER z (with
+    // the old convention flipped, dir pointed backwards and every froxel sampled its density mirrored
+    // behind the camera — sky froxels read ground-level fog). mvp/invMvp are unjittered (the TAA jitter
+    // only applies to rasterization). A second, UNJITTERED froxel-center ray feeds the temporal
+    // reprojection below — reprojecting the jittered sample point would smear the per-frame jitter into
+    // the history lookup itself.
+    const float ZN = 0.9, ZF = 0.1; // reversed-Z NDC z of the ray's near/far unproject points
     const vec4 clipNdc = vec4(vpUv.x * 2.0 - 1.0, 1.0 - vpUv.y * 2.0, 0.0, 0.0);
-    vec4 pN = u_invMvp * vec4(clipNdc.xy, 0.1, 1.0); pN.xyz /= pN.w;
-    vec4 pF = u_invMvp * vec4(clipNdc.xy, 0.9, 1.0); pF.xyz /= pF.w;
+    vec4 pN = u_invMvp * vec4(clipNdc.xy, ZN, 1.0); pN.xyz /= pN.w;
+    vec4 pF = u_invMvp * vec4(clipNdc.xy, ZF, 1.0); pF.xyz /= pF.w;
     const vec3 dir = normalize(pF.xyz - pN.xyz);
-    vec4 cN = u_invMvp * vec4(0.0, 0.0, 0.1, 1.0); cN.xyz /= cN.w;
-    vec4 cF = u_invMvp * vec4(0.0, 0.0, 0.9, 1.0); cF.xyz /= cF.w;
+    vec4 cN = u_invMvp * vec4(0.0, 0.0, ZN, 1.0); cN.xyz /= cN.w;
+    vec4 cF = u_invMvp * vec4(0.0, 0.0, ZF, 1.0); cF.xyz /= cF.w;
     const vec3 camFwd = normalize(cF.xyz - cN.xyz);
     const vec3 worldPos = u_viewPos + dir * (viewZ / max(dot(dir, camFwd), 1e-3));
 
     const vec2 centerUv = (vec2(cell.xy) + 0.5) / vec2(VOL_FROXEL_X, VOL_FROXEL_Y);
     const vec2 centerNdc = vec2(centerUv.x * 2.0 - 1.0, 1.0 - centerUv.y * 2.0);
-    vec4 qN = u_invMvp * vec4(centerNdc, 0.1, 1.0); qN.xyz /= qN.w;
-    vec4 qF = u_invMvp * vec4(centerNdc, 0.9, 1.0); qF.xyz /= qF.w;
+    vec4 qN = u_invMvp * vec4(centerNdc, ZN, 1.0); qN.xyz /= qN.w;
+    vec4 qF = u_invMvp * vec4(centerNdc, ZF, 1.0); qF.xyz /= qF.w;
     const vec3 centerDir = normalize(qF.xyz - qN.xyz);
 
     // ---- Media density + scattering albedo ------------------------------------------------------------
@@ -241,20 +245,27 @@ void main()
     // rising slower than the ground under it). The height is clamped up to the baked sea level so fog
     // rests on the water surface instead of sinking over the seabed.
     float heightBase = u_fogParams0.y;
-    float regionMul = 1.0; // baked regional fog-thickness modulation (fog terrain map, packed channel B)
+    float heightFalloff = u_fogParams0.z;
+    float regionMul = 1.0; // baked regional fog-thickness modulation (terrain data map, packed channel B)
     if (terrainHeightMapPresent())
     {
         if (u_fogParams3.x > 0.0)
             heightBase += u_fogParams3.x * max(terrainHeightAt(worldPos.xz), u_fogParams5.w);
         if (u_fogParams6.z > 0.0)
-            regionMul = mix(1.0, terrainClimateAt(worldPos.xz).x, u_fogParams6.z);
+        {
+            // Regional climate: x = fog thickness (density multiplier), y = height-falloff multiplier
+            // (fog hugs the ground in one region, towers in another), both eased in by Region strength.
+            const vec4 climate = terrainClimateNearestAt(worldPos.xz);
+            regionMul = mix(1.0, climate.x, u_fogParams6.z);
+            heightFalloff *= mix(1.0, climate.y, u_fogParams6.z);
+        }
     }
     // Height density = the analytic mean over this slice's segment of the sample ray (see heightFogMean),
     // not a point sample at worldPos.
     const float tScale = 1.0 / max(dot(dir, camFwd), 1e-3);
     const float yA = u_viewPos.y + dir.y * (volSliceToViewZ(float(cell.z) / float(VOL_FROXEL_Z)) * tScale);
     const float yB = u_viewPos.y + dir.y * (volSliceToViewZ(float(cell.z + 1) / float(VOL_FROXEL_Z)) * tScale);
-    const float heightDensity = u_fogParams0.x * heightFogMean(yA, yB, heightBase, u_fogParams0.z) * regionMul;
+    const float heightDensity = u_fogParams0.x * heightFogMean(yA, yB, heightBase, heightFalloff) * regionMul;
 
     // Density noise fades out where one noise wavelength drops under the froxel footprint (sub-froxel
     // noise is pure aliasing the temporal blend turns into shimmer; its mean is 1) and is skipped

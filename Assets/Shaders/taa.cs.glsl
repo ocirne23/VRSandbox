@@ -57,16 +57,16 @@ void main()
         return;
     }
 
-    // Sky pixels (the sky sphere is excluded from the G-buffer, so its depth stays at the far plane)
-    // reproject AT the far plane: the reprojection is then purely rotational (parallax-free, correct for
-    // content at infinity) and the jittered sky raster still accumulates instead of visibly shaking.
-    const bool sky = depth >= 1.0;
-    const vec3 worldPos = worldPosFromDepth(uv, min(depth, 1.0)); // disocclusion test only
+    // Sky pixels (the sky sphere is excluded from the G-buffer, so its depth stays at the cleared far
+    // plane — 0.0 under reversed-Z) reproject AT the far plane: the reprojection is then purely rotational
+    // (parallax-free, correct for content at infinity) and the jittered sky raster still accumulates.
+    const bool sky = depth <= 0.0;
+    const vec3 worldPos = worldPosFromDepth(uv, depth); // disocclusion test only
     float clipW;
     // Clip-space reprojection (u_reprojClip): the world-space round trip drifts pixel-scale away from
     // the world origin, which made TAA fetch history off-target and turned every stochastic input
     // (jitter accumulation, shadow dither, RTAO, sky clouds) into visible per-frame noise.
-    const vec2 prevUv = prevScreenUVClip(uv, min(depth, 1.0), clipW);
+    const vec2 prevUv = prevScreenUVClip(uv, depth, clipW);
 
     const bool histValid = clipW > 0.0 && insideViewport(prevUv);
     if (!histValid)
@@ -101,10 +101,10 @@ void main()
     if (sky)
     {
         // Sky accumulates against sky only; geometry there last frame means a disocclusion.
-        if (prevDepth < 1.0)
+        if (prevDepth > 0.0)
             fb = 0.0;
     }
-    else if (prevDepth < 1.0)
+    else if (prevDepth > 0.0)
     {
         const vec3 prevWorld = worldPosFromDepthMat(prevUv, prevDepth, u_prevInvMvp);
         const float thresh = 0.05 * (1.0 + distance(u_viewPos, worldPos));

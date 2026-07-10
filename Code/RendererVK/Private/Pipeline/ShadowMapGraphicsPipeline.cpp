@@ -21,6 +21,7 @@ void ShadowMapGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& layo
     layout.fragmentShader.text = FileSystem::readFileStr(layout.fragmentShader.debugFilePath);
 
     layout.depthOnly = true;
+    layout.depthCompareOp = vk::CompareOp::eLess; // shadow ortho projections stay standard-Z (not reversed)
     layout.depthBiasEnable = true;
     layout.depthBiasConstantFactor = 1.25f; // slope-scaled bias fights shadow acne on lit slopes
     layout.depthBiasSlopeFactor = 2.5f;

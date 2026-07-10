@@ -139,8 +139,8 @@ namespace Procedural
 					if (d >= r * 1.7f)
 						continue;
 					const float level = e0 - 1.0f;
-					const float mask = 1.0f - glm::smoothstep(0.4f * r, r, d);
-					h = glm::mix(h, glm::min(h, level - m_cfg.lakeDepth), mask); // basin carve
+					const float mask2 = 1.0f - glm::smoothstep(0.4f * r, r, d);
+					h = glm::mix(h, glm::min(h, level - m_cfg.lakeDepth), mask2); // basin carve
 					if (outWaterLevel)
 					{
 						// FLAT water level held past the basin rim; the terrain cuts the shoreline (the
@@ -188,8 +188,8 @@ namespace Procedural
 	{
 		const float base = m_temperature.fbm((float)(worldX * m_cfg.climateFrequency), (float)(worldZ * m_cfg.climateFrequency), 4) * 0.5f + 0.5f;
 		const float altitude = sampleHeight(worldX, worldZ) - m_cfg.seaLevel;
-		const float t = base - glm::max(0.0f, altitude) * m_cfg.lapseRate;
-		return glm::clamp(t, 0.0f, 1.0f);
+		const float t01 = glm::clamp(base - glm::max(0.0f, altitude) * m_cfg.lapseRate, 0.0f, 1.0f);
+		return TEMPERATURE_MIN_C + t01 * (TEMPERATURE_MAX_C - TEMPERATURE_MIN_C); // sampler contract: Celsius
 	}
 
 	float ClimateMaps::sampleHumidity(double worldX, double worldZ) const

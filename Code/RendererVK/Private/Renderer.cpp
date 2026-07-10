@@ -120,7 +120,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_oceanSimPipeline.initialize();
     m_volumetricFogPipeline.initialize();
     m_volumetricFogPipeline.initializeApply(sceneRenderPass, m_sceneViewCount);
-    m_oceanShoreMap.initialize(RendererVKLayout::OCEAN_SHORE_RES, 1, 2, "OceanShore"); // RG: terrain height + water level
+    m_oceanShoreMap.initialize(RendererVKLayout::OCEAN_SHORE_RES, 1, 4, "OceanShore"); // RGBA: terrain height, water level, flow dir (8b, nearest), spare
     m_fogTerrainMap.initialize(RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4, "FogTerrainHeight"); // RGBA: terrain height, water level, fog thickness, spare
     m_taaPipeline.initialize(ext.width, ext.height, m_sceneViewCount);
     m_eyeAdaptationPipeline.initialize();
@@ -433,9 +433,10 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     // In VR the "centre view" (used for culling, GI region, shadow cascade fit, and the shared screen-space
     // froxel fog volume) uses a head-centred projection spanning the union of both eyes' FOV, so it covers
     // everything either eye renders. Desktop uses the plain camera perspective.
-    const glm::mat4x4 projection = Globals::openXR.isEnabled()
+    const glm::mat4x4 projection = reverseZProjection(Globals::openXR.isEnabled()
         ? Globals::openXR.getCombinedProjection(camera.near, camera.far)
-        : glm::perspective(glm::radians(camera.fovDeg), (float)viewportSize.x / (float)viewportSize.y, camera.near, camera.far);
+        : glm::perspective(glm::radians(camera.fovDeg), (float)viewportSize.x / (float)viewportSize.y, camera.near, camera.far),
+        camera.near, camera.far);
     glm::mat4 viewMatrix = camera.viewMatrix;
 
     glm::vec2 taaJitterNdc(0.0f);
@@ -472,7 +473,9 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     // exactly, leaving a near-identity matrix that survives float32 storage at any camera position.
     centerView.reprojClip = glm::mat4(glm::dmat4(centerView.prevMvp) * centerInvMvpD);
     centerView.viewPos = glm::vec4(camera.position, 1.0f);
-    ubo.frustum.fromMatrix(centerView.mvp);
+    // ZO plane extraction (the projection is reversed-Z [0,1] clip; the near/far plane slots swap roles
+    // under the reversal but the extracted volume is identical, so all cull consumers stay correct).
+    ubo.frustum.fromMatrixZO(centerView.mvp);
     m_centerViewProj = centerView.mvp;
 
     if (Globals::openXR.isEnabled())
@@ -2136,9 +2139,10 @@ void Renderer::recordCommandBuffers()
         }
         SceneColor& sceneColor = frameData.sceneColor;
         GBuffer& gbuffer = frameData.gbuffer;
-        std::array<vk::ClearValue, 2> gbufferClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
+        // Reversed-Z: the far plane / "no geometry" depth is 0.0 (shadow maps stay standard, cleared 1.0).
+        std::array<vk::ClearValue, 2> gbufferClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } }, vk::ClearDepthStencilValue{ 0.0f, 0 } };
         const vk::Rect2D gbufferArea{ .offset = vk::Offset2D{ 0, 0 }, .extent = vk::Extent2D{ gbuffer.getWidth(), gbuffer.getHeight() } };
-        std::array<vk::ClearValue, 2> sceneClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.5f, 0.7f, 0.9f, 1.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
+        std::array<vk::ClearValue, 2> sceneClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.5f, 0.7f, 0.9f, 1.0f } }, vk::ClearDepthStencilValue{ 0.0f, 0 } };
         const vk::Rect2D sceneArea{ .offset = vk::Offset2D{ m_viewportRect.min.x, m_viewportRect.min.y }, .extent = vk::Extent2D{ sceneColor.getWidth() - m_viewportRect.min.x, sceneColor.getHeight() - m_viewportRect.min.y } };
         const vk::AccelerationStructureKHR tlas = m_accelStructure.getTlas(frameIdx);
 
@@ -2214,7 +2218,7 @@ void Renderer::recordCommandBuffers()
             const vk::Extent2D ext = m_swapChain.getLayout().extent;
             for (uint32 eye = 0; eye < 2; ++eye)
             {
-                std::array<vk::ClearValue, 2> eyeClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 1.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
+                std::array<vk::ClearValue, 2> eyeClears{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 1.0f } }, vk::ClearDepthStencilValue{ 0.0f, 0 } };
                 const vk::RenderPassBeginInfo eyeCompositeBegin{
                     .renderPass = m_renderPass.getRenderPass(),
                     .framebuffer = m_eyeFramebuffer[eye],
@@ -2309,7 +2313,7 @@ void Renderer::recordCommandBuffers()
     }
 
     // Swapchain render pass: composite the resolved scene into the swapchain, then ImGui on top.
-    constexpr std::array<vk::ClearValue, 2> clearValues{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } }, vk::ClearDepthStencilValue{ 1.0f, 0 } };
+    constexpr std::array<vk::ClearValue, 2> clearValues{ vk::ClearColorValue{ std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 0.0f } }, vk::ClearDepthStencilValue{ 0.0f, 0 } };
     const vk::RenderPassBeginInfo renderPassBeginInfo{
         .renderPass = m_renderPass.getRenderPass(),
         .framebuffer = m_framebuffers.getFramebuffer(m_swapChain.getCurrentImageIdx()),

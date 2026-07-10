@@ -2,7 +2,7 @@ export module Procedural:TerrainGenerator;
 
 import Core;
 import Core.glm;
-import :Climate;
+import :TerrainSampler;
 import :TerrainChunk;
 
 export namespace Procedural
@@ -16,9 +16,9 @@ export namespace Procedural
 		float  skirtDepth = 8.0f; // how far border skirt walls drop below the surface
 	};
 
-	// Generates one chunk's surface mesh (geometry only). Pure and thread-safe given a shared ClimateMaps.
-	// The height field is sampled in world space (so heights agree across chunk/LOD boundaries) and
-	// includes the seabed below sea level — the OceanRenderer draws the water over it and bakes its
-	// shore-depth map from the same field.
-	void generateChunk(const ClimateMaps& maps, const ChunkParams& params, TerrainChunkMesh& out);
+	// Generates one chunk's surface mesh (geometry only) from any generator's fields. Pure and thread-safe
+	// given a shared sampler. The height field is sampled in world space (so heights agree across chunk/LOD
+	// boundaries) and includes the seabed below sea level — the OceanRenderer draws the water over it and
+	// bakes its shore-depth map from the same field.
+	void generateChunk(const ITerrainSampler& maps, const ChunkParams& params, TerrainChunkMesh& out);
 }

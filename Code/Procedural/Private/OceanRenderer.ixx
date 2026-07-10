@@ -7,7 +7,7 @@ import Core.Transform;
 
 import RendererVK;
 
-import :Climate;
+import :TerrainSampler;
 import :HeightMapBaker;
 
 export namespace Procedural
@@ -40,7 +40,7 @@ export namespace Procedural
 		// (TerrainStreamer::activeClimateMaps(), nullptr = no terrain): with it the ocean bakes a coarse
 		// water-depth map around the camera on a worker thread — shallow water fades the waves (fake
 		// shoaling), the waterline grows a surf band, and waves never poke through land.
-		void update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ClimateMaps> terrain = nullptr);
+		void update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain = nullptr);
 
 		// Water surface world Y at (x, z), CPU-evaluated from the GPU displacement readback (mirrors the
 		// vertex shader's cascade sum, shoaling fade and seabed clamp; ~2 frames of latency — invisible
@@ -51,7 +51,7 @@ export namespace Procedural
 
 	private:
 		void rebuildGrid();
-		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& terrain);
+		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain);
 		glm::vec2 sampleShoreData(float x, float z) const;          // (water depth, water level) from the CPU shore copy
 		float sampleShoreDepth(float x, float z) const;             // CPU copy of the baked shore map
 		glm::vec3 sampleDisplacement(glm::vec2 worldXZ, float depth) const; // shoal-faded cascade sum from the readback tile
@@ -108,7 +108,7 @@ export namespace Procedural
 		glm::vec2 m_shoreCenter = glm::vec2(0.0f); // region of the ACTIVE (uploaded) map
 		float m_shoreActiveRange = 0.0f;
 		bool  m_shoreValid = false;
-		std::vector<float> m_shoreHeights;         // CPU copy of the active map: interleaved (terrain height, water level) pairs
+		std::vector<float> m_shoreHeights;         // CPU copy of the active map: RGBA texels (terrain height, water level, flow, spare)
 
 		// CPU copy of the GPU displacement readback tile, refreshed every update() inside the frame's
 		// fence-safe window — sampleWaterHeight can then run at ANY point in the frame (physics updates

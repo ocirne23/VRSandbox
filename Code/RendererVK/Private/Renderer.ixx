@@ -148,18 +148,21 @@ public:
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
-    // Terrain edge fade (TERRAIN pipeline variant): chunk vertices lerp their height toward targetHeight as
-    // their horizontal distance from the camera runs from startDist to endDist, hiding the streaming
-    // generation-boundary pop-in. endDist <= startDist disables it. Set per frame by the terrain streamer.
-    void setTerrainFade(float startDist, float endDist, float targetHeight) { m_terrainFade = glm::vec4(startDist, endDist, targetHeight, 0.0f); }
+    // Terrain edge fade (TERRAIN pipeline variant): chunk vertices lerp their height toward targetHeight
+    // minus edgeDrop as their horizontal distance from the camera runs from startDist to endDist, hiding
+    // the streaming generation-boundary pop-in. targetHeight also feeds the terrain shader's sea level
+    // (coloring), so edgeDrop is separate: sinking the fade a few meters under the ocean surface keeps the
+    // far edge from z-fighting the coplanar calm water. endDist <= startDist disables it. Set per frame.
+    void setTerrainFade(float startDist, float endDist, float targetHeight, float edgeDrop = 0.0f) { m_terrainFade = glm::vec4(startDist, endDist, targetHeight, edgeDrop); }
     // Flipping OceanParams::hitLighting rebuilds the ocean fragment variant (GPU idle + shader reload).
     void setOceanParams(const OceanParams& ocean);
-    // Replaces the ocean's shore map (OCEAN_SHORE_RES^2 RG texel pairs, interleaved floats: R = raw
+    // Replaces the ocean's shore map (OCEAN_SHORE_RES^2 RGBA texel quads, interleaved floats: R = raw
     // world-space terrain height, G = water surface level — sea level over the open ocean, higher where
-    // an elevated water table forms lakes/rivers) covering worldSize meters centered on centerXZ. The
-    // shaders derive the water depth live as water level - height, and the ocean clipmap lifts its
-    // vertices by water level - sea level. Staged ping-pong (BakedWorldMap): active next frame together
-    // with its UBO center/range; no GPU sync, no command-buffer re-record.
+    // rivers/lakes sit at altitude, B = 8-bit river flow direction driving the local wave-travel rotation
+    // (0 = none), A = spare) covering worldSize meters centered on centerXZ. The shaders derive the water
+    // depth live as water level - height, and the ocean clipmap lifts its vertices by water level - sea
+    // level. Staged ping-pong (BakedWorldMap): active next frame together with its UBO center/range; no
+    // GPU sync, no command-buffer re-record.
     void setOceanShoreMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, float worldSize) { m_oceanShoreMap.upload(heightTexels, centerXZ, glm::vec2(worldSize, 0.0f), 0.0f, m_swapChain.getCurrentFrameIndex()); }
     void clearOceanShoreMap() { m_oceanShoreMap.clear(); } // ocean falls back to the fog terrain map / open-ocean depth
     // Replaces the fog terrain map (FOG_TERRAIN_CASCADES layers of FOG_TERRAIN_RES^2 RGBA texel quads,

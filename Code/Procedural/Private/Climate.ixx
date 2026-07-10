@@ -3,6 +3,7 @@ export module Procedural:Climate;
 import Core;
 import Core.glm;
 import :Noise;
+import :TerrainSampler;
 
 export namespace Procedural
 {
@@ -51,26 +52,27 @@ export namespace Procedural
 		float  fogCoverage = 0.5f; // 0..1 fraction of the world that is foggy (0 = clear everywhere)
 	};
 
-	class ClimateMaps
+	class ClimateMaps final : public ITerrainSampler
 	{
 	public:
 		explicit ClimateMaps(const TerrainConfig& cfg);
 
 		// Surface height in world meters (Y). Continuous everywhere.
-		float sampleHeight(double worldX, double worldZ) const;
+		float sampleHeight(double worldX, double worldZ) const override;
 		// Water surface height in world meters (Y): seaLevel over the open ocean, the lake level over lake
 		// basins. Water is present wherever this exceeds sampleHeight; outside features it drops steeply
 		// below ground (hidden — depth buffer clips it).
-		float sampleWaterHeight(double worldX, double worldZ) const;
+		float sampleWaterHeight(double worldX, double worldZ) const override;
 		// Both fields from one evaluation (the terrain/water math is shared; bakes sampling both per texel
 		// pay half the noise cost this way). Returns the terrain height, writes the water level.
-		float sampleHeightAndWater(double worldX, double worldZ, float& outWaterLevel) const;
+		float sampleHeightAndWater(double worldX, double worldZ, float& outWaterLevel) const override;
 		// Regional fog thickness multiplier [0,1] (see TerrainConfig::fogCoverage).
-		float sampleFogThickness(double worldX, double worldZ) const;
-		// Normalized [0,1] temperature (cold 0 .. hot 1); drops with altitude.
-		float sampleTemperature(double worldX, double worldZ) const;
+		float sampleFogThickness(double worldX, double worldZ) const override;
+		// Temperature in Celsius (noise mapped over TEMPERATURE_MIN_C..MAX_C); drops with altitude.
+		float sampleTemperature(double worldX, double worldZ) const override;
 		// Normalized [0,1] humidity (dry 0 .. wet 1).
-		float sampleHumidity(double worldX, double worldZ) const;
+		float sampleHumidity(double worldX, double worldZ) const override;
+		float seaLevel() const override { return m_cfg.seaLevel; }
 
 		const TerrainConfig& config() const { return m_cfg; }
 

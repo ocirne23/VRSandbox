@@ -2,14 +2,14 @@ export module Procedural:HeightMapBaker;
 
 import Core;
 import Core.glm;
-import :Climate;
+import :TerrainSampler;
 
 export namespace Procedural
 {
 	// Async single-bake driver for camera-centered terrain height snapshots: res^2 floats of raw surface
-	// height (world Y, m) per cascade, cascade-major, sampled from a ClimateMaps. Shared by the ocean
-	// shore map (1 cascade) and the fog terrain height map (2 cascades); both ship the result to a
-	// renderer-side BakedWorldMap. One bake in flight at a time; a bake pins its ClimateMaps via the
+	// height (world Y, m) per cascade, cascade-major, sampled from any ITerrainSampler. Shared by the
+	// ocean shore map (1 cascade) and the fog terrain height map (2 cascades); both ship the result to a
+	// renderer-side BakedWorldMap. One bake in flight at a time; a bake pins its sampler via the
 	// captured shared_ptr, and the active map keeps working until the replacement lands. Re-bakes when the
 	// maps identity or the ranges change, or the camera strays a quarter of the FINEST range from the
 	// active center; centers snap to the finest cascade's texel lattice so re-bakes never make features
@@ -28,13 +28,17 @@ export namespace Procedural
 		// a completed bake should ship to the renderer (out is filled). active = false drops any finished
 		// bake and invalidates (the caller clears its renderer-side map); maps must be non-null while
 		// active. numCascades <= 2; ranges.y is ignored when numCascades == 1. channels (interleaved per
-		// texel): 1 = terrain height; 2 = + water level (the ocean shore map); 4 = the fog terrain cascades
-		// (4 not 3: RGB32F is not a sampled-image format on most GPUs) — channel 2 packs (fog thickness,
-		// temperature, humidity) as 3x8 bits in the float's exact-integer range (bit-packed values cannot
-		// be bilinearly filtered: shaders fetch this channel nearest, see terrainClimateAt), channel 3 is
-		// spare (0) for a future field.
-		bool update(Baked& out, bool active, const std::shared_ptr<const ClimateMaps>& maps,
-			const glm::vec2& camXZ, glm::vec2 ranges, uint32 res, uint32 numCascades, uint32 channels = 1)
+		// texel): 1 = terrain height; 2 = height + water level; 4 = four-channel layouts (4 not 3: RGB32F
+		// is not a sampled-image format on most GPUs):
+		//   shoreLayout = false (fog terrain cascades): (height, water level, PACKED fog thickness | fog
+		//     height-falloff mul | temperature | humidity 4x8 bits BIT-CAST into the float texel, MACRO
+		//     ALTITUDE). The packed channel tolerates no bilinear filtering and no float arithmetic (NaN
+		//     patterns possible) — shaders decode texels via floatBitsToUint (terrainClimateAt); altitude
+		//     is a plain float (bilinear-safe).
+		//   shoreLayout = true (ocean shore map): (height, water level, flow-direction 8 bits — 0 = none,
+		//     1..255 = angle/2pi — read nearest for the wave-direction rotation, spare).
+		bool update(Baked& out, bool active, const std::shared_ptr<const ITerrainSampler>& maps,
+			const glm::vec2& camXZ, glm::vec2 ranges, uint32 res, uint32 numCascades, uint32 channels = 1, bool shoreLayout = false)
 		{
 			bool shipped = false;
 			if (m_future.valid() && m_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
@@ -75,7 +79,7 @@ export namespace Procedural
 			m_pendingCenter = center;
 			m_pendingRanges = ranges;
 			m_pendingMaps = maps.get();
-			m_future = std::async(std::launch::async, [maps, center, ranges, res, numCascades, channels]() {
+			m_future = std::async(std::launch::async, [maps, center, ranges, res, numCascades, channels, shoreLayout]() {
 				std::vector<float> heights((size_t)numCascades * res * res * channels);
 				for (uint32 c = 0; c < numCascades; ++c)
 				{
@@ -95,14 +99,38 @@ export namespace Procedural
 								texel[0] = maps->sampleHeight(wx, wz);
 							if (channels > 3)
 							{
-								const auto q8 = [](float f) { return (uint32)(glm::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
-								const uint32 packed = q8(maps->sampleFogThickness(wx, wz))
-									| (q8(maps->sampleTemperature(wx, wz)) << 8)
-									| (q8(maps->sampleHumidity(wx, wz)) << 16);
-								texel[2] = (float)packed; // <= 2^24-1: exact in float32
-								texel[3] = 0.0f;          // spare
+								if (shoreLayout)
+								{
+									const float flow = maps->sampleFlowAngle01(wx, wz);
+									texel[2] = flow < 0.0f ? 0.0f : (float)(1u + (uint32)(glm::clamp(flow, 0.0f, 1.0f) * 254.0f + 0.5f));
+									texel[3] = 0.0f; // spare
+								}
+								else
+								{
+									// 4x8-bit climate pack: fog thickness [0,1] | fog height-falloff mul
+									// (0..FOG_FALLOFF_MUL_MAX, 1 = neutral) | temperature (TEMPERATURE_MIN_C..
+									// MAX_C) | humidity [0,1] (0 -> 0.0, 255 -> 1.0 exactly). 32 bits exceed
+									// float32's exact-integer range, so the bits are BIT-CAST into the texel
+									// (std::bit_cast here, floatBitsToUint in terrain_height.inc.glsl). The
+									// whole path — vector moves, staging memcpy, copyBufferToImage, texelFetch
+									// — carries raw bits with NO float arithmetic; some packs form NaN bit
+									// patterns, which any arithmetic (the old float(packed)/+0.5 decode) would
+									// corrupt. Keep it bit-exact end to end.
+									const auto q8 = [](float f) { return (uint32)(glm::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
+									const uint32 packed = q8(maps->sampleFogThickness(wx, wz))
+										| (q8(maps->sampleFogHeightFalloff(wx, wz) * (1.0f / FOG_FALLOFF_MUL_MAX)) << 8)
+										| (q8((maps->sampleTemperature(wx, wz) - TEMPERATURE_MIN_C) / (TEMPERATURE_MAX_C - TEMPERATURE_MIN_C)) << 16)
+										| (q8(maps->sampleHumidity(wx, wz)) << 24);
+									texel[2] = std::bit_cast<float>(packed);
+									texel[3] = maps->sampleAltitude(wx, wz); // macro elevation (terrain coloring)
+								}
 							}
 						}
+					// NOTE: the water-level channel bakes EXACTLY what the sampler reports — no post-processing.
+					// A land-burial dive (sinking the level under land texels against standard-Z depth noise)
+					// briefly lived here and backfired: the ocean clipmap's coarse outer rings vertex-sample
+					// this channel, and one triangle bridging a flat water texel to a deeply dived land texel
+					// visibly sagged the far sea near coasts. Reversed-Z made any such separation unnecessary.
 				}
 				return heights;
 			});
@@ -115,10 +143,10 @@ export namespace Procedural
 		std::future<std::vector<float>> m_future;
 		glm::vec2 m_pendingCenter = glm::vec2(0.0f); // inputs of the IN-FLIGHT bake
 		glm::vec2 m_pendingRanges = glm::vec2(0.0f);
-		const ClimateMaps* m_pendingMaps = nullptr;  // identity only (never dereferenced)
+		const ITerrainSampler* m_pendingMaps = nullptr;  // identity only (never dereferenced)
 		glm::vec2 m_activeCenter = glm::vec2(0.0f);  // inputs of the ACTIVE (shipped) map
 		glm::vec2 m_activeRanges = glm::vec2(0.0f);
-		const ClimateMaps* m_activeMaps = nullptr;   // identity only (never dereferenced)
+		const ITerrainSampler* m_activeMaps = nullptr;   // identity only (never dereferenced)
 		bool m_valid = false;
 	};
 }

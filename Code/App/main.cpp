@@ -100,7 +100,8 @@ int main()
     std::vector<PhysicsJoint> spawnedJoints;
 
     std::vector<EntityPtr> entities;
-    entities.push_back(world.spawnAssetFile("Entities/SponzaScene.pre", Transform(), false));
+    entities.push_back(world.spawnAssetFile("Entities/sponza.pre", Transform(), false));
+    entities.push_back(world.spawnAssetFile("Entities/skysphere.pre", Transform(), false));
     entities.push_back(world.spawnAssetFile("Entities/character.pre", Transform()));
 
     GizmoController gizmo;
@@ -294,7 +295,12 @@ int main()
             IOcclusionTester* occlusion = nullptr;
             if (Globals::occlusionBuffer.isEnabled())
             {
-                const glm::mat4 viewProjRelCamera = renderer.getCenterViewProj() * glm::translate(glm::mat4(1.0f), camera.position);
+                // The renderer's projection is REVERSED-Z; the CPU occlusion rasterizer assumes NDC z grows
+                // with distance (farthest-depth blocks, huge "no occluder" sentinel). Flip the z row back to
+                // standard orientation (z' = w - z) so its internal comparisons keep their meaning.
+                glm::mat4 viewProjRelCamera = renderer.getCenterViewProj() * glm::translate(glm::mat4(1.0f), camera.position);
+                for (int c = 0; c < 4; ++c)
+                    viewProjRelCamera[c][2] = viewProjRelCamera[c][3] - viewProjRelCamera[c][2];
                 Globals::occlusionBuffer.render(viewProjRelCamera, cameraPos);
                 occlusion = &Globals::occlusionBuffer;
             }

@@ -30,7 +30,7 @@ void main()
     const vec2 uv = (vec2(px) + 0.5) / vec2(pc.aoWidth, pc.aoHeight);
     const vec4 raw = texture(u_rawAO, uv); // rgb = bent normal, a = AO
     const float depth = texture(u_curDepth, uv).r;
-    if (depth >= 1.0) { imageStore(u_accumOut, px, raw); return; }
+    if (depth <= 0.0) { imageStore(u_accumOut, px, raw); return; } // background (reversed-Z far = 0)
 
     const vec3 worldPos = worldPosFromDepth(uv, depth); // disocclusion test only
 
@@ -63,7 +63,7 @@ void main()
         {
             const vec2 tapUv = base + offs[i];
             const float prevDepth = texture(u_prevDepth, tapUv).r;
-            if (prevDepth >= 1.0)
+            if (prevDepth <= 0.0)
                 continue;
             const vec3 prevWorld = worldPosFromDepthMat(tapUv, prevDepth, u_prevInvMvp);
             if (length(prevWorld - worldPos) >= thresh)

@@ -89,14 +89,16 @@ void main()
 #endif
 
 #ifdef TERRAIN
-    // Edge fade: sink chunk vertices toward the target height (sea level) as their horizontal distance from
-    // the camera runs from fade-start to fade-end, so terrain rises out of a flat far edge instead of
-    // popping in at full height at the streaming boundary. Follows the camera every frame (not baked).
+    // Edge fade: sink chunk vertices toward sea level MINUS the edge drop (w) as their horizontal distance
+    // from the camera runs from fade-start to fade-end, so terrain rises out of a flat far edge instead of
+    // popping in at full height at the streaming boundary. The drop puts the faded plane a few meters
+    // UNDER the ocean surface instead of exactly on it (coplanar = z-fighting shimmer at the horizon);
+    // the ocean covers it, so the world edge reads as land dissolving into the sea. Camera-relative, live.
     if (u_terrainFade.y > u_terrainFade.x)
     {
         const float d = distance(out_pos.xz, u_viewPos.xz);
         const float t = clamp((u_terrainFade.y - d) / (u_terrainFade.y - u_terrainFade.x), 0.0, 1.0);
-        out_pos.y = mix(u_terrainFade.z, out_pos.y, t);
+        out_pos.y = mix(u_terrainFade.z - u_terrainFade.w, out_pos.y, t);
     }
 #endif
 
@@ -105,9 +107,10 @@ void main()
     gl_Position = u_mvp * vec4(out_pos, 1.0);
     gl_Position.xy += u_taaJitter.xy * gl_Position.w; // TAA sub-pixel jitter (clip space)
 #ifdef FORCE_NEAR_DEPTH
-    // GizmoUI: stamp the nearest depth (NDC z = 0 under Vulkan's [0,1] range, eLess compare). Only z is
+    // GizmoUI: stamp (nearly) the nearest depth — NDC z = 1 under REVERSED-Z, eGreater compare. Only z is
     // touched, so x/y/w (and thus the on-screen shape) are unchanged; the gizmo just always wins depth.
-    gl_Position.z *= 0.01;
+    // The residual 1% of the original z keeps the gizmo's own parts depth-sorted against each other.
+    gl_Position.z = mix(gl_Position.w, gl_Position.z, 0.01);
 #endif
 }
 

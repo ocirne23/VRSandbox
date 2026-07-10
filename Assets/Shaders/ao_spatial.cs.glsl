@@ -30,7 +30,7 @@ void main()
     const vec2 uv = (vec2(px) + 0.5) * texel;
 
     const float depth = texture(u_depth, uv).r;
-    if (depth >= 1.0)
+    if (depth <= 0.0) // background (reversed-Z: far/cleared = 0)
     {
         // Dilate geometry AO into background texels. The trace writes background as (bentN=+Z, ao=1);
         // the forward pass upsamples this image with plain bilinear, so background texels bleed into
@@ -43,7 +43,7 @@ void main()
         for (int dx = -r; dx <= r; ++dx)
         {
             const vec2 nuv = uv + vec2(dx, dy) * texel;
-            if (texture(u_depth, nuv).r >= 1.0) continue;
+            if (texture(u_depth, nuv).r <= 0.0) continue;
             const float ws = exp(-float(dx * dx + dy * dy) / 8.0);
             sum  += texture(u_accumAO, nuv) * ws;
             wsum += ws;
@@ -70,7 +70,7 @@ void main()
     {
         const vec2 nuv = uv + vec2(dx, dy) * texel;
         const float nDepth = texture(u_depth, nuv).r;
-        if (nDepth >= 1.0) continue;
+        if (nDepth <= 0.0) continue;
 
         const vec3 nPos = worldPosFromDepth(nuv, nDepth);
         const vec3 nN   = normalize(texture(u_normal, nuv).xyz);

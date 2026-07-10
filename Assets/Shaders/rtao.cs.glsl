@@ -90,7 +90,7 @@ void main()
     const vec2 uv = (vec2(px) + 0.5) / vec2(pc.aoWidth, pc.aoHeight);
 
     const float depth = texture(u_gbufferDepth, uv).r;
-    if (depth >= 1.0) { imageStore(u_aoOut, px, vec4(0.0, 0.0, 1.0, 1.0)); return; } // background: no occlusion
+    if (depth <= 0.0) { imageStore(u_aoOut, px, vec4(0.0, 0.0, 1.0, 1.0)); return; } // background (reversed-Z far = 0): no occlusion
 
     const vec3 nRaw = texture(u_gbufferNormal, uv).xyz;
     const float nLen = length(nRaw);

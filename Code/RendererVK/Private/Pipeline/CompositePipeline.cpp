@@ -13,6 +13,10 @@ void CompositePipeline::buildPipelineLayout(GraphicsPipelineLayout& layout)
     layout.vertexShader.text = FileSystem::readFileStr(layout.vertexShader.debugFilePath);
     layout.fragmentShader.text = FileSystem::readFileStr(layout.fragmentShader.debugFilePath);
     layout.cullMode = vk::CullModeFlagBits::eNone;
+    // Fullscreen HDR->display op: depth is meaningless here (it's the first draw of the swapchain pass and
+    // relied on always-passing the old eLess-vs-cleared-1.0 test; under reversed-Z it would fail instead).
+    layout.depthTestEnable = false;
+    layout.depthWriteEnable = false;
     layout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{
         .binding = 0, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     layout.descriptorSetLayoutBindings.push_back(vk::DescriptorSetLayoutBinding{

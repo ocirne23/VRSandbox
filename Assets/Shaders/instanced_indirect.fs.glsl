@@ -137,7 +137,7 @@ vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
 	{
 		const vec2 uv = base + offs[i];
 		const float d = texture(u_gbufferDepth, uv).r;
-		if (d >= 1.0)
+		if (d <= 0.0) // background (reversed-Z far = 0)
 			continue;
 		const vec3 tapPos = worldPosFromDepth(uv, d);
 		const float dz = length(tapPos - pos);
@@ -150,27 +150,62 @@ vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
 }
 
 #ifdef TERRAIN
-// Procedural terrain surface color from world height + slope. No textures: procedural terrain chunks
-// carry none (the material resolves to the shared fallback). NOTE: the height bands assume the default
-// TerrainConfig (sea level ~0, continent/mountain amplitudes) — a later pass should feed sea level /
-// height scale through the UBO so this tracks the tweaks. Slope reads bare rock on steep faces.
+#define TERRAIN_HEIGHT_BINDING 19
+#include "terrain_height.inc.glsl"
+
+// Procedural terrain surface color from the baked terrain fields (fog terrain cascades: height, water
+// level, MACRO ALTITUDE + nearest-fetched fog/temperature/humidity). The altitude/height split is what
+// tells a MOUNTAIN (height far above the local macro altitude -> crag rock) from high-altitude flatland
+// (grass at elevation); humidity separates desert from jungle (both hot), temperature drives snow (the
+// generator's lapse already cools high ground). No textures: chunks use the shared fallback material.
+// Falls back to simple height bands when no terrain map is bound.
 vec3 terrainAlbedo(vec3 worldPos, vec3 N)
 {
-	const vec3 sand  = vec3(0.76, 0.70, 0.50);
-	const vec3 grass = vec3(0.26, 0.42, 0.17);
-	const vec3 rock  = vec3(0.37, 0.34, 0.31);
-	const vec3 snow  = vec3(0.90, 0.93, 0.97);
+	const vec3 sand   = vec3(0.76, 0.70, 0.50);
+	const vec3 steppe = vec3(0.55, 0.52, 0.33);
+	const vec3 grass  = vec3(0.26, 0.42, 0.17);
+	const vec3 jungle = vec3(0.10, 0.30, 0.12);
+	const vec3 rock   = vec3(0.37, 0.34, 0.31);
+	const vec3 snow   = vec3(0.90, 0.93, 0.97);
 
-	const float h = worldPos.y;
+	const float seaLevel = u_terrainFade.z; // the streamer's live sea level rides the edge-fade params
+	const float h = worldPos.y - seaLevel;
 	const float slope = 1.0 - clamp(N.y, 0.0, 1.0);
-
-	// Cheap value noise to break up the otherwise flat height bands.
+	// Cheap value noise to break up band edges.
 	const float n = fract(sin(dot(floor(worldPos.xz * 0.08), vec2(12.9898, 78.233))) * 43758.5453) * 2.0 - 1.0;
 
-	vec3 col = mix(sand, grass, smoothstep(0.5, 6.0 + n * 2.0, h));
-	col = mix(col, rock, smoothstep(55.0 + n * 8.0, 110.0, h));
-	col = mix(col, snow, smoothstep(135.0 + n * 10.0, 185.0, h));
-	col = mix(col, rock, smoothstep(0.45, 0.70, slope)); // steep faces -> bare rock
+	float altitude = h;        // fallbacks when no map is bound: no macro/detail split, mild climate
+	float temperature = 12.5;  // Celsius (mid of the encoded -25..+50 range)
+	float humidity = 0.5;
+	float waterLevel = seaLevel;
+	if (terrainHeightMapPresent())
+	{
+		const vec4 td = terrainDataAt(worldPos.xz);
+		altitude = td.w;
+		waterLevel = td.y;
+		const vec4 climate = terrainClimateAt(worldPos.xz); // (fog thickness, falloff mul, temp C, humidity)
+		temperature = climate.z;
+		humidity = climate.w;
+	}
+
+	// Ground cover by climate: dry -> sand/steppe, mild -> grass, saturated -> deep jungle green.
+	vec3 col = mix(sand, steppe, smoothstep(0.08, 0.25, humidity + n * 0.02));
+	col = mix(col, grass, smoothstep(0.25, 0.50, humidity + n * 0.02));
+	col = mix(col, jungle, smoothstep(0.65, 0.95, humidity));
+
+	// Beach band just above the local waterline (sea or a river/lake surface at altitude).
+	const float aboveWater = worldPos.y - waterLevel;
+	col = mix(sand, col, smoothstep(0.4, 3.0 + n, aboveWater));
+
+	// Mountain-ness: local relief ABOVE the macro altitude — a ridge poking out of a plateau reads as
+	// rock while a high-altitude grassland stays grass. Steep faces are bare rock regardless.
+	const float crag = smoothstep(10.0, 45.0, h - altitude);
+	col = mix(col, rock, max(crag * 0.85, smoothstep(0.45, 0.70, slope + n * 0.03)));
+
+	// Snow where it's COLD (the generator's altitude lapse + climate bands decide, not raw height);
+	// steep faces shed it. Temperature is in Celsius: snow fades in below ~-8C, full by ~-19C.
+	const float snowAmt = smoothstep(-8.5, -19.0, temperature) * (1.0 - smoothstep(0.5, 0.75, slope));
+	col = mix(col, snow, snowAmt);
 	return col;
 }
 #endif

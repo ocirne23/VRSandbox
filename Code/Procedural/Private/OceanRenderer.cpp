@@ -172,12 +172,12 @@ namespace Procedural
 	// water depth live as water level - height and lift the clipmap by water level - sea level (lakes/
 	// rivers at altitude); beyond this map's range they fall back to the coarser fog terrain cascades
 	// (TerrainStreamer's bake of the same fields).
-	void OceanRenderer::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& terrain)
+	void OceanRenderer::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain)
 	{
 		const bool active = m_shoreEnabled && terrain != nullptr;
 		HeightMapBaker::Baked baked;
 		if (m_shoreBaker.update(baked, active, terrain, glm::vec2(camera.position.x, camera.position.z),
-			glm::vec2(glm::max(m_shoreRange, 256.0f), 0.0f), RendererVKLayout::OCEAN_SHORE_RES, 1, 2))
+			glm::vec2(glm::max(m_shoreRange, 256.0f), 0.0f), RendererVKLayout::OCEAN_SHORE_RES, 1, 4, true)) // shore layout: h, water, flow, spare
 		{
 			renderer.setOceanShoreMap(baked.texels, baked.center, baked.ranges.x);
 			m_shoreHeights = std::move(baked.texels); // CPU copy: sampleShoreDepth (buoyancy) reads this
@@ -192,7 +192,7 @@ namespace Procedural
 		}
 	}
 
-	void OceanRenderer::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ClimateMaps> terrain)
+	void OceanRenderer::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain)
 	{
 		if (m_enabled)
 			updateShoreMap(renderer, camera, terrain);
@@ -295,8 +295,8 @@ namespace Procedural
 		const float tz = glm::clamp(v * (float)RES - 0.5f, 0.0f, (float)RES - 1.001f);
 		const uint32 x0 = (uint32)tx, z0 = (uint32)tz;
 		const float fx = tx - (float)x0, fz = tz - (float)z0;
-		const auto at = [&](uint32 i, uint32 j) { // (terrain height, water level) texel pair
-			const float* t = &m_shoreHeights[((size_t)j * RES + i) * 2];
+		const auto at = [&](uint32 i, uint32 j) { // (terrain height, water level) of the RGBA texel
+			const float* t = &m_shoreHeights[((size_t)j * RES + i) * 4];
 			return glm::vec2(t[0], t[1]);
 		};
 		const glm::vec2 hw = glm::mix(glm::mix(at(x0, z0), at(x0 + 1, z0), fx),

@@ -9,6 +9,20 @@ export struct Ray
     glm::vec3 dir; // normalized
 };
 
+// Rewrites a glm perspective/frustum projection's z row to REVERSED-Z [0,1] clip (near -> 1, far -> 0).
+// glm builds OpenGL [-1,1] matrices here (GLM_FORCE_DEPTH_ZERO_TO_ONE is not set), which Vulkan clips to
+// [0,w] — that both near-clipped at ~2x near and wasted half the depth curve. Reversed-Z stores distant
+// depths near 0.0, where float32 spacing shrinks exponentially — this cancels the projection's 1/d^2
+// compression and gives near-constant relative depth precision at every distance (planet-scale terrain
+// stops z-fighting). The whole engine renders this convention: depth compare eGreater, clears/sky at 0.0.
+// Idempotent (only the z row is written), x/y rows and the -1 w row pass through untouched.
+export inline glm::mat4 reverseZProjection(glm::mat4 proj, float nearZ, float farZ)
+{
+    proj[2][2] = nearZ / (farZ - nearZ);
+    proj[3][2] = nearZ * farZ / (farZ - nearZ);
+    return proj;
+}
+
 export struct Camera
 {
 public:

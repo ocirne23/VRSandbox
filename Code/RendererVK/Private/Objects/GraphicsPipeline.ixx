@@ -70,6 +70,9 @@ export struct GraphicsPipelineLayout
     vk::BlendFactor dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
     bool depthTestEnable = true;
     bool depthWriteEnable = true;
+    // The main view renders REVERSED-Z (near = 1, far = 0, cleared to 0) for far-field depth precision,
+    // so closer = greater. Shadow maps keep standard-Z ortho projections and override this with eLess.
+    vk::CompareOp depthCompareOp = vk::CompareOp::eGreater;
 
     // Additional pipeline variants for DGC Indirect Execution Set selection. Variant 0 always
     // uses both layout defaults; each extra entry can independently override either shader stage.

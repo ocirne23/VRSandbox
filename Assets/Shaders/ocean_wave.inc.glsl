@@ -17,9 +17,10 @@
 #endif
 layout (binding = OCEAN_MAPS_BINDING) uniform sampler2DArray u_oceanMaps;
 
-// Shore map (optional; the includer defines OCEAN_SHORE_BINDING to enable it): an RG32F snapshot around
+// Shore map (optional; the includer defines OCEAN_SHORE_BINDING to enable it): an RGBA32F snapshot around
 // the camera, CPU-baked. R = raw terrain surface height (world Y, m); G = the WATER SURFACE LEVEL — sea
-// level over the open ocean, higher where an elevated water table forms lakes/rivers at altitude. The
+// level over the open ocean, higher where rivers/lakes sit at altitude; B = 8-bit river flow direction
+// (0 = none, 1..255 = angle/2pi; nearest-fetched, drives the wave-travel rotation); A = spare. The
 // water depth is derived live as water level - height; it drives fake shoaling + the shoreline surf band,
 // and the clipmap lifts its vertices by water level - sea level. When the includer also defines
 // TERRAIN_HEIGHT_BINDING, the coarser fog terrain cascades (terrain_height.inc.glsl — the same terrain
@@ -79,6 +80,40 @@ float oceanWaterOffset(vec2 worldXZ)
     return oceanSampleShoreData(worldXZ).y - u_oceanParams2.w;
 }
 
+// Local wave-travel basis: rivers carry a baked FLOW DIRECTION (shore map channel B, 8 bits: 0 = none,
+// 1..255 = angle/2pi) that replaces the global wind locally. Returns (cos, sin) of the flow-vs-wind
+// rotation, identity where there is no directed flow (open sea, lakes, outside the map). Nearest-texel:
+// packed angles must not be bilinearly filtered (and they wrap). Every pass sampling the wave field MUST
+// apply the same rotation or the prepass depth and the drawn surface diverge.
+vec2 oceanFlowRotation(vec2 worldXZ)
+{
+#ifdef OCEAN_SHORE_BINDING
+    const float invRange = u_oceanParams4.x;
+    if (invRange > 0.0)
+    {
+        const vec2 uv = (worldXZ - u_oceanParams3.xy) * invRange + 0.5;
+        if (all(greaterThan(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0))))
+        {
+            const ivec2 res = textureSize(u_shoreHeight, 0);
+            const uint enc = uint(texelFetch(u_shoreHeight, clamp(ivec2(uv * vec2(res)), ivec2(0), res - 1), 0).z + 0.5);
+            if (enc > 0u)
+            {
+                const float flowAngle = (float(enc) - 1.0) * (6.28318530718 / 254.0);
+                const float windAngle = atan(u_oceanParams0.y, u_oceanParams0.x);
+                const float d = flowAngle - windAngle;
+                return vec2(cos(d), sin(d));
+            }
+        }
+    }
+#endif
+    return vec2(1.0, 0.0);
+}
+
+// Rotate the FFT sampling position by -delta (waves then TRAVEL along the flow) / a resulting horizontal
+// vector back by +delta into world space.
+vec2 oceanFlowSamplePos(vec2 worldXZ, vec2 fr) { return vec2(fr.x * worldXZ.x + fr.y * worldXZ.y, -fr.y * worldXZ.x + fr.x * worldXZ.y); }
+vec2 oceanFlowToWorld(vec2 v, vec2 fr) { return vec2(fr.x * v.x - fr.y * v.y, fr.y * v.x + fr.x * v.y); }
+
 // Fake shoaling: a cascade's waves fade out once the water is shallower than a fraction of its patch
 // size ("Ocean/Shore/Shoal depth scale") — long swell feels the bottom far offshore while short chop
 // runs almost to the beach, and every cascade reaches zero at the waterline so waves never poke through
@@ -107,13 +142,16 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
 {
     const float chop = u_oceanParams0.w;
     const float depth = oceanSampleShoreDepth(worldXZ);
+    const vec2 fr = oceanFlowRotation(worldXZ);           // rivers: waves travel along the local flow
+    const vec2 sampleXZ = oceanFlowSamplePos(worldXZ, fr);
     vec3 disp = vec3(0.0);
     for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
         const float L = u_oceanParams2[c];
-        const vec4 d = textureLod(u_oceanMaps, vec3(worldXZ / L, float(c)), oceanVertexLod(cellSize, morph, L));
+        const vec4 d = textureLod(u_oceanMaps, vec3(sampleXZ / L, float(c)), oceanVertexLod(cellSize, morph, L));
         disp += vec3(d.x * chop, d.y, d.z * chop) * oceanShoalFade(depth, L);
     }
+    disp.xz = oceanFlowToWorld(disp.xz, fr);
     // Waterline treatment: smooth-clamp the surface to just above the seabed — the shoal fade only
     // scales the waves, so a trough could still swing under the bottom and open a "hole" of exposed
     // seabed. The clamp is an INNER-rounded smooth max (dips at most k/4 below the hard max, never
@@ -124,6 +162,9 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
     // and the rendered terrain triangles disagree by decimeters (bilinear texels vs LOD'd mesh) and any
     // vertex-level shaping against the map pokes out of (or gaps under) the real ground wherever they
     // differ. Deep water (large depth) leaves both terms inert.
+    // (The ~3-5 cm land-side offset is enough at ANY distance now that the main view is reversed-Z; a
+    // cell-scaled extra burial used to live here for standard-Z depth noise, but its depth ramp exceeded
+    // the open-ocean depth at the coarse outer rings and visibly sank the far sea surface.)
     const float eps = 0.05, k = 0.2;
     const float floorY = eps - max(depth, 2.0 * eps);
     const float hh = max(k - abs(disp.y - floorY), 0.0) / k;
@@ -156,13 +197,15 @@ void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out ve
 {
     const float chop = u_oceanParams0.w;
     const float depth = oceanSampleShoreDepth(worldXZ);
+    const vec2 fr = oceanFlowRotation(worldXZ);           // same rotation as the displacement passes
+    const vec2 sampleXZ = oceanFlowSamplePos(worldXZ, fr);
     vec2 slopeSum = vec2(0.0);
     vec2 varSum = vec2(0.0);
     float sxx = 0.0, szz = 0.0, sxz = 0.0;
     accel = 0.0;
     for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
-        const vec2 uv = worldXZ / u_oceanParams2[c];
+        const vec2 uv = sampleXZ / u_oceanParams2[c];
         const vec4 g = OCEAN_SURFACE_TEX(vec3(uv, float(OCEAN_CASCADES + c)));
         const vec4 d = OCEAN_SURFACE_TEX(vec3(uv, float(c)));
         const vec4 m = OCEAN_SURFACE_TEX(vec3(uv, float(2 * OCEAN_CASCADES + c)));
@@ -183,6 +226,7 @@ void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out ve
     // tips the normal past grazing and shades as harsh dark creases along every crest.
     slope = slopeSum / max(vec2(jxx, jzz), vec2(0.6));
     slope /= 1.0 + 0.2 * length(slope);
+    slope = oceanFlowToWorld(slope, fr); // back into world space (jacobian/variance are near rotation-invariant)
     slopeVar = varSum;
 }
 
@@ -245,18 +289,21 @@ vec3 oceanSampleNormalLod(vec2 worldXZ, float cellSize, float morph)
 {
     const float chop = u_oceanParams0.w;
     const float depth = oceanSampleShoreDepth(worldXZ);
+    const vec2 fr = oceanFlowRotation(worldXZ);           // same rotation as the displacement passes
+    const vec2 sampleXZ = oceanFlowSamplePos(worldXZ, fr);
     vec2 slopeSum = vec2(0.0);
     vec2 sxx_szz = vec2(0.0);
     for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
         const float L = u_oceanParams2[c];
-        const vec4 g = textureLod(u_oceanMaps, vec3(worldXZ / L, float(OCEAN_CASCADES + c)), oceanVertexLod(cellSize, morph, L));
+        const vec4 g = textureLod(u_oceanMaps, vec3(sampleXZ / L, float(OCEAN_CASCADES + c)), oceanVertexLod(cellSize, morph, L));
         const float fade = oceanShoalFade(depth, L);
         slopeSum += g.xy * fade;
         sxx_szz += g.zw * fade;
     }
     vec2 slope = slopeSum / max(vec2(1.0) + chop * sxx_szz, vec2(0.6));
     slope /= 1.0 + 0.2 * length(slope); // same fold-over soft limit as oceanSampleSurface
+    slope = oceanFlowToWorld(slope, fr);
     return normalize(vec3(-slope.x, 1.0, -slope.y));
 }
 

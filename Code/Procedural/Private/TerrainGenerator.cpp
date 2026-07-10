@@ -3,12 +3,12 @@ module Procedural;
 import Core;
 import Core.glm;
 import :TerrainGenerator;
-import :Climate;
+import :TerrainSampler;
 import :TerrainChunk;
 
 namespace Procedural
 {
-	void generateChunk(const ClimateMaps& maps, const ChunkParams& params, TerrainChunkMesh& out)
+	void generateChunk(const ITerrainSampler& maps, const ChunkParams& params, TerrainChunkMesh& out)
 	{
 		out.clear();
 

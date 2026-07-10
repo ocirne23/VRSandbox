@@ -10,12 +10,16 @@ import RendererVK;
 import File;
 
 import :TerrainStreamer;
+import :TerrainSampler;
 import :Climate;
+import :GeneratorV2;
 import :TerrainGenerator;
 import :TerrainChunk;
 
 namespace
 {
+	constexpr std::string_view s_generatorNames[] = { "V1 Climate", "V2 Biome" };
+
 	// Pack a chunk coordinate + LOD into a stable 64-bit key. 28 bits each for X/Z covers +-134M chunks.
 	uint64 chunkKey(glm::ivec2 coord, uint32 lod)
 	{
@@ -52,6 +56,7 @@ namespace Procedural
 		auto dirty = [this]() { m_configDirty = true; };
 
 		Tweak::boolean("Terrain", "Enabled", &m_enabled);
+		Tweak::enumVar("Terrain", "Generator", &m_generator, s_generatorNames, dirty); // V1 Climate / V2 Biome
 		Tweak::intVar("Terrain", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
 		Tweak::floatVar("Terrain", "Chunk size (m)", &m_chunkSize, 16.0f, 1024.0f, 1.0f, dirty);
 		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 4, 256, 1.0f, dirty);
@@ -62,9 +67,12 @@ namespace Procedural
 		Tweak::floatVar("Terrain", "Sea level (m)", &m_seaLevel, -200.0f, 200.0f, 0.5f, dirty);
 		Tweak::floatVar("Terrain", "Skirt depth (m)", &m_skirtDepth, 0.0f, 64.0f, 0.5f, dirty);
 		Tweak::floatVar("Terrain", "Edge fade (chunks)", &m_edgeFadeChunks, 0.0f, 16.0f, 0.25f); // 0 = off
-		Tweak::boolean("Terrain", "Fog height map", &m_fogMapEnabled); // feeds Fog/Terrain Follow (renderer)
-		Tweak::floatVar("Terrain", "Fog map range (m)", &m_fogMapRange, 256.0f, 8192.0f, 32.0f);
-		Tweak::floatVar("Terrain", "Fog map far range (m)", &m_fogMapFarRange, 1024.0f, 65536.0f, 256.0f);
+		// ONE shared baked terrain-data map (height, water level, fog|falloff|temp|hum, altitude): the volumetric
+		// fog's terrain follow + regional thickness, the ocean's far shore fallback, and the terrain
+		// coloring all read these cascades. Disabling it degrades all three.
+		Tweak::boolean("Terrain", "Terrain data map", &m_terrainMapEnabled);
+		Tweak::floatVar("Terrain", "Data map range (m)", &m_terrainMapRange, 256.0f, 8192.0f, 32.0f);
+		Tweak::floatVar("Terrain", "Data map far range (m)", &m_terrainMapFarRange, 1024.0f, 65536.0f, 256.0f);
 
 		Tweak::floatVar("Terrain/Noise", "Continent amp (m)", &m_continentAmplitude, 0.0f, 400.0f, 1.0f, dirty);
 		Tweak::floatVar("Terrain/Noise", "Mountain amp (m)", &m_mountainAmplitude, 0.0f, 800.0f, 1.0f, dirty);
@@ -85,6 +93,32 @@ namespace Procedural
 		Tweak::floatVar("Terrain/Fog", "Fog frequency", &m_fogFrequency, 0.0f, FLT_MAX, 0.0001f, dirty);
 		Tweak::floatVar("Terrain/Fog", "Fog coverage", &m_fogCoverage, 0.0f, 1.0f, 0.01f, dirty); // apply via Fog/Region strength
 
+		Tweak::floatVar("Terrain/V2", "Biome size (m)", &m_v2BiomeSize, 8.0f, 8000.0f, 10.0f, dirty);  // typical biome extent
+		Tweak::floatVar("Terrain/V2", "Biome resolution", &m_v2BiomeRes, 4.0f, 128.0f, 1.0f, dirty);  // texels per biome (texel = size/res)
+		Tweak::floatVar("Terrain/V2", "Biome blending", &m_v2BiomeBlend, 0.75f, 2.0f, 0.01f, dirty);  // gradient width of all derived fields
+		Tweak::floatVar("Terrain/V2", "Border warp (m)", &m_v2BorderWarp, 0.0f, 1500.0f, 5.0f, dirty);
+		Tweak::floatVar("Terrain/V2", "Ocean fraction", &m_v2OceanFraction, 0.0f, 1.0f, 0.01f, dirty);
+		Tweak::floatVar("Terrain/V2", "Continent freq", &m_v2ContinentFreq, 0.0f, FLT_MAX, 0.00001f, dirty); // lower = bigger oceans/continents
+		Tweak::floatVar("Terrain/V2", "Inland rise (m)", &m_v2InlandRise, 0.0f, 500.0f, 1.0f, dirty);        // coast -> deep inland altitude gain
+		Tweak::floatVar("Terrain/V2", "Ocean deepen (m)", &m_v2OceanDeepen, 0.0f, 200.0f, 1.0f, dirty);
+		Tweak::floatVar("Terrain/V2", "Temp lapse", &m_v2TempLapse, 0.0f, 0.01f, 0.0001f, dirty);            // altitude -> cold
+		Tweak::floatVar("Terrain/V2", "Climate bands", &m_v2ClimateBandAmp, 0.0f, 0.6f, 0.01f, dirty);       // regional hot/cold swing
+		Tweak::floatVar("Terrain/V2", "Height scale", &m_v2HeightScale, 0.0f, 8.0f, 0.05f, dirty);
+		Tweak::floatVar("Terrain/V2", "Altitude texel (m)", &m_v2AltitudeTexel, 8.0f, 512.0f, 1.0f, dirty); // macro elevation lattice
+		Tweak::floatVar("Terrain/V2", "Altitude amp (m)", &m_v2AltitudeAmp, 0.0f, 400.0f, 1.0f, dirty);     // large-scale relief
+		Tweak::floatVar("Terrain/V2", "Altitude freq", &m_v2AltitudeFreq, 0.0f, FLT_MAX, 0.00005f, dirty);
+		Tweak::floatVar("Terrain/V2", "Peak amp (m)", &m_v2PeakAmp, 0.0f, 1000.0f, 5.0f, dirty);       // fantasy ranges
+		Tweak::floatVar("Terrain/V2", "Peak threshold", &m_v2PeakThreshold, 0.0f, 1.0f, 0.01f, dirty); // higher = rarer
+		Tweak::floatVar("Terrain/V2", "Peak sharpness", &m_v2PeakSharpness, 0.1f, 6.0f, 0.05f, dirty);
+		Tweak::floatVar("Terrain/V2", "Peak freq", &m_v2PeakFreq, 0.0f, FLT_MAX, 0.00002f, dirty);
+		Tweak::floatVar("Terrain/V2", "Mtn detail amp (m)", &m_v2MtnDetailAmp, 0.0f, 300.0f, 1.0f, dirty); // craggy ridges on high ground
+		Tweak::floatVar("Terrain/V2", "Mtn detail freq", &m_v2MtnDetailFreq, 0.0f, FLT_MAX, 0.0005f, dirty);
+		Tweak::floatVar("Terrain/V2", "Mtn mask start (m)", &m_v2MtnMaskStart, 0.0f, 300.0f, 1.0f, dirty);
+		Tweak::floatVar("Terrain/V2", "Mtn mask full (m)", &m_v2MtnMaskFull, 0.0f, 500.0f, 1.0f, dirty);
+		Tweak::boolean("Terrain/V2", "Erosion", &m_v2Erosion, dirty); // water accumulation + erosion pass
+		Tweak::floatVar("Terrain/V2", "Erosion strength (m)", &m_v2ErosionStrength, 0.0f, 30.0f, 0.25f, dirty);
+		Tweak::floatVar("Terrain/V2", "Erosion region (m)", &m_v2ErosionRegion, 512.0f, 8192.0f, 64.0f, dirty);
+
 		rebuildMaps();
 
 		m_running = true;
@@ -93,28 +127,65 @@ namespace Procedural
 
 	void TerrainStreamer::rebuildMaps()
 	{
-		TerrainConfig cfg;
-		cfg.seed = (uint32)m_seed;
-		cfg.seaLevel = m_seaLevel;
-		cfg.continentFrequency = m_continentFrequency;
-		cfg.continentOctaves = (uint32)glm::max(1, m_continentOctaves);
-		cfg.continentAmplitude = m_continentAmplitude;
-		cfg.mountainFrequency = m_mountainFrequency;
-		cfg.mountainOctaves = (uint32)glm::max(1, m_mountainOctaves);
-		cfg.mountainAmplitude = m_mountainAmplitude;
-		cfg.detailFrequency = m_detailFrequency;
-		cfg.detailOctaves = (uint32)glm::max(1, m_detailOctaves);
-		cfg.detailAmplitude = m_detailAmplitude;
-		cfg.warpStrength = m_warpStrength;
-		cfg.climateFrequency = m_climateFrequency;
-		cfg.lapseRate = m_lapseRate;
-		cfg.networkCellSize = m_networkCell;
-		cfg.lakeCoverage = m_lakeCoverage;
-		cfg.lakeDepth = m_lakeDepth;
-		cfg.fogFrequency = m_fogFrequency;
-		cfg.fogCoverage = m_fogCoverage;
-
-		auto maps = std::make_shared<const ClimateMaps>(cfg);
+		std::shared_ptr<const ITerrainSampler> maps;
+		if (m_generator == 1)
+		{
+			TerrainConfigV2 cfg;
+			cfg.seed = (uint32)m_seed;
+			cfg.seaLevel = m_seaLevel;
+			cfg.biomeSize = m_v2BiomeSize;
+			cfg.biomeResolution = m_v2BiomeRes;
+			cfg.biomeBlend = m_v2BiomeBlend;
+			cfg.borderWarp = m_v2BorderWarp;
+			cfg.oceanFraction = m_v2OceanFraction;
+			cfg.continentFrequency = m_v2ContinentFreq;
+			cfg.inlandRise = m_v2InlandRise;
+			cfg.oceanDeepen = m_v2OceanDeepen;
+			cfg.temperatureLapse = m_v2TempLapse;
+			cfg.climateBandAmplitude = m_v2ClimateBandAmp;
+			cfg.heightScale = m_v2HeightScale;
+			cfg.altitudeTexelSize = m_v2AltitudeTexel;
+			cfg.altitudeAmplitude = m_v2AltitudeAmp;
+			cfg.altitudeFrequency = m_v2AltitudeFreq;
+			cfg.peakAmplitude = m_v2PeakAmp;
+			cfg.peakThreshold = m_v2PeakThreshold;
+			cfg.peakSharpness = m_v2PeakSharpness;
+			cfg.peakFrequency = m_v2PeakFreq;
+			cfg.mountainDetailAmplitude = m_v2MtnDetailAmp;
+			cfg.mountainDetailFrequency = m_v2MtnDetailFreq;
+			cfg.mountainMaskStart = m_v2MtnMaskStart;
+			cfg.mountainMaskFull = m_v2MtnMaskFull;
+			cfg.detailFrequency = m_detailFrequency;
+			cfg.detailOctaves = (uint32)glm::max(1, m_detailOctaves);
+			cfg.erosionEnabled = m_v2Erosion;
+			cfg.erosionStrength = m_v2ErosionStrength;
+			cfg.erosionRegionSize = m_v2ErosionRegion;
+			maps = std::make_shared<const TerrainGenV2>(cfg);
+		}
+		else
+		{
+			TerrainConfig cfg;
+			cfg.seed = (uint32)m_seed;
+			cfg.seaLevel = m_seaLevel;
+			cfg.continentFrequency = m_continentFrequency;
+			cfg.continentOctaves = (uint32)glm::max(1, m_continentOctaves);
+			cfg.continentAmplitude = m_continentAmplitude;
+			cfg.mountainFrequency = m_mountainFrequency;
+			cfg.mountainOctaves = (uint32)glm::max(1, m_mountainOctaves);
+			cfg.mountainAmplitude = m_mountainAmplitude;
+			cfg.detailFrequency = m_detailFrequency;
+			cfg.detailOctaves = (uint32)glm::max(1, m_detailOctaves);
+			cfg.detailAmplitude = m_detailAmplitude;
+			cfg.warpStrength = m_warpStrength;
+			cfg.climateFrequency = m_climateFrequency;
+			cfg.lapseRate = m_lapseRate;
+			cfg.networkCellSize = m_networkCell;
+			cfg.lakeCoverage = m_lakeCoverage;
+			cfg.lakeDepth = m_lakeDepth;
+			cfg.fogFrequency = m_fogFrequency;
+			cfg.fogCoverage = m_fogCoverage;
+			maps = std::make_shared<const ClimateMaps>(cfg);
+		}
 
 		std::lock_guard<std::mutex> lk(m_mutex);
 		m_maps = std::move(maps);
@@ -122,7 +193,7 @@ namespace Procedural
 		m_requests.clear(); // drop queued work built against the old config
 	}
 
-	std::shared_ptr<const ClimateMaps> TerrainStreamer::currentMaps()
+	std::shared_ptr<const ITerrainSampler> TerrainStreamer::currentMaps()
 	{
 		std::lock_guard<std::mutex> lk(m_mutex);
 		return m_maps;
@@ -164,28 +235,28 @@ namespace Procedural
 		}
 	}
 
-	// Fog terrain height map: FOG_TERRAIN_CASCADES snapshots of the raw surface height around the camera
-	// (HeightMapBaker, sampled from the SAME ClimateMaps the chunks render from) — a near cascade over
-	// m_fogMapRange meters at fine texels and a far cascade over m_fogMapFarRange at the same resolution
-	// (coarse texels are fine at fog distances, so long-range terrain data costs no extra memory). The
-	// volumetric fog raises its height-fog base by Fog/Terrain Follow x this height (clamped up to sea
-	// level in the shader, so fog rests on the water), and the ocean reads the same cascades as its
-	// shore-map fallback.
-	void TerrainStreamer::updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ClimateMaps>& maps)
+	// Shared terrain-data map: FOG_TERRAIN_CASCADES camera-centered snapshots (HeightMapBaker, sampled
+	// from the SAME sampler the chunks render from) — a near cascade over m_terrainMapRange meters at
+	// fine texels and a far cascade over m_terrainMapFarRange at the same resolution (coarse texels are
+	// fine at those distances, so long-range data costs no extra memory). Per texel: height, water level,
+	// packed fog|falloff|temp|hum, macro altitude. Consumers: the volumetric fog's terrain follow + regional
+	// thickness, the ocean's shore-map fallback, and the TERRAIN pipeline's coloring. (The renderer-side
+	// API keeps the historical "FogTerrainHeightMap" name — fog was its first consumer.)
+	void TerrainStreamer::updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& maps)
 	{
-		const bool active = m_fogMapEnabled && maps != nullptr;
+		const bool active = m_terrainMapEnabled && maps != nullptr;
 		HeightMapBaker::Baked baked;
-		if (m_fogMapBaker.update(baked, active, maps, glm::vec2(camera.position.x, camera.position.z),
-			glm::vec2(glm::max(m_fogMapRange, 256.0f), m_fogMapFarRange),
-			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4)) // RGBA: height, water level, fog thickness, spare
+		if (m_terrainMapBaker.update(baked, active, maps, glm::vec2(camera.position.x, camera.position.z),
+			glm::vec2(glm::max(m_terrainMapRange, 256.0f), m_terrainMapFarRange),
+			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4)) // RGBA: height, water level, fog|falloff|temp|hum, altitude
 		{
-			renderer.setFogTerrainHeightMap(baked.texels, baked.center, baked.ranges, maps->config().seaLevel);
-			m_fogMapUploaded = true;
+			renderer.setFogTerrainHeightMap(baked.texels, baked.center, baked.ranges, maps->seaLevel());
+			m_terrainMapUploaded = true;
 		}
-		if (!active && m_fogMapUploaded)
+		if (!active && m_terrainMapUploaded)
 		{
-			renderer.clearFogTerrainHeightMap(); // fog reverts to the flat base; the ocean loses its fallback
-			m_fogMapUploaded = false;
+			renderer.clearFogTerrainHeightMap(); // fog reverts to the flat base; ocean/coloring lose their data
+			m_terrainMapUploaded = false;
 		}
 	}
 
@@ -221,12 +292,14 @@ namespace Procedural
 		{
 			const float edgeDist = (float)(R + 1) * chunkSize;
 			const float band = glm::clamp(m_edgeFadeChunks, 0.25f, (float)R) * chunkSize;
-			renderer.setTerrainFade(edgeDist - band, edgeDist, m_seaLevel);
+			// The fade lands 4 m UNDER the sea surface, not on it: a plane exactly at sea level z-fights
+			// the calm ocean over the whole horizon ring; sunk under it, the ocean simply covers the edge.
+			renderer.setTerrainFade(edgeDist - band, edgeDist, m_seaLevel, 4.0f);
 		}
 		else
 			renderer.setTerrainFade(0.0f, 0.0f, m_seaLevel); // disabled (endDist <= startDist)
 
-		std::shared_ptr<const ClimateMaps> maps;
+		std::shared_ptr<const ITerrainSampler> maps;
 		uint32 generation;
 		{
 			std::lock_guard<std::mutex> lk(m_mutex);
@@ -276,15 +349,30 @@ namespace Procedural
 			}
 		}
 
-		if (!newRequests.empty())
+		// Queue hygiene for fast flight: DROP queued work that fell out of the ring — the worker would
+		// waste seconds generating chunks that get discarded on arrival and fall ever further behind —
+		// and keep the queue nearest-first so ground materializes under the camera outward, not in the
+		// order areas were flown over.
 		{
+			std::lock_guard<std::mutex> lk(m_mutex);
+			std::erase_if(m_requests, [&](const Request& r)
 			{
-				std::lock_guard<std::mutex> lk(m_mutex);
-				for (Request& r : newRequests)
-					m_requests.push_back(std::move(r));
-			}
-			m_cv.notify_all();
+				if (desired.count(r.key))
+					return false;
+				m_pending.erase(r.key); // free the key for a future re-entry into the ring
+				return true;
+			});
+			for (Request& r : newRequests)
+				m_requests.push_back(std::move(r));
+			const glm::ivec2 cam(camCX, camCZ);
+			std::sort(m_requests.begin(), m_requests.end(), [&](const Request& a, const Request& b)
+			{
+				const glm::ivec2 da = a.params.coord - cam, db = b.params.coord - cam;
+				return da.x * da.x + da.y * da.y < db.x * db.x + db.y * db.y;
+			});
 		}
+		if (!newRequests.empty())
+			m_cv.notify_all();
 
 		// --- Drain generated chunks (backlog first, then whatever the worker finished), budget-limited.
 		std::vector<Result> ready = std::move(m_readyBacklog);

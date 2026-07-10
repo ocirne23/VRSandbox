@@ -9,6 +9,7 @@ module;
 module RendererVK;
 
 import Core;
+import Core.Camera;
 import :VK;
 
 namespace
@@ -442,7 +443,7 @@ glm::mat4 OpenXRSession::getEyeProjection(uint32 eye, float nearZ, float farZ) c
     const float r = std::tan(fov.angleRight) * nearZ;
     const float b = std::tan(fov.angleDown) * nearZ;
     const float t = std::tan(fov.angleUp) * nearZ;
-    return glm::frustum(l, r, b, t, nearZ, farZ);
+    return reverseZProjection(glm::frustum(l, r, b, t, nearZ, farZ), nearZ, farZ);
 }
 
 glm::mat4 OpenXRSession::getCombinedProjection(float nearZ, float farZ) const
@@ -463,7 +464,7 @@ glm::mat4 OpenXRSession::getCombinedProjection(float nearZ, float farZ) const
     const float r = std::tan(u.angleRight) * nearZ * margin;
     const float b = std::tan(u.angleDown)  * nearZ * margin;
     const float t = std::tan(u.angleUp)    * nearZ * margin;
-    return glm::frustum(l, r, b, t, nearZ, farZ);
+    return reverseZProjection(glm::frustum(l, r, b, t, nearZ, farZ), nearZ, farZ);
 }
 
 void OpenXRSession::endFrame(vk::Image leftSource, vk::Image rightSource, vk::Extent2D sourceExtent, vk::ImageLayout sourceLayout)
