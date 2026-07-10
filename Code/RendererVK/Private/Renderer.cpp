@@ -52,6 +52,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
 
     auto rerecordCallback = [this]() { setHaveToRecordCommandBuffers(); };
     m_skyParams.registerTweaks();
+    m_shadowParams.registerTweaks();
     m_fogParams.registerTweaks();
     m_rtParams.registerTweaks();
     m_rtaoParams.registerTweaks(rerecordCallback, [this]() { if (Globals::device.getGraphicsQueue().waitIdle() != vk::Result::eSuccess) return; m_rtaoPipeline.reloadShaders(); setHaveToRecordCommandBuffers(); });
@@ -537,7 +538,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     if (ubo.rtSunShadow < 0.5f)
     {
         const float aspect = (float)viewportSize.x / (float)viewportSize.y;
-        computeSunCascades(camera, aspect, sky.sunDirection, m_sunCascadeViewProj);
+        computeSunCascades(camera, aspect, sky.sunDirection,
+            m_shadowParams.maxDistance, m_shadowParams.splitLambda, m_shadowParams.casterPad, m_sunCascadeViewProj);
         m_numSunCascades = RendererVKLayout::NUM_SHADOW_CASCADES;
         for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
             ubo.cascadeViewProj[c] = m_sunCascadeViewProj[c];

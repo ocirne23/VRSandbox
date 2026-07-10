@@ -101,7 +101,10 @@ vec3 giGatherDirect(vec3 pos, vec3 N, vec3 albedo)
     if (sunNdotL > 0.0)
     {
         float sunShadow = (g_sunShadowOverride >= 0.0) ? g_sunShadowOverride : giSunShadow(pos, N);
-        E += u_sunColor.rgb * sunShadow * sunNdotL * u_eclipseParams.x;
+        // Same atmospheric attenuation as the forward pass' doSunLight — without it, probe-lit bounce
+        // light stays at full space-sun strength at low sun angles while direct light (and the
+        // out-of-field skyGroundRadiance fallback) dims with transmittance.
+        E += atmosTransmittanceToLight(0.0, sunL, u_skyUp) * u_sunColor.rgb * sunShadow * sunNdotL * u_eclipseParams.x;
     }
 
     // The sky radiance light is intentionally absent here: it is injected directly into the probe SH

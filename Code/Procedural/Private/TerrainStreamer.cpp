@@ -11,15 +11,12 @@ import File;
 
 import :TerrainStreamer;
 import :TerrainSampler;
-import :Climate;
 import :GeneratorV2;
 import :TerrainGenerator;
 import :TerrainChunk;
 
 namespace
 {
-	constexpr std::string_view s_generatorNames[] = { "V1 Climate", "V2 Biome" };
-
 	// Pack a chunk coordinate + LOD into a stable 64-bit key. 28 bits each for X/Z covers +-134M chunks.
 	uint64 chunkKey(glm::ivec2 coord, uint32 lod)
 	{
@@ -49,7 +46,6 @@ namespace Procedural
 		auto dirty = [this]() { m_configDirty = true; };
 
 		Tweak::boolean("Terrain", "Enabled", &m_enabled);
-		Tweak::enumVar("Terrain", "Generator", &m_generator, s_generatorNames, dirty); // V1 Climate / V2 Biome
 		Tweak::intVar("Terrain", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
 		Tweak::floatVar("Terrain", "Chunk size (m)", &m_chunkSize, 16.0f, 1024.0f, 1.0f, dirty);
 		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 4, 256, 1.0f, dirty);
@@ -66,25 +62,6 @@ namespace Procedural
 		Tweak::boolean("Terrain", "Terrain data map", &m_terrainMapEnabled);
 		Tweak::floatVar("Terrain", "Data map range (m)", &m_terrainMapRange, 256.0f, 8192.0f, 32.0f);
 		Tweak::floatVar("Terrain", "Data map far range (m)", &m_terrainMapFarRange, 1024.0f, 65536.0f, 256.0f);
-
-		Tweak::floatVar("Terrain/Noise", "Continent amp (m)", &m_continentAmplitude, 0.0f, 400.0f, 1.0f, dirty);
-		Tweak::floatVar("Terrain/Noise", "Mountain amp (m)", &m_mountainAmplitude, 0.0f, 800.0f, 1.0f, dirty);
-		Tweak::floatVar("Terrain/Noise", "Detail amp (m)", &m_detailAmplitude, 0.0f, 40.0f, 0.1f, dirty);
-		Tweak::floatVar("Terrain/Noise", "Continent freq", &m_continentFrequency, 0.0f, FLT_MAX, 0.0001f, dirty);
-		Tweak::floatVar("Terrain/Noise", "Mountain freq", &m_mountainFrequency, 0.0f, FLT_MAX, 0.0001f, dirty);
-		Tweak::floatVar("Terrain/Noise", "Detail freq", &m_detailFrequency, 0.0f, FLT_MAX, 0.001f, dirty);
-		Tweak::floatVar("Terrain/Noise", "Climate freq", &m_climateFrequency, 0.0f, FLT_MAX, 0.0001f, dirty);
-		Tweak::intVar("Terrain/Noise", "Continent octaves", &m_continentOctaves, 1, 8, 1.0f, dirty);
-		Tweak::intVar("Terrain/Noise", "Mountain octaves", &m_mountainOctaves, 1, 8, 1.0f, dirty);
-		Tweak::intVar("Terrain/Noise", "Detail octaves", &m_detailOctaves, 1, 8, 1.0f, dirty);
-		Tweak::floatVar("Terrain/Noise", "Warp strength (m)", &m_warpStrength, 0.0f, 200.0f, 0.5f, dirty);
-		Tweak::floatVar("Terrain/Noise", "Lapse rate", &m_lapseRate, 0.0f, 0.02f, 0.0001f, dirty);
-
-		Tweak::floatVar("Terrain/Water", "Lake cell (m)", &m_networkCell, 200.0f, 4000.0f, 10.0f, dirty); // lattice spacing: smaller = more lakes
-		Tweak::floatVar("Terrain/Water", "Lake coverage", &m_lakeCoverage, 0.0f, 1.0f, 0.01f, dirty);    // fraction of lattice minima with a lake
-		Tweak::floatVar("Terrain/Water", "Lake depth (m)", &m_lakeDepth, 0.0f, 60.0f, 0.5f, dirty);      // basin carve below the surface
-		Tweak::floatVar("Terrain/Fog", "Fog frequency", &m_fogFrequency, 0.0f, FLT_MAX, 0.0001f, dirty);
-		Tweak::floatVar("Terrain/Fog", "Fog coverage", &m_fogCoverage, 0.0f, 1.0f, 0.01f, dirty); // apply via Fog/Region strength
 
 		Tweak::floatVar("Terrain/V2", "Biome size (m)", &m_v2BiomeSize, 8.0f, 8000.0f, 10.0f, dirty);  // climate-field feature size
 		Tweak::floatVar("Terrain/V2", "Biome blending", &m_v2BiomeBlend, 0.1f, 3.0f, 0.01f, dirty);   // climate-space kernel width (low = crisp biomes)
@@ -109,6 +86,8 @@ namespace Procedural
 		Tweak::floatVar("Terrain/V2", "Mtn mask full (m)", &m_v2MtnMaskFull, 0.0f, 500.0f, 1.0f, dirty);
 		Tweak::floatVar("Terrain/V2", "Grass fog", &m_v2GrassFog, 0.0f, 1.0f, 0.01f, dirty);   // patchy ground mist
 		Tweak::floatVar("Terrain/V2", "Valley fog", &m_v2ValleyFog, 0.0f, 1.0f, 0.01f, dirty); // fills mountain valleys
+		Tweak::floatVar("Terrain/V2", "Detail freq", &m_detailFrequency, 0.0f, FLT_MAX, 0.001f, dirty); // height detail fBm
+		Tweak::intVar("Terrain/V2", "Detail octaves", &m_detailOctaves, 1, 8, 1.0f, dirty);
 
 		rebuildMaps();
 
@@ -118,63 +97,35 @@ namespace Procedural
 
 	void TerrainStreamer::rebuildMaps()
 	{
-		std::shared_ptr<const ITerrainSampler> maps;
-		if (m_generator == 1)
-		{
-			TerrainConfigV2 cfg;
-			cfg.seed = (uint32)m_seed;
-			cfg.seaLevel = m_seaLevel;
-			cfg.biomeSize = m_v2BiomeSize;
-			cfg.biomeBlend = m_v2BiomeBlend;
-			cfg.borderWarp = m_v2BorderWarp;
-			cfg.oceanFraction = m_v2OceanFraction;
-			cfg.continentFrequency = m_v2ContinentFreq;
-			cfg.inlandRise = m_v2InlandRise;
-			cfg.oceanDeepen = m_v2OceanDeepen;
-			cfg.temperatureLapse = m_v2TempLapse;
-			cfg.climateBandAmplitude = m_v2ClimateBandAmp;
-			cfg.heightScale = m_v2HeightScale;
-			cfg.altitudeTexelSize = m_v2AltitudeTexel;
-			cfg.altitudeAmplitude = m_v2AltitudeAmp;
-			cfg.altitudeFrequency = m_v2AltitudeFreq;
-			cfg.peakAmplitude = m_v2PeakAmp;
-			cfg.peakThreshold = m_v2PeakThreshold;
-			cfg.peakSharpness = m_v2PeakSharpness;
-			cfg.peakFrequency = m_v2PeakFreq;
-			cfg.mountainDetailAmplitude = m_v2MtnDetailAmp;
-			cfg.mountainDetailFrequency = m_v2MtnDetailFreq;
-			cfg.mountainMaskStart = m_v2MtnMaskStart;
-			cfg.mountainMaskFull = m_v2MtnMaskFull;
-			cfg.detailFrequency = m_detailFrequency;
-			cfg.detailOctaves = (uint32)glm::max(1, m_detailOctaves);
-			cfg.grassFogAmount = m_v2GrassFog;
-			cfg.valleyFogAmount = m_v2ValleyFog;
-			maps = std::make_shared<const TerrainGenV2>(cfg);
-		}
-		else
-		{
-			TerrainConfig cfg;
-			cfg.seed = (uint32)m_seed;
-			cfg.seaLevel = m_seaLevel;
-			cfg.continentFrequency = m_continentFrequency;
-			cfg.continentOctaves = (uint32)glm::max(1, m_continentOctaves);
-			cfg.continentAmplitude = m_continentAmplitude;
-			cfg.mountainFrequency = m_mountainFrequency;
-			cfg.mountainOctaves = (uint32)glm::max(1, m_mountainOctaves);
-			cfg.mountainAmplitude = m_mountainAmplitude;
-			cfg.detailFrequency = m_detailFrequency;
-			cfg.detailOctaves = (uint32)glm::max(1, m_detailOctaves);
-			cfg.detailAmplitude = m_detailAmplitude;
-			cfg.warpStrength = m_warpStrength;
-			cfg.climateFrequency = m_climateFrequency;
-			cfg.lapseRate = m_lapseRate;
-			cfg.networkCellSize = m_networkCell;
-			cfg.lakeCoverage = m_lakeCoverage;
-			cfg.lakeDepth = m_lakeDepth;
-			cfg.fogFrequency = m_fogFrequency;
-			cfg.fogCoverage = m_fogCoverage;
-			maps = std::make_shared<const ClimateMaps>(cfg);
-		}
+		TerrainConfigV2 cfg;
+		cfg.seed = (uint32)m_seed;
+		cfg.seaLevel = m_seaLevel;
+		cfg.biomeSize = m_v2BiomeSize;
+		cfg.biomeBlend = m_v2BiomeBlend;
+		cfg.borderWarp = m_v2BorderWarp;
+		cfg.oceanFraction = m_v2OceanFraction;
+		cfg.continentFrequency = m_v2ContinentFreq;
+		cfg.inlandRise = m_v2InlandRise;
+		cfg.oceanDeepen = m_v2OceanDeepen;
+		cfg.temperatureLapse = m_v2TempLapse;
+		cfg.climateBandAmplitude = m_v2ClimateBandAmp;
+		cfg.heightScale = m_v2HeightScale;
+		cfg.altitudeTexelSize = m_v2AltitudeTexel;
+		cfg.altitudeAmplitude = m_v2AltitudeAmp;
+		cfg.altitudeFrequency = m_v2AltitudeFreq;
+		cfg.peakAmplitude = m_v2PeakAmp;
+		cfg.peakThreshold = m_v2PeakThreshold;
+		cfg.peakSharpness = m_v2PeakSharpness;
+		cfg.peakFrequency = m_v2PeakFreq;
+		cfg.mountainDetailAmplitude = m_v2MtnDetailAmp;
+		cfg.mountainDetailFrequency = m_v2MtnDetailFreq;
+		cfg.mountainMaskStart = m_v2MtnMaskStart;
+		cfg.mountainMaskFull = m_v2MtnMaskFull;
+		cfg.detailFrequency = m_detailFrequency;
+		cfg.detailOctaves = (uint32)glm::max(1, m_detailOctaves);
+		cfg.grassFogAmount = m_v2GrassFog;
+		cfg.valleyFogAmount = m_v2ValleyFog;
+		std::shared_ptr<const ITerrainSampler> maps = std::make_shared<const TerrainGenV2>(cfg);
 
 		std::lock_guard<std::mutex> lk(m_mutex);
 		m_maps = std::move(maps);

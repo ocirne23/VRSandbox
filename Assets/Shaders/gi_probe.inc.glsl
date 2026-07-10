@@ -130,6 +130,15 @@ vec3 giEvalCell(uint cellBase, vec3 n)
     return giEvalSH(c0, c1, c2, c3, n);
 }
 
+// Virtual sky probe: the trace pass projects skyRadiance (sky + analytic sunlit ground) into one extra
+// SH-L1 slot stored after the last probe. Out-of-field surfaces evaluate it exactly like a real probe
+// with no geometry hits, so leaving the probe field hands over to the same integral the probes converge
+// to in open space — instead of a differently-shaped cheap approximation that diverges at low sun angles
+// (a single sky sample along the normal misses the bright horizon in-scatter band the probes gather).
+// Returns cosine-convolved irradiance E(n), like evalProbeSHCoverage.
+#define GI_SKY_SH_BASE (uint(GI_NUM_CASCADES) * uint(GI_CASCADE_PROBES) * uint(GI_PROBE_STRIDE))
+vec3 giEvalSkySH(vec3 n) { return giEvalCell(GI_SKY_SH_BASE, n); }
+
 // True when cascade c's 8-probe stencil around p fully fits inside its toroidal window (so the slots are
 // the ones actually resident for this camera position, and we never interpolate across the wrap seam).
 bool giCascadeFits(int c, vec3 p, out ivec3 base, out ivec3 origin, out int s, out vec3 frac)

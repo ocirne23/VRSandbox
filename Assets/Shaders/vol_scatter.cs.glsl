@@ -356,7 +356,7 @@ void main()
                 amb = vec3(0.0);
         }
         if (giCov < 1.0)
-            amb = mix(skyGroundRadiance(-dir) * PI, amb, giCov);
+            amb = mix(giEvalSkySH(-dir), amb, giCov);
         inLight += amb * u_aoParams.y / PI + u_ambientColor;
 
         // Local lights from the world-space hash grid cell containing this froxel.

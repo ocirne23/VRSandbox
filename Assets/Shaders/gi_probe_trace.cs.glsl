@@ -185,10 +185,66 @@ vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist, out fl
 
 layout(local_size_x = 64) in;
 
+// Virtual sky probe (GI_SKY_SH_BASE): the last workgroup of the dispatch cooperatively projects
+// skyRadiance over the sphere into the extra SH-L1 slot the out-of-field fallback evaluates. Fixed
+// (unjittered) direction set: the integrand is analytic and smooth, so 64 deterministic samples give a
+// stable projection with no temporal blend.
+shared vec3 s_skySH[4 * 64];
+
+void projectSkySH(uint lane)
+{
+    const vec3 dir = sampleSphere(lane, 64u, vec2(0.0));
+    vec3 rad = skyRadiance(dir);
+    const vec3 up = normalize(u_skyUp);
+    // Sky/Ground Horizon (u_groundParams.w): on rolling terrain part of the above-horizon hemisphere is
+    // other sunlit ground, not sky — real probes see that as geometry hits; blend the analytic ground in.
+    if (dot(dir, up) > 0.0)
+        rad = mix(rad, skyRadiance(-up), u_groundParams.w);
+    const float wsh = 4.0 * PI / 64.0;
+    const vec4 Y = shBasisL1(dir) * wsh;
+    s_skySH[lane]        = rad * Y.x;
+    s_skySH[lane + 64u]  = rad * Y.y;
+    s_skySH[lane + 128u] = rad * Y.z;
+    s_skySH[lane + 192u] = rad * Y.w;
+    barrier();
+    for (uint s = 32u; s > 0u; s >>= 1u)
+    {
+        if (lane < s)
+        {
+            s_skySH[lane]        += s_skySH[lane + s];
+            s_skySH[lane + 64u]  += s_skySH[lane + s + 64u];
+            s_skySH[lane + 128u] += s_skySH[lane + s + 128u];
+            s_skySH[lane + 192u] += s_skySH[lane + s + 192u];
+        }
+        barrier();
+    }
+    if (lane == 0u)
+    {
+        vec3 c0 = s_skySH[0], c1 = s_skySH[64], c2 = s_skySH[128], c3 = s_skySH[192];
+        // Direct sky-radiance light (moonlight / space light) delta projection, matching the per-probe
+        // injection in main() — unoccluded here (the virtual probe floats in open sky).
+        if (dot(u_skyRadianceColor, u_skyRadianceColor) > 0.0)
+        {
+            const vec4 Ysky = shBasisL1(up);
+            c0 += u_skyRadianceColor * Ysky.x;
+            c1 += u_skyRadianceColor * Ysky.y;
+            c2 += u_skyRadianceColor * Ysky.z;
+            c3 += u_skyRadianceColor * Ysky.w;
+        }
+        giStoreCell(GI_SKY_SH_BASE, c0, c1, c2, c3);
+    }
+}
+
 void main()
 {
+    const uint numProbes = uint(GI_NUM_CASCADES) * uint(GI_CASCADE_PROBES);
+    if (gl_WorkGroupID.x == numProbes / 64u) // the extra workgroup past the probes (probe count is a multiple of 64)
+    {
+        projectSkySH(gl_LocalInvocationID.x);
+        return;
+    }
     const uint id = gl_GlobalInvocationID.x;
-    if (id >= uint(GI_NUM_CASCADES) * uint(GI_CASCADE_PROBES))
+    if (id >= numProbes)
         return;
 
     const int  cascade = int(id / uint(GI_CASCADE_PROBES));

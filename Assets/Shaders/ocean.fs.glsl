@@ -243,8 +243,8 @@ vec3 shadeHit(SceneHit hit, vec3 rayDir, vec3 sunRadiance, vec3 L)
     float giCoverage;
     const vec3 probeE = evalProbeSHCoverage(hit.pos, hit.N, giCoverage);
     vec3 indirect = probeE.x >= 0.0 ? probeE / PI : vec3(0.0);
-    if (giCoverage < 1.0) // fade to the sky+ground fallback over the probe field's outer band (no boundary step)
-        indirect = mix(skyGroundRadiance(hit.N), indirect, giCoverage);
+    if (giCoverage < 1.0) // fade to the virtual sky probe over the probe field's outer band (no boundary step)
+        indirect = mix(giEvalSkySH(hit.N) / PI, indirect, giCoverage);
     indirect *= u_aoParams.y;
     // Underwater hits: the ambient/GI reaching the bottom enters at the surface and Beer-Lamberts down
     // the water column, like the sun path the caller already attenuates. Neither the probes nor the sky

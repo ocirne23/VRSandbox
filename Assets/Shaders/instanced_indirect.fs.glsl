@@ -281,13 +281,13 @@ void main()
 		// occluded directions. Mix partway toward N so flat, unoccluded surfaces are left untouched.
 		bentN = normalize(mix(N, normalize(aoSample.xyz), 0.75));
 	}
-	// Blend to the sky+ground fallback over the probe field's outer band (coverage) instead of stepping
+	// Blend to the virtual sky probe over the probe field's outer band (coverage) instead of stepping
 	// at the outermost cascade's window face; the fallback is only evaluated where it contributes.
 	float giCoverage;
 	const vec3 indirectE = evalProbeSHCoverage(in_pos, bentN, giCoverage);
 	vec3 indirect = (indirectE.x >= 0.0) ? (indirectE / PI) : vec3(0.0);
 	if (giCoverage < 1.0)
-		indirect = mix(skyGroundRadiance(bentN), indirect, giCoverage);
+		indirect = mix(giEvalSkySH(bentN) / PI, indirect, giCoverage);
 	indirect *= u_aoParams.y;
 	vec3 color = materialColor * (indirect + u_ambientColor) * ao;
 

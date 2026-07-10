@@ -87,6 +87,20 @@ export struct SkyParams
     void registerTweaks();
 };
 
+// Sun shadow cascade distribution (raster path; RT sun shadows ignore these) — the TweakPanel's
+// "Shadows" category. Consumed per frame by computeSunCascades, so changes apply live.
+export struct ShadowParams
+{
+    float maxDistance = 3000.0f; // farthest camera distance receiving sun shadows (m). Lower = every
+                                // cascade covers less ground = sharper shadows everywhere, at range cost.
+    float splitLambda = 0.95f;  // cascade split scheme: 0 = uniform splits, 1 = logarithmic (resolution
+                                // bunches up near the camera)
+    float casterPad = 2000.0f;   // how far up-sun a caster may sit above a cascade and still be captured
+                                // (m). Must exceed the tallest shadow-casting feature (mountains!); too
+                                // small clips casters out of the depth map and their shadows pop away.
+    void registerTweaks();
+};
+
 // Volumetric fog (froxel grid; see VolumetricFogPipeline) — the TweakPanel's "Fog" categories.
 // All UBO-driven, so changes apply live.
 export struct FogParams
@@ -108,9 +122,10 @@ export struct FogParams
     float terrainShadowDist = 512.0f; // froxels beyond this distance sun-shadow by marching the terrain
                                    // height map instead of TLAS rays / cascade taps (both run out of data
                                    // at distance — TLAS is range-bounded); needs the terrain fog map
-    float regionStrength = 0.9;   // how much the baked regional fog-thickness field (fog terrain map
-                                   // channel B, Procedural's ClimateMaps::sampleFogThickness) modulates the
-                                   // height-fog density: 0 = uniform fog, 1 = fully region-driven
+    float regionStrength = 0.9f;   // how much the baked regional fog fields (terrain data map channel B:
+                                   // thickness + height-falloff mul, Procedural's sampleFogThickness /
+                                   // sampleFogHeightFalloff) modulate the height fog: 0 = uniform fog,
+                                   // 1 = fully region-driven
     float noiseScale = 0.08f;      // density noise frequency (1/m)
     float noiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
     float windSpeed = 1.5f;        // noise drift (m/s)

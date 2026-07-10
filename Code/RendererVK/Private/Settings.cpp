@@ -60,6 +60,13 @@ void SkyParams::registerTweaks()
     Tweak::float3("Sky", "Up Axis", &up, 0.01f, [&]() { up = glm::normalize(up); });
 }
 
+void ShadowParams::registerTweaks()
+{
+    Tweak::floatVar("Shadows", "Max distance (m)", &maxDistance, 25.0f, 4000.0f, 5.0f);
+    Tweak::floatVar("Shadows", "Split lambda", &splitLambda, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Shadows", "Caster pad (m)", &casterPad, 0.0f, 2000.0f, 10.0f);
+}
+
 void FogParams::registerTweaks()
 {
     Tweak::boolean("Fog", "Enabled", &enabled);

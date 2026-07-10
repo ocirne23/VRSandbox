@@ -10,7 +10,7 @@ import RendererVK;
 import File;
 
 import :OceanRenderer;
-import :Climate;
+import :TerrainSampler;
 
 namespace Procedural
 {
@@ -167,7 +167,7 @@ namespace Procedural
 	}
 
 	// Shore bake: an OCEAN_SHORE_RES^2 snapshot of (terrain height, water level) pairs covering
-	// m_shoreRange meters around the camera (HeightMapBaker, sampled from the SAME ClimateMaps the
+	// m_shoreRange meters around the camera (HeightMapBaker, sampled from the SAME terrain sampler the
 	// terrain streamer renders from, so the water agrees with the drawn ground). The shaders derive the
 	// water depth live as water level - height and lift the clipmap by water level - sea level (lakes/
 	// rivers at altitude); beyond this map's range they fall back to the coarser fog terrain cascades

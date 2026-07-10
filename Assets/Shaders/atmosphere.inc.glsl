@@ -200,22 +200,8 @@ vec3 skyRadiance(vec3 dir)
 //	return radiance * groundAtten;
 //}
 
-// Irradiance/PI stand-in for SURFACE indirect lighting where no GI probe data exists (the out-of-field
-// fallback): a single skyRadiance sample along the normal misses the ground half of a wall's hemisphere
-// entirely, so split the hemisphere by the horizontal-plane form factor (1 - n.up)/2 — a sky sample
-// along n (raised to a graze for side/down normals) blended with the sunlit-ground radiance. The plane
-// form factor is zero for up-facing surfaces, but on rolling terrain part of the hemisphere above the
-// horizon is OTHER sunlit terrain, not sky — exactly what the probes integrate — so the ground fraction
-// is floored at u_groundParams.w ("Sky/Ground Horizon"). This is what makes the fallback track the
-// probes' "sky + sunlit ground bounce" instead of sky only.
-vec3 skyGroundRadiance(vec3 n)
-{
-	const vec3 up = normalize(u_skyUp);
-	const float cosUp = dot(n, up);
-	const float groundF = mix(0.5 - 0.5 * cosUp, 1.0, u_groundParams.w);
-	const vec3 skyL = skyRadiance(cosUp < 0.02 ? normalize(n - up * (cosUp - 0.05)) : n);
-	const vec3 groundL = skyRadiance(-up);
-	return mix(skyL, groundL, groundF);
-}
+// The SURFACE out-of-field fallback is the virtual sky probe: gi_probe_trace.cs.glsl projects
+// skyRadiance into an SH-L1 slot (GI_SKY_SH_BASE, gi_probe.inc.glsl giEvalSkySH) evaluated exactly like
+// a real probe, so the handover at the probe field's edge matches by construction.
 
 #endif

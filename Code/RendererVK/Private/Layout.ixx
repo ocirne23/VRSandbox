@@ -66,8 +66,10 @@ export namespace RendererVKLayout
     constexpr uint32 GI_CASCADE_PROBES = GI_CASCADE_PROBE_DIM * GI_CASCADE_PROBE_DIM * GI_CASCADE_PROBE_DIM;
     constexpr uint32 GI_PROBES_TOTAL = GI_NUM_CASCADES * GI_CASCADE_PROBES;
 
-    constexpr size_t GI_GRID_DATA_BUFFER_SIZE = (size_t)GI_PROBES_TOTAL * GI_PROBE_STRIDE * sizeof(uint32);
-    constexpr uint32 GI_TRACE_THREADS = GI_PROBES_TOTAL;                                 // one invocation per probe
+    // + one extra SH-L1 slot after the last probe: the "virtual sky probe" (skyRadiance projected by the
+    // trace pass), evaluated as the out-of-field fallback so it matches the probes by construction.
+    constexpr size_t GI_GRID_DATA_BUFFER_SIZE = ((size_t)GI_PROBES_TOTAL * GI_PROBE_STRIDE + GI_SH_STRIDE) * sizeof(uint32);
+    constexpr uint32 GI_TRACE_THREADS = GI_PROBES_TOTAL + 64;                            // one invocation per probe + one workgroup projecting the sky SH
 
     constexpr uint32 GI_INITIAL_TLAS_INSTANCES = 256; // grown when the instance count exceeds it
     constexpr size_t GI_TLAS_INSTANCE_SIZE = 64;                                         // sizeof(VkAccelerationStructureInstanceKHR)

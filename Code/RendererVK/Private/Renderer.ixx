@@ -417,6 +417,7 @@ private:
     std::vector<DebugLinePipeline::LineVertex> m_debugLineVerts; // CPU staging, drained in present()
 
     SkyParams m_skyParams;
+    ShadowParams m_shadowParams;
     FogParams m_fogParams;
     OceanParams m_oceanParams;
     glm::vec4 m_terrainFade{ 0.0f }; // see setTerrainFade; (0,0,0,0) = disabled (y<=x)

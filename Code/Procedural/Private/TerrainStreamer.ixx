@@ -75,7 +75,6 @@ export namespace Procedural
 
 		// --- Tweak-backed configuration (source of truth; the generator/ChunkParams are built from these) ---
 		bool  m_enabled = true;
-		int   m_generator = 1;  // 0 = V1 Climate (continents + lakes), 1 = V2 Biome (biome field first)
 		int   m_seed = 62500;
 		float m_chunkSize = 128.0f;
 		int   m_lod0Res = 90;
@@ -87,25 +86,9 @@ export namespace Procedural
 		int   m_maxUploadsPerFrame = 16;
 		float m_edgeFadeChunks = 2.0f; // width (in chunks) of the height fade-in band at the generation edge
 
-		float  m_continentAmplitude = 150.0f;
-		float  m_mountainAmplitude = 300.0f;
-		float  m_detailAmplitude = 6.0f;
-		float  m_continentFrequency = 0.0009f;
-		float  m_mountainFrequency = 0.0015f;
-		float  m_detailFrequency = 0.02f;
-		float  m_climateFrequency = 0.00025f;
-		int    m_continentOctaves = 5;
-		int    m_mountainOctaves = 6;
-		int    m_detailOctaves = 4;
-		float  m_warpStrength = 40.0f;
-		float  m_lapseRate = 0.0018f;
-		float  m_networkCell = 1200.0f;    // lake lattice spacing (m): smaller = more (and smaller) lakes
-		float  m_lakeCoverage = 0.5f;      // fraction of lattice local-minima that hold a lake
-		float  m_lakeDepth = 8.0f;
-		float  m_fogFrequency = 0.0003f;   // regional fog thickness (fog map channel B; V1 only)
-		float  m_fogCoverage = 0.5f;
-
 		// --- V2 (climate-first) generator ---
+		float  m_detailFrequency = 0.02f;  // height detail fBm (cycles/m)
+		int    m_detailOctaves = 4;
 		float  m_v2BiomeSize = 128.0f;    // typical biome extent (m): climate-field feature size
 		float  m_v2BiomeBlend = 1.0f;      // climate-space kernel width (low = crisp biome identity)
 		float  m_v2BorderWarp = 350.0f;    // domain warp on the biome lookup (wiggly borders)

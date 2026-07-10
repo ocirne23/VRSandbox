@@ -12,7 +12,7 @@ export namespace Procedural
 	// 0..255 (1.0 = the global Fog/Height Falloff unchanged).
 	inline constexpr float FOG_FALLOFF_MUL_MAX = 4.0f;
 
-	// The point-evaluable terrain field every generator implements (V1 ClimateMaps, V2 TerrainGenV2).
+	// The point-evaluable terrain field every generator implements (TerrainGenV2).
 	// All methods are pure functions of world position — seeded, thread-safe, world-continuous — which is
 	// what keeps chunks, LODs, bakes (shore/fog maps) and buoyancy consistent with each other regardless
 	// of which generator produced them. Consumers hold shared_ptr<const ITerrainSampler>.

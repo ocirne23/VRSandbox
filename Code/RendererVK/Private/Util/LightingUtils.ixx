@@ -8,7 +8,8 @@ import :Layout;
 
 export float radicalInverse(uint32 i, uint32 base);
 export float sunVisibleFraction(const glm::vec3& sunDir, const glm::vec3& moonDir, float cosSunRadius, float cosMoonRadius, float sunGlow);
-export void computeSunCascades(const Camera& camera, float aspect, const glm::vec3& sunDir, glm::mat4(&outViewProj)[RendererVKLayout::NUM_SHADOW_CASCADES]);
+export void computeSunCascades(const Camera& camera, float aspect, const glm::vec3& sunDir,
+    float shadowFar, float splitLambda, float casterPad, glm::mat4(&outViewProj)[RendererVKLayout::NUM_SHADOW_CASCADES]);
 
 // Radical inverse in an arbitrary base; (Halton(2), Halton(3)) gives the low-discrepancy sub-pixel jitter
 // sequence used by the TAA accumulation.
@@ -41,18 +42,19 @@ float sunVisibleFraction(const glm::vec3& sunDir, const glm::vec3& moonDir,
     return glm::mix(contained, 1.0f, glm::smoothstep(fabsf(rs - rm), rs + rm, d));
 }
 
+// Cascade distribution knobs (ShadowParams tweaks, "Shadows" panel):
+//   shadowFar:    max distance from the camera that receives sun shadows. Lower = every cascade
+//                 covers less ground = higher resolution everywhere (at the cost of range).
+//   splitLambda:  0 = evenly spaced splits (uniform), 1 = logarithmic (splits bunch up close to
+//                 the camera). Higher = more shadow-map resolution near the camera.
+//   casterPad:    up-sun depth-slab extension per cascade — see the comment at its use.
 void computeSunCascades(const Camera& camera, float aspect, const glm::vec3& sunDir,
-    glm::mat4(&outViewProj)[RendererVKLayout::NUM_SHADOW_CASCADES])
+    float shadowFar, float splitLambda, float casterPad, glm::mat4(&outViewProj)[RendererVKLayout::NUM_SHADOW_CASCADES])
 {
     constexpr uint32 N = RendererVKLayout::NUM_SHADOW_CASCADES;
     const float shadowNear = camera.near;
-    // --- Cascade distribution knobs --------------------------------------------------------
-    // shadowFar:    max distance from the camera that receives sun shadows. Lower = every cascade
-    //               covers less ground = higher resolution everywhere (at the cost of range).
-    // splitLambda:  0 = evenly spaced splits (uniform), 1 = logarithmic (splits bunch up close to
-    //               the camera). Higher = more shadow-map resolution near the camera.
-    const float shadowFar = 250.0f;
-    const float splitLambda = 0.80f;
+    shadowFar = glm::max(shadowFar, shadowNear + 1.0f);
+    splitLambda = glm::clamp(splitLambda, 0.0f, 1.0f);
     const float res = (float)RendererVKLayout::SHADOW_MAP_RESOLUTION;
 
     const glm::mat4 invView = glm::inverse(camera.viewMatrix);
@@ -103,7 +105,7 @@ void computeSunCascades(const Camera& camera, float aspect, const glm::vec3& sun
         // cost is depth precision over a longer range (fine for D32). It must exceed the tallest
         // caster's height above the cascade; too small and casters get clipped out of the depth map,
         // making their shadows pop/disappear as the cascade slab slides with camera motion.
-        const float zPad = 250.0f;
+        const float zPad = casterPad;
         // L points towards the sun, so the light sits up-sun of the scene looking back along -L.
         const glm::vec3 eye = center + L * (radius + zPad);
         const glm::mat4 lightView = glm::lookAtRH(eye, center, upRef);
