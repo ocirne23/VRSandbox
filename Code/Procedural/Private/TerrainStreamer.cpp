@@ -8,6 +8,7 @@ import Core.Tweaks;
 
 import RendererVK;
 import File;
+import Spatial;
 
 import :TerrainStreamer;
 import :TerrainSampler;
@@ -410,13 +411,27 @@ namespace Procedural
 			resident.coord = res.coord;
 			resident.lod = res.lod;
 			resident.node = std::move(node);
+			// Culling registration: chunks live in the SpatialIndex like entity render components, but on
+			// their own layer (no Entity* behind userData — gameplay queries must not see them),
+			// registered ONCE (chunks never move, so they promote straight into the static tier), and
+			// WITHOUT the spawn-visibility guard (chunks stream in off-screen constantly; the guard
+			// would pin each one in the main pass until it first enters the frustum).
+			const Sphere bounds = resident.node.getWorldBounds();
+			resident.spatialEntry = SpatialEntry(Globals::spatialIndex.registerEntry(
+				glm::dvec3(bounds.pos), bounds.radius, 0ull, SpatialLayer_Terrain, false));
 			m_residents.emplace(res.key, std::move(resident));
 			++uploads;
 		}
 
+		const SpatialCullingConfig& culling = Globals::spatialIndex.getCullingConfig();
+		const bool gate = culling.mode >= int(ESpatialCullMode::Cull);
+
 		// --- Evict residents, but keep a column's current chunk until its replacement is ready (no hole
 		// while a new LOD streams in). Evict a resident only if its column left the ring entirely, or its
-		// column now wants a different LOD AND that replacement chunk is already resident.
+		// column now wants a different LOD AND that replacement chunk is resident AND can take over ON
+		// SCREEN: a freshly registered replacement isn't main-stamped until the next markVisibleSet, so
+		// evicting on residency alone opened a one-frame hole on every in-view LOD change (and while the
+		// culling is FROZEN the replacement never gets stamped — the old chunk just stays).
 		for (auto it = m_residents.begin(); it != m_residents.end(); )
 		{
 			const Resident& res = it->second;
@@ -427,7 +442,20 @@ namespace Procedural
 			else if ((uint32)want == res.lod)
 				evict = false; // this is the wanted LOD
 			else
-				evict = m_residents.count(chunkKey(res.coord, (uint32)want)) != 0; // replacement ready
+			{
+				const auto repIt = m_residents.find(chunkKey(res.coord, (uint32)want));
+				evict = repIt != m_residents.end();
+				if (evict && gate)
+				{
+					// Hole-free handover: the replacement is main-visible, or the old chunk isn't
+					// on screen either (an off-screen swap can't show a hole).
+					const bool newVis = repIt->second.spatialEntry.isValid()
+						&& (Globals::spatialIndex.getPassMask(repIt->second.spatialEntry.handle()) & SpatialPassBit_Main);
+					const bool oldVis = res.spatialEntry.isValid()
+						&& (Globals::spatialIndex.getPassMask(res.spatialEntry.handle()) & SpatialPassBit_Main);
+					evict = newVis || !oldVis;
+				}
+			}
 
 			if (evict)
 				it = m_residents.erase(it);
@@ -435,11 +463,28 @@ namespace Procedural
 				++it;
 		}
 
-		// --- Push every resident chunk to the renderer (GPU indirect cull handles visibility).
+		// --- Push resident chunks through the spatial culling gate. Main-visible chunks feed every pass;
+		// main-culled chunks KEEP their shadow/GI passes unconditionally (terrain is the ground
+		// everywhere — unlike entities, it skips the Near-ball test, because dropping the ground behind
+		// the camera from the TLAS/shadow maps visibly breaks GI and long sun shadows; the GPU shadow
+		// cull and the TLAS range bound already refine those passes). MainOnly debug mode drops
+		// main-culled chunks entirely, like entities.
 		for (auto& entry : m_residents)
 		{
-			if (entry.second.node.isValid())
-				renderer.renderNode(entry.second.node);
+			Resident& res = entry.second;
+			if (!res.node.isValid())
+				continue;
+			if (gate && res.spatialEntry.isValid())
+			{
+				uint32 passMask = RendererVKLayout::PASS_SHADOW | RendererVKLayout::PASS_GI;
+				if (Globals::spatialIndex.getPassMask(res.spatialEntry.handle()) & SpatialPassBit_Main)
+					passMask = RendererVKLayout::PASS_ALL;
+				else if (culling.mode == int(ESpatialCullMode::MainOnly))
+					continue;
+				renderer.renderNode(res.node, passMask);
+			}
+			else
+				renderer.renderNode(res.node);
 		}
 	}
 }

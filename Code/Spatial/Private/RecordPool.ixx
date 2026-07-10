@@ -21,6 +21,10 @@ enum ERecordFlag : uint8
     RecordFlag_PendingStatic = 32, // sits in a pendingPromotions list; blocks re-promotion until a
                                    // rebuild consumes that entry (a demote in between would otherwise
                                    // allow a duplicate, and the rebuild would unlink the entry twice)
+    RecordFlag_NoSpawnGuard  = 64, // registerEntry(spawnVisible = false): the entry is NEVER treated as
+                                   // visible before its first real stamp — streamed terrain wants this
+                                   // (chunks materialize off-screen constantly; the guard pinned them in
+                                   // the main pass until first entering the frustum, forever with Freeze)
 };
 
 class RecordPool final

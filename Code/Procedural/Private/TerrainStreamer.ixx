@@ -6,6 +6,7 @@ import Core.Camera;
 import Core.Transform;
 
 import RendererVK;
+import Spatial;
 
 import :TerrainSampler;
 import :TerrainGenerator;
@@ -63,6 +64,7 @@ export namespace Procedural
 			glm::ivec2 coord{ 0, 0 };
 			uint32 lod = 0;
 			RenderNode node;                            // references container's meshes; destroyed first
+			SpatialEntry spatialEntry;                  // culling registration (SpatialLayer_Terrain, static)
 		};
 
 		void workerLoop();
@@ -119,7 +121,7 @@ export namespace Procedural
 		// terrain coloring; height / water level / fog|falloff|temp|hum / altitude per texel) ---
 		bool  m_terrainMapEnabled = true;
 		float m_terrainMapRange = 2048.0f;     // near cascade world size (m), centered on the camera
-		float m_terrainMapFarRange = 16384.0f; // far cascade world size (m; same texel count, coarser texels)
+		float m_terrainMapFarRange = 8192.0f;  // far cascade world size (m; same texel count, coarser texels)
 		HeightMapBaker m_terrainMapBaker;
 		bool  m_terrainMapUploaded = false;    // a map is live in the renderer (cleared on disable)
 

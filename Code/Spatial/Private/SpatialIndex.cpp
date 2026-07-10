@@ -65,7 +65,7 @@ void SpatialIndex::initialize(const SpatialIndexDesc& desc)
     Tweak::floatVar("Spatial/Culling", "Skinned radius scale", &m_culling.skinnedRadiusScale, 1.0f, 4.0f, 0.01f);
 }
 
-SpatialHandle SpatialIndex::registerEntry(const glm::dvec3& pos, float radius, uint64 userData, uint32 layerMask)
+SpatialHandle SpatialIndex::registerEntry(const glm::dvec3& pos, float radius, uint64 userData, uint32 layerMask, bool spawnVisible)
 {
     assert(m_initialized && radius >= 0.0f);
     const uint32 idx = m_pool.acquire();
@@ -86,11 +86,11 @@ SpatialHandle SpatialIndex::registerEntry(const glm::dvec3& pos, float radius, u
     m_pool.prev[idx] = UINT32_MAX;
     m_pool.layerMask[idx] = layerMask;
     for (uint32 p = 0; p < uint32(ESpatialPass::Count); ++p)
-        m_pool.lastVisible[p][idx] = 0; // never stamped: every pass reports visible until first query
+        m_pool.lastVisible[p][idx] = 0; // never stamped: reports visible until the first query, unless NoSpawnGuard
     m_pool.lastMoveFrame[idx] = m_frameId;
     m_pool.storeIdx[idx] = UINT32_MAX;
     m_pool.level[idx] = uint8(level);
-    m_pool.flags[idx] = RecordFlag_Alive | RecordFlag_Unlinked;
+    m_pool.flags[idx] = uint8(RecordFlag_Alive | RecordFlag_Unlinked | (spawnVisible ? 0 : RecordFlag_NoSpawnGuard));
     m_pendingOps.push_back({ .newKey = key, .newRelPos = rel, .newRadius = radius,
                              .idx = idx, .gen = m_pool.gen[idx], .type = PendingOp::Link, .newLevel = uint8(level) });
     return { idx, m_pool.gen[idx] };
@@ -175,10 +175,13 @@ void SpatialIndex::commitFrame()
             {
                 linkIntoCell(op.idx);
                 m_pool.flags[op.idx] = uint8(opFlags & ~RecordFlag_Unlinked);
-                // counts as visible for the current stamp generation; the next markVisibleSet
-                // (which runs with the entry actually in the index) decides for real
-                for (uint32 p = 0; p < uint32(ESpatialPass::Count); ++p)
-                    m_pool.lastVisible[p][op.idx] = m_visibleQueryId[p];
+                // Counts as visible for the current stamp generation; the next markVisibleSet (which
+                // runs with the entry actually in the index) decides for real. NOT for NoSpawnGuard
+                // entries: with the culling FROZEN no markVisibleSet ever re-decides, so this write
+                // would leak every newly linked (off-screen-streamed) entry into the frozen main set.
+                if (!(opFlags & RecordFlag_NoSpawnGuard))
+                    for (uint32 p = 0; p < uint32(ESpatialPass::Count); ++p)
+                        m_pool.lastVisible[p][op.idx] = m_visibleQueryId[p];
             }
             break;
         case PendingOp::Move:

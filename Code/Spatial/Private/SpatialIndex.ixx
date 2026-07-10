@@ -21,7 +21,12 @@ public:
 
     void initialize(const SpatialIndexDesc& desc = {});
 
-    SpatialHandle registerEntry(const glm::dvec3& pos, float radius, uint64 userData, uint32 layerMask = 1);
+    // spawnVisible: whether the entry counts as visible in every pass until its first real stamp.
+    // Entities want true (a fresh spawn must not flash invisible during its link+stamp latency);
+    // streamed geometry (terrain chunks) passes false — appearing one frame late is invisible for
+    // something that didn't exist before, while the guard would leak never-stamped off-screen entries
+    // into the main pass (permanently while the culling is frozen).
+    SpatialHandle registerEntry(const glm::dvec3& pos, float radius, uint64 userData, uint32 layerMask = 1, bool spawnVisible = true);
     void unregisterEntry(SpatialHandle handle); // neutralized immediately, unlinked at commit
     void updateEntry(SpatialHandle handle, const glm::dvec3& pos, float radius);
     void setLayerMask(SpatialHandle handle, uint32 layerMask);
@@ -43,23 +48,27 @@ public:
                         uint32 layerMask, IOcclusionTester* occlusion = nullptr);
     void markVisibleSphere(ESpatialPass pass, const glm::dvec3& center, float radius, uint32 layerMask);
 
-    bool isVisible(SpatialHandle handle) const // main pass; never-stamped entries count as visible (spawn-pop guard)
+    // Main pass; a never-stamped entry counts as visible unless it registered with spawnVisible = false
+    // (see registerEntry).
+    bool isVisible(SpatialHandle handle) const
     {
         if (!m_pool.isValidAlive(handle))
             return false;
         const uint32 stamp = m_pool.lastVisible[uint32(ESpatialPass::Main)][handle.idx];
-        return stamp == m_visibleQueryId[uint32(ESpatialPass::Main)] || stamp == 0;
+        return stamp == m_visibleQueryId[uint32(ESpatialPass::Main)]
+            || (stamp == 0 && !(m_pool.flags[handle.idx] & RecordFlag_NoSpawnGuard));
     }
 
-    uint32 getPassMask(SpatialHandle handle) const // SpatialPassBit_* bits
+    uint32 getPassMask(SpatialHandle handle) const // SpatialPassBit_* bits; spawn guard as in isVisible
     {
         if (!m_pool.isValidAlive(handle))
             return 0;
+        const bool spawnGuard = !(m_pool.flags[handle.idx] & RecordFlag_NoSpawnGuard);
         uint32 mask = 0;
         for (uint32 p = 0; p < uint32(ESpatialPass::Count); ++p)
         {
             const uint32 stamp = m_pool.lastVisible[p][handle.idx];
-            if (stamp == m_visibleQueryId[p] || stamp == 0)
+            if (stamp == m_visibleQueryId[p] || (spawnGuard && stamp == 0))
                 mask |= 1u << p;
         }
         return mask;

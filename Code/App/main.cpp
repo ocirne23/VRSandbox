@@ -304,8 +304,10 @@ int main()
                 Globals::occlusionBuffer.render(viewProjRelCamera, cameraPos);
                 occlusion = &Globals::occlusionBuffer;
             }
+            // Terrain chunks ride the Main stamp too (TerrainStreamer registers them on their own layer);
+            // they skip the Near ball — main-culled terrain keeps its shadow/GI passes unconditionally.
             spatialIndex.markVisibleSet(ESpatialPass::Main, cullFrustum, cameraPos,
-                cullingConfig.maxDist + cullingConfig.margin, SpatialLayer_Render, occlusion);
+                cullingConfig.maxDist + cullingConfig.margin, SpatialLayer_Render | SpatialLayer_Terrain, occlusion);
             // The Near ball barely changes frame to frame: inflate it by the slack and requery only
             // once the camera has moved that far. The frame cap keeps off-screen MOVERS from staying
             // unstamped too long (they can enter the ball without the camera moving).

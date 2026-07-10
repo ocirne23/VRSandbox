@@ -10,7 +10,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/
 
 # Procedural sits above the renderer: its generation partitions are Core-only, but TerrainStreamer bridges
 # generated chunks into renderable ObjectContainer/RenderNode handles, so the lib links RendererVK + File.
-target_link_libraries(${PROJECT_NAME} PUBLIC Core RendererVK File)
+target_link_libraries(${PROJECT_NAME} PUBLIC Core RendererVK File Spatial)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER Engine)
 

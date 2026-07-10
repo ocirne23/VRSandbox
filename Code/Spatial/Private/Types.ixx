@@ -53,8 +53,11 @@ export struct IOcclusionTester
     virtual bool isVisible(const glm::vec3& centerRelCamera, const glm::vec3& halfExtent) = 0;
 };
 
-export constexpr uint32 SpatialLayer_Render = 1u << 0; // entities with a RenderComponent
-export constexpr uint32 SpatialLayer_Stress = 1u << 1; // synthetic stress-test entries
+export constexpr uint32 SpatialLayer_Render = 1u << 0;  // entities with a RenderComponent
+export constexpr uint32 SpatialLayer_Stress = 1u << 1;  // synthetic stress-test entries
+export constexpr uint32 SpatialLayer_Terrain = 1u << 2; // procedural terrain chunks (render culling only:
+                                                        // NOT entities — their userData is not an Entity*,
+                                                        // so gameplay queries must never include this layer)
 
 // Rebase a world-space frustum to camera-relative space (in double, so the planes stay exact at
 // planet-scale camera positions): dot(n, p) + w == dot(n, p - camPos) + (w + dot(n, camPos)).
@@ -99,10 +102,10 @@ export enum class ESpatialCullMode : int
 // these and Entity::updateTree pushes per-pass masks when mode >= Cull.
 export struct SpatialCullingConfig
 {
-    int mode = int(ESpatialCullMode::Off);
+    int mode = int(ESpatialCullMode::Cull);
     bool freeze = false;             // stop re-stamping, fly around to inspect the culled set
     float margin = 4.0f;             // frustum inflation masking the one-frame stamp latency
-    float nearRadius = 512.0f;       // shadow-caster + ray-tracing relevance range around the camera
+    float nearRadius = 0.0f;       // shadow-caster + ray-tracing relevance range around the camera
     float nearSlack = 16.0f;         // Near ball inflation; requery only after the camera moves this far (0 = every frame)
     float maxDist = 5000.0f;
     float skinnedRadiusScale = 1.5f; // animation can exceed the bind-pose bounds sphere
