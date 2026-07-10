@@ -32,6 +32,7 @@ void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, g
             if (evt.button == 1)
             {
                 m_isMouseDown = true;
+                m_mousePosUpdated = false;
             }
         };
     m_mouseListener->onMouseReleased = [this](const SDL_MouseButtonEvent& evt)
@@ -45,7 +46,10 @@ void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, g
     m_mouseListener->onMouseMoved = [this](const SDL_MouseMotionEvent& evt)
         {
             if (!Globals::input.isWindowHasFocus() || !m_isMouseDown || !Globals::ui.isViewportFocused() || Globals::input.isMouseCaptured())
+            {
+                m_mousePosUpdated = false;
                 return;
+            }
             if (!m_mousePosUpdated || Globals::ui.hasViewportGainedFocused())
             {
                 m_lastMousePos = glm::vec2(evt.x, evt.y);

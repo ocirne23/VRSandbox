@@ -49,7 +49,7 @@ export struct SkyParams
     float rayleighHeight = 8500.0f;     // Rayleigh scale height (m): how fast air density falls off
     float mieHeight = 1200.0f;          // Mie scale height (m): how high the haze layer reaches
     float mieExtinction = 1.11f;        // Mie extinction/scattering ratio (> 1 = absorbing haze)
-    float ozone = 1.0f;                 // ozone absorption strength (1 = Earth-like); absorbs green/yellow,
+    float ozone = 2.0f;                 // ozone absorption strength (1 = Earth-like); absorbs green/yellow,
                                         // suppresses the green horizon band single scattering produces
 
     // Clouds
@@ -92,23 +92,23 @@ export struct SkyParams
 export struct FogParams
 {
     bool  enabled = true;
-    float density = 0.020f;        // global extinction at the height base (1/m)
+    float density = 0.030f;        // global extinction at the height base (1/m)
     float heightBase = 0.0f;       // world height where the global fog is densest
     float heightFalloff = 0.33f;   // exponential density falloff above the base (1/m)
-    float terrainFollow = 0.75f;   // fraction of the local terrain height added to the height base (needs a
+    float terrainFollow = 1.0f;   // fraction of the local terrain height added to the height base (needs a
                                    // terrain height map, see Renderer::setFogTerrainHeightMap): 0 = flat fog,
                                    // 1 = fog hugs the terrain at constant depth; in between it reaches higher
                                    // on mountainsides but still clears the peaks
     glm::vec3 albedo = glm::vec3(1.0f, 1.0f, 1.0f);
     float albedoIntensity = 1.0f;  // > 1 is a non-physical gain (emissive-ish fog)
     float anisotropy = 0.15f;      // HG phase g (0 = isotropic, ->1 = forward scattering)
-    float range = 1900.0f;         // froxel grid far distance (m)
+    float range = 3700.0f;         // froxel grid far distance (m)
     float slicePower = 1.0f;       // froxel Z distribution exponent: 1 = plain exponential slices, < 1
                                    // shifts Z resolution from near to far (worth ~0.7-0.85 at long ranges)
     float terrainShadowDist = 512.0f; // froxels beyond this distance sun-shadow by marching the terrain
                                    // height map instead of TLAS rays / cascade taps (both run out of data
                                    // at distance — TLAS is range-bounded); needs the terrain fog map
-    float regionStrength = 1.0f;   // how much the baked regional fog-thickness field (fog terrain map
+    float regionStrength = 0.9;   // how much the baked regional fog-thickness field (fog terrain map
                                    // channel B, Procedural's ClimateMaps::sampleFogThickness) modulates the
                                    // height-fog density: 0 = uniform fog, 1 = fully region-driven
     float noiseScale = 0.08f;      // density noise frequency (1/m)

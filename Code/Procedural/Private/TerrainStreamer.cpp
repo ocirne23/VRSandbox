@@ -28,13 +28,6 @@ namespace
 		return (x << 36) | (z << 8) | (uint64)(lod & 0xFFu);
 	}
 
-	// Same packing without the LOD byte — identifies a column of chunks regardless of level.
-	uint64 coordKey(glm::ivec2 coord)
-	{
-		const uint64 x = (uint64)(uint32)coord.x & 0xFFFFFFFull;
-		const uint64 z = (uint64)(uint32)coord.y & 0xFFFFFFFull;
-		return (x << 36) | (z << 8);
-	}
 }
 
 namespace Procedural
@@ -93,9 +86,8 @@ namespace Procedural
 		Tweak::floatVar("Terrain/Fog", "Fog frequency", &m_fogFrequency, 0.0f, FLT_MAX, 0.0001f, dirty);
 		Tweak::floatVar("Terrain/Fog", "Fog coverage", &m_fogCoverage, 0.0f, 1.0f, 0.01f, dirty); // apply via Fog/Region strength
 
-		Tweak::floatVar("Terrain/V2", "Biome size (m)", &m_v2BiomeSize, 8.0f, 8000.0f, 10.0f, dirty);  // typical biome extent
-		Tweak::floatVar("Terrain/V2", "Biome resolution", &m_v2BiomeRes, 4.0f, 128.0f, 1.0f, dirty);  // texels per biome (texel = size/res)
-		Tweak::floatVar("Terrain/V2", "Biome blending", &m_v2BiomeBlend, 0.75f, 2.0f, 0.01f, dirty);  // gradient width of all derived fields
+		Tweak::floatVar("Terrain/V2", "Biome size (m)", &m_v2BiomeSize, 8.0f, 8000.0f, 10.0f, dirty);  // climate-field feature size
+		Tweak::floatVar("Terrain/V2", "Biome blending", &m_v2BiomeBlend, 0.1f, 3.0f, 0.01f, dirty);   // climate-space kernel width (low = crisp biomes)
 		Tweak::floatVar("Terrain/V2", "Border warp (m)", &m_v2BorderWarp, 0.0f, 1500.0f, 5.0f, dirty);
 		Tweak::floatVar("Terrain/V2", "Ocean fraction", &m_v2OceanFraction, 0.0f, 1.0f, 0.01f, dirty);
 		Tweak::floatVar("Terrain/V2", "Continent freq", &m_v2ContinentFreq, 0.0f, FLT_MAX, 0.00001f, dirty); // lower = bigger oceans/continents
@@ -115,9 +107,8 @@ namespace Procedural
 		Tweak::floatVar("Terrain/V2", "Mtn detail freq", &m_v2MtnDetailFreq, 0.0f, FLT_MAX, 0.0005f, dirty);
 		Tweak::floatVar("Terrain/V2", "Mtn mask start (m)", &m_v2MtnMaskStart, 0.0f, 300.0f, 1.0f, dirty);
 		Tweak::floatVar("Terrain/V2", "Mtn mask full (m)", &m_v2MtnMaskFull, 0.0f, 500.0f, 1.0f, dirty);
-		Tweak::boolean("Terrain/V2", "Erosion", &m_v2Erosion, dirty); // water accumulation + erosion pass
-		Tweak::floatVar("Terrain/V2", "Erosion strength (m)", &m_v2ErosionStrength, 0.0f, 30.0f, 0.25f, dirty);
-		Tweak::floatVar("Terrain/V2", "Erosion region (m)", &m_v2ErosionRegion, 512.0f, 8192.0f, 64.0f, dirty);
+		Tweak::floatVar("Terrain/V2", "Grass fog", &m_v2GrassFog, 0.0f, 1.0f, 0.01f, dirty);   // patchy ground mist
+		Tweak::floatVar("Terrain/V2", "Valley fog", &m_v2ValleyFog, 0.0f, 1.0f, 0.01f, dirty); // fills mountain valleys
 
 		rebuildMaps();
 
@@ -134,7 +125,6 @@ namespace Procedural
 			cfg.seed = (uint32)m_seed;
 			cfg.seaLevel = m_seaLevel;
 			cfg.biomeSize = m_v2BiomeSize;
-			cfg.biomeResolution = m_v2BiomeRes;
 			cfg.biomeBlend = m_v2BiomeBlend;
 			cfg.borderWarp = m_v2BorderWarp;
 			cfg.oceanFraction = m_v2OceanFraction;
@@ -157,9 +147,8 @@ namespace Procedural
 			cfg.mountainMaskFull = m_v2MtnMaskFull;
 			cfg.detailFrequency = m_detailFrequency;
 			cfg.detailOctaves = (uint32)glm::max(1, m_detailOctaves);
-			cfg.erosionEnabled = m_v2Erosion;
-			cfg.erosionStrength = m_v2ErosionStrength;
-			cfg.erosionRegionSize = m_v2ErosionRegion;
+			cfg.grassFogAmount = m_v2GrassFog;
+			cfg.valleyFogAmount = m_v2ValleyFog;
 			maps = std::make_shared<const TerrainGenV2>(cfg);
 		}
 		else
@@ -211,14 +200,38 @@ namespace Procedural
 		for (;;)
 		{
 			Request req;
+			bool haveWork = false;
 			{
 				std::unique_lock<std::mutex> lk(m_mutex);
 				m_cv.wait(lk, [this]() { return !m_running || !m_requests.empty(); });
 				if (!m_running)
 					return;
-				req = std::move(m_requests.front());
-				m_requests.pop_front();
+				// Lazy staleness: requests that fell out of the ring while queued are dropped HERE, at
+				// dequeue, against the published ring state — the main thread never rewrites the queue.
+				// A dropped request bounces back as an EMPTY result so the main thread releases its
+				// pending key (m_pending is main-thread-owned). Skipping costs a few integer ops per
+				// entry, so a deep stale backlog from fast flight burns off in microseconds.
+				while (!m_requests.empty())
+				{
+					req = std::move(m_requests.front());
+					m_requests.pop_front();
+					const glm::ivec2 d = req.params.coord - m_ringCam;
+					const int cheb = glm::max(glm::abs(d.x), glm::abs(d.y));
+					if (cheb <= m_ringR && req.params.lod == glm::min(m_ringMaxLod, (uint32)(cheb / m_ringLodStep)))
+					{
+						haveWork = true;
+						break;
+					}
+					Result drop;
+					drop.key = req.key;
+					drop.generation = req.generation;
+					drop.coord = req.params.coord;
+					drop.lod = req.params.lod;
+					m_results.push_back(std::move(drop)); // empty mesh = dropped
+				}
 			}
+			if (!haveWork)
+				continue; // everything was stale: back to waiting
 
 			Result res;
 			res.key = req.key;
@@ -309,29 +322,25 @@ namespace Procedural
 
 		updateFogHeightMap(renderer, camera, maps);
 
-		// --- Desired ring + enqueue any chunk that is neither resident nor already in flight.
-		// desired      = the exact (coord,lod) keys we want resident.
-		// desiredLod   = per-column target LOD, used by eviction to keep a column's current chunk alive
-		//                until its new-LOD replacement is resident (avoids a hole while it streams in).
-		std::unordered_set<uint64> desired;
-		std::unordered_map<uint64, uint32> desiredLod;
-		desired.reserve((size_t)(2 * R + 1) * (2 * R + 1));
-		desiredLod.reserve((size_t)(2 * R + 1) * (2 * R + 1));
-		std::vector<Request> newRequests;
+		// Ring membership is CLOSED FORM: the column at Chebyshev distance cheb from the camera chunk
+		// wants LOD min(maxLod, cheb/lodStep), nothing outside R. Every "is this still wanted" question
+		// below (queue pruning, result validation, eviction) is this arithmetic — no desired-key sets.
+		const auto ringLod = [&](glm::ivec2 coord) -> int
+		{
+			const int cheb = glm::max(glm::abs(coord.x - camCX), glm::abs(coord.y - camCZ));
+			return cheb <= R ? (int)glm::min(maxLod, (uint32)(cheb / lodStep)) : -1;
+		};
 
+		// --- Enqueue any ring chunk that is neither resident nor already in flight.
+		std::vector<Request> newRequests;
 		for (int dz = -R; dz <= R; ++dz)
 		{
 			for (int dx = -R; dx <= R; ++dx)
 			{
-				const int adx = dx < 0 ? -dx : dx;
-				const int adz = dz < 0 ? -dz : dz;
-				const int cheb = glm::max(adx, adz);
+				const int cheb = glm::max(dx < 0 ? -dx : dx, dz < 0 ? -dz : dz);
 				const uint32 lod = glm::min(maxLod, (uint32)(cheb / lodStep));
 				const glm::ivec2 coord(camCX + dx, camCZ + dz);
 				const uint64 key = chunkKey(coord, lod);
-				desired.insert(key);
-				desiredLod.emplace(coordKey(coord), lod);
-
 				if (m_residents.count(key) || m_pending.count(key))
 					continue;
 
@@ -349,27 +358,31 @@ namespace Procedural
 			}
 		}
 
-		// Queue hygiene for fast flight: DROP queued work that fell out of the ring — the worker would
-		// waste seconds generating chunks that get discarded on arrival and fall ever further behind —
-		// and keep the queue nearest-first so ground materializes under the camera outward, not in the
-		// order areas were flown over.
+		// Out-of-range queued work is dropped LAZILY by the worker at dequeue (see workerLoop) — the main
+		// thread never prunes or re-sorts the queue. It only publishes the ring state the worker
+		// validates against, and appends new work nearest-first: each batch is sorted (a batch is either
+		// the initial/teleport fill, where nearest-first matters, or a thin leading-edge strip of roughly
+		// equidistant chunks), and batches are consumed in enqueue order, so ground still materializes
+		// under the camera outward during flight.
+		const bool ringMoved = camCX != m_lastRingCX || camCZ != m_lastRingCZ
+			|| R != m_lastRingR || lodStep != m_lastRingLodStep || maxLod != m_lastRingMaxLod;
+		m_lastRingCX = camCX; m_lastRingCZ = camCZ;
+		m_lastRingR = R; m_lastRingLodStep = lodStep; m_lastRingMaxLod = maxLod;
+		if (ringMoved || !newRequests.empty())
 		{
-			std::lock_guard<std::mutex> lk(m_mutex);
-			std::erase_if(m_requests, [&](const Request& r)
-			{
-				if (desired.count(r.key))
-					return false;
-				m_pending.erase(r.key); // free the key for a future re-entry into the ring
-				return true;
-			});
-			for (Request& r : newRequests)
-				m_requests.push_back(std::move(r));
 			const glm::ivec2 cam(camCX, camCZ);
-			std::sort(m_requests.begin(), m_requests.end(), [&](const Request& a, const Request& b)
+			std::sort(newRequests.begin(), newRequests.end(), [&](const Request& a, const Request& b)
 			{
 				const glm::ivec2 da = a.params.coord - cam, db = b.params.coord - cam;
 				return da.x * da.x + da.y * da.y < db.x * db.x + db.y * db.y;
 			});
+			std::lock_guard<std::mutex> lk(m_mutex);
+			m_ringCam = cam;
+			m_ringR = R;
+			m_ringLodStep = lodStep;
+			m_ringMaxLod = maxLod;
+			for (Request& r : newRequests)
+				m_requests.push_back(std::move(r));
 		}
 		if (!newRequests.empty())
 			m_cv.notify_all();
@@ -387,7 +400,12 @@ namespace Procedural
 		int uploads = 0;
 		for (Result& res : ready)
 		{
-			const bool valid = (res.generation == generation) && desired.count(res.key) && !m_residents.count(res.key);
+			if (res.mesh.indices.empty()) // worker-dropped (stale at dequeue): just release the key
+			{
+				m_pending.erase(res.key); // re-enters the ring as a fresh request if wanted again
+				continue;
+			}
+			const bool valid = (res.generation == generation) && (int)res.lod == ringLod(res.coord) && !m_residents.count(res.key);
 			if (!valid)
 			{
 				m_pending.erase(res.key); // stale / no longer wanted / duplicate: done with it
@@ -451,14 +469,14 @@ namespace Procedural
 		for (auto it = m_residents.begin(); it != m_residents.end(); )
 		{
 			const Resident& res = it->second;
-			const auto wantIt = desiredLod.find(coordKey(res.coord));
+			const int want = ringLod(res.coord);
 			bool evict;
-			if (wantIt == desiredLod.end())
+			if (want < 0)
 				evict = true; // column outside the ring
-			else if (wantIt->second == res.lod)
+			else if ((uint32)want == res.lod)
 				evict = false; // this is the wanted LOD
 			else
-				evict = m_residents.count(chunkKey(res.coord, wantIt->second)) != 0; // replacement ready
+				evict = m_residents.count(chunkKey(res.coord, (uint32)want)) != 0; // replacement ready
 
 			if (evict)
 				it = m_residents.erase(it);

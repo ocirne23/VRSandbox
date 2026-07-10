@@ -216,28 +216,27 @@ void main()
     const vec2 vpUv = (vec2(cell.xy) + vec2(jx, jy)) / vec2(VOL_FROXEL_X, VOL_FROXEL_Y);
     const float viewZ = volSliceToViewZ((float(cell.z) + jz) / float(VOL_FROXEL_Z));
 
-    // World position: unproject the viewport-local UV at two depths for the ray, scale by view depth.
-    // REVERSED-Z: NDC z runs near = 1 to far = 0, so the "near" unproject point uses the HIGHER z (with
-    // the old convention flipped, dir pointed backwards and every froxel sampled its density mirrored
-    // behind the camera — sky froxels read ground-level fog). mvp/invMvp are unjittered (the TAA jitter
-    // only applies to rasterization). A second, UNJITTERED froxel-center ray feeds the temporal
-    // reprojection below — reprojecting the jittered sample point would smear the per-frame jitter into
-    // the history lookup itself.
-    const float ZN = 0.9, ZF = 0.1; // reversed-Z NDC z of the ray's near/far unproject points
-    const vec4 clipNdc = vec4(vpUv.x * 2.0 - 1.0, 1.0 - vpUv.y * 2.0, 0.0, 0.0);
-    vec4 pN = u_invMvp * vec4(clipNdc.xy, ZN, 1.0); pN.xyz /= pN.w;
-    vec4 pF = u_invMvp * vec4(clipNdc.xy, ZF, 1.0); pF.xyz /= pF.w;
-    const vec3 dir = normalize(pF.xyz - pN.xyz);
-    vec4 cN = u_invMvp * vec4(0.0, 0.0, ZN, 1.0); cN.xyz /= cN.w;
-    vec4 cF = u_invMvp * vec4(0.0, 0.0, ZF, 1.0); cF.xyz /= cF.w;
-    const vec3 camFwd = normalize(cF.xyz - cN.xyz);
+    // View rays from u_mvp's x/y/w ROWS (the sky.fs pattern): for a world direction d, ndc.xy =
+    // (r0.d, r1.d) / (rw.d), so solving the 3x3 system {r0.d = ndc.x, r1.d = ndc.y, rw.d = 1} gives the
+    // exact ray through a pixel from O(1)-magnitude rotation/projection terms — no camera translation,
+    // no depth-convention dependence, and no float32 invMvp (whose error grows with the camera's
+    // distance from the origin and RE-ROLLS EVERY FRAME: the previous two-point unprojection through it
+    // wobbled the ray directions per frame, de-syncing the temporal reprojection into fog shimmer —
+    // reversed-Z shrank the unproject baseline and amplified it). mvp is unjittered (the TAA jitter only
+    // applies at rasterization). The UNJITTERED froxel-center ray feeds the temporal reprojection below —
+    // reprojecting the jittered sample point would smear the per-frame jitter into the history lookup.
+    const mat3 rayFromNdc = inverse(mat3(
+        vec3(u_mvp[0][0], u_mvp[1][0], u_mvp[2][0]),
+        vec3(u_mvp[0][1], u_mvp[1][1], u_mvp[2][1]),
+        vec3(u_mvp[0][3], u_mvp[1][3], u_mvp[2][3])));
+    const vec2 ndc = vec2(vpUv.x * 2.0 - 1.0, 1.0 - vpUv.y * 2.0);
+    const vec3 dir = normalize(vec3(ndc, 1.0) * rayFromNdc);
+    const vec3 camFwd = normalize(vec3(0.0, 0.0, 1.0) * rayFromNdc);
     const vec3 worldPos = u_viewPos + dir * (viewZ / max(dot(dir, camFwd), 1e-3));
 
     const vec2 centerUv = (vec2(cell.xy) + 0.5) / vec2(VOL_FROXEL_X, VOL_FROXEL_Y);
     const vec2 centerNdc = vec2(centerUv.x * 2.0 - 1.0, 1.0 - centerUv.y * 2.0);
-    vec4 qN = u_invMvp * vec4(centerNdc, ZN, 1.0); qN.xyz /= qN.w;
-    vec4 qF = u_invMvp * vec4(centerNdc, ZF, 1.0); qF.xyz /= qF.w;
-    const vec3 centerDir = normalize(qF.xyz - qN.xyz);
+    const vec3 centerDir = normalize(vec3(centerNdc, 1.0) * rayFromNdc);
 
     // ---- Media density + scattering albedo ------------------------------------------------------------
     // Terrain-following height fog: raise the base by a fraction of the local terrain height, so fog pools
@@ -249,8 +248,13 @@ void main()
     float regionMul = 1.0; // baked regional fog-thickness modulation (terrain data map, packed channel B)
     if (terrainHeightMapPresent())
     {
+        // Terrain follow rides the MACRO ALTITUDE channel (A, m above sea level), not the raw height:
+        // the fog base tracks the smooth macro landscape, so ridge bumps don't drag the layer up with
+        // them and valleys carved below the macro surface sit INSIDE the fog (the generator's
+        // valley-fog thickness keys on the same carve depth). Clamped to sea level so fog rests on
+        // the water instead of sinking over the seabed.
         if (u_fogParams3.x > 0.0)
-            heightBase += u_fogParams3.x * max(terrainHeightAt(worldPos.xz), u_fogParams5.w);
+            heightBase += u_fogParams3.x * (u_fogParams5.w + max(terrainDataAt(worldPos.xz).w, 0.0));
         if (u_fogParams6.z > 0.0)
         {
             // Regional climate: x = fog thickness (density multiplier), y = height-falloff multiplier

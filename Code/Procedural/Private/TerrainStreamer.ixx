@@ -74,17 +74,17 @@ export namespace Procedural
 		void updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& maps);
 
 		// --- Tweak-backed configuration (source of truth; the generator/ChunkParams are built from these) ---
-		bool  m_enabled = false;
+		bool  m_enabled = true;
 		int   m_generator = 1;  // 0 = V1 Climate (continents + lakes), 1 = V2 Biome (biome field first)
 		int   m_seed = 62500;
 		float m_chunkSize = 128.0f;
 		int   m_lod0Res = 90;
-		int   m_ringRadius = 16;   // max generation range from the camera chunk, in chunks
+		int   m_ringRadius = 32;   // max generation range from the camera chunk, in chunks
 		int   m_lodStep = 2;      // chunks of ring distance per extra LOD level
 		int   m_maxLod = 4;
 		float m_seaLevel = 0.0f;
 		float m_skirtDepth = 5.0f;
-		int   m_maxUploadsPerFrame = 8;
+		int   m_maxUploadsPerFrame = 16;
 		float m_edgeFadeChunks = 2.0f; // width (in chunks) of the height fade-in band at the generation edge
 
 		float  m_continentAmplitude = 150.0f;
@@ -105,13 +105,12 @@ export namespace Procedural
 		float  m_fogFrequency = 0.0003f;   // regional fog thickness (fog map channel B; V1 only)
 		float  m_fogCoverage = 0.5f;
 
-		// --- V2 (biome-first) generator ---
-		float  m_v2BiomeSize = 512.0f;    // typical biome extent (m)
-		float  m_v2BiomeRes = 4.0f;       // biome-field texels across one biome (texel = size/resolution)
-		float  m_v2BiomeBlend = 1.0f;      // blend width in texels: gradient width of ALL derived fields
+		// --- V2 (climate-first) generator ---
+		float  m_v2BiomeSize = 128.0f;    // typical biome extent (m): climate-field feature size
+		float  m_v2BiomeBlend = 1.0f;      // climate-space kernel width (low = crisp biome identity)
 		float  m_v2BorderWarp = 350.0f;    // domain warp on the biome lookup (wiggly borders)
-		float  m_v2OceanFraction = 0.32f;  // fraction of the world that is Ocean
-		float  m_v2ContinentFreq = 0.00004f; // continent/ocean scale (~25km: few, huge oceans)
+		float  m_v2OceanFraction = 0.42f;  // fraction of the world that is Ocean
+		float  m_v2ContinentFreq = 0.00005f; // continent/ocean scale (~25km: few, huge oceans)
 		float  m_v2InlandRise = 120.0f;    // altitude gain (m) from coast to deep inland
 		float  m_v2OceanDeepen = 40.0f;    // extra seabed depth (m) toward mid-ocean
 		float  m_v2TempLapse = 0.0012f;    // temperature drop per meter of altitude (snowy peaks)
@@ -128,9 +127,8 @@ export namespace Procedural
 		float  m_v2MtnDetailFreq = 0.004f; // ridge detail scale (~250m features)
 		float  m_v2MtnMaskStart = 20.0f;   // altitude above sea (m) where mountain detail fades in
 		float  m_v2MtnMaskFull = 120.0f;   // altitude where it reaches full amplitude
-		bool   m_v2Erosion = false;         // pass 3: water accumulation + erosion (rivers/lakes via humidity)
-		float  m_v2ErosionStrength = 6.0f; // max channel carve depth (m)
-		float  m_v2ErosionRegion = 2048.0f;// simulation tile size (m); rivers stay within a tile
+		float  m_v2GrassFog = 0.5f;        // grassland low-fog patch thickness (0 = off)
+		float  m_v2ValleyFog = 0.8f;       // mountain-valley fog thickness (0 = off)
 
 		bool m_configDirty = false; // set by Tweak onChange; consumed at the top of update()
 
@@ -147,6 +145,14 @@ export namespace Procedural
 		std::mutex              m_mutex;
 		std::condition_variable m_cv;
 		std::deque<Request>     m_requests;
+		// Ring state the worker validates queued requests against at DEQUEUE time (guarded by m_mutex):
+		// stale requests drop lazily when popped — nobody rewrites the queue. m_ringR = -1 until the
+		// first publish (everything queued before that would drop, but the first publish precedes the
+		// first append under the same lock).
+		glm::ivec2 m_ringCam{ 0, 0 };
+		int    m_ringR = -1;
+		int    m_ringLodStep = 1;
+		uint32 m_ringMaxLod = 0;
 		std::vector<Result>     m_results;      // filled by worker, drained on the main thread
 		std::vector<Result>     m_readyBacklog; // main-thread only: generated chunks over the per-frame upload cap
 		std::shared_ptr<const ITerrainSampler> m_maps;
@@ -156,5 +162,12 @@ export namespace Procedural
 		// --- Main-thread residency state ---
 		std::unordered_map<uint64, Resident> m_residents;
 		std::unordered_set<uint64>           m_pending; // requested/queued, not yet resident
+		// Last ring parameters published to the worker (main-thread copies: the publish is skipped —
+		// no lock taken — while none of them changed and there is nothing new to append).
+		int    m_lastRingCX = INT_MIN;
+		int    m_lastRingCZ = INT_MIN;
+		int    m_lastRingR = -1;
+		int    m_lastRingLodStep = 0;
+		uint32 m_lastRingMaxLod = 0xFFFFFFFFu;
 	};
 }

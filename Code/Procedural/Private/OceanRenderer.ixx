@@ -57,11 +57,11 @@ export namespace Procedural
 		glm::vec3 sampleDisplacement(glm::vec2 worldXZ, float depth) const; // shoal-faded cascade sum from the readback tile
 
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---
-		bool  m_enabled = false;
+		bool  m_enabled = true;
 		float m_seaLevel = 0.0f;
 		float m_ringCell = 0.125f;     // ring 0 cell size (m); doubles per ring. Reach = ringCell*res/2*2^(rings-1)
 		int   m_ringRes = 512;         // cells per axis per ring (ring 0 is a full grid, outer rings are annuli)
-		int   m_rings = 7;             // ring count (defaults: 16m fine region, ~1km reach)
+		int   m_rings = 8;             // ring count (defaults: 16m fine region, ~1km reach)
 		// Bias on the ring-matched displacement mip (negative = sample finer than the ring's Nyquist:
 		// slightly more detail, some sampling shimmer while moving). With fixed-cell rings 0 should be fine.
 		float m_detailBias = 0.0f;
