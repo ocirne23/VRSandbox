@@ -543,7 +543,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         m_numSunCascades = RendererVKLayout::NUM_SHADOW_CASCADES;
         for (uint32 c = 0; c < RendererVKLayout::NUM_SHADOW_CASCADES; ++c)
             ubo.cascadeViewProj[c] = m_sunCascadeViewProj[c];
-        ubo.shadowParams = glm::vec3(sky.shadowDepthBias, sky.shadowNormalBias, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION);
+        ubo.shadowParams = glm::vec3(m_shadowParams.depthBias, m_shadowParams.normalBias, 1.0f / (float)RendererVKLayout::SHADOW_MAP_RESOLUTION);
     }
     else
         m_numSunCascades = 0;
@@ -575,7 +575,15 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.fogParams5 = glm::vec4(m_fogTerrainMap.getCenter(),
         fogTerrainSizes.y > 1.0f ? 1.0f / fogTerrainSizes.y : 0.0f, m_fogTerrainMap.getUserParam());
     ubo.fogParams6 = glm::vec4(glm::clamp(fog.slicePower, 0.25f, 2.0f), fog.terrainShadowDist,
-        glm::clamp(fog.regionStrength, 0.0f, 1.0f), 0.0f); // z: baked regional fog-thickness modulation
+        glm::clamp(fog.regionStrength, 0.0f, 1.0f), // z: baked regional fog-thickness modulation
+        glm::max(fog.underwaterDensity, 0.0f));     // w: density multiplier below the local water surface
+    // x: underwater fog boundary margin (m) relative to the LIVE wave surface (the fog scatter samples
+    // the FFT displacement maps directly). y: the waterline band half-height gating those samples —
+    // froxel segments outside +-band of the calm level are trivially above/below any possible wave, so
+    // only a thin shell pays for wave taps. The CPU trough estimate (ocean readback) bounds the wave
+    // amplitude; 0 disables wave sampling entirely (ocean off).
+    const float waveBand = m_oceanParams.enabled ? m_oceanWaveTrough * 2.0f + 0.5f : 0.0f;
+    ubo.fogParams7 = glm::vec4(0.0f, waveBand, 0.0f, 0.0f);
 
     ubo.moonParams = glm::vec4(glm::normalize(sky.moonDirection), cosf(glm::radians(sky.moonSizeDeg)));
     ubo.starParams = glm::vec4(sky.starSize, sky.starSizeVar, sky.starBrightness, sky.starColorVar);
@@ -1661,6 +1669,8 @@ void Renderer::recordVolumetricFog(uint32 frameIdx)
             .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
             .shadowMapView = frameData.shadowMap.getSampleView(),
             .shadowMapSampler = frameData.shadowMap.getSampler(),
+            .oceanMapsView = m_oceanSimPipeline.getMapsView(),
+            .oceanMapsSampler = m_oceanSimPipeline.getMapsSampler(),
             .tlas = tlas,
         };
         m_volumetricFogPipeline.record(cb, frameIdx, params);

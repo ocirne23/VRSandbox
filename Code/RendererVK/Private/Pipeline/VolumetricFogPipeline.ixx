@@ -40,6 +40,8 @@ public:
         Buffer& giGridDataBuffer;
         vk::ImageView shadowMapView;
         vk::Sampler   shadowMapSampler;
+        vk::ImageView oceanMapsView;   // FFT displacement maps: the scatter pass samples the live wave
+        vk::Sampler   oceanMapsSampler; // height around the waterline (underwater fog boundary)
         vk::AccelerationStructureKHR tlas;
     };
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, const RecordParams& params);

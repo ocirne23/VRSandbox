@@ -55,6 +55,7 @@ export namespace Procedural
 		glm::vec2 sampleShoreData(float x, float z) const;          // (water depth, water level) from the CPU shore copy
 		float sampleShoreDepth(float x, float z) const;             // CPU copy of the baked shore map
 		glm::vec3 sampleDisplacement(glm::vec2 worldXZ, float depth) const; // shoal-faded cascade sum from the readback tile
+		void estimateWaveTrough(); // sparse re-scan of the readback for the deepest current trough (underwater fog boundary)
 
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---
 		bool  m_enabled = true;
@@ -115,6 +116,8 @@ export namespace Procedural
 		// before beginFrame) without racing the GPU rewriting the slot's readback buffer.
 		std::vector<uint16> m_dispTile;                  // RGBA16F texels, res^2 per cascade
 		uint32 m_dispTileRes = 0;
+		float m_waveTrough = 0.0f;      // deepest current trough below the calm level (m; see estimateWaveTrough)
+		int   m_waveTroughCooldown = 0; // sparse re-scan counter (the patch minimum is near-stationary)
 
 		bool m_gridDirty = true;
 

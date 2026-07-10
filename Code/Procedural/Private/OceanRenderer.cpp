@@ -230,7 +230,10 @@ namespace Procedural
 		renderer.setOceanParams(params);
 
 		if (!m_enabled)
+		{
+			renderer.setOceanWaveTrough(0.0f); // no waves: the underwater-fog boundary sits at the calm level
 			return;
+		}
 
 		if (m_gridDirty || !m_node.isValid())
 			rebuildGrid();
@@ -255,6 +258,9 @@ namespace Procedural
 		const std::span<const uint16> tile = renderer.getOceanDisplacementReadback(tileRes);
 		m_dispTile.assign(tile.begin(), tile.end());
 		m_dispTileRes = tileRes;
+
+		estimateWaveTrough();
+		renderer.setOceanWaveTrough(m_waveTrough); // sinks the underwater-fog boundary below live troughs
 	}
 
 	// FP16 -> FP32 (readback texels are RGBA16F). Fabian Giesen's half_to_float_fast: rebias the
@@ -307,6 +313,28 @@ namespace Procedural
 	float OceanRenderer::sampleShoreDepth(float x, float z) const
 	{
 		return sampleShoreData(x, z).x;
+	}
+
+	// Deepest-possible current wave trough (m below the calm level) from the readback: the sum of each
+	// cascade's layer minimum bounds any combined trough (cascades add; their minima rarely coincide, so
+	// this is conservative — right for hiding fog under the surface). The minimum over the WHOLE tiling
+	// patch is a sea-state statistic, near-stationary frame to frame, so re-scan sparsely.
+	void OceanRenderer::estimateWaveTrough()
+	{
+		if (m_waveTroughCooldown-- > 0 || m_dispTileRes == 0)
+			return;
+		m_waveTroughCooldown = 15;
+		float troughSum = 0.0f;
+		for (uint32 c = 0; c < RendererVKLayout::OCEAN_CASCADES; ++c)
+		{
+			const size_t n = (size_t)m_dispTileRes * m_dispTileRes;
+			const uint16* layer = m_dispTile.data() + (size_t)c * n * 4;
+			float minH = 0.0f;
+			for (size_t i = 0; i < n; ++i)
+				minH = glm::min(minH, halfToFloat(layer[i * 4 + 1])); // texel.y = height displacement
+			troughSum -= minH;
+		}
+		m_waveTrough = troughSum;
 	}
 
 	// Shoal-faded sum of all cascades' displacement at an undisplaced world XZ, bilinear-wrapped over

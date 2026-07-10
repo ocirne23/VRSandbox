@@ -55,6 +55,9 @@ layout (binding = 8, rgba16f) uniform writeonly image3D u_outScatter;
 layout (binding = 9, std430) readonly buffer GiGridData { float gi_gridData[]; };
 #define TERRAIN_HEIGHT_BINDING 10
 #include "terrain_height.inc.glsl"
+// FFT ocean displacement maps (layer c = cascade c's (Dx, h, Dz, dDx/dz); see ocean_wave.inc.glsl): the
+// underwater fog boundary samples the LIVE wave height so fog never pokes out of a trough.
+layout (binding = 11) uniform sampler2DArray u_oceanDisp;
 
 // Light grid (read) + giSquareFalloff/giSunShadow from the shared lighting helpers.
 #define GRID_DATA_NAME  in_gridData
@@ -119,6 +122,22 @@ float heightFogMean(float yA, float yB, float base, float falloff)
     const float a0 = max(y0, 0.0), a1 = max(y1, 0.0);
     const float belowFrac = clamp(-y0 / dy, 0.0, 1.0); // fraction of the segment below the base (density 1)
     return belowFrac + (exp(-a0 * falloff) - exp(-a1 * falloff)) / (falloff * dy);
+}
+
+// Vertical FFT wave displacement at worldXZ (m, sum of the cascades, shoal-faded like the drawn surface;
+// chop and river flow rotation are skipped — sub-froxel for a fog boundary). The mip matches the froxel's
+// world footprint, band-limiting the boundary to what the froxel grid can represent anyway.
+float oceanWaveHeightAt(vec2 worldXZ, float waterDepth, float footprint)
+{
+    float h = 0.0;
+    for (int c = 0; c < OCEAN_CASCADES; ++c)
+    {
+        const float L = u_oceanParams2[c];
+        const float fade = smoothstep(0.0, max(u_oceanParams4.z * L, 0.01), waterDepth);
+        const float lod = max(log2(max(footprint, 1e-3) * float(OCEAN_FFT_SIZE) / L), 0.0);
+        h += textureLod(u_oceanDisp, vec3(worldXZ / L, float(c)), lod).y * fade;
+    }
+    return h;
 }
 
 // Hard visibility ray against opaque TLAS geometry (alpha-masked detail is irrelevant at fog frequency).
@@ -245,16 +264,21 @@ void main()
     // rests on the water surface instead of sinking over the seabed.
     float heightBase = u_fogParams0.y;
     float heightFalloff = u_fogParams0.z;
-    float regionMul = 1.0; // baked regional fog-thickness modulation (terrain data map, packed channel B)
+    float regionMul = 1.0;   // baked regional fog-thickness modulation (terrain data map, packed channel B)
+    float waterY = -1.0e9;   // local CALM water level (world Y); everything below the wave surface is fogged
+    float waterDepth = 0.0;  // water level - terrain height (shoal fade for the wave sampling)
     if (terrainHeightMapPresent())
     {
+        const vec4 td = terrainDataAt(worldPos.xz); // .x = terrain height, .y = water level, .w = macro altitude
+        waterY = td.y;
+        waterDepth = td.y - td.x;
         // Terrain follow rides the MACRO ALTITUDE channel (A, m above sea level), not the raw height:
         // the fog base tracks the smooth macro landscape, so ridge bumps don't drag the layer up with
         // them and valleys carved below the macro surface sit INSIDE the fog (the generator's
         // valley-fog thickness keys on the same carve depth). Clamped to sea level so fog rests on
         // the water instead of sinking over the seabed.
         if (u_fogParams3.x > 0.0)
-            heightBase += u_fogParams3.x * (u_fogParams5.w + max(terrainDataAt(worldPos.xz).w, 0.0));
+            heightBase += u_fogParams3.x * (u_fogParams5.w + max(td.w, 0.0));
         if (u_fogParams6.z > 0.0)
         {
             // Regional climate: x = fog thickness (density multiplier), y = height-falloff multiplier
@@ -271,15 +295,31 @@ void main()
     const float yB = u_viewPos.y + dir.y * (volSliceToViewZ(float(cell.z + 1) / float(VOL_FROXEL_Z)) * tScale);
     const float heightDensity = u_fogParams0.x * heightFogMean(yA, yB, heightBase, heightFalloff) * regionMul;
 
+    // Underwater: everything at/below the LOCAL water surface is ALWAYS fogged at the global density x
+    // "Fog/Underwater density" (u_fogParams6.w) — the height profile and the regional thickness only
+    // shape the fog ABOVE the surface, so dipping the camera below the waterline reads as murky depth
+    // regardless of the local climate (thick murk under thin haze at > 1, off at 0). The boundary is the
+    // LIVE WAVE SURFACE: froxel segments inside the waterline band (u_fogParams7.y — sized CPU-side from
+    // the readback's trough estimate, 0 = ocean off) sample the FFT displacement for the real wave height,
+    // so fog neither pokes out of troughs nor recedes under crests; segments outside the band are
+    // trivially above/below any possible wave, so only a thin shell pays for the wave taps.
+    // Analytic per-slice fraction (mean of the step profile over the segment), like heightFogMean.
+    const float y0 = min(yA, yB), y1 = max(yA, yB);
+    float surfY = waterY;
+    if (u_fogParams7.y > 0.0 && y0 < waterY + u_fogParams7.y && y1 > waterY - u_fogParams7.y)
+        surfY += oceanWaveHeightAt(worldPos.xz, waterDepth, viewZ * (2.0 / float(VOL_FROXEL_Y)));
+    const float underFrac = clamp((surfY - y0) / max(y1 - y0, 1e-3), 0.0, 1.0);
+    const float underDensity = u_fogParams0.x * u_fogParams6.w * underFrac;
+
     // Density noise fades out where one noise wavelength drops under the froxel footprint (sub-froxel
     // noise is pure aliasing the temporal blend turns into shimmer; its mean is 1) and is skipped
     // entirely where there is no medium to modulate — sky/above-fog froxels pay nothing.
     float noiseMul = 1.0;
     const float noiseWavelength = 1.0 / max(u_fogParams2.x, 1e-4);
     const float noiseAmp = u_fogParams2.y * (1.0 - smoothstep(40.0 * noiseWavelength, 80.0 * noiseWavelength, viewZ));
-    if (noiseAmp > 0.001 && (heightDensity > 1e-7 || in_numFogVolumes > 0u))
+    if (noiseAmp > 0.001 && (heightDensity + underDensity > 1e-7 || in_numFogVolumes > 0u))
         noiseMul = max(1.0 + noiseAmp * (fogNoise(worldPos) * 2.0 - 1.0), 0.0);
-    float density = heightDensity * noiseMul;
+    float density = max(heightDensity, underDensity) * noiseMul;
     vec3 albedoWeighted = u_fogParams1.rgb * density;
     vec3 emissive = vec3(0.0);
 

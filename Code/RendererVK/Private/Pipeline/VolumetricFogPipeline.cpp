@@ -36,6 +36,10 @@ void VolumetricFogPipeline::buildScatterLayout(ComputePipelineLayout& layout)
     layout.descriptorBindingFlags.resize(b.size());
     // Terrain height map: ping-pong image refreshed per frame without re-recording the cached fog CB.
     layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
+    // FFT ocean displacement maps (persistent image, rewritten in place by the sim each frame): the
+    // scatter pass samples the live wave height around the waterline for the underwater fog boundary.
+    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 11, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
+    layout.descriptorBindingFlags.resize(b.size());
 }
 
 void VolumetricFogPipeline::buildIntegrateLayout(ComputePipelineLayout& layout)
@@ -233,7 +237,7 @@ void VolumetricFogPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx
     { // -------- Pass 1: scatter (write scatter[cur], read scatter[prev] as history) --------
         DescriptorSet& set = m_scatterSets[frameIdx];
         vk::DescriptorSet vkSet = set.getDescriptorSet();
-        std::array<DescriptorSetUpdateInfo, 9> updates{
+        std::array<DescriptorSetUpdateInfo, 10> updates{
             DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer, .bufferInfos = { uboInfo } },
             DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.lightInfosBuffer) } },
             DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.lightGridsBuffer) } },
@@ -243,6 +247,7 @@ void VolumetricFogPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx
             DescriptorSetUpdateInfo{ .binding = 7, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledGeneral(m_sampler, m_scatter.view[prevIdx]) } },
             DescriptorSetUpdateInfo{ .binding = 8, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_scatter.view[frameIdx]) } },
             DescriptorSetUpdateInfo{ .binding = 9, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.giGridDataBuffer) } },
+            DescriptorSetUpdateInfo{ .binding = 11, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.oceanMapsSampler, params.oceanMapsView) } },
         };
         commandBuffer.cmdUpdateDescriptorSets(m_scatterPipeline.getPipelineLayout(), vk::PipelineBindPoint::eCompute, vkSet, updates);
         vk::WriteDescriptorSetAccelerationStructureKHR asInfo{ .accelerationStructureCount = 1, .pAccelerationStructures = &params.tlas };

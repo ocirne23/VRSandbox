@@ -154,6 +154,10 @@ public:
     // (coloring), so edgeDrop is separate: sinking the fade a few meters under the ocean surface keeps the
     // far edge from z-fighting the coplanar calm water. endDist <= startDist disables it. Set per frame.
     void setTerrainFade(float startDist, float endDist, float targetHeight, float edgeDrop = 0.0f) { m_terrainFade = glm::vec4(startDist, endDist, targetHeight, edgeDrop); }
+    // Deepest current ocean wave trough below the calm water level (m, >= 0; the OceanRenderer estimates
+    // it from its displacement readback). Sizes the waterline band inside which the fog scatter samples
+    // the live FFT wave height for the underwater fog boundary (fogParams7.y).
+    void setOceanWaveTrough(float meters) { m_oceanWaveTrough = glm::max(meters, 0.0f); }
     // Flipping OceanParams::hitLighting rebuilds the ocean fragment variant (GPU idle + shader reload).
     void setOceanParams(const OceanParams& ocean);
     // Replaces the ocean's shore map (OCEAN_SHORE_RES^2 RGBA texel quads, interleaved floats: R = raw
@@ -421,6 +425,7 @@ private:
     FogParams m_fogParams;
     OceanParams m_oceanParams;
     glm::vec4 m_terrainFade{ 0.0f }; // see setTerrainFade; (0,0,0,0) = disabled (y<=x)
+    float m_oceanWaveTrough = 0.0f;  // see setOceanWaveTrough; 0 while the ocean is disabled
     PostParams m_postParams;
     RTParams m_rtParams;
     RTAOParams m_rtaoParams;

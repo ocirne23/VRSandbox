@@ -19,8 +19,6 @@ void SkyParams::registerTweaks()
     Tweak::floatVar("Sky", "Ground Horizon", &groundHorizon, 0.0f, 0.5f, 0.01f);
     Tweak::floatVar("Sky/Sun", "Sun Angle Cos", &sunAngularCos, 0.9995f, 1.0f, 0.000001f);
     Tweak::floatVar("Sky/Sun", "Sun Glow", &sunGlow, 0.0, 5.0f, 0.01f);
-    Tweak::floatVar("Sky/Sun", "SunCasc D Bias", &shadowDepthBias, 0.0f, 0.005f, 0.0001f);
-    Tweak::floatVar("Sky/Sun", "SunCasc N Bias", &shadowNormalBias, 0.0f, 10.0f);
     Tweak::floatVar("Sky/Sun", "Highlight Rolloff", &sunRolloff, 0.0f, 2.0f);
     Tweak::floatVar("Sky/Sun", "Rolloff Knee", &sunRolloffKnee, 0.1f, 1.0f, 0.005f);
     Tweak::floatVar("Sky/Sun", "Rolloff Headroom", &sunRolloffHeadroom, 0.5f, 32.0f, 0.05f);
@@ -62,9 +60,11 @@ void SkyParams::registerTweaks()
 
 void ShadowParams::registerTweaks()
 {
-    Tweak::floatVar("Shadows", "Max distance (m)", &maxDistance, 25.0f, 4000.0f, 5.0f);
+    Tweak::floatVar("Shadows", "Max distance (m)", &maxDistance, 25.0f, 5000.0f, 5.0f);
     Tweak::floatVar("Shadows", "Split lambda", &splitLambda, 0.0f, 1.0f, 0.01f);
-    Tweak::floatVar("Shadows", "Caster pad (m)", &casterPad, 0.0f, 2000.0f, 10.0f);
+    Tweak::floatVar("Shadows", "Caster pad (m)", &casterPad, 0.0f, 5000.0f, 10.0f);
+    Tweak::floatVar("Shadows", "Depth bias", &depthBias, 0.0f, 0.005f, 0.0001f);
+    Tweak::floatVar("Shadows", "Normal bias", &normalBias, 0.0f, 10.0f);
 }
 
 void FogParams::registerTweaks()
@@ -83,6 +83,7 @@ void FogParams::registerTweaks()
     Tweak::floatVar("Fog", "Wind Speed", &windSpeed, 0.0f, 20.0f);
     Tweak::floatVar("Fog", "Temporal Blend", &temporalBlend, 0.0f, 0.97f, 0.01f);
     Tweak::floatVar("Fog", "Region strength", &regionStrength, 0.0f, 1.0f, 0.01f);
+    Tweak::floatVar("Fog", "Underwater density", &underwaterDensity, 0.0f, 20.0f, 0.1f);
     Tweak::intVar("Fog/Quality", "Sun Rays", &sunRays, 1, 8);
     Tweak::floatVar("Fog/Quality", "Terrain Shadow Dist", &terrainShadowDist, 32.0f, 8192.0f, 16.0f);
     Tweak::floatVar("Fog/Quality", "Sun Softness", &sunSoftness, 0.0f, 0.2f, 0.005f);

@@ -14,7 +14,9 @@
 //   u_fogParams6: x = slice power (exponent on the normalized slice before the exponential mapping:
 //                 1 = plain exponential, < 1 shifts Z resolution from near to far — useful at long ranges),
 //                 y = terrain shadow distance (froxels beyond it sun-shadow against the terrain height map
-//                 instead of TLAS rays / cascade taps, which both run out of data at distance), zw = unused
+//                 instead of TLAS rays / cascade taps, which both run out of data at distance),
+//                 z = regional fog strength (baked thickness/falloff modulation, 0 = uniform),
+//                 w = underwater density multiplier (on the global density, below the local water surface)
 
 #ifndef VOL_FOG_INC_GLSL
 #define VOL_FOG_INC_GLSL

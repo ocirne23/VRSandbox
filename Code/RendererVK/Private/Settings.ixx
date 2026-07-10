@@ -21,8 +21,6 @@ export struct SkyParams
     float sunRolloff = 1.25f;           // sky highlight roll-off: soft-clips the overexposed sun region so its gradient survives (0 = raw hard clip)
     float sunRolloffKnee = 0.75f;       // luminance where compression starts at full roll-off (lower = more range compressed)
     float sunRolloffHeadroom = 6.0f;    // brightness range the shoulder absorbs (higher = brighter values stay distinguishable)
-    float shadowDepthBias = 0.001f;    // sun cascade depth bias
-    float shadowNormalBias = 1.0f;      // sun cascade normal bias (texels)
 
     // Ambient + sky radiance (the non-sun lighting inputs)
     glm::vec3 ambientColor = glm::vec3(1.0f);   // flat non-physical minimum ambient
@@ -95,9 +93,11 @@ export struct ShadowParams
                                 // cascade covers less ground = sharper shadows everywhere, at range cost.
     float splitLambda = 0.95f;  // cascade split scheme: 0 = uniform splits, 1 = logarithmic (resolution
                                 // bunches up near the camera)
-    float casterPad = 2000.0f;   // how far up-sun a caster may sit above a cascade and still be captured
+    float casterPad = 4000.0f;   // how far up-sun a caster may sit above a cascade and still be captured
                                 // (m). Must exceed the tallest shadow-casting feature (mountains!); too
                                 // small clips casters out of the depth map and their shadows pop away.
+    float depthBias = 0.001f;    // sun cascade depth bias
+    float normalBias = 1.0f;     // sun cascade normal bias (texels)
     void registerTweaks();
 };
 
@@ -126,6 +126,9 @@ export struct FogParams
                                    // thickness + height-falloff mul, Procedural's sampleFogThickness /
                                    // sampleFogHeightFalloff) modulate the height fog: 0 = uniform fog,
                                    // 1 = fully region-driven
+    float underwaterDensity = 1.0f; // multiplier on the global density at/below the LOCAL water surface
+                                    // (terrain data map water level; always-on murk, immune to regional
+                                    // thickness): thick murk under thin morning haze, or 0 to disable
     float noiseScale = 0.08f;      // density noise frequency (1/m)
     float noiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
     float windSpeed = 1.5f;        // noise drift (m/s)
