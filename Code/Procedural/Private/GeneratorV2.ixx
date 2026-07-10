@@ -70,14 +70,16 @@ export namespace Procedural
 		float  peakThreshold = 0.5f;         // ridged-field value where peaks start (higher = rarer ranges)
 		float  peakSharpness = 1.8f;         // power on the curve (higher = steeper, more dramatic peaks)
 
-		// Altitude-aware mountain detail: high-frequency ridged relief whose amplitude follows the MACRO
-		// altitude — the smooth B-spline ranges grow craggy ridgelines and side valleys, while low ground
-		// never sees any of it (smooth grasslands preserved).
+		// Altitude-aware mountain detail: high-frequency ridged relief whose amplitude follows the
+		// altitude map's LOCAL RELIEF — how far the macro surface rises above its own baseline (climate
+		// base height + continent gradient) — NOT the raw elevation: the smooth B-spline ranges grow
+		// craggy ridgelines and side valleys at any altitude, while flat ground (grasslands, high inland
+		// plateaus lifted by the continent gradient) never sees any of it.
 		float  mountainDetailFrequency = 0.004f; // ridge detail scale (~250m features)
 		uint32 mountainDetailOctaves = 4;
 		float  mountainDetailAmplitude = 90.0f;  // ridge relief (m) at full mask
-		float  mountainMaskStart = 20.0f;        // altitude above sea (m) where the detail fades in
-		float  mountainMaskFull = 120.0f;        // altitude where it reaches full amplitude
+		float  mountainMaskStart = 20.0f;        // macro relief (m above the local baseline) where the detail fades in
+		float  mountainMaskFull = 120.0f;        // macro relief where it reaches full amplitude
 
 		// --- Fine fields.
 		float  detailFrequency = 0.008f;     // height detail fBm (cycles/m)
@@ -139,6 +141,12 @@ export namespace Procedural
 		FieldBlend blendFields(const Climate& cl) const;
 
 		float altitudeAtTexel(int32 ax, int32 az) const; // altitude lattice value, memoized
+		// The continent-scale altitude gradient (coastal shelf + inland rise + ocean deepen) at
+		// continentalness c — part of the altitude map's BASELINE (with the climate base height).
+		float continentGradient(float c) const;
+		// The altitude map's local relief: macro altitude minus its baseline. This is what "mountain-ness"
+		// means — the mountain-detail mask and the valley fog key on it, not on raw elevation.
+		float macroRelief(float sampledAltitude, const Climate& cl, const FieldBlend& blend) const;
 
 		// Both fog fields from one evaluation (they share the climate/valley analysis).
 		struct FogSample { float thickness, falloffMul; };

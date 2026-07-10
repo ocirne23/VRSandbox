@@ -18,6 +18,20 @@ import :TerrainChunk;
 
 namespace
 {
+	// GEOMETRIC LOD bands: lod = floor(log2(1 + cheb/lodStep)) — lodStep rings of LOD0, then 2*lodStep
+	// of LOD1, 4*lodStep of LOD2, ... capped at maxLod. Each LOD halves mesh density while a feature's
+	// screen size halves per distance DOUBLING, so doubling band widths keeps the on-screen triangle
+	// density roughly constant (linear bands over-detailed the mid rings). This is THE ring-LOD function:
+	// enqueue, queue staleness, result validation and eviction all derive from it.
+	uint32 ringLodAt(int cheb, float lodStep, uint32 maxLod)
+	{
+		// Float step: fractional values place band boundaries between rings (steps < 1 pull the coarser
+		// bands inside the first rings). Deterministic across all callers — same function, same inputs.
+		const float k = (float)cheb / glm::max(lodStep, 0.01f);
+		const int lod = (int)std::floor(std::log2(1.0f + k));
+		return glm::min(maxLod, (uint32)glm::max(lod, 0));
+	}
+
 	// Pack a chunk coordinate + LOD into a stable 64-bit key. 28 bits each for X/Z covers +-134M chunks.
 	uint64 chunkKey(glm::ivec2 coord, uint32 lod)
 	{
@@ -49,9 +63,9 @@ namespace Procedural
 		Tweak::boolean("Terrain", "Enabled", &m_enabled);
 		Tweak::intVar("Terrain", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
 		Tweak::floatVar("Terrain", "Chunk size (m)", &m_chunkSize, 16.0f, 1024.0f, 1.0f, dirty);
-		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 4, 256, 1.0f, dirty);
+		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 4, 512, 1.0f, dirty);
 		Tweak::intVar("Terrain", "Range (chunks)", &m_ringRadius, 1, 64, 1.0f); // max generation radius from the camera chunk
-		Tweak::intVar("Terrain", "LOD step (chunks)", &m_lodStep, 1, 16, 1.0f);
+		Tweak::floatVar("Terrain", "LOD step (chunks)", &m_lodStep, 0.1f, 4.0f, 0.1f); // LOD0 band width; each next band doubles
 		Tweak::intVar("Terrain", "Max LOD", &m_maxLod, 0, 6, 1.0f);
 		Tweak::intVar("Terrain", "Uploads/frame", &m_maxUploadsPerFrame, 1, 32, 1.0f);
 		Tweak::floatVar("Terrain", "Sea level (m)", &m_seaLevel, -200.0f, 200.0f, 0.5f, dirty);
@@ -69,8 +83,8 @@ namespace Procedural
 		Tweak::floatVar("Terrain/V2", "Border warp (m)", &m_v2BorderWarp, 0.0f, 1500.0f, 5.0f, dirty);
 		Tweak::floatVar("Terrain/V2", "Ocean fraction", &m_v2OceanFraction, 0.0f, 1.0f, 0.01f, dirty);
 		Tweak::floatVar("Terrain/V2", "Continent freq", &m_v2ContinentFreq, 0.0f, FLT_MAX, 0.00001f, dirty); // lower = bigger oceans/continents
-		Tweak::floatVar("Terrain/V2", "Inland rise (m)", &m_v2InlandRise, 0.0f, 500.0f, 1.0f, dirty);        // coast -> deep inland altitude gain
-		Tweak::floatVar("Terrain/V2", "Ocean deepen (m)", &m_v2OceanDeepen, 0.0f, 200.0f, 1.0f, dirty);
+		Tweak::floatVar("Terrain/V2", "Inland rise (m)", &m_v2InlandRise, 0.0f, 2500.0f, 1.0f, dirty);        // coast -> deep inland altitude gain
+		Tweak::floatVar("Terrain/V2", "Ocean deepen (m)", &m_v2OceanDeepen, 0.0f, 1000.0f, 1.0f, dirty);
 		Tweak::floatVar("Terrain/V2", "Temp lapse", &m_v2TempLapse, 0.0f, 0.01f, 0.0001f, dirty);            // altitude -> cold
 		Tweak::floatVar("Terrain/V2", "Climate bands", &m_v2ClimateBandAmp, 0.0f, 0.6f, 0.01f, dirty);       // regional hot/cold swing
 		Tweak::floatVar("Terrain/V2", "Height scale", &m_v2HeightScale, 0.0f, 8.0f, 0.05f, dirty);
@@ -83,7 +97,7 @@ namespace Procedural
 		Tweak::floatVar("Terrain/V2", "Peak freq", &m_v2PeakFreq, 0.0f, FLT_MAX, 0.00002f, dirty);
 		Tweak::floatVar("Terrain/V2", "Mtn detail amp (m)", &m_v2MtnDetailAmp, 0.0f, 300.0f, 1.0f, dirty); // craggy ridges on high ground
 		Tweak::floatVar("Terrain/V2", "Mtn detail freq", &m_v2MtnDetailFreq, 0.0f, FLT_MAX, 0.0005f, dirty);
-		Tweak::floatVar("Terrain/V2", "Mtn mask start (m)", &m_v2MtnMaskStart, 0.0f, 300.0f, 1.0f, dirty);
+		Tweak::floatVar("Terrain/V2", "Mtn mask start (m)", &m_v2MtnMaskStart, 0.0f, 300.0f, 1.0f, dirty); // MACRO RELIEF above the local baseline, not raw altitude
 		Tweak::floatVar("Terrain/V2", "Mtn mask full (m)", &m_v2MtnMaskFull, 0.0f, 500.0f, 1.0f, dirty);
 		Tweak::floatVar("Terrain/V2", "Grass fog", &m_v2GrassFog, 0.0f, 1.0f, 0.01f, dirty);   // patchy ground mist
 		Tweak::floatVar("Terrain/V2", "Valley fog", &m_v2ValleyFog, 0.0f, 1.0f, 0.01f, dirty); // fills mountain valleys
@@ -169,7 +183,7 @@ namespace Procedural
 					m_requests.pop_front();
 					const glm::ivec2 d = req.params.coord - m_ringCam;
 					const int cheb = glm::max(glm::abs(d.x), glm::abs(d.y));
-					if (cheb <= m_ringR && req.params.lod == glm::min(m_ringMaxLod, (uint32)(cheb / m_ringLodStep)))
+					if (cheb <= m_ringR && req.params.lod == ringLodAt(cheb, m_ringLodStep, m_ringMaxLod))
 					{
 						haveWork = true;
 						break;
@@ -246,7 +260,7 @@ namespace Procedural
 		const int camCX = (int)std::floor(camera.position.x / chunkSize);
 		const int camCZ = (int)std::floor(camera.position.z / chunkSize);
 		const int R = glm::max(1, m_ringRadius);
-		const int lodStep = glm::max(1, m_lodStep);
+		const float lodStep = glm::max(0.01f, m_lodStep);
 		const uint32 maxLod = (uint32)glm::max(0, m_maxLod);
 
 		// Edge fade: terrain heights lerp toward sea level over the outermost m_edgeFadeChunks chunks of the
@@ -275,12 +289,12 @@ namespace Procedural
 		updateFogHeightMap(renderer, camera, maps);
 
 		// Ring membership is CLOSED FORM: the column at Chebyshev distance cheb from the camera chunk
-		// wants LOD min(maxLod, cheb/lodStep), nothing outside R. Every "is this still wanted" question
-		// below (queue pruning, result validation, eviction) is this arithmetic — no desired-key sets.
+		// wants ringLodAt(cheb) (geometric bands), nothing outside R. Every "is this still wanted"
+		// question below (result validation, eviction) is this arithmetic — no desired-key sets.
 		const auto ringLod = [&](glm::ivec2 coord) -> int
 		{
 			const int cheb = glm::max(glm::abs(coord.x - camCX), glm::abs(coord.y - camCZ));
-			return cheb <= R ? (int)glm::min(maxLod, (uint32)(cheb / lodStep)) : -1;
+			return cheb <= R ? (int)ringLodAt(cheb, lodStep, maxLod) : -1;
 		};
 
 		// --- Enqueue any ring chunk that is neither resident nor already in flight.
@@ -290,7 +304,7 @@ namespace Procedural
 			for (int dx = -R; dx <= R; ++dx)
 			{
 				const int cheb = glm::max(dx < 0 ? -dx : dx, dz < 0 ? -dz : dz);
-				const uint32 lod = glm::min(maxLod, (uint32)(cheb / lodStep));
+				const uint32 lod = ringLodAt(cheb, lodStep, maxLod);
 				const glm::ivec2 coord(camCX + dx, camCZ + dz);
 				const uint64 key = chunkKey(coord, lod);
 				if (m_residents.count(key) || m_pending.count(key))

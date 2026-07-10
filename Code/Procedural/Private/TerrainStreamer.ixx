@@ -78,10 +78,10 @@ export namespace Procedural
 		// --- Tweak-backed configuration (source of truth; the generator/ChunkParams are built from these) ---
 		bool  m_enabled = true;
 		int   m_seed = 62500;
-		float m_chunkSize = 128.0f;
-		int   m_lod0Res = 90;
+		float m_chunkSize = 256.0f;
+		int   m_lod0Res = 256;
 		int   m_ringRadius = 32;   // max generation range from the camera chunk, in chunks
-		int   m_lodStep = 2;      // chunks of ring distance per extra LOD level
+		float m_lodStep = 1.0f;   // LOD0 band width in chunks (fractional ok); each next LOD band is twice as wide (geometric)
 		int   m_maxLod = 4;
 		float m_seaLevel = 0.0f;
 		float m_skirtDepth = 5.0f;
@@ -91,13 +91,13 @@ export namespace Procedural
 		// --- V2 (climate-first) generator ---
 		float  m_detailFrequency = 0.02f;  // height detail fBm (cycles/m)
 		int    m_detailOctaves = 4;
-		float  m_v2BiomeSize = 128.0f;    // typical biome extent (m): climate-field feature size
+		float  m_v2BiomeSize = 100.0f;    // typical biome extent (m): climate-field feature size
 		float  m_v2BiomeBlend = 1.0f;      // climate-space kernel width (low = crisp biome identity)
-		float  m_v2BorderWarp = 350.0f;    // domain warp on the biome lookup (wiggly borders)
+		float  m_v2BorderWarp = 300.0f;    // domain warp on the biome lookup (wiggly borders)
 		float  m_v2OceanFraction = 0.42f;  // fraction of the world that is Ocean
 		float  m_v2ContinentFreq = 0.00005f; // continent/ocean scale (~25km: few, huge oceans)
-		float  m_v2InlandRise = 120.0f;    // altitude gain (m) from coast to deep inland
-		float  m_v2OceanDeepen = 40.0f;    // extra seabed depth (m) toward mid-ocean
+		float  m_v2InlandRise = 500.0f;    // altitude gain (m) from coast to deep inland
+		float  m_v2OceanDeepen = 200.0f;    // extra seabed depth (m) toward mid-ocean
 		float  m_v2TempLapse = 0.0012f;    // temperature drop per meter of altitude (snowy peaks)
 		float  m_v2ClimateBandAmp = 0.25f; // continent-scale hot/cold band strength
 		float  m_v2HeightScale = 1.0f;     // global multiplier on the biome height table
@@ -110,8 +110,8 @@ export namespace Procedural
 		float  m_v2PeakFreq = 0.00025f;    // range placement scale (~4km: more, smaller ranges)
 		float  m_v2MtnDetailAmp = 90.0f;   // altitude-masked ridge detail on mountains (m)
 		float  m_v2MtnDetailFreq = 0.004f; // ridge detail scale (~250m features)
-		float  m_v2MtnMaskStart = 20.0f;   // altitude above sea (m) where mountain detail fades in
-		float  m_v2MtnMaskFull = 120.0f;   // altitude where it reaches full amplitude
+		float  m_v2MtnMaskStart = 40.0f;   // macro RELIEF above the local baseline (m) where mountain detail fades in
+		float  m_v2MtnMaskFull = 150.0f;   // macro relief where it reaches full amplitude
 		float  m_v2GrassFog = 0.5f;        // grassland low-fog patch thickness (0 = off)
 		float  m_v2ValleyFog = 0.8f;       // mountain-valley fog thickness (0 = off)
 
@@ -136,7 +136,7 @@ export namespace Procedural
 		// first append under the same lock).
 		glm::ivec2 m_ringCam{ 0, 0 };
 		int    m_ringR = -1;
-		int    m_ringLodStep = 1;
+		float  m_ringLodStep = 1.0f;
 		uint32 m_ringMaxLod = 0;
 		std::vector<Result>     m_results;      // filled by worker, drained on the main thread
 		std::vector<Result>     m_readyBacklog; // main-thread only: generated chunks over the per-frame upload cap
@@ -152,7 +152,7 @@ export namespace Procedural
 		int    m_lastRingCX = INT_MIN;
 		int    m_lastRingCZ = INT_MIN;
 		int    m_lastRingR = -1;
-		int    m_lastRingLodStep = 0;
+		float  m_lastRingLodStep = 0.0f;
 		uint32 m_lastRingMaxLod = 0xFFFFFFFFu;
 	};
 }

@@ -175,6 +175,24 @@ namespace Procedural
 
 	// --- The altitude map --------------------------------------------------------------------------------
 
+	// Continent-scale gradient: the coast climbs the FIXED shelf, the inland rise only lifts the
+	// interior beyond it (see COAST_BAND/COAST_RISE), and the seabed deepens away from shore.
+	float TerrainGenV2::continentGradient(float c) const
+	{
+		const float shelfEnd = glm::min(m_cfg.oceanFraction + COAST_BAND, 1.0f);
+		return glm::smoothstep(m_cfg.oceanFraction, shelfEnd, c) * COAST_RISE
+			+ glm::smoothstep(shelfEnd, 1.0f, c) * m_cfg.inlandRise
+			- (1.0f - glm::smoothstep(0.0f, m_cfg.oceanFraction, c)) * m_cfg.oceanDeepen;
+	}
+
+	// How far the (sampled, heightScale'd) macro altitude rises above its own baseline — the part of the
+	// altitude map that is RELIEF (rolling hills + peaks) rather than base elevation. A 200 m inland
+	// plateau has near-zero macro relief; a ridge cresting 100 m above its plateau has 100.
+	float TerrainGenV2::macroRelief(float sampledAltitude, const Climate& cl, const FieldBlend& blend) const
+	{
+		return sampledAltitude - (blend.baseHeight + continentGradient(cl.c)) * m_cfg.heightScale;
+	}
+
 	float TerrainGenV2::altitudeAtTexel(int32 ax, int32 az) const
 	{
 		struct Entry { uint32 id = 0; int32 ax = 0, az = 0; float alt = 0.0f; };
@@ -193,13 +211,7 @@ namespace Procedural
 		const double cx = ((double)ax + 0.5) * ts, cz = ((double)az + 0.5) * ts;
 		const Climate cl = climateAt(cx, cz);
 		const FieldBlend blend = blendFields(cl);
-
-		// Continent-scale gradient: the coast climbs the FIXED shelf, the inland rise only lifts the
-		// interior beyond it (see COAST_BAND/COAST_RISE), and the seabed deepens away from shore.
-		const float shelfEnd = glm::min(m_cfg.oceanFraction + COAST_BAND, 1.0f);
-		const float gradient = glm::smoothstep(m_cfg.oceanFraction, shelfEnd, cl.c) * COAST_RISE
-			+ glm::smoothstep(shelfEnd, 1.0f, cl.c) * m_cfg.inlandRise
-			- (1.0f - glm::smoothstep(0.0f, m_cfg.oceanFraction, cl.c)) * m_cfg.oceanDeepen;
+		const float gradient = continentGradient(cl.c);
 
 		const float rolling = m_altitude.fbm((float)(cx * m_cfg.altitudeFrequency), (float)(cz * m_cfg.altitudeFrequency), m_cfg.altitudeOctaves) * m_cfg.altitudeAmplitude;
 		const float ridge = m_peaks.ridged((float)(cx * m_cfg.peakFrequency), (float)(cz * m_cfg.peakFrequency), 3);
@@ -244,17 +256,20 @@ namespace Procedural
 	{
 		// The smooth altitude map carries the macro landscape; the fine field adds slope-damped fBm detail
 		// scaled by the climate-blended roughness (swamps stay flat while taiga rolls), plus the
-		// altitude-masked mountain detail: high-frequency ridged relief that fades in with the MACRO
-		// altitude, so the smooth B-spline ranges grow craggy ridgelines and side valleys while low ground
-		// (grasslands, swamps) never sees any of it.
-		const FieldBlend blend = blendFields(climateAt(worldX, worldZ));
+		// relief-masked mountain detail: high-frequency ridged relief that fades in with the altitude
+		// map's LOCAL RELIEF (macroRelief — height above the climate-base + continent-gradient baseline),
+		// so B-spline ranges grow craggy ridgelines and side valleys at ANY elevation while flat ground —
+		// including high inland plateaus the continent gradient lifted — never sees any of it.
+		const Climate cl = climateAt(worldX, worldZ);
+		const FieldBlend blend = blendFields(cl);
 		const float detail = m_detail.fbmEroded((float)(worldX * m_cfg.detailFrequency), (float)(worldZ * m_cfg.detailFrequency), m_cfg.detailOctaves);
 		const float alt = sampleAltitude(worldX, worldZ);
 		float h = m_cfg.seaLevel + alt + blend.heightVar * detail * m_cfg.heightScale;
 
-		const float mask = glm::smoothstep(m_cfg.mountainMaskStart, glm::max(m_cfg.mountainMaskFull, m_cfg.mountainMaskStart + 1.0f), alt);
+		float mask = glm::smoothstep(m_cfg.mountainMaskStart, glm::max(m_cfg.mountainMaskFull, m_cfg.mountainMaskStart + 1.0f), macroRelief(alt, cl, blend));
 		if (mask > 0.001f && m_cfg.mountainDetailAmplitude > 0.0f)
 		{
+			mask *= glm::smoothstep(0.0f, 20.0f, alt); // land only: seafloor relief keeps the old no-crag behavior
 			const float ridge = m_mountain.ridged((float)(worldX * m_cfg.mountainDetailFrequency), (float)(worldZ * m_cfg.mountainDetailFrequency), m_cfg.mountainDetailOctaves);
 			h += (ridge - 0.3f) * m_cfg.mountainDetailAmplitude * mask * m_cfg.heightScale; // -0.3: ridges rise AND valleys cut in
 		}
@@ -321,13 +336,15 @@ namespace Procedural
 		}
 
 		// Mountain-valley fog: the fine height carved BELOW the smooth macro altitude inside the mountain
-		// mask is a valley floor between ridgelines — fill it, thinning gradually up the walls. The
+		// mask (the same LOCAL-RELIEF mask the mountain detail uses — plateaus at altitude get no valley
+		// fog) is a valley floor between ridgelines — fill it, thinning gradually up the walls. The
 		// moderate falloff raise keeps the fog pooled in the valley (ridges poke out clear).
 		float valleyFog = 0.0f;
 		if (m_cfg.valleyFogAmount > 0.0f)
 		{
 			const float alt = sampleAltitude(worldX, worldZ);
-			const float mask = glm::smoothstep(m_cfg.mountainMaskStart, glm::max(m_cfg.mountainMaskFull, m_cfg.mountainMaskStart + 1.0f), alt);
+			const float relief = macroRelief(alt, cl, blendFields(cl));
+			const float mask = glm::smoothstep(m_cfg.mountainMaskStart, glm::max(m_cfg.mountainMaskFull, m_cfg.mountainMaskStart + 1.0f), relief);
 			if (mask > 0.01f)
 			{
 				const float depth = (m_cfg.seaLevel + alt) - sampleHeight(worldX, worldZ); // > 0 = below the macro surface
