@@ -29,7 +29,9 @@ export struct SkyParams
     float skyRadianceIntensity = 0.05f;
 
     // Ground plane of the sky sphere (below the horizon): albedo lit by sun + sky. Also tints the
-    // ground-bounce fallback in skyRadiance() for downward GI/fog rays.
+    // ground-bounce fallback in skyRadiance() for downward GI/fog rays. Can stay 0: the GI probe gather
+    // fills its range-bounded below-horizon misses from the mirrored sky instead (giMissRadiance), so
+    // black ground no longer paints probe-spaced dark dots on sunlit floors.
     glm::vec3 groundColor = glm::vec3(0.55f, 0.65f, 1.0f);
     float groundIntensity = 0.0f;
     float groundHorizon = 0.25f;  // fraction of every hemisphere treated as sunlit terrain in the
@@ -126,7 +128,15 @@ export struct FogParams
                                    // thickness + height-falloff mul, Procedural's sampleFogThickness /
                                    // sampleFogHeightFalloff) modulate the height fog: 0 = uniform fog,
                                    // 1 = fully region-driven
-    float underwaterDensity = 1.0f; // multiplier on the global density at/below the LOCAL water surface
+    float shaftBoost = 10.0f;        // non-physical gain on the underwater sun in-scatter (fog only, not
+                                    // surfaces): water scatters little at fog densities, so physically
+                                    // correct shafts are faint — this makes them readable. 1 = physical.
+    float causticStrength = 2.0f;   // underwater caustic focus (fold-Jacobian light pattern on submerged
+                                    // surfaces + fog shafts; underwater_light.inc.glsl): 0 = off, > 1
+                                    // exaggerated. Beer-Lambert depth absorption is separate (Ocean/Absorption).
+    float causticDepthFade = 0.02f; // caustic contrast decay with depth (1/m) — approximates defocus;
+                                    // higher = the pattern washes out closer to the surface
+    float underwaterDensity = 0.7f; // multiplier on the global density at/below the LOCAL water surface
                                     // (terrain data map water level; always-on murk, immune to regional
                                     // thickness): thick murk under thin morning haze, or 0 to disable
     float noiseScale = 0.08f;      // density noise frequency (1/m)

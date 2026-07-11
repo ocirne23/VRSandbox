@@ -221,8 +221,10 @@ export namespace RendererVKLayout
         glm::vec4 fogParams5; // xy = terrain height map world center XZ (shared by both cascades), z = 1 / far cascade world size (0 = near only), w = baked terrain sea level
         glm::vec4 fogParams6; // x = slice power (Z distribution exponent), y = terrain shadow distance (m),
                               // z = regional fog strength, w = underwater density multiplier
-        glm::vec4 fogParams7; // x = unused, y = waterline band half-height gating the fog's FFT wave taps
-                              // (m; 0 = ocean off; sized from the readback trough estimate), zw = unused
+        glm::vec4 fogParams7; // x = underwater sun in-scatter gain (fog light shafts; 1 = physical),
+                              // y = waterline band half-height gating the fog's FFT wave taps
+                              // (m; 0 = ocean off; sized from the readback trough estimate),
+                              // z = underwater caustic strength (0 = off), w = caustic depth fade (1/m)
 
         glm::vec4 moonParams; // xyz = normalized direction towards the moon, w = cos of the moon disc radius
 

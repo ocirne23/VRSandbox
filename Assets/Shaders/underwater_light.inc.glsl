@@ -1,0 +1,65 @@
+// Sunlight transmittance through the wavy water surface, for points BELOW the local water level.
+// Shared by the froxel fog (vol_scatter.cs.glsl — turns per-froxel sun light into volumetric light
+// shafts) and the lit surface pass (instanced_indirect.fs.glsl — caustics on underwater geometry).
+// Two physically-motivated terms, both from data that already exists:
+//   - CAUSTIC FOCUS: the fold Jacobian of the FFT wave field at the point where the sun ray crossed
+//     the surface (entryXZ = worldXZ + sunDir.xz/sunDir.y * depth). Converging wavefronts (J -> 0)
+//     focus light into the bright moving filaments; diverging ones dim it. Same Jacobian terms the
+//     whitecap foam uses, so the pattern matches the drawn surface exactly.
+//   - BEER-LAMBERT: exp(-u_oceanAbsorption.rgb * pathLength) — the blue-green shift with depth that
+//     makes accumulated froxel light read as colored shafts.
+// Tweaks ride u_fogParams7: z = caustic strength (0 disables the focus term, absorption remains),
+// w = caustic depth fade (1/m: contrast decay with depth, approximating defocus — paired with a mip
+// that coarsens with depth so deep caustics blur out instead of aliasing).
+//
+// The includer defines UNDERWATER_OCEAN_BINDING for the FFT maps (fog binds them at 11, the forward
+// set carries them at 7) before including. Requires ubo.inc.glsl (via shared.inc.glsl).
+
+#ifndef UNDERWATER_LIGHT_INC_GLSL
+#define UNDERWATER_LIGHT_INC_GLSL
+
+layout (binding = UNDERWATER_OCEAN_BINDING) uniform sampler2DArray u_uwOceanMaps;
+
+// worldXZ/depthBelow locate the shaded point below the CALM water level; footprint = world size of one
+// receiver sample (froxel width for fog, ~0 for surface pixels) — it floors the sampling mip so the
+// pattern never aliases against what the receiver can represent. reach (>= 1) divides the depth the
+// ATTENUATION terms see (absorption + contrast fade + defocus), stretching how far shafts survive
+// without moving the pattern (the geometric entry point uses the true depth); 1 = physical. The fog
+// passes sqrt of its shaft boost so brightness and length grow together; surfaces pass 1.
+vec3 underwaterSunTransmittance(vec2 worldXZ, float depthBelow, float footprint, float reach)
+{
+    const vec3 sunDir = normalize(u_sunDirection.xyz);
+    const float sy = max(sunDir.y, 0.08); // grazing sun: cap the path-length blow-up
+    const float dEff = depthBelow / max(reach, 1.0);
+    const float pathLen = dEff / sy;
+
+    float focus = 1.0;
+    if (u_fogParams7.z > 0.0)
+    {
+        const vec2 entryXZ = worldXZ + sunDir.xz * (depthBelow / sy); // TRUE surface entry point
+        const float chop = u_oceanParams0.w;
+        const float defocusLod = min(dEff * 0.1, 5.0); // deeper = softer, wider pattern
+        float sxx = 0.0, szz = 0.0, sxz = 0.0;
+        for (int c = 0; c < OCEAN_CASCADES; ++c)
+        {
+            const float L = u_oceanParams2[c];
+            const float lod = max(log2(max(footprint, 1e-3) * float(OCEAN_FFT_SIZE) / L), 0.0) + defocusLod;
+            const vec2 uv = entryXZ / L;
+            const vec4 g = textureLod(u_uwOceanMaps, vec3(uv, float(OCEAN_CASCADES + c)), lod); // (dh/dx, dh/dz, dDx/dx, dDz/dz)
+            sxx += g.z;
+            szz += g.w;
+            sxz += textureLod(u_uwOceanMaps, vec3(uv, float(c)), lod).w; // displacement layer w = dDx/dz
+        }
+        // Fold Jacobian (Tessendorf): < 1 converging (bright), > 1 diverging (dim). Applied as a CONTRAST
+        // EXPONENT — "Caustic strength" steepens the response, so converging zones spike into hot
+        // filaments (up to 8x) instead of a gentle modulation, which is what makes fog columns read as
+        // distinct rays. The exponent decays with depth (defocus), flattening focus toward 1.
+        const float J = (1.0 + chop * sxx) * (1.0 + chop * szz) - chop * sxz * chop * sxz;
+        const float depthFade = exp(-dEff * u_fogParams7.w);
+        focus = pow(clamp(1.0 / max(J, 0.125), 0.02, 8.0), 1.5 * u_fogParams7.z * depthFade);
+    }
+
+    return exp(-u_oceanAbsorption.rgb * pathLen) * focus;
+}
+
+#endif

@@ -55,9 +55,11 @@ layout (binding = 8, rgba16f) uniform writeonly image3D u_outScatter;
 layout (binding = 9, std430) readonly buffer GiGridData { float gi_gridData[]; };
 #define TERRAIN_HEIGHT_BINDING 10
 #include "terrain_height.inc.glsl"
-// FFT ocean displacement maps (layer c = cascade c's (Dx, h, Dz, dDx/dz); see ocean_wave.inc.glsl): the
-// underwater fog boundary samples the LIVE wave height so fog never pokes out of a trough.
-layout (binding = 11) uniform sampler2DArray u_oceanDisp;
+// FFT ocean maps at binding 11 (declared by the include as u_uwOceanMaps): the underwater fog boundary
+// samples the LIVE wave height so fog never pokes out of a trough, and the underwater sun term crosses
+// the same surface (light shafts: caustic focus + Beer-Lambert; see underwater_light.inc.glsl).
+#define UNDERWATER_OCEAN_BINDING 11
+#include "underwater_light.inc.glsl"
 
 // Light grid (read) + giSquareFalloff/giSunShadow from the shared lighting helpers.
 #define GRID_DATA_NAME  in_gridData
@@ -135,7 +137,7 @@ float oceanWaveHeightAt(vec2 worldXZ, float waterDepth, float footprint)
         const float L = u_oceanParams2[c];
         const float fade = smoothstep(0.0, max(u_oceanParams4.z * L, 0.01), waterDepth);
         const float lod = max(log2(max(footprint, 1e-3) * float(OCEAN_FFT_SIZE) / L), 0.0);
-        h += textureLod(u_oceanDisp, vec3(worldXZ / L, float(c)), lod).y * fade;
+        h += textureLod(u_uwOceanMaps, vec3(worldXZ / L, float(c)), lod).y * fade;
     }
     return h;
 }
@@ -308,7 +310,14 @@ void main()
     float surfY = waterY;
     if (u_fogParams7.y > 0.0 && y0 < waterY + u_fogParams7.y && y1 > waterY - u_fogParams7.y)
         surfY += oceanWaveHeightAt(worldPos.xz, waterDepth, viewZ * (2.0 / float(VOL_FROXEL_Y)));
-    const float underFrac = clamp((surfY - y0) / max(y1 - y0, 1e-3), 0.0, 1.0);
+    // Underwater fog is a NEAR-FIELD effect: water absorbs everything within tens of meters, so distant
+    // underwater froxels can never be legitimately seen — but the froxel grid integrates THROUGH the
+    // water surface, and at range the coarse Z slices + XY bilinear leaked the dense tinted murk from
+    // behind the surface into the surface pixels (blurry, shimmering distant water). Fading the whole
+    // underwater treatment out by view distance removes the discontinuity the leak fed on; beyond the
+    // fade the water column just carries the plain (continuous) height fog, as it did before.
+    const float uwFade = 1.0 - smoothstep(100.0, 300.0, viewZ);
+    const float underFrac = uwFade * clamp((surfY - y0) / max(y1 - y0, 1e-3), 0.0, 1.0);
     const float underDensity = u_fogParams0.x * u_fogParams6.w * underFrac;
 
     // Density noise fades out where one noise wavelength drops under the froxel footprint (sub-froxel
@@ -320,7 +329,9 @@ void main()
     if (noiseAmp > 0.001 && (heightDensity + underDensity > 1e-7 || in_numFogVolumes > 0u))
         noiseMul = max(1.0 + noiseAmp * (fogNoise(worldPos) * 2.0 - 1.0), 0.0);
     float density = max(heightDensity, underDensity) * noiseMul;
-    vec3 albedoWeighted = u_fogParams1.rgb * density;
+    // Underwater the medium is water, not air: blend the fog albedo toward the ocean's in-scatter color
+    // by how submerged the slice is, so the murk reads blue-green instead of atmospheric gray.
+    vec3 albedoWeighted = mix(u_fogParams1.rgb, u_oceanScatter.rgb, underFrac) * density;
     vec3 emissive = vec3(0.0);
 
     for (uint v = 0u; v < in_numFogVolumes; ++v)
@@ -380,7 +391,29 @@ void main()
         else
             sunVis = giSunShadow(worldPos, vec3(0.0));
 
-        vec3 inLight = atmosTransmittanceToLight(0.0, sunDir, u_skyUp) * u_sunColor.rgb * (volPhaseHG(dot(dir, sunDir), g) * sunVis * u_eclipseParams.x);
+        // Light shafts: sunlight reaching an underwater froxel crossed the wavy surface — caustic focus
+        // + Beer-Lambert absorption (underwater_light.inc.glsl) — weighted by the slice's SUBMERGED
+        // fraction, never a binary test at the jittered sample point: straddling froxels flipped between
+        // air and water lighting per frame, and the temporal blend smeared that flicker across every
+        // distant water surface. Depth = the submerged part's midpoint (y0/y1 are slice bounds, jitter-
+        // free). The sun phase also steepens underwater: water forward-scatters far harder than haze
+        // (g -> ~0.65) — without the forward lobe the focused columns barely brighten toward the sun
+        // and no shafts read at any strength.
+        vec3 sunTrans = vec3(1.0);
+        float gSun = g;
+        if (underFrac > 0.0)
+        {
+            const float depthMid = max((surfY - y0) - 0.5 * underFrac * (y1 - y0), 0.05);
+            // "Fog/Shaft boost" (u_fogParams7.x): non-physical gain on the underwater sun in-scatter —
+            // at fog-scale densities the physically correct shaft radiance is too faint to read. Its
+            // sqrt also feeds the helper's REACH, so boosting brightness stretches shaft length too.
+            sunTrans = mix(vec3(1.0),
+                underwaterSunTransmittance(worldPos.xz, depthMid, viewZ * (2.0 / float(VOL_FROXEL_Y)),
+                    u_fogParams7.x * u_fogParams7.x
+                    ), underFrac);
+            gSun = mix(g, 0.78, underFrac); // strong forward lobe: ~8x gain toward the sun
+        }
+        vec3 inLight = atmosTransmittanceToLight(0.0, sunDir, u_skyUp) * u_sunColor.rgb * (volPhaseHG(dot(dir, sunDir), gSun) * sunVis * u_eclipseParams.x) * sunTrans;
 
         // Ambient: GI probe irradiance toward the camera (toggleable; the clipmap lookup is the next
         // biggest cost after the shadow rays), fading to the analytic sky over the probe field's outer

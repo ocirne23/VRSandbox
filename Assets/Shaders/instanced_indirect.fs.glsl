@@ -106,6 +106,14 @@ layout (location = 0) out vec4 out_color;
 
 #include "punctual_lights.inc.glsl"
 
+// Terrain data cascades (height/water level/climate/altitude) + FFT ocean maps: underwater sunlight
+// (caustics) for EVERY lit material, and the TERRAIN variant's procedural coloring. Both bindings exist
+// set-wide (19 = terrain data, 7 = u_oceanMaps — see StaticMeshGraphicsPipeline::buildPipelineLayout).
+#define TERRAIN_HEIGHT_BINDING 19
+#include "terrain_height.inc.glsl"
+#define UNDERWATER_OCEAN_BINDING 7
+#include "underwater_light.inc.glsl"
+
 vec3 doSunLight(vec3 worldPos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, float metalness, float roughness, float roughnessSq)
 {
 	vec3 L = normalize(u_sunDirection.xyz);
@@ -113,6 +121,15 @@ vec3 doSunLight(vec3 worldPos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOver
 		return vec3(0.0);
 	float visibility = u_rtSunShadow > 0.5 ? traceSunVisibility(worldPos, N) : sampleSunShadow(worldPos, N);
 	vec3 lightRadiance = atmosTransmittanceToLight(0.0, L, u_skyUp) * u_sunColor.rgb * visibility * u_eclipseParams.x;
+	// Underwater: the sun crossed the wavy surface — caustic focus + Beer-Lambert absorption
+	// (underwater_light.inc.glsl), so seabed/submerged objects get the dancing light patterns. One
+	// water-level fetch + a branch above water; only underwater pixels pay for the wave taps.
+	if (terrainHeightMapPresent())
+	{
+		const float depthBelow = terrainDataAt(worldPos.xz).y - worldPos.y;
+		if (depthBelow > 0.0)
+			lightRadiance *= underwaterSunTransmittance(worldPos.xz, depthBelow, 0.0, 1.0); // surfaces: physical reach
+	}
 	return doLight(lightRadiance, L, V, N, specularCol, matColOverPi, metalness, roughness, roughnessSq);
 }
 // Depth-aware 2x2 upsample of the half-res AO/bent-normal image. Plain bilinear bleeds across depth
@@ -150,8 +167,7 @@ vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
 }
 
 #ifdef TERRAIN
-#define TERRAIN_HEIGHT_BINDING 19
-#include "terrain_height.inc.glsl"
+// terrain_height.inc.glsl is included unconditionally above (underwater caustics use it too).
 
 // Procedural terrain surface color from the baked terrain fields (fog terrain cascades: height, water
 // level, MACRO ALTITUDE + nearest-fetched fog/temperature/humidity). The altitude/height split is what

@@ -324,7 +324,37 @@ void main()
     }
     const float ns = u_oceanParams1.w;
     vec3 N = normalize(vec3(-slope.x * ns, 1.0, -slope.y * ns));
-    if (dot(N, V) < 0.0) // grazing/underwater: keep the shading hemisphere consistent
+
+    // --- Underside (Snell's window): the camera is below the surface looking at its back face. The
+    // above-water shading (sky reflection, downward refraction, glint against an up normal) is
+    // meaningless from here: what you actually see is the refracted sky compressed into the ~97 degree
+    // window — with the SUN blazing through it, danced around by the wave normals — and total internal
+    // reflection of the water body outside the window. The volumetric fog's underwater murk handles the
+    // water column between the camera and the surface, so no view-path absorption here.
+    if (dot(N, V) < 0.0 && u_viewPos.y < in_pos.y)
+    {
+        const vec3 sunTintU = u_sunColor.rgb * atmosTransmittanceToLight(0.0, L, up) * u_eclipseParams.x;
+        const vec3 inscatterU = u_oceanScatter.rgb * u_oceanScatter.w * (skyRadiance(up) + sunTintU * max(L.y, 0.0) / PI);
+        const vec3 refrUp = refract(-V, -N, 1.33); // water -> air across the down-facing interface
+        vec3 color = inscatterU;                   // TIR (refract() = 0): mirror of the water body
+        if (dot(refrUp, refrUp) > 1e-6)
+        {
+            const vec3 tDir = normalize(refrUp);
+            // Fresnel transmittance from inside; Schlick vs the internal angle is fine away from the
+            // TIR edge (refract() already zeroed the far side of it).
+            const float T = 1.0 - F_Schlick(clamp(dot(-V, N), 0.0, 1.0), 0.02);
+            vec3 sky = reflectedSkyRadiance(tDir);
+            // The sun through the window: a hot disc + a wave-scattered glow around the refracted sun
+            // direction — the wave normals swing tDir, so the disc shimmers and stretches like it should.
+            const float sunDot = max(dot(tDir, L), 0.0);
+            sky += sunTintU * (pow(sunDot, 600.0) * 30.0 + pow(sunDot, 24.0) * 0.6);
+            color = sky * T + inscatterU * (1.0 - T);
+        }
+        out_color = vec4(color, 1.0);
+        return;
+    }
+
+    if (dot(N, V) < 0.0) // grazing: keep the shading hemisphere consistent
         N = -N;
 
     const float NoV = clamp(dot(N, V), 1e-3, 1.0);
@@ -354,7 +384,7 @@ void main()
     const vec3 whitewater = u_oceanFoam.rgb * (sunTint * (NoL * sunVis) / PI + ambientSky + u_ambientColor);
 
     // In-scattered radiance of the water body (the color of deep water).
-    const vec3 sigmaT = u_oceanAbsorption.rgb;
+    const vec3 sigmaT = vec3(0.0);//u_oceanAbsorption.rgb;
     const vec3 inscatter = u_oceanScatter.rgb * u_oceanScatter.w * (ambientSky + sunTint * max(L.y, 0.0) / PI);
 
     // Fresnel split early: it gates which rays are worth tracing.

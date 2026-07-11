@@ -117,6 +117,33 @@ float sunVisibility(vec3 origin)
     return rtShadowVisibility(origin, normalize(u_sunDirection.xyz), 0.05, 1.0e4);
 }
 
+// Radiance for a gather ray that found no geometry within rayMax. Upward: the sky. BELOW the horizon a
+// range-bounded miss is NOT sky and NOT black void — over a terrain heightfield the ray would inevitably
+// hit ground somewhere past rayMax. Complete it from the PROBE FIELD at the truncation point (the exact
+// counterpart of the multi-bounce prevE completion the HITS already get): E(-dir)/PI is the radiance a
+// Lambertian-ish environment with the field's local irradiance sends back along the ray — sun-scaled and
+// albedo-aware because the field is. Out of field coverage, fall back to an analytic sun-lit-terrain
+// estimate (~25% albedo under the live sun + mirrored sky; the SUN term is the important one — these
+// misses' deficit is exactly the sun-bounce band). Without any of this, probes near a floor carried a
+// black band of shallow rays (|dir.y| < h/rayMax — thickness varying with each probe's height h above
+// the floor), a probe-lattice-periodic darkening that painted dark dots on sunlit floors, maskable only
+// by cranking Max Ray Distance or ground albedo. Probe-gather-only: cannot brighten shadowed undersides
+// the way a global ground albedo does.
+vec3 giMissRadiance(vec3 origin, vec3 dir, float rayMax)
+{
+    return skyRadiance(dir);
+    //if (dir.y >= 0.0)
+    //    return skyRadiance(dir);
+    //const vec3 sunL = normalize(u_sunDirection.xyz);
+    //const vec3 sunE = atmosTransmittanceToLight(0.0, sunL, u_skyUp) * u_sunColor.rgb * (max(sunL.y, 0.0) * u_eclipseParams.x);
+    //const vec3 distantGround = (0.25 / PI) * sunE + 0.25 * skyRadiance(vec3(dir.x, -dir.y, dir.z));
+    //float cov;
+    //const vec3 E = evalProbeSHCoverage(origin + dir * rayMax, -dir, cov);
+    //if (E.x >= 0.0 && cov > 0.0)
+    //    return mix(max(skyRadiance(dir), distantGround), E / PI, cov);
+    //return max(skyRadiance(dir), distantGround);
+}
+
 vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist, out float backface)
 {
     const float rayMax = pc.maxRayDist * (cascade + 1);
@@ -127,7 +154,7 @@ vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist, out fl
     while (rayQueryProceedEXT(rq)) {}
 
     if (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
-        return skyRadiance(dir);
+        return giMissRadiance(origin, dir, rayMax);
 
     const int instanceIdx = rayQueryGetIntersectionInstanceCustomIndexEXT(rq, true);
     const int prim        = rayQueryGetIntersectionPrimitiveIndexEXT(rq, true);
@@ -138,24 +165,24 @@ vec3 traceRadiance(vec3 origin, vec3 dir, int cascade, out float hitDist, out fl
     // Bound every post-hit buffer access. A bad meshIdx/triBase/vertex index would otherwise read wildly
     // out of bounds and MMU-fault; treat any out-of-range hit as a miss.
     if (uint(instanceIdx) >= in_instances.length())
-        return skyRadiance(dir);
+        return giMissRadiance(origin, dir, rayMax);
     // Geometry comes from the RT meshIdx the TLAS writer packed into the instance's sbtOffset (a LOD
     // chain traces one shared BLAS, which may differ from the raster-selected level the instance
     // references); the material still comes from the instance.
     const uint meshIdx     = rayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetEXT(rq, true);
     const uint materialIdx = in_instances[instanceIdx].meshIdxMaterialIdx >> 16;
     if (meshIdx >= in_meshInfos.length() || materialIdx >= in_materialInfos.length())
-        return skyRadiance(dir);
+        return giMissRadiance(origin, dir, rayMax);
     const InMeshInfo mi    = in_meshInfos[meshIdx];
 
     const uint triBase = mi.firstIndex + uint(prim) * 3u;
     if (triBase + 2u >= in_indices.length())
-        return skyRadiance(dir);
+        return giMissRadiance(origin, dir, rayMax);
     const uint v0 = uint(mi.vertexOffset) + in_indices[triBase + 0u];
     const uint v1 = uint(mi.vertexOffset) + in_indices[triBase + 1u];
     const uint v2 = uint(mi.vertexOffset) + in_indices[triBase + 2u];
     if ((max(max(v0, v1), v2) * 12u + 11u) >= in_vertices.length())
-        return skyRadiance(dir);
+        return giMissRadiance(origin, dir, rayMax);
 
     const vec3 b = vec3(1.0 - bc.x - bc.y, bc.x, bc.y);
     const vec3 objN = normalize(b.x * vNormal(v0) + b.y * vNormal(v1) + b.z * vNormal(v2));
@@ -326,14 +353,26 @@ void main()
     // steering step except the discrete punch-through is damped: raw per-frame corrections make the probe
     // position (and with it the whole Chebyshev visibility field) wobble frame to frame.
     const float minFront = 0.15 * float(spacing);
+    const float maxLen = 0.45 * float(spacing);
     vec3 newOffset = probeOffset;
     if (backFrac > 0.25 && closestBack < 1e29)
-        newOffset += closestBackDir * (closestBack + minFront * 0.5); // escape is all-or-nothing: full step
+    {
+        // Escape is all-or-nothing, landing minFront*1.5 past the backface: clear of BOTH the back-off
+        // band (< minFront) and the drift-home gate (> minFront*1.5), so an escaped probe PARKS. The old
+        // minFront*0.5 landing put it inside the back-off band and drift-home then pulled it back toward
+        // its (embedded) lattice home until it re-embedded — the escape/drift oscillation had probes
+        // above a heightfield floor spend frames UNDER it gathering void-black, which painted a grid of
+        // dark dots on sunlit floors (one per escaped probe). If the exit is beyond the offset clamp the
+        // probe can never escape: keep it STILL (it stays dead-rejected) instead of churning the offset
+        // (and the Chebyshev field) with a differently-jittered unreachable direction every frame.
+        const vec3 esc = probeOffset + closestBackDir * (closestBack + minFront * 1.5);
+        if (dot(esc, esc) <= maxLen * maxLen)
+            newOffset = esc;
+    }
     else if (closestFront < minFront)
         newOffset -= closestFrontDir * (0.5 * (minFront - closestFront));
-    else if (closestFront > minFront * 1.5)
-        newOffset *= 0.99;
-    const float maxLen = 0.45 * float(spacing);
+    else if (closestFront > minFront * 1.5 && giProbeBackfaceFrac(cellBase) < GI_BACKFACE_DEAD_MIN)
+        newOffset *= 0.99; // drift home only while home's HISTORY is clean: an embedded home re-swallows the probe
     const float offLen = length(newOffset);
     if (offLen > maxLen)
         newOffset *= maxLen / offLen;

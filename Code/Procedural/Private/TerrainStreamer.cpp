@@ -84,7 +84,7 @@ namespace Procedural
 		Tweak::floatVar("Terrain/V2", "Ocean fraction", &m_v2OceanFraction, 0.0f, 1.0f, 0.01f, dirty);
 		Tweak::floatVar("Terrain/V2", "Continent freq", &m_v2ContinentFreq, 0.0f, FLT_MAX, 0.00001f, dirty); // lower = bigger oceans/continents
 		Tweak::floatVar("Terrain/V2", "Inland rise (m)", &m_v2InlandRise, 0.0f, 2500.0f, 1.0f, dirty);        // coast -> deep inland altitude gain
-		Tweak::floatVar("Terrain/V2", "Ocean deepen (m)", &m_v2OceanDeepen, 0.0f, 1000.0f, 1.0f, dirty);
+		Tweak::floatVar("Terrain/V2", "Ocean deepen (m)", &m_v2OceanDeepen, 0.0f, 5000.0f, 1.0f, dirty);
 		Tweak::floatVar("Terrain/V2", "Temp lapse", &m_v2TempLapse, 0.0f, 0.01f, 0.0001f, dirty);            // altitude -> cold
 		Tweak::floatVar("Terrain/V2", "Climate bands", &m_v2ClimateBandAmp, 0.0f, 0.6f, 0.01f, dirty);       // regional hot/cold swing
 		Tweak::floatVar("Terrain/V2", "Height scale", &m_v2HeightScale, 0.0f, 8.0f, 0.05f, dirty);

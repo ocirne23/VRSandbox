@@ -583,7 +583,11 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     // only a thin shell pays for wave taps. The CPU trough estimate (ocean readback) bounds the wave
     // amplitude; 0 disables wave sampling entirely (ocean off).
     const float waveBand = m_oceanParams.enabled ? m_oceanWaveTrough * 2.0f + 0.5f : 0.0f;
-    ubo.fogParams7 = glm::vec4(0.0f, waveBand, 0.0f, 0.0f);
+    ubo.fogParams7 = glm::vec4(
+        glm::max(fog.shaftBoost, 0.0f),        // x: underwater sun in-scatter gain (fog light shafts)
+        waveBand,
+        glm::max(fog.causticStrength, 0.0f),   // z: underwater caustic focus strength (surfaces + fog shafts)
+        glm::max(fog.causticDepthFade, 0.0f)); // w: caustic contrast decay with depth (1/m)
 
     ubo.moonParams = glm::vec4(glm::normalize(sky.moonDirection), cosf(glm::radians(sky.moonSizeDeg)));
     ubo.starParams = glm::vec4(sky.starSize, sky.starSizeVar, sky.starBrightness, sky.starColorVar);

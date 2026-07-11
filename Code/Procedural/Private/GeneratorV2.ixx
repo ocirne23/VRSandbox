@@ -51,7 +51,7 @@ export namespace Procedural
 		// (deep inland = high; ramps down to meet the coast) and the seabed deepens away from shore. Biome
 		// base heights are OFFSETS on this gradient, so any biome (swamp, wetland...) can sit at altitude.
 		float  inlandRise = 120.0f;          // altitude gain (m) from coast to deepest inland
-		float  oceanDeepen = 40.0f;          // extra seabed depth (m) from shore to mid-ocean
+		float  oceanDeepen = 1000.0f;          // extra seabed depth (m) from shore to mid-ocean
 
 		// --- The altitude map. A mid-resolution lattice between the climate fields and the fine height
 		// field: each texel = the climate-blended base elevation + large-scale relief noise, sampled with a
