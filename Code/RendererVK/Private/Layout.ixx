@@ -225,7 +225,8 @@ export namespace RendererVKLayout
                               // y = waterline band half-height gating the fog's FFT wave taps
                               // (m; 0 = ocean off; sized from the readback trough estimate),
                               // z = underwater caustic strength (0 = off), w = caustic depth fade (1/m)
-        glm::vec4 fogParams8; // x = underwater fog boundary offset off the local water surface (m), yzw unused
+        glm::vec4 fogParams8; // x = underwater fog boundary offset off the local water surface (m),
+                              // y = caustic shore fade depth (m; 0 = off), zw unused
 
         glm::vec4 moonParams; // xyz = normalized direction towards the moon, w = cos of the moon disc radius
 

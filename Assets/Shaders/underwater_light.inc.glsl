@@ -56,7 +56,11 @@ vec3 underwaterSunTransmittance(vec2 worldXZ, float depthBelow, float footprint,
         // distinct rays. The exponent decays with depth (defocus), flattening focus toward 1.
         const float J = (1.0 + chop * sxx) * (1.0 + chop * szz) - chop * sxz * chop * sxz;
         const float depthFade = exp(-dEff * u_fogParams7.w);
-        focus = pow(clamp(1.0 / max(J, 0.125), 0.02, 8.0), 1.5 * u_fogParams7.z * depthFade);
+        // Shoreline fade: contrast ramps in over the first meters of TRUE depth, so the pattern
+        // dissolves at the terrain-waterline intersection instead of cutting off there (a caustic
+        // needs a water column to focus through; at depth 0 there is none).
+        const float shoreFade = u_fogParams8.y > 0.0 ? smoothstep(0.0, u_fogParams8.y, depthBelow) : 1.0;
+        focus = pow(clamp(1.0 / max(J, 0.125), 0.02, 8.0), 1.5 * u_fogParams7.z * depthFade * shoreFade);
     }
 
     return exp(-u_oceanAbsorption.rgb * pathLen) * focus;

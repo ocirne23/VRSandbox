@@ -88,6 +88,7 @@ void FogParams::registerTweaks()
     Tweak::floatVar("Fog", "Shaft boost", &shaftBoost, 0.0f, 100.0f, 0.1f);
     Tweak::floatVar("Fog", "Caustic strength", &causticStrength, 0.0f, 2.0f, 0.05f);
     Tweak::floatVar("Fog", "Caustic depth fade", &causticDepthFade, 0.0f, 0.5f, 0.005f);
+    Tweak::floatVar("Fog", "Caustic shore fade (m)", &causticShoreFade, 0.0f, 10.0f, 0.05f);
     Tweak::intVar("Fog/Quality", "Sun Rays", &sunRays, 1, 8);
     Tweak::floatVar("Fog/Quality", "Terrain Shadow Dist", &terrainShadowDist, 32.0f, 8192.0f, 16.0f);
     Tweak::floatVar("Fog/Quality", "Sun Softness", &sunSoftness, 0.0f, 0.2f, 0.005f);

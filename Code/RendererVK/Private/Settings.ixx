@@ -136,6 +136,8 @@ export struct FogParams
                                     // exaggerated. Beer-Lambert depth absorption is separate (Ocean/Absorption).
     float causticDepthFade = 0.02f; // caustic contrast decay with depth (1/m) — approximates defocus;
                                     // higher = the pattern washes out closer to the surface
+    float causticShoreFade = 1.5f;  // caustic contrast ramps in over this much water depth (m), so the
+                                    // pattern dissolves at the terrain-waterline intersection; 0 = off
     float underwaterDensity = 0.7f; // multiplier on the global density at/below the LOCAL water surface
                                     // (terrain data map water level; always-on murk, immune to regional
                                     // thickness): thick murk under thin morning haze, or 0 to disable

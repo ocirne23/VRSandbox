@@ -597,7 +597,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         waveBand,
         glm::max(fog.causticStrength, 0.0f),   // z: underwater caustic focus strength (surfaces + fog shafts)
         glm::max(fog.causticDepthFade, 0.0f)); // w: caustic contrast decay with depth (1/m)
-    ubo.fogParams8 = glm::vec4(fog.underwaterOffset, 0.0f, 0.0f, 0.0f);
+    ubo.fogParams8 = glm::vec4(fog.underwaterOffset, glm::max(fog.causticShoreFade, 0.0f), 0.0f, 0.0f);
 
     ubo.moonParams = glm::vec4(glm::normalize(sky.moonDirection), cosf(glm::radians(sky.moonSizeDeg)));
     ubo.starParams = glm::vec4(sky.starSize, sky.starSizeVar, sky.starBrightness, sky.starColorVar);
