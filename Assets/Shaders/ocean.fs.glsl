@@ -384,7 +384,7 @@ void main()
     const vec3 whitewater = u_oceanFoam.rgb * (sunTint * (NoL * sunVis) / PI + ambientSky + u_ambientColor);
 
     // In-scattered radiance of the water body (the color of deep water).
-    const vec3 sigmaT = vec3(0.0);//u_oceanAbsorption.rgb;
+    const vec3 sigmaT = u_oceanAbsorption.rgb;
     const vec3 inscatter = u_oceanScatter.rgb * u_oceanScatter.w * (ambientSky + sunTint * max(L.y, 0.0) / PI);
 
     // Fresnel split early: it gates which rays are worth tracing.
