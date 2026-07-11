@@ -54,6 +54,9 @@ namespace Procedural
 		// filtering scales the roughness-widening variance terms (0 = raw sharp GGX, 1 = fully filtered).
 		Tweak::floatVar("Ocean/Shading", "Glint sharpness", &m_glintSharpness, 0.0f, 3.0f, 0.05f);
 		Tweak::floatVar("Ocean/Shading", "Glint filtering", &m_glintFilter, 0.0f, 2.0f, 0.05f);
+		// Crest SSS (Sea of Thieves-style): sun shining through back-lit crests, scaled by wave height.
+		Tweak::floatVar("Ocean/Shading", "SSS strength", &m_sssStrength, 0.0f, 4.0f, 0.01f);
+		Tweak::floatVar("Ocean/Shading", "SSS power", &m_sssPower, 1.0f, 16.0f, 0.1f);
 		Tweak::boolean("Ocean/Shading", "Hit lighting", &m_hitLighting); // lights on geometry seen through/mirrored in the water
 		Tweak::color3("Ocean/Shading", "Foam color", &m_foamColor);
 		// One instant-foam response (thresholds + softness) draws the crest foam AND injects the
@@ -216,6 +219,8 @@ namespace Procedural
 		params.roughness = m_roughness;
 		params.glintSharpness = m_glintSharpness;
 		params.glintFilter = m_glintFilter;
+		params.sssStrength = m_sssStrength;
+		params.sssPower = m_sssPower;
 		params.hitLighting = m_hitLighting;
 		params.foamColor = m_foamColor;
 		params.foamBias = m_foamBias;

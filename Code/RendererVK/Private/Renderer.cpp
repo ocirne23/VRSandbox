@@ -614,7 +614,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanParams4 = glm::vec4(shoreMapSize > 1.0f ? 1.0f / shoreMapSize : 0.0f,
         glm::clamp(ocean.foamSpread * 0.25f, 0.0f, 0.95f), glm::max(ocean.shoalScale, 0.0f), glm::max(ocean.foamSoftness, 0.02f));
     ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), glm::max(ocean.shoreFoamDepth, 0.0f), glm::max(ocean.foamBreakAccel, 0.01f));
-    ubo.oceanParams6 = glm::vec4(-glm::clamp(ocean.glintSharpness, 0.0f, 3.0f), glm::max(ocean.glintFilter, 0.0f), 0.0f, 0.0f);
+    ubo.oceanParams6 = glm::vec4(-glm::clamp(ocean.glintSharpness, 0.0f, 3.0f), glm::max(ocean.glintFilter, 0.0f),
+        glm::max(ocean.sssStrength, 0.0f), glm::max(ocean.sssPower, 1.0f));
 
     ubo.terrainFade = m_terrainFade;
 

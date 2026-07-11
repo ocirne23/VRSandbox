@@ -273,6 +273,10 @@ export struct OceanParams
     // spec AA + LEAN); below 1 trades a touch of shimmer for a visibly tighter sun glint.
     float glintSharpness   = 0.75f; // 0 = trilinear (old look); higher = sharper (some shimmer past ~1.5)
     float glintFilter      = 0.5f;  // 1 = full variance widening, 0 = none (raw sharp GGX)
+    // Crest subsurface scattering (Sea of Thieves-style): back-lit wave crests glow the scatter color,
+    // scaled by height above the calm water line. Power shapes the toward-the-sun view lobe.
+    float sssStrength      = 1.0f;  // per meter of crest height; 0 disables (and the extra shadow rays with it)
+    float sssPower         = 1.0f;
     bool  hitLighting      = false; // evaluate the scene's grid lights at refraction/reflection ray hits
                                     // (OCEAN_HIT_LIGHTS shader variant; toggling reloads the pipeline)
     // Foam & turbulence. ONE instant-foam response (oceanInstantFoam) both draws the per-pixel crest

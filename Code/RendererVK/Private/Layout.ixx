@@ -260,7 +260,8 @@ export namespace RendererVKLayout
                                    // z = shore foam depth (m; surf band width at the waterline, 0 = off),
                                    // w = breaking-crest foam threshold (downward crest accel in g units)
         glm::vec4 oceanParams6;    // x = glint mip bias (negative = sharper shading normals),
-                                   // y = glint variance filter scale (spec AA + LEAN roughness), zw unused
+                                   // y = glint variance filter scale (spec AA + LEAN roughness),
+                                   // z = crest SSS strength (0 = off), w = crest SSS forward-lobe power
         glm::vec4 terrainFade;     // TERRAIN variant edge fade: x = fade-start dist, y = fade-end dist
                                    // (radial from camera XZ), z = target height (sea level), w = extra drop
                                    // below z at the edge (avoids z-fighting the ocean). y<=x disables.

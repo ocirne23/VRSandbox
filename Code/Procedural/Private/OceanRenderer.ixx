@@ -83,6 +83,8 @@ export namespace Procedural
 		float m_roughness = 0.07f;
 		float m_glintSharpness = 0.75f; // negative mip bias on the FS surface samples: crisper glitter
 		float m_glintFilter = 0.5f;     // scale on the roughness-widening variance (spec AA + LEAN)
+		float m_sssStrength = 1.0f;     // crest SSS: back-lit crests glow the scatter color, per meter of height
+		float m_sssPower = 1.0f;        // crest SSS toward-the-sun view lobe exponent
 		bool  m_hitLighting = false; // grid lights at refraction/reflection ray hits (pipeline reload on toggle)
 		// Foam & turbulence: one instant-foam response draws the crest foam AND injects the accumulated
 		// turbulence field, which in turn relaxes the fold threshold (aged foam along live geometry) and

@@ -376,9 +376,12 @@ void main()
     const float alphaF = clamp(sqrt(alphaSq), 0.02, 1.0);
 
     // Sun radiance at the surface (atmosphere-attenuated + eclipse-scaled) + one RT shadow ray so
-    // terrain and objects actually shade the water.
+    // terrain and objects actually shade the water. Back-lit crests (NoL <= 0) still need the ray while
+    // crest SSS is on: the subsurface glow shines through exactly those faces, and must still be
+    // shadow-gated (no glowing crests in terrain shadow).
     const vec3 sunTint = u_sunColor.rgb * atmosTransmittanceToLight(0.0, L, up) * u_eclipseParams.x;
-    const float sunVis = NoL > 0.0 ? rtShadowVisibility(in_pos + N * 0.1, L, 0.05, 10000.0) : 0.0;
+    const bool sunUp = L.y > 0.0 && (NoL > 0.0 || u_oceanParams6.z > 0.0);
+    const float sunVis = sunUp ? rtShadowVisibility(in_pos + N * 0.1, L, 0.05, 10000.0) : 0.0;
     const vec3 ambientSky = skyRadiance(up);
     // Diffusely lit whitewater: used for the crest foam and (dimmer) the entrained-bubble milkiness.
     const vec3 whitewater = u_oceanFoam.rgb * (sunTint * (NoL * sunVis) / PI + ambientSky + u_ambientColor);
@@ -449,6 +452,30 @@ void main()
     // Entrained bubbles: turbulent water turns milky — churned wakes stay visibly brighter/whiter even
     // after the surface foam has thinned to streaks ("Ocean/Foam/Turbidity").
     body = mix(body, whitewater * 0.55, clamp(turbulence * u_oceanParams5.y, 0.0, 1.0));
+
+    // --- Crest subsurface scattering (Sea of Thieves-style fake SSS): sunlight enters the back of a
+    // wave and scatters out through the thin crest, so crests glow the water's scatter color when the
+    // view looks toward the sun through them. Height above the LOCAL calm water line stands in for the
+    // crest's thinness (tall crest = long lit path through little water), the forward lobe
+    // pow(dot(V, -L)) selects backlit viewing, and pow(0.5 - 0.5 dot(L, N)) selects the sun grazing
+    // the back slope (front-lit faces get nothing). Added to the transmitted body so the Fresnel split
+    // fades it at grazing like all subsurface light, and the crest foam overlays it.
+    const float sssStrength = u_oceanParams6.z;
+    if (sssStrength > 0.0)
+    {
+        const float waveH = max(in_pos.y - oceanSampleShoreData(in_uv).y, 0.0);
+        const float towardSun = pow(clamp(dot(V, -L), 0.0, 1.0), u_oceanParams6.w);
+        const float backSlope = 0.5 - 0.5 * dot(L, N);
+
+        body += u_oceanScatter.rgb * sunTint * (sssStrength * waveH * towardSun * backSlope * backSlope * backSlope * sunVis);
+
+        // Height response saturates (h / (1+h)): meters of crest height must not scale the sun radiance
+        // unbounded, only select crests over troughs. With all factors at their max the term tops out at
+        // strength * scatterColor * sunTint / PI — the same order as the water's own in-scatter, so the
+        // glow reads as brighter water, not a light source.
+        //body += u_oceanScatter.rgb * sunTint * (sssStrength * (waveH / (1.0 + waveH)) * towardSun
+        //    * backSlope * backSlope * backSlope * sunVis / PI);
+    }
 
     vec3 color = mix(body, reflection, F);
 
