@@ -272,8 +272,8 @@ void main()
     if (terrainHeightMapPresent())
     {
         const vec4 td = terrainDataAt(worldPos.xz); // .x = terrain height, .y = water level, .w = macro altitude
-        waterY = td.y;
-        waterDepth = td.y - td.x;
+        waterY = td.y + u_fogParams8.x; // "Fog/Underwater offset (m)" raises/lowers the fog boundary
+        waterDepth = td.y - td.x;       // wave shoal fade keys on the REAL depth, not the offset boundary
         // Terrain follow rides the MACRO ALTITUDE channel (A, m above sea level), not the raw height:
         // the fog base tracks the smooth macro landscape, so ridge bumps don't drag the layer up with
         // them and valleys carved below the macro surface sit INSIDE the fog (the generator's
@@ -409,7 +409,7 @@ void main()
             // sqrt also feeds the helper's REACH, so boosting brightness stretches shaft length too.
             sunTrans = mix(vec3(1.0),
                 underwaterSunTransmittance(worldPos.xz, depthMid, viewZ * (2.0 / float(VOL_FROXEL_Y)),
-                    u_fogParams7.x * u_fogParams7.x
+                    u_fogParams7.x
                     ), underFrac);
             gSun = mix(g, 0.78, underFrac); // strong forward lobe: ~8x gain toward the sun
         }

@@ -73,7 +73,7 @@ export namespace Procedural
 		float m_depth = 100.0f;        // ocean depth (m): finite-depth dispersion + TMA attenuation
 		float m_windAngle = 0.45f;     // radians (XZ heading of the dominant swell)
 		float m_amplitude = 1.0f;      // artistic scale on the spectrum (1 = physical)
-		float m_choppiness = 0.33f;     // horizontal displacement lambda
+		float m_choppiness = 1.1f;     // horizontal displacement lambda
 		float m_normalStrength = 1.0f;
 		glm::vec3 m_cascadeSizes = glm::vec3(384.0f, 47.0f, 6.3f); // FFT patch sizes (m)
 

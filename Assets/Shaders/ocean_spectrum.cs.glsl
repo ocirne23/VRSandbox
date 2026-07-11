@@ -156,15 +156,17 @@ void main()
     // The 8 real signals' spectra, packed as 4 complex (re = first signal, im = second):
     //   P0 = h        + i Dx        P1 = Dz       + i dh/dx
     //   P2 = dh/dz    + i dDx/dx    P3 = dDz/dz   + i dDx/dz
-    // Dx = -i kx/k h~, Dz = -i kz/k h~ (choppy displacement, Tessendorf eq. 44, lambda applied at sample
-    // time); dh/dx = i kx h~; dDx/dx = kx^2/k h~; dDz/dz = kz^2/k h~; dDx/dz = kx kz / k h~.
-    const vec2 Dx    = iht * -kn.x;
-    const vec2 Dz    = iht * -kn.y;
+    // Dx = i kx/k h~, Dz = i kz/k h~ (choppy displacement, Tessendorf eq. 44 NEGATED: under this e^{+ikx}
+    // transform the paper's -i sign converges water into the TROUGHS — sharp valleys, round crests; +i
+    // pinches the crests, and the dD derivatives flip with it so the fold Jacobian stays consistent);
+    // dh/dx = i kx h~; dDx/dx = -kx^2/k h~; dDz/dz = -kz^2/k h~; dDx/dz = -kx kz / k h~.
+    const vec2 Dx    = iht * kn.x;
+    const vec2 Dz    = iht * kn.y;
     const vec2 dhx   = iht * kv.x;
     const vec2 dhz   = iht * kv.y;
-    const vec2 dDxx  = ht * (kv.x * kn.x);
-    const vec2 dDzz  = ht * (kv.y * kn.y);
-    const vec2 dDxz  = ht * (kv.x * kn.y);
+    const vec2 dDxx  = ht * -(kv.x * kn.x);
+    const vec2 dDzz  = ht * -(kv.y * kn.y);
+    const vec2 dDxz  = ht * -(kv.x * kn.y);
 
     const vec2 P0 = ht   + vec2(-Dx.y,   Dx.x);
     const vec2 P1 = Dz   + vec2(-dhx.y,  dhx.x);

@@ -139,10 +139,12 @@ export struct FogParams
     float underwaterDensity = 0.7f; // multiplier on the global density at/below the LOCAL water surface
                                     // (terrain data map water level; always-on murk, immune to regional
                                     // thickness): thick murk under thin morning haze, or 0 to disable
+    float underwaterOffset = -1.0f;  // raises/lowers the underwater fog boundary relative to the local
+                                    // water surface (m); the live wave displacement rides on top
     float noiseScale = 0.08f;      // density noise frequency (1/m)
     float noiseStrength = 0.5f;    // 0 = uniform fog, 1 = fully modulated (dusty wisps)
     float windSpeed = 1.5f;        // noise drift (m/s)
-    float temporalBlend = 0.5f;    // history blend weight (jittered Z integration)
+    float temporalBlend = 0.8f;    // history blend weight (jittered Z integration)
     bool  lightShadows = true;     // shadow ray per froxel per grid light (expensive)
     int   sunRays = 1;             // sun shadow rays per froxel (RT sun mode); main perf knob
     float sunSoftness = 0.02f;     // shadow ray cone half-angle (rad); softens + decorrelates the rays
