@@ -59,6 +59,15 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_taaParams.registerTweaks(rerecordCallback);
     m_postParams.registerTweaks(rerecordCallback);
     m_lodParams.registerTweaks();
+    // Wireframe is baked pipeline state (polygonMode), so flipping it rebuilds the static mesh pipeline —
+    // same GPU-idle + reload pattern as the RTAO alpha-test and ocean hit-lighting tweaks.
+    Tweak::boolean("Editor", "Wireframe", &m_wireframe, [this]() {
+        if (Globals::device.getGraphicsQueue().waitIdle() != vk::Result::eSuccess)
+            return;
+        m_staticMeshGraphicsPipeline.setWireframe(m_wireframe);
+        m_staticMeshGraphicsPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass(), m_maxTextures);
+        setHaveToRecordCommandBuffers();
+    });
     Globals::meshStreamer.initialize();
 
     glslang::InitializeProcess();

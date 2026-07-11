@@ -60,6 +60,9 @@ export struct GraphicsPipelineLayout
     float depthBiasSlopeFactor = 0.0f;
     vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
 
+    // Variant-0 polygon mode (additional variants carry their own); the global wireframe toggle sets eLine.
+    vk::PolygonMode polygonMode = vk::PolygonMode::eFill;
+
     // Primitive topology for every variant (debug line passes set eLineList).
     vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList;
 

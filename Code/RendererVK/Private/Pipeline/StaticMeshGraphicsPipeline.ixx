@@ -73,6 +73,9 @@ public:
     // Ocean variant: light refraction/reflection ray hits with the grid lights (OCEAN_HIT_LIGHTS define).
     // Takes effect on the next reloadShaders (the Renderer reloads when the tweak flips).
     void setOceanHitLights(bool enabled) { m_oceanHitLights = enabled; }
+    // Global wireframe ("Renderer/Wireframe" tweak): scene variants rasterize as lines.
+    // Takes effect on the next reloadShaders (the Renderer reloads when the tweak flips).
+    void setWireframe(bool enabled) { m_wireframe = enabled; }
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
     const IndirectExecutionSet& getIndirectExecutionSet() const { return m_indirectExecutionSet; }
     const IndirectCommandsLayout& getIndirectCommandsLayout() const { return m_indirectCommandsLayout; }
@@ -88,6 +91,7 @@ private:
     vk::RenderPass m_renderPass;
     bool m_stereo = false;
     bool m_oceanHitLights = false; // OCEAN_HIT_LIGHTS define on the ocean fragment variant
+    bool m_wireframe = false;      // global wireframe: scene variants get vk::PolygonMode::eLine
 
     vk::DeviceSize m_preprocessSize = 0;
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;            // opaque pass

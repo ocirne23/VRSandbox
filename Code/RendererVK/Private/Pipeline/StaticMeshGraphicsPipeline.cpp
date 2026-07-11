@@ -146,6 +146,22 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 		.cullMode = vk::CullModeFlagBits::eNone,
 	});
 
+	// Global wireframe ("Renderer/Wireframe" tweak): rasterize every scene variant as lines. The sky and
+	// gizmo overlays stay solid so the view keeps a background and the editor gizmos stay usable.
+	if (m_wireframe)
+	{
+		graphicsPipelineLayout.polygonMode = vk::PolygonMode::eLine; // variant 0 (LitOpaque)
+		for (size_t i = 0; i < graphicsPipelineLayout.additionalVariants.size(); ++i)
+		{
+			const auto pipelineIdx = RendererVKLayout::EPipelineIndex(i + 1);
+			if (pipelineIdx == RendererVKLayout::EPipelineIndex::Sky
+				|| pipelineIdx == RendererVKLayout::EPipelineIndex::GizmoUI
+				|| pipelineIdx == RendererVKLayout::EPipelineIndex::GizmoWorld)
+				continue;
+			graphicsPipelineLayout.additionalVariants[i].polygonMode = vk::PolygonMode::eLine;
+		}
+	}
+
     // VR: every shader in this pipeline selects the per-eye view (u_views[u_viewIndex]) from one push
     // constant, gated behind STEREO. Define it once across all shader sources (and add the range once)
     // rather than per-variant; shaders that don't reference STEREO just ignore the define.

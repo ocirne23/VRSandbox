@@ -132,7 +132,7 @@ bool GraphicsPipeline::createPipelines(vk::RenderPass renderPass, GraphicsPipeli
         .flags = {},
         .depthClampEnable = vk::False,
         .rasterizerDiscardEnable = vk::False,
-        .polygonMode = vk::PolygonMode::eFill,
+        .polygonMode = layout.polygonMode,
         .cullMode = layout.cullMode,
         .frontFace = vk::FrontFace::eCounterClockwise,
         .depthBiasEnable = layout.depthBiasEnable ? vk::True : vk::False,

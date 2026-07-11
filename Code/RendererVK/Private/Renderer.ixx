@@ -448,6 +448,7 @@ private:
     Rect m_viewportRect = Rect();
     bool m_windowMinimized = false;
     bool m_vsyncEnabled = true;
+    bool m_wireframe = false; // "Renderer/Wireframe" tweak: forward scene variants rasterize as lines
     uint32 m_sceneViewCount = 1; // 2 in VR: SceneColor + forward pass are multiview (one layer per eye)
 
     // VR: per-eye LDR composite targets
