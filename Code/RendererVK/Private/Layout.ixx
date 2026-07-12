@@ -274,7 +274,8 @@ export namespace RendererVKLayout
                                    // y = shore foam max coverage (surf band opacity cap),
                                    // z = swash amplitude (0 = off), w = swash reach (m, CPU estimate)
         glm::vec4 oceanParams8;    // x = swash drawdown burial (m below the seabed when receding),
-                                   // y = shore foam threshold bias (negative = sparser surf), zw unused
+                                   // y = shore foam threshold bias (negative = sparser surf),
+                                   // z = swash backflow (horizontal chop scale on the tongue), w unused
         glm::vec4 terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                                    // 0 = no terrain mesh up — fences the ocean land cull), y unused,
                                    // z = sea level (world Y, live from the streamer), w unused

@@ -13,7 +13,7 @@ export struct SkyParams
     glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // sky "up" axis; also the sky radiance light direction
 
     // Sun
-    glm::vec3 sunDirection = glm::normalize(glm::vec3(-0.4f, 0.91f, 0.09f));
+    glm::vec3 sunDirection = glm::normalize(glm::vec3(-0.517f, 0.081f, 0.852f));
     glm::vec3 sunColor = glm::vec3(0.9568f, 1.0f, 0.9214f);
     float sunIntensity = 3.0f;
     float sunAngularCos = 0.99998f;     // cos of the disc radius (1 = disc off)
@@ -136,7 +136,7 @@ export struct FogParams
                                     // exaggerated. Beer-Lambert depth absorption is separate (Ocean/Absorption).
     float causticDepthFade = 0.25f; // caustic contrast decay with depth (1/m) — approximates defocus;
                                     // higher = the pattern washes out closer to the surface
-    float causticShoreFade = 0.1f;  // caustic contrast ramps in over this much water depth (m), so the
+    float causticShoreFade = 0.5f;  // caustic contrast ramps in over this much water depth (m), so the
                                     // pattern dissolves at the terrain-waterline intersection; 0 = off
     float underwaterDensity = 0.7f; // multiplier on the global density at/below the LOCAL water surface
                                     // (terrain data map water level; always-on murk, immune to regional
@@ -279,7 +279,7 @@ export struct OceanParams
     float glintFilter      = 0.5f;  // 1 = full variance widening, 0 = none (raw sharp GGX)
     // Crest subsurface scattering (Sea of Thieves-style): back-lit wave crests glow the scatter color,
     // scaled by height above the calm water line. Power shapes the toward-the-sun view lobe.
-    float sssStrength      = 1.0f;  // per meter of crest height; 0 disables (and the extra shadow rays with it)
+    float sssStrength      = 0.65f;  // per meter of crest height; 0 disables (and the extra shadow rays with it)
     float sssPower         = 1.0f;
     bool  hitLighting      = false; // evaluate the scene's grid lights at refraction/reflection ray hits
                                     // (OCEAN_HIT_LIGHTS shader variant; toggling reloads the pipeline)
@@ -305,16 +305,18 @@ export struct OceanParams
     // shoaling — each cascade's displacement fades out below depth = shoalScale * its patch size, so long
     // swell dies offshore while chop runs almost to the beach and waves never poke through land — plus a
     // surf/foam band where the water column vanishes at the waterline.
-    float shoalScale     = 0.05f; // shoaling depth as a fraction of each cascade's patch size
-    float shoreFoamDepth = 1.5f;  // water-column height (m) below which the waterline churns white; 0 = off
-    float shoreFoamMax   = 0.65f; // surf band opacity cap: shore foam coverage never exceeds this, so the
+    float shoalScale     = 0.015f; // shoaling depth as a fraction of each cascade's patch size
+    float shoreFoamDepth = 8.0f;  // water-column height (m) below which the waterline churns white; 0 = off
+    float shoreFoamMax   = 0.75f; // surf band opacity cap: shore foam coverage never exceeds this, so the
                                   // refracted bottom stays visible through the lace (whitecaps unaffected)
     float swashAmp       = 0.5f;  // swash run-up: scale on the un-shoaled wave height riding through the
                                   // waterline and up the beach (waves crash and flow over; 0 = hard cutoff)
-    float swashDrawdown  = 0.3f;  // m below the seabed a receding swash surface sinks: deeper = steeper,
+    float swashDrawdown  = 1.0f;  // m below the seabed a receding swash surface sinks: deeper = steeper,
                                   // cleaner cut against the sand (shallow grazes sawtooth the retreat edge)
-    float shoreFoamBias  = 0.0f;  // shifts the surf fold threshold: negative = sparser lace / more
+    float shoreFoamBias  = -0.33f;  // shifts the surf fold threshold: negative = sparser lace / more
                                   // transparent shore waves, positive = denser churn
+    float swashFlow      = 0.33f;  // backflow: scale on the raw horizontal chop riding the swash weight —
+                                  // the tongue visibly flows back seaward as the wave recedes (0 = off)
     float cullMargin     = 1.0f;  // land cull: clipmap triangles whose whole footprint is buried deeper
                                   // than this under the local water level are VS-culled (0 = off)
 };

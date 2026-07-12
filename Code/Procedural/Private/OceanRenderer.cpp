@@ -79,6 +79,7 @@ namespace Procedural
 		Tweak::floatVar("Ocean/Shore", "Swash amplitude", &m_swashAmp, 0.0f, 2.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shore", "Swash drawdown (m)", &m_swashDrawdown, 0.05f, 2.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shore", "Shore foam bias", &m_shoreFoamBias, -1.0f, 1.0f, 0.01f);
+		Tweak::floatVar("Ocean/Shore", "Swash backflow", &m_swashFlow, 0.0f, 3.0f, 0.01f);
 		// Land cull: clipmap triangles buried deeper than this under the local water level (over their
 		// whole footprint) are discarded in the vertex shaders — no displacement sampling, no raster.
 	}
@@ -242,6 +243,7 @@ namespace Procedural
 		params.swashAmp = m_swashAmp;
 		params.swashDrawdown = m_swashDrawdown;
 		params.shoreFoamBias = m_shoreFoamBias;
+		params.swashFlow = m_swashFlow;
 		params.cullMargin = m_cullMargin;
 		renderer.setOceanParams(params);
 

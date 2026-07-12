@@ -234,15 +234,21 @@ float oceanVertexLod(float cellSize, float morph, float patchSize)
 // instead of spiking right at the shoreline (the mid-cascade shoal band is the floor so a tiny reach
 // never fades sharper than the waves themselves). Used identically by the displacement and the
 // shading-surface sample; underwaterLiveWaveY (underwater_light.inc.glsl) mirrors it.
-float oceanSwashWeight(float depth)
+float oceanSwashWeight(float depth, float waterLevel)
 {
     const float amp = u_oceanParams7.z;
     if (amp <= 0.0)
         return 0.0;
+    // Swash is OPEN-OCEAN swell energy running ashore. Water whose baked level sits off sea level
+    // (lakes/ponds/rivers at altitude) is landlocked — no swell reaches it — so the swash fades out
+    // over the first meter of elevation difference and their shores keep the plain shoaled waterline.
+    const float seaFade = 1.0 - smoothstep(0.05, 1.0, abs(waterLevel - u_oceanParams2.w));
+    if (seaFade <= 0.0)
+        return 0.0;
     const float reach = max(u_oceanParams7.w, 0.01);
     const float landFade = clamp(1.0 + min(depth, 0.0) / reach, 0.0, 1.0);
     const float fadeIn = 1.0 - smoothstep(0.0, max(2.0 * reach, u_oceanParams4.z * u_oceanParams2.y), depth);
-    return amp * landFade * fadeIn;
+    return amp * seaFade * landFade * fadeIn;
 }
 
 // Sum of all cascades' displacement at an undisplaced (morphed) world XZ. Choppy lambda (u_oceanParams0.w)
@@ -250,8 +256,10 @@ float oceanSwashWeight(float depth)
 vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
 {
     const float chop = u_oceanParams0.w;
-    const float depth = oceanSampleShoreDepth(worldXZ);
+    const vec2 shoreHW = oceanSampleShoreData(worldXZ); // (terrain height, water level)
+    const float depth = shoreHW.y - shoreHW.x;
     vec3 disp = vec3(0.0);
+    float sw = 0.0;
     // Buried under land (depth <= 0): every cascade's shoal fade is exactly zero, so the map/flow
     // sampling below degenerates to displacing nothing — skip it and let the waterline clamp place
     // the vertex (bit-identical to the full path, just without the texture fetches). The swash band
@@ -262,13 +270,31 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
         const vec2 fr = oceanFlowRotation(worldXZ);           // rivers: waves travel along the local flow
         const vec2 sampleXZ = oceanFlowSamplePos(worldXZ, fr);
         float rawY = 0.0;
+        vec2 rawXZ = vec2(0.0);
         for (int c = 0; c < OCEAN_CASCADES; ++c)
         {
             const float L = u_oceanParams2[c];
             const vec4 d = textureLod(u_oceanMaps, vec3(sampleXZ / L, float(c)), oceanVertexLod(cellSize, morph, L));
             disp += vec3(d.x * chop, d.y, d.z * chop) * oceanShoalFade(depth, L);
             rawY += d.y;
+            rawXZ += d.xz;
         }
+        sw = oceanSwashWeight(depth, shoreHW.y);
+        // Swash backflow ("Swash backflow"): the raw horizontal chop oscillates shoreward under a crest
+        // and seaward under a trough — riding it on the swash weight makes the tongue FLOW back down the
+        // beach as the wave recedes (the waterline contour slides seaward) instead of sinking in place.
+        // Gated by the tongue's THICKNESS above the sand (surface rel. level = rawY*sw, terrain rel.
+        // level = -depth): a buried surface must not keep sliding, or the next wave lifts it back out
+        // displaced from where it sank — a seam of water emerging from the terrain ahead of the crest.
+        const float flowFade = smoothstep(0.0, 0.35, rawY * sw + depth);
+        vec2 flowOff = rawXZ * (chop * u_oceanParams8.z * sw * flowFade);
+        // Soft-cap the slide to ~the swash reach: the raw chop x backflow is unbounded (metres in a big
+        // sea), and a per-vertex offset that large shears the clipmap triangles into streaks that creep
+        // up the beach. The rational cap keeps the direction and the small-offset response, and
+        // asymptotes to the cap instead of clipping.
+        const float flowCap = clamp(0.5 * u_oceanParams7.w, 0.25, 1.0);
+        flowOff *= flowCap / (flowCap + length(flowOff));
+        disp.xz += flowOff;
         disp.xz = oceanFlowToWorld(disp.xz, fr);
         // Swash run-up ("Ocean/Shore/Swash amplitude"): the shoal fade kills the displayed waves at the
         // waterline, which is what left a static cutoff there. Ride the RAW (un-shoaled) wave height
@@ -277,7 +303,7 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
         // surface-vs-terrain intersection that already IS the waterline, so the wet edge surges up the
         // beach and drains back with each swell. Fades in as the shoal fade takes over (mid cascade as
         // the reference), so deep water sees no double displacement.
-        disp.y += rawY * oceanSwashWeight(depth);
+        disp.y += rawY * sw;
     }
     // Waterline treatment: smooth-clamp the surface to just above the seabed — the shoal fade only
     // scales the waves, so a trough could still swing under the bottom and open a "hole" of exposed
@@ -292,7 +318,12 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
     // (The ~3-5 cm land-side offset is enough at ANY distance now that the main view is reversed-Z; a
     // cell-scaled extra burial used to live here for standard-Z depth noise, but its depth ramp exceeded
     // the open-ocean depth at the coarse outer rings and visibly sank the far sea surface.)
-    const float eps = 0.05, k = 0.2;
+    // The smooth-max rounding width k flattens all wave detail within ~k of the floor — fine offshore,
+    // but the swash's thin film LIVES in that band: it clamped every centimeter ripple off the receding
+    // sheet, leaving a geometrically flat plate. Tighten the rounding toward a near-hard max where the
+    // swash is active so the film keeps its fine-cascade texture down to the sand.
+    const float eps = 0.05;
+    const float k = mix(0.2, 0.06, clamp(sw * 4.0, 0.0, 1.0));
     float floorY = eps - max(depth, 2.0 * eps);
     // Swash drawdown: the floor clamp pins the surface just ABOVE the seabed, which reads as a film of
     // water stuck at the old waterline while a wave recedes. Inside the swash shallows invert it to
@@ -334,7 +365,8 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
 void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out vec2 slopeVar, out float accel)
 {
     const float chop = u_oceanParams0.w;
-    const float depth = oceanSampleShoreDepth(worldXZ);
+    const vec2 shoreHW = oceanSampleShoreData(worldXZ); // (terrain height, water level)
+    const float depth = shoreHW.y - shoreHW.x;
     // Buried under land: all shoal fades are zero — the loop would sum nothing (flat calm surface).
     // With swash on, the run-up band on land still shades: its geometry carries the raw wave residual.
     if (depth <= (u_oceanParams7.z > 0.0 ? -u_oceanParams7.w : 0.0))
@@ -374,7 +406,7 @@ void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out ve
     // Swash run-up: the displacement rides the RAW wave height through the waterline (scaled by
     // amplitude, land-height fade and the inverse shoal fade — oceanSampleDisplacement), so the shading
     // slopes/variance/accel must carry the same residual or the tongue shades as a flat mirror sheet.
-    const float w = oceanSwashWeight(depth);
+    const float w = oceanSwashWeight(depth, shoreHW.y);
     if (w > 0.0)
     {
         slopeSum += rawSlope * w;

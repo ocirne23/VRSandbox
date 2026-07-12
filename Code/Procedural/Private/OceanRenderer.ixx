@@ -83,7 +83,7 @@ export namespace Procedural
 		float m_roughness = 0.07f;
 		float m_glintSharpness = 0.75f; // negative mip bias on the FS surface samples: crisper glitter
 		float m_glintFilter = 0.5f;     // scale on the roughness-widening variance (spec AA + LEAN)
-		float m_sssStrength = 1.0f;     // crest SSS: back-lit crests glow the scatter color, per meter of height
+		float m_sssStrength = 0.66f;     // crest SSS: back-lit crests glow the scatter color, per meter of height
 		float m_sssPower = 1.0f;        // crest SSS toward-the-sun view lobe exponent
 		bool  m_hitLighting = false; // grid lights at refraction/reflection ray hits (pipeline reload on toggle)
 		// Foam & turbulence: one instant-foam response draws the crest foam AND injects the accumulated
@@ -107,6 +107,7 @@ export namespace Procedural
 		float m_swashAmp = 0.5f;        // swash run-up: un-shoaled wave height riding up the beach (0 = hard cutoff)
 		float m_swashDrawdown = 0.3f;   // receding burial depth (m below seabed): deeper = cleaner retreat edge
 		float m_shoreFoamBias = -0.33f;   // surf fold-threshold shift: negative = sparser/more transparent surf
+		float m_swashFlow = 1.0f;       // backflow: horizontal chop on the tongue (recede flows seaward; 0 = off)
 		float m_cullMargin = 1.0f;      // VS land cull: footprint buried deeper than this = triangle discarded (0 = off)
 
 		// Bake state (HeightMapBaker: async, one bake at a time; the active map keeps working until the

@@ -31,22 +31,50 @@ layout (binding = UNDERWATER_OCEAN_BINDING) uniform sampler2DArray u_uwOceanMaps
 // close enough for gating). Lets callers test "underwater" against the INSTANTANEOUS surface instead of
 // the calm level, so sand exposed by a receding swash reads as dry (no caustics/absorption) and the
 // run-up tongue reads as covered. columnDepth = calm water depth at the point (drives the shoal fades).
-float underwaterLiveWaveY(vec2 worldXZ, float columnDepth)
+float underwaterLiveWaveY(vec2 worldXZ, float columnDepth, float waterLevel)
 {
+    // Swash weight — mirrors oceanSwashWeight (ocean_wave.inc.glsl): amplitude x sea-connection fade
+    // (landlocked lakes/ponds at elevated levels get no swell) x land-height decay x wide fade-in
+    // (~2 swash reaches of approach depth, floored by the mid-cascade shoal band).
+    const float seaFade = 1.0 - smoothstep(0.05, 1.0, abs(waterLevel - u_oceanParams2.w));
+    const float reach = max(u_oceanParams7.w, 0.01);
+    const float landFade = clamp(1.0 + min(columnDepth, 0.0) / reach, 0.0, 1.0);
+    const float fadeIn = 1.0 - smoothstep(0.0, max(2.0 * reach, u_oceanParams4.z * u_oceanParams2.y), columnDepth);
+    const float sw = u_oceanParams7.z * seaFade * landFade * fadeIn;
+
+    // Swash backflow moves the water HORIZONTALLY (displaced = source + chop offset), so the surface
+    // above this ground point originates from x - offset: first-order inverse — evaluate the offset
+    // here, then sample the height field at the offset position. Without this the gate tests the wrong
+    // water column and paints caustics on dry sand just in front of a receding tongue.
+    vec2 sampleXZ = worldXZ;
+    const float flow = u_oceanParams0.w * u_oceanParams8.z * sw; // chop * backflow * swash weight
+    if (flow > 0.0)
+    {
+        vec2 off = vec2(0.0);
+        float rawY0 = 0.0;
+        for (int c = 0; c < OCEAN_CASCADES; ++c)
+        {
+            const float L = u_oceanParams2[c];
+            const vec4 d = textureLod(u_uwOceanMaps, vec3(worldXZ / L, float(c)), 0.0);
+            off += d.xz;
+            rawY0 += d.y;
+        }
+        // Same thickness gate + reach soft-cap as the displacement: a buried tongue doesn't slide, and
+        // the slide distance stays bounded.
+        vec2 flowOff = off * (flow * smoothstep(0.0, 0.35, rawY0 * sw + columnDepth));
+        const float flowCap = clamp(0.5 * u_oceanParams7.w, 0.25, 1.0);
+        sampleXZ -= flowOff * (flowCap / (flowCap + length(flowOff)));
+    }
+
     float y = 0.0, rawY = 0.0;
     for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
         const float L = u_oceanParams2[c];
-        const float d = textureLod(u_uwOceanMaps, vec3(worldXZ / L, float(c)), 0.0).y;
+        const float d = textureLod(u_uwOceanMaps, vec3(sampleXZ / L, float(c)), 0.0).y;
         rawY += d;
         y += d * smoothstep(0.0, max(u_oceanParams4.z * L, 0.01), columnDepth); // oceanShoalFade
     }
-    // Swash run-up residual — mirrors oceanSwashWeight (ocean_wave.inc.glsl): amplitude x land-height
-    // decay x wide fade-in (~2 swash reaches of approach depth, floored by the mid-cascade shoal band).
-    const float reach = max(u_oceanParams7.w, 0.01);
-    const float landFade = clamp(1.0 + min(columnDepth, 0.0) / reach, 0.0, 1.0);
-    const float fadeIn = 1.0 - smoothstep(0.0, max(2.0 * reach, u_oceanParams4.z * u_oceanParams2.y), columnDepth);
-    y += rawY * u_oceanParams7.z * landFade * fadeIn;
+    y += rawY * sw;
     return y;
 }
 

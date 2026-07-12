@@ -126,7 +126,9 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_oceanParams8;    // x = swash drawdown burial (m below the seabed a receding surface sinks;
                             // deeper = steeper, cleaner cut against the sand),
                             // y = shore foam threshold bias (shifts the surf fold threshold:
-                            // negative = sparser/more transparent surf), zw unused
+                            // negative = sparser/more transparent surf),
+                            // z = swash backflow (scale on the raw horizontal chop riding the swash
+                            // weight: the tongue flows back seaward as the wave recedes), w unused
     vec4 u_terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                             // 0 = no terrain mesh up — fences the ocean land cull), y unused,
                             // z = sea level (world Y, live from the streamer), w unused
