@@ -100,8 +100,9 @@ private:
 };
 
 // One mesh LOD chain: global mesh indices per level ([0] = full resolution) sharing one set of local
-// bounds (used for the projected-size selection). Registered by ObjectContainer at load, referenced by
-// RenderNode::m_lodInstances, applied per frame by Renderer::selectMeshLods.
+// bounds. Registered by ObjectContainer at load, referenced by RenderNode::m_lodInstances; selection
+// happens per instance on the GPU (mesh_lod.inc.glsl in the cull shaders), fed by the GpuMeshLodGroup
+// mirror this registers.
 export struct MeshLodGroup
 {
     uint16 meshIdx[RendererVKLayout::MAX_MESH_LODS] = {};
@@ -113,6 +114,7 @@ export struct MeshLodGroup
     // projects below "LOD/Max error (px)". All-zero (authored chains without error data) falls back to
     // the projected-size metric.
     float errors[RendererVKLayout::MAX_MESH_LODS] = {};
+    uint32 lastUseFrame = UINT32_MAX; // frame stamp for the once-per-frame chain-warmth noteUse
 };
 
 export class Renderer final
@@ -148,12 +150,10 @@ public:
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
-    // Terrain edge fade (TERRAIN pipeline variant): chunk vertices lerp their height toward targetHeight
-    // minus edgeDrop as their horizontal distance from the camera runs from startDist to endDist, hiding
-    // the streaming generation-boundary pop-in. targetHeight also feeds the terrain shader's sea level
-    // (coloring), so edgeDrop is separate: sinking the fade a few meters under the ocean surface keeps the
-    // far edge from z-fighting the coplanar calm water. endDist <= startDist disables it. Set per frame.
-    void setTerrainFade(float startDist, float endDist, float targetHeight, float edgeDrop = 0.0f) { m_terrainFade = glm::vec4(startDist, endDist, targetHeight, edgeDrop); }
+    // Live terrain state for the shaders: meshRadius = radius (m, radial from the camera XZ) inside which
+    // streamed terrain chunks are guaranteed resident — the fence for the ocean's land cull (0 = no
+    // terrain mesh up, cull disabled); seaLevel feeds the terrain shader's coloring. Set per frame.
+    void setTerrainParams(float meshRadius, float seaLevel) { m_terrainParams = glm::vec4(meshRadius, 0.0f, seaLevel, 0.0f); }
     // One terrain splat material: BC-compressed .dds paths (relative to Assets/) + a climate-space
     // attractor coordinate (temperature01, humidity01) used by ground/rock entries — ignored for the
     // trailing beach entry, which is climate-independent (always available at the shoreline).
@@ -282,11 +282,10 @@ private:
     // Texture-streaming priority pass: reports the node's projected screen size to the TextureStreamer
     // for every material texture its instances sample (called from renderNode/renderNodeThreadSafe).
     void noteTextureUse(const RenderNode& node, uint32 passMask);
-    // Per-instance mesh LOD selection: redirects a node's LOD-chained instances (freshly copied into
-    // this frame's mapped instance buffer at instances[]) to the level their projected size wants,
-    // keeping the per-mesh instance counts in step. Off-screen nodes (no PASS_MAIN in passMask) take
-    // two levels coarser. threadSafe = called from renderNodeThreadSafe.
-    void selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshInstance* instances, uint32 passMask, bool threadSafe);
+    struct PerFrameData;
+    // Per-frame CPU side of GPU LOD selection: stamps the node's chains as used (keeps every level's
+    // mesh set warm in the mesh streamer) and publishes the node's state-slot bias for the cull shader.
+    void noteLodChainUse(const RenderNode& node, uint32 startIdx, PerFrameData& frameData);
     void recordSkinning(uint32 frameIdx);
     void recordOceanSim(uint32 frameIdx);
     void recordIndirectCull(uint32 frameIdx);
@@ -369,14 +368,34 @@ private:
         {
             m_meshLodGroups.push_back(group);
             groupIdx = (uint32)m_meshLodGroups.size() - 1;
+            if ((uint32)m_meshLodGroups.size() > m_maxMeshLodGroups)
+                growMeshLodGroupCapacity((uint32)m_meshLodGroups.size());
         }
         // One shared BLAS per chain: every level aliases the RT level's geometry (rays don't need
         // per-level fidelity), so only that level's BLAS is ever built.
         const uint8 rtLevel = (uint8)std::clamp(m_rtParams.blasLodLevel, 0, (int)group.numLods - 1);
         for (uint8 k = 0; k < group.numLods; ++k)
             m_accelStructure.setMeshAlias(group.meshIdx[k], group.meshIdx[rtLevel]);
+        // GPU LOD selection: publish the group and point every member mesh at it.
+        uploadMeshLodGroup(groupIdx);
+        for (uint8 k = 0; k < group.numLods; ++k)
+            setMeshLodGroupIdx(group.meshIdx[k], groupIdx);
         return groupIdx;
     }
+    // Frees a LOD group: detaches its member meshes from GPU selection, then recycles the slot.
+    void freeMeshLodGroup(uint32 groupIdx)
+    {
+        const MeshLodGroup& group = m_meshLodGroups[groupIdx];
+        for (uint8 k = 0; k < group.numLods; ++k)
+            setMeshLodGroupIdx(group.meshIdx[k], UINT32_MAX);
+        m_freeMeshLodGroups.push_back(groupIdx);
+    }
+    void uploadMeshLodGroup(uint32 groupIdx);
+    void setMeshLodGroupIdx(uint16 meshIdx, uint32 groupIdx);
+    // Per-instance LOD hysteresis state slots (GPU), one contiguous range per RenderNode with LOD chains.
+    uint32 allocateLodStateRange(uint32 count);
+    void growLodStateCapacity(uint32 needed);
+    void growMeshLodGroupCapacity(uint32 needed);
     uint32 addSkinnedMeshSources(const std::vector<RendererVKLayout::SkinnedMeshSource>& sources);
     const RendererVKLayout::SkinnedMeshSource& getSkinnedMeshSource(uint32 idx) const { return m_skinnedMeshSources[idx]; }
 
@@ -460,7 +479,7 @@ private:
     ShadowParams m_shadowParams;
     FogParams m_fogParams;
     OceanParams m_oceanParams;
-    glm::vec4 m_terrainFade{ 0.0f }; // see setTerrainFade; (0,0,0,0) = disabled (y<=x)
+    glm::vec4 m_terrainParams{ 0.0f }; // see setTerrainParams; x = 0 disables the ocean land cull
     // Terrain biome splat materials (setTerrainBiomeMaterials): contiguous material range + owned textures.
     int32  m_terrainBiomeBaseMaterial = -1; // -1 = no set registered (shader uses flat-color fallback)
     uint32 m_terrainBiomeNumGround = 0;
@@ -542,7 +561,8 @@ private:
     std::vector<uint8> m_meshIsSkinnedOutput;  // per MeshInfo: skinned output region (no static BLAS build)
     std::vector<uint32> m_pendingBlasRebuilds; // re-streamed meshes awaiting a BLAS rebuild in recordGlobalIllum
     std::vector<MeshLodGroup> m_meshLodGroups;
-    std::array<uint32, RendererVKLayout::MAX_MESH_LODS> m_lodInstanceCounts{}; // per-level picks this frame (stats)
+    std::vector<uint32> m_meshToLodGroup; // per MeshInfo: owning MeshLodGroup (UINT32_MAX = no chain); mirrors m_meshLodGroupIdxBuffer
+    std::array<uint32, RendererVKLayout::MAX_MESH_LODS> m_lodInstanceCounts{}; // stats snapshot of the GPU cull's per-level picks
     std::vector<uint32> m_freeRenderNodeIndexes;
     std::vector<SkinnedInstanceBundle> m_skinnedBundles;
     std::unordered_map<uint32, std::vector<uint32>> m_freeSkinnedBundles; // sourceKey -> parked bundle handles
@@ -572,6 +592,17 @@ private:
     Buffer m_meshInfosBuffer;
     Buffer m_materialInfosBuffer;
     Buffer m_instanceOffsetsBuffer;
+
+    // GPU LOD selection (shared, device-local): per-mesh group index, packed group data, and the
+    // per-instance hysteresis state the main cull reads/writes (advisory only — the shader clamps
+    // whatever it reads into the frame's valid band, so cross-frame races and garbage are benign).
+    Buffer m_meshLodGroupIdxBuffer;
+    Buffer m_meshLodGroupsBuffer;
+    Buffer m_lodLevelStateBuffer;
+    IndexRangeFreeList m_freeLodStateSlots;
+    uint32 m_lodStateCounter = 0;
+    uint32 m_maxLodStateSlots = RendererVKLayout::INITIAL_LOD_STATE_SLOTS;
+    uint32 m_maxMeshLodGroups = RendererVKLayout::INITIAL_MESH_LOD_GROUPS;
 
     struct PerFrameData
     {
@@ -613,8 +644,11 @@ private:
         Buffer ubo;
         Buffer inRenderNodeTransformsBuffer;
         Buffer inNodePassMasksBuffer; // uint per render node: PASS_* bits, written at push time
+        Buffer inNodeLodStateBiasBuffer; // int per render node: LOD state slot bias (stateBase - startIdx), written at push time
         Buffer inMeshInstancesBuffer;
         Buffer inFirstInstancesBuffer;
+        Buffer lodStatsBuffer; // per-level LOD pick counts, written by the cull, read back for stats
+        std::span<uint32> mappedLodStats;
         // This frame's unique-mesh count, read on the GPU by the DGC executes (sequenceCountAddress) and
         // the G-buffer's drawIndexedIndirectCount, so registering new meshes never re-records.
         Buffer meshCountBuffer;
@@ -627,6 +661,7 @@ private:
         RendererVKLayout::Ubo* mappedUniformBuffer = nullptr;
         std::span<RendererVKLayout::RenderNodeTransform> mappedRenderNodeTransforms;
         std::span<uint32> mappedNodePassMasks;
+        std::span<int32> mappedNodeLodStateBias;
         std::span<RendererVKLayout::InMeshInstance> mappedMeshInstances;
         std::span<uint32> mappedFirstInstances;
 

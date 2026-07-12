@@ -95,6 +95,7 @@ private:
         m_transformIdx = other.m_transformIdx;
         m_skinnedPaletteHandle = other.m_skinnedPaletteHandle;
         m_skinnedBundleHandle = other.m_skinnedBundleHandle;
+        m_lodStateBase = other.m_lodStateBase;
         m_bounds = other.m_bounds;
         m_meshInstances = std::move(other.m_meshInstances);
         m_numInstancesPerMesh = std::move(other.m_numInstancesPerMesh);
@@ -102,22 +103,25 @@ private:
         other.m_transformIdx = UINT32_MAX;
         other.m_skinnedPaletteHandle = UINT32_MAX;
         other.m_skinnedBundleHandle = UINT32_MAX;
+        other.m_lodStateBase = UINT32_MAX;
     }
 
     uint32 m_transformIdx = UINT32_MAX;
     uint32 m_skinnedPaletteHandle = UINT32_MAX;
     uint32 m_skinnedBundleHandle = UINT32_MAX;
+    // First slot of this node's per-instance LOD hysteresis state range on the GPU (one slot per mesh
+    // instance, allocated at spawn when the node has any LOD chain; UINT32_MAX = none). The cull shader
+    // addresses it as stateBase + instance ordinal via the per-frame node bias buffer.
+    uint32 m_lodStateBase = UINT32_MAX;
     Sphere m_bounds;
     std::vector<RendererVKLayout::InMeshInstance> m_meshInstances;
     std::vector<std::pair<uint16, uint16>> m_numInstancesPerMesh;
-    // Instances with a LOD chain. The stored instance references the LOD0 mesh; Renderer::selectMeshLods
-    // redirects per frame. lastLevel is the selection history for hysteresis — mutable because selection
-    // runs on const nodes (each node is rendered by exactly one thread per frame, so this is race-free).
+    // Instances with a LOD chain (the stored instance references the LOD0 mesh; the GPU cull redirects).
+    // Kept CPU-side for the per-frame chain-warmth noteUse and the state-range allocation.
     struct LodInstance
     {
         uint32 instanceIdx = 0;
         uint32 lodGroupIdx = 0;
-        mutable uint8 lastLevel = 0;
     };
     std::vector<LodInstance> m_lodInstances;
 };

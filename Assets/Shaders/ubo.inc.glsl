@@ -119,9 +119,9 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_oceanParams7;    // x = land cull margin (m): clipmap triangles whose whole footprint is
                             // buried deeper than this under the local water level are VS-culled
                             // (oceanVertexCulled; 0 = off), yzw unused
-    vec4 u_terrainFade;     // TERRAIN variant edge fade: x = fade-start dist, y = fade-end dist
-                            // (radial from camera XZ), z = target height (sea level), w = extra drop
-                            // below z at the edge (avoids z-fighting the ocean). y<=x disables.
+    vec4 u_terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
+                            // 0 = no terrain mesh up — fences the ocean land cull), y unused,
+                            // z = sea level (world Y, live from the streamer), w unused
 
     // TERRAIN variant biome texture splatting (keep in sync with RendererVKLayout::Ubo). Materials are
     // contiguous: [base .. base+numGround) ground biomes, then numRock rock-layer entries.
@@ -135,6 +135,11 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_terrainTexParams3; // x = dedicated beach material present (0/1; when present it's always the
                               // LAST registered material: index base + numGround + numRock), yzw unused
     vec4 u_terrainBiomeCoords[MAX_TERRAIN_BIOME_MATERIALS]; // xy = (t01, h01) climate attractor, zw unused
+
+    // GPU mesh LOD selection (indirect + shadow cull; keep in sync with RendererVKLayout::Ubo)
+    vec4 u_lodParams0; // x = screen-space error threshold (px, bias pre-applied), y = hysteresis band,
+                       // z = fallback full-res pixels (authored chains), w = mipPixelScale (px per unit/dist)
+    vec4 u_lodParams1; // x = force LOD level (< 0 = off), y = fallback-metric level bias, z = enabled (0/1), w unused
 };
 
 // View index selecting which u_views[] entry the convenience macros / reconstruction helpers read. Defaults

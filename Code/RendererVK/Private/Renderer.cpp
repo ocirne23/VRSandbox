@@ -204,6 +204,17 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
             vk::MemoryPropertyFlagBits::eHostVisible, false, "NodePassMasks", BufferHostAccess::eSequentialWrite);
         perFrame.mappedNodePassMasks = perFrame.inNodePassMasksBuffer.mapMemory<uint32>();
 
+        perFrame.inNodeLodStateBiasBuffer.initialize(m_maxRenderNodes * sizeof(int32),
+            vk::BufferUsageFlagBits2::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "NodeLodStateBias", BufferHostAccess::eSequentialWrite);
+        perFrame.mappedNodeLodStateBias = perFrame.inNodeLodStateBiasBuffer.mapMemory<int32>();
+
+        perFrame.lodStatsBuffer.initialize(RendererVKLayout::MAX_MESH_LODS * sizeof(uint32),
+            vk::BufferUsageFlagBits2::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "LodStats");
+        perFrame.mappedLodStats = perFrame.lodStatsBuffer.mapMemory<uint32>();
+        memset(perFrame.mappedLodStats.data(), 0, perFrame.mappedLodStats.size_bytes());
+
         // Kept cached/random: growMeshInstanceCapacity reads the existing mapping to preserve in-flight
         // instances across a resize, so this buffer must stay CPU-readable.
         perFrame.inMeshInstancesBuffer.initialize(m_maxInstanceData * sizeof(RendererVKLayout::InMeshInstance),
@@ -256,6 +267,16 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_instanceOffsetsBuffer.initialize(m_maxInstanceOffsets * sizeof(RendererVKLayout::MeshInstanceOffset),
         vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
         vk::MemoryPropertyFlagBits::eDeviceLocal, true, "InstanceOffsets");
+
+    m_meshLodGroupIdxBuffer.initialize(m_maxUniqueMeshes * sizeof(uint32),
+        vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
+        vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshLodGroupIdx");
+    m_meshLodGroupsBuffer.initialize(m_maxMeshLodGroups * sizeof(RendererVKLayout::GpuMeshLodGroup),
+        vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
+        vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshLodGroups");
+    m_lodLevelStateBuffer.initialize(m_maxLodStateSlots * sizeof(uint32),
+        vk::BufferUsageFlagBits2::eStorageBuffer,
+        vk::MemoryPropertyFlagBits::eDeviceLocal, false, "LodLevelState");
 
 	uint16 diffuseIdx = Globals::textureManager.upload(*ITextureData::createFallbackWhiteTexture(), false);
 	assert(diffuseIdx == RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX);
@@ -490,7 +511,6 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 
     m_meshInstanceCounter = 0;
     memset(m_numInstancesPerMesh.data(), 0, m_numInstancesPerMesh.size() * sizeof(m_numInstancesPerMesh[0]));
-    m_lodInstanceCounts.fill(0);
 
     const glm::ivec2 viewportSize = m_viewportRect.getSize();
     // In VR the "centre view" (used for culling, GI region, shadow cascade fit, and the shared screen-space
@@ -516,7 +536,20 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     m_cameraPos = camera.position; // drives the GI probe region each frame
     m_mipPixelScale = (float)std::max(1, viewportSize.y) / std::max(1e-3f, std::tan(glm::radians(camera.fovDeg) * 0.5f));
 
+    // This slot's fence was waited above, so its last submitted cull's LOD stats have landed: snapshot
+    // them for getStats (the mapped buffer is zeroed here for the frame about to record).
+    for (uint32 i = 0; i < RendererVKLayout::MAX_MESH_LODS; ++i)
+        m_lodInstanceCounts[i] = frameData.mappedLodStats[i];
+    memset(frameData.mappedLodStats.data(), 0, frameData.mappedLodStats.size_bytes());
+    frameData.lodStatsBuffer.flushMappedMemory(vk::WholeSize);
+
     static RendererVKLayout::Ubo ubo;
+
+    ubo.lodParams0 = glm::vec4(
+        std::max(0.01f, m_lodParams.maxErrorPixels) * std::exp2((float)m_lodParams.bias),
+        m_lodParams.hysteresis, m_lodParams.fullResPixels, m_mipPixelScale);
+    ubo.lodParams1 = glm::vec4((float)m_lodParams.forceLod, (float)m_lodParams.bias,
+        m_lodParams.enabled ? 1.0f : 0.0f, 0.0f);
 
     const uint32 numViews = Globals::openXR.isEnabled() ? RendererVKLayout::NUM_UBO_VIEWS : 1;
     for (uint32 v = 0; v < numViews; ++v)
@@ -681,7 +714,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         glm::max(ocean.sssStrength, 0.0f), glm::max(ocean.sssPower, 1.0f));
     ubo.oceanParams7 = glm::vec4(glm::max(ocean.cullMargin, 0.0f), 0.0f, 0.0f, 0.0f);
 
-    ubo.terrainFade = m_terrainFade;
+    ubo.terrainParams = m_terrainParams;
 
     ubo.terrainTexParams0 = glm::vec4(m_terrainBiomeBaseMaterial < 0 ? -1.0f : (float)m_terrainBiomeBaseMaterial,
         (float)m_terrainBiomeNumGround, (float)m_terrainBiomeNumRock, glm::max(m_terrainClimateSigma * m_terrainTexTweaks.blendScale, 1e-3f));
@@ -734,8 +767,8 @@ void Renderer::renderNodeThreadSafe(const RenderNode& node, uint32 passMask)
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
-    if (!node.m_lodInstances.empty() && m_lodParams.enabled)
-        selectMeshLods(node, frameData.mappedMeshInstances.data() + startIdx, passMask, true);
+    if (!node.m_lodInstances.empty())
+        noteLodChainUse(node, startIdx, frameData); // benign races: same-value stamp + thread-safe noteUse
 }
 
 void Renderer::noteTextureUse(const RenderNode& node, uint32 passMask)
@@ -780,115 +813,61 @@ void Renderer::renderNode(const RenderNode& node, uint32 passMask)
     PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
     frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
     memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
-    if (!node.m_lodInstances.empty() && m_lodParams.enabled)
-        selectMeshLods(node, frameData.mappedMeshInstances.data() + startIdx, passMask, false);
+    if (!node.m_lodInstances.empty())
+        noteLodChainUse(node, startIdx, frameData);
 }
 
-void Renderer::selectMeshLods(const RenderNode& node, RendererVKLayout::InMeshInstance* instances, uint32 passMask, bool threadSafe)
+void Renderer::noteLodChainUse(const RenderNode& node, uint32 startIdx, PerFrameData& frameData)
 {
-    const Transform& nodeTransform = Globals::renderNodeTransforms[node.m_transformIdx];
-    const std::span<const RendererVKLayout::MeshInstanceOffset> offsets =
-        m_instanceOffsetsBuffer.getBackingStoreAs<RendererVKLayout::MeshInstanceOffset>();
-    const int forceLod = m_lodParams.forceLod;
-    const bool mainPass = (passMask & RendererVKLayout::PASS_MAIN) != 0;
-    // Off-screen (shadow/GI-only) nodes tolerate coarser geometry, like the texture mip bias: 4x the
-    // error threshold (~2 levels, errors roughly double per level) / +2 levels on the fallback metric.
-    const float errorThreshold = std::max(0.01f, m_lodParams.maxErrorPixels)
-        * std::exp2((float)m_lodParams.bias) * (mainPass ? 1.0f : 4.0f);
-    const float passBias = mainPass ? 0.0f : 2.0f;
-    const float hysteresis = m_lodParams.hysteresis;
-
+    // The GPU cull picks each instance's level, so every level of a referenced chain must stay warm in
+    // the mesh streamer. Only AUTHORED chains (no error data) need this: their levels are independent
+    // mesh sets, and a cold one would draw nothing while it re-streams. Generated chains share LOD0's
+    // set, which the caller's per-instance noteUse already touched. Stamped once per group per frame;
+    // races on the stamp are benign: both threads write the same frame value, worst case double-noting.
     for (const RenderNode::LodInstance& lod : node.m_lodInstances)
     {
-        const MeshLodGroup& group = m_meshLodGroups[lod.lodGroupIdx];
-        RendererVKLayout::InMeshInstance& instance = instances[lod.instanceIdx];
-
-        int level;
-        if (forceLod >= 0)
+        MeshLodGroup& group = m_meshLodGroups[lod.lodGroupIdx];
+        if (group.errors[1] == 0.0f && group.lastUseFrame != m_frameCounter)
         {
-            level = std::min(forceLod, (int)group.numLods - 1);
+            group.lastUseFrame = m_frameCounter;
+            for (uint8 k = 1; k < group.numLods; ++k)
+                Globals::meshStreamer.noteUse(group.meshIdx[k]);
         }
-        else
-        {
-            const Transform& offset = offsets[instance.instanceOffsetIdx].transform;
-            const glm::vec3 worldCenter = nodeTransform.transformPoint(offset.transformPoint(group.center));
-            const float instanceScale = offset.scale * nodeTransform.scale;
-            const float radius = group.radius * instanceScale;
-            const float dist = std::max(0.01f, glm::length(worldCenter - m_cameraPos) - radius);
-            const float pixelsPerUnit = m_mipPixelScale / dist;
-
-            if (group.errors[1] > 0.0f)
-            {
-                // Screen-space error: use the coarsest level whose geometric deviation from LOD0 still
-                // projects below the pixel threshold. The error scales with the object itself, so small
-                // props hold full detail up close while large meshes shed triangles early — object size
-                // needs no separate tuning.
-                auto pickLevel = [&](float threshold)
-                {
-                    int picked = 0;
-                    while (picked + 1 < (int)group.numLods && group.errors[picked + 1] * instanceScale * pixelsPerUnit <= threshold)
-                        ++picked;
-                    return picked;
-                };
-                // Hysteresis band: hold the previous level while it sits between the conservative and
-                // permissive picks, so an instance parked near a boundary can't flip-flop.
-                const int finest = pickLevel(errorThreshold / (1.0f + hysteresis));
-                const int coarsest = pickLevel(errorThreshold * (1.0f + hysteresis));
-                level = std::clamp((int)lod.lastLevel, finest, coarsest);
-            }
-            else
-            {
-                // No per-level error data (authored LodN_ chains): projected-size metric — each halving
-                // of the on-screen diameter below fullResPixels drops one level (density ~ area).
-                const float projPixels = std::max(1.0f, radius * pixelsPerUnit);
-                const float lodF = std::log2(std::max(1.0f, m_lodParams.fullResPixels / projPixels))
-                    + (float)m_lodParams.bias + passBias;
-                level = (int)lodF;
-                const int lastLevel = (int)lod.lastLevel;
-                if (level > lastLevel && lodF < (float)lastLevel + 1.0f + hysteresis)
-                    level = lastLevel;
-                else if (level < lastLevel && lodF > (float)lastLevel - hysteresis)
-                    level = lastLevel;
-                level = std::clamp(level, 0, (int)group.numLods - 1);
-            }
-        }
-        lod.lastLevel = (uint8)level;
-
-        // The copied instance references the LOD0 mesh; redirect it and keep the per-mesh counts
-        // (which renderNode accumulated for LOD0) in step so the cull's instance buckets stay exact.
-        // The chosen level is marked used separately: authored chains are independent mesh sets, so the
-        // pre-redirect noteUse in renderNode only covered level 0's.
-        uint16 chosenMeshIdx = group.meshIdx[level];
-        Globals::meshStreamer.noteUse(chosenMeshIdx); // keeps it warm / requests a re-stream if evicted
-        if (!Globals::meshStreamer.isResident(chosenMeshIdx))
-        {
-            // Desired level evicted (streaming back in): render the nearest resident level meanwhile.
-            // Generated chains share one residency (the whole set evicts together), so this only ever
-            // redirects for authored chains; a fully evicted set draws nothing until the re-stream lands.
-            for (int d = 1; d < (int)group.numLods; ++d)
-            {
-                if (level - d >= 0 && Globals::meshStreamer.isResident(group.meshIdx[level - d])) { level -= d; break; }
-                if (level + d < (int)group.numLods && Globals::meshStreamer.isResident(group.meshIdx[level + d])) { level += d; break; }
-            }
-            chosenMeshIdx = group.meshIdx[level];
-        }
-        if (chosenMeshIdx != instance.meshIdx)
-        {
-            if (threadSafe)
-            {
-                std::atomic_ref<uint32>(m_numInstancesPerMesh[instance.meshIdx]).fetch_sub(1, std::memory_order_relaxed);
-                std::atomic_ref<uint32>(m_numInstancesPerMesh[chosenMeshIdx]).fetch_add(1, std::memory_order_relaxed);
-            }
-            else
-            {
-                m_numInstancesPerMesh[instance.meshIdx]--;
-                m_numInstancesPerMesh[chosenMeshIdx]++;
-            }
-            instance.meshIdx = chosenMeshIdx;
-        }
-        std::atomic_ref<uint32>(m_lodInstanceCounts[level]).fetch_add(1, std::memory_order_relaxed);
     }
+    // Publish the cull's hysteresis-state addressing for this node: stateSlot = instanceIdx + bias.
+    frameData.mappedNodeLodStateBias[node.m_transformIdx] = (int32)node.m_lodStateBase - (int32)startIdx;
 }
+
+void Renderer::uploadMeshLodGroup(uint32 groupIdx)
+{
+    const MeshLodGroup& group = m_meshLodGroups[groupIdx];
+    RendererVKLayout::GpuMeshLodGroup gpu{};
+    gpu.numLods = group.numLods;
+    gpu.mesh01 = (uint32)group.meshIdx[0] | ((uint32)group.meshIdx[1] << 16);
+    gpu.mesh23 = (uint32)group.meshIdx[2] | ((uint32)group.meshIdx[3] << 16);
+    gpu.mesh4 = (uint32)group.meshIdx[4];
+    for (uint32 k = 1; k < RendererVKLayout::MAX_MESH_LODS; ++k)
+        gpu.errors1_4[k - 1] = group.errors[k];
+    uploadToSharedBuffer(m_meshLodGroupsBuffer, sizeof(gpu), &gpu, (size_t)groupIdx * sizeof(gpu));
+}
+
+void Renderer::setMeshLodGroupIdx(uint16 meshIdx, uint32 groupIdx)
+{
+    m_meshToLodGroup[meshIdx] = groupIdx;
+    uploadToSharedBuffer(m_meshLodGroupIdxBuffer, sizeof(uint32), &m_meshToLodGroup[meshIdx], (size_t)meshIdx * sizeof(uint32));
+}
+
+uint32 Renderer::allocateLodStateRange(uint32 count)
+{
+    if (const uint32 reusedBase = m_freeLodStateSlots.allocate(count); reusedBase != UINT32_MAX)
+        return reusedBase;
+    const uint32 base = m_lodStateCounter;
+    m_lodStateCounter += count;
+    if (m_lodStateCounter > m_maxLodStateSlots)
+        growLodStateCapacity(m_lodStateCounter);
+    return base;
+}
+
 
 void Renderer::addLightInfo(const RendererVKLayout::LightInfo& light)
 {
@@ -946,16 +925,26 @@ void Renderer::present()
         Globals::renderNodeDirtyBits[idx] &= uint8(~(1u << frameIdx));
     }
     transformDirtyList.clear();
+    // Bucket layout for the GPU culls: instances are pushed referencing LOD0, and the cull redirects
+    // each one to its selected level — so every member of a LOD chain gets a bucket sized to the
+    // CHAIN's instance count (any split of the instances across levels fits). Non-chain meshes keep
+    // exact buckets. The expansion can exceed the pushed instance count; the instance-index buffers
+    // are sized to m_maxInstanceData, so grow when the expanded total outruns it.
     uint32 instanceCounter = 0;
     const uint32 numMeshInfos = (uint32)m_numInstancesPerMesh.size();
     for (uint32 meshIdx = 0; meshIdx < numMeshInfos; ++meshIdx)
     {
         frameData.mappedFirstInstances[meshIdx] = instanceCounter;
-        instanceCounter += m_numInstancesPerMesh[meshIdx];
+        const uint32 groupIdx = m_meshToLodGroup[meshIdx];
+        instanceCounter += groupIdx == UINT32_MAX ? m_numInstancesPerMesh[meshIdx]
+            : m_numInstancesPerMesh[m_meshLodGroups[groupIdx].meshIdx[0]];
     }
+    if (instanceCounter > m_maxInstanceData)
+        growMeshInstanceCapacity(instanceCounter);
 
     frameData.inRenderNodeTransformsBuffer.flushMappedMemory(m_renderNodeTransforms.size() * sizeof(m_renderNodeTransforms[0]));
     frameData.inNodePassMasksBuffer.flushMappedMemory(m_renderNodeTransforms.size() * sizeof(uint32));
+    frameData.inNodeLodStateBiasBuffer.flushMappedMemory(m_renderNodeTransforms.size() * sizeof(int32));
     frameData.inMeshInstancesBuffer.flushMappedMemory(m_meshInstanceCounter * sizeof(RendererVKLayout::InMeshInstance));
     frameData.inFirstInstancesBuffer.flushMappedMemory(numMeshInfos * sizeof(uint32));
     frameData.lightInfosBuffer.flushMappedMemory(m_lightCounter * sizeof(RendererVKLayout::LightInfo));
@@ -1073,6 +1062,11 @@ void Renderer::freeRenderNode(RenderNode& node)
         releaseSkinnedBundle(node.m_skinnedBundleHandle);
         node.m_skinnedBundleHandle = UINT32_MAX;
     }
+    if (node.m_lodStateBase != UINT32_MAX)
+    {
+        m_freeLodStateSlots.release(node.m_lodStateBase, (uint32)node.m_meshInstances.size());
+        node.m_lodStateBase = UINT32_MAX;
+    }
     node.m_skinnedPaletteHandle = UINT32_MAX;
     node.m_meshInstances.clear();
     node.m_numInstancesPerMesh.clear();
@@ -1177,6 +1171,11 @@ void Renderer::growRenderNodeCapacity(uint32 needed)
             vk::BufferUsageFlagBits2::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible, false, "NodePassMasks", BufferHostAccess::eSequentialWrite);
         perFrame.mappedNodePassMasks = perFrame.inNodePassMasksBuffer.mapMemory<uint32>();
+
+        perFrame.inNodeLodStateBiasBuffer.initialize(m_maxRenderNodes * sizeof(int32),
+            vk::BufferUsageFlagBits2::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible, false, "NodeLodStateBias", BufferHostAccess::eSequentialWrite);
+        perFrame.mappedNodeLodStateBias = perFrame.inNodeLodStateBiasBuffer.mapMemory<int32>();
     }
     // Fresh (empty) GPU buffers: every live slot has to upload again.
     for (std::vector<uint32>& dirtyList : Globals::renderNodeDirtyLists)
@@ -1229,6 +1228,16 @@ void Renderer::growUniqueMeshCapacity(uint32 needed)
         perFrame.mappedFirstInstances = perFrame.inFirstInstancesBuffer.mapMemory<uint32>();
     }
     m_meshInfosBuffer.resize(m_maxUniqueMeshes * sizeof(RendererVKLayout::MeshInfo));
+    // Fresh (unmirrored) buffer: re-upload the whole per-mesh LOD group mapping, padded to capacity so
+    // future slots read as "no chain".
+    m_meshLodGroupIdxBuffer.initialize(m_maxUniqueMeshes * sizeof(uint32),
+        vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
+        vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshLodGroupIdx");
+    {
+        std::vector<uint32> mapping(m_maxUniqueMeshes, UINT32_MAX);
+        memcpy(mapping.data(), m_meshToLodGroup.data(), m_meshToLodGroup.size() * sizeof(uint32));
+        uploadToSharedBuffer(m_meshLodGroupIdxBuffer, mapping.size() * sizeof(uint32), mapping.data(), 0);
+    }
     m_accelStructure.resizeBlasAddressBuffer(m_maxUniqueMeshes);
     m_indirectCullComputePipeline.resizeCommandBuffers(m_maxUniqueMeshes);
     m_shadowCullComputePipeline.resizeCommandBuffers(m_maxUniqueMeshes);
@@ -1311,6 +1320,32 @@ void Renderer::growInstanceOffsetCapacity(uint32 needed)
     printf("Renderer: grew instance offset capacity to %u\n", m_maxInstanceOffsets);
 }
 
+void Renderer::growLodStateCapacity(uint32 needed)
+{
+    m_maxLodStateSlots = growCapacity(m_maxLodStateSlots, needed);
+    waitForGpuAndFlushStaging();
+    // Contents are advisory hysteresis history (clamped into a valid band on read), so the old
+    // buffer's state doesn't need preserving.
+    m_lodLevelStateBuffer.initialize(m_maxLodStateSlots * sizeof(uint32),
+        vk::BufferUsageFlagBits2::eStorageBuffer,
+        vk::MemoryPropertyFlagBits::eDeviceLocal, false, "LodLevelState");
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew LOD state capacity to %u\n", m_maxLodStateSlots);
+}
+
+void Renderer::growMeshLodGroupCapacity(uint32 needed)
+{
+    m_maxMeshLodGroups = growCapacity(m_maxMeshLodGroups, needed);
+    waitForGpuAndFlushStaging();
+    m_meshLodGroupsBuffer.initialize(m_maxMeshLodGroups * sizeof(RendererVKLayout::GpuMeshLodGroup),
+        vk::BufferUsageFlagBits2::eStorageBuffer | vk::BufferUsageFlagBits2::eTransferDst,
+        vk::MemoryPropertyFlagBits::eDeviceLocal, false, "MeshLodGroups");
+    for (uint32 i = 0; i < (uint32)m_meshLodGroups.size(); ++i)
+        uploadMeshLodGroup(i); // fresh buffer: re-publish every registered group
+    setHaveToRecordCommandBuffers();
+    printf("Renderer: grew mesh LOD group capacity to %u\n", m_maxMeshLodGroups);
+}
+
 void Renderer::recordIndirectCull(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -1327,6 +1362,11 @@ void Renderer::recordIndirectCull(uint32 frameIdx)
         .inMeshInfoBuffer = m_meshInfosBuffer,
         .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
         .inNodePassMasksBuffer = frameData.inNodePassMasksBuffer,
+        .inMeshLodGroupIdxBuffer = m_meshLodGroupIdxBuffer,
+        .inMeshLodGroupsBuffer = m_meshLodGroupsBuffer,
+        .lodLevelStateBuffer = m_lodLevelStateBuffer,
+        .inNodeLodStateBiasBuffer = frameData.inNodeLodStateBiasBuffer,
+        .outLodStatsBuffer = frameData.lodStatsBuffer,
     };
     m_indirectCullComputePipeline.record(cb, frameIdx, cullParams);
     cb.end();
@@ -1478,6 +1518,8 @@ void Renderer::recordShadowCull(uint32 frameIdx)
         .inFirstInstancesBuffer = frameData.inFirstInstancesBuffer,
         .inMaterialInfoBuffer = m_materialInfosBuffer,
         .inNodePassMasksBuffer = frameData.inNodePassMasksBuffer,
+        .inMeshLodGroupIdxBuffer = m_meshLodGroupIdxBuffer,
+        .inMeshLodGroupsBuffer = m_meshLodGroupsBuffer,
     };
     m_shadowCullComputePipeline.record(cb, frameIdx, params);
     cb.end();
@@ -2506,7 +2548,7 @@ void Renderer::removeObjectContainer(ObjectContainer* pObjectContainer)
         m_freeInstanceOffsetSlots.release(container.m_skinnedIdentityOffsetIdx, 1);
 
     for (const uint32 groupIdx : container.m_ownedLodGroups)
-        m_freeMeshLodGroups.push_back(groupIdx);
+        freeMeshLodGroup(groupIdx); // also detaches the member meshes from GPU LOD selection
 
     // The images may still be sampled by in-flight frames: destroyed in present() once the GPU has
     // drained, their bindless slots rewritten to the fallback at the next record.
@@ -2555,7 +2597,7 @@ void Renderer::destroySkinnedBundle(uint32 bundleHandle)
     m_freeSkinningPaletteHandles.push_back(bundle.paletteHandle);
     for (const uint32 groupIdx : bundle.lodGroupForMesh)
         if (groupIdx != UINT32_MAX)
-            m_freeMeshLodGroups.push_back(groupIdx);
+            freeMeshLodGroup(groupIdx); // also detaches the member meshes from GPU LOD selection
     bundle = SkinnedInstanceBundle{ .sourceKey = UINT32_MAX, .baseMeshIdx = 0, .paletteHandle = 0, .firstJob = 0, .numMeshes = 0 };
     m_freeSkinnedBundleSlots.push_back(bundleHandle);
 }
@@ -2624,6 +2666,7 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
     m_numInstancesPerMesh.resize(m_meshInfoCounter);
     m_meshVertexCounts.insert(m_meshVertexCounts.end(), vertexCounts.begin(), vertexCounts.end());
     m_meshIsSkinnedOutput.resize(m_meshInfoCounter, skinnedOutputs ? 1 : 0);
+    m_meshToLodGroup.resize(m_meshInfoCounter, UINT32_MAX);
     assert(m_meshInfoCounter < USHRT_MAX);
 
     m_meshInfosBuffer.appendToBackingStore<RendererVKLayout::MeshInfo>(meshInfos);
@@ -2634,8 +2677,14 @@ uint32 Renderer::addMeshInfos(const std::vector<RendererVKLayout::MeshInfo>& mes
     // whole capacity-sized buffers, DGC reads the count via sequenceCountAddress, the G-buffer draws via
     // drawIndexedIndirectCount, and new BLASes build per frame in recordGlobalIllum).
     else
+    {
         uploadToSharedBuffer(m_meshInfosBuffer, meshInfos.size() * sizeof(RendererVKLayout::MeshInfo),
             meshInfos.data(), baseMeshInfoIdx * sizeof(RendererVKLayout::MeshInfo));
+        // Fresh mesh slots must read as "no LOD chain" on the GPU (device memory starts undefined;
+        // addMeshLodGroup overwrites the chained ones right after).
+        uploadToSharedBuffer(m_meshLodGroupIdxBuffer, meshInfos.size() * sizeof(uint32),
+            m_meshToLodGroup.data() + baseMeshInfoIdx, (size_t)baseMeshInfoIdx * sizeof(uint32));
+    }
 
     // After the capacity check: the alias buffer is grown by resizeBlasAddressBuffer inside
     // growUniqueMeshCapacity, and setNumMeshes writes identity entries for the new range.
@@ -2826,6 +2875,7 @@ Stats Renderer::getStats()
 
     stats.numMeshLodGroups = (uint32)m_meshLodGroups.size();
     static_assert(sizeof(stats.lodInstanceCounts) == sizeof(uint32) * RendererVKLayout::MAX_MESH_LODS);
+    // GPU-written, snapshotted in beginFrame — a few frames behind, and counting VISIBLE picks only.
     for (uint32 i = 0; i < RendererVKLayout::MAX_MESH_LODS; ++i)
         stats.lodInstanceCounts[i] = m_lodInstanceCounts[i];
 

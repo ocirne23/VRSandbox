@@ -98,20 +98,6 @@ void main()
     out_uv  = in_uv;
 #endif
 
-#ifdef TERRAIN
-    // Edge fade: sink chunk vertices toward sea level MINUS the edge drop (w) as their horizontal distance
-    // from the camera runs from fade-start to fade-end, so terrain rises out of a flat far edge instead of
-    // popping in at full height at the streaming boundary. The drop puts the faded plane a few meters
-    // UNDER the ocean surface instead of exactly on it (coplanar = z-fighting shimmer at the horizon);
-    // the ocean covers it, so the world edge reads as land dissolving into the sea. Camera-relative, live.
-    if (u_terrainFade.y > u_terrainFade.x)
-    {
-        const float d = distance(out_pos.xz, u_viewPos.xz);
-        const float t = clamp((u_terrainFade.y - d) / (u_terrainFade.y - u_terrainFade.x), 0.0, 1.0);
-        out_pos.y = mix(u_terrainFade.z - u_terrainFade.w, out_pos.y, t);
-    }
-#endif
-
     // Per-eye projection in VR (g_viewIndex set above) / centre view on desktop, with the same TAA
     // sub-pixel jitter both eyes (per-eye TAA accumulates it just like desktop).
     gl_Position = u_mvp * vec4(out_pos, 1.0);

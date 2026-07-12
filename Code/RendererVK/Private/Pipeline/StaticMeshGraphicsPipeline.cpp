@@ -106,8 +106,7 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 	});
 	// Variant 8 (EPipelineIndex::TerrainLit): same lit shader + lighting as variant 0, but the TERRAIN
 	// define swaps the textured-material albedo for a procedural height/slope color (procedural terrain
-	// chunks carry no textures) and adds the vertex-shader edge fade (u_terrainFade). Opaque, back-face
-	// culled, depth write on (all layout defaults).
+	// chunks carry no textures). Opaque, back-face culled, depth write on (all layout defaults).
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
 		.vertexShader = ShaderSource{
 			.text = graphicsPipelineLayout.vertexShader.text,

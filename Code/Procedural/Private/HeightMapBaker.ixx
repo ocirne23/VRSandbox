@@ -12,8 +12,8 @@ export namespace Procedural
 	// renderer-side BakedWorldMap. One bake in flight at a time; a bake pins its sampler via the
 	// captured shared_ptr, and the active map keeps working until the replacement lands. Re-bakes when the
 	// maps identity or the ranges change, or the camera strays a quarter of the FINEST range from the
-	// active center; centers snap to the finest cascade's texel lattice so re-bakes never make features
-	// swim sub-texel.
+	// active center; centers snap to the COARSEST cascade's texel lattice so no cascade's features ever
+	// swim between re-bakes.
 	class HeightMapBaker
 	{
 	public:
@@ -74,7 +74,13 @@ export namespace Procedural
 			if (!stale)
 				return shipped;
 
-			const float texel = ranges.x / float(res);
+			// Snap the shared center to the COARSEST cascade's texel lattice: every cascade's texels then
+			// re-land on the exact same world positions bake after bake (with the default range ratio the
+			// finer lattice divides the coarser), so re-bakes reproduce identical values where the terrain
+			// is unchanged. Snapping to the finest lattice instead let the coarse cascade's texels shift
+			// sub-coarse-texel per bake — on steep coasts a 16 m texel's height then jumped meters between
+			// bakes, and consumers thresholding the field (the ocean land cull) flipped visibly.
+			const float texel = ranges[numCascades > 1 ? 1 : 0] / float(res);
 			const glm::vec2 center = glm::floor(camXZ / texel + 0.5f) * texel;
 			m_pendingCenter = center;
 			m_pendingRanges = ranges;

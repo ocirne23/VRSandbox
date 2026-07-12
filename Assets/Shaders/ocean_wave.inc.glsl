@@ -120,44 +120,87 @@ vec2 oceanFlowToWorld(vec2 v, vec2 fr) { return vec2(fr.x * v.x - fr.y * v.y, fr
 // every primitive using this vertex is fully buried under land — the VS then emits a NaN position,
 // which discards those primitives before rasterization. Waves shoal-fade to zero at depth <= 0, so a
 // footprint buried by a positive margin can never clip live water; the margin absorbs the decimeter
-// disagreement between the baked map and the LOD'd terrain mesh. Only runs inside the shore map's
-// full-weight interior, and only while the 3x3 tap grid is at least texel-dense (on coarser rings a
-// water dip could hide between taps; those vertices keep the depth <= 0 sampling early-outs instead).
+// disagreement between the baked maps and the LOD'd terrain mesh.
+// The taps read oceanSampleShoreDepth — the EXACT field the waves shoal/lift by — but only where the
+// data is trustworthy enough to delete geometry on: the shore map close in, then the fog NEAR cascade
+// out to its far handover (~860 m). The far cascade never culls: its coarse texels cannot resolve
+// narrow water (rivers) and the far terrain LODs stray meters from the bake — distant buried vertices
+// keep the depth <= 0 sampling early-outs instead. Tap spacing is capped at 1.5 texels of the map
+// covering the footprint (adaptive grid up to 5x5), the burial requirement grows with its texel size,
+// and footprints straddling the shore map's edge-blend band (mixed fields) are never culled.
 // Both displacement passes (prepass + forward) MUST apply the same test or their geometry diverges.
 bool oceanVertexCulled(vec2 worldXZ, float cellSize)
 {
-#ifdef OCEAN_SHORE_BINDING
-    const float invRange = u_oceanParams4.x;
     const float margin = u_oceanParams7.x;
-    if (invRange <= 0.0 || margin <= 0.0)
+    if (margin <= 0.0)
         return false;
     const float reach = 3.0 * cellSize;
-    if (reach * float(textureSize(u_shoreHeight, 0).x) * invRange > 1.0)
-        return false; // taps would be sparser than the map's texels
-    // Center tap first: any water in reach and we are done (the common case over open water).
-    const vec2 uv0 = (worldXZ - u_oceanParams3.xy) * invRange + 0.5;
-    const vec2 e0 = min(uv0, vec2(1.0) - uv0);
-    if (min(e0.x, e0.y) < 0.06 + reach * invRange)
-        return false; // footprint leaves the map's full-weight interior (inMap blend band at 0.05)
-    const vec2 hw0 = textureLod(u_shoreHeight, uv0, 0.0).xy;
-    float maxDepth = hw0.y - hw0.x;
-    if (maxDepth >= -margin)
+
+    // The cull is only invisible while the RENDERED terrain mesh stands above the water and depth-cuts
+    // it. Past the streamed chunks there is no mesh at all — while the baked cascades still report
+    // "land" out there (clamp-to-edge extends them forever). Culling there would punch holes showing
+    // the underwater fog behind the surface, so never cull once the footprint reaches the streamer's
+    // mesh coverage radius (u_terrainParams.x, radial from the camera; 0 = no terrain mesh up).
+    if (distance(worldXZ, u_viewPos.xz) + reach >= u_terrainParams.x)
         return false;
-    for (int j = -1; j <= 1; ++j)
+
+    // Which map the footprint reads: its texel size gates the tap density and scales the burial margin.
+    float texel = -1.0;
+#ifdef OCEAN_SHORE_BINDING
+    const float invShore = u_oceanParams4.x;
+    if (invShore > 0.0)
     {
-        for (int i = -1; i <= 1; ++i)
-        {
-            if (i == 0 && j == 0)
-                continue;
-            const vec2 uv = uv0 + vec2(float(i), float(j)) * (reach * invRange);
-            const vec2 hw = textureLod(u_shoreHeight, uv, 0.0).xy;
-            maxDepth = max(maxDepth, hw.y - hw.x);
-        }
+        const vec2 uvS = (worldXZ - u_oceanParams3.xy) * invShore + 0.5;
+        const vec2 eS = min(uvS, vec2(1.0) - uvS);
+        const float e = min(eS.x, eS.y);
+        const float r = reach * invShore;
+        if (e - r >= 0.06) // fully inside the full-weight interior (inMap blend band ends at 0.05)
+            texel = 1.0 / (float(textureSize(u_shoreHeight, 0).x) * invShore);
+        else if (e + r > 0.0) // footprint touches the map's influence: mixed fields, don't cull
+            return false;
     }
-    return maxDepth < -margin;
-#else
-    return false;
 #endif
+#ifdef TERRAIN_HEIGHT_BINDING
+    if (texel < 0.0 && terrainHeightMapPresent())
+    {
+        // Only the NEAR fog cascade may cull. The far cascade's coarse texels cannot reliably resolve
+        // narrow water — a river renders from it as dashed segments that coarse taps then straddle —
+        // and the far terrain mesh LODs deviate from the bake by meters; every far-range cull artifact
+        // (horizon holes, rebake flicker, river cuts) traced back to trusting far data. Distant buried
+        // geometry keeps the depth <= 0 sampling early-outs; the depth buffer handles the rest.
+        const vec2 rel = worldXZ - u_fogParams5.xy;
+        const float cheb = max(abs(rel.x), abs(rel.y));
+        const float invNear = u_fogParams3.y;
+        if ((cheb + reach) * invNear >= 0.42) // footprint touches far-blended data / leaves the near region
+            return false;
+        texel = 1.0 / (float(textureSize(u_terrainHeight, 0).x) * invNear);
+    }
+#endif
+    if (texel <= 0.0)
+        return false; // no baked terrain data here: open-ocean fallback, always water
+
+    // Everything that can make "the map says buried" wrong grows with the map's coarseness: sub-tap
+    // water detail the taps can straddle, AND how far the rendered terrain mesh (coarser LODs at
+    // distance) deviates from the baked field. So the burial requirement scales with the texel size
+    // — near the camera ~the raw margin, ~9 m out at the far cascade: marginal far coastlines never
+    // cull (their holes read as underwater-fog haze), plainly inland terrain still does.
+    const float need = margin + 0.5 * texel;
+
+    // Taps per axis: enough to keep the spacing under 1.5 texels of the sampled map, at most 5x5
+    // (only already-buried vertices ever pay for the grid; the first tap exits over water).
+    const float limit = 1.5 * texel;
+    const int n = max(1 + int(ceil(2.0 * reach / limit)), 2);
+    if (n > 5)
+        return false;
+
+    if (oceanSampleShoreDepth(worldXZ) >= -need)
+        return false; // water in reach: done (the common case over open water — one tap and out)
+    const float spacing = 2.0 * reach / float(n - 1);
+    for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i)
+            if (oceanSampleShoreDepth(worldXZ + vec2(float(i), float(j)) * spacing - vec2(reach)) >= -need)
+                return false;
+    return true;
 }
 
 // Fake shoaling: a cascade's waves fade out once the water is shallower than a fraction of its patch

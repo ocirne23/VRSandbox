@@ -152,6 +152,7 @@ static std::string buildLayoutPreamble()
     def("PASS_MAIN", PASS_MAIN, "u");
     def("PASS_SHADOW", PASS_SHADOW, "u");
     def("PASS_GI", PASS_GI, "u");
+    def("MAX_MESH_LODS", MAX_MESH_LODS);
     return s;
 }
 

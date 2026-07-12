@@ -38,6 +38,8 @@ export namespace RendererVKLayout
         - 1;
     // Max levels in a mesh LOD chain (level 0 = full resolution), authored or meshopt-generated.
     constexpr uint32 MAX_MESH_LODS = 5;
+    constexpr uint32 INITIAL_MESH_LOD_GROUPS = 256;  // GPU MeshLodGroup array capacity, grown on demand
+    constexpr uint32 INITIAL_LOD_STATE_SLOTS = 1024; // per-instance LOD hysteresis state slots, grown on demand
     constexpr size_t MAX_LIGHTS = USHRT_MAX - 1;
     // Sun shadow cascaded shadow maps.
     constexpr uint32 NUM_SHADOW_CASCADES = 6;
@@ -269,9 +271,9 @@ export namespace RendererVKLayout
         glm::vec4 oceanParams7;    // x = land cull margin (m): clipmap triangles whose whole footprint is
                                    // buried deeper than this under the local water level are VS-culled
                                    // (oceanVertexCulled; 0 = off), yzw unused
-        glm::vec4 terrainFade;     // TERRAIN variant edge fade: x = fade-start dist, y = fade-end dist
-                                   // (radial from camera XZ), z = target height (sea level), w = extra drop
-                                   // below z at the edge (avoids z-fighting the ocean). y<=x disables.
+        glm::vec4 terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
+                                   // 0 = no terrain mesh up — fences the ocean land cull), y unused,
+                                   // z = sea level (world Y, live from the streamer), w unused
 
         // TERRAIN variant biome texture splatting (Renderer::setTerrainBiomeMaterials; keep in sync with
         // ubo.inc.glsl). Materials are CONTIGUOUS in the material buffer: [base .. base+numGround) are
@@ -289,6 +291,11 @@ export namespace RendererVKLayout
                                      // present, is always the LAST registered material: index base +
                                      // numGround + numRock), yzw unused
         glm::vec4 terrainBiomeCoords[MAX_TERRAIN_BIOME_MATERIALS]; // xy = (t01, h01) climate attractor, zw unused
+
+        // GPU mesh LOD selection (indirect + shadow cull; keep in sync with ubo.inc.glsl)
+        glm::vec4 lodParams0; // x = screen-space error threshold (px, bias pre-applied), y = hysteresis band,
+                              // z = fallback full-res pixels (authored chains), w = mipPixelScale (px per unit/dist)
+        glm::vec4 lodParams1; // x = force LOD level (< 0 = off), y = fallback-metric level bias, z = enabled (0/1), w unused
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};
@@ -354,6 +361,19 @@ export namespace RendererVKLayout
         int32  vertexOffset;
         uint32 firstInstance;
     };
+
+    // GPU copy of a MeshLodGroup for the cull shaders' per-instance LOD selection: the chain's global
+    // mesh indices packed pairwise (level 0 low half of mesh01) + per-level simplify errors for levels
+    // 1..4 (level 0's is always 0). Keep in sync with mesh_lod.inc.glsl.
+    struct alignas(16) GpuMeshLodGroup
+    {
+        uint32 numLods;
+        uint32 mesh01; // level 1 << 16 | level 0
+        uint32 mesh23; // level 3 << 16 | level 2
+        uint32 mesh4;  // level 4 in the low half
+        float errors1_4[4];
+    };
+    static_assert(sizeof(GpuMeshLodGroup) == 32);
 
     enum class EAlphaMode : uint16
     {

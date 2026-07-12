@@ -28,6 +28,8 @@ public:
         Buffer& inFirstInstancesBuffer;       // 5
         Buffer& inMaterialInfoBuffer;         // 9 - resolves the alpha-mask texture per caster
         Buffer& inNodePassMasksBuffer;        // 10
+        Buffer& inMeshLodGroupIdxBuffer;      // 11 - per mesh: LOD group index (GPU LOD selection)
+        Buffer& inMeshLodGroupsBuffer;        // 12
     };
 
     void initialize(uint32 maxMeshInstances, uint32 maxUniqueMeshes);

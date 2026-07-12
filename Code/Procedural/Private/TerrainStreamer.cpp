@@ -199,7 +199,6 @@ namespace Procedural
 		Tweak::intVar("Terrain", "Uploads/frame", &m_maxUploadsPerFrame, 1, 32, 1.0f);
 		Tweak::floatVar("Terrain", "Sea level (m)", &m_seaLevel, -200.0f, 200.0f, 0.5f, dirty);
 		Tweak::floatVar("Terrain", "Skirt depth (m)", &m_skirtDepth, 0.0f, 64.0f, 0.5f, dirty);
-		Tweak::floatVar("Terrain", "Edge fade (chunks)", &m_edgeFadeChunks, 0.0f, 16.0f, 0.25f); // 0 = off
 		// ONE shared baked terrain-data map (height, water level, fog|falloff|temp|hum, altitude): the volumetric
 		// fog's terrain follow + regional thickness, the ocean's far shore fallback, and the terrain
 		// coloring all read these cascades. Disabling it degrades all three.
@@ -462,6 +461,7 @@ namespace Procedural
 			if (!m_residents.empty() || !m_pending.empty())
 				clearResidents();
 			updateFogHeightMap(renderer, camera, nullptr); // no terrain -> no terrain-following fog
+			renderer.setTerrainParams(0.0f, m_seaLevel);   // no mesh up: disables the ocean land cull
 			return;
 		}
 
@@ -474,20 +474,10 @@ namespace Procedural
 		const float lodStep = glm::max(0.01f, m_lodStep);
 		const uint32 maxLod = (uint32)glm::max(0, m_maxLod);
 
-		// Edge fade: terrain heights lerp toward sea level over the outermost m_edgeFadeChunks chunks of the
-		// ring, so chunks rise out of a flat far edge instead of popping in at full height. Applied in the
-		// TERRAIN vertex shader relative to the live camera position (u_terrainFade). endDist sits just past
-		// the visible edge (~R+1 chunks); startDist a band inward.
-		if (m_edgeFadeChunks > 0.0f)
-		{
-			const float edgeDist = (float)(R + 1) * chunkSize;
-			const float band = glm::clamp(m_edgeFadeChunks, 0.25f, (float)R) * chunkSize;
-			// The fade lands 4 m UNDER the sea surface, not on it: a plane exactly at sea level z-fights
-			// the calm ocean over the whole horizon ring; sunk under it, the ocean simply covers the edge.
-			renderer.setTerrainFade(edgeDist - band, edgeDist, m_seaLevel, 4.0f);
-		}
-		else
-			renderer.setTerrainFade(0.0f, 0.0f, m_seaLevel); // disabled (endDist <= startDist)
+		// Chunk mesh coverage: chunks span +-R around the camera's chunk, so a disk of R*chunkSize around
+		// the camera is guaranteed resident whatever its position within its own chunk — the fence for
+		// the ocean's buried-under-land vertex cull. Also carries the live sea level (terrain coloring).
+		renderer.setTerrainParams((float)R * chunkSize, m_seaLevel);
 
 		std::shared_ptr<const ITerrainSampler> maps;
 		uint32 generation;

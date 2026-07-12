@@ -374,7 +374,7 @@ export struct Stats
     uint32 numMeshSets;
     uint32 numEvictedMeshSets;
 
-    // Mesh LOD (see MeshLodParams / Renderer::selectMeshLods).
+    // Mesh LOD (see MeshLodParams; selection runs in the GPU cull, counters read back a few frames late).
     uint32 numMeshLodGroups;
-    uint32 lodInstanceCounts[5];   // LOD instances rendered per selected level this frame (MAX_MESH_LODS)
+    uint32 lodInstanceCounts[5];   // VISIBLE LOD instances per selected level (MAX_MESH_LODS)
 };

@@ -28,8 +28,8 @@ static constexpr std::string_view COLLISION_MESH_PREFIX = "Col_";
 
 // Meshes (or nodes) named "LodN_*" form authored LOD chains: "Lod0_house"/"Lod1_house"/... group under
 // the logical name "house" (a plain "house" mesh may also serve as level 0). Levels above 0 are never
-// instanced directly; Renderer::selectMeshLods redirects instances to them by projected size, and a
-// "Lod0_*" node is also reachable by its logical name in path lookups.
+// instanced directly; the GPU cull redirects instances to them by projected size, and a "Lod0_*" node
+// is also reachable by its logical name in path lookups.
 static bool parseLodName(std::string_view name, uint32& outLevel, std::string_view& outLogicalName)
 {
     if (name.size() < 5 || (name[0] != 'L' && name[0] != 'l') || (name[1] != 'O' && name[1] != 'o') || (name[2] != 'D' && name[2] != 'd'))
@@ -825,6 +825,8 @@ RenderNode ObjectContainer::spawnNodeForIdx(NodeSpawnIdx idx, const Transform& t
         if (nodeInfo.lodGroupIdx != UINT32_MAX)
             node.m_lodInstances.push_back(RenderNode::LodInstance{ i, nodeInfo.lodGroupIdx });
     }
+    if (!node.m_lodInstances.empty())
+        node.m_lodStateBase = Globals::rendererVK.allocateLodStateRange(range.numNodes); // GPU hysteresis slots, one per instance
 
     std::map<uint16, uint16> instancesPerMesh;
     for (uint32 i = 0; i < range.numNodes; ++i)
@@ -977,6 +979,8 @@ RenderNode ObjectContainer::spawnSkinnedNode(const Transform& transform)
         if (bundle.lodGroupForMesh[k] != UINT32_MAX)
             node.m_lodInstances.push_back(RenderNode::LodInstance{ k, bundle.lodGroupForMesh[k] });
     }
+    if (!node.m_lodInstances.empty())
+        node.m_lodStateBase = renderer.allocateLodStateRange(m_numSkinnedMeshes); // GPU hysteresis slots, one per instance
     node.m_bounds = combinedBounds;
     node.m_numInstancesPerMesh.reserve(instancesPerMesh.size());
     for (auto& pair : instancesPerMesh)

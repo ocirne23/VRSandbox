@@ -32,6 +32,11 @@ layout (binding = 8, std430) writeonly buffer OutIndirectCommandBuffer     { Out
 layout (binding = 9, std430) readonly buffer InMaterialInfos               { MaterialInfo         in_materialInfos[]; };
 layout (binding = 10, std430) readonly buffer InNodePassMasksBuffer        { uint                 in_nodePassMasks[]; };
 
+#include "mesh_lod.inc.glsl"
+
+layout (binding = 11, std430) readonly buffer InMeshLodGroupIdxBuffer      { uint                 in_meshLodGroupIdx[]; };
+layout (binding = 12, std430) readonly buffer InMeshLodGroupsBuffer        { MeshLodGroup         in_meshLodGroups[]; };
+
 vec3 quat_transform(vec3 v, vec4 q) { return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); }
 vec4 quat_multiply(vec4 q, vec4 p)
 {
@@ -80,7 +85,7 @@ void main()
     const InMeshInstance instance = in_instances[instanceIdx];
     if ((in_nodePassMasks[instance.renderNodeIdx] & PASS_SHADOW) == 0u)
         return; // not shadow-relevant this frame
-    const uint16_t meshIdx        = uint16_t(instance.meshIdxMaterialIdx & 0x0000FFFF);
+    uint meshIdx                  = instance.meshIdxMaterialIdx & 0x0000FFFF;
     const InMeshInfo meshInfo     = in_meshInfos[meshIdx];
 
     const vec4 quat                   = quat_multiply(in_renderNodeTransforms[instance.renderNodeIdx].quat, in_instanceOffsets[instance.instanceOffsetIdx].quat);
@@ -106,15 +111,43 @@ void main()
     const uint alphaTexIdx = (alphaMode == ALPHA_MODE_MASK) ? (material.diffuseNormalTexIdx & 0x0000FFFFu) : 0xFFFFu;
     const uint packed = (alphaTexIdx << 16) | (cascadeMask & 0x0000FFFFu);
 
+    // GPU LOD selection, stateless and two levels coarser than the main view (matches the old CPU
+    // pass bias: 4x the error budget / +2 fallback levels). Off-screen casters never pop on screen,
+    // so hysteresis state isn't worth carrying here.
+    InMeshInfo drawMeshInfo = meshInfo;
+    const uint lodGroupIdx = in_meshLodGroupIdx[meshIdx];
+    if (lodGroupIdx != 0xFFFFFFFFu && u_lodParams1.z > 0.5)
+    {
+        const MeshLodGroup group = in_meshLodGroups[lodGroupIdx];
+        const float dist = max(0.01, length(centerPos - u_views[VIEW_CENTER].viewPos.xyz) - radius);
+        int level = lodSelectLevel(group, dist, radius, instancePosScale.w,
+            u_lodParams0.x * 4.0, 2.0, -1);
+        uint chosenMeshIdx = lodMeshAt(group, level);
+        if (in_meshInfos[chosenMeshIdx].indexCount == 0u)
+        {
+            for (int d = 1; d < int(group.numLods); ++d)
+            {
+                if (level - d >= 0 && in_meshInfos[lodMeshAt(group, level - d)].indexCount != 0u) { level -= d; break; }
+                if (level + d < int(group.numLods) && in_meshInfos[lodMeshAt(group, level + d)].indexCount != 0u) { level += d; break; }
+            }
+            chosenMeshIdx = lodMeshAt(group, level);
+        }
+        if (chosenMeshIdx != meshIdx)
+        {
+            meshIdx = chosenMeshIdx;
+            drawMeshInfo = in_meshInfos[meshIdx];
+        }
+    }
+
     const uint firstInstance = in_firstInstances[meshIdx];
     const uint cmdIdx = meshIdx; // single opaque region
     const uint idx = atomicAdd(out_indirectCommands[cmdIdx].instanceCount, 1);
     if (idx == 0)
     {
         out_indirectCommands[cmdIdx].pipelineIndex = 0u;
-        out_indirectCommands[cmdIdx].indexCount    = meshInfo.indexCount;
-        out_indirectCommands[cmdIdx].firstIndex    = meshInfo.firstIndex;
-        out_indirectCommands[cmdIdx].vertexOffset  = meshInfo.vertexOffset;
+        out_indirectCommands[cmdIdx].indexCount    = drawMeshInfo.indexCount;
+        out_indirectCommands[cmdIdx].firstIndex    = drawMeshInfo.firstIndex;
+        out_indirectCommands[cmdIdx].vertexOffset  = drawMeshInfo.vertexOffset;
         out_indirectCommands[cmdIdx].firstInstance = firstInstance;
     }
 

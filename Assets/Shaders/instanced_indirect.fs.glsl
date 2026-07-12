@@ -183,7 +183,7 @@ struct TerrainFields
 
 TerrainFields terrainFields(vec3 worldPos)
 {
-	const float seaLevel = u_terrainFade.z; // the streamer's live sea level rides the edge-fade params
+	const float seaLevel = u_terrainParams.z; // the streamer's live sea level
 	TerrainFields f;
 	f.altitude = worldPos.y - seaLevel;
 	f.temperature = 12.5;
@@ -212,7 +212,7 @@ vec3 terrainFlatAlbedo(vec3 worldPos, vec3 N, TerrainFields f)
 	const vec3 rock   = vec3(0.37, 0.34, 0.31);
 	const vec3 snow   = vec3(0.90, 0.93, 0.97);
 
-	const float seaLevel = u_terrainFade.z;
+	const float seaLevel = u_terrainParams.z;
 	const float h = worldPos.y - seaLevel;
 	const float slope = 1.0 - clamp(N.y, 0.0, 1.0);
 	// Cheap value noise to break up band edges.
@@ -410,7 +410,7 @@ bool terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f, float distFade, out
 	// Rock layer: steep slopes + crags (relief above the macro altitude). Rock type is the nearest rock
 	// attractor in the same climate space (gray granite cold, red sandstone hot/dry, dark basalt wet).
 	const float slope = 1.0 - clamp(geoN.y, 0.0, 1.0);
-	const float seaLevel = u_terrainFade.z;
+	const float seaLevel = u_terrainParams.z;
 	const float crag = smoothstep(u_terrainTexParams2.x, u_terrainTexParams2.y, (worldPos.y - seaLevel) - f.altitude);
 	float rockW = max(smoothstep(u_terrainTexParams1.z, u_terrainTexParams1.w, slope), crag * 0.85);
 	if (rockW > 0.004 && numRock > 0)

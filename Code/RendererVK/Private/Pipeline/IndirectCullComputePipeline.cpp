@@ -134,6 +134,15 @@ void IndirectCullComputePipeline::buildComputeLayout(ComputePipelineLayout& comp
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute
     });
+    for (uint32 binding = 11; binding <= 15; ++binding) // LOD selection: group idx / groups / state / node bias / stats
+    {
+        descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
+            .binding = binding,
+            .descriptorType = vk::DescriptorType::eStorageBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eCompute
+        });
+    }
 }
 
 void IndirectCullComputePipeline::update(uint32 frameIdx, uint32 numMeshInstances)
@@ -149,7 +158,7 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    std::array<DescriptorSetUpdateInfo, 11> computeDescriptorSetUpdateInfos
+    std::array<DescriptorSetUpdateInfo, 16> computeDescriptorSetUpdateInfos
     {
         DescriptorSetUpdateInfo { // UBO
             .binding = 0,
@@ -259,6 +268,56 @@ void IndirectCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fr
                 vk::DescriptorBufferInfo {
                     .buffer = recordParams.inNodePassMasksBuffer.getBuffer(),
                     .range = recordParams.inNodePassMasksBuffer.getSize(),
+                }
+            }
+        },
+        DescriptorSetUpdateInfo { // InMeshLodGroupIdxBuffer
+            .binding = 11,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inMeshLodGroupIdxBuffer.getBuffer(),
+                    .range = recordParams.inMeshLodGroupIdxBuffer.getSize(),
+                }
+            }
+        },
+        DescriptorSetUpdateInfo { // InMeshLodGroupsBuffer
+            .binding = 12,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inMeshLodGroupsBuffer.getBuffer(),
+                    .range = recordParams.inMeshLodGroupsBuffer.getSize(),
+                }
+            }
+        },
+        DescriptorSetUpdateInfo { // LodLevelStateBuffer
+            .binding = 13,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.lodLevelStateBuffer.getBuffer(),
+                    .range = recordParams.lodLevelStateBuffer.getSize(),
+                }
+            }
+        },
+        DescriptorSetUpdateInfo { // InNodeLodStateBiasBuffer
+            .binding = 14,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.inNodeLodStateBiasBuffer.getBuffer(),
+                    .range = recordParams.inNodeLodStateBiasBuffer.getSize(),
+                }
+            }
+        },
+        DescriptorSetUpdateInfo { // OutLodStatsBuffer
+            .binding = 15,
+            .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = {
+                vk::DescriptorBufferInfo {
+                    .buffer = recordParams.outLodStatsBuffer.getBuffer(),
+                    .range = recordParams.outLodStatsBuffer.getSize(),
                 }
             }
         }

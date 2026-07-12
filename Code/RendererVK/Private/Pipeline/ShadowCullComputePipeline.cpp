@@ -56,7 +56,7 @@ void ShadowCullComputePipeline::buildComputeLayout(ComputePipelineLayout& comput
     computePipelineLayout.computeShaderText = FileSystem::readFileStr(computePipelineLayout.computeShaderDebugFilePath);
 
     auto& b = computePipelineLayout.descriptorSetLayoutBindings;
-    for (uint32 i = 0; i <= 10; i++)
+    for (uint32 i = 0; i <= 12; i++) // 11/12 = LOD group idx per mesh / LOD group data
     {
         b.push_back(vk::DescriptorSetLayoutBinding{
             .binding = i,
@@ -71,7 +71,7 @@ void ShadowCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fram
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
 
-    std::array<DescriptorSetUpdateInfo, 11> updates{
+    std::array<DescriptorSetUpdateInfo, 13> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = params.ubo.getSize() } } },
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer,
@@ -94,6 +94,10 @@ void ShadowCullComputePipeline::record(CommandBuffer& commandBuffer, uint32 fram
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inMaterialInfoBuffer.getBuffer(), .range = params.inMaterialInfoBuffer.getSize() } } },
         DescriptorSetUpdateInfo{ .binding = 10, .type = vk::DescriptorType::eStorageBuffer,
             .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inNodePassMasksBuffer.getBuffer(), .range = params.inNodePassMasksBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 11, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inMeshLodGroupIdxBuffer.getBuffer(), .range = params.inMeshLodGroupIdxBuffer.getSize() } } },
+        DescriptorSetUpdateInfo{ .binding = 12, .type = vk::DescriptorType::eStorageBuffer,
+            .bufferInfos = { vk::DescriptorBufferInfo{ .buffer = params.inMeshLodGroupsBuffer.getBuffer(), .range = params.inMeshLodGroupsBuffer.getSize() } } },
     };
 
     vk::CommandBuffer vkCommandBuffer = commandBuffer.getCommandBuffer();

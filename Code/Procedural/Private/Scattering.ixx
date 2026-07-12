@@ -136,7 +136,7 @@ export namespace Procedural
 		void despawnGroup(RuleGroup& group);
 
 		// --- Tweak-backed configuration ---
-		bool  m_enabled = true;
+		bool  m_enabled = false;
 		int   m_seed = 777;
 		float m_cellSize = 64.0f;
 		float m_densityScale = 1.0f;   // global multiplier on every rule's density

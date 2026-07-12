@@ -27,6 +27,11 @@ public:
         Buffer& inMeshInfoBuffer;             // 4
         Buffer& inFirstInstancesBuffer;       // 5
         Buffer& inNodePassMasksBuffer;        // 10
+        Buffer& inMeshLodGroupIdxBuffer;      // 11 - per mesh: LOD group index (GPU LOD selection)
+        Buffer& inMeshLodGroupsBuffer;        // 12
+        Buffer& lodLevelStateBuffer;          // 13 - per-instance hysteresis state (RW)
+        Buffer& inNodeLodStateBiasBuffer;     // 14 - per node: state slot bias
+        Buffer& outLodStatsBuffer;            // 15 - per-level pick counts (stats readback)
     };
 
     void initialize(uint32 maxMeshInstances, uint32 maxUniqueMeshes);

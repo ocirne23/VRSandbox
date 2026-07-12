@@ -89,7 +89,6 @@ export namespace Procedural
 		float m_seaLevel = 0.0f;
 		float m_skirtDepth = 5.0f;
 		int   m_maxUploadsPerFrame = 16;
-		float m_edgeFadeChunks = 2.0f; // width (in chunks) of the height fade-in band at the generation edge
 
 		// --- V2 (climate-first) generator ---
 		float  m_detailFrequency = 0.02f;  // height detail fBm (cycles/m)
