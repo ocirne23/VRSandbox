@@ -30,6 +30,10 @@ export namespace Procedural
 		Count
 	};
 
+	// The (temperature01, humidity01) coordinates of a biome's attractor in climate space (BIOME_TABLE) —
+	// for consumers that must agree with the generator's biome placement (terrain texture splatting).
+	glm::vec2 biomeClimateCoords(EBiomeV2 biome);
+
 	struct TerrainConfigV2
 	{
 		uint32 seed = 1337;

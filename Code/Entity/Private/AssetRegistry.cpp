@@ -5,7 +5,6 @@ import Core.Log;
 import File;
 
 import :AssetRegistry;
-import :ObjectDescription;
 import :AnimationDescription;
 
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }

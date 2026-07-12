@@ -48,6 +48,16 @@ uint32 TextureManager::getDescriptorCap() const
 
 uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips, bool sRGB)
 {
+	return uploadImpl([&](Texture& texture) { return texture.initialize(textureData, generateMips, sRGB); });
+}
+
+uint16 TextureManager::upload(const char* filePath, bool generateMips, bool sRGB)
+{
+	return uploadImpl([&](Texture& texture) { return texture.initialize(filePath, generateMips, sRGB); });
+}
+
+uint16 TextureManager::uploadImpl(const std::function<bool(Texture&)>& initialize)
+{
 	uint16 idx;
 	if (!m_freeSlots.empty()) // slot freed by a destroyed ObjectContainer
 	{
@@ -74,7 +84,7 @@ uint16 TextureManager::upload(const ITextureData& textureData, bool generateMips
 		idx = (uint16)m_textures.size();
 		m_textures.emplace_back();
 	}
-	if (!m_textures[idx].initialize(textureData, generateMips, sRGB))
+	if (!initialize(m_textures[idx]))
 	{
 		assert(false && "Failed to initialize texture");
 		if (idx == (uint16)(m_textures.size() - 1))

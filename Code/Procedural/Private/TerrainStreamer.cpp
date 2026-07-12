@@ -5,6 +5,7 @@ import Core.glm;
 import Core.Camera;
 import Core.Transform;
 import Core.Tweaks;
+import Core.Log;
 
 import RendererVK;
 import File;
@@ -40,6 +41,134 @@ namespace
 		return (x << 36) | (z << 8) | (uint64)(lod & 0xFFu);
 	}
 
+	// --- Terrain splat texture sources -----------------------------------------------------------------
+	// One PBR texture set per land biome (climate-blended ground), per climate-picked rock type (steep
+	// slopes/crags), and exactly one dedicated Beach set — NOT a biome, a climate-independent shoreline
+	// overlay the shader blends in near the waterline regardless of which biome it's over. Sources are
+	// the CC0 sets under Assets/Textures/Terrain (see Assets/THIRD_PARTY_ASSETS.md); they bake once into
+	// Assets/Local/TerrainTex as BC .dds so they mip-stream like cooked scene textures.
+	enum class ESourceKind : uint8 { Ground, Rock, Beach };
+	struct TerrainTexSource
+	{
+		ESourceKind kind = ESourceKind::Ground;
+		Procedural::EBiomeV2 biome = Procedural::EBiomeV2::Count; // Ground entries only
+		glm::vec2 rockCoords{};      // Rock entries only: attractor position in (t01, h01) climate space
+		const char* cacheName;       // output stem: Local/TerrainTex/<cacheName>_{diff|nor|arm}.dds
+		const char* diffSrc;         // sources relative to Assets/
+		const char* norSrc;
+		const char* armSrc;          // packed AO/rough/metal; nullptr -> pack aoSrc+roughSrc instead
+		const char* aoSrc = nullptr;
+		const char* roughSrc = nullptr;
+	};
+	using enum Procedural::EBiomeV2;
+	const TerrainTexSource TERRAIN_TEX_SOURCES[] =
+	{
+		{ .biome = Desert,     .cacheName = "desert",     .diffSrc = "Textures/Terrain/sand_01/sand_01_diff_2k.jpg",                   .norSrc = "Textures/Terrain/sand_01/sand_01_nor_gl_2k.jpg",                   .armSrc = "Textures/Terrain/sand_01/sand_01_arm_2k.jpg" },
+		{ .biome = Savanna,    .cacheName = "savanna",    .diffSrc = "Textures/Terrain/dry_ground_01/dry_ground_01_diff_2k.jpg",       .norSrc = "Textures/Terrain/dry_ground_01/dry_ground_01_nor_gl_2k.jpg",       .armSrc = "Textures/Terrain/dry_ground_01/dry_ground_01_arm_2k.jpg" },
+		{ .biome = Swampland,  .cacheName = "swampland",  .diffSrc = "Textures/Terrain/mud_forest/mud_forest_diff_2k.jpg",             .norSrc = "Textures/Terrain/mud_forest/mud_forest_nor_gl_2k.jpg",             .armSrc = "Textures/Terrain/mud_forest/mud_forest_arm_2k.jpg" },
+		{ .biome = Grassland,  .cacheName = "grassland",  .diffSrc = "Textures/Terrain/Grass001/Grass001_2K-JPG_Color.jpg",            .norSrc = "Textures/Terrain/Grass001/Grass001_2K-JPG_NormalGL.jpg",           .armSrc = "Textures/Terrain/Grass001/Grass001_arm_2k.jpg" },
+		{ .biome = Forest,     .cacheName = "forest",     .diffSrc = "Textures/Terrain/forest_floor/forest_floor_diff_2k.jpg",         .norSrc = "Textures/Terrain/forest_floor/forest_floor_nor_gl_2k.jpg",         .armSrc = "Textures/Terrain/forest_floor/forest_floor_arm_2k.jpg" },
+		{ .biome = Rainforest, .cacheName = "rainforest", .diffSrc = "Textures/Terrain/Moss002/Moss002_2K-JPG_Color.jpg",              .norSrc = "Textures/Terrain/Moss002/Moss002_2K-JPG_NormalGL.jpg",             .armSrc = "Textures/Terrain/Moss002/Moss002_arm_2k.jpg" },
+		{ .biome = Taiga,      .cacheName = "taiga",      .diffSrc = "Textures/Terrain/forest_ground_04/forest_ground_04_diff_2k.jpg", .norSrc = "Textures/Terrain/forest_ground_04/forest_ground_04_nor_gl_2k.jpg", .armSrc = "Textures/Terrain/forest_ground_04/forest_ground_04_arm_2k.jpg" },
+		{ .biome = Tundra,     .cacheName = "tundra",     .diffSrc = "Textures/Terrain/rocky_trail/rocky_trail_diff_2k.jpg",           .norSrc = "Textures/Terrain/rocky_trail/rocky_trail_nor_gl_2k.jpg",           .armSrc = "Textures/Terrain/rocky_trail/rocky_trail_arm_2k.jpg" },
+		{ .biome = Arctic,     .cacheName = "arctic",     .diffSrc = "Textures/Terrain/snow_02/snow_02_diff_2k.jpg",                   .norSrc = "Textures/Terrain/snow_02/snow_02_nor_gl_2k.jpg",                   .armSrc = "Textures/Terrain/snow_02/snow_02_arm_2k.jpg" },
+		{ .biome = Lakes,      .cacheName = "lakes",      .diffSrc = "Textures/Terrain/brown_mud_03/brown_mud_03_diff_2k.jpg",         .norSrc = "Textures/Terrain/brown_mud_03/brown_mud_03_nor_gl_2k.jpg",         .armSrc = "Textures/Terrain/brown_mud_03/brown_mud_03_arm_2k.jpg" },
+		{ .biome = Highlands,  .cacheName = "highlands",  .diffSrc = "Textures/Terrain/rock_face/rock_face_diff_2k.jpg",               .norSrc = "Textures/Terrain/rock_face/rock_face_nor_gl_2k.jpg",               .armSrc = "Textures/Terrain/rock_face/rock_face_arm_2k.jpg" },
+		// Rock layer: 6 climate-picked types spanning (temperature, humidity) so mountains/crags read
+		// differently by biome instead of one rock texture everywhere. Coordinates use the same
+		// (t01, h01) space as GeneratorV2's BIOME_TABLE (see biomeClimateCoords).
+		{ .kind = ESourceKind::Rock, .rockCoords = { 0.10f, 0.35f }, .cacheName = "rock_gray",  .diffSrc = "Textures/Terrain/gray_rocks/gray_rocks_diff_2k.jpg",                     .norSrc = "Textures/Terrain/gray_rocks/gray_rocks_nor_gl_2k.jpg",                     .armSrc = "Textures/Terrain/gray_rocks/gray_rocks_arm_2k.jpg" }, // cold/dry granite: tundra, highlands, arctic peaks
+		{ .kind = ESourceKind::Rock, .rockCoords = { 0.85f, 0.10f }, .cacheName = "rock_red",   .diffSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_diff_2k.jpg",             .norSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_nor_gl_2k.jpg",             .armSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_arm_2k.jpg" }, // hot/dry sandstone: desert, savanna canyons
+		{ .kind = ESourceKind::Rock, .rockCoords = { 0.55f, 0.85f }, .cacheName = "rock_dark",  .diffSrc = "Textures/Terrain/dark_rock/dark_rock_diff_2k.jpg",                       .norSrc = "Textures/Terrain/dark_rock/dark_rock_nor_gl_2k.jpg",                       .armSrc = "Textures/Terrain/dark_rock/dark_rock_arm_2k.jpg" },       // warm/wet dark basalt: rainforest, swampland cliffs
+		{ .kind = ESourceKind::Rock, .rockCoords = { 0.30f, 0.75f }, .cacheName = "rock_mossy", .diffSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_diff_2k.jpg",       .norSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_nor_gl_2k.jpg",       .armSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_arm_2k.jpg" }, // cool/wet lichened rock: forest, taiga
+		{ .kind = ESourceKind::Rock, .rockCoords = { 0.65f, 0.35f }, .cacheName = "rock_worn",  .diffSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_diff_2k.jpg", .norSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_nor_gl_2k.jpg", .armSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_arm_2k.jpg" }, // warm/dry weathered sandstone: savanna, highlands
+		{ .kind = ESourceKind::Rock, .rockCoords = { 0.45f, 0.55f }, .cacheName = "rock_coast", .diffSrc = "Textures/Terrain/rock_3/rock_3_diff_2k.jpg",                             .norSrc = "Textures/Terrain/rock_3/rock_3_nor_gl_2k.jpg",                             .armSrc = "Textures/Terrain/rock_3/rock_3_arm_2k.jpg" }, // temperate coastal rock: grassland, lakes cliffs
+		// Shoreline overlay: NOT a biome, always the trailing material (Renderer::setTerrainBiomeMaterials).
+		{ .kind = ESourceKind::Beach, .cacheName = "beach", .diffSrc = "Textures/Terrain/coast_sand_01/coast_sand_01_diff_2k.jpg", .norSrc = "Textures/Terrain/coast_sand_01/coast_sand_01_nor_gl_2k.jpg", .armSrc = "Textures/Terrain/coast_sand_01/coast_sand_01_arm_2k.jpg" },
+	};
+
+	constexpr const char* TERRAIN_TEX_CACHE_DIR = "Local/TerrainTex/";
+
+	std::string terrainTexCachePath(const TerrainTexSource& src, const char* map)
+	{
+		return std::string(TERRAIN_TEX_CACHE_DIR) + src.cacheName + "_" + map + ".dds";
+	}
+
+	// True when outPath exists and is newer than every present source (missing sources don't invalidate).
+	bool terrainTexCacheFresh(const std::string& outPath, std::initializer_list<const char*> sources)
+	{
+		std::error_code ec;
+		const auto outTime = std::filesystem::last_write_time(outPath, ec);
+		if (ec)
+			return false;
+		for (const char* src : sources)
+		{
+			if (!src)
+				continue;
+			const auto srcTime = std::filesystem::last_write_time(src, ec);
+			if (!ec && srcTime > outTime)
+				return false;
+		}
+		return true;
+	}
+
+	// Bakes every stale terrain texture into the DDS cache. Runs on a background jthread at startup;
+	// one conversion is seconds of CPU (mips + BC compression), so stale entries fan out over a small
+	// thread pool and the stop token is checked between files (app shutdown mid-first-bake).
+	void bakeTerrainTexCache(std::stop_token stopToken)
+	{
+		std::error_code ec;
+		std::filesystem::create_directories(TERRAIN_TEX_CACHE_DIR, ec);
+
+		struct BakeTask { const TerrainTexSource* src; int map; }; // map: 0 = diff, 1 = nor, 2 = arm
+		std::vector<BakeTask> tasks;
+		for (const TerrainTexSource& src : TERRAIN_TEX_SOURCES)
+		{
+			if (!terrainTexCacheFresh(terrainTexCachePath(src, "diff"), { src.diffSrc }))
+				tasks.push_back({ &src, 0 });
+			if (!terrainTexCacheFresh(terrainTexCachePath(src, "nor"), { src.norSrc }))
+				tasks.push_back({ &src, 1 });
+			if (!terrainTexCacheFresh(terrainTexCachePath(src, "arm"), { src.armSrc, src.aoSrc, src.roughSrc }))
+				tasks.push_back({ &src, 2 });
+		}
+		if (tasks.empty())
+			return;
+
+		const auto bakeStart = std::chrono::steady_clock::now();
+		std::atomic<size_t> nextTask{ 0 };
+		const uint32 numThreads = glm::clamp(std::thread::hardware_concurrency(), 2u, (uint32)tasks.size());
+		std::vector<std::thread> pool;
+		pool.reserve(numThreads);
+		for (uint32 t = 0; t < numThreads; ++t)
+		{
+			pool.emplace_back([&]()
+			{
+				for (size_t i = nextTask.fetch_add(1); i < tasks.size(); i = nextTask.fetch_add(1))
+				{
+					if (stopToken.stop_requested())
+						return;
+					const TerrainTexSource& src = *tasks[i].src;
+					bool ok = false;
+					switch (tasks[i].map)
+					{
+					case 0: ok = TextureConvert::convertToDds(src.diffSrc, TextureConvert::EUsage::Color, terrainTexCachePath(src, "diff").c_str()); break;
+					case 1: ok = TextureConvert::convertToDds(src.norSrc, TextureConvert::EUsage::NormalMap, terrainTexCachePath(src, "nor").c_str()); break;
+					case 2:
+						ok = src.armSrc
+							? TextureConvert::convertToDds(src.armSrc, TextureConvert::EUsage::Data, terrainTexCachePath(src, "arm").c_str())
+							: TextureConvert::convertPackedToDds(src.aoSrc, src.roughSrc, nullptr, terrainTexCachePath(src, "arm").c_str());
+						break;
+					}
+					if (!ok)
+						Log::warning(std::format("Terrain: failed to bake splat texture '{}' map {}", src.cacheName, tasks[i].map));
+				}
+			});
+		}
+		for (std::thread& t : pool)
+			t.join();
+		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - bakeStart).count();
+		Log::info(std::format("Terrain: baked {} splat textures into {} in {} ms", tasks.size(), TERRAIN_TEX_CACHE_DIR, ms));
+	}
 }
 
 namespace Procedural
@@ -78,6 +207,18 @@ namespace Procedural
 		Tweak::floatVar("Terrain", "Data map range (m)", &m_terrainMapRange, 256.0f, 8192.0f, 32.0f);
 		Tweak::floatVar("Terrain", "Data map far range (m)", &m_terrainMapFarRange, 1024.0f, 65536.0f, 256.0f);
 
+		// Terrain biome texture splatting (TERRAIN pipeline variant; pushed to the renderer every frame
+		// from updateTerrainTextures via Renderer::setTerrainTextureParams).
+		Tweak::floatVar("Terrain/Textures", "Ground uv scale (1/m)", &m_texUvScaleGround, 0.005f, 2.0f);
+		Tweak::floatVar("Terrain/Textures", "Rock uv scale (1/m)", &m_texUvScaleRock, 0.005f, 2.0f);
+		Tweak::floatVar("Terrain/Textures", "Slope rock start", &m_texSlopeRockStart, 0.0f, 1.0f);
+		Tweak::floatVar("Terrain/Textures", "Slope rock full", &m_texSlopeRockFull, 0.0f, 1.0f);
+		Tweak::floatVar("Terrain/Textures", "Crag relief start (m)", &m_texCragStart, 0.0f, 200.0f);
+		Tweak::floatVar("Terrain/Textures", "Crag relief full (m)", &m_texCragFull, 0.0f, 400.0f);
+		Tweak::floatVar("Terrain/Textures", "Beach band (m)", &m_texBeachBand, 0.0f, 20.0f);
+		Tweak::floatVar("Terrain/Textures", "Fade distance (m)", &m_texFadeDist, 0.0f, 20000.0f);
+		Tweak::floatVar("Terrain/Textures", "Blend width scale", &m_texBlendScale, 0.25f, 6.0f);
+
 		Tweak::floatVar("Terrain/V2", "Biome size (m)", &m_v2BiomeSize, 8.0f, 8000.0f, 10.0f, dirty);  // climate-field feature size
 		Tweak::floatVar("Terrain/V2", "Biome blending", &m_v2BiomeBlend, 0.1f, 3.0f, 0.01f, dirty);   // climate-space kernel width (low = crisp biomes)
 		Tweak::floatVar("Terrain/V2", "Border warp (m)", &m_v2BorderWarp, 0.0f, 1500.0f, 5.0f, dirty);
@@ -106,8 +247,76 @@ namespace Procedural
 
 		rebuildMaps();
 
+		// Bake the biome splat textures to the DDS cache in the background (no-op when fresh); chunks
+		// render with the flat-color fallback until updateTerrainTextures registers the finished set.
+		m_texBakeWorker = std::jthread([this](std::stop_token stopToken)
+		{
+			bakeTerrainTexCache(stopToken);
+			m_texBakeDone.store(!stopToken.stop_requested(), std::memory_order_release);
+		});
+
 		m_running = true;
 		m_worker = std::thread([this]() { workerLoop(); });
+	}
+
+	void TerrainStreamer::updateTerrainTextures(Renderer& renderer)
+	{
+		// The generator clamps its kernel width the same way (TerrainGenV2 ctor); keep the shader's
+		// climate blend live against the tweak without re-uploading the texture set.
+		const float climateSigma = 0.10f * glm::clamp(m_v2BiomeBlend, 0.1f, 3.0f);
+		renderer.setTerrainClimateSigma(climateSigma);
+
+		renderer.setTerrainTextureParams({
+			.uvScaleGround = m_texUvScaleGround,
+			.uvScaleRock = m_texUvScaleRock,
+			.slopeRockStart = m_texSlopeRockStart,
+			.slopeRockFull = m_texSlopeRockFull,
+			.cragStart = m_texCragStart,
+			.cragFull = m_texCragFull,
+			.beachBand = m_texBeachBand,
+			.fadeDist = m_texFadeDist,
+			.blendScale = m_texBlendScale,
+		});
+
+		if (m_texSetRegistered || !m_texBakeDone.load(std::memory_order_acquire))
+			return;
+		m_texSetRegistered = true;
+
+		// Renderer::setTerrainBiomeMaterials requires [ground][rock][beach] contiguous, in that order —
+		// build it in three passes over the table rather than relying on TERRAIN_TEX_SOURCES' declaration
+		// order, so entries can be listed/grouped however is clearest there.
+		auto tryBuildMat = [](const TerrainTexSource& src) -> std::optional<Renderer::TerrainBiomeMaterial>
+		{
+			Renderer::TerrainBiomeMaterial mat;
+			mat.climateCoords = src.kind == ESourceKind::Ground ? biomeClimateCoords(src.biome) : src.rockCoords;
+			mat.diffuseDds = terrainTexCachePath(src, "diff");
+			mat.normalDds = terrainTexCachePath(src, "nor");
+			mat.armDds = terrainTexCachePath(src, "arm");
+			std::error_code ec;
+			if (!std::filesystem::exists(mat.diffuseDds, ec) || !std::filesystem::exists(mat.normalDds, ec) || !std::filesystem::exists(mat.armDds, ec))
+			{
+				// Source images missing/bake failed: drop the entry (ground/rock lose the attractor; a
+				// missing beach entry just disables the shoreline overlay).
+				Log::warning(std::format("Terrain: splat set '{}' incomplete, skipping", src.cacheName));
+				return std::nullopt;
+			}
+			return mat;
+		};
+
+		std::vector<Renderer::TerrainBiomeMaterial> mats;
+		uint32 numGround = 0, numRock = 0;
+		for (const TerrainTexSource& src : TERRAIN_TEX_SOURCES)
+			if (src.kind == ESourceKind::Ground)
+				if (auto mat = tryBuildMat(src)) { mats.push_back(std::move(*mat)); numGround++; }
+		for (const TerrainTexSource& src : TERRAIN_TEX_SOURCES)
+			if (src.kind == ESourceKind::Rock)
+				if (auto mat = tryBuildMat(src)) { mats.push_back(std::move(*mat)); numRock++; }
+		for (const TerrainTexSource& src : TERRAIN_TEX_SOURCES)
+			if (src.kind == ESourceKind::Beach)
+				if (auto mat = tryBuildMat(src)) mats.push_back(std::move(*mat)); // at most one
+
+		if (!mats.empty())
+			renderer.setTerrainBiomeMaterials(mats, numGround, numRock, climateSigma);
 	}
 
 	void TerrainStreamer::rebuildMaps()
@@ -255,6 +464,8 @@ namespace Procedural
 			updateFogHeightMap(renderer, camera, nullptr); // no terrain -> no terrain-following fog
 			return;
 		}
+
+		updateTerrainTextures(renderer);
 
 		const float chunkSize = m_chunkSize;
 		const int camCX = (int)std::floor(camera.position.x / chunkSize);

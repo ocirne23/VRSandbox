@@ -154,6 +154,42 @@ public:
     // (coloring), so edgeDrop is separate: sinking the fade a few meters under the ocean surface keeps the
     // far edge from z-fighting the coplanar calm water. endDist <= startDist disables it. Set per frame.
     void setTerrainFade(float startDist, float endDist, float targetHeight, float edgeDrop = 0.0f) { m_terrainFade = glm::vec4(startDist, endDist, targetHeight, edgeDrop); }
+    // One terrain splat material: BC-compressed .dds paths (relative to Assets/) + a climate-space
+    // attractor coordinate (temperature01, humidity01) used by ground/rock entries — ignored for the
+    // trailing beach entry, which is climate-independent (always available at the shoreline).
+    struct TerrainBiomeMaterial
+    {
+        glm::vec2 climateCoords{ 0.5f };
+        std::string diffuseDds;
+        std::string normalDds;
+        std::string armDds; // packed AO (R) / roughness (G) / metalness (B); sampled linear
+    };
+    // Registers the terrain texture set: mats is laid out [numGround climate-blended ground biomes]
+    // [numRock climate-picked rock-layer entries] [optional single beach entry]. hasBeach = mats.size()
+    // > numGround + numRock; the beach entry (NOT a biome — a shoreline overlay independent of climate)
+    // is used for the waterline blend instead of reusing a ground biome. climateSigma = the generator's
+    // climate kernel width. Call once (or again to replace — old materials stay allocated, textures are
+    // freed; cheap enough for a config-tweak refresh, not a per-frame path). Textures mip-stream like
+    // cooked scene textures.
+    void setTerrainBiomeMaterials(std::span<const TerrainBiomeMaterial> mats, uint32 numGround, uint32 numRock, float climateSigma);
+    // Terrain splat shaping (UBO terrainTexParams1/2); tweak-backed, owned by TerrainStreamer (Terrain/
+    // Textures category) and pushed here every frame alongside setTerrainClimateSigma.
+    struct TerrainTexTweaks
+    {
+        float uvScaleGround = 0.20f;  // 1/m: ~5 m texture repeat on flat ground
+        float uvScaleRock = 0.08f;    // 1/m: rock features read larger on cliffs
+        float slopeRockStart = 0.55f;
+        float slopeRockFull = 0.75f;
+        float cragStart = 12.0f;
+        float cragFull = 50.0f;
+        float beachBand = 2.5f;
+        float fadeDist = 3000.0f;
+        float blendScale = 1.5f; // multiplies the generator's climate sigma for TEXTURE blends only
+    };
+    void setTerrainTextureParams(const TerrainTexTweaks& params) { m_terrainTexTweaks = params; }
+    // Keeps the shader's climate blend width in step with the generator's biome-blend tweak (cheap, per
+    // frame) without re-uploading the texture set.
+    void setTerrainClimateSigma(float sigma) { m_terrainClimateSigma = sigma; }
     // Deepest current ocean wave trough below the calm water level (m, >= 0; the OceanRenderer estimates
     // it from its displacement readback). Sizes the waterline band inside which the fog scatter samples
     // the live FFT wave height for the underwater fog boundary (fogParams7.y).
@@ -425,6 +461,15 @@ private:
     FogParams m_fogParams;
     OceanParams m_oceanParams;
     glm::vec4 m_terrainFade{ 0.0f }; // see setTerrainFade; (0,0,0,0) = disabled (y<=x)
+    // Terrain biome splat materials (setTerrainBiomeMaterials): contiguous material range + owned textures.
+    int32  m_terrainBiomeBaseMaterial = -1; // -1 = no set registered (shader uses flat-color fallback)
+    uint32 m_terrainBiomeNumGround = 0;
+    uint32 m_terrainBiomeNumRock = 0;
+    bool   m_terrainBiomeHasBeach = false; // trailing beach entry present (index base + numGround + numRock)
+    float  m_terrainClimateSigma = 0.1f;
+    std::vector<uint16> m_terrainBiomeTextures; // for the per-frame streaming noteUse + replacement frees
+    glm::vec4 m_terrainBiomeCoords[RendererVKLayout::MAX_TERRAIN_BIOME_MATERIALS]{};
+    TerrainTexTweaks m_terrainTexTweaks; // see setTerrainTextureParams
     float m_oceanWaveTrough = 0.0f;  // see setOceanWaveTrough; 0 while the ocean is disabled
     PostParams m_postParams;
     RTParams m_rtParams;

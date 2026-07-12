@@ -1,0 +1,7 @@
+Prefab namaqualand_boulder_04
+	Component Render
+		ObjectContainer namaqualand_boulder_04
+		Node boulder_04
+		Type StaticMesh
+		Position 0, 0, 0
+		Rotation 0, 0, 0

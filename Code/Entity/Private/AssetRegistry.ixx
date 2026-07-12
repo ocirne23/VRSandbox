@@ -1,7 +1,7 @@
 ﻿export module Entity:AssetRegistry;
 
 import Core;
-import :ObjectDescription;
+import File;
 import :AnimationDescription;
 
 export class AssetRegistry final

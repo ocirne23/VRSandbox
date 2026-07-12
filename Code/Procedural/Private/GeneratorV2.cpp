@@ -29,7 +29,7 @@ namespace
 	{
 		// baseH   var    temp   humidity relief
 		{ -42.0f, 14.0f, 0.50f, 0.85f,   0.35f }, // Ocean (weighted by continentalness, not climate)
-		{  10.0f,  7.0f, 0.95f, 0.05f,   0.55f }, // Desert (mesa-ish)
+		{  10.0f,  7.0f, 0.85f, 0.10f,   0.55f }, // Desert (mesa-ish)
 		{   9.0f,  5.0f, 0.85f, 0.25f,   0.50f }, // Savanna
 		{   1.5f,  2.0f, 0.60f, 0.95f,   0.10f }, // Swampland (dead flat, at whatever altitude it sits)
 		{   8.0f,  5.0f, 0.55f, 0.45f,   0.30f }, // Grassland (smooth rolling)
@@ -51,6 +51,12 @@ namespace
 
 namespace Procedural
 {
+	glm::vec2 biomeClimateCoords(EBiomeV2 biome)
+	{
+		const BiomeFieldParams& p = BIOME_TABLE[(size_t)biome];
+		return glm::vec2(p.temperature, p.humidity);
+	}
+
 	TerrainGenV2::TerrainGenV2(const TerrainConfigV2& cfg)
 		: m_cfg(cfg)
 		, m_instanceId(++s_v2InstanceCounter)

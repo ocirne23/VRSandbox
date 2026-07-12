@@ -70,6 +70,9 @@ export namespace Procedural
 		void workerLoop();
 		void rebuildMaps();                             // (re)builds the active generator from the tweak-backed config
 		void clearResidents();
+		// Registers the biome texture sets with the renderer once the background DDS bake finishes (the
+		// TERRAIN shader falls back to flat colors until then), and keeps the climate kernel width live.
+		void updateTerrainTextures(Renderer& renderer);
 		std::shared_ptr<const ITerrainSampler> currentMaps();
 		// Bakes/refreshes the fog terrain height map around the camera (Renderer::setFogTerrainHeightMap);
 		// maps == nullptr means "no terrain" and clears the map. See the .cpp for the bake scheme.
@@ -91,7 +94,7 @@ export namespace Procedural
 		// --- V2 (climate-first) generator ---
 		float  m_detailFrequency = 0.02f;  // height detail fBm (cycles/m)
 		int    m_detailOctaves = 4;
-		float  m_v2BiomeSize = 100.0f;    // typical biome extent (m): climate-field feature size
+		float  m_v2BiomeSize = 512.0f;    // typical biome extent (m): climate-field feature size
 		float  m_v2BiomeBlend = 1.0f;      // climate-space kernel width (low = crisp biome identity)
 		float  m_v2BorderWarp = 300.0f;    // domain warp on the biome lookup (wiggly borders)
 		float  m_v2OceanFraction = 0.42f;  // fraction of the world that is Ocean
@@ -124,6 +127,24 @@ export namespace Procedural
 		float m_terrainMapFarRange = 8192.0f;  // far cascade world size (m; same texel count, coarser texels)
 		HeightMapBaker m_terrainMapBaker;
 		bool  m_terrainMapUploaded = false;    // a map is live in the renderer (cleared on disable)
+
+		// --- Terrain splat textures: source images baked to BC .dds (Assets/Local/TerrainTex) on a
+		// background thread at startup (skipped when the cache is fresh), then registered once ---
+		std::jthread      m_texBakeWorker;
+		std::atomic<bool> m_texBakeDone{ false };
+		bool              m_texSetRegistered = false;
+
+		// --- Terrain/Textures tweaks: splat shaping, pushed to Renderer::setTerrainTextureParams every
+		// frame from updateTerrainTextures (mirrors Renderer::TerrainTexTweaks) ---
+		float m_texUvScaleGround = 0.20f;  // 1/m: ~5 m texture repeat on flat ground
+		float m_texUvScaleRock = 0.08f;    // 1/m: rock features read larger on cliffs
+		float m_texSlopeRockStart = 0.55f;
+		float m_texSlopeRockFull = 0.75f;
+		float m_texCragStart = 12.0f;      // crag relief start (m above macro altitude)
+		float m_texCragFull = 50.0f;
+		float m_texBeachBand = 2.5f;       // beach band height (m above water level)
+		float m_texFadeDist = 3000.0f;     // texture fade-out END distance (m; 0 = never)
+		float m_texBlendScale = 1.5f;      // multiplies the climate kernel sigma for TEXTURE blends only
 
 		// --- Threading ---
 		std::thread             m_worker;

@@ -76,6 +76,16 @@ void main()
         localPos.xz = mix(localPos.xz, floor(localPos.xz / (2.0 * ringCell) + 0.5) * (2.0 * ringCell), ringMorph);
         worldPos = quat_transform(localPos * inst.posScale.w, inst.quat) + inst.posScale.xyz;
         const vec2 baseXZ = worldPos.xz;
+        if (oceanVertexCulled(baseXZ, ringCell))
+        {
+            // Buried under land: cull the primitives — identical test to the forward OCEAN vertex
+            // shader, so the prepass depth and the drawn geometry stay in lockstep.
+            out_normal = vec3(0.0, 1.0, 0.0);
+            out_uv = in_uv;
+            out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
+            gl_Position = vec4(uintBitsToFloat(0x7FC00000u));
+            return;
+        }
         worldPos.y += oceanWaterOffset(baseXZ); // water-table lift — identical to the forward pass
         worldPos += oceanSampleDisplacement(baseXZ, ringCell, ringMorph);
         out_normal = oceanSampleNormalLod(baseXZ, ringCell, ringMorph);

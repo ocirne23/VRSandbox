@@ -114,6 +114,52 @@ vec2 oceanFlowRotation(vec2 worldXZ)
 vec2 oceanFlowSamplePos(vec2 worldXZ, vec2 fr) { return vec2(fr.x * worldXZ.x + fr.y * worldXZ.y, -fr.y * worldXZ.x + fr.x * worldXZ.y); }
 vec2 oceanFlowToWorld(vec2 v, vec2 fr) { return vec2(fr.x * v.x - fr.y * v.y, fr.y * v.x + fr.x * v.y); }
 
+// Conservative land cull for the clipmap vertex shaders: true when the terrain sits at least
+// "Ocean/Shore/Cull margin" (u_oceanParams7.x) above the LOCAL water level across the vertex's whole
+// triangle footprint (+-3 cells: after the CDLOD morph no co-triangle vertex lies further away), so
+// every primitive using this vertex is fully buried under land — the VS then emits a NaN position,
+// which discards those primitives before rasterization. Waves shoal-fade to zero at depth <= 0, so a
+// footprint buried by a positive margin can never clip live water; the margin absorbs the decimeter
+// disagreement between the baked map and the LOD'd terrain mesh. Only runs inside the shore map's
+// full-weight interior, and only while the 3x3 tap grid is at least texel-dense (on coarser rings a
+// water dip could hide between taps; those vertices keep the depth <= 0 sampling early-outs instead).
+// Both displacement passes (prepass + forward) MUST apply the same test or their geometry diverges.
+bool oceanVertexCulled(vec2 worldXZ, float cellSize)
+{
+#ifdef OCEAN_SHORE_BINDING
+    const float invRange = u_oceanParams4.x;
+    const float margin = u_oceanParams7.x;
+    if (invRange <= 0.0 || margin <= 0.0)
+        return false;
+    const float reach = 3.0 * cellSize;
+    if (reach * float(textureSize(u_shoreHeight, 0).x) * invRange > 1.0)
+        return false; // taps would be sparser than the map's texels
+    // Center tap first: any water in reach and we are done (the common case over open water).
+    const vec2 uv0 = (worldXZ - u_oceanParams3.xy) * invRange + 0.5;
+    const vec2 e0 = min(uv0, vec2(1.0) - uv0);
+    if (min(e0.x, e0.y) < 0.06 + reach * invRange)
+        return false; // footprint leaves the map's full-weight interior (inMap blend band at 0.05)
+    const vec2 hw0 = textureLod(u_shoreHeight, uv0, 0.0).xy;
+    float maxDepth = hw0.y - hw0.x;
+    if (maxDepth >= -margin)
+        return false;
+    for (int j = -1; j <= 1; ++j)
+    {
+        for (int i = -1; i <= 1; ++i)
+        {
+            if (i == 0 && j == 0)
+                continue;
+            const vec2 uv = uv0 + vec2(float(i), float(j)) * (reach * invRange);
+            const vec2 hw = textureLod(u_shoreHeight, uv, 0.0).xy;
+            maxDepth = max(maxDepth, hw.y - hw.x);
+        }
+    }
+    return maxDepth < -margin;
+#else
+    return false;
+#endif
+}
+
 // Fake shoaling: a cascade's waves fade out once the water is shallower than a fraction of its patch
 // size ("Ocean/Shore/Shoal depth scale") — long swell feels the bottom far offshore while short chop
 // runs almost to the beach, and every cascade reaches zero at the waterline so waves never poke through
@@ -142,16 +188,22 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
 {
     const float chop = u_oceanParams0.w;
     const float depth = oceanSampleShoreDepth(worldXZ);
-    const vec2 fr = oceanFlowRotation(worldXZ);           // rivers: waves travel along the local flow
-    const vec2 sampleXZ = oceanFlowSamplePos(worldXZ, fr);
     vec3 disp = vec3(0.0);
-    for (int c = 0; c < OCEAN_CASCADES; ++c)
+    // Buried under land (depth <= 0): every cascade's shoal fade is exactly zero, so the map/flow
+    // sampling below degenerates to displacing nothing — skip it and let the waterline clamp place
+    // the vertex (bit-identical to the full path, just without the texture fetches).
+    if (depth > 0.0)
     {
-        const float L = u_oceanParams2[c];
-        const vec4 d = textureLod(u_oceanMaps, vec3(sampleXZ / L, float(c)), oceanVertexLod(cellSize, morph, L));
-        disp += vec3(d.x * chop, d.y, d.z * chop) * oceanShoalFade(depth, L);
+        const vec2 fr = oceanFlowRotation(worldXZ);           // rivers: waves travel along the local flow
+        const vec2 sampleXZ = oceanFlowSamplePos(worldXZ, fr);
+        for (int c = 0; c < OCEAN_CASCADES; ++c)
+        {
+            const float L = u_oceanParams2[c];
+            const vec4 d = textureLod(u_oceanMaps, vec3(sampleXZ / L, float(c)), oceanVertexLod(cellSize, morph, L));
+            disp += vec3(d.x * chop, d.y, d.z * chop) * oceanShoalFade(depth, L);
+        }
+        disp.xz = oceanFlowToWorld(disp.xz, fr);
     }
-    disp.xz = oceanFlowToWorld(disp.xz, fr);
     // Waterline treatment: smooth-clamp the surface to just above the seabed — the shoal fade only
     // scales the waves, so a trough could still swing under the bottom and open a "hole" of exposed
     // seabed. The clamp is an INNER-rounded smooth max (dips at most k/4 below the hard max, never
@@ -197,6 +249,15 @@ void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out ve
 {
     const float chop = u_oceanParams0.w;
     const float depth = oceanSampleShoreDepth(worldXZ);
+    if (depth <= 0.0)
+    {
+        // Buried under land: all shoal fades are zero — the loop would sum nothing (flat calm surface).
+        slope = vec2(0.0);
+        jacobian = 1.0;
+        slopeVar = vec2(0.0);
+        accel = 0.0;
+        return;
+    }
     const vec2 fr = oceanFlowRotation(worldXZ);           // same rotation as the displacement passes
     const vec2 sampleXZ = oceanFlowSamplePos(worldXZ, fr);
     vec2 slopeSum = vec2(0.0);
@@ -289,6 +350,8 @@ vec3 oceanSampleNormalLod(vec2 worldXZ, float cellSize, float morph)
 {
     const float chop = u_oceanParams0.w;
     const float depth = oceanSampleShoreDepth(worldXZ);
+    if (depth <= 0.0)
+        return vec3(0.0, 1.0, 0.0); // buried under land: all shoal fades are zero — flat
     const vec2 fr = oceanFlowRotation(worldXZ);           // same rotation as the displacement passes
     const vec2 sampleXZ = oceanFlowSamplePos(worldXZ, fr);
     vec2 slopeSum = vec2(0.0);

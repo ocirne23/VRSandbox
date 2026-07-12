@@ -116,9 +116,25 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_oceanParams6;    // x = glint mip bias (negative = sharper shading normals),
                             // y = glint variance filter scale (spec AA + LEAN roughness),
                             // z = crest SSS strength (0 = off), w = crest SSS forward-lobe power
+    vec4 u_oceanParams7;    // x = land cull margin (m): clipmap triangles whose whole footprint is
+                            // buried deeper than this under the local water level are VS-culled
+                            // (oceanVertexCulled; 0 = off), yzw unused
     vec4 u_terrainFade;     // TERRAIN variant edge fade: x = fade-start dist, y = fade-end dist
                             // (radial from camera XZ), z = target height (sea level), w = extra drop
                             // below z at the edge (avoids z-fighting the ocean). y<=x disables.
+
+    // TERRAIN variant biome texture splatting (keep in sync with RendererVKLayout::Ubo). Materials are
+    // contiguous: [base .. base+numGround) ground biomes, then numRock rock-layer entries.
+    vec4 u_terrainTexParams0; // x = base material idx (< 0 = no texture set: flat-color fallback),
+                              // y = ground biome count, z = rock entry count, w = climate kernel sigma
+    vec4 u_terrainTexParams1; // x = ground uv scale (1/m), y = rock uv scale (1/m),
+                              // z = slope where rock fades in, w = slope where rock is full
+    vec4 u_terrainTexParams2; // x = crag relief start (m above macro altitude), y = crag relief full,
+                              // z = beach band height (m above water level),
+                              // w = texture fade-out END distance (m; fade starts at half this, 0 = never)
+    vec4 u_terrainTexParams3; // x = dedicated beach material present (0/1; when present it's always the
+                              // LAST registered material: index base + numGround + numRock), yzw unused
+    vec4 u_terrainBiomeCoords[MAX_TERRAIN_BIOME_MATERIALS]; // xy = (t01, h01) climate attractor, zw unused
 };
 
 // View index selecting which u_views[] entry the convenience macros / reconstruction helpers read. Defaults

@@ -1,0 +1,7 @@
+Prefab tree_small_02
+	Component Render
+		ObjectContainer tree_small_02
+		Node tree_small_02_LOD0
+		Type StaticMesh
+		Position 0, 0, 0
+		Rotation 0, 0, 0

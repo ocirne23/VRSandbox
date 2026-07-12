@@ -307,6 +307,8 @@ export struct OceanParams
     // surf/foam band where the water column vanishes at the waterline.
     float shoalScale     = 0.05f; // shoaling depth as a fraction of each cascade's patch size
     float shoreFoamDepth = 1.5f;  // water-column height (m) below which the waterline churns white; 0 = off
+    float cullMargin     = 1.0f;  // land cull: clipmap triangles whose whole footprint is buried deeper
+                                  // than this under the local water level are VS-culled (0 = off)
 };
 
 export struct Stats

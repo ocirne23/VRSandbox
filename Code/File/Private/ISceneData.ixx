@@ -32,6 +32,9 @@ export struct SceneCookOptions
 	int  lodLevels = 4;           // max generated levels beyond LOD0
 	float lodReduction = 0.25f;   // index-count factor per generated level
 	int  lodMinIndices = 32;      // don't generate for meshes below this index count
+	float decimationFactor = 1.0f; // < 1 simplifies every mesh's base geometry to this index-count factor
+	                               // at cook time (unused vertices dropped; LOD chains build on the result).
+	                               // Skinned scenes bypass the cache, so they never decimate.
 };
 
 // Byte ranges a mesh's data occupies in its cooked cache file (see CookedSceneData), so a consumer can

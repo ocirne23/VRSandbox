@@ -384,6 +384,59 @@ void Renderer::setWindowMinimized(bool minimized)
     m_windowMinimized = minimized;
 }
 
+void Renderer::setTerrainBiomeMaterials(std::span<const TerrainBiomeMaterial> mats, uint32 numGround, uint32 numRock, float climateSigma)
+{
+    assert(mats.size() <= RendererVKLayout::MAX_TERRAIN_BIOME_MATERIALS && (size_t)numGround + numRock <= mats.size());
+    assert(mats.size() - numGround - numRock <= 1 && "at most one trailing beach entry");
+    // Replacing a live set: the old images may still be sampled in flight — same deferred free path as
+    // ObjectContainer teardown (processed in present() after the GPU drain). The old material slots are
+    // not recycled (nothing tracks their range), but a set replacement is a rare config-refresh event.
+    m_pendingTextureFrees.insert(m_pendingTextureFrees.end(), m_terrainBiomeTextures.begin(), m_terrainBiomeTextures.end());
+    m_terrainBiomeTextures.clear();
+
+    std::vector<RendererVKLayout::MaterialInfo> materialInfos;
+    materialInfos.reserve(mats.size());
+    for (size_t i = 0; i < mats.size(); ++i)
+    {
+        const TerrainBiomeMaterial& mat = mats[i];
+        RendererVKLayout::MaterialInfo& info = materialInfos.emplace_back();
+        info.flags = 0;
+        info.opacity = 1.0f;
+        info.alphaMode = (uint16)RendererVKLayout::EAlphaMode::Opaque;
+        info.diffuseTexIdx = RendererVKLayout::FALLBACK_DIFFUSE_TEX_IDX;
+        info.normalTexIdx = RendererVKLayout::FALLBACK_NORMAL_TEX_IDX;
+        info.metalRoughnessTexIdx = UINT16_MAX;
+
+        const auto upload = [&](const std::string& path, bool sRGB) -> uint16 {
+            if (path.empty())
+                return UINT16_MAX;
+            const uint16 idx = Globals::textureManager.upload(path.c_str(), true, sRGB);
+            if (idx != UINT16_MAX)
+                m_terrainBiomeTextures.push_back(idx);
+            return idx;
+        };
+        if (const uint16 idx = upload(mat.diffuseDds, true); idx != UINT16_MAX)
+            info.diffuseTexIdx = idx;
+        if (const uint16 idx = upload(mat.normalDds, false); idx != UINT16_MAX)
+        {
+            info.normalTexIdx = idx;
+            const vk::Format normalFormat = Globals::textureManager.getTexture(idx).getFormat();
+            if (normalFormat == vk::Format::eBc5UnormBlock || normalFormat == vk::Format::eBc5SnormBlock)
+                info.flags |= RendererVKLayout::MATERIAL_FLAG_BC5_NORMAL;
+        }
+        if (const uint16 idx = upload(mat.armDds, false); idx != UINT16_MAX)
+            info.metalRoughnessTexIdx = idx;
+
+        m_terrainBiomeCoords[i] = glm::vec4(mat.climateCoords, 0.0f, 0.0f);
+    }
+
+    m_terrainBiomeBaseMaterial = (int32)addMaterialInfos(materialInfos);
+    m_terrainBiomeNumGround = numGround;
+    m_terrainBiomeNumRock = numRock;
+    m_terrainBiomeHasBeach = mats.size() > (size_t)numGround + numRock;
+    m_terrainClimateSigma = climateSigma;
+}
+
 const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 {
     // This frame slot's fence must be waited BEFORE anything writes its host-visible per-frame buffers
@@ -626,8 +679,28 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), glm::max(ocean.shoreFoamDepth, 0.0f), glm::max(ocean.foamBreakAccel, 0.01f));
     ubo.oceanParams6 = glm::vec4(-glm::clamp(ocean.glintSharpness, 0.0f, 3.0f), glm::max(ocean.glintFilter, 0.0f),
         glm::max(ocean.sssStrength, 0.0f), glm::max(ocean.sssPower, 1.0f));
+    ubo.oceanParams7 = glm::vec4(glm::max(ocean.cullMargin, 0.0f), 0.0f, 0.0f, 0.0f);
 
     ubo.terrainFade = m_terrainFade;
+
+    ubo.terrainTexParams0 = glm::vec4(m_terrainBiomeBaseMaterial < 0 ? -1.0f : (float)m_terrainBiomeBaseMaterial,
+        (float)m_terrainBiomeNumGround, (float)m_terrainBiomeNumRock, glm::max(m_terrainClimateSigma * m_terrainTexTweaks.blendScale, 1e-3f));
+    ubo.terrainTexParams1 = glm::vec4(m_terrainTexTweaks.uvScaleGround, m_terrainTexTweaks.uvScaleRock,
+        m_terrainTexTweaks.slopeRockStart, glm::max(m_terrainTexTweaks.slopeRockFull, m_terrainTexTweaks.slopeRockStart + 1e-3f));
+    ubo.terrainTexParams2 = glm::vec4(m_terrainTexTweaks.cragStart, glm::max(m_terrainTexTweaks.cragFull, m_terrainTexTweaks.cragStart + 1e-3f),
+        m_terrainTexTweaks.beachBand, m_terrainTexTweaks.fadeDist);
+    ubo.terrainTexParams3 = glm::vec4(m_terrainBiomeHasBeach ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    static_assert(sizeof(ubo.terrainBiomeCoords) == sizeof(m_terrainBiomeCoords));
+    memcpy(ubo.terrainBiomeCoords, m_terrainBiomeCoords, sizeof(m_terrainBiomeCoords));
+    // The biome textures belong to no rendered instance's material, so the projected-size priority pass
+    // never sees them — report them here instead: terrain tiles them across the whole view, so they can
+    // always display roughly a screen's worth of texels.
+    if (m_terrainBiomeBaseMaterial >= 0)
+    {
+        const float log2Screen = std::log2((float)std::max(m_windowSize.x, m_windowSize.y) * 2.0f);
+        for (const uint16 texIdx : m_terrainBiomeTextures)
+            Globals::textureStreamer.noteUse(texIdx, log2Screen);
+    }
 
     Globals::stagingManager.upload(frameData.ubo.getBuffer(), sizeof(RendererVKLayout::Ubo), &ubo);
 

@@ -1,0 +1,7 @@
+Prefab stone_01
+	Component Render
+		ObjectContainer stone_01
+		Node stone_01
+		Type StaticMesh
+		Position 0, 0, 0
+		Rotation 0, 0, 0

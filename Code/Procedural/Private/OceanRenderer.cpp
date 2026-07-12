@@ -75,6 +75,9 @@ namespace Procedural
 		Tweak::floatVar("Ocean/Shore", "Range (m)", &m_shoreRange, 256.0f, 8192.0f, 32.0f);
 		Tweak::floatVar("Ocean/Shore", "Shoal depth scale", &m_shoalScale, 0.0f, 0.5f, 0.005f);
 		Tweak::floatVar("Ocean/Shore", "Shore foam depth (m)", &m_shoreFoamDepth, 0.0f, 8.0f, 0.05f);
+		// Land cull: clipmap triangles buried deeper than this under the local water level (over their
+		// whole footprint) are discarded in the vertex shaders — no displacement sampling, no raster.
+		Tweak::floatVar("Ocean/Shore", "Cull margin (m)", &m_cullMargin, 0.0f, 20.0f, 0.1f);
 	}
 
 	void OceanRenderer::rebuildGrid()
@@ -232,6 +235,7 @@ namespace Procedural
 		params.turbidity = m_turbidity;
 		params.shoalScale = m_shoalScale;
 		params.shoreFoamDepth = m_shoreFoamDepth;
+		params.cullMargin = m_cullMargin;
 		renderer.setOceanParams(params);
 
 		if (!m_enabled)

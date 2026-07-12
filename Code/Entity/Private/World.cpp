@@ -10,7 +10,6 @@ import :Component;
 import File;
 
 import :AssetRegistry;
-import :ObjectDescription;
 import :AnimationDescription;
 import Animation;
 import Physics;
@@ -109,7 +108,11 @@ static SceneCookOptions makeSceneCookOptions()
 static std::unique_ptr<ISceneData> loadSceneData(const ObjectContainerDesc& desc)
 {
     if (!desc.procedural)
-        return ISceneData::loadCached(desc.path.c_str(), desc.mergeNodes, desc.preTransformVertices, makeSceneCookOptions());
+    {
+        SceneCookOptions options = makeSceneCookOptions();
+        options.decimationFactor = desc.decimationFactor;
+        return ISceneData::loadCached(desc.path.c_str(), desc.mergeNodes, desc.preTransformVertices, options);
+    }
     std::unique_ptr<ISceneData> sceneData = ISceneData::createProceduralLoader();
     if (!sceneData->initialize(desc.path.c_str(), desc.mergeNodes, desc.preTransformVertices))
         sceneData.reset();

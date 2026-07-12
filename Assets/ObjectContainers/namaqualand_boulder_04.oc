@@ -1,0 +1,5 @@
+ObjectContainer namaqualand_boulder_04
+	Path "Models/PolyHaven/namaqualand_boulder_04/namaqualand_boulder_04_2k.gltf"
+	MergeNodes false
+	PreTransformVertices false
+	DecimationFactor 0.01

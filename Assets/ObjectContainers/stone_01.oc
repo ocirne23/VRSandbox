@@ -1,0 +1,4 @@
+ObjectContainer stone_01
+	Path "Models/PolyHaven/stone_01/stone_01_2k.gltf"
+	MergeNodes false
+	PreTransformVertices false

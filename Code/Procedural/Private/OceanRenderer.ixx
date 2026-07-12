@@ -103,6 +103,7 @@ export namespace Procedural
 		float m_shoreRange = 1024.0f;   // world size (m) the baked map covers, centered on the camera
 		float m_shoalScale = 0.05f;     // waves fade below depth = scale * cascade patch size
 		float m_shoreFoamDepth = 1.5f;  // surf band: water-column height (m) that churns white; 0 = off
+		float m_cullMargin = 1.0f;      // VS land cull: footprint buried deeper than this = triangle discarded (0 = off)
 
 		// Bake state (HeightMapBaker: async, one bake at a time; the active map keeps working until the
 		// replacement lands). The map stores raw terrain heights; depth = live sea level - height, so

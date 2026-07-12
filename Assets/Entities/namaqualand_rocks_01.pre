@@ -1,0 +1,7 @@
+Prefab namaqualand_rocks_01
+	Component Render
+		ObjectContainer namaqualand_rocks_01
+		Node namaqualand_rocks_02_d
+		Type StaticMesh
+		Position 0, 0, 0
+		Rotation 0, 0, 0

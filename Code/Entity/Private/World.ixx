@@ -13,7 +13,6 @@ import :Component;
 
 import File;
 import Spatial;
-import :ObjectDescription;
 import :AnimationDescription;
 
 // Flattened collision geometry for one spawnable node (positions + triangle indices, node

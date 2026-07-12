@@ -1,0 +1,5 @@
+ObjectContainer tree_small_02
+	Path "Models/PolyHaven/tree_small_02/tree_small_02_2k.gltf"
+	MergeNodes false
+	PreTransformVertices false
+	DecimationFactor 0.01

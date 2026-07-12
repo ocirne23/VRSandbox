@@ -23,6 +23,7 @@ module;
 #include <cstring>
 #include <cctype>
 #include <cmath>
+#include <cfloat>
 
 module File;
 
@@ -37,6 +38,7 @@ import :IMaterialData;
 import :ITextureData;
 import :INodeData;
 import :CookedSceneData;
+import :TextureConvert;
 
 using namespace SceneCache;
 
@@ -300,6 +302,52 @@ namespace
         return ok;
     }
 
+    // Mips + BC compression + .dds write for an already-decoded RGBA8 image (the shared tail of the
+    // TextureConvert entry points; alpha-coverage preservation is a cooked-scene concern, not needed here).
+    bool compressRgbaToDds(const uint8* pRgba, uint32 width, uint32 height, TextureConvert::EUsage usage, const char* outPath)
+    {
+        dds::DXGI_FORMAT format = dds::DXGI_FORMAT::DXGI_FORMAT_BC1_UNORM;
+        if (usage == TextureConvert::EUsage::NormalMap)
+            format = dds::DXGI_FORMAT::DXGI_FORMAT_BC5_UNORM;
+        else if (usage == TextureConvert::EUsage::Color)
+        {
+            const uint8* pA = pRgba + 3;
+            const size_t numPixels = (size_t)width * height;
+            for (size_t i = 0; i < numPixels; ++i, pA += 4)
+                if (*pA < 250) { format = dds::DXGI_FORMAT::DXGI_FORMAT_BC3_UNORM; break; }
+        }
+
+        const uint32 numMips = 1 + (uint32)std::floor(std::log2((float)std::max(width, height)));
+        std::vector<uint8> fileData(sizeof(dds::Header));
+        dds::write_header(fileData.data(), format, width, height, numMips);
+
+        std::vector<uint8> mipPixels;
+        for (uint32 mip = 0; mip < numMips; ++mip)
+        {
+            const uint32 mipW = std::max(1u, width >> mip);
+            const uint32 mipH = std::max(1u, height >> mip);
+            const uint8* pSrc = pRgba;
+            if (mip > 0)
+            {
+                mipPixels.resize((size_t)mipW * mipH * 4);
+                if (usage == TextureConvert::EUsage::Color)
+                    stbir_resize_uint8_srgb(pRgba, (int)width, (int)height, 0, mipPixels.data(), (int)mipW, (int)mipH, 0, STBIR_RGBA);
+                else
+                    stbir_resize_uint8_linear(pRgba, (int)width, (int)height, 0, mipPixels.data(), (int)mipW, (int)mipH, 0, STBIR_4CHANNEL);
+                pSrc = mipPixels.data();
+            }
+            compressMip(pSrc, mipW, mipH, format, fileData);
+        }
+
+        FILE* pFile = nullptr;
+        fopen_s(&pFile, outPath, "wb");
+        if (!pFile)
+            return false;
+        const bool ok = fwrite(fileData.data(), 1, fileData.size(), pFile) == fileData.size();
+        fclose(pFile);
+        return ok;
+    }
+
     // ---------------------------------------------------------------- cooking
 
     struct CookContext
@@ -343,16 +391,54 @@ namespace
 
         const float reduction = std::clamp(options.lodReduction, 0.05f, 0.75f);
         const int maxLevels = std::min(options.lodLevels, (int)MAX_COOKED_LOD_LEVELS);
+        const float decimation = std::clamp(options.decimationFactor, 0.0f, 1.0f);
 
         ctx.meshes.resize(numMeshes);
         std::vector<glm::vec3> zeroes;
         std::vector<uint32> lodIndices;
+        std::vector<uint32> decimatedIndices, vertexRemap;
+        std::vector<glm::vec3> decimatedAttributes[5];
         for (uint32 meshIdx = 0; meshIdx < numMeshes; ++meshIdx)
         {
             const IMeshData& meshData = *scene.getMesh(meshIdx);
             CookedMesh& cooked = ctx.meshes[meshIdx];
-            const uint32 numVertices = meshData.getNumVertices();
-            const uint32 numIndices = meshData.getNumIndices();
+            uint32 numVertices = meshData.getNumVertices();
+            uint32 numIndices = meshData.getNumIndices();
+            const uint32* pIndices = meshData.getIndices();
+            const glm::vec3* attributes[5] = { meshData.getVertices(), meshData.getNormals(),
+                meshData.getTangents(), meshData.getBitangents(), meshData.getTexCoords() };
+            const bool isColMesh = std::string_view(meshData.getName()).starts_with("Col_");
+
+            // Decimation simplifies the base geometry itself (error-unbounded, target count wins) and
+            // drops the vertices that fall out of use — everything downstream (LOD chains, collision
+            // snapshots, mesh streaming) sees only the decimated mesh. Col_ proxies are authored
+            // collision shapes and keep their exact geometry.
+            if (decimation < 1.0f && !meshData.isSkinned() && !isColMesh && numIndices >= 12)
+            {
+                const size_t targetIndexCount = std::max<size_t>(12, ((size_t)((float)numIndices * decimation)) / 3 * 3);
+                decimatedIndices.resize(numIndices);
+                float resultError = 0.0f;
+                const size_t resultCount = meshopt_simplify(decimatedIndices.data(), pIndices, numIndices,
+                    &attributes[0][0].x, numVertices, sizeof(glm::vec3), targetIndexCount, FLT_MAX, 0, &resultError);
+                if (resultCount >= 3 && resultCount < numIndices)
+                {
+                    meshopt_optimizeVertexCache(decimatedIndices.data(), decimatedIndices.data(), resultCount, numVertices);
+                    vertexRemap.resize(numVertices);
+                    const size_t uniqueVertices = meshopt_optimizeVertexFetchRemap(vertexRemap.data(), decimatedIndices.data(), resultCount, numVertices);
+                    meshopt_remapIndexBuffer(decimatedIndices.data(), decimatedIndices.data(), resultCount, vertexRemap.data());
+                    for (int i = 0; i < 5; ++i)
+                    {
+                        if (!attributes[i])
+                            continue;
+                        decimatedAttributes[i].resize(uniqueVertices);
+                        meshopt_remapVertexBuffer(decimatedAttributes[i].data(), attributes[i], numVertices, sizeof(glm::vec3), vertexRemap.data());
+                        attributes[i] = decimatedAttributes[i].data();
+                    }
+                    numVertices = (uint32)uniqueVertices;
+                    numIndices = (uint32)resultCount;
+                    pIndices = decimatedIndices.data();
+                }
+            }
 
             cooked.nameOffset = ctx.strings.add(meshData.getName());
             cooked.materialIdx = meshData.getMaterialIndex();
@@ -366,14 +452,13 @@ namespace
             auto writeAttribute = [&](const glm::vec3* pData) {
                 return ctx.blob.writeAligned(pData ? pData : zeroes.data(), (size_t)numVertices * sizeof(glm::vec3));
             };
-            cooked.positionsOffset = writeAttribute(meshData.getVertices());
-            cooked.normalsOffset = writeAttribute(meshData.getNormals());
-            cooked.tangentsOffset = writeAttribute(meshData.getTangents());
-            cooked.bitangentsOffset = writeAttribute(meshData.getBitangents());
-            cooked.texCoordsOffset = writeAttribute(meshData.getTexCoords());
-            cooked.indicesOffset = ctx.blob.writeAligned(meshData.getIndices(), (size_t)numIndices * sizeof(uint32));
+            cooked.positionsOffset = writeAttribute(attributes[0]);
+            cooked.normalsOffset = writeAttribute(attributes[1]);
+            cooked.tangentsOffset = writeAttribute(attributes[2]);
+            cooked.bitangentsOffset = writeAttribute(attributes[3]);
+            cooked.texCoordsOffset = writeAttribute(attributes[4]);
+            cooked.indicesOffset = ctx.blob.writeAligned(pIndices, (size_t)numIndices * sizeof(uint32));
 
-            const bool isColMesh = std::string_view(meshData.getName()).starts_with("Col_");
             if (!options.generateLods || meshData.isSkinned() || isColMesh || inAuthoredChain[meshIdx]
                 || numIndices < (uint32)options.lodMinIndices)
                 continue;
@@ -381,8 +466,7 @@ namespace
             // Same policy as the runtime path in ObjectContainer::initializeMeshes, plus a vertex-cache
             // pass on each level (free at cook time). The simplify error is kept per level (scaled to
             // mesh-local units) — the renderer's screen-space-error selection projects it into pixels.
-            const uint32* pIndices = meshData.getIndices();
-            const glm::vec3* pPositions = meshData.getVertices();
+            const glm::vec3* pPositions = attributes[0];
             const float meshScale = meshopt_simplifyScale(&pPositions[0].x, numVertices, sizeof(glm::vec3));
             lodIndices.resize(numIndices);
             uint32 prevIndexCount = numIndices;
@@ -683,6 +767,7 @@ std::unique_ptr<ISceneData> ISceneData::loadCached(const char* filePath, bool me
     optionsHash = fnv1a(mergeNodes, optionsHash);
     optionsHash = fnv1a(preTransformVertices, optionsHash);
     const uint64 nameHash = optionsHash;
+    optionsHash = fnv1a(std::clamp(options.decimationFactor, 0.0f, 1.0f), optionsHash);
     optionsHash = fnv1a(options.convertTextures, optionsHash);
     optionsHash = fnv1a(options.generateLods, optionsHash);
     optionsHash = fnv1a(options.lodLevels, optionsHash);
@@ -737,4 +822,59 @@ std::unique_ptr<ISceneData> ISceneData::loadCached(const char* filePath, bool me
         }
     }
     return imported;
+}
+
+bool TextureConvert::convertToDds(const char* srcPath, EUsage usage, const char* outPath)
+{
+    int w = 0, h = 0, comp = 0;
+    stbi_uc* pDecoded = stbi_load(srcPath, &w, &h, &comp, 4);
+    if (!pDecoded)
+    {
+        Log::warning(std::format("TextureConvert: could not decode '{}'", srcPath));
+        return false;
+    }
+    const bool ok = compressRgbaToDds(pDecoded, (uint32)w, (uint32)h, usage, outPath);
+    stbi_image_free(pDecoded);
+    return ok;
+}
+
+bool TextureConvert::convertPackedToDds(const char* srcPathR, const char* srcPathG, const char* srcPathB, const char* outPath)
+{
+    const char* srcPaths[3] = { srcPathR, srcPathG, srcPathB };
+    std::vector<uint8> rgba;
+    uint32 width = 0, height = 0;
+    for (int channel = 0; channel < 3; ++channel)
+    {
+        if (!srcPaths[channel])
+            continue;
+        int w = 0, h = 0, comp = 0;
+        stbi_uc* pGray = stbi_load(srcPaths[channel], &w, &h, &comp, 1);
+        if (!pGray)
+        {
+            Log::warning(std::format("TextureConvert: could not decode '{}'", srcPaths[channel]));
+            return false;
+        }
+        if (rgba.empty())
+        {
+            width = (uint32)w;
+            height = (uint32)h;
+            rgba.resize((size_t)width * height * 4, 0);
+            uint8* pA = rgba.data() + 3;
+            for (size_t i = 0, n = (size_t)width * height; i < n; ++i, pA += 4)
+                *pA = 255;
+        }
+        else if ((uint32)w != width || (uint32)h != height)
+        {
+            Log::warning(std::format("TextureConvert: '{}' is {}x{}, expected {}x{} (all packed sources must match)", srcPaths[channel], w, h, width, height));
+            stbi_image_free(pGray);
+            return false;
+        }
+        uint8* pDst = rgba.data() + channel;
+        for (size_t i = 0, n = (size_t)width * height; i < n; ++i, pDst += 4)
+            *pDst = pGray[i];
+        stbi_image_free(pGray);
+    }
+    if (rgba.empty())
+        return false;
+    return compressRgbaToDds(rgba.data(), width, height, EUsage::Data, outPath);
 }

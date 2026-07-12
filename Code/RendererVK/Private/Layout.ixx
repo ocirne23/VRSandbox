@@ -82,6 +82,8 @@ export namespace RendererVKLayout
                                              // the map went RG->RGBA so its memory stayed flat (~0.5m -> 1m
                                              // texels over the default 1km range)
 
+    constexpr uint32 MAX_TERRAIN_BIOME_MATERIALS = 24; // UBO capacity for terrain splat materials (ground + rock)
+
     struct MeshVertex
     {
         glm::vec3 position;
@@ -264,9 +266,29 @@ export namespace RendererVKLayout
         glm::vec4 oceanParams6;    // x = glint mip bias (negative = sharper shading normals),
                                    // y = glint variance filter scale (spec AA + LEAN roughness),
                                    // z = crest SSS strength (0 = off), w = crest SSS forward-lobe power
+        glm::vec4 oceanParams7;    // x = land cull margin (m): clipmap triangles whose whole footprint is
+                                   // buried deeper than this under the local water level are VS-culled
+                                   // (oceanVertexCulled; 0 = off), yzw unused
         glm::vec4 terrainFade;     // TERRAIN variant edge fade: x = fade-start dist, y = fade-end dist
                                    // (radial from camera XZ), z = target height (sea level), w = extra drop
                                    // below z at the edge (avoids z-fighting the ocean). y<=x disables.
+
+        // TERRAIN variant biome texture splatting (Renderer::setTerrainBiomeMaterials; keep in sync with
+        // ubo.inc.glsl). Materials are CONTIGUOUS in the material buffer: [base .. base+numGround) are
+        // ground biomes, [base+numGround .. base+numGround+numRock) the steep-slope rock layer.
+        glm::vec4 terrainTexParams0; // x = base material idx (< 0 = no texture set: flat-color fallback),
+                                     // y = ground biome count, z = rock entry count,
+                                     // w = climate kernel sigma (Gaussian width in (t01,h01) space)
+        glm::vec4 terrainTexParams1; // x = ground uv scale (1/m), y = rock uv scale (1/m),
+                                     // z = slope where rock fades in, w = slope where rock is full
+        glm::vec4 terrainTexParams2; // x = crag relief start (m above macro altitude), y = crag relief full,
+                                     // z = beach band height (m above water level),
+                                     // w = texture fade-out END distance (m; blends back to flat colors,
+                                     //     fade starts at half this, 0 = never)
+        glm::vec4 terrainTexParams3; // x = dedicated beach material present (0/1; the beach entry, when
+                                     // present, is always the LAST registered material: index base +
+                                     // numGround + numRock), yzw unused
+        glm::vec4 terrainBiomeCoords[MAX_TERRAIN_BIOME_MATERIALS]; // xy = (t01, h01) climate attractor, zw unused
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

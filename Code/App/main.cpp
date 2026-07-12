@@ -65,6 +65,11 @@ int main()
     Procedural::TerrainStreamer terrain;
     terrain.initialize();
 
+    // Terrain object scattering: biome-driven trees/rocks placed per cell on a worker thread from the
+    // same climate field the terrain renders. Declared after the renderer for the same teardown order.
+    Procedural::ScatterSystem scatter;
+    scatter.initialize();
+
     // Procedural ocean: one camera-following graded grid, GPU-displaced into Gerstner waves by the Ocean
     // pipeline variant. Declared after the renderer so it frees its RenderNode/container before the device.
     Procedural::OceanRenderer ocean;
@@ -103,6 +108,13 @@ int main()
     entities.push_back(world.spawnAssetFile("Entities/sponza.pre", Transform(), false));
     entities.push_back(world.spawnAssetFile("Entities/skysphere.pre", Transform(), false));
     entities.push_back(world.spawnAssetFile("Entities/character.pre", Transform()));
+
+    // Poly Haven PBR vegetation/rock test assets, placed near the camera start for a quick visual check.
+    const glm::quat identityQuat(1.0f, 0.0f, 0.0f, 0.0f);
+    entities.push_back(world.spawnAssetFile("Entities/namaqualand_rocks_01.pre", Transform(glm::vec3(4.0f, 0.0f, -2.0f), 1.0f, identityQuat)));
+    entities.push_back(world.spawnAssetFile("Entities/namaqualand_boulder_04.pre", Transform(glm::vec3(4.0f, 0.0f, 0.0f), 1.0f, identityQuat)));
+    entities.push_back(world.spawnAssetFile("Entities/stone_01.pre", Transform(glm::vec3(4.0f, 0.0f, 2.0f), 1.0f, identityQuat)));
+    entities.push_back(world.spawnAssetFile("Entities/tree_small_02.pre", Transform(glm::vec3(6.0f, 0.0f, 0.0f), 1.0f, identityQuat)));
 
     GizmoController gizmo;
     gizmo.initialize(world);
@@ -340,8 +352,10 @@ int main()
         }
 
         terrain.update(renderer, camera);
-        // The terrain's height field feeds the ocean's shore-depth bake (shoaling + surf at the coast).
+        // The terrain's height field feeds the ocean's shore-depth bake (shoaling + surf at the coast)
+        // and drives the object scattering (both clear themselves while terrain is disabled).
         ocean.update(renderer, camera, terrain.activeClimateMaps());
+        scatter.update(renderer, camera, terrain.activeClimateMaps());
 
         if (gizmo.isVisible())
             gizmo.getGizmoEntity()->update(renderer, (float)deltaSec);

@@ -14,6 +14,9 @@ public:
     ~TextureManager();
     //uint16 upload(const std::vector<ITextureData*>& textureData, bool generateMips);
     uint16 upload(const ITextureData& textureData, bool generateMips, bool sRGB = false);
+    // Standalone texture file (e.g. a terrain biome .dds): same slot/streaming/descriptor handling as the
+    // ITextureData path, resolved relative to the working directory (Assets/).
+    uint16 upload(const char* filePath, bool generateMips, bool sRGB = false);
     // Destroys a texture (ObjectContainer teardown) and recycles its slot for a later upload. The caller
     // guarantees the GPU is idle (Renderer::processPendingTextureFrees); unregisters from the
     // TextureStreamer and queues a fallback rewrite of the slot's bindless descriptor entries.
@@ -42,6 +45,8 @@ public:
     uint32 getDescriptorCap() const;
 
 private:
+
+    uint16 uploadImpl(const std::function<bool(Texture&)>& initialize);
 
     std::vector<Texture> m_textures;
     std::vector<uint16> m_freeSlots; // freed by ObjectContainer teardown, recycled by upload()

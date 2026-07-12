@@ -1,0 +1,5 @@
+ObjectContainer namaqualand_rocks_01
+	Path "Models/PolyHaven/namaqualand_rocks_01/namaqualand_rocks_01_2k.gltf"
+	MergeNodes false
+	PreTransformVertices false
+	DecimationFactor 0.05
