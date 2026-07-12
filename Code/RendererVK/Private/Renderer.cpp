@@ -712,7 +712,12 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), glm::max(ocean.shoreFoamDepth, 0.0f), glm::max(ocean.foamBreakAccel, 0.01f));
     ubo.oceanParams6 = glm::vec4(-glm::clamp(ocean.glintSharpness, 0.0f, 3.0f), glm::max(ocean.glintFilter, 0.0f),
         glm::max(ocean.sssStrength, 0.0f), glm::max(ocean.sssPower, 1.0f));
-    ubo.oceanParams7 = glm::vec4(glm::max(ocean.cullMargin, 0.0f), 0.0f, 0.0f, 0.0f);
+    // Swash reach: conservative max run-up height from the wave-amplitude readback (trough estimate ~
+    // crest scale) — sizes the on-land sampling band and keeps the vertex cull off the wet beach.
+    const float swashAmp = glm::clamp(ocean.swashAmp, 0.0f, 4.0f);
+    const float swashReach = swashAmp * (m_oceanWaveTrough + 0.25f);
+    ubo.oceanParams7 = glm::vec4(glm::max(ocean.cullMargin, 0.0f), glm::clamp(ocean.shoreFoamMax, 0.0f, 1.0f), swashAmp, swashReach);
+    ubo.oceanParams8 = glm::vec4(glm::max(ocean.swashDrawdown, 0.0f), glm::clamp(ocean.shoreFoamBias, -1.0f, 1.0f), 0.0f, 0.0f);
 
     ubo.terrainParams = m_terrainParams;
 

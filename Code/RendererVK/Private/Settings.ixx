@@ -131,12 +131,12 @@ export struct FogParams
     float shaftBoost = 10.0f;        // non-physical gain on the underwater sun in-scatter (fog only, not
                                     // surfaces): water scatters little at fog densities, so physically
                                     // correct shafts are faint — this makes them readable. 1 = physical.
-    float causticStrength = 2.0f;   // underwater caustic focus (fold-Jacobian light pattern on submerged
+    float causticStrength = 1.5f;   // underwater caustic focus (fold-Jacobian light pattern on submerged
                                     // surfaces + fog shafts; underwater_light.inc.glsl): 0 = off, > 1
                                     // exaggerated. Beer-Lambert depth absorption is separate (Ocean/Absorption).
-    float causticDepthFade = 0.02f; // caustic contrast decay with depth (1/m) — approximates defocus;
+    float causticDepthFade = 0.25f; // caustic contrast decay with depth (1/m) — approximates defocus;
                                     // higher = the pattern washes out closer to the surface
-    float causticShoreFade = 1.5f;  // caustic contrast ramps in over this much water depth (m), so the
+    float causticShoreFade = 0.1f;  // caustic contrast ramps in over this much water depth (m), so the
                                     // pattern dissolves at the terrain-waterline intersection; 0 = off
     float underwaterDensity = 0.7f; // multiplier on the global density at/below the LOCAL water surface
                                     // (terrain data map water level; always-on murk, immune to regional
@@ -307,6 +307,14 @@ export struct OceanParams
     // surf/foam band where the water column vanishes at the waterline.
     float shoalScale     = 0.05f; // shoaling depth as a fraction of each cascade's patch size
     float shoreFoamDepth = 1.5f;  // water-column height (m) below which the waterline churns white; 0 = off
+    float shoreFoamMax   = 0.65f; // surf band opacity cap: shore foam coverage never exceeds this, so the
+                                  // refracted bottom stays visible through the lace (whitecaps unaffected)
+    float swashAmp       = 0.5f;  // swash run-up: scale on the un-shoaled wave height riding through the
+                                  // waterline and up the beach (waves crash and flow over; 0 = hard cutoff)
+    float swashDrawdown  = 0.3f;  // m below the seabed a receding swash surface sinks: deeper = steeper,
+                                  // cleaner cut against the sand (shallow grazes sawtooth the retreat edge)
+    float shoreFoamBias  = 0.0f;  // shifts the surf fold threshold: negative = sparser lace / more
+                                  // transparent shore waves, positive = denser churn
     float cullMargin     = 1.0f;  // land cull: clipmap triangles whose whole footprint is buried deeper
                                   // than this under the local water level are VS-culled (0 = off)
 };

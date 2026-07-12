@@ -179,6 +179,26 @@ struct SceneHit
     vec3 albedo;
 };
 
+// Seabed albedo for terrain hits: terrain colors procedurally in its own pipeline variant (the
+// material's diffuse slot is only a fallback), so a raw material fetch shades the bottom flat white —
+// which reads as opaque milk through shallow water. Underwater/shoreline terrain is overwhelmingly the
+// beach layer, so sample the dedicated beach splat by world XZ (same UVs the terrain FS uses); flat
+// sand when no texture set is registered yet. rayT drives the same distance mip as the material fetch.
+vec3 terrainSeabedAlbedo(vec2 worldXZ, float rayT)
+{
+    if (u_terrainTexParams3.x > 0.5)
+    {
+        const uint beachMatIdx = uint(u_terrainTexParams0.x) + uint(u_terrainTexParams0.y) + uint(u_terrainTexParams0.z);
+        if (beachMatIdx < in_materialInfos.length())
+        {
+            const uint sandTexIdx = in_materialInfos[beachMatIdx].diffuseNormalTexIdx & 0xFFFFu;
+            const float lod = clamp(log2(max(rayT, 1.0)) + 1.0, 0.0, 7.0);
+            return textureLod(u_textures[nonuniformEXT(sandTexIdx)], worldXZ * u_terrainTexParams1.x, lod).rgb;
+        }
+    }
+    return vec3(0.32, 0.28, 0.22);
+}
+
 bool traceScene(vec3 origin, vec3 dir, float tMax, out SceneHit hit)
 {
     rayQueryEXT rq;
@@ -223,9 +243,14 @@ bool traceScene(vec3 origin, vec3 dir, float tMax, out SceneHit hit)
                 const uint materialIdx = in_instances[instanceIdx].meshIdxMaterialIdx >> 16;
                 if (materialIdx < in_materialInfos.length())
                 {
-                    const uint diffuseTexIdx = in_materialInfos[materialIdx].diffuseNormalTexIdx & 0x0000FFFFu;
-                    const float lod = clamp(log2(max(hit.t, 1.0)) + 1.0, 0.0, 7.0); // ray-cone-ish LOD by distance
-                    hit.albedo = textureLod(u_textures[nonuniformEXT(diffuseTexIdx)], uv, lod).rgb;
+                    if ((in_materialInfos[materialIdx].flags & MATERIAL_FLAG_TERRAIN) != 0u)
+                        hit.albedo = terrainSeabedAlbedo(hit.pos.xz, hit.t);
+                    else
+                    {
+                        const uint diffuseTexIdx = in_materialInfos[materialIdx].diffuseNormalTexIdx & 0x0000FFFFu;
+                        const float lod = clamp(log2(max(hit.t, 1.0)) + 1.0, 0.0, 7.0); // ray-cone-ish LOD by distance
+                        hit.albedo = textureLod(u_textures[nonuniformEXT(diffuseTexIdx)], uv, lod).rgb;
+                    }
                 }
             }
         }
@@ -319,8 +344,38 @@ void main()
         const float column = max(shoreDepth, 0.0) + waveH;      // instantaneous water column at this pixel
         const float nearShore = 1.0 - smoothstep(shoreFoamDepth, 4.0 * shoreFoamDepth, shoreDepth);
         const float bore = max(waveH, 0.0) / max(column, 0.05); // crest fraction of the column (bore front)
-        shoreFoam = nearShore * smoothstep(0.4, 0.8, bore);
-        shoreFoam = max(shoreFoam, 1.0 - smoothstep(0.0, 0.35 * shoreFoamDepth, column)); // waterline lace
+        // Coverage TARGET from the analytic drivers: the breaking bore front + the waterline band.
+        float target = nearShore * smoothstep(0.4, 0.8, bore);
+        target = max(target, 1.0 - smoothstep(0.0, 0.35 * shoreFoamDepth, column));
+
+        // ...realized THROUGH the wave field's fold pattern, like the whitecap foam, instead of painting
+        // the gradient directly. The DISPLAYED waves are shoal-faded to flat here, so their jacobian is
+        // patternless — sample the raw (un-shoaled) open-ocean fold Jacobian instead: filaments along the
+        // swell's convergence lines that advect with it. The fold threshold rises with the target, so
+        // light surf shows only the filaments and heavy surf fills in from those lines outward — dense
+        // churn at the bore front/waterline breaking into streaks and gaps toward open water.
+        float sxx = 0.0, szz = 0.0, sxz = 0.0;
+        const float chop = u_oceanParams0.w;
+        const float fp = length(fwidth(in_pos.xz));
+        for (int c = 0; c < OCEAN_CASCADES; ++c)
+        {
+            const float Lc = u_oceanParams2[c];
+            const float lod = max(log2(max(fp, 1e-3) * float(OCEAN_FFT_SIZE) / Lc), 0.0);
+            const vec2 uvc = in_uv / Lc;
+            const vec4 g = textureLod(u_oceanMaps, vec3(uvc, float(OCEAN_CASCADES + c)), lod); // (dh/dx, dh/dz, dDx/dx, dDz/dz)
+            sxx += g.z;
+            szz += g.w;
+            sxz += textureLod(u_oceanMaps, vec3(uvc, float(c)), lod).w; // displacement layer w = dDx/dz
+        }
+        const float Jraw = (1.0 + chop * sxx) * (1.0 + chop * szz) - chop * sxz * chop * sxz;
+        // Fold threshold: filaments only -> nearly filled; "Shore foam bias" shifts the whole range
+        // (negative = sparser lace, more transparent surf).
+        const float b = mix(0.75, 1.45, target) + u_oceanParams8.y;
+        shoreFoam = target * (1.0 - smoothstep(b - 0.4, b + 0.4, Jraw));
+        // Coverage cap: surf is lace over water, not paint — keep the band below full foam so the
+        // refracted bottom stays visible through it ("Shore foam max"). Open-ocean whitecaps (foam)
+        // are unaffected and can still saturate.
+        shoreFoam = min(shoreFoam, u_oceanParams7.y);
     }
     const float ns = u_oceanParams1.w;
     vec3 N = normalize(vec3(-slope.x * ns, 1.0, -slope.y * ns));
@@ -410,17 +465,26 @@ void main()
                 // the baked terrain height field instead (shore map + fog cascade fallback, valid for many
                 // km): intersect the refracted ray with the water column analytically and shade a flat
                 // ground-albedo pseudo-hit; the absorption/inscatter composition below is identical.
-                float depth = oceanSampleShoreDepth(in_pos.xz);
-                float t = depth / -refrDir.y;
-                depth = oceanSampleShoreDepth(in_pos.xz + refrDir.xz * t); // one refinement for sloped shelves
-                if (depth > 0.0)
-                {
-                    hit.t = clamp(depth / -refrDir.y, 0.0, 4.6 / minSigma);
-                    hit.pos = in_pos + refrDir * hit.t;
-                    hit.N = vec3(0.0, 1.0, 0.0);
-                    hit.albedo = vec3(1.0);
-                    haveHit = true;
-                }
+                // Bottom distance measured from the SURFACE POINT (in_pos.y - terrain height), not from
+                // the calm water level: at the waterline the calm-level depth crosses 0 and rejected the
+                // pseudo-hit, leaving the deep-water inscatter as a blue line along the shore — and the
+                // swash tongue (surface above the calm line, terrain centimeters below) always has a
+                // positive bottom distance this way. Doubly important here because the RT ray's tMin
+                // (5 cm) guarantees a miss in exactly that band.
+                // Never reject: these pixels only rasterized because REAL terrain stood behind the
+                // water in the depth test, so a bottom always exists — but the baked map is decimeters
+                // off the rendered mesh, and on rising beaches the refined sample lands inland where the
+                // map reads above the surface. A negative estimate just means "the bottom is right
+                // here": clamp to a centimeters-deep hit instead of falling back to the deep-water
+                // inscatter (which drew a blue line along every map-vs-mesh disagreement).
+                float bottom = in_pos.y - oceanSampleShoreData(in_pos.xz).x;
+                const float t = max(bottom, 0.02) / -refrDir.y;
+                bottom = in_pos.y - oceanSampleShoreData(in_pos.xz + refrDir.xz * t).x; // one refinement for sloped shelves
+                hit.t = clamp(max(bottom, 0.02) / -refrDir.y, 0.0, 4.6 / minSigma);
+                hit.pos = in_pos + refrDir * hit.t;
+                hit.N = vec3(0.0, 1.0, 0.0);
+                hit.albedo = terrainSeabedAlbedo(hit.pos.xz, hit.t);
+                haveHit = true;
             }
             if (haveHit)
             {

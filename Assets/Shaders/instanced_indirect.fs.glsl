@@ -126,7 +126,15 @@ vec3 doSunLight(vec3 worldPos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOver
 	// water-level fetch + a branch above water; only underwater pixels pay for the wave taps.
 	if (terrainHeightMapPresent())
 	{
-		const float depthBelow = terrainDataAt(worldPos.xz).y - worldPos.y;
+		float depthBelow = terrainDataAt(worldPos.xz).y - worldPos.y;
+		// Swash band: gate against the LIVE displaced surface, not the calm level — a receded wave
+		// leaves sand below the calm line dry (no caustics/absorption tint on exposed bottom), and the
+		// run-up tongue is lit as underwater while it covers the beach. Points deeper than the swash
+		// reach are underwater at any wave phase and skip the wave taps (u_oceanParams7.w is 0 with
+		// swash off, so this is free for non-swash setups).
+		const float swashReach = u_oceanParams7.w;
+		if (swashReach > 0.0 && abs(depthBelow) < swashReach)
+			depthBelow += underwaterLiveWaveY(worldPos.xz, depthBelow);
 		if (depthBelow > 0.0)
 			lightRadiance *= underwaterSunTransmittance(worldPos.xz, depthBelow, 0.0, 1.0); // surfaces: physical reach
 	}

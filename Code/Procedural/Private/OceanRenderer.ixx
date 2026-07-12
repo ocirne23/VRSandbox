@@ -68,10 +68,10 @@ export namespace Procedural
 		float m_detailBias = 0.0f;
 
 		// --- Spectrum (TMA/JONSWAP + finite-depth dispersion) + shading; all live via setOceanParams ---
-		float m_windSpeed = 7.5f;     // U10 (m/s): the main sea-state knob
+		float m_windSpeed = 20.0f;     // U10 (m/s): the main sea-state knob
 		float m_fetchKm = 300.0f;      // wind fetch (km)
 		float m_depth = 100.0f;        // ocean depth (m): finite-depth dispersion + TMA attenuation
-		float m_windAngle = 0.45f;     // radians (XZ heading of the dominant swell)
+		float m_windAngle = 3.14f;     // radians (XZ heading of the dominant swell)
 		float m_amplitude = 1.0f;      // artistic scale on the spectrum (1 = physical)
 		float m_choppiness = 1.1f;     // horizontal displacement lambda
 		float m_normalStrength = 1.0f;
@@ -101,8 +101,12 @@ export namespace Procedural
 		// --- Shore interaction (terrain height bake; see updateShoreMap) ---
 		bool  m_shoreEnabled = true;
 		float m_shoreRange = 1024.0f;   // world size (m) the baked map covers, centered on the camera
-		float m_shoalScale = 0.05f;     // waves fade below depth = scale * cascade patch size
-		float m_shoreFoamDepth = 1.5f;  // surf band: water-column height (m) that churns white; 0 = off
+		float m_shoalScale = 0.015f;     // waves fade below depth = scale * cascade patch size
+		float m_shoreFoamDepth = 8.0f;  // surf band: water-column height (m) that churns white; 0 = off
+		float m_shoreFoamMax = 0.75f;   // surf band opacity cap: keeps the refracted bottom visible through the foam
+		float m_swashAmp = 0.5f;        // swash run-up: un-shoaled wave height riding up the beach (0 = hard cutoff)
+		float m_swashDrawdown = 0.3f;   // receding burial depth (m below seabed): deeper = cleaner retreat edge
+		float m_shoreFoamBias = -0.33f;   // surf fold-threshold shift: negative = sparser/more transparent surf
 		float m_cullMargin = 1.0f;      // VS land cull: footprint buried deeper than this = triangle discarded (0 = off)
 
 		// Bake state (HeightMapBaker: async, one bake at a time; the active map keeps working until the

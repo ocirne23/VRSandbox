@@ -520,6 +520,8 @@ void ObjectContainer::initializeMaterials(const ISceneData& sceneData, TempInitD
             // depth/normal it writes match the forward Ocean variant (TAA reprojection, RTAO reads).
             if (pOverrides->pipelineIdx == RendererVKLayout::EPipelineIndex::Ocean)
                 material.flags |= RendererVKLayout::MATERIAL_FLAG_OCEAN;
+            if (pOverrides->pipelineIdx == RendererVKLayout::EPipelineIndex::TerrainLit)
+                material.flags |= RendererVKLayout::MATERIAL_FLAG_TERRAIN;
         }
         if (pOverrides && !pOverrides->useSceneTextures)
         {

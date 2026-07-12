@@ -26,6 +26,30 @@ layout (binding = UNDERWATER_OCEAN_BINDING) uniform sampler2DArray u_uwOceanMaps
 // ATTENUATION terms see (absorption + contrast fade + defocus), stretching how far shafts survive
 // without moving the pattern (the geometric entry point uses the true depth); 1 = physical. The fog
 // passes sqrt of its shaft boost so brightness and length grow together; surfaces pass 1.
+// Live wave height (m, relative to the calm local water level): mirrors the vertex displacement's
+// VERTICAL logic — shoal-faded cascades plus the swash run-up residual (no flow rotation / choppy XZ,
+// close enough for gating). Lets callers test "underwater" against the INSTANTANEOUS surface instead of
+// the calm level, so sand exposed by a receding swash reads as dry (no caustics/absorption) and the
+// run-up tongue reads as covered. columnDepth = calm water depth at the point (drives the shoal fades).
+float underwaterLiveWaveY(vec2 worldXZ, float columnDepth)
+{
+    float y = 0.0, rawY = 0.0;
+    for (int c = 0; c < OCEAN_CASCADES; ++c)
+    {
+        const float L = u_oceanParams2[c];
+        const float d = textureLod(u_uwOceanMaps, vec3(worldXZ / L, float(c)), 0.0).y;
+        rawY += d;
+        y += d * smoothstep(0.0, max(u_oceanParams4.z * L, 0.01), columnDepth); // oceanShoalFade
+    }
+    // Swash run-up residual — mirrors oceanSwashWeight (ocean_wave.inc.glsl): amplitude x land-height
+    // decay x wide fade-in (~2 swash reaches of approach depth, floored by the mid-cascade shoal band).
+    const float reach = max(u_oceanParams7.w, 0.01);
+    const float landFade = clamp(1.0 + min(columnDepth, 0.0) / reach, 0.0, 1.0);
+    const float fadeIn = 1.0 - smoothstep(0.0, max(2.0 * reach, u_oceanParams4.z * u_oceanParams2.y), columnDepth);
+    y += rawY * u_oceanParams7.z * landFade * fadeIn;
+    return y;
+}
+
 vec3 underwaterSunTransmittance(vec2 worldXZ, float depthBelow, float footprint, float reach)
 {
     const vec3 sunDir = normalize(u_sunDirection.xyz);

@@ -270,7 +270,11 @@ export namespace RendererVKLayout
                                    // z = crest SSS strength (0 = off), w = crest SSS forward-lobe power
         glm::vec4 oceanParams7;    // x = land cull margin (m): clipmap triangles whose whole footprint is
                                    // buried deeper than this under the local water level are VS-culled
-                                   // (oceanVertexCulled; 0 = off), yzw unused
+                                   // (oceanVertexCulled; 0 = off),
+                                   // y = shore foam max coverage (surf band opacity cap),
+                                   // z = swash amplitude (0 = off), w = swash reach (m, CPU estimate)
+        glm::vec4 oceanParams8;    // x = swash drawdown burial (m below the seabed when receding),
+                                   // y = shore foam threshold bias (negative = sparser surf), zw unused
         glm::vec4 terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                                    // 0 = no terrain mesh up — fences the ocean land cull), y unused,
                                    // z = sea level (world Y, live from the streamer), w unused
@@ -404,6 +408,9 @@ export namespace RendererVKLayout
                                                           // the shader reconstructs Z instead of reading .z
     constexpr uint32 MATERIAL_FLAG_OCEAN = 1u << 28; // ocean water: the G-buffer prepass vertex shader Gerstner-
                                                      // displaces these instances so depth/normal match the forward pass
+    constexpr uint32 MATERIAL_FLAG_TERRAIN = 1u << 27; // terrain chunk: colors procedurally (TERRAIN variant), the
+                                                       // material's diffuse slot is a fallback — RT hits (ocean
+                                                       // refraction) substitute the beach splat instead
 
     struct alignas(16) MaterialInfo
     {

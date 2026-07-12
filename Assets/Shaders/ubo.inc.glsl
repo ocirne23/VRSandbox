@@ -118,7 +118,15 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // z = crest SSS strength (0 = off), w = crest SSS forward-lobe power
     vec4 u_oceanParams7;    // x = land cull margin (m): clipmap triangles whose whole footprint is
                             // buried deeper than this under the local water level are VS-culled
-                            // (oceanVertexCulled; 0 = off), yzw unused
+                            // (oceanVertexCulled; 0 = off),
+                            // y = shore foam max coverage (surf band opacity cap),
+                            // z = swash amplitude (scale on the un-shoaled wave height running up the
+                            // beach, 0 = off), w = swash reach (m; CPU estimate of max run-up height —
+                            // sizes the land sampling band and relaxes the vertex cull)
+    vec4 u_oceanParams8;    // x = swash drawdown burial (m below the seabed a receding surface sinks;
+                            // deeper = steeper, cleaner cut against the sand),
+                            // y = shore foam threshold bias (shifts the surf fold threshold:
+                            // negative = sparser/more transparent surf), zw unused
     vec4 u_terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                             // 0 = no terrain mesh up — fences the ocean land cull), y unused,
                             // z = sea level (world Y, live from the streamer), w unused
