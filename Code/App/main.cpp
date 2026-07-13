@@ -275,8 +275,7 @@ int main()
             const glm::mat4 camToWorld = glm::inverse(camera.viewMatrix);
             const glm::vec3 camDir = glm::normalize(-glm::vec3(camToWorld[2]));
             const glm::vec3 camUp = glm::normalize(glm::vec3(camToWorld[1]));
-            Globals::scriptContext.update((float)deltaSec, (float)Globals::time.getElapsedSec(),
-                camera.position, camDir, camUp, camera.fovDeg);
+            Globals::scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
             audio.setListener(camera.position, camDir, camUp);
         }
 
@@ -298,6 +297,7 @@ int main()
         const Frustum& frustum = renderer.beginFrame(camera);
 
         spatialIndex.commitFrame(); // applies cell moves queued during last frame's entity updates
+        spatialIndex.setCullMaxDist(camera.far); // cull to exactly the view distance, not a fixed cap
         const SpatialCullingConfig& cullingConfig = spatialIndex.getCullingConfig();
         if (cullingConfig.mode != int(ESpatialCullMode::Off) && !cullingConfig.freeze)
         {

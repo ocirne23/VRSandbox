@@ -30,6 +30,8 @@ public:
         Camera camera;
         camera.position = m_position;
         camera.viewMatrix = m_viewMatrix;
+        camera.near = m_near;
+        camera.far = m_far;
         return camera;
     }
 
@@ -42,6 +44,8 @@ private:
     float m_boostMultiplier = 10.0f;
     float m_speed = 5.0f;
     float m_sensitivity = 0.01f;
+    float m_near = 0.01f;
+    float m_far = 5000.0f;
     glm::vec2 m_lastMousePos;
     glm::vec3 m_position;
     glm::vec3 m_direction;

@@ -6,7 +6,7 @@ Prefab skysphere
 		ObjectContainer skysphere
 		Node ROOT
 		Type StaticMesh
-		Scale 8000
+		Scale 100
 	Component Script
 		Path Scripts/Sky.scr
 		Enabled true

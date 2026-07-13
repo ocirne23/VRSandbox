@@ -107,7 +107,7 @@ export struct SpatialCullingConfig
     float margin = 4.0f;             // frustum inflation masking the one-frame stamp latency
     float nearRadius = 0.0f;       // shadow-caster + ray-tracing relevance range around the camera
     float nearSlack = 16.0f;         // Near ball inflation; requery only after the camera moves this far (0 = every frame)
-    float maxDist = 5000.0f;
+    float maxDist = 5000.0f; // main-pass cull distance; overwritten each frame with the camera far plane (setCullMaxDist)
     float skinnedRadiusScale = 1.5f; // animation can exceed the bind-pose bounds sphere
 };
 

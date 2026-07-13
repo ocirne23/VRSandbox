@@ -104,7 +104,7 @@ private:
     float m_giTemporalAlpha = 0.005f;  // per-frame blend toward freshly traced irradiance
     float m_giMaxRayDist = 8.0f;       // gather ray max distance (world units)
     float m_giStrength = 1.0f;         // multiplier on the sampled probe irradiance at shading time
-    float m_tlasRange = 512.0f;        // TLAS instance range bound around the camera (origin distance)
+    float m_tlasRange = 4096.0f;        // TLAS instance range bound around the camera (origin distance)
 
     // SH-L1 depth visibility (Chebyshev) lookup tuning. Higher variance floor / lower power = softer,
     // temporally stabler occlusion edges (the L1 depth estimate wobbles with the per-frame ray jitter);

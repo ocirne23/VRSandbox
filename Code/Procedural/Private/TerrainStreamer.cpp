@@ -191,7 +191,7 @@ namespace Procedural
 
 		Tweak::boolean("Terrain", "Enabled", &m_enabled);
 		Tweak::intVar("Terrain", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
-		Tweak::floatVar("Terrain", "Chunk size (m)", &m_chunkSize, 16.0f, 1024.0f, 1.0f, dirty);
+		Tweak::intVar("Terrain", "Chunk size (m)", &m_chunkSize, 16, 1024, 1.0f, dirty);
 		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 4, 512, 1.0f, dirty);
 		Tweak::intVar("Terrain", "Range (chunks)", &m_ringRadius, 1, 64, 1.0f); // max generation radius from the camera chunk
 		Tweak::floatVar("Terrain", "LOD step (chunks)", &m_lodStep, 0.1f, 4.0f, 0.1f); // LOD0 band width; each next band doubles
@@ -449,6 +449,7 @@ namespace Procedural
 
 	void TerrainStreamer::update(Renderer& renderer, const Camera& camera)
 	{
+		m_terrainMapFarRange = camera.far;
 		if (m_configDirty)
 		{
 			m_configDirty = false;
@@ -467,7 +468,7 @@ namespace Procedural
 
 		updateTerrainTextures(renderer);
 
-		const float chunkSize = m_chunkSize;
+		const float chunkSize = (float)m_chunkSize;
 		const int camCX = (int)std::floor(camera.position.x / chunkSize);
 		const int camCZ = (int)std::floor(camera.position.z / chunkSize);
 		const int R = glm::max(1, m_ringRadius);

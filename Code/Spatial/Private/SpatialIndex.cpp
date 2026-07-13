@@ -61,7 +61,7 @@ void SpatialIndex::initialize(const SpatialIndexDesc& desc)
     Tweak::floatVar("Spatial/Culling", "Margin", &m_culling.margin, 0.0f, 64.0f, 0.1f);
     Tweak::floatVar("Spatial/Culling", "Near radius", &m_culling.nearRadius, 0.0f, 4096.0f, 1.0f);
     Tweak::floatVar("Spatial/Culling", "Near requery slack", &m_culling.nearSlack, 0.0f, 128.0f, 0.5f);
-    Tweak::floatVar("Spatial/Culling", "Max dist", &m_culling.maxDist, 1.0f, 1'000'000.0f, 10.0f);
+    // Max dist is not tweaked: it's driven every frame from the render camera's far plane (setCullMaxDist).
     Tweak::floatVar("Spatial/Culling", "Skinned radius scale", &m_culling.skinnedRadiusScale, 1.0f, 4.0f, 0.01f);
 }
 

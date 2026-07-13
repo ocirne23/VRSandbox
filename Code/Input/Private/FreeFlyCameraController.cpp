@@ -25,6 +25,8 @@ void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, g
 
     // The controller outlives the registration (owned by main for the app's lifetime).
     Tweak::floatVar("Editor", "Speed", &m_speed, 0.1f, 200.0f, 0.1f);
+    Tweak::floatVar("Editor", "Camera Near", &m_near, 0.001f, 10.0f, 0.001f);
+    Tweak::floatVar("Editor", "Camera Far", &m_far, 500.0f, 65536.0f, 500.0f);
 
     m_mouseListener = Globals::input.addMouseListener();
     m_mouseListener->onMousePressed = [this](const SDL_MouseButtonEvent& evt)

@@ -36,6 +36,7 @@ struct Entity
 #else
 class Entity;
 #endif
+struct Camera; // engine render camera; only the host-only update() below touches it (scripts never see it)
 
 // Services the host exposes to scripts. The host fills these in; scripts only call them.
 typedef struct ScriptContext
@@ -50,6 +51,8 @@ typedef struct ScriptContext
     glm::vec3 cameraDirection; // forward, normalized
     glm::vec3 cameraUp;        // normalized
     float     cameraFovDeg;
+    float     cameraNear;
+	float     cameraFar;
 
     void  (*log)(const char* message);
     void  (*logf)(const char* message, ...);
@@ -127,13 +130,14 @@ typedef struct ScriptContext
     Entity* (*spatialGetNearestEntity)(glm::vec3 position, float maxRadius, Entity* exclude);
 
 #ifdef __cplusplus
+#ifndef SCRIPT_BUILD
     ScriptContext(); // the engine binds all the function pointers here; scripts never construct one
 
-    // Refreshes the per-frame fields above. Called once per frame by the host (main.cpp), before any script
-    // runs; scripts never call this themselves. Defined in ScriptContext.cpp (needs Core.Time), so this
-    // header stays dependency-free.
-    void update(float newDeltaSeconds, float newElapsedSeconds,
-        glm::vec3 newCameraPosition, glm::vec3 newCameraDirection, glm::vec3 newCameraUp, float newCameraFovDeg);
+    // Refreshes the per-frame fields above from the frame's active render camera. Called once per frame by the
+    // host (main.cpp), before any script runs; scripts never call this themselves (it's compiled out of script
+    // DLLs, so the engine Camera type never leaks across the ABI). Defined in ScriptContext.cpp.
+    void update(const Camera& camera, float newDeltaSeconds, float newElapsedSeconds);
+#endif
 #endif
 } ScriptContext;
 

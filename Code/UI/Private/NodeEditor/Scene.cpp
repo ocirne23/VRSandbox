@@ -1456,6 +1456,7 @@ std::string Scene::generateCpp()
         ed::SetCurrentEditor(m_nodeEditorContext);
 
     std::string code;
+    code += "#define SCRIPT_BUILD 1\n";
     code += "#include \"ScriptAPI.h\"\n";
 
     // The Script Data node becomes a persistent struct. The host reads its byte size through ScriptDataSize()

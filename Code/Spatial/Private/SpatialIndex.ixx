@@ -79,6 +79,9 @@ public:
 
     const SpatialStats& getStats() const { return m_stats; }
     const SpatialCullingConfig& getCullingConfig() const { return m_culling; }
+    // The main-pass cull distance tracks the render camera's far plane (driven per frame by the App),
+    // so terrain/entities stream to exactly the view distance rather than a fixed cap.
+    void setCullMaxDist(float maxDist) { m_culling.maxDist = maxDist; }
 
 private:
 

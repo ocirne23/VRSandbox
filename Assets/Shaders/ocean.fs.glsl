@@ -101,6 +101,12 @@ layout (binding = 10, std430) readonly buffer GiGridData { float gi_gridData[]; 
 #include "gi_probe.inc.glsl"
 
 #include "rt_shadow.inc.glsl"       // rtShadowVisibility + the alpha-masked candidate test
+
+// Sun CSM (PCSS) fallback when RT sun shadows are off — bindings 8/9 exist set-wide (the forward set
+// layout is shared with the static-mesh pass, which binds the same maps).
+layout (binding = 8) uniform sampler2DArrayShadow u_shadowMap;      // comparison sampler (hardware PCF)
+layout (binding = 9) uniform sampler2DArray u_shadowMapDepth;       // raw depth (PCSS blocker search)
+#include "shadows.inc.glsl"
 #include "punctual_lights.inc.glsl" // point/spot/area/tube evaluation + RT light shadows (shared with the forward pass)
 
 layout (location = 0) in vec3 in_pos;                       // displaced world position
@@ -436,7 +442,9 @@ void main()
     // shadow-gated (no glowing crests in terrain shadow).
     const vec3 sunTint = u_sunColor.rgb * atmosTransmittanceToLight(0.0, L, up) * u_eclipseParams.x;
     const bool sunUp = L.y > 0.0 && (NoL > 0.0 || u_oceanParams6.z > 0.0);
-    const float sunVis = sunUp ? rtShadowVisibility(in_pos + N * 0.1, L, 0.05, 10000.0) : 0.0;
+    const float sunVis = !sunUp ? 0.0
+        : (u_rtSunShadow > 0.5 ? rtShadowVisibility(in_pos + N * 0.1, L, 0.05, 10000.0)
+                               : sampleSunShadow(in_pos, N)); // PCSS cascades, same split as the lit pass
     const vec3 ambientSky = skyRadiance(up);
     // Diffusely lit whitewater: used for the crest foam and (dimmer) the entrained-bubble milkiness.
     const vec3 whitewater = u_oceanFoam.rgb * (sunTint * (NoL * sunVis) / PI + ambientSky + u_ambientColor);

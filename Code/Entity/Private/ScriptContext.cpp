@@ -13,6 +13,7 @@ import Core.Time;
 import Core.SDL;
 import Core.Sphere;
 import Core.Transform;
+import Core.Camera;
 import RendererVK;
 import Animation;
 import Physics;
@@ -316,14 +317,18 @@ ScriptContext::ScriptContext()
 }
 
 // Refreshes the per-frame fields; called once a frame (main.cpp) before any script runs this frame.
-void ScriptContext::update(float newDeltaSeconds, float newElapsedSeconds,
-    glm::vec3 newCameraPosition, glm::vec3 newCameraDirection, glm::vec3 newCameraUp, float newCameraFovDeg)
+void ScriptContext::update(const Camera& camera, float newDeltaSeconds, float newElapsedSeconds)
 {
     deltaSeconds = newDeltaSeconds;
     elapsedSeconds = newElapsedSeconds;
-    cameraPosition = newCameraPosition;
-    cameraDirection = newCameraDirection;
-    cameraUp = newCameraUp;
-    cameraFovDeg = newCameraFovDeg;
+
+    // Forward/up are derived from the inverse view matrix (its -Z / Y columns).
+    const glm::mat4 camToWorld = glm::inverse(camera.viewMatrix);
+    cameraPosition = camera.position;
+    cameraDirection = glm::normalize(-glm::vec3(camToWorld[2]));
+    cameraUp = glm::normalize(glm::vec3(camToWorld[1]));
+    cameraFovDeg = camera.fovDeg;
+    cameraNear = camera.near;
+    cameraFar = camera.far;
 }
 

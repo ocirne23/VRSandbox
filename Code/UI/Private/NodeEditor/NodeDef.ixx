@@ -507,8 +507,10 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "Position",  D::Vec3,  "", 0, "ctx->cameraPosition" },
             { "Direction", D::Vec3,  "", 0, "ctx->cameraDirection" },
             { "Up",        D::Vec3,  "", 0, "ctx->cameraUp" },
-            { "Fov",       D::Float, "", 0, "ctx->cameraFovDeg" } },
-        "" });
+            { "Fov",       D::Float, "", 0, "ctx->cameraFovDeg" },
+            { "Near",       D::Float, "", 0, "ctx->cameraNear" },
+            { "Far",       D::Float, "", 0, "ctx->cameraFar" },
+        }, "" });
 
     // ---- math ----
     // -- mutable math nodes -- 
