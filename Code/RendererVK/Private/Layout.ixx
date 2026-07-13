@@ -289,9 +289,7 @@ export namespace RendererVKLayout
         glm::vec4 terrainTexParams1; // x = ground uv scale (1/m), y = rock uv scale (1/m),
                                      // z = slope where rock fades in, w = slope where rock is full
         glm::vec4 terrainTexParams2; // x = crag relief start (m above macro altitude), y = crag relief full,
-                                     // z = beach band height (m above water level),
-                                     // w = texture fade-out END distance (m; blends back to flat colors,
-                                     //     fade starts at half this, 0 = never)
+                                     // z = beach band height (m above water level), w = unused
         glm::vec4 terrainTexParams3; // x = dedicated beach material present (0/1; the beach entry, when
                                      // present, is always the LAST registered material: index base +
                                      // numGround + numRock), yzw unused

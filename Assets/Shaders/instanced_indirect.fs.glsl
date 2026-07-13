@@ -210,44 +210,6 @@ TerrainFields terrainFields(vec3 worldPos)
 	return f;
 }
 
-// Procedural flat-color terrain albedo: the far-distance / no-texture-set fallback (and the GI-facing
-// approximation of the splatted result).
-vec3 terrainFlatAlbedo(vec3 worldPos, vec3 N, TerrainFields f)
-{
-	const vec3 sand   = vec3(0.76, 0.70, 0.50);
-	const vec3 steppe = vec3(0.55, 0.52, 0.33);
-	const vec3 grass  = vec3(0.26, 0.42, 0.17);
-	const vec3 jungle = vec3(0.10, 0.30, 0.12);
-	const vec3 rock   = vec3(0.37, 0.34, 0.31);
-	const vec3 snow   = vec3(0.90, 0.93, 0.97);
-
-	const float seaLevel = u_terrainParams.z;
-	const float h = worldPos.y - seaLevel;
-	const float slope = 1.0 - clamp(N.y, 0.0, 1.0);
-	// Cheap value noise to break up band edges.
-	const float n = fract(sin(dot(floor(worldPos.xz * 0.08), vec2(12.9898, 78.233))) * 43758.5453) * 2.0 - 1.0;
-
-	// Ground cover by climate: dry -> sand/steppe, mild -> grass, saturated -> deep jungle green.
-	vec3 col = mix(sand, steppe, smoothstep(0.08, 0.25, f.humidity + n * 0.02));
-	col = mix(col, grass, smoothstep(0.25, 0.50, f.humidity + n * 0.02));
-	col = mix(col, jungle, smoothstep(0.65, 0.95, f.humidity));
-
-	// Beach band just above the local waterline (sea or a river/lake surface at altitude).
-	const float aboveWater = worldPos.y - f.waterLevel;
-	col = mix(sand, col, smoothstep(0.4, 3.0 + n, aboveWater));
-
-	// Mountain-ness: local relief ABOVE the macro altitude — a ridge poking out of a plateau reads as
-	// rock while a high-altitude grassland stays grass. Steep faces are bare rock regardless.
-	const float crag = smoothstep(10.0, 45.0, h - f.altitude);
-	col = mix(col, rock, max(crag * 0.85, smoothstep(0.45, 0.70, slope + n * 0.03)));
-
-	// Snow where it's COLD (the generator's altitude lapse + climate bands decide, not raw height);
-	// steep faces shed it. Temperature is in Celsius: snow fades in below ~-8C, full by ~-19C.
-	const float snowAmt = smoothstep(-8.5, -19.0, f.temperature) * (1.0 - smoothstep(0.5, 0.75, slope));
-	col = mix(col, snow, snowAmt);
-	return col;
-}
-
 // --- Biome texture splatting (setTerrainBiomeMaterials; u_terrainTexParams*/u_terrainBiomeCoords) ------
 // Ground biomes are climate attractors in the generator's (t01, h01) space: per-pixel Gaussian weights
 // select the top two, their textures blend, and a rock layer (its own climate-picked attractor set)
@@ -356,15 +318,15 @@ void terrainWeighted(inout TerrainSample acc, TerrainSample s, float w)
 	acc.ao     += s.ao * w;
 }
 
-// The full splatted terrain surface. Returns false when no texture set is bound or the pixel is past the
-// fade-out distance (caller falls back to the flat-color path).
-bool terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f, float distFade, out TerrainSample surf)
+// The full splatted terrain surface. When no texture set is bound yet (early startup, before the biome DDS
+// bake registers) it returns a neutral mid-gray so the material reads stay in bounds.
+TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f)
 {
 	const int baseMat = int(u_terrainTexParams0.x);
 	const int numGround = int(u_terrainTexParams0.y);
 	const int numRock = int(u_terrainTexParams0.z);
-	if (baseMat < 0 || numGround <= 0 || distFade >= 1.0)
-		return false;
+	if (baseMat < 0 || numGround <= 0)
+		return TerrainSample(vec3(0.5), geoN, 0.92, 0.0, 1.0);
 
 	// Climate position of this pixel in the generator's (t01, h01) attractor space. The baked
 	// temperature includes the altitude lapse, so cold peaks drift toward the Tundra/Arctic attractors
@@ -458,17 +420,7 @@ bool terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f, float distFade, out
 	}
 
 	surfAcc.normal = normalize(surfAcc.normal);
-	// Far fade back to the flat colors + geometric normal (hides tiling, spares texture cache).
-	if (distFade > 0.0)
-	{
-		surfAcc.albedo = mix(surfAcc.albedo, terrainFlatAlbedo(worldPos, geoN, f), distFade);
-		surfAcc.normal = normalize(mix(surfAcc.normal, geoN, distFade));
-		surfAcc.rough  = mix(surfAcc.rough, 0.92, distFade);
-		surfAcc.metal  = mix(surfAcc.metal, 0.0, distFade);
-		surfAcc.ao     = mix(surfAcc.ao, 1.0, distFade);
-	}
-	surf = surfAcc;
-	return true;
+	return surfAcc;
 }
 #endif
 
@@ -486,26 +438,12 @@ void main()
 #ifdef TERRAIN
 	const vec3 geoN = normalize(in_tbn[2]); // geometric (interpolated vertex) normal
 	const TerrainFields fields = terrainFields(in_pos);
-	// Texture fade-out band: [end/2 .. end] of camera distance blends back to the flat colors.
-	const float fadeEnd = u_terrainTexParams2.w;
-	const float distFade = fadeEnd > 0.0 ? smoothstep(fadeEnd * 0.5, fadeEnd, distance(u_viewPos, in_pos)) : 0.0;
-	float terrainTexAO = 1.0;
-	TerrainSample surf;
-	if (terrainSplat(in_pos, geoN, fields, distFade, surf))
-	{
-		materialColor = surf.albedo;
-		N = surf.normal;
-		roughness = surf.rough;
-		metalness = surf.metal;
-		terrainTexAO = surf.ao;
-	}
-	else
-	{
-		N = geoN;
-		materialColor = terrainFlatAlbedo(in_pos, geoN, fields);
-		roughness = 0.92;
-		metalness = 0.0;
-	}
+	const TerrainSample surf = terrainSplat(in_pos, geoN, fields);
+	materialColor = surf.albedo;
+	N = surf.normal;
+	roughness = surf.rough;
+	metalness = surf.metal;
+	const float terrainTexAO = surf.ao;
 #else
 	const uint16_t materialIdx   = uint16_t((in_meshIdxMaterialIdx & 0xFFFF0000) >> 16);
 	const MaterialInfo material  = in_materialInfos[materialIdx];

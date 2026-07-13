@@ -191,7 +191,7 @@ namespace Procedural
 
 		Tweak::boolean("Terrain", "Enabled", &m_enabled);
 		Tweak::intVar("Terrain", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
-		Tweak::intVar("Terrain", "Chunk size (m)", &m_chunkSize, 16, 1024, 1.0f, dirty);
+		Tweak::intVar("Terrain", "Chunk size (m)", &m_chunkSize, 128, 1024, 1.0f, dirty);
 		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 4, 512, 1.0f, dirty);
 		Tweak::intVar("Terrain", "Range (chunks)", &m_ringRadius, 1, 64, 1.0f); // max generation radius from the camera chunk
 		Tweak::floatVar("Terrain", "LOD step (chunks)", &m_lodStep, 0.1f, 4.0f, 0.1f); // LOD0 band width; each next band doubles
@@ -204,6 +204,8 @@ namespace Procedural
 		// coloring all read these cascades. Disabling it degrades all three.
 		Tweak::boolean("Terrain", "Terrain data map", &m_terrainMapEnabled);
 		Tweak::floatVar("Terrain", "Data map range (m)", &m_terrainMapRange, 256.0f, 8192.0f, 32.0f);
+		// Floor for the far cascade world size: the actual range is raised to cover the resident mesh ring
+		// (2*(R+1)*chunkSize) so distant terrain never reads clamp-to-edge frozen altitude/temperature.
 		Tweak::floatVar("Terrain", "Data map far range (m)", &m_terrainMapFarRange, 1024.0f, 65536.0f, 256.0f);
 
 		// Terrain biome texture splatting (TERRAIN pipeline variant; pushed to the renderer every frame
@@ -215,7 +217,6 @@ namespace Procedural
 		Tweak::floatVar("Terrain/Textures", "Crag relief start (m)", &m_texCragStart, 0.0f, 200.0f);
 		Tweak::floatVar("Terrain/Textures", "Crag relief full (m)", &m_texCragFull, 0.0f, 400.0f);
 		Tweak::floatVar("Terrain/Textures", "Beach band (m)", &m_texBeachBand, 0.0f, 20.0f);
-		Tweak::floatVar("Terrain/Textures", "Fade distance (m)", &m_texFadeDist, 0.0f, 20000.0f);
 		Tweak::floatVar("Terrain/Textures", "Blend width scale", &m_texBlendScale, 0.25f, 6.0f);
 
 		Tweak::floatVar("Terrain/V2", "Biome size (m)", &m_v2BiomeSize, 8.0f, 8000.0f, 10.0f, dirty);  // climate-field feature size
@@ -273,7 +274,6 @@ namespace Procedural
 			.cragStart = m_texCragStart,
 			.cragFull = m_texCragFull,
 			.beachBand = m_texBeachBand,
-			.fadeDist = m_texFadeDist,
 			.blendScale = m_texBlendScale,
 		});
 
@@ -429,12 +429,12 @@ namespace Procedural
 	// packed fog|falloff|temp|hum, macro altitude. Consumers: the volumetric fog's terrain follow + regional
 	// thickness, the ocean's shore-map fallback, and the TERRAIN pipeline's coloring. (The renderer-side
 	// API keeps the historical "FogTerrainHeightMap" name — fog was its first consumer.)
-	void TerrainStreamer::updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& maps)
+	void TerrainStreamer::updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& maps, float farRange)
 	{
 		const bool active = m_terrainMapEnabled && maps != nullptr;
 		HeightMapBaker::Baked baked;
 		if (m_terrainMapBaker.update(baked, active, maps, glm::vec2(camera.position.x, camera.position.z),
-			glm::vec2(glm::max(m_terrainMapRange, 256.0f), m_terrainMapFarRange),
+			glm::vec2(glm::max(m_terrainMapRange, 256.0f), farRange),
 			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4)) // RGBA: height, water level, fog|falloff|temp|hum, altitude
 		{
 			renderer.setFogTerrainHeightMap(baked.texels, baked.center, baked.ranges, maps->seaLevel());
@@ -461,7 +461,7 @@ namespace Procedural
 		{
 			if (!m_residents.empty() || !m_pending.empty())
 				clearResidents();
-			updateFogHeightMap(renderer, camera, nullptr); // no terrain -> no terrain-following fog
+			updateFogHeightMap(renderer, camera, nullptr, m_terrainMapFarRange); // no terrain -> no terrain-following fog
 			renderer.setTerrainParams(0.0f, m_seaLevel);   // no mesh up: disables the ocean land cull
 			return;
 		}
@@ -488,7 +488,13 @@ namespace Procedural
 			generation = m_generation;
 		}
 
-		updateFogHeightMap(renderer, camera, maps);
+		// The far cascade must cover the whole resident mesh, else terrain past its edge reads clamp-to-edge
+		// (frozen altitude/temperature -> distant inland looks uniformly cold/snowy, ignoring the inland
+		// rise). The mesh reaches ~(R+1)*chunkSize from the camera on each axis; the map is a centered
+		// square of side = range, so range must be at least twice that. Keep the tweak as a floor.
+		const float meshHalfExtent = (float)(R + 1) * chunkSize;
+		const float farRange = glm::max(m_terrainMapFarRange, 2.0f * meshHalfExtent);
+		updateFogHeightMap(renderer, camera, maps, farRange);
 
 		// Ring membership is CLOSED FORM: the column at Chebyshev distance cheb from the camera chunk
 		// wants ringLodAt(cheb) (geometric bands), nothing outside R. Every "is this still wanted"

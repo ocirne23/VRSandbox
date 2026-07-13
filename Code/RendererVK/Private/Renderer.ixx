@@ -183,7 +183,6 @@ public:
         float cragStart = 12.0f;
         float cragFull = 50.0f;
         float beachBand = 2.5f;
-        float fadeDist = 3000.0f;
         float blendScale = 1.5f; // multiplies the generator's climate sigma for TEXTURE blends only
     };
     void setTerrainTextureParams(const TerrainTexTweaks& params) { m_terrainTexTweaks = params; }

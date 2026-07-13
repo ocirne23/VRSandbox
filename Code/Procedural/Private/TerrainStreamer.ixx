@@ -76,13 +76,13 @@ export namespace Procedural
 		std::shared_ptr<const ITerrainSampler> currentMaps();
 		// Bakes/refreshes the fog terrain height map around the camera (Renderer::setFogTerrainHeightMap);
 		// maps == nullptr means "no terrain" and clears the map. See the .cpp for the bake scheme.
-		void updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& maps);
+		void updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& maps, float farRange);
 
 		// --- Tweak-backed configuration (source of truth; the generator/ChunkParams are built from these) ---
 		bool  m_enabled = true;
 		int   m_seed = 62500;
-		int   m_chunkSize = 256;
-		int   m_lod0Res = 256;
+		int   m_chunkSize = 512;
+		int   m_lod0Res = 512;
 		int   m_ringRadius = 32;   // max generation range from the camera chunk, in chunks
 		float m_lodStep = 1.0f;   // LOD0 band width in chunks (fractional ok); each next LOD band is twice as wide (geometric)
 		int   m_maxLod = 4;
@@ -98,8 +98,8 @@ export namespace Procedural
 		float  m_v2BorderWarp = 300.0f;    // domain warp on the biome lookup (wiggly borders)
 		float  m_v2OceanFraction = 0.42f;  // fraction of the world that is Ocean
 		float  m_v2ContinentFreq = 0.00005f; // continent/ocean scale (~25km: few, huge oceans)
-		float  m_v2InlandRise = 500.0f;    // altitude gain (m) from coast to deep inland
-		float  m_v2OceanDeepen = 200.0f;    // extra seabed depth (m) toward mid-ocean
+		float  m_v2InlandRise = 1024.0;    // altitude gain (m) from coast to deep inland
+		float  m_v2OceanDeepen = 400.0f;    // extra seabed depth (m) toward mid-ocean
 		float  m_v2TempLapse = 0.0012f;    // temperature drop per meter of altitude (snowy peaks)
 		float  m_v2ClimateBandAmp = 0.25f; // continent-scale hot/cold band strength
 		float  m_v2HeightScale = 1.0f;     // global multiplier on the biome height table
@@ -142,7 +142,6 @@ export namespace Procedural
 		float m_texCragStart = 12.0f;      // crag relief start (m above macro altitude)
 		float m_texCragFull = 50.0f;
 		float m_texBeachBand = 2.5f;       // beach band height (m above water level)
-		float m_texFadeDist = 3000.0f;     // texture fade-out END distance (m; 0 = never)
 		float m_texBlendScale = 1.5f;      // multiplies the climate kernel sigma for TEXTURE blends only
 
 		// --- Threading ---

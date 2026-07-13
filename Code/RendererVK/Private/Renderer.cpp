@@ -727,7 +727,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.terrainTexParams1 = glm::vec4(m_terrainTexTweaks.uvScaleGround, m_terrainTexTweaks.uvScaleRock,
         m_terrainTexTweaks.slopeRockStart, glm::max(m_terrainTexTweaks.slopeRockFull, m_terrainTexTweaks.slopeRockStart + 1e-3f));
     ubo.terrainTexParams2 = glm::vec4(m_terrainTexTweaks.cragStart, glm::max(m_terrainTexTweaks.cragFull, m_terrainTexTweaks.cragStart + 1e-3f),
-        m_terrainTexTweaks.beachBand, m_terrainTexTweaks.fadeDist);
+        m_terrainTexTweaks.beachBand, 0.0f);
     ubo.terrainTexParams3 = glm::vec4(m_terrainBiomeHasBeach ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
     static_assert(sizeof(ubo.terrainBiomeCoords) == sizeof(m_terrainBiomeCoords));
     memcpy(ubo.terrainBiomeCoords, m_terrainBiomeCoords, sizeof(m_terrainBiomeCoords));

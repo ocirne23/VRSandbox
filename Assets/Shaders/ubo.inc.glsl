@@ -140,8 +140,7 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_terrainTexParams1; // x = ground uv scale (1/m), y = rock uv scale (1/m),
                               // z = slope where rock fades in, w = slope where rock is full
     vec4 u_terrainTexParams2; // x = crag relief start (m above macro altitude), y = crag relief full,
-                              // z = beach band height (m above water level),
-                              // w = texture fade-out END distance (m; fade starts at half this, 0 = never)
+                              // z = beach band height (m above water level), w = unused
     vec4 u_terrainTexParams3; // x = dedicated beach material present (0/1; when present it's always the
                               // LAST registered material: index base + numGround + numRock), yzw unused
     vec4 u_terrainBiomeCoords[MAX_TERRAIN_BIOME_MATERIALS]; // xy = (t01, h01) climate attractor, zw unused
