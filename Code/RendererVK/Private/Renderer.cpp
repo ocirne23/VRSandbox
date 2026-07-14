@@ -405,21 +405,22 @@ void Renderer::setWindowMinimized(bool minimized)
     m_windowMinimized = minimized;
 }
 
-void Renderer::setTerrainBiomeMaterials(std::span<const TerrainBiomeMaterial> mats, uint32 numGround, uint32 numRock, float climateSigma)
+void Renderer::setTerrainSplatMaterials(std::span<const TerrainSplatMaterial> mats, const TerrainSplatCounts& counts)
 {
-    assert(mats.size() <= RendererVKLayout::MAX_TERRAIN_BIOME_MATERIALS && (size_t)numGround + numRock <= mats.size());
-    assert(mats.size() - numGround - numRock <= 1 && "at most one trailing beach entry");
+    assert(mats.size() <= RendererVKLayout::MAX_TERRAIN_SPLAT_MATERIALS);
+    assert((size_t)counts.numGround + counts.numRock + (counts.hasBeach ? 1 : 0) + (counts.hasSnow ? 1 : 0) == mats.size()
+        && "counts must describe the whole [ground][rock][beach?][snow?] span");
     // Replacing a live set: the old images may still be sampled in flight — same deferred free path as
     // ObjectContainer teardown (processed in present() after the GPU drain). The old material slots are
     // not recycled (nothing tracks their range), but a set replacement is a rare config-refresh event.
-    m_pendingTextureFrees.insert(m_pendingTextureFrees.end(), m_terrainBiomeTextures.begin(), m_terrainBiomeTextures.end());
-    m_terrainBiomeTextures.clear();
+    m_pendingTextureFrees.insert(m_pendingTextureFrees.end(), m_terrainSplatTextures.begin(), m_terrainSplatTextures.end());
+    m_terrainSplatTextures.clear();
 
     std::vector<RendererVKLayout::MaterialInfo> materialInfos;
     materialInfos.reserve(mats.size());
     for (size_t i = 0; i < mats.size(); ++i)
     {
-        const TerrainBiomeMaterial& mat = mats[i];
+        const TerrainSplatMaterial& mat = mats[i];
         RendererVKLayout::MaterialInfo& info = materialInfos.emplace_back();
         info.flags = 0;
         info.opacity = 1.0f;
@@ -433,7 +434,7 @@ void Renderer::setTerrainBiomeMaterials(std::span<const TerrainBiomeMaterial> ma
                 return UINT16_MAX;
             const uint16 idx = Globals::textureManager.upload(path.c_str(), true, sRGB);
             if (idx != UINT16_MAX)
-                m_terrainBiomeTextures.push_back(idx);
+                m_terrainSplatTextures.push_back(idx);
             return idx;
         };
         if (const uint16 idx = upload(mat.diffuseDds, true); idx != UINT16_MAX)
@@ -448,14 +449,16 @@ void Renderer::setTerrainBiomeMaterials(std::span<const TerrainBiomeMaterial> ma
         if (const uint16 idx = upload(mat.armDds, false); idx != UINT16_MAX)
             info.metalRoughnessTexIdx = idx;
 
-        m_terrainBiomeCoords[i] = glm::vec4(mat.climateCoords, 0.0f, 0.0f);
     }
 
-    m_terrainBiomeBaseMaterial = (int32)addMaterialInfos(materialInfos);
-    m_terrainBiomeNumGround = numGround;
-    m_terrainBiomeNumRock = numRock;
-    m_terrainBiomeHasBeach = mats.size() > (size_t)numGround + numRock;
-    m_terrainClimateSigma = climateSigma;
+    m_terrainSplatBaseMaterial = (int32)addMaterialInfos(materialInfos);
+    m_terrainSplatCounts = counts;
+}
+
+void Renderer::setTerrainSplatClimate(std::span<const glm::vec4> boxes)
+{
+    assert(boxes.size() <= RendererVKLayout::MAX_TERRAIN_SPLAT_MATERIALS);
+    memcpy(m_terrainSplatClimate, boxes.data(), boxes.size() * sizeof(glm::vec4));
 }
 
 const Frustum& Renderer::beginFrame(const Camera& cameraIn)
@@ -722,22 +725,30 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 
     ubo.terrainParams = m_terrainParams;
 
-    ubo.terrainTexParams0 = glm::vec4(m_terrainBiomeBaseMaterial < 0 ? -1.0f : (float)m_terrainBiomeBaseMaterial,
-        (float)m_terrainBiomeNumGround, (float)m_terrainBiomeNumRock, glm::max(m_terrainClimateSigma * m_terrainTexTweaks.blendScale, 1e-3f));
-    ubo.terrainTexParams1 = glm::vec4(m_terrainTexTweaks.uvScaleGround, m_terrainTexTweaks.uvScaleRock,
-        m_terrainTexTweaks.slopeRockStart, glm::max(m_terrainTexTweaks.slopeRockFull, m_terrainTexTweaks.slopeRockStart + 1e-3f));
-    ubo.terrainTexParams2 = glm::vec4(m_terrainTexTweaks.cragStart, glm::max(m_terrainTexTweaks.cragFull, m_terrainTexTweaks.cragStart + 1e-3f),
-        m_terrainTexTweaks.beachBand, 0.0f);
-    ubo.terrainTexParams3 = glm::vec4(m_terrainBiomeHasBeach ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
-    static_assert(sizeof(ubo.terrainBiomeCoords) == sizeof(m_terrainBiomeCoords));
-    memcpy(ubo.terrainBiomeCoords, m_terrainBiomeCoords, sizeof(m_terrainBiomeCoords));
-    // The biome textures belong to no rendered instance's material, so the projected-size priority pass
+    const TerrainTexTweaks& tex = m_terrainTexTweaks;
+    // Every start/full pair is ordered here rather than in the shader: an inverted pair from the tweak
+    // UI would otherwise make smoothstep divide by a negative span and flip the layer inside out.
+    ubo.terrainTexParams0 = glm::vec4(m_terrainSplatBaseMaterial < 0 ? -1.0f : (float)m_terrainSplatBaseMaterial,
+        (float)m_terrainSplatCounts.numGround, (float)m_terrainSplatCounts.numRock, glm::max(tex.climateBlend, 1e-3f));
+    ubo.terrainTexParams1 = glm::vec4(tex.uvScaleGround, tex.uvScaleRock,
+        tex.slopeRockStart, glm::max(tex.slopeRockFull, tex.slopeRockStart + 1e-3f));
+    ubo.terrainTexParams2 = glm::vec4(tex.cragStart, glm::max(tex.cragFull, tex.cragStart + 1e-3f),
+        tex.beachBand, tex.uvScaleSnow);
+    ubo.terrainTexParams3 = glm::vec4(m_terrainSplatCounts.hasBeach ? 1.0f : 0.0f, m_terrainSplatCounts.hasSnow ? 1.0f : 0.0f,
+        tex.snowTempFull, glm::max(tex.snowTempNone, tex.snowTempFull + 1e-3f));
+    ubo.terrainTexParams4 = glm::vec4(tex.snowSlopeStart, glm::max(tex.snowSlopeFull, tex.snowSlopeStart + 1e-3f),
+        tex.snowAridity, 0.0f);
+    ubo.terrainTexParams5 = glm::vec4(glm::max(tex.cragWanderAmp, 0.0f),
+        1.0f / glm::max(tex.cragWanderWavelength, 1.0f), 0.0f, 0.0f);
+    static_assert(sizeof(ubo.terrainSplatClimate) == sizeof(m_terrainSplatClimate));
+    memcpy(ubo.terrainSplatClimate, m_terrainSplatClimate, sizeof(m_terrainSplatClimate));
+    // The splat textures belong to no rendered instance's material, so the projected-size priority pass
     // never sees them — report them here instead: terrain tiles them across the whole view, so they can
     // always display roughly a screen's worth of texels.
-    if (m_terrainBiomeBaseMaterial >= 0)
+    if (m_terrainSplatBaseMaterial >= 0)
     {
         const float log2Screen = std::log2((float)std::max(m_windowSize.x, m_windowSize.y) * 2.0f);
-        for (const uint16 texIdx : m_terrainBiomeTextures)
+        for (const uint16 texIdx : m_terrainSplatTextures)
             Globals::textureStreamer.noteUse(texIdx, log2Screen);
     }
 

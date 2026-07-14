@@ -20,19 +20,45 @@ namespace Procedural::Diffusion
 		constexpr int32 COARSE_TILE_STRIDE = 48;
 		constexpr int32 COARSE_STEPS = 20;
 		constexpr int32 LATENT_TILE_SIZE = 64;
-		constexpr int32 LATENT_TILE_STRIDE = 32;
+		// MUST be exactly LATENT_TILE_SIZE / 2. This is NOT a tunable overlap/cost dial, however much it
+		// looks like one — the latent stage silently produces a garbage world at any other value. Measured,
+		// on a region whose correct elevation is 3017..5708 m (100% land):
+		//     stride 16 -> -128..1661 m,  93% land   (wrong)
+		//     stride 32 ->  3017..5708 m, 100% land  (correct)
+		//     stride 48 -> -4494..-4263 m,  0% land  (mountain range comes out as deep ocean)
+		//     stride 64 -> -4483..-3892 m,  0% land
+		// Only SIZE/2 is right, and 64 being just as broken as 48 rules out any coarse-lattice alignment
+		// story: at 50% overlap the tent windows sum to exactly 1 (a partition of unity), and this stage
+		// depends on that. Blending LATENTS is not blending outputs — the weight-channel normalisation that
+		// makes the other stages stride-agnostic does not rescue this one.
+		// The failure is silent and does not look like a bug: overlapping windows still AGREE with each
+		// other to 7 cm, so the tile-agreement check reports "consistent" while the terrain is inverted.
+		// Only an absolute elevation check catches it (DiffusionTest's native-region dump).
+		constexpr int32 LATENT_TILE_STRIDE = LATENT_TILE_SIZE / 2;
 
 		// Batch sizes, chosen from measured DirectML scaling on these models rather than the reference's
-		// values (it uses 4 for latent and never batches coarse):
-		//   base    43.7 ms/item @1 -> 32.9 @4 -> 21.9 @8   (dispatch-bound: batch hard)
-		//   coarse   6.1 ms/item @1 ->  4.9 @4 ->  3.3 @8   (dispatch-bound)
-		//   decoder 48.8 ms/item @1 -> 59.7 @4 -> 51.9 @8   (COMPUTE-bound: batching is pointless, so the
-		//                                                    decoder stage deliberately stays unbatched)
+		// values (it uses 4 for latent and never batches coarse). Per-item cost at batch 1 -> 4 -> 8:
+		//   base    43.7 -> 32.9 -> 21.9 ms
+		//   coarse   6.1 ->  4.9 ->  3.3 ms
+		//   decoder 48.8 -> 59.7 -> 51.9 ms  (gets WORSE: the decoder is compute-bound, so batching only
+		//                                     adds latency. It deliberately stays unbatched.)
+		// 8 is where it stops paying: a later sweep at 16 and 32 moved base by 0% (675 -> 674 -> 691 ms)
+		// while cutting dispatches 4x, which is the evidence that this pipeline is NOT dispatch-bound and
+		// that neither bigger batches nor fp16 nor IO binding has anything left to reclaim. The only wins
+		// left are algorithmic — do less work (see the stride above), not dispatch it better.
 		// Both models take a dynamic batch dim, and a partial final batch is fine.
 		constexpr int32 LATENT_BATCH = 8;
 		constexpr int32 COARSE_BATCH = 8;
 		constexpr int32 DECODER_TILE_SIZE = 256;
-		constexpr int32 DECODER_TILE_STRIDE = 192;
+		// Unlike the latent stride above, this one IS a real overlap/cost dial: every value tried (192, 224,
+		// 240, 256) reproduces the reference elevation to within ~0.1% (3017..5708 m -> 3024..5706 at 224),
+		// because the decoder's weight-channel normalisation genuinely is stride-agnostic.
+		// 192 -> 224 measured: decoder 401 -> 347 ms, total inference ~1300 -> ~1156 ms (-11%). Less than
+		// the tile count suggests — wider tiles need more latent tiles around the edges (74 -> 86 items), so
+		// part of the decoder saving is handed back to the latent stage. 240/256 gave nothing further.
+		// Stopping at 224 (1.14x redundancy): the decoder draws the visible fine detail, so it is the stage
+		// where a too-thin blend window would actually be seen, and a range check cannot detect a seam.
+		constexpr int32 DECODER_TILE_STRIDE = 224;
 		constexpr size_t CACHE_LIMIT_BYTES = 100ull * 1024 * 1024; // per stage, as in the reference
 
 		// The low-frequency elevation band's normalisation. Hardcoded in the reference too (not config).
@@ -144,7 +170,7 @@ namespace Procedural::Diffusion
 	}
 
 	bool WorldPipeline::initialize(uint64 seed, const ModelConfig& cfg, const PipelineData& data,
-	                               EInferenceDevice device, bool coarseOnly)
+	                               EInferenceDevice device, bool coarseOnly, EPrecision precision)
 	{
 		m_seed = seed;
 		m_config = cfg;
@@ -162,13 +188,15 @@ namespace Procedural::Diffusion
 			return false;
 		}
 
-		if (!m_coarseModel.load(ModelAssets::assetPath("coarse_model.onnx"), "coarse", device))
+		// Precision resolves PER MODEL: an fp16 file that was never converted falls back to its fp32
+		// original rather than failing the load, so a partial conversion still runs.
+		if (!m_coarseModel.load(ModelAssets::modelPath("coarse_model", precision), "coarse", device))
 			return false;
 		if (!coarseOnly)
 		{
-			if (!m_baseModel.load(ModelAssets::assetPath("base_model.onnx"), "base", device))
+			if (!m_baseModel.load(ModelAssets::modelPath("base_model", precision), "base", device))
 				return false;
-			if (!m_decoderModel.load(ModelAssets::assetPath("decoder_model.onnx"), "decoder", device))
+			if (!m_decoderModel.load(ModelAssets::modelPath("decoder_model", precision), "decoder", device))
 				return false;
 		}
 
@@ -741,19 +769,76 @@ namespace Procedural::Diffusion
 		const int32 oi = i1 - pi1, oj = j1 - pj1;
 		const int32 H = i2 - i1, W = j2 - j1;
 		outElev.resize((size_t)H * W);
-		if (outMacro)
-			outMacro->resize((size_t)H * W);
 		for (int32 r = 0; r < H; r++)
 			for (int32 c = 0; c < W; c++)
 			{
-				// Undo the signed-sqrt compression the model works in: sign(e) * e^2. The macro band is
-				// decompressed the SAME way, so (elev - macro) stays a difference of real elevations.
+				// Undo the signed-sqrt compression the model works in: sign(e) * e^2.
 				const float ms = macroP.at(oi + r, oj + c);
 				const float es = residual.at(oi + r, oj + c) + ms; // == laplacianDecode(residual, newLowres)
 				outElev[(size_t)r * W + c] = javaSignum(es) * es * es;
-				if (outMacro)
-					(*outMacro)[(size_t)r * W + c] = javaSignum(ms) * ms * ms;
 			}
+
+		// NOT the low band `macroP` computed just above, even though it is the pipeline's own macro/detail
+		// split and is sitting right there for free. See computeCoarseSurface.
+		if (outMacro)
+			computeCoarseSurface(i1, j1, i2, j2, *outMacro);
+	}
+
+	// The COARSE stage's elevation, resampled onto the native window: the surface the terrain shader
+	// measures crag relief against, as (mesh height - altitude).
+	//
+	// Why not the Laplacian low band, which computeElev has already built: the terrain-data map has two
+	// cascades, and the far one is served by ESampleDetail::Coarse, which runs the coarse stage ALONE —
+	// skipping the latent stage is exactly what makes it ~249x cheaper. So the far cascade HAS no low band;
+	// it can only report the coarse surface. If the near cascade answered with the low band instead, the
+	// same mountain would measure its relief against two surfaces ~6x apart in smoothing, and it did:
+	// near 19.5 m vs far 427.7 m of mean crag at mpp=30, so peaks that rendered rocky in the distance went
+	// bare as the camera approached (55% of a mountain region). Both cascades now answer with the only
+	// surface BOTH can compute.
+	//
+	// The price: macro is a 7.68 km surface, so high ground flatter than one coarse pixel reads as craggy
+	// rather than as plateau — there is no longer a reference fine enough to tell those apart.
+	//
+	// Nearly free: the coarse tiles this reads are already resident, since the latent stage is conditioned
+	// on them and computeClimate slices the same window with a larger pad.
+	void WorldPipeline::computeCoarseSurface(int32 i1, int32 j1, int32 i2, int32 j2, std::vector<float>& out)
+	{
+		const int32 S = 32 * m_config.latentCompression; // native pixels per coarse pixel (256)
+		const int32 ci1 = floorDiv(i1, S), cj1 = floorDiv(j1, S);
+		const int32 ci2 = -floorDiv(-i2, S), cj2 = -floorDiv(-j2, S); // ceil
+		constexpr int32 pad = 2;                                      // bilinear needs 1 neighbour; 2 is slack
+
+		const int32 g0i = ci1 - pad, g0j = cj1 - pad; // coarse index of the slice's [0,0]
+		const int32 cStart[3] = { 0, g0i, g0j };
+		const int32 cEnd[3] = { 7, ci2 + pad, cj2 + pad }; // 6 data channels + the trailing weight
+		const FloatTensor slice = m_coarse->getSlice(cStart, cEnd);
+		const int32 cH = (ci2 + pad) - g0i, cW = (cj2 + pad) - g0j;
+		const size_t cplane = (size_t)cH * cW;
+
+		Grid coarseElev(cH, cW);
+		for (size_t i = 0; i < cplane; i++)
+		{
+			// SIGNED, unlike computeClimate's otherwise identical decode: that one clamps the ocean to 0
+			// because its temperature regression only wants land. Here the seabed must stay below sea level,
+			// or the whole ocean floor would report a macro of 0 and read as one enormous crag.
+			const float e = unweight(slice.data[0 * cplane + i], slice.data[6 * cplane + i]);
+			coarseElev.data[i] = javaSignum(e) * e * e;
+		}
+
+		const int32 H = i2 - i1, W = j2 - j1;
+		out.resize((size_t)H * W);
+		for (int32 r = 0; r < H; r++)
+		{
+			// Pixel-CENTRE mapping: native -> coarse -> this grid's index. Must match computeClimate's
+			// convention exactly. Using native/S instead is a half-coarse-pixel error = 128 native px =
+			// 3.84 km at true scale, and it is precisely the bug that made near and far disagree on CLIMATE.
+			const float gridY = ((float)(i1 + r) + 0.5f) / (float)S - 0.5f - (float)g0i;
+			for (int32 c = 0; c < W; c++)
+			{
+				const float gridX = ((float)(j1 + c) + 0.5f) / (float)S - 0.5f - (float)g0j;
+				out[(size_t)r * W + c] = bilinearSample(coarseElev, gridY, gridX);
+			}
+		}
 	}
 
 	void WorldPipeline::computeClimate(int32 i1, int32 j1, int32 i2, int32 j2, std::span<const float> elev,

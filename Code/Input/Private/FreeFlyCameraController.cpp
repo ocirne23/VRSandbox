@@ -38,6 +38,7 @@ void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, g
     // The controller outlives the registration (owned by main for the app's lifetime).
     Tweak::boolean("Editor", "Lock To World Up", &m_lockToWorldUp);
     Tweak::floatVar("Editor", "Speed", &m_speed, 0.1f, 200.0f, 0.1f);
+    Tweak::floatVar("Editor", "Max Look Delta", &m_maxLookDelta, 10.0f, 2000.0f, 5.0f);
     Tweak::floatVar("Editor", "Camera Near", &m_near, 0.001f, 10.0f, 0.001f);
     Tweak::floatVar("Editor", "Camera Far", &m_far, 500.0f, 65536.0f, 500.0f);
 
@@ -74,6 +75,12 @@ void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, g
             glm::vec2 delta = currentPos - m_lastMousePos;
             m_lastMousePos = currentPos;
 
+            // Windows coalesces WM_MOUSEMOVE, so a frame hitch collapses the whole move into one
+            // event; missed events around focus changes do the same. A real mouse never travels
+            // this far between two events, so drop it and resume from the new position.
+            if (glm::dot(delta, delta) > m_maxLookDelta * m_maxLookDelta)
+                return;
+
             float yaw = -delta.x * m_sensitivity;
             float pitch = -delta.y * m_sensitivity;
 
@@ -103,7 +110,17 @@ void FreeFlyCameraController::update(double deltaTime)
 {
     const float deltaSec = static_cast<float>(deltaTime);
     Input& input = Globals::input;
-    if (input.isWindowHasFocus() && Globals::ui.isViewportFocused())
+    const bool viewportActive = input.isWindowHasFocus() && Globals::ui.isViewportFocused();
+
+    // Input::update drops mouse events while the viewport is unfocused, so the button release that
+    // ends a drag can go missing entirely. End it from the frame state, which always runs.
+    if (!viewportActive)
+    {
+        m_isMouseDown = false;
+        m_mousePosUpdated = false;
+    }
+
+    if (viewportActive)
     {
         const float boost = input.isKeyDown(SDL_SCANCODE_LSHIFT) ? m_boostMultiplier : 1.0f;
 

@@ -47,6 +47,18 @@ namespace Procedural::Diffusion
 			return std::string_view(buf).starts_with(LFS_POINTER_MAGIC);
 		}
 
+		// A converted model counts as usable only if it is real weights. No size check, unlike REQUIRED,
+		// which pins exact upstream byte counts — these are converted locally, so there is no known-good
+		// size to compare against, and a bad conversion surfaces as an ORT load error naming the file. But
+		// they sit beside the originals under the repo's "*.onnx filter=lfs" rule, so a clone without
+		// `git lfs pull` leaves a text pointer exactly where the weights should be; feeding that to ORT is
+		// the inscrutable-protobuf-error failure the fp32 check already exists to prevent.
+		bool fp16Usable(const std::filesystem::path& p)
+		{
+			std::error_code ec;
+			return std::filesystem::exists(p, ec) && !looksLikeLfsPointer(p);
+		}
+
 		bool readAll(const std::filesystem::path& p, std::string& out)
 		{
 			std::ifstream f(p, std::ios::binary);
@@ -66,6 +78,33 @@ namespace Procedural::Diffusion
 	std::filesystem::path ModelAssets::assetPath(std::string_view fileName)
 	{
 		return modelDir() / std::filesystem::path(fileName);
+	}
+
+	std::filesystem::path ModelAssets::fp16Path(std::string_view stem)
+	{
+		// Beside the fp32 originals, NOT in Local/: these are shipped assets like the models they came from,
+		// converted once and committed, not a cache the engine may regenerate. Nothing here ever writes
+		// them — Tools/convert_models_fp16.py does, by hand, when the model set changes.
+		return assetPath(std::string(stem) + "_fp16.onnx");
+	}
+
+	std::filesystem::path ModelAssets::modelPath(std::string_view stem, EPrecision precision)
+	{
+		if (precision == EPrecision::Fp16 && fp16Usable(fp16Path(stem)))
+			return fp16Path(stem);
+		return assetPath(std::string(stem) + ".onnx");
+	}
+
+	bool ModelAssets::hasFp16Models(EAssetSet set)
+	{
+		for (const RequiredAsset& a : REQUIRED)
+		{
+			if (!a.name.ends_with(".onnx") || !assetInSet(a, set))
+				continue;
+			if (!fp16Usable(fp16Path(a.name.substr(0, a.name.size() - 5))))
+				return false;
+		}
+		return true;
 	}
 
 	bool ModelAssets::load(EAssetSet set)

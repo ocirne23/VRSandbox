@@ -49,14 +49,26 @@ vec4 terrainDataAt(vec2 worldXZ)
 // Raw terrain surface height (world Y, m) at worldXZ.
 float terrainHeightAt(vec2 worldXZ) { return terrainDataAt(worldXZ).x; }
 
+// Fog height-falloff from temperature: cold air hugs the ground, warm air lets fog tower. Recomputed
+// rather than baked — it is a pure function of temperature, so storing it wasted 8 bits of the packed
+// channel that the LAPSE RATE genuinely needs. Mirrors Procedural's fogFalloffFromTemperature.
+float fogFalloffFromTemperature(float celsius)
+{
+    return clamp(1.8 - 1.2 * clamp((celsius + 10.0) * (1.0 / 40.0), 0.0, 1.0), 0.0, 4.0);
+}
+
 // One decoded climate texel from the bit-packed B channel at integer texel coords:
-//   x = fog thickness [0,1], y = fog height-falloff multiplier [0,4] (1 = neutral),
-//   z = temperature in CELSIUS [-25, +50], w = humidity [0,1].
+//   x = fog thickness [0,1], y = LAPSE RATE in C per world metre [-0.012, 0],
+//   z = temperature in CELSIUS [-25, +50] AT THIS TEXEL'S OWN BAKED HEIGHT, w = humidity [0,1].
+// The temperature is only valid at the height in channel R. The two cascades bake DIFFERENT heights for
+// the same world position — the near one the full-detail surface, the far one its 7.68 km average — so a
+// consumer that wants the temperature somewhere else (the terrain shader wants it at the MESH height)
+// must move it with the lapse rate. See terrainTemperatureAt.
 vec4 terrainClimateTexel(ivec2 t, int layer, ivec2 res)
 {
     const uint packed = floatBitsToUint(texelFetch(u_terrainHeight, ivec3(clamp(t, ivec2(0), res - 1), layer), 0).z);
     return vec4(float(packed & 255u) * (1.0 / 255.0),
-                float((packed >> 8) & 255u) * (4.0 / 255.0),
+                float((packed >> 8) & 255u) * (0.012 / 255.0) - 0.012,
                 float((packed >> 16) & 255u) * (75.0 / 255.0) - 25.0,
                 float((packed >> 24) & 255u) * (1.0 / 255.0));
 }

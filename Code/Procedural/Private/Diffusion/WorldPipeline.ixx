@@ -30,10 +30,11 @@ export namespace Procedural::Diffusion
 		WorldPipeline& operator=(const WorldPipeline&) = delete;
 
 		// Loads the models and builds the stage graph. `coarseOnly` skips base/decoder (M1 bring-up: the
-		// coarse model is 22 MB against 2.25 GB for the other two).
+		// coarse model is 22 MB against 2.25 GB for the other two). `precision` picks which weights to load;
+		// it falls back to fp32 per model when a converted file is absent (see ModelAssets::modelPath).
 		// Returns false on any failure, after logging; the pipeline is then unusable.
 		bool initialize(uint64 seed, const ModelConfig& cfg, const PipelineData& data,
-		                EInferenceDevice device, bool coarseOnly);
+		                EInferenceDevice device, bool coarseOnly, EPrecision precision = EPrecision::Fp32);
 		bool isValid() const;
 
 		// Cheap reseed: swaps the synthetic map and drops the tile caches. The models stay loaded — this is
@@ -57,11 +58,13 @@ export namespace Procedural::Diffusion
 		// The full-resolution result for the half-open NATIVE-pixel rect [i1,i2) x [j1,j2) (i = row/z,
 		// j = column/x). Requires the full pipeline (coarseOnly == false).
 		//   outElev    -> H*W metres above sea level (negative = seabed)
-		//   outMacro   -> H*W, optional: the LOW-FREQUENCY band of the same elevation, i.e. the smooth
-		//                 surface the high-frequency residual rides on. Free — the pipeline builds elevation
-		//                 as residual + lowres and this is that lowres term, decompressed the same way. The
-		//                 difference (elev - macro) is the local relief that tells a crag from flat ground at
-		//                 altitude, which is what the terrain shader's rock layer keys on.
+		//   outMacro   -> H*W, optional: the COARSE STAGE's surface (7.68 km per pixel) resampled to this
+		//                 window — the macro elevation the local relief is measured against, which is what
+		//                 the terrain shader's rock layer keys on: (mesh height - macro) tells a crag from
+		//                 flat ground at altitude.
+		//                 NOT the pipeline's own low band (residual + lowres), even though that is a finer
+		//                 and free macro/detail split, because the coarse-only path cannot produce one and
+		//                 the two cascades of the terrain-data map must agree. See computeCoarseSurface.
 		//   outClimate -> 5*H*W, channel-major, only when withClimate:
 		//                 0 temperature C (lapse-corrected to the native elevation)
 		//                 1 temperature seasonality
@@ -99,6 +102,9 @@ export namespace Procedural::Diffusion
 
 		void computeElev(int32 i1, int32 j1, int32 i2, int32 j2, std::vector<float>& outElev,
 		                 std::vector<float>* outMacro);
+		// The coarse stage's surface over a native window — the macro elevation BOTH terrain-data cascades
+		// can agree on. See the .cpp for why it is this and not the finer Laplacian low band.
+		void computeCoarseSurface(int32 i1, int32 j1, int32 i2, int32 j2, std::vector<float>& out);
 		void computeClimate(int32 i1, int32 j1, int32 i2, int32 j2, std::span<const float> elev,
 		                    int32 H, int32 W, std::vector<float>& outClimate);
 

@@ -31,7 +31,29 @@ export namespace Procedural
 	}
 	// Encoding range of the baked 8-bit fog height-falloff MULTIPLIER: 0..FOG_FALLOFF_MUL_MAX maps to
 	// 0..255 (1.0 = the global Fog/Height Falloff unchanged).
+	// NOT baked any more — it is a pure function of temperature, so the shaders recompute it (see
+	// fogFalloffFromTemperature) and its 8 bits in the packed channel now carry the LAPSE RATE, which
+	// nothing else can reconstruct. Kept because both sides still need the range to agree.
 	inline constexpr float FOG_FALLOFF_MUL_MAX = 4.0f;
+
+	// Encoding range of the baked 8-bit LAPSE RATE (temperature change per metre of elevation, in the
+	// generator's own vertical frame). Matches the clamp the diffusion pipeline's own regression applies.
+	// This is baked because the terrain-data map's two cascades report temperature at DIFFERENT elevations
+	// — the near one at the full-detail surface, the far one at its 7.68 km average, which cannot know a
+	// peak's real height — so the shader has to re-derive temperature at the mesh elevation to make them
+	// agree. Without it, distant peaks read up to 10.6 C too warm and their textures flip.
+	inline constexpr float LAPSE_RATE_MIN = -0.012f;
+	inline constexpr float LAPSE_RATE_MAX = 0.0f;
+
+	// Fog height-falloff from temperature: cold air hugs the ground, warm air lets fog tower. Mirrored by
+	// terrain_height.inc.glsl — keep them in step.
+	constexpr float fogFalloffFromTemperature(float celsius)
+	{
+		const float t01 = (celsius + 10.0f) * (1.0f / 40.0f);
+		const float c = t01 < 0.0f ? 0.0f : (t01 > 1.0f ? 1.0f : t01);
+		const float f = 1.8f - 1.2f * c;
+		return f < 0.0f ? 0.0f : (f > FOG_FALLOFF_MUL_MAX ? FOG_FALLOFF_MUL_MAX : f);
+	}
 
 	// Every field the terrain-data bake needs, from ONE evaluation. Sampling these one at a time is fine
 	// for a noise field but not for a generator with a per-point cost (V3 does a tile lookup + bilinear per
@@ -44,7 +66,15 @@ export namespace Procedural
 		float temperature = 15.0f;   // degrees CELSIUS
 		float humidity = 0.5f;       // [0,1]
 		float fogThickness = 0.0f;   // [0,1]
-		float fogFalloffMul = 1.0f;  // [0, FOG_FALLOFF_MUL_MAX], 1 = neutral
+		float fogFalloffMul = 1.0f;  // [0, FOG_FALLOFF_MUL_MAX], 1 = neutral. NOT baked (derived from
+		                             // temperature); still reported for CPU consumers.
+		// Temperature change per metre of elevation IN THE GENERATOR'S OWN VERTICAL FRAME — for V3 that is
+		// model metres, so a consumer working in world metres must divide by vertScale (which the terrain
+		// shader gets as u_terrainParams.y). Not pre-converted, because the world-frame rate leaves the
+		// [LAPSE_RATE_MIN, LAPSE_RATE_MAX] range this is encoded over as soon as the world is compressed.
+		// `temperature` above is the value at THIS point's own height; this is what lets a consumer move it
+		// to a different height. See LAPSE_RATE_MIN for why the terrain shader must.
+		float lapseRate = -0.0065f;
 		float flowAngle01 = -1.0f;   // angle/2pi in [0,1), or < 0 for no direction
 	};
 

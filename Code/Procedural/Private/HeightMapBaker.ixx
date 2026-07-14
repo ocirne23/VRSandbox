@@ -125,8 +125,8 @@ export namespace Procedural
 								}
 								else
 								{
-									// 4x8-bit climate pack: fog thickness [0,1] | fog height-falloff mul
-									// (0..FOG_FALLOFF_MUL_MAX, 1 = neutral) | temperature (TEMPERATURE_MIN_C..
+									// 4x8-bit climate pack: fog thickness [0,1] | LAPSE RATE
+									// (LAPSE_RATE_MIN..MAX, C per world metre) | temperature (TEMPERATURE_MIN_C..
 									// MAX_C) | humidity [0,1] (0 -> 0.0, 255 -> 1.0 exactly). 32 bits exceed
 									// float32's exact-integer range, so the bits are BIT-CAST into the texel
 									// (std::bit_cast here, floatBitsToUint in terrain_height.inc.glsl). The
@@ -134,9 +134,17 @@ export namespace Procedural
 									// — carries raw bits with NO float arithmetic; some packs form NaN bit
 									// patterns, which any arithmetic (the old float(packed)/+0.5 decode) would
 									// corrupt. Keep it bit-exact end to end.
+									// The lapse rate takes the slot the fog height-falloff used to have. The
+									// falloff was pure redundancy — a function of temperature alone, which the
+									// shaders can and now do recompute (fogFalloffFromTemperature). The lapse
+									// rate cannot be reconstructed from anything else in the map, and without
+									// it the far cascade's temperature is simply wrong on any relief: it
+									// reports the value at its own 7.68 km-averaged elevation, so peaks come
+									// out up to 10.6 C too warm and flip texture. See LAPSE_RATE_MIN.
 									const auto q8 = [](float f) { return (uint32)(glm::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
+									constexpr float invLapseRange = 1.0f / (LAPSE_RATE_MAX - LAPSE_RATE_MIN);
 									const uint32 packed = q8(p.fogThickness)
-										| (q8(p.fogFalloffMul * (1.0f / FOG_FALLOFF_MUL_MAX)) << 8)
+										| (q8((p.lapseRate - LAPSE_RATE_MIN) * invLapseRange) << 8)
 										| (q8(temperatureTo01(p.temperature)) << 16)
 										| (q8(p.humidity) << 24);
 									texel[2] = std::bit_cast<float>(packed);

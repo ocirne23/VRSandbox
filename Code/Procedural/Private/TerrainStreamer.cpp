@@ -42,78 +42,127 @@ namespace
 	}
 
 	// --- Terrain splat texture sources -----------------------------------------------------------------
-	// One PBR texture set per land biome (climate-blended ground), per climate-picked rock type (steep
-	// slopes/crags), and exactly one dedicated Beach set — NOT a biome, a climate-independent shoreline
-	// overlay the shader blends in near the waterline regardless of which biome it's over. Sources are
-	// the CC0 sets under Assets/Textures/Terrain (see Assets/THIRD_PARTY_ASSETS.md); they bake once into
-	// Assets/Local/TerrainTex as BC .dds so they mip-stream like cooked scene textures.
-	enum class ESourceKind : uint8 { Ground, Rock, Beach };
+	// THERE ARE NO BIOMES HERE. Climate picks textures directly: every Ground and Rock entry declares the
+	// CLIMATE BOX it covers in real units (mean annual temperature C, annual precipitation mm/yr), and the
+	// shader blends the two best matches per pixel — weight 1 inside the box, Gaussian falloff outside.
+	// Leaving an axis at its full range means "this entry does not care about it": alpine bedrock is cold
+	// at ANY humidity and simply says so. The old point attractors could not express that, which is why
+	// every cold entry used to have to claim one fictional humidity and sit in a hand-tuned ladder.
+	//
+	// The bands come off the Whittaker diagram (the standard mean-temperature/mean-precipitation plot of
+	// what actually grows where). That is also why the hot entries sit at HIGHER precipitation than cold
+	// ones covering similar vegetation: 1000 mm on a 25 C plain is seasonal savanna, on a 0 C plain it is
+	// boreal forest. Evaporation is not modelled — it is baked into where the bands sit.
+	//
+	// Beach and Snow are NOT climate entries; they are overlays the shader composites on top (see
+	// terrainSplat). Snow especially must not be a ground entry: the rock layer paints over the ground, so
+	// a "snow ground type" is overwritten on exactly the peaks it exists for, and they come out gray.
+	//
+	// Sources are the CC0 sets under Assets/Textures/Terrain (see Assets/THIRD_PARTY_ASSETS.md); they bake
+	// once into Assets/Local/TerrainTex as BC .dds so they mip-stream like cooked scene textures.
+	enum class ESourceKind : uint8 { Ground, Rock, Beach, Snow };
+	// Sentinels for "this axis does not constrain the entry" — past the encodable climate range, so they
+	// clamp to a full-width 0..1 box and contribute no distance on that axis.
+	constexpr float ANY_COLD = -1000.0f, ANY_HOT = 1000.0f, ANY_DRY = 0.0f, ANY_WET = 100000.0f;
 	struct TerrainTexSource
 	{
 		ESourceKind kind = ESourceKind::Ground;
-		Procedural::EBiomeV2 biome = Procedural::EBiomeV2::Count; // Ground entries only
-		// Rock entries only: the attractor's climate, in the same REAL units as GeneratorV2's BIOME_TABLE
-		// (mean annual temperature C / annual precipitation mm) — converted to (t01, h01) at use. These
-		// must stay aligned with the ground attractors or a rock type simply never gets picked.
-		float rockTempC = 0.0f;
-		float rockPrecipMm = 0.0f;
-		const char* cacheName;       // output stem: Local/TerrainTex/<cacheName>_{diff|nor|arm}.dds
-		const char* diffSrc;         // sources relative to Assets/
-		const char* norSrc;
-		const char* armSrc;          // packed AO/rough/metal; nullptr -> pack aoSrc+roughSrc instead
-		const char* aoSrc = nullptr;
-		const char* roughSrc = nullptr;
+		// Climate box in REAL units; ignored for Beach/Snow.
+		float tempMinC = ANY_COLD, tempMaxC = ANY_HOT;
+		float precipMinMm = ANY_DRY, precipMaxMm = ANY_WET;
+		// Texture set name under Assets/Textures/Terrain/. Sources default to the Poly Haven layout,
+		// <stem>/<stem>_{diff,nor_gl,arm}_2k.jpg, and bake to Local/TerrainTex/<stem>_{diff,nor,arm}.dds —
+		// so the cache is keyed by the texture, and swapping one here can never read a stale bake.
+		const char* stem;
+		// Only for sets that name their files differently (the ambientCG ones). Relative to Assets/.
+		const char* diffSrc = nullptr;
+		const char* norSrc = nullptr;
+		const char* armSrc = nullptr;
 	};
-	using enum Procedural::EBiomeV2;
 	const TerrainTexSource TERRAIN_TEX_SOURCES[] =
 	{
-		{ .biome = Desert,     .cacheName = "desert",     .diffSrc = "Textures/Terrain/sand_01/sand_01_diff_2k.jpg",                   .norSrc = "Textures/Terrain/sand_01/sand_01_nor_gl_2k.jpg",                   .armSrc = "Textures/Terrain/sand_01/sand_01_arm_2k.jpg" },
-		{ .biome = Savanna,    .cacheName = "savanna",    .diffSrc = "Textures/Terrain/dry_ground_01/dry_ground_01_diff_2k.jpg",       .norSrc = "Textures/Terrain/dry_ground_01/dry_ground_01_nor_gl_2k.jpg",       .armSrc = "Textures/Terrain/dry_ground_01/dry_ground_01_arm_2k.jpg" },
-		{ .biome = Swampland,  .cacheName = "swampland",  .diffSrc = "Textures/Terrain/mud_forest/mud_forest_diff_2k.jpg",             .norSrc = "Textures/Terrain/mud_forest/mud_forest_nor_gl_2k.jpg",             .armSrc = "Textures/Terrain/mud_forest/mud_forest_arm_2k.jpg" },
-		{ .biome = Grassland,  .cacheName = "grassland",  .diffSrc = "Textures/Terrain/Grass001/Grass001_2K-JPG_Color.jpg",            .norSrc = "Textures/Terrain/Grass001/Grass001_2K-JPG_NormalGL.jpg",           .armSrc = "Textures/Terrain/Grass001/Grass001_arm_2k.jpg" },
-		{ .biome = Forest,     .cacheName = "forest",     .diffSrc = "Textures/Terrain/forest_floor/forest_floor_diff_2k.jpg",         .norSrc = "Textures/Terrain/forest_floor/forest_floor_nor_gl_2k.jpg",         .armSrc = "Textures/Terrain/forest_floor/forest_floor_arm_2k.jpg" },
-		{ .biome = Rainforest, .cacheName = "rainforest", .diffSrc = "Textures/Terrain/Moss002/Moss002_2K-JPG_Color.jpg",              .norSrc = "Textures/Terrain/Moss002/Moss002_2K-JPG_NormalGL.jpg",             .armSrc = "Textures/Terrain/Moss002/Moss002_arm_2k.jpg" },
-		{ .biome = Taiga,      .cacheName = "taiga",      .diffSrc = "Textures/Terrain/forest_ground_04/forest_ground_04_diff_2k.jpg", .norSrc = "Textures/Terrain/forest_ground_04/forest_ground_04_nor_gl_2k.jpg", .armSrc = "Textures/Terrain/forest_ground_04/forest_ground_04_arm_2k.jpg" },
-		{ .biome = Tundra,     .cacheName = "tundra",     .diffSrc = "Textures/Terrain/rocky_trail/rocky_trail_diff_2k.jpg",           .norSrc = "Textures/Terrain/rocky_trail/rocky_trail_nor_gl_2k.jpg",           .armSrc = "Textures/Terrain/rocky_trail/rocky_trail_arm_2k.jpg" },
-		{ .biome = Arctic,     .cacheName = "arctic",     .diffSrc = "Textures/Terrain/snow_02/snow_02_diff_2k.jpg",                   .norSrc = "Textures/Terrain/snow_02/snow_02_nor_gl_2k.jpg",                   .armSrc = "Textures/Terrain/snow_02/snow_02_arm_2k.jpg" },
-		{ .biome = Lakes,      .cacheName = "lakes",      .diffSrc = "Textures/Terrain/brown_mud_03/brown_mud_03_diff_2k.jpg",         .norSrc = "Textures/Terrain/brown_mud_03/brown_mud_03_nor_gl_2k.jpg",         .armSrc = "Textures/Terrain/brown_mud_03/brown_mud_03_arm_2k.jpg" },
-		{ .biome = Highlands,  .cacheName = "highlands",  .diffSrc = "Textures/Terrain/rock_face/rock_face_diff_2k.jpg",               .norSrc = "Textures/Terrain/rock_face/rock_face_nor_gl_2k.jpg",               .armSrc = "Textures/Terrain/rock_face/rock_face_arm_2k.jpg" },
-		// Rock layer: 6 climate-picked types spanning (temperature, precipitation) so mountains/crags read
-		// differently by biome instead of one rock texture everywhere. Same REAL units as GeneratorV2's
-		// BIOME_TABLE; keep them aimed at the ground attractors they are meant to accompany.
-		{ .kind = ESourceKind::Rock, .rockTempC = -12.0f, .rockPrecipMm = 770.0f, .cacheName = "rock_gray",  .diffSrc = "Textures/Terrain/gray_rocks/gray_rocks_diff_2k.jpg",                     .norSrc = "Textures/Terrain/gray_rocks/gray_rocks_nor_gl_2k.jpg",                     .armSrc = "Textures/Terrain/gray_rocks/gray_rocks_arm_2k.jpg" }, // cold/dry granite: tundra, highlands, arctic peaks
-		{ .kind = ESourceKind::Rock, .rockTempC = 24.0f,  .rockPrecipMm = 220.0f, .cacheName = "rock_red",   .diffSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_diff_2k.jpg",             .norSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_nor_gl_2k.jpg",             .armSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_arm_2k.jpg" }, // hot/dry sandstone: desert, savanna canyons
-		{ .kind = ESourceKind::Rock, .rockTempC = 22.0f,  .rockPrecipMm = 1870.0f, .cacheName = "rock_dark",  .diffSrc = "Textures/Terrain/dark_rock/dark_rock_diff_2k.jpg",                       .norSrc = "Textures/Terrain/dark_rock/dark_rock_nor_gl_2k.jpg",                       .armSrc = "Textures/Terrain/dark_rock/dark_rock_arm_2k.jpg" },       // warm/wet dark basalt: rainforest, swampland cliffs
-		{ .kind = ESourceKind::Rock, .rockTempC = 5.0f,   .rockPrecipMm = 1650.0f, .cacheName = "rock_mossy", .diffSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_diff_2k.jpg",       .norSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_nor_gl_2k.jpg",       .armSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_arm_2k.jpg" }, // cool/wet lichened rock: forest, taiga
-		{ .kind = ESourceKind::Rock, .rockTempC = 17.0f,  .rockPrecipMm = 770.0f, .cacheName = "rock_worn",  .diffSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_diff_2k.jpg", .norSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_nor_gl_2k.jpg", .armSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_arm_2k.jpg" }, // warm/dry weathered sandstone: savanna, highlands
-		{ .kind = ESourceKind::Rock, .rockTempC = 10.0f,  .rockPrecipMm = 1210.0f, .cacheName = "rock_coast", .diffSrc = "Textures/Terrain/rock_3/rock_3_diff_2k.jpg",                             .norSrc = "Textures/Terrain/rock_3/rock_3_nor_gl_2k.jpg",                             .armSrc = "Textures/Terrain/rock_3/rock_3_arm_2k.jpg" }, // temperate coastal rock: grassland, lakes cliffs
-		// Shoreline overlay: NOT a biome, always the trailing material (Renderer::setTerrainBiomeMaterials).
-		{ .kind = ESourceKind::Beach, .cacheName = "beach", .diffSrc = "Textures/Terrain/coast_sand_01/coast_sand_01_diff_2k.jpg", .norSrc = "Textures/Terrain/coast_sand_01/coast_sand_01_nor_gl_2k.jpg", .armSrc = "Textures/Terrain/coast_sand_01/coast_sand_01_arm_2k.jpg" },
+		// --- Ground: what the climate grows.
+		// The boxes ABUT with only a narrow overlap. That is deliberate and is the one thing to preserve
+		// when editing: a point inside two boxes scores a perfect 1.0 on both, so a wide overlap is not a
+		// wide blend — it is a permanent 50/50 mush in which neither texture ever appears on its own. The
+		// blend comes from the Gaussian tails just outside the edges, so entries should MEET, not straddle.
+		//                temperature C           precipitation mm/yr
+		{ .tempMinC = ANY_COLD, .tempMaxC = -4.0f,   .precipMinMm = ANY_DRY,  .precipMaxMm = ANY_WET, .stem = "gravel_ground_01" },        // polar/alpine scree: frost-shattered rubble. The substrate beside (and under) the snow, at ANY humidity — above the snow line there is no vegetation left for humidity to decide
+		{ .tempMinC = -6.0f,    .tempMaxC = 0.0f,    .precipMinMm = 250.0f,   .precipMaxMm = ANY_WET, .stem = "rocky_trail" },             // tundra: moss and lichen over stony ground
+		{ .tempMinC = -1.0f,    .tempMaxC = 5.0f,    .precipMinMm = 300.0f,   .precipMaxMm = 1500.0f, .stem = "forest_ground_04" },        // taiga / boreal forest floor: needle litter
+		{ .tempMinC = 2.0f,     .tempMaxC = 19.0f,   .precipMinMm = ANY_DRY,  .precipMaxMm = 400.0f,  .stem = "dry_ground_01" },           // cold desert / dry steppe
+		{ .tempMinC = 4.0f,     .tempMaxC = 20.0f,   .precipMinMm = 400.0f,   .precipMaxMm = 1000.0f, .stem = "Grass001",                  // temperate grassland / prairie
+		  .diffSrc = "Textures/Terrain/Grass001/Grass001_2K-JPG_Color.jpg", .norSrc = "Textures/Terrain/Grass001/Grass001_2K-JPG_NormalGL.jpg", .armSrc = "Textures/Terrain/Grass001/Grass001_arm_2k.jpg" },
+		{ .tempMinC = 5.0f,     .tempMaxC = 18.0f,   .precipMinMm = 1000.0f,  .precipMaxMm = 1900.0f, .stem = "forest_floor" },            // temperate seasonal forest: broadleaf litter
+		{ .tempMinC = 3.0f,     .tempMaxC = 15.0f,   .precipMinMm = 1800.0f,  .precipMaxMm = ANY_WET, .stem = "Moss002",                   // temperate rainforest: deep moss
+		  .diffSrc = "Textures/Terrain/Moss002/Moss002_2K-JPG_Color.jpg", .norSrc = "Textures/Terrain/Moss002/Moss002_2K-JPG_NormalGL.jpg", .armSrc = "Textures/Terrain/Moss002/Moss002_arm_2k.jpg" },
+		{ .tempMinC = 20.0f,    .tempMaxC = ANY_HOT, .precipMinMm = ANY_DRY,  .precipMaxMm = 300.0f,  .stem = "sand_01" },                 // subtropical desert: dune sand
+		{ .tempMinC = 19.0f,    .tempMaxC = ANY_HOT, .precipMinMm = 250.0f,   .precipMaxMm = 1300.0f, .stem = "red_laterite_soil_stones" },// savanna / dry tropics: iron-red laterite
+		{ .tempMinC = 18.0f,    .tempMaxC = ANY_HOT, .precipMinMm = 1300.0f,  .precipMaxMm = 2100.0f, .stem = "leaves_forest_ground" },    // tropical forest floor: leaf litter
+		{ .tempMinC = 16.0f,    .tempMaxC = ANY_HOT, .precipMinMm = 2000.0f,  .precipMaxMm = ANY_WET, .stem = "mud_forest" },              // wetland / swamp: saturated mud
+
+		// --- Rock: the bedrock the slope/crag layer exposes. Climate still selects the TYPE — weathering
+		// is a climate process — but the cold entry spans all humidity for the same reason the scree does.
+		{ .kind = ESourceKind::Rock, .tempMinC = ANY_COLD, .tempMaxC = 1.0f,    .precipMinMm = ANY_DRY, .precipMaxMm = ANY_WET, .stem = "gray_rocks" },           // alpine/polar granite: the rock the snow caps sit on and the faces it slides off
+		{ .kind = ESourceKind::Rock, .tempMinC = 0.0f,     .tempMaxC = 13.0f,   .precipMinMm = 1100.0f, .precipMaxMm = ANY_WET, .stem = "rock_pitted_mossy" },    // cool + wet: lichened, moss-pitted
+		{ .kind = ESourceKind::Rock, .tempMinC = 0.0f,     .tempMaxC = 16.0f,   .precipMinMm = 250.0f,  .precipMaxMm = 1100.0f, .stem = "rock_3" },               // temperate: plain weathered stone
+		{ .kind = ESourceKind::Rock, .tempMinC = 14.0f,    .tempMaxC = 24.0f,   .precipMinMm = 200.0f,  .precipMaxMm = 900.0f,  .stem = "worn_rock_natural_01" }, // warm + dry: wind-worn sandstone
+		{ .kind = ESourceKind::Rock, .tempMinC = 23.0f,    .tempMaxC = ANY_HOT, .precipMinMm = ANY_DRY, .precipMaxMm = 450.0f,  .stem = "terrain_red_01" },       // hot + arid: oxidised red rock
+		{ .kind = ESourceKind::Rock, .tempMinC = 15.0f,    .tempMaxC = ANY_HOT, .precipMinMm = 900.0f,  .precipMaxMm = ANY_WET, .stem = "dark_rock" },            // warm + wet: dark basalt
+
+		// --- Overlays, in composite order. Both are climate-independent; their boxes are never read.
+		{ .kind = ESourceKind::Beach, .stem = "coast_sand_01" },
+		{ .kind = ESourceKind::Snow,  .stem = "snow_02" },
 	};
+
+	static_assert(std::size(TERRAIN_TEX_SOURCES) <= RendererVKLayout::MAX_TERRAIN_SPLAT_MATERIALS,
+		"the splat table outgrew the UBO's climate array - raise MAX_TERRAIN_SPLAT_MATERIALS");
 
 	constexpr const char* TERRAIN_TEX_CACHE_DIR = "Local/TerrainTex/";
 
-	std::string terrainTexCachePath(const TerrainTexSource& src, const char* map)
+	// Poly Haven layout; the two ambientCG sets override it per map.
+	std::string terrainTexSrcPath(const TerrainTexSource& src, const char* map)
 	{
-		return std::string(TERRAIN_TEX_CACHE_DIR) + src.cacheName + "_" + map + ".dds";
+		const char* const overrides[] = { src.diffSrc, src.norSrc, src.armSrc };
+		const int slot = map[0] == 'd' ? 0 : (map[0] == 'n' ? 1 : 2);
+		if (overrides[slot])
+			return overrides[slot];
+		return std::format("Textures/Terrain/{}/{}_{}_2k.jpg", src.stem, src.stem, map);
 	}
 
-	// True when outPath exists and is newer than every present source (missing sources don't invalidate).
-	bool terrainTexCacheFresh(const std::string& outPath, std::initializer_list<const char*> sources)
+	std::string terrainTexCachePath(const TerrainTexSource& src, const char* map)
+	{
+		return std::format("{}{}_{}.dds", TERRAIN_TEX_CACHE_DIR, src.stem, map);
+	}
+
+	// The entry's climate in REAL units, as the streamer stores it: (tempMinC, tempMaxC, precipMinMm,
+	// precipMaxMm).
+	glm::vec4 terrainClimateReal(const TerrainTexSource& src)
+	{
+		return glm::vec4(src.tempMinC, src.tempMaxC, src.precipMinMm, src.precipMaxMm);
+	}
+
+	// Real climate -> the normalized (t01, h01) box the shader tests against. Precipitation converts
+	// through the GENERATOR'S live mm-per-full-humidity scale rather than the shared constant: V3 exposes
+	// that as a tweak, and if the two ever drift the whole table slides along the humidity axis while
+	// still looking perfectly reasonable in this file.
+	glm::vec4 terrainClimateBox(const glm::vec4& real, float precipFullMm)
+	{
+		const float invFull = 1.0f / glm::max(precipFullMm, 1.0f);
+		return glm::vec4(Procedural::temperatureTo01(real.x), Procedural::temperatureTo01(real.y),
+		                 glm::clamp(real.z * invFull, 0.0f, 1.0f),
+		                 glm::clamp(real.w * invFull, 0.0f, 1.0f));
+	}
+
+	// True when outPath exists and is newer than its source (a missing source doesn't invalidate a bake).
+	bool terrainTexCacheFresh(const std::string& outPath, const std::string& source)
 	{
 		std::error_code ec;
 		const auto outTime = std::filesystem::last_write_time(outPath, ec);
 		if (ec)
 			return false;
-		for (const char* src : sources)
-		{
-			if (!src)
-				continue;
-			const auto srcTime = std::filesystem::last_write_time(src, ec);
-			if (!ec && srcTime > outTime)
-				return false;
-		}
-		return true;
+		const auto srcTime = std::filesystem::last_write_time(source, ec);
+		return ec || srcTime <= outTime;
 	}
 
 	// Bakes every stale terrain texture into the DDS cache. Runs on a background jthread at startup;
@@ -128,11 +177,11 @@ namespace
 		std::vector<BakeTask> tasks;
 		for (const TerrainTexSource& src : TERRAIN_TEX_SOURCES)
 		{
-			if (!terrainTexCacheFresh(terrainTexCachePath(src, "diff"), { src.diffSrc }))
+			if (!terrainTexCacheFresh(terrainTexCachePath(src, "diff"), terrainTexSrcPath(src, "diff")))
 				tasks.push_back({ &src, 0 });
-			if (!terrainTexCacheFresh(terrainTexCachePath(src, "nor"), { src.norSrc }))
+			if (!terrainTexCacheFresh(terrainTexCachePath(src, "nor"), terrainTexSrcPath(src, "nor_gl")))
 				tasks.push_back({ &src, 1 });
-			if (!terrainTexCacheFresh(terrainTexCachePath(src, "arm"), { src.armSrc, src.aoSrc, src.roughSrc }))
+			if (!terrainTexCacheFresh(terrainTexCachePath(src, "arm"), terrainTexSrcPath(src, "arm")))
 				tasks.push_back({ &src, 2 });
 		}
 		if (tasks.empty())
@@ -155,16 +204,12 @@ namespace
 					bool ok = false;
 					switch (tasks[i].map)
 					{
-					case 0: ok = TextureConvert::convertToDds(src.diffSrc, TextureConvert::EUsage::Color, terrainTexCachePath(src, "diff").c_str()); break;
-					case 1: ok = TextureConvert::convertToDds(src.norSrc, TextureConvert::EUsage::NormalMap, terrainTexCachePath(src, "nor").c_str()); break;
-					case 2:
-						ok = src.armSrc
-							? TextureConvert::convertToDds(src.armSrc, TextureConvert::EUsage::Data, terrainTexCachePath(src, "arm").c_str())
-							: TextureConvert::convertPackedToDds(src.aoSrc, src.roughSrc, nullptr, terrainTexCachePath(src, "arm").c_str());
-						break;
+					case 0: ok = TextureConvert::convertToDds(terrainTexSrcPath(src, "diff").c_str(), TextureConvert::EUsage::Color, terrainTexCachePath(src, "diff").c_str()); break;
+					case 1: ok = TextureConvert::convertToDds(terrainTexSrcPath(src, "nor_gl").c_str(), TextureConvert::EUsage::NormalMap, terrainTexCachePath(src, "nor").c_str()); break;
+					case 2: ok = TextureConvert::convertToDds(terrainTexSrcPath(src, "arm").c_str(), TextureConvert::EUsage::Data, terrainTexCachePath(src, "arm").c_str()); break;
 					}
 					if (!ok)
-						Log::warning(std::format("Terrain: failed to bake splat texture '{}' map {}", src.cacheName, tasks[i].map));
+						Log::warning(std::format("Terrain: failed to bake splat texture '{}' map {}", src.stem, tasks[i].map));
 				}
 			});
 		}
@@ -200,7 +245,7 @@ namespace Procedural
 		Tweak::enumVar("Terrain", "Generator", &m_generator, generatorNames, dirty);
 		Tweak::intVar("Terrain", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
 		Tweak::intVar("Terrain", "Chunk size (m)", &m_chunkSize, 128, 1024, 1.0f, dirty);
-		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 4, 512, 1.0f, dirty);
+		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 128, 1024, 1.0f, dirty);
 		Tweak::intVar("Terrain", "Range (chunks)", &m_ringRadius, 1, 64, 1.0f); // max generation radius from the camera chunk
 		Tweak::floatVar("Terrain", "LOD step (chunks)", &m_lodStep, 0.1f, 4.0f, 0.1f); // LOD0 band width; each next band doubles
 		Tweak::intVar("Terrain", "Max LOD", &m_maxLod, 0, 6, 1.0f);
@@ -220,16 +265,38 @@ namespace Procedural
 		// (2*(R+1)*chunkSize) so distant terrain never reads clamp-to-edge frozen altitude/temperature.
 		Tweak::floatVar("Terrain", "Data map far range (m)", &m_terrainMapFarRange, 1024.0f, 65536.0f, 256.0f);
 
-		// Terrain biome texture splatting (TERRAIN pipeline variant; pushed to the renderer every frame
-		// from updateTerrainTextures via Renderer::setTerrainTextureParams).
+		// Terrain texture splatting (TERRAIN pipeline variant; pushed to the renderer every frame from
+		// updateTerrainTextures via Renderer::setTerrainTextureParams). The surface composites bottom-up
+		// as ground -> beach -> rock -> snow; these shape where each layer takes over.
 		Tweak::floatVar("Terrain/Textures", "Ground uv scale (1/m)", &m_texUvScaleGround, 0.005f, 2.0f);
 		Tweak::floatVar("Terrain/Textures", "Rock uv scale (1/m)", &m_texUvScaleRock, 0.005f, 2.0f);
+		Tweak::floatVar("Terrain/Textures", "Snow uv scale (1/m)", &m_texUvScaleSnow, 0.005f, 2.0f);
+		// How far outside its climate box an entry still competes. Low = crisp climate borders.
+		Tweak::floatVar("Terrain/Textures", "Climate blend", &m_texClimateBlend, 0.01f, 0.5f, 0.005f);
+		// Slope = 1 - N.y, so 0.30 = 45 deg, 0.55 = 63. NOTE for V3: the diffusion field is 30 m/px and
+		// barely reaches 45 deg on its own, so most rock arrives via the crag test below, not this one.
 		Tweak::floatVar("Terrain/Textures", "Slope rock start", &m_texSlopeRockStart, 0.0f, 1.0f);
 		Tweak::floatVar("Terrain/Textures", "Slope rock full", &m_texSlopeRockFull, 0.0f, 1.0f);
+		// Relief above the MACRO altitude: what separates a mountain from flat ground that merely sits
+		// high. This is the main rock control under V3.
+		// V3's macro altitude is the coarse stage's 7.68 km surface — nearly flat across one mountain — so
+		// crag relief is essentially (height - constant) and the rock boundary traces an ELEVATION CONTOUR:
+		// grass gives way to stone at one height right across a range. This wanders it up and down.
+		// Scaled by the local relief in the shader, so it cannot rock a plain however high it is set; safe
+		// to push. 0 = off (contour lines). Both are metres at the model's true scale, like the thresholds
+		// below, so they hold their look across "Meters per pixel".
+		Tweak::floatVar("Terrain/Textures", "Crag wander (m)", &m_texCragWanderAmp, 0.0f, 600.0f, 5.0f);
+		Tweak::floatVar("Terrain/Textures", "Crag wander wavelength (m)", &m_texCragWanderWavelength, 200.0f, 20000.0f, 100.0f);
 		Tweak::floatVar("Terrain/Textures", "Crag relief start (m)", &m_texCragStart, 0.0f, 200.0f);
 		Tweak::floatVar("Terrain/Textures", "Crag relief full (m)", &m_texCragFull, 0.0f, 400.0f);
 		Tweak::floatVar("Terrain/Textures", "Beach band (m)", &m_texBeachBand, 0.0f, 20.0f);
-		Tweak::floatVar("Terrain/Textures", "Blend width scale", &m_texBlendScale, 0.25f, 6.0f);
+		// Snow cover. Temperature sets the snow LINE (the generator's lapse rate is what makes it follow
+		// the mountains); slope decides how much of the mountain's own rock shows through it.
+		Tweak::floatVar("Terrain/Textures", "Snow temp full (C)", &m_texSnowTempFull, -30.0f, 20.0f, 0.5f);
+		Tweak::floatVar("Terrain/Textures", "Snow temp none (C)", &m_texSnowTempNone, -30.0f, 20.0f, 0.5f);
+		Tweak::floatVar("Terrain/Textures", "Snow slope start", &m_texSnowSlopeStart, 0.0f, 1.0f);
+		Tweak::floatVar("Terrain/Textures", "Snow slope full", &m_texSnowSlopeFull, 0.0f, 1.0f);
+		Tweak::floatVar("Terrain/Textures", "Snow min humidity", &m_texSnowAridity, 0.0f, 0.5f, 0.005f);
 
 		Tweak::floatVar("Terrain/V2", "Biome size (m)", &m_v2BiomeSize, 8.0f, 8000.0f, 10.0f, dirty);  // climate-field feature size
 		Tweak::floatVar("Terrain/V2", "Biome blending", &m_v2BiomeBlend, 0.1f, 3.0f, 0.01f, dirty);   // climate-space kernel width (low = crisp biomes)
@@ -272,16 +339,56 @@ namespace Procedural
 		// colder.
 		Tweak::floatVar("Terrain/V3", "Temp offset (C)", &m_v3TemperatureOffset, -30.0f, 30.0f, 0.5f, dirty);
 		Tweak::floatVar("Terrain/V3", "Extra lapse (C/m)", &m_v3ExtraLapseRate, 0.0f, 0.02f, 0.0005f, dirty);
+		// The model's temperature is a function of ELEVATION, so every climate boundary it draws is an
+		// isotherm and therefore a contour line: grass gives way to rock at one height right across a range,
+		// and the snow line is a perfect ring. This wanders the temperature so those boundaries ride up and
+		// down instead. In degrees, so it breaks up the ground transitions and the snow line with one field,
+		// and it goes into the climate the scatter system reads too — trees keep marking the treeline the
+		// textures draw. 0 = the model's own banded climate.
+		// Roughly: at the model's lapse (~0.005 C/m in model metres) 1 C of wander moves a boundary ~200
+		// model metres up or down.
+		Tweak::floatVar("Terrain/V3", "Climate wander (C)", &m_v3ClimateNoiseC, 0.0f, 8.0f, 0.1f, dirty);
+		// Model metres, like the detail wavelengths. Floored well above the far terrain-data cascade's texel
+		// (~16 m world): this is BAKED, so a short wavelength aliases and near/far stop agreeing.
+		Tweak::floatVar("Terrain/V3", "Climate wander wavelength (m)", &m_v3ClimateNoiseWavelength, 500.0f, 20000.0f, 100.0f, dirty);
+		Tweak::intVar("Terrain/V3", "Climate wander octaves", &m_v3ClimateNoiseOctaves, 1, 6, 1.0f, dirty);
 		Tweak::floatVar("Terrain/V3", "Detail slope gain", &m_v3DetailSlopeGain, 0.0f, 4.0f, 0.05f, dirty); // higher = detail on gentler slopes
+		// THE resolution dial. The model resolves 30 m/px and nothing will make it resolve less, so every
+		// feature below that is these two fBm layers — and how far down they reach is set by the OCTAVE
+		// count, not the wavelength: finest feature = wavelength / 2^(octaves-1), in MODEL metres, then
+		// scaled by metersPerPixel/30 like everything else.
+		//
+		// At the defaults (A 220 m/4, B 45 m/3) the finest thing in the field is 45/4 = 11 model metres.
+		// That is why lowering "Meters per pixel" looks like it adds detail: at mpp=3 those 11 model metres
+		// become 1.1 world metres, which finally matches the 1 m vertex grid (chunk size / LOD0 res). It is
+		// not generating more — it is shrinking the world until the existing detail reaches the vertices.
+		// To get the same crispness at FULL scale (mpp=30), raise the octaves instead:
+		//     B 3 -> 5   finest 11.25 m -> 2.81 m
+		//     A 4 -> 6   finest 27.50 m -> 6.88 m
+		// Do not chase the last factor of two: below ~2 m the detail is finer than the 1 m vertex grid can
+		// represent and simply aliases into shimmer. fbm() is amplitude-normalised, so extra octaves add
+		// roughness without inflating the relief, and each one is a single noise lookup against a diffusion
+		// tile resolve — the cost is not measurable next to inference.
 		Tweak::floatVar("Terrain/V3", "Detail A wavelength (m)", &m_v3DetailWavelengthA, 20.0f, 1000.0f, 5.0f, dirty);
 		Tweak::floatVar("Terrain/V3", "Detail A amp (m)", &m_v3DetailAmplitudeA, 0.0f, 200.0f, 1.0f, dirty);
+		Tweak::intVar("Terrain/V3", "Detail A octaves", &m_v3DetailOctavesA, 1, 8, 1.0f, dirty);
 		Tweak::floatVar("Terrain/V3", "Detail B wavelength (m)", &m_v3DetailWavelengthB, 5.0f, 300.0f, 1.0f, dirty);
 		Tweak::floatVar("Terrain/V3", "Detail B amp (m)", &m_v3DetailAmplitudeB, 0.0f, 80.0f, 0.5f, dirty);
+		Tweak::intVar("Terrain/V3", "Detail B octaves", &m_v3DetailOctavesB, 1, 8, 1.0f, dirty);
 		Tweak::floatVar("Terrain/V3", "Precip for full humidity", &m_v3PrecipFullHumidity, 200.0f, 6000.0f, 50.0f, dirty);
 		Tweak::floatVar("Terrain/V3", "Humidity offset", &m_v3HumidityOffset, -1.0f, 1.0f, 0.01f, dirty);
 		Tweak::floatVar("Terrain/V3", "Humid fog", &m_v3HumidFog, 0.0f, 1.0f, 0.01f, dirty);
 		Tweak::floatVar("Terrain/V3", "Valley fog", &m_v3ValleyFog, 0.0f, 1.0f, 0.01f, dirty);
 		Tweak::intVar("Terrain/V3", "Resident tiles", &m_v3MaxTiles, 4, 256, 1.0f, dirty); // ~800 KB each
+		// Half-precision inference. This does NOT generate terrain faster: measured at mpp=3, the near
+		// cascade is unchanged (4.03 s -> 4.02 s) and the coarse/far path is ~15% SLOWER (1.12 s -> 1.30 s).
+		// The pipeline is dispatch-bound, not compute-bound, so halving the FLOPs buys nothing and the
+		// boundary Casts cost a little. What it does buy: model VRAM drops ~2.28 GB -> ~1.1 GB (the
+		// renderer wants that back) and the models load ~1.8x faster (2.14 s -> 1.19 s for base).
+		// Needs the optional fp16 models (Tools/convert_models_fp16.py); without them this does nothing and
+		// the log says so. Flipping it RELOADS the weights and regenerates the world - fp16 is not
+		// bit-identical, so the same seed grows visibly different fine detail.
+		Tweak::boolean("Terrain/V3", "FP16 inference", &m_v3Fp16, dirty);
 
 		rebuildMaps();
 
@@ -299,63 +406,114 @@ namespace Procedural
 
 	void TerrainStreamer::updateTerrainTextures(Renderer& renderer)
 	{
-		// The generator clamps its kernel width the same way (TerrainGenV2 ctor); keep the shader's
-		// climate blend live against the tweak without re-uploading the texture set.
-		const float climateSigma = 0.10f * glm::clamp(m_v2BiomeBlend, 0.1f, 3.0f);
-		renderer.setTerrainClimateSigma(climateSigma);
-
+		// The crag thresholds are the ONE shader parameter denominated in the same units the generator's
+		// elevation is, so they alone have to follow V3's uniform world scale. Crag relief is a height
+		// difference, so it shrinks with "Meters per pixel" exactly like everything else: the same mountain
+		// measures ~15 m of relief at mpp=30 and ~1.5 m at mpp=3. Left absolute, a 12 m start is unreachable
+		// below mpp≈25 and the near field simply never grows rock (measured: mean crag 1.5 m, rock weight
+		// 0.019 at mpp=3). Scaling here keeps the tweak meaning "metres at the model's true scale", which is
+		// the same convention the V3 detail wavelengths already use.
+		// V2 has no such scale — its altitude lattice is a fixed 64 m — so it passes them through.
+		const float cragScale = m_generator == 1 ? TerrainGenV3::worldScale(m_v3MetersPerPixel) : 1.0f;
 		renderer.setTerrainTextureParams({
 			.uvScaleGround = m_texUvScaleGround,
 			.uvScaleRock = m_texUvScaleRock,
+			.uvScaleSnow = m_texUvScaleSnow,
+			.climateBlend = m_texClimateBlend,
 			.slopeRockStart = m_texSlopeRockStart,
 			.slopeRockFull = m_texSlopeRockFull,
-			.cragStart = m_texCragStart,
-			.cragFull = m_texCragFull,
+			.cragStart = m_texCragStart * cragScale,
+			.cragFull = m_texCragFull * cragScale,
 			.beachBand = m_texBeachBand,
-			.blendScale = m_texBlendScale,
+			.snowTempFull = m_texSnowTempFull,
+			.snowTempNone = m_texSnowTempNone,
+			.snowSlopeStart = m_texSnowSlopeStart,
+			.snowSlopeFull = m_texSnowSlopeFull,
+			.snowAridity = m_texSnowAridity,
+			.cragWanderAmp = m_texCragWanderAmp * cragScale,
+			.cragWanderWavelength = m_texCragWanderWavelength * cragScale,
 		});
 
-		if (m_texSetRegistered || !m_texBakeDone.load(std::memory_order_acquire))
-			return;
-		m_texSetRegistered = true;
-
-		// Renderer::setTerrainBiomeMaterials requires [ground][rock][beach] contiguous, in that order —
-		// build it in three passes over the table rather than relying on TERRAIN_TEX_SOURCES' declaration
-		// order, so entries can be listed/grouped however is clearest there.
-		auto tryBuildMat = [](const TerrainTexSource& src) -> std::optional<Renderer::TerrainBiomeMaterial>
+		if (!m_texSetRegistered)
 		{
-			Renderer::TerrainBiomeMaterial mat;
-			mat.climateCoords = src.kind == ESourceKind::Ground
-				? biomeClimateCoords(src.biome)
-				: glm::vec2(temperatureTo01(src.rockTempC), precipTo01(src.rockPrecipMm));
+			if (!m_texBakeDone.load(std::memory_order_acquire))
+				return; // still baking: chunks draw with the flat-color fallback
+			registerTerrainTextures(renderer);
+			if (!m_texSetRegistered)
+				return; // nothing usable baked; the warnings above say what
+		}
+
+		// Live: the boxes are authored in mm/yr and divided by the generator's precipitation scale, which
+		// is a tweak. Pushing them every frame is a memcpy of two dozen vec4s and means the table can never
+		// be reading a scale the generator has already moved off.
+		const float precipFullMm = m_generator == 1 ? m_v3PrecipFullHumidity : HUMIDITY_FULL_PRECIP_MM;
+		for (size_t i = 0; i < m_texClimateReal.size(); ++i)
+			m_texClimateBoxes[i] = terrainClimateBox(m_texClimateReal[i], precipFullMm);
+		renderer.setTerrainSplatClimate(m_texClimateBoxes);
+	}
+
+	// Hands the baked DDS set to the renderer as [ground][rock][beach?][snow?], which is the order the
+	// shader composites it in (Renderer::setTerrainSplatMaterials). Built in four passes over the table
+	// rather than trusting its declaration order, so entries stay grouped however reads best there.
+	void TerrainStreamer::registerTerrainTextures(Renderer& renderer)
+	{
+		auto tryBuildMat = [](const TerrainTexSource& src) -> std::optional<Renderer::TerrainSplatMaterial>
+		{
+			Renderer::TerrainSplatMaterial mat;
 			mat.diffuseDds = terrainTexCachePath(src, "diff");
 			mat.normalDds = terrainTexCachePath(src, "nor");
 			mat.armDds = terrainTexCachePath(src, "arm");
 			std::error_code ec;
 			if (!std::filesystem::exists(mat.diffuseDds, ec) || !std::filesystem::exists(mat.normalDds, ec) || !std::filesystem::exists(mat.armDds, ec))
 			{
-				// Source images missing/bake failed: drop the entry (ground/rock lose the attractor; a
-				// missing beach entry just disables the shoreline overlay).
-				Log::warning(std::format("Terrain: splat set '{}' incomplete, skipping", src.cacheName));
+				// Source images missing / bake failed: drop the entry. A ground or rock entry just leaves
+				// its climate to the neighbouring boxes; a missing beach or snow entry disables that
+				// overlay outright, which is worth saying out loud — a world with no snow layer looks like
+				// a climate bug rather than a missing file.
+				Log::warning(std::format("Terrain: splat set '{}' incomplete, skipping", src.stem));
 				return std::nullopt;
 			}
 			return mat;
 		};
 
-		std::vector<Renderer::TerrainBiomeMaterial> mats;
-		uint32 numGround = 0, numRock = 0;
-		for (const TerrainTexSource& src : TERRAIN_TEX_SOURCES)
-			if (src.kind == ESourceKind::Ground)
-				if (auto mat = tryBuildMat(src)) { mats.push_back(std::move(*mat)); numGround++; }
-		for (const TerrainTexSource& src : TERRAIN_TEX_SOURCES)
-			if (src.kind == ESourceKind::Rock)
-				if (auto mat = tryBuildMat(src)) { mats.push_back(std::move(*mat)); numRock++; }
-		for (const TerrainTexSource& src : TERRAIN_TEX_SOURCES)
-			if (src.kind == ESourceKind::Beach)
-				if (auto mat = tryBuildMat(src)) mats.push_back(std::move(*mat)); // at most one
+		std::vector<Renderer::TerrainSplatMaterial> mats;
+		Renderer::TerrainSplatCounts counts;
+		m_texClimateReal.clear();
+		const auto append = [&](ESourceKind kind, uint32* count)
+		{
+			for (const TerrainTexSource& src : TERRAIN_TEX_SOURCES)
+			{
+				if (src.kind != kind)
+					continue;
+				if (auto mat = tryBuildMat(src))
+				{
+					mats.push_back(std::move(*mat));
+					// Parallel to mats, INCLUDING the overlays (whose climate is never read): the shader
+					// indexes climate boxes by material slot, so a skipped entry has to drop out of both
+					// or every box after it describes the wrong texture.
+					m_texClimateReal.push_back(terrainClimateReal(src));
+					if (count)
+						(*count)++;
+				}
+			}
+		};
+		append(ESourceKind::Ground, &counts.numGround);
+		append(ESourceKind::Rock, &counts.numRock);
+		const size_t beforeBeach = mats.size();
+		append(ESourceKind::Beach, nullptr);
+		counts.hasBeach = mats.size() > beforeBeach;
+		const size_t beforeSnow = mats.size();
+		append(ESourceKind::Snow, nullptr);
+		counts.hasSnow = mats.size() > beforeSnow;
 
-		if (!mats.empty())
-			renderer.setTerrainBiomeMaterials(mats, numGround, numRock, climateSigma);
+		if (counts.numGround == 0)
+		{
+			Log::error("Terrain: no ground splat textures baked - terrain stays flat-shaded");
+			return;
+		}
+		m_texClimateBoxes.assign(mats.size(), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
+		renderer.setTerrainSplatMaterials(mats, counts);
+		m_texSetRegistered = true;
 	}
 
 	void TerrainStreamer::rebuildMaps()
@@ -374,15 +532,27 @@ namespace Procedural
 			cfg.detailSlopeGain = m_v3DetailSlopeGain;
 			cfg.detailWavelengthA = m_v3DetailWavelengthA;
 			cfg.detailAmplitudeA = m_v3DetailAmplitudeA;
+			cfg.detailOctavesA = (uint32)glm::max(1, m_v3DetailOctavesA);
 			cfg.detailWavelengthB = m_v3DetailWavelengthB;
 			cfg.detailAmplitudeB = m_v3DetailAmplitudeB;
+			cfg.detailOctavesB = (uint32)glm::max(1, m_v3DetailOctavesB);
 			cfg.precipForFullHumidity = m_v3PrecipFullHumidity;
 			cfg.humidityOffset = m_v3HumidityOffset;
 			cfg.temperatureOffset = m_v3TemperatureOffset;
 			cfg.extraLapseRate = m_v3ExtraLapseRate;
+			cfg.climateNoiseAmplitudeC = m_v3ClimateNoiseC;
+			cfg.climateNoiseWavelength = m_v3ClimateNoiseWavelength;
+			cfg.climateNoiseOctaves = (uint32)glm::max(1, m_v3ClimateNoiseOctaves);
 			cfg.humidFogAmount = m_v3HumidFog;
 			cfg.valleyFogAmount = m_v3ValleyFog;
 			cfg.maxResidentTiles = m_v3MaxTiles;
+			cfg.useFp16 = m_v3Fp16;
+
+			// BEFORE the isReady() check, not inside the generator: switching precision reloads the models
+			// and drops isReady(), so a check taken before it would publish a generator whose pipeline is
+			// being torn down underneath it — and every chunk built meanwhile would bake a flat sea-level
+			// world into the resident cache and never be revisited.
+			TerrainGenV3::setPrecision(m_v3Fp16);
 
 			std::shared_ptr<const ITerrainSampler> maps;
 			if (TerrainGenV3::isReady())
@@ -614,7 +784,12 @@ namespace Procedural
 		// Chunk mesh coverage: chunks span +-R around the camera's chunk, so a disk of R*chunkSize around
 		// the camera is guaranteed resident whatever its position within its own chunk — the fence for
 		// the ocean's buried-under-land vertex cull. Also carries the live sea level (terrain coloring).
-		renderer.setTerrainParams((float)R * chunkSize, m_seaLevel);
+		// vertScale converts the baked LAPSE RATE out of the generator's vertical frame (see
+		// TerrainPoint::lapseRate). V2 works directly in world metres, so it is 1 there.
+		const float vertScale = m_generator == 1
+			? TerrainGenV3::worldScale(m_v3MetersPerPixel) * glm::max(m_v3HeightScale, 0.01f)
+			: 1.0f;
+		renderer.setTerrainParams((float)R * chunkSize, m_seaLevel, vertScale);
 
 		std::shared_ptr<const ITerrainSampler> maps;
 		uint32 generation;

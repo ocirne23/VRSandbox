@@ -84,7 +84,7 @@ export namespace RendererVKLayout
                                              // the map went RG->RGBA so its memory stayed flat (~0.5m -> 1m
                                              // texels over the default 1km range)
 
-    constexpr uint32 MAX_TERRAIN_BIOME_MATERIALS = 24; // UBO capacity for terrain splat materials (ground + rock)
+    constexpr uint32 MAX_TERRAIN_SPLAT_MATERIALS = 24; // UBO capacity for terrain splat materials (ground + rock + beach + snow)
 
     struct MeshVertex
     {
@@ -277,23 +277,38 @@ export namespace RendererVKLayout
                                    // y = shore foam threshold bias (negative = sparser surf),
                                    // z = swash backflow (horizontal chop scale on the tongue), w unused
         glm::vec4 terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
-                                   // 0 = no terrain mesh up — fences the ocean land cull), y unused,
+                                   // 0 = no terrain mesh up — fences the ocean land cull),
+                                   // y = generator vertScale (world metres per unit of its vertical frame;
+                                   //     converts the baked lapse rate — see TerrainPoint::lapseRate),
                                    // z = sea level (world Y, live from the streamer), w unused
 
-        // TERRAIN variant biome texture splatting (Renderer::setTerrainBiomeMaterials; keep in sync with
-        // ubo.inc.glsl). Materials are CONTIGUOUS in the material buffer: [base .. base+numGround) are
-        // ground biomes, [base+numGround .. base+numGround+numRock) the steep-slope rock layer.
+        // TERRAIN variant texture splatting (Renderer::setTerrainSplatMaterials; keep in sync with
+        // ubo.inc.glsl). Materials are CONTIGUOUS in the material buffer, in the order the shader
+        // composites them bottom-up: [base .. +numGround) climate-blended ground, [.. +numRock) the
+        // bedrock exposed by slope/crag, then the optional single beach entry, then the optional single
+        // snow entry.
         glm::vec4 terrainTexParams0; // x = base material idx (< 0 = no texture set: flat-color fallback),
-                                     // y = ground biome count, z = rock entry count,
-                                     // w = climate kernel sigma (Gaussian width in (t01,h01) space)
+                                     // y = ground entry count, z = rock entry count,
+                                     // w = climate kernel sigma (Gaussian falloff OUTSIDE a climate box)
         glm::vec4 terrainTexParams1; // x = ground uv scale (1/m), y = rock uv scale (1/m),
                                      // z = slope where rock fades in, w = slope where rock is full
         glm::vec4 terrainTexParams2; // x = crag relief start (m above macro altitude), y = crag relief full,
-                                     // z = beach band height (m above water level), w = unused
-        glm::vec4 terrainTexParams3; // x = dedicated beach material present (0/1; the beach entry, when
-                                     // present, is always the LAST registered material: index base +
-                                     // numGround + numRock), yzw unused
-        glm::vec4 terrainBiomeCoords[MAX_TERRAIN_BIOME_MATERIALS]; // xy = (t01, h01) climate attractor, zw unused
+                                     // z = beach band height (m above water level), w = snow uv scale (1/m)
+        glm::vec4 terrainTexParams3; // x = beach entry present (0/1; index base + numGround + numRock),
+                                     // y = snow entry present (0/1; the LAST material, after the beach),
+                                     // z = temperature (C) at/below which snow cover is complete,
+                                     // w = temperature (C) at/above which there is no snow
+        glm::vec4 terrainTexParams4; // x = slope where snow starts sliding off, y = slope where none remains,
+                                     // z = humidity at/below which cold ground stays bare (polar desert),
+                                     // w = unused
+        glm::vec4 terrainTexParams5; // x = crag wander amplitude (m; 0 = off), y = crag wander frequency
+                                     // (1/m), zw unused. Breaks the rock boundary off the elevation contour
+                                     // the crag test would otherwise trace — see terrainSplat.
+        glm::vec4 terrainSplatClimate[MAX_TERRAIN_SPLAT_MATERIALS]; // ground/rock CLIMATE BOX in the
+                                     // (t01, h01) space: xy = temperature range, zw = humidity range.
+                                     // Weight is 1 inside the box and Gaussian-decays outside it, so a
+                                     // full-width range on an axis means "this axis does not matter here"
+                                     // (snow-line rock is cold at ANY humidity). Unused for beach/snow.
 
         // GPU mesh LOD selection (indirect + shadow cull; keep in sync with ubo.inc.glsl)
         glm::vec4 lodParams0; // x = screen-space error threshold (px, bias pre-applied), y = hysteresis band,

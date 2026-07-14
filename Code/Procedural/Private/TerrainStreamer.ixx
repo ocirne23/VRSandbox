@@ -70,9 +70,11 @@ export namespace Procedural
 		void workerLoop();
 		void rebuildMaps();                             // (re)builds the active generator from the tweak-backed config
 		void clearResidents();
-		// Registers the biome texture sets with the renderer once the background DDS bake finishes (the
-		// TERRAIN shader falls back to flat colors until then), and keeps the climate kernel width live.
+		// Pushes the splat shaping params + the live climate boxes every frame, and registers the texture
+		// set once the background DDS bake finishes (the TERRAIN shader falls back to flat colors until
+		// then).
 		void updateTerrainTextures(Renderer& renderer);
+		void registerTerrainTextures(Renderer& renderer); // one-shot, from updateTerrainTextures
 		std::shared_ptr<const ITerrainSampler> currentMaps();
 		// Bakes/refreshes the fog terrain height map around the camera (Renderer::setFogTerrainHeightMap);
 		// maps == nullptr means "no terrain" and clears the map. See the .cpp for the bake scheme.
@@ -124,18 +126,33 @@ export namespace Procedural
 		float m_v3MetersPerPixel = 3.0f;  // 30 = the model's true training scale; lower compresses the world
 		float m_v3HeightScale = 1.0f;
 		float m_v3DetailSlopeGain = 0.75f; // slope -> detail mask (the model only resolves 30 m/px)
+		// Wavelengths/amplitudes are in MODEL metres and ride metersPerPixel, so the OCTAVE counts are what
+		// set how far below the model's 30 m/px the terrain actually has anything in it. See the tweak
+		// registration for the resolution arithmetic — this is the dial for "detailed at full world scale".
 		float m_v3DetailWavelengthA = 220.0f;
 		float m_v3DetailAmplitudeA = 38.0f;
+		int   m_v3DetailOctavesA = 4;
 		float m_v3DetailWavelengthB = 45.0f;
 		float m_v3DetailAmplitudeB = 11.0f;
+		int   m_v3DetailOctavesB = 3;
 		float m_v3PrecipFullHumidity = 2200.0f; // mm/yr that reads as humidity 1.0
 		float m_v3HumidityOffset = 0.0f;        // slides the planet along arid <-> lush
 		float m_v3TemperatureOffset = 0.0f;     // C, shifts the whole planet
 		float m_v3ExtraLapseRate = 0.0f;        // C/m on top of the model's own lapse: pushes the snow line
 		                                        // lower than reality. 0 = the model's real climate.
-		float m_v3HumidFog = 0.6f;
-		float m_v3ValleyFog = 0.8f;
+		// Microclimate wander (C): breaks climate boundaries off the contour lines the lapse rate pins them
+		// to. See the tweak registration.
+		float m_v3ClimateNoiseC = 1.5f;
+		float m_v3ClimateNoiseWavelength = 2000.0f; // model metres
+		int   m_v3ClimateNoiseOctaves = 3;
+		float m_v3HumidFog = 0.25f;
+		float m_v3ValleyFog = 0.5f;
 		int   m_v3MaxTiles = 256;           // resident tile budget (~800 KB each)
+		// Half-precision inference. Buys VRAM (~2.28 GB -> ~1.1 GB) and load time, NOT generation speed —
+		// the pipeline is dispatch-bound (see the tweak registration for the measurements). Needs the
+		// optional models from Tools/convert_models_fp16.py; without them it stays fp32. Flipping it
+		// reloads the models and changes the terrain for a given seed, so it regenerates the world.
+		bool  m_v3Fp16 = false;
 		// V3 can't generate until its models are downloaded+loaded. Building chunks before then would bake a
 		// flat sea-level world into the resident cache, so the streamer idles instead and rebuilds on ready.
 		bool m_v3AwaitingModels = false;
@@ -157,17 +174,37 @@ export namespace Procedural
 		std::jthread      m_texBakeWorker;
 		std::atomic<bool> m_texBakeDone{ false };
 		bool              m_texSetRegistered = false;
+		// Climate of each entry that survived the bake, in registered material order. Kept in REAL units
+		// (x,y = temperature C range, z,w = precipitation mm/yr range) and renormalized into m_texClimateBoxes
+		// every frame, because the mm-per-full-humidity divisor is a live tweak.
+		std::vector<glm::vec4> m_texClimateReal;
+		std::vector<glm::vec4> m_texClimateBoxes;
 
 		// --- Terrain/Textures tweaks: splat shaping, pushed to Renderer::setTerrainTextureParams every
 		// frame from updateTerrainTextures (mirrors Renderer::TerrainTexTweaks) ---
 		float m_texUvScaleGround = 0.20f;  // 1/m: ~5 m texture repeat on flat ground
 		float m_texUvScaleRock = 0.08f;    // 1/m: rock features read larger on cliffs
-		float m_texSlopeRockStart = 0.55f;
-		float m_texSlopeRockFull = 0.75f;
-		float m_texCragStart = 12.0f;      // crag relief start (m above macro altitude)
-		float m_texCragFull = 50.0f;
+		float m_texUvScaleSnow = 0.12f;    // 1/m
+		float m_texClimateBlend = 0.02f;   // Gaussian sigma OUTSIDE a climate box, in (t01, h01) units
+		// Slope is 1 - N.y: 0.30 = 45 deg (about where soil stops holding), 0.55 = 63 deg.
+		float m_texSlopeRockStart = 0.25f;
+		float m_texSlopeRockFull = 0.60f;
+		// Crag wander: breaks the rock boundary off the elevation contour it otherwise traces. In metres at
+		// the model's true scale, like the crag thresholds it modulates. See the tweak registration.
+		float m_texCragWanderAmp = 66.0f;
+		float m_texCragWanderWavelength = 400.0f;
+		float m_texCragStart = 34.0f;      // crag relief start (m above macro altitude)
+		float m_texCragFull = 400.0f;
 		float m_texBeachBand = 2.5f;       // beach band height (m above water level)
-		float m_texBlendScale = 1.5f;      // multiplies the climate kernel sigma for TEXTURE blends only
+		// Snow COVER (composited over ground and rock alike, so peaks read white with their own rock
+		// showing on the steep faces). It sheds before rock appears: 0.18 = 35 deg vs rock's 45.
+		// Below freezing is NOT permanent snow (Siberia averages -10 C and is forest), so these sit well
+		// below 0. Raise "temp none" toward 0 for a more fantasy, snow-capped look.
+		float m_texSnowTempFull = -7.0f;  // C at/below which cover is complete
+		float m_texSnowTempNone = -1.0f;   // C at/above which there is none
+		float m_texSnowSlopeStart = 0.26f;
+		float m_texSnowSlopeFull = 0.60f;
+		float m_texSnowAridity = 0.10f;    // humidity at/below which cold ground stays bare (polar desert)
 
 		// --- Threading ---
 		std::thread             m_worker;

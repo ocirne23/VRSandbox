@@ -46,6 +46,7 @@ private:
     float m_boostMultiplier = 10.0f;
     float m_speed = 5.0f;
     float m_sensitivity = 0.01f;
+    float m_maxLookDelta = 150.0f; // pixels between two mouse events; beyond this we missed some
     float m_near = 0.05f;
     float m_far = 42000.0f;
     glm::vec2 m_lastMousePos;

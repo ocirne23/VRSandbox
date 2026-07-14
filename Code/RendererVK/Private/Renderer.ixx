@@ -153,42 +153,85 @@ public:
     // Live terrain state for the shaders: meshRadius = radius (m, radial from the camera XZ) inside which
     // streamed terrain chunks are guaranteed resident — the fence for the ocean's land cull (0 = no
     // terrain mesh up, cull disabled); seaLevel feeds the terrain shader's coloring. Set per frame.
-    void setTerrainParams(float meshRadius, float seaLevel) { m_terrainParams = glm::vec4(meshRadius, 0.0f, seaLevel, 0.0f); }
-    // One terrain splat material: BC-compressed .dds paths (relative to Assets/) + a climate-space
-    // attractor coordinate (temperature01, humidity01) used by ground/rock entries — ignored for the
-    // trailing beach entry, which is climate-independent (always available at the shoreline).
-    struct TerrainBiomeMaterial
+    // vertScale = the generator's world metres per unit of its own vertical frame (V3: metersPerPixel/30 *
+    // heightScale; 1 for a generator that works directly in world metres). The terrain shader needs it to
+    // use the baked LAPSE RATE, which is stored in that frame — see TerrainPoint::lapseRate.
+    void setTerrainParams(float meshRadius, float seaLevel, float vertScale = 1.0f)
     {
-        glm::vec2 climateCoords{ 0.5f };
+        m_terrainParams = glm::vec4(meshRadius, glm::max(vertScale, 1e-4f), seaLevel, 0.0f);
+    }
+    // One terrain splat material: BC-compressed .dds paths (relative to Assets/). Which climate it covers
+    // is NOT here — see setTerrainSplatClimate; textures are heavy and change ~never, the climate boxes
+    // are two dozen floats and track live tweaks.
+    struct TerrainSplatMaterial
+    {
         std::string diffuseDds;
         std::string normalDds;
         std::string armDds; // packed AO (R) / roughness (G) / metalness (B); sampled linear
     };
-    // Registers the terrain texture set: mats is laid out [numGround climate-blended ground biomes]
-    // [numRock climate-picked rock-layer entries] [optional single beach entry]. hasBeach = mats.size()
-    // > numGround + numRock; the beach entry (NOT a biome — a shoreline overlay independent of climate)
-    // is used for the waterline blend instead of reusing a ground biome. climateSigma = the generator's
-    // climate kernel width. Call once (or again to replace — old materials stay allocated, textures are
-    // freed; cheap enough for a config-tweak refresh, not a per-frame path). Textures mip-stream like
-    // cooked scene textures.
-    void setTerrainBiomeMaterials(std::span<const TerrainBiomeMaterial> mats, uint32 numGround, uint32 numRock, float climateSigma);
-    // Terrain splat shaping (UBO terrainTexParams1/2); tweak-backed, owned by TerrainStreamer (Terrain/
-    // Textures category) and pushed here every frame alongside setTerrainClimateSigma.
+    // Layout of a registered set, in the order the shader composites it bottom-up. The beach and snow
+    // entries are OVERLAYS, not materials the climate blend can pick: beach paints over the waterline
+    // whatever the climate, and snow paints over everything else (ground AND rock) where it is cold
+    // enough and the slope is shallow enough to hold it.
+    struct TerrainSplatCounts
+    {
+        uint32 numGround = 0;
+        uint32 numRock = 0;
+        bool hasBeach = false;
+        bool hasSnow = false;
+    };
+    // Registers the terrain texture set: mats must be laid out [numGround][numRock][beach?][snow?] to
+    // match. Call once (or again to replace — old materials stay allocated, textures are freed; cheap
+    // enough for a config-tweak refresh, not a per-frame path). Textures mip-stream like cooked scene
+    // textures.
+    void setTerrainSplatMaterials(std::span<const TerrainSplatMaterial> mats, const TerrainSplatCounts& counts);
+    // The CLIMATE BOX each ground/rock entry covers, parallel to the registered mats (trailing beach/snow
+    // entries are not climate-selected; their boxes are ignored). Per box, in the generator's normalized
+    // space: xy = (t01 min, t01 max), zw = (h01 min, h01 max). Weight is 1 inside the box and
+    // Gaussian-decays outside it, so an entry that does not care about an axis leaves it full width (0..1)
+    // instead of having to claim a fictional value on it.
+    // Cheap — push it per frame. The boxes are authored in real climate units and converted through the
+    // generator's live precipitation scale, so a tweak change must reach the shader without dragging a
+    // texture re-upload behind it.
+    void setTerrainSplatClimate(std::span<const glm::vec4> boxes);
+    // Terrain splat shaping (UBO terrainTexParams0..4); tweak-backed, owned by TerrainStreamer
+    // (Terrain/Textures category) and pushed here every frame.
     struct TerrainTexTweaks
     {
         float uvScaleGround = 0.20f;  // 1/m: ~5 m texture repeat on flat ground
         float uvScaleRock = 0.08f;    // 1/m: rock features read larger on cliffs
-        float slopeRockStart = 0.55f;
-        float slopeRockFull = 0.75f;
+        float uvScaleSnow = 0.12f;    // 1/m
+        float climateBlend = 0.09f;   // Gaussian sigma OUTSIDE a climate box, in (t01,h01) units
+        // Slope here is 1 - N.y, so these read as angles: 0.30 = 45 deg, 0.55 = 63 deg. Soil genuinely
+        // stops holding around 45, which is also about the steepest the diffusion model's 30 m/px field
+        // reaches — a threshold set for a sharper procedural field simply never fires on it.
+        float slopeRockStart = 0.30f;
+        float slopeRockFull = 0.55f;
         float cragStart = 12.0f;
         float cragFull = 50.0f;
         float beachBand = 2.5f;
-        float blendScale = 1.5f; // multiplies the generator's climate sigma for TEXTURE blends only
+        // Snow cover. It is a layer ON TOP of the ground/rock, not a climate entry competing with them:
+        // real snow buries soil and bedrock alike and slides off anything steep, which is what makes a
+        // cold mountain read as white with bare rock on its faces. It sheds EARLIER than rock appears
+        // (0.18 = 35 deg vs 0.30 = 45), so a steepening slope loses its snow first and only then goes to
+        // bedrock, rather than flipping between the two at one shared angle.
+        // Mean annual temperature below freezing is NOT permanent snow — Siberia averages -10 C and is
+        // forest. Permanent cover needs roughly -8 C and colder, so these sit well below 0: measured on the
+        // model's own climate, a -2 C snow line covers 15.8% of land and a +2 C one covers 25.4%.
+        float snowTempFull = -11.0f;  // C at/below which cover is complete
+        float snowTempNone = -3.0f;   // C at/above which there is none
+        float snowSlopeStart = 0.18f; // slope where it starts sliding off (~35 deg)
+        float snowSlopeFull = 0.45f;  // slope where none remains (~57 deg)
+        float snowAridity = 0.10f;    // humidity at/below which cold ground stays bare (polar desert)
+        // Crag wander. The crag test measures the surface against the generator's macro altitude, which for
+        // V3 is a 7.68 km surface — nearly flat across one mountain — so crag ~= height - constant and the
+        // rock boundary traces an elevation contour right across a range. This wanders it. Scaled by the
+        // local relief in the shader, so it can only modulate relief that exists and never rocks a plain.
+        // TerrainStreamer scales these by V3's world scale, like the crag thresholds.
+        float cragWanderAmp = 150.0f;      // metres at the model's true scale; 0 = off
+        float cragWanderWavelength = 2000.0f; // metres at the model's true scale
     };
     void setTerrainTextureParams(const TerrainTexTweaks& params) { m_terrainTexTweaks = params; }
-    // Keeps the shader's climate blend width in step with the generator's biome-blend tweak (cheap, per
-    // frame) without re-uploading the texture set.
-    void setTerrainClimateSigma(float sigma) { m_terrainClimateSigma = sigma; }
     // Deepest current ocean wave trough below the calm water level (m, >= 0; the OceanRenderer estimates
     // it from its displacement readback). Sizes the waterline band inside which the fog scatter samples
     // the live FFT wave height for the underwater fog boundary (fogParams7.y).
@@ -479,14 +522,11 @@ private:
     FogParams m_fogParams;
     OceanParams m_oceanParams;
     glm::vec4 m_terrainParams{ 0.0f }; // see setTerrainParams; x = 0 disables the ocean land cull
-    // Terrain biome splat materials (setTerrainBiomeMaterials): contiguous material range + owned textures.
-    int32  m_terrainBiomeBaseMaterial = -1; // -1 = no set registered (shader uses flat-color fallback)
-    uint32 m_terrainBiomeNumGround = 0;
-    uint32 m_terrainBiomeNumRock = 0;
-    bool   m_terrainBiomeHasBeach = false; // trailing beach entry present (index base + numGround + numRock)
-    float  m_terrainClimateSigma = 0.1f;
-    std::vector<uint16> m_terrainBiomeTextures; // for the per-frame streaming noteUse + replacement frees
-    glm::vec4 m_terrainBiomeCoords[RendererVKLayout::MAX_TERRAIN_BIOME_MATERIALS]{};
+    // Terrain splat materials (setTerrainSplatMaterials): contiguous material range + owned textures.
+    int32  m_terrainSplatBaseMaterial = -1; // -1 = no set registered (shader uses flat-color fallback)
+    TerrainSplatCounts m_terrainSplatCounts;
+    std::vector<uint16> m_terrainSplatTextures; // for the per-frame streaming noteUse + replacement frees
+    glm::vec4 m_terrainSplatClimate[RendererVKLayout::MAX_TERRAIN_SPLAT_MATERIALS]{};
     TerrainTexTweaks m_terrainTexTweaks; // see setTerrainTextureParams
     float m_oceanWaveTrough = 0.0f;  // see setOceanWaveTrough; 0 while the ocean is disabled
     PostParams m_postParams;

@@ -71,12 +71,37 @@ export namespace Procedural
 		float temperatureOffset = 0.0f;  // degrees C
 		float extraLapseRate = 0.0f;     // C per metre of altitude
 
+		// --- Microclimate. The model's temperature is essentially a FUNCTION OF ELEVATION (it regresses a
+		// lapse rate against the coarse map), so every climate boundary it produces is an isotherm — and an
+		// isotherm follows a contour line. Left alone, grass gives way to rock at the same height right
+		// across a mountain range, like a tide mark, and the snow line is a perfect ring.
+		// This is a slow wander added to the temperature to break that: real treelines and snow lines move
+		// hundreds of metres up and down a range with soil, drainage, wind scour and shelter. Adding it in
+		// DEGREES lets it act on the same axis the lapse rate does, so one field breaks up the ground
+		// transitions AND the snow line together, and it lands in the climate the scatter system and fog
+		// read too — so trees keep marking the treeline the textures draw.
+		// The wavelength is in model metres (it rides metersPerPixel like the detail layer). Keep it LONG:
+		// it is baked into the terrain-data map, whose far cascade is ~16 m per texel, and a wavelength near
+		// that aliases into near/far disagreement. The default is ~30x the far texel at mpp=3.
+		float climateNoiseAmplitudeC = 1.5f;   // 0 = off (the model's own banded climate)
+		float climateNoiseWavelength = 2000.0f; // model metres
+		uint32 climateNoiseOctaves = 3;
+
+
 		// --- Regional fog character (same role as V2's, derived from the model's real climate).
 		float humidFogAmount = 0.6f;  // broad fog in wet regions
 		float valleyFogAmount = 0.8f; // fog pooling below ridgelines
 
 		// --- Residency. One tile is 256x256 native px + halo, ~800 KB across elevation/temperature/precip.
 		int32 maxResidentTiles = 256;
+
+		// --- Inference precision. Requires the optional fp16 models produced by
+		// Tools/convert_models_fp16.py; without them this silently stays fp32 (see ModelAssets::modelPath).
+		// Halves model VRAM and load time but does NOT speed generation up (this pipeline is dispatch-bound;
+		// measurements in TerrainStreamer's tweak registration). Changing it RELOADS the models (precision
+		// lives in the file) and changes the terrain for a given seed, so it belongs here in the world
+		// config rather than being a pure perf knob.
+		bool useFp16 = false;
 	};
 
 	class TerrainGenV3 final : public ITerrainSampler
@@ -88,10 +113,20 @@ export namespace Procedural
 		// Starts loading the models (which ship in Assets/TerrainDiffusion) onto the GPU on a background
 		// thread. Cheap and idempotent; the TerrainGenV3 constructor calls it for you.
 		static void beginLoad();
+		// Applies the inference precision process-wide (see TerrainConfigV3::useFp16). Cheap to call on
+		// every rebuild — only a CHANGE does anything — but a change RELOADS the models, so isReady() must
+		// be re-read after this, never cached across it.
+		static void setPrecision(bool useFp16);
 		// False while the models are loading, and permanently if that failed. Sampling before this is true
 		// yields a flat sea-level world, so callers must gate geometry generation on it.
 		static bool isReady();
 		static bool hasFailed();
+		// metersPerPixel / the model's native resolution: the uniform factor every world-space length the
+		// generator produces is scaled by (elevation, crag relief, detail). Anything OUTSIDE the generator
+		// that compares against those lengths in metres — the terrain shader's crag thresholds — has to
+		// scale by this too, or it is tuned for exactly one metersPerPixel. Valid before the models load
+		// (the native resolution has a default), so callers need not gate on isReady().
+		static float worldScale(float metersPerPixel);
 		// Short human-readable status, or the reason it failed.
 		static std::string statusText();
 

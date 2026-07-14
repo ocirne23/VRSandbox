@@ -124,7 +124,7 @@ export struct FogParams
     float terrainShadowDist = 512.0f; // froxels beyond this distance sun-shadow by marching the terrain
                                    // height map instead of TLAS rays / cascade taps (both run out of data
                                    // at distance — TLAS is range-bounded); needs the terrain fog map
-    float regionStrength = 0.9f;   // how much the baked regional fog fields (terrain data map channel B:
+    float regionStrength = 1.0f;   // how much the baked regional fog fields (terrain data map channel B:
                                    // thickness + height-falloff mul, Procedural's sampleFogThickness /
                                    // sampleFogHeightFalloff) modulate the height fog: 0 = uniform fog,
                                    // 1 = fully region-driven

@@ -4,6 +4,7 @@ import Core;
 import Core.Log;
 import :GeneratorV3;
 import :Noise;
+import :Diffusion.Laplacian;
 import :Diffusion.ModelAssets;
 import :Diffusion.Onnx;
 import :Diffusion.Pipeline;
@@ -34,8 +35,15 @@ namespace Procedural
 		struct FieldTile
 		{
 			std::vector<float> elev;   // metres in the MODEL's frame, SIGNED (seabed stays negative)
-			std::vector<float> macro;  // the low-frequency band of elev: the smooth surface it rides on
-			std::vector<float> temp;   // degrees C
+			std::vector<float> macro;  // the COARSE stage's surface (7.68 km/px), resampled to this tile: the
+			                           // reference the shader measures crag relief against. Identical in
+			                           // meaning on both detail levels, which is the point.
+			std::vector<float> temp;   // degrees C, at THIS tile's own elevation
+			// The lapse rate that temperature was derived with, C per MODEL metre, clamped [-0.012, 0].
+			// Carried so the terrain shader can re-derive temperature at the MESH elevation: the coarse level
+			// reports temperature at its 7.68 km-averaged elevation and cannot know a peak's real height, so
+			// without this the far cascade omits peak cold entirely (measured: up to 10.6 C too warm).
+			std::vector<float> beta;
 			std::vector<float> precip; // mm/yr
 			int32 width = 0;           // TILE_W or CTILE_W
 		};
@@ -116,6 +124,50 @@ namespace Procedural
 				evictLocked();
 			}
 
+			// Unlike setSeed, this CANNOT be done in place: precision is a property of the model file, so the
+			// sessions have to be torn down and up to 2.28 GB reloaded. Callers see isReady() drop and come
+			// back, which is the same handover TerrainStreamer already polls for at startup.
+			// Called before beginLoad() on the first construction, so the usual path picks the precision up
+			// without ever paying for a reload.
+			void setPrecision(EPrecision p)
+			{
+				std::lock_guard<std::mutex> lk(m_loadMutex);
+				if (p == m_precision)
+					return;
+				if (!m_loadStarted)
+				{
+					m_precision = p; // nothing to reload; loadWorker will read it
+					return;
+				}
+
+				// Join FIRST: the old worker may still be building a pipeline, and m_precision must not
+				// change under it. Blocks the caller for the rest of an in-flight load (seconds, once, only
+				// when the toggle is flipped mid-load); afterwards the thread has already exited and this
+				// returns at once.
+				if (m_loader.joinable())
+					m_loader.join();
+				m_precision = p;
+
+				m_ready.store(false, std::memory_order_release);
+				m_failed.store(false, std::memory_order_release);
+				setStatus("Reloading models...");
+				{
+					// Waits out any inference already running. New fetches then see a null pipeline and
+					// return no tile, which the sample path already treats as "not generated yet".
+					std::lock_guard<std::mutex> pk(m_pipelineMutex);
+					m_pipeline.reset();
+				}
+				{
+					// The weights changed, so every cached tile is from the wrong model.
+					std::lock_guard<std::mutex> ck(m_cacheMutex);
+					m_cache.clear();
+					m_coarseCache.clear();
+				}
+				Log::info(std::format("[Diffusion] switching to {} - reloading models",
+				                      p == EPrecision::Fp16 ? "fp16" : "fp32"));
+				m_loader = std::thread([this]() { loadWorker(); });
+			}
+
 		private:
 			DiffusionRuntime() = default;
 			~DiffusionRuntime()
@@ -141,10 +193,18 @@ namespace Procedural
 				m_nativeResolution.store(m_assets.config().nativeResolution, std::memory_order_relaxed);
 				m_nativePerCoarse.store(32 * m_assets.config().latentCompression, std::memory_order_relaxed);
 
+				// Read once, without m_loadMutex: setPrecision only ever writes it with no loader running
+				// (it joins first), and starting this thread is the happens-before edge that publishes it.
+				const EPrecision precision = m_precision;
+				if (precision == EPrecision::Fp16 && !ModelAssets::hasFp16Models(EAssetSet::Full))
+					Log::warning("[Diffusion] fp16 requested but some *_fp16.onnx models are missing or are "
+					             "unfetched git-lfs pointers - those stages stay fp32. Try 'git lfs pull', or "
+					             "regenerate them with Tools/convert_models_fp16.py.");
+
 				setStatus("Loading models onto the GPU...");
 				auto p = std::make_unique<WorldPipeline>();
 				if (!p->initialize(m_seedAtLoad, m_assets.config(), m_assets.data(),
-				                   EInferenceDevice::Gpu, /*coarseOnly*/ false))
+				                   EInferenceDevice::Gpu, /*coarseOnly*/ false, precision))
 				{
 					m_failed.store(true, std::memory_order_release);
 					return;
@@ -217,6 +277,7 @@ namespace Procedural
 			std::mutex m_loadMutex;
 			bool m_loadStarted = false;
 			uint64 m_seedAtLoad = 1337;
+			EPrecision m_precision = EPrecision::Fp32; // guarded by m_loadMutex; see setPrecision
 			std::atomic<bool> m_ready{ false };
 			std::atomic<bool> m_failed{ false };
 			std::atomic<float> m_nativeResolution{ 30.0f };
@@ -282,6 +343,8 @@ namespace Procedural
 						t->temp.assign(climate.begin(), climate.begin() + (ptrdiff_t)plane);
 						t->precip.assign(climate.begin() + (ptrdiff_t)(2 * plane),
 						                 climate.begin() + (ptrdiff_t)(3 * plane));
+						t->beta.assign(climate.begin() + (ptrdiff_t)(4 * plane),  // channel 4 = lapse rate
+						               climate.begin() + (ptrdiff_t)(5 * plane));
 						return t;
 					});
 					fut = std::shared_future<FieldTilePtr>(task->get_future());
@@ -340,32 +403,76 @@ namespace Procedural
 						return hit;
 				}
 
+				// PADDED by the regression window: unlike the full path, the coarse tensor carries no lapse
+				// rate (its channels are elev/p5/temp/temp_std/precip/precip_std), so this path has to
+				// regress its own the same way computeClimate does — and localBaselineTemperature crops
+				// (win - 1) from each axis. Fetching CBETA_PAD extra on every side makes its output land
+				// exactly on the tile.
+				constexpr int32 CBETA_WIN = 15;             // same window computeClimate regresses over
+				constexpr int32 CBETA_PAD = CBETA_WIN / 2;  // 7
 				const int32 i0 = ti * CTILE - CHALO, i1 = (ti + 1) * CTILE + CHALO;
 				const int32 j0 = tj * CTILE - CHALO, j1 = (tj + 1) * CTILE + CHALO;
-				const FloatTensor slice = m_pipeline->getCoarseSlice(i0, j0, i1, j1);
+				const FloatTensor slice = m_pipeline->getCoarseSlice(i0 - CBETA_PAD, j0 - CBETA_PAD,
+				                                                     i1 + CBETA_PAD, j1 + CBETA_PAD);
 
+				const int32 pw = CTILE_W + 2 * CBETA_PAD;
+				const size_t pplane = (size_t)pw * pw;
 				const size_t plane = (size_t)CTILE_W * CTILE_W;
-				assert(slice.data.size() == 7 * plane);
-				auto t = std::make_shared<FieldTile>();
-				t->width = CTILE_W;
-				t->elev.resize(plane);
-				t->temp.resize(plane);
-				t->precip.resize(plane);
-				for (size_t i = 0; i < plane; i++)
+				assert(slice.data.size() == 7 * pplane);
+
+				// Decode the padded region once: signed elevation for the tile itself, and the
+				// clamped-to-sea-level copy the regression wants (computeClimate clamps for the same reason
+				// — the lapse is only meaningful over land).
+				Grid pTemp(pw, pw), pElevLand(pw, pw);
+				std::vector<float> pElev(pplane), pPrecip(pplane);
+				for (size_t i = 0; i < pplane; i++)
 				{
-					const float w = slice.data[6 * plane + i];
+					const float w = slice.data[6 * pplane + i];
 					const float inv = (w > 1e-6f) ? 1.0f / w : 0.0f;
 					// Undo the model's signed-sqrt elevation compression, keeping the SIGN: the far cascade
 					// feeds the fog and the ocean, which need the seabed, unlike the pipeline's own climate
 					// path which clamps ocean to zero.
-					const float e = slice.data[0 * plane + i] * inv;
-					t->elev[i] = (e > 0.0f ? 1.0f : (e < 0.0f ? -1.0f : 0.0f)) * e * e;
-					t->temp[i] = slice.data[2 * plane + i] * inv;
-					t->precip[i] = slice.data[4 * plane + i] * inv;
+					const float e = slice.data[0 * pplane + i] * inv;
+					pElev[i] = (e > 0.0f ? 1.0f : (e < 0.0f ? -1.0f : 0.0f)) * e * e;
+					pTemp.data[i] = slice.data[2 * pplane + i] * inv;
+					pPrecip[i] = slice.data[4 * pplane + i] * inv;
+					const float el = std::max(0.0f, e);
+					pElevLand.data[i] = el * el;
 				}
-				// At 7.68 km per pixel the coarse level IS the macro surface — there is no crag relief to
-				// resolve here, so macro == elev and (elev - macro) is zero. Correct rather than convenient:
-				// the far cascade genuinely cannot tell a crag from flat ground.
+
+				Grid tSea, betaG;
+				localBaselineTemperature(pTemp, pElevLand, CBETA_WIN, 0.02f, tSea, betaG);
+				assert(tSea.h == CTILE_W && tSea.w == CTILE_W);
+
+				auto t = std::make_shared<FieldTile>();
+				t->width = CTILE_W;
+				t->elev.resize(plane);
+				t->temp.resize(plane);
+				t->beta.resize(plane);
+				t->precip.resize(plane);
+				for (int32 r = 0; r < CTILE_W; r++)
+					for (int32 c = 0; c < CTILE_W; c++)
+					{
+						const size_t dst = (size_t)r * CTILE_W + c;
+						const size_t src = (size_t)(r + CBETA_PAD) * pw + (c + CBETA_PAD);
+						t->elev[dst] = pElev[src];
+						t->precip[dst] = pPrecip[src];
+						t->beta[dst] = betaG.at(r, c);
+						// The FITTED temperature, not the model's raw coarse value. This looks like it throws
+						// information away — the raw value carries a residual the fit does not — but the full
+						// path already threw exactly that away: computeClimate CONSTRUCTS its temperature as
+						// tSea + beta*elev and never uses the raw coarse temperature at all. Keeping the raw
+						// value here leaves the two levels disagreeing by that residual even after the shader
+						// corrects for elevation (measured: 1.53 C mean, 8.9 C max). Fitting both the same
+						// way is what actually makes them converge.
+						t->temp[dst] = tSea.at(r, c) + betaG.at(r, c) * pElevLand.data[src];
+					}
+				// At 7.68 km per pixel the coarse level IS the macro surface, so macro == elev and this
+				// path's own (elev - macro) is zero — a coarse tile cannot tell a crag from flat ground.
+				// That costs nothing: the shader never subtracts these two. It measures crag as the
+				// full-detail MESH height (which it always has) minus this macro, and the FULL path now
+				// reports this same coarse surface (WorldPipeline::computeCoarseSurface), so both detail
+				// levels hand it the same reference and cannot disagree.
 				t->macro = t->elev;
 				tile = t;
 			}
@@ -386,6 +493,7 @@ namespace Procedural
 		TerrainConfigV3 cfg;
 		NoiseField detailA;
 		NoiseField detailB;
+		NoiseField climateNoise; // the microclimate wander; see temperatureFrom
 		float invMpp = 1.0f / 30.0f;
 
 		// One evaluation of the diffusion field at a world position.
@@ -393,7 +501,8 @@ namespace Procedural
 		{
 			float elev = 0.0f;     // metres in the MODEL's frame (before worldScale/heightScale)
 			float macro = 0.0f;    // the low-frequency band of elev, same frame
-			float temp = 15.0f;    // C
+			float temp = 15.0f;    // C, at the sampled elevation
+			float beta = -0.0065f; // lapse rate, C per MODEL metre (see FieldTile::beta)
 			float precip = 800.0f; // mm/yr
 			float slope = 0.0f;    // m/m in WORLD space (already through worldScale * heightScale)
 			bool valid = false;
@@ -527,6 +636,7 @@ namespace Procedural
 			s.elev = bilerp(tile->elev);
 			s.macro = bilerp(tile->macro);
 			s.temp = bilerp(tile->temp);
+			s.beta = bilerp(tile->beta);
 			s.precip = bilerp(tile->precip);
 
 			// Central differences over the lattice -> WORLD slope. The halo is what lets this work at a tile
@@ -583,11 +693,41 @@ namespace Procedural
 		// climate rides along unscaled and a shrunk world keeps the snow caps and biome bands of the
 		// full-size one. Only the procedural detail adds relief the model never saw, so it alone earns a
 		// lapse correction (converted back into model metres to stay in that frame).
-		float temperatureFrom(const Sample& s, float detailWorldM) const
+		// A slow wander in degrees C. This is what stops every climate boundary from being a contour line:
+		// see TerrainConfigV3::climateNoiseAmplitudeC. A pure function of world position, so the near (Full)
+		// and far (Coarse) terrain-data cascades get identical values and cannot disagree about it.
+		float climateWander(double worldX, double worldZ) const
+		{
+			if (cfg.climateNoiseAmplitudeC <= 0.0f)
+				return 0.0f;
+			const float f = 1.0f / std::max(1.0f, cfg.climateNoiseWavelength * worldScale());
+			return climateNoise.fbm((float)(worldX * f), (float)(worldZ * f), cfg.climateNoiseOctaves)
+			     * cfg.climateNoiseAmplitudeC;
+		}
+
+		// The lapse rate this point's temperature is built with: the model's own regressed rate plus the
+		// snow-line tweak. C per MODEL metre, negative. See TerrainPoint::lapseRate for why it is reported.
+		float lapseOf(const Sample& s) const
+		{
+			return std::clamp(s.beta - cfg.extraLapseRate, LAPSE_RATE_MIN, LAPSE_RATE_MAX);
+		}
+
+		// Temperature at the point's FULL surface height (model elevation + the procedural detail).
+		//
+		// Written as ONE lapse from sea level — tBase + lapse * elevation — rather than as the model's
+		// temperature with corrections bolted on, because the terrain shader has to INVERT exactly this to
+		// move the temperature onto the mesh height (terrainFields), and it can only invert a clean
+		// function of height. The previous form lapsed the detail layer at a hardcoded -0.0065 while the
+		// model's own relief used the regressed beta, so temperature was not a function of the reported
+		// height at all and the inversion left ~1.5 C on the table.
+		float temperatureFrom(double worldX, double worldZ, const Sample& s, float detailWorldM) const
 		{
 			const float detailModelM = detailWorldM / std::max(0.01f, vertScale());
-			float t = s.temp - 0.0065f * std::max(0.0f, detailModelM);
-			t -= cfg.extraLapseRate * std::max(0.0f, s.elev); // snow-line control, model frame
+			// Recover the sea-level baseline the pipeline regressed: s.temp is tBase + beta * max(0, elev).
+			const float tBase = s.temp - s.beta * std::max(0.0f, s.elev);
+			const float elevWithDetail = s.elev + detailModelM;
+			float t = tBase + lapseOf(s) * std::max(0.0f, elevWithDetail);
+			t += climateWander(worldX, worldZ);
 			return t + cfg.temperatureOffset;
 		}
 
@@ -633,10 +773,23 @@ namespace Procedural
 			// crag relief (height - altitude) to tell a mountain from flat ground at altitude, so reporting
 			// the full elevation here made that difference the detail layer alone (a few metres) and no
 			// slope ever grew rock — mountain tops came out textured as whatever biome the lowland was.
+			// The macro surface, unperturbed. The crag WANDER that stops the rock boundary being a contour
+			// line lives in the terrain shader, not here: it has to be scaled by the local relief (so it can
+			// only modulate relief that exists, never invent rock on a plain), and relief is exactly what
+			// this path cannot supply on the coarse level — macro == elev there, so relief is 0 by
+			// construction and the far cascade would silently get no wander at all while the near one did.
+			// The shader has the full-detail MESH height whichever cascade it reads, so it can always
+			// compute the real relief. See terrainSplat / u_terrainTexParams5.
 			out.altitude = s.macro * vs;
 			out.height = cfg.seaLevel + s.elev * vs + d;
 			out.waterLevel = cfg.seaLevel;
-			out.temperature = temperatureFrom(s, d);
+			out.temperature = temperatureFrom(worldX, worldZ, s, d);
+			// In the MODEL's vertical frame, NOT per world metre. Converting here looks tidier but destroys
+			// the value: the world-frame rate is lapse/vertScale, which at mpp=3 is -0.065 — five times
+			// outside the [-0.012, 0] range the 8-bit bake encodes, so it would clamp and the shader's
+			// correction would come out 5.4x too small. The frame conversion belongs on the consumer side,
+			// where vertScale is known (u_terrainParams.y).
+			out.lapseRate = lapseOf(s);
 			out.humidity = humidityOf(s);
 			out.fogThickness = fogThicknessOf(s);
 			out.fogFalloffMul = fogFalloffOf(out.temperature);
@@ -651,7 +804,11 @@ namespace Procedural
 		m_impl->invMpp = 1.0f / m_impl->cfg.metersPerPixel;
 		m_impl->detailA.setSeed(cfg.seed * 0x9E3779B9u + 0x51ED2701u);
 		m_impl->detailB.setSeed(cfg.seed * 0x85EBCA6Bu + 0xC2B2AE35u);
+		m_impl->climateNoise.setSeed(cfg.seed * 0x27220A95u + 0x165667B1u);
 
+		// Before beginLoad: on the first construction this just records the choice, so the initial load
+		// reads the right weights instead of loading fp32 and immediately reloading.
+		DiffusionRuntime::get().setPrecision(cfg.useFp16 ? EPrecision::Fp16 : EPrecision::Fp32);
 		DiffusionRuntime::get().beginLoad();
 		DiffusionRuntime::get().setSeed((uint64)cfg.seed);
 		DiffusionRuntime::get().setMaxResidentTiles(cfg.maxResidentTiles);
@@ -660,6 +817,15 @@ namespace Procedural
 	TerrainGenV3::~TerrainGenV3() = default;
 
 	void TerrainGenV3::beginLoad() { DiffusionRuntime::get().beginLoad(); }
+	float TerrainGenV3::worldScale(float metersPerPixel)
+	{
+		const float nr = DiffusionRuntime::get().nativeResolution();
+		return metersPerPixel / (nr > 0.0f ? nr : 30.0f);
+	}
+	void TerrainGenV3::setPrecision(bool useFp16)
+	{
+		DiffusionRuntime::get().setPrecision(useFp16 ? EPrecision::Fp16 : EPrecision::Fp32);
+	}
 	bool TerrainGenV3::isReady() { return DiffusionRuntime::get().isReady(); }
 	bool TerrainGenV3::hasFailed() { return DiffusionRuntime::get().hasFailed(); }
 	std::string TerrainGenV3::statusText() { return DiffusionRuntime::get().statusText(); }
@@ -702,7 +868,7 @@ namespace Procedural
 		const Impl::Sample s = m_impl->sampleField(worldX, worldZ);
 		if (!s.valid)
 			return 15.0f;
-		return m_impl->temperatureFrom(s, m_impl->detail(worldX, worldZ, s.slope));
+		return m_impl->temperatureFrom(worldX, worldZ, s, m_impl->detail(worldX, worldZ, s.slope));
 	}
 
 	float TerrainGenV3::sampleHumidity(double worldX, double worldZ) const
@@ -727,7 +893,7 @@ namespace Procedural
 		if (!s.valid)
 			return 1.0f;
 		// Uses the SHAPED temperature so the fog agrees with the biome splatting rather than the raw model.
-		return m_impl->fogFalloffOf(m_impl->temperatureFrom(s, m_impl->detail(worldX, worldZ, s.slope)));
+		return m_impl->fogFalloffOf(m_impl->temperatureFrom(worldX, worldZ, s, m_impl->detail(worldX, worldZ, s.slope)));
 	}
 
 	void TerrainGenV3::samplePoint(double worldX, double worldZ, TerrainPoint& out, ESampleDetail detail) const

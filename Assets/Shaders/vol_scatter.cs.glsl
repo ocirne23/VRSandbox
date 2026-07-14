@@ -283,11 +283,13 @@ void main()
             heightBase += u_fogParams3.x * (u_fogParams5.w + max(td.w, 0.0));
         if (u_fogParams6.z > 0.0)
         {
-            // Regional climate: x = fog thickness (density multiplier), y = height-falloff multiplier
-            // (fog hugs the ground in one region, towers in another), both eased in by Region strength.
+            // Regional climate: x = fog thickness (density multiplier), and the height-falloff multiplier
+            // (fog hugs the ground in one region, towers in another) DERIVED from the temperature in .z —
+            // it is a pure function of it, and the .y slot it used to be baked into now carries the lapse
+            // rate, which nothing else can reconstruct. Both eased in by Region strength.
             const vec4 climate = terrainClimateNearestAt(worldPos.xz);
             regionMul = mix(1.0, climate.x, u_fogParams6.z);
-            heightFalloff *= mix(1.0, climate.y, u_fogParams6.z);
+            heightFalloff *= mix(1.0, fogFalloffFromTemperature(climate.z), u_fogParams6.z);
         }
     }
     // Height density = the analytic mean over this slice's segment of the sample ray (see heightFogMean),

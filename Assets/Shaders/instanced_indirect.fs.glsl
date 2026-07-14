@@ -203,9 +203,25 @@ TerrainFields terrainFields(vec3 worldPos)
 		const vec4 td = terrainDataAt(worldPos.xz);
 		f.altitude = td.w;
 		f.waterLevel = td.y;
-		const vec4 climate = terrainClimateAt(worldPos.xz); // (fog thickness, falloff mul, temp C, humidity)
-		f.temperature = climate.z;
+		const vec4 climate = terrainClimateAt(worldPos.xz); // (fog thickness, lapse rate, temp C, humidity)
 		f.humidity = climate.w;
+
+		// Re-derive the temperature at THIS PIXEL'S height. The baked temperature is only valid at the
+		// baked height (td.x), and the two cascades bake different heights for the same spot: the near one
+		// the full-detail surface, the far one its 7.68 km average — which cannot know a peak exists, so it
+		// reports the temperature of the plateau the peak stands on. Left uncorrected the far cascade omits
+		// peak cold entirely and summits read up to 10.6 C too warm, flipping their texture as the camera
+		// crosses the cascade crossfade.
+		// Moving it to worldPos.y fixes both levels with one expression, and it is self-cancelling rather
+		// than cascade-aware: near bakes td.x ~= worldPos.y so the correction vanishes on its own, while far
+		// supplies exactly the missing lapse over the relief. Clamped at sea level to match how the
+		// generator applies the lapse in the first place (only over land).
+		// climate.y is per unit of the GENERATOR's vertical frame, so the world-metre delta converts through
+		// vertScale. Baked in that frame on purpose: the world-frame rate runs to -0.065 on a compressed
+		// world and would clamp to nothing in 8 bits.
+		const float bakedElev = max(td.x - seaLevel, 0.0);
+		const float pixelElev = max(worldPos.y - seaLevel, 0.0);
+		f.temperature = climate.z + climate.y * (pixelElev - bakedElev) / u_terrainParams.y;
 	}
 	return f;
 }
@@ -216,20 +232,17 @@ TerrainFields terrainFields(vec3 worldPos)
 // upload all look identical on-screen, and "the texture is wrong" cannot tell them apart.
 //   1 = temperature    blue(-25 C) -> cyan -> green -> yellow -> red(+50 C), with 5 C contour lines, plus:
 //                      MAGENTA line = the FREEZING LINE (0 C)
-//                      CYAN line + darkened fill = the snow threshold (TERRAIN_DEBUG_SNOW_C): past the
-//                        Arctic attractor, i.e. where the splat can actually reach the snow texture. If
-//                        that region is empty, snow cannot happen anywhere in view.
+//                      CYAN line + darkened fill = the snow line (the live Terrain/Textures "Snow temp
+//                        none" tweak — everything colder than it holds some snow). If that region is
+//                        empty, snow cannot happen anywhere in view.
 //                      A CONSTANT field draws no contour lines at all — that alone tells you the field is
 //                      stuck rather than merely uniform-looking.
 //   2 = humidity       black (arid) -> white (h01 = 1), contour lines every 0.1
 //   3 = crag relief    |height - altitude|: black 0 m -> white 200 m. This drives the rock layer; if it
-//                      is black everywhere, mountains keep their lowland biome texture.
+//                      is black everywhere, mountains keep their lowland ground texture.
 //   4 = altitude       the macro band: black = sea level -> white = 5 km
 //   5 = cascade        green = near cascade, red = far, yellow = the crossfade band between them
 #define TERRAIN_DEBUG_MODE 0
-// Mode 1's snow marker. Must track the Arctic attractor's temperature in GeneratorV2.cpp's BIOME_TABLE
-// (-15 C, widened here to where its Gaussian actually starts winning the splat).
-#define TERRAIN_DEBUG_SNOW_C -15.0
 
 #if TERRAIN_DEBUG_MODE != 0
 vec3 debugHeatRamp(float t)
@@ -264,12 +277,14 @@ vec3 terrainDebugColor(TerrainFields f, vec3 worldPos)
 {
 #if TERRAIN_DEBUG_MODE == 1
 	vec3 col = debugHeatRamp((f.temperature + 25.0) / 75.0) * debugContour(f.temperature, 5.0);
-	// The snow zone: past the Arctic attractor, i.e. where the splat can actually reach the snow texture.
-	if (f.temperature <= TERRAIN_DEBUG_SNOW_C)
+	// The snow zone, read from the LIVE snow params rather than a mirrored constant, so this marks where
+	// the splat actually lays snow down instead of where it did when this line was last hand-edited.
+	const float snowLineC = u_terrainTexParams3.w;
+	if (f.temperature <= snowLineC)
 		col = mix(col, vec3(0.05), 0.75);
-	// The FREEZING LINE (0 C) in magenta, and the snow threshold in cyan. Drawn last and thick so they
-	// read over the ramp: these two are the boundaries that actually decide what the terrain looks like.
-	col = mix(col, vec3(0.0, 1.0, 1.0), debugIsoline(f.temperature, TERRAIN_DEBUG_SNOW_C, 1.5));
+	// The FREEZING LINE (0 C) in magenta, and the snow line in cyan. Drawn last and thick so they read
+	// over the ramp: these two are the boundaries that actually decide what the terrain looks like.
+	col = mix(col, vec3(0.0, 1.0, 1.0), debugIsoline(f.temperature, snowLineC, 1.5));
 	col = mix(col, vec3(1.0, 0.0, 1.0), debugIsoline(f.temperature, 0.0, 2.0));
 	return col;
 #elif TERRAIN_DEBUG_MODE == 2
@@ -288,11 +303,18 @@ vec3 terrainDebugColor(TerrainFields f, vec3 worldPos)
 }
 #endif
 
-// --- Biome texture splatting (setTerrainBiomeMaterials; u_terrainTexParams*/u_terrainBiomeCoords) ------
-// Ground biomes are climate attractors in the generator's (t01, h01) space: per-pixel Gaussian weights
-// select the top two, their textures blend, and a rock layer (its own climate-picked attractor set)
-// takes over on steep slopes and on ridges rising far above the macro altitude. World-XZ projection for
-// ground, triplanar for rock (XZ stretches to smear on cliff faces).
+// --- Terrain texture splatting (setTerrainSplatMaterials; u_terrainTexParams*/u_terrainSplatClimate) ---
+// The surface is composited as four physical layers, bottom-up, in the order nature stacks them:
+//   1. GROUND — the soil/vegetation the climate grows; selected by the pixel's (temperature, humidity)
+//               against each entry's climate BOX. World-XZ projection.
+//   2. BEACH  — a shoreline band just above the local waterline. Not climate-selected: sand is what a
+//               wave leaves behind whatever the weather is doing.
+//   3. ROCK   — bedrock, wherever the surface is too steep or too prominent to hold soil. Its type IS
+//               climate-selected (weathering depends on climate). Triplanar (XZ smears on cliff faces).
+//   4. SNOW   — cover over ALL of the above. This is the layer that makes cold mountains read correctly,
+//               and it is why snow is not a ground type: snow falls ON the bedrock, so a ground-level
+//               snow entry would just be painted over by layer 3 and the peaks would come out gray.
+// There is no "biome" here — no enum, no discrete regions. Climate selects textures directly.
 
 struct TerrainSample
 {
@@ -387,17 +409,94 @@ TerrainSample sampleTerrainTriplanar(uint matIdx, vec3 worldPos, vec3 geoN, floa
 	return s;
 }
 
-void terrainWeighted(inout TerrainSample acc, TerrainSample s, float w)
+// --- Crag wander noise ------------------------------------------------------------------------------
+// Value-noise fBm over world XZ. Lives here rather than in the generator because the wander has to be
+// scaled by the LOCAL RELIEF, and relief is the one thing the generator's coarse path cannot supply
+// (macro == elev there, so its relief is 0 by construction and the far cascade would get no wander while
+// the near one did — the cascades would disagree again). The shader always has the full-detail mesh
+// height, so it can always form the real relief.
+float terrainHash12(vec2 p)
 {
-	acc.albedo += s.albedo * w;
-	acc.normal += s.normal * w;
-	acc.rough  += s.rough * w;
-	acc.metal  += s.metal * w;
-	acc.ao     += s.ao * w;
+	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return fract((p3.x + p3.y) * p3.z);
 }
 
-// The full splatted terrain surface. When no texture set is bound yet (early startup, before the biome DDS
-// bake registers) it returns a neutral mid-gray so the material reads stay in bounds.
+float terrainValueNoise(vec2 p)
+{
+	const vec2 i = floor(p);
+	const vec2 f = p - i;
+	const vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(terrainHash12(i),                terrainHash12(i + vec2(1.0, 0.0)), u.x),
+	           mix(terrainHash12(i + vec2(0.0, 1.0)), terrainHash12(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+// ~[-1, 1], 3 octaves. Amplitude-normalised, so octaves add roughness rather than range.
+float terrainFbm(vec2 p)
+{
+	float v = 0.0, a = 0.5, norm = 0.0;
+	for (int i = 0; i < 3; ++i)
+	{
+		v += a * terrainValueNoise(p);
+		norm += a;
+		p *= 2.0;
+		a *= 0.5;
+	}
+	return (v / norm) * 2.0 - 1.0;
+}
+
+// Lay `s` over `acc` with coverage `w`.
+void terrainMixInto(inout TerrainSample acc, TerrainSample s, float w)
+{
+	acc.albedo = mix(acc.albedo, s.albedo, w);
+	acc.normal = mix(acc.normal, s.normal, w);
+	acc.rough  = mix(acc.rough, s.rough, w);
+	acc.metal  = mix(acc.metal, s.metal, w);
+	acc.ao     = mix(acc.ao, s.ao, w);
+}
+
+// How well `climate` matches an entry's climate BOX: 1 anywhere inside it, Gaussian-decaying by the
+// distance to its edge outside. A box rather than a point is what lets an entry opt OUT of an axis it
+// does not care about — leaving a range at full 0..1 width contributes no distance on it — so "bedrock
+// that is cold at ANY humidity" is directly expressible. With point attractors it was not, and every
+// entry had to claim some fictional humidity to sit at.
+float climateBoxWeight(vec2 climate, vec4 box, float invS2)
+{
+	const vec2 d = max(max(box.xz - climate, climate - box.yw), vec2(0.0));
+	return exp(-dot(d, d) * invS2);
+}
+
+struct ClimatePick
+{
+	int i0;        // best entry, as an ENTRY index (0-based, like u_terrainSplatClimate) — the caller adds
+	int i1;        // runner-up                       baseMat to reach the material
+	float blend1;  // coverage of i1 over i0, in [0, 1]
+};
+
+// The top two climate entries in [first, first + count), with weights taken RELATIVE to the third
+// (w - w2): when the #2/#3 ranking swaps, both candidates sit exactly at w2 and so enter and leave the
+// blend at zero contribution. Without this the second texture flips instantly mid-blend and every
+// ranking crossover draws a hard seam across the terrain.
+ClimatePick pickClimate(vec2 climate, int first, int count, float invS2)
+{
+	int i0 = first, i1 = first;
+	float w0 = -1.0, w1 = -1.0, w2 = -1.0;
+	for (int i = first; i < first + count; ++i)
+	{
+		const float w = climateBoxWeight(climate, u_terrainSplatClimate[i], invS2);
+		if (w > w0)      { i1 = i0; w2 = w1; w1 = w0; i0 = i; w0 = w; }
+		else if (w > w1) { i1 = i; w2 = w1; w1 = w; }
+		else if (w > w2) { w2 = w; }
+	}
+	w2 = max(w2, 0.0); // count < 3: nothing to subtract
+	const float w1r = max(w1 - w2, 0.0);
+	// Every weight can underflow when the climate sits far outside all boxes; the max() keeps the blend
+	// defined (top-1 wins outright).
+	return ClimatePick(i0, i1, w1r / max((w0 - w2) + w1r, 1e-6));
+}
+
+// The full splatted terrain surface. When no texture set is bound yet (early startup, before the DDS bake
+// registers) it returns a neutral mid-gray so the material reads stay in bounds.
 TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f)
 {
 	const int baseMat = int(u_terrainTexParams0.x);
@@ -406,99 +505,78 @@ TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f)
 	if (baseMat < 0 || numGround <= 0)
 		return TerrainSample(vec3(0.5), geoN, 0.92, 0.0, 1.0);
 
-	// Climate position of this pixel in the generator's (t01, h01) attractor space. The baked
-	// temperature includes the altitude lapse, so cold peaks drift toward the Tundra/Arctic attractors
-	// (rocky/snowy textures) exactly where the generator grows them.
+	// This pixel's climate, in the same normalized space the table's boxes are written in. The baked
+	// temperature already carries the generator's altitude lapse, so elevation enters the selection as the
+	// cold it actually causes rather than as a raw height threshold — one field decides both where snow
+	// lies and which vegetation grows under it, and they cannot disagree.
 	const vec2 climate = vec2(clamp((f.temperature + 25.0) / 75.0, 0.0, 1.0), f.humidity);
 	const float invS2 = 1.0 / (2.0 * u_terrainTexParams0.w * u_terrainTexParams0.w);
-
-	// Top-3 ground biomes by Gaussian proximity. Only the top two get sampled, but their weights are
-	// taken RELATIVE to the third (w - w2): when the #2/#3 ranking swaps, both candidates sit exactly at
-	// w2 and enter/leave the blend at zero contribution — without this, the second texture flips
-	// instantly mid-blend and every ranking crossover shows as a hard seam.
-	int i0 = 0, i1 = 0;
-	float w0 = -1.0, w1 = -1.0, w2 = -1.0;
-	for (int i = 0; i < numGround; ++i)
-	{
-		const vec2 d = climate - u_terrainBiomeCoords[i].xy;
-		const float w = exp(-dot(d, d) * invS2);
-		if (w > w0)      { i1 = i0; w2 = w1; w1 = w0; i0 = i; w0 = w; }
-		else if (w > w1) { i1 = i; w2 = w1; w1 = w; }
-		else if (w > w2) { w2 = w; }
-	}
-	w2 = max(w2, 0.0); // numGround < 3: nothing to subtract
-	const float w0r = w0 - w2;
-	const float w1r = max(w1 - w2, 0.0);
-	// Weights can all underflow far from every attractor; the max() keeps the blend defined (top-1 wins).
-	const float wSum = max(w0r + w1r, 1e-6);
-	float blend1 = w1r / wSum;
-
+	const float slope = 1.0 - clamp(geoN.y, 0.0, 1.0);
 	const vec2 uvGround = worldPos.xz * u_terrainTexParams1.x;
-	TerrainSample surfAcc = TerrainSample(vec3(0.0), vec3(0.0), 0.0, 0.0, 0.0);
-	terrainWeighted(surfAcc, sampleTerrainXZ(uint(baseMat + i0), uvGround, geoN), 1.0 - blend1);
-	if (blend1 > 0.004)
-		terrainWeighted(surfAcc, sampleTerrainXZ(uint(baseMat + i1), uvGround, geoN), blend1);
 
-	// Beach sand just above the local waterline: blend toward the dedicated beach entry (NOT a biome —
-	// a climate-independent shoreline overlay, always the LAST registered material when present).
+	// --- 1. Ground: whatever the climate grows here.
+	const ClimatePick g = pickClimate(climate, 0, numGround, invS2);
+	TerrainSample surf = sampleTerrainXZ(uint(baseMat + g.i0), uvGround, geoN);
+	if (g.blend1 > 0.004)
+		terrainMixInto(surf, sampleTerrainXZ(uint(baseMat + g.i1), uvGround, geoN), g.blend1);
+
+	// --- 2. Beach: the band just above the local waterline, whatever the climate.
 	if (u_terrainTexParams3.x > 0.5)
 	{
 		const float beachW = 1.0 - smoothstep(0.3, max(u_terrainTexParams2.z, 0.31), worldPos.y - f.waterLevel);
 		if (beachW > 0.004)
-		{
-			const uint beachMatIdx = uint(baseMat) + uint(numGround) + uint(numRock);
-			const TerrainSample sand = sampleTerrainXZ(beachMatIdx, uvGround, geoN);
-			surfAcc.albedo = mix(surfAcc.albedo, sand.albedo, beachW);
-			surfAcc.normal = mix(surfAcc.normal, sand.normal, beachW);
-			surfAcc.rough  = mix(surfAcc.rough, sand.rough, beachW);
-			surfAcc.metal  = mix(surfAcc.metal, sand.metal, beachW);
-			surfAcc.ao     = mix(surfAcc.ao, sand.ao, beachW);
-		}
+			terrainMixInto(surf, sampleTerrainXZ(uint(baseMat + numGround + numRock), uvGround, geoN), beachW);
 	}
 
-	// Rock layer: steep slopes + crags (relief above the macro altitude). Rock type is the nearest rock
-	// attractor in the same climate space (gray granite cold, red sandstone hot/dry, dark basalt wet).
-	const float slope = 1.0 - clamp(geoN.y, 0.0, 1.0);
-	const float seaLevel = u_terrainParams.z;
-	const float crag = smoothstep(u_terrainTexParams2.x, u_terrainTexParams2.y, (worldPos.y - seaLevel) - f.altitude);
-	float rockW = max(smoothstep(u_terrainTexParams1.z, u_terrainTexParams1.w, slope), crag * 0.85);
+	// --- 3. Bedrock, exposed where the surface cannot hold soil: too steep, or standing too far above the
+	// macro altitude (a crag). max(), not a sum — the two reasons coincide on a cliff and adding them
+	// would double-count. These are NOT redundant: at the model's 30 m/px the field rarely reaches the
+	// slope threshold, so on V3 terrain crag is what puts rock on nearly every mountain.
+	//
+	// The relief is WANDERED before the test. Without it the rock boundary is an elevation contour: V3's
+	// macro altitude is the coarse stage's 7.68 km surface, which is nearly flat across any one mountain,
+	// so relief ~= height - constant and grass gives way to stone at the same height right across a range.
+	// The wander is scaled by the relief itself, which is what stops it inventing rock: |wander| <= relief
+	// keeps the tested value in [0, 2*relief], so flat lowlands (relief ~ 0) are untouched no matter how
+	// large the amplitude, and only ground that already stands proud gets moved.
+	float relief = (worldPos.y - u_terrainParams.z) - f.altitude;
+	if (u_terrainTexParams5.x > 0.0)
+	{
+		const float w = terrainFbm(worldPos.xz * u_terrainTexParams5.y) * u_terrainTexParams5.x;
+		relief -= w * clamp(relief / u_terrainTexParams5.x, 0.0, 1.0);
+	}
+	const float crag = smoothstep(u_terrainTexParams2.x, u_terrainTexParams2.y, relief);
+	const float rockW = max(smoothstep(u_terrainTexParams1.z, u_terrainTexParams1.w, slope), crag * 0.85);
 	if (rockW > 0.004 && numRock > 0)
 	{
-		// Top-2 rock types with the same third-weight subtraction as the ground blend (a top-1 pick
-		// flips the whole cliff texture at the ranking crossover).
-		int r0 = 0, r1 = 0;
-		float rw0 = -1.0, rw1 = -1.0, rw2 = -1.0;
-		for (int i = 0; i < numRock; ++i)
-		{
-			const vec2 d = climate - u_terrainBiomeCoords[numGround + i].xy;
-			const float w = exp(-dot(d, d) * invS2);
-			if (w > rw0)      { r1 = r0; rw2 = rw1; rw1 = rw0; r0 = i; rw0 = w; }
-			else if (w > rw1) { r1 = i; rw2 = rw1; rw1 = w; }
-			else if (w > rw2) { rw2 = w; }
-		}
-		rw2 = max(rw2, 0.0);
-		const float rw1r = max(rw1 - rw2, 0.0);
-		const float rockBlend1 = rw1r / max((rw0 - rw2) + rw1r, 1e-6);
-
-		TerrainSample rock = sampleTerrainTriplanar(uint(baseMat + numGround + r0), worldPos, geoN, u_terrainTexParams1.y);
-		if (rockBlend1 > 0.004)
-		{
-			const TerrainSample rockB = sampleTerrainTriplanar(uint(baseMat + numGround + r1), worldPos, geoN, u_terrainTexParams1.y);
-			rock.albedo = mix(rock.albedo, rockB.albedo, rockBlend1);
-			rock.normal = normalize(mix(rock.normal, rockB.normal, rockBlend1));
-			rock.rough  = mix(rock.rough, rockB.rough, rockBlend1);
-			rock.metal  = mix(rock.metal, rockB.metal, rockBlend1);
-			rock.ao     = mix(rock.ao, rockB.ao, rockBlend1);
-		}
-		surfAcc.albedo = mix(surfAcc.albedo, rock.albedo, rockW);
-		surfAcc.normal = mix(surfAcc.normal, rock.normal, rockW);
-		surfAcc.rough  = mix(surfAcc.rough, rock.rough, rockW);
-		surfAcc.metal  = mix(surfAcc.metal, rock.metal, rockW);
-		surfAcc.ao     = mix(surfAcc.ao, rock.ao, rockW);
+		const ClimatePick r = pickClimate(climate, numGround, numRock, invS2);
+		TerrainSample rock = sampleTerrainTriplanar(uint(baseMat + r.i0), worldPos, geoN, u_terrainTexParams1.y);
+		if (r.blend1 > 0.004)
+			terrainMixInto(rock, sampleTerrainTriplanar(uint(baseMat + r.i1), worldPos, geoN, u_terrainTexParams1.y), r.blend1);
+		terrainMixInto(surf, rock, rockW);
 	}
 
-	surfAcc.normal = normalize(surfAcc.normal);
-	return surfAcc;
+	// --- 4. Snow, over ALL of the above. Snow settles on bedrock exactly as it settles on soil, so it has
+	// to be applied after the rock layer rather than selected as a cold ground type — that ordering is the
+	// difference between a white peak and a gray one. What keeps it from being a flat white cap is that it
+	// slides off anything steep, so the mountain's own rock shows through on its faces.
+	if (u_terrainTexParams3.y > 0.5)
+	{
+		const float cold  = 1.0 - smoothstep(u_terrainTexParams3.z, u_terrainTexParams3.w, f.temperature);
+		const float holds = 1.0 - smoothstep(u_terrainTexParams4.x, u_terrainTexParams4.y, slope);
+		// Nothing accumulates where nothing falls: without this the cold DRY ground (polar desert, and the
+		// arid side of any high range) turns white too.
+		const float wet = smoothstep(0.0, max(u_terrainTexParams4.z, 1e-3), f.humidity);
+		const float snowW = cold * holds * wet;
+		if (snowW > 0.004)
+		{
+			const uint snowMatIdx = uint(baseMat + numGround + numRock) + (u_terrainTexParams3.x > 0.5 ? 1u : 0u);
+			terrainMixInto(surf, sampleTerrainXZ(snowMatIdx, worldPos.xz * u_terrainTexParams2.w, geoN), snowW);
+		}
+	}
+
+	surf.normal = normalize(surf.normal);
+	return surf;
 }
 #endif
 

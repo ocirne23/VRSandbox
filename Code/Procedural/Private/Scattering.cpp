@@ -302,11 +302,19 @@ namespace Procedural
 					const double wx = ox + ((double)si + rng.next01()) * sub;
 					const double wz = oz + ((double)sj + rng.next01()) * sub;
 
+					// ONE evaluation for climate AND height: samplePoint returns both from a single tile
+					// resolve, where sampleTemperature + sampleHumidity + sampleHeightAndWater is three of
+					// them for the same point. Worth it even though the altitude test below rejects some
+					// candidates that never needed a height — under V3 the height falls out of the same
+					// resolve for free, so the only way to not pay for it is to resolve the tile twice.
+					TerrainPoint tp;
+					maps.samplePoint(wx, wz, tp);
+
 					// Climate weight: density fades with distance to the biome attractor in the same
 					// (t01, h01) space the terrain blends in. The reported temperature carries the altitude
 					// lapse, so growth thins toward peaks on its own.
-					const float t01 = glm::clamp((maps.sampleTemperature(wx, wz) - TEMPERATURE_MIN_C) / TEMP_RANGE, 0.0f, 1.0f);
-					const float h01 = glm::clamp(maps.sampleHumidity(wx, wz), 0.0f, 1.0f);
+					const float t01 = glm::clamp((tp.temperature - TEMPERATURE_MIN_C) / TEMP_RANGE, 0.0f, 1.0f);
+					const float h01 = glm::clamp(tp.humidity, 0.0f, 1.0f);
 					const glm::vec2 dClim = glm::vec2(t01, h01) - rt.climateCoords;
 					const float w = std::exp(-(dClim.x * dClim.x + dClim.y * dClim.y) * invS2);
 					if (w < 0.02f || rng.next01() > w)
@@ -322,8 +330,8 @@ namespace Procedural
 							continue;
 					}
 
-					float waterLevel;
-					const float h = maps.sampleHeightAndWater(wx, wz, waterLevel);
+					const float h = tp.height;
+					const float waterLevel = tp.waterLevel;
 					const float altitude = h - waterLevel;
 					if (altitude < rule.minAltitude || altitude > rule.maxAltitude)
 						continue;

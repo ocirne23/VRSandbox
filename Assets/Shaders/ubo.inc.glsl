@@ -130,20 +130,34 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // z = swash backflow (scale on the raw horizontal chop riding the swash
                             // weight: the tongue flows back seaward as the wave recedes), w unused
     vec4 u_terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
-                            // 0 = no terrain mesh up — fences the ocean land cull), y unused,
+                            // 0 = no terrain mesh up — fences the ocean land cull),
+                            // y = generator vertScale (world m per unit of its vertical frame; converts the
+                            //     baked lapse rate in the climate pack's .y from that frame to world m),
                             // z = sea level (world Y, live from the streamer), w unused
 
-    // TERRAIN variant biome texture splatting (keep in sync with RendererVKLayout::Ubo). Materials are
-    // contiguous: [base .. base+numGround) ground biomes, then numRock rock-layer entries.
+    // TERRAIN variant texture splatting (keep in sync with RendererVKLayout::Ubo). Materials are
+    // contiguous, in the order the shader composites them bottom-up:
+    //   [base .. +numGround) climate-blended ground, [.. +numRock) bedrock exposed by slope/crag,
+    //   then the optional beach entry, then the optional snow entry (always last).
     vec4 u_terrainTexParams0; // x = base material idx (< 0 = no texture set: flat-color fallback),
-                              // y = ground biome count, z = rock entry count, w = climate kernel sigma
+                              // y = ground entry count, z = rock entry count,
+                              // w = climate kernel sigma (Gaussian falloff OUTSIDE a climate box)
     vec4 u_terrainTexParams1; // x = ground uv scale (1/m), y = rock uv scale (1/m),
                               // z = slope where rock fades in, w = slope where rock is full
     vec4 u_terrainTexParams2; // x = crag relief start (m above macro altitude), y = crag relief full,
-                              // z = beach band height (m above water level), w = unused
-    vec4 u_terrainTexParams3; // x = dedicated beach material present (0/1; when present it's always the
-                              // LAST registered material: index base + numGround + numRock), yzw unused
-    vec4 u_terrainBiomeCoords[MAX_TERRAIN_BIOME_MATERIALS]; // xy = (t01, h01) climate attractor, zw unused
+                              // z = beach band height (m above water level), w = snow uv scale (1/m)
+    vec4 u_terrainTexParams3; // x = beach entry present (0/1; index base + numGround + numRock),
+                              // y = snow entry present (0/1; the LAST material, after the beach),
+                              // z = temperature (C) at/below which snow cover is complete,
+                              // w = temperature (C) at/above which there is no snow
+    vec4 u_terrainTexParams4; // x = slope where snow starts sliding off, y = slope where none remains,
+                              // z = humidity at/below which cold ground stays bare (polar desert), w unused
+    vec4 u_terrainTexParams5; // x = crag wander amplitude (m; 0 = off), y = crag wander frequency (1/m),
+                              // zw unused
+    vec4 u_terrainSplatClimate[MAX_TERRAIN_SPLAT_MATERIALS]; // ground/rock CLIMATE BOX: xy = t01 range,
+                              // zw = h01 range. Weight is 1 inside and Gaussian-decays outside, so a full
+                              // 0..1 range on an axis means "this axis does not matter for this entry".
+                              // Unused for the beach/snow overlays.
 
     // GPU mesh LOD selection (indirect + shadow cull; keep in sync with RendererVKLayout::Ubo)
     vec4 u_lodParams0; // x = screen-space error threshold (px, bias pre-applied), y = hysteresis band,

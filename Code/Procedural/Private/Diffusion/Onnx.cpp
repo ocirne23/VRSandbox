@@ -19,9 +19,16 @@ namespace Procedural::Diffusion
 	{
 		// The ORT environment is a process-wide singleton and is never destroyed (matching the reference,
 		// where OrtEnvironment is likewise never closed). Constructed on first use.
+		//
+		// ERROR, not WARNING: ORT logs straight to stdout, bypassing Core.Log, and at WARNING every session
+		// emits VerifyEachNodeIsAssignedToAnEp ("some nodes were not assigned to the preferred execution
+		// providers"). That one is unactionable by construction — ORT deliberately keeps shape/reshape ops
+		// on the CPU because they compute tensor metadata, and a GPU round-trip per op to produce a few
+		// integers would be slower. Nothing here reads ORT's warning stream: a DirectML EP that genuinely
+		// fails to attach THROWS, and is reported below as an explicit error plus "inference provider: CPU".
 		Ort::Env& ortEnv()
 		{
-			static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "VRSandbox.Diffusion");
+			static Ort::Env env(ORT_LOGGING_LEVEL_ERROR, "VRSandbox.Diffusion");
 			return env;
 		}
 
