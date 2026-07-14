@@ -18,29 +18,62 @@ namespace
 
 	std::atomic<uint32> s_v2InstanceCounter{ 0 };
 
-	// The biome attractor table: (temperature, humidity) are each biome's COORDINATES in climate space —
-	// the independently generated climate fields select biomes by proximity to them — and the rest is the
-	// terrain character blended in. Heights are relative to sea level and ride the continent altitude
-	// gradient as offsets. heightVar is the +- swing the detail fBm applies on top — the biome's
+	// The biome attractor table. Each biome's CLIMATE COORDINATES are given in REAL units — mean annual
+	// temperature (C) and annual precipitation (mm/yr), roughly following the Whittaker biome diagram —
+	// and converted into the shared normalized (t01, h01) space (TerrainSampler.ixx) at use. The
+	// independently generated climate fields then select biomes by proximity to them; the rest of each row
+	// is the terrain character blended in. Heights are relative to sea level and ride the continent
+	// altitude gradient as offsets. heightVar is the +- swing the detail fBm applies on top — the biome's
 	// "roughness" (swamps flat, taiga rugged). reliefScale multiplies the macro relief AND the fantasy
 	// peaks: flat-biased biomes keep their smooth character while mountain-biased ones erupt.
-	struct BiomeFieldParams { float baseHeight, heightVar, temperature, humidity, reliefScale; };
+	//
+	// WHY REAL UNITS: V3's diffusion model emits genuine WorldClim-calibrated climate, so these coordinates
+	// have to mean something physical for it to land on the right biome. TEMPERATURE is what was fake — the
+	// snow attractor used to sit at an effective -23.5 C, which the model only reaches above ~5.5 km, so V3
+	// produced no snow anywhere. The precipitation figures are the original tuned values re-expressed in
+	// mm/yr (they were already sane read that way: the old Desert 0.10 == 220 mm).
+	//
+	// DO NOT "fix" the precipitation column to be more physically precise. Selection is an ISOTROPIC
+	// nearest-attractor test, and the two axes do not behave alike: within any one view the model's
+	// precipitation is essentially CONSTANT (it varies only at the coarse ~7.7 km scale) while temperature
+	// varies per-pixel with elevation. A region therefore traverses climate space along a roughly
+	// HORIZONTAL line, and can only ever reach attractors sitting near its own humidity.
+	// That is why the cold ladder — Grassland / Highlands / Tundra / Arctic — is parked at MID humidity and
+	// separated purely by temperature: it has to be reachable whether you are climbing out of a wet forest
+	// (h01 ~ 0.55) or a dry rain-shadowed range (h01 ~ 0.13), and above the tree line temperature is what
+	// you actually see anyway. Both alternatives were measured and both fail:
+	//   physically dry Tundra/Arctic (300/400 mm) -> wet regions never leave Forest, even on peaks
+	//   Arctic wetter than Tundra (880 vs 770 mm) -> dry peaks stop at Tundra and never reach snow
+	struct BiomeFieldParams { float baseHeight, heightVar, temperatureC, precipMm, reliefScale; };
 	constexpr BiomeFieldParams BIOME_TABLE[(size_t)Procedural::EBiomeV2::Count] =
 	{
-		// baseH   var    temp   humidity relief
-		{ -42.0f, 14.0f, 0.50f, 0.85f,   0.35f }, // Ocean (weighted by continentalness, not climate)
-		{  10.0f,  7.0f, 0.85f, 0.10f,   0.55f }, // Desert (mesa-ish)
-		{   9.0f,  5.0f, 0.85f, 0.25f,   0.50f }, // Savanna
-		{   1.5f,  2.0f, 0.60f, 0.95f,   0.10f }, // Swampland (dead flat, at whatever altitude it sits)
-		{   8.0f,  5.0f, 0.55f, 0.45f,   0.30f }, // Grassland (smooth rolling)
-		{  12.0f, 10.0f, 0.50f, 0.60f,   0.80f }, // Forest
-		{  14.0f, 12.0f, 0.80f, 0.95f,   0.70f }, // Rainforest
-		{  18.0f, 16.0f, 0.25f, 0.55f,   1.30f }, // Taiga (mountainous)
-		{   7.0f,  5.0f, 0.10f, 0.35f,   0.90f }, // Tundra
-		{  14.0f, 10.0f, 0.02f, 0.40f,   1.20f }, // Arctic (dramatic ranges)
-		{  -6.0f,  1.5f, 0.50f, 1.00f,   0.08f }, // Lakes (the ultra-humid attractor: sunken + dead flat)
-		{  90.0f,  8.0f, 0.30f, 0.45f,   0.90f }, // Highlands (elevated plateau; gated to deep inland)
+		// baseH   var    MAT C   precip   relief
+		{ -42.0f, 14.0f,  15.0f, 1870.0f, 0.35f }, // Ocean (weighted by continentalness, not climate)
+		{  10.0f,  7.0f,  24.0f,  220.0f, 0.55f }, // Desert (hot, arid; mesa-ish)
+		{   9.0f,  5.0f,  24.0f,  550.0f, 0.50f }, // Savanna (hot, seasonal rainfall)
+		{   1.5f,  2.0f,  17.0f, 2090.0f, 0.10f }, // Swampland (warm + waterlogged; dead flat at any altitude)
+		{   8.0f,  5.0f,   9.0f,  990.0f, 0.30f }, // Grassland (temperate; smooth rolling)   -- cold ladder
+		{  12.0f, 10.0f,  11.0f, 1320.0f, 0.80f }, // Forest (temperate deciduous)
+		{  14.0f, 12.0f,  26.0f, 2090.0f, 0.70f }, // Rainforest (tropical)
+		{  18.0f, 16.0f,  -1.0f, 1210.0f, 1.30f }, // Taiga (boreal/montane forest; mountainous)
+		{   7.0f,  5.0f,  -8.0f,  990.0f, 0.90f }, // Tundra (freezing, above the tree line) -- cold ladder
+		{  14.0f, 10.0f, -15.0f,  990.0f, 1.20f }, // Arctic (SNOW; glaciated ranges)        -- cold ladder
+		{  -6.0f,  1.5f,  12.0f, 2200.0f, 0.08f }, // Lakes (the ultra-humid attractor: sunken + dead flat)
+		{  90.0f,  8.0f,   2.0f,  990.0f, 0.90f }, // Highlands (alpine plateau)             -- cold ladder
 	};
+
+	// The table's real-unit climate in the normalized space blendFields and the terrain shader both work in.
+	constexpr glm::vec2 biomeClimate01(const BiomeFieldParams& p)
+	{
+		return glm::vec2(Procedural::temperatureTo01(p.temperatureC), Procedural::precipTo01(p.precipMm));
+	}
+
+	// V2's climate field is arbitrary [0,1] noise, so it needs a band to land on. Map it onto a REALISTIC
+	// mean-annual-temperature range instead of the full encoding range: no attractor lives above +26 C, so
+	// spreading the field all the way to the encoding's +50 C would strand its hot tail with every Gaussian
+	// underflowed and the blending mush. The 8-bit ENCODING is deliberately left at -25..+50.
+	constexpr float V2_FIELD_COLD_C = -22.0f;
+	constexpr float V2_FIELD_HOT_C = 30.0f;
 
 	// Coastal shelf shared by the altitude gradient and the Highlands inland gate: the coast always climbs
 	// a FIXED +COAST_RISE over the first COAST_BAND of continentalness above the ocean threshold, so the
@@ -53,8 +86,7 @@ namespace Procedural
 {
 	glm::vec2 biomeClimateCoords(EBiomeV2 biome)
 	{
-		const BiomeFieldParams& p = BIOME_TABLE[(size_t)biome];
-		return glm::vec2(p.temperature, p.humidity);
+		return biomeClimate01(BIOME_TABLE[(size_t)biome]);
 	}
 
 	TerrainGenV2::TerrainGenV2(const TerrainConfigV2& cfg)
@@ -100,7 +132,12 @@ namespace Procedural
 		// space, so individual biome regions come out roughly biomeSize across.
 		const double cf = 0.25 / (double)m_cfg.biomeSize;
 		const float bands = m_climT.fbm((float)(worldX * m_cfg.climateBandFrequency + 91.7), (float)(worldZ * m_cfg.climateBandFrequency - 33.1), 2) * m_cfg.climateBandAmplitude;
-		cl.t01 = glm::clamp(m_tempField.fbm((float)(wx * cf), (float)(wz * cf), 3) * 0.5f + 0.5f + bands, 0.0f, 1.0f);
+		const float rawT = glm::clamp(m_tempField.fbm((float)(wx * cf), (float)(wz * cf), 3) * 0.5f + 0.5f + bands, 0.0f, 1.0f);
+		// Land the normalized field on the realistic temperature band the attractor table is calibrated
+		// for (see V2_FIELD_COLD_C). sampleTemperature's altitude lapse still drives below it, down to the
+		// encoding floor — which is what keeps V2's peaks snowy.
+		cl.t01 = glm::mix(Procedural::temperatureTo01(V2_FIELD_COLD_C),
+		                  Procedural::temperatureTo01(V2_FIELD_HOT_C), rawT);
 		cl.h01 = glm::clamp(m_humField.fbm((float)(wx * cf + 71.3), (float)(wz * cf - 19.7), 3) * 0.5f + 0.5f, 0.0f, 1.0f);
 		return cl;
 	}
@@ -125,8 +162,9 @@ namespace Procedural
 		for (size_t i = 1; i < (size_t)EBiomeV2::Count; ++i) // 0 = Ocean, handled below
 		{
 			const BiomeFieldParams& p = BIOME_TABLE[i];
-			const float dT = cl.t01 - p.temperature;
-			const float dH = cl.h01 - p.humidity;
+			const glm::vec2 coord = biomeClimate01(p);
+			const float dT = cl.t01 - coord.x;
+			const float dH = cl.h01 - coord.y;
 			const float d2 = dT * dT + dH * dH;
 			float w = std::exp(-d2 * invS2);
 			if (i == (size_t)EBiomeV2::Highlands)
@@ -168,9 +206,9 @@ namespace Procedural
 		float bestW = -1.0f;
 		for (size_t i = 1; i < (size_t)EBiomeV2::Count; ++i)
 		{
-			const BiomeFieldParams& p = BIOME_TABLE[i];
-			const float dT = cl.t01 - p.temperature;
-			const float dH = cl.h01 - p.humidity;
+			const glm::vec2 coord = biomeClimate01(BIOME_TABLE[i]);
+			const float dT = cl.t01 - coord.x;
+			const float dH = cl.h01 - coord.y;
 			float w = -(dT * dT + dH * dH); // nearest attractor (monotonic in the Gaussian weight)
 			if (i == (size_t)EBiomeV2::Highlands && inland < 0.5f)
 				continue;
@@ -332,8 +370,8 @@ namespace Procedural
 		float grassFog = 0.0f;
 		if (m_cfg.grassFogAmount > 0.0f)
 		{
-			const BiomeFieldParams& g = BIOME_TABLE[(size_t)EBiomeV2::Grassland];
-			const float dT = cl.t01 - g.temperature, dH = cl.h01 - g.humidity;
+			const glm::vec2 g = biomeClimate01(BIOME_TABLE[(size_t)EBiomeV2::Grassland]);
+			const float dT = cl.t01 - g.x, dH = cl.h01 - g.y;
 			const float grass = glm::smoothstep(0.30f, 0.08f, std::sqrt(dT * dT + dH * dH));
 			const double pf = 1.0 / (double)m_cfg.biomeSize; // patch features ~1/4 biome (fbm's finer octaves)
 			const float patch = glm::smoothstep(-0.05f, 0.65f, m_fogPatch.fbm((float)(worldX * pf + 3.7), (float)(worldZ * pf - 8.9), 2));

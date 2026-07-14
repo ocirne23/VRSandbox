@@ -80,10 +80,11 @@ export namespace Procedural
 
 		// --- Tweak-backed configuration (source of truth; the generator/ChunkParams are built from these) ---
 		bool  m_enabled = true;
+		int   m_generator = 1; // EGeneratorKind: 0 = V2 (noise), 1 = V3 (diffusion)
 		int   m_seed = 62500;
 		int   m_chunkSize = 512;
 		int   m_lod0Res = 512;
-		int   m_ringRadius = 32;   // max generation range from the camera chunk, in chunks
+		int   m_ringRadius = 4;   // max generation range from the camera chunk, in chunks
 		float m_lodStep = 1.0f;   // LOD0 band width in chunks (fractional ok); each next LOD band is twice as wide (geometric)
 		int   m_maxLod = 4;
 		float m_seaLevel = 0.0f;
@@ -117,11 +118,35 @@ export namespace Procedural
 		float  m_v2GrassFog = 0.5f;        // grassland low-fog patch thickness (0 = off)
 		float  m_v2ValleyFog = 0.8f;       // mountain-valley fog thickness (0 = off)
 
+		// --- V3 (Terrain Diffusion) generator. Unlike V2 this is ONNX-model backed: it needs 2.28 GB of
+		// weights on disk and a DirectML-capable GPU, and it generates 7.68 km tiles rather than evaluating
+		// a point function. See Private/Diffusion/GeneratorV3.ixx.
+		float m_v3MetersPerPixel = 3.0f;  // 30 = the model's true training scale; lower compresses the world
+		float m_v3HeightScale = 1.0f;
+		float m_v3DetailSlopeGain = 0.75f; // slope -> detail mask (the model only resolves 30 m/px)
+		float m_v3DetailWavelengthA = 220.0f;
+		float m_v3DetailAmplitudeA = 38.0f;
+		float m_v3DetailWavelengthB = 45.0f;
+		float m_v3DetailAmplitudeB = 11.0f;
+		float m_v3PrecipFullHumidity = 2200.0f; // mm/yr that reads as humidity 1.0
+		float m_v3HumidityOffset = 0.0f;        // slides the planet along arid <-> lush
+		float m_v3TemperatureOffset = 0.0f;     // C, shifts the whole planet
+		float m_v3ExtraLapseRate = 0.0f;        // C/m on top of the model's own lapse: pushes the snow line
+		                                        // lower than reality. 0 = the model's real climate.
+		float m_v3HumidFog = 0.6f;
+		float m_v3ValleyFog = 0.8f;
+		int   m_v3MaxTiles = 256;           // resident tile budget (~800 KB each)
+		// V3 can't generate until its models are downloaded+loaded. Building chunks before then would bake a
+		// flat sea-level world into the resident cache, so the streamer idles instead and rebuilds on ready.
+		bool m_v3AwaitingModels = false;
+		double m_v3LastStatusLog = 0.0; // rate-limits the download/load progress log
+
 		bool m_configDirty = false; // set by Tweak onChange; consumed at the top of update()
 
 		// --- Shared terrain-data map (fog terrain-following + regional thickness, ocean shore fallback,
 		// terrain coloring; height / water level / fog|falloff|temp|hum / altitude per texel) ---
 		bool  m_terrainMapEnabled = true;
+		bool  m_terrainMapDebugLog = false; // log the decoded climate range of every baked cascade
 		float m_terrainMapRange = 2048.0f;     // near cascade world size (m), centered on the camera
 		float m_terrainMapFarRange = 8192.0f;  // far cascade world size (m; same texel count, coarser texels)
 		HeightMapBaker m_terrainMapBaker;

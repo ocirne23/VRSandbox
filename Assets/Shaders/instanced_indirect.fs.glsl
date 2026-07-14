@@ -210,6 +210,84 @@ TerrainFields terrainFields(vec3 worldPos)
 	return f;
 }
 
+// --- Terrain field debug view -------------------------------------------------------------------------
+// Set a non-zero mode and hit F5 (shaders compile at runtime) to draw the baked terrain data map instead
+// of shading it. The bake is otherwise invisible from here: a wrong sampler, a wrong pack and a wrong
+// upload all look identical on-screen, and "the texture is wrong" cannot tell them apart.
+//   1 = temperature    blue(-25 C) -> cyan -> green -> yellow -> red(+50 C), with 5 C contour lines, plus:
+//                      MAGENTA line = the FREEZING LINE (0 C)
+//                      CYAN line + darkened fill = the snow threshold (TERRAIN_DEBUG_SNOW_C): past the
+//                        Arctic attractor, i.e. where the splat can actually reach the snow texture. If
+//                        that region is empty, snow cannot happen anywhere in view.
+//                      A CONSTANT field draws no contour lines at all — that alone tells you the field is
+//                      stuck rather than merely uniform-looking.
+//   2 = humidity       black (arid) -> white (h01 = 1), contour lines every 0.1
+//   3 = crag relief    |height - altitude|: black 0 m -> white 200 m. This drives the rock layer; if it
+//                      is black everywhere, mountains keep their lowland biome texture.
+//   4 = altitude       the macro band: black = sea level -> white = 5 km
+//   5 = cascade        green = near cascade, red = far, yellow = the crossfade band between them
+#define TERRAIN_DEBUG_MODE 0
+// Mode 1's snow marker. Must track the Arctic attractor's temperature in GeneratorV2.cpp's BIOME_TABLE
+// (-15 C, widened here to where its Gaussian actually starts winning the splat).
+#define TERRAIN_DEBUG_SNOW_C -15.0
+
+#if TERRAIN_DEBUG_MODE != 0
+vec3 debugHeatRamp(float t)
+{
+	t = clamp(t, 0.0, 1.0);
+	const float s = t * 4.0;
+	if (s < 1.0) return mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), s);
+	if (s < 2.0) return mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), s - 1.0);
+	if (s < 3.0) return mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), s - 2.0);
+	return mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), s - 3.0);
+}
+
+// A dark line wherever `v` crosses a multiple of `spacing` — makes a smooth ramp readable as values
+// rather than a vague wash, and makes a CONSTANT field obvious (no lines at all).
+float debugContour(float v, float spacing)
+{
+	const float f = abs(fract(v / spacing - 0.5) - 0.5) / fwidth(v / spacing);
+	return 1.0 - clamp(1.0 - f, 0.0, 1.0) * 0.7;
+}
+
+// Coverage of a single isoline at `v == level`, `widthPx` pixels wide. Dividing by fwidth is what keeps
+// the line a constant width ON SCREEN however fast the field varies — a fixed |v - level| < eps test
+// instead paints a fat band across a plain and vanishes entirely on a steep face, which is precisely
+// where an isotherm is most interesting.
+float debugIsoline(float v, float level, float widthPx)
+{
+	const float d = abs(v - level) / max(fwidth(v), 1e-6);
+	return 1.0 - smoothstep(0.0, widthPx, d);
+}
+
+vec3 terrainDebugColor(TerrainFields f, vec3 worldPos)
+{
+#if TERRAIN_DEBUG_MODE == 1
+	vec3 col = debugHeatRamp((f.temperature + 25.0) / 75.0) * debugContour(f.temperature, 5.0);
+	// The snow zone: past the Arctic attractor, i.e. where the splat can actually reach the snow texture.
+	if (f.temperature <= TERRAIN_DEBUG_SNOW_C)
+		col = mix(col, vec3(0.05), 0.75);
+	// The FREEZING LINE (0 C) in magenta, and the snow threshold in cyan. Drawn last and thick so they
+	// read over the ramp: these two are the boundaries that actually decide what the terrain looks like.
+	col = mix(col, vec3(0.0, 1.0, 1.0), debugIsoline(f.temperature, TERRAIN_DEBUG_SNOW_C, 1.5));
+	col = mix(col, vec3(1.0, 0.0, 1.0), debugIsoline(f.temperature, 0.0, 2.0));
+	return col;
+#elif TERRAIN_DEBUG_MODE == 2
+	return vec3(clamp(f.humidity, 0.0, 1.0)) * debugContour(f.humidity, 0.1);
+#elif TERRAIN_DEBUG_MODE == 3
+	const float relief = abs((worldPos.y - u_terrainParams.z) - f.altitude);
+	return debugHeatRamp(relief / 200.0) * debugContour(relief, 25.0);
+#elif TERRAIN_DEBUG_MODE == 4
+	return vec3(clamp(f.altitude / 5000.0, 0.0, 1.0)) * debugContour(f.altitude, 250.0);
+#else // 5 = which cascade fed this pixel
+	const vec2 uv0 = (worldPos.xz - u_fogParams5.xy) * u_fogParams3.y + 0.5;
+	const float edge = max(abs(uv0.x - 0.5), abs(uv0.y - 0.5));
+	const float nearW = u_fogParams5.z > 0.0 ? 1.0 - smoothstep(0.42, 0.48, edge) : 1.0;
+	return mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), nearW);
+#endif
+}
+#endif
+
 // --- Biome texture splatting (setTerrainBiomeMaterials; u_terrainTexParams*/u_terrainBiomeCoords) ------
 // Ground biomes are climate attractors in the generator's (t01, h01) space: per-pixel Gaussian weights
 // select the top two, their textures blend, and a rock layer (its own climate-picked attractor set)
@@ -545,6 +623,10 @@ void main()
 	}
 
 #ifdef TERRAIN
+#if TERRAIN_DEBUG_MODE != 0
+	out_color = vec4(terrainDebugColor(fields, in_pos), 1.0); // unlit: the field itself, not its shading
+	return;
+#endif
 	out_color = vec4(color, 1.0); // opaque terrain
 #else
 	out_color = vec4(color, min(diffuseSample.a, material.opacity));

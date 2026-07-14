@@ -18,6 +18,7 @@ public:
     void update(double deltaTime);
     void setSpeed(float speed) { m_speed = speed; }
     void setSensitivity(float sensitivity) { m_sensitivity = sensitivity; }
+    void setLockToWorldUp(bool lock) { m_lockToWorldUp = lock; }
 
     glm::vec3 getPosition() const { return m_position; }
     glm::vec3 getDirection() const { return m_direction; }
@@ -41,6 +42,7 @@ private:
 
     bool m_isMouseDown = false;
     bool m_mousePosUpdated = false;
+    bool m_lockToWorldUp = true;
     float m_boostMultiplier = 10.0f;
     float m_speed = 5.0f;
     float m_sensitivity = 0.01f;
@@ -50,5 +52,6 @@ private:
     glm::vec3 m_position;
     glm::vec3 m_direction;
     glm::vec3 m_up;
+    glm::vec3 m_worldUp = glm::vec3(0, 1, 0);
     glm::mat4 m_viewMatrix;
 };

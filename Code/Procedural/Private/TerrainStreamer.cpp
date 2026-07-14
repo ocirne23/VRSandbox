@@ -52,7 +52,11 @@ namespace
 	{
 		ESourceKind kind = ESourceKind::Ground;
 		Procedural::EBiomeV2 biome = Procedural::EBiomeV2::Count; // Ground entries only
-		glm::vec2 rockCoords{};      // Rock entries only: attractor position in (t01, h01) climate space
+		// Rock entries only: the attractor's climate, in the same REAL units as GeneratorV2's BIOME_TABLE
+		// (mean annual temperature C / annual precipitation mm) — converted to (t01, h01) at use. These
+		// must stay aligned with the ground attractors or a rock type simply never gets picked.
+		float rockTempC = 0.0f;
+		float rockPrecipMm = 0.0f;
 		const char* cacheName;       // output stem: Local/TerrainTex/<cacheName>_{diff|nor|arm}.dds
 		const char* diffSrc;         // sources relative to Assets/
 		const char* norSrc;
@@ -74,15 +78,15 @@ namespace
 		{ .biome = Arctic,     .cacheName = "arctic",     .diffSrc = "Textures/Terrain/snow_02/snow_02_diff_2k.jpg",                   .norSrc = "Textures/Terrain/snow_02/snow_02_nor_gl_2k.jpg",                   .armSrc = "Textures/Terrain/snow_02/snow_02_arm_2k.jpg" },
 		{ .biome = Lakes,      .cacheName = "lakes",      .diffSrc = "Textures/Terrain/brown_mud_03/brown_mud_03_diff_2k.jpg",         .norSrc = "Textures/Terrain/brown_mud_03/brown_mud_03_nor_gl_2k.jpg",         .armSrc = "Textures/Terrain/brown_mud_03/brown_mud_03_arm_2k.jpg" },
 		{ .biome = Highlands,  .cacheName = "highlands",  .diffSrc = "Textures/Terrain/rock_face/rock_face_diff_2k.jpg",               .norSrc = "Textures/Terrain/rock_face/rock_face_nor_gl_2k.jpg",               .armSrc = "Textures/Terrain/rock_face/rock_face_arm_2k.jpg" },
-		// Rock layer: 6 climate-picked types spanning (temperature, humidity) so mountains/crags read
-		// differently by biome instead of one rock texture everywhere. Coordinates use the same
-		// (t01, h01) space as GeneratorV2's BIOME_TABLE (see biomeClimateCoords).
-		{ .kind = ESourceKind::Rock, .rockCoords = { 0.10f, 0.35f }, .cacheName = "rock_gray",  .diffSrc = "Textures/Terrain/gray_rocks/gray_rocks_diff_2k.jpg",                     .norSrc = "Textures/Terrain/gray_rocks/gray_rocks_nor_gl_2k.jpg",                     .armSrc = "Textures/Terrain/gray_rocks/gray_rocks_arm_2k.jpg" }, // cold/dry granite: tundra, highlands, arctic peaks
-		{ .kind = ESourceKind::Rock, .rockCoords = { 0.85f, 0.10f }, .cacheName = "rock_red",   .diffSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_diff_2k.jpg",             .norSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_nor_gl_2k.jpg",             .armSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_arm_2k.jpg" }, // hot/dry sandstone: desert, savanna canyons
-		{ .kind = ESourceKind::Rock, .rockCoords = { 0.55f, 0.85f }, .cacheName = "rock_dark",  .diffSrc = "Textures/Terrain/dark_rock/dark_rock_diff_2k.jpg",                       .norSrc = "Textures/Terrain/dark_rock/dark_rock_nor_gl_2k.jpg",                       .armSrc = "Textures/Terrain/dark_rock/dark_rock_arm_2k.jpg" },       // warm/wet dark basalt: rainforest, swampland cliffs
-		{ .kind = ESourceKind::Rock, .rockCoords = { 0.30f, 0.75f }, .cacheName = "rock_mossy", .diffSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_diff_2k.jpg",       .norSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_nor_gl_2k.jpg",       .armSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_arm_2k.jpg" }, // cool/wet lichened rock: forest, taiga
-		{ .kind = ESourceKind::Rock, .rockCoords = { 0.65f, 0.35f }, .cacheName = "rock_worn",  .diffSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_diff_2k.jpg", .norSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_nor_gl_2k.jpg", .armSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_arm_2k.jpg" }, // warm/dry weathered sandstone: savanna, highlands
-		{ .kind = ESourceKind::Rock, .rockCoords = { 0.45f, 0.55f }, .cacheName = "rock_coast", .diffSrc = "Textures/Terrain/rock_3/rock_3_diff_2k.jpg",                             .norSrc = "Textures/Terrain/rock_3/rock_3_nor_gl_2k.jpg",                             .armSrc = "Textures/Terrain/rock_3/rock_3_arm_2k.jpg" }, // temperate coastal rock: grassland, lakes cliffs
+		// Rock layer: 6 climate-picked types spanning (temperature, precipitation) so mountains/crags read
+		// differently by biome instead of one rock texture everywhere. Same REAL units as GeneratorV2's
+		// BIOME_TABLE; keep them aimed at the ground attractors they are meant to accompany.
+		{ .kind = ESourceKind::Rock, .rockTempC = -12.0f, .rockPrecipMm = 770.0f, .cacheName = "rock_gray",  .diffSrc = "Textures/Terrain/gray_rocks/gray_rocks_diff_2k.jpg",                     .norSrc = "Textures/Terrain/gray_rocks/gray_rocks_nor_gl_2k.jpg",                     .armSrc = "Textures/Terrain/gray_rocks/gray_rocks_arm_2k.jpg" }, // cold/dry granite: tundra, highlands, arctic peaks
+		{ .kind = ESourceKind::Rock, .rockTempC = 24.0f,  .rockPrecipMm = 220.0f, .cacheName = "rock_red",   .diffSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_diff_2k.jpg",             .norSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_nor_gl_2k.jpg",             .armSrc = "Textures/Terrain/terrain_red_01/terrain_red_01_arm_2k.jpg" }, // hot/dry sandstone: desert, savanna canyons
+		{ .kind = ESourceKind::Rock, .rockTempC = 22.0f,  .rockPrecipMm = 1870.0f, .cacheName = "rock_dark",  .diffSrc = "Textures/Terrain/dark_rock/dark_rock_diff_2k.jpg",                       .norSrc = "Textures/Terrain/dark_rock/dark_rock_nor_gl_2k.jpg",                       .armSrc = "Textures/Terrain/dark_rock/dark_rock_arm_2k.jpg" },       // warm/wet dark basalt: rainforest, swampland cliffs
+		{ .kind = ESourceKind::Rock, .rockTempC = 5.0f,   .rockPrecipMm = 1650.0f, .cacheName = "rock_mossy", .diffSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_diff_2k.jpg",       .norSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_nor_gl_2k.jpg",       .armSrc = "Textures/Terrain/rock_pitted_mossy/rock_pitted_mossy_arm_2k.jpg" }, // cool/wet lichened rock: forest, taiga
+		{ .kind = ESourceKind::Rock, .rockTempC = 17.0f,  .rockPrecipMm = 770.0f, .cacheName = "rock_worn",  .diffSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_diff_2k.jpg", .norSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_nor_gl_2k.jpg", .armSrc = "Textures/Terrain/worn_rock_natural_01/worn_rock_natural_01_arm_2k.jpg" }, // warm/dry weathered sandstone: savanna, highlands
+		{ .kind = ESourceKind::Rock, .rockTempC = 10.0f,  .rockPrecipMm = 1210.0f, .cacheName = "rock_coast", .diffSrc = "Textures/Terrain/rock_3/rock_3_diff_2k.jpg",                             .norSrc = "Textures/Terrain/rock_3/rock_3_nor_gl_2k.jpg",                             .armSrc = "Textures/Terrain/rock_3/rock_3_arm_2k.jpg" }, // temperate coastal rock: grassland, lakes cliffs
 		// Shoreline overlay: NOT a biome, always the trailing material (Renderer::setTerrainBiomeMaterials).
 		{ .kind = ESourceKind::Beach, .cacheName = "beach", .diffSrc = "Textures/Terrain/coast_sand_01/coast_sand_01_diff_2k.jpg", .norSrc = "Textures/Terrain/coast_sand_01/coast_sand_01_nor_gl_2k.jpg", .armSrc = "Textures/Terrain/coast_sand_01/coast_sand_01_arm_2k.jpg" },
 	};
@@ -190,6 +194,10 @@ namespace Procedural
 		auto dirty = [this]() { m_configDirty = true; };
 
 		Tweak::boolean("Terrain", "Enabled", &m_enabled);
+		// V2 = noise field, evaluated per point. V3 = Terrain Diffusion (ONNX): needs 2.28 GB of models
+		// (downloaded on first selection) and a DirectML GPU; terrain appears once they finish loading.
+		static constexpr std::string_view generatorNames[] = { "V2 (noise)", "V3 (diffusion)" };
+		Tweak::enumVar("Terrain", "Generator", &m_generator, generatorNames, dirty);
 		Tweak::intVar("Terrain", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
 		Tweak::intVar("Terrain", "Chunk size (m)", &m_chunkSize, 128, 1024, 1.0f, dirty);
 		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 4, 512, 1.0f, dirty);
@@ -203,6 +211,10 @@ namespace Procedural
 		// fog's terrain follow + regional thickness, the ocean's far shore fallback, and the terrain
 		// coloring all read these cascades. Disabling it degrades all three.
 		Tweak::boolean("Terrain", "Terrain data map", &m_terrainMapEnabled);
+		// Diagnostic: prints what each baked cascade actually contains, decoded the way the shader
+		// decodes it. The bake is otherwise invisible — a wrong sampler, pack or upload all look
+		// the same from the shader side.
+		Tweak::boolean("Terrain", "Log baked data map", &m_terrainMapDebugLog);
 		Tweak::floatVar("Terrain", "Data map range (m)", &m_terrainMapRange, 256.0f, 8192.0f, 32.0f);
 		// Floor for the far cascade world size: the actual range is raised to cover the resident mesh ring
 		// (2*(R+1)*chunkSize) so distant terrain never reads clamp-to-edge frozen altitude/temperature.
@@ -244,6 +256,32 @@ namespace Procedural
 		Tweak::floatVar("Terrain/V2", "Valley fog", &m_v2ValleyFog, 0.0f, 1.0f, 0.01f, dirty); // fills mountain valleys
 		Tweak::floatVar("Terrain/V2", "Detail freq", &m_detailFrequency, 0.0f, FLT_MAX, 0.001f, dirty); // height detail fBm
 		Tweak::intVar("Terrain/V2", "Detail octaves", &m_detailOctaves, 1, 8, 1.0f, dirty);
+
+		// V3 (Terrain Diffusion). The model resolves 30 m/px, which is what makes its continents
+		// continent-sized; everything below that is the slope-masked detail layer below.
+		// "Meters per pixel" is a UNIFORM world scale: heights and detail shrink with it, so the model's
+		// proportions survive and "Height scale" stays a pure exaggeration on top (1 = real proportions).
+		// NOTE ON COST: lowering it compresses the world (mountains become reachable sooner) but is
+		// quadratically MORE expensive — the same view distance then spans more model pixels, so more tiles
+		// must be generated. 30 -> 15 is ~4x the inference work for the same ring radius.
+		Tweak::floatVar("Terrain/V3", "Meters per pixel", &m_v3MetersPerPixel, 1.0f, 60.0f, 0.5f, dirty); // 30 = true scale
+		Tweak::floatVar("Terrain/V3", "Height scale", &m_v3HeightScale, 0.0f, 4.0f, 0.05f, dirty);
+		// The model's climate is real-world calibrated and the biome attractors are expressed in real units
+		// to match, so both of these default to 0 (= the model's own climate). "Extra lapse" pushes the
+		// snow line further down the mountains than reality; "Temp offset" makes the whole planet warmer or
+		// colder.
+		Tweak::floatVar("Terrain/V3", "Temp offset (C)", &m_v3TemperatureOffset, -30.0f, 30.0f, 0.5f, dirty);
+		Tweak::floatVar("Terrain/V3", "Extra lapse (C/m)", &m_v3ExtraLapseRate, 0.0f, 0.02f, 0.0005f, dirty);
+		Tweak::floatVar("Terrain/V3", "Detail slope gain", &m_v3DetailSlopeGain, 0.0f, 4.0f, 0.05f, dirty); // higher = detail on gentler slopes
+		Tweak::floatVar("Terrain/V3", "Detail A wavelength (m)", &m_v3DetailWavelengthA, 20.0f, 1000.0f, 5.0f, dirty);
+		Tweak::floatVar("Terrain/V3", "Detail A amp (m)", &m_v3DetailAmplitudeA, 0.0f, 200.0f, 1.0f, dirty);
+		Tweak::floatVar("Terrain/V3", "Detail B wavelength (m)", &m_v3DetailWavelengthB, 5.0f, 300.0f, 1.0f, dirty);
+		Tweak::floatVar("Terrain/V3", "Detail B amp (m)", &m_v3DetailAmplitudeB, 0.0f, 80.0f, 0.5f, dirty);
+		Tweak::floatVar("Terrain/V3", "Precip for full humidity", &m_v3PrecipFullHumidity, 200.0f, 6000.0f, 50.0f, dirty);
+		Tweak::floatVar("Terrain/V3", "Humidity offset", &m_v3HumidityOffset, -1.0f, 1.0f, 0.01f, dirty);
+		Tweak::floatVar("Terrain/V3", "Humid fog", &m_v3HumidFog, 0.0f, 1.0f, 0.01f, dirty);
+		Tweak::floatVar("Terrain/V3", "Valley fog", &m_v3ValleyFog, 0.0f, 1.0f, 0.01f, dirty);
+		Tweak::intVar("Terrain/V3", "Resident tiles", &m_v3MaxTiles, 4, 256, 1.0f, dirty); // ~800 KB each
 
 		rebuildMaps();
 
@@ -287,7 +325,9 @@ namespace Procedural
 		auto tryBuildMat = [](const TerrainTexSource& src) -> std::optional<Renderer::TerrainBiomeMaterial>
 		{
 			Renderer::TerrainBiomeMaterial mat;
-			mat.climateCoords = src.kind == ESourceKind::Ground ? biomeClimateCoords(src.biome) : src.rockCoords;
+			mat.climateCoords = src.kind == ESourceKind::Ground
+				? biomeClimateCoords(src.biome)
+				: glm::vec2(temperatureTo01(src.rockTempC), precipTo01(src.rockPrecipMm));
 			mat.diffuseDds = terrainTexCachePath(src, "diff");
 			mat.normalDds = terrainTexCachePath(src, "nor");
 			mat.armDds = terrainTexCachePath(src, "arm");
@@ -320,6 +360,54 @@ namespace Procedural
 
 	void TerrainStreamer::rebuildMaps()
 	{
+		if (m_generator == 1)
+		{
+			// V3 can't sample anything until its models are resident. Constructing the generator is what
+			// kicks the download/load off, so do that unconditionally, but only PUBLISH it once ready —
+			// otherwise every chunk built in the meantime would bake a flat sea-level world into the
+			// resident cache and never be revisited.
+			TerrainConfigV3 cfg;
+			cfg.seed = (uint32)m_seed;
+			cfg.seaLevel = m_seaLevel;
+			cfg.metersPerPixel = m_v3MetersPerPixel;
+			cfg.heightScale = m_v3HeightScale;
+			cfg.detailSlopeGain = m_v3DetailSlopeGain;
+			cfg.detailWavelengthA = m_v3DetailWavelengthA;
+			cfg.detailAmplitudeA = m_v3DetailAmplitudeA;
+			cfg.detailWavelengthB = m_v3DetailWavelengthB;
+			cfg.detailAmplitudeB = m_v3DetailAmplitudeB;
+			cfg.precipForFullHumidity = m_v3PrecipFullHumidity;
+			cfg.humidityOffset = m_v3HumidityOffset;
+			cfg.temperatureOffset = m_v3TemperatureOffset;
+			cfg.extraLapseRate = m_v3ExtraLapseRate;
+			cfg.humidFogAmount = m_v3HumidFog;
+			cfg.valleyFogAmount = m_v3ValleyFog;
+			cfg.maxResidentTiles = m_v3MaxTiles;
+
+			std::shared_ptr<const ITerrainSampler> maps;
+			if (TerrainGenV3::isReady())
+			{
+				maps = std::make_shared<const TerrainGenV3>(cfg);
+				m_v3AwaitingModels = false;
+			}
+			else
+			{
+				// Cheap: the ctor only registers interest and starts the background load.
+				const TerrainGenV3 kick(cfg);
+				m_v3AwaitingModels = !TerrainGenV3::hasFailed();
+				if (TerrainGenV3::hasFailed())
+					Log::error("[Terrain] V3 unavailable (model load failed) - staying on an empty world; "
+					           "switch Terrain/Generator back to V2");
+			}
+
+			std::lock_guard<std::mutex> lk(m_mutex);
+			m_maps = std::move(maps);
+			++m_generation;
+			m_requests.clear();
+			return;
+		}
+
+		m_v3AwaitingModels = false;
 		TerrainConfigV2 cfg;
 		cfg.seed = (uint32)m_seed;
 		cfg.seaLevel = m_seaLevel;
@@ -437,6 +525,33 @@ namespace Procedural
 			glm::vec2(glm::max(m_terrainMapRange, 256.0f), farRange),
 			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4)) // RGBA: height, water level, fog|falloff|temp|hum, altitude
 		{
+			// Decode what actually went into the packed climate channel, per cascade, exactly as
+			// terrain_height.inc.glsl does. The bake is the one link in the chain nothing else can see: a
+			// wrong sampler, a wrong pack and a wrong upload all look identical from the shader.
+			if (m_terrainMapDebugLog)
+			{
+				const uint32 res = RendererVKLayout::FOG_TERRAIN_RES;
+				const size_t perCascade = (size_t)res * res * 4;
+				for (uint32 c = 0; c < RendererVKLayout::FOG_TERRAIN_CASCADES; c++)
+				{
+					float tMin = FLT_MAX, tMax = -FLT_MAX, hMin = FLT_MAX, hMax = -FLT_MAX;
+					float yMin = FLT_MAX, yMax = -FLT_MAX, aMin = FLT_MAX, aMax = -FLT_MAX;
+					for (size_t i = 0; i < perCascade; i += 4)
+					{
+						const float* t = baked.texels.data() + (size_t)c * perCascade + i;
+						const uint32 packed = std::bit_cast<uint32>(t[2]);
+						const float temp = float((packed >> 16) & 255u) * (75.0f / 255.0f) - 25.0f;
+						const float hum = float((packed >> 24) & 255u) * (1.0f / 255.0f);
+						tMin = glm::min(tMin, temp); tMax = glm::max(tMax, temp);
+						hMin = glm::min(hMin, hum);  hMax = glm::max(hMax, hum);
+						yMin = glm::min(yMin, t[0]); yMax = glm::max(yMax, t[0]);
+						aMin = glm::min(aMin, t[3]); aMax = glm::max(aMax, t[3]);
+					}
+					Log::info(std::format("[Terrain] baked cascade {} ({:.0f} m): height {:.0f}..{:.0f} | "
+					                      "altitude {:.0f}..{:.0f} | temp {:.1f}..{:.1f} C | humidity {:.2f}..{:.2f}",
+					                      c, baked.ranges[(int)c], yMin, yMax, aMin, aMax, tMin, tMax, hMin, hMax));
+				}
+			}
 			renderer.setFogTerrainHeightMap(baked.texels, baked.center, baked.ranges, maps->seaLevel());
 			m_terrainMapUploaded = true;
 		}
@@ -449,12 +564,33 @@ namespace Procedural
 
 	void TerrainStreamer::update(Renderer& renderer, const Camera& camera)
 	{
-		m_terrainMapFarRange = camera.far;
+		//m_terrainMapFarRange = camera.far;
 		if (m_configDirty)
 		{
 			m_configDirty = false;
 			rebuildMaps();
 			clearResidents(); // geometry/climate changed: regenerate everything against the new config
+		}
+
+		// V3's 2.28 GB of models load on a background thread; poll for the handover. Until then m_maps is
+		// null and nothing is generated, so the world stays empty rather than flat.
+		if (m_v3AwaitingModels)
+		{
+			if (TerrainGenV3::isReady() || TerrainGenV3::hasFailed())
+			{
+				rebuildMaps();
+				clearResidents();
+			}
+			else
+			{
+				// Rate-limited: loading 2.28 GB onto the GPU takes a few seconds.
+				const double now = std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+				if (now - m_v3LastStatusLog > 1.0)
+				{
+					m_v3LastStatusLog = now;
+					Log::info(std::format("[Terrain] V3: {}", TerrainGenV3::statusText()));
+				}
+			}
 		}
 
 		if (!m_enabled)

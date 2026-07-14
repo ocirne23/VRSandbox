@@ -8,11 +8,63 @@ export namespace Procedural
 	// (~0.29 C steps). Shared by the baker and the terrain shaders (terrain_height.inc.glsl mirrors it).
 	inline constexpr float TEMPERATURE_MIN_C = -25.0f;
 	inline constexpr float TEMPERATURE_MAX_C = 50.0f;
+
+	// Humidity encoding: sampleHumidity is [0,1], where 1 means HUMIDITY_FULL_PRECIP_MM of annual
+	// precipitation or more. A generator that models real precipitation (V3, whose diffusion model emits
+	// mm/yr) maps through this; V2's humidity is a normalized field that adopts it implicitly.
+	inline constexpr float HUMIDITY_FULL_PRECIP_MM = 2200.0f;
+
+	// Physical climate -> the normalized (t01, h01) space that the biome attractor table, V2's
+	// terrain-character blend and the terrain shader's texture splatting ALL share. The shader mirrors
+	// temperatureTo01 as clamp((temp + 25) / 75) — keep them in step.
+	constexpr float temperatureTo01(float celsius)
+	{
+		constexpr float invRange = 1.0f / (TEMPERATURE_MAX_C - TEMPERATURE_MIN_C);
+		const float t = (celsius - TEMPERATURE_MIN_C) * invRange;
+		return t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+	}
+	constexpr float precipTo01(float mmPerYear)
+	{
+		constexpr float invFull = 1.0f / HUMIDITY_FULL_PRECIP_MM;
+		const float h = mmPerYear * invFull;
+		return h < 0.0f ? 0.0f : (h > 1.0f ? 1.0f : h);
+	}
 	// Encoding range of the baked 8-bit fog height-falloff MULTIPLIER: 0..FOG_FALLOFF_MUL_MAX maps to
 	// 0..255 (1.0 = the global Fog/Height Falloff unchanged).
 	inline constexpr float FOG_FALLOFF_MUL_MAX = 4.0f;
 
-	// The point-evaluable terrain field every generator implements (TerrainGenV2).
+	// Every field the terrain-data bake needs, from ONE evaluation. Sampling these one at a time is fine
+	// for a noise field but not for a generator with a per-point cost (V3 does a tile lookup + bilinear per
+	// call, so the six separate calls were six times the work).
+	struct TerrainPoint
+	{
+		float height = 0.0f;         // surface Y (m)
+		float waterLevel = 0.0f;     // water surface Y (m)
+		float altitude = 0.0f;       // macro elevation above sea level (m)
+		float temperature = 15.0f;   // degrees CELSIUS
+		float humidity = 0.5f;       // [0,1]
+		float fogThickness = 0.0f;   // [0,1]
+		float fogFalloffMul = 1.0f;  // [0, FOG_FALLOFF_MUL_MAX], 1 = neutral
+		float flowAngle01 = -1.0f;   // angle/2pi in [0,1), or < 0 for no direction
+	};
+
+	// How much fidelity a query needs.
+	//   Full   — the real field, whatever it costs. Geometry and near-field bakes.
+	//   Coarse — a cheap, low-resolution approximation, for bakes that span tens of km at low texel
+	//            density. A generator whose field is built hierarchically may answer these from a much
+	//            cheaper level; one that is a plain function of (x, z) just ignores the hint.
+	// This exists because V3 (diffusion) generates 7.68 km TILES at real cost: a far cascade covering the
+	// whole view distance would otherwise force thousands of full-detail tiles — for terrain largely beyond
+	// the mesh ring — and evict the ones the geometry needs. V3 answers Coarse from its coarse stage alone,
+	// where one tile covers several hundred km. The shader crossfades near->far, so the drop in fidelity
+	// blends in rather than seaming.
+	enum class ESampleDetail : uint8
+	{
+		Full,
+		Coarse
+	};
+
+	// The point-evaluable terrain field every generator implements (TerrainGenV2, TerrainGenV3).
 	// All methods are pure functions of world position — seeded, thread-safe, world-continuous — which is
 	// what keeps chunks, LODs, bakes (shore/fog maps) and buoyancy consistent with each other regardless
 	// of which generator produced them. Consumers hold shared_ptr<const ITerrainSampler>.
@@ -20,6 +72,38 @@ export namespace Procedural
 	{
 	public:
 		virtual ~ITerrainSampler() = default;
+
+		// Everything at once. The default composes the individual samplers, which is right for a pure
+		// function of (x, z); override when a shared evaluation is cheaper, or when Coarse can be answered
+		// from a cheaper level.
+		virtual void samplePoint(double worldX, double worldZ, TerrainPoint& out,
+		                         ESampleDetail = ESampleDetail::Full) const
+		{
+			out.height = sampleHeightAndWater(worldX, worldZ, out.waterLevel);
+			out.altitude = sampleAltitude(worldX, worldZ);
+			out.temperature = sampleTemperature(worldX, worldZ);
+			out.humidity = sampleHumidity(worldX, worldZ);
+			out.fogThickness = sampleFogThickness(worldX, worldZ);
+			out.fogFalloffMul = sampleFogHeightFalloff(worldX, worldZ);
+			out.flowAngle01 = sampleFlowAngle01(worldX, worldZ);
+		}
+
+		// A regular XZ grid: point (i, j) sits at (originX + i*step, originZ + j*step) and is written to
+		// out[j*resX + i]. out must hold resX*resZ entries.
+		//
+		// This exists so a generator can hoist its PER-POINT overhead out of the loop. For a noise field the
+		// default loop is exactly right and costs nothing. For V3 it is the difference between a shared-cache
+		// lock per point and one per tile: the terrain-data bake is 512x512 texels per cascade, so the point
+		// path meant a quarter-million lock/unlock pairs contending with the mesh worker for a grid that
+		// resolves to a couple of dozen tiles. Wide-area consumers should prefer this over samplePoint.
+		virtual void sampleGrid(double originX, double originZ, double step, uint32 resX, uint32 resZ,
+		                        std::span<TerrainPoint> out, ESampleDetail detail = ESampleDetail::Full) const
+		{
+			assert(out.size() >= (size_t)resX * resZ);
+			for (uint32 j = 0; j < resZ; j++)
+				for (uint32 i = 0; i < resX; i++)
+					samplePoint(originX + i * step, originZ + j * step, out[(size_t)j * resX + i], detail);
+		}
 
 		// Terrain surface height in world meters (Y).
 		virtual float sampleHeight(double worldX, double worldZ) const = 0;

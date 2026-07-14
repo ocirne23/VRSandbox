@@ -87,6 +87,7 @@ export namespace Procedural
 			m_pendingMaps = maps.get();
 			m_future = std::async(std::launch::async, [maps, center, ranges, res, numCascades, channels, shoreLayout]() {
 				std::vector<float> heights((size_t)numCascades * res * res * channels);
+				std::vector<TerrainPoint> points; // reused across cascades
 				for (uint32 c = 0; c < numCascades; ++c)
 				{
 					float* dst = heights.data() + (size_t)c * res * res * channels;
@@ -94,20 +95,31 @@ export namespace Procedural
 					const double texelSize = range / (double)res;
 					const double x0 = (double)center.x - range * 0.5 + texelSize * 0.5; // texel centers
 					const double z0 = (double)center.y - range * 0.5 + texelSize * 0.5;
+					// Cascade 0 is the near/fine map; every later cascade spans tens of km at the same texel
+					// count, so ask for the cheap approximation there. For a generator with a real per-point
+					// cost (V3) that is the difference between a handful of coarse tiles and thousands of
+					// full-detail ones covering terrain mostly beyond the mesh ring — see ESampleDetail. The
+					// shader crossfades near->far, so the fidelity step blends in instead of seaming.
+					const ESampleDetail detail = (c == 0) ? ESampleDetail::Full : ESampleDetail::Coarse;
+
+					// ONE grid call per cascade, not res*res point calls: it lets the sampler resolve
+					// whatever it needs (V3: its tile set, under one lock each) before touching a texel.
+					points.resize((size_t)res * res);
+					maps->sampleGrid(x0, z0, texelSize, res, res, points, detail);
+
 					for (uint32 j = 0; j < res; ++j)
 						for (uint32 i = 0; i < res; ++i)
 						{
-							const double wx = x0 + i * texelSize, wz = z0 + j * texelSize;
+							const TerrainPoint& p = points[(size_t)j * res + i];
 							float* texel = dst + ((size_t)j * res + i) * channels;
+							texel[0] = p.height;
 							if (channels > 1)
-								texel[0] = maps->sampleHeightAndWater(wx, wz, texel[1]); // one shared evaluation
-							else
-								texel[0] = maps->sampleHeight(wx, wz);
+								texel[1] = p.waterLevel;
 							if (channels > 3)
 							{
 								if (shoreLayout)
 								{
-									const float flow = maps->sampleFlowAngle01(wx, wz);
+									const float flow = p.flowAngle01;
 									texel[2] = flow < 0.0f ? 0.0f : (float)(1u + (uint32)(glm::clamp(flow, 0.0f, 1.0f) * 254.0f + 0.5f));
 									texel[3] = 0.0f; // spare
 								}
@@ -123,12 +135,12 @@ export namespace Procedural
 									// patterns, which any arithmetic (the old float(packed)/+0.5 decode) would
 									// corrupt. Keep it bit-exact end to end.
 									const auto q8 = [](float f) { return (uint32)(glm::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
-									const uint32 packed = q8(maps->sampleFogThickness(wx, wz))
-										| (q8(maps->sampleFogHeightFalloff(wx, wz) * (1.0f / FOG_FALLOFF_MUL_MAX)) << 8)
-										| (q8((maps->sampleTemperature(wx, wz) - TEMPERATURE_MIN_C) / (TEMPERATURE_MAX_C - TEMPERATURE_MIN_C)) << 16)
-										| (q8(maps->sampleHumidity(wx, wz)) << 24);
+									const uint32 packed = q8(p.fogThickness)
+										| (q8(p.fogFalloffMul * (1.0f / FOG_FALLOFF_MUL_MAX)) << 8)
+										| (q8(temperatureTo01(p.temperature)) << 16)
+										| (q8(p.humidity) << 24);
 									texel[2] = std::bit_cast<float>(packed);
-									texel[3] = maps->sampleAltitude(wx, wz); // macro elevation (terrain coloring)
+									texel[3] = p.altitude; // macro elevation (terrain coloring)
 								}
 							}
 						}

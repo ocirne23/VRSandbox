@@ -11,7 +11,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE Core Animation RendererVK UI Entit
 
 apply_compile_settings(${PROJECT_NAME})
 
+# onnxruntime.dll imports DirectML.dll by name, so both must sit next to the exe: the AddDllDirectory
+# in FileSystem::initialize only covers LoadLibraryEx(LOAD_LIBRARY_SEARCH_USER_DIRS), not load-time imports.
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/Dependencies/Dll/GFSDK_Aftermath_Lib.x64.dll"
+        "${CMAKE_SOURCE_DIR}/Dependencies/Dll/onnxruntime.dll"
+        "${CMAKE_SOURCE_DIR}/Dependencies/Dll/DirectML.dll"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>")

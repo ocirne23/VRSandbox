@@ -1,0 +1,201 @@
+module Procedural;
+
+import Core;
+import Core.Log;
+import :Diffusion.Json;
+import :Diffusion.ModelAssets;
+
+namespace Procedural::Diffusion
+{
+	namespace
+	{
+		// Expected sizes for the assets shipped in Assets/TerrainDiffusion (upstream:
+		// huggingface.co/xandergos/terrain-diffusion-30m-onnx @ ad2df557eca5645f588766101cf3bc3682455c3e).
+		// These are a sanity check, not a security one — their real job is catching the two failure modes
+		// that would otherwise surface as an inscrutable protobuf error deep inside ONNX Runtime:
+		// an unfetched git-lfs pointer, and a truncated copy.
+		struct RequiredAsset
+		{
+			std::string_view name;
+			uint64 sizeBytes;
+			bool coarseSetOnly;
+		};
+
+		constexpr RequiredAsset REQUIRED[] = {
+			{ "world_pipeline_config.json",       774ull, true },
+			{ "pipeline_data.json",             12226ull, true },
+			{ "coarse_model.onnx",           22497125ull, true },
+			{ "decoder_model.onnx",         223854143ull, false },
+			{ "base_model.onnx",           2029994361ull, false },
+		};
+
+		constexpr std::string_view LFS_POINTER_MAGIC = "version https://git-lfs.github.com/spec/v1";
+
+		bool assetInSet(const RequiredAsset& a, EAssetSet set)
+		{
+			return set == EAssetSet::Full || a.coarseSetOnly;
+		}
+
+		// A git-lfs pointer is a small text file. Detect it explicitly so the error can say what to do.
+		bool looksLikeLfsPointer(const std::filesystem::path& p)
+		{
+			std::ifstream f(p, std::ios::binary);
+			if (!f)
+				return false;
+			char buf[64] = {};
+			f.read(buf, sizeof(buf) - 1);
+			return std::string_view(buf).starts_with(LFS_POINTER_MAGIC);
+		}
+
+		bool readAll(const std::filesystem::path& p, std::string& out)
+		{
+			std::ifstream f(p, std::ios::binary);
+			if (!f)
+				return false;
+			out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+			return true;
+		}
+	}
+
+	std::filesystem::path ModelAssets::modelDir()
+	{
+		// CWD is Assets/ (FileSystem::initialize).
+		return std::filesystem::path("TerrainDiffusion");
+	}
+
+	std::filesystem::path ModelAssets::assetPath(std::string_view fileName)
+	{
+		return modelDir() / std::filesystem::path(fileName);
+	}
+
+	bool ModelAssets::load(EAssetSet set)
+	{
+		m_loaded = false;
+		m_error.clear();
+
+		auto fail = [&](std::string s)
+		{
+			m_error = std::move(s);
+			Log::error(std::format("[Diffusion] {}", m_error));
+			return false;
+		};
+
+		// --- Presence / integrity ------------------------------------------------------------------
+		std::error_code ec;
+		for (const RequiredAsset& a : REQUIRED)
+		{
+			if (!assetInSet(a, set))
+				continue;
+
+			const std::filesystem::path p = assetPath(a.name);
+			if (!std::filesystem::exists(p, ec))
+				return fail(std::format("missing model asset Assets/{} - the diffusion models ship with the "
+				                        "repo; if this is a fresh clone run 'git lfs pull'",
+				                        p.generic_string()));
+
+			const uint64 actual = (uint64)std::filesystem::file_size(p, ec);
+			if (ec)
+				return fail(std::format("cannot stat Assets/{}: {}", p.generic_string(), ec.message()));
+
+			if (actual != a.sizeBytes)
+			{
+				if (looksLikeLfsPointer(p))
+					return fail(std::format("Assets/{} is an unfetched git-lfs pointer, not the real file - "
+					                        "run 'git lfs pull'", p.generic_string()));
+				return fail(std::format("Assets/{} is {} bytes, expected {} - the file looks truncated or is "
+				                        "from a different model revision", p.generic_string(), actual, a.sizeBytes));
+			}
+		}
+
+		// --- world_pipeline_config.json --------------------------------------------------------------
+		std::string text;
+		JsonValue root;
+		std::string jerr;
+		if (!readAll(assetPath("world_pipeline_config.json"), text) || !JsonValue::parse(text, root, jerr))
+			return fail(std::format("could not read/parse world_pipeline_config.json: {}", jerr));
+
+		{
+			ModelConfig c;
+			auto num = [&](std::string_view k, float& dst) -> bool
+			{
+				const JsonValue* v = root.find(k);
+				if (!v || v->type != JsonValue::EType::Number)
+					return false;
+				dst = v->asFloat();
+				return true;
+			};
+			const JsonValue* lc = root.find("latent_compression");
+			const JsonValue* cp = root.find("coarse_pooling");
+			const JsonValue* cm = root.find("coarse_means");
+			const JsonValue* cs = root.find("coarse_stds");
+			const JsonValue* sn = root.find("cond_snr");
+			const JsonValue* fm = root.find("frequency_mult");
+			const JsonValue* hr = root.find("histogram_raw");
+
+			if (!num("native_resolution", c.nativeResolution) || c.nativeResolution <= 0.0f)
+				return fail("world_pipeline_config: native_resolution missing or <= 0");
+			if (!num("residual_mean", c.residualMean) || !num("residual_std", c.residualStd))
+				return fail("world_pipeline_config: residual_mean/residual_std missing");
+			if (!lc || lc->asInt() <= 0)
+				return fail("world_pipeline_config: latent_compression missing or <= 0");
+			c.latentCompression = lc->asInt();
+			if (!cp || cp->asInt() <= 0)
+				return fail("world_pipeline_config: coarse_pooling missing or <= 0");
+			c.coarsePooling = cp->asInt();
+			// The reference throws on anything else, and so do we: coarse_pooling != 1 changes the
+			// conditioning path in ways nothing here implements.
+			if (c.coarsePooling != 1)
+				return fail(std::format("world_pipeline_config: coarse_pooling={} is not supported", c.coarsePooling));
+
+			if (!cm || !cm->asFloatArray(c.coarseMeans, 6))
+				return fail("world_pipeline_config: coarse_means must be 6 numbers");
+			if (!cs || !cs->asFloatArray(c.coarseStds, 6))
+				return fail("world_pipeline_config: coarse_stds must be 6 numbers");
+			if (!sn || !sn->asFloatArray(c.condSnr, 5))
+				return fail("world_pipeline_config: cond_snr must be 5 numbers");
+			if (!fm || !fm->asFloatArray(c.frequencyMult, 5))
+				return fail("world_pipeline_config: frequency_mult must be 5 numbers");
+
+			// histogram_raw is null in the shipped config; the reference substitutes five zeros.
+			if (!hr || hr->isNull())
+				c.histogramRaw.assign(5, 0.0f);
+			else if (!hr->asFloatArray(c.histogramRaw, 5))
+				return fail("world_pipeline_config: histogram_raw must be 5 numbers or null");
+
+			m_config = std::move(c);
+		}
+
+		// --- pipeline_data.json ----------------------------------------------------------------------
+		if (!readAll(assetPath("pipeline_data.json"), text) || !JsonValue::parse(text, root, jerr))
+			return fail(std::format("could not read/parse pipeline_data.json: {}", jerr));
+
+		{
+			PipelineData d;
+			const JsonValue* nq = root.find("n_quantiles");
+			const JsonValue* dq = root.find("data_quantile_tables");
+			const JsonValue* a = root.find("a_temp_std");
+			const JsonValue* b = root.find("b_temp_std");
+			const JsonValue* p1 = root.find("temp_std_p1");
+			const JsonValue* p99 = root.find("temp_std_p99");
+			if (!nq || nq->asInt() <= 0)
+				return fail("pipeline_data: n_quantiles missing or <= 0");
+			d.nQuantiles = nq->asInt();
+			if (!dq || !dq->asFloatArray2D(d.dataQuantiles, 5, d.nQuantiles))
+				return fail(std::format("pipeline_data: data_quantile_tables must be [5][{}]", d.nQuantiles));
+			if (!a || !b || !p1 || !p99)
+				return fail("pipeline_data: a_temp_std/b_temp_std/temp_std_p1/temp_std_p99 missing");
+			d.aTempStd = a->asFloat();
+			d.bTempStd = b->asFloat();
+			d.tempStdP1 = p1->asFloat();
+			d.tempStdP99 = p99->asFloat();
+			// noise_quantile_tables is also present in the file but deliberately unused: the noise side is
+			// seed-dependent, so SyntheticMapFactory rebuilds it per world (as the reference does).
+			m_data = std::move(d);
+		}
+
+		Log::verbose(std::format("[Diffusion] model assets found ({} m/px, latent compression {})",
+		                         m_config.nativeResolution, m_config.latentCompression));
+		m_loaded = true;
+		return true;
+	}
+}
