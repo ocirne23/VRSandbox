@@ -127,8 +127,11 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // deeper = steeper, cleaner cut against the sand),
                             // y = shore foam threshold bias (shifts the surf fold threshold:
                             // negative = sparser/more transparent surf),
+                            // w = crest ceiling as a fraction of water depth (0 = no limit),
                             // z = swash backflow (scale on the raw horizontal chop riding the swash
                             // weight: the tongue flows back seaward as the wave recedes), w unused
+    vec4 u_oceanParams9;    // x = trough margin (m): how far above the seabed the wave trough is held,
+                            // tapered in with depth so the waterline itself does not lift, yzw unused
     vec4 u_terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                             // 0 = no terrain mesh up — fences the ocean land cull),
                             // y = generator vertScale (world m per unit of its vertical frame; converts the

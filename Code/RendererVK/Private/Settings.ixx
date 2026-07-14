@@ -315,6 +315,21 @@ export struct OceanParams
                                   // cleaner cut against the sand (shallow grazes sawtooth the retreat edge)
     float shoreFoamBias  = -0.33f;  // shifts the surf fold threshold: negative = sparser lace / more
                                   // transparent shore waves, positive = denser churn
+    // Crest ceiling as a fraction of the local WATER DEPTH: a wave cannot stand taller than the water it
+    // is in. The waterline clamp already pins the TROUGH above the seabed, but nothing bounded the crest —
+    // only the shoal fade, which is a fixed depth/(scale*patch) ramp rather than anything relative to the
+    // water column, so a metre-high crest was allowed in two metres of water. The clipmap triangle running
+    // from that vertex to the next one on land then carries the crest straight over the beach.
+    // Real waves break around H/d ~ 0.78 (crest ~ 0.39*d), so this is physical, not a fudge. 0 = no limit.
+    // Applied to the shoaled waves only: the swash run-up rides ON TOP, since going up the beach is its job.
+    float crestDepthLimit = 0.4f;
+    // How far above the seabed the wave TROUGH is held (m). The clamp that does this had a hard-coded 5 cm
+    // margin, which is far under the decimetre-scale disagreement between the baked depth map it measures
+    // against and the LOD'd terrain mesh you actually see — so a trough legally clear of the map's seabed
+    // still sank under the real ground and let it poke through the surface. Raise until that stops.
+    // Tapered in with depth (see the shader): the margin cannot exceed the water it is lifting the surface
+    // within, and lifting it at the waterline would drag the water's edge seaward.
+    float troughMargin = 0.15f;
     float swashFlow      = 0.33f;  // backflow: scale on the raw horizontal chop riding the swash weight —
                                   // the tongue visibly flows back seaward as the wave recedes (0 = off)
     float cullMargin     = 1.0f;  // land cull: clipmap triangles whose whole footprint is buried deeper

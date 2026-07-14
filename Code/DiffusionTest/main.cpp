@@ -302,6 +302,165 @@ static int runBakeBench(uint64 seed, float metersPerPixel, bool runSlow, bool us
 		Log::info(std::format("[Bake] tallest coarse point {:.0f} m at ({:.0f}, {:.0f})", best, landX, landZ));
 	}
 
+	// Is the spurious swash actually FAR inland? The coastal probe below can only see its own 4 km window,
+	// so it says "the band is within 250 m of ocean" by construction. Ask the opposite question: find land
+	// with NO ocean for many km, and count how much of it sits in the 0..1 m swash band anyway.
+	{
+		// Inland probe: the coarse pixel farthest (in coarse pixels) from any sub-sea-level coarse pixel.
+		double inX = 0.0, inZ = 0.0;
+		double bestSep = -1.0;
+		constexpr uint32 N = 96;
+		const double crange = 400000.0 * (double)metersPerPixel / 30.0;
+		const double cstep = crange / (double)N;
+		const double corg = -crange * 0.5;
+		{
+			std::vector<Procedural::TerrainPoint> cpts((size_t)N * N);
+			gen.sampleGrid(corg, corg, cstep, N, N, cpts, Procedural::ESampleDetail::Coarse);
+			std::vector<glm::ivec2> csea;
+			for (uint32 j = 0; j < N; j++)
+				for (uint32 i = 0; i < N; i++)
+					if (cpts[(size_t)j * N + i].height <= 0.0f) csea.push_back({ (int)i, (int)j });
+			for (uint32 j = 0; j < N; j++)
+				for (uint32 i = 0; i < N; i++)
+				{
+					if (cpts[(size_t)j * N + i].height <= 0.0f)
+						continue;
+					double d2 = 1e30;
+					for (const glm::ivec2& c : csea)
+						d2 = std::min(d2, (double)((int)i - c.x) * ((int)i - c.x) + (double)((int)j - c.y) * ((int)j - c.y));
+					if (d2 > bestSep) { bestSep = d2; inX = corg + cstep * i; inZ = corg + cstep * j; }
+				}
+		}
+		Log::info(std::format("[Bake] inland probe at ({:.0f}, {:.0f}), ~{:.1f} km from the nearest coarse sea pixel",
+		                      inX, inZ, std::sqrt(bestSep) * cstep / 1000.0));
+
+		constexpr uint32 M = 512;
+		const double step = 8.0;
+		const double org = -(double)M * step * 0.5;
+		std::vector<Procedural::TerrainPoint> pts((size_t)M * M);
+		gen.sampleGrid(inX + org, inZ + org, step, M, M, pts, Procedural::ESampleDetail::Full);
+		size_t band = 0, sea = 0, land = 0;
+		for (const Procedural::TerrainPoint& p : pts)
+		{
+			if (p.height <= 0.0f) { sea++; continue; }
+			land++;
+			if (p.height <= 1.0f) band++;
+		}
+		Log::info(std::format("[Bake]   over a {:.0f} m window: {} sea texels, {} land, {} in the 0..1 m swash band ({:.2f}% of land)",
+		                      M * step, sea, land, band, 100.0 * band / (double)std::max<size_t>(land, 1)));
+		Log::info(std::format("[Bake]   -> {}", sea == 0 && band > 0
+			? "SPURIOUS: swash-band terrain with no ocean for kilometres"
+			: (band == 0 ? "no swash band here" : "window contains sea; inconclusive")));
+	}
+
+	// SHORE SWASH: does anything V3 reports tell a beach from an inland puddle?
+	// The ocean runs swash onto any terrain within ~1 m of the water level, and V3 reports the water level
+	// as sea level EVERYWHERE (it models no lakes), so every 0..1 m patch on the planet reads as shoreline.
+	// The swash already has the right gate — it fades where the water level leaves sea level — so the fix is
+	// to report a level the ocean cannot reach when landlocked. The question is what signal to key that on.
+	// Measure the candidate against ground truth: brute-force the real distance to sub-sea-level terrain.
+	{
+		// Find a COAST, not a peak: the coarse pixel closest to sea level with land and sea both nearby.
+		double shoreX = 0.0, shoreZ = 0.0;
+		{
+			constexpr uint32 N = 128;
+			const double range = 600000.0 * (double)metersPerPixel / 30.0;
+			const double step = range / (double)N;
+			const double origin = -range * 0.5;
+			std::vector<Procedural::TerrainPoint> pts((size_t)N * N);
+			gen.sampleGrid(origin, origin, step, N, N, pts, Procedural::ESampleDetail::Coarse);
+			float best = FLT_MAX;
+			for (uint32 j = 1; j + 1 < N; j++)
+				for (uint32 i = 1; i + 1 < N; i++)
+				{
+					const float h = pts[(size_t)j * N + i].height;
+					if (h <= 0.0f)
+						continue;
+					bool sea = false;
+					for (int dj = -1; dj <= 1; dj++)
+						for (int di = -1; di <= 1; di++)
+							if (pts[(size_t)(j + dj) * N + (i + di)].height <= 0.0f) sea = true;
+					if (sea && h < best) { best = h; shoreX = origin + step * i; shoreZ = origin + step * j; }
+				}
+			Log::info(std::format("[Bake] shore probe at ({:.0f}, {:.0f}), coarse height {:.0f} m", shoreX, shoreZ, best));
+		}
+
+		// A window big enough to hold both a real beach and inland ground, at a step fine enough that the
+		// distance-to-ocean ground truth means something.
+		constexpr uint32 M = 512;
+		const double step = 8.0;
+		const double org = -(double)M * step * 0.5;
+		std::vector<Procedural::TerrainPoint> pts((size_t)M * M);
+		gen.sampleGrid(shoreX + org, shoreZ + org, step, M, M, pts, Procedural::ESampleDetail::Full);
+
+		// Ground truth: brute-force distance from each swash-band texel to the nearest sub-sea-level texel.
+		std::vector<glm::ivec2> sea;
+		for (uint32 j = 0; j < M; j++)
+			for (uint32 i = 0; i < M; i++)
+				if (pts[(size_t)j * M + i].height <= 0.0f) sea.push_back({ (int)i, (int)j });
+
+		size_t band = 0, nearSea = 0, farSea = 0;
+		double macroNearSum = 0, macroFarSum = 0;
+		double macroNearMax = -1e9, macroFarMin = 1e9;
+		for (uint32 j = 0; j < M; j++)
+			for (uint32 i = 0; i < M; i++)
+			{
+				const Procedural::TerrainPoint& p = pts[(size_t)j * M + i];
+				if (p.height <= 0.0f || p.height > 1.0f) // the swash band: 0..1 m above sea level
+					continue;
+				band++;
+				double d2 = 1e30;
+				for (const glm::ivec2& sxy : sea)
+				{
+					const double dx = (double)((int)i - sxy.x) * step, dz = (double)((int)j - sxy.y) * step;
+					d2 = std::min(d2, dx * dx + dz * dz);
+				}
+				const double dist = std::sqrt(d2);
+				const double macro = p.altitude; // the coarse surface, world metres
+				if (dist <= 50.0) { nearSea++; macroNearSum += macro; macroNearMax = std::max(macroNearMax, macro); }
+				else              { farSea++;  macroFarSum += macro;  macroFarMin = std::min(macroFarMin, macro); }
+			}
+		// How far inland the spurious band actually sits decides what resolution a fix needs: a signal can
+		// only separate beach from puddle if it resolves finer than the gap between them.
+		{
+			std::vector<double> dists;
+			for (uint32 j = 0; j < M; j++)
+				for (uint32 i = 0; i < M; i++)
+				{
+					const Procedural::TerrainPoint& p = pts[(size_t)j * M + i];
+					if (p.height <= 0.0f || p.height > 1.0f)
+						continue;
+					double d2 = 1e30;
+					for (const glm::ivec2& sxy : sea)
+					{
+						const double dx = (double)((int)i - sxy.x) * step, dz = (double)((int)j - sxy.y) * step;
+						d2 = std::min(d2, dx * dx + dz * dz);
+					}
+					dists.push_back(std::sqrt(d2));
+				}
+			std::sort(dists.begin(), dists.end());
+			if (!dists.empty())
+			{
+				const auto pct = [&](double q) { return dists[std::min(dists.size() - 1, (size_t)(q * 0.01 * (double)dists.size()))]; };
+				Log::info(std::format("[Bake]   distance-to-ocean percentiles (m): p10 {:.0f}  p25 {:.0f}  p50 {:.0f}  "
+				                      "p75 {:.0f}  p90 {:.0f}  max {:.0f}",
+				                      pct(10), pct(25), pct(50), pct(75), pct(90), dists.back()));
+			}
+		}
+		Log::info(std::format("[Bake] swash band (0..1 m) over {} texels of a {:.0f} m window:", band, M * step));
+		if (band > 0 && nearSea > 0 && farSea > 0)
+		{
+			Log::info(std::format("[Bake]   WITHIN 50 m of ocean: {:5.1f}%  macro mean {:8.1f} m (max {:.1f})",
+			                      100.0 * nearSea / (double)band, macroNearSum / (double)nearSea, macroNearMax));
+			Log::info(std::format("[Bake]   FARTHER than 50 m:    {:5.1f}%  macro mean {:8.1f} m (min {:.1f})",
+			                      100.0 * farSea / (double)band, macroFarSum / (double)farSea, macroFarMin));
+			Log::info(std::format("[Bake]   -> macro {} separate beach from inland puddle",
+			                      macroNearMax < macroFarMin ? "DOES" : "does NOT"));
+		}
+		else
+			Log::info(std::format("[Bake]   inconclusive here (near {} / far {})", nearSea, farSea));
+	}
+
 	// Crag relief (height - altitude) is what the terrain shader's rock layer keys on: it separates a
 	// MOUNTAIN from flat ground at altitude. Terrain/Textures "Crag relief start/full" are the thresholds.
 	// If this stays near zero, mountain tops keep the lowland biome's texture and never grow rock.

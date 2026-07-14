@@ -40,7 +40,18 @@ export namespace Procedural
 		// (TerrainStreamer::activeClimateMaps(), nullptr = no terrain): with it the ocean bakes a coarse
 		// water-depth map around the camera on a worker thread — shallow water fades the waves (fake
 		// shoaling), the waterline grows a surf band, and waves never poke through land.
-		void update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain = nullptr);
+		// `reach` sinks the baked water level below ground the ocean cannot reach (nullptr = off); it comes
+		// from the terrain streamer rather than being owned here ON PURPOSE. This map overrides the
+		// terrain-data map inside its range, so the two must bake the SAME rule — a second copy of the
+		// setting would sit at its defaults while the tweaks moved the other, and the disagreement would
+		// show as a ring of swash appearing where one map hands over to the other. See applyWaterReach.
+		// `seaLevel` is the world datum, and it comes from the TERRAIN (TerrainStreamer::seaLevel) rather
+		// than being a tweak here. It cannot be two values: the terrain generator builds its heights around
+		// it (V3's elevations are relative to it, which is why moving it regenerates chunks), the ocean
+		// floats its surface on it, and the swash gate compares the two — so a fork between them switches
+		// the swash off everywhere rather than just looking off.
+		void update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain = nullptr,
+		            const WaterReach* reach = nullptr, float seaLevel = 0.0f);
 
 		// Water surface world Y at (x, z), CPU-evaluated from the GPU displacement readback (mirrors the
 		// vertex shader's cascade sum, shoaling fade and seabed clamp; ~2 frames of latency — invisible
@@ -51,7 +62,8 @@ export namespace Procedural
 
 	private:
 		void rebuildGrid();
-		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain);
+		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain,
+		                    const WaterReach* reach);
 		glm::vec2 sampleShoreData(float x, float z) const;          // (water depth, water level) from the CPU shore copy
 		float sampleShoreDepth(float x, float z) const;             // CPU copy of the baked shore map
 		glm::vec3 sampleDisplacement(glm::vec2 worldXZ, float depth) const; // shoal-faded cascade sum from the readback tile
@@ -59,7 +71,7 @@ export namespace Procedural
 
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---
 		bool  m_enabled = true;
-		float m_seaLevel = 0.0f;
+		float m_seaLevel = 0.0f;   // mirrors the terrain's datum; set every update(), never tweaked here
 		float m_ringCell = 0.125f;     // ring 0 cell size (m); doubles per ring. Reach = ringCell*res/2*2^(rings-1)
 		int   m_ringRes = 512;         // cells per axis per ring (ring 0 is a full grid, outer rings are annuli)
 		int   m_rings = 8;             // ring count (defaults: 16m fine region, ~1km reach)
@@ -71,7 +83,7 @@ export namespace Procedural
 		float m_windSpeed = 20.0f;     // U10 (m/s): the main sea-state knob
 		float m_fetchKm = 300.0f;      // wind fetch (km)
 		float m_depth = 100.0f;        // ocean depth (m): finite-depth dispersion + TMA attenuation
-		float m_windAngle = 3.14f;     // radians (XZ heading of the dominant swell)
+		float m_windAngle = 5.12f;     // radians (XZ heading of the dominant swell)
 		float m_amplitude = 1.0f;      // artistic scale on the spectrum (1 = physical)
 		float m_choppiness = 1.1f;     // horizontal displacement lambda
 		float m_normalStrength = 1.0f;
@@ -101,12 +113,15 @@ export namespace Procedural
 		// --- Shore interaction (terrain height bake; see updateShoreMap) ---
 		bool  m_shoreEnabled = true;
 		float m_shoreRange = 1024.0f;   // world size (m) the baked map covers, centered on the camera
-		float m_shoalScale = 0.015f;     // waves fade below depth = scale * cascade patch size
+
+		float m_shoalScale = 0.02f;     // waves fade below depth = scale * cascade patch size
 		float m_shoreFoamDepth = 8.0f;  // surf band: water-column height (m) that churns white; 0 = off
 		float m_shoreFoamMax = 0.75f;   // surf band opacity cap: keeps the refracted bottom visible through the foam
 		float m_swashAmp = 0.5f;        // swash run-up: un-shoaled wave height riding up the beach (0 = hard cutoff)
-		float m_swashDrawdown = 0.3f;   // receding burial depth (m below seabed): deeper = cleaner retreat edge
-		float m_shoreFoamBias = -0.33f;   // surf fold-threshold shift: negative = sparser/more transparent surf
+		float m_swashDrawdown = 0.0f;   // receding burial depth (m below seabed): deeper = cleaner retreat edge
+		float m_crestLimit = 0.4f;      // crest ceiling as a fraction of water depth (0 = unbounded)
+		float m_troughMargin = 0.15f;   // m the trough is held above the seabed (covers baked-map vs mesh error)
+		float m_shoreFoamBias = -0.80f;   // surf fold-threshold shift: negative = sparser/more transparent surf
 		float m_swashFlow = 1.0f;       // backflow: horizontal chop on the tongue (recede flows seaward; 0 = off)
 		float m_cullMargin = 1.0f;      // VS land cull: footprint buried deeper than this = triangle discarded (0 = off)
 

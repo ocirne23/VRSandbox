@@ -721,7 +721,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     const float swashReach = swashAmp * (m_oceanWaveTrough + 0.25f);
     ubo.oceanParams7 = glm::vec4(glm::max(ocean.cullMargin, 0.0f), glm::clamp(ocean.shoreFoamMax, 0.0f, 1.0f), swashAmp, swashReach);
     ubo.oceanParams8 = glm::vec4(glm::max(ocean.swashDrawdown, 0.0f), glm::clamp(ocean.shoreFoamBias, -1.0f, 1.0f),
-        glm::max(ocean.swashFlow, 0.0f), 0.0f);
+        glm::max(ocean.swashFlow, 0.0f), glm::max(ocean.crestDepthLimit, 0.0f));
+    ubo.oceanParams9 = glm::vec4(glm::max(ocean.troughMargin, 0.0f), 0.0f, 0.0f, 0.0f);
 
     ubo.terrainParams = m_terrainParams;
 

@@ -26,7 +26,6 @@ namespace Procedural
 		auto gridDirty = [this]() { m_gridDirty = true; };
 
 		Tweak::boolean("Ocean", "Enabled", &m_enabled);
-		Tweak::floatVar("Ocean", "Sea level (m)", &m_seaLevel, -10.0f, 10.0f, 0.1f);
 		Tweak::floatVar("Ocean", "Ring cell (m)", &m_ringCell, 0.02f, 2.0f, 0.005f, gridDirty);
 		Tweak::intVar("Ocean", "Ring resolution", &m_ringRes, 64, 512, 4.0f, gridDirty);
 		Tweak::intVar("Ocean", "Rings", &m_rings, 1, 10, 1.0f, gridDirty);
@@ -77,7 +76,20 @@ namespace Procedural
 		Tweak::floatVar("Ocean/Shore", "Shore foam depth (m)", &m_shoreFoamDepth, 0.0f, 8.0f, 0.05f);
 		Tweak::floatVar("Ocean/Shore", "Shore foam max", &m_shoreFoamMax, 0.0f, 1.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shore", "Swash amplitude", &m_swashAmp, 0.0f, 2.0f, 0.01f);
-		Tweak::floatVar("Ocean/Shore", "Swash drawdown (m)", &m_swashDrawdown, 0.05f, 2.0f, 0.01f);
+		Tweak::floatVar("Ocean/Shore", "Swash drawdown (m)", &m_swashDrawdown, 0.00f, 2.0f, 0.01f);
+		// A wave cannot stand taller than the water it is in. The waterline clamp already keeps the TROUGH
+		// off the seabed; this is the other half, and without it nothing bounded the crest except the shoal
+		// fade — a fixed depth/(scale*patch) ramp, not a limit relative to the water column. A crest allowed
+		// to stand a metre high in two metres of water gets carried over the beach by the clipmap triangle
+		// that bridges it to the next vertex on land. Real waves break near H/d ~ 0.78 (crest ~ 0.39*d), so
+		// lower it to break them earlier and further out. 0 = unbounded (the old behaviour).
+		Tweak::floatVar("Ocean/Shore", "Crest limit (x depth)", &m_crestLimit, 0.0f, 2.0f, 0.01f);
+		// The other half: how far above the seabed the TROUGH is held. The clamp measures against the baked
+		// depth map, but you see the LOD'd terrain mesh, and the two disagree by decimetres — so the old
+		// hard-coded 5 cm let a trough that clears the map's seabed sink under the real ground, which then
+		// pokes through the surface. This is the margin for that error, so size it to the disagreement, not
+		// to the waves. Tapered in with depth, so the waterline does not lift and retreat.
+		Tweak::floatVar("Ocean/Shore", "Trough margin (m)", &m_troughMargin, 0.0f, 1.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shore", "Shore foam bias", &m_shoreFoamBias, -1.0f, 1.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shore", "Swash backflow", &m_swashFlow, 0.0f, 3.0f, 0.01f);
 		// Land cull: clipmap triangles buried deeper than this under the local water level (over their
@@ -182,12 +194,14 @@ namespace Procedural
 	// water depth live as water level - height and lift the clipmap by water level - sea level (lakes/
 	// rivers at altitude); beyond this map's range they fall back to the coarser fog terrain cascades
 	// (TerrainStreamer's bake of the same fields).
-	void OceanRenderer::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain)
+	void OceanRenderer::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain,
+	                                   const WaterReach* reach)
 	{
 		const bool active = m_shoreEnabled && terrain != nullptr;
 		HeightMapBaker::Baked baked;
 		if (m_shoreBaker.update(baked, active, terrain, glm::vec2(camera.position.x, camera.position.z),
-			glm::vec2(glm::max(m_shoreRange, 256.0f), 0.0f), RendererVKLayout::OCEAN_SHORE_RES, 1, 4, true)) // shore layout: h, water, flow, spare
+			glm::vec2(glm::max(m_shoreRange, 256.0f), 0.0f), RendererVKLayout::OCEAN_SHORE_RES, 1, 4,
+			true, reach)) // shore layout: h, water, flow, spare
 		{
 			renderer.setOceanShoreMap(baked.texels, baked.center, baked.ranges.x);
 			m_shoreHeights = std::move(baked.texels); // CPU copy: sampleShoreDepth (buoyancy) reads this
@@ -202,10 +216,17 @@ namespace Procedural
 		}
 	}
 
-	void OceanRenderer::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain)
+	void OceanRenderer::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain,
+	                           const WaterReach* reach, float seaLevel)
 	{
+		// ONE sea level, owned by the terrain (see the header). Adopted here every frame rather than
+		// tweaked separately: this used to be its own slider, and the two silently forked — the water plane
+		// moved while the terrain kept reporting its water at the old datum, which does not merely look
+		// wrong. The swash gate fades on |baked water level - sea level|, so a metre of disagreement turned
+		// the swash off planet-wide.
+		m_seaLevel = seaLevel;
 		if (m_enabled)
-			updateShoreMap(renderer, camera, terrain);
+			updateShoreMap(renderer, camera, terrain, reach);
 
 		// Push the spectrum/shading params every frame; `enabled` also gates the GPU FFT simulation.
 		OceanParams params;
@@ -242,6 +263,8 @@ namespace Procedural
 		params.shoreFoamMax = m_shoreFoamMax;
 		params.swashAmp = m_swashAmp;
 		params.swashDrawdown = m_swashDrawdown;
+		params.crestDepthLimit = m_crestLimit;
+		params.troughMargin = m_troughMargin;
 		params.shoreFoamBias = m_shoreFoamBias;
 		params.swashFlow = m_swashFlow;
 		params.cullMargin = m_cullMargin;

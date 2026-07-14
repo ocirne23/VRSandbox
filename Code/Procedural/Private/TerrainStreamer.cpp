@@ -260,6 +260,19 @@ namespace Procedural
 		// decodes it. The bake is otherwise invisible — a wrong sampler, pack or upload all look
 		// the same from the shader side.
 		Tweak::boolean("Terrain", "Log baked data map", &m_terrainMapDebugLog);
+		// The ocean runs swash onto anything within ~1 m of the water level, and V3 reports sea level
+		// EVERYWHERE (it models no lakes), so inland ground that happens to sit at 0..1 m reads as beach and
+		// gets waves. These sink the baked water level well below any ground the ocean cannot reach, which
+		// the swash's existing landlocked-water gate then takes care of; the beach texture overlay keys on
+		// the same field, so inland sand goes with it. Off = the raw sampler water level.
+		Tweak::boolean("Terrain", "Ocean reach limit", &m_waterReachEnabled);
+		// How deep water must be before it counts as ocean at all. Guards the reach test against shallow
+		// inland dips: one texel a hair under sea level would otherwise vouch for every hollow within the
+		// reach radius of it. Raise it if puddles still rescue ground they should not.
+		Tweak::floatVar("Terrain", "Ocean swash depth", &m_waterReach.swashDepth, 0.0f, 20.0f, 0.1f);
+		Tweak::floatVar("Terrain", "Ocean reach (m)", &m_waterReach.radius, 0.0f, 100.0f, 0.1f);
+		Tweak::floatVar("Terrain", "Ocean reach feather (m)", &m_waterReach.feather, 1.0f, 100.0f, 0.1f);
+		Tweak::floatVar("Terrain", "Ocean reach drop (m)", &m_waterReach.drop, 0.0f, 50.0f, 0.5f);
 		Tweak::floatVar("Terrain", "Data map range (m)", &m_terrainMapRange, 256.0f, 8192.0f, 32.0f);
 		// Floor for the far cascade world size: the actual range is raised to cover the resident mesh ring
 		// (2*(R+1)*chunkSize) so distant terrain never reads clamp-to-edge frozen altitude/temperature.
@@ -638,28 +651,61 @@ namespace Procedural
 				m_cv.wait(lk, [this]() { return !m_running || !m_requests.empty(); });
 				if (!m_running)
 					return;
-				// Lazy staleness: requests that fell out of the ring while queued are dropped HERE, at
-				// dequeue, against the published ring state — the main thread never rewrites the queue.
-				// A dropped request bounces back as an EMPTY result so the main thread releases its
-				// pending key (m_pending is main-thread-owned). Skipping costs a few integer ops per
-				// entry, so a deep stale backlog from fast flight burns off in microseconds.
-				while (!m_requests.empty())
+				// Take the request NEAREST THE CAMERA, re-measured against the ring state as it is RIGHT NOW.
+				// Deliberately not a queue: FIFO order is enqueue TIME, which stops matching distance the
+				// moment the camera moves. Chunks arrive over many frames, and a chunk whose LOD band
+				// changes has its queued request invalidated and re-appended — landing BEHIND the far
+				// leading-edge chunks queued on earlier frames. The ground under the camera then arrives
+				// after the horizon does, which at V3's seconds-per-chunk is impossible to miss.
+				// Sorting each batch on the way in cannot fix that: it only orders WITHIN a batch, and the
+				// camera has moved by the time the next one is picked up. Only choosing at dequeue, against
+				// the live camera, is order-independent.
+				//
+				// Lazy staleness rides along in the same pass: requests that fell out of the ring are
+				// dropped HERE — the main thread never rewrites the queue — and bounce back as an EMPTY
+				// result so it releases its pending key (m_pending is main-thread-owned).
+				//
+				// O(queue) per generated chunk. The queue is a few hundred entries and a chunk costs
+				// milliseconds (V2) to seconds (V3), so the scan does not register.
+				size_t best = SIZE_MAX;
+				int64 bestDist2 = INT64_MAX;
+				size_t keep = 0;
+				for (size_t i = 0; i < m_requests.size(); ++i)
 				{
+					Request& r = m_requests[i];
+					const glm::ivec2 d = r.params.coord - m_ringCam;
+					const int cheb = glm::max(glm::abs(d.x), glm::abs(d.y));
+					if (cheb > m_ringR || r.params.lod != ringLodAt(cheb, m_ringLodStep, m_ringMaxLod))
+					{
+						Result drop;
+						drop.key = r.key;
+						drop.generation = r.generation;
+						drop.coord = r.params.coord;
+						drop.lod = r.params.lod;
+						m_results.push_back(std::move(drop)); // empty mesh = dropped
+						continue;                             // not carried into the kept prefix
+					}
+					// Euclidean, not the ring's Chebyshev: "nearest" should mean nearest, not same-ring.
+					const int64 dist2 = (int64)d.x * d.x + (int64)d.y * d.y;
+					if (dist2 < bestDist2)
+					{
+						bestDist2 = dist2;
+						best = keep;
+					}
+					if (keep != i)
+						m_requests[keep] = std::move(r);
+					++keep;
+				}
+				m_requests.resize(keep);
+				if (best != SIZE_MAX)
+				{
+					// Queue ORDER carries no meaning now (every dequeue rescans the lot), so the winner can
+					// come out in O(1) by swapping it to the front rather than erasing from the middle.
+					if (best != 0)
+						std::swap(m_requests[best], m_requests[0]);
 					req = std::move(m_requests.front());
 					m_requests.pop_front();
-					const glm::ivec2 d = req.params.coord - m_ringCam;
-					const int cheb = glm::max(glm::abs(d.x), glm::abs(d.y));
-					if (cheb <= m_ringR && req.params.lod == ringLodAt(cheb, m_ringLodStep, m_ringMaxLod))
-					{
-						haveWork = true;
-						break;
-					}
-					Result drop;
-					drop.key = req.key;
-					drop.generation = req.generation;
-					drop.coord = req.params.coord;
-					drop.lod = req.params.lod;
-					m_results.push_back(std::move(drop)); // empty mesh = dropped
+					haveWork = true;
 				}
 			}
 			if (!haveWork)
@@ -691,9 +737,11 @@ namespace Procedural
 	{
 		const bool active = m_terrainMapEnabled && maps != nullptr;
 		HeightMapBaker::Baked baked;
+		const WaterReach* reach = m_waterReachEnabled ? &m_waterReach : nullptr;
 		if (m_terrainMapBaker.update(baked, active, maps, glm::vec2(camera.position.x, camera.position.z),
 			glm::vec2(glm::max(m_terrainMapRange, 256.0f), farRange),
-			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4)) // RGBA: height, water level, fog|falloff|temp|hum, altitude
+			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4, // RGBA: height, water level, fog|lapse|temp|hum, altitude
+			false, reach))
 		{
 			// Decode what actually went into the packed climate channel, per cascade, exactly as
 			// terrain_height.inc.glsl does. The bake is the one link in the chain nothing else can see: a
@@ -843,26 +891,20 @@ namespace Procedural
 			}
 		}
 
-		// Out-of-range queued work is dropped LAZILY by the worker at dequeue (see workerLoop) — the main
-		// thread never prunes or re-sorts the queue. It only publishes the ring state the worker
-		// validates against, and appends new work nearest-first: each batch is sorted (a batch is either
-		// the initial/teleport fill, where nearest-first matters, or a thin leading-edge strip of roughly
-		// equidistant chunks), and batches are consumed in enqueue order, so ground still materializes
-		// under the camera outward during flight.
+		// The queue is an unordered POOL, not a queue: the worker rescans it on every dequeue and takes the
+		// chunk nearest the camera at that moment (see workerLoop), and drops out-of-range entries in the
+		// same pass. So the main thread neither sorts nor prunes — appending in any order is correct, and
+		// sorting here would only be re-deciding, one camera position out of date, something the worker
+		// decides properly a moment later.
+		// What it DOES owe the worker is the ring state to judge against, published under the same lock.
 		const bool ringMoved = camCX != m_lastRingCX || camCZ != m_lastRingCZ
 			|| R != m_lastRingR || lodStep != m_lastRingLodStep || maxLod != m_lastRingMaxLod;
 		m_lastRingCX = camCX; m_lastRingCZ = camCZ;
 		m_lastRingR = R; m_lastRingLodStep = lodStep; m_lastRingMaxLod = maxLod;
 		if (ringMoved || !newRequests.empty())
 		{
-			const glm::ivec2 cam(camCX, camCZ);
-			std::sort(newRequests.begin(), newRequests.end(), [&](const Request& a, const Request& b)
-			{
-				const glm::ivec2 da = a.params.coord - cam, db = b.params.coord - cam;
-				return da.x * da.x + da.y * da.y < db.x * db.x + db.y * db.y;
-			});
 			std::lock_guard<std::mutex> lk(m_mutex);
-			m_ringCam = cam;
+			m_ringCam = glm::ivec2(camCX, camCZ);
 			m_ringR = R;
 			m_ringLodStep = lodStep;
 			m_ringMaxLod = maxLod;

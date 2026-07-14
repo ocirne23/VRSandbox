@@ -354,7 +354,7 @@ int main()
         terrain.update(renderer, camera);
         // The terrain's height field feeds the ocean's shore-depth bake (shoaling + surf at the coast)
         // and drives the object scattering (both clear themselves while terrain is disabled).
-        ocean.update(renderer, camera, terrain.activeClimateMaps());
+        ocean.update(renderer, camera, terrain.activeClimateMaps(), terrain.activeWaterReach(), terrain.seaLevel());
         scatter.update(renderer, camera, terrain.activeClimateMaps());
 
         if (gizmo.isVisible())

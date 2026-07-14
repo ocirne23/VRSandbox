@@ -39,6 +39,15 @@ export namespace Procedural
 		// as "no terrain" rather than sampling a field that isn't drawn. Thread-safe; the shared_ptr
 		// keeps the maps valid across config rebuilds (workers holding the old maps finish against them).
 		std::shared_ptr<const ITerrainSampler> activeClimateMaps() { return m_enabled ? currentMaps() : nullptr; }
+		// The ocean-reach rule this streamer bakes into the terrain-data map, for anything baking the SAME
+		// fields off the same sampler (the ocean's shore map, which overrides that map inside its range).
+		// Handed out rather than duplicated so the two cannot drift apart — see applyWaterReach.
+		// nullptr = the rule is off; bake the sampler's water level as-is.
+		const WaterReach* activeWaterReach() const { return m_waterReachEnabled ? &m_waterReach : nullptr; }
+		// THE sea level datum for the world, tweak-backed here because the terrain generator builds its
+		// heights around it (so it regenerates chunks) — the ocean floats on this rather than owning a
+		// second copy. Valid even while terrain is disabled, so the ocean can still run on its own.
+		float seaLevel() const { return m_seaLevel; }
 
 	private:
 		struct Request
@@ -166,6 +175,12 @@ export namespace Procedural
 		bool  m_terrainMapDebugLog = false; // log the decoded climate range of every baked cascade
 		float m_terrainMapRange = 2048.0f;     // near cascade world size (m), centered on the camera
 		float m_terrainMapFarRange = 8192.0f;  // far cascade world size (m; same texel count, coarser texels)
+		// Ocean reach: how close real ocean must be for water here to still be the sea. Beyond it the baked
+		// water level sinks below the ground, which is what stops the ocean running swash up every inland
+		// hollow that happens to sit within a metre of sea level (V3 models no lakes, so it reports sea
+		// level planet-wide). See applyWaterReach.
+		WaterReach m_waterReach;
+		bool  m_waterReachEnabled = true;
 		HeightMapBaker m_terrainMapBaker;
 		bool  m_terrainMapUploaded = false;    // a map is live in the renderer (cleared on disable)
 
@@ -210,9 +225,14 @@ export namespace Procedural
 		std::thread             m_worker;
 		std::mutex              m_mutex;
 		std::condition_variable m_cv;
+		// An unordered POOL of outstanding work, despite the deque: the worker rescans it on every dequeue
+		// and takes whichever chunk is nearest the camera THEN, so insertion order carries no meaning and
+		// neither side sorts it. Ordering it would just re-decide, one camera position stale, what the
+		// worker decides correctly at pick time — and FIFO is what made distant chunks generate before the
+		// ground underfoot.
 		std::deque<Request>     m_requests;
-		// Ring state the worker validates queued requests against at DEQUEUE time (guarded by m_mutex):
-		// stale requests drop lazily when popped — nobody rewrites the queue. m_ringR = -1 until the
+		// Ring state the worker judges queued requests against at DEQUEUE time (guarded by m_mutex): both
+		// which are stale (dropped lazily, in the same pass) and which is nearest. m_ringR = -1 until the
 		// first publish (everything queued before that would drop, but the first publish precedes the
 		// first append under the same lock).
 		glm::ivec2 m_ringCam{ 0, 0 };

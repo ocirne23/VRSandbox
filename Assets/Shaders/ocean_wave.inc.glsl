@@ -303,6 +303,18 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
         // surface-vs-terrain intersection that already IS the waterline, so the wet edge surges up the
         // beach and drains back with each swell. Fades in as the shoal fade takes over (mid cascade as
         // the reference), so deep water sees no double displacement.
+        // Crest ceiling: a wave cannot stand taller than the water it is in. The waterline clamp below
+        // pins the TROUGH above the seabed, but nothing bounded the crest — the shoal fade is a fixed
+        // depth/(scale*patch) ramp, not a limit relative to the water column, so a metre-high crest was
+        // legal in two metres of water. It is not the crest itself that shows: it is the clipmap triangle
+        // bridging that vertex to the next one on LAND, which interpolates the crest straight over the
+        // beach. Real waves break near H/d ~ 0.78 (crest ~ 0.39*d), so bounding the crest to a fraction of
+        // depth is what the water would do anyway.
+        // BEFORE the swash add, never after: running up the beach is precisely the swash's job, and it
+        // rides the raw un-shoaled field on purpose.
+        const float crestLimit = u_oceanParams8.w;
+        if (crestLimit > 0.0 && depth > 0.0)
+            disp.y = min(disp.y, crestLimit * depth);
         disp.y += rawY * sw;
     }
     // Waterline treatment: smooth-clamp the surface to just above the seabed — the shoal fade only
@@ -325,6 +337,16 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
     const float eps = 0.05;
     const float k = mix(0.2, 0.06, clamp(sw * 4.0, 0.0, 1.0));
     float floorY = eps - max(depth, 2.0 * eps);
+    // Trough margin: hold the surface further above the seabed than the 5 cm above. That eps is measured
+    // against the BAKED map, and the terrain MESH you see disagrees with it by decimetres (bilinear texels
+    // vs LOD'd triangles) — so a trough 5 cm clear of the map's seabed still sinks under the real ground,
+    // which then pokes through the water. The margin has to cover that disagreement, not the wave.
+    // TAPERED IN over 2x itself, for two reasons that are really the same one: the margin cannot exceed the
+    // water it is lifting the surface inside of, and applying it at the waterline would raise the floor
+    // there and march the water's edge seaward, trading a poke-through for a retreated sea.
+    const float troughMargin = u_oceanParams9.x;
+    if (troughMargin > 0.0 && depth > 0.0)
+        floorY += troughMargin * smoothstep(0.0, 2.0 * troughMargin, depth);
     // Swash drawdown: the floor clamp pins the surface just ABOVE the seabed, which reads as a film of
     // water stuck at the old waterline while a wave recedes. Inside the swash shallows invert it to
     // just BELOW the seabed instead, so a receding surface sinks under the sand and the terrain
@@ -334,7 +356,10 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
     // angle, and a deeper dive steepens that intersection so the retreat edge cuts clean instead of
     // sawtoothing along the clipmap triangles.
     const float swashReach = u_oceanParams7.w;
-    if (u_oceanParams7.z > 0.0 && depth > 0.0)
+    // Drawdown 0 means NO drawdown — keep the anti-hole floor. The inversion has to be gated on the tweak
+    // itself, not just clamped inside: max(x, eps) still buries 5 cm at x = 0, so the setting could not be
+    // turned off from the UI, only turned down.
+    if (u_oceanParams7.z > 0.0 && depth > 0.0 && u_oceanParams8.x > 0.0)
         floorY = mix(floorY, -depth - max(u_oceanParams8.x, eps), 1.0 - smoothstep(0.0, max(swashReach, 0.01), depth));
     const float hh = max(k - abs(disp.y - floorY), 0.0) / k;
     disp.y = max(disp.y, floorY) - hh * hh * (k * 0.25);
