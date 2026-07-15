@@ -135,6 +135,234 @@ export namespace Procedural
 		}
 	}
 
+	// The 8-bit flow-direction encoding both baked layouts share (and the shaders' decode mirrors):
+	// 0 = no direction, 1..255 = angle / 2pi over [0, 1) in the world XZ plane (0 = +X). Negative input
+	// (the sampler's "no direction") encodes 0.
+	inline uint32 encodeFlowAngle01(float angle01)
+	{
+		return angle01 < 0.0f ? 0u : 1u + (uint32)(glm::clamp(angle01, 0.0f, 1.0f) * 254.0f + 0.5f);
+	}
+	inline uint32 encodeFlowDir(glm::vec2 dirXZ) // need not be normalized
+	{
+		const float a01 = std::atan2(dirXZ.y, dirXZ.x) * (1.0f / 6.283185307f);
+		return encodeFlowAngle01(a01 - std::floor(a01));
+	}
+
+	// Direction assignment for the baked 8-bit flow channel — where the local water MOVES. Ocean texels
+	// (submerged, water at sea level) within `oceanRange` of land point AT that land: this is what carries
+	// waves inland at the coast (the water shader rotates its wave field along it). Everything else — dry
+	// ground, lakes, reach-drained flats — points downhill, for rivers/water simulation to build on.
+	struct FlowField
+	{
+		float oceanRange = 250.0f;   // world m: how far offshore the toward-land direction still applies
+		// World m at the END of that range over which the direction eases back to the WIND heading, so the
+		// encoded field meets the unencoded (= wind-driven) open ocean without a visible turn: past the
+		// range "no direction" and "the wind's direction" are the same answer to 8-bit precision.
+		float oceanFade = 120.0f;
+		// World m of box averaging over the shore directions. The raw nearest-land field is Voronoi
+		// piecewise-constant — a jagged coastline flips it texel to texel, and waves would visibly change
+		// travel direction along the beach. Averaged as VECTORS, so opposing shores cancel to "none"
+		// rather than to a bogus average angle.
+		float smoothRadius = 40.0f;
+		float minSlope = 0.02f;      // land: slopes flatter than this (m per m) carry no direction
+		float windAngle = 0.0f;      // radians in XZ: the swell heading the fade band returns to (the ocean's)
+
+		// Staleness comparison (HeightMapBaker::update), same reasoning as WaterReach's.
+		bool operator==(const FlowField&) const = default;
+	};
+
+	// Fills the 8-bit flow channel of one baked cascade. Runs AFTER applyWaterReach on purpose: reach
+	// drains inland sea-level films, so they classify as land here and get downhill directions instead of
+	// pointing at a coast they cannot see. `texels` as in applyWaterReach; flow bits already non-zero
+	// (the generator authored a river direction there) are kept, everything else is computed:
+	//   - submerged at ocean level, land within reach -> at the nearest land, eased to the wind offshore
+	//   - anywhere else                               -> downhill (none where flatter than cfg.minSlope)
+	// Cost is a handful of O(n) sweeps (feature transform, running-window blur), independent of the radii.
+	inline void applyFlowField(float* texels, uint32 res, uint32 channels, double texelSize,
+	                           float seaLevel, bool shoreLayout, const FlowField& cfg)
+	{
+		if (channels < 4 || cfg.oceanRange <= 0.0f)
+			return;
+		const size_t n = (size_t)res * res;
+		constexpr float kSeaEps = 0.05f; // the same "is this the ocean's level" test as applyWaterReach
+
+		// The layout's 8 flow bits: the shore map keeps a plain 0..255 count in B, the terrain-data map
+		// packs them as bits 8-15 of the bit-cast climate channel (bit ops only — the packed value may
+		// form NaN patterns, so no float arithmetic may ever touch it).
+		const auto readEnc = [shoreLayout](const float* t) -> uint32
+		{
+			return shoreLayout ? (uint32)(t[2] + 0.5f) : (std::bit_cast<uint32>(t[2]) >> 8) & 255u;
+		};
+		const auto writeEnc = [shoreLayout](float* t, uint32 enc)
+		{
+			if (shoreLayout)
+				t[2] = (float)enc;
+			else
+				t[2] = std::bit_cast<float>((std::bit_cast<uint32>(t[2]) & ~0x0000FF00u) | (enc << 8));
+		};
+
+		// Nearest-land feature transform, dead-reckoning style: the two chamfer sweeps of applyWaterReach,
+		// but PROPAGATING the nearest dry texel's coords and scoring candidates by true euclidean distance
+		// to them. Directions come out of this — chamfer distances alone visibly bend them near corners.
+		constexpr uint32 kNoSeed = 0xFFFFFFFFu;
+		std::vector<uint32> seed(n);  // packed (y << 16 | x) of the nearest non-ocean texel
+		std::vector<float> distSq(n); // squared distance to it, in texels
+		enum : uint8 { Land = 0, Shore = 1, OpenOcean = 2 };
+		std::vector<uint8> cls(n);
+		for (uint32 j = 0; j < res; ++j)
+			for (uint32 i = 0; i < res; ++i)
+			{
+				const size_t k = (size_t)j * res + i;
+				const float* t = texels + k * channels;
+				const bool ocean = t[0] < t[1] && std::abs(t[1] - seaLevel) <= kSeaEps;
+				seed[k] = ocean ? kNoSeed : (j << 16 | i);
+				distSq[k] = ocean ? FLT_MAX : 0.0f;
+				cls[k] = ocean ? OpenOcean : Land; // Shore resolves after the transform
+			}
+		const auto relax = [&](size_t k, int32 x, int32 y, size_t from)
+		{
+			const uint32 s = seed[from];
+			if (s == kNoSeed)
+				return;
+			const int32 dx = x - (int32)(s & 0xFFFFu), dy = y - (int32)(s >> 16);
+			const float d = (float)(dx * dx + dy * dy);
+			if (d < distSq[k])
+			{
+				distSq[k] = d;
+				seed[k] = s;
+			}
+		};
+		for (uint32 j = 0; j < res; ++j)
+			for (uint32 i = 0; i < res; ++i)
+			{
+				const size_t k = (size_t)j * res + i;
+				if (distSq[k] == 0.0f)
+					continue;
+				if (j > 0)                relax(k, i, j, k - res);
+				if (i > 0)                relax(k, i, j, k - 1);
+				if (j > 0 && i > 0)       relax(k, i, j, k - res - 1);
+				if (j > 0 && i + 1 < res) relax(k, i, j, k - res + 1);
+			}
+		for (uint32 j = res; j-- > 0; )
+			for (uint32 i = res; i-- > 0; )
+			{
+				const size_t k = (size_t)j * res + i;
+				if (distSq[k] == 0.0f)
+					continue;
+				if (j + 1 < res)                relax(k, i, j, k + res);
+				if (i + 1 < res)                relax(k, i, j, k + 1);
+				if (j + 1 < res && i + 1 < res) relax(k, i, j, k + res + 1);
+				if (j + 1 < res && i > 0)       relax(k, i, j, k + res - 1);
+			}
+
+		// Raw direction per SHORE texel, as (vector, weight). Land and out-of-reach ocean carry weight 0:
+		// the averaging below must never pull shore directions toward the beach's own downhill — that
+		// points the OPPOSITE way, and the two would cancel exactly at the waterline. Authored (river)
+		// directions on shore texels do participate, so a river mouth blends into the surrounding surf.
+		const float r1 = cfg.oceanRange;
+		const float r0 = glm::max(r1 - glm::max(cfg.oceanFade, 0.0f), 0.0f);
+		const glm::vec2 windDir(std::cos(cfg.windAngle), std::sin(cfg.windAngle));
+		std::vector<glm::vec3> field(n, glm::vec3(0.0f));
+		for (uint32 j = 0; j < res; ++j)
+			for (uint32 i = 0; i < res; ++i)
+			{
+				const size_t k = (size_t)j * res + i;
+				if (distSq[k] == 0.0f || seed[k] == kNoSeed) // land / a map with no land at all
+					continue;
+				const float dWorld = std::sqrt(distSq[k]) * (float)texelSize;
+				if (dWorld > r1)
+					continue;
+				cls[k] = Shore;
+				glm::vec2 dir;
+				if (const uint32 enc = readEnc(texels + k * channels); enc != 0)
+				{
+					const float a = (float)(enc - 1u) * (6.283185307f / 254.0f);
+					dir = glm::vec2(std::cos(a), std::sin(a));
+				}
+				else
+				{
+					const uint32 s = seed[k];
+					dir = glm::normalize(glm::vec2((float)((int32)(s & 0xFFFFu) - (int32)i),
+					                               (float)((int32)(s >> 16) - (int32)j)));
+					const float f = glm::clamp((dWorld - r0) / glm::max(r1 - r0, 1e-3f), 0.0f, 1.0f);
+					const float e = f * f * (3.0f - 2.0f * f);
+					dir = dir * (1.0f - e) + windDir * e;
+				}
+				field[k] = glm::vec3(dir, 1.0f);
+			}
+
+		// Separable box average over the shore vectors: windowed running SUMS per axis (O(n) at any
+		// radius), mean = sum / summed weight at the end — no per-window normalization needed, and land's
+		// zero weight keeps the mask exact.
+		const int32 radius = (int32)glm::clamp(cfg.smoothRadius / (float)texelSize + 0.5f, 0.0f, (float)(res / 4));
+		if (radius > 0)
+		{
+			std::vector<glm::vec3> tmp(n);
+			for (uint32 j = 0; j < res; ++j)
+			{
+				const glm::vec3* src = field.data() + (size_t)j * res;
+				glm::vec3* dst = tmp.data() + (size_t)j * res;
+				glm::vec3 sum(0.0f);
+				for (int32 i = -radius; i < (int32)res; ++i)
+				{
+					if (i + radius < (int32)res) sum += src[i + radius];
+					if (i - radius - 1 >= 0)     sum -= src[i - radius - 1];
+					if (i >= 0)                  dst[i] = sum;
+				}
+			}
+			std::vector<glm::vec3> acc(res, glm::vec3(0.0f)); // per-column running sums, streamed row-major
+			for (int32 j = -radius; j < (int32)res; ++j)
+			{
+				if (j + radius < (int32)res)
+				{
+					const glm::vec3* row = tmp.data() + (size_t)(j + radius) * res;
+					for (uint32 i = 0; i < res; ++i) acc[i] += row[i];
+				}
+				if (j - radius - 1 >= 0)
+				{
+					const glm::vec3* row = tmp.data() + (size_t)(j - radius - 1) * res;
+					for (uint32 i = 0; i < res; ++i) acc[i] -= row[i];
+				}
+				if (j >= 0)
+					std::copy(acc.begin(), acc.end(), field.begin() + (size_t)j * res);
+			}
+		}
+
+		const float gradScale = 1.0f / (2.0f * (float)texelSize);
+		for (uint32 j = 0; j < res; ++j)
+			for (uint32 i = 0; i < res; ++i)
+			{
+				const size_t k = (size_t)j * res + i;
+				float* t = texels + k * channels;
+				if (readEnc(t) != 0)
+					continue; // generator-authored flow (rivers) is ground truth — never overwritten
+				uint32 enc = 0;
+				if (cls[k] == Shore)
+				{
+					const glm::vec3 f = field[k];
+					const glm::vec2 dir = f.z > 0.0f ? glm::vec2(f) * (1.0f / f.z) : glm::vec2(0.0f);
+					// Opposing shores (a strait, the middle of a bay) cancel toward zero: that genuinely is
+					// "no one direction", and the wind keeps those texels.
+					if (glm::dot(dir, dir) > 0.15f * 0.15f)
+						enc = encodeFlowDir(dir);
+				}
+				else if (cls[k] == Land)
+				{
+					// Downhill of the baked surface (clamped central differences; halved but correctly-aimed
+					// gradients on the map's border texels are fine for a direction).
+					const float hL = texels[((size_t)j * res + (i > 0 ? i - 1 : 0)) * channels];
+					const float hR = texels[((size_t)j * res + (i + 1 < res ? i + 1 : res - 1)) * channels];
+					const float hD = texels[((size_t)(j > 0 ? j - 1 : 0) * res + i) * channels];
+					const float hU = texels[((size_t)(j + 1 < res ? j + 1 : res - 1) * res + i) * channels];
+					const glm::vec2 g = glm::vec2(hR - hL, hU - hD) * gradScale;
+					if (glm::dot(g, g) >= cfg.minSlope * cfg.minSlope)
+						enc = encodeFlowDir(-g);
+				}
+				if (enc != 0)
+					writeEnc(t, enc);
+			}
+	}
+
 	// Async single-bake driver for camera-centered terrain height snapshots: res^2 floats of raw surface
 	// height (world Y, m) per cascade, cascade-major, sampled from any ITerrainSampler. Shared by the
 	// ocean shore map (1 cascade) and the fog terrain height map (2 cascades); both ship the result to a
@@ -159,16 +387,19 @@ export namespace Procedural
 		// active. numCascades <= 2; ranges.y is ignored when numCascades == 1. channels (interleaved per
 		// texel): 1 = terrain height; 2 = height + water level; 4 = four-channel layouts (4 not 3: RGB32F
 		// is not a sampled-image format on most GPUs):
-		//   shoreLayout = false (fog terrain cascades): (height, water level, PACKED fog thickness | fog
-		//     height-falloff mul | temperature | humidity 4x8 bits BIT-CAST into the float texel, MACRO
+		//   shoreLayout = false (fog terrain cascades): (height, water level, PACKED fog thickness |
+		//     flow direction | temperature | humidity 4x8 bits BIT-CAST into the float texel, MACRO
 		//     ALTITUDE). The packed channel tolerates no bilinear filtering and no float arithmetic (NaN
 		//     patterns possible) — shaders decode texels via floatBitsToUint (terrainClimateAt); altitude
 		//     is a plain float (bilinear-safe).
 		//   shoreLayout = true (ocean shore map): (height, water level, flow-direction 8 bits — 0 = none,
 		//     1..255 = angle/2pi — read nearest for the wave-direction rotation, spare).
+		// Both layouts carry the same 8-bit flow direction (see encodeFlowAngle01/applyFlowField): the
+		// generator's authored angle where it has one, the computed toward-land/downhill field where
+		// flowField is non-null.
 		bool update(Baked& out, bool active, const std::shared_ptr<const ITerrainSampler>& maps,
 			const glm::vec2& camXZ, glm::vec2 ranges, uint32 res, uint32 numCascades, uint32 channels = 1,
-			bool shoreLayout = false, const WaterReach* waterReach = nullptr)
+			bool shoreLayout = false, const WaterReach* waterReach = nullptr, const FlowField* flowField = nullptr)
 		{
 			bool shipped = false;
 			if (m_future.valid() && m_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
@@ -184,6 +415,8 @@ export namespace Procedural
 					m_activeMaps = m_pendingMaps;
 					m_activeReach = m_pendingReach;
 					m_activeReachOn = m_pendingReachOn;
+					m_activeFlow = m_pendingFlow;
+					m_activeFlowOn = m_pendingFlowOn;
 					m_valid = true;
 					shipped = true;
 				}
@@ -204,12 +437,16 @@ export namespace Procedural
 			// is worse than no slider.
 			const WaterReach reachNow = waterReach ? *waterReach : WaterReach{};
 			const bool reachOnNow = waterReach != nullptr;
+			const FlowField flowNow = flowField ? *flowField : FlowField{};
+			const bool flowOnNow = flowField != nullptr;
 			const glm::vec2 drift = glm::abs(camXZ - m_activeCenter);
 			const bool stale = !m_valid
 				|| m_activeMaps != maps.get()
 				|| m_activeRanges != ranges
 				|| m_activeReachOn != reachOnNow
 				|| (reachOnNow && !(m_activeReach == reachNow))
+				|| m_activeFlowOn != flowOnNow
+				|| (flowOnNow && !(m_activeFlow == flowNow))
 				|| glm::max(drift.x, drift.y) > ranges.x * 0.25f;
 			if (!stale)
 				return shipped;
@@ -227,9 +464,13 @@ export namespace Procedural
 			m_pendingMaps = maps.get();
 			m_pendingReach = reachNow;
 			m_pendingReachOn = reachOnNow;
+			m_pendingFlow = flowNow;
+			m_pendingFlowOn = flowOnNow;
 			const WaterReach reach = reachNow;
 			const bool applyReach = reachOnNow;
-			m_future = std::async(std::launch::async, [maps, center, ranges, res, numCascades, channels, shoreLayout, reach, applyReach]() {
+			const FlowField flow = flowNow;
+			const bool applyFlow = flowOnNow;
+			m_future = std::async(std::launch::async, [maps, center, ranges, res, numCascades, channels, shoreLayout, reach, applyReach, flow, applyFlow]() {
 				std::vector<float> heights((size_t)numCascades * res * res * channels);
 				std::vector<TerrainPoint> points; // reused across cascades
 				for (uint32 c = 0; c < numCascades; ++c)
@@ -263,8 +504,7 @@ export namespace Procedural
 							{
 								if (shoreLayout)
 								{
-									const float flow = p.flowAngle01;
-									texel[2] = flow < 0.0f ? 0.0f : (float)(1u + (uint32)(glm::clamp(flow, 0.0f, 1.0f) * 254.0f + 0.5f));
+									texel[2] = (float)encodeFlowAngle01(p.flowAngle01);
 									texel[3] = 0.0f; // spare
 								}
 								else
@@ -287,14 +527,17 @@ export namespace Procedural
 									// the crossfade. A baseline has no anchor to disagree about: consumers
 									// evaluate it at the height they shade (terrainTemperatureAt), against the
 									// generator's one published lapse rate (u_terrainParams.y).
-									// Bits 8-15 are FREE. They held the fog height-falloff, which was pure
+									// Bits 8-15 carry the FLOW DIRECTION (encodeFlowAngle01: 0 = none,
+									// 1..255 = angle/2pi). The sampler's authored angle goes in here; where it
+									// has none, applyFlowField below fills the computed toward-land/downhill
+									// field. Before this they held the fog height-falloff, which was pure
 									// redundancy (a function of temperature, so the shaders recompute it), then
 									// briefly a per-texel lapse rate, which measured as redundant too — both
 									// cascades regress the same data, so their rates agreed and removing it left
 									// near-vs-far disagreement unchanged at 0.15 C.
 									const auto q8 = [](float f) { return (uint32)(glm::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
 									const uint32 packed = q8(p.fogThickness)
-										// bits 8-15 free
+										| (encodeFlowAngle01(p.flowAngle01) << 8)
 										| (q8(temperatureTo01(p.temperatureSeaLevel)) << 16)
 										| (q8(p.humidity) << 24);
 									texel[2] = std::bit_cast<float>(packed);
@@ -312,6 +555,11 @@ export namespace Procedural
 					// applyWaterReach. Done here, after the grid exists, because it is a distance question.
 					if (applyReach)
 						applyWaterReach(dst, res, channels, texelSize, maps->seaLevel(), reach);
+					// Flow directions are a distance question too (toward the nearest land), so they are
+					// also computed here — and after the reach pass, so drained inland films point downhill
+					// instead of at a coast the ocean never reaches them from.
+					if (applyFlow)
+						applyFlowField(dst, res, channels, texelSize, maps->seaLevel(), shoreLayout, flow);
 				}
 				return heights;
 			});
@@ -326,6 +574,10 @@ export namespace Procedural
 		bool m_activeReachOn = false;
 		WaterReach m_pendingReach;     // ... and the one the in-flight bake is using
 		bool m_pendingReachOn = false;
+		FlowField m_activeFlow;        // same active/pending pair for the flow-direction rule
+		bool m_activeFlowOn = false;
+		FlowField m_pendingFlow;
+		bool m_pendingFlowOn = false;
 		glm::vec2 m_pendingCenter = glm::vec2(0.0f); // inputs of the IN-FLIGHT bake
 		glm::vec2 m_pendingRanges = glm::vec2(0.0f);
 		const ITerrainSampler* m_pendingMaps = nullptr;  // identity only (never dereferenced)

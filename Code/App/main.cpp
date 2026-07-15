@@ -347,10 +347,14 @@ int main()
                 renderer.renderNode(render->node);
         }
 
+        // The baked flow directions ease back to the swell's travel heading offshore; the ocean owns that
+        // angle, the terrain owns the flow rule — wire the one value across so both maps bake the same field.
+        terrain.setFlowWindAngle(ocean.swellTravelAngle());
         terrain.update(renderer, camera);
         // The terrain's height field feeds the ocean's shore-depth bake (shoaling + surf at the coast)
         // and drives the object scattering (both clear themselves while terrain is disabled).
-        ocean.update(renderer, camera, terrain.activeClimateMaps(), terrain.activeWaterReach(), terrain.seaLevel());
+        ocean.update(renderer, camera, terrain.activeClimateMaps(), terrain.activeWaterReach(), terrain.seaLevel(),
+                     terrain.activeFlowField());
         scatter.update(renderer, camera, terrain.activeClimateMaps());
 
         if (gizmo.isVisible())

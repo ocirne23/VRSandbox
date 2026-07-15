@@ -44,6 +44,14 @@ export namespace Procedural
 		// Handed out rather than duplicated so the two cannot drift apart — see applyWaterReach.
 		// nullptr = the rule is off; bake the sampler's water level as-is.
 		const WaterReach* activeWaterReach() const { return m_waterReachEnabled ? &m_waterReach : nullptr; }
+		// The flow-direction rule, handed out for the same reason (the ocean's shore map must bake the
+		// SAME directions this streamer bakes into the terrain-data map's 8 flow bits, or the wave travel
+		// direction would turn where one map hands over to the other). nullptr = flow bits carry only what
+		// the generator authors. See applyFlowField.
+		const FlowField* activeFlowField() const { return m_flowFieldEnabled ? &m_flowField : nullptr; }
+		// The offshore heading the baked flow eases back into — the ocean's swell heading, pushed in by the
+		// app each frame (the streamer cannot know it; a stale angle just re-bakes one map). See FlowField.
+		void setFlowWindAngle(float radians) { m_flowField.windAngle = radians; }
 		// THE sea level datum for the world, tweak-backed here because the terrain generator builds its
 		// heights around it (so it regenerates chunks) — the ocean floats on this rather than owning a
 		// second copy. Valid even while terrain is disabled, so the ocean can still run on its own.
@@ -152,6 +160,11 @@ export namespace Procedural
 		// level planet-wide). See applyWaterReach.
 		WaterReach m_waterReach;
 		bool  m_waterReachEnabled = true;
+		// Flow direction: which way the water moves per texel (toward land through the surf zone, downhill
+		// everywhere else) — the wave-travel field at the coast and the seed data for future rivers/water
+		// simulation. See applyFlowField.
+		FlowField m_flowField;
+		bool  m_flowFieldEnabled = true;
 		HeightMapBaker m_terrainMapBaker;
 		bool  m_terrainMapUploaded = false;    // a map is live in the renderer (cleared on disable)
 

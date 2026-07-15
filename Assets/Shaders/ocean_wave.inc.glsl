@@ -19,8 +19,10 @@ layout (binding = OCEAN_MAPS_BINDING) uniform sampler2DArray u_oceanMaps;
 
 // Shore map (optional; the includer defines OCEAN_SHORE_BINDING to enable it): an RGBA32F snapshot around
 // the camera, CPU-baked. R = raw terrain surface height (world Y, m); G = the WATER SURFACE LEVEL — sea
-// level over the open ocean, higher where rivers/lakes sit at altitude; B = 8-bit river flow direction
-// (0 = none, 1..255 = angle/2pi; nearest-fetched, drives the wave-travel rotation); A = spare. The
+// level over the open ocean, higher where rivers/lakes sit at altitude; B = 8-bit water flow direction
+// (0 = none, 1..255 = angle/2pi; nearest-fetched, drives the wave-travel rotation: toward land through
+// the surf zone, easing back to the wind heading offshore — plus generator-authored river directions.
+// See HeightMapBaker's applyFlowField); A = spare. The
 // water depth is derived live as water level - height; it drives fake shoaling + the shoreline surf band,
 // and the clipmap lifts its vertices by water level - sea level. When the includer also defines
 // TERRAIN_HEIGHT_BINDING, the coarser fog terrain cascades (terrain_height.inc.glsl — the same terrain
@@ -80,13 +82,26 @@ float oceanWaterOffset(vec2 worldXZ)
     return oceanSampleShoreData(worldXZ).y - u_oceanParams2.w;
 }
 
-// Local wave-travel basis: rivers carry a baked FLOW DIRECTION (shore map channel B, 8 bits: 0 = none,
-// 1..255 = angle/2pi) that replaces the global wind locally. Returns (cos, sin) of the flow-vs-wind
-// rotation, identity where there is no directed flow (open sea, lakes, outside the map). Nearest-texel:
-// packed angles must not be bilinearly filtered (and they wrap). Every pass sampling the wave field MUST
-// apply the same rotation or the prepass depth and the drawn surface diverge.
+// Local wave-travel basis: the shore map bakes a FLOW DIRECTION (channel B, 8 bits: 0 = none, 1..255 =
+// angle/2pi — toward land through the surf zone, authored river directions) that replaces the global
+// wind locally. Returns (cos, sin) of the flow-vs-wind rotation.
+//
+// DISABLED (returns identity): rotating the SAMPLE DOMAIN does not work. The rotation pivots on the
+// world origin, so two texels one 8-bit angle step apart (2pi/254) sample the wave field
+// |worldXZ| * 0.025 m apart — the sea creases along every quantization contour, worse with distance
+// from the origin. The baked flow steers the SIMULATION's wind instead (OceanGenerator's
+// steeredWindAngle): the spectrum regenerates every frame, so turning its wind makes the whole field
+// genuinely travel toward the local shore, continuous by construction. Kept for a future per-pixel
+// take — that needs a formulation whose error does not grow with |worldXZ| (blending pre-rotated
+// fields, a local pivot per wave patch, ...). If re-enabled: nearest-texel only (packed angles wrap),
+// every pass sampling the wave field MUST apply the same rotation or the prepass depth and the drawn
+// surface diverge, and mind the wind convention — the field TRAVELS AGAINST u_oceanParams0.xy (the
+// spectrum's dominant term is h0(k) e^{i(k.x + wt)}), so the delta below needs flowAngle vs the
+// TRAVEL heading (windAngle + pi), not the wind vector's own angle.
+#define OCEAN_FLOW_SAMPLE_ROTATION 0
 vec2 oceanFlowRotation(vec2 worldXZ)
 {
+#if OCEAN_FLOW_SAMPLE_ROTATION
 #ifdef OCEAN_SHORE_BINDING
     const float invRange = u_oceanParams4.x;
     if (invRange > 0.0)
@@ -105,6 +120,7 @@ vec2 oceanFlowRotation(vec2 worldXZ)
             }
         }
     }
+#endif
 #endif
     return vec2(1.0, 0.0);
 }

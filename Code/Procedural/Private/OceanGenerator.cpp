@@ -5,6 +5,7 @@ import Core.glm;
 import Core.Camera;
 import Core.Transform;
 import Core.Tweaks;
+import Core.Time;
 
 import RendererVK;
 import File;
@@ -38,6 +39,11 @@ namespace Procedural
 		Tweak::floatVar("Ocean/Waves", "Fetch (km)", &m_fetchKm, 1.0f, 2000.0f, 1.0f);
 		Tweak::floatVar("Ocean/Waves", "Depth (m)", &m_depth, 1.0f, 500.0f, 0.5f);
 		Tweak::floatVar("Ocean/Waves", "Wind angle (rad)", &m_windAngle, 0.0f, 6.2831853f, 0.01f);
+		// Flow -> wind steering: near a coast the SIMULATION wind turns toward the baked flow directions
+		// (waves roll in toward the local shore); away from any shore it returns to the wind angle above.
+		Tweak::boolean("Ocean/Waves", "Flow steers wind", &m_windSteerEnabled);
+		Tweak::floatVar("Ocean/Waves", "Steer rate (deg/s)", &m_windSteerRate, 0.0f, 90.0f, 0.5f);
+		Tweak::floatVar("Ocean/Waves", "Steer range (m)", &m_windSteerRange, 0.0f, 2000.0f, 10.0f);
 		Tweak::floatVar("Ocean/Waves", "Amplitude scale", &m_amplitude, 0.0f, 4.0f, 0.01f);
 		Tweak::floatVar("Ocean/Waves", "Choppiness", &m_choppiness, 0.0f, 2.5f, 0.01f);
 		Tweak::floatVar("Ocean/Waves", "Normal strength", &m_normalStrength, 0.0f, 4.0f, 0.01f);
@@ -195,13 +201,13 @@ namespace Procedural
 	// rivers at altitude); beyond this map's range they fall back to the coarser fog terrain cascades
 	// (TerrainStreamer's bake of the same fields).
 	void OceanGenerator::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain,
-	                                   const WaterReach* reach)
+	                                   const WaterReach* reach, const FlowField* flow)
 	{
 		const bool active = m_shoreEnabled && terrain != nullptr;
 		HeightMapBaker::Baked baked;
 		if (m_shoreBaker.update(baked, active, terrain, glm::vec2(camera.position.x, camera.position.z),
 			glm::vec2(glm::max(m_shoreRange, 256.0f), 0.0f), RendererVKLayout::OCEAN_SHORE_RES, 1, 4,
-			true, reach)) // shore layout: h, water, flow, spare
+			true, reach, flow)) // shore layout: h, water, flow, spare
 		{
 			renderer.setOceanShoreMap(baked.texels, baked.center, baked.ranges.x);
 			m_shoreHeights = std::move(baked.texels); // CPU copy: sampleShoreDepth (buoyancy) reads this
@@ -216,8 +222,65 @@ namespace Procedural
 		}
 	}
 
+	// Baked flow -> simulation wind. The FFT field travels along the wind its SPECTRUM was built with, and
+	// the spectrum regenerates every frame — so turning that wind is the one continuous way to make the
+	// whole sea (every cascade, chop, foam) genuinely travel toward the local shore. The per-pixel
+	// alternative — rotating each texel's sample position by its own flow angle (oceanFlowRotation) — is
+	// disabled in the shader: the rotation pivots on the world origin, so the sea creased along every
+	// 8-bit angle contour, worse with distance.
+	// Here the baked shore directions around the camera vote (ocean texels carrying a direction; land and
+	// undirected open sea abstain) and the sim wind slews toward their mean at a bounded rate, morphing
+	// the spectrum smoothly through the turn. The baked field itself eases back to the base wind offshore
+	// (FlowField::oceanFade), so far-from-land votes already agree with the tweak angle and leaving the
+	// coast hands back to it by construction.
+	float OceanGenerator::steeredWindAngle(const Camera& camera)
+	{
+		if (!m_windSteerEnabled || m_windSteerRate <= 0.0f)
+		{
+			m_windSteerSynced = false; // re-adopt the base wind when steering comes back on
+			return m_windAngle;
+		}
+		if (!m_windSteerSynced)
+		{
+			m_steeredWindAngle = m_windAngle;
+			m_windSteerSynced = true;
+		}
+		glm::vec2 sum(0.0f);
+		if (m_shoreValid && m_shoreActiveRange > 0.0f && m_windSteerRange > 0.0f)
+		{
+			const int32 res = (int32)RendererVKLayout::OCEAN_SHORE_RES;
+			const float texel = m_shoreActiveRange / (float)res;
+			const int32 radius = (int32)(m_windSteerRange / texel);
+			const int32 step = glm::max(radius / 16, 1); // <= 33x33 taps of the CPU shore copy
+			const glm::vec2 rel = glm::vec2(camera.position.x, camera.position.z) - m_shoreCenter;
+			const int32 cx = (int32)std::floor(rel.x / texel) + res / 2;
+			const int32 cy = (int32)std::floor(rel.y / texel) + res / 2;
+			for (int32 y = glm::max(cy - radius, 0); y <= glm::min(cy + radius, res - 1); y += step)
+				for (int32 x = glm::max(cx - radius, 0); x <= glm::min(cx + radius, res - 1); x += step)
+				{
+					const float* t = &m_shoreHeights[((size_t)y * res + x) * 4];
+					const uint32 enc = (uint32)(t[2] + 0.5f);
+					if (enc == 0u || t[0] >= t[1]) // undirected or dry ground: abstains
+						continue;
+					const float a = (float)(enc - 1u) * (6.283185307f / 254.0f);
+					sum += glm::vec2(std::cos(a), std::sin(a));
+				}
+		}
+		// Needs a net vote worth at least one texel: a lone sliver of coast at the range's edge may turn
+		// the sea, a wash of mutually cancelling directions may not. Votes are the direction the water
+		// should TRAVEL; the sim's dominant waves travel AGAINST its wind vector (see swellTravelAngle),
+		// so the wind target points the opposite way — offshore votes (faded to the travel heading) then
+		// negate right back to the base tweak.
+		const float target = glm::dot(sum, sum) > 1.0f ? std::atan2(-sum.y, -sum.x) : m_windAngle;
+		float d = target - m_steeredWindAngle;
+		d -= std::floor(d * (1.0f / 6.283185307f) + 0.5f) * 6.283185307f; // shortest arc
+		const float maxStep = glm::radians(m_windSteerRate) * (float)glm::min(Globals::time.getDeltaSec(), 0.1);
+		m_steeredWindAngle += glm::clamp(d, -maxStep, maxStep);
+		return m_steeredWindAngle;
+	}
+
 	void OceanGenerator::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain,
-	                           const WaterReach* reach, float seaLevel)
+	                           const WaterReach* reach, float seaLevel, const FlowField* flow)
 	{
 		// ONE sea level, owned by the terrain (see the header). Adopted here every frame rather than
 		// tweaked separately: this used to be its own slider, and the two silently forked — the water plane
@@ -226,12 +289,13 @@ namespace Procedural
 		// the swash off planet-wide.
 		m_seaLevel = seaLevel;
 		if (m_enabled)
-			updateShoreMap(renderer, camera, terrain, reach);
+			updateShoreMap(renderer, camera, terrain, reach, flow);
 
 		// Push the spectrum/shading params every frame; `enabled` also gates the GPU FFT simulation.
+		const float windAngle = steeredWindAngle(camera); // base wind, turned toward the local shore flow
 		OceanParams params;
 		params.enabled = m_enabled;
-		params.windDirection = glm::vec2(std::cos(m_windAngle), std::sin(m_windAngle));
+		params.windDirection = glm::vec2(std::cos(windAngle), std::sin(windAngle));
 		params.windSpeed = m_windSpeed;
 		params.fetchKm = m_fetchKm;
 		params.depth = m_depth;

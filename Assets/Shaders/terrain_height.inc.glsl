@@ -6,7 +6,9 @@
 //   B = PACKED 4x8 bits BIT-CAST into the float (NaN patterns possible — floatBitsToUint only, never
 //       float arithmetic or hardware filtering on the raw value):
 //         bits 0-7   fog thickness, decodes to [0,1]
-//         bits 8-15  fog height-falloff multiplier, decodes to [0,4] (1 = global falloff unchanged)
+//         bits 8-15  water FLOW direction: 0 = none, 1..255 = angle/2pi in XZ (toward nearest land where
+//                    the ocean meets the coast, downhill elsewhere — see HeightMapBaker's applyFlowField).
+//                    Angles wrap: NEAREST texel only (terrainFlowEncAt), never any form of bilinear.
 //         bits 16-23 temperature, decodes to CELSIUS over [-25, +50]
 //         bits 24-31 humidity, decodes to [0,1] (0 -> 0.0, 255 -> 1.0)
 //       Read via terrainClimateAt (manual bilinear of decoded texels) / terrainClimateNearestAt.
@@ -58,8 +60,9 @@ float fogFalloffFromTemperature(float celsius)
 }
 
 // One decoded climate texel from the bit-packed B channel at integer texel coords:
-//   x = fog thickness [0,1], y = UNUSED (free: 8 bits), z = SEA-LEVEL temperature in CELSIUS [-25, +50],
-//   w = humidity [0,1].
+//   x = fog thickness [0,1], y = UNUSED (bits 8-15 hold the flow direction, which must never pass
+//   through the bilinear below — angles wrap; read it via terrainFlowEncAt), z = SEA-LEVEL temperature
+//   in CELSIUS [-25, +50], w = humidity [0,1].
 // .z is NOT the temperature here — it is the baseline at sea level. Evaluate with terrainTemperatureAt at
 // whatever height you care about; that is the whole point of storing the model's parameterisation (a
 // baseline and a slope) rather than a sample of it. A sample is only valid at the height it was taken
@@ -118,6 +121,21 @@ vec4 terrainClimateAt(vec2 worldXZ)
     if (nearW > 0.0)
         c = mix(c, terrainClimateBilinear(uv0, 0, res), nearW);
     return c;
+}
+
+// Raw 8-bit flow direction at worldXZ (bits 8-15 of the packed channel): 0 = no direction, 1..255 =
+// angle/2pi of where the water moves — toward land through the surf zone, downhill elsewhere. NEAREST
+// texel, near cascade preferred: encoded angles wrap, so no form of bilinear may ever touch them.
+uint terrainFlowEncAt(vec2 worldXZ)
+{
+    const vec2 rel = worldXZ - u_fogParams5.xy;
+    const vec2 uv0 = rel * u_fogParams3.y + 0.5;
+    const float edge = max(abs(uv0.x - 0.5), abs(uv0.y - 0.5));
+    const bool useFar = u_fogParams5.z > 0.0 && edge > 0.45;
+    const vec2 uv = useFar ? rel * u_fogParams5.z + 0.5 : uv0;
+    const ivec2 res = textureSize(u_terrainHeight, 0).xy;
+    const ivec2 t = clamp(ivec2(uv * vec2(res)), ivec2(0), res - 1);
+    return (floatBitsToUint(texelFetch(u_terrainHeight, ivec3(t, useFar ? 1 : 0), 0).z) >> 8) & 255u;
 }
 
 // Cheap nearest-texel variant for volume consumers (froxel fog): regional fog is km-scale, texel

@@ -50,8 +50,11 @@ export namespace Procedural
 		// it (V3's elevations are relative to it, which is why moving it regenerates chunks), the ocean
 		// floats its surface on it, and the swash gate compares the two — so a fork between them switches
 		// the swash off everywhere rather than just looking off.
+		// `flow` fills the shore map's flow-direction channel (waves travel toward land through the surf
+		// zone) and comes from the terrain streamer for the same one-rule reason as `reach` — the app feeds
+		// this ocean's windAngle() back into it so the offshore fade returns to the actual swell heading.
 		void update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain = nullptr,
-		            const WaterReach* reach = nullptr, float seaLevel = 0.0f);
+		            const WaterReach* reach = nullptr, float seaLevel = 0.0f, const FlowField* flow = nullptr);
 
 		// Water surface world Y at (x, z), CPU-evaluated from the GPU displacement readback (mirrors the
 		// vertex shader's cascade sum, shoaling fade and seabed clamp; ~2 frames of latency — invisible
@@ -60,10 +63,22 @@ export namespace Procedural
 		// wires into PhysicsWorld::setWaterSurface; keys 8/9's cubes bob in the swell through it.
 		float sampleWaterHeight(float x, float z) const;
 
+		// The heading the swell actually TRAVELS in open water (radians, XZ) — the terrain streamer's baked
+		// flow field eases back to this offshore so the encoded directions meet the wind-driven open sea
+		// without a turn. NOTE the sim's convention: the spectrum's dominant term is h0(k) e^{i(k.x + wt)},
+		// which moves AGAINST the wind-direction vector, so travel = m_windAngle + pi (steeredWindAngle
+		// converts back when it feeds the sim). Derived from the BASE wind tweak, deliberately not the
+		// steered value: feeding that into the bake would re-bake both maps every frame the wind turns
+		// (bake -> steering -> bake feedback).
+		float swellTravelAngle() const { return m_windAngle + 3.14159265f; }
+
 	private:
+		// Turns the SIMULATION wind toward the baked shore flow around the camera — how the waves actually
+		// travel inland at the coast. See the .cpp.
+		float steeredWindAngle(const Camera& camera);
 		void rebuildGrid();
 		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain,
-		                    const WaterReach* reach);
+		                    const WaterReach* reach, const FlowField* flow);
 		glm::vec2 sampleShoreData(float x, float z) const;          // (water depth, water level) from the CPU shore copy
 		float sampleShoreDepth(float x, float z) const;             // CPU copy of the baked shore map
 		glm::vec3 sampleDisplacement(glm::vec2 worldXZ, float depth) const; // shoal-faded cascade sum from the readback tile
@@ -83,7 +98,14 @@ export namespace Procedural
 		float m_windSpeed = 20.0f;     // U10 (m/s): the main sea-state knob
 		float m_fetchKm = 300.0f;      // wind fetch (km)
 		float m_depth = 100.0f;        // ocean depth (m): finite-depth dispersion + TMA attenuation
-		float m_windAngle = 5.12f;     // radians (XZ heading of the dominant swell)
+		float m_windAngle = 5.12f;     // radians, XZ. The swell TRAVELS opposite this — see swellTravelAngle
+		// Flow -> wind steering (steeredWindAngle): near a coast the SIM wind turns toward the baked flow
+		// so the waves roll toward the local shore; away from any it returns to m_windAngle.
+		bool  m_windSteerEnabled = true;
+		float m_windSteerRate = 10.0f;    // deg/s the simulation wind may turn (spectrum morphs through it)
+		float m_windSteerRange = 400.0f;  // m around the camera whose baked shore directions vote
+		float m_steeredWindAngle = 0.0f;  // follows m_windAngle/the flow at the slew rate
+		bool  m_windSteerSynced = false;  // adopt m_windAngle on first use instead of turning in from 0
 		float m_amplitude = 1.0f;      // artistic scale on the spectrum (1 = physical)
 		float m_choppiness = 1.1f;     // horizontal displacement lambda
 		float m_normalStrength = 1.0f;

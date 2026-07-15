@@ -268,6 +268,15 @@ namespace Procedural
 		Tweak::floatVar("Terrain", "Ocean reach (m)", &m_waterReach.radius, 0.0f, 100.0f, 0.1f);
 		Tweak::floatVar("Terrain", "Ocean reach feather (m)", &m_waterReach.feather, 1.0f, 100.0f, 0.1f);
 		Tweak::floatVar("Terrain", "Ocean reach drop (m)", &m_waterReach.drop, 0.0f, 50.0f, 0.5f);
+		// Baked per-texel flow direction (the data map's 8 packed bits + the ocean shore map's B channel):
+		// toward the nearest land through the surf zone — the waves' travel direction at the coast — and
+		// downhill everywhere else (future rivers/water simulation). See applyFlowField for each knob's
+		// role; changing one re-bakes both maps, like the reach settings above.
+		Tweak::boolean("Terrain", "Flow direction", &m_flowFieldEnabled);
+		Tweak::floatVar("Terrain", "Flow shore range (m)", &m_flowField.oceanRange, 0.0f, 2000.0f, 10.0f);
+		Tweak::floatVar("Terrain", "Flow shore fade (m)", &m_flowField.oceanFade, 0.0f, 1000.0f, 10.0f);
+		Tweak::floatVar("Terrain", "Flow smoothing (m)", &m_flowField.smoothRadius, 0.0f, 200.0f, 1.0f);
+		Tweak::floatVar("Terrain", "Flow min slope", &m_flowField.minSlope, 0.0f, 0.5f, 0.005f);
 		Tweak::floatVar("Terrain", "Data map range (m)", &m_terrainMapRange, 256.0f, 8192.0f, 32.0f);
 		// Floor for the far cascade world size: the actual range is raised to cover the resident mesh ring
 		// (2*(R+1)*chunkSize) so distant terrain never reads clamp-to-edge frozen altitude/temperature.
@@ -675,8 +684,8 @@ namespace Procedural
 		const WaterReach* reach = m_waterReachEnabled ? &m_waterReach : nullptr;
 		if (m_terrainMapBaker.update(baked, active, maps, glm::vec2(camera.position.x, camera.position.z),
 			glm::vec2(glm::max(m_terrainMapRange, 256.0f), farRange),
-			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4, // RGBA: height, water level, fog|lapse|temp|hum, altitude
-			false, reach))
+			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4, // RGBA: height, water level, fog|flow|temp|hum, altitude
+			false, reach, activeFlowField()))
 		{
 			// Decode what actually went into the packed climate channel, per cascade, exactly as
 			// terrain_height.inc.glsl does. The bake is the one link in the chain nothing else can see: a
