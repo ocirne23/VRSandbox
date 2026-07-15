@@ -9,10 +9,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/
 target_include_directories(${PROJECT_NAME} PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/Public")
 
 # Procedural sits above the renderer: its generation partitions are Core-only, but TerrainStreamer bridges
-# generated chunks into renderable ObjectContainer/RenderNode handles, so the lib links RendererVK + File.
+# generated chunks into renderable ObjectContainer/RenderNode handles, so the lib links RendererVK + File;
+# TerrainCollider bridges the same height field into static PhysicsBody/PhysicsMesh tiles, so it links
+# Physics too (Core-only itself; box3d never leaks through it).
 # onnxruntime (V3/Diffusion) is PRIVATE and never leaks into the public surface, like box3d in Physics; it
 # ships release-CRT only, so no $<$<CONFIG:Debug>:d> suffix (the Aftermath precedent, not the box3d one).
-target_link_libraries(${PROJECT_NAME} PUBLIC Core RendererVK File Spatial PRIVATE onnxruntime)
+target_link_libraries(${PROJECT_NAME} PUBLIC Core RendererVK File Spatial Physics PRIVATE onnxruntime)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER Engine)
 

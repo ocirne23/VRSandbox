@@ -9,5 +9,6 @@ export import :TerrainChunk;
 export import :TerrainGenerator;
 export import :HeightMapBaker;
 export import :TerrainStreamer;
+export import :TerrainCollider;
 export import :Scattering;
 export import :OceanGenerator;

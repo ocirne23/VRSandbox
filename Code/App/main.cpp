@@ -19,6 +19,7 @@ import Script;
 import Physics;
 import Audio;
 import Spatial;
+import Threading;
 
 import App.InputControls;
 import Procedural;
@@ -32,6 +33,11 @@ int main()
 
     Input& input = Globals::input;
     input.initialize();
+
+    // Must run on the main thread: registers it as the helper context so wait() runs jobs here.
+    JobSystem& jobSystem = Globals::jobSystem;
+    jobSystem.initialize();
+    Globals::jobSystemStress.initialize();
 
     const glm::vec3 spawnPos = glm::vec3(50.0f, 80.0f, 2327.0f);
 
@@ -66,6 +72,11 @@ int main()
     // after the renderer so it's destroyed before it (frees RenderNodes/containers while the device lives).
     Procedural::TerrainStreamer terrain;
     terrain.initialize();
+
+    // Terrain physics: camera-centered ring of static mesh-collider tiles built on a worker from the
+    // same height field the terrain renders, so dynamic bodies land on the drawn surface.
+    Procedural::TerrainCollider terrainCollider;
+    terrainCollider.initialize();
 
     // Terrain object scattering: biome-driven trees/rocks placed per cell on a worker thread from the
     // same climate field the terrain renders. Declared after the renderer for the same teardown order.
@@ -329,6 +340,7 @@ int main()
             }
         }
         Globals::spatialStress.update(glm::dvec3(camera.position), frustum);
+        Globals::jobSystemStress.update();
 
         for (const EntityPtr& entity : entities)
             entity->update(renderer, (float)deltaSec);
@@ -351,6 +363,8 @@ int main()
         // angle, the terrain owns the flow rule — wire the one value across so both maps bake the same field.
         terrain.setFlowWindAngle(ocean.swellTravelAngle());
         terrain.update(renderer, camera);
+        // ... and the collider tiles under/around the camera (clears itself while terrain is disabled).
+        terrainCollider.update(camera.position, terrain.activeClimateMaps());
         // The terrain's height field feeds the ocean's shore-depth bake (shoaling + surf at the coast)
         // and drives the object scattering (both clear themselves while terrain is disabled).
         ocean.update(renderer, camera, terrain.activeClimateMaps(), terrain.activeWaterReach(), terrain.seaLevel(),
@@ -367,5 +381,6 @@ int main()
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
     physics.setWaterSurface({}); // the callback captures the stack-local ocean; drop it before it dies
+    jobSystem.shutdown(); // join the workers while every global they might touch still lives
     return 0;
 }
