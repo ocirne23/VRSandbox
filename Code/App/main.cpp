@@ -1,4 +1,4 @@
-import Core;
+﻿import Core;
 import Core.Allocator;
 import Core.Log;
 import Core.Window;
@@ -117,115 +117,25 @@ int main()
     std::vector<EntityPtr> spawnedLightGeom;
     std::vector<PhysicsJoint> spawnedJoints;
 
-    std::vector<EntityPtr> entities;
     const glm::vec3 spawnOffset = spawnPos - glm::vec3(0, 1, 1);
-    entities.push_back(world.spawnAssetFile("Entities/sponza.pre", Transform(spawnOffset), true));
-    entities.push_back(world.spawnAssetFile("Entities/skysphere.pre", Transform(spawnOffset), true));
-    entities.push_back(world.spawnAssetFile("Entities/character.pre", Transform(spawnOffset), true));
+    world.addRootEntity(world.spawnAssetFile("Entities/sponza.pre", Transform(spawnOffset), true));
+    world.addRootEntity(world.spawnAssetFile("Entities/skysphere.pre", Transform(spawnOffset), true));
+    world.addRootEntity(world.spawnAssetFile("Entities/character.pre", Transform(spawnOffset), true));
 
     GizmoController gizmo;
     gizmo.initialize(world);
 
-    InputControls controls(gizmo, cameraController, entities, spawnedLights, spawnedLightGeom, spawnedJoints);
+    InputControls controls(gizmo, cameraController, world, spawnedLights, spawnedLightGeom, spawnedJoints);
 
     Camera camera;
     glm::dvec3 lastNearQueryPos(1e30); // last camera position the Near visibility ball was stamped at
     uint32 framesSinceNearQuery = 0;
 
-    auto handleEntityChange = [&](EntityChange& change)
-    {
-        if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
-        {
-            const glm::vec3 worldPos = camera.screenToWorld(ui.getViewportRect(), cv->screenPos);
-            entities.push_back(world.spawnAssetFile(cv->path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
-        }
-        else if (auto* ch = std::get_if<EntityChange::CreateHierarchy>(&change.type))
-        {
-            EntityPtr e = world.spawnAssetFile(ch->path, Transform(), false);
-            if (ch->parent && hasComponent<SceneComponent>(ch->parent))
-                e->reparentEntity(ch->parent);   // parent's SceneComponent takes ownership
-            else
-                entities.push_back(std::move(e));
-        }
-        else if (auto* as = std::get_if<EntityChange::AddSceneEntity>(&change.type))
-        {
-            EntityPtr e = world.createEmptyEntity(as->displayName);
-            if (as->parent && hasComponent<SceneComponent>(as->parent))
-                e->reparentEntity(as->parent);
-            else
-                entities.push_back(std::move(e));
-        }
-        else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
-            std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });
-        else if (auto* rep = std::get_if<EntityChange::Reparent>(&change.type))
-            rep->newParent ? (void)std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); }) : entities.push_back(std::move(rep->entity));
-        else if (auto* sp = std::get_if<EntityChange::SavePrefab>(&change.type))
-        {
-            if (savePrefab(sp->root.get(), sp->path, sp->text))
-                world.invalidatePrefab(std::filesystem::path(sp->path).stem().string());
-        }
-        else if (auto* op = std::get_if<EntityChange::OpenPrefabForEdit>(&change.type))
-        {
-            EntityPtr e = world.spawnAssetFile(op->path, Transform(), false);
-            if (e)
-            {
-                e->setPrefabInstance(false); // unpack: the Entity Editor edits it freely
-                entities.push_back(e);
-                ui.onOpened(e, op->path);
-            }
-        }
-        else if (auto* np = std::get_if<EntityChange::NewPrefab>(&change.type))
-        {
-            EntityPtr e = world.createEmptyEntity(np->displayName);
-            entities.push_back(e);
-            ui.onOpened(e, "");
-        }
-        else if (auto* rs = std::get_if<EntityChange::RespawnEntity>(&change.type))
-        {
-            // Entity::create() only stores a raw, non-owning pointer to the template â€” keep it alive for
-            // as long as the entity might reference it (World's own template caches do the same for
-            // prefabs; this one is ad-hoc, so nothing else would hold onto it).
-            world.keepTemplateAlive(rs->tmpl);
-
-            Transform t(rs->oldEntity->pos, rs->oldEntity->scale, rs->oldEntity->rot);
-            // Pre-set the paused flag so component spawn (script OnSpawn) already sees it â€” the parent
-            // chain isn't linked yet during create, so a paused ancestor can't be discovered there.
-            const uint8 initialFlags = rs->oldEntity->isEditorPausedInTree() ? uint8(EEntityFlag_EditorPaused) : uint8(0);
-            EntityPtr newEntity = Entity::create(*rs->tmpl, t, initialFlags);
-            newEntity->setPrefabInstance(rs->oldEntity->isPrefabInstance()); // keep the editor's unpacked state despite the template's prefabName
-
-            // Preserve any existing children (the Entity Editor commits one entity's own component set at
-            // a time; whatever was already parented under it stays put).
-            if (SceneComponent* oldSc = getComponent<SceneComponent>(rs->oldEntity.get()))
-                if (SceneComponent* newSc = getComponent<SceneComponent>(newEntity.get()))
-                {
-                    newSc->children = std::move(oldSc->children);
-                    for (EntityPtr& child : newSc->children)
-                        child->parent = newEntity.get();
-                }
-
-            // Re-attach where the old entity was: a root (in `entities`) or a child (in its parent's
-            // SceneComponent::children) â€” replace it in place so siblings/order aren't disturbed.
-            if (Entity* parent = rs->oldEntity->parent)
-            {
-                newEntity->parent = parent;
-                if (SceneComponent* parentSc = getComponent<SceneComponent>(parent))
-                    for (EntityPtr& child : parentSc->children)
-                        if (child.get() == rs->oldEntity.get())
-                        {
-                            child = newEntity;
-                            break;
-                        }
-            }
-            else
-            {
-                std::erase_if(entities, [&](const EntityPtr& e) { return e.get() == rs->oldEntity.get(); });
-                entities.push_back(newEntity);
-            }
-
-            ui.onEntityRespawned(rs->oldEntity, newEntity);
-        }
-    };
+    // World owns the root entities and applies all queued changes; the UI notifications it can't
+    // deliver itself (dependency points UI -> Entity) route back through these.
+    world.setOnPrefabOpened([&ui](const EntityPtr& entity, const std::string& path) { ui.onOpened(entity, path); });
+    world.setOnEntityRespawned([&ui](const EntityPtr& oldEntity, const EntityPtr& newEntity) { ui.onEntityRespawned(oldEntity, newEntity); });
+    auto handleEntityChange = [&](EntityChange& change) { world.handleEntityChange(change, camera, ui.getViewportRect()); };
 
     uint32 frameCount = 0;
     uint32 fps = 0;
@@ -257,7 +167,7 @@ int main()
         const double deltaSec = Globals::time.getDeltaSec();
         input.update(deltaSec);
         cameraController.update(deltaSec);
-        ui.update(entities, deltaSec);
+        ui.update(world.rootEntities(), deltaSec);
 
         for (const std::string& reloadPath : ui.takeScriptReloadRequests())
 			Globals::scriptHost.getOrLoad(reloadPath, true);
@@ -342,7 +252,7 @@ int main()
         Globals::spatialStress.update(glm::dvec3(camera.position), frustum);
         Globals::jobSystemStress.update();
 
-        for (const EntityPtr& entity : entities)
+        for (const EntityPtr& entity : world.rootEntities())
             entity->update(renderer, (float)deltaSec);
 
 		for (auto& light : spawnedLights)
@@ -381,6 +291,9 @@ int main()
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
     physics.setWaterSurface({}); // the callback captures the stack-local ocean; drop it before it dies
+    // World is a global: without this, the roots would die during static teardown, where the
+    // renderer/physics globals they release into may already be gone (cross-library order is undefined).
+    world.clearRootEntities();
     jobSystem.shutdown(); // join the workers while every global they might touch still lives
     return 0;
 }

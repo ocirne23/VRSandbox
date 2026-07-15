@@ -218,7 +218,7 @@ export namespace Procedural
 		// leaving decrements m_numPumps BEFORE its empty-recheck and re-claims a slot if requests
 		// remain, and every append is followed by kickPump - so requests never strand. ---
 		std::atomic<int32>      m_numPumps{ 0 };
-		int                     m_maxGenJobs = 2; // tweak: concurrent chunk generations
+		int                     m_maxGenJobs = 4; // tweak: concurrent chunk generations
 		JobCounter              m_pumpCounter;
 		std::mutex              m_mutex;
 		// An unordered POOL of outstanding work, despite the deque: the worker rescans it on every dequeue

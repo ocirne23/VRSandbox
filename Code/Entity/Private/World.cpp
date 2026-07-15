@@ -3,6 +3,9 @@
 import Core;
 import Core.glm;
 import Core.Log;
+import Core.Camera;
+import Core.Rect;
+import Core.Transform;
 
 import RendererVK;
 import :Entity;
@@ -815,4 +818,102 @@ EntityPtr World::createEmptyEntity(const std::string& name)
     EntityPtr entity = Entity::create(*m_emptyTemplate, Transform());
     entity->displayName = name;
     return entity;
+}
+
+void World::handleEntityChange(EntityChange& change, const Camera& camera, const Rect& viewportRect)
+{
+    if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
+    {
+        const glm::vec3 worldPos = camera.screenToWorld(viewportRect, cv->screenPos);
+        addRootEntity(spawnAssetFile(cv->path, Transform(worldPos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
+    }
+    else if (auto* ch = std::get_if<EntityChange::CreateHierarchy>(&change.type))
+    {
+        EntityPtr e = spawnAssetFile(ch->path, Transform(), false);
+        if (ch->parent && hasComponent<SceneComponent>(ch->parent))
+            e->reparentEntity(ch->parent);   // parent's SceneComponent takes ownership
+        else
+            addRootEntity(std::move(e));
+    }
+    else if (auto* as = std::get_if<EntityChange::AddSceneEntity>(&change.type))
+    {
+        EntityPtr e = createEmptyEntity(as->displayName);
+        if (as->parent && hasComponent<SceneComponent>(as->parent))
+            e->reparentEntity(as->parent);
+        else
+            addRootEntity(std::move(e));
+    }
+    else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
+        std::erase_if(m_rootEntities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });
+    else if (auto* rep = std::get_if<EntityChange::Reparent>(&change.type))
+        rep->newParent ? (void)std::erase_if(m_rootEntities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); }) : addRootEntity(std::move(rep->entity));
+    else if (auto* sp = std::get_if<EntityChange::SavePrefab>(&change.type))
+    {
+        if (savePrefab(sp->root.get(), sp->path, sp->text))
+            invalidatePrefab(std::filesystem::path(sp->path).stem().string());
+    }
+    else if (auto* op = std::get_if<EntityChange::OpenPrefabForEdit>(&change.type))
+    {
+        EntityPtr e = spawnAssetFile(op->path, Transform(), false);
+        if (e)
+        {
+            e->setPrefabInstance(false); // unpack: the Entity Editor edits it freely
+            addRootEntity(e);
+            if (m_onPrefabOpened)
+                m_onPrefabOpened(e, op->path);
+        }
+    }
+    else if (auto* np = std::get_if<EntityChange::NewPrefab>(&change.type))
+    {
+        EntityPtr e = createEmptyEntity(np->displayName);
+        addRootEntity(e);
+        if (m_onPrefabOpened)
+            m_onPrefabOpened(e, "");
+    }
+    else if (auto* rs = std::get_if<EntityChange::RespawnEntity>(&change.type))
+    {
+        // Entity::create() only stores a raw, non-owning pointer to the template — keep it alive for
+        // as long as the entity might reference it (World's own template caches do the same for
+        // prefabs; this one is ad-hoc, so nothing else would hold onto it).
+        keepTemplateAlive(rs->tmpl);
+
+        Transform t(rs->oldEntity->pos, rs->oldEntity->scale, rs->oldEntity->rot);
+        // Pre-set the paused flag so component spawn (script OnSpawn) already sees it — the parent
+        // chain isn't linked yet during create, so a paused ancestor can't be discovered there.
+        const uint8 initialFlags = rs->oldEntity->isEditorPausedInTree() ? uint8(EEntityFlag_EditorPaused) : uint8(0);
+        EntityPtr newEntity = Entity::create(*rs->tmpl, t, initialFlags);
+        newEntity->setPrefabInstance(rs->oldEntity->isPrefabInstance()); // keep the editor's unpacked state despite the template's prefabName
+
+        // Preserve any existing children (the Entity Editor commits one entity's own component set at
+        // a time; whatever was already parented under it stays put).
+        if (SceneComponent* oldSc = getComponent<SceneComponent>(rs->oldEntity.get()))
+            if (SceneComponent* newSc = getComponent<SceneComponent>(newEntity.get()))
+            {
+                newSc->children = std::move(oldSc->children);
+                for (EntityPtr& child : newSc->children)
+                    child->parent = newEntity.get();
+            }
+
+        // Re-attach where the old entity was: a root (in m_rootEntities) or a child (in its parent's
+        // SceneComponent::children) — replace it in place so siblings/order aren't disturbed.
+        if (Entity* parent = rs->oldEntity->parent)
+        {
+            newEntity->parent = parent;
+            if (SceneComponent* parentSc = getComponent<SceneComponent>(parent))
+                for (EntityPtr& child : parentSc->children)
+                    if (child.get() == rs->oldEntity.get())
+                    {
+                        child = newEntity;
+                        break;
+                    }
+        }
+        else
+        {
+            std::erase_if(m_rootEntities, [&](const EntityPtr& e) { return e.get() == rs->oldEntity.get(); });
+            addRootEntity(newEntity);
+        }
+
+        if (m_onEntityRespawned)
+            m_onEntityRespawned(rs->oldEntity, newEntity);
+    }
 }

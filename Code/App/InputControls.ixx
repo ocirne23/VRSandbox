@@ -26,7 +26,7 @@ private:
 
     GizmoController& gizmo;
     FreeFlyCameraController& cameraController;
-    std::vector<EntityPtr>& entities;
+    World& world; // spawns go through the world's API; it owns the root entity lifetimes
     std::vector<RendererVKLayout::LightInfo>& spawnedLights;
     std::vector<EntityPtr>& spawnedLightGeom;
     std::vector<PhysicsJoint>& spawnedJoints;
@@ -37,11 +37,11 @@ public:
     InputControls(
         GizmoController& gizmo,
         FreeFlyCameraController& cameraController,
-        std::vector<EntityPtr>& entities,
+        World& world,
         std::vector<RendererVKLayout::LightInfo>& spawnedLights,
         std::vector<EntityPtr>& spawnedLightGeom,
-		std::vector<PhysicsJoint>& spawnedJoints) 
-        : gizmo(gizmo), cameraController(cameraController), entities(entities), spawnedLights(spawnedLights), spawnedLightGeom(spawnedLightGeom), spawnedJoints(spawnedJoints)
+		std::vector<PhysicsJoint>& spawnedJoints)
+        : gizmo(gizmo), cameraController(cameraController), world(world), spawnedLights(spawnedLights), spawnedLightGeom(spawnedLightGeom), spawnedJoints(spawnedJoints)
     {
 
         auto& input = Globals::input;
@@ -60,7 +60,6 @@ public:
     {
         ScriptEventManager& scriptEvents = Globals::scriptEvents;
         Renderer& renderer = Globals::rendererVK;
-        World& world = Globals::world;
         UI& ui = Globals::ui;
 
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_W) scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "W Down" : "W Up");
@@ -163,7 +162,7 @@ public:
                 spawnedJoints.push_back(Globals::physics.createSphericalJoint(*prevBody, pc->body, pivot));
                 prevBody = &pc->body;
                 pivot = pos - glm::vec3(0.0f, 0.175f, 0.0f);
-                entities.push_back(std::move(e));
+                world.addRootEntity(std::move(e));
             }
         }
         // 8/9: throw a dynamic physics cube/sphere from the camera
@@ -176,7 +175,7 @@ public:
             {
                 if (PhysicsComponent* pc = getComponent<PhysicsComponent>(e))
                     pc->body.setLinearVelocity(dir * 12.0f);
-                entities.push_back(std::move(e));
+                world.addRootEntity(std::move(e));
             }
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)

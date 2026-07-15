@@ -3,6 +3,8 @@
 import Core;
 import Core.glm;
 import Core.Transform;
+import Core.Camera;
+import Core.Rect;
 
 import RendererVK;
 import Animation;
@@ -61,6 +63,25 @@ public:
     EntityPtr spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform = true);
 
     EntityPtr createEmptyEntity(const std::string& name);
+
+    // --- Root entity ownership (the world controls lifetimes; was a main.cpp local). Roots hold
+    // the owning refs for every entity not parented under another; the App's update loop iterates
+    // them and its spawn controls append. clearRootEntities() must run before main returns:
+    // World is a global, and globals in different libraries have no defined destruction order -
+    // entities must die while the renderer/physics globals are certainly still alive.
+    void addRootEntity(EntityPtr entity) { if (entity) m_rootEntities.push_back(std::move(entity)); }
+    const std::vector<EntityPtr>& rootEntities() const { return m_rootEntities; } // read-only: all mutation goes through the World API
+    void clearRootEntities() { m_rootEntities.clear(); }
+
+    // Applies one queued EntityChange (from the UI panels or script events) - all root-list and
+    // entity-lifetime mutations funnel through here. camera + viewportRect resolve viewport-drop
+    // spawns to world positions.
+    void handleEntityChange(EntityChange& change, const Camera& camera, const Rect& viewportRect);
+
+    // Editor notifications emitted while applying changes; the App wires these to the UI (the
+    // dependency points UI -> Entity, so World cannot call the UI directly).
+    void setOnPrefabOpened(std::function<void(const EntityPtr&, const std::string&)> callback) { m_onPrefabOpened = std::move(callback); }
+    void setOnEntityRespawned(std::function<void(const EntityPtr&, const EntityPtr&)> callback) { m_onEntityRespawned = std::move(callback); }
 
     void reloadPrefabs();
 
@@ -135,6 +156,9 @@ private:
     std::unordered_set<std::string> m_buildingTemplates; // prefab names currently being built (cycle guard)
     std::shared_ptr<EntitySpawnTemplate> m_emptyTemplate; // blank Scene-only template for editable (non-prefab) entities
     std::vector<std::shared_ptr<const EntitySpawnTemplate>> m_editorTemplates; // ad-hoc templates kept alive via keepTemplateAlive()
+    std::vector<EntityPtr> m_rootEntities;
+    std::function<void(const EntityPtr&, const std::string&)> m_onPrefabOpened;
+    std::function<void(const EntityPtr&, const EntityPtr&)> m_onEntityRespawned;
 };
 
 export namespace Globals
