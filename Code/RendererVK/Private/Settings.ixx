@@ -108,7 +108,7 @@ export struct ShadowParams
 export struct FogParams
 {
     bool  enabled = true;
-    float density = 0.030f;        // global extinction at the height base (1/m)
+    float density = 0.010f;        // global extinction at the height base (1/m)
     float heightBase = 0.0f;       // world height where the global fog is densest
     float heightFalloff = 0.33f;   // exponential density falloff above the base (1/m)
     float terrainFollow = 1.0f;   // fraction of the local terrain height added to the height base (needs a

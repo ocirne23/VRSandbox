@@ -141,10 +141,10 @@ export namespace Procedural
 		float m_shoreFoamMax = 0.75f;   // surf band opacity cap: keeps the refracted bottom visible through the foam
 		float m_swashAmp = 0.5f;        // swash run-up: un-shoaled wave height riding up the beach (0 = hard cutoff)
 		float m_swashDrawdown = 0.0f;   // receding burial depth (m below seabed): deeper = cleaner retreat edge
-		float m_crestLimit = 0.4f;      // crest ceiling as a fraction of water depth (0 = unbounded)
-		float m_troughMargin = 0.15f;   // m the trough is held above the seabed (covers baked-map vs mesh error)
+		float m_crestLimit = 0.8f;      // crest ceiling as a fraction of water depth (0 = unbounded)
+		float m_troughMargin = 0.35f;   // m the trough is held above the seabed (covers baked-map vs mesh error)
 		float m_shoreFoamBias = -0.80f;   // surf fold-threshold shift: negative = sparser/more transparent surf
-		float m_swashFlow = 1.0f;       // backflow: horizontal chop on the tongue (recede flows seaward; 0 = off)
+		float m_swashFlow = 0.5f;       // backflow: horizontal chop on the tongue (recede flows seaward; 0 = off)
 		float m_cullMargin = 1.0f;      // VS land cull: footprint buried deeper than this = triangle discarded (0 = off)
 
 		// Bake state (HeightMapBaker: async, one bake at a time; the active map keeps working until the

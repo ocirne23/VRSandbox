@@ -134,7 +134,7 @@ export namespace Procedural
 		float m_v3ClimateNoiseWavelength = 2000.0f; // model metres
 		int   m_v3ClimateNoiseOctaves = 3;
 		float m_v3HumidFog = 0.25f;
-		float m_v3ValleyFog = 0.5f;
+		float m_v3ValleyFog = 0.25f;
 		int   m_v3MaxTiles = 256;           // resident tile budget (~800 KB each)
 		// Half-precision inference. Buys VRAM (~2.28 GB -> ~1.1 GB) and load time, NOT generation speed —
 		// the pipeline is dispatch-bound (see the tweak registration for the measurements). Needs the
