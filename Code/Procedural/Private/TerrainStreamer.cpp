@@ -351,7 +351,14 @@ namespace Procedural
 		// snow line further down the mountains than reality; "Temp offset" makes the whole planet warmer or
 		// colder.
 		Tweak::floatVar("Terrain/V3", "Temp offset (C)", &m_v3TemperatureOffset, -30.0f, 30.0f, 0.5f, dirty);
-		Tweak::floatVar("Terrain/V3", "Extra lapse (C/m)", &m_v3ExtraLapseRate, 0.0f, 0.02f, 0.0005f, dirty);
+		// THE snow-line dial: how fast it cools with altitude, C per MODEL metre (so it rides "Meters per
+		// pixel" like every other vertical quantity). More negative = snow lower down the mountains.
+		// One number for the world, not the model's own per-region rate. That was baked into the terrain-data
+		// map and measured as buying nothing: both cascades regress the same data, so their rates agreed and
+		// dropping it left near-vs-far disagreement unchanged at 0.15 C max. It only bought fidelity to the
+		// model's absolute temperature, which nothing consumes. -0.008 is the mean of what it regressed
+		// (Earth's environmental lapse is ~-0.0065).
+		Tweak::floatVar("Terrain/V3", "Lapse rate (C/m)", &m_v3LapseRate, -0.03f, 0.0f, 0.0005f, dirty);
 		// The model's temperature is a function of ELEVATION, so every climate boundary it draws is an
 		// isotherm and therefore a contour line: grass gives way to rock at one height right across a range,
 		// and the snow line is a perfect ring. This wanders the temperature so those boundaries ride up and
@@ -552,7 +559,7 @@ namespace Procedural
 			cfg.precipForFullHumidity = m_v3PrecipFullHumidity;
 			cfg.humidityOffset = m_v3HumidityOffset;
 			cfg.temperatureOffset = m_v3TemperatureOffset;
-			cfg.extraLapseRate = m_v3ExtraLapseRate;
+			cfg.lapseRate = m_v3LapseRate;
 			cfg.climateNoiseAmplitudeC = m_v3ClimateNoiseC;
 			cfg.climateNoiseWavelength = m_v3ClimateNoiseWavelength;
 			cfg.climateNoiseOctaves = (uint32)glm::max(1, m_v3ClimateNoiseOctaves);
@@ -832,13 +839,6 @@ namespace Procedural
 		// Chunk mesh coverage: chunks span +-R around the camera's chunk, so a disk of R*chunkSize around
 		// the camera is guaranteed resident whatever its position within its own chunk — the fence for
 		// the ocean's buried-under-land vertex cull. Also carries the live sea level (terrain coloring).
-		// vertScale converts the baked LAPSE RATE out of the generator's vertical frame (see
-		// TerrainPoint::lapseRate). V2 works directly in world metres, so it is 1 there.
-		const float vertScale = m_generator == 1
-			? TerrainGenV3::worldScale(m_v3MetersPerPixel) * glm::max(m_v3HeightScale, 0.01f)
-			: 1.0f;
-		renderer.setTerrainParams((float)R * chunkSize, m_seaLevel, vertScale);
-
 		std::shared_ptr<const ITerrainSampler> maps;
 		uint32 generation;
 		{
@@ -846,6 +846,22 @@ namespace Procedural
 			maps = m_maps;
 			generation = m_generation;
 		}
+
+		// The generator's lapse rate, converted to C per WORLD metre for the shaders (it publishes in its
+		// own vertical frame). This is how terrainTemperatureAt turns the map's baked SEA-LEVEL baseline
+		// into a temperature at any height, so it must be the rate the generator ACTUALLY used — hence read
+		// from the sampler rather than from the tweak beside it. 0 with no terrain, and 0 from a generator
+		// that folds its own lapse into the temperature it reports (V2, which publishes 0): there the
+		// baseline IS the temperature and lapsing it again would double-count.
+		float lapsePerWorldM = 0.0f;
+		if (maps)
+		{
+			const float vertScale = m_generator == 1
+				? TerrainGenV3::worldScale(m_v3MetersPerPixel) * glm::max(m_v3HeightScale, 0.01f)
+				: 1.0f;
+			lapsePerWorldM = maps->lapseRatePerMetre() / glm::max(vertScale, 1e-4f);
+		}
+		renderer.setTerrainParams((float)R * chunkSize, m_seaLevel, lapsePerWorldM);
 
 		// The far cascade must cover the whole resident mesh, else terrain past its edge reads clamp-to-edge
 		// (frozen altitude/temperature -> distant inland looks uniformly cold/snowy, ignoring the inland

@@ -58,19 +58,34 @@ float fogFalloffFromTemperature(float celsius)
 }
 
 // One decoded climate texel from the bit-packed B channel at integer texel coords:
-//   x = fog thickness [0,1], y = LAPSE RATE in C per world metre [-0.012, 0],
-//   z = temperature in CELSIUS [-25, +50] AT THIS TEXEL'S OWN BAKED HEIGHT, w = humidity [0,1].
-// The temperature is only valid at the height in channel R. The two cascades bake DIFFERENT heights for
-// the same world position — the near one the full-detail surface, the far one its 7.68 km average — so a
-// consumer that wants the temperature somewhere else (the terrain shader wants it at the MESH height)
-// must move it with the lapse rate. See terrainTemperatureAt.
+//   x = fog thickness [0,1], y = UNUSED (free: 8 bits), z = SEA-LEVEL temperature in CELSIUS [-25, +50],
+//   w = humidity [0,1].
+// .z is NOT the temperature here — it is the baseline at sea level. Evaluate with terrainTemperatureAt at
+// whatever height you care about; that is the whole point of storing the model's parameterisation (a
+// baseline and a slope) rather than a sample of it. A sample is only valid at the height it was taken
+// from, and the two cascades bake different heights for the same spot — the near one the full-detail
+// surface, the far one its 7.68 km average, which cannot know a peak exists.
 vec4 terrainClimateTexel(ivec2 t, int layer, ivec2 res)
 {
     const uint packed = floatBitsToUint(texelFetch(u_terrainHeight, ivec3(clamp(t, ivec2(0), res - 1), layer), 0).z);
     return vec4(float(packed & 255u) * (1.0 / 255.0),
-                float((packed >> 8) & 255u) * (0.012 / 255.0) - 0.012,
+                0.0, // bits 8-15 free
                 float((packed >> 16) & 255u) * (75.0 / 255.0) - 25.0,
                 float((packed >> 24) & 255u) * (1.0 / 255.0));
+}
+
+// Temperature (C) at a world height, from a decoded climate texel. THE way to read temperature out of
+// this map: .z alone is the sea-level baseline and means nothing on its own.
+// Every consumer passes the height IT shades — the terrain shader its vertex, the fog the ground under a
+// froxel — so the two cascades cannot disagree: they carry the same baseline and slope, and the height
+// comes from the caller, not from whatever each cascade happened to bake.
+// The rate is the generator's own, published once as u_terrainParams.y (C per WORLD metre) rather than
+// baked per texel: measured, a per-texel rate bought no near/far agreement at all — both cascades regress
+// the same data, so their rates agreed and the disagreement was entirely in the baselines. Clamped at sea
+// level because that is where the generator stops applying it (it does not warm the seabed).
+float terrainTemperatureAt(vec4 climate, float worldY)
+{
+    return climate.z + u_terrainParams.y * max(worldY - u_terrainParams.z, 0.0);
 }
 
 // Manual bilinear of one cascade's climate: hardware filtering would blend the PACKED bits into

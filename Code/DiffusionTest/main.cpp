@@ -756,16 +756,36 @@ static int runBakeBench(uint64 seed, float metersPerPixel, bool runSlow, bool us
 
 			// The mesh height is the FULL-detail surface whichever cascade a pixel reads.
 			const double meshElev = std::max((double)full[i].height - seaLevel, 0.0);
-			// p.lapseRate is per unit of the GENERATOR's vertical frame, so the world-metre delta converts
-			// through vertScale — exactly what the shader does with u_terrainParams.y.
+			// terrainTemperatureAt() from terrain_height.inc.glsl: the map bakes a SEA-LEVEL baseline and
+			// the generator publishes ONE lapse rate, so every consumer evaluates at the height it shades.
+			// vertScale converts the rate out of the generator's vertical frame (u_terrainParams.y).
 			const double vertScale = (double)metersPerPixel / 30.0; // heightScale is 1 here
+			const double lapse = (double)gen.lapseRatePerMetre() / vertScale;
 			const auto corrected = [&](const Procedural::TerrainPoint& p)
 			{
-				const double bakedElev = std::max((double)p.height - seaLevel, 0.0);
-				return (double)p.temperature + (double)p.lapseRate * (meshElev - bakedElev) / vertScale;
+				return (double)p.temperatureSeaLevel + lapse * meshElev;
 			};
 			const double dc = std::abs(corrected(full[i]) - corrected(coarse[i]));
 			cMax = std::max(cMax, dc); cSum += dc;
+		}
+		// The generator publishes ONE lapse rate, so the lapse term is identical on both cascades (same
+		// constant, same mesh height) and cancels exactly: near-vs-far disagreement IS the baselines'
+		// disagreement, and nothing else. Reported separately as a check on that claim — if these two ever
+		// diverge, something has reintroduced a per-point rate.
+		{
+			double dMax = 0, dSum = 0;
+			size_t k = 0;
+			for (size_t i = 0; i < full.size(); i++)
+			{
+				if (full[i].height <= 0.0f)
+					continue;
+				k++;
+				const double d = std::abs((double)full[i].temperatureSeaLevel - (double)coarse[i].temperatureSeaLevel);
+				dMax = std::max(dMax, d); dSum += d;
+			}
+			if (k > 0)
+				Log::info(std::format("[Bake]   near-vs-far |tSea diff| alone: mean {:.2f} C max {:.2f} C",
+				                      dSum / (double)k, dMax));
 		}
 		if (m > 0)
 		{

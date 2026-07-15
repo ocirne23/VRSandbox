@@ -281,8 +281,8 @@ export namespace RendererVKLayout
                                    // yzw unused
         glm::vec4 terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                                    // 0 = no terrain mesh up — fences the ocean land cull),
-                                   // y = generator vertScale (world metres per unit of its vertical frame;
-                                   //     converts the baked lapse rate — see TerrainPoint::lapseRate),
+                                   // y = temperature lapse rate, C per WORLD metre above sea level (<= 0;
+                                   //     pairs with the map's baked sea-level baseline — terrainTemperatureAt),
                                    // z = sea level (world Y, live from the streamer), w unused
 
         // TERRAIN variant texture splatting (Renderer::setTerrainSplatMaterials; keep in sync with

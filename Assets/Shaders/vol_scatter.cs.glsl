@@ -284,12 +284,17 @@ void main()
         if (u_fogParams6.z > 0.0)
         {
             // Regional climate: x = fog thickness (density multiplier), and the height-falloff multiplier
-            // (fog hugs the ground in one region, towers in another) DERIVED from the temperature in .z —
-            // it is a pure function of it, and the .y slot it used to be baked into now carries the lapse
-            // rate, which nothing else can reconstruct. Both eased in by Region strength.
+            // (fog hugs the ground in one region, towers in another) DERIVED from temperature — it is a
+            // pure function of it, so the slot it used to be baked into is now free entirely.
+            // Both eased in by Region strength.
+            // Temperature is evaluated at the GROUND (td.x), not at this froxel: the fog's character comes
+            // from the air over the terrain, and .z on its own is only the sea-level baseline. Using the
+            // baseline directly would give a mountain valley the coast's falloff — the altitude signal is
+            // the entire point of the knob.
             const vec4 climate = terrainClimateNearestAt(worldPos.xz);
             regionMul = mix(1.0, climate.x, u_fogParams6.z);
-            heightFalloff *= mix(1.0, fogFalloffFromTemperature(climate.z), u_fogParams6.z);
+            const float groundTemp = terrainTemperatureAt(climate, td.x);
+            heightFalloff *= mix(1.0, fogFalloffFromTemperature(groundTemp), u_fogParams6.z);
         }
     }
     // Height density = the analytic mean over this slice's segment of the sample ray (see heightFogMean),

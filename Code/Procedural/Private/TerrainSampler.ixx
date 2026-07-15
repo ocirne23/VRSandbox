@@ -36,15 +36,6 @@ export namespace Procedural
 	// nothing else can reconstruct. Kept because both sides still need the range to agree.
 	inline constexpr float FOG_FALLOFF_MUL_MAX = 4.0f;
 
-	// Encoding range of the baked 8-bit LAPSE RATE (temperature change per metre of elevation, in the
-	// generator's own vertical frame). Matches the clamp the diffusion pipeline's own regression applies.
-	// This is baked because the terrain-data map's two cascades report temperature at DIFFERENT elevations
-	// — the near one at the full-detail surface, the far one at its 7.68 km average, which cannot know a
-	// peak's real height — so the shader has to re-derive temperature at the mesh elevation to make them
-	// agree. Without it, distant peaks read up to 10.6 C too warm and their textures flip.
-	inline constexpr float LAPSE_RATE_MIN = -0.012f;
-	inline constexpr float LAPSE_RATE_MAX = 0.0f;
-
 	// Fog height-falloff from temperature: cold air hugs the ground, warm air lets fog tower. Mirrored by
 	// terrain_height.inc.glsl — keep them in step.
 	constexpr float fogFalloffFromTemperature(float celsius)
@@ -68,13 +59,21 @@ export namespace Procedural
 		float fogThickness = 0.0f;   // [0,1]
 		float fogFalloffMul = 1.0f;  // [0, FOG_FALLOFF_MUL_MAX], 1 = neutral. NOT baked (derived from
 		                             // temperature); still reported for CPU consumers.
-		// Temperature change per metre of elevation IN THE GENERATOR'S OWN VERTICAL FRAME — for V3 that is
-		// model metres, so a consumer working in world metres must divide by vertScale (which the terrain
-		// shader gets as u_terrainParams.y). Not pre-converted, because the world-frame rate leaves the
-		// [LAPSE_RATE_MIN, LAPSE_RATE_MAX] range this is encoded over as soon as the world is compressed.
-		// `temperature` above is the value at THIS point's own height; this is what lets a consumer move it
-		// to a different height. See LAPSE_RATE_MIN for why the terrain shader must.
-		float lapseRate = -0.0065f;
+		// The SEA-LEVEL baseline `temperature` is derived from: temperature = temperatureSeaLevel +
+		// lapse * max(0, height above sea level), for a lapse rate the GENERATOR holds fixed and publishes
+		// once (ITerrainSampler::lapseRatePerMetre) rather than varying per point.
+		//
+		// This — not `temperature` — is what the terrain-data map bakes, and the reason is the map's two
+		// cascades: they bake DIFFERENT heights for the same spot (the near one the full-detail surface, the
+		// far one its 7.68 km average, which cannot know a peak exists). A baked temperature is only valid at
+		// the height it was baked from, so the far one reported the temperature of the plateau a peak stands
+		// on — 10.6 C too warm, wider than a climate box, and its texture flipped at the crossfade. A
+		// baseline plus a shared constant has no such anchor: every consumer evaluates at the height it
+		// shades, and the cascades agree by construction.
+		//
+		// Defaults to `temperature` for a generator that does not model a lapse (see samplePoint): with a
+		// published rate of 0, evaluating at any height returns it unchanged.
+		float temperatureSeaLevel = 15.0f;
 		float flowAngle01 = -1.0f;   // angle/2pi in [0,1), or < 0 for no direction
 	};
 
@@ -112,6 +111,10 @@ export namespace Procedural
 			out.height = sampleHeightAndWater(worldX, worldZ, out.waterLevel);
 			out.altitude = sampleAltitude(worldX, worldZ);
 			out.temperature = sampleTemperature(worldX, worldZ);
+			// No lapse (lapseRatePerMetre() is 0 by default): this generator's temperature already IS the
+			// value at this point and it exposes no way to move it elsewhere, so reporting it as the
+			// baseline is exactly true — evaluating at any height returns it unchanged.
+			out.temperatureSeaLevel = out.temperature;
 			out.humidity = sampleHumidity(worldX, worldZ);
 			out.fogThickness = sampleFogThickness(worldX, worldZ);
 			out.fogFalloffMul = sampleFogHeightFalloff(worldX, worldZ);
@@ -161,5 +164,21 @@ export namespace Procedural
 		// to the terrain shader for coloring. Default: the full height (no macro/detail split).
 		virtual float sampleAltitude(double worldX, double worldZ) const { return sampleHeight(worldX, worldZ) - seaLevel(); }
 		virtual float seaLevel() const = 0;
+
+		// Temperature change per metre of elevation above sea level, in this generator's VERTICAL FRAME
+		// (model metres for V3 — divide by vertScale for world metres). ONE value for the whole world, not a
+		// field: `sampleTemperature` and `TerrainPoint::temperatureSeaLevel` are consistent with it by
+		// construction, so a consumer can re-derive the temperature at any height from the baseline alone.
+		//
+		// It was per-point once, regressed by the diffusion model per region and baked into the terrain-data
+		// map. Measured, that bought nothing: the two cascades regress the same data through the same
+		// windows, so their rates AGREE — near-vs-far disagreement was 0.15 C max either way, and all of it
+		// came from the baselines. The per-region rate only bought fidelity to the model's own temperature,
+		// which has no consumer (the field is an artistic input, not a measurement), and cost 8 bits of the
+		// packed climate channel. What it did buy was regional variety in the lapse; that is now a tweak.
+		//
+		// 0 = temperature does not vary with height (the default; correct for a generator that folds its own
+		// lapse into sampleTemperature and cannot move it).
+		virtual float lapseRatePerMetre() const { return 0.0f; }
 	};
 }

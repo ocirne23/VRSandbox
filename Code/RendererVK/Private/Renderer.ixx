@@ -153,12 +153,13 @@ public:
     // Live terrain state for the shaders: meshRadius = radius (m, radial from the camera XZ) inside which
     // streamed terrain chunks are guaranteed resident — the fence for the ocean's land cull (0 = no
     // terrain mesh up, cull disabled); seaLevel feeds the terrain shader's coloring. Set per frame.
-    // vertScale = the generator's world metres per unit of its own vertical frame (V3: metersPerPixel/30 *
-    // heightScale; 1 for a generator that works directly in world metres). The terrain shader needs it to
-    // use the baked LAPSE RATE, which is stored in that frame — see TerrainPoint::lapseRate.
-    void setTerrainParams(float meshRadius, float seaLevel, float vertScale = 1.0f)
+    // lapseRate = the generator's temperature change per WORLD metre above sea level (<= 0). The terrain
+    // data map bakes the SEA-LEVEL temperature baseline; this is the other half, and the shaders multiply
+    // it by the height THEY shade to get a temperature (terrainTemperatureAt). One value for the world, so
+    // no consumer can disagree with another about it; 0 = temperature does not vary with height.
+    void setTerrainParams(float meshRadius, float seaLevel, float lapseRate = 0.0f)
     {
-        m_terrainParams = glm::vec4(meshRadius, glm::max(vertScale, 1e-4f), seaLevel, 0.0f);
+        m_terrainParams = glm::vec4(meshRadius, glm::min(lapseRate, 0.0f), seaLevel, 0.0f);
     }
     // One terrain splat material: BC-compressed .dds paths (relative to Assets/). Which climate it covers
     // is NOT here — see setTerrainSplatClimate; textures are heavy and change ~never, the climate boxes

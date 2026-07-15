@@ -147,11 +147,10 @@ export namespace Procedural
 		float m_v3PrecipFullHumidity = 2200.0f; // mm/yr that reads as humidity 1.0
 		float m_v3HumidityOffset = 0.0f;        // slides the planet along arid <-> lush
 		float m_v3TemperatureOffset = 0.0f;     // C, shifts the whole planet
-		float m_v3ExtraLapseRate = 0.0f;        // C/m on top of the model's own lapse: pushes the snow line
-		                                        // lower than reality. 0 = the model's real climate.
+		float m_v3LapseRate = -0.008f;          // C per MODEL metre: THE snow-line dial. See the tweak.
 		// Microclimate wander (C): breaks climate boundaries off the contour lines the lapse rate pins them
 		// to. See the tweak registration.
-		float m_v3ClimateNoiseC = 1.5f;
+		float m_v3ClimateNoiseC = 5.0f;
 		float m_v3ClimateNoiseWavelength = 2000.0f; // model metres
 		int   m_v3ClimateNoiseOctaves = 3;
 		float m_v3HumidFog = 0.25f;

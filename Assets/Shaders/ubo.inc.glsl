@@ -134,8 +134,8 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // tapered in with depth so the waterline itself does not lift, yzw unused
     vec4 u_terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                             // 0 = no terrain mesh up — fences the ocean land cull),
-                            // y = generator vertScale (world m per unit of its vertical frame; converts the
-                            //     baked lapse rate in the climate pack's .y from that frame to world m),
+                            // y = temperature lapse rate, C per WORLD metre above sea level (<= 0; pairs
+                            //     with the climate pack's baked sea-level baseline — terrainTemperatureAt),
                             // z = sea level (world Y, live from the streamer), w unused
 
     // TERRAIN variant texture splatting (keep in sync with RendererVKLayout::Ubo). Materials are

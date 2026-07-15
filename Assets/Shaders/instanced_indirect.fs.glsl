@@ -203,25 +203,17 @@ TerrainFields terrainFields(vec3 worldPos)
 		const vec4 td = terrainDataAt(worldPos.xz);
 		f.altitude = td.w;
 		f.waterLevel = td.y;
-		const vec4 climate = terrainClimateAt(worldPos.xz); // (fog thickness, lapse rate, temp C, humidity)
+		const vec4 climate = terrainClimateAt(worldPos.xz); // (fog thickness, unused, SEA-LEVEL temp, humidity)
 		f.humidity = climate.w;
 
-		// Re-derive the temperature at THIS PIXEL'S height. The baked temperature is only valid at the
-		// baked height (td.x), and the two cascades bake different heights for the same spot: the near one
-		// the full-detail surface, the far one its 7.68 km average — which cannot know a peak exists, so it
-		// reports the temperature of the plateau the peak stands on. Left uncorrected the far cascade omits
-		// peak cold entirely and summits read up to 10.6 C too warm, flipping their texture as the camera
-		// crosses the cascade crossfade.
-		// Moving it to worldPos.y fixes both levels with one expression, and it is self-cancelling rather
-		// than cascade-aware: near bakes td.x ~= worldPos.y so the correction vanishes on its own, while far
-		// supplies exactly the missing lapse over the relief. Clamped at sea level to match how the
-		// generator applies the lapse in the first place (only over land).
-		// climate.y is per unit of the GENERATOR's vertical frame, so the world-metre delta converts through
-		// vertScale. Baked in that frame on purpose: the world-frame rate runs to -0.065 on a compressed
-		// world and would clamp to nothing in 8 bits.
-		const float bakedElev = max(td.x - seaLevel, 0.0);
-		const float pixelElev = max(worldPos.y - seaLevel, 0.0);
-		f.temperature = climate.z + climate.y * (pixelElev - bakedElev) / u_terrainParams.y;
+		// Evaluate the temperature at THIS VERTEX. The map stores the model's own parameterisation — a
+		// sea-level baseline plus a lapse rate — precisely so this can be asked at the height being shaded,
+		// which we already have. Nothing about the cascades enters into it: they carry the same baseline and
+		// slope, and the height comes from the geometry, so near and far cannot disagree by construction.
+		// (Baking a temperature SAMPLE instead is what caused the mismatch this replaced: a sample is only
+		// valid at the height it was taken from, and the far cascade's height is a 7.68 km average that
+		// cannot know a peak exists — it reported the plateau's temperature, up to 10.6 C too warm.)
+		f.temperature = terrainTemperatureAt(climate, worldPos.y);
 	}
 	return f;
 }

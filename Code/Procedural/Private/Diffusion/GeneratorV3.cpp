@@ -705,30 +705,37 @@ namespace Procedural
 			     * cfg.climateNoiseAmplitudeC;
 		}
 
-		// The lapse rate this point's temperature is built with: the model's own regressed rate plus the
-		// snow-line tweak. C per MODEL metre, negative. See TerrainPoint::lapseRate for why it is reported.
-		float lapseOf(const Sample& s) const
+		// THE lapse rate, C per MODEL metre. One number for the world (see TerrainConfigV3::lapseRate), so
+		// the temperature is an evaluable function of height rather than a field of samples.
+		float lapseOf() const { return std::min(cfg.lapseRate, 0.0f); }
+
+		// The temperature this point would have AT SEA LEVEL: the baseline the lapse rate is applied to.
+		// This — not a temperature — is what the terrain-data map bakes, so consumers can evaluate at their
+		// own height (see TerrainPoint::temperatureSeaLevel).
+		//
+		// Everything that does not depend on height belongs here, and everything that does belongs in the
+		// lapse. The wander is a property of WHERE you are, not how high, so it rides the baseline; the
+		// snow-line tweak scales with altitude, so it is folded into lapseOf instead.
+		float temperatureSeaLevelFrom(double worldX, double worldZ, const Sample& s) const
 		{
-			return std::clamp(s.beta - cfg.extraLapseRate, LAPSE_RATE_MIN, LAPSE_RATE_MAX);
+			// s.beta — the model's OWN regressed rate — is used here and only here: it is what the model's
+			// temperature was built with, so undoing it is the only way to recover the baseline underneath.
+			// The rate applied on top is ours (lapseOf), which is why the two differ.
+			const float tBase = s.temp - s.beta * std::max(0.0f, s.elev);
+			return tBase + climateWander(worldX, worldZ) + cfg.temperatureOffset;
 		}
 
 		// Temperature at the point's FULL surface height (model elevation + the procedural detail).
 		//
-		// Written as ONE lapse from sea level — tBase + lapse * elevation — rather than as the model's
-		// temperature with corrections bolted on, because the terrain shader has to INVERT exactly this to
-		// move the temperature onto the mesh height (terrainFields), and it can only invert a clean
-		// function of height. The previous form lapsed the detail layer at a hardcoded -0.0065 while the
-		// model's own relief used the regressed beta, so temperature was not a function of the reported
-		// height at all and the inversion left ~1.5 C on the table.
+		// Literally the baseline evaluated at this height, so it CANNOT disagree with what the map bakes —
+		// which was worth restructuring for. The previous form built the temperature by bolting corrections
+		// onto the model's value, and the detail layer's correction used a hardcoded -0.0065 while the
+		// model's own relief used the regressed beta; the result was not an affine function of the reported
+		// height at all, and the consumer trying to move it off that height was left ~1.5 C short.
 		float temperatureFrom(double worldX, double worldZ, const Sample& s, float detailWorldM) const
 		{
-			const float detailModelM = detailWorldM / std::max(0.01f, vertScale());
-			// Recover the sea-level baseline the pipeline regressed: s.temp is tBase + beta * max(0, elev).
-			const float tBase = s.temp - s.beta * std::max(0.0f, s.elev);
-			const float elevWithDetail = s.elev + detailModelM;
-			float t = tBase + lapseOf(s) * std::max(0.0f, elevWithDetail);
-			t += climateWander(worldX, worldZ);
-			return t + cfg.temperatureOffset;
+			const float elevWithDetail = s.elev + detailWorldM / std::max(0.01f, vertScale());
+			return temperatureSeaLevelFrom(worldX, worldZ, s) + lapseOf() * std::max(0.0f, elevWithDetail);
 		}
 
 		float humidityOf(const Sample& s) const
@@ -784,12 +791,9 @@ namespace Procedural
 			out.height = cfg.seaLevel + s.elev * vs + d;
 			out.waterLevel = cfg.seaLevel;
 			out.temperature = temperatureFrom(worldX, worldZ, s, d);
-			// In the MODEL's vertical frame, NOT per world metre. Converting here looks tidier but destroys
-			// the value: the world-frame rate is lapse/vertScale, which at mpp=3 is -0.065 — five times
-			// outside the [-0.012, 0] range the 8-bit bake encodes, so it would clamp and the shader's
-			// correction would come out 5.4x too small. The frame conversion belongs on the consumer side,
-			// where vertScale is known (u_terrainParams.y).
-			out.lapseRate = lapseOf(s);
+			// What the map bakes. The rate that pairs with it is published once (lapseRatePerMetre), not
+			// per point.
+			out.temperatureSeaLevel = temperatureSeaLevelFrom(worldX, worldZ, s);
 			out.humidity = humidityOf(s);
 			out.fogThickness = fogThicknessOf(s);
 			out.fogFalloffMul = fogFalloffOf(out.temperature);
@@ -832,6 +836,7 @@ namespace Procedural
 
 	const TerrainConfigV3& TerrainGenV3::config() const { return m_impl->cfg; }
 	float TerrainGenV3::seaLevel() const { return m_impl->cfg.seaLevel; }
+	float TerrainGenV3::lapseRatePerMetre() const { return m_impl->lapseOf(); }
 
 	float TerrainGenV3::sampleAltitude(double worldX, double worldZ) const
 	{

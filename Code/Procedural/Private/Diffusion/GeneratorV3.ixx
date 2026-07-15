@@ -59,17 +59,26 @@ export namespace Procedural
 		// world along the arid <-> lush axis: +0.2 turns steppe into forest, -0.2 turns it into desert.
 		float humidityOffset = 0.0f; // added to the [0,1] humidity, then re-clamped
 
-		// --- Temperature shaping. The model's temperatures are REAL (WorldClim-calibrated), and the biome
-		// attractor table (BIOME_TABLE in GeneratorV2.cpp, shared with the terrain shader's splatting) is
-		// expressed in real units to match, so the defaults here are ZERO: out of the box you get the
-		// model's own climate and snow lands where the physics puts it.
-		// These stay as artistic overrides:
-		//   temperatureOffset  shifts the whole planet (a colder/warmer world)
-		//   extraLapseRate     extra cooling with ALTITUDE, on top of the model's own regressed lapse rate.
-		//                      A snow-line control: it scales with altitude, so it costs lowlands and ocean
-		//                      nothing. Raise it to push snow further down the mountains than reality would.
+		// --- Temperature shaping. The model's temperatures are REAL (WorldClim-calibrated) and the climate
+		// boxes are in real units to match, so temperatureOffset defaults to 0: out of the box you get the
+		// model's own climate, shifted only if you want a colder/warmer planet.
 		float temperatureOffset = 0.0f;  // degrees C
-		float extraLapseRate = 0.0f;     // C per metre of altitude
+
+		// THE lapse rate: how fast it cools with altitude, C per MODEL metre (it rides metersPerPixel like
+		// every other vertical quantity here). This is the snow line dial — it multiplies altitude, so it
+		// costs lowlands and ocean nothing.
+		//
+		// Fixed, not per-region. The model regresses its own rate per coarse pixel and that used to be baked
+		// into the terrain-data map, 8 bits of it. It bought nothing measurable: both cascades regress the
+		// same data through the same windows, so their rates agree, and near-vs-far disagreement was 0.15 C
+		// max with or without it — all of it from the baselines. It only bought fidelity to the model's
+		// absolute temperature, which nothing consumes. Using one number instead frees those bits, makes the
+		// snow line a dial rather than a model output, and keeps every consumer able to re-derive the
+		// temperature at any height from the baseline alone.
+		// The regressed rate is still read internally, to recover that baseline from the model's temperature.
+		// Default -0.008 = the measured mean of what the model regresses (its own values run -0.012..-0.004
+		// above 1000 m, so this sits mid-range; Earth's environmental lapse is ~-0.0065).
+		float lapseRate = -0.008f;
 
 		// --- Microclimate. The model's temperature is essentially a FUNCTION OF ELEVATION (it regresses a
 		// lapse rate against the coarse map), so every climate boundary it produces is an isotherm — and an
@@ -149,6 +158,7 @@ export namespace Procedural
 		// this to tell "a mountain" from "high flatland".
 		float sampleAltitude(double worldX, double worldZ) const override;
 		float seaLevel() const override;
+		float lapseRatePerMetre() const override;
 
 		const TerrainConfigV3& config() const;
 
