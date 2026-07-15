@@ -3,12 +3,12 @@ export module Procedural:GeneratorV3;
 import Core;
 import :TerrainSampler;
 
-// V3: the Terrain Diffusion generator (Private/Diffusion), exposed through the same ITerrainSampler the
-// rest of the terrain stack consumes, so it drops in beside TerrainGenV2.
+// The Terrain Diffusion generator (Private/Diffusion), exposed through the ITerrainSampler the rest of the
+// terrain stack consumes.
 //
-// HOW IT DIFFERS FROM V2, and why the shape of this class is what it is:
-// V2 is a pure function of (x, z) — evaluate noise, done. V3 is a neural diffusion pipeline that generates
-// 256x256-pixel TILES (7.68 km at the default 30 m/px) through three ONNX models. So:
+// WHY THE SHAPE OF THIS CLASS IS WHAT IT IS: an ITerrainSampler looks like a pure function of (x, z), but
+// this one is a neural diffusion pipeline that generates 256x256-pixel TILES (7.68 km at the default
+// 30 m/px) through three ONNX models. So:
 //   * Sampling a point means bilinearly reading a resident tile. A miss BLOCKS the caller while the tile is
 //     generated (~1.5 s cold; ~0 once resident, and one tile covers ~225 chunks at chunkSize 512).
 //   * All inference is serialised onto one thread. That is required, not a convenience: the tile store is
@@ -97,7 +97,7 @@ export namespace Procedural
 		uint32 climateNoiseOctaves = 3;
 
 
-		// --- Regional fog character (same role as V2's, derived from the model's real climate).
+		// --- Regional fog character, derived from the model's real climate.
 		float humidFogAmount = 0.6f;  // broad fog in wet regions
 		float valleyFogAmount = 0.8f; // fog pooling below ridgelines
 

@@ -91,7 +91,6 @@ export namespace Procedural
 
 		// --- Tweak-backed configuration (source of truth; the generator/ChunkParams are built from these) ---
 		bool  m_enabled = true;
-		int   m_generator = 1; // EGeneratorKind: 0 = V2 (noise), 1 = V3 (diffusion)
 		int   m_seed = 62500;
 		int   m_chunkSize = 512;
 		int   m_lod0Res = 512;
@@ -102,34 +101,7 @@ export namespace Procedural
 		float m_skirtDepth = 5.0f;
 		int   m_maxUploadsPerFrame = 16;
 
-		// --- V2 (climate-first) generator ---
-		float  m_detailFrequency = 0.02f;  // height detail fBm (cycles/m)
-		int    m_detailOctaves = 4;
-		float  m_v2BiomeSize = 512.0f;    // typical biome extent (m): climate-field feature size
-		float  m_v2BiomeBlend = 1.0f;      // climate-space kernel width (low = crisp biome identity)
-		float  m_v2BorderWarp = 300.0f;    // domain warp on the biome lookup (wiggly borders)
-		float  m_v2OceanFraction = 0.42f;  // fraction of the world that is Ocean
-		float  m_v2ContinentFreq = 0.00005f; // continent/ocean scale (~25km: few, huge oceans)
-		float  m_v2InlandRise = 1024.0;    // altitude gain (m) from coast to deep inland
-		float  m_v2OceanDeepen = 400.0f;    // extra seabed depth (m) toward mid-ocean
-		float  m_v2TempLapse = 0.0012f;    // temperature drop per meter of altitude (snowy peaks)
-		float  m_v2ClimateBandAmp = 0.25f; // continent-scale hot/cold band strength
-		float  m_v2HeightScale = 1.0f;     // global multiplier on the biome height table
-		float  m_v2AltitudeTexel = 64.0f;  // altitude map texel size (m): between biome map and fine fields
-		float  m_v2AltitudeAmp = 60.0f;    // large-scale rolling-relief swing (m)
-		float  m_v2AltitudeFreq = 0.0002f; // relief noise frequency (cycles/m)
-		float  m_v2PeakAmp = 250.0f;       // fantasy peak height (m); per-biome relief scale damps flats
-		float  m_v2PeakThreshold = 0.5f;   // ridged-field value where peaks start (higher = rarer ranges)
-		float  m_v2PeakSharpness = 1.8f;   // peak curve power (higher = steeper)
-		float  m_v2PeakFreq = 0.00025f;    // range placement scale (~4km: more, smaller ranges)
-		float  m_v2MtnDetailAmp = 90.0f;   // altitude-masked ridge detail on mountains (m)
-		float  m_v2MtnDetailFreq = 0.004f; // ridge detail scale (~250m features)
-		float  m_v2MtnMaskStart = 40.0f;   // macro RELIEF above the local baseline (m) where mountain detail fades in
-		float  m_v2MtnMaskFull = 150.0f;   // macro relief where it reaches full amplitude
-		float  m_v2GrassFog = 0.5f;        // grassland low-fog patch thickness (0 = off)
-		float  m_v2ValleyFog = 0.8f;       // mountain-valley fog thickness (0 = off)
-
-		// --- V3 (Terrain Diffusion) generator. Unlike V2 this is ONNX-model backed: it needs 2.28 GB of
+		// --- The Terrain Diffusion generator. ONNX-model backed: it needs 2.28 GB of
 		// weights on disk and a DirectML-capable GPU, and it generates 7.68 km tiles rather than evaluating
 		// a point function. See Private/Diffusion/GeneratorV3.ixx.
 		float m_v3MetersPerPixel = 3.0f;  // 30 = the model's true training scale; lower compresses the world

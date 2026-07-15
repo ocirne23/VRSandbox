@@ -13,19 +13,24 @@ import Spatial;
 
 import :Scattering;
 import :TerrainSampler;
-import :GeneratorV2;
 import :Noise;
 
 namespace
 {
 	using namespace Procedural;
-	using enum EBiomeV2;
 
 	// --- Scatter configuration ---------------------------------------------------------------------------
 	// THE place to add scatterable content. An asset describes one model (with optional node variants) and
-	// how it sits on the ground; a rule places one asset in one biome — add as many rules per biome as you
-	// like, and reference one asset from any number of biomes. Function-local statics so the tables build
+	// how it sits on the ground; a rule places one asset in one CLIMATE, given in real units (mean annual
+	// temperature C / annual precipitation mm/yr) with density falling off around it — add as many rules as
+	// you like, and reference one asset from any number of them. Function-local statics so the tables build
 	// on first use (no global-init order dependency on the engine allocator).
+	//
+	// The climates below are the ones these rules were tuned against, carried over verbatim from the named
+	// biomes they used to reference. They are NOT the terrain textures' climate boxes: those were retuned
+	// onto the Whittaker diagram for the diffusion generator's real climate, while these still sit where the
+	// old noise generator's attractors were. So trees can disagree with the ground they stand on — worth
+	// fixing, but it is a tuning pass with nothing to do with removing the generator.
 
 	std::span<const ScatterAsset> scatterAssets()
 	{
@@ -52,28 +57,28 @@ namespace
 		static const ScatterRule rules[] =
 		{
 			// Forest belt: clustered woods with mossy ground stones between the trunks.
-			{ .biome = Forest,     .asset = "tree_small", .density = 90.0f,  .viewDistance = 500.0f, .clusterSize = 60.0f,  .clusterCoverage = 0.65f, .maxSlope = 0.55f },
-			{ .biome = Forest,     .asset = "stone",      .density = 25.0f,  .viewDistance = 160.0f },
-			{ .biome = Rainforest, .asset = "tree_small", .density = 140.0f, .viewDistance = 500.0f, .clusterSize = 90.0f,  .clusterCoverage = 0.80f, .maxSlope = 0.6f },
-			{ .biome = Taiga,      .asset = "tree_small", .density = 45.0f,  .viewDistance = 500.0f, .clusterSize = 80.0f,  .clusterCoverage = 0.55f },
-			{ .biome = Taiga,      .asset = "boulder",    .density = 2.5f,   .viewDistance = 600.0f },
+			{ .temperatureC =  11.0f, .precipMm = 1320.0f, .asset = "tree_small", .density = 90.0f,  .viewDistance = 500.0f, .clusterSize = 60.0f,  .clusterCoverage = 0.65f, .maxSlope = 0.55f },
+			{ .temperatureC =  11.0f, .precipMm = 1320.0f, .asset = "stone",      .density = 25.0f,  .viewDistance = 160.0f },
+			{ .temperatureC =  26.0f, .precipMm = 2090.0f, .asset = "tree_small", .density = 140.0f, .viewDistance = 500.0f, .clusterSize = 90.0f,  .clusterCoverage = 0.80f, .maxSlope = 0.6f },
+			{ .temperatureC =  -1.0f, .precipMm = 1210.0f, .asset = "tree_small", .density = 45.0f,  .viewDistance = 500.0f, .clusterSize = 80.0f,  .clusterCoverage = 0.55f },
+			{ .temperatureC =  -1.0f, .precipMm = 1210.0f, .asset = "boulder",    .density = 2.5f,   .viewDistance = 600.0f },
 			// Open country: lone trees, stones in the grass.
-			{ .biome = Grassland,  .asset = "tree_small", .density = 2.5f,   .viewDistance = 500.0f, .climateWidth = 0.09f },
-			{ .biome = Grassland,  .asset = "stone",      .density = 30.0f,  .viewDistance = 160.0f },
-			{ .biome = Savanna,    .asset = "tree_small", .density = 6.0f,   .viewDistance = 500.0f, .clusterSize = 120.0f, .clusterCoverage = 0.40f },
-			{ .biome = Savanna,    .asset = "rocks",      .density = 12.0f,  .viewDistance = 260.0f },
+			{ .temperatureC =   9.0f, .precipMm =  990.0f, .asset = "tree_small", .density = 2.5f,   .viewDistance = 500.0f, .climateWidth = 0.09f },
+			{ .temperatureC =   9.0f, .precipMm =  990.0f, .asset = "stone",      .density = 30.0f,  .viewDistance = 160.0f },
+			{ .temperatureC =  24.0f, .precipMm =  550.0f, .asset = "tree_small", .density = 6.0f,   .viewDistance = 500.0f, .clusterSize = 120.0f, .clusterCoverage = 0.40f },
+			{ .temperatureC =  24.0f, .precipMm =  550.0f, .asset = "rocks",      .density = 12.0f,  .viewDistance = 260.0f },
 			// Arid: namaqualand boulder fields.
-			{ .biome = Desert,     .asset = "boulder",    .density = 4.0f,   .viewDistance = 600.0f, .clusterSize = 150.0f, .clusterCoverage = 0.35f },
-			{ .biome = Desert,     .asset = "rocks",      .density = 18.0f,  .viewDistance = 300.0f, .clusterSize = 100.0f, .clusterCoverage = 0.50f },
+			{ .temperatureC =  24.0f, .precipMm =  220.0f, .asset = "boulder",    .density = 4.0f,   .viewDistance = 600.0f, .clusterSize = 150.0f, .clusterCoverage = 0.35f },
+			{ .temperatureC =  24.0f, .precipMm =  220.0f, .asset = "rocks",      .density = 18.0f,  .viewDistance = 300.0f, .clusterSize = 100.0f, .clusterCoverage = 0.50f },
 			// Wet lowland: sparse trees on the flats above the waterline.
-			{ .biome = Swampland,  .asset = "tree_small", .density = 18.0f,  .viewDistance = 400.0f, .maxSlope = 0.4f },
-			{ .biome = Lakes,      .asset = "stone",      .density = 20.0f,  .viewDistance = 160.0f },
+			{ .temperatureC =  17.0f, .precipMm = 2090.0f, .asset = "tree_small", .density = 18.0f,  .viewDistance = 400.0f, .maxSlope = 0.4f },
+			{ .temperatureC =  12.0f, .precipMm = 2200.0f, .asset = "stone",      .density = 20.0f,  .viewDistance = 160.0f },
 			// Cold/high: bare rock.
-			{ .biome = Tundra,     .asset = "rocks",      .density = 20.0f,  .viewDistance = 300.0f },
-			{ .biome = Tundra,     .asset = "boulder",    .density = 2.5f,   .viewDistance = 600.0f },
-			{ .biome = Highlands,  .asset = "boulder",    .density = 5.0f,   .viewDistance = 600.0f, .maxSlope = 0.8f },
-			{ .biome = Highlands,  .asset = "rocks",      .density = 15.0f,  .viewDistance = 300.0f, .maxSlope = 0.8f },
-			{ .biome = Arctic,     .asset = "rocks",      .density = 6.0f,   .viewDistance = 300.0f },
+			{ .temperatureC =  -8.0f, .precipMm =  990.0f, .asset = "rocks",      .density = 20.0f,  .viewDistance = 300.0f },
+			{ .temperatureC =  -8.0f, .precipMm =  990.0f, .asset = "boulder",    .density = 2.5f,   .viewDistance = 600.0f },
+			{ .temperatureC =   2.0f, .precipMm =  990.0f, .asset = "boulder",    .density = 5.0f,   .viewDistance = 600.0f, .maxSlope = 0.8f },
+			{ .temperatureC =   2.0f, .precipMm =  990.0f, .asset = "rocks",      .density = 15.0f,  .viewDistance = 300.0f, .maxSlope = 0.8f },
+			{ .temperatureC = -15.0f, .precipMm =  990.0f, .asset = "rocks",      .density = 6.0f,   .viewDistance = 300.0f },
 		};
 		return rules;
 	}
@@ -232,7 +237,9 @@ namespace Procedural
 				continue; // asset failed to load, already warned
 			m_rules[i].assetIdx = assetIdx;
 			m_rules[i].numVariants = (uint16)m_assets[assetIdx].variants.size();
-			m_rules[i].climateCoords = biomeClimateCoords(rule.biome);
+			// Real units -> the normalized (t01, h01) space the density falloff and the terrain's texture
+			// picking both work in.
+			m_rules[i].climateCoords = glm::vec2(temperatureTo01(rule.temperatureC), precipTo01(rule.precipMm));
 			m_ruleOrder.push_back((uint16)i);
 			m_maxViewDistance = glm::max(m_maxViewDistance, rule.viewDistance);
 		}

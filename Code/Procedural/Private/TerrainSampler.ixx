@@ -10,13 +10,13 @@ export namespace Procedural
 	inline constexpr float TEMPERATURE_MAX_C = 50.0f;
 
 	// Humidity encoding: sampleHumidity is [0,1], where 1 means HUMIDITY_FULL_PRECIP_MM of annual
-	// precipitation or more. A generator that models real precipitation (V3, whose diffusion model emits
-	// mm/yr) maps through this; V2's humidity is a normalized field that adopts it implicitly.
+	// precipitation or more. The generator models real precipitation (its diffusion model emits mm/yr)
+	// and maps through this.
 	inline constexpr float HUMIDITY_FULL_PRECIP_MM = 2200.0f;
 
-	// Physical climate -> the normalized (t01, h01) space that the biome attractor table, V2's
-	// terrain-character blend and the terrain shader's texture splatting ALL share. The shader mirrors
-	// temperatureTo01 as clamp((temp + 25) / 75) — keep them in step.
+	// Physical climate -> the normalized (t01, h01) space that the scatter rules' climate attractors and
+	// the terrain shader's texture splatting BOTH share. The shader mirrors temperatureTo01 as
+	// clamp((temp + 25) / 75) — keep them in step.
 	constexpr float temperatureTo01(float celsius)
 	{
 		constexpr float invRange = 1.0f / (TEMPERATURE_MAX_C - TEMPERATURE_MIN_C);
@@ -93,7 +93,7 @@ export namespace Procedural
 		Coarse
 	};
 
-	// The point-evaluable terrain field every generator implements (TerrainGenV2, TerrainGenV3).
+	// The point-evaluable terrain field the generator (TerrainGenV3) implements.
 	// All methods are pure functions of world position — seeded, thread-safe, world-continuous — which is
 	// what keeps chunks, LODs, bakes (shore/fog maps) and buoyancy consistent with each other regardless
 	// of which generator produced them. Consumers hold shared_ptr<const ITerrainSampler>.

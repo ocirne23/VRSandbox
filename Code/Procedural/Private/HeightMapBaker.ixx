@@ -30,7 +30,7 @@ export namespace Procedural
 	// A real shelving bay is kept wet by the RADIUS instead: its apron is too shallow to seed itself, but it
 	// sits close to water that does. Radius shorter than the apron = the sea retreats off it.
 	//
-	// LAKES are never touched: a lake's surface already differs from sea level, so V2's lakes pass through
+	// LAKES are never touched: a lake's surface already differs from sea level, so lakes pass through
 	// and keep their own shoreline.
 	struct WaterReach
 	{

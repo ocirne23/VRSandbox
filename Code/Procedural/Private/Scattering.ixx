@@ -9,12 +9,11 @@ import RendererVK;
 import Spatial;
 
 import :TerrainSampler;
-import :GeneratorV2;
 
 export namespace Procedural
 {
 	// One scatterable model: how it looks and how it occupies ground. Assets are shared — any number of
-	// biome rules can reference one by name. Configured in the SCATTER_ASSETS table (Scattering.cpp).
+	// rules can reference one by name. Configured in the SCATTER_ASSETS table (Scattering.cpp).
 	struct ScatterAsset
 	{
 		const char* name = "";
@@ -31,20 +30,27 @@ export namespace Procedural
 		float sinkDepth = 0.08f;           // m (x scale) embedded below the surface — hides floating edges on slopes
 	};
 
-	// One asset's distribution within one biome — a biome supports any number of rules, and one asset can
-	// appear in many biomes with different densities. Density falls off smoothly with the local climate's
-	// distance to the biome's attractor (same (t, h) space the terrain character blends in), so scatter
-	// borders track the terrain's soft biome borders instead of the hard nearest-attractor classification.
+	// One asset's distribution in one climate — add as many rules as you like, and reference one asset from
+	// any number of them. Density falls off smoothly with the local climate's distance to the rule's
+	// attractor (the same (t, h) space the terrain's textures are picked in), so scatter borders are soft
+	// and track the ground they stand on rather than snapping at a classification boundary.
 	// Configured in the SCATTER_RULES table (Scattering.cpp).
 	struct ScatterRule
 	{
-		EBiomeV2 biome = EBiomeV2::Grassland;
+		// The climate this asset likes, in REAL units (mean annual temperature C / annual precipitation
+		// mm/yr) — the same units the terrain's texture table uses. Density falls off as a Gaussian around
+		// it, so a rule is an attractor in climate space rather than a member of a named region.
+		// It named a biome enum once. That enum belonged to the old noise generator and went with it, but
+		// the indirection was worth losing on its own: a rule now says what climate it wants instead of
+		// pointing at a table entry that says it somewhere else.
+		float temperatureC = 9.0f;
+		float precipMm = 990.0f;
 		const char* asset = "";
 		float density = 20.0f;        // instances per hectare (100x100 m) at full climate weight
 		float viewDistance = 400.0f;  // spawn range (m): instances exist only within this camera distance
-		float climateWidth = 0.12f;   // sigma of the density falloff around the biome attractor in climate space
-		float clusterSize = 0.0f;     // patch feature size (m); 0 = even coverage across the biome
-		float clusterCoverage = 0.5f; // ~fraction of the biome covered by patches (clusterSize > 0 only)
+		float climateWidth = 0.12f;   // sigma of the density falloff around the attractor, in climate space
+		float clusterSize = 0.0f;     // patch feature size (m); 0 = even coverage
+		float clusterCoverage = 0.5f; // ~fraction of the region covered by patches (clusterSize > 0 only)
 		float maxSlope = 0.7f;        // reject ground steeper than this (rise/run)
 		float minAltitude = 1.5f;     // placement band, m above the local water level (keeps things off beaches)
 		float maxAltitude = FLT_MAX;
@@ -148,7 +154,7 @@ export namespace Procedural
 		std::vector<AssetRuntime> m_assets;
 
 		// --- Per-rule runtime, resolved at initialize (read-only afterwards, shared with the worker):
-		// table asset index (UINT16_MAX = rule dropped), variant count, and the biome attractor's
+		// table asset index (UINT16_MAX = rule dropped), variant count, and the rule attractor's
 		// coordinates in climate space. m_ruleOrder is the generation order — valid rules sorted by
 		// footprint descending, so large objects claim ground before small ones fill the gaps.
 		struct RuleRuntime

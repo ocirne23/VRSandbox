@@ -13,7 +13,6 @@ import Spatial;
 
 import :TerrainStreamer;
 import :TerrainSampler;
-import :GeneratorV2;
 import :TerrainGenerator;
 import :TerrainChunk;
 
@@ -239,10 +238,6 @@ namespace Procedural
 		auto dirty = [this]() { m_configDirty = true; };
 
 		Tweak::boolean("Terrain", "Enabled", &m_enabled);
-		// V2 = noise field, evaluated per point. V3 = Terrain Diffusion (ONNX): needs 2.28 GB of models
-		// (downloaded on first selection) and a DirectML GPU; terrain appears once they finish loading.
-		static constexpr std::string_view generatorNames[] = { "V2 (noise)", "V3 (diffusion)" };
-		Tweak::enumVar("Terrain", "Generator", &m_generator, generatorNames, dirty);
 		Tweak::intVar("Terrain", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
 		Tweak::intVar("Terrain", "Chunk size (m)", &m_chunkSize, 128, 1024, 1.0f, dirty);
 		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 128, 1024, 1.0f, dirty);
@@ -311,31 +306,6 @@ namespace Procedural
 		Tweak::floatVar("Terrain/Textures", "Snow slope full", &m_texSnowSlopeFull, 0.0f, 1.0f);
 		Tweak::floatVar("Terrain/Textures", "Snow min humidity", &m_texSnowAridity, 0.0f, 0.5f, 0.005f);
 
-		Tweak::floatVar("Terrain/V2", "Biome size (m)", &m_v2BiomeSize, 8.0f, 8000.0f, 10.0f, dirty);  // climate-field feature size
-		Tweak::floatVar("Terrain/V2", "Biome blending", &m_v2BiomeBlend, 0.1f, 3.0f, 0.01f, dirty);   // climate-space kernel width (low = crisp biomes)
-		Tweak::floatVar("Terrain/V2", "Border warp (m)", &m_v2BorderWarp, 0.0f, 1500.0f, 5.0f, dirty);
-		Tweak::floatVar("Terrain/V2", "Ocean fraction", &m_v2OceanFraction, 0.0f, 1.0f, 0.01f, dirty);
-		Tweak::floatVar("Terrain/V2", "Continent freq", &m_v2ContinentFreq, 0.0f, FLT_MAX, 0.00001f, dirty); // lower = bigger oceans/continents
-		Tweak::floatVar("Terrain/V2", "Inland rise (m)", &m_v2InlandRise, 0.0f, 2500.0f, 1.0f, dirty);        // coast -> deep inland altitude gain
-		Tweak::floatVar("Terrain/V2", "Ocean deepen (m)", &m_v2OceanDeepen, 0.0f, 5000.0f, 1.0f, dirty);
-		Tweak::floatVar("Terrain/V2", "Temp lapse", &m_v2TempLapse, 0.0f, 0.01f, 0.0001f, dirty);            // altitude -> cold
-		Tweak::floatVar("Terrain/V2", "Climate bands", &m_v2ClimateBandAmp, 0.0f, 0.6f, 0.01f, dirty);       // regional hot/cold swing
-		Tweak::floatVar("Terrain/V2", "Height scale", &m_v2HeightScale, 0.0f, 8.0f, 0.05f, dirty);
-		Tweak::floatVar("Terrain/V2", "Altitude texel (m)", &m_v2AltitudeTexel, 8.0f, 512.0f, 1.0f, dirty); // macro elevation lattice
-		Tweak::floatVar("Terrain/V2", "Altitude amp (m)", &m_v2AltitudeAmp, 0.0f, 400.0f, 1.0f, dirty);     // large-scale relief
-		Tweak::floatVar("Terrain/V2", "Altitude freq", &m_v2AltitudeFreq, 0.0f, FLT_MAX, 0.00005f, dirty);
-		Tweak::floatVar("Terrain/V2", "Peak amp (m)", &m_v2PeakAmp, 0.0f, 1000.0f, 5.0f, dirty);       // fantasy ranges
-		Tweak::floatVar("Terrain/V2", "Peak threshold", &m_v2PeakThreshold, 0.0f, 1.0f, 0.01f, dirty); // higher = rarer
-		Tweak::floatVar("Terrain/V2", "Peak sharpness", &m_v2PeakSharpness, 0.1f, 6.0f, 0.05f, dirty);
-		Tweak::floatVar("Terrain/V2", "Peak freq", &m_v2PeakFreq, 0.0f, FLT_MAX, 0.00002f, dirty);
-		Tweak::floatVar("Terrain/V2", "Mtn detail amp (m)", &m_v2MtnDetailAmp, 0.0f, 300.0f, 1.0f, dirty); // craggy ridges on high ground
-		Tweak::floatVar("Terrain/V2", "Mtn detail freq", &m_v2MtnDetailFreq, 0.0f, FLT_MAX, 0.0005f, dirty);
-		Tweak::floatVar("Terrain/V2", "Mtn mask start (m)", &m_v2MtnMaskStart, 0.0f, 300.0f, 1.0f, dirty); // MACRO RELIEF above the local baseline, not raw altitude
-		Tweak::floatVar("Terrain/V2", "Mtn mask full (m)", &m_v2MtnMaskFull, 0.0f, 500.0f, 1.0f, dirty);
-		Tweak::floatVar("Terrain/V2", "Grass fog", &m_v2GrassFog, 0.0f, 1.0f, 0.01f, dirty);   // patchy ground mist
-		Tweak::floatVar("Terrain/V2", "Valley fog", &m_v2ValleyFog, 0.0f, 1.0f, 0.01f, dirty); // fills mountain valleys
-		Tweak::floatVar("Terrain/V2", "Detail freq", &m_detailFrequency, 0.0f, FLT_MAX, 0.001f, dirty); // height detail fBm
-		Tweak::intVar("Terrain/V2", "Detail octaves", &m_detailOctaves, 1, 8, 1.0f, dirty);
 
 		// V3 (Terrain Diffusion). The model resolves 30 m/px, which is what makes its continents
 		// continent-sized; everything below that is the slope-masked detail layer below.
@@ -432,9 +402,8 @@ namespace Procedural
 		// measures ~15 m of relief at mpp=30 and ~1.5 m at mpp=3. Left absolute, a 12 m start is unreachable
 		// below mpp≈25 and the near field simply never grows rock (measured: mean crag 1.5 m, rock weight
 		// 0.019 at mpp=3). Scaling here keeps the tweak meaning "metres at the model's true scale", which is
-		// the same convention the V3 detail wavelengths already use.
-		// V2 has no such scale — its altitude lattice is a fixed 64 m — so it passes them through.
-		const float cragScale = m_generator == 1 ? TerrainGenV3::worldScale(m_v3MetersPerPixel) : 1.0f;
+		// the same convention the detail wavelengths already use.
+		const float cragScale = TerrainGenV3::worldScale(m_v3MetersPerPixel);
 		renderer.setTerrainTextureParams({
 			.uvScaleGround = m_texUvScaleGround,
 			.uvScaleRock = m_texUvScaleRock,
@@ -466,7 +435,7 @@ namespace Procedural
 		// Live: the boxes are authored in mm/yr and divided by the generator's precipitation scale, which
 		// is a tweak. Pushing them every frame is a memcpy of two dozen vec4s and means the table can never
 		// be reading a scale the generator has already moved off.
-		const float precipFullMm = m_generator == 1 ? m_v3PrecipFullHumidity : HUMIDITY_FULL_PRECIP_MM;
+		const float precipFullMm = m_v3PrecipFullHumidity;
 		for (size_t i = 0; i < m_texClimateReal.size(); ++i)
 			m_texClimateBoxes[i] = terrainClimateBox(m_texClimateReal[i], precipFullMm);
 		renderer.setTerrainSplatClimate(m_texClimateBoxes);
@@ -538,95 +507,54 @@ namespace Procedural
 
 	void TerrainStreamer::rebuildMaps()
 	{
-		if (m_generator == 1)
-		{
-			// V3 can't sample anything until its models are resident. Constructing the generator is what
-			// kicks the download/load off, so do that unconditionally, but only PUBLISH it once ready —
-			// otherwise every chunk built in the meantime would bake a flat sea-level world into the
-			// resident cache and never be revisited.
-			TerrainConfigV3 cfg;
-			cfg.seed = (uint32)m_seed;
-			cfg.seaLevel = m_seaLevel;
-			cfg.metersPerPixel = m_v3MetersPerPixel;
-			cfg.heightScale = m_v3HeightScale;
-			cfg.detailSlopeGain = m_v3DetailSlopeGain;
-			cfg.detailWavelengthA = m_v3DetailWavelengthA;
-			cfg.detailAmplitudeA = m_v3DetailAmplitudeA;
-			cfg.detailOctavesA = (uint32)glm::max(1, m_v3DetailOctavesA);
-			cfg.detailWavelengthB = m_v3DetailWavelengthB;
-			cfg.detailAmplitudeB = m_v3DetailAmplitudeB;
-			cfg.detailOctavesB = (uint32)glm::max(1, m_v3DetailOctavesB);
-			cfg.precipForFullHumidity = m_v3PrecipFullHumidity;
-			cfg.humidityOffset = m_v3HumidityOffset;
-			cfg.temperatureOffset = m_v3TemperatureOffset;
-			cfg.lapseRate = m_v3LapseRate;
-			cfg.climateNoiseAmplitudeC = m_v3ClimateNoiseC;
-			cfg.climateNoiseWavelength = m_v3ClimateNoiseWavelength;
-			cfg.climateNoiseOctaves = (uint32)glm::max(1, m_v3ClimateNoiseOctaves);
-			cfg.humidFogAmount = m_v3HumidFog;
-			cfg.valleyFogAmount = m_v3ValleyFog;
-			cfg.maxResidentTiles = m_v3MaxTiles;
-			cfg.useFp16 = m_v3Fp16;
-
-			// BEFORE the isReady() check, not inside the generator: switching precision reloads the models
-			// and drops isReady(), so a check taken before it would publish a generator whose pipeline is
-			// being torn down underneath it — and every chunk built meanwhile would bake a flat sea-level
-			// world into the resident cache and never be revisited.
-			TerrainGenV3::setPrecision(m_v3Fp16);
-
-			std::shared_ptr<const ITerrainSampler> maps;
-			if (TerrainGenV3::isReady())
-			{
-				maps = std::make_shared<const TerrainGenV3>(cfg);
-				m_v3AwaitingModels = false;
-			}
-			else
-			{
-				// Cheap: the ctor only registers interest and starts the background load.
-				const TerrainGenV3 kick(cfg);
-				m_v3AwaitingModels = !TerrainGenV3::hasFailed();
-				if (TerrainGenV3::hasFailed())
-					Log::error("[Terrain] V3 unavailable (model load failed) - staying on an empty world; "
-					           "switch Terrain/Generator back to V2");
-			}
-
-			std::lock_guard<std::mutex> lk(m_mutex);
-			m_maps = std::move(maps);
-			++m_generation;
-			m_requests.clear();
-			return;
-		}
-
-		m_v3AwaitingModels = false;
-		TerrainConfigV2 cfg;
+		// The generator can't sample anything until its models are resident. Constructing it is what kicks
+		// the download/load off, so do that unconditionally, but only PUBLISH it once ready — otherwise
+		// every chunk built in the meantime would bake a flat sea-level world into the resident cache and
+		// never be revisited.
+		TerrainConfigV3 cfg;
 		cfg.seed = (uint32)m_seed;
 		cfg.seaLevel = m_seaLevel;
-		cfg.biomeSize = m_v2BiomeSize;
-		cfg.biomeBlend = m_v2BiomeBlend;
-		cfg.borderWarp = m_v2BorderWarp;
-		cfg.oceanFraction = m_v2OceanFraction;
-		cfg.continentFrequency = m_v2ContinentFreq;
-		cfg.inlandRise = m_v2InlandRise;
-		cfg.oceanDeepen = m_v2OceanDeepen;
-		cfg.temperatureLapse = m_v2TempLapse;
-		cfg.climateBandAmplitude = m_v2ClimateBandAmp;
-		cfg.heightScale = m_v2HeightScale;
-		cfg.altitudeTexelSize = m_v2AltitudeTexel;
-		cfg.altitudeAmplitude = m_v2AltitudeAmp;
-		cfg.altitudeFrequency = m_v2AltitudeFreq;
-		cfg.peakAmplitude = m_v2PeakAmp;
-		cfg.peakThreshold = m_v2PeakThreshold;
-		cfg.peakSharpness = m_v2PeakSharpness;
-		cfg.peakFrequency = m_v2PeakFreq;
-		cfg.mountainDetailAmplitude = m_v2MtnDetailAmp;
-		cfg.mountainDetailFrequency = m_v2MtnDetailFreq;
-		cfg.mountainMaskStart = m_v2MtnMaskStart;
-		cfg.mountainMaskFull = m_v2MtnMaskFull;
-		cfg.detailFrequency = m_detailFrequency;
-		cfg.detailOctaves = (uint32)glm::max(1, m_detailOctaves);
-		cfg.grassFogAmount = m_v2GrassFog;
-		cfg.valleyFogAmount = m_v2ValleyFog;
-		std::shared_ptr<const ITerrainSampler> maps = std::make_shared<const TerrainGenV2>(cfg);
+		cfg.metersPerPixel = m_v3MetersPerPixel;
+		cfg.heightScale = m_v3HeightScale;
+		cfg.detailSlopeGain = m_v3DetailSlopeGain;
+		cfg.detailWavelengthA = m_v3DetailWavelengthA;
+		cfg.detailAmplitudeA = m_v3DetailAmplitudeA;
+		cfg.detailOctavesA = (uint32)glm::max(1, m_v3DetailOctavesA);
+		cfg.detailWavelengthB = m_v3DetailWavelengthB;
+		cfg.detailAmplitudeB = m_v3DetailAmplitudeB;
+		cfg.detailOctavesB = (uint32)glm::max(1, m_v3DetailOctavesB);
+		cfg.precipForFullHumidity = m_v3PrecipFullHumidity;
+		cfg.humidityOffset = m_v3HumidityOffset;
+		cfg.temperatureOffset = m_v3TemperatureOffset;
+		cfg.lapseRate = m_v3LapseRate;
+		cfg.climateNoiseAmplitudeC = m_v3ClimateNoiseC;
+		cfg.climateNoiseWavelength = m_v3ClimateNoiseWavelength;
+		cfg.climateNoiseOctaves = (uint32)glm::max(1, m_v3ClimateNoiseOctaves);
+		cfg.humidFogAmount = m_v3HumidFog;
+		cfg.valleyFogAmount = m_v3ValleyFog;
+		cfg.maxResidentTiles = m_v3MaxTiles;
+		cfg.useFp16 = m_v3Fp16;
+
+		// BEFORE the isReady() check, not inside the generator: switching precision reloads the models
+		// and drops isReady(), so a check taken before it would publish a generator whose pipeline is
+		// being torn down underneath it — and every chunk built meanwhile would bake a flat sea-level
+		// world into the resident cache and never be revisited.
+		TerrainGenV3::setPrecision(m_v3Fp16);
+
+		std::shared_ptr<const ITerrainSampler> maps;
+		if (TerrainGenV3::isReady())
+		{
+			maps = std::make_shared<const TerrainGenV3>(cfg);
+			m_v3AwaitingModels = false;
+		}
+		else
+		{
+			// Cheap: the ctor only registers interest and starts the background load.
+			const TerrainGenV3 kick(cfg);
+			m_v3AwaitingModels = !TerrainGenV3::hasFailed();
+			if (TerrainGenV3::hasFailed())
+				Log::error("[Terrain] unavailable (model load failed) - staying on an empty world");
+		}
 
 		std::lock_guard<std::mutex> lk(m_mutex);
 		m_maps = std::move(maps);
@@ -673,7 +601,7 @@ namespace Procedural
 				// result so it releases its pending key (m_pending is main-thread-owned).
 				//
 				// O(queue) per generated chunk. The queue is a few hundred entries and a chunk costs
-				// milliseconds (V2) to seconds (V3), so the scan does not register.
+				// milliseconds to seconds, so the scan does not register.
 				size_t best = SIZE_MAX;
 				int64 bestDist2 = INT64_MAX;
 				size_t keep = 0;
@@ -851,14 +779,12 @@ namespace Procedural
 		// own vertical frame). This is how terrainTemperatureAt turns the map's baked SEA-LEVEL baseline
 		// into a temperature at any height, so it must be the rate the generator ACTUALLY used — hence read
 		// from the sampler rather than from the tweak beside it. 0 with no terrain, and 0 from a generator
-		// that folds its own lapse into the temperature it reports (V2, which publishes 0): there the
-		// baseline IS the temperature and lapsing it again would double-count.
+		// that folds its own lapse into the temperature it reports: there the baseline IS the temperature
+		// and lapsing it again would double-count.
 		float lapsePerWorldM = 0.0f;
 		if (maps)
 		{
-			const float vertScale = m_generator == 1
-				? TerrainGenV3::worldScale(m_v3MetersPerPixel) * glm::max(m_v3HeightScale, 0.01f)
-				: 1.0f;
+			const float vertScale = TerrainGenV3::worldScale(m_v3MetersPerPixel) * glm::max(m_v3HeightScale, 0.01f);
 			lapsePerWorldM = maps->lapseRatePerMetre() / glm::max(vertScale, 1e-4f);
 		}
 		renderer.setTerrainParams((float)R * chunkSize, m_seaLevel, lapsePerWorldM);
