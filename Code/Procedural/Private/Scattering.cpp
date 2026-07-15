@@ -141,12 +141,11 @@ namespace Procedural
 	ScatterSystem::~ScatterSystem()
 	{
 		{
+			// starve the pump: it exits once the pool is empty, and nothing re-kicks it
 			std::lock_guard<std::mutex> lk(m_mutex);
-			m_running = false;
+			m_requests.clear();
 		}
-		m_cv.notify_all();
-		if (m_worker.joinable())
-			m_worker.join();
+		Globals::jobSystem.wait(m_pumpCounter); // main thread helps while waiting
 		clearResidents(); // main thread: free RenderNodes while the renderer is still alive
 	}
 
@@ -157,6 +156,7 @@ namespace Procedural
 		Tweak::intVar("Scatter", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
 		Tweak::floatVar("Scatter", "Cell size (m)", &m_cellSize, 16.0f, 256.0f, 1.0f, dirty);
 		Tweak::floatVar("Scatter", "Density scale", &m_densityScale, 0.0f, 8.0f, 0.05f, dirty);
+		Tweak::intVar("Scatter", "Gen jobs", &m_maxGenJobs, 1, 16, 1.0f);
 		Tweak::floatVar("Scatter", "View distance scale", &m_viewScale, 0.1f, 4.0f, 0.05f); // live: spawn range only, no regen
 		Tweak::intVar("Scatter", "Spawns/frame", &m_maxSpawnsPerFrame, 32, 8192, 1.0f);
 
@@ -248,8 +248,6 @@ namespace Procedural
 			return scatterAssets()[m_rules[a].assetIdx].footprintRadius > scatterAssets()[m_rules[b].assetIdx].footprintRadius;
 		});
 
-		m_running = true;
-		m_worker = std::thread([this]() { workerLoop(); });
 	}
 
 	void ScatterSystem::clearResidents()
@@ -391,17 +389,30 @@ namespace Procedural
 		}
 	}
 
-	void ScatterSystem::workerLoop()
+	void ScatterSystem::kickPump(size_t numNew)
+	{
+		const int32 cap = glm::clamp(m_maxGenJobs, 1, 16);
+		for (size_t spawned = 0; spawned < numNew; )
+		{
+			int32 cur = m_numPumps.load(std::memory_order_relaxed);
+			if (cur >= cap)
+				return;
+			if (m_numPumps.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel))
+			{
+				Globals::jobSystem.submit([this] { pumpJob(); }, EJobPriority::Low, &m_pumpCounter, "scatterCellPump");
+				++spawned;
+			}
+		}
+	}
+
+	void ScatterSystem::pumpJob()
 	{
 		for (;;)
 		{
 			Request req;
 			bool haveWork = false;
 			{
-				std::unique_lock<std::mutex> lk(m_mutex);
-				m_cv.wait(lk, [this]() { return !m_running || !m_requests.empty(); });
-				if (!m_running)
-					return;
+				std::lock_guard<std::mutex> lk(m_mutex);
 				// Lazy staleness at dequeue, like the terrain worker: cells that left the ring while
 				// queued bounce back as dropped results so the main thread releases their pending keys.
 				while (!m_requests.empty())
@@ -423,7 +434,25 @@ namespace Procedural
 				}
 			}
 			if (!haveWork)
+			{
+				// same claim/exit-recheck protocol as the terrain pump
+				m_numPumps.fetch_sub(1, std::memory_order_release);
+				{
+					std::lock_guard<std::mutex> lk(m_mutex);
+					if (m_requests.empty())
+						return;
+				}
+				const int32 cap = glm::clamp(m_maxGenJobs, 1, 16);
+				int32 cur = m_numPumps.load(std::memory_order_relaxed);
+				for (;;)
+				{
+					if (cur >= cap)
+						return; // an appender's kicks refilled the pool; those jobs take over
+					if (m_numPumps.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel))
+						break;
+				}
 				continue;
+			}
 
 			Result res;
 			res.key = req.key;
@@ -551,7 +580,7 @@ namespace Procedural
 				m_requests.push_back(std::move(r));
 		}
 		if (!newRequests.empty())
-			m_cv.notify_all();
+			kickPump(newRequests.size());
 
 		// --- Drain generated cells. Admission is just moving vectors into the resident map (node
 		// spawning is budgeted separately below), so no per-frame cap is needed here.

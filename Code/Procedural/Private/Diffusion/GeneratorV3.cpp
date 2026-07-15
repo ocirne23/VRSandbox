@@ -2,6 +2,7 @@ module Procedural;
 
 import Core;
 import Core.Log;
+import Threading;
 import :GeneratorV3;
 import :Noise;
 import :Diffusion.Laplacian;
@@ -105,7 +106,7 @@ namespace Procedural
 			{
 				if (!isReady())
 					return;
-				std::lock_guard<std::mutex> lk(m_pipelineMutex);
+				JobMutex::Scope lk(m_pipelineMutex);
 				if (seed == m_pipeline->seed())
 					return;
 				m_pipeline->setSeed(seed);
@@ -154,7 +155,7 @@ namespace Procedural
 				{
 					// Waits out any inference already running. New fetches then see a null pipeline and
 					// return no tile, which the sample path already treats as "not generated yet".
-					std::lock_guard<std::mutex> pk(m_pipelineMutex);
+					JobMutex::Scope pk(m_pipelineMutex);
 					m_pipeline.reset();
 				}
 				{
@@ -210,7 +211,7 @@ namespace Procedural
 					return;
 				}
 				{
-					std::lock_guard<std::mutex> lk(m_pipelineMutex);
+					JobMutex::Scope lk(m_pipelineMutex);
 					m_pipeline = std::move(p);
 				}
 				m_ready.store(true, std::memory_order_release);
@@ -286,15 +287,23 @@ namespace Procedural
 			std::string m_status;
 
 			// The pipeline is single-threaded by construction; this lock IS the inference thread.
-			std::mutex m_pipelineMutex;
+			// A JobMutex so a ~1.5s cold-tile wait from a job parks its FIBER instead of a pooled
+			// worker thread (unregistered threads still just block).
+			JobMutex m_pipelineMutex;
 			std::unique_ptr<WorldPipeline> m_pipeline;
 
 			std::mutex m_cacheMutex;
 			Lru m_cache;
 			Lru m_coarseCache;
 			int32 m_maxTiles = 64;
-			// Dedups concurrent requests for the same tile so N callers cause 1 generation, not N.
-			std::unordered_map<uint64, std::shared_future<FieldTilePtr>> m_pending;
+			// Dedups concurrent requests for the same tile so N callers cause 1 generation, not N;
+			// joiners park on the tile's JobEvent instead of blocking a worker on a shared_future.
+			struct PendingTile
+			{
+				JobEvent done;
+				FieldTilePtr result;
+			};
+			std::unordered_map<uint64, std::shared_ptr<PendingTile>> m_pending;
 			std::mutex m_pendingMutex;
 		};
 
@@ -309,22 +318,22 @@ namespace Procedural
 
 			// Not resident. Claim the generation, or join whoever already claimed it, so N concurrent
 			// callers cause one generation rather than N.
-			std::shared_future<FieldTilePtr> fut;
-			std::shared_ptr<std::packaged_task<FieldTilePtr()>> ownerTask;
+			std::shared_ptr<PendingTile> pending;
+			std::shared_ptr<std::function<FieldTilePtr()>> ownerTask;
 			bool owner = false;
 			{
 				std::lock_guard<std::mutex> pk(m_pendingMutex);
 				auto it = m_pending.find(key);
 				if (it != m_pending.end())
 				{
-					fut = it->second;
+					pending = it->second;
 				}
 				else
 				{
-					auto task = std::make_shared<std::packaged_task<FieldTilePtr()>>([this, ti, tj]() -> FieldTilePtr
+					auto task = std::make_shared<std::function<FieldTilePtr()>>([this, ti, tj]() -> FieldTilePtr
 					{
 						// One inference at a time: the tile store is not thread-safe.
-						std::lock_guard<std::mutex> lk(m_pipelineMutex);
+						JobMutex::Scope lk(m_pipelineMutex);
 						if (!m_pipeline)
 							return nullptr;
 
@@ -347,8 +356,8 @@ namespace Procedural
 						               climate.begin() + (ptrdiff_t)(5 * plane));
 						return t;
 					});
-					fut = std::shared_future<FieldTilePtr>(task->get_future());
-					m_pending[key] = fut;
+					pending = std::make_shared<PendingTile>();
+					m_pending[key] = pending;
 					ownerTask = task;
 					owner = true;
 				}
@@ -358,24 +367,28 @@ namespace Procedural
 			// already worker threads that expect to block (the terrain streamer worker, the scatter worker,
 			// the height-map baker's std::async), and m_pipelineMutex is what actually serialises inference —
 			// so a dedicated inference thread would only add a hop and a thread per tile.
-			if (ownerTask)
-				(*ownerTask)();
-
-			FieldTilePtr tile = fut.get();
-
-			if (owner)
+			if (!owner)
 			{
-				{
-					std::lock_guard<std::mutex> pk(m_pendingMutex);
-					m_pending.erase(key);
-				}
-				if (tile)
-				{
-					std::lock_guard<std::mutex> ck(m_cacheMutex);
-					m_cache.put(key, tile);
-					evictLocked();
-				}
+				// Joiners park on the tile's event: a fiber frees its worker to run other jobs, an
+				// unregistered thread blocks - either way one generation serves everyone.
+				pending->done.wait();
+				return pending->result;
 			}
+
+			FieldTilePtr tile = pending->result = (*ownerTask)();
+
+			if (tile)
+			{
+				// cache first so callers arriving after the pending-erase below hit it immediately
+				std::lock_guard<std::mutex> ck(m_cacheMutex);
+				m_cache.put(key, tile);
+				evictLocked();
+			}
+			{
+				std::lock_guard<std::mutex> pk(m_pendingMutex);
+				m_pending.erase(key);
+			}
+			pending->done.signal(); // joiners read pending->result, ordered by the event
 			return tile;
 		}
 
@@ -393,7 +406,7 @@ namespace Procedural
 			// waste; the pipeline lock below already serialises them.
 			FieldTilePtr tile;
 			{
-				std::lock_guard<std::mutex> lk(m_pipelineMutex);
+				JobMutex::Scope lk(m_pipelineMutex);
 				if (!m_pipeline)
 					return nullptr;
 				{

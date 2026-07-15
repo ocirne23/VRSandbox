@@ -167,7 +167,7 @@ namespace
 	// Bakes every stale terrain texture into the DDS cache. Runs on a background jthread at startup;
 	// one conversion is seconds of CPU (mips + BC compression), so stale entries fan out over a small
 	// thread pool and the stop token is checked between files (app shutdown mid-first-bake).
-	void bakeTerrainTexCache(std::stop_token stopToken)
+	void bakeTerrainTexCache(const std::atomic<bool>& stopRequested)
 	{
 		std::error_code ec;
 		std::filesystem::create_directories(TERRAIN_TEX_CACHE_DIR, ec);
@@ -187,33 +187,25 @@ namespace
 			return;
 
 		const auto bakeStart = std::chrono::steady_clock::now();
-		std::atomic<size_t> nextTask{ 0 };
-		const uint32 numThreads = glm::clamp(std::thread::hardware_concurrency(), 2u, (uint32)tasks.size());
-		std::vector<std::thread> pool;
-		pool.reserve(numThreads);
-		for (uint32 t = 0; t < numThreads; ++t)
+		// grain 1: each conversion is a whole image load + BC compress, seconds apart in cost
+		Globals::jobSystem.parallelFor(0, (uint32)tasks.size(), 1, [&](uint32 begin, uint32 end)
 		{
-			pool.emplace_back([&]()
+			for (uint32 i = begin; i < end; ++i)
 			{
-				for (size_t i = nextTask.fetch_add(1); i < tasks.size(); i = nextTask.fetch_add(1))
+				if (stopRequested.load(std::memory_order_relaxed))
+					return;
+				const TerrainTexSource& src = *tasks[i].src;
+				bool ok = false;
+				switch (tasks[i].map)
 				{
-					if (stopToken.stop_requested())
-						return;
-					const TerrainTexSource& src = *tasks[i].src;
-					bool ok = false;
-					switch (tasks[i].map)
-					{
-					case 0: ok = TextureConvert::convertToDds(terrainTexSrcPath(src, "diff").c_str(), TextureConvert::EUsage::Color, terrainTexCachePath(src, "diff").c_str()); break;
-					case 1: ok = TextureConvert::convertToDds(terrainTexSrcPath(src, "nor_gl").c_str(), TextureConvert::EUsage::NormalMap, terrainTexCachePath(src, "nor").c_str()); break;
-					case 2: ok = TextureConvert::convertToDds(terrainTexSrcPath(src, "arm").c_str(), TextureConvert::EUsage::Data, terrainTexCachePath(src, "arm").c_str()); break;
-					}
-					if (!ok)
-						Log::warning(std::format("Terrain: failed to bake splat texture '{}' map {}", src.stem, tasks[i].map));
+				case 0: ok = TextureConvert::convertToDds(terrainTexSrcPath(src, "diff").c_str(), TextureConvert::EUsage::Color, terrainTexCachePath(src, "diff").c_str()); break;
+				case 1: ok = TextureConvert::convertToDds(terrainTexSrcPath(src, "nor_gl").c_str(), TextureConvert::EUsage::NormalMap, terrainTexCachePath(src, "nor").c_str()); break;
+				case 2: ok = TextureConvert::convertToDds(terrainTexSrcPath(src, "arm").c_str(), TextureConvert::EUsage::Data, terrainTexCachePath(src, "arm").c_str()); break;
 				}
-			});
-		}
-		for (std::thread& t : pool)
-			t.join();
+				if (!ok)
+					Log::warning(std::format("Terrain: failed to bake splat texture '{}' map {}", src.stem, tasks[i].map));
+			}
+		}, EJobPriority::Low);
 		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - bakeStart).count();
 		Log::info(std::format("Terrain: baked {} splat textures into {} in {} ms", tasks.size(), TERRAIN_TEX_CACHE_DIR, ms));
 	}
@@ -224,12 +216,13 @@ namespace Procedural
 	TerrainStreamer::~TerrainStreamer()
 	{
 		{
+			// starve the pump: it exits once the pool is empty, and nothing re-kicks it
 			std::lock_guard<std::mutex> lk(m_mutex);
-			m_running = false;
+			m_requests.clear();
 		}
-		m_cv.notify_all();
-		if (m_worker.joinable())
-			m_worker.join();
+		m_texBakeStop.store(true, std::memory_order_relaxed);
+		Globals::jobSystem.wait(m_pumpCounter);   // main thread helps while waiting
+		Globals::jobSystem.wait(m_texBakeCounter);
 		clearResidents(); // main thread: free RenderNodes/containers while the renderer is still alive
 	}
 
@@ -245,6 +238,9 @@ namespace Procedural
 		Tweak::floatVar("Terrain", "LOD step (chunks)", &m_lodStep, 0.1f, 4.0f, 0.1f); // LOD0 band width; each next band doubles
 		Tweak::intVar("Terrain", "Max LOD", &m_maxLod, 0, 6, 1.0f);
 		Tweak::intVar("Terrain", "Uploads/frame", &m_maxUploadsPerFrame, 1, 32, 1.0f);
+		// Concurrent generation jobs: >1 lets warm-tile mesh builds overlap a cold V3 tile wait
+		// (inference itself still serializes on the pipeline lock).
+		Tweak::intVar("Terrain", "Gen jobs", &m_maxGenJobs, 1, 16, 1.0f);
 		Tweak::floatVar("Terrain", "Sea level (m)", &m_seaLevel, -200.0f, 200.0f, 0.5f, dirty);
 		Tweak::floatVar("Terrain", "Skirt depth (m)", &m_skirtDepth, 0.0f, 64.0f, 0.5f, dirty);
 		// ONE shared baked terrain-data map (height, water level, fog|falloff|temp|hum, altitude): the volumetric
@@ -393,14 +389,11 @@ namespace Procedural
 
 		// Bake the biome splat textures to the DDS cache in the background (no-op when fresh); chunks
 		// render with the flat-color fallback until updateTerrainTextures registers the finished set.
-		m_texBakeWorker = std::jthread([this](std::stop_token stopToken)
+		Globals::jobSystem.submit([this]
 		{
-			bakeTerrainTexCache(stopToken);
-			m_texBakeDone.store(!stopToken.stop_requested(), std::memory_order_release);
-		});
-
-		m_running = true;
-		m_worker = std::thread([this]() { workerLoop(); });
+			bakeTerrainTexCache(m_texBakeStop);
+			m_texBakeDone.store(!m_texBakeStop.load(std::memory_order_relaxed), std::memory_order_release);
+		}, EJobPriority::Low, &m_texBakeCounter, "terrainTexBake");
 	}
 
 	void TerrainStreamer::updateTerrainTextures(Renderer& renderer)
@@ -582,19 +575,36 @@ namespace Procedural
 		m_residents.clear();
 		m_pending.clear();
 		m_readyBacklog.clear();
+		m_ringScanNeeded = true;
 	}
 
-	void TerrainStreamer::workerLoop()
+	void TerrainStreamer::kickPump(size_t numNew)
+	{
+		// Top the pump pool up to min(cap, active + new work): each CAS claims one slot. Spawning
+		// more pumps than requests is impossible this way; a pump finding the pool already drained
+		// just exits through its recheck.
+		const int32 cap = glm::clamp(m_maxGenJobs, 1, 16);
+		for (size_t spawned = 0; spawned < numNew; )
+		{
+			int32 cur = m_numPumps.load(std::memory_order_relaxed);
+			if (cur >= cap)
+				return;
+			if (m_numPumps.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel))
+			{
+				Globals::jobSystem.submit([this] { pumpJob(); }, EJobPriority::Low, &m_pumpCounter, "terrainChunkPump");
+				++spawned;
+			}
+		}
+	}
+
+	void TerrainStreamer::pumpJob()
 	{
 		for (;;)
 		{
 			Request req;
 			bool haveWork = false;
 			{
-				std::unique_lock<std::mutex> lk(m_mutex);
-				m_cv.wait(lk, [this]() { return !m_running || !m_requests.empty(); });
-				if (!m_running)
-					return;
+				std::lock_guard<std::mutex> lk(m_mutex);
 				// Take the request NEAREST THE CAMERA, re-measured against the ring state as it is RIGHT NOW.
 				// Deliberately not a queue: FIFO order is enqueue TIME, which stops matching distance the
 				// moment the camera moves. Chunks arrive over many frames, and a chunk whose LOD band
@@ -653,7 +663,27 @@ namespace Procedural
 				}
 			}
 			if (!haveWork)
-				continue; // everything was stale: back to waiting
+			{
+				// The pool drained (or held only stale entries, dropped above). Release the slot,
+				// then re-check: an append racing between our scan and the release either sees the
+				// slot still held (we re-claim below) or its kick spawns a fresh pump itself.
+				m_numPumps.fetch_sub(1, std::memory_order_release);
+				{
+					std::lock_guard<std::mutex> lk(m_mutex);
+					if (m_requests.empty())
+						return;
+				}
+				const int32 cap = glm::clamp(m_maxGenJobs, 1, 16);
+				int32 cur = m_numPumps.load(std::memory_order_relaxed);
+				for (;;)
+				{
+					if (cur >= cap)
+						return; // an appender's kicks refilled the pool; those jobs take over
+					if (m_numPumps.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel))
+						break;
+				}
+				continue;
+			}
 
 			Result res;
 			res.key = req.key;
@@ -661,7 +691,24 @@ namespace Procedural
 			res.coord = req.params.coord;
 			res.lod = req.params.lod;
 			if (req.maps)
-				generateChunk(*req.maps, req.params, res.mesh);
+			{
+				TerrainChunkMesh mesh;
+				generateChunk(*req.maps, req.params, mesh);
+				if (!mesh.indices.empty())
+				{
+					MeshGeometryDesc geom;
+					geom.positions = mesh.positions.data();
+					geom.normals = mesh.normals.data();
+					geom.tangents = mesh.tangents.data();
+					geom.bitangents = mesh.bitangents.data();
+					geom.texCoords = mesh.texCoords.data();
+					geom.numVertices = (uint32)mesh.positions.size();
+					geom.indices = mesh.indices.data();
+					geom.numIndices = (uint32)mesh.indices.size();
+					geom.name = "TerrainChunk";
+					res.scene = ISceneData::createMeshScene(geom); // copies; mesh dies here, halving what ships
+				}
+			}
 
 			{
 				std::lock_guard<std::mutex> lk(m_mutex);
@@ -815,30 +862,38 @@ namespace Procedural
 			return cheb <= R ? (int)ringLodAt(cheb, lodStep, maxLod) : -1;
 		};
 
-		// --- Enqueue any ring chunk that is neither resident nor already in flight.
-		std::vector<Request> newRequests;
-		for (int dz = -R; dz <= R; ++dz)
-		{
-			for (int dx = -R; dx <= R; ++dx)
-			{
-				const int cheb = glm::max(dx < 0 ? -dx : dx, dz < 0 ? -dz : dz);
-				const uint32 lod = ringLodAt(cheb, lodStep, maxLod);
-				const glm::ivec2 coord(camCX + dx, camCZ + dz);
-				const uint64 key = chunkKey(coord, lod);
-				if (m_residents.count(key) || m_pending.count(key))
-					continue;
+		const bool ringMoved = camCX != m_lastRingCX || camCZ != m_lastRingCZ
+			|| R != m_lastRingR || lodStep != m_lastRingLodStep || maxLod != m_lastRingMaxLod;
 
-				Request req;
-				req.key = key;
-				req.generation = generation;
-				req.maps = maps;
-				req.params.coord = coord;
-				req.params.lod = lod;
-				req.params.chunkSize = chunkSize;
-				req.params.lod0Res = (uint32)glm::max(1, m_lod0Res);
-				req.params.skirtDepth = m_skirtDepth;
-				newRequests.push_back(std::move(req));
-				m_pending.insert(key);
+		// --- Enqueue any ring chunk that is neither resident nor already in flight. The scan is a
+		// pure function of (ring, residents, pending), so it only re-runs when one of them changed.
+		std::vector<Request> newRequests;
+		if (ringMoved || m_ringScanNeeded)
+		{
+			m_ringScanNeeded = false;
+			for (int dz = -R; dz <= R; ++dz)
+			{
+				for (int dx = -R; dx <= R; ++dx)
+				{
+					const int cheb = glm::max(dx < 0 ? -dx : dx, dz < 0 ? -dz : dz);
+					const uint32 lod = ringLodAt(cheb, lodStep, maxLod);
+					const glm::ivec2 coord(camCX + dx, camCZ + dz);
+					const uint64 key = chunkKey(coord, lod);
+					if (m_residents.count(key) || m_pending.count(key))
+						continue;
+
+					Request req;
+					req.key = key;
+					req.generation = generation;
+					req.maps = maps;
+					req.params.coord = coord;
+					req.params.lod = lod;
+					req.params.chunkSize = chunkSize;
+					req.params.lod0Res = (uint32)glm::max(1, m_lod0Res);
+					req.params.skirtDepth = m_skirtDepth;
+					newRequests.push_back(std::move(req));
+					m_pending.insert(key);
+				}
 			}
 		}
 
@@ -848,8 +903,6 @@ namespace Procedural
 		// sorting here would only be re-deciding, one camera position out of date, something the worker
 		// decides properly a moment later.
 		// What it DOES owe the worker is the ring state to judge against, published under the same lock.
-		const bool ringMoved = camCX != m_lastRingCX || camCZ != m_lastRingCZ
-			|| R != m_lastRingR || lodStep != m_lastRingLodStep || maxLod != m_lastRingMaxLod;
 		m_lastRingCX = camCX; m_lastRingCZ = camCZ;
 		m_lastRingR = R; m_lastRingLodStep = lodStep; m_lastRingMaxLod = maxLod;
 		if (ringMoved || !newRequests.empty())
@@ -863,7 +916,7 @@ namespace Procedural
 				m_requests.push_back(std::move(r));
 		}
 		if (!newRequests.empty())
-			m_cv.notify_all();
+			kickPump(newRequests.size());
 
 		// --- Drain generated chunks (backlog first, then whatever the worker finished), budget-limited.
 		std::vector<Result> ready = std::move(m_readyBacklog);
@@ -878,15 +931,17 @@ namespace Procedural
 		int uploads = 0;
 		for (Result& res : ready)
 		{
-			if (res.mesh.indices.empty()) // worker-dropped (stale at dequeue): just release the key
+			if (!res.scene) // pump-dropped (stale at dequeue) or generation failed: just release the key
 			{
 				m_pending.erase(res.key); // re-enters the ring as a fresh request if wanted again
+				m_ringScanNeeded = true;
 				continue;
 			}
 			const bool valid = (res.generation == generation) && (int)res.lod == ringLod(res.coord) && !m_residents.count(res.key);
 			if (!valid)
 			{
 				m_pending.erase(res.key); // stale / no longer wanted / duplicate: done with it
+				m_ringScanNeeded = true;
 				continue;
 			}
 			if (uploads >= m_maxUploadsPerFrame)
@@ -895,23 +950,8 @@ namespace Procedural
 				continue;
 			}
 
-			MeshGeometryDesc geom;
-			geom.positions = res.mesh.positions.data();
-			geom.normals = res.mesh.normals.data();
-			geom.tangents = res.mesh.tangents.data();
-			geom.bitangents = res.mesh.bitangents.data();
-			geom.texCoords = res.mesh.texCoords.data();
-			geom.numVertices = (uint32)res.mesh.positions.size();
-			geom.indices = res.mesh.indices.data();
-			geom.numIndices = (uint32)res.mesh.indices.size();
-			geom.name = "TerrainChunk";
-
-			// Geometry only — no per-chunk texture; the material falls back to the shared renderer textures
-			// (a dedicated terrain shader will color the surface from height/biome later).
-			std::unique_ptr<ISceneData> scene = ISceneData::createMeshScene(geom);
 			m_pending.erase(res.key);
-			if (!scene)
-				continue;
+			m_ringScanNeeded = true; // conservative: covers the failure continue below
 
 			// Route the chunk onto the terrain pipeline variant (procedural height/slope albedo). Keep the
 			// material's own texture indices (fallback) — terrain carries no textures.
@@ -924,7 +964,7 @@ namespace Procedural
 			// single mesh with one identity-aliased BLAS — far less churn through the mesh/RT free lists.
 			overrides.disableGeneratedLods = true;
 			auto container = std::make_unique<ObjectContainer>();
-			if (!container->initialize(*scene, &overrides))
+			if (!container->initialize(*res.scene, &overrides))
 				continue;
 
 			const Transform transform(

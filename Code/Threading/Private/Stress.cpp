@@ -23,6 +23,7 @@ void JobSystemStress::initialize()
     Tweak::intVar("Threading/Stats", "Resumed/s", &m_resumedPerSec, 0, INT32_MAX, 0.0f);
     Tweak::intVar("Threading/Stats", "Sleeps/s", &m_sleepsPerSec, 0, INT32_MAX, 0.0f);
     Tweak::intVar("Threading/Stats", "Inline fallbacks", &m_inlineFallbacks, 0, INT32_MAX, 0.0f);
+    Tweak::intVar("Threading/Stats", "Busy %", &m_busyPercent, 0, 100, 0.0f);
 }
 
 void JobSystemStress::update()
@@ -186,6 +187,7 @@ void JobSystemStress::updateStatsDisplay()
         m_resumedPerSec = int(double(stats.numResumed - m_lastStats.numResumed) / interval);
         m_sleepsPerSec = int(double(stats.numSleeps - m_lastStats.numSleeps) / interval);
         m_inlineFallbacks = int(stats.numInlineFallbacks);
+        m_busyPercent = int(100.0 * double(stats.busyNs - m_lastStats.busyNs) / (interval * 1e9 * double(Globals::jobSystem.getNumContexts())));
     }
     m_lastStats = stats;
     m_lastStatsTime = now;
@@ -225,23 +227,44 @@ void JobSystemStress::selfTest()
         pass ? Log::info(buf) : Log::error(buf);
     }
 
+    { // JobCost auto-grain: coverage stays exact across runs while the estimate converges
+        JobCost cost(10, "testAutoGrain");
+        std::vector<uint32> values(200000, 0);
+        uint32* data = values.data();
+        for (uint32 run = 0; run < 8; ++run)
+            jobSystem.parallelFor(0, uint32(values.size()), cost, [data](uint32 begin, uint32 end)
+                {
+                    for (uint32 i = begin; i < end; ++i)
+                        data[i] += 1;
+                });
+        bool pass = cost.nsPerItem() > 0;
+        for (uint32 i = 0; i < uint32(values.size()); ++i)
+            pass &= values[i] == 8;
+        numFailed += !pass;
+        sprintf_s(buf, "JobSystem self test: JobCost auto-grain coverage x8 (%llu ns/item) - %s", cost.nsPerItem(), pass ? "PASS" : "FAIL");
+        pass ? Log::info(buf) : Log::error(buf);
+    }
+
     { // graph hazard ordering: write -> reads -> write -> read must observe each stage
         JobResource resource("testResource");
         std::atomic<int32> value = 0;
         std::atomic<uint32> wrongOrder = 0;
         JobGraph graph;
-        graph.addJob("write1", [&value] { value.store(1, std::memory_order_relaxed); }).writes(resource);
+        const JobId write1 = graph.addJob("write1", [&value] { value.store(1, std::memory_order_relaxed); }).writes(resource);
         graph.addJob("readA", [&value, &wrongOrder] { if (value.load(std::memory_order_relaxed) != 1) wrongOrder.fetch_add(1); }).reads(resource);
         graph.addJob("readB", [&value, &wrongOrder] { if (value.load(std::memory_order_relaxed) != 1) wrongOrder.fetch_add(1); }).reads(resource);
         graph.addJob("write2", [&value, &wrongOrder] { if (value.load(std::memory_order_relaxed) != 1) wrongOrder.fetch_add(1); value.store(2, std::memory_order_relaxed); }).writes(resource);
-        graph.addJob("readC", [&value, &wrongOrder] { if (value.load(std::memory_order_relaxed) != 2) wrongOrder.fetch_add(1); }).reads(resource);
+        const JobId readC = graph.addJob("readC", [&value, &wrongOrder] { if (value.load(std::memory_order_relaxed) != 2) wrongOrder.fetch_add(1); }).reads(resource);
         graph.compile();
         for (uint32 run = 0; run < 64; ++run) // re-run the same compiled graph, resets must hold up
         {
             value.store(0, std::memory_order_relaxed);
             graph.runAndWait();
         }
-        const bool pass = wrongOrder.load() == 0;
+        // cost/rank plumbing: every node ran (cost >= 1us floor), and the chain head outranks the tail
+        bool pass = wrongOrder.load() == 0;
+        pass &= graph.getJobCostUs(write1) >= 1 && graph.getJobCostUs(readC) >= 1;
+        pass &= graph.getJobRankUs(write1) > graph.getJobRankUs(readC);
         numFailed += !pass;
         sprintf_s(buf, "JobSystem self test: graph hazard ordering x64 - %s", pass ? "PASS" : "FAIL");
         pass ? Log::info(buf) : Log::error(buf);

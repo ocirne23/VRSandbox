@@ -31,13 +31,14 @@ namespace Procedural
 
 	void TerrainCollider::update(const glm::vec3& focusPos, std::shared_ptr<const ITerrainSampler> maps)
 	{
-		// Drain the in-flight build FIRST: even on a reset frame the future must be consumed, and a
+		// Drain the in-flight build FIRST: even on a reset frame the result must be consumed, and a
 		// completed tile should land the same frame it finishes.
 		BuildResult done;
 		bool haveDone = false;
-		if (m_building.valid() && m_building.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+		if (m_buildInFlight && m_buildCounter.isDone())
 		{
-			done = m_building.get();
+			done = std::move(m_buildResult);
+			m_buildInFlight = false;
 			haveDone = true;
 		}
 
@@ -98,8 +99,8 @@ namespace Procedural
 		}
 
 		// --- Launch the nearest missing tile (one build in flight at a time; a tile is a few ms of
-		// sampleGrid + BVH warm, but can block on V3 tile inference — off the main thread either way).
-		if (m_building.valid())
+		// sampleGrid + BVH warm, but can wait on V3 tile inference — a Low job that parks its fiber).
+		if (m_buildInFlight)
 			return;
 
 		const int minX = (int)std::floor((focus.x - radius) / tileSize);
@@ -134,8 +135,8 @@ namespace Procedural
 		const uint32 res = glm::clamp((uint32)std::lround(tileSize / spacing), 1u, 512u);
 		const uint32 generation = m_generation;
 		const uint64 key = tileKey(bestCoord);
-		m_building = std::async(std::launch::async,
-			[maps, coord = bestCoord, key, generation, tileSize, res]()
+		m_buildInFlight = true;
+		Globals::jobSystem.submit([this, maps, coord = bestCoord, key, generation, tileSize, res]()
 		{
 			BuildResult out;
 			out.key = key;
@@ -175,7 +176,7 @@ namespace Procedural
 
 			// Standalone BVH build (no world touched), safe off the main thread.
 			out.mesh = Globals::physics.createCollisionMesh(positions, indices);
-			return out;
-		});
+			m_buildResult = std::move(out); // single producer; read only after the counter completes
+		}, EJobPriority::Low, &m_buildCounter, "terrainColliderTile");
 	}
 }

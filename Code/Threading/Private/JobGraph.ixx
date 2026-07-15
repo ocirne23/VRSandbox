@@ -64,8 +64,11 @@ public:
         job.numSuccessors = 0;
         job.pending.store(0, std::memory_order_relaxed);
         job.initialPending = 0;
+        job.costEmaUs = 0;
+        job.rankUs = 0;
         job.priority = priority;
-        job.flags = 0;
+        job.effectivePriority = priority;
+        job.flags = 0; // timed by default: measured cost drives the critical-path ranking in run()
         job.name = name;
         return JobGraphBuilder(*this, m_numJobs - 1);
     }
@@ -96,6 +99,11 @@ public:
     uint32 getNumJobs() const { return m_numJobs; }
     uint32 getNumEdges() const { return uint32(m_edges.size()); }
 
+    // Measured cost EMA / critical-path rank of a node after at least one run (min 1us each) -
+    // free per-node profiling for the frame graph.
+    uint32 getJobCostUs(JobId id) const { return jobAt(id.index).costEmaUs; }
+    uint32 getJobRankUs(JobId id) const { return jobAt(id.index).rankUs; }
+
     void clear(); // destroys the callables; the graph can be redeclared from scratch
 
 private:
@@ -105,6 +113,7 @@ private:
     static constexpr uint32 JobsPerChunk = 64; // Job is non-movable (atomics), chunks keep addresses stable
 
     Job& jobAt(uint32 index) { return m_chunks[index / JobsPerChunk][index % JobsPerChunk]; }
+    const Job& jobAt(uint32 index) const { return m_chunks[index / JobsPerChunk][index % JobsPerChunk]; }
     Job& allocateJob();
     void declareRead(uint32 jobIndex, uint32 resourceId);
     void declareWrite(uint32 jobIndex, uint32 resourceId);
@@ -123,5 +132,6 @@ private:
     std::vector<Job*> m_successorStorage;   // CSR edge array the jobs' successor spans point into
     std::vector<Job*> m_roots;
     JobCounter m_counter;
+    uint32 m_lastMaxRankUs = 0; // previous run's critical-path length; this run's promotion threshold
     bool m_compiled = false;
 };

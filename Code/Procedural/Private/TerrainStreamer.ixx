@@ -7,6 +7,8 @@ import Core.Transform;
 
 import RendererVK;
 import Spatial;
+import Threading;
+import File;
 
 import :TerrainSampler;
 import :TerrainGenerator;
@@ -72,7 +74,10 @@ export namespace Procedural
 			uint32 generation = 0;
 			glm::ivec2 coord{ 0, 0 };
 			uint32 lod = 0;
-			TerrainChunkMesh mesh;
+			// Built IN the pump job (createMeshScene is pure per-instance copying - audited): the
+			// main thread only does the GPU-facing ObjectContainer::initialize. null = dropped/failed;
+			// the key is released and the ring scan re-requests it if still wanted.
+			std::unique_ptr<ISceneData> scene;
 		};
 
 		struct Resident
@@ -84,7 +89,8 @@ export namespace Procedural
 			SpatialEntry spatialEntry;                  // culling registration (SpatialLayer_Terrain, static)
 		};
 
-		void workerLoop();
+		void pumpJob();                 // self-continuing Low-priority generation job
+		void kickPump(size_t numNew);  // top pumps up to min(cap, new work) after appending requests
 		void rebuildMaps();                             // (re)builds the active generator from the tweak-backed config
 		void clearResidents();
 		// Pushes the splat shaping params + the live climate boxes every frame, and registers the texture
@@ -170,7 +176,8 @@ export namespace Procedural
 
 		// --- Terrain splat textures: source images baked to BC .dds (Assets/Local/TerrainTex) on a
 		// background thread at startup (skipped when the cache is fresh), then registered once ---
-		std::jthread      m_texBakeWorker;
+		JobCounter        m_texBakeCounter;         // one Low job (internally a parallelFor over conversions)
+		std::atomic<bool> m_texBakeStop{ false };
 		std::atomic<bool> m_texBakeDone{ false };
 		bool              m_texSetRegistered = false;
 		// Climate of each entry that survived the bake, in registered material order. Kept in REAL units
@@ -205,10 +212,15 @@ export namespace Procedural
 		float m_texSnowSlopeFull = 0.60f;
 		float m_texSnowAridity = 0.10f;    // humidity at/below which cold ground stays bare (polar desert)
 
-		// --- Threading ---
-		std::thread             m_worker;
+		// --- Threading: generation runs on up to m_maxGenJobs Low-priority pump jobs; V3 waits
+		// inside them park their fibers (several pumps joining one cold tile all proceed when it
+		// lands, and warm-tile mesh builds overlap the cold-tile wait). Claim invariant: a pump
+		// leaving decrements m_numPumps BEFORE its empty-recheck and re-claims a slot if requests
+		// remain, and every append is followed by kickPump - so requests never strand. ---
+		std::atomic<int32>      m_numPumps{ 0 };
+		int                     m_maxGenJobs = 2; // tweak: concurrent chunk generations
+		JobCounter              m_pumpCounter;
 		std::mutex              m_mutex;
-		std::condition_variable m_cv;
 		// An unordered POOL of outstanding work, despite the deque: the worker rescans it on every dequeue
 		// and takes whichever chunk is nearest the camera THEN, so insertion order carries no meaning and
 		// neither side sorts it. Ordering it would just re-decide, one camera position stale, what the
@@ -227,7 +239,6 @@ export namespace Procedural
 		std::vector<Result>     m_readyBacklog; // main-thread only: generated chunks over the per-frame upload cap
 		std::shared_ptr<const ITerrainSampler> m_maps;
 		uint32                  m_generation = 0;
-		bool                    m_running = false;
 
 		// --- Main-thread residency state ---
 		std::unordered_map<uint64, Resident> m_residents;
@@ -239,5 +250,8 @@ export namespace Procedural
 		int    m_lastRingR = -1;
 		float  m_lastRingLodStep = 0.0f;
 		uint32 m_lastRingMaxLod = 0xFFFFFFFFu;
+		// The enqueue scan re-runs only when the ring moved or a key left pending/residency (its
+		// result is identical otherwise) - skips (2R+1)^2 hash probes per idle frame.
+		bool   m_ringScanNeeded = true;
 	};
 }

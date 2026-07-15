@@ -38,6 +38,7 @@ struct alignas(64) WorkerContext
     uint64 numParked = 0;
     uint64 numResumed = 0;
     uint64 numSleeps = 0;
+    uint64 busyNs = 0; // summed measured job time (timed jobs only)
 };
 
 // Fiber-based work-stealing job scheduler. All memory is allocated in initialize(); the
@@ -85,6 +86,7 @@ public:
         }
         setJobCallable(*job, std::forward<Func>(func));
         job->priority = priority;
+        job->effectivePriority = priority;
         job->name = name;
         if (counter)
         {
@@ -107,6 +109,7 @@ public:
         }
         setJobCallable(*job, std::forward<Func>(func));
         job->priority = priority;
+        job->effectivePriority = priority;
         job->name = name;
         if (counter)
         {
@@ -130,13 +133,38 @@ public:
     template<typename Func>
     void parallelFor(uint32 begin, uint32 end, uint32 grainSize, Func&& func, EJobPriority priority = EJobPriority::Normal)
     {
+        parallelForImpl(begin, end, grainSize, nullptr, std::forward<Func>(func), priority);
+    }
+
+    // Auto-grain: the chunk size is derived from the tracker's measured ns/item to hit
+    // JobSystemDesc::parallelForTargetChunkNs, and this run's timings feed back into it.
+    template<typename Func>
+    void parallelFor(uint32 begin, uint32 end, JobCost& cost, Func&& func, EJobPriority priority = EJobPriority::Normal)
+    {
+        const uint64 grain = std::max<uint64>(1, m_targetChunkNs / cost.nsPerItem());
+        parallelForImpl(begin, end, uint32(std::min<uint64>(grain, UINT32_MAX)), &cost, std::forward<Func>(func), priority);
+    }
+
+    // Scheduler plumbing shared with JobGraph - not for gameplay code.
+    Job* allocatePooledJob();
+    void submitReady(Job* job);                        // job->pending must already be zero
+    void submitReadyBatch(std::span<Job* const> jobs); // fan-out path: straight to the shared queues
+
+private:
+
+    template<typename Func>
+    void parallelForImpl(uint32 begin, uint32 end, uint32 grainSize, JobCost* cost, Func&& func, EJobPriority priority)
+    {
         if (end <= begin)
             return;
         const uint32 count = end - begin;
         grainSize = std::max(grainSize, 1u);
         if (count <= grainSize || m_numWorkers == 0)
         {
+            const Clock::time_point start = cost ? Clock::now() : Clock::time_point{};
             func(begin, end);
+            if (cost)
+                cost->addSample(uint64(std::chrono::nanoseconds(Clock::now() - start).count()), count);
             return;
         }
         struct Shared
@@ -144,18 +172,25 @@ public:
             std::atomic<uint64> next;
             uint64 end;
             uint32 grain;
+            JobCost* cost;
             std::remove_reference_t<Func>* func;
         };
-        Shared shared{ begin, end, grainSize, &func };
+        Shared shared{ begin, end, grainSize, cost, &func };
         auto runner = [&shared]()
         {
+            const Clock::time_point start = shared.cost ? Clock::now() : Clock::time_point{};
+            uint32 numItems = 0;
             for (;;)
             {
                 const uint64 chunkBegin = shared.next.fetch_add(shared.grain, std::memory_order_relaxed);
                 if (chunkBegin >= shared.end)
-                    return;
-                (*shared.func)(uint32(chunkBegin), uint32(std::min(chunkBegin + shared.grain, shared.end)));
+                    break;
+                const uint32 chunkEnd = uint32(std::min(chunkBegin + shared.grain, shared.end));
+                (*shared.func)(uint32(chunkBegin), chunkEnd);
+                numItems += chunkEnd - uint32(chunkBegin);
             }
+            if (shared.cost && numItems) // includes the cursor overhead: overhead-dominated loops drive the grain up
+                shared.cost->addSample(uint64(std::chrono::nanoseconds(Clock::now() - start).count()), numItems);
         };
         const uint32 numChunks = (count + grainSize - 1) / grainSize;
         const uint32 numHelpers = std::min(m_numWorkers, numChunks - 1);
@@ -165,13 +200,6 @@ public:
         runner();
         wait(counter);
     }
-
-    // Scheduler plumbing shared with JobGraph - not for gameplay code.
-    Job* allocatePooledJob();
-    void submitReady(Job* job);                        // job->pending must already be zero
-    void submitReadyBatch(std::span<Job* const> jobs); // fan-out path: straight to the shared queues
-
-private:
 
     friend class JobGraph;
     friend class JobMutex;
@@ -221,6 +249,7 @@ private:
     uint32 m_numContexts = 0;
     uint32 m_numFibers = 0;
     uint32 m_jobPoolCapacity = 0;
+    uint32 m_targetChunkNs = 25000;
     std::atomic<bool> m_running = false;
     std::atomic<uint64> m_numInlineFallbacks = 0;
     std::atomic<int32> m_pooledInFlight = 0;

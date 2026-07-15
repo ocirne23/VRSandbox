@@ -7,6 +7,7 @@ import Core.Transform;
 
 import RendererVK;
 import Spatial;
+import Threading;
 
 import :TerrainSampler;
 
@@ -136,7 +137,8 @@ export namespace Procedural
 			std::vector<NodeSpawnIdx> variants;
 		};
 
-		void workerLoop();
+		void pumpJob();                // self-continuing Low-priority generation job
+		void kickPump(size_t numNew); // top pumps up to min(cap, new work) after appending requests
 		void clearResidents();
 		void spawnGroup(RuleGroup& group);
 		void despawnGroup(RuleGroup& group);
@@ -171,16 +173,18 @@ export namespace Procedural
 		static void generateCell(const ITerrainSampler& maps, glm::ivec2 coord, const GenParams& params,
 			std::span<const RuleRuntime> ruleRt, std::span<const uint16> order, std::vector<GroupResult>& outGroups);
 
-		// --- Threading (mirrors TerrainStreamer: lazy staleness at dequeue against published ring state) ---
-		std::thread             m_worker;
+		// --- Threading (mirrors TerrainStreamer: up to m_maxGenJobs Low-priority pump jobs, lazy
+		// staleness at dequeue against published ring state; same claim/exit-recheck protocol.
+		// generateCell is a pure function of const rule tables, so concurrent pumps are safe) ---
+		std::atomic<int32>      m_numPumps{ 0 };
+		int                     m_maxGenJobs = 2;
+		JobCounter              m_pumpCounter;
 		std::mutex              m_mutex;
-		std::condition_variable m_cv;
 		std::deque<Request>     m_requests;
 		std::vector<Result>     m_results;
 		glm::ivec2              m_ringCam{ 0, 0 };
 		int                     m_ringR = -1;
 		uint32                  m_generation = 0;
-		bool                    m_running = false;
 
 		// --- Main-thread residency state. Cell keys pack the coord (cellKey/cellCoord), so anything that
 		// only needs a coordinate range enumerates coords and hash-probes instead of walking a map. Groups

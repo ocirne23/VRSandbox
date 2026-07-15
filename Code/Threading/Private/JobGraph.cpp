@@ -113,11 +113,27 @@ void JobGraph::run()
     if (m_numJobs == 0)
         return;
     m_counter.add(m_numJobs);
-    for (uint32 i = 0; i < m_numJobs; ++i)
+    // Reverse index order is reverse-topological (edges only point forward), so one backward walk
+    // computes each node's critical-path rank from last run's measured costs. Nodes on the top
+    // quartile of the critical path get promoted Normal -> High so the longest chain drains first;
+    // explicit user priorities are respected. Threshold uses the PREVIOUS run's max (converges
+    // with the cost EMAs; the first run has no costs and promotes nothing).
+    const uint32 promoteThreshold = m_lastMaxRankUs - m_lastMaxRankUs / 4;
+    uint32 maxRank = 0;
+    for (uint32 i = m_numJobs; i-- > 0;)
     {
         Job& job = jobAt(i);
+        uint32 successorMax = 0;
+        for (uint32 s = 0; s < job.numSuccessors; ++s)
+            successorMax = std::max(successorMax, job.successors[s]->rankUs);
+        job.rankUs = uint32(std::min<uint64>(uint64(job.costEmaUs) + successorMax, UINT32_MAX));
+        maxRank = std::max(maxRank, job.rankUs);
+        job.effectivePriority = job.priority == EJobPriority::Normal && m_lastMaxRankUs != 0 && job.rankUs >= promoteThreshold
+            ? EJobPriority::High : job.priority;
         job.pending.store(int32(job.initialPending), std::memory_order_relaxed);
     }
+    m_lastMaxRankUs = maxRank;
+    std::sort(m_roots.begin(), m_roots.end(), [](const Job* a, const Job* b) { return a->rankUs > b->rankUs; });
     // the queue pushes release these resets to whoever pops a root; successors follow transitively
     std::atomic_thread_fence(std::memory_order_release);
     Globals::jobSystem.submitReadyBatch(m_roots);

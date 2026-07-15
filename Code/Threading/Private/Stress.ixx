@@ -62,6 +62,7 @@ private:
     int m_resumedPerSec = 0;
     int m_sleepsPerSec = 0;
     int m_inlineFallbacks = 0;
+    int m_busyPercent = 0;
 };
 
 export namespace Globals

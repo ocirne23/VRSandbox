@@ -78,7 +78,10 @@ export using JobFunc = void(*)(void*);
 
 export enum EJobFlags : uint8
 {
-    EJobFlag_Pooled = 1, // owned by the JobSystem's ad-hoc pool, recycled after execution
+    EJobFlag_Pooled = 1,  // owned by the JobSystem's ad-hoc pool, recycled after execution
+    EJobFlag_Untimed = 2, // OPT-OUT of wall-time measurement (costEmaUs + worker busy-time stats).
+                          // Timing is on by default; clear it only for nanosecond-scale spam jobs
+                          // where two clock reads (~40-60ns) would dominate the job itself
 };
 
 // One schedulable unit: two cache lines, callable stored inline (no heap). Graph jobs live in
@@ -93,11 +96,14 @@ export struct alignas(64) Job
     uint32 numSuccessors = 0;
     std::atomic<int32> pending = 0;     // unsatisfied predecessors; last one to decrement pushes us
     uint32 initialPending = 0;          // reset value for re-running graphs
-    EJobPriority priority = EJobPriority::Normal;
+    uint32 costEmaUs = 0;               // EMA of measured wall time (Timed jobs; min 1us per run)
+    uint32 rankUs = 0;                  // critical path: costEmaUs + longest successor chain (graph)
+    EJobPriority priority = EJobPriority::Normal;          // what the user asked for
+    EJobPriority effectivePriority = EJobPriority::Normal; // what the queues use (rank promotion)
     uint8 flags = 0;
     const char* name = nullptr;
 
-    static constexpr uint32 StorageSize = 72;
+    static constexpr uint32 StorageSize = 64;
     alignas(8) uint8 storage[StorageSize];
 };
 static_assert(sizeof(Job) == 128);
@@ -137,6 +143,38 @@ private:
     const char* m_name;
 };
 
+// Live per-item cost estimate for a parallelFor call site. Create one next to the loop it
+// measures (static/member, like a Tweak registration) and pass it instead of a grain size: the
+// chunk size is derived from the measured ns/item to hit JobSystemDesc::parallelForTargetChunkNs,
+// and every run's runner timings feed back into the estimate. initialNsPerItem seeds the first
+// run. Lossy racy EMA on purpose - it is a heuristic, not a measurement.
+export class JobCost final
+{
+public:
+
+    explicit JobCost(uint32 initialNsPerItem = 250, const char* name = nullptr)
+        : m_nsPerItem(std::max(1u, initialNsPerItem)), m_name(name) {}
+    JobCost(const JobCost&) = delete;
+    JobCost& operator=(const JobCost&) = delete;
+
+    uint64 nsPerItem() const { return m_nsPerItem.load(std::memory_order_relaxed); }
+    const char* name() const { return m_name; }
+
+    void addSample(uint64 totalNs, uint32 numItems)
+    {
+        if (numItems == 0)
+            return;
+        const uint64 sample = std::max<uint64>(1, totalNs / numItems);
+        const uint64 old = m_nsPerItem.load(std::memory_order_relaxed);
+        m_nsPerItem.store((old * 7 + sample) / 8, std::memory_order_relaxed);
+    }
+
+private:
+
+    std::atomic<uint64> m_nsPerItem;
+    const char* m_name;
+};
+
 export struct JobSystemDesc
 {
     uint32 numWorkers = 0;                  // 0 = hardware threads - 2 (main + headroom), min 1
@@ -146,6 +184,7 @@ export struct JobSystemDesc
     uint32 jobPoolCapacity = 16384;         // ad-hoc jobs in flight (rounded up to a power of two)
     uint32 queueCapacity = 16384;           // per priority class (rounded up to a power of two)
     uint32 dequeCapacity = 4096;            // per worker (rounded up to a power of two)
+    uint32 parallelForTargetChunkNs = 25000; // auto-grain (JobCost overload) aims chunks at this duration
 };
 
 export struct JobSystemStats
@@ -159,4 +198,5 @@ export struct JobSystemStats
     uint64 numResumed = 0;
     uint64 numSleeps = 0;    // workers going through a kernel wait
     uint64 numInlineFallbacks = 0; // pool/queue exhaustion made a submit run on the calling thread
+    uint64 busyNs = 0;       // summed measured job wall time across contexts (timed jobs)
 };

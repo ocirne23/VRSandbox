@@ -2,6 +2,7 @@ export module Procedural:HeightMapBaker;
 
 import Core;
 import Core.glm;
+import Threading;
 import :TerrainSampler;
 
 export namespace Procedural
@@ -402,9 +403,10 @@ export namespace Procedural
 			bool shoreLayout = false, const WaterReach* waterReach = nullptr, const FlowField* flowField = nullptr)
 		{
 			bool shipped = false;
-			if (m_future.valid() && m_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+			if (m_bakeInFlight && m_bakeCounter.isDone())
 			{
-				std::vector<float> texels = m_future.get();
+				std::vector<float> texels = std::move(m_bake->result);
+				m_bakeInFlight = false;
 				if (active) // a bake finishing after its consumer got disabled is dropped
 				{
 					out.texels = std::move(texels);
@@ -426,7 +428,7 @@ export namespace Procedural
 				m_valid = false;
 				return false;
 			}
-			if (m_future.valid())
+			if (m_bakeInFlight)
 				return shipped; // one bake in flight at a time
 
 			ranges.x = glm::max(ranges.x, 1.0f);
@@ -466,11 +468,18 @@ export namespace Procedural
 			m_pendingReachOn = reachOnNow;
 			m_pendingFlow = flowNow;
 			m_pendingFlowOn = flowOnNow;
-			const WaterReach reach = reachNow;
-			const bool applyReach = reachOnNow;
-			const FlowField flow = flowNow;
-			const bool applyFlow = flowOnNow;
-			m_future = std::async(std::launch::async, [maps, center, ranges, res, numCascades, channels, shoreLayout, reach, applyReach, flow, applyFlow]() {
+			// The bake parameters exceed the job's 64-byte inline capture - box them (result rides
+			// in the same box, written before the counter signals; read only after isDone).
+			m_bake = std::make_shared<BakeJob>(BakeJob{ maps, center, ranges, res, numCascades, channels,
+				shoreLayout, reachNow, reachOnNow, flowNow, flowOnNow, {} });
+			m_bakeInFlight = true;
+			Globals::jobSystem.submit([bake = m_bake]() {
+				const std::shared_ptr<const ITerrainSampler>& maps = bake->maps;
+				const glm::vec2 center = bake->center, ranges = bake->ranges;
+				const uint32 res = bake->res, numCascades = bake->numCascades, channels = bake->channels;
+				const bool shoreLayout = bake->shoreLayout, applyReach = bake->applyReach, applyFlow = bake->applyFlow;
+				const WaterReach reach = bake->reach;
+				const FlowField flow = bake->flow;
 				std::vector<float> heights((size_t)numCascades * res * res * channels);
 				std::vector<TerrainPoint> points; // reused across cascades
 				for (uint32 c = 0; c < numCascades; ++c)
@@ -561,15 +570,33 @@ export namespace Procedural
 					if (applyFlow)
 						applyFlowField(dst, res, channels, texelSize, maps->seaLevel(), shoreLayout, flow);
 				}
-				return heights;
-			});
+				bake->result = std::move(heights);
+			}, EJobPriority::Low, &m_bakeCounter, "heightMapBake");
 			return shipped;
 		}
 
 		bool hasActiveMap() const { return m_valid; }
 
+		// Callers must destroy this after draining (both owners outlive the frame); the wait covers
+		// a bake still in flight at teardown.
+		~HeightMapBaker() { Globals::jobSystem.wait(m_bakeCounter); }
+
 	private:
-		std::future<std::vector<float>> m_future;
+		struct BakeJob
+		{
+			std::shared_ptr<const ITerrainSampler> maps;
+			glm::vec2 center, ranges;
+			uint32 res, numCascades, channels;
+			bool shoreLayout;
+			WaterReach reach;
+			bool applyReach;
+			FlowField flow;
+			bool applyFlow;
+			std::vector<float> result;
+		};
+		std::shared_ptr<BakeJob> m_bake;
+		JobCounter m_bakeCounter;
+		bool m_bakeInFlight = false;
 		WaterReach m_activeReach;      // the reach rule baked into the live map (see update)
 		bool m_activeReachOn = false;
 		WaterReach m_pendingReach;     // ... and the one the in-flight bake is using

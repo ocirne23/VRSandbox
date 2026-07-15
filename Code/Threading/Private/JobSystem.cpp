@@ -42,6 +42,7 @@ void JobSystem::initialize(const JobSystemDesc& desc)
     m_numContexts = m_numWorkers + 1;
     m_numFibers = desc.numFibers;
     m_jobPoolCapacity = std::bit_ceil(desc.jobPoolCapacity);
+    m_targetChunkNs = std::max(1000u, desc.parallelForTargetChunkNs);
 
     m_jobPool = std::make_unique<Job[]>(m_jobPoolCapacity);
     m_freeJobs.initialize(m_jobPoolCapacity);
@@ -145,6 +146,7 @@ JobSystemStats JobSystem::getStats() const
         stats.numParked += ctx.numParked;
         stats.numResumed += ctx.numResumed;
         stats.numSleeps += ctx.numSleeps;
+        stats.busyNs += ctx.busyNs;
     }
     return stats;
 }
@@ -230,7 +232,21 @@ void JobSystem::execute(Job& job)
     assert(!(job.flags & EJobFlag_Pooled) || job.pending.fetch_add(1, std::memory_order_acq_rel) == 0);
     if (WorkerContext* ctx = t_worker)
         ctx->numExecuted++;
+    const bool timed = (job.flags & EJobFlag_Untimed) == 0;
+    const Clock::time_point timedStart = timed ? Clock::now() : Clock::time_point{};
     job.invoke(job.storage);
+    if (timed)
+    {
+        // wall time, min 1us: parked waits inside the job count (they occupy dependency-time on
+        // the critical path), and all-cheap graphs degrade to chain-depth ranking. The same graph
+        // node never runs concurrently with itself, so a plain EMA is race-free.
+        const uint64 elapsedNs = uint64(std::chrono::nanoseconds(Clock::now() - timedStart).count());
+        const uint64 us = std::max<uint64>(1, elapsedNs / 1000);
+        const uint32 old = job.costEmaUs;
+        job.costEmaUs = old ? uint32(std::min<uint64>((uint64(old) * 3 + us) / 4, UINT32_MAX)) : uint32(std::min<uint64>(us, UINT32_MAX));
+        if (WorkerContext* ctx = t_worker) // re-read: the job may have parked and migrated
+            ctx->busyNs += elapsedNs;
+    }
     Job* const* successors = job.successors;
     const uint32 numSuccessors = job.numSuccessors;
     JobCounter* signal = job.signal;
@@ -299,7 +315,7 @@ void JobSystem::pushReadyJob(Job* job)
     WorkerContext* ctx = t_worker;
     if (ctx && ctx->isWorker && ctx->deque.push(job))
         return; // continuations run LIFO on the worker that made them ready
-    if (m_readyQueues[uint32(job->priority)].push(job))
+    if (m_readyQueues[uint32(job->effectivePriority)].push(job))
         return;
     // full (or transiently full behind a preempted popper): run it here rather than lose it
     m_numInlineFallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -320,7 +336,7 @@ void JobSystem::submitReadyBatch(std::span<Job* const> jobs)
     {
         // straight to the shared queues: batches are fan-out, a local deque would serialize the
         // start behind one steal per job
-        if (!m_readyQueues[uint32(job->priority)].push(job))
+        if (!m_readyQueues[uint32(job->effectivePriority)].push(job))
         {
             m_numInlineFallbacks.fetch_add(1, std::memory_order_relaxed);
             execute(*job);
@@ -349,7 +365,10 @@ Job* JobSystem::allocatePooledJob()
     job->numSuccessors = 0;
     job->pending.store(0, std::memory_order_relaxed);
     job->initialPending = 0;
+    job->costEmaUs = 0;
+    job->rankUs = 0;
     job->priority = EJobPriority::Normal;
+    job->effectivePriority = EJobPriority::Normal;
     job->flags = EJobFlag_Pooled;
     job->name = nullptr;
     return job;

@@ -4,6 +4,7 @@ import Core;
 import Core.glm;
 
 import Physics;
+import Threading;
 
 import :TerrainSampler;
 
@@ -25,8 +26,9 @@ export namespace Procedural
 		TerrainCollider() = default;
 		TerrainCollider(const TerrainCollider&) = delete;
 		TerrainCollider& operator=(const TerrainCollider&) = delete;
-		// Default dtor is correct: the future's destructor joins the in-flight build, then tiles destroy
-		// their bodies/meshes — Globals::physics outlives any stack-local instance.
+		// Wait out the in-flight build job (main thread helps), then tiles destroy their
+		// bodies/meshes — Globals::physics outlives any stack-local instance.
+		~TerrainCollider() { Globals::jobSystem.wait(m_buildCounter); }
 
 		void initialize(); // registers the Tweaks ("Terrain/Collision")
 
@@ -58,7 +60,11 @@ export namespace Procedural
 		float m_friction = 0.8f;
 		bool  m_configDirty = false; // geometry-affecting tweak changed: rebuild everything
 
-		std::future<BuildResult> m_building; // ONE build in flight (the HeightMapBaker pattern)
+		// ONE build in flight, submitted to the job system; the counter is the "future", the job
+		// writes m_buildResult before signaling (single producer, consumed only after isDone).
+		JobCounter m_buildCounter;
+		BuildResult m_buildResult;
+		bool m_buildInFlight = false;
 		uint32 m_generation = 0;             // bumped on clear; stale in-flight results are dropped
 		const ITerrainSampler* m_mapsIdentity = nullptr; // identity only (never dereferenced)
 		std::unordered_map<uint64, Tile> m_tiles;
