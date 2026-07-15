@@ -9,19 +9,19 @@ import Core.Tweaks;
 import RendererVK;
 import File;
 
-import :OceanRenderer;
+import :OceanGenerator;
 import :TerrainSampler;
 
 namespace Procedural
 {
-	OceanRenderer::~OceanRenderer()
+	OceanGenerator::~OceanGenerator()
 	{
 		// Free the RenderNode before its ObjectContainer, while the renderer/device are still alive.
 		m_node = RenderNode();
 		m_container.reset();
 	}
 
-	void OceanRenderer::initialize()
+	void OceanGenerator::initialize()
 	{
 		auto gridDirty = [this]() { m_gridDirty = true; };
 
@@ -96,7 +96,7 @@ namespace Procedural
 		// whole footprint) are discarded in the vertex shaders — no displacement sampling, no raster.
 	}
 
-	void OceanRenderer::rebuildGrid()
+	void OceanGenerator::rebuildGrid()
 	{
 		m_gridDirty = false;
 		m_node = RenderNode(); // release the previous grid first
@@ -194,7 +194,7 @@ namespace Procedural
 	// water depth live as water level - height and lift the clipmap by water level - sea level (lakes/
 	// rivers at altitude); beyond this map's range they fall back to the coarser fog terrain cascades
 	// (TerrainStreamer's bake of the same fields).
-	void OceanRenderer::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain,
+	void OceanGenerator::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain,
 	                                   const WaterReach* reach)
 	{
 		const bool active = m_shoreEnabled && terrain != nullptr;
@@ -216,7 +216,7 @@ namespace Procedural
 		}
 	}
 
-	void OceanRenderer::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain,
+	void OceanGenerator::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain,
 	                           const WaterReach* reach, float seaLevel)
 	{
 		// ONE sea level, owned by the terrain (see the header). Adopted here every frame rather than
@@ -329,7 +329,7 @@ namespace Procedural
 	// well inside the shore map.
 	// (water depth, water surface level) at (x, z) from the CPU copy of the baked shore map — the CPU
 	// mirror of the shaders' oceanSampleShoreData. Outside the map: open-ocean depth at sea level.
-	glm::vec2 OceanRenderer::sampleShoreData(float x, float z) const
+	glm::vec2 OceanGenerator::sampleShoreData(float x, float z) const
 	{
 		if (!m_shoreValid || m_shoreHeights.empty() || m_shoreActiveRange <= 1.0f)
 			return glm::vec2(m_depth, m_seaLevel);
@@ -351,7 +351,7 @@ namespace Procedural
 		return glm::vec2(hw.y - hw.x, hw.y);
 	}
 
-	float OceanRenderer::sampleShoreDepth(float x, float z) const
+	float OceanGenerator::sampleShoreDepth(float x, float z) const
 	{
 		return sampleShoreData(x, z).x;
 	}
@@ -360,7 +360,7 @@ namespace Procedural
 	// cascade's layer minimum bounds any combined trough (cascades add; their minima rarely coincide, so
 	// this is conservative — right for hiding fog under the surface). The minimum over the WHOLE tiling
 	// patch is a sea-state statistic, near-stationary frame to frame, so re-scan sparsely.
-	void OceanRenderer::estimateWaveTrough()
+	void OceanGenerator::estimateWaveTrough()
 	{
 		if (m_waveTroughCooldown-- > 0 || m_dispTileRes == 0)
 			return;
@@ -380,7 +380,7 @@ namespace Procedural
 
 	// Shoal-faded sum of all cascades' displacement at an undisplaced world XZ, bilinear-wrapped over
 	// the readback tile — the CPU mirror of oceanSampleDisplacement (at the readback mip's band limit).
-	glm::vec3 OceanRenderer::sampleDisplacement(glm::vec2 worldXZ, float depth) const
+	glm::vec3 OceanGenerator::sampleDisplacement(glm::vec2 worldXZ, float depth) const
 	{
 		const uint32 res = m_dispTileRes;
 		const float shoal = glm::max(m_shoalScale, 0.0f);
@@ -408,7 +408,7 @@ namespace Procedural
 		return disp;
 	}
 
-	float OceanRenderer::sampleWaterHeight(float x, float z) const
+	float OceanGenerator::sampleWaterHeight(float x, float z) const
 	{
 		if (!m_enabled || m_dispTile.empty() || m_dispTileRes == 0)
 			return -FLT_MAX;

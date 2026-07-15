@@ -55,7 +55,7 @@ namespace Procedural
 			{
 				const float lx = (float)col * step;
 				const float lz = (float)row * step;
-				// True surface height, INCLUDING the seabed below sea level: water is the OceanRenderer's
+				// True surface height, INCLUDING the seabed below sea level: water is the OceanGenerator's
 				// job now (its shore-depth bake samples this same field, and its ray-traced refraction needs
 				// the real bottom to hit — the old max(h, seaLevel) lid read as zero-depth water and
 				// co-planed with it).

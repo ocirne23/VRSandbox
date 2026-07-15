@@ -32,8 +32,9 @@ namespace Procedural::Diffusion
 		// depends on that. Blending LATENTS is not blending outputs — the weight-channel normalisation that
 		// makes the other stages stride-agnostic does not rescue this one.
 		// The failure is silent and does not look like a bug: overlapping windows still AGREE with each
-		// other to 7 cm, so the tile-agreement check reports "consistent" while the terrain is inverted.
-		// Only an absolute elevation check catches it (DiffusionTest's native-region dump).
+		// other to 7 cm, so any tile-agreement check reports "consistent" while the terrain is inverted.
+		// Catching it needs an ABSOLUTE check — the native surface against the coarse stage's own
+		// prediction for the same region — not tiles compared against each other.
 		constexpr int32 LATENT_TILE_STRIDE = LATENT_TILE_SIZE / 2;
 
 		// Batch sizes, chosen from measured DirectML scaling on these models rather than the reference's

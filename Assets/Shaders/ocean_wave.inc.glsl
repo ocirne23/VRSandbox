@@ -215,7 +215,7 @@ float oceanShoalFade(float depth, float patchSize)
 }
 
 // Explicit LOD for vertex-shader displacement sampling: pick the mip whose texel matches the vertex's
-// CLIPMAP RING cell size (baked per vertex; OceanRenderer's rings have FIXED cell sizes, so every world
+// CLIPMAP RING cell size (baked per vertex; OceanGenerator's rings have FIXED cell sizes, so every world
 // position samples a FIXED mip regardless of camera distance — no wave morphing coupled to camera
 // motion). This band-limits the displacement to what the local mesh density can represent (Nyquist) —
 // point-sampling finer content aliases the surface. `morph` blends toward the next ring's mip (+1) over

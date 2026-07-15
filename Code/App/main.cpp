@@ -74,7 +74,7 @@ int main()
 
     // Procedural ocean: one camera-following graded grid, GPU-displaced into Gerstner waves by the Ocean
     // pipeline variant. Declared after the renderer so it frees its RenderNode/container before the device.
-    Procedural::OceanRenderer ocean;
+    Procedural::OceanGenerator ocean;
     ocean.initialize();
     // Buoyancy: dynamic bodies float in the ocean (keys 8/9's cubes/spheres bob in the swell). The ocean
     // CPU-samples its GPU displacement readback; -FLT_MAX where there is no water gates the whole pass.

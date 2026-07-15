@@ -243,7 +243,7 @@ export struct MeshLodParams
 // FFT/Tessendorf ocean: spectrum inputs for the GPU simulation (OceanSimulationPipeline) + water shading.
 // The Renderer feeds these into the per-frame UBO (ocean* fields), which drives BOTH the compute simulation
 // (the TMA spectrum is re-evaluated every frame, so all of it is live) and the surface shading. The grid
-// geometry + Tweaks live in Procedural::OceanRenderer, which builds one of these each frame and hands it to
+// geometry + Tweaks live in Procedural::OceanGenerator, which builds one of these each frame and hands it to
 // Renderer::setOceanParams.
 export struct OceanParams
 {
@@ -301,7 +301,7 @@ export struct OceanParams
                                     // turbulent water (the wake stays visible after the foam thins)
 
     // Shore interaction: the CPU-baked shore terrain height map (Renderer::setOceanShoreMap, baked by
-    // Procedural::OceanRenderer; center/range live in the renderer's BakedWorldMap, not here) drives fake
+    // Procedural::OceanGenerator; center/range live in the renderer's BakedWorldMap, not here) drives fake
     // shoaling — each cascade's displacement fades out below depth = shoalScale * its patch size, so long
     // swell dies offshore while chop runs almost to the beach and waves never poke through land — plus a
     // surf/foam band where the water column vanishes at the waterline.

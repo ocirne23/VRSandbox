@@ -1,4 +1,4 @@
-export module Procedural:OceanRenderer;
+export module Procedural:OceanGenerator;
 
 import Core;
 import Core.glm;
@@ -27,13 +27,13 @@ export namespace Procedural
 	// displacement/gradient maps each frame, the Ocean pipeline variant displaces this mesh by them and
 	// shades the surface (RT refraction, Beer-Lambert). All spectrum/shading parameters are Tweak-backed
 	// and pushed via Renderer::setOceanParams (fully live); the mesh rebuilds only when ring params change.
-	class OceanRenderer
+	class OceanGenerator
 	{
 	public:
-		OceanRenderer() = default;
-		~OceanRenderer();
-		OceanRenderer(const OceanRenderer&) = delete;
-		OceanRenderer& operator=(const OceanRenderer&) = delete;
+		OceanGenerator() = default;
+		~OceanGenerator();
+		OceanGenerator(const OceanGenerator&) = delete;
+		OceanGenerator& operator=(const OceanGenerator&) = delete;
 
 		void initialize();                                     // registers Tweaks
 		// Per-frame: push params + render (after beginFrame). terrain = the streamer's live height field

@@ -233,7 +233,7 @@ public:
         float cragWanderWavelength = 2000.0f; // metres at the model's true scale
     };
     void setTerrainTextureParams(const TerrainTexTweaks& params) { m_terrainTexTweaks = params; }
-    // Deepest current ocean wave trough below the calm water level (m, >= 0; the OceanRenderer estimates
+    // Deepest current ocean wave trough below the calm water level (m, >= 0; the OceanGenerator estimates
     // it from its displacement readback). Sizes the waterline band inside which the fog scatter samples
     // the live FFT wave height for the underwater fog boundary (fogParams7.y).
     void setOceanWaveTrough(float meters) { m_oceanWaveTrough = glm::max(meters, 0.0f); }
@@ -260,7 +260,7 @@ public:
     void clearFogTerrainHeightMap() { m_fogTerrainMap.clear(); } // fog reverts to the flat height base
     // This frame slot's ocean displacement readback: RGBA16F texels (Dx, h, Dz, dDxz), outRes^2 per
     // cascade, cascades packed consecutively. Safe to read between beginFrame (fence waited) and
-    // present (slot resubmits) — copy it out inside that window (Procedural::OceanRenderer does, for
+    // present (slot resubmits) — copy it out inside that window (Procedural::OceanGenerator does, for
     // the buoyancy water-height queries); contents are ~2 frames old and only refresh while the ocean
     // simulates.
     std::span<const uint16> getOceanDisplacementReadback(uint32& outRes) const
