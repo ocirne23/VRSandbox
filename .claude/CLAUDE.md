@@ -5,13 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Project Description
 A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is the testbed: it spawns `Entities/SponzaScene.pre` (Sponza + skysphere prefabs, Sponza with a static mesh collider) and `Entities/character.pre` (skinned, animated, scripted character) through the `World`, runs an ImGui editor UI (scene hierarchy, properties, asset browser, visual-script node editor, tweaks) around the viewport, and drives a transform gizmo. VR is initialized with `EVr::DISABLED` in main.cpp â€” flip to `ENABLED` to run on an OpenXR headset. A Bistro scene (`Entities/BistroScene.pre`) exists as an alternative test scene.
 
-## App testbed key bindings
-* F5 = shader hot-reload, F6 = recompile + hot-swap the current visual script
-* T/R/G = gizmo translate/rotate/scale
-* P = GI probe debug cubes, O = cycle probe debug mode, L = aim sun along camera
-* 1 = clear spawned lights, 2/3 = point lights, 4 = spot, 5 = area, 6 = tube, 7 = 100 random point lights
-* 8/9 = throw physics cube/sphere (with a positional audio blip), 0 = hang a physics chain (spherical joints)
-* WASD/LShift also fire global script events ("W Down"/"W Up", ...) via `Globals::scriptEvents`; Ctrl+C/V = script node copy/paste
+## Claude
+* Do not commit or push files
+* Prefer to let me test out changes myself rather than looking at log output/screen yourself
+* Keep this file up to date
 
 ## Building
 * CMake with Visual Studio 18 2026 generator, build dir is `Build/`
@@ -19,7 +16,6 @@ A modern c++ Game Engine codebase. Windows/MSVC only. The `App` executable is th
 	* Build: `cmake --build Build --config Debug` (also `RelWithDebInfo`, `Release`)
 	* Output: `Build/x64/<Config>/App.exe`. Run from anywhere inside the repo; `FileSystem::initialize()` walks up to find `Assets/` and sets it as the working directory, so all asset paths are relative to `Assets/`
 * No test suite, no linter. Verifying = it compiles + the user runs it
-* Prefer to let me test out changes myself rather than looking at log output/screen yourself
 * Dependencies are prebuilt in `Dependencies/` (Include/Lib/Dll) â€” Vulkan-Hpp (no exceptions, no constructors), SDL3, ImGui docking branch, Assimp, glslang/shaderc, OpenXR loader, Nsight Aftermath, box3d, Steam Audio (static, no DLL; phonon(d).lib bundles its pffft/mysofa/zlib deps), miniaudio (single header, no build), meshoptimizer (LOD generation). box3d, steam-audio and meshoptimizer source stay vendored under `Dependencies/` for rebuilding the prebuilt libs â€” recipes in `Dependencies/CMakeLists.txt` (which is otherwise unused; everything links the prebuilt `<name>.lib`/`<name>d.lib` pairs)
 
 ## Style
