@@ -6,6 +6,8 @@ import :MPMCQueue;
 import :FreeStack;
 import :StealDeque;
 
+export class JobMutex;
+
 // A job executes on a fiber, so it can wait() mid-execution without blocking its worker thread:
 // the fiber parks on the counter's wait list, the worker switches back to its scheduler loop and
 // runs other jobs, and when the counter hits zero the fiber is pushed to the resume queue and
@@ -56,6 +58,16 @@ public:
     bool isInitialized() const { return m_numContexts != 0; }
     uint32 getNumWorkers() const { return m_numWorkers; }
     JobSystemStats getStats() const;
+
+    // Index of the calling thread's scheduler context: 0 = the registered main thread,
+    // 1..getNumWorkers() = workers. Only valid on registered threads and inside jobs. NEVER cache
+    // it across a wait() - the fiber may resume on a different worker (same reason as /GT).
+    uint32 getWorkerIndex() const;
+    uint32 getNumContexts() const { return m_numContexts; } // sizes PerWorker arrays
+
+    // Manually decrement a counter, resuming waiters at zero - the building block for JobEvent
+    // and external completion sources. Pair every signal with a preceding add().
+    void signal(JobCounter& counter) { signalCounter(counter); }
 
     // Fire-and-forget or counter-tracked async execution. The callable must fit Job::StorageSize.
     // counter (optional) is incremented now and decremented when the job finishes: submit
@@ -162,6 +174,10 @@ public:
 private:
 
     friend class JobGraph;
+    friend class JobMutex;
+    void lockJobMutexSlow(JobMutex& mutex);
+    void unlockJobMutexSlow(JobMutex& mutex);
+
     static void __stdcall fiberEntry(void* param);
 
     void workerMain(uint32 contextIndex);

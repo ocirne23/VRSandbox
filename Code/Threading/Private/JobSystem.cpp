@@ -573,6 +573,85 @@ void JobSystem::signalCounter(JobCounter& counter)
         wakeMany(numResumed);
 }
 
+uint32 JobSystem::getWorkerIndex() const
+{
+    assert(t_worker && "getWorkerIndex on an unregistered thread");
+    return t_worker ? t_worker->index : 0;
+}
+
+void JobSystem::lockJobMutexSlow(JobMutex& mutex)
+{
+    for (;;)
+    {
+        for (uint32 spin = 0; spin < 32; ++spin)
+        {
+            if (mutex.tryLock())
+                return;
+            _mm_pause();
+        }
+        WorkerContext* ctx = t_worker; // re-read every round: a parked fiber resumes anywhere
+        if (ctx && ctx->currentFiber)
+        {
+            Fiber* fiber = ctx->currentFiber;
+            FiberWaitNode node{ fiber, nullptr };
+            while (mutex.m_listLock.exchange(1, std::memory_order_acquire) != 0)
+                _mm_pause();
+            if (!(mutex.m_state.load(std::memory_order_relaxed) & JobMutex::LockedBit))
+            {
+                mutex.m_listLock.store(0, std::memory_order_release);
+                continue; // freed while we queued up - race for it again
+            }
+            mutex.m_state.fetch_or(JobMutex::WaitersBit, std::memory_order_relaxed);
+            fiber->switchDone.store(0, std::memory_order_relaxed);
+            fiber->state = Fiber::EState::Parked;
+            node.next = mutex.m_waiters;
+            mutex.m_waiters = &node;
+            mutex.m_listLock.store(0, std::memory_order_release);
+            ctx->numParked++;
+            SwitchToFiber(fiber->returnFiber);
+            // resumed by an unlock (possibly on another worker); barging: retry the lock
+        }
+        else if (ctx)
+        {
+            // registered main thread: help run jobs while the lock is held elsewhere
+            if (!tryRunOneJob())
+                std::this_thread::yield();
+        }
+        else
+        {
+            // unregistered thread: block on the state word (announce first - Dekker with unlock)
+            mutex.m_numBlockedThreads.fetch_add(1, std::memory_order_seq_cst);
+            const uint32 state = mutex.m_state.load(std::memory_order_seq_cst);
+            if (state & JobMutex::LockedBit)
+                mutex.m_state.wait(state, std::memory_order_relaxed);
+            mutex.m_numBlockedThreads.fetch_sub(1, std::memory_order_relaxed);
+        }
+    }
+}
+
+void JobSystem::unlockJobMutexSlow(JobMutex& mutex)
+{
+    // pop ONE parked fiber and resume it; it re-races fresh lockers (barging)
+    while (mutex.m_listLock.exchange(1, std::memory_order_acquire) != 0)
+        _mm_pause();
+    FiberWaitNode* node = mutex.m_waiters;
+    if (node)
+        mutex.m_waiters = node->next;
+    if (!mutex.m_waiters)
+        mutex.m_state.fetch_and(~JobMutex::WaitersBit, std::memory_order_relaxed);
+    mutex.m_listLock.store(0, std::memory_order_release);
+    if (mutex.m_numBlockedThreads.load(std::memory_order_relaxed) != 0)
+        mutex.m_state.notify_all();
+    if (node)
+    {
+        Fiber* fiber = node->fiber; // the node dies when the fiber resumes - read first
+        while (fiber->switchDone.load(std::memory_order_acquire) == 0)
+            _mm_pause();
+        pushMust(m_resumeQueue, fiber);
+        wakeOne();
+    }
+}
+
 void JobSystem::queueTimed(Job* job, double delaySec)
 {
     const Clock::time_point due = Clock::now() + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(std::max(delaySec, 0.0)));

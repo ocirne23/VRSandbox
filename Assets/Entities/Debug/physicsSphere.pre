@@ -1,6 +1,6 @@
 Prefab physicsSphere
 	Position 10.162546 0.23326987 2.6038632
-	Rotation 41.85098 2.477621 -161.22649
+	Rotation 41.850983 2.47762 -161.22649
 	Scale 0.25
 	Component Render
 		ObjectContainer wireshapes
@@ -8,8 +8,8 @@ Prefab physicsSphere
 		Type StaticMesh
 	Component Physics
 		Body Dynamic
-		Shape Box
-		HalfExtents 1 1 1
+		Shape Sphere
+		Radius 1
+		Density 300
 		Friction 0.4
 		Restitution 0.4
-		Density 300

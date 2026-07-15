@@ -267,6 +267,76 @@ void JobSystemStress::selfTest()
         pass ? Log::info(buf) : Log::error(buf);
     }
 
+    { // JobMutex: exclusion + fiber parking under heavy contention, from jobs AND external threads
+        JobMutex mutex;
+        uint32 shared = 0; // non-atomic on purpose: the mutex is what protects it
+        std::atomic<int32> inside = 0;
+        JobCounter counter;
+        for (uint32 i = 0; i < 512; ++i)
+            jobSystem.submit([this, &mutex, &shared, &inside]
+                {
+                    JobMutex::Scope lock(mutex);
+                    if (inside.fetch_add(1, std::memory_order_relaxed) != 0)
+                        m_violations.fetch_add(1, std::memory_order_relaxed);
+                    shared += 1;
+                    for (volatile int spin = 0; spin < 50; ++spin) {}
+                    inside.fetch_sub(1, std::memory_order_relaxed);
+                }, EJobPriority::Normal, &counter, "testMutex");
+        std::thread external([&mutex, &shared, &inside, this]
+            {
+                for (uint32 i = 0; i < 64; ++i)
+                {
+                    JobMutex::Scope lock(mutex);
+                    if (inside.fetch_add(1, std::memory_order_relaxed) != 0)
+                        m_violations.fetch_add(1, std::memory_order_relaxed);
+                    shared += 1;
+                    inside.fetch_sub(1, std::memory_order_relaxed);
+                }
+            });
+        jobSystem.wait(counter);
+        external.join();
+        const bool pass = shared == 512 + 64 && m_violations.load(std::memory_order_relaxed) == 0;
+        numFailed += !pass;
+        sprintf_s(buf, "JobSystem self test: JobMutex exclusion (512 jobs + external thread) - %s", pass ? "PASS" : "FAIL");
+        pass ? Log::info(buf) : Log::error(buf);
+    }
+
+    { // JobEvent: one producer signals, many parked consumers release exactly once
+        JobEvent event;
+        std::atomic<uint32> released = 0;
+        JobCounter counter;
+        for (uint32 i = 0; i < 64; ++i)
+            jobSystem.submit([&event, &released]
+                {
+                    event.wait();
+                    released.fetch_add(1, std::memory_order_relaxed);
+                }, EJobPriority::Normal, &counter, "testEventWait");
+        jobSystem.submitDelayed(0.02, [&event] { event.signal(); });
+        jobSystem.wait(counter);
+        const bool pass = released.load() == 64 && event.isSignaled();
+        numFailed += !pass;
+        sprintf_s(buf, "JobSystem self test: JobEvent (64 parked waiters, delayed signal) - %s", pass ? "PASS" : "FAIL");
+        pass ? Log::info(buf) : Log::error(buf);
+    }
+
+    { // PerWorker + getWorkerIndex: per-slot sums with no cross-talk; nested graph->parallelFor
+        PerWorker<uint64> sums;
+        sums.initialize();
+        JobGraph graph;
+        graph.addParallelJob("perWorkerSum", [] { return 100000u; }, 256, [&sums](uint32 begin, uint32 end)
+            {
+                sums.local() += end - begin; // single writer per slot within the phase
+            });
+        graph.compile();
+        graph.runAndWait();
+        uint64 total = 0;
+        sums.forEach([&total](uint64& value) { total += value; });
+        const bool pass = total == 100000u;
+        numFailed += !pass;
+        sprintf_s(buf, "JobSystem self test: PerWorker sums via graph-nested parallelFor - %s", pass ? "PASS" : "FAIL");
+        pass ? Log::info(buf) : Log::error(buf);
+    }
+
     { // delayed job; result is logged from update() when it lands
         const Clock::time_point start = Clock::now();
         jobSystem.submitDelayed(0.25, [this, start]

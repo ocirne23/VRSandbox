@@ -7,6 +7,7 @@ import Core.Sphere;
 import Core.Transform;
 import Core.Camera;
 import Core.VrSession;
+import Threading;
 
 import :Layout;
 import :Instance;
@@ -126,22 +127,26 @@ public:
 
     bool initialize(Window& window, EValidation validation, EVSync vsync, EVr vr = EVr::DISABLED);
 
-    const Frustum& beginFrame(const Camera& camera);
+    const Frustum& beginFrame(const Camera& camera); // [Concurrency: SERIAL-OWNER of the render chain]
     // passMask (RendererVKLayout::PASS_* bits) selects which culled passes may draw/trace the node
     // this frame: main view, sun shadows, ray tracing (GI/RTAO/RT shadows).
-    void renderNodeThreadSafe(const RenderNode& node, uint32 passMask = RendererVKLayout::PASS_ALL);
+    // [Concurrency: LOCK-FREE - callable from any job between beginFrame and present; on an
+    // overflow frame the tail that no longer fits is dropped for one frame and capacity regrows
+    // at the next beginFrame]
     void renderNode(const RenderNode& node, uint32 passMask = RendererVKLayout::PASS_ALL);
-    void addLightInfo(const RendererVKLayout::LightInfo& light);
-    void addFogVolume(const RendererVKLayout::FogVolumeInfo& fogVolume);
-    void addPointLight(const PointLight& light);
-    void addAreaLight(const AreaLight& areaLight);
-    void addSpotLight(const SpotLight& spotLight);
+    void addLightInfo(const RendererVKLayout::LightInfo& light);   // [Concurrency: LOCK-FREE]
+    void addFogVolume(const RendererVKLayout::FogVolumeInfo& fogVolume); // [Concurrency: LOCK-FREE]
+    void addPointLight(const PointLight& light);                   // [Concurrency: LOCK-FREE]
+    void addAreaLight(const AreaLight& areaLight);                 // [Concurrency: LOCK-FREE]
+    void addSpotLight(const SpotLight& spotLight);                 // [Concurrency: LOCK-FREE]
     // World-space debug overlay line for this frame (physics collider wireframes etc.). color is
     // packed RGBA8 with R in the low byte. Callable any time between two present() calls.
+    // [Concurrency: LOCK-FREE - per-worker staging, merged in present]
     void addDebugLine(const glm::vec3& a, const glm::vec3& b, uint32 color)
     {
-        m_debugLineVerts.push_back({ a, color });
-        m_debugLineVerts.push_back({ b, color });
+        std::vector<DebugLinePipeline::LineVertex>& verts = m_debugLineVerts.local();
+        verts.push_back({ a, color });
+        verts.push_back({ b, color });
     }
     void setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity);
     void present();
@@ -516,7 +521,8 @@ private:
     AccelerationStructure m_accelStructure;
     GIProbePipeline m_giProbePipeline;
     DebugLinePipeline m_debugLinePipeline;
-    std::vector<DebugLinePipeline::LineVertex> m_debugLineVerts; // CPU staging, drained in present()
+    PerWorker<std::vector<DebugLinePipeline::LineVertex>> m_debugLineVerts; // per-worker CPU staging, merged in present()
+    std::vector<DebugLinePipeline::LineVertex> m_debugLineMergedVerts;
 
     SkyParams m_skyParams;
     ShadowParams m_shadowParams;
@@ -628,6 +634,7 @@ private:
     uint32 m_fogVolumeCounter = 0;
     uint32 m_blasBuiltCount = 0;
     uint32 m_pendingMaxInstanceData = 0;
+    uint32 m_instanceOverflowStart = UINT32_MAX; // smallest failed claim this frame; present clamps the counter to it
 
     Buffer m_meshInfosBuffer;
     Buffer m_materialInfosBuffer;

@@ -70,6 +70,18 @@ public:
         return JobGraphBuilder(*this, m_numJobs - 1);
     }
 
+    // A node whose body fans out into a parallelFor over [0, countFunc()) - the range is
+    // re-evaluated every run (live entity/item counts). The node's fiber parks at the internal
+    // join, so budget one fiber per such node running concurrently (JobSystemDesc::numFibers).
+    template<typename CountFunc, typename Func>
+    JobGraphBuilder addParallelJob(const char* name, CountFunc&& countFunc, uint32 grainSize, Func&& func, EJobPriority priority = EJobPriority::Normal)
+    {
+        return addJob(name, [countFunc = std::forward<CountFunc>(countFunc), grainSize, func = std::forward<Func>(func)]
+            {
+                Globals::jobSystem.parallelFor(0u, countFunc(), grainSize, func);
+            }, priority);
+    }
+
     void compile(); // dedupes edges, builds the successor arrays + dependency counts + root set
     void run();     // non-blocking; requires compile()d and not already running
     void wait() { Globals::jobSystem.wait(m_counter); }

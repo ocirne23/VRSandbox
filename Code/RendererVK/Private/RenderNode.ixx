@@ -4,6 +4,7 @@ import Core;
 import Core.glm;
 import Core.Sphere;
 import Core.Transform;
+import Threading;
 
 import :Layout;
 
@@ -12,21 +13,25 @@ export namespace Globals
     std::vector<Transform> renderNodeTransforms;
 
     // Sparse transform-upload tracking: per slot, one pending-upload bit per frame in flight, plus
-    // the per-frame index lists Renderer::present drains (only changed slots are copied into that
-    // frame's GPU buffer instead of the whole array). Maintained by markRenderNodeTransformDirty.
+    // per-WORKER per-frame index lists Renderer::present drains (only changed slots are copied into
+    // that frame's GPU buffer instead of the whole array). Maintained by markRenderNodeTransformDirty.
+    // The bits byte is single-writer per node (one owner pushes a node per frame); the lists are
+    // per-worker so concurrent setTransform calls from parallel jobs never share a vector.
     std::vector<uint8> renderNodeDirtyBits;
-    std::array<std::vector<uint32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> renderNodeDirtyLists;
+    PerWorker<std::array<std::vector<uint32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT>> renderNodeDirtyLists;
 }
 
+// [Concurrency: LOCK-FREE across distinct nodes - one owner per node]
 export inline void markRenderNodeTransformDirty(uint32 idx)
 {
     constexpr uint8 allBits = uint8((1u << RendererVKLayout::NUM_FRAMES_IN_FLIGHT) - 1);
     uint8& bits = Globals::renderNodeDirtyBits[idx];
     if (bits == allBits)
         return;
+    std::array<std::vector<uint32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT>& lists = Globals::renderNodeDirtyLists.local();
     for (uint32 frame = 0; frame < RendererVKLayout::NUM_FRAMES_IN_FLIGHT; ++frame)
         if (!(bits & (1u << frame)))
-            Globals::renderNodeDirtyLists[frame].push_back(idx);
+            lists[frame].push_back(idx);
     bits = allBits;
 }
 

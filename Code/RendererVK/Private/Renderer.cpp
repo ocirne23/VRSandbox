@@ -50,6 +50,11 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     _putenv("DISABLE_VULKAN_OW_OBS_CAPTURE=True");
     _putenv("DISABLE_VULKAN_OBS_CAPTURE=True");
 
+    // Per-worker staging for the lock-free submission surface (requires the JobSystem first).
+    assert(Globals::jobSystem.isInitialized() && "initialize the JobSystem before the Renderer");
+    Globals::renderNodeDirtyLists.initialize();
+    m_debugLineVerts.initialize();
+
     auto rerecordCallback = [this]() { setHaveToRecordCommandBuffers(); };
     m_skyParams.registerTweaks();
     m_shadowParams.registerTweaks();
@@ -513,6 +518,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     checkLightGridCapacity();
 
     m_meshInstanceCounter = 0;
+    m_instanceOverflowStart = UINT32_MAX;
     memset(m_numInstancesPerMesh.data(), 0, m_numInstancesPerMesh.size() * sizeof(m_numInstancesPerMesh[0]));
 
     const glm::ivec2 viewportSize = m_viewportRect.getSize();
@@ -761,14 +767,20 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     return ubo.frustum;
 }
 
-void Renderer::renderNodeThreadSafe(const RenderNode& node, uint32 passMask)
+void Renderer::renderNode(const RenderNode& node, uint32 passMask)
 {
     const uint32 numInstances = (uint32)node.m_meshInstances.size();
     const uint32 startIdx = std::atomic_ref<uint32>(m_meshInstanceCounter).fetch_add(numInstances);
     if (startIdx + numInstances > m_maxInstanceData)
     {
-        // Doesn't fit this frame: return the space, drop the node, and grow at the next beginFrame.
-        std::atomic_ref<uint32>(m_meshInstanceCounter).fetch_sub(numInstances);
+        // Doesn't fit this frame: drop the node and grow at the next beginFrame. NO rollback -
+        // un-bumping a non-top claim corrupts the cursor (later claims would land above the final
+        // counter or leave unwritten gaps below it). The cursor is monotonic, so no claim after
+        // this one can fit either: successful claims stay one contiguous prefix, and present()
+        // clamps the counter to the smallest failed claim recorded here.
+        std::atomic_ref<uint32> overflow(m_instanceOverflowStart);
+        uint32 curOverflow = overflow.load(std::memory_order_relaxed);
+        while (startIdx < curOverflow && !overflow.compare_exchange_weak(curOverflow, startIdx)) {}
         std::atomic_ref<uint32> pending(m_pendingMaxInstanceData);
         uint32 cur = pending.load(std::memory_order_relaxed);
         while (cur < startIdx + numInstances && !pending.compare_exchange_weak(cur, startIdx + numInstances)) {}
@@ -811,30 +823,6 @@ void Renderer::noteTextureUse(const RenderNode& node, uint32 passMask)
     }
 }
 
-void Renderer::renderNode(const RenderNode& node, uint32 passMask)
-{
-    const uint32 numInstances = (uint32)node.m_meshInstances.size();
-    const uint32 startIdx = m_meshInstanceCounter;
-    if (startIdx + numInstances > m_maxInstanceData)
-    {
-        growMeshInstanceCapacity(startIdx + numInstances);
-    }
-    m_meshInstanceCounter += numInstances;
-
-    for (auto& pair : node.m_numInstancesPerMesh)
-        m_numInstancesPerMesh[pair.first] += pair.second;
-
-    noteTextureUse(node, passMask);
-    for (const RendererVKLayout::InMeshInstance& instance : node.m_meshInstances)
-        Globals::meshStreamer.noteUse(instance.meshIdx);
-
-    PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-    frameData.mappedNodePassMasks[node.m_transformIdx] = passMask;
-    memcpy(frameData.mappedMeshInstances.data() + startIdx, node.m_meshInstances.data(), numInstances * sizeof(node.m_meshInstances[0]));
-    if (!node.m_lodInstances.empty())
-        noteLodChainUse(node, startIdx, frameData);
-}
-
 void Renderer::noteLodChainUse(const RenderNode& node, uint32 startIdx, PerFrameData& frameData)
 {
     // The GPU cull picks each instance's level, so every level of a referenced chain must stay warm in
@@ -845,9 +833,9 @@ void Renderer::noteLodChainUse(const RenderNode& node, uint32 startIdx, PerFrame
     for (const RenderNode::LodInstance& lod : node.m_lodInstances)
     {
         MeshLodGroup& group = m_meshLodGroups[lod.lodGroupIdx];
-        if (group.errors[1] == 0.0f && group.lastUseFrame != m_frameCounter)
+        if (group.errors[1] == 0.0f && std::atomic_ref<uint32>(group.lastUseFrame).load(std::memory_order_relaxed) != m_frameCounter)
         {
-            group.lastUseFrame = m_frameCounter;
+            std::atomic_ref<uint32>(group.lastUseFrame).store(m_frameCounter, std::memory_order_relaxed);
             for (uint8 k = 1; k < group.numLods; ++k)
                 Globals::meshStreamer.noteUse(group.meshIdx[k]);
         }
@@ -889,21 +877,22 @@ uint32 Renderer::allocateLodStateRange(uint32 count)
 
 void Renderer::addLightInfo(const RendererVKLayout::LightInfo& light)
 {
-    if (m_lightCounter < RendererVKLayout::MAX_LIGHTS)
+    // lock-free bump; claims beyond MAX_LIGHTS are dropped (present clamps the flush count)
+    const uint32 idx = std::atomic_ref<uint32>(m_lightCounter).fetch_add(1);
+    if (idx < RendererVKLayout::MAX_LIGHTS)
     {
         PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-        frameData.mappedLightInfos[m_lightCounter] = light;
-        m_lightCounter++;
+        frameData.mappedLightInfos[idx] = light;
     }
 }
 
 void Renderer::addFogVolume(const RendererVKLayout::FogVolumeInfo& fogVolume)
 {
-    if (m_fogVolumeCounter < RendererVKLayout::MAX_FOG_VOLUMES)
+    const uint32 idx = std::atomic_ref<uint32>(m_fogVolumeCounter).fetch_add(1);
+    if (idx < RendererVKLayout::MAX_FOG_VOLUMES)
     {
         PerFrameData& frameData = m_perFrameData[m_swapChain.getCurrentFrameIndex()];
-        frameData.mappedFogVolumes.data()->volumes[m_fogVolumeCounter] = fogVolume;
-        m_fogVolumeCounter++;
+        frameData.mappedFogVolumes.data()->volumes[idx] = fogVolume;
     }
 }
 
@@ -922,10 +911,17 @@ void Renderer::present()
 {
     if(m_windowMinimized)
     {
-        m_debugLineVerts.clear();
+        m_debugLineVerts.forEach([](std::vector<DebugLinePipeline::LineVertex>& verts) { verts.clear(); });
         Globals::openXR.endFrame(nullptr, nullptr, {}, vk::ImageLayout::eUndefined); // balance the begun XR frame
         return;
     }
+
+    // Single-threaded again: settle the lock-free frame counters. Instance claims past capacity
+    // never wrote (renderNode's monotonic-cursor overflow path), so the valid prefix ends at the
+    // smallest failed claim; light/fog claims past their fixed maxima were dropped the same way.
+    m_meshInstanceCounter = std::min(m_meshInstanceCounter, m_instanceOverflowStart);
+    m_lightCounter = std::min(m_lightCounter, uint32(RendererVKLayout::MAX_LIGHTS));
+    m_fogVolumeCounter = std::min(m_fogVolumeCounter, uint32(RendererVKLayout::MAX_FOG_VOLUMES));
 
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -935,14 +931,18 @@ void Renderer::present()
     assert(frameData.mappedFirstInstances.size() >= m_meshInfoCounter);
     assert(m_renderNodeTransforms.size() == 0 || Globals::textureManager.getNumTextures() > 0 && "Attempting to render object without any textures loaded!");
 
-    // Sparse transform upload: only slots that changed since this frame-in-flight last consumed them.
-    std::vector<uint32>& transformDirtyList = Globals::renderNodeDirtyLists[frameIdx];
-    for (const uint32 idx : transformDirtyList)
-    {
-        memcpy(&frameData.mappedRenderNodeTransforms[idx], &m_renderNodeTransforms[idx], sizeof(Transform));
-        Globals::renderNodeDirtyBits[idx] &= uint8(~(1u << frameIdx));
-    }
-    transformDirtyList.clear();
+    // Sparse transform upload: only slots that changed since this frame-in-flight last consumed
+    // them, gathered from every worker's dirty list.
+    Globals::renderNodeDirtyLists.forEach([&](std::array<std::vector<uint32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT>& lists)
+        {
+            std::vector<uint32>& transformDirtyList = lists[frameIdx];
+            for (const uint32 idx : transformDirtyList)
+            {
+                memcpy(&frameData.mappedRenderNodeTransforms[idx], &m_renderNodeTransforms[idx], sizeof(Transform));
+                Globals::renderNodeDirtyBits[idx] &= uint8(~(1u << frameIdx));
+            }
+            transformDirtyList.clear();
+        });
     // Bucket layout for the GPU culls: instances are pushed referencing LOD0, and the cull redirects
     // each one to its selected level — so every member of a LOD chain gets a bucket sized to the
     // CHAIN's instance count (any split of the instances across levels fits). Non-chain meshes keep
@@ -975,9 +975,14 @@ void Renderer::present()
 
     // Debug overlay lines accumulated since the last present (safe here: this slot's fence was waited
     // in beginFrame). First use lazily creates the GPU buffers -> re-record to pick up the new pass.
-    if (m_debugLinePipeline.upload(frameIdx, m_debugLineVerts))
+    m_debugLineMergedVerts.clear();
+    m_debugLineVerts.forEach([this](std::vector<DebugLinePipeline::LineVertex>& verts)
+        {
+            m_debugLineMergedVerts.insert(m_debugLineMergedVerts.end(), verts.begin(), verts.end());
+            verts.clear();
+        });
+    if (m_debugLinePipeline.upload(frameIdx, m_debugLineMergedVerts))
         setHaveToRecordCommandBuffers();
-    m_debugLineVerts.clear();
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_skinningComputePipeline.update(frameIdx, m_skinningPalettes, m_skinningJobs);
@@ -1196,8 +1201,11 @@ void Renderer::growRenderNodeCapacity(uint32 needed)
         perFrame.mappedNodeLodStateBias = perFrame.inNodeLodStateBiasBuffer.mapMemory<int32>();
     }
     // Fresh (empty) GPU buffers: every live slot has to upload again.
-    for (std::vector<uint32>& dirtyList : Globals::renderNodeDirtyLists)
-        dirtyList.clear();
+    Globals::renderNodeDirtyLists.forEach([](std::array<std::vector<uint32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT>& lists)
+        {
+            for (std::vector<uint32>& dirtyList : lists)
+                dirtyList.clear();
+        });
     std::fill(Globals::renderNodeDirtyBits.begin(), Globals::renderNodeDirtyBits.end(), uint8(0));
     for (uint32 idx = 0; idx < (uint32)m_renderNodeTransforms.size(); ++idx)
         markRenderNodeTransformDirty(idx);
