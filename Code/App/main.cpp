@@ -33,8 +33,10 @@ int main()
     Input& input = Globals::input;
     input.initialize();
 
+    const glm::vec3 spawnPos = glm::vec3(50.0f, 80.0f, 2327.0f);
+
     FreeFlyCameraController cameraController;
-    cameraController.initialize(glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    cameraController.initialize(spawnPos, glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::ENABLED, EVSync::DISABLED, EVr::DISABLED); // ENABLED DISABLED
@@ -105,16 +107,10 @@ int main()
     std::vector<PhysicsJoint> spawnedJoints;
 
     std::vector<EntityPtr> entities;
-    entities.push_back(world.spawnAssetFile("Entities/sponza.pre", Transform(), false));
-    entities.push_back(world.spawnAssetFile("Entities/skysphere.pre", Transform(), false));
-    entities.push_back(world.spawnAssetFile("Entities/character.pre", Transform()));
-
-    // Poly Haven PBR vegetation/rock test assets, placed near the camera start for a quick visual check.
-    const glm::quat identityQuat(1.0f, 0.0f, 0.0f, 0.0f);
-    entities.push_back(world.spawnAssetFile("Entities/namaqualand_rocks_01.pre", Transform(glm::vec3(4.0f, 0.0f, -2.0f), 1.0f, identityQuat)));
-    entities.push_back(world.spawnAssetFile("Entities/namaqualand_boulder_04.pre", Transform(glm::vec3(4.0f, 0.0f, 0.0f), 1.0f, identityQuat)));
-    entities.push_back(world.spawnAssetFile("Entities/stone_01.pre", Transform(glm::vec3(4.0f, 0.0f, 2.0f), 1.0f, identityQuat)));
-    entities.push_back(world.spawnAssetFile("Entities/tree_small_02.pre", Transform(glm::vec3(6.0f, 0.0f, 0.0f), 1.0f, identityQuat)));
+    const glm::vec3 spawnOffset = spawnPos - glm::vec3(0, 1, 1);
+    entities.push_back(world.spawnAssetFile("Entities/sponza.pre", Transform(spawnOffset), true));
+    entities.push_back(world.spawnAssetFile("Entities/skysphere.pre", Transform(spawnOffset), true));
+    entities.push_back(world.spawnAssetFile("Entities/character.pre", Transform(spawnOffset), true));
 
     GizmoController gizmo;
     gizmo.initialize(world);

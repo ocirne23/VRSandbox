@@ -13,7 +13,7 @@ export struct SkyParams
     glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // sky "up" axis; also the sky radiance light direction
 
     // Sun
-    glm::vec3 sunDirection = glm::normalize(glm::vec3(-0.517f, 0.081f, 0.852f));
+    glm::vec3 sunDirection = glm::normalize(glm::vec3(0.739f, 0.221f, -0.636f));
     glm::vec3 sunColor = glm::vec3(0.9568f, 1.0f, 0.9214f);
     float sunIntensity = 3.0f;
     float sunAngularCos = 0.99998f;     // cos of the disc radius (1 = disc off)
