@@ -1,6 +1,7 @@
 export module Procedural:GeneratorV3;
 
 import Core;
+import :Noise;
 import :TerrainSampler;
 
 // The Terrain Diffusion generator (Private/Diffusion), exposed through the ITerrainSampler the rest of the
@@ -117,7 +118,7 @@ export namespace Procedural
 	{
 	public:
 		explicit TerrainGenV3(const TerrainConfigV3& cfg);
-		~TerrainGenV3() override;
+		~TerrainGenV3() override = default;
 
 		// Starts loading the models (which ship in Assets/TerrainDiffusion) onto the GPU on a background
 		// thread. Cheap and idempotent; the TerrainGenV3 constructor calls it for you.
@@ -166,7 +167,37 @@ export namespace Procedural
 		const TerrainConfigV3& config() const;
 
 	private:
-		struct Impl;
-		std::unique_ptr<Impl> m_impl;
+		// Defined in the .cpp. They are the tile-lattice mechanics — vectors of cached tiles, lattice
+		// offsets — which no consumer can name and none needs to see; declaring them here only lets the
+		// helpers below traffic in them.
+		struct Sample;    // one evaluation of the diffusion field at a world position
+		struct TileBlock; // the tiles covering a query region, resolved up front
+
+		// The uniform world scale (the static worldScale(float) applied to this config's metersPerPixel),
+		// and it times heightScale: model metres -> world metres.
+		float worldScale() const;
+		float vertScale() const;
+
+		bool resolveBlock(double x0, double z0, double x1, double z1, bool coarse, TileBlock& out) const;
+		Sample sampleFromBlock(const TileBlock& b, double worldX, double worldZ) const;
+		Sample sampleField(double worldX, double worldZ, bool coarse = false) const;
+
+		// The shaping layer: the model's raw field -> what the terrain stack actually consumes.
+		float slopeMask(float slope) const;
+		float detail(double worldX, double worldZ, float slope) const;
+		float climateWander(double worldX, double worldZ) const;
+		float lapseOf() const;
+		float temperatureSeaLevelFrom(double worldX, double worldZ, const Sample& s) const;
+		float temperatureFrom(double worldX, double worldZ, const Sample& s, float detailWorldM) const;
+		float humidityOf(const Sample& s) const;
+		float fogThicknessOf(const Sample& s) const;
+		float fogFalloffOf(float temperature) const;
+		void fill(double worldX, double worldZ, const Sample& s, bool withDetail, TerrainPoint& out) const;
+
+		TerrainConfigV3 m_cfg;
+		NoiseField m_detailA;
+		NoiseField m_detailB;
+		NoiseField m_climateNoise; // the microclimate wander; see temperatureFrom
+		float m_invMpp = 1.0f / 30.0f;
 	};
 }

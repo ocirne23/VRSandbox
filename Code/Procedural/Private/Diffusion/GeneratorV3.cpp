@@ -488,327 +488,316 @@ namespace Procedural
 	// TerrainGenV3
 	// =====================================================================================================
 
-	struct TerrainGenV3::Impl
+	// One evaluation of the diffusion field at a world position.
+	struct TerrainGenV3::Sample
 	{
-		TerrainConfigV3 cfg;
-		NoiseField detailA;
-		NoiseField detailB;
-		NoiseField climateNoise; // the microclimate wander; see temperatureFrom
-		float invMpp = 1.0f / 30.0f;
+		float elev = 0.0f;     // metres in the MODEL's frame (before worldScale/heightScale)
+		float macro = 0.0f;    // the low-frequency band of elev, same frame
+		float temp = 15.0f;    // C, at the sampled elevation
+		float beta = -0.0065f; // lapse rate, C per MODEL metre (see FieldTile::beta)
+		float precip = 800.0f; // mm/yr
+		float slope = 0.0f;    // m/m in WORLD space (already through worldScale * heightScale)
+		bool valid = false;
+	};
 
-		// One evaluation of the diffusion field at a world position.
-		struct Sample
+	// A block of tiles covering a query region, fetched UP FRONT — one shared-cache lock per tile — and
+	// then sampled with no locking at all. This is what sampleGrid buys over per-point fetching: a
+	// 512x512 bake resolves to a couple of dozen tiles, not a quarter-million lock/unlock pairs.
+	struct TerrainGenV3::TileBlock
+	{
+		std::vector<FieldTilePtr> tiles; // row-major over [ti0, ti0+th) x [tj0, tj0+tw)
+		int32 ti0 = 0, tj0 = 0, tw = 0, th = 0;
+		int32 span = 0;                  // lattice pixels per tile (TILE or CTILE)
+		int32 halo = 0;
+		// lattice coordinate = world * scale + offset.
+		// The offset is NOT decoration: the coarse lattice is PIXEL-CENTRED with respect to the native
+		// one. WorldPipeline::computeClimate maps native -> coarse as (native + 0.5)/S - 0.5, i.e. coarse
+		// pixel c is centred at native (c + 0.5)*S. Sampling it as native/S instead shifts the entire
+		// coarse field by HALF A COARSE PIXEL — 128 native pixels, which is 3.8 km at 30 m/px — so the
+		// far cascade's climate lands somewhere else than the near cascade's and the textures disagree
+		// for the same position.
+		double latticeScale = 0.0;
+		double latticeOffset = 0.0;
+		bool coarse = false;
+
+		double latticeX(double worldX) const { return worldX * latticeScale + latticeOffset; }
+		double latticeZ(double worldZ) const { return worldZ * latticeScale + latticeOffset; }
+		double worldPerLattice() const { return latticeScale > 0.0 ? 1.0 / latticeScale : 0.0; }
+
+		const FieldTile* tileAt(int32 ti, int32 tj) const
 		{
-			float elev = 0.0f;     // metres in the MODEL's frame (before worldScale/heightScale)
-			float macro = 0.0f;    // the low-frequency band of elev, same frame
-			float temp = 15.0f;    // C, at the sampled elevation
-			float beta = -0.0065f; // lapse rate, C per MODEL metre (see FieldTile::beta)
-			float precip = 800.0f; // mm/yr
-			float slope = 0.0f;    // m/m in WORLD space (already through worldScale * heightScale)
-			bool valid = false;
-		};
-
-		// A block of tiles covering a query region, fetched UP FRONT — one shared-cache lock per tile — and
-		// then sampled with no locking at all. This is what sampleGrid buys over per-point fetching: a
-		// 512x512 bake resolves to a couple of dozen tiles, not a quarter-million lock/unlock pairs.
-		struct TileBlock
-		{
-			std::vector<FieldTilePtr> tiles; // row-major over [ti0, ti0+th) x [tj0, tj0+tw)
-			int32 ti0 = 0, tj0 = 0, tw = 0, th = 0;
-			int32 span = 0;                  // lattice pixels per tile (TILE or CTILE)
-			int32 halo = 0;
-			// lattice coordinate = world * scale + offset.
-			// The offset is NOT decoration: the coarse lattice is PIXEL-CENTRED with respect to the native
-			// one. WorldPipeline::computeClimate maps native -> coarse as (native + 0.5)/S - 0.5, i.e. coarse
-			// pixel c is centred at native (c + 0.5)*S. Sampling it as native/S instead shifts the entire
-			// coarse field by HALF A COARSE PIXEL — 128 native pixels, which is 3.8 km at 30 m/px — so the
-			// far cascade's climate lands somewhere else than the near cascade's and the textures disagree
-			// for the same position.
-			double latticeScale = 0.0;
-			double latticeOffset = 0.0;
-			bool coarse = false;
-
-			double latticeX(double worldX) const { return worldX * latticeScale + latticeOffset; }
-			double latticeZ(double worldZ) const { return worldZ * latticeScale + latticeOffset; }
-			double worldPerLattice() const { return latticeScale > 0.0 ? 1.0 / latticeScale : 0.0; }
-
-			const FieldTile* tileAt(int32 ti, int32 tj) const
-			{
-				const int32 ri = ti - ti0, rj = tj - tj0;
-				if (ri < 0 || ri >= th || rj < 0 || rj >= tw)
-					return nullptr;
-				return tiles[(size_t)ri * tw + rj].get();
-			}
-		};
-
-		// metersPerPixel is a true world SCALE, not just a horizontal one: it shrinks elevation by the same
-		// factor, so a compressed world keeps the proportions the model drew (same slopes, same shape, just
-		// smaller). heightScale is then a pure vertical exaggeration on top.
-		float worldScale() const
-		{
-			const float nr = DiffusionRuntime::get().nativeResolution();
-			return cfg.metersPerPixel / (nr > 0.0f ? nr : 30.0f);
-		}
-		// Model metres -> world metres.
-		float vertScale() const { return worldScale() * cfg.heightScale; }
-
-		// Resolve every tile a world-space rect touches. Returns false if the models aren't up yet.
-		bool resolveBlock(double x0, double z0, double x1, double z1, bool coarse, TileBlock& out) const
-		{
-			DiffusionRuntime& rt = DiffusionRuntime::get();
-			if (!rt.isReady())
-				return false;
-
-			out.coarse = coarse;
-			out.span = coarse ? CTILE : TILE;
-			out.halo = coarse ? CHALO : HALO;
-
-			if (!coarse)
-			{
-				out.latticeScale = (double)invMpp; // world -> native pixels, 1:1 with the tile lattice
-				out.latticeOffset = 0.0;
-			}
-			else
-			{
-				const int32 npc = rt.nativePerCoarsePixel();
-				if (npc <= 0)
-					return false;
-				// coarse = (native + 0.5)/npc - 0.5, matching WorldPipeline::computeClimate exactly.
-				out.latticeScale = (double)invMpp / (double)npc;
-				out.latticeOffset = 0.5 / (double)npc - 0.5;
-			}
-			if (out.latticeScale <= 0.0)
-				return false;
-
-			// +-1 lattice pixel of slack so the bilinear/gradient taps at the rect's edge stay in range.
-			const int32 j0 = (int32)std::floor(out.latticeX(x0)) - 1;
-			const int32 j1 = (int32)std::floor(out.latticeX(x1)) + 1;
-			const int32 i0 = (int32)std::floor(out.latticeZ(z0)) - 1;
-			const int32 i1 = (int32)std::floor(out.latticeZ(z1)) + 1;
-
-			out.ti0 = floorDiv(i0, out.span);
-			out.tj0 = floorDiv(j0, out.span);
-			out.th = floorDiv(i1, out.span) - out.ti0 + 1;
-			out.tw = floorDiv(j1, out.span) - out.tj0 + 1;
-			if (out.th <= 0 || out.tw <= 0)
-				return false;
-
-			out.tiles.assign((size_t)out.th * out.tw, nullptr);
-			for (int32 ti = 0; ti < out.th; ti++)
-				for (int32 tj = 0; tj < out.tw; tj++)
-					out.tiles[(size_t)ti * out.tw + tj] = coarse
-						? rt.fetchCoarseTile(out.ti0 + ti, out.tj0 + tj)
-						: rt.fetchTile(out.ti0 + ti, out.tj0 + tj);
-			return true;
-		}
-
-		// Sample a point from an already-resolved block. No locks, no fetches.
-		Sample sampleFromBlock(const TileBlock& b, double worldX, double worldZ) const
-		{
-			Sample s;
-			// j <-> x, i <-> z (the pipeline's i is the row axis).
-			const double nj = b.latticeX(worldX);
-			const double ni = b.latticeZ(worldZ);
-			const int32 j0 = (int32)std::floor(nj);
-			const int32 i0 = (int32)std::floor(ni);
-			const float fj = (float)(nj - (double)j0);
-			const float fi = (float)(ni - (double)i0);
-
-			const int32 ti = floorDiv(i0, b.span), tj = floorDiv(j0, b.span);
-			const FieldTile* tile = b.tileAt(ti, tj);
-			if (!tile)
-				return s;
-
-			const int32 w = tile->width;
-			const int32 li = i0 - (ti * b.span - b.halo);
-			const int32 lj = j0 - (tj * b.span - b.halo);
-			assert(li >= 0 && li + 1 < w && lj >= 0 && lj + 1 < w);
-
-			auto bilerp = [&](const std::vector<float>& v) -> float
-			{
-				const float a = v[(size_t)li * w + lj];
-				const float b2 = v[(size_t)li * w + lj + 1];
-				const float c = v[(size_t)(li + 1) * w + lj];
-				const float d = v[(size_t)(li + 1) * w + lj + 1];
-				return (1 - fi) * ((1 - fj) * a + fj * b2) + fi * ((1 - fj) * c + fj * d);
-			};
-
-			s.elev = bilerp(tile->elev);
-			s.macro = bilerp(tile->macro);
-			s.temp = bilerp(tile->temp);
-			s.beta = bilerp(tile->beta);
-			s.precip = bilerp(tile->precip);
-
-			// Central differences over the lattice -> WORLD slope. The halo is what lets this work at a tile
-			// edge without a seam. The vertical scaling matters: without it, compressing the world would
-			// silently steepen every slope, which then skews the detail mask and the fog. With it, worldScale
-			// cancels and the slope depends only on heightScale — i.e. proportions hold.
-			const float eL = tile->elev[(size_t)li * w + (lj > 0 ? lj - 1 : lj)];
-			const float eR = tile->elev[(size_t)li * w + lj + 1];
-			const float eU = tile->elev[(size_t)(li > 0 ? li - 1 : li) * w + lj];
-			const float eD = tile->elev[(size_t)(li + 1) * w + lj];
-			const float step = 2.0f * (float)b.worldPerLattice(); // world metres between the two taps
-			const float vs = vertScale();
-			const float dx = (eR - eL) * vs / step;
-			const float dz = (eD - eU) * vs / step;
-			s.slope = std::sqrt(dx * dx + dz * dz);
-			s.valid = true;
-			return s;
-		}
-
-		// The point path: resolve a one-tile block and sample it.
-		Sample sampleField(double worldX, double worldZ, bool coarse = false) const
-		{
-			TileBlock b;
-			if (!resolveBlock(worldX, worldZ, worldX, worldZ, coarse, b))
-				return Sample{};
-			return sampleFromBlock(b, worldX, worldZ);
-		}
-
-		// The slope mask: sf^2 * sqrt(sf), so detail ramps in sharply and plains stay perfectly smooth.
-		float slopeMask(float slope) const
-		{
-			const float sf = std::min(1.0f, slope * cfg.detailSlopeGain);
-			return sf * sf * std::sqrt(sf);
-		}
-
-		// Sub-model-pixel relief, in WORLD metres. Both the wavelengths and the amplitudes ride worldScale,
-		// so a compressed world gets proportionally finer, shallower crags rather than the same absolute
-		// ones. Not affected by heightScale: the detail amplitudes are already direct tweaks in metres.
-		float detail(double worldX, double worldZ, float slope) const
-		{
-			const float mask = slopeMask(slope);
-			if (mask <= 0.0f)
-				return 0.0f;
-			const float scale = worldScale();
-			const float fA = 1.0f / (cfg.detailWavelengthA * scale);
-			const float fB = 1.0f / (cfg.detailWavelengthB * scale);
-			const float a = detailA.fbm((float)(worldX * fA), (float)(worldZ * fA), cfg.detailOctavesA);
-			const float b = detailB.fbm((float)(worldX * fB), (float)(worldZ * fB), cfg.detailOctavesB);
-			return (a * cfg.detailAmplitudeA + b * cfg.detailAmplitudeB) * mask * scale;
-		}
-
-		// Climate lives in the MODEL's elevation frame and stays there. metersPerPixel and heightScale are
-		// presentation choices — we draw the same planet at a different size, not relocate it — so the
-		// climate rides along unscaled and a shrunk world keeps the snow caps and biome bands of the
-		// full-size one. Only the procedural detail adds relief the model never saw, so it alone earns a
-		// lapse correction (converted back into model metres to stay in that frame).
-		// A slow wander in degrees C. This is what stops every climate boundary from being a contour line:
-		// see TerrainConfigV3::climateNoiseAmplitudeC. A pure function of world position, so the near (Full)
-		// and far (Coarse) terrain-data cascades get identical values and cannot disagree about it.
-		float climateWander(double worldX, double worldZ) const
-		{
-			if (cfg.climateNoiseAmplitudeC <= 0.0f)
-				return 0.0f;
-			const float f = 1.0f / std::max(1.0f, cfg.climateNoiseWavelength * worldScale());
-			return climateNoise.fbm((float)(worldX * f), (float)(worldZ * f), cfg.climateNoiseOctaves)
-			     * cfg.climateNoiseAmplitudeC;
-		}
-
-		// THE lapse rate, C per MODEL metre. One number for the world (see TerrainConfigV3::lapseRate), so
-		// the temperature is an evaluable function of height rather than a field of samples.
-		float lapseOf() const { return std::min(cfg.lapseRate, 0.0f); }
-
-		// The temperature this point would have AT SEA LEVEL: the baseline the lapse rate is applied to.
-		// This — not a temperature — is what the terrain-data map bakes, so consumers can evaluate at their
-		// own height (see TerrainPoint::temperatureSeaLevel).
-		//
-		// Everything that does not depend on height belongs here, and everything that does belongs in the
-		// lapse. The wander is a property of WHERE you are, not how high, so it rides the baseline; the
-		// snow-line tweak scales with altitude, so it is folded into lapseOf instead.
-		float temperatureSeaLevelFrom(double worldX, double worldZ, const Sample& s) const
-		{
-			// s.beta — the model's OWN regressed rate — is used here and only here: it is what the model's
-			// temperature was built with, so undoing it is the only way to recover the baseline underneath.
-			// The rate applied on top is ours (lapseOf), which is why the two differ.
-			const float tBase = s.temp - s.beta * std::max(0.0f, s.elev);
-			return tBase + climateWander(worldX, worldZ) + cfg.temperatureOffset;
-		}
-
-		// Temperature at the point's FULL surface height (model elevation + the procedural detail).
-		//
-		// Literally the baseline evaluated at this height, so it CANNOT disagree with what the map bakes —
-		// which was worth restructuring for. The previous form built the temperature by bolting corrections
-		// onto the model's value, and the detail layer's correction used a hardcoded -0.0065 while the
-		// model's own relief used the regressed beta; the result was not an affine function of the reported
-		// height at all, and the consumer trying to move it off that height was left ~1.5 C short.
-		float temperatureFrom(double worldX, double worldZ, const Sample& s, float detailWorldM) const
-		{
-			const float elevWithDetail = s.elev + detailWorldM / std::max(0.01f, vertScale());
-			return temperatureSeaLevelFrom(worldX, worldZ, s) + lapseOf() * std::max(0.0f, elevWithDetail);
-		}
-
-		float humidityOf(const Sample& s) const
-		{
-			const float h = s.precip / std::max(1.0f, cfg.precipForFullHumidity) + cfg.humidityOffset;
-			return std::clamp(h, 0.0f, 1.0f);
-		}
-
-		float fogThicknessOf(const Sample& s) const
-		{
-			// Two contributions, both keyed off the model's real climate: wet regions carry broad haze, and
-			// flat land collects valley fog.
-			const float humidity = humidityOf(s);
-			const float humid = cfg.humidFogAmount * humidity * humidity;
-			const float flat = 1.0f - std::min(1.0f, s.slope * 2.0f);
-			const float land = s.elev > 0.0f ? 1.0f : 0.0f;
-			const float valley = cfg.valleyFogAmount * flat * land * humidity;
-			return std::clamp(std::max(humid, valley), 0.0f, 1.0f);
-		}
-
-		float fogFalloffOf(float temperature) const
-		{
-			// Cold air hugs the ground; warm humid air lets fog tower.
-			const float t01 = std::clamp((temperature + 10.0f) / 40.0f, 0.0f, 1.0f);
-			return std::clamp(1.8f - 1.2f * t01, 0.0f, FOG_FALLOFF_MUL_MAX);
-		}
-
-		// Everything from one field evaluation. `withDetail` is false on the coarse path: sub-model-pixel
-		// noise is meaningless at a far cascade's texel density and would only cost noise lookups.
-		void fill(double worldX, double worldZ, const Sample& s, bool withDetail, TerrainPoint& out) const
-		{
-			if (!s.valid)
-			{
-				out = TerrainPoint{};
-				out.height = cfg.seaLevel;
-				out.waterLevel = cfg.seaLevel;
-				return;
-			}
-			const float d = withDetail ? detail(worldX, worldZ, s.slope) : 0.0f;
-			const float vs = vertScale();
-			// altitude is the MACRO band, NOT the full surface. The terrain shader's rock layer keys on the
-			// crag relief (height - altitude) to tell a mountain from flat ground at altitude, so reporting
-			// the full elevation here made that difference the detail layer alone (a few metres) and no
-			// slope ever grew rock — mountain tops came out textured as whatever biome the lowland was.
-			// The macro surface, unperturbed. The crag WANDER that stops the rock boundary being a contour
-			// line lives in the terrain shader, not here: it has to be scaled by the local relief (so it can
-			// only modulate relief that exists, never invent rock on a plain), and relief is exactly what
-			// this path cannot supply on the coarse level — macro == elev there, so relief is 0 by
-			// construction and the far cascade would silently get no wander at all while the near one did.
-			// The shader has the full-detail MESH height whichever cascade it reads, so it can always
-			// compute the real relief. See terrainSplat / u_terrainTexParams5.
-			out.altitude = s.macro * vs;
-			out.height = cfg.seaLevel + s.elev * vs + d;
-			out.waterLevel = cfg.seaLevel;
-			out.temperature = temperatureFrom(worldX, worldZ, s, d);
-			// What the map bakes. The rate that pairs with it is published once (lapseRatePerMetre), not
-			// per point.
-			out.temperatureSeaLevel = temperatureSeaLevelFrom(worldX, worldZ, s);
-			out.humidity = humidityOf(s);
-			out.fogThickness = fogThicknessOf(s);
-			out.fogFalloffMul = fogFalloffOf(out.temperature);
-			out.flowAngle01 = -1.0f;
+			const int32 ri = ti - ti0, rj = tj - tj0;
+			if (ri < 0 || ri >= th || rj < 0 || rj >= tw)
+				return nullptr;
+			return tiles[(size_t)ri * tw + rj].get();
 		}
 	};
 
-	TerrainGenV3::TerrainGenV3(const TerrainConfigV3& cfg) : m_impl(std::make_unique<Impl>())
+	// metersPerPixel is a true world SCALE, not just a horizontal one: it shrinks elevation by the same
+	// factor, so a compressed world keeps the proportions the model drew (same slopes, same shape, just
+	// smaller). heightScale is then a pure vertical exaggeration on top.
+	// Resolves to the static worldScale(float) overload -- one argument, so the const overload is not a
+	// candidate. Same number, computed in one place.
+	float TerrainGenV3::worldScale() const { return worldScale(m_cfg.metersPerPixel); }
+	// Model metres -> world metres.
+	float TerrainGenV3::vertScale() const { return worldScale() * m_cfg.heightScale; }
+
+	// Resolve every tile a world-space rect touches. Returns false if the models aren't up yet.
+	bool TerrainGenV3::resolveBlock(double x0, double z0, double x1, double z1, bool coarse, TileBlock& out) const
 	{
-		m_impl->cfg = cfg;
-		m_impl->cfg.metersPerPixel = std::max(0.5f, cfg.metersPerPixel);
-		m_impl->invMpp = 1.0f / m_impl->cfg.metersPerPixel;
-		m_impl->detailA.setSeed(cfg.seed * 0x9E3779B9u + 0x51ED2701u);
-		m_impl->detailB.setSeed(cfg.seed * 0x85EBCA6Bu + 0xC2B2AE35u);
-		m_impl->climateNoise.setSeed(cfg.seed * 0x27220A95u + 0x165667B1u);
+		DiffusionRuntime& rt = DiffusionRuntime::get();
+		if (!rt.isReady())
+			return false;
+
+		out.coarse = coarse;
+		out.span = coarse ? CTILE : TILE;
+		out.halo = coarse ? CHALO : HALO;
+
+		if (!coarse)
+		{
+			out.latticeScale = (double)m_invMpp; // world -> native pixels, 1:1 with the tile lattice
+			out.latticeOffset = 0.0;
+		}
+		else
+		{
+			const int32 npc = rt.nativePerCoarsePixel();
+			if (npc <= 0)
+				return false;
+			// coarse = (native + 0.5)/npc - 0.5, matching WorldPipeline::computeClimate exactly.
+			out.latticeScale = (double)m_invMpp / (double)npc;
+			out.latticeOffset = 0.5 / (double)npc - 0.5;
+		}
+		if (out.latticeScale <= 0.0)
+			return false;
+
+		// +-1 lattice pixel of slack so the bilinear/gradient taps at the rect's edge stay in range.
+		const int32 j0 = (int32)std::floor(out.latticeX(x0)) - 1;
+		const int32 j1 = (int32)std::floor(out.latticeX(x1)) + 1;
+		const int32 i0 = (int32)std::floor(out.latticeZ(z0)) - 1;
+		const int32 i1 = (int32)std::floor(out.latticeZ(z1)) + 1;
+
+		out.ti0 = floorDiv(i0, out.span);
+		out.tj0 = floorDiv(j0, out.span);
+		out.th = floorDiv(i1, out.span) - out.ti0 + 1;
+		out.tw = floorDiv(j1, out.span) - out.tj0 + 1;
+		if (out.th <= 0 || out.tw <= 0)
+			return false;
+
+		out.tiles.assign((size_t)out.th * out.tw, nullptr);
+		for (int32 ti = 0; ti < out.th; ti++)
+			for (int32 tj = 0; tj < out.tw; tj++)
+				out.tiles[(size_t)ti * out.tw + tj] = coarse
+					? rt.fetchCoarseTile(out.ti0 + ti, out.tj0 + tj)
+					: rt.fetchTile(out.ti0 + ti, out.tj0 + tj);
+		return true;
+	}
+
+	// Sample a point from an already-resolved block. No locks, no fetches.
+	TerrainGenV3::Sample TerrainGenV3::sampleFromBlock(const TileBlock& b, double worldX, double worldZ) const
+	{
+		Sample s;
+		// j <-> x, i <-> z (the pipeline's i is the row axis).
+		const double nj = b.latticeX(worldX);
+		const double ni = b.latticeZ(worldZ);
+		const int32 j0 = (int32)std::floor(nj);
+		const int32 i0 = (int32)std::floor(ni);
+		const float fj = (float)(nj - (double)j0);
+		const float fi = (float)(ni - (double)i0);
+
+		const int32 ti = floorDiv(i0, b.span), tj = floorDiv(j0, b.span);
+		const FieldTile* tile = b.tileAt(ti, tj);
+		if (!tile)
+			return s;
+
+		const int32 w = tile->width;
+		const int32 li = i0 - (ti * b.span - b.halo);
+		const int32 lj = j0 - (tj * b.span - b.halo);
+		assert(li >= 0 && li + 1 < w && lj >= 0 && lj + 1 < w);
+
+		auto bilerp = [&](const std::vector<float>& v) -> float
+		{
+			const float a = v[(size_t)li * w + lj];
+			const float b2 = v[(size_t)li * w + lj + 1];
+			const float c = v[(size_t)(li + 1) * w + lj];
+			const float d = v[(size_t)(li + 1) * w + lj + 1];
+			return (1 - fi) * ((1 - fj) * a + fj * b2) + fi * ((1 - fj) * c + fj * d);
+		};
+
+		s.elev = bilerp(tile->elev);
+		s.macro = bilerp(tile->macro);
+		s.temp = bilerp(tile->temp);
+		s.beta = bilerp(tile->beta);
+		s.precip = bilerp(tile->precip);
+
+		// Central differences over the lattice -> WORLD slope. The halo is what lets this work at a tile
+		// edge without a seam. The vertical scaling matters: without it, compressing the world would
+		// silently steepen every slope, which then skews the detail mask and the fog. With it, worldScale
+		// cancels and the slope depends only on heightScale — i.e. proportions hold.
+		const float eL = tile->elev[(size_t)li * w + (lj > 0 ? lj - 1 : lj)];
+		const float eR = tile->elev[(size_t)li * w + lj + 1];
+		const float eU = tile->elev[(size_t)(li > 0 ? li - 1 : li) * w + lj];
+		const float eD = tile->elev[(size_t)(li + 1) * w + lj];
+		const float step = 2.0f * (float)b.worldPerLattice(); // world metres between the two taps
+		const float vs = vertScale();
+		const float dx = (eR - eL) * vs / step;
+		const float dz = (eD - eU) * vs / step;
+		s.slope = std::sqrt(dx * dx + dz * dz);
+		s.valid = true;
+		return s;
+	}
+
+	// The point path: resolve a one-tile block and sample it.
+	TerrainGenV3::Sample TerrainGenV3::sampleField(double worldX, double worldZ, bool coarse) const
+	{
+		TileBlock b;
+		if (!resolveBlock(worldX, worldZ, worldX, worldZ, coarse, b))
+			return Sample{};
+		return sampleFromBlock(b, worldX, worldZ);
+	}
+
+	// The slope mask: sf^2 * sqrt(sf), so detail ramps in sharply and plains stay perfectly smooth.
+	float TerrainGenV3::slopeMask(float slope) const
+	{
+		const float sf = std::min(1.0f, slope * m_cfg.detailSlopeGain);
+		return sf * sf * std::sqrt(sf);
+	}
+
+	// Sub-model-pixel relief, in WORLD metres. Both the wavelengths and the amplitudes ride worldScale,
+	// so a compressed world gets proportionally finer, shallower crags rather than the same absolute
+	// ones. Not affected by heightScale: the detail amplitudes are already direct tweaks in metres.
+	float TerrainGenV3::detail(double worldX, double worldZ, float slope) const
+	{
+		const float mask = slopeMask(slope);
+		if (mask <= 0.0f)
+			return 0.0f;
+		const float scale = worldScale();
+		const float fA = 1.0f / (m_cfg.detailWavelengthA * scale);
+		const float fB = 1.0f / (m_cfg.detailWavelengthB * scale);
+		const float a = m_detailA.fbm((float)(worldX * fA), (float)(worldZ * fA), m_cfg.detailOctavesA);
+		const float b = m_detailB.fbm((float)(worldX * fB), (float)(worldZ * fB), m_cfg.detailOctavesB);
+		return (a * m_cfg.detailAmplitudeA + b * m_cfg.detailAmplitudeB) * mask * scale;
+	}
+
+	// Climate lives in the MODEL's elevation frame and stays there. metersPerPixel and heightScale are
+	// presentation choices — we draw the same planet at a different size, not relocate it — so the
+	// climate rides along unscaled and a shrunk world keeps the snow caps and biome bands of the
+	// full-size one. Only the procedural detail adds relief the model never saw, so it alone earns a
+	// lapse correction (converted back into model metres to stay in that frame).
+	// A slow wander in degrees C. This is what stops every climate boundary from being a contour line:
+	// see TerrainConfigV3::climateNoiseAmplitudeC. A pure function of world position, so the near (Full)
+	// and far (Coarse) terrain-data cascades get identical values and cannot disagree about it.
+	float TerrainGenV3::climateWander(double worldX, double worldZ) const
+	{
+		if (m_cfg.climateNoiseAmplitudeC <= 0.0f)
+			return 0.0f;
+		const float f = 1.0f / std::max(1.0f, m_cfg.climateNoiseWavelength * worldScale());
+		return m_climateNoise.fbm((float)(worldX * f), (float)(worldZ * f), m_cfg.climateNoiseOctaves)
+		     * m_cfg.climateNoiseAmplitudeC;
+	}
+
+	// THE lapse rate, C per MODEL metre. One number for the world (see TerrainConfigV3::lapseRate), so
+	// the temperature is an evaluable function of height rather than a field of samples.
+	float TerrainGenV3::lapseOf() const { return std::min(m_cfg.lapseRate, 0.0f); }
+
+	// The temperature this point would have AT SEA LEVEL: the baseline the lapse rate is applied to.
+	// This — not a temperature — is what the terrain-data map bakes, so consumers can evaluate at their
+	// own height (see TerrainPoint::temperatureSeaLevel).
+	//
+	// Everything that does not depend on height belongs here, and everything that does belongs in the
+	// lapse. The wander is a property of WHERE you are, not how high, so it rides the baseline; the
+	// snow-line tweak scales with altitude, so it is folded into lapseOf instead.
+	float TerrainGenV3::temperatureSeaLevelFrom(double worldX, double worldZ, const Sample& s) const
+	{
+		// s.beta — the model's OWN regressed rate — is used here and only here: it is what the model's
+		// temperature was built with, so undoing it is the only way to recover the baseline underneath.
+		// The rate applied on top is ours (lapseOf), which is why the two differ.
+		const float tBase = s.temp - s.beta * std::max(0.0f, s.elev);
+		return tBase + climateWander(worldX, worldZ) + m_cfg.temperatureOffset;
+	}
+
+	// Temperature at the point's FULL surface height (model elevation + the procedural detail).
+	//
+	// Literally the baseline evaluated at this height, so it CANNOT disagree with what the map bakes —
+	// which was worth restructuring for. The previous form built the temperature by bolting corrections
+	// onto the model's value, and the detail layer's correction used a hardcoded -0.0065 while the
+	// model's own relief used the regressed beta; the result was not an affine function of the reported
+	// height at all, and the consumer trying to move it off that height was left ~1.5 C short.
+	float TerrainGenV3::temperatureFrom(double worldX, double worldZ, const Sample& s, float detailWorldM) const
+	{
+		const float elevWithDetail = s.elev + detailWorldM / std::max(0.01f, vertScale());
+		return temperatureSeaLevelFrom(worldX, worldZ, s) + lapseOf() * std::max(0.0f, elevWithDetail);
+	}
+
+	float TerrainGenV3::humidityOf(const Sample& s) const
+	{
+		const float h = s.precip / std::max(1.0f, m_cfg.precipForFullHumidity) + m_cfg.humidityOffset;
+		return std::clamp(h, 0.0f, 1.0f);
+	}
+
+	float TerrainGenV3::fogThicknessOf(const Sample& s) const
+	{
+		// Two contributions, both keyed off the model's real climate: wet regions carry broad haze, and
+		// flat land collects valley fog.
+		const float humidity = humidityOf(s);
+		const float humid = m_cfg.humidFogAmount * humidity * humidity;
+		const float flat = 1.0f - std::min(1.0f, s.slope * 2.0f);
+		const float land = s.elev > 0.0f ? 1.0f : 0.0f;
+		const float valley = m_cfg.valleyFogAmount * flat * land * humidity;
+		return std::clamp(std::max(humid, valley), 0.0f, 1.0f);
+	}
+
+	float TerrainGenV3::fogFalloffOf(float temperature) const
+	{
+		// Cold air hugs the ground; warm humid air lets fog tower.
+		const float t01 = std::clamp((temperature + 10.0f) / 40.0f, 0.0f, 1.0f);
+		return std::clamp(1.8f - 1.2f * t01, 0.0f, FOG_FALLOFF_MUL_MAX);
+	}
+
+	// Everything from one field evaluation. `withDetail` is false on the coarse path: sub-model-pixel
+	// noise is meaningless at a far cascade's texel density and would only cost noise lookups.
+	void TerrainGenV3::fill(double worldX, double worldZ, const Sample& s, bool withDetail, TerrainPoint& out) const
+	{
+		if (!s.valid)
+		{
+			out = TerrainPoint{};
+			out.height = m_cfg.seaLevel;
+			out.waterLevel = m_cfg.seaLevel;
+			return;
+		}
+		const float d = withDetail ? detail(worldX, worldZ, s.slope) : 0.0f;
+		const float vs = vertScale();
+		// altitude is the MACRO band, NOT the full surface. The terrain shader's rock layer keys on the
+		// crag relief (height - altitude) to tell a mountain from flat ground at altitude, so reporting
+		// the full elevation here made that difference the detail layer alone (a few metres) and no
+		// slope ever grew rock — mountain tops came out textured as whatever biome the lowland was.
+		// The macro surface, unperturbed. The crag WANDER that stops the rock boundary being a contour
+		// line lives in the terrain shader, not here: it has to be scaled by the local relief (so it can
+		// only modulate relief that exists, never invent rock on a plain), and relief is exactly what
+		// this path cannot supply on the coarse level — macro == elev there, so relief is 0 by
+		// construction and the far cascade would silently get no wander at all while the near one did.
+		// The shader has the full-detail MESH height whichever cascade it reads, so it can always
+		// compute the real relief. See terrainSplat / u_terrainTexParams5.
+		out.altitude = s.macro * vs;
+		out.height = m_cfg.seaLevel + s.elev * vs + d;
+		out.waterLevel = m_cfg.seaLevel;
+		out.temperature = temperatureFrom(worldX, worldZ, s, d);
+		// What the map bakes. The rate that pairs with it is published once (lapseRatePerMetre), not
+		// per point.
+		out.temperatureSeaLevel = temperatureSeaLevelFrom(worldX, worldZ, s);
+		out.humidity = humidityOf(s);
+		out.fogThickness = fogThicknessOf(s);
+		out.fogFalloffMul = fogFalloffOf(out.temperature);
+		out.flowAngle01 = -1.0f;
+	}
+
+	TerrainGenV3::TerrainGenV3(const TerrainConfigV3& cfg)
+		: m_cfg(cfg)
+		, m_detailA(cfg.seed * 0x9E3779B9u + 0x51ED2701u)
+		, m_detailB(cfg.seed * 0x85EBCA6Bu + 0xC2B2AE35u)
+		, m_climateNoise(cfg.seed * 0x27220A95u + 0x165667B1u)
+	{
+		m_cfg.metersPerPixel = std::max(0.5f, cfg.metersPerPixel);
+		m_invMpp = 1.0f / m_cfg.metersPerPixel;
 
 		// Before beginLoad: on the first construction this just records the choice, so the initial load
 		// reads the right weights instead of loading fp32 and immediately reloading.
@@ -817,8 +806,6 @@ namespace Procedural
 		DiffusionRuntime::get().setSeed((uint64)cfg.seed);
 		DiffusionRuntime::get().setMaxResidentTiles(cfg.maxResidentTiles);
 	}
-
-	TerrainGenV3::~TerrainGenV3() = default;
 
 	void TerrainGenV3::beginLoad() { DiffusionRuntime::get().beginLoad(); }
 	float TerrainGenV3::worldScale(float metersPerPixel)
@@ -834,85 +821,85 @@ namespace Procedural
 	bool TerrainGenV3::hasFailed() { return DiffusionRuntime::get().hasFailed(); }
 	std::string TerrainGenV3::statusText() { return DiffusionRuntime::get().statusText(); }
 
-	const TerrainConfigV3& TerrainGenV3::config() const { return m_impl->cfg; }
-	float TerrainGenV3::seaLevel() const { return m_impl->cfg.seaLevel; }
-	float TerrainGenV3::lapseRatePerMetre() const { return m_impl->lapseOf(); }
+	const TerrainConfigV3& TerrainGenV3::config() const { return m_cfg; }
+	float TerrainGenV3::seaLevel() const { return m_cfg.seaLevel; }
+	float TerrainGenV3::lapseRatePerMetre() const { return lapseOf(); }
 
 	float TerrainGenV3::sampleAltitude(double worldX, double worldZ) const
 	{
-		// The MACRO band (see Impl::fill): the smooth surface the high-frequency residual rides on, which is
+		// The MACRO band (see fill): the smooth surface the high-frequency residual rides on, which is
 		// what makes height - altitude a meaningful "how craggy is this" measure.
-		const Impl::Sample s = m_impl->sampleField(worldX, worldZ);
-		return s.macro * m_impl->vertScale();
+		const Sample s = sampleField(worldX, worldZ);
+		return s.macro * vertScale();
 	}
 
 	float TerrainGenV3::sampleHeight(double worldX, double worldZ) const
 	{
-		const Impl::Sample s = m_impl->sampleField(worldX, worldZ);
+		const Sample s = sampleField(worldX, worldZ);
 		if (!s.valid)
-			return m_impl->cfg.seaLevel;
-		return m_impl->cfg.seaLevel + s.elev * m_impl->vertScale()
-			+ m_impl->detail(worldX, worldZ, s.slope);
+			return m_cfg.seaLevel;
+		return m_cfg.seaLevel + s.elev * vertScale()
+			+ detail(worldX, worldZ, s.slope);
 	}
 
 	float TerrainGenV3::sampleWaterHeight(double, double) const
 	{
 		// The model's elevation is already relative to sea level, so the sea is exactly seaLevel.
 		// (Elevated water — lakes, rivers — is not modelled yet.)
-		return m_impl->cfg.seaLevel;
+		return m_cfg.seaLevel;
 	}
 
 	float TerrainGenV3::sampleHeightAndWater(double worldX, double worldZ, float& outWaterLevel) const
 	{
-		outWaterLevel = m_impl->cfg.seaLevel;
+		outWaterLevel = m_cfg.seaLevel;
 		return sampleHeight(worldX, worldZ);
 	}
 
 	float TerrainGenV3::sampleTemperature(double worldX, double worldZ) const
 	{
-		const Impl::Sample s = m_impl->sampleField(worldX, worldZ);
+		const Sample s = sampleField(worldX, worldZ);
 		if (!s.valid)
 			return 15.0f;
-		return m_impl->temperatureFrom(worldX, worldZ, s, m_impl->detail(worldX, worldZ, s.slope));
+		return temperatureFrom(worldX, worldZ, s, detail(worldX, worldZ, s.slope));
 	}
 
 	float TerrainGenV3::sampleHumidity(double worldX, double worldZ) const
 	{
-		const Impl::Sample s = m_impl->sampleField(worldX, worldZ);
+		const Sample s = sampleField(worldX, worldZ);
 		if (!s.valid)
 			return 0.5f;
-		return m_impl->humidityOf(s);
+		return humidityOf(s);
 	}
 
 	float TerrainGenV3::sampleFogThickness(double worldX, double worldZ) const
 	{
-		const Impl::Sample s = m_impl->sampleField(worldX, worldZ);
+		const Sample s = sampleField(worldX, worldZ);
 		if (!s.valid)
 			return 0.0f;
-		return m_impl->fogThicknessOf(s);
+		return fogThicknessOf(s);
 	}
 
 	float TerrainGenV3::sampleFogHeightFalloff(double worldX, double worldZ) const
 	{
-		const Impl::Sample s = m_impl->sampleField(worldX, worldZ);
+		const Sample s = sampleField(worldX, worldZ);
 		if (!s.valid)
 			return 1.0f;
 		// Uses the SHAPED temperature so the fog agrees with the biome splatting rather than the raw model.
-		return m_impl->fogFalloffOf(m_impl->temperatureFrom(worldX, worldZ, s, m_impl->detail(worldX, worldZ, s.slope)));
+		return fogFalloffOf(temperatureFrom(worldX, worldZ, s, detail(worldX, worldZ, s.slope)));
 	}
 
 	float TerrainGenV3::sampleFlowAngle01(double, double) const
 	{
 		// No rivers: the model emits elevation and climate, not a flow network, so the only water is the sea
-		// and it takes its direction from the global wind. Matches what Impl::fill writes.
+		// and it takes its direction from the global wind. Matches what fill writes.
 		return -1.0f;
 	}
 
 	void TerrainGenV3::samplePoint(double worldX, double worldZ, TerrainPoint& out, ESampleDetail detail) const
 	{
 		const bool coarse = (detail == ESampleDetail::Coarse);
-		const Impl::Sample s = m_impl->sampleField(worldX, worldZ, coarse);
-		m_impl->fill(worldX, worldZ, s, /*withDetail*/ !coarse, out);
+		const Sample s = sampleField(worldX, worldZ, coarse);
+		fill(worldX, worldZ, s, /*withDetail*/ !coarse, out);
 	}
 
 	void TerrainGenV3::sampleGrid(double originX, double originZ, double step, uint32 resX, uint32 resZ,
@@ -930,14 +917,14 @@ namespace Procedural
 		const double x1 = originX + step * (double)(resX - 1);
 		const double z1 = originZ + step * (double)(resZ - 1);
 
-		Impl::TileBlock block;
-		if (!m_impl->resolveBlock(originX, originZ, x1, z1, coarse, block))
+		TileBlock block;
+		if (!resolveBlock(originX, originZ, x1, z1, coarse, block))
 		{
 			// Models not up yet: a flat sea-level world. Callers gate geometry on isReady(), so this only
 			// shows up in bakes that raced the load.
 			for (uint32 j = 0; j < resZ; j++)
 				for (uint32 i = 0; i < resX; i++)
-					m_impl->fill(0.0, 0.0, Impl::Sample{}, false, out[(size_t)j * resX + i]);
+					fill(0.0, 0.0, Sample{}, false, out[(size_t)j * resX + i]);
 			return;
 		}
 
@@ -947,8 +934,8 @@ namespace Procedural
 			for (uint32 i = 0; i < resX; i++)
 			{
 				const double wx = originX + step * (double)i;
-				const Impl::Sample s = m_impl->sampleFromBlock(block, wx, wz);
-				m_impl->fill(wx, wz, s, /*withDetail*/ !coarse, out[(size_t)j * resX + i]);
+				const Sample s = sampleFromBlock(block, wx, wz);
+				fill(wx, wz, s, /*withDetail*/ !coarse, out[(size_t)j * resX + i]);
 			}
 		}
 	}
