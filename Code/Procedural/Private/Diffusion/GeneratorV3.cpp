@@ -901,6 +901,13 @@ namespace Procedural
 		return m_impl->fogFalloffOf(m_impl->temperatureFrom(worldX, worldZ, s, m_impl->detail(worldX, worldZ, s.slope)));
 	}
 
+	float TerrainGenV3::sampleFlowAngle01(double, double) const
+	{
+		// No rivers: the model emits elevation and climate, not a flow network, so the only water is the sea
+		// and it takes its direction from the global wind. Matches what Impl::fill writes.
+		return -1.0f;
+	}
+
 	void TerrainGenV3::samplePoint(double worldX, double worldZ, TerrainPoint& out, ESampleDetail detail) const
 	{
 		const bool coarse = (detail == ESampleDetail::Coarse);

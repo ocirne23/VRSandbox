@@ -146,6 +146,9 @@ export namespace Procedural
 		float sampleHumidity(double worldX, double worldZ) const override;
 		float sampleFogThickness(double worldX, double worldZ) const override;
 		float sampleFogHeightFalloff(double worldX, double worldZ) const override;
+		// Always < 0: the diffusion model emits no river network, so water here is only the sea and has no
+		// direction of its own. samplePoint/fill report the same.
+		float sampleFlowAngle01(double worldX, double worldZ) const override;
 		// One evaluation for every field, and the only way to ask for the cheap coarse level (ESampleDetail).
 		void samplePoint(double worldX, double worldZ, TerrainPoint& out,
 		                 ESampleDetail detail = ESampleDetail::Full) const override;

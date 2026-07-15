@@ -71,8 +71,8 @@ export namespace Procedural
 		// baseline plus a shared constant has no such anchor: every consumer evaluates at the height it
 		// shades, and the cascades agree by construction.
 		//
-		// Defaults to `temperature` for a generator that does not model a lapse (see samplePoint): with a
-		// published rate of 0, evaluating at any height returns it unchanged.
+		// A generator that models no lapse (lapseRatePerMetre() == 0) reports this equal to `temperature`:
+		// evaluating at any height then returns it unchanged, so the two agree by construction.
 		float temperatureSeaLevel = 15.0f;
 		float flowAngle01 = -1.0f;   // angle/2pi in [0,1), or < 0 for no direction
 	};
@@ -97,46 +97,30 @@ export namespace Procedural
 	// All methods are pure functions of world position — seeded, thread-safe, world-continuous — which is
 	// what keeps chunks, LODs, bakes (shore/fog maps) and buoyancy consistent with each other regardless
 	// of which generator produced them. Consumers hold shared_ptr<const ITerrainSampler>.
+	//
+	// A PURE interface: nothing here has a default. The defaults it used to carry composed the single-field
+	// samplers point by point, which is only free if the field is a cheap function of (x, z) — true of the
+	// noise generator they were written for, false of a tile-based one, which would silently inherit a
+	// cache lock per texel of every bake. An implementer answers each question the way that is actually
+	// cheap for it, or says so explicitly (a constant, or a value it does not model).
 	class ITerrainSampler
 	{
 	public:
 		virtual ~ITerrainSampler() = default;
 
-		// Everything at once. The default composes the individual samplers, which is right for a pure
-		// function of (x, z); override when a shared evaluation is cheaper, or when Coarse can be answered
-		// from a cheaper level.
+		// Everything at once, from one evaluation.
 		virtual void samplePoint(double worldX, double worldZ, TerrainPoint& out,
-		                         ESampleDetail = ESampleDetail::Full) const
-		{
-			out.height = sampleHeightAndWater(worldX, worldZ, out.waterLevel);
-			out.altitude = sampleAltitude(worldX, worldZ);
-			out.temperature = sampleTemperature(worldX, worldZ);
-			// No lapse (lapseRatePerMetre() is 0 by default): this generator's temperature already IS the
-			// value at this point and it exposes no way to move it elsewhere, so reporting it as the
-			// baseline is exactly true — evaluating at any height returns it unchanged.
-			out.temperatureSeaLevel = out.temperature;
-			out.humidity = sampleHumidity(worldX, worldZ);
-			out.fogThickness = sampleFogThickness(worldX, worldZ);
-			out.fogFalloffMul = sampleFogHeightFalloff(worldX, worldZ);
-			out.flowAngle01 = sampleFlowAngle01(worldX, worldZ);
-		}
+		                         ESampleDetail = ESampleDetail::Full) const = 0;
 
 		// A regular XZ grid: point (i, j) sits at (originX + i*step, originZ + j*step) and is written to
 		// out[j*resX + i]. out must hold resX*resZ entries.
 		//
-		// This exists so a generator can hoist its PER-POINT overhead out of the loop. For a noise field the
-		// default loop is exactly right and costs nothing. For V3 it is the difference between a shared-cache
-		// lock per point and one per tile: the terrain-data bake is 512x512 texels per cascade, so the point
-		// path meant a quarter-million lock/unlock pairs contending with the mesh worker for a grid that
-		// resolves to a couple of dozen tiles. Wide-area consumers should prefer this over samplePoint.
+		// This is where an implementer hoists its PER-POINT overhead out of the loop, and wide-area consumers
+		// should prefer it over samplePoint. For V3 it is the difference between a shared-cache lock per point
+		// and one per tile: a terrain-data cascade is 512x512 texels resolving to a couple of dozen tiles, so
+		// a point-at-a-time loop means a quarter-million lock/unlock pairs contending with the mesh worker.
 		virtual void sampleGrid(double originX, double originZ, double step, uint32 resX, uint32 resZ,
-		                        std::span<TerrainPoint> out, ESampleDetail detail = ESampleDetail::Full) const
-		{
-			assert(out.size() >= (size_t)resX * resZ);
-			for (uint32 j = 0; j < resZ; j++)
-				for (uint32 i = 0; i < resX; i++)
-					samplePoint(originX + i * step, originZ + j * step, out[(size_t)j * resX + i], detail);
-		}
+		                        std::span<TerrainPoint> out, ESampleDetail detail = ESampleDetail::Full) const = 0;
 
 		// Terrain surface height in world meters (Y).
 		virtual float sampleHeight(double worldX, double worldZ) const = 0;
@@ -144,25 +128,23 @@ export namespace Procedural
 		// Water is present wherever this exceeds sampleHeight.
 		virtual float sampleWaterHeight(double worldX, double worldZ) const = 0;
 		// Both fields from one evaluation (bakes sampling both per texel use this).
-		virtual float sampleHeightAndWater(double worldX, double worldZ, float& outWaterLevel) const
-		{
-			outWaterLevel = sampleWaterHeight(worldX, worldZ);
-			return sampleHeight(worldX, worldZ);
-		}
+		virtual float sampleHeightAndWater(double worldX, double worldZ, float& outWaterLevel) const = 0;
 		virtual float sampleTemperature(double worldX, double worldZ) const = 0; // degrees CELSIUS (baked over TEMPERATURE_MIN_C..MAX_C)
 		virtual float sampleHumidity(double worldX, double worldZ) const = 0;   // normalized [0,1] (baked 1:1 — 0 -> 0.0, 255 -> 1.0)
 		virtual float sampleFogThickness(double worldX, double worldZ) const = 0; // [0,1] regional fog multiplier
 		// Regional multiplier on the global Fog/Height Falloff, [0, FOG_FALLOFF_MUL_MAX] (1 = neutral):
-		// lets a generator make fog hug the ground in one region and tower in another.
-		virtual float sampleFogHeightFalloff(double, double) const { return 1.0f; }
+		// lets a generator make fog hug the ground in one region and tower in another. 1 = no variation.
+		virtual float sampleFogHeightFalloff(double worldX, double worldZ) const = 0;
 		// Directed water-flow angle at (x, z), as angle / 2pi in [0,1) (0 = +X, counter-clockwise), or
 		// < 0 where the water has no direction (open ocean/lakes -> the global wind drives the waves).
 		// Baked into the ocean shore map so the water shader orients its wave field along rivers.
-		virtual float sampleFlowAngle01(double, double) const { return -1.0f; }
+		// A generator that models no rivers returns < 0 everywhere.
+		virtual float sampleFlowAngle01(double worldX, double worldZ) const = 0;
 		// The MACRO elevation (m above sea level) before fine detail — what separates "a mountain" (height
 		// far above the local altitude) from "high-altitude flatland" (height ~ altitude). Fed per-vertex
-		// to the terrain shader for coloring. Default: the full height (no macro/detail split).
-		virtual float sampleAltitude(double worldX, double worldZ) const { return sampleHeight(worldX, worldZ) - seaLevel(); }
+		// to the terrain shader for coloring. A generator with no macro/detail split returns the full
+		// height above sea level.
+		virtual float sampleAltitude(double worldX, double worldZ) const = 0;
 		virtual float seaLevel() const = 0;
 
 		// Temperature change per metre of elevation above sea level, in this generator's VERTICAL FRAME
@@ -177,8 +159,9 @@ export namespace Procedural
 		// which has no consumer (the field is an artistic input, not a measurement), and cost 8 bits of the
 		// packed climate channel. What it did buy was regional variety in the lapse; that is now a tweak.
 		//
-		// 0 = temperature does not vary with height (the default; correct for a generator that folds its own
-		// lapse into sampleTemperature and cannot move it).
-		virtual float lapseRatePerMetre() const { return 0.0f; }
+		// 0 = temperature does not vary with height — correct for a generator that folds its own lapse into
+		// sampleTemperature and exposes no way to move it: there the baseline IS the temperature, and a
+		// consumer lapsing it again would double-count.
+		virtual float lapseRatePerMetre() const = 0;
 	};
 }
