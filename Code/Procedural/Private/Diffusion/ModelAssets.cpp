@@ -21,9 +21,17 @@ namespace Procedural::Diffusion
 			bool coarseSetOnly;
 		};
 
+		// sizeBytes = 0 means "do not size-check". The JSONs are TEXT, and git rewrites their line endings
+		// on checkout unless told otherwise (.gitattributes marks *.onnx binary; nothing covers these), so
+		// their byte count is not a property of the file's content — world_pipeline_config.json is 774 bytes
+		// with LF and 817 with CRLF, and pinning either one makes a normal git operation look exactly like a
+		// corrupt download. Neither failure this table exists to catch can reach them anyway: they are not
+		// lfs-tracked, and they are parsed immediately below, so damage surfaces as a JSON error naming the
+		// file rather than as an inscrutable protobuf failure inside ONNX Runtime. The .onnx blobs keep
+		// their sizes — they are binary, lfs-tracked, and fed straight to ORT.
 		constexpr RequiredAsset REQUIRED[] = {
-			{ "world_pipeline_config.json",       774ull, true },
-			{ "pipeline_data.json",             12226ull, true },
+			{ "world_pipeline_config.json",          0ull, true },
+			{ "pipeline_data.json",                  0ull, true },
 			{ "coarse_model.onnx",           22497125ull, true },
 			{ "decoder_model.onnx",         223854143ull, false },
 			{ "base_model.onnx",           2029994361ull, false },
@@ -136,7 +144,7 @@ namespace Procedural::Diffusion
 			if (ec)
 				return fail(std::format("cannot stat Assets/{}: {}", p.generic_string(), ec.message()));
 
-			if (actual != a.sizeBytes)
+			if (a.sizeBytes != 0 && actual != a.sizeBytes)
 			{
 				if (looksLikeLfsPointer(p))
 					return fail(std::format("Assets/{} is an unfetched git-lfs pointer, not the real file - "

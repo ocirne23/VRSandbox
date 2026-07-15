@@ -10,3 +10,8 @@
 *.gltf filter=lfs diff=lfs merge=lfs -text
 *.glb filter=lfs diff=lfs merge=lfs -text
 *.onnx filter=lfs diff=lfs merge=lfs -text
+
+# The diffusion model configs are read byte-for-byte alongside the .onnx blobs they describe; keep git
+# from normalising their line endings (it silently changed world_pipeline_config.json from 774 to 817
+# bytes on checkout, which the loader's size check then read as a corrupt download).
+Assets/TerrainDiffusion/*.json -text
