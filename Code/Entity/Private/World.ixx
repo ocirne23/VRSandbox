@@ -60,6 +60,22 @@ public:
 
     void update(Renderer& renderer, float deltaSeconds);
 
+    void handleContactEvent(const PhysicsWorld::ContactEvent& evt)
+    {
+        Entity* a = static_cast<Entity*>(evt.userDataA);
+        Entity* b = static_cast<Entity*>(evt.userDataB);
+        auto fire = [&](Entity* target, Entity* other)
+            {
+                if (PhysicsComponent* pc = getComponent<PhysicsComponent>(target); pc && pc->onContact)
+                    pc->onContact(*other, evt.begin);
+                if (ScriptComponent* sc = getComponent<ScriptComponent>(target))
+                    sc->firePhysicsEvent(*target, other, evt.begin, evt.sensor, evt.contactId);
+            };
+        fire(a, b);
+        fire(b, a);
+    }
+
+
     EntityPtr spawn(const std::string& name, const Transform& base);
 
     EntityPtr spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform = true);

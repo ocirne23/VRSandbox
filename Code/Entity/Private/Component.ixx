@@ -224,6 +224,7 @@ export struct PhysicsComponent
     bool enabled = true;
     bool synced = false;      // body is teleported to the entity's true world transform on first update
     bool suspended = false;   // body removed from the simulation (entity disabled via EEntityFlag_Enabled)
+	PhysicsWorld::ContactEvent* pContactEventList = nullptr; // linked list of contact events collected this frame
 
     // Fired by dispatchPhysicsContactEvents for begin/end contact and sensor overlaps involving this
     // body (the shape must set ContactEvents true, or be a Sensor). C++ gameplay hook; scripts get
@@ -341,11 +342,6 @@ export struct AudioComponent
 private:
     int selectClip(const SoundDesc& sound, Voice& voice) const;
 };
-
-// Maps this frame's physics contact/sensor events (body userData -> Entity*) onto the involved
-// entities: invokes PhysicsComponent::onContact and fires the script's "On Physics Event" entry
-// point (ScriptComponent::firePhysicsEvent). Call once per frame after Globals::physics.update().
-export void dispatchPhysicsContactEvents();
 
 export Transform composeTransform(const Transform& parent, const Transform& local);
 

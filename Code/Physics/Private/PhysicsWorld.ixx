@@ -1,4 +1,4 @@
-export module Physics:World;
+export module Physics:PhysicsWorld;
 
 import Core;
 import Core.glm;
@@ -18,9 +18,23 @@ public:
     bool initialize();
     void shutdown();
 
+    // Contact/sensor begin/end events collected during update() (this frame's steps), reported as the
+    // colliding bodies' userData pointers (Entity* for component-spawned bodies, null otherwise).
+    // For sensor events userDataA is the sensor's body.
+    struct ContactEvent
+    {
+        void* userDataA = nullptr;
+        void* userDataB = nullptr;
+        bool begin = false;   // begin or end touch
+        bool sensor = false;  // sensor overlap instead of a solid contact
+        int64 contactId = 0;  // opaque box3d contact handle (0 for sensor events, which have no manifold);
+                               // pass to getContactPoint() before the next update() call, after which it may
+                               // reference a recycled contact
+    };
+
     // Fixed-step accumulator; steps at stepHz with a bounded number of catch-up steps per frame.
     // Also drains contact/sensor events (see getContactEvents) and advances the step counter.
-    void update(double deltaSec);
+    void update(double deltaSec, std::function<void(const ContactEvent&)> contactCallback);
 
     PhysicsBody createBody(const PhysicsBodyDesc& desc, std::span<const PhysicsShape> shapes);
 
@@ -58,21 +72,6 @@ public:
     // function disables the pass entirely.
     using WaterSurfaceFn = std::function<float(float x, float z)>;
     void setWaterSurface(WaterSurfaceFn fn) { m_waterSurface = std::move(fn); }
-
-    // Contact/sensor begin/end events collected during update() (this frame's steps), reported as the
-    // colliding bodies' userData pointers (Entity* for component-spawned bodies, null otherwise).
-    // For sensor events userDataA is the sensor's body.
-    struct ContactEvent
-    {
-        void* userDataA = nullptr;
-        void* userDataB = nullptr;
-        bool begin = false;   // begin or end touch
-        bool sensor = false;  // sensor overlap instead of a solid contact
-        int64 contactId = 0;  // opaque box3d contact handle (0 for sensor events, which have no manifold);
-                               // pass to getContactPoint() before the next update() call, after which it may
-                               // reference a recycled contact
-    };
-    std::span<const ContactEvent> getContactEvents() const { return m_contactEvents; }
 
     // Resolves a ContactEvent::contactId (from THIS frame, before the next update()) to its first manifold
     // point in world space. Returns false (leaving the outputs untouched) if the contact is stale/gone or
@@ -113,7 +112,6 @@ private:
     uint32 m_stepCount = 0;
     glm::vec3 m_gravity = glm::vec3(0.0f, -9.81f, 0.0f);
     PhysicsBody m_staticBody;
-    std::vector<ContactEvent> m_contactEvents;
 
     // Buoyancy (see setWaterSurface)
     WaterSurfaceFn m_waterSurface;

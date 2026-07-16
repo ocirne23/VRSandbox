@@ -376,26 +376,6 @@ void suspendPhysicsTree(Entity& entity)
             suspendPhysicsTree(*child);
 }
 
-void dispatchPhysicsContactEvents()
-{
-    for (const PhysicsWorld::ContactEvent& evt : Globals::physics.getContactEvents())
-    {
-        Entity* a = static_cast<Entity*>(evt.userDataA);
-        Entity* b = static_cast<Entity*>(evt.userDataB);
-        auto fire = [&](Entity* target, Entity* other)
-        {
-            if (!target)
-                return; // bodies created outside the ECS (ground plane, world static body) have no entity
-            if (PhysicsComponent* pc = getComponent<PhysicsComponent>(target); pc && pc->onContact && other)
-                pc->onContact(*other, evt.begin);
-            if (ScriptComponent* sc = getComponent<ScriptComponent>(target))
-                sc->firePhysicsEvent(*target, other, evt.begin, evt.sensor, evt.contactId);
-        };
-        fire(a, b);
-        fire(b, a);
-    }
-}
-
 void SceneComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base, uint8*& treeCursor)
 {
     for (const SpawnInfo::ChildSpawnInfo& child : info.children)

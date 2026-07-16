@@ -9,7 +9,7 @@ import Core.glm;
 import Core.Log;
 import Core.Tweaks;
 
-import :World;
+import :PhysicsWorld;
 import :Body;
 import :Joint;
 import :Mesh;
@@ -68,7 +68,7 @@ void PhysicsWorld::shutdown()
 // Appends the step's buffered contact/sensor begin/end events (box3d clears them on the next step,
 // so they are drained after every step, not once per frame). End events may reference destroyed
 // shapes and are validated first.
-static void appendContactEvents(b3WorldId world, std::vector<PhysicsWorld::ContactEvent>& outEvents)
+static void dispatchContactEvents(b3WorldId world, std::function<void(const PhysicsWorld::ContactEvent&)> contactCallback)
 {
     auto userDataOf = [](b3ShapeId shape) { return b3Body_GetUserData(b3Shape_GetBody(shape)); };
 
@@ -76,34 +76,33 @@ static void appendContactEvents(b3WorldId world, std::vector<PhysicsWorld::Conta
     for (int i = 0; i < contacts.beginCount; ++i)
     {
         const b3ContactBeginTouchEvent& e = contacts.beginEvents[i];
-        outEvents.push_back({ userDataOf(e.shapeIdA), userDataOf(e.shapeIdB), true, false, packContactId(e.contactId) });
+        contactCallback({ userDataOf(e.shapeIdA), userDataOf(e.shapeIdB), true, false, packContactId(e.contactId) });
     }
     for (int i = 0; i < contacts.endCount; ++i)
     {
         const b3ContactEndTouchEvent& e = contacts.endEvents[i];
         if (!b3Shape_IsValid(e.shapeIdA) || !b3Shape_IsValid(e.shapeIdB))
             continue;
-        outEvents.push_back({ userDataOf(e.shapeIdA), userDataOf(e.shapeIdB), false, false, packContactId(e.contactId) });
+        contactCallback({ userDataOf(e.shapeIdA), userDataOf(e.shapeIdB), false, false, packContactId(e.contactId) });
     }
 
     const b3SensorEvents sensors = b3World_GetSensorEvents(world);
     for (int i = 0; i < sensors.beginCount; ++i)
     {
         const b3SensorBeginTouchEvent& e = sensors.beginEvents[i];
-        outEvents.push_back({ userDataOf(e.sensorShapeId), userDataOf(e.visitorShapeId), true, true, 0 });
+        contactCallback({ userDataOf(e.sensorShapeId), userDataOf(e.visitorShapeId), true, true, 0 });
     }
     for (int i = 0; i < sensors.endCount; ++i)
     {
         const b3SensorEndTouchEvent& e = sensors.endEvents[i];
         if (!b3Shape_IsValid(e.sensorShapeId) || !b3Shape_IsValid(e.visitorShapeId))
             continue;
-        outEvents.push_back({ userDataOf(e.sensorShapeId), userDataOf(e.visitorShapeId), false, true, 0 });
+        contactCallback({ userDataOf(e.sensorShapeId), userDataOf(e.visitorShapeId), false, true, 0 });
     }
 }
 
-void PhysicsWorld::update(double deltaSec)
+void PhysicsWorld::update(double deltaSec, std::function<void(const ContactEvent&)> contactCallback)
 {
-    m_contactEvents.clear();
     if (!m_initialized || m_paused)
         return;
 
@@ -119,7 +118,7 @@ void PhysicsWorld::update(double deltaSec)
             applyBuoyancy(); // box3d clears applied forces every step, so this runs per step
         b3World_Step(world, step, m_subSteps);
         ++m_stepCount;
-        appendContactEvents(world, m_contactEvents);
+        dispatchContactEvents(world, contactCallback);
         m_accumulator -= step;
         ++steps;
     }

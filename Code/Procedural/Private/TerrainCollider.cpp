@@ -17,8 +17,9 @@ namespace Procedural
 		return (uint64)(uint32)coord.x << 32 | (uint64)(uint32)coord.y;
 	}
 
-	void TerrainCollider::initialize()
+	void TerrainCollider::initialize(void* terrainUserData)
 	{
+		m_terrainUserData = terrainUserData;
 		const auto dirty = [this]() { m_configDirty = true; };
 		Tweak::boolean("Terrain/Collision", "Enabled", &m_enabled);
 		Tweak::floatVar("Terrain/Collision", "Radius", &m_radius, 16.0f, 512.0f, 1.0f);
@@ -69,6 +70,7 @@ namespace Procedural
 		if (haveDone && done.generation == m_generation && done.mesh.isValid() && !m_tiles.contains(done.key))
 		{
 			PhysicsBodyDesc desc;
+			desc.userData = m_terrainUserData;
 			desc.type = EPhysicsBodyType::Static;
 			desc.transform = Transform(
 				glm::vec3((float)done.coord.x * tileSize, 0.0f, (float)done.coord.y * tileSize),

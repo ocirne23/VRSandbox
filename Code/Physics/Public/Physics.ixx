@@ -5,4 +5,4 @@ export import :Mesh;
 export import :Body;
 export import :Joint;
 export import :Types;
-export import :World;
+export import :PhysicsWorld;

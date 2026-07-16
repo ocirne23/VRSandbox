@@ -73,10 +73,11 @@ int main()
     Procedural::TerrainStreamer terrain;
     terrain.initialize();
 
+	EntityPtr terrainEntity = world.createEmptyEntity("Terrain");
     // Terrain physics: camera-centered ring of static mesh-collider tiles built on a worker from the
     // same height field the terrain renders, so dynamic bodies land on the drawn surface.
     Procedural::TerrainCollider terrainCollider;
-    terrainCollider.initialize();
+    terrainCollider.initialize((void*)terrainEntity);
 
     // Terrain object scattering: biome-driven trees/rocks placed per cell on a worker thread from the
     // same climate field the terrain renders. Declared after the renderer for the same teardown order.
@@ -201,8 +202,7 @@ int main()
         for (EntityChange& change : ui.takeEntityChanges())
 			handleEntityChange(change);
 
-        physics.update(deltaSec); // fixed-step; entities sync to body poses in their update below
-        dispatchPhysicsContactEvents();    // fire onContact hooks + script "Contact/Sensor Begin/End" events
+        physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); }); // fixed-step; entities sync to body poses in their update below
 
         // Collider wireframes ("Physics/Debug/Draw colliders" tweak): box3d debug draw decomposed into
         // world-space lines, pushed to the renderer's per-frame debug line overlay.
