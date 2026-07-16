@@ -17,6 +17,26 @@ import :Types;
 import :Layers;
 import :Convert;
 
+// box3d hands DrawShapeFcn a *user* shape handle, created on demand the first time each shape is
+// drawn and destroyed when that shape is modified or removed. Without these callbacks there is no
+// handle to pass and shapes are never drawn at all. The handle is a copy of box3d's b3DebugShape:
+// its union points at box3d-owned geometry that stays valid for as long as the handle does, which
+// is exactly the lifetime destroyDebugShape delimits.
+namespace
+{
+std::vector<std::unique_ptr<b3DebugShape>> g_debugShapes;
+
+void* createDebugShapeFcn(const b3DebugShape* debugShape, void*)
+{
+    return g_debugShapes.emplace_back(std::make_unique<b3DebugShape>(*debugShape)).get();
+}
+
+void destroyDebugShapeFcn(void* userShape, void*)
+{
+    std::erase_if(g_debugShapes, [userShape](const std::unique_ptr<b3DebugShape>& shape) { return shape.get() == userShape; });
+}
+} // namespace
+
 bool PhysicsWorld::initialize()
 {
     if (m_initialized)
@@ -24,6 +44,8 @@ bool PhysicsWorld::initialize()
 
     b3WorldDef def = b3DefaultWorldDef();
     def.gravity = toB3(m_gravity);
+    def.createDebugShape = createDebugShapeFcn;
+    def.destroyDebugShape = destroyDebugShapeFcn;
     const b3WorldId world = b3CreateWorld(&def);
     if (B3_IS_NULL(world))
     {

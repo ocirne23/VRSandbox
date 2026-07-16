@@ -18,9 +18,8 @@ public:
     bool initialize();
     void shutdown();
 
-    // Contact/sensor begin/end events collected during update() (this frame's steps), reported as the
-    // colliding bodies' userData pointers (Entity* for component-spawned bodies, null otherwise).
-    // For sensor events userDataA is the sensor's body.
+    // Contact/sensor begin/end events fired during update() (this frame's steps), userData is Entity*
+	// Do not store the returned ContactEvent references.
     struct ContactEvent
     {
         void* userDataA = nullptr;
@@ -121,7 +120,7 @@ private:
 
     // Debug draw tweaks (Physics/Debug)
     bool m_debugDrawEnabled = false;
-    bool m_debugDrawJoints = true;
+    bool m_debugDrawJoints = false;
     bool m_debugDrawContacts = false;
     bool m_debugDrawBounds = false;
     float m_debugDrawRange = 64.0f; // draw distance around viewPos (world units)

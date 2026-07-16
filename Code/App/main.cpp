@@ -34,13 +34,10 @@ int main()
     Input& input = Globals::input;
     input.initialize();
 
-    // Must run on the main thread: registers it as the helper context so wait() runs jobs here.
     JobSystem& jobSystem = Globals::jobSystem;
     jobSystem.initialize();
-    Globals::jobSystemStress.initialize();
 
     const glm::vec3 spawnPos = glm::vec3(50.0f, 80.0f, 2327.0f);
-
     FreeFlyCameraController cameraController;
     cameraController.initialize(spawnPos, glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
@@ -62,34 +59,24 @@ int main()
     SpatialIndex& spatialIndex = Globals::spatialIndex;
     spatialIndex.initialize();
     Globals::occlusionBuffer.initialize();
-    Globals::spatialStress.initialize();
 
     Globals::scriptHost.setCurrentScriptPath("Scripts/Graph.scr");
     ScriptEventManager& scriptEvents = Globals::scriptEvents;
     scriptEvents.initialize();
 
-    // Procedural terrain: bounded ring of camera-following chunks, generated on a worker thread. Declared
-    // after the renderer so it's destroyed before it (frees RenderNodes/containers while the device lives).
     Procedural::TerrainStreamer terrain;
     terrain.initialize();
 
 	EntityPtr terrainEntity = world.createEmptyEntity("Terrain");
-    // Terrain physics: camera-centered ring of static mesh-collider tiles built on a worker from the
-    // same height field the terrain renders, so dynamic bodies land on the drawn surface.
     Procedural::TerrainCollider terrainCollider;
     terrainCollider.initialize((void*)terrainEntity);
 
-    // Terrain object scattering: biome-driven trees/rocks placed per cell on a worker thread from the
-    // same climate field the terrain renders. Declared after the renderer for the same teardown order.
     Procedural::ScatterSystem scatter;
     scatter.initialize();
 
-    // Procedural ocean: one camera-following graded grid, GPU-displaced into Gerstner waves by the Ocean
-    // pipeline variant. Declared after the renderer so it frees its RenderNode/container before the device.
     Procedural::OceanGenerator ocean;
     ocean.initialize();
-    // Buoyancy: dynamic bodies float in the ocean (keys 8/9's cubes/spheres bob in the swell). The ocean
-    // CPU-samples its GPU displacement readback; -FLT_MAX where there is no water gates the whole pass.
+
     physics.setWaterSurface([&ocean](float x, float z) { return ocean.sampleWaterHeight(x, z); });
 
     VrInput& vrInput = Globals::vrInput;
@@ -186,21 +173,10 @@ int main()
         }
 
         gizmo.update(camera, ui.getViewportRect(), ui.getSelectedEntity(), deltaSec);
-
-        // Refresh the script ABI's per-frame fields (delta/elapsed seconds, camera) once before any script
-        // runs this frame. Forward/up are derived from the inverse view matrix (its -Z / Y columns).
-        {
-            const glm::mat4 camToWorld = glm::inverse(camera.viewMatrix);
-            const glm::vec3 camDir = glm::normalize(-glm::vec3(camToWorld[2]));
-            const glm::vec3 camUp = glm::normalize(glm::vec3(camToWorld[1]));
-            Globals::scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
-            audio.setListener(camera.position, camDir, camUp);
-        }
-
-        for (EntityChange& change : scriptEvents.takeEntityChanges())
-            handleEntityChange(change);
-        for (EntityChange& change : ui.takeEntityChanges())
-			handleEntityChange(change);
+        audio.setListener(camera);
+        
+        for (EntityChange& change : scriptEvents.takeEntityChanges()) handleEntityChange(change);
+        for (EntityChange& change : ui.takeEntityChanges()) handleEntityChange(change);
 
         physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); }); // fixed-step; entities sync to body poses in their update below
 
@@ -249,8 +225,6 @@ int main()
                 framesSinceNearQuery = 0;
             }
         }
-        Globals::spatialStress.update(glm::dvec3(camera.position), frustum);
-        Globals::jobSystemStress.update();
 
         world.update(renderer, (float)deltaSec); // serial script prepass + parallel component/tree pass + sink flush
 

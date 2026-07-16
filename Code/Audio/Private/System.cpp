@@ -84,6 +84,14 @@ void AudioSystem::shutdown()
     iplContextRelease(&state.iplContext);
 }
 
+void AudioSystem::setListener(Camera& camera, const glm::vec3& velocity)
+{
+    const glm::mat4 camToWorld = glm::inverse(camera.viewMatrix);
+    const glm::vec3 camDir = glm::normalize(-glm::vec3(camToWorld[2]));
+    const glm::vec3 camUp = glm::normalize(glm::vec3(camToWorld[1]));
+    setListener(camera.position, camDir, camUp, velocity);
+}
+
 void AudioSystem::setListener(const glm::vec3& position, const glm::vec3& forward, const glm::vec3& up, const glm::vec3& velocity)
 {
     if (!m_initialized)

@@ -16,4 +16,5 @@ void main()
     v_color = unpackUnorm4x8(floatBitsToUint(data.w)).rgb;
     gl_Position = u_mvp * vec4(data.xyz, 1.0);
     gl_Position.xy += u_taaJitter.xy * gl_Position.w; // TAA sub-pixel jitter (clip space)
+    gl_Position.z = mix(gl_Position.w, gl_Position.z, 0.01);
 }
