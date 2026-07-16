@@ -164,7 +164,7 @@ public:
     void emitParticles(uint32 slot, uint32 count);
     // Flags the slot's live particles for retirement; the slot recycles once the kill has drained.
     void destroyParticleEmitter(uint32 slot);
-    void resetParticles() { m_particlePipeline.requestReset(); }
+    void resetParticles() { m_particleResetPending = true; }
     void addDecal(const RendererVKLayout::DecalInfo& decal); // [Concurrency: LOCK-FREE]
     // Loads a standalone texture (path relative to Assets/) into the bindless array for particle
     // emitters / decals to reference (ParticleEmitterGpu::texFlags.x, DecalInfo::params.x).
@@ -557,6 +557,11 @@ private:
     bool m_particleCollision = true;
     float m_particleTimeScale = 1.0f;
     bool m_particleLogStats = false; // "Particles/Log stats": prints GPU alive/dead counts ~once a second
+    // Pool init/reset request. Cleared only AFTER a frame that carried reset=1 AND executed the sim was
+    // actually submitted: a reset consumed by a frame that never runs (acquire failure -> early return,
+    // no mesh instances so the sim CB is skipped) would leave the dead stack empty forever, silently
+    // dropping every spawn. True at startup: the first simulating frame initializes the pool.
+    bool m_particleResetPending = true;
     bool m_decalsEnabled = true;
     PerWorker<std::vector<DebugLinePipeline::LineVertex>> m_debugLineVerts; // per-worker CPU staging, merged in present()
     std::vector<DebugLinePipeline::LineVertex> m_debugLineMergedVerts;

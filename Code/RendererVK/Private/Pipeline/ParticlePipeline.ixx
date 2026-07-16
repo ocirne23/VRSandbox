@@ -53,11 +53,13 @@ public:
     // Copies this frame's emitter table + spawn map + params into the frame slot's mapped buffers
     // (call from present(), after the slot's fence wait). spawnRequests are (emitter slot, count)
     // pairs, expanded here into the per-spawn map; the total clamps to MAX_PARTICLE_SPAWNS_PER_FRAME.
+    // reset runs the pool initialization this frame INSTEAD of the per-frame prepare; the caller
+    // (Renderer) owns the pending-reset flag and must only clear it once the frame that carried
+    // reset=true was actually SUBMITTED with the sim executing — a reset consumed by a frame that
+    // never runs (acquire failure, empty scene) would leave the pool permanently uninitialized
+    // (dead stack empty -> every emit drops its spawn).
     void update(uint32 frameIdx, std::span<const RendererVKLayout::ParticleEmitterGpu> emitters,
-        std::span<const std::pair<uint16, uint16>> spawnRequests, float dt, bool collision);
-
-    // One-time pool initialization rides the first update(); call again to hard-reset the pool.
-    void requestReset() { m_pendingReset = true; }
+        std::span<const std::pair<uint16, uint16>> spawnRequests, float dt, bool collision, bool reset);
 
     struct SimParams
     {
@@ -139,5 +141,4 @@ private:
     Sampler m_textureSampler;
     uint32 m_viewCount = 1;
     uint32 m_frameCounter = 0; // RNG stream for the emit pass
-    bool m_pendingReset = true; // first update initializes the pool
 };

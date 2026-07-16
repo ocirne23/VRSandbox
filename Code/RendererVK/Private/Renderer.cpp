@@ -1067,6 +1067,9 @@ void Renderer::present()
     if (m_debugLinePipeline.upload(frameIdx, m_debugLineMergedVerts))
         setHaveToRecordCommandBuffers();
 
+    // Only spend the pool reset on a frame that will actually execute the sim (see
+    // m_particleResetPending); the flag is cleared after this frame's successful submit below.
+    const bool particleResetCarried = m_particleResetPending && m_particlesEnabled && m_meshInstanceCounter > 0;
     { // Particle emitter table + spawn map + decals into this slot's mapped buffers (fence waited).
         static Clock::time_point s_lastParticleTime = Clock::now();
         const Clock::time_point now = Clock::now();
@@ -1076,7 +1079,7 @@ void Renderer::present()
         for (const auto& [slot, count] : m_particleSpawnRequests)
             spawnRequestTotal += count;
         m_particlePipeline.update(frameIdx, m_particleEmitters, m_particleSpawnRequests,
-            dt * m_particleTimeScale, m_particleCollision);
+            dt * m_particleTimeScale, m_particleCollision, particleResetCarried);
         m_particleSpawnRequests.clear();
         m_decalPipeline.upload(frameIdx, m_decalCounter);
 
@@ -1136,6 +1139,10 @@ void Renderer::present()
     recordCommandBuffers();
 
     m_swapChain.submitCommandBuffer(getCurrentCommandBuffer());
+    // The reset actually reached the GPU with this submission; until here any early-out above
+    // (acquire failure -> recreateSwapchain return) keeps it pending for the next frame.
+    if (particleResetCarried)
+        m_particleResetPending = false;
     // This frame's submission is now new GPU work that could read the shared mesh/material/instance-offset
     // buffers; any upload into them from here on needs a fresh drain. See StagingManager::ensureDrainedForSharedWrite.
     Globals::stagingManager.resetSharedWriteGate();

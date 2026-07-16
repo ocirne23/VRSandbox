@@ -184,7 +184,7 @@ void ParticlePipeline::updateTextureDescriptor(uint32 frameIdx, uint32 slotIdx, 
 }
 
 void ParticlePipeline::update(uint32 frameIdx, std::span<const ParticleEmitterGpu> emitters,
-    std::span<const std::pair<uint16, uint16>> spawnRequests, float dt, bool collision)
+    std::span<const std::pair<uint16, uint16>> spawnRequests, float dt, bool collision, bool reset)
 {
     if (!emitters.empty())
     {
@@ -208,13 +208,13 @@ void ParticlePipeline::update(uint32 frameIdx, std::span<const ParticleEmitterGp
     params.dt = dt;
     params.spawnCount = spawnCount;
     params.parity = frameIdx & 1u;
-    params.reset = m_pendingReset ? 1u : 0u;
+    params.reset = reset ? 1u : 0u;
     params.frameIndex = m_frameCounter++;
     params.collision = collision ? 1u : 0u;
     m_paramsBuffers[frameIdx].flushMappedMemory(sizeof(FrameParams));
 
     std::span<uint32> beginDispatch = m_mappedBeginDispatch[frameIdx];
-    beginDispatch[0] = m_pendingReset ? (MAX_PARTICLES + 255) / 256 : 1;
+    beginDispatch[0] = reset ? (MAX_PARTICLES + 255) / 256 : 1;
     beginDispatch[1] = 1;
     beginDispatch[2] = 1;
     m_beginDispatchBuffers[frameIdx].flushMappedMemory(sizeof(vk::DispatchIndirectCommand));
@@ -224,8 +224,6 @@ void ParticlePipeline::update(uint32 frameIdx, std::span<const ParticleEmitterGp
     emitDispatch[1] = 1;
     emitDispatch[2] = 1;
     m_emitDispatchBuffers[frameIdx].flushMappedMemory(sizeof(vk::DispatchIndirectCommand));
-
-    m_pendingReset = false;
 }
 
 void ParticlePipeline::recordSim(CommandBuffer& commandBuffer, uint32 frameIdx, const SimParams& params)
