@@ -4,7 +4,6 @@ Prefab character
 	Rotation 0 -5.792576 0
 	Scale 1
 	Component Scene
-		Enabled true
 	Component Render
 		ObjectContainer character
 		Node ROOT

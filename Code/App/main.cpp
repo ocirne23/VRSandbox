@@ -252,8 +252,7 @@ int main()
         Globals::spatialStress.update(glm::dvec3(camera.position), frustum);
         Globals::jobSystemStress.update();
 
-        for (const EntityPtr& entity : world.rootEntities())
-            entity->update(renderer, (float)deltaSec);
+        world.update(renderer, (float)deltaSec); // serial script prepass + parallel component/tree pass + sink flush
 
 		for (auto& light : spawnedLights)
 		{

@@ -1,52 +1,88 @@
-﻿module Entity;
+module;
+
+#include <intrin.h>
+
+module Entity;
 
 import Core;
 import Core.Allocator;
 
-static uint32 alignUp(uint32 value, uint32 alignment)
+static constexpr uint32 alignUp(uint32 value, uint32 alignment)
 {
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
 EntityAllocator::~EntityAllocator()
 {
-    for (void* chunk : m_chunks)
-        Globals::allocator.deallocate(chunk);
+    for (Chunk* chunk : m_chunks)
+        Globals::allocator.deallocate(chunk); // header lives at the chunk base
     m_chunks.clear();
 }
 
-void EntityAllocator::addChunk(uint32 minSize)
+// Called with m_chunkLock held. Re-checks the active chunk so racing losers don't each add one.
+EntityAllocator::Chunk* EntityAllocator::addChunkLocked(uint32 minSize, Chunk* expectedActive)
 {
-    const uint32 chunkSize = minSize > CHUNK_SIZE ? minSize : CHUNK_SIZE;
-    void* chunk = Globals::allocator.allocate(chunkSize); // 16-byte aligned
+    Chunk* current = m_activeChunk.load(std::memory_order_acquire);
+    if (current != expectedActive)
+        return current; // another thread already replaced it
+
+    constexpr uint32 headerSize = alignUp(sizeof(Chunk), ALIGNMENT);
+    const uint32 payloadSize = minSize > CHUNK_SIZE ? minSize : CHUNK_SIZE;
+    uint8* memory = static_cast<uint8*>(Globals::allocator.allocate(headerSize + payloadSize)); // 16-byte aligned
+    Chunk* chunk = new (memory) Chunk{ .offset = 0, .size = payloadSize, .base = memory + headerSize };
+
     m_chunks.push_back(chunk);
-    m_cursor = static_cast<uint8*>(chunk);
-    m_chunkEnd = m_cursor + chunkSize;
+    m_numChunks.store(m_chunks.size(), std::memory_order_relaxed);
+    m_activeChunk.store(chunk, std::memory_order_release);
+    return chunk;
 }
 
 void* EntityAllocator::allocate(uint32 size)
 {
+    assert(size > 0 && size <= MAX_BLOCK_SIZE);
     size = alignUp(size, ALIGNMENT);
 
-    if (auto it = m_freeLists.find(size); it != m_freeLists.end() && it->second)
+    // recycled block of the exact size: lock-free tagged pop (tag defeats ABA on concurrent pop/push)
+    std::atomic<uint64>& freeList = m_freeLists[size / ALIGNMENT - 1];
+    uint64 head = freeList.load(std::memory_order_acquire);
+    while (headPtr(head))
     {
-        FreeBlock* block = it->second;
-        it->second = block->next;
-        return block;
+        FreeBlock* block = headPtr(head);
+        if (freeList.compare_exchange_weak(head, packHead(block->next, (head >> 48) + 1),
+                                           std::memory_order_acquire, std::memory_order_acquire))
+            return block;
     }
 
-    if (m_cursor + size > m_chunkEnd) // also covers the very first allocation (cursor/end both null)
-        addChunk(size);
+    for (;;)
+    {
+        Chunk* chunk = m_activeChunk.load(std::memory_order_acquire);
+        if (chunk)
+        {
+            const uint32 offset = chunk->offset.fetch_add(size, std::memory_order_relaxed);
+            if (offset + size <= chunk->size)
+                return chunk->base + offset;
+            // chunk exhausted (tail bytes wasted, bounded by one claim per racing thread)
+        }
 
-    void* ptr = m_cursor;
-    m_cursor += size;
-    return ptr;
+        while (m_chunkLock.test_and_set(std::memory_order_acquire))
+            _mm_pause();
+        addChunkLocked(size, chunk);
+        m_chunkLock.clear(std::memory_order_release);
+    }
 }
 
 void EntityAllocator::deallocate(void* ptr, uint32 size)
 {
+    assert(size > 0 && size <= MAX_BLOCK_SIZE);
     size = alignUp(size, ALIGNMENT);
+
+    // lock-free tagged push
+    std::atomic<uint64>& freeList = m_freeLists[size / ALIGNMENT - 1];
     FreeBlock* block = static_cast<FreeBlock*>(ptr);
-    block->next = m_freeLists[size];
-    m_freeLists[size] = block;
+    uint64 head = freeList.load(std::memory_order_relaxed);
+    do
+    {
+        block->next = headPtr(head);
+    } while (!freeList.compare_exchange_weak(head, packHead(block, (head >> 48) + 1),
+                                             std::memory_order_release, std::memory_order_relaxed));
 }

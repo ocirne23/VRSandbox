@@ -3,7 +3,6 @@ Prefab NewEntity1
 	Rotation 0 -0 0
 	Scale 1
 	Component Scene
-		Enabled true
 		Entity Entity
 			Position 0 3.15 0
 			Rotation 0 -0 0

@@ -15,7 +15,22 @@ import Spatial;
 import RendererVK;
 
 export int componentIdFromName(std::string_view name);
-export void detachFromOwner(Entity* entity);
+export void detachFromOwner(Entity* entity);          // deletion path: breaks the entity's tree allocation (conservative)
+export void detachKeepAllocation(Entity* entity);     // reparentEntity only: break decision already made by the caller
+
+// Tree-allocation contiguity (see EEntityFlag_RootAllocation/ContiguousAllocation):
+// Nearest allocation root reachable through an unbroken contiguous parent chain (self included); null if broken.
+export Entity* findAllocationRoot(Entity* entity);
+// Splits the member's allocation before it departs: path ancestors revert to per-entity freeing, every
+// off-path subtree (and the member itself) is promoted to its own RootAllocation and keeps one-chunk
+// freeing for its contiguous DFS range. No-op for broken members and allocation roots.
+export void breakContiguousAllocation(Entity* member);
+// Same split entered at the allocation root itself (Entity::destroy's solely-owned fallback): the root
+// reverts to its own slice, each child subtree becomes an independent allocation.
+export void breakContiguousAllocationFromRoot(Entity* root);
+// True if every contiguous member below `entity` is owned solely by its parent's children list
+// (refcount 1) — i.e. destroying the tree is guaranteed to destroy all of them.
+export bool contiguousTreeSolelyOwned(Entity* entity);
 
 export constexpr uint16 MaxInlineComponentTypes = 8;
 export constexpr uint16 ComponentAlignment = 16;
@@ -33,23 +48,20 @@ export struct SceneComponent
             std::shared_ptr<const EntitySpawnTemplate> tmpl;
             Transform localTransform;                  // placement composed onto the parent's spawn transform
             std::string name;                          // name override, empty = use the template's
+            bool enabled = true;                       // reference-site "Enabled false" (a prefab reference has no template of its own to carry it)
         };
         std::vector<ChildSpawnInfo> children;
-        bool enabled = true;
     };
 
     std::vector<EntityPtr> children;
-    bool enabled = true;
     bool physicsSuspended = false; // subtree bodies pulled from the simulation while disabled (see updateTree)
 
-    void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
+    // treeCursor: children carve their slices from the tree's single spawn allocation (see Entity::create)
+    void spawn(Entity& entity, const SpawnInfo& info, const Transform& base, uint8*& treeCursor);
 	void destroy(Entity& entity, const SpawnInfo& info);
 
-    void serialize(AssetNode& out) const { out.set("Enabled", enabled); }
-    void deserialize(const AssetNode& in)
-    {
-        if (const AssetNode* n = in.find("Enabled")) enabled = n->asBool();
-    }
+    void serialize(AssetNode&) const {}
+    void deserialize(const AssetNode&) {}
 };
 
 export struct ZoneComponent
@@ -160,7 +172,6 @@ export struct ScriptComponent
     std::unique_ptr<uint8[]> scriptData;
     uint32 scriptDataSize = 0;
     bool enabled = true;
-    bool pendingOnSpawn = false; // OnSpawn was suppressed (spawned editor-paused); fired when editing ends
 
     struct SpawnInfo
     {
@@ -170,9 +181,6 @@ export struct ScriptComponent
 
     void spawn(Entity&, const SpawnInfo& info, const Transform&);
     void destroy(Entity&, const SpawnInfo&);
-
-    // Runs a suppressed OnSpawn (see pendingOnSpawn). Call after clearing the editor-paused flag.
-    void fireOnSpawnIfPending(Entity& entity);
 
     // Compiles (on demand) and runs the referenced script with `entity` as its `self`. Defined in
     // ScriptRuntime.cpp, which owns the ScriptContext + thunks.
@@ -215,7 +223,7 @@ export struct PhysicsComponent
     EPhysicsBodyType bodyType = EPhysicsBodyType::Dynamic;
     bool enabled = true;
     bool synced = false;      // body is teleported to the entity's true world transform on first update
-    bool suspended = false;   // body removed from the simulation (entity disabled via SceneComponent)
+    bool suspended = false;   // body removed from the simulation (entity disabled via EEntityFlag_Enabled)
 
     // Fired by dispatchPhysicsContactEvents for begin/end contact and sensor overlaps involving this
     // body (the shape must set ContactEvents true, or be a Sensor). C++ gameplay hook; scripts get
@@ -237,16 +245,16 @@ export struct PhysicsComponent
     void destroy(Entity& entity, const SpawnInfo& info);
     void update(Entity& entity, const Transform& parentWorld);
 
-    // Pulls the body out of the simulation (and drops its occluder) while the entity is disabled via
-    // its SceneComponent; the next update() after re-enable re-adds and resyncs it. See updateTree.
+    // Pulls the body out of the simulation (and drops its occluder) while the entity is disabled
+    // (EEntityFlag_Enabled); the next update() after re-enable re-adds and resyncs it. See updateTree.
     void suspendBody();
 
     void serialize(AssetNode&) const {}
     void deserialize(const AssetNode&) {}
 };
 
-// Suspends every PhysicsComponent body in this entity's subtree (used when a SceneComponent disables
-// the tree — updateTree stops reaching it, so the bodies would otherwise keep colliding invisibly).
+// Suspends every PhysicsComponent body in this entity's subtree (used when the entity is disabled —
+// updateTree stops reaching it, so the bodies would otherwise keep colliding invisibly).
 export void suspendPhysicsTree(Entity& entity);
 
 // How a Sound alias holding several clips picks which one to play on each trigger.

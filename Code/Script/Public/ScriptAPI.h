@@ -18,9 +18,9 @@ extern "C" {
 // Entity (Code/Entity/Private/EntityDef.ixx), so script code can read/write self->pos / self->scale /
 // self->rot / self->parent directly instead of only through the ctx->entity* calls.
 //
-// Only the members BEFORE the engine Entity's `std::string displayName` are mirrored: std::string has a
-// different layout under the engine's debug CRT than the script's /MD, which would misalign everything past
-// it. Reach the rest (name, enabled, children, ...) through the ctx->entity* functions. KEEP THESE FIELDS IN
+// Only the members BEFORE the engine Entity's `displayName` are mirrored: past it the layout depends on
+// engine-internal types the script side cannot see. Reach the rest (name, enabled, children, ...) through the
+// ctx->entity* functions (ctx->entityGetName for the display name). KEEP THESE FIELDS IN
 // SYNC with EntityDef.ixx â€” the engine static_asserts the offsets (ScriptContext.cpp) so drift fails the build.
 //
 // Host-side this stays a forward declaration: the real engine Entity is the actual type; defining the mirror

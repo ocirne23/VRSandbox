@@ -37,7 +37,7 @@ namespace
     {
         if (SceneComponent* sc = getComponent<SceneComponent>(parent))
             for (const EntityPtr& c : sc->children)
-                if (c->displayName == name)
+                if (std::string_view(c->getName()) == name)
                     return c.get();
         return nullptr;
     }
@@ -129,6 +129,11 @@ void GizmoController::initialize(World& world)
             m_mousePos = glm::vec2(float(evt.x), float(evt.y));
             if (!viewportContains(m_viewport, m_mousePos))
                 return;
+            // if gizmo too close to camera, return
+            const glm::vec3 targetPos = m_selected->pos;
+            const float dist = glm::length(m_camera.position - targetPos);
+            if (dist < 0.1f)
+                return;
 
             const Ray ray = m_camera.screenToRay(m_viewport, m_mousePos);
             const Handle handle = pickHandle(ray);
@@ -165,8 +170,7 @@ void GizmoController::update(const Camera& camera, const Rect& viewport, Entity*
     if (!m_gizmo)
         return;
 
-    if (SceneComponent* root = getComponent<SceneComponent>(m_gizmo.get()))
-        root->enabled = m_visible;
+    m_gizmo->setEnabled(m_visible);
 
     if (!m_visible)
     {
@@ -180,6 +184,8 @@ void GizmoController::update(const Camera& camera, const Rect& viewport, Entity*
 
     const glm::vec3 targetPos = worldTransform(selected).pos;
     const float dist = glm::length(camera.position - targetPos);
+	if (dist < 0.1f)
+		m_gizmo->setEnabled(false);
 
     // Rotate is object-local: rings tilt with the object so the ring you grab is the axis you turn about.
     // Translate/Scale stay world-aligned (global).
@@ -383,10 +389,9 @@ void GizmoController::setChildEnabled(const char* name, bool enabled)
     if (!root)
         return;
     for (const EntityPtr& child : root->children)
-        if (child->displayName == name)
+        if (std::string_view(child->getName()) == name)
         {
-            if (SceneComponent* sc = getComponent<SceneComponent>(child.get()))
-                sc->enabled = enabled;
+            child->setEnabled(enabled);
             return;
         }
 }

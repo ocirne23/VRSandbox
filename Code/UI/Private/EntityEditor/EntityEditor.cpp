@@ -173,7 +173,7 @@ std::string EntityEditor::currentId() const
 {
 	if (!m_path.empty())
 		return std::filesystem::path(m_path).stem().string();
-	return (m_editRoot && !m_editRoot->displayName.empty()) ? m_editRoot->displayName : std::string("NewEntity");
+	return (m_editRoot && m_editRoot->hasName()) ? std::string(m_editRoot->getName()) : std::string("NewEntity");
 }
 
 // Serializes the document. With Sync off, the selected node's live transform (which the gizmo/world may
@@ -248,11 +248,11 @@ void EntityEditor::onOpened(EntityPtr root, const std::string& path)
 	m_selected = root;
 	m_path = path;
 	if (root)
-		root->setEditorPaused(true); // freeze scripts/physics while the document is open
+		root->setFrozen(true); // freeze scripts/physics/animation while the document is open
 
 	std::string suggested = path;
 	if (suggested.empty() && root)
-		suggested = "Entities/" + (root->displayName.empty() ? std::string("NewEntity") : root->displayName) + ".pre";
+		suggested = "Entities/" + (root->hasName() ? std::string(root->getName()) : std::string("NewEntity")) + ".pre";
 	strncpy_s(m_pathBuf, sizeof(m_pathBuf), suggested.c_str(), sizeof(m_pathBuf) - 1);
 	m_pathBuf[sizeof(m_pathBuf) - 1] = '\0';
 
@@ -303,28 +303,16 @@ void EntityEditor::closeCurrent()
 {
 	if (m_editRoot)
 	{
-		// Respawned children carry their own copy of the flag (set at create so OnSpawn sees it) — clear the
-		// whole tree, then run any OnSpawn that was suppressed while paused.
-		auto clearPaused = [](auto&& self, Entity* e) -> void
+		// Respawned children carry their own copy of the flag (World::handleEntityChange sets it at create),
+		// so thaw the whole tree, not just the root.
+		auto clearFrozen = [](auto&& self, Entity* e) -> void
 		{
-			e->setEditorPaused(false);
+			e->setFrozen(false);
 			if (SceneComponent* sc = getComponent<SceneComponent>(e))
 				for (const EntityPtr& child : sc->children)
 					self(self, child.get());
 		};
-		clearPaused(clearPaused, m_editRoot.get());
-		if (!m_ownsEntity) // a borrowed scene entity resumes living — not one about to be deleted below
-		{
-			auto firePending = [](auto&& self, Entity* e) -> void
-			{
-				if (ScriptComponent* script = getComponent<ScriptComponent>(e))
-					script->fireOnSpawnIfPending(*e);
-				if (SceneComponent* sc = getComponent<SceneComponent>(e))
-					for (const EntityPtr& child : sc->children)
-						self(self, child.get());
-			};
-			firePending(firePending, m_editRoot.get());
-		}
+		clearFrozen(clearFrozen, m_editRoot.get());
 		if (m_ownsEntity)
 			m_changes.push_back({ EntityChange::Delete{ m_editRoot } }); // a dedicated entity this editor spawned
 		else if (m_wasPacked)
@@ -360,7 +348,7 @@ void EntityEditor::doSwitchOpenSelected(EntityPtr entity)
 	m_ownsEntity = false;
 	m_wasPacked = entity->isPrefabInstance();
 	entity->setPrefabInstance(false); // unpack: edit it freely, same as opening a prefab by path
-	entity->setEditorPaused(true);    // freeze scripts/physics while the document is open
+	entity->setFrozen(true);    // freeze scripts/physics/animation while the document is open
 
 	m_editRoot = entity;
 	m_selected = entity;
@@ -592,7 +580,7 @@ void EntityEditor::renderTreeNode(Entity* node)
 	if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 	if (m_selected.get() == node) flags |= ImGuiTreeNodeFlags_Selected;
 
-	const std::string label = node->displayName.empty() ? std::string("Entity") : node->displayName;
+	const std::string label = node->hasName() ? std::string(node->getName()) : std::string("Entity");
 
 	if (isLocked)
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.62f, 0.95f, 1.0f));
@@ -662,11 +650,15 @@ void EntityEditor::renderTree()
 
 void EntityEditor::renderNameAndTransform()
 {
-	strncpy_s(m_nameBuf, sizeof(m_nameBuf), m_selected->displayName.c_str(), sizeof(m_nameBuf) - 1);
+	strncpy_s(m_nameBuf, sizeof(m_nameBuf), m_selected->getName(), sizeof(m_nameBuf) - 1);
 	m_nameBuf[sizeof(m_nameBuf) - 1] = '\0';
 	ImGui::SetNextItemWidth(240.0f);
 	if (ImGui::InputText("Name", m_nameBuf, sizeof(m_nameBuf)))
-		m_selected->displayName = m_nameBuf;
+		m_selected->setName(m_nameBuf);
+
+	bool enabled = m_selected->isEnabled();
+	if (ImGui::Checkbox("Enabled", &enabled))
+		m_selected->setEnabled(enabled); // direct live mutation — no respawn needed, matches PropertiesPanel
 
 	if (ImGui::CollapsingHeader("Transform"))
 	{
@@ -712,14 +704,7 @@ void EntityEditor::renderSceneSection()
 	ImGui::PushID("scene");
 
 	SceneComponent* sc = getComponent<SceneComponent>(m_selected.get());
-	if (sc)
-	{
-		bool enabled = sc->enabled;
-		if (ImGui::Checkbox("Enabled", &enabled))
-			sc->enabled = enabled; // direct live mutation — no respawn needed, matches PropertiesPanel
-	}
 
-	ImGui::Separator();
 	ImGui::SetNextItemWidth(160.0f);
 	ImGui::InputTextWithHint("##newchildname", "Child name", m_newChildNameBuf, sizeof(m_newChildNameBuf));
 	ImGui::SameLine();
@@ -1197,13 +1182,10 @@ void EntityEditor::commitRespawn()
 	if (m_hasScene)
 	{
 		typeBits |= uint16(1 << EComponentID_Scene);
-		auto info = std::make_shared<SceneComponent::SpawnInfo>();
-		if (SceneComponent* sc = getComponent<SceneComponent>(m_selected.get()))
-			info->enabled = sc->enabled;
-		infos.push_back(std::move(info));
+		infos.push_back(std::make_shared<SceneComponent::SpawnInfo>());
 	}
 
-	const std::string ownerName = m_selected->displayName.empty() ? currentId() : m_selected->displayName;
+	const std::string ownerName = m_selected->hasName() ? std::string(m_selected->getName()) : currentId();
 
 	std::string renderContainerName, renderNodePath;
 	if (m_hasRender)
@@ -1347,7 +1329,8 @@ void EntityEditor::commitRespawn()
 
 	tmpl->archetype = makeEntityArchetype(typeBits);
 	tmpl->spawnInfos = std::move(infos);
-	tmpl->displayName = m_selected->displayName;
+	tmpl->displayName = m_selected->getName();
+	tmpl->enabled = m_selected->isEnabled(); // carry the live enable state onto the respawned entity
 	tmpl->sourceFile = m_path; // every node in the document belongs to the open .pre (empty until first save)
 	// Keep the prefab identity across respawns — losing it would break "Open Selected"'s registry lookup
 	// and re-serialize the entity inline instead of as a "Prefab <name>" reference.

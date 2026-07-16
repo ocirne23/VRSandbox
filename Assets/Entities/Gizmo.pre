@@ -3,13 +3,11 @@ Prefab Gizmo
 	Rotation 0 -0 0
 	Scale 1
 	Component Scene
-		Enabled true
 		Entity Arrows
 			Position 0 0 0
 			Rotation 0 -0 0
 			Scale 0.22
 			Component Scene
-				Enabled true
 				Entity ArrowRed
 					Component Render
 						ObjectContainer gizmos
@@ -39,7 +37,6 @@ Prefab Gizmo
 			Rotation 0 -0 0
 			Scale 0.44
 			Component Scene
-				Enabled true
 				Entity PlaneRed
 					Component Render
 						ObjectContainer gizmos
@@ -65,11 +62,11 @@ Prefab Gizmo
 					Rotation 0 -0 90
 					Scale 1
 		Entity Arches
+			Enabled false
 			Position 0 0 0
 			Rotation 0 -0 0
 			Scale 0.22
 			Component Scene
-				Enabled false
 				Entity ArchRed
 					Component Render
 						ObjectContainer gizmos
@@ -95,11 +92,11 @@ Prefab Gizmo
 					Rotation 0 -0 -90
 					Scale 1.75
 		Entity Scale
+			Enabled false
 			Position 0 0 0
 			Rotation 0 -0 0
 			Scale 0.22
 			Component Scene
-				Enabled false
 				Entity ScaleRed
 					Component Render
 						ObjectContainer gizmos

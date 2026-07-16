@@ -15,8 +15,6 @@ void PropertiesPanel::render(Entity* selected)
 		return;
 	}
 
-	SceneComponent* sc = getComponent<SceneComponent>(selected);
-
 	if (ImGui::CollapsingHeader("Entity", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::AlignTextToFramePadding();
@@ -25,10 +23,10 @@ void PropertiesPanel::render(Entity* selected)
 		ImGui::SetNextItemWidth(-1.0f);
 		{
 			char nameBuf[256];
-			strncpy_s(nameBuf, sizeof(nameBuf), selected->displayName.c_str(), sizeof(nameBuf) - 1);
+			strncpy_s(nameBuf, sizeof(nameBuf), selected->getName(), sizeof(nameBuf) - 1);
 			nameBuf[sizeof(nameBuf) - 1] = '\0';
 			if (ImGui::InputText("##pp_name", nameBuf, sizeof(nameBuf), ImGuiInputTextFlags_EnterReturnsTrue))
-				selected->displayName = nameBuf;
+				selected->setName(nameBuf);
 		}
 
 		{
@@ -40,12 +38,13 @@ void PropertiesPanel::render(Entity* selected)
 			ImGui::TextWrapped("%s", sourceFile.empty() ? "<inline>" : sourceFile.c_str());
 		}
 
-		if (sc)
 		{
 			ImGui::AlignTextToFramePadding();
 			ImGui::Text("Enabled");
 			ImGui::SameLine(80.0f);
-			ImGui::Checkbox("##pp_enabled", &sc->enabled);
+			bool enabled = selected->isEnabled();
+			if (ImGui::Checkbox("##pp_enabled", &enabled))
+				selected->setEnabled(enabled);
 		}
 	}
 

@@ -22,6 +22,13 @@ void SpatialEntry::reset()
     }
 }
 
+// Lock-free max for the clamped-oversize radius (updateEntry runs concurrently on jobs).
+static void atomicFloatMax(std::atomic<float>& target, float value)
+{
+    float current = target.load(std::memory_order_relaxed);
+    while (value > current && !target.compare_exchange_weak(current, value, std::memory_order_relaxed)) {}
+}
+
 void SpatialIndex::initialize(const SpatialIndexDesc& desc)
 {
     assert(!m_initialized);
@@ -29,7 +36,8 @@ void SpatialIndex::initialize(const SpatialIndexDesc& desc)
     for (uint32 i = 0; i < m_numLevels; ++i)
         m_levels[i].initialize(desc.initialCellCapacity);
     m_pool.initialize(desc.initialEntryCapacity);
-    m_pendingOps.reserve(1024);
+    m_pendingOps.initialize(); // requires the JobSystem (sized by scheduler context count)
+    m_pendingOps.forEach([](std::vector<PendingOp>& ops) { ops.reserve(1024); });
     m_initialized = true;
 
     Tweak::intVar("Spatial/Stats", "Entries", &m_stats.numEntries, 0, INT32_MAX);
@@ -73,7 +81,7 @@ SpatialHandle SpatialIndex::registerEntry(const glm::dvec3& pos, float radius, u
     if (level >= m_numLevels)
         level = m_numLevels - 1;
     if (float(Morton::cellSize(level)) < radius * 2.0f) // clamped oversize, widen top-level tests
-        m_topLevelMaxRadius = glm::max(m_topLevelMaxRadius, radius);
+        atomicFloatMax(m_topLevelMaxRadius, radius);
     const uint64 key = Morton::keyAtLevel(Morton::fineKey(pos), level);
     const glm::vec3 rel = glm::vec3(pos - Morton::cellMinWorld(key, level));
     m_pool.posX[idx] = rel.x;
@@ -91,8 +99,8 @@ SpatialHandle SpatialIndex::registerEntry(const glm::dvec3& pos, float radius, u
     m_pool.storeIdx[idx] = UINT32_MAX;
     m_pool.level[idx] = uint8(level);
     m_pool.flags[idx] = uint8(RecordFlag_Alive | RecordFlag_Unlinked | (spawnVisible ? 0 : RecordFlag_NoSpawnGuard));
-    m_pendingOps.push_back({ .newKey = key, .newRelPos = rel, .newRadius = radius,
-                             .idx = idx, .gen = m_pool.gen[idx], .type = PendingOp::Link, .newLevel = uint8(level) });
+    m_pendingOps.local().push_back({ .newKey = key, .newRelPos = rel, .newRadius = radius,
+                                     .idx = idx, .gen = m_pool.gen[idx], .type = PendingOp::Link, .newLevel = uint8(level) });
     return { idx, m_pool.gen[idx] };
 }
 
@@ -109,8 +117,8 @@ void SpatialIndex::unregisterEntry(SpatialHandle handle)
     }
     m_pool.flags[idx] = uint8((m_pool.flags[idx] & ~RecordFlag_Alive) | RecordFlag_PendingFree);
     m_pool.radius[idx] = -1e30f; // queries this frame can no longer return the dying entry
-    m_pendingOps.push_back({ .newKey = 0, .newRelPos = glm::vec3(0.0f), .newRadius = 0.0f,
-                             .idx = idx, .gen = handle.gen, .type = PendingOp::Unlink, .newLevel = 0 });
+    m_pendingOps.local().push_back({ .newKey = 0, .newRelPos = glm::vec3(0.0f), .newRadius = 0.0f,
+                                     .idx = idx, .gen = handle.gen, .type = PendingOp::Unlink, .newLevel = 0 });
 }
 
 void SpatialIndex::updateEntry(SpatialHandle handle, const glm::dvec3& pos, float radius)
@@ -125,7 +133,7 @@ void SpatialIndex::updateEntry(SpatialHandle handle, const glm::dvec3& pos, floa
         if (level >= m_numLevels)
             level = m_numLevels - 1;
         if (float(Morton::cellSize(level)) < radius * 2.0f)
-            m_topLevelMaxRadius = glm::max(m_topLevelMaxRadius, radius);
+            atomicFloatMax(m_topLevelMaxRadius, radius);
     }
     const uint64 key = Morton::keyAtLevel(Morton::fineKey(pos), level);
     const glm::vec3 rel = glm::vec3(pos - Morton::cellMinWorld(key, level));
@@ -145,8 +153,8 @@ void SpatialIndex::updateEntry(SpatialHandle handle, const glm::dvec3& pos, floa
     }
     m_pool.flags[idx] = uint8(m_pool.flags[idx] | RecordFlag_PendingMove);
     m_pool.lastMoveFrame[idx] = m_frameId;
-    m_pendingOps.push_back({ .newKey = key, .newRelPos = rel, .newRadius = radius,
-                             .idx = idx, .gen = handle.gen, .type = PendingOp::Move, .newLevel = uint8(level) });
+    m_pendingOps.local().push_back({ .newKey = key, .newRelPos = rel, .newRadius = radius,
+                                     .idx = idx, .gen = handle.gen, .type = PendingOp::Move, .newLevel = uint8(level) });
 }
 
 void SpatialIndex::setLayerMask(SpatialHandle handle, uint32 layerMask)
@@ -163,7 +171,13 @@ void SpatialIndex::commitFrame()
 {
     assert(m_initialized);
     const auto start = Clock::now();
-    for (const PendingOp& op : m_pendingOps)
+    // Per-slot FIFO is the only ordering guarantee (one visitor per entity per pass keeps a frame's
+    // Moves for one entry in one slot). The lone cross-slot case - Link (main) + first Move (worker)
+    // in the same frame - self-heals: a Move that lands before its Link skips on RecordFlag_Unlinked
+    // and leaves PendingMove set, which forces the next updateEntry to re-queue it.
+    m_pendingOps.forEach([&](std::vector<PendingOp>& ops)
+    {
+    for (const PendingOp& op : ops)
     {
         if (op.idx >= m_pool.capacity() || m_pool.gen[op.idx] != op.gen)
             continue;
@@ -214,7 +228,8 @@ void SpatialIndex::commitFrame()
             break;
         }
     }
-    m_pendingOps.clear();
+    ops.clear();
+    });
     if (m_staticEnabled)
         promotionScan();
     sweepEmptyCells();

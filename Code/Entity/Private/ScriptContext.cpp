@@ -85,14 +85,9 @@ namespace
         Globals::scriptEvents.addDestroyRequest(EntityPtr(e));
     }
 
-    const char* thunk_entityGetName(Entity* e) { return e->displayName.c_str(); }
+    const char* thunk_entityGetName(Entity* e) { return e->getName(); }
 
-    int thunk_entityGetEnabled(Entity* en)
-    {
-        if (SceneComponent* sc = getComponent<SceneComponent>(en))
-            return sc->enabled ? 1 : 0;
-		return 1;
-    }
+    int thunk_entityGetEnabled(Entity* en) { return en->isEnabled() ? 1 : 0; }
     int thunk_entityGetChildCount(Entity* en)
     {
         if (SceneComponent* sc = getComponent<SceneComponent>(en))
@@ -110,7 +105,7 @@ namespace
         if (!en || !name) return nullptr;
         if (SceneComponent* sc = getComponent<SceneComponent>(en))
             for (const EntityPtr& child : sc->children)
-                if (child->displayName == name)
+                if (std::string_view(child->getName()) == name)
                     return child.get();
         return nullptr;
     }
@@ -122,7 +117,7 @@ namespace
         return nullptr;
     }
 
-    void thunk_entitySetEnabled(Entity* en, int enabled)              { if (SceneComponent* sc = getComponent<SceneComponent>(en)) sc->enabled = enabled != 0; }
+    void thunk_entitySetEnabled(Entity* en, int enabled)              { en->setEnabled(enabled != 0); }
     void thunk_entitySetAnimFloat(Entity* en, const char* p, float v) { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setFloat(p, v); }
     void thunk_entitySetAnimBool(Entity * en, const char* p, int v)   { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setBool(p, v != 0); }
     void thunk_entitySetAnimTrigger(Entity* en, const char* p)        { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setTrigger(p); }

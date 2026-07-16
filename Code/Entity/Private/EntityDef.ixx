@@ -12,7 +12,15 @@ export struct EntityPtr;
 export enum EEntityFlags : uint8
 {
     EEntityFlag_PrefabInstance = 1 << 0, // root of a locked prefab instance; cleared by "unpack"
-    EEntityFlag_EditorPaused   = 1 << 1, // open in the Entity Editor: scripts/physics don't update this tree
+    EEntityFlag_Enabled        = 1 << 1, // off = the entity and its whole subtree stop updating (see updateTree)
+    EEntityFlag_Frozen         = 1 << 2, // scripts/physics/animator don't update this tree (Entity Editor documents)
+    // A spawned prefab tree is ONE EntityAllocator block (see Entity::create). While the tree is intact
+    // (no member reparented/deleted out, no external refs at teardown) the root frees the whole block in
+    // one call and members skip their own free. A structural break SPLITS the allocation
+    // (breakContiguousAllocation): path ancestors revert to per-entity freeing while every off-path
+    // subtree becomes its own RootAllocation over its contiguous DFS range and keeps one-chunk freeing.
+    EEntityFlag_RootAllocation       = 1 << 3, // first entity of its allocation range; frees it while contiguous
+    EEntityFlag_ContiguousAllocation = 1 << 4, // slice still owned by an intact (sub)tree allocation
 };
 
 export enum EComponentID : uint16
@@ -31,9 +39,14 @@ export class Entity
 {
 public:
 
-    // initialFlags (EEntityFlags) applies before components spawn, so e.g. EEntityFlag_EditorPaused can
-    // suppress a script's OnSpawn when the Entity Editor respawns a paused entity.
+    // initialFlags (EEntityFlags) applies before components spawn, so e.g. EEntityFlag_Frozen is already
+    // visible to a component's spawn(). EEntityFlag_Enabled comes from the template, not from here.
+    // Allocates ONE block for the entity plus its entire SceneComponent child tree (size cached on the
+    // template); the spawn recursion carves each entity from `treeCursor` via the overload below. Each
+    // entity frees its own exact-size slice on destroy (the allocator's free lists recycle the pieces),
+    // so tree members are independent: any of them can outlive the others or be reparented away.
     static EntityPtr create(const EntitySpawnTemplate& tmpl, const Transform& transform, uint8 initialFlags = 0);
+    static EntityPtr create(const EntitySpawnTemplate& tmpl, const Transform& transform, uint8 initialFlags, uint8*& treeCursor);
     static void destroy(Entity* entity);
 
 public:
@@ -43,7 +56,7 @@ public:
     glm::quat rot;
 
     Entity* parent = nullptr;
-    std::string displayName;
+    std::unique_ptr<char[]> displayName; // null when unnamed; access via getName()/setName()
     const EntitySpawnTemplate* spawnTemplate = nullptr;
 
     uint16 refCount = 0;
@@ -53,20 +66,28 @@ public:
 
     void update(Renderer& renderer, float deltaSeconds) { updateTree(renderer, Transform(), deltaSeconds); }
 
+    const char* getName() const { return displayName ? displayName.get() : ""; }
+    bool hasName() const { return displayName != nullptr; }
+    void setName(std::string_view name);
+
     void serializeComponent(EComponentID id, AssetNode& out);
     void deserializeComponent(EComponentID id, const AssetNode& in);
     void reparentEntity(Entity* newParent);
 
     bool isPrefabInstance() const { return (flags & EEntityFlag_PrefabInstance) != 0; }
     void setPrefabInstance(bool on) { flags = on ? uint8(flags | EEntityFlag_PrefabInstance) : uint8(flags & ~EEntityFlag_PrefabInstance); }
-    bool isEditorPaused() const { return (flags & EEntityFlag_EditorPaused) != 0; }
-    void setEditorPaused(bool on) { flags = on ? uint8(flags | EEntityFlag_EditorPaused) : uint8(flags & ~EEntityFlag_EditorPaused); }
-    // The flag lives on the edited document's root; entry points invoked outside updateTree's propagation
+    // Disabling prunes the whole subtree from updateTree (and suspends its physics bodies); the individual
+    // component enables (script/animator/physics) stay independent of this.
+    bool isEnabled() const { return (flags & EEntityFlag_Enabled) != 0; }
+    void setEnabled(bool on) { flags = on ? uint8(flags | EEntityFlag_Enabled) : uint8(flags & ~EEntityFlag_Enabled); }
+    bool isFrozen() const { return (flags & EEntityFlag_Frozen) != 0; }
+    void setFrozen(bool on) { flags = on ? uint8(flags | EEntityFlag_Frozen) : uint8(flags & ~EEntityFlag_Frozen); }
+    // The flag lives on the frozen (sub)tree's root; entry points invoked outside updateTree's propagation
     // (global script events, physics contact events) must check the whole ancestor chain.
-    bool isEditorPausedInTree() const
+    bool isFrozenInTree() const
     {
         for (const Entity* p = this; p; p = p->parent)
-            if (p->isEditorPaused())
+            if (p->isFrozen())
                 return true;
         return false;
     }
@@ -81,9 +102,9 @@ private:
 	Entity(const Entity&) = delete;
     ~Entity() { assert(refCount == 0); }
 
-    void updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds = 0.0f, bool editorPaused = false);
+    void updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds = 0.0f, bool frozen = false);
 
-    void createComponent(EComponentID id, uint16 componentOffset, const void* info, const Transform& base);
+    void createComponent(EComponentID id, uint16 componentOffset, const void* info, const Transform& base, uint8*& treeCursor);
     void destroyComponent(EComponentID id, uint16 componentOffset, const void* info);
 };
 
@@ -160,6 +181,8 @@ export struct EntitySpawnTemplate
     std::string sourceFile;
     std::string prefabName;
     std::string displayName;
+    bool enabled = true;             // spawns with EEntityFlag_Enabled set/cleared ("Enabled" in the .pre)
+    mutable uint32 treeAllocSize = 0; // lazy cache: entity + recursive SceneComponent children, 0 = uncomputed
 };
 
 export struct EntityChange

@@ -3,6 +3,7 @@ export module Spatial:SpatialIndex;
 import Core;
 import Core.glm;
 import Core.Frustum;
+import Threading;
 import :Morton;
 import :Types;
 import :CellMap;
@@ -15,6 +16,11 @@ import :StaticStore;
 // hierarchy with bit scans and never visit empty space. Mutations that change a cell are queued
 // and applied in commitFrame(); same-cell position updates write in place. Queries are read-only
 // and valid between commits.
+//
+// Threading contract: updateEntry is callable from any job during the parallel entity pass -
+// same-cell updates write only that entry's SoA slots, and cell-changing ops stage into per-worker
+// pending lists. registerEntry/unregisterEntry/setLayerMask/commitFrame stay single-threaded
+// (main, outside the pass), as do queries relative to commits.
 export class SpatialIndex final
 {
 public:
@@ -121,7 +127,7 @@ private:
     std::array<CellMap, Morton::MaxLevels> m_levels;
     std::array<StaticStore, Morton::MaxLevels> m_static;
     RecordPool m_pool;
-    std::vector<PendingOp> m_pendingOps;
+    PerWorker<std::vector<PendingOp>> m_pendingOps; // staged per scheduler context, drained FIFO per slot in commitFrame
     std::vector<EmptyCandidate> m_emptyCandidates;
     uint32 m_levelEntityCount[Morton::MaxLevels] = {};
     uint32 m_numLevels = Morton::MaxLevels;
@@ -132,7 +138,7 @@ private:
     int m_promoteAfterFrames = 60;
     int m_staticScanBudget = 65536;  // pool slots inspected per commit
     int m_staticRebuildBatch = 1024; // pending promotions that force a level rebuild
-    float m_topLevelMaxRadius = 0.0f; // largest clamped-oversize radius, inflates top-level tests
+    std::atomic<float> m_topLevelMaxRadius = 0.0f; // largest clamped-oversize radius, inflates top-level tests (CAS-max: updateEntry runs on jobs)
     SpatialCullingConfig m_culling;
     mutable SpatialStats m_stats;
     bool m_initialized = false;

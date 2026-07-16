@@ -18,7 +18,7 @@ void ScriptEventManager::fireEvent(EventKey key)
 				auto eventIt = script->eventKeyToIndex.find(key);
 				if (eventIt == script->eventKeyToIndex.end())
 					continue;
-				if (sit->second.entity->isEditorPausedInTree())
+				if (sit->second.entity->isFrozenInTree())
 					continue;
 				reinterpret_cast<ScriptOnEventFn>(script->onEvent)(&Globals::scriptContext, sit->second.entity, eventIt->second, sit->second.scriptData);
 			}

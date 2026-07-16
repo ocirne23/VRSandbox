@@ -232,8 +232,9 @@ void SpatialIndex::traverseCell(const Tester& tester, const glm::dvec3& refPos, 
     const float halfCell = float(Morton::cellSize(level) * 0.5);
     const glm::vec3 cellMin = glm::vec3(Morton::cellMinWorld(key, level) - refPos);
     float loose = halfCell;
-    if (level == m_numLevels - 1 && m_topLevelMaxRadius > halfCell)
-        loose = m_topLevelMaxRadius; // clamped-oversize entries can stick out further
+    const float topLevelMaxRadius = m_topLevelMaxRadius.load(std::memory_order_relaxed);
+    if (level == m_numLevels - 1 && topLevelMaxRadius > halfCell)
+        loose = topLevelMaxRadius; // clamped-oversize entries can stick out further
     if (!fullyInside)
     {
         ++m_stats.cellsTested;

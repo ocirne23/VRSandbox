@@ -58,6 +58,8 @@ public:
 
     bool initialize();
 
+    void update(Renderer& renderer, float deltaSeconds);
+
     EntityPtr spawn(const std::string& name, const Transform& base);
 
     EntityPtr spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform = true);

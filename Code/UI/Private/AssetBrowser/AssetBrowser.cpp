@@ -177,7 +177,7 @@ void AssetBrowser::acceptPrefabDrop()
 	if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SV_ENTITY"))
 	{
 		Entity* entity = *static_cast<Entity**>(payload->Data);
-		const std::string name = entity->displayName.empty() ? std::string("Prefab") : entity->displayName;
+		const std::string name = entity->hasName() ? std::string(entity->getName()) : std::string("Prefab");
 		const std::filesystem::path out = m_currentPath / (name + ".pre");
 		std::error_code ec;
 		if (prefabWouldCycle(entity, name))

@@ -56,11 +56,15 @@ export namespace Procedural
 		void update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain = nullptr,
 		            const WaterReach* reach = nullptr, float seaLevel = 0.0f, const FlowField* flow = nullptr);
 
-		// Water surface world Y at (x, z), CPU-evaluated from the GPU displacement readback (mirrors the
-		// vertex shader's cascade sum, shoaling fade and seabed clamp; ~2 frames of latency — invisible
-		// for physics). Returns -FLT_MAX where there is no water: ocean disabled, readback not primed,
-		// or terrain at/above sea level per the shore bake. This is the buoyancy height field the App
-		// wires into PhysicsWorld::setWaterSurface; keys 8/9's cubes bob in the swell through it.
+		// Water surface world Y at (x, z), CPU-evaluated from the GPU displacement readback (a full mirror
+		// of the clipmap vertex shader: cascade sum, shoaling fade, swash run-up, crest ceiling and the
+		// waterline floor; ~2 frames of latency — invisible for physics). Returns -FLT_MAX where there is
+		// no water: ocean disabled, readback not primed, or land beyond the swash run-up band per the
+		// shore bake. Inside that band it returns the live tongue surface, which SINKS BELOW the terrain
+		// as the wave recedes (the drawdown floor) — bodies beach themselves on their own that way, so
+		// callers want a plain surface-vs-point test, not a separate dry check. This is the buoyancy
+		// height field the App wires into PhysicsWorld::setWaterSurface; keys 8/9's cubes bob in the
+		// swell through it.
 		float sampleWaterHeight(float x, float z) const;
 
 		// The heading the swell actually TRAVELS in open water (radians, XZ) — the terrain streamer's baked
@@ -80,8 +84,9 @@ export namespace Procedural
 		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain,
 		                    const WaterReach* reach, const FlowField* flow);
 		glm::vec2 sampleShoreData(float x, float z) const;          // (water depth, water level) from the CPU shore copy
-		float sampleShoreDepth(float x, float z) const;             // CPU copy of the baked shore map
-		glm::vec3 sampleDisplacement(glm::vec2 worldXZ, float depth) const; // shoal-faded cascade sum from the readback tile
+		float swashReach() const;                                   // run-up band height; mirrors the UBO's estimate
+		float swashWeight(float depth, float waterLevel) const;     // mirrors oceanSwashWeight
+		glm::vec3 sampleDisplacement(glm::vec2 worldXZ) const;      // CPU mirror of oceanSampleDisplacement
 		void estimateWaveTrough(); // sparse re-scan of the readback for the deepest current trough (underwater fog boundary)
 
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---

@@ -20,7 +20,7 @@ static const char* fallbackLabel(Entity* entity)
 
 static const char* displayLabel(Entity* entity)
 {
-	return entity->displayName.empty() ? fallbackLabel(entity) : entity->displayName.c_str();
+	return entity->hasName() ? entity->getName() : fallbackLabel(entity);
 }
 
 static bool containsCI(const char* haystack, const char* needle)
@@ -46,7 +46,7 @@ void SceneView::beginRename(Entity* entity)
 {
 	m_renamingEntity  = entity;
 	m_focusRenameNext = true;
-	strncpy_s(m_renameBuffer, sizeof(m_renameBuffer), entity->displayName.c_str(), sizeof(m_renameBuffer) - 1);
+	strncpy_s(m_renameBuffer, sizeof(m_renameBuffer), entity->getName(), sizeof(m_renameBuffer) - 1);
 	m_renameBuffer[sizeof(m_renameBuffer) - 1] = '\0';
 }
 
@@ -114,7 +114,7 @@ void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 	if (isScene && hasFilter) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
 
 	// Prefab instances show in blue (Unity-style); a disabled entity's grey takes precedence.
-	const bool dimmed = isScene && !sc->enabled;
+	const bool dimmed = !entity->isEnabled();
 	int pushedColors = 0;
 	if (dimmed)
 	{
@@ -154,7 +154,7 @@ void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 		if (ImGui::InputText("##sv_rename", m_renameBuffer, sizeof(m_renameBuffer),
 			ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
 		{
-			entity->displayName = m_renameBuffer;
+			entity->setName(m_renameBuffer);
 			m_renamingEntity = nullptr;
 		}
 		if (!ImGui::IsItemActive() && !ImGui::IsItemFocused() && !m_focusRenameNext)
@@ -166,8 +166,10 @@ void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 	}
 	else
 	{
+		// AllowOverlap: the row spans the full width, so without it the Selectable eats the clicks
+		// meant for the enable toggle drawn on top of its right edge (the TreeNode path does the same).
 		ImGui::Selectable(displayLabel(entity), isSelected,
-			ImGuiSelectableFlags_SpanAvailWidth | ImGuiSelectableFlags_NoPadWithHalfSpacing);
+			ImGuiSelectableFlags_SpanAvailWidth | ImGuiSelectableFlags_NoPadWithHalfSpacing | ImGuiSelectableFlags_AllowOverlap);
 	}
 
 	if (pushedColors)
@@ -187,7 +189,6 @@ void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 	if (isScene && !locked)
 		dropTargetReparentUnder(entity);   // a locked instance can't receive children
 
-	if (isScene)
 	{
 		const float btnW = ImGui::GetTextLineHeight() + 4.0f;
 		const float posX = ImGui::GetWindowWidth()
@@ -195,11 +196,11 @@ void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 		ImGui::SameLine(posX);
 		ImGui::PushID("##vis");
 		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-		ImGui::PushStyleColor(ImGuiCol_Text, sc->enabled
+		ImGui::PushStyleColor(ImGuiCol_Text, entity->isEnabled()
 			? ImGui::GetStyleColorVec4(ImGuiCol_Text)
 			: ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		if (ImGui::SmallButton(sc->enabled ? "o" : "-"))
-			sc->enabled = !sc->enabled;
+		if (ImGui::SmallButton(entity->isEnabled() ? "o" : "-"))
+			entity->setEnabled(!entity->isEnabled());
 		ImGui::PopStyleColor(2);
 		ImGui::PopID();
 	}

@@ -24,6 +24,12 @@ bool World::initialize()
     return true;
 }
 
+void World::update(Renderer& renderer, float deltaSeconds)
+{
+	for (EntityPtr& root : m_rootEntities)
+		root->update(renderer, deltaSeconds);
+}
+
 static RendererVKLayout::EPipelineIndex parsePipeline(const std::string& name)
 {
     using P = RendererVKLayout::EPipelineIndex;
@@ -386,7 +392,6 @@ std::shared_ptr<AnimatorComponent::SpawnInfo> World::buildAnimatorSpawnInfo(cons
 std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const AssetNode& sceneNode)
 {
     auto info = std::make_shared<SceneComponent::SpawnInfo>();
-    if (const AssetNode* n = sceneNode.find("Enabled")) info->enabled = n->asBool();
 
     for (const AssetNode& child : sceneNode.children)
     {
@@ -404,6 +409,7 @@ std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const Asse
         ci.tmpl = std::move(childTmpl);
         ci.localTransform = readNodeTransform(child);
         if (const AssetNode* n = child.find("Name")) ci.name = n->asString();
+        if (const AssetNode* n = child.find("Enabled")) ci.enabled = n->asBool();
         info->children.push_back(std::move(ci));
     }
     return info;
@@ -657,6 +663,7 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
     tmpl.defaultTransform = readNodeTransform(node); // the declaration's authored placement
     const AssetNode* nameNode = node.find("Name");
     tmpl.displayName = nameNode ? nameNode->asString() : node.asString();
+    if (const AssetNode* n = node.find("Enabled")) tmpl.enabled = n->asBool();
 
     uint16 typeBits = 0;
 
@@ -816,7 +823,7 @@ EntityPtr World::createEmptyEntity(const std::string& name)
         m_emptyTemplate->displayName = "Entity";
     }
     EntityPtr entity = Entity::create(*m_emptyTemplate, Transform());
-    entity->displayName = name;
+    entity->setName(name);
     return entity;
 }
 
@@ -878,9 +885,9 @@ void World::handleEntityChange(EntityChange& change, const Camera& camera, const
         keepTemplateAlive(rs->tmpl);
 
         Transform t(rs->oldEntity->pos, rs->oldEntity->scale, rs->oldEntity->rot);
-        // Pre-set the paused flag so component spawn (script OnSpawn) already sees it — the parent
-        // chain isn't linked yet during create, so a paused ancestor can't be discovered there.
-        const uint8 initialFlags = rs->oldEntity->isEditorPausedInTree() ? uint8(EEntityFlag_EditorPaused) : uint8(0);
+        // Pre-set the frozen flag so component spawn already sees it — the parent chain isn't linked
+        // yet during create, so a frozen ancestor can't be discovered there.
+        const uint8 initialFlags = rs->oldEntity->isFrozenInTree() ? uint8(EEntityFlag_Frozen) : uint8(0);
         EntityPtr newEntity = Entity::create(*rs->tmpl, t, initialFlags);
         newEntity->setPrefabInstance(rs->oldEntity->isPrefabInstance()); // keep the editor's unpacked state despite the template's prefabName
 

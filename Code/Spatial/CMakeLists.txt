@@ -8,7 +8,7 @@ add_library(${PROJECT_NAME} STATIC ${PROJECT_PRIVATE_FILES} ${PROJECT_PUBLIC_FIL
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Private")
 target_include_directories(${PROJECT_NAME} PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/Public")
 
-target_link_libraries(${PROJECT_NAME} PUBLIC Core)
+target_link_libraries(${PROJECT_NAME} PUBLIC Core Threading)
 
 # Finest cell size (meters) is compile-time so all quantization math constant-folds.
 # Override here if a world needs a different extent: 2m cells span +/-2097km.

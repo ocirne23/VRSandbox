@@ -11,8 +11,10 @@ static void writeSceneChild(Entity* child, AssetNode& sceneComp);
 
 static void writeOverrides(Entity* entity, AssetNode& node, const std::string& tokenName)
 {
-    if (!entity->displayName.empty() && entity->displayName != tokenName)
-        node.set("Name", entity->displayName);
+    if (entity->hasName() && entity->getName() != tokenName)
+        node.set("Name", entity->getName());
+    if (!entity->isEnabled())
+        node.set("Enabled", false); // enabled is the default, so only the disabled state is authored
     node.set("Position", entity->pos);
     node.set("Rotation", glm::degrees(glm::eulerAngles(entity->rot)));
     node.set("Scale", entity->scale);
@@ -67,7 +69,9 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
                 for (const EntityPtr& child : sc->children)
                     writeSceneChild(child, comp);
 
-        if (comp.children.empty())
+        // Scene is written even when empty: it is what makes the entity able to hold children, and it
+        // serializes nothing of its own now that Enabled lives on the entity.
+        if (comp.children.empty() && id != EComponentID_Scene)
             continue;
         node.children.push_back(std::move(comp));
     }
@@ -84,7 +88,7 @@ static void writeSceneChild(Entity* child, AssetNode& sceneComp)
     }
     else
     {
-        const std::string token = child->displayName.empty() ? std::string("Entity") : child->displayName;
+        const std::string token = child->hasName() ? std::string(child->getName()) : std::string("Entity");
         AssetNode& node = sceneComp.addChild("Entity");
         node.values.emplace_back(token);
         writeEntityBody(child, node, token);
