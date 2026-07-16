@@ -10,6 +10,7 @@ import Animation;
 import Script;
 import Physics;
 import Audio;
+import Particle;
 import Spatial;
 
 import RendererVK;
@@ -32,7 +33,7 @@ export void breakContiguousAllocationFromRoot(Entity* root);
 // (refcount 1) — i.e. destroying the tree is guaranteed to destroy all of them.
 export bool contiguousTreeSolelyOwned(Entity* entity);
 
-export constexpr uint16 MaxInlineComponentTypes = 8;
+export constexpr uint16 MaxInlineComponentTypes = 9;
 export constexpr uint16 ComponentAlignment = 16;
 
 export struct SceneComponent
@@ -343,12 +344,41 @@ private:
     int selectClip(const SoundDesc& sound, Voice& voice) const;
 };
 
+// A particle effect attached to the entity ("Component Particle" in .pre files): instantiates a .pfx
+// effect (Particle library) and follows the entity's world transform every update, feeding its motion
+// to the emitters (velocity inheritance/stretch). Gameplay toggles emission or fires bursts through
+// the effect handle; the authored state is just the effect path + initial Emitting.
+export struct ParticleComponent
+{
+    static constexpr EComponentID getId() { return EComponentID_Particle; }
+
+    ~ParticleComponent() {}
+
+    ParticleEffect effect;
+    glm::vec3 lastPos = glm::vec3(0.0f); // world position last update (finite-difference emitter velocity)
+    bool hasLastPos = false;
+
+    struct SpawnInfo
+    {
+        std::string effectPath; // .pfx, relative to Assets/
+        bool emitting = true;   // initial continuous-emission state
+    };
+
+    void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
+    void destroy(Entity& entity, const SpawnInfo& info);
+    void update(Entity& entity, const Transform& world, float deltaSeconds);
+
+    void serialize(AssetNode&) const {}
+    void deserialize(const AssetNode&) {}
+};
+
 export Transform composeTransform(const Transform& parent, const Transform& local);
 
 export const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity);
 export const AnimatorComponent::SpawnInfo* getAnimatorSpawnInfo(const Entity* entity);
 export const PhysicsComponent::SpawnInfo* getPhysicsSpawnInfo(const Entity* entity);
 export const AudioComponent::SpawnInfo* getAudioSpawnInfo(const Entity* entity);
+export const ParticleComponent::SpawnInfo* getParticleSpawnInfo(const Entity* entity);
 export const ScriptComponent::SpawnInfo* getScriptSpawnInfo(const Entity* entity);
 
 // Serializes a render spawn recipe into a "Component Render" node; mirror of World::buildRenderSpawnInfo.
@@ -363,6 +393,9 @@ export void writePhysicsSpawnInfo(const PhysicsComponent::SpawnInfo& info, Asset
 // Serializes an audio spawn recipe into a "Component Audio" node.
 export void writeAudioSpawnInfo(const AudioComponent::SpawnInfo& info, AssetNode& out);
 
+// Serializes a particle spawn recipe into a "Component Particle" node.
+export void writeParticleSpawnInfo(const ParticleComponent::SpawnInfo& info, AssetNode& out);
+
 export constexpr const char* componentTypeName(EComponentID id)
 {
     switch (id)
@@ -374,6 +407,7 @@ export constexpr const char* componentTypeName(EComponentID id)
     case EComponentID_Animator: return "Animator";
     case EComponentID_Physics: return "Physics";
     case EComponentID_Audio:  return "Audio";
+    case EComponentID_Particle: return "Particle";
     case EComponentID_Script: return "Script";
     default:                  return "Unknown";
     }
@@ -391,6 +425,7 @@ export namespace EntityComponentDetail
         alignUp(uint16(sizeof(AnimatorComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(PhysicsComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(AudioComponent)),   ComponentAlignment),
+        alignUp(uint16(sizeof(ParticleComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(ScriptComponent)),  ComponentAlignment),
     };
     static_assert(EComponentID_Scene == 0);
@@ -400,7 +435,8 @@ export namespace EntityComponentDetail
     static_assert(EComponentID_Animator == 4);
     static_assert(EComponentID_Physics == 5);
     static_assert(EComponentID_Audio == 6);
-    static_assert(EComponentID_Script == 7);
+    static_assert(EComponentID_Particle == 7);
+    static_assert(EComponentID_Script == 8);
 
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);
 }

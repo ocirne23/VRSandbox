@@ -235,6 +235,10 @@ void EntityEditor::refreshDraftsFromEntity()
 	m_hasAudio = hasComponent<AudioComponent>(e);
 	m_audioDraft = m_hasAudio ? *getAudioSpawnInfo(e) : AudioComponent::SpawnInfo{};
 
+	m_hasParticle = hasComponent<ParticleComponent>(e);
+	m_particleDraft = m_hasParticle && getParticleSpawnInfo(e) ? *getParticleSpawnInfo(e) : ParticleComponent::SpawnInfo{};
+	strncpy_s(m_particleEffectBuf, sizeof(m_particleEffectBuf), m_particleDraft.effectPath.c_str(), sizeof(m_particleEffectBuf) - 1);
+
 	m_hasScript = hasComponent<ScriptComponent>(e);
 	m_scriptDraft = m_hasScript && getScriptSpawnInfo(e) ? *getScriptSpawnInfo(e) : ScriptComponent::SpawnInfo{};
 	if (m_hasScript)
@@ -322,7 +326,7 @@ void EntityEditor::closeCurrent()
 	m_selected = EntityPtr();
 	m_path.clear();
 	m_baselineText.clear();
-	m_hasScene = m_hasRender = m_hasAnimator = m_hasPhysics = m_hasAudio = m_hasScript = false;
+	m_hasScene = m_hasRender = m_hasAnimator = m_hasPhysics = m_hasAudio = m_hasParticle = m_hasScript = false;
 	m_ownsEntity = true;
 	m_wasPacked = false;
 }
@@ -1088,6 +1092,46 @@ void EntityEditor::renderAudioSection()
 	ImGui::PopID();
 }
 
+void EntityEditor::renderParticleSection()
+{
+	if (!m_hasParticle)
+	{
+		if (ImGui::Button("+ Add Particle"))
+		{
+			m_hasParticle = true;
+			m_particleDraft = ParticleComponent::SpawnInfo{};
+			m_particleEffectBuf[0] = '\0';
+			commitRespawn();
+		}
+		return;
+	}
+
+	if (!ImGui::CollapsingHeader("Particle", ImGuiTreeNodeFlags_DefaultOpen))
+		return;
+	ImGui::PushID("particle");
+
+	ImGui::AlignTextToFramePadding();
+	ImGui::Text("Effect");
+	ImGui::SameLine(60.0f);
+	ImGui::SetNextItemWidth(-1.0f);
+	ImGui::InputTextWithHint("##effect", "Effects/fire.pfx", m_particleEffectBuf, sizeof(m_particleEffectBuf));
+	if (ImGui::IsItemDeactivatedAfterEdit())
+	{
+		m_particleDraft.effectPath = m_particleEffectBuf;
+		commitRespawn();
+	}
+
+	if (ImGui::Checkbox("Emitting", &m_particleDraft.emitting))
+		commitRespawn();
+
+	if (ImGui::Button("Remove Particle"))
+	{
+		m_hasParticle = false;
+		commitRespawn();
+	}
+	ImGui::PopID();
+}
+
 void EntityEditor::renderScriptSection()
 {
 	if (!m_hasScript)
@@ -1164,6 +1208,7 @@ void EntityEditor::renderComponents()
 	renderAnimatorSection();
 	renderPhysicsSection();
 	renderAudioSection();
+	renderParticleSection();
 	renderScriptSection();
 }
 
@@ -1316,6 +1361,13 @@ void EntityEditor::commitRespawn()
 			typeBits |= uint16(1 << EComponentID_Audio);
 			infos.push_back(std::move(info));
 		}
+	}
+
+	if (m_hasParticle && !m_particleDraft.effectPath.empty())
+	{
+		auto info = std::make_shared<ParticleComponent::SpawnInfo>(m_particleDraft);
+		typeBits |= uint16(1 << EComponentID_Particle);
+		infos.push_back(std::move(info));
 	}
 
 	if (m_hasScript)

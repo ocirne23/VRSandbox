@@ -18,6 +18,7 @@ import RendererVK;
 import Script;
 import Physics;
 import Audio;
+import Particle;
 import Spatial;
 
 Transform composeTransform(const Transform& parent, const Transform& local)
@@ -382,12 +383,12 @@ void SceneComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfor
     {
         if (!child.tmpl)
             continue;
-        EntityPtr childEntity = Entity::create(*child.tmpl, child.localTransform, 0, treeCursor); // carve from the tree's single allocation
+        EntityPtr childEntity = Entity::create(*child.tmpl, child.localTransform, 0, treeCursor, &entity); // carve from the tree's single allocation
         if (!child.name.empty())
             childEntity->setName(child.name);
         if (!child.enabled)
             childEntity->setEnabled(false); // the reference site can disable, never re-enable a template's own default
-        childEntity->reparentEntity(&entity); // hands the owning child handle to this entity's children list
+        children.emplace_back(std::move(childEntity)); // attach the owning handle directly — reparentEntity would break the fresh allocation
     }
 }
 
@@ -546,6 +547,31 @@ const ScriptComponent::SpawnInfo* getScriptSpawnInfo(const Entity* entity)
     if (idx >= entity->spawnTemplate->spawnInfos.size())
         return nullptr;
     return static_cast<const ScriptComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
+}
+
+void ParticleComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
+{
+    if (info.effectPath.empty())
+        return;
+    effect = Globals::particleSystem.createEffect(info.effectPath, base.pos, base.quat);
+    if (effect.isValid() && !info.emitting)
+        effect.setEmitting(false);
+}
+
+void ParticleComponent::destroy(Entity& entity, const SpawnInfo&)
+{
+    effect.destroy(); // live particles retire over the next frames
+}
+
+void ParticleComponent::update(Entity& entity, const Transform& world, float deltaSeconds)
+{
+    if (!effect.isValid())
+        return;
+    effect.setTransform(world.pos, world.quat);
+    if (hasLastPos && deltaSeconds > 1e-5f)
+        effect.setVelocity((world.pos - lastPos) / deltaSeconds);
+    lastPos = world.pos;
+    hasLastPos = true;
 }
 
 void AudioComponent::spawn(Entity& entity, const SpawnInfo& spawnInfo, const Transform& base)
@@ -801,6 +827,29 @@ void writeAudioSpawnInfo(const AudioComponent::SpawnInfo& info, AssetNode& out)
             if (clip.rolloff != defaults.rolloff)                     pathNode.set("Rolloff", clip.rolloff);
         }
     }
+}
+
+const ParticleComponent::SpawnInfo* getParticleSpawnInfo(const Entity* entity)
+{
+    if (!entity->spawnTemplate || !hasComponent<ParticleComponent>(entity))
+        return nullptr;
+
+    size_t idx = 0;
+    for (uint16 i = 0; i < uint16(EComponentID_Particle); ++i)
+        if (entity->typeBits & (1 << i))
+            ++idx;
+    if (idx >= entity->spawnTemplate->spawnInfos.size())
+        return nullptr;
+    return static_cast<const ParticleComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
+}
+
+void writeParticleSpawnInfo(const ParticleComponent::SpawnInfo& info, AssetNode& out)
+{
+    if (info.effectPath.empty())
+        return;
+    out.set("Effect", info.effectPath);
+    if (!info.emitting)
+        out.set("Emitting", info.emitting);
 }
 
 int componentIdFromName(std::string_view name)

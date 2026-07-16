@@ -39,6 +39,8 @@ import :VolumetricFogPipeline;
 import :BakedWorldMap;
 import :SceneColor;
 import :DebugLinePipeline;
+import :ParticlePipeline;
+import :DecalPipeline;
 import :TaaPipeline;
 import :CompositePipeline;
 import :EyeAdaptationPipeline;
@@ -150,6 +152,23 @@ public:
     }
     void setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity);
     void present();
+
+    // ---- GPU particles + projected decals (driven by the Particle library) ----
+    // Emitter slot management is main-thread (the Particle system's serial update); addDecal is
+    // lock-free like addLightInfo. An emitter slot's GPU config is re-uploaded every frame, so
+    // updateParticleEmitter edits retroactively drive already-spawned particles.
+    // Returns UINT32_MAX when all MAX_PARTICLE_EMITTERS slots are taken.
+    uint32 createParticleEmitter(const RendererVKLayout::ParticleEmitterGpu& desc);
+    void updateParticleEmitter(uint32 slot, const RendererVKLayout::ParticleEmitterGpu& desc);
+    // Queues count spawns from the slot this frame (clamped to MAX_PARTICLE_SPAWNS_PER_FRAME total).
+    void emitParticles(uint32 slot, uint32 count);
+    // Flags the slot's live particles for retirement; the slot recycles once the kill has drained.
+    void destroyParticleEmitter(uint32 slot);
+    void resetParticles() { m_particlePipeline.requestReset(); }
+    void addDecal(const RendererVKLayout::DecalInfo& decal); // [Concurrency: LOCK-FREE]
+    // Loads a standalone texture (path relative to Assets/) into the bindless array for particle
+    // emitters / decals to reference (ParticleEmitterGpu::texFlags.x, DecalInfo::params.x).
+    uint16 loadEffectTexture(const char* filePath, bool sRGB = true);
 
     void setAmbientLight(const glm::vec3& color, float intensity) { m_skyParams.ambientColor = color; m_skyParams.ambientIntensity = intensity; }
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
@@ -349,6 +368,11 @@ private:
     void recordTaaInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordGiProbeDebug(uint32 frameIdx);
     void recordDebugLines(uint32 frameIdx);
+    void recordParticleSim(uint32 frameIdx);
+    void recordParticles(uint32 frameIdx);
+    void recordParticlesInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
+    void recordDecals(uint32 frameIdx);
+    void recordDecalsInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordAO(uint32 frameIdx);
     void recordVolumetricFog(uint32 frameIdx);
     void recordFogApply(uint32 frameIdx);
@@ -521,6 +545,19 @@ private:
     AccelerationStructure m_accelStructure;
     GIProbePipeline m_giProbePipeline;
     DebugLinePipeline m_debugLinePipeline;
+    ParticlePipeline m_particlePipeline;
+    DecalPipeline m_decalPipeline;
+    // CPU emitter slot table, re-uploaded per frame; retired slots keep their KILL flag alive until the
+    // sim has drained their particles, then recycle.
+    std::vector<RendererVKLayout::ParticleEmitterGpu> m_particleEmitters;
+    std::vector<uint32> m_freeParticleEmitterSlots;
+    std::vector<std::pair<uint32, uint32>> m_retiredParticleEmitters; // slot, retire frame
+    std::vector<std::pair<uint16, uint16>> m_particleSpawnRequests;   // emitter slot, count
+    bool m_particlesEnabled = true;
+    bool m_particleCollision = true;
+    float m_particleTimeScale = 1.0f;
+    bool m_particleLogStats = false; // "Particles/Log stats": prints GPU alive/dead counts ~once a second
+    bool m_decalsEnabled = true;
     PerWorker<std::vector<DebugLinePipeline::LineVertex>> m_debugLineVerts; // per-worker CPU staging, merged in present()
     std::vector<DebugLinePipeline::LineVertex> m_debugLineMergedVerts;
 
@@ -632,6 +669,7 @@ private:
     uint32 m_meshInstanceCounter = 0;
     uint32 m_lightCounter = 0;
     uint32 m_fogVolumeCounter = 0;
+    uint32 m_decalCounter = 0;
     uint32 m_blasBuiltCount = 0;
     uint32 m_pendingMaxInstanceData = 0;
     uint32 m_instanceOverflowStart = UINT32_MAX; // smallest failed claim this frame; present clamps the counter to it
@@ -683,6 +721,9 @@ private:
         CommandBuffer fogApplyCommandBuffer;
         CommandBuffer giProbeDebugCommandBuffer;
         CommandBuffer debugLineCommandBuffer;
+        CommandBuffer particleSimCommandBuffer;
+        CommandBuffer particleCommandBuffer;
+        CommandBuffer decalCommandBuffer;
         CommandBuffer taaCommandBuffer;
         CommandBuffer eyeAdaptCommandBuffer;
         CommandBuffer compositeCommandBuffer;

@@ -33,6 +33,66 @@ export namespace RendererVKLayout
     // line buffer, allocated lazily on first use (16 bytes/vertex). Overflow drops the excess lines.
     constexpr uint32 MAX_DEBUG_LINE_VERTICES = 2 * 1024 * 1024;
 
+    // GPU particle system (ParticlePipeline / particle_*.glsl). The particle POOL is persistent GPU
+    // state (one copy, not per-frame-in-flight): a dead-index stack plus two alive lists ping-ponged by
+    // frame parity. CPU work per frame is only the emitter table + a spawn map (mapped per-frame
+    // buffers); emit/simulate run in compute with GPU-written indirect args, so spawning never
+    // re-records anything. Sizing constants are injected into every shader compile (Shader.cpp).
+    constexpr uint32 MAX_PARTICLES = 256 * 1024;             // persistent pool capacity (48 B each)
+    constexpr uint32 MAX_PARTICLE_EMITTERS = 256;            // live emitter slots (table re-uploaded per frame)
+    constexpr uint32 MAX_PARTICLE_SPAWNS_PER_FRAME = 16 * 1024; // spawn-map capacity (one uint per spawned particle)
+    constexpr uint32 PARTICLE_SIM_GROUP_SIZE = 64;
+
+    // ParticleEmitterGpu::flags bits (mirrored in the particle shaders via the injected defines).
+    constexpr uint32 PARTICLE_FLAG_LIT     = 1u << 0; // per-particle GI probe + sun lighting in the vertex shader
+    constexpr uint32 PARTICLE_FLAG_COLLIDE = 1u << 1; // screen-space depth collision (previous frame's G-buffer)
+    constexpr uint32 PARTICLE_FLAG_KILL    = 1u << 2; // emitter destroyed: the sim retires its live particles
+    constexpr uint32 PARTICLE_TEX_NONE = 0xFFFFu;     // texIdx sentinel: procedural soft round sprite
+
+    // Per-emitter GPU config, uploaded per frame for every live slot (small). Particles reference their
+    // emitter slot each frame, so live param edits retroactively drive already-spawned particles.
+    // Keep in sync with particle.inc.glsl.
+    struct alignas(16) ParticleEmitterGpu
+    {
+        glm::vec4 posSpawnRadius{ 0.0f };          // xyz = world position, w = spawn radius (m)
+        glm::vec4 rotation{ 0.0f, 0.0f, 0.0f, 1.0f }; // quat; the spawn cone axis is local +Y
+        glm::vec4 velocityInherit{ 0.0f };         // xyz = emitter velocity (m/s), w = inherit factor [0,1]
+        glm::vec4 spawnParams{ 0.0f, 1.0f, 1.0f, 0.0f }; // x = cone angle (rad), y = speed min, z = speed max, w = spawn on shell (0 = solid, 1 = surface)
+        glm::vec4 lifeParams{ 1.0f, 1.0f, 0.0f, 0.0f };  // x = life min (s), y = life max, z = gravity (m/s^2, along -Y), w = drag (1/s)
+        glm::vec4 noiseParams{ 0.0f, 0.25f, 0.0f, 0.3f };// x = turbulence accel (m/s^2), y = turbulence frequency (1/m), z = turbulence scroll (m/s), w = collision bounce [0,1]
+        glm::vec4 sizeParams{ 0.1f, 0.1f, 0.0f, 0.0f };  // x = size start (m), y = size end, z = size variance [0,1], w = velocity stretch (s, 0 = round billboard)
+        glm::vec4 colorStart{ 1.0f };              // rgb = linear color * intensity, a = start alpha
+        glm::vec4 colorEnd{ 1.0f, 1.0f, 1.0f, 0.0f };
+        glm::vec4 fadeParams{ 0.1f, 0.7f, 0.0f, 0.25f }; // x = fade-in end (life frac), y = fade-out start, z = additivity [0,1], w = soft-particle fade distance (m)
+        glm::vec4 spinParams{ 0.0f };              // x = max spin (rad/s, random sign), y = random initial rotation (0/1), z = lit emissive floor [0,1], w unused
+        glm::uvec4 texFlags{ PARTICLE_TEX_NONE, 0u, 0u, 0u }; // x = texture idx (PARTICLE_TEX_NONE = procedural), y = PARTICLE_FLAG_* bits, z = flipbook cols | rows << 16 (0 = none), w = flipbook fps (float bits)
+    };
+    static_assert(sizeof(ParticleEmitterGpu) == 192);
+
+    // Projected box decals (DecalPipeline / decal.vs/fs.glsl), submitted per frame like lights
+    // (Renderer::addDecal, lock-free). Drawn in the scene-color pass right after the opaque forward
+    // draw: the box's fragments reconstruct the surface from the G-buffer depth, project it into decal
+    // space and blend over the lit scene (premultiplied), so decals wrap any static or skinned surface.
+    // Local +Z is the projection direction; the texture maps across local XY.
+    constexpr uint32 MAX_DECALS = 4096;
+
+    constexpr uint32 DECAL_FLAG_LIT = 1u << 0; // sun N.L + GI probe irradiance modulate the decal color
+
+    struct alignas(16) DecalInfo
+    {
+        glm::vec3 pos{ 0.0f };                     // box center
+        float opacity = 1.0f;                      // overall multiplier (CPU-side lifetime fade)
+        glm::vec4 rotation{ 0.0f, 0.0f, 0.0f, 1.0f }; // quat; local +Z projects onto the surface
+        glm::vec3 halfExtents{ 0.5f };             // box half size (z = projection depth)
+        float angleFadeCos = -0.1f;                // fade out surfaces whose normal faces away from the
+                                                   // projection (cos of the cutoff angle vs -Z; -1 = never)
+        glm::vec4 tint{ 1.0f };                    // rgb = color * intensity, a = base alpha
+        glm::vec3 emissive{ 0.0f };                // radiance added regardless of lighting
+        float normalFadeWidth = 0.2f;              // angle-fade smoothstep band width (cos units)
+        glm::uvec4 params{ PARTICLE_TEX_NONE, 0u, 0u, 0u }; // x = diffuse texture idx (PARTICLE_TEX_NONE = solid tint), y = DECAL_FLAG_* bits, zw unused
+    };
+    static_assert(sizeof(DecalInfo) == 96);
+
     // Mesh/material indices are stored as uint16 in InMeshInstance, so growth clamps to this.
     constexpr uint32 MESH_MATERIAL_INDEX_LIMIT = USHRT_MAX
         - 1;

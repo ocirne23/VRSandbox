@@ -718,7 +718,22 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 
-    static_assert(EComponentID_Script == 7);
+    static_assert(EComponentID_Particle == 7);
+    if (const AssetNode* particleNode = findComponentNode(node, "Particle"))
+    {
+        auto info = std::make_shared<ParticleComponent::SpawnInfo>();
+        if (const AssetNode* n = particleNode->find("Effect"))   info->effectPath = n->asString();
+        if (const AssetNode* n = particleNode->find("Emitting")) info->emitting = n->asBool(0, true);
+        if (!info->effectPath.empty())
+        {
+            typeBits |= uint16(1 << EComponentID_Particle);
+            tmpl.spawnInfos.emplace_back(std::move(info));
+        }
+        else
+            Log::warning("Scene: entity '" + tmpl.displayName + "' has a Particle component without an Effect path, skipping");
+    }
+
+    static_assert(EComponentID_Script == 8);
     if (const AssetNode* scriptNode = findComponentNode(node, "Script"))
     {
         auto info = std::make_shared<ScriptComponent::SpawnInfo>();

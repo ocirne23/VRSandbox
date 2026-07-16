@@ -154,6 +154,14 @@ static std::string buildLayoutPreamble()
     def("PASS_SHADOW", PASS_SHADOW, "u");
     def("PASS_GI", PASS_GI, "u");
     def("MAX_MESH_LODS", MAX_MESH_LODS);
+    def("MAX_PARTICLES", MAX_PARTICLES, "u");
+    def("MAX_PARTICLE_EMITTERS", MAX_PARTICLE_EMITTERS, "u");
+    def("PARTICLE_SIM_GROUP_SIZE", PARTICLE_SIM_GROUP_SIZE, "u");
+    def("PARTICLE_FLAG_LIT", PARTICLE_FLAG_LIT, "u");
+    def("PARTICLE_FLAG_COLLIDE", PARTICLE_FLAG_COLLIDE, "u");
+    def("PARTICLE_FLAG_KILL", PARTICLE_FLAG_KILL, "u");
+    def("PARTICLE_TEX_NONE", PARTICLE_TEX_NONE, "u");
+    def("DECAL_FLAG_LIT", DECAL_FLAG_LIT, "u");
     return s;
 }
 

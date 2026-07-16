@@ -32,7 +32,8 @@ export enum EComponentID : uint16
     EComponentID_Animator = 4,
     EComponentID_Physics  = 5,
     EComponentID_Audio    = 6,
-    EComponentID_Script   = 7, // should be last so all other components are available on spawn
+    EComponentID_Particle = 7,
+    EComponentID_Script   = 8, // should be last so all other components are available on spawn
 };
 
 export class Entity
@@ -45,8 +46,11 @@ public:
     // template); the spawn recursion carves each entity from `treeCursor` via the overload below. Each
     // entity frees its own exact-size slice on destroy (the allocator's free lists recycle the pieces),
     // so tree members are independent: any of them can outlive the others or be reparented away.
+    // `parent` links the entity into its tree at construction (before components spawn), so spawn-time
+    // logic never sees a contiguous member with a null parent; the caller still owns attaching the
+    // child handle to the parent's children list.
     static EntityPtr create(const EntitySpawnTemplate& tmpl, const Transform& transform, uint8 initialFlags = 0);
-    static EntityPtr create(const EntitySpawnTemplate& tmpl, const Transform& transform, uint8 initialFlags, uint8*& treeCursor);
+    static EntityPtr create(const EntitySpawnTemplate& tmpl, const Transform& transform, uint8 initialFlags, uint8*& treeCursor, Entity* parent);
     static void destroy(Entity* entity);
 
 public:

@@ -1,0 +1,75 @@
+#version 460
+
+// Particle emit: one thread per requested spawn. The spawn map (CPU-written per frame) holds the
+// emitter slot of each spawn; a thread pops a free index off the dead stack, initializes the particle
+// from its emitter's config and appends it to the IN alive list, where this frame's sim pass picks it
+// up (the begin pass sized the sim dispatch to cover survivors + spawns). Dead-stack exhaustion
+// (pool full) silently drops spawns.
+
+#include "particle.inc.glsl"
+
+layout (local_size_x = 64) in;
+
+layout (binding = 0, std140) uniform ParticleParams
+{
+    float p_dt; uint p_spawnCount; uint p_parity; uint p_reset;
+    uint p_frameIndex; uint p_collision; uint p_padA; uint p_padB;
+};
+layout (binding = 1, std430) buffer Particles { Particle pp_particles[]; };
+layout (binding = 2, std430) buffer AliveIn { uint pa_aliveIn[]; };
+layout (binding = 3, std430) buffer DeadList { uint pd_deadList[]; };
+layout (binding = 4, std430) buffer Counters { PARTICLE_COUNTERS_BLOCK };
+layout (binding = 5, std430) readonly buffer Emitters { ParticleEmitter pe_emitters[]; };
+layout (binding = 6, std430) readonly buffer SpawnMap { uint ps_spawnMap[]; };
+
+const float PARTICLE_PI = 3.14159265359;
+
+void main()
+{
+    const uint gid = gl_GlobalInvocationID.x;
+    if (gid >= p_spawnCount)
+        return;
+
+    // Pop a free pool index; underflow = pool exhausted, drop the spawn.
+    const int deadSlot = atomicAdd(c_deadCount, -1);
+    if (deadSlot <= 0)
+    {
+        atomicAdd(c_deadCount, 1);
+        return;
+    }
+    const uint particleIdx = pd_deadList[deadSlot - 1];
+
+    const uint emitterIdx = ps_spawnMap[gid];
+    const ParticleEmitter e = pe_emitters[emitterIdx];
+
+    uint seed = particlePcg(p_frameIndex * 0x9E3779B9u + gid * 0x85EBCA6Bu + particleIdx);
+
+    // Spawn position: random point in (or on) the emitter's sphere.
+    vec3 offDir = normalize(vec3(particleRand(seed), particleRand(seed), particleRand(seed)) * 2.0 - 1.0 + 1e-5);
+    float offR = e.posSpawnRadius.w * mix(pow(particleRand(seed), 1.0 / 3.0), 1.0, e.spawnParams.w);
+    vec3 pos = e.posSpawnRadius.xyz + offDir * offR;
+
+    // Direction: uniform within the cone around the emitter's local +Y.
+    const float cosCone = cos(clamp(e.spawnParams.x, 0.0, PARTICLE_PI));
+    const float cosTheta = mix(cosCone, 1.0, particleRand(seed));
+    const float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+    const float phi = particleRand(seed) * 2.0 * PARTICLE_PI;
+    const vec3 localDir = vec3(sinTheta * cos(phi), cosTheta, sinTheta * sin(phi));
+    const vec3 dir = particleQuatRotate(e.rotation, localDir);
+
+    const float speed = mix(e.spawnParams.y, e.spawnParams.z, particleRand(seed));
+    const vec3 vel = dir * speed + e.velocityInherit.xyz * e.velocityInherit.w;
+
+    const float lifetime = max(0.01, mix(e.lifeParams.x, e.lifeParams.y, particleRand(seed)));
+    const float rotation = e.spinParams.y > 0.5 ? particleRand(seed) * 2.0 * PARTICLE_PI : 0.0;
+    const float spin = e.spinParams.x * (particleRand(seed) * 2.0 - 1.0);
+
+    Particle particle;
+    particle.posAge = vec4(pos, 0.0);
+    particle.velLife = vec4(vel, lifetime);
+    particle.misc = uvec4(emitterIdx, seed, floatBitsToUint(rotation), floatBitsToUint(spin));
+    pp_particles[particleIdx] = particle;
+
+    const uint aliveIdx = atomicAdd(c_draw[p_parity * 4u + 1u], 1u);
+    pa_aliveIn[aliveIdx] = particleIdx;
+}

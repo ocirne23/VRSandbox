@@ -1,0 +1,6 @@
+Prefab particle
+	Position 0 0 0
+	Rotation 0 -0 0
+	Scale 1
+	Component Particle
+		Effect Effects/fire.pfx

@@ -73,6 +73,12 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
         m_staticMeshGraphicsPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass(), m_maxTextures);
         setHaveToRecordCommandBuffers();
     });
+    // Live toggles: the primary CB re-records every frame, so no re-record callback is needed.
+    Tweak::boolean("Particles", "Enabled", &m_particlesEnabled);
+    Tweak::boolean("Particles", "Depth collision", &m_particleCollision);
+    Tweak::floatVar("Particles", "Time scale", &m_particleTimeScale, 0.0f, 4.0f);
+    Tweak::boolean("Particles", "Log stats", &m_particleLogStats);
+    Tweak::boolean("Decals", "Enabled", &m_decalsEnabled);
     Globals::meshStreamer.initialize();
 
     glslang::InitializeProcess();
@@ -147,6 +153,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_giProbePipeline.initialize(m_maxGiTlasInstances, m_maxTextures, m_numTextureDescriptors);
     m_giProbePipeline.initializeDebug(sceneRenderPass);
     m_debugLinePipeline.initialize(sceneRenderPass);
+    m_particlePipeline.initialize(sceneRenderPass, m_maxTextures, m_numTextureDescriptors, m_sceneViewCount);
+    m_decalPipeline.initialize(sceneRenderPass, m_maxTextures, m_numTextureDescriptors, m_sceneViewCount);
 
 
     m_shadowCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
@@ -191,6 +199,9 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
         perFrame.fogApplyCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.giProbeDebugCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.debugLineCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.particleSimCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.particleCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.decalCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.taaCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.eyeAdaptCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.compositeCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -380,6 +391,8 @@ void Renderer::reloadShaders()
     m_giProbePipeline.reloadShaders(m_maxTextures);
     m_giProbePipeline.reloadDebugShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_debugLinePipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
+    m_particlePipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
+    m_decalPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_taaPipeline.reloadShaders();
     m_eyeAdaptationPipeline.reloadShaders();
     m_compositePipeline.reloadShaders(m_renderPass);
@@ -763,6 +776,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
 
     m_lightCounter = 0;
     m_fogVolumeCounter = 0;
+    m_decalCounter = 0;
     m_frameCounter++;
     return ubo.frustum;
 }
@@ -900,6 +914,74 @@ void Renderer::addPointLight(const PointLight& light)   { addLightInfo(light); }
 void Renderer::addAreaLight(const AreaLight& areaLight) { addLightInfo(areaLight); }
 void Renderer::addSpotLight(const SpotLight& spotLight) { addLightInfo(spotLight); }
 
+void Renderer::addDecal(const RendererVKLayout::DecalInfo& decal)
+{
+    // lock-free bump like addLightInfo; claims beyond MAX_DECALS are dropped (present clamps the count)
+    const uint32 idx = std::atomic_ref<uint32>(m_decalCounter).fetch_add(1);
+    if (idx < RendererVKLayout::MAX_DECALS)
+        m_decalPipeline.getMapped(m_swapChain.getCurrentFrameIndex())[idx] = decal;
+}
+
+uint32 Renderer::createParticleEmitter(const RendererVKLayout::ParticleEmitterGpu& desc)
+{
+    // Recycle retired slots once their KILL flag has drained through the sim (their particles are gone
+    // after the flag has been live for a couple of simulated frames).
+    for (size_t i = 0; i < m_retiredParticleEmitters.size();)
+    {
+        if (m_frameCounter - m_retiredParticleEmitters[i].second > RendererVKLayout::NUM_FRAMES_IN_FLIGHT + 2)
+        {
+            m_freeParticleEmitterSlots.push_back(m_retiredParticleEmitters[i].first);
+            m_retiredParticleEmitters.erase(m_retiredParticleEmitters.begin() + i);
+        }
+        else
+            ++i;
+    }
+    uint32 slot;
+    if (!m_freeParticleEmitterSlots.empty())
+    {
+        slot = m_freeParticleEmitterSlots.back();
+        m_freeParticleEmitterSlots.pop_back();
+    }
+    else
+    {
+        if (m_particleEmitters.size() >= RendererVKLayout::MAX_PARTICLE_EMITTERS)
+            return UINT32_MAX;
+        m_particleEmitters.emplace_back();
+        slot = (uint32)m_particleEmitters.size() - 1;
+    }
+    m_particleEmitters[slot] = desc;
+    return slot;
+}
+
+void Renderer::updateParticleEmitter(uint32 slot, const RendererVKLayout::ParticleEmitterGpu& desc)
+{
+    assert(slot < m_particleEmitters.size());
+    m_particleEmitters[slot] = desc;
+}
+
+void Renderer::emitParticles(uint32 slot, uint32 count)
+{
+    assert(slot < m_particleEmitters.size());
+    if (count > 0)
+        m_particleSpawnRequests.emplace_back((uint16)slot, (uint16)std::min(count, 0xFFFFu));
+}
+
+void Renderer::destroyParticleEmitter(uint32 slot)
+{
+    assert(slot < m_particleEmitters.size());
+    m_particleEmitters[slot].texFlags.y |= RendererVKLayout::PARTICLE_FLAG_KILL;
+    m_retiredParticleEmitters.emplace_back(slot, m_frameCounter);
+}
+
+uint16 Renderer::loadEffectTexture(const char* filePath, bool sRGB)
+{
+    const uint16 idx = Globals::textureManager.upload(filePath, true, sRGB);
+    // The bindless arrays are fully (re)written when the cached draw CBs record, so make sure the new
+    // slot lands in them (growth beyond the descriptor capacity is caught by syncTextureDescriptorCapacity).
+    setHaveToRecordCommandBuffers();
+    return idx;
+}
+
 void Renderer::setSunLight(const glm::vec3& direction, const glm::vec3& color, float intensity)
 {
     m_skyParams.sunDirection = glm::normalize(direction);
@@ -922,6 +1004,7 @@ void Renderer::present()
     m_meshInstanceCounter = std::min(m_meshInstanceCounter, m_instanceOverflowStart);
     m_lightCounter = std::min(m_lightCounter, uint32(RendererVKLayout::MAX_LIGHTS));
     m_fogVolumeCounter = std::min(m_fogVolumeCounter, uint32(RendererVKLayout::MAX_FOG_VOLUMES));
+    m_decalCounter = std::min(m_decalCounter, uint32(RendererVKLayout::MAX_DECALS));
 
     const uint32 frameIdx = m_swapChain.getCurrentFrameIndex();
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -983,6 +1066,28 @@ void Renderer::present()
         });
     if (m_debugLinePipeline.upload(frameIdx, m_debugLineMergedVerts))
         setHaveToRecordCommandBuffers();
+
+    { // Particle emitter table + spawn map + decals into this slot's mapped buffers (fence waited).
+        static Clock::time_point s_lastParticleTime = Clock::now();
+        const Clock::time_point now = Clock::now();
+        const float dt = std::min(std::chrono::duration<float>(now - s_lastParticleTime).count(), 0.25f);
+        s_lastParticleTime = now;
+        uint32 spawnRequestTotal = 0;
+        for (const auto& [slot, count] : m_particleSpawnRequests)
+            spawnRequestTotal += count;
+        m_particlePipeline.update(frameIdx, m_particleEmitters, m_particleSpawnRequests,
+            dt * m_particleTimeScale, m_particleCollision);
+        m_particleSpawnRequests.clear();
+        m_decalPipeline.upload(frameIdx, m_decalCounter);
+
+        if (m_particleLogStats && m_frameCounter % 120 == 0)
+        {
+            const ParticlePipeline::DebugCounters counters = m_particlePipeline.getDebugCounters(frameIdx);
+            printf("Particles: alive %u/%u (parity 0/1), dead %d, simGroups %u, emitters %u, spawn reqs %u, decals %u\n",
+                counters.alive[0], counters.alive[1], counters.deadCount, counters.simGroups,
+                (uint32)m_particleEmitters.size(), spawnRequestTotal, m_decalCounter);
+        }
+    }
 
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_skinningComputePipeline.update(frameIdx, m_skinningPalettes, m_skinningJobs);
@@ -1778,6 +1883,90 @@ void Renderer::recordDebugLines(uint32 frameIdx)
     cb.end();
 }
 
+// Particle GPU sim (begin/emit/simulate compute chain), its own secondary outside any render pass;
+// executed right after the light grid in the primary. Reads LAST frame's G-buffer for depth collision.
+void Renderer::recordParticleSim(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& cb = frameData.particleSimCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    const uint32 prevFrameIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    ParticlePipeline::SimParams simParams{
+        .ubo = frameData.ubo,
+        .prevDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(),
+        .prevNormalView = m_perFrameData[prevFrameIdx].gbuffer.getNormalView(),
+        .gbufferSampler = frameData.gbuffer.getSampler(),
+    };
+    m_particlePipeline.recordSim(cb, frameIdx, simParams);
+    cb.end();
+}
+
+// Particle billboard draw for one eye, inside the eye's scene-colour render pass (after the opaque
+// forward + decal draws, before fog apply).
+void Renderer::recordParticlesInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBuffer vkCb = cb.getCommandBuffer();
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 vpSize = m_viewportRect.getSize();
+    const vk::Viewport viewport{ .x = (float)m_viewportRect.min.x, .y = (float)m_viewportRect.max.y,
+        .width = (float)vpSize.x, .height = -((float)vpSize.y), .minDepth = 0.0f, .maxDepth = 1.0f };
+    const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+    vkCb.setViewport(0, { viewport });
+    vkCb.setScissor(0, { scissor });
+    ParticlePipeline::DrawParams drawParams{
+        .ubo = frameData.ubo,
+        .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
+        .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
+        .gbufferSampler = frameData.gbuffer.getSampler(),
+    };
+    m_particlePipeline.recordDraw(cb, frameIdx, eyeIndex, drawParams);
+}
+
+void Renderer::recordParticles(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = frameData.sceneColor.getRenderPass() };
+    CommandBuffer& cb = frameData.particleCommandBuffer;
+    cb.begin(false, &inheritance);
+    recordParticlesInto(cb, frameIdx, 0);
+    cb.end();
+}
+
+// Projected decal draw for one eye, inside the eye's scene-colour render pass right after the opaque
+// forward draw (so particles/fog layer on top).
+void Renderer::recordDecalsInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBuffer vkCb = cb.getCommandBuffer();
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 vpSize = m_viewportRect.getSize();
+    const vk::Viewport viewport{ .x = (float)m_viewportRect.min.x, .y = (float)m_viewportRect.max.y,
+        .width = (float)vpSize.x, .height = -((float)vpSize.y), .minDepth = 0.0f, .maxDepth = 1.0f };
+    const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+    vkCb.setViewport(0, { viewport });
+    vkCb.setScissor(0, { scissor });
+    DecalPipeline::DrawParams drawParams{
+        .ubo = frameData.ubo,
+        .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
+        .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
+        .gbufferNormalView = frameData.gbuffer.getNormalView(eyeIndex),
+        .gbufferSampler = frameData.gbuffer.getSampler(),
+    };
+    m_decalPipeline.recordDraw(cb, frameIdx, eyeIndex, drawParams);
+}
+
+void Renderer::recordDecals(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = frameData.sceneColor.getRenderPass() };
+    CommandBuffer& cb = frameData.decalCommandBuffer;
+    cb.begin(false, &inheritance);
+    recordDecalsInto(cb, frameIdx, 0);
+    cb.end();
+}
+
 void Renderer::recordAO(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -2116,9 +2305,9 @@ bool Renderer::recordGlobalIllum(uint32 frameIdx)
     m_giProbePipeline.recordTrace(globalIllumCommandBuffer, frameIdx, traceParams);
     m_giPrevCameraPos = m_cameraPos;
 
-    // trace (SH write) -> fragment read in the main pass
+    // trace (SH write) -> fragment read in the main pass + vertex read (per-particle lighting)
     fullBarrier(vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite,
-        vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderStorageRead);
+        vk::PipelineStageFlagBits2::eFragmentShader | vk::PipelineStageFlagBits2::eVertexShader, vk::AccessFlagBits2::eShaderStorageRead);
     }
 
     globalIllumCommandBuffer.end();
@@ -2151,6 +2340,8 @@ void Renderer::applyPendingTextureDescriptorWrites(uint32 frameIdx)
         m_shadowMapGraphicsPipeline.updateTextureDescriptor(frameData.shadowDrawDescriptorSet.getDescriptorSet(), texIdx, view);
         m_giProbePipeline.updateTextureDescriptor(frameIdx, texIdx, view);
         m_rtaoPipeline.updateTextureDescriptor(frameIdx, texIdx, view);
+        m_particlePipeline.updateTextureDescriptor(frameIdx, texIdx, view);
+        m_decalPipeline.updateTextureDescriptor(frameIdx, texIdx, view);
     }
     Globals::textureStreamer.clearPendingDescriptorWrites(frameIdx);
 }
@@ -2191,6 +2382,7 @@ void Renderer::recordCommandBuffers()
         recordOceanSim(frameIdx); // executed only while an ocean is active (m_oceanParams.enabled)
         recordIndirectCull(frameIdx);
         recordLightGrid(frameIdx);
+        recordParticleSim(frameIdx); // indirect dispatches: emitter/spawn changes never re-record
         recordShadowCull(frameIdx);
         recordShadowDraw(frameIdx);
         recordVolumetricFog(frameIdx); // shared scatter/integrate (center view in VR)
@@ -2207,6 +2399,8 @@ void Renderer::recordCommandBuffers()
             recordGiProbeDebug(frameIdx);
             if (m_debugLinePipeline.hasBuffers())
                 recordDebugLines(frameIdx);
+            recordDecals(frameIdx);
+            recordParticles(frameIdx);
             recordAO(frameIdx);
             recordFogApply(frameIdx);
             recordTaa(frameIdx);
@@ -2284,6 +2478,13 @@ void Renderer::recordCommandBuffers()
             vkCommandBuffer.executeCommands(1, &vkOceanSimCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkLightGridCommandBuffer);
+        // Particle emit/simulate (outside any render pass; reads LAST frame's G-buffer for collision,
+        // writes the alive list + indirect draw args the in-pass billboard draw consumes).
+        if (m_particlesEnabled)
+        {
+            vk::CommandBuffer vkParticleSimCommandBuffer = frameData.particleSimCommandBuffer.getCommandBuffer();
+            vkCommandBuffer.executeCommands(1, &vkParticleSimCommandBuffer);
+        }
         // RT sun shadows replace the cascades entirely (forward pass traces, GI uses per-probe sun rays),
         // so skip the shadow cull + cascade render. The primary CB is re-recorded every frame, so the
         // toggle takes effect immediately; the cached secondary CBs just go unexecuted.
@@ -2356,6 +2557,10 @@ void Renderer::recordCommandBuffers()
                     };
                     vkCommandBuffer.beginRenderPass(eyeRpBegin, vk::SubpassContents::eInline);
                     recordStaticMeshInto(commandBuffer, frameIdx, eye);
+                    if (m_decalsEnabled)
+                        recordDecalsInto(commandBuffer, frameIdx, eye);
+                    if (m_particlesEnabled)
+                        recordParticlesInto(commandBuffer, frameIdx, eye);
                     if (m_fogParams.enabled)
                         recordFogApplyInto(commandBuffer, frameIdx, eye);
                     vkCommandBuffer.endRenderPass();
@@ -2446,12 +2651,22 @@ void Renderer::recordCommandBuffers()
             };
             vkCommandBuffer.beginRenderPass(sceneRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
             vkCommandBuffer.executeCommands(1, &vkStaticMeshCommandBuffer);
+            if (m_decalsEnabled) // right after opaque: particles/debug/fog layer on top
+            {
+                vk::CommandBuffer vkDecalCommandBuffer = frameData.decalCommandBuffer.getCommandBuffer();
+                vkCommandBuffer.executeCommands(1, &vkDecalCommandBuffer);
+            }
             if (m_giProbeDebugEnabled)
                 vkCommandBuffer.executeCommands(1, &vkGiProbeDebugCommandBuffer);
             if (m_debugLinePipeline.hasBuffers())
             {
                 vk::CommandBuffer vkDebugLineCommandBuffer = frameData.debugLineCommandBuffer.getCommandBuffer();
                 vkCommandBuffer.executeCommands(1, &vkDebugLineCommandBuffer);
+            }
+            if (m_particlesEnabled)
+            {
+                vk::CommandBuffer vkParticleCommandBuffer = frameData.particleCommandBuffer.getCommandBuffer();
+                vkCommandBuffer.executeCommands(1, &vkParticleCommandBuffer);
             }
             if (m_fogParams.enabled)
                 vkCommandBuffer.executeCommands(1, &vkFogApplyCommandBuffer);
@@ -2513,6 +2728,8 @@ void Renderer::syncTextureDescriptorCapacity()
     waitForGpuAndFlushStaging();
     m_giProbePipeline.resizeTextureDescriptors(m_numTextureDescriptors);
     m_rtaoPipeline.resizeTextureDescriptors(m_numTextureDescriptors);
+    m_particlePipeline.resizeTextureDescriptors(m_numTextureDescriptors);
+    m_decalPipeline.resizeTextureDescriptors(m_numTextureDescriptors);
     for (PerFrameData& perFrame : m_perFrameData)
     {
         for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)

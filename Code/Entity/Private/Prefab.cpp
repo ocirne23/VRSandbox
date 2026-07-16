@@ -55,6 +55,11 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
             if (const AudioComponent::SpawnInfo* ai = getAudioSpawnInfo(entity))
                 writeAudioSpawnInfo(*ai, comp);
         }
+        else if (id == EComponentID_Particle)
+        {
+            if (const ParticleComponent::SpawnInfo* pi = getParticleSpawnInfo(entity))
+                writeParticleSpawnInfo(*pi, comp);
+        }
         else if (id == EComponentID_Script)
         {
             if (const ScriptComponent::SpawnInfo* si = getScriptSpawnInfo(entity))

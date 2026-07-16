@@ -97,6 +97,10 @@ void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float 
     if (AudioComponent* audio = getComponent<AudioComponent>(this))
         audio->update(*this, world); // playing follow-sounds track the entity
 
+    if (ParticleComponent* particle = getComponent<ParticleComponent>(this))
+        if (!frozen)
+            particle->update(*this, world, deltaSeconds); // effect follows the entity (position + velocity)
+
     if (sc)
         for (const EntityPtr& child : sc->children)
             child->updateTree(renderer, world, deltaSeconds, frozen);
@@ -128,17 +132,17 @@ EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& trans
     // (SceneComponent::spawn -> the create overload below) carves each entity's slice from the cursor;
     // slices free themselves individually on destroy.
     uint8* treeCursor = static_cast<uint8*>(Globals::entityAllocator.allocate(getTreeAllocSize(tmpl)));
-    EntityPtr root = create(tmpl, transform, initialFlags, treeCursor);
-    root->flags |= EEntityFlag_RootAllocation; // while contiguous, this entity frees the whole tree block
+    EntityPtr root = create(tmpl, transform, initialFlags | EEntityFlag_RootAllocation, treeCursor, nullptr);
     return root;
 }
 
-EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& transform, uint8 initialFlags, uint8*& treeCursor)
+EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& transform, uint8 initialFlags, uint8*& treeCursor, Entity* parent)
 {
     void* buffer = treeCursor;
     treeCursor += tmpl.archetype.allocSize; // per-entity sizes are 16-aligned, so a straight bump stays aligned
 
     Entity* entity = ::new (buffer) Entity();
+    entity->parent = parent; // linked before components spawn (see declaration)
     entity->pos = transform.pos;
     entity->scale = transform.scale;
     entity->rot = transform.quat;
@@ -234,6 +238,13 @@ void Entity::createComponent(EComponentID id, uint16 componentOffset, const void
         ac->spawn(*this, *static_cast<const AudioComponent::SpawnInfo*>(info), base);
         break;
     }
+    case EComponentID_Particle:
+    {
+        ParticleComponent* pc = reinterpret_cast<ParticleComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        new (pc) ParticleComponent();
+        pc->spawn(*this, *static_cast<const ParticleComponent::SpawnInfo*>(info), base);
+        break;
+    }
     case EComponentID_Script:
     {
         ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
@@ -285,6 +296,13 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
         ac->~AudioComponent();
         break;
     }
+    case EComponentID_Particle:
+    {
+        ParticleComponent* pc = reinterpret_cast<ParticleComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        pc->destroy(*this, *static_cast<const ParticleComponent::SpawnInfo*>(info));
+        pc->~ParticleComponent();
+        break;
+    }
     case EComponentID_Script:
     {
         ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
@@ -308,6 +326,7 @@ void Entity::serializeComponent(EComponentID id, AssetNode& out)
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->serialize(out); break;
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->serialize(out);  break;
     case EComponentID_Audio:  getComponent<AudioComponent>(this)->serialize(out);    break;
+    case EComponentID_Particle: getComponent<ParticleComponent>(this)->serialize(out); break;
     case EComponentID_Script: getComponent<ScriptComponent>(this)->serialize(out);   break;
     default: break;
     }
@@ -324,6 +343,7 @@ void Entity::deserializeComponent(EComponentID id, const AssetNode& in)
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->deserialize(in); break;
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->deserialize(in);  break;
     case EComponentID_Audio:  getComponent<AudioComponent>(this)->deserialize(in);    break;
+    case EComponentID_Particle: getComponent<ParticleComponent>(this)->deserialize(in); break;
     case EComponentID_Script: getComponent<ScriptComponent>(this)->deserialize(in);   break;
     default: break;
     }

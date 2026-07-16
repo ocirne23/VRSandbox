@@ -23,6 +23,7 @@ import Threading;
 
 import App.InputControls;
 import Procedural;
+import Particle;
 
 int main()
 {
@@ -59,6 +60,9 @@ int main()
     SpatialIndex& spatialIndex = Globals::spatialIndex;
     spatialIndex.initialize();
     Globals::occlusionBuffer.initialize();
+
+    ParticleSystem& particleSystem = Globals::particleSystem;
+    particleSystem.initialize(); // before any world spawn: ParticleComponents register effects on spawn
 
     Globals::scriptHost.setCurrentScriptPath("Scripts/Graph.scr");
     ScriptEventManager& scriptEvents = Globals::scriptEvents;
@@ -109,6 +113,7 @@ int main()
     world.addRootEntity(world.spawnAssetFile("Entities/sponza.pre", Transform(spawnOffset), true));
     world.addRootEntity(world.spawnAssetFile("Entities/skysphere.pre", Transform(spawnOffset), true));
     world.addRootEntity(world.spawnAssetFile("Entities/character.pre", Transform(spawnOffset), true));
+    world.addRootEntity(world.spawnAssetFile("Entities/particle.pre", Transform(spawnOffset), true));
 
     GizmoController gizmo;
     gizmo.initialize(world);
@@ -253,6 +258,10 @@ int main()
         ocean.update(renderer, camera, terrain.activeClimateMaps(), terrain.activeWaterReach(), terrain.seaLevel(),
                      terrain.activeFlowField());
         scatter.update(renderer, camera, terrain.activeClimateMaps());
+
+        // Particle effects + decals: turns emitter rates/bursts into GPU spawn requests and submits the
+        // live decal set (after world.update so effects follow this frame's entity transforms).
+        particleSystem.update(renderer, (float)deltaSec);
 
         if (gizmo.isVisible())
             gizmo.getGizmoEntity()->update(renderer, (float)deltaSec);

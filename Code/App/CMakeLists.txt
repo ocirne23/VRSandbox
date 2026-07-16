@@ -7,7 +7,7 @@ add_executable(${PROJECT_NAME} ${PROJECT_PRIVATE_FILES})
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER Apps)
 set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "/ignore:4099")
 
-target_link_libraries(${PROJECT_NAME} PRIVATE Core Animation RendererVK UI Entity File Input Script Physics Network Audio Spatial Threading Procedural)
+target_link_libraries(${PROJECT_NAME} PRIVATE Core Animation RendererVK UI Entity File Input Script Physics Network Audio Spatial Threading Procedural Particle)
 
 apply_compile_settings(${PROJECT_NAME})
 
