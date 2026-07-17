@@ -104,19 +104,15 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 		},
 		.cullMode = vk::CullModeFlagBits::eNone, // gizmo: double-sided so it reads from any angle
 	});
-	// Variant 8 (EPipelineIndex::TerrainLit): same lit shader + lighting as variant 0, but the TERRAIN
-	// define swaps the textured-material albedo for a procedural height/slope color (procedural terrain
-	// chunks carry no textures). Opaque, back-face culled, depth write on (all layout defaults).
+	// Variant 8 (EPipelineIndex::TerrainLit): same lighting core as variant 0 (instanced_indirect_lit.inc),
+	// but a dedicated fragment shader splats climate-picked procedural textures instead of sampling the
+	// material's own (procedural terrain chunks carry no textures). Opaque, back-face culled, depth write
+	// on (all layout defaults).
+	const std::string terrainVariantPath = "Shaders/instanced_indirect_terrain.fs.glsl";
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
-		.vertexShader = ShaderSource{
-			.text = graphicsPipelineLayout.vertexShader.text,
-			.debugFilePath = graphicsPipelineLayout.vertexShader.debugFilePath,
-			.defines = { { "TERRAIN", "1" } },
-		},
 		.fragmentShader = ShaderSource{
-			.text = graphicsPipelineLayout.fragmentShader.text,
-			.debugFilePath = graphicsPipelineLayout.fragmentShader.debugFilePath,
-			.defines = { { "TERRAIN", "1" } },
+			.text = FileSystem::readFileStr(terrainVariantPath),
+			.debugFilePath = terrainVariantPath,
 		},
 	});
 	// Variant 9 (EPipelineIndex::Ocean): FFT/Tessendorf water. The shared vertex shader with OCEAN defined
