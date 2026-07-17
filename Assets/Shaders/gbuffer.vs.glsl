@@ -65,11 +65,11 @@ void main()
     out_normal = quat_transform(in_normal, inst.quat);
     // Ocean water: displace with the exact same clipmap morph + FFT displacement-map samples the forward
     // Ocean variant uses, so this reference depth/normal — which TAA reprojection and RTAO read — tracks
-    // the drawn waves. The texcoord carries (ring cell size, morph weight); see instanced_indirect.vs.
+    // the drawn waves. The texcoord carries (ring cell size, morph weight); see instanced_indirect_ocean.vs.
     if ((in_materialInfos[inst.meshIdxMaterialIdx >> 16].flags & MATERIAL_FLAG_OCEAN) != 0u)
     {
         // Morph in MESH-LOCAL space (exact lattice) then re-transform — identical math to the forward
-        // OCEAN vertex shader (instanced_indirect.vs.glsl), see the comment there.
+        // ocean vertex shader (instanced_indirect_ocean.vs.glsl), see the comment there.
         const float ringCell = in_uv.x;
         const float ringMorph = in_uv.y;
         vec3 localPos = in_pos;

@@ -7,12 +7,6 @@
 
 #include "shared.inc.glsl"
 
-#ifdef OCEAN
-#define OCEAN_SHORE_BINDING 18
-#define TERRAIN_HEIGHT_BINDING 19
-#include "ocean_wave.inc.glsl"
-#endif
-
 #ifdef STEREO
 // VR renders one eye per pass (no multiview here: the forward pass's DGC execution set forbids it), so the
 // view index (1 = left eye, 2 = right eye) is a push constant selecting the per-eye matrices via g_viewIndex.
@@ -58,37 +52,6 @@ void main()
 
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
 
-#ifdef OCEAN
-    // FFT ocean clipmap: the texcoord carries (ring cell size, morph weight). Over each ring's outer band
-    // the CDLOD morph collapses odd vertices onto the next ring's coarser (2*cell) lattice while the
-    // sampled mip blends +1, so adjacent rings meet exactly. The displaced position samples the maps at
-    // the ring-matched mip (fixed per world position — waves don't morph with camera motion). The fragment
-    // shader re-derives the shading normal per pixel from the (morphed) world XZ in out_uv.
-    // The morph snaps in MESH-LOCAL space: ring vertices are exact lattice multiples there by
-    // construction, so a ring's collapsed edge coincides with the next ring's vertices for ANY node
-    // position (snapping in world space aligned to an absolute lattice the node need not sit on, which
-    // opened gaps at coarse-ring boundaries). floor(x+0.5) instead of round(): odd vertices sit exactly
-    // at .5 and GLSL round() is implementation-defined there.
-    const float ringCell = in_uv.x;
-    const float ringMorph = in_uv.y;
-    vec3 localPos = in_pos;
-    localPos.xz = mix(localPos.xz, floor(localPos.xz / (2.0 * ringCell) + 0.5) * (2.0 * ringCell), ringMorph);
-    vec3 basePos = quat_transform(localPos * inst_scale, inst_quat) + inst_pos;
-    if (oceanVertexCulled(basePos.xz, ringCell))
-    {
-        // Whole triangle footprint is buried under land: a NaN position discards every primitive using
-        // this vertex before rasterization (the G-buffer prepass applies the identical test).
-        out_pos = basePos;
-        out_tbn = mat3(1.0);
-        out_uv = basePos.xz;
-        gl_Position = vec4(uintBitsToFloat(0x7FC00000u));
-        return;
-    }
-    basePos.y += oceanWaterOffset(basePos.xz); // lift onto the local water table (lakes/rivers at altitude)
-    out_pos = basePos + oceanSampleDisplacement(basePos.xz, ringCell, ringMorph);
-    out_tbn = mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0));
-    out_uv  = basePos.xz;
-#else
     vec3 N = quat_transform(in_normal, inst_quat);
     vec3 T = quat_transform(in_tangent.xyz, inst_quat);
     vec3 B = cross(N, T) * in_tangent.w;
@@ -96,7 +59,6 @@ void main()
     out_pos = quat_transform(in_pos * inst_scale, inst_quat) + inst_pos;
     out_tbn = mat3(T, B, N);
     out_uv  = in_uv;
-#endif
 
     // Per-eye projection in VR (g_viewIndex set above) / centre view on desktop, with the same TAA
     // sub-pixel jitter both eyes (per-eye TAA accumulates it just like desktop).

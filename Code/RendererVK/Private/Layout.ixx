@@ -335,10 +335,17 @@ export namespace RendererVKLayout
                                    // z = swash amplitude (0 = off), w = swash reach (m, CPU estimate)
         glm::vec4 oceanParams8;    // x = swash drawdown burial (m below the seabed when receding),
                                    // y = shore foam threshold bias (negative = sparser surf),
-                                   // z = swash backflow (horizontal chop scale on the tongue), w unused
+                                   // z = swash backflow (horizontal chop scale on the tongue),
+                                   // w = RT ray cutoff distance (m from the camera; beyond it the water
+                                   //     shader traces no scene rays, 0 = unlimited)
         glm::vec4 oceanParams9;    // x = trough margin (m): how far above the seabed the wave trough is
                                    // held, tapered in with depth so the waterline itself does not lift,
-                                   // yzw unused
+                                   // y = RT refraction ray range (m: underwater visibility),
+                                   // z = RT reflection ray range (m),
+                                   // w = RT reflection roughness cutoff (rougher = sky fallback)
+        glm::vec4 oceanParams10;   // x = far-cascade land-cull error allowance (m; flat burial slack the
+                                   //     cull demands when only far terrain data covers the footprint,
+                                   //     0 = never cull from far data), yzw unused
         glm::vec4 terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                                    // 0 = no terrain mesh up — fences the ocean land cull),
                                    // y = temperature lapse rate, C per WORLD metre above sea level (<= 0;

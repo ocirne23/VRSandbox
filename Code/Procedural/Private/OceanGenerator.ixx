@@ -57,8 +57,8 @@ export namespace Procedural
 		            const WaterReach* reach = nullptr, float seaLevel = 0.0f, const FlowField* flow = nullptr);
 
 		// Water surface world Y at (x, z), CPU-evaluated from the GPU displacement readback (a full mirror
-		// of the clipmap vertex shader: cascade sum, shoaling fade, swash run-up, crest ceiling and the
-		// waterline floor; ~2 frames of latency — invisible for physics). Returns -FLT_MAX where there is
+		// of the clipmap vertex shader: cascade sum, shoaling fade, swash run-up and the waterline
+		// floor; ~2 frames of latency — invisible for physics). Returns -FLT_MAX where there is
 		// no water: ocean disabled, readback not primed, or land beyond the swash run-up band per the
 		// shore bake. Inside that band it returns the live tongue surface, which SINKS BELOW the terrain
 		// as the wave recedes (the drawdown floor) — bodies beach themselves on their own that way, so
@@ -95,6 +95,12 @@ export namespace Procedural
 		float m_ringCell = 0.125f;     // ring 0 cell size (m); doubles per ring. Reach = ringCell*res/2*2^(rings-1)
 		int   m_ringRes = 512;         // cells per axis per ring (ring 0 is a full grid, outer rings are annuli)
 		int   m_rings = 8;             // ring count (defaults: 16m fine region, ~1km reach)
+		// One coarse quad band appended past the outermost ring, stretching its edge lattice out to the
+		// camera far plane — the sea meets the horizon in every direction instead of ending at the ring
+		// reach. Its inner edge sits on the last ring's fully-morphed (2x cell) lattice at the matching
+		// mip, so the seam is watertight by the same CDLOD construction the rings use.
+		bool  m_horizonBand = true;
+		float m_lastFar = 0.0f;        // camera far plane the current grid was built for (change = rebuild)
 		// Bias on the ring-matched displacement mip (negative = sample finer than the ring's Nyquist:
 		// slightly more detail, some sampling shimmer while moving). With fixed-cell rings 0 should be fine.
 		float m_detailBias = 0.0f;
@@ -146,11 +152,18 @@ export namespace Procedural
 		float m_shoreFoamMax = 0.75f;   // surf band opacity cap: keeps the refracted bottom visible through the foam
 		float m_swashAmp = 0.5f;        // swash run-up: un-shoaled wave height riding up the beach (0 = hard cutoff)
 		float m_swashDrawdown = 0.0f;   // receding burial depth (m below seabed): deeper = cleaner retreat edge
-		float m_crestLimit = 0.8f;      // crest ceiling as a fraction of water depth (0 = unbounded)
 		float m_troughMargin = 0.35f;   // m the trough is held above the seabed (covers baked-map vs mesh error)
 		float m_shoreFoamBias = -0.80f;   // surf fold-threshold shift: negative = sparser/more transparent surf
 		float m_swashFlow = 0.5f;       // backflow: horizontal chop on the tongue (recede flows seaward; 0 = off)
 		float m_cullMargin = 1.0f;      // VS land cull: footprint buried deeper than this = triangle discarded (0 = off)
+		float m_farCullError = 4.0f;    // land cull from the FAR terrain cascade: flat error allowance (m); 0 = near-only
+
+		// --- Ray tracing budget (ocean.fs.glsl per-pixel refraction/reflection rays; all live) ---
+		float m_rtRefractionRange = 10.0f;   // max refracted-ray length (m): underwater visibility of traced geometry
+		float m_rtReflectionRange = 3000.0f;  // max mirror-ray length (m): how distant scenery still reflects
+		float m_rtReflectionMaxRough = 0.25f; // roughness above which the mirror ray is skipped (blurred-sky fallback)
+		float m_rtRayCutoffDist = 0.0f;       // camera distance (m) beyond which NO rays trace (analytic
+		                                      // bottom + sky fallbacks — the same paths misses take); 0 = unlimited
 
 		// Bake state (HeightMapBaker: async, one bake at a time; the active map keeps working until the
 		// replacement lands). The map stores raw terrain heights; depth = live sea level - height, so

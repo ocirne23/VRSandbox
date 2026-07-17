@@ -115,11 +115,13 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 			.debugFilePath = terrainVariantPath,
 		},
 	});
-	// Variant 9 (EPipelineIndex::Ocean): FFT/Tessendorf water. The shared vertex shader with OCEAN defined
-	// displaces the flat grid by the OceanSimulationPipeline's displacement maps (binding 7); a dedicated
-	// fragment shader shades the surface (Fresnel, GGX sun glint, RAY-TRACED refraction with Beer-Lambert
-	// absorption, Jacobian foam). Opaque + depth write (matches the G-buffer prepass ocean branch);
-	// double-sided so it still draws when the camera dips below the surface.
+	// Variant 9 (EPipelineIndex::Ocean): FFT/Tessendorf water. A dedicated vertex shader (same pipeline
+	// layout/interface as the shared one) displaces the clipmap grid by the OceanSimulationPipeline's
+	// displacement maps (binding 7); a dedicated fragment shader shades the surface (Fresnel, GGX sun
+	// glint, RAY-TRACED refraction with Beer-Lambert absorption, Jacobian foam). Opaque + depth write
+	// (matches the G-buffer prepass ocean branch); double-sided so it still draws when the camera dips
+	// below the surface.
+	const std::string oceanVertexPath = "Shaders/instanced_indirect_ocean.vs.glsl";
 	const std::string oceanVariantPath = "Shaders/ocean.fs.glsl";
 	const std::string oceanVariantText = FileSystem::readFileStr(oceanVariantPath);
 	// OCEAN_HIT_LIGHTS: also evaluate the scene's grid lights at refraction/reflection ray hits
@@ -129,9 +131,8 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 		oceanFragDefines.push_back({ "OCEAN_HIT_LIGHTS", "1" });
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
 		.vertexShader = ShaderSource{
-			.text = graphicsPipelineLayout.vertexShader.text,
-			.debugFilePath = graphicsPipelineLayout.vertexShader.debugFilePath,
-			.defines = { { "OCEAN", "1" } },
+			.text = FileSystem::readFileStr(oceanVertexPath),
+			.debugFilePath = oceanVertexPath,
 		},
 		.fragmentShader = ShaderSource{
 			.text = oceanVariantText,

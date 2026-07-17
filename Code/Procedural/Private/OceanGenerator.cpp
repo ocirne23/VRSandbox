@@ -30,6 +30,10 @@ namespace Procedural
 		Tweak::floatVar("Ocean", "Ring cell (m)", &m_ringCell, 0.02f, 2.0f, 0.005f, gridDirty);
 		Tweak::intVar("Ocean", "Ring resolution", &m_ringRes, 64, 512, 4.0f, gridDirty);
 		Tweak::intVar("Ocean", "Rings", &m_rings, 1, 10, 1.0f, gridDirty);
+		// One coarse quad band from the outermost ring's edge to the camera far plane, so the sea always
+		// reaches the horizon; its geometry is band-limited to the coarsest mips (near-flat), which is
+		// exactly what sub-pixel waves at that distance resolve to anyway.
+		Tweak::boolean("Ocean", "Horizon band", &m_horizonBand, gridDirty);
 		// Negative = displacement sampled finer than the ring's Nyquist (slight shimmer while moving);
 		// with fixed-cell rings the default 0 is already motion-stable.
 		Tweak::floatVar("Ocean", "Detail bias", &m_detailBias, -2.0f, 2.0f, 0.05f);
@@ -83,14 +87,7 @@ namespace Procedural
 		Tweak::floatVar("Ocean/Shore", "Shore foam max", &m_shoreFoamMax, 0.0f, 1.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shore", "Swash amplitude", &m_swashAmp, 0.0f, 2.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shore", "Swash drawdown (m)", &m_swashDrawdown, 0.00f, 2.0f, 0.01f);
-		// A wave cannot stand taller than the water it is in. The waterline clamp already keeps the TROUGH
-		// off the seabed; this is the other half, and without it nothing bounded the crest except the shoal
-		// fade — a fixed depth/(scale*patch) ramp, not a limit relative to the water column. A crest allowed
-		// to stand a metre high in two metres of water gets carried over the beach by the clipmap triangle
-		// that bridges it to the next vertex on land. Real waves break near H/d ~ 0.78 (crest ~ 0.39*d), so
-		// lower it to break them earlier and further out. 0 = unbounded (the old behaviour).
-		Tweak::floatVar("Ocean/Shore", "Crest limit (x depth)", &m_crestLimit, 0.0f, 2.0f, 0.01f);
-		// The other half: how far above the seabed the TROUGH is held. The clamp measures against the baked
+		// How far above the seabed the TROUGH is held. The clamp measures against the baked
 		// depth map, but you see the LOD'd terrain mesh, and the two disagree by decimetres — so the old
 		// hard-coded 5 cm let a trough that clears the map's seabed sink under the real ground, which then
 		// pokes through the surface. This is the margin for that error, so size it to the disagreement, not
@@ -101,6 +98,23 @@ namespace Procedural
 		// Land cull: clipmap triangles buried deeper than this under the local water level (over their
 		// whole footprint) are discarded in the vertex shaders — no displacement sampling, no raster.
 		Tweak::floatVar("Ocean/Shore", "Cull margin (m)", &m_cullMargin, 0.0f, 4.0f, 0.05f);
+		// Beyond the near terrain cascade (~860 m) the cull uses the FAR cascade with this flat burial
+		// error allowance in meters (covers the far mesh LODs' drift off the bake). Narrow rivers the
+		// coarse far bake cannot resolve may lose triangles out there — speed over accuracy; raise it
+		// if that shows, 0 = never cull from far data.
+		Tweak::floatVar("Ocean/Shore", "Far cull error (m)", &m_farCullError, 0.0f, 20.0f, 0.25f);
+
+		// Ray-tracing budget: the water shader traces the scene TLAS per pixel for refraction (seeing
+		// geometry through the water) and reflection (scenery mirrored in it). Refraction range = how far
+		// underwater stays visible (the ~99% Beer-Lambert extinction bound still applies on top, so this
+		// caps the clear-water case); reflection rays skip above the roughness cutoff (a wide lobe cannot
+		// be represented by one mirror sample — the blurred sky stands in); the ray cutoff distance stops
+		// ALL rays past that camera distance (refraction falls back to the analytic baked-terrain bottom,
+		// reflections to the atmosphere — the same paths misses already take), 0 = unlimited.
+		Tweak::floatVar("Ocean/RT", "Refraction range (m)", &m_rtRefractionRange, 1.0f, 100.0f, 1.0f);
+		Tweak::floatVar("Ocean/RT", "Reflection range (m)", &m_rtReflectionRange, 50.0f, 10000.0f, 50.0f);
+		Tweak::floatVar("Ocean/RT", "Reflection max rough", &m_rtReflectionMaxRough, 0.0f, 1.0f, 0.01f);
+		Tweak::floatVar("Ocean/RT", "Ray cutoff dist (m)", &m_rtRayCutoffDist, 0.0f, 10000.0f, 50.0f);
 	}
 
 	void OceanGenerator::rebuildGrid()
@@ -164,6 +178,52 @@ namespace Procedural
 					const uint32 d = c + 1;
 					indices.push_back(a); indices.push_back(c); indices.push_back(b);
 					indices.push_back(b); indices.push_back(c); indices.push_back(d);
+				}
+			}
+		}
+
+		// Horizon band: one coarse quad ring from the outermost ring's edge to the camera far plane, so
+		// the sea reaches the horizon in every view direction instead of ending at the ring reach. Its
+		// inner edge sits on the last ring's fully-morphed lattice (2x its cell, which the CDLOD morph
+		// collapses the edge onto — morph hits exactly 1 there) with the matching texcoord cell size, so
+		// the seam is watertight and mip-continuous by the same construction the rings use. Outer verts
+		// carry a proportionally scaled cell size: they band-limit to the coarsest mips (near-flat), which
+		// is what sub-pixel waves at that distance resolve to anyway; shading stays per-pixel regardless.
+		// Chebyshev half-extent = far plane covers every Euclidean far-plane point (diagonals clip first).
+		if (m_horizonBand && m_lastFar > 0.0f)
+		{
+			const float lastCell = c0 * float(1 << (rings - 1));
+			const float outerH = lastCell * float(N) * 0.5f;
+			if (m_lastFar > outerH * 1.01f)
+			{
+				const float step = 2.0f * lastCell;
+				const float scale = m_lastFar / outerH;
+				const int M = N / 2; // segments per side on the morphed lattice
+				std::vector<glm::vec2> perim;
+				perim.reserve((size_t)M * 4);
+				for (int i = 0; i < M; ++i) perim.push_back(glm::vec2(-outerH + step * float(i), -outerH));
+				for (int i = 0; i < M; ++i) perim.push_back(glm::vec2(outerH, -outerH + step * float(i)));
+				for (int i = 0; i < M; ++i) perim.push_back(glm::vec2(outerH - step * float(i), outerH));
+				for (int i = 0; i < M; ++i) perim.push_back(glm::vec2(-outerH, outerH - step * float(i)));
+				const uint32 base = (uint32)positions.size();
+				const uint32 P = (uint32)perim.size();
+				for (const glm::vec2& p : perim)
+				{
+					positions.push_back(glm::vec3(p.x, 0.0f, p.y));
+					normals.push_back(glm::vec3(0.0f, 1.0f, 0.0f));
+					texCoords.push_back(glm::vec3(step, 0.0f, 0.0f));
+				}
+				for (const glm::vec2& p : perim)
+				{
+					positions.push_back(glm::vec3(p.x * scale, 0.0f, p.y * scale));
+					normals.push_back(glm::vec3(0.0f, 1.0f, 0.0f));
+					texCoords.push_back(glm::vec3(step * scale, 0.0f, 0.0f));
+				}
+				for (uint32 i = 0; i < P; ++i)
+				{
+					const uint32 j = (i + 1) % P;
+					indices.push_back(base + i); indices.push_back(base + j); indices.push_back(base + P + i);
+					indices.push_back(base + j); indices.push_back(base + P + j); indices.push_back(base + P + i);
 				}
 			}
 		}
@@ -328,11 +388,15 @@ namespace Procedural
 		params.shoreFoamMax = m_shoreFoamMax;
 		params.swashAmp = m_swashAmp;
 		params.swashDrawdown = m_swashDrawdown;
-		params.crestDepthLimit = m_crestLimit;
 		params.troughMargin = m_troughMargin;
 		params.shoreFoamBias = m_shoreFoamBias;
 		params.swashFlow = m_swashFlow;
 		params.cullMargin = m_cullMargin;
+		params.farCullError = m_farCullError;
+		params.rtRefractionRange = m_rtRefractionRange;
+		params.rtReflectionRange = m_rtReflectionRange;
+		params.rtReflectionMaxRough = m_rtReflectionMaxRough;
+		params.rtRayCutoffDist = m_rtRayCutoffDist;
 		renderer.setOceanParams(params);
 
 		if (!m_enabled)
@@ -341,6 +405,12 @@ namespace Procedural
 			return;
 		}
 
+		// The horizon band is sized to the camera far plane; a far change (rare — settings, VR) rebuilds.
+		if (camera.far != m_lastFar)
+		{
+			m_lastFar = camera.far;
+			m_gridDirty = true;
+		}
 		if (m_gridDirty || !m_node.isValid())
 			rebuildGrid();
 		if (!m_node.isValid())
@@ -463,7 +533,7 @@ namespace Procedural
 	}
 
 	// CPU mirror of oceanSampleDisplacement (ocean_wave.inc.glsl) at an UNDISPLACED world XZ, bilinear-
-	// wrapped over the readback tile: shoal-faded cascade sum, swash backflow, crest ceiling, the raw
+	// wrapped over the readback tile: shoal-faded cascade sum, swash backflow, the raw
 	// run-up residual, then the waterline floor — same order, same clamps, y relative to the LOCAL water
 	// level like the shader's. The shader is what you SEE and this is what floats on it, so any change
 	// there has to land here too; the divergence is invisible until a body sinks through a drawn wave.
@@ -517,10 +587,6 @@ namespace Procedural
 			flowOff *= flowCap / (flowCap + glm::length(flowOff));
 			disp.x += flowOff.x;
 			disp.z += flowOff.y;
-			// Crest ceiling BEFORE the run-up add, never after: riding up the beach is the swash's job.
-			const float crestLimit = glm::max(m_crestLimit, 0.0f);
-			if (crestLimit > 0.0f && depth > 0.0f)
-				disp.y = glm::min(disp.y, crestLimit * depth);
 			disp.y += rawY * sw;
 		}
 		// Waterline floor: the inner-rounded smooth max, tightening under an active swash.

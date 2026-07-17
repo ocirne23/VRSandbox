@@ -315,14 +315,6 @@ export struct OceanParams
                                   // cleaner cut against the sand (shallow grazes sawtooth the retreat edge)
     float shoreFoamBias  = -0.33f;  // shifts the surf fold threshold: negative = sparser lace / more
                                   // transparent shore waves, positive = denser churn
-    // Crest ceiling as a fraction of the local WATER DEPTH: a wave cannot stand taller than the water it
-    // is in. The waterline clamp already pins the TROUGH above the seabed, but nothing bounded the crest —
-    // only the shoal fade, which is a fixed depth/(scale*patch) ramp rather than anything relative to the
-    // water column, so a metre-high crest was allowed in two metres of water. The clipmap triangle running
-    // from that vertex to the next one on land then carries the crest straight over the beach.
-    // Real waves break around H/d ~ 0.78 (crest ~ 0.39*d), so this is physical, not a fudge. 0 = no limit.
-    // Applied to the shoaled waves only: the swash run-up rides ON TOP, since going up the beach is its job.
-    float crestDepthLimit = 0.4f;
     // How far above the seabed the wave TROUGH is held (m). The clamp that does this had a hard-coded 5 cm
     // margin, which is far under the decimetre-scale disagreement between the baked depth map it measures
     // against and the LOD'd terrain mesh you actually see — so a trough legally clear of the map's seabed
@@ -334,6 +326,25 @@ export struct OceanParams
                                   // the tongue visibly flows back seaward as the wave recedes (0 = off)
     float cullMargin     = 1.0f;  // land cull: clipmap triangles whose whole footprint is buried deeper
                                   // than this under the local water level are VS-culled (0 = off)
+    float farCullError = 4.0f;    // land cull from the FAR terrain cascade (beyond the near cascade's
+                                  // ~860 m): flat burial error allowance in METERS, covering how far
+                                  // the far mesh LODs stray from the bake. Deliberately NOT scaled by
+                                  // the far texel — that left everything under tens of meters of
+                                  // terrain alive (a visible band of buried water past the near
+                                  // handover). Narrow rivers the coarse point-sampled bake cannot
+                                  // resolve may lose triangles out there (speed over accuracy);
+                                  // 0 = never cull from far data
+
+    // Ray tracing budget (ocean.fs.glsl traces the scene TLAS per pixel for refraction + reflection).
+    float rtRefractionRange = 10.0f;  // max refracted-ray length (m): how far underwater geometry stays
+                                       // visible through the surface (the ~99% Beer-Lambert extinction
+                                       // bound still applies on top, so clear water is the case this caps)
+    float rtReflectionRange = 3000.0f; // max mirror-ray length (m): how distant scenery still reflects
+    float rtReflectionMaxRough = 0.25f; // filtered roughness above which the mirror ray is skipped and the
+                                        // blurred sky stands in (a wide lobe can't be one mirror sample)
+    float rtRayCutoffDist = 0.0f;  // camera distance (m) beyond which NO scene rays are traced: refraction
+                                   // falls back to the analytic baked-terrain bottom (the same path RT
+                                   // misses take), reflections to the atmosphere. 0 = unlimited
 };
 
 export struct Stats

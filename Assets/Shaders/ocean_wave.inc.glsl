@@ -6,8 +6,8 @@
 //   layer c                      : displacement (Dx, h, Dz, dDx/dz)
 //   layer   OCEAN_CASCADES + c   : gradients    (dh/dx, dh/dz, dDx/dx, dDz/dz)
 //   layer 2*OCEAN_CASCADES + c   : slope second moments (dhx^2, dhz^2, dhx*dhz, foam [c=0 only])
-// all with a full mip chain. Shared by the raster displacement passes (instanced_indirect.vs.glsl with
-// OCEAN, the G-buffer prepass gbuffer.vs.glsl) and the water shading (ocean.fs.glsl), so the prepass
+// all with a full mip chain. Shared by the raster displacement passes (instanced_indirect_ocean.vs.glsl,
+// the G-buffer prepass gbuffer.vs.glsl) and the water shading (ocean.fs.glsl), so the prepass
 // depth, the drawn geometry and the shaded normals all read the exact same wave field. Requires
 // ubo.inc.glsl. The includer may set OCEAN_MAPS_BINDING before including (the G-buffer pipeline binds
 // the maps at a different slot than the forward pipeline).
@@ -137,13 +137,15 @@ vec2 oceanFlowToWorld(vec2 v, vec2 fr) { return vec2(fr.x * v.x - fr.y * v.y, fr
 // which discards those primitives before rasterization. Waves shoal-fade to zero at depth <= 0, so a
 // footprint buried by a positive margin can never clip live water; the margin absorbs the decimeter
 // disagreement between the baked maps and the LOD'd terrain mesh.
-// The taps read oceanSampleShoreDepth — the EXACT field the waves shoal/lift by — but only where the
-// data is trustworthy enough to delete geometry on: the shore map close in, then the fog NEAR cascade
-// out to its far handover (~860 m). The far cascade never culls: its coarse texels cannot resolve
-// narrow water (rivers) and the far terrain LODs stray meters from the bake — distant buried vertices
-// keep the depth <= 0 sampling early-outs instead. Tap spacing is capped at 1.5 texels of the map
-// covering the footprint (adaptive grid up to 5x5), the burial requirement grows with its texel size,
-// and footprints straddling the shore map's edge-blend band (mixed fields) are never culled.
+// The taps read oceanSampleShoreDepth — the EXACT field the waves shoal/lift by. Tier selection: the
+// finest map that covers the footprint AND whose 5x5 tap budget can span it at <= 1.5-texel spacing
+// (shore map, then the near fog cascade, err = half a texel each); everything else — big coarse-ring
+// footprints included — goes to the FAR tier: ONE center sample, no grid, with the flat
+// "Ocean/Shore/Far cull error (m)" allowance (0 = the far tier off). A tier that can't take the
+// footprint must FALL THROUGH, never bail: bailing carved never-cull rings (the shore map's edge
+// band, and coarse rings whose footprint outgrew the shore texels mid-interior). Water the far tier's
+// single sample misses (narrow rivers, partial-footprint coasts) can lose triangles — sub-pixel at
+// that distance, accepted; raise the far error if it ever shows.
 // Both displacement passes (prepass + forward) MUST apply the same test or their geometry diverges.
 bool oceanVertexCulled(vec2 worldXZ, float cellSize)
 {
@@ -160,8 +162,13 @@ bool oceanVertexCulled(vec2 worldXZ, float cellSize)
     if (distance(worldXZ, u_viewPos.xz) + reach >= u_terrainParams.x)
         return false;
 
-    // Which map the footprint reads: its texel size gates the tap density and scales the burial margin.
+    // Which map the footprint reads: its texel size gates the tap density; err is the burial-error
+    // allowance for that map's disagreement with the rendered terrain mesh.
     float texel = -1.0;
+    float err = 0.0;
+    bool farTier = false; // far cascade: one center sample, no footprint grid
+    // Tier gates: "reach <= 3 * texel" is exactly "a 5x5 grid spans the footprint at <= 1.5-texel
+    // spacing" — a footprint too big for a fine map's tap budget falls through to the coarser tier.
 #ifdef OCEAN_SHORE_BINDING
     const float invShore = u_oceanParams4.x;
     if (invShore > 0.0)
@@ -169,50 +176,60 @@ bool oceanVertexCulled(vec2 worldXZ, float cellSize)
         const vec2 uvS = (worldXZ - u_oceanParams3.xy) * invShore + 0.5;
         const vec2 eS = min(uvS, vec2(1.0) - uvS);
         const float e = min(eS.x, eS.y);
-        const float r = reach * invShore;
-        if (e - r >= 0.06) // fully inside the full-weight interior (inMap blend band ends at 0.05)
-            texel = 1.0 / (float(textureSize(u_shoreHeight, 0).x) * invShore);
-        else if (e + r > 0.0) // footprint touches the map's influence: mixed fields, don't cull
-            return false;
+        const float t = 1.0 / (float(textureSize(u_shoreHeight, 0).x) * invShore);
+        if (e - reach * invShore >= 0.06 && reach <= 3.0 * t) // full-weight interior (blend band ends at 0.05)
+        {
+            texel = t;
+            err = 0.5 * t;
+        }
     }
 #endif
 #ifdef TERRAIN_HEIGHT_BINDING
     if (texel < 0.0 && terrainHeightMapPresent())
     {
-        // Only the NEAR fog cascade may cull. The far cascade's coarse texels cannot reliably resolve
-        // narrow water — a river renders from it as dashed segments that coarse taps then straddle —
-        // and the far terrain mesh LODs deviate from the bake by meters; every far-range cull artifact
-        // (horizon holes, rebake flicker, river cuts) traced back to trusting far data. Distant buried
-        // geometry keeps the depth <= 0 sampling early-outs; the depth buffer handles the rest.
         const vec2 rel = worldXZ - u_fogParams5.xy;
         const float cheb = max(abs(rel.x), abs(rel.y));
         const float invNear = u_fogParams3.y;
-        if ((cheb + reach) * invNear >= 0.42) // footprint touches far-blended data / leaves the near region
-            return false;
-        texel = 1.0 / (float(textureSize(u_terrainHeight, 0).x) * invNear);
+        const float res = float(textureSize(u_terrainHeight, 0).x);
+        const float tNear = 1.0 / (res * invNear);
+        if ((cheb + reach) * invNear < 0.42 && reach <= 3.0 * tNear) // full-weight near region (blend starts at 0.42)
+        {
+            texel = tNear;
+            err = 0.5 * tNear;
+        }
+        else
+        {
+            // FAR tier: flat error in METERS ("Far cull error", u_oceanParams10.x; 0 = off — a
+            // texel-scaled allowance left everything under tens of meters of terrain alive).
+            // Footprints reaching the far map's clamp-to-edge border never cull (extended edge
+            // values are not data).
+            const float invFar = u_fogParams5.z;
+            if (u_oceanParams10.x <= 0.0 || invFar <= 0.0 || (cheb + reach) * invFar >= 0.48)
+                return false;
+            texel = 1.0 / (res * invFar);
+            err = u_oceanParams10.x;
+            farTier = true;
+        }
     }
 #endif
     if (texel <= 0.0)
         return false; // no baked terrain data here: open-ocean fallback, always water
 
-    // Everything that can make "the map says buried" wrong grows with the map's coarseness: sub-tap
-    // water detail the taps can straddle, AND how far the rendered terrain mesh (coarser LODs at
-    // distance) deviates from the baked field. So the burial requirement scales with the texel size
-    // — near the camera ~the raw margin, ~9 m out at the far cascade: marginal far coastlines never
-    // cull (their holes read as underwater-fog haze), plainly inland terrain still does.
     // Swash run-up (u_oceanParams7.w, CPU-estimated max reach) keeps the wet band above the waterline
     // alive: those vertices sit on land but can still rise above the terrain with an incoming wave.
-    const float need = margin + u_oceanParams7.w + 0.5 * texel;
-
-    // Taps per axis: enough to keep the spacing under 1.5 texels of the sampled map, at most 5x5
-    // (only already-buried vertices ever pay for the grid; the first tap exits over water).
-    const float limit = 1.5 * texel;
-    const int n = max(1 + int(ceil(2.0 * reach / limit)), 2);
-    if (n > 5)
-        return false;
+    const float need = margin + u_oceanParams7.w + err;
 
     if (oceanSampleShoreDepth(worldXZ) >= -need)
-        return false; // water in reach: done (the common case over open water — one tap and out)
+        return false; // water at the vertex: done (the common case over open water — one tap and out)
+
+    // Far tier: that single center sample decides — no footprint grid, pure speed. A triangle edge
+    // reaching from this buried vertex over nearby unresolved water is sub-pixel at that distance.
+    if (farTier)
+        return true;
+
+    // Fine tiers verify the whole footprint: spacing under 1.5 texels, at most 5x5 by the tier gates
+    // above (only already-buried vertices ever pay for the grid).
+    const int n = clamp(1 + int(ceil(2.0 * reach / (1.5 * texel))), 2, 5);
     const float spacing = 2.0 * reach / float(n - 1);
     for (int j = 0; j < n; ++j)
         for (int i = 0; i < n; ++i)
@@ -319,18 +336,6 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
         // surface-vs-terrain intersection that already IS the waterline, so the wet edge surges up the
         // beach and drains back with each swell. Fades in as the shoal fade takes over (mid cascade as
         // the reference), so deep water sees no double displacement.
-        // Crest ceiling: a wave cannot stand taller than the water it is in. The waterline clamp below
-        // pins the TROUGH above the seabed, but nothing bounded the crest — the shoal fade is a fixed
-        // depth/(scale*patch) ramp, not a limit relative to the water column, so a metre-high crest was
-        // legal in two metres of water. It is not the crest itself that shows: it is the clipmap triangle
-        // bridging that vertex to the next one on LAND, which interpolates the crest straight over the
-        // beach. Real waves break near H/d ~ 0.78 (crest ~ 0.39*d), so bounding the crest to a fraction of
-        // depth is what the water would do anyway.
-        // BEFORE the swash add, never after: running up the beach is precisely the swash's job, and it
-        // rides the raw un-shoaled field on purpose.
-        const float crestLimit = u_oceanParams8.w;
-        if (crestLimit > 0.0 && depth > 0.0)
-            disp.y = min(disp.y, crestLimit * depth);
         disp.y += rawY * sw;
     }
     // Waterline treatment: smooth-clamp the surface to just above the seabed — the shoal fade only
@@ -391,6 +396,8 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
 //              roughness, which is what produces the elongated glittering sun path at distance.
 //   accel    : the surface's vertical acceleration (m/s^2, negative = downward) — with the Jacobian this
 //              drives the instantaneous, geometry-locked crest foam in the water shader
+//   shoreHW  : the (terrain height, water level) pair this function already fetched — returned so the
+//              caller's shore-dependent shading (surf band, SSS) reuses it instead of re-sampling
 // Implicit-LOD sample for the surface-shading reads. The water fragment shader defines
 // OCEAN_SURFACE_SAMPLE_BIAS ("Ocean/Shading/Glint sharpness", negative = finer mips): the shading
 // normal then resolves wave detail the plain trilinear footprint would have filtered away, so the sun
@@ -403,10 +410,10 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
 #define OCEAN_SURFACE_TEX(uvw) texture(u_oceanMaps, uvw)
 #endif
 
-void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out vec2 slopeVar, out float accel)
+void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out vec2 slopeVar, out float accel, out vec2 shoreHW)
 {
     const float chop = u_oceanParams0.w;
-    const vec2 shoreHW = oceanSampleShoreData(worldXZ); // (terrain height, water level)
+    shoreHW = oceanSampleShoreData(worldXZ); // (terrain height, water level)
     const float depth = shoreHW.y - shoreHW.x;
     // Buried under land: all shoal fades are zero — the loop would sum nothing (flat calm surface).
     // With swash on, the run-up band on land still shades: its geometry carries the raw wave residual.

@@ -127,11 +127,18 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // deeper = steeper, cleaner cut against the sand),
                             // y = shore foam threshold bias (shifts the surf fold threshold:
                             // negative = sparser/more transparent surf),
-                            // w = crest ceiling as a fraction of water depth (0 = no limit),
                             // z = swash backflow (scale on the raw horizontal chop riding the swash
-                            // weight: the tongue flows back seaward as the wave recedes), w unused
+                            // weight: the tongue flows back seaward as the wave recedes),
+                            // w = RT ray cutoff distance (m from the camera; beyond it the water shader
+                            // traces no scene rays at all, 0 = unlimited)
     vec4 u_oceanParams9;    // x = trough margin (m): how far above the seabed the wave trough is held,
-                            // tapered in with depth so the waterline itself does not lift, yzw unused
+                            // tapered in with depth so the waterline itself does not lift,
+                            // y = RT refraction ray range (m: underwater visibility of traced geometry),
+                            // z = RT reflection ray range (m),
+                            // w = RT reflection roughness cutoff (rougher pixels skip the mirror ray)
+    vec4 u_oceanParams10;   // x = far-cascade land-cull error allowance (m; flat burial slack the cull
+                            // demands when only far terrain data covers the footprint, 0 = never cull
+                            // from far data), yzw unused
     vec4 u_terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                             // 0 = no terrain mesh up — fences the ocean land cull),
                             // y = temperature lapse rate, C per WORLD metre above sea level (<= 0; pairs
