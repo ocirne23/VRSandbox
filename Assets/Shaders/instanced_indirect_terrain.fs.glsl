@@ -14,9 +14,7 @@
 #include "shared.inc.glsl"
 
 layout (location = 0) in vec3 in_pos;
-layout (location = 1) in mat3 in_tbn;
-layout (location = 4) in vec2 in_uv; // unused (shared VS interface)
-layout (location = 5) in flat uint in_meshIdxMaterialIdx;
+layout (location = 1) in vec3 in_normal; // geometric (interpolated vertex) normal; terrain builds its own tangent bases
 #ifdef STEREO
 layout (push_constant) uniform ViewPC { uint u_viewIndex; };
 #endif
@@ -48,7 +46,15 @@ TerrainFields terrainFields(vec3 worldPos)
 		const vec4 td = terrainDataAt(worldPos.xz);
 		f.altitude = td.w;
 		f.waterLevel = td.y;
+		// Climate only selects/blends the splat textures (never shades directly), so nearest sampling (1
+		// tap vs the 8-tap manual bilinear) is enough — the top-2 texture crossfade still smooths borders.
+		// Set to 0 for the old smooth selection if the biome boundaries look too faceted.
+#define TERRAIN_CLIMATE_NEAREST 1
+#if TERRAIN_CLIMATE_NEAREST
+		const vec4 climate = terrainClimateNearestAt(worldPos.xz);
+#else
 		const vec4 climate = terrainClimateAt(worldPos.xz);
+#endif
 		f.humidity = climate.w;
 		// The map stores a SEA-LEVEL baseline + one lapse rate, evaluated at the shaded height — never
 		// bake a temperature sample (only valid at the height it was taken; the cascades' heights differ).
@@ -163,7 +169,24 @@ TerrainSample sampleTerrainXZ(uint matIdx, vec2 uv, vec3 geoN)
 	return s;
 }
 
+// Decode one triplanar normal-map tap into tangent space (BC5 reconstructs Z).
+vec3 decodeTriplanarNormal(vec3 ns, bool bc5)
+{
+	if (bc5)
+	{
+		const vec2 xy = ns.xy * 2.0 - 1.0;
+		return vec3(xy, sqrt(max(1.0 - dot(xy, xy), 0.0)));
+	}
+	return normalize(ns * 2.0 - 1.0);
+}
+
 // Triplanar version for the rock layer (whiteout-style normal blend), so cliff faces don't smear.
+// PLANE SKIPPING: the three projection weights sum to 1, so a plane below TRIPLANAR_WMIN contributes
+// <~4% and is dropped (its texture taps skipped) — on shallow crag one axis dominates and the other two
+// are near-zero, cutting up to 2/3 of the taps. Surviving weights are renormalised so no energy is lost.
+// The branch is coherent across a quad except on the exact plane-crossover diagonal, where one pixel may
+// get a slightly wrong mip; invisible in practice.
+#define TRIPLANAR_WMIN 0.05
 TerrainSample sampleTerrainTriplanar(uint matIdx, vec3 worldPos, vec3 geoN, float uvScale)
 {
 	const MaterialInfo material = in_materialInfos[nonuniformEXT(matIdx)];
@@ -174,44 +197,46 @@ TerrainSample sampleTerrainTriplanar(uint matIdx, vec3 worldPos, vec3 geoN, floa
 
 	vec3 w = abs(geoN);
 	w = w / (w.x + w.y + w.z);
+	const bvec3 use = greaterThan(w, vec3(TRIPLANAR_WMIN));
+	w /= dot(w, vec3(use)); // renormalise over the kept planes
 	const vec2 uvX = worldPos.zy * uvScale; // plane normal = X
 	const vec2 uvY = worldPos.xz * uvScale; // plane normal = Y
 	const vec2 uvZ = worldPos.xy * uvScale; // plane normal = Z
 
+	vec3 albedo = vec3(0.0);
+	vec3 arm = vec3(0.0);
+	vec3 nrm = vec3(0.0);
+	const bool hasArm = armTexIdx != 0xFFFFu;
+	if (use.x)
+	{
+		albedo += texture(u_textures[nonuniformEXT(diffuseTexIdx)], uvX).rgb * w.x;
+		const vec3 tn = decodeTriplanarNormal(texture(u_textures[nonuniformEXT(normalTexIdx)], uvX).xyz, bc5);
+		nrm += vec3(tn.z * sign(geoN.x), tn.y, tn.x) * w.x;
+		if (hasArm) arm += texture(u_textures[nonuniformEXT(armTexIdx)], uvX).rgb * w.x;
+	}
+	if (use.y)
+	{
+		albedo += texture(u_textures[nonuniformEXT(diffuseTexIdx)], uvY).rgb * w.y;
+		const vec3 tn = decodeTriplanarNormal(texture(u_textures[nonuniformEXT(normalTexIdx)], uvY).xyz, bc5);
+		nrm += vec3(tn.x, tn.z * sign(geoN.y), tn.y) * w.y;
+		if (hasArm) arm += texture(u_textures[nonuniformEXT(armTexIdx)], uvY).rgb * w.y;
+	}
+	if (use.z)
+	{
+		albedo += texture(u_textures[nonuniformEXT(diffuseTexIdx)], uvZ).rgb * w.z;
+		const vec3 tn = decodeTriplanarNormal(texture(u_textures[nonuniformEXT(normalTexIdx)], uvZ).xyz, bc5);
+		nrm += vec3(tn.x, tn.y, tn.z * sign(geoN.z)) * w.z;
+		if (hasArm) arm += texture(u_textures[nonuniformEXT(armTexIdx)], uvZ).rgb * w.z;
+	}
+	if (!hasArm)
+		arm = vec3(1.0, 0.9, 0.0);
+
 	TerrainSample s;
-	s.albedo = texture(u_textures[nonuniformEXT(diffuseTexIdx)], uvX).rgb * w.x
-	         + texture(u_textures[nonuniformEXT(diffuseTexIdx)], uvY).rgb * w.y
-	         + texture(u_textures[nonuniformEXT(diffuseTexIdx)], uvZ).rgb * w.z;
-	vec3 arm = vec3(1.0, 0.9, 0.0);
-	if (armTexIdx != 0xFFFFu)
-		arm = texture(u_textures[nonuniformEXT(armTexIdx)], uvX).rgb * w.x
-		    + texture(u_textures[nonuniformEXT(armTexIdx)], uvY).rgb * w.y
-		    + texture(u_textures[nonuniformEXT(armTexIdx)], uvZ).rgb * w.z;
+	s.albedo = albedo;
 	s.ao = arm.r;
 	s.rough = max(arm.g, 0.01);
 	s.metal = arm.b;
-
-	const vec3 nsX = texture(u_textures[nonuniformEXT(normalTexIdx)], uvX).xyz;
-	const vec3 nsY = texture(u_textures[nonuniformEXT(normalTexIdx)], uvY).xyz;
-	const vec3 nsZ = texture(u_textures[nonuniformEXT(normalTexIdx)], uvZ).xyz;
-	vec3 tnX, tnY, tnZ;
-	if (bc5)
-	{
-		const vec2 xy0 = nsX.xy * 2.0 - 1.0, xy1 = nsY.xy * 2.0 - 1.0, xy2 = nsZ.xy * 2.0 - 1.0;
-		tnX = vec3(xy0, sqrt(max(1.0 - dot(xy0, xy0), 0.0)));
-		tnY = vec3(xy1, sqrt(max(1.0 - dot(xy1, xy1), 0.0)));
-		tnZ = vec3(xy2, sqrt(max(1.0 - dot(xy2, xy2), 0.0)));
-	}
-	else
-	{
-		tnX = normalize(nsX * 2.0 - 1.0);
-		tnY = normalize(nsY * 2.0 - 1.0);
-		tnZ = normalize(nsZ * 2.0 - 1.0);
-	}
-	const vec3 nX = vec3(tnX.z * sign(geoN.x), tnX.y, tnX.x);
-	const vec3 nY = vec3(tnY.x, tnY.z * sign(geoN.y), tnY.y);
-	const vec3 nZ = vec3(tnZ.x, tnZ.y, tnZ.z * sign(geoN.z));
-	s.normal = normalize(nX * w.x + nY * w.y + nZ * w.z + geoN * 2.0); // biased toward geoN: detail, not replacement
+	s.normal = normalize(nrm + geoN * 2.0); // biased toward geoN: detail, not replacement
 	return s;
 }
 
@@ -368,7 +393,7 @@ void main()
 	g_viewIndex = int(u_viewIndex);
 #endif
 	const vec3 V = normalize(u_viewPos - in_pos);
-	const vec3 geoN = normalize(in_tbn[2]); // geometric (interpolated vertex) normal
+	const vec3 geoN = normalize(in_normal);
 	const TerrainFields fields = terrainFields(in_pos);
 
 #if TERRAIN_DEBUG_MODE != 0
@@ -377,6 +402,9 @@ void main()
 #endif
 
 	const TerrainSample surf = terrainSplat(in_pos, geoN, fields);
+	// We already sampled the terrain data cascade for fields.waterLevel; hand it to the lit core so
+	// doSunLight's underwater test reuses it instead of re-fetching the same cascade.
+	g_waterLevelOverride = fields.waterLevel;
 	// surf.ao = baked texture AO on top of the screen-space term (ambient/indirect only).
 	const vec3 color = computeLitColor(in_pos, V, surf.normal, surf.albedo, surf.rough, surf.metal, surf.ao);
 	out_color = vec4(color, 1.0); // opaque terrain

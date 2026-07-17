@@ -108,8 +108,15 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
 	// but a dedicated fragment shader splats climate-picked procedural textures instead of sampling the
 	// material's own (procedural terrain chunks carry no textures). Opaque, back-face culled, depth write
 	// on (all layout defaults).
+	// A dedicated vertex shader passes only world position + normal (the terrain FS builds its own tangent
+	// bases and needs no UV), trimming the interpolated attributes from a full TBN+UV to two vec3s.
+	const std::string terrainVertexPath = "Shaders/instanced_indirect_terrain.vs.glsl";
 	const std::string terrainVariantPath = "Shaders/instanced_indirect_terrain.fs.glsl";
 	graphicsPipelineLayout.additionalVariants.push_back(PipelineVariant{
+		.vertexShader = ShaderSource{
+			.text = FileSystem::readFileStr(terrainVertexPath),
+			.debugFilePath = terrainVertexPath,
+		},
 		.fragmentShader = ShaderSource{
 			.text = FileSystem::readFileStr(terrainVariantPath),
 			.debugFilePath = terrainVariantPath,

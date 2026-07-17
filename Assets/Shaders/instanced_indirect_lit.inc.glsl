@@ -99,6 +99,12 @@ layout (binding = 10, std430) readonly buffer GiGridData { float gi_gridData[]; 
 #define UNDERWATER_OCEAN_BINDING 7
 #include "underwater_light.inc.glsl"
 
+// Optional precomputed local water level, so callers that already sampled the terrain data cascade (the
+// terrain variant does, for its splatting) don't pay for a second identical terrainDataAt fetch here.
+// >= this sentinel = not provided -> fetch it. Default keeps every other lit variant unchanged.
+const float WATER_LEVEL_UNSET = 1e30;
+float g_waterLevelOverride = WATER_LEVEL_UNSET;
+
 vec3 doSunLight(vec3 worldPos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOverPi, float metalness, float roughness, float roughnessSq)
 {
 	vec3 L = normalize(u_sunDirection.xyz);
@@ -111,7 +117,7 @@ vec3 doSunLight(vec3 worldPos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOver
 	// water-level fetch + a branch above water; only underwater pixels pay for the wave taps.
 	if (terrainHeightMapPresent())
 	{
-		const float localWaterLevel = terrainDataAt(worldPos.xz).y;
+		const float localWaterLevel = g_waterLevelOverride < WATER_LEVEL_UNSET ? g_waterLevelOverride : terrainDataAt(worldPos.xz).y;
 		float depthBelow = localWaterLevel - worldPos.y;
 		// Swash band: gate against the LIVE displaced surface, not the calm level — a receded wave
 		// leaves sand below the calm line dry (no caustics/absorption tint on exposed bottom), and the
