@@ -9,6 +9,7 @@ import Core.Time;
 
 import RendererVK;
 import File;
+import Spatial;
 
 import :OceanGenerator;
 import :TerrainSampler;
@@ -17,9 +18,8 @@ namespace Procedural
 {
 	OceanGenerator::~OceanGenerator()
 	{
-		// Free the RenderNode before its ObjectContainer, while the renderer/device are still alive.
-		m_node = RenderNode();
-		m_container.reset();
+		// Free the sectors while the renderer/device are still alive (each node before its container).
+		m_sectors.clear();
 	}
 
 	void OceanGenerator::initialize()
@@ -118,8 +118,7 @@ namespace Procedural
 	void OceanGenerator::rebuildGrid()
 	{
 		m_gridDirty = false;
-		m_node = RenderNode(); // release the previous grid first
-		m_container.reset();
+		m_sectors.clear(); // release the previous grid first (nodes before their containers)
 
 		// Geometry clipmap: ring 0 is a full NxN-cell grid at m_ringCell; each outer ring is a square
 		// annulus at double the cell size whose hole is the previous ring's coverage. Per vertex, the
@@ -127,7 +126,11 @@ namespace Procedural
 		// ring-matched displacement mip and to run the CDLOD boundary morph (over each ring's outer band,
 		// odd vertices collapse onto the next ring's lattice and the mip blends +1, so adjacent rings meet
 		// exactly — no stitching geometry needed).
-		const int   N = glm::clamp(m_ringRes & ~3, 16, 1024); // multiple of 4: hole edges stay on the lattice
+		// Built as SECTORS (terrain-chunk style): ring 0 whole, each annulus as 8 rectangular blocks
+		// around its hole, the horizon band as its 4 sides — each its own container/node + spatial entry
+		// so both cull paths (Spatial gate + GPU per-instance frustum test) drop off-screen water.
+		// Sector borders duplicate identical vertices: same position, cell size and morph -> watertight.
+		const int   N = glm::clamp(m_ringRes & ~3, 16, 1024); // multiple of 4: hole/sector edges stay on the lattice
 		const float c0 = glm::max(m_ringCell, 0.01f);
 		const int   rings = glm::clamp(m_rings, 1, 12);
 		constexpr float MORPH_BAND_START = 0.7f; // morph over the outer 30% of each ring
@@ -136,21 +139,70 @@ namespace Procedural
 		std::vector<glm::vec3> normals;
 		std::vector<glm::vec3> texCoords;
 		std::vector<uint32> indices;
-		const size_t vertsPerRing = (size_t)(N + 1) * (N + 1);
-		positions.reserve(vertsPerRing * rings);
-		normals.reserve(vertsPerRing * rings);
-		texCoords.reserve(vertsPerRing * rings);
 
-		for (int r = 0; r < rings; ++r)
-		{
-			const float cell = c0 * float(1 << r);
-			const float outerH = cell * float(N) * 0.5f;              // this ring's coverage half-extent
-			const float holeH = r == 0 ? -1.0f : outerH * 0.5f;       // previous ring's coverage
-			const uint32 base = (uint32)positions.size();
+		// Wraps the accumulated arrays into one sector: container + node + SpatialIndex registration
+		// (SpatialLayer_Terrain like terrain chunks — render culling only, invisible to gameplay
+		// queries; no spawn guard, sectors surround the camera and stamp on the next markVisibleSet).
+		const auto emitSector = [&]() {
+			if (indices.empty())
+				return;
+			MeshGeometryDesc geom;
+			geom.positions = positions.data();
+			geom.normals = normals.data();
+			geom.texCoords = texCoords.data();
+			geom.numVertices = (uint32)positions.size();
+			geom.indices = indices.data();
+			geom.numIndices = (uint32)indices.size();
+			geom.name = "Ocean";
 
-			for (int j = 0; j <= N; ++j)
+			std::unique_ptr<ISceneData> scene = ISceneData::createMeshScene(geom);
+			if (scene)
 			{
-				for (int i = 0; i <= N; ++i)
+				ObjectContainer::MaterialOverrides overrides;
+				overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::Ocean;
+				overrides.useSceneTextures = true;
+				overrides.excludeFromRayTracing = true; // the animated water surface isn't in the TLAS
+				// No meshopt LOD chains (same as terrain chunks): the clipmap IS its own LOD — a generated
+				// level would collapse the lattice the CDLOD morph and ring-matched mips depend on. The
+				// old single-mesh ocean carried chains too but projected too large to ever leave LOD0;
+				// per-sector meshes are small enough that the selector actually used them (stretched
+				// triangles, per-sector pops, cracked borders).
+				overrides.disableGeneratedLods = true;
+				auto container = std::make_unique<ObjectContainer>();
+				if (container->initialize(*scene, &overrides))
+				{
+					Sector& s = m_sectors.emplace_back();
+					s.node = container->spawnRootNode(
+						Transform(glm::vec3(0.0f, m_seaLevel, 0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+					s.container = std::move(container);
+					glm::vec3 mn(FLT_MAX), mx(-FLT_MAX);
+					for (const glm::vec3& p : positions)
+					{
+						mn = glm::min(mn, p);
+						mx = glm::max(mx, p);
+					}
+					s.localCenter = (mn + mx) * 0.5f;
+					s.radius = glm::length((mx - mn) * 0.5f) + 8.0f; // headroom for wave/swash displacement
+					s.spatialEntry = SpatialEntry(Globals::spatialIndex.registerEntry(
+						glm::dvec3(s.localCenter) + glm::dvec3(0.0, m_seaLevel, 0.0), s.radius, 0ull,
+						SpatialLayer_Terrain, false));
+				}
+			}
+			positions.clear();
+			normals.clear();
+			texCoords.clear();
+			indices.clear();
+		};
+
+		// Vertices + quads for cell range [i0,i1) x [j0,j1) of ring r (vertex grid is the +1 superset).
+		const auto emitBlock = [&](int r, int i0, int i1, int j0, int j1) {
+			const float cell = c0 * float(1 << r);
+			const float outerH = cell * float(N) * 0.5f; // this ring's coverage half-extent
+			const uint32 base = (uint32)positions.size();
+			const int w = i1 - i0 + 1;
+			for (int j = j0; j <= j1; ++j)
+			{
+				for (int i = i0; i <= i1; ++i)
 				{
 					const float x = float(i - N / 2) * cell;
 					const float z = float(j - N / 2) * cell;
@@ -161,26 +213,39 @@ namespace Procedural
 					texCoords.push_back(glm::vec3(cell, morph, 0.0f));
 				}
 			}
-			for (int j = 0; j < N; ++j)
+			for (int j = j0; j < j1; ++j)
 			{
-				for (int i = 0; i < N; ++i)
+				for (int i = i0; i < i1; ++i)
 				{
-					// Skip cells fully inside the hole (covered by the finer ring).
-					const float xMax = glm::max(std::fabs(float(i - N / 2)), std::fabs(float(i + 1 - N / 2))) * cell;
-					const float zMax = glm::max(std::fabs(float(j - N / 2)), std::fabs(float(j + 1 - N / 2))) * cell;
-					if (r > 0 && glm::max(xMax, zMax) <= holeH + cell * 0.25f)
-						continue;
-					const uint32 a = base + (uint32)(j * (N + 1) + i);
+					const uint32 a = base + (uint32)((j - j0) * w + (i - i0));
 					const uint32 b = a + 1;
-					const uint32 c = a + (uint32)(N + 1);
+					const uint32 c = a + (uint32)w;
 					const uint32 d = c + 1;
 					indices.push_back(a); indices.push_back(c); indices.push_back(b);
 					indices.push_back(b); indices.push_back(c); indices.push_back(d);
 				}
 			}
+		};
+
+		// Ring 0: one sector (always around the camera, never worth splitting).
+		emitBlock(0, 0, N, 0, N);
+		emitSector();
+		// Outer rings: the hole is exactly the central [N/4, 3N/4) cell block (the previous ring's
+		// coverage), leaving 4 corner blocks + 4 edge strips.
+		const int q = N / 4, q3 = 3 * N / 4;
+		for (int r = 1; r < rings; ++r)
+		{
+			emitBlock(r, 0, q, 0, q);    emitSector(); // corners
+			emitBlock(r, q3, N, 0, q);   emitSector();
+			emitBlock(r, 0, q, q3, N);   emitSector();
+			emitBlock(r, q3, N, q3, N);  emitSector();
+			emitBlock(r, q, q3, 0, q);   emitSector(); // edge strips
+			emitBlock(r, q, q3, q3, N);  emitSector();
+			emitBlock(r, 0, q, q, q3);   emitSector();
+			emitBlock(r, q3, N, q, q3);  emitSector();
 		}
 
-		// Horizon band: one coarse quad ring from the outermost ring's edge to the camera far plane, so
+		// Horizon band: a coarse quad ring from the outermost ring's edge to the camera far plane, so
 		// the sea reaches the horizon in every view direction instead of ending at the ring reach. Its
 		// inner edge sits on the last ring's fully-morphed lattice (2x its cell, which the CDLOD morph
 		// collapses the edge onto — morph hits exactly 1 there) with the matching texcoord cell size, so
@@ -188,6 +253,7 @@ namespace Procedural
 		// carry a proportionally scaled cell size: they band-limit to the coarsest mips (near-flat), which
 		// is what sub-pixel waves at that distance resolve to anyway; shading stays per-pixel regardless.
 		// Chebyshev half-extent = far plane covers every Euclidean far-plane point (diagonals clip first).
+		// One sector per side (corner vertices duplicated between sides — identical, watertight).
 		if (m_horizonBand && m_lastFar > 0.0f)
 		{
 			const float lastCell = c0 * float(1 << (rings - 1));
@@ -197,60 +263,37 @@ namespace Procedural
 				const float step = 2.0f * lastCell;
 				const float scale = m_lastFar / outerH;
 				const int M = N / 2; // segments per side on the morphed lattice
-				std::vector<glm::vec2> perim;
-				perim.reserve((size_t)M * 4);
-				for (int i = 0; i < M; ++i) perim.push_back(glm::vec2(-outerH + step * float(i), -outerH));
-				for (int i = 0; i < M; ++i) perim.push_back(glm::vec2(outerH, -outerH + step * float(i)));
-				for (int i = 0; i < M; ++i) perim.push_back(glm::vec2(outerH - step * float(i), outerH));
-				for (int i = 0; i < M; ++i) perim.push_back(glm::vec2(-outerH, outerH - step * float(i)));
-				const uint32 base = (uint32)positions.size();
-				const uint32 P = (uint32)perim.size();
-				for (const glm::vec2& p : perim)
+				const glm::vec2 corners[5] = {
+					{ -outerH, -outerH }, { outerH, -outerH }, { outerH, outerH }, { -outerH, outerH }, { -outerH, -outerH } };
+				for (int side = 0; side < 4; ++side)
 				{
-					positions.push_back(glm::vec3(p.x, 0.0f, p.y));
-					normals.push_back(glm::vec3(0.0f, 1.0f, 0.0f));
-					texCoords.push_back(glm::vec3(step, 0.0f, 0.0f));
-				}
-				for (const glm::vec2& p : perim)
-				{
-					positions.push_back(glm::vec3(p.x * scale, 0.0f, p.y * scale));
-					normals.push_back(glm::vec3(0.0f, 1.0f, 0.0f));
-					texCoords.push_back(glm::vec3(step * scale, 0.0f, 0.0f));
-				}
-				for (uint32 i = 0; i < P; ++i)
-				{
-					const uint32 j = (i + 1) % P;
-					indices.push_back(base + i); indices.push_back(base + j); indices.push_back(base + P + i);
-					indices.push_back(base + j); indices.push_back(base + P + j); indices.push_back(base + P + i);
+					const glm::vec2 a = corners[side];
+					const glm::vec2 d = (corners[side + 1] - a) / float(M);
+					for (int k = 0; k <= M; ++k)
+					{
+						const glm::vec2 p = a + d * float(k);
+						positions.push_back(glm::vec3(p.x, 0.0f, p.y));
+						normals.push_back(glm::vec3(0.0f, 1.0f, 0.0f));
+						texCoords.push_back(glm::vec3(step, 0.0f, 0.0f));
+					}
+					for (int k = 0; k <= M; ++k)
+					{
+						const glm::vec2 p = (a + d * float(k)) * scale;
+						positions.push_back(glm::vec3(p.x, 0.0f, p.y));
+						normals.push_back(glm::vec3(0.0f, 1.0f, 0.0f));
+						texCoords.push_back(glm::vec3(step * scale, 0.0f, 0.0f));
+					}
+					for (uint32 k = 0; k < (uint32)M; ++k)
+					{
+						const uint32 in0 = k, in1 = k + 1;
+						const uint32 out0 = (uint32)(M + 1) + k, out1 = out0 + 1;
+						indices.push_back(in0); indices.push_back(in1); indices.push_back(out0);
+						indices.push_back(in1); indices.push_back(out1); indices.push_back(out0);
+					}
+					emitSector();
 				}
 			}
 		}
-
-		MeshGeometryDesc geom;
-		geom.positions = positions.data();
-		geom.normals = normals.data();
-		geom.texCoords = texCoords.data();
-		geom.numVertices = (uint32)positions.size();
-		geom.indices = indices.data();
-		geom.numIndices = (uint32)indices.size();
-		geom.name = "Ocean";
-
-		std::unique_ptr<ISceneData> scene = ISceneData::createMeshScene(geom);
-		if (!scene)
-			return;
-
-		ObjectContainer::MaterialOverrides overrides;
-		overrides.pipelineIdx = RendererVKLayout::EPipelineIndex::Ocean;
-		overrides.useSceneTextures = true;
-		overrides.excludeFromRayTracing = true; // the animated water surface isn't in the TLAS
-		auto container = std::make_unique<ObjectContainer>();
-		if (!container->initialize(*scene, &overrides))
-			return;
-
-		RenderNode node = container->spawnRootNode(
-			Transform(glm::vec3(0.0f, m_seaLevel, 0.0f), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
-		m_container = std::move(container);
-		m_node = std::move(node);
 	}
 
 	// Baked flow -> simulation wind. The FFT field travels along the wind its SPECTRUM was built with, and
@@ -384,9 +427,9 @@ namespace Procedural
 			m_lastFar = camera.far;
 			m_gridDirty = true;
 		}
-		if (m_gridDirty || !m_node.isValid())
+		if (m_gridDirty || m_sectors.empty())
 			rebuildGrid();
-		if (!m_node.isValid())
+		if (m_sectors.empty())
 			return;
 
 		// Follow the camera, snapped to a multiple of the ring lattices so vertices re-land on the exact
@@ -396,9 +439,27 @@ namespace Procedural
 		const float snap = 8.0f * glm::max(m_ringCell, 0.01f);
 		const float px = std::floor(camera.position.x / snap + 0.5f) * snap;
 		const float pz = std::floor(camera.position.z / snap + 0.5f) * snap;
-		m_node.setTransform(Transform(glm::vec3(px, m_seaLevel, pz), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+		const Transform xf(glm::vec3(px, m_seaLevel, pz), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 
-		renderer.renderNode(m_node, RendererVKLayout::PASS_MAIN);
+		// Push the visible sectors, terrain-chunk style: re-center each sector's spatial entry on the
+		// snapped node position, then gate on the Main-pass stamp (Spatial/Culling >= Cull). The ocean
+		// draws PASS_MAIN only, so a main-culled sector has nothing to push at all — and the GPU
+		// per-instance frustum cull refines whatever the CPU gate lets through.
+		const SpatialCullingConfig& culling = Globals::spatialIndex.getCullingConfig();
+		const bool gate = culling.mode >= int(ESpatialCullMode::Cull);
+		for (Sector& s : m_sectors)
+		{
+			if (!s.node.isValid())
+				continue;
+			s.node.setTransform(xf);
+			if (s.spatialEntry.isValid())
+				Globals::spatialIndex.updateEntry(s.spatialEntry.handle(),
+					glm::dvec3(px + s.localCenter.x, m_seaLevel + s.localCenter.y, pz + s.localCenter.z), s.radius);
+			if (gate && s.spatialEntry.isValid()
+				&& !(Globals::spatialIndex.getPassMask(s.spatialEntry.handle()) & SpatialPassBit_Main))
+				continue;
+			renderer.renderNode(s.node, RendererVKLayout::PASS_MAIN);
+		}
 
 		// Refresh the CPU copy of the GPU displacement readback inside this frame's fence-safe window
 		// (the slot's buffer is stable between beginFrame and present, and physics updates BEFORE

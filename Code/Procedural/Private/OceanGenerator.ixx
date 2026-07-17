@@ -6,6 +6,7 @@ import Core.Camera;
 import Core.Transform;
 
 import RendererVK;
+import Spatial;
 
 import :TerrainSampler;
 import :HeightMapBaker;
@@ -20,8 +21,12 @@ export namespace Procedural
 	// transitions use a CDLOD-style vertex morph baked per vertex (texcoord = ring cell size + morph
 	// weight): over each ring's outer band, odd vertices collapse onto the next ring's coarser lattice and
 	// the sampled mip blends +1, so the boundary matches the next ring exactly — seamless by construction.
-	// The whole clipmap is ONE mesh on one node, snapped to a lattice multiple so vertices re-land on the
-	// same world positions as the camera moves.
+	// The clipmap is split into SECTORS, terrain-chunk style — ring 0 whole, each outer ring as 8
+	// rectangular blocks around its hole, the horizon band as its 4 sides — each a container/node with
+	// its own SpatialIndex entry, so the CPU visibility gate and the GPU per-instance frustum cull drop
+	// off-screen water instead of vertex-shading the whole multi-km disc every frame. All sectors share
+	// one transform, snapped to a lattice multiple so vertices re-land on the same world positions as
+	// the camera moves; sector borders duplicate identical vertices, so splitting can't open seams.
 	//
 	// Everything else runs on the GPU: OceanSimulationPipeline simulates the wave spectrum + IFFT into
 	// displacement/gradient maps each frame, the Ocean pipeline variant displaces this mesh by them and
@@ -83,9 +88,9 @@ export namespace Procedural
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---
 		bool  m_enabled = true;
 		float m_seaLevel = 0.0f;   // mirrors the terrain's datum; set every update(), never tweaked here
-		float m_ringCell = 0.125f;     // ring 0 cell size (m); doubles per ring. Reach = ringCell*res/2*2^(rings-1)
-		int   m_ringRes = 512;         // cells per axis per ring (ring 0 is a full grid, outer rings are annuli)
-		int   m_rings = 8;             // ring count (defaults: 16m fine region, ~1km reach)
+		float m_ringCell = 2.0ff;     // ring 0 cell size (m); doubles per ring. Reach = ringCell*res/2*2^(rings-1)
+		int   m_ringRes = 256;         // cells per axis per ring (ring 0 is a full grid, outer rings are annuli)
+		int   m_rings = 5;             // ring count (defaults: 16m fine region, ~1km reach)
 		// One coarse quad band appended past the outermost ring, stretching its edge lattice out to the
 		// camera far plane — the sea meets the horizon in every direction instead of ending at the ring
 		// reach. Its inner edge sits on the last ring's fully-morphed (2x cell) lattice at the matching
@@ -168,8 +173,18 @@ export namespace Procedural
 
 		bool m_gridDirty = true;
 
-		// container declared first -> destroyed AFTER the node it owns the meshes for
-		std::unique_ptr<ObjectContainer> m_container;
-		RenderNode m_node;
+		// One clipmap sector per draw (see the class comment). Registered in the SpatialIndex like
+		// terrain chunks (SpatialLayer_Terrain, no spawn guard); unlike chunks they MOVE — updateEntry
+		// re-centers them on the snapped node position every frame, so they stay in the dynamic tier.
+		struct Sector
+		{
+			std::unique_ptr<ObjectContainer> container; // declared first -> destroyed AFTER the node
+			RenderNode node;
+			SpatialEntry spatialEntry;
+			glm::vec3 localCenter = glm::vec3(0.0f); // mesh-local bounds center (the node snap adds on top)
+			float radius = 0.0f; // bounds sphere radius; the XZ half-diagonal dominates, so it also covers
+			                     // the vertical wave/swash displacement the flat mesh knows nothing about
+		};
+		std::vector<Sector> m_sectors;
 	};
 }
