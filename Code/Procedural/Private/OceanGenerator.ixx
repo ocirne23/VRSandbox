@@ -36,25 +36,18 @@ export namespace Procedural
 		OceanGenerator& operator=(const OceanGenerator&) = delete;
 
 		void initialize();                                     // registers Tweaks
-		// Per-frame: push params + render (after beginFrame). terrain = the streamer's live height field
-		// (TerrainStreamer::activeClimateMaps(), nullptr = no terrain): with it the ocean bakes a coarse
-		// water-depth map around the camera on a worker thread — shallow water fades the waves (fake
-		// shoaling), the waterline grows a surf band, and waves never poke through land.
-		// `reach` sinks the baked water level below ground the ocean cannot reach (nullptr = off); it comes
-		// from the terrain streamer rather than being owned here ON PURPOSE. This map overrides the
-		// terrain-data map inside its range, so the two must bake the SAME rule — a second copy of the
-		// setting would sit at its defaults while the tweaks moved the other, and the disagreement would
-		// show as a ring of swash appearing where one map hands over to the other. See applyWaterReach.
+		// Per-frame: push params + render (after beginFrame). terrainData = the streamer's active baked
+		// terrain-data map (TerrainStreamer::activeTerrainData(), nullptr = no terrain). The GPU passes
+		// read the SAME bake (the fog terrain cascades) for water depth/level — shoaling, surf, swash,
+		// the land cull — and this CPU copy feeds buoyancy and wind steering, so the drawn water and the
+		// simulated water agree by construction.
 		// `seaLevel` is the world datum, and it comes from the TERRAIN (TerrainStreamer::seaLevel) rather
 		// than being a tweak here. It cannot be two values: the terrain generator builds its heights around
 		// it (V3's elevations are relative to it, which is why moving it regenerates chunks), the ocean
 		// floats its surface on it, and the swash gate compares the two — so a fork between them switches
 		// the swash off everywhere rather than just looking off.
-		// `flow` fills the shore map's flow-direction channel (waves travel toward land through the surf
-		// zone) and comes from the terrain streamer for the same one-rule reason as `reach` — the app feeds
-		// this ocean's windAngle() back into it so the offshore fade returns to the actual swell heading.
-		void update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain = nullptr,
-		            const WaterReach* reach = nullptr, float seaLevel = 0.0f, const FlowField* flow = nullptr);
+		void update(Renderer& renderer, const Camera& camera,
+		            std::shared_ptr<const BakedTerrainData> terrainData = nullptr, float seaLevel = 0.0f);
 
 		// Water surface world Y at (x, z), CPU-evaluated from the GPU displacement readback (a full mirror
 		// of the clipmap vertex shader: cascade sum, shoaling fade, swash run-up and the waterline
@@ -81,9 +74,7 @@ export namespace Procedural
 		// travel inland at the coast. See the .cpp.
 		float steeredWindAngle(const Camera& camera);
 		void rebuildGrid();
-		void updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain,
-		                    const WaterReach* reach, const FlowField* flow);
-		glm::vec2 sampleShoreData(float x, float z) const;          // (water depth, water level) from the CPU shore copy
+		glm::vec2 sampleShoreData(float x, float z) const;          // (water depth, water level) from the terrain-data CPU copy
 		float swashReach() const;                                   // run-up band height; mirrors the UBO's estimate
 		float swashWeight(float depth, float waterLevel) const;     // mirrors oceanSwashWeight
 		glm::vec3 sampleDisplacement(glm::vec2 worldXZ) const;      // CPU mirror of oceanSampleDisplacement
@@ -143,10 +134,7 @@ export namespace Procedural
 		float m_foamBoost = 0.67f;    // turbulence -> fold-threshold relaxation (aged-foam amount)
 		float m_turbidity = 0.0f;    // entrained bubbles: milky brightening + roughness of the wake
 
-		// --- Shore interaction (terrain height bake; see updateShoreMap) ---
-		bool  m_shoreEnabled = true;
-		float m_shoreRange = 1024.0f;   // world size (m) the baked map covers, centered on the camera
-
+		// --- Shore interaction (driven by the streamer's baked terrain-data map) ---
 		float m_shoalScale = 0.02f;     // waves fade below depth = scale * cascade patch size
 		float m_shoreFoamDepth = 8.0f;  // surf band: water-column height (m) that churns white; 0 = off
 		float m_shoreFoamMax = 0.75f;   // surf band opacity cap: keeps the refracted bottom visible through the foam
@@ -165,14 +153,10 @@ export namespace Procedural
 		float m_rtRayCutoffDist = 0.0f;       // camera distance (m) beyond which NO rays trace (analytic
 		                                      // bottom + sky fallbacks — the same paths misses take); 0 = unlimited
 
-		// Bake state (HeightMapBaker: async, one bake at a time; the active map keeps working until the
-		// replacement lands). The map stores raw terrain heights; depth = live sea level - height, so
-		// sea-level changes need no re-bake.
-		HeightMapBaker m_shoreBaker;
-		glm::vec2 m_shoreCenter = glm::vec2(0.0f); // region of the ACTIVE (uploaded) map
-		float m_shoreActiveRange = 0.0f;
-		bool  m_shoreValid = false;
-		std::vector<float> m_shoreHeights;         // CPU copy of the active map: RGBA texels (terrain height, water level, flow, spare)
+		// The streamer's active baked terrain-data map (adopted each update()); the shared_ptr keeps this
+		// snapshot alive across the frame even while the streamer ships a replacement bake — buoyancy
+		// queries (physics, before the next update) and wind steering read it.
+		std::shared_ptr<const BakedTerrainData> m_terrainData;
 
 		// CPU copy of the GPU displacement readback tile, refreshed every update() inside the frame's
 		// fence-safe window — sampleWaterHeight can then run at ANY point in the frame (physics updates

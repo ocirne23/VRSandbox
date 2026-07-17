@@ -263,23 +263,15 @@ public:
     void setOceanWaveTrough(float meters) { m_oceanWaveTrough = glm::max(meters, 0.0f); }
     // Flipping OceanParams::hitLighting rebuilds the ocean fragment variant (GPU idle + shader reload).
     void setOceanParams(const OceanParams& ocean);
-    // Replaces the ocean's shore map (OCEAN_SHORE_RES^2 RGBA texel quads, interleaved floats: R = raw
-    // world-space terrain height, G = water surface level — sea level over the open ocean, higher where
-    // rivers/lakes sit at altitude, B = 8-bit river flow direction driving the local wave-travel rotation
-    // (0 = none), A = spare) covering worldSize meters centered on centerXZ. The shaders derive the water
-    // depth live as water level - height, and the ocean clipmap lifts its vertices by water level - sea
-    // level. Staged ping-pong (BakedWorldMap): active next frame together with its UBO center/range; no
-    // GPU sync, no command-buffer re-record.
-    void setOceanShoreMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, float worldSize) { m_oceanShoreMap.upload(heightTexels, centerXZ, glm::vec2(worldSize, 0.0f), 0.0f, m_swapChain.getCurrentFrameIndex()); }
-    void clearOceanShoreMap() { m_oceanShoreMap.clear(); } // ocean falls back to the fog terrain map / open-ocean depth
     // Replaces the fog terrain map (FOG_TERRAIN_CASCADES layers of FOG_TERRAIN_RES^2 RGBA texel quads,
     // interleaved floats: R = raw world-space terrain height, G = water surface level, B = regional fog
     // thickness [0,1], A = spare; near cascade first) centered on centerXZ; cascade i covers
     // cascadeWorldSizes[i] meters (far cascade = same texel count over a larger range, so long-range
     // data costs no extra memory). The height fog base rises by Fog/Terrain Follow x the local terrain
     // height (clamped up to seaLevel, so fog rests on the water), Fog/Region strength modulates density
-    // by the fog channel, and the ocean uses the same cascades as its height/water-level fallback beyond
-    // the shore map. Staged ping-pong like setOceanShoreMap.
+    // by the fog channel, and the ocean reads the same cascades for its water depth/level (shoaling,
+    // surf, swash, land cull). Staged ping-pong (BakedWorldMap): active next frame together with its
+    // UBO center/ranges; no GPU sync, no command-buffer re-record.
     void setFogTerrainHeightMap(std::span<const float> heightTexels, const glm::vec2& centerXZ, const glm::vec2& cascadeWorldSizes, float seaLevel) { m_fogTerrainMap.upload(heightTexels, centerXZ, cascadeWorldSizes, seaLevel, m_swapChain.getCurrentFrameIndex()); }
     void clearFogTerrainHeightMap() { m_fogTerrainMap.clear(); } // fog reverts to the flat height base
     // This frame slot's ocean displacement readback: RGBA16F texels (Dx, h, Dz, dDxz), outRes^2 per
@@ -535,7 +527,6 @@ private:
     // CPU-baked terrain height snapshots around the camera (raw surface height, world meters). The shore
     // map drives the ocean's shoaling/surf/waterline; the fog terrain map (2 cascades) drives the fog's
     // terrain-following height base AND is the ocean's coarse fallback outside the shore map's range.
-    BakedWorldMap m_oceanShoreMap;
     BakedWorldMap m_fogTerrainMap;
     TaaPipeline m_taaPipeline;
     ShadowCullComputePipeline m_shadowCullComputePipeline;

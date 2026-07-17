@@ -7,6 +7,21 @@ import :TerrainSampler;
 
 export namespace Procedural
 {
+	// A shipped terrain-data bake, shared out for CPU consumers (the ocean's buoyancy sampling and
+	// wind-steering votes read the near cascade). Held by shared_ptr: the streamer replaces the whole
+	// object when a re-bake ships, so a consumer's copy of the pointer stays valid across the swap.
+	// Texel layout matches the GPU map (terrain_height.inc.glsl): cascade-major, res^2 RGBA floats per
+	// cascade — R = terrain height (world Y), G = water surface level, B = 4x8 packed bits (flow
+	// direction in bits 8-15; bit-cast, never float arithmetic), A = macro altitude.
+	struct BakedTerrainData
+	{
+		std::vector<float> texels;
+		glm::vec2 center = glm::vec2(0.0f);
+		glm::vec2 ranges = glm::vec2(0.0f); // world size per cascade
+		uint32 res = 0;
+		uint32 cascades = 0;
+	};
+
 	// Sea level everywhere is a lie the ocean believes. A generator that models no lakes (V3) reports the
 	// ocean's level at every point on the planet, so every scrap of terrain within a metre of it — an
 	// inland hollow, a river flat, anything — reads as shoreline and the ocean runs swash up it.
@@ -180,26 +195,22 @@ export namespace Procedural
 	//   - anywhere else                               -> downhill (none where flatter than cfg.minSlope)
 	// Cost is a handful of O(n) sweeps (feature transform, running-window blur), independent of the radii.
 	inline void applyFlowField(float* texels, uint32 res, uint32 channels, double texelSize,
-	                           float seaLevel, bool shoreLayout, const FlowField& cfg)
+	                           float seaLevel, const FlowField& cfg)
 	{
 		if (channels < 4 || cfg.oceanRange <= 0.0f)
 			return;
 		const size_t n = (size_t)res * res;
 		constexpr float kSeaEps = 0.05f; // the same "is this the ocean's level" test as applyWaterReach
 
-		// The layout's 8 flow bits: the shore map keeps a plain 0..255 count in B, the terrain-data map
-		// packs them as bits 8-15 of the bit-cast climate channel (bit ops only — the packed value may
-		// form NaN patterns, so no float arithmetic may ever touch it).
-		const auto readEnc = [shoreLayout](const float* t) -> uint32
+		// The 8 flow bits ride bits 8-15 of the bit-cast climate channel (bit ops only — the packed
+		// value may form NaN patterns, so no float arithmetic may ever touch it).
+		const auto readEnc = [](const float* t) -> uint32
 		{
-			return shoreLayout ? (uint32)(t[2] + 0.5f) : (std::bit_cast<uint32>(t[2]) >> 8) & 255u;
+			return (std::bit_cast<uint32>(t[2]) >> 8) & 255u;
 		};
-		const auto writeEnc = [shoreLayout](float* t, uint32 enc)
+		const auto writeEnc = [](float* t, uint32 enc)
 		{
-			if (shoreLayout)
-				t[2] = (float)enc;
-			else
-				t[2] = std::bit_cast<float>((std::bit_cast<uint32>(t[2]) & ~0x0000FF00u) | (enc << 8));
+			t[2] = std::bit_cast<float>((std::bit_cast<uint32>(t[2]) & ~0x0000FF00u) | (enc << 8));
 		};
 
 		// Nearest-land feature transform, dead-reckoning style: the two chamfer sweeps of applyWaterReach,
@@ -365,9 +376,9 @@ export namespace Procedural
 	}
 
 	// Async single-bake driver for camera-centered terrain height snapshots: res^2 floats of raw surface
-	// height (world Y, m) per cascade, cascade-major, sampled from any ITerrainSampler. Shared by the
-	// ocean shore map (1 cascade) and the fog terrain height map (2 cascades); both ship the result to a
-	// renderer-side BakedWorldMap. One bake in flight at a time; a bake pins its sampler via the
+	// height (world Y, m) per cascade, cascade-major, sampled from any ITerrainSampler. The terrain
+	// streamer bakes the shared terrain-data map through this and ships the result to a renderer-side
+	// BakedWorldMap. One bake in flight at a time; a bake pins its sampler via the
 	// captured shared_ptr, and the active map keeps working until the replacement lands. Re-bakes when the
 	// maps identity or the ranges change, or the camera strays a quarter of the FINEST range from the
 	// active center; centers snap to the COARSEST cascade's texel lattice so no cascade's features ever
@@ -386,21 +397,16 @@ export namespace Procedural
 		// a completed bake should ship to the renderer (out is filled). active = false drops any finished
 		// bake and invalidates (the caller clears its renderer-side map); maps must be non-null while
 		// active. numCascades <= 2; ranges.y is ignored when numCascades == 1. channels (interleaved per
-		// texel): 1 = terrain height; 2 = height + water level; 4 = four-channel layouts (4 not 3: RGB32F
-		// is not a sampled-image format on most GPUs):
-		//   shoreLayout = false (fog terrain cascades): (height, water level, PACKED fog thickness |
-		//     flow direction | temperature | humidity 4x8 bits BIT-CAST into the float texel, MACRO
-		//     ALTITUDE). The packed channel tolerates no bilinear filtering and no float arithmetic (NaN
-		//     patterns possible) — shaders decode texels via floatBitsToUint (terrainClimateAt); altitude
-		//     is a plain float (bilinear-safe).
-		//   shoreLayout = true (ocean shore map): (height, water level, flow-direction 8 bits — 0 = none,
-		//     1..255 = angle/2pi — read nearest for the wave-direction rotation, spare).
-		// Both layouts carry the same 8-bit flow direction (see encodeFlowAngle01/applyFlowField): the
-		// generator's authored angle where it has one, the computed toward-land/downhill field where
-		// flowField is non-null.
+		// texel): 1 = terrain height; 2 = height + water level; 4 = the terrain-data layout (4 not 3:
+		// RGB32F is not a sampled-image format on most GPUs): (height, water level, PACKED fog thickness
+		// | flow direction | temperature | humidity 4x8 bits BIT-CAST into the float texel, MACRO
+		// ALTITUDE). The packed channel tolerates no bilinear filtering and no float arithmetic (NaN
+		// patterns possible) — shaders decode texels via floatBitsToUint (terrainClimateAt); altitude is
+		// a plain float (bilinear-safe). The flow bits carry the generator's authored angle where it has
+		// one, the computed toward-land/downhill field where flowField is non-null (applyFlowField).
 		bool update(Baked& out, bool active, const std::shared_ptr<const ITerrainSampler>& maps,
 			const glm::vec2& camXZ, glm::vec2 ranges, uint32 res, uint32 numCascades, uint32 channels = 1,
-			bool shoreLayout = false, const WaterReach* waterReach = nullptr, const FlowField* flowField = nullptr)
+			const WaterReach* waterReach = nullptr, const FlowField* flowField = nullptr)
 		{
 			bool shipped = false;
 			if (m_bakeInFlight && m_bakeCounter.isDone())
@@ -471,13 +477,13 @@ export namespace Procedural
 			// The bake parameters exceed the job's 64-byte inline capture - box them (result rides
 			// in the same box, written before the counter signals; read only after isDone).
 			m_bake = std::make_shared<BakeJob>(BakeJob{ maps, center, ranges, res, numCascades, channels,
-				shoreLayout, reachNow, reachOnNow, flowNow, flowOnNow, {} });
+				reachNow, reachOnNow, flowNow, flowOnNow, {} });
 			m_bakeInFlight = true;
 			Globals::jobSystem.submit([bake = m_bake]() {
 				const std::shared_ptr<const ITerrainSampler>& maps = bake->maps;
 				const glm::vec2 center = bake->center, ranges = bake->ranges;
 				const uint32 res = bake->res, numCascades = bake->numCascades, channels = bake->channels;
-				const bool shoreLayout = bake->shoreLayout, applyReach = bake->applyReach, applyFlow = bake->applyFlow;
+				const bool applyReach = bake->applyReach, applyFlow = bake->applyFlow;
 				const WaterReach reach = bake->reach;
 				const FlowField flow = bake->flow;
 				std::vector<float> heights((size_t)numCascades * res * res * channels);
@@ -511,47 +517,28 @@ export namespace Procedural
 								texel[1] = p.waterLevel;
 							if (channels > 3)
 							{
-								if (shoreLayout)
-								{
-									texel[2] = (float)encodeFlowAngle01(p.flowAngle01);
-									texel[3] = 0.0f; // spare
-								}
-								else
-								{
-									// 4x8-bit climate pack: fog thickness [0,1] | FREE | SEA-LEVEL TEMPERATURE
-									// (TEMPERATURE_MIN_C..MAX_C) | humidity [0,1] (0 -> 0.0, 255 -> 1.0
-									// exactly). 32 bits exceed
-									// float32's exact-integer range, so the bits are BIT-CAST into the texel
-									// (std::bit_cast here, floatBitsToUint in terrain_height.inc.glsl). The
-									// whole path — vector moves, staging memcpy, copyBufferToImage, texelFetch
-									// — carries raw bits with NO float arithmetic; some packs form NaN bit
-									// patterns, which any arithmetic (the old float(packed)/+0.5 decode) would
-									// corrupt. Keep it bit-exact end to end.
-									// Temperature is stored as the SEA-LEVEL BASELINE, not as a sample: a sample
-									// is only valid at the height it was taken from, and the two cascades bake
-									// different heights for the same spot — the near one the full-detail
-									// surface, the far one its 7.68 km average, which cannot know a peak
-									// exists. Baking samples left the far cascade reporting the temperature of
-									// the plateau a peak stands on, 10.6 C too warm, and its texture flipped at
-									// the crossfade. A baseline has no anchor to disagree about: consumers
-									// evaluate it at the height they shade (terrainTemperatureAt), against the
-									// generator's one published lapse rate (u_terrainParams.y).
-									// Bits 8-15 carry the FLOW DIRECTION (encodeFlowAngle01: 0 = none,
-									// 1..255 = angle/2pi). The sampler's authored angle goes in here; where it
-									// has none, applyFlowField below fills the computed toward-land/downhill
-									// field. Before this they held the fog height-falloff, which was pure
-									// redundancy (a function of temperature, so the shaders recompute it), then
-									// briefly a per-texel lapse rate, which measured as redundant too — both
-									// cascades regress the same data, so their rates agreed and removing it left
-									// near-vs-far disagreement unchanged at 0.15 C.
-									const auto q8 = [](float f) { return (uint32)(glm::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
-									const uint32 packed = q8(p.fogThickness)
-										| (encodeFlowAngle01(p.flowAngle01) << 8)
-										| (q8(temperatureTo01(p.temperatureSeaLevel)) << 16)
-										| (q8(p.humidity) << 24);
-									texel[2] = std::bit_cast<float>(packed);
-									texel[3] = p.altitude; // macro elevation (terrain coloring)
-								}
+								// 4x8-bit climate pack: fog thickness [0,1] | FLOW DIRECTION (bits 8-15,
+								// encodeFlowAngle01; the sampler's authored angle, applyFlowField fills the
+								// computed field where it has none) | SEA-LEVEL TEMPERATURE | humidity [0,1].
+								// 32 bits exceed float32's exact-integer range, so the bits are BIT-CAST into
+								// the texel (std::bit_cast here, floatBitsToUint in terrain_height.inc.glsl).
+								// The whole path — vector moves, staging memcpy, copyBufferToImage, texelFetch
+								// — carries raw bits with NO float arithmetic; some packs form NaN bit
+								// patterns, which any arithmetic would corrupt. Keep it bit-exact end to end.
+								// Temperature is stored as the SEA-LEVEL BASELINE, not as a sample: a sample
+								// is only valid at the height it was taken from, and the two cascades bake
+								// different heights for the same spot — baking samples left the far cascade
+								// 10.6 C too warm at peaks and its texture flipped at the crossfade. A
+								// baseline has no anchor to disagree about: consumers evaluate it at the
+								// height they shade (terrainTemperatureAt) against the generator's one
+								// published lapse rate (u_terrainParams.y).
+								const auto q8 = [](float f) { return (uint32)(glm::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); };
+								const uint32 packed = q8(p.fogThickness)
+									| (encodeFlowAngle01(p.flowAngle01) << 8)
+									| (q8(temperatureTo01(p.temperatureSeaLevel)) << 16)
+									| (q8(p.humidity) << 24);
+								texel[2] = std::bit_cast<float>(packed);
+								texel[3] = p.altitude; // macro elevation (terrain coloring)
 							}
 						}
 					// NOTE: the water-level channel bakes EXACTLY what the sampler reports — no post-processing.
@@ -568,7 +555,7 @@ export namespace Procedural
 					// also computed here — and after the reach pass, so drained inland films point downhill
 					// instead of at a coast the ocean never reaches them from.
 					if (applyFlow)
-						applyFlowField(dst, res, channels, texelSize, maps->seaLevel(), shoreLayout, flow);
+						applyFlowField(dst, res, channels, texelSize, maps->seaLevel(), flow);
 				}
 				bake->result = std::move(heights);
 			}, EJobPriority::Low, &m_bakeCounter, "heightMapBake");
@@ -587,7 +574,6 @@ export namespace Procedural
 			std::shared_ptr<const ITerrainSampler> maps;
 			glm::vec2 center, ranges;
 			uint32 res, numCascades, channels;
-			bool shoreLayout;
 			WaterReach reach;
 			bool applyReach;
 			FlowField flow;

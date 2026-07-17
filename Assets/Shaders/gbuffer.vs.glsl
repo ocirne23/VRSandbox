@@ -5,7 +5,6 @@
 
 #include "shared.inc.glsl"
 #define OCEAN_MAPS_BINDING 3
-#define OCEAN_SHORE_BINDING 4
 #define TERRAIN_HEIGHT_BINDING 5
 #include "ocean_wave.inc.glsl"
 

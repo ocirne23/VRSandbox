@@ -17,27 +17,16 @@
 #endif
 layout (binding = OCEAN_MAPS_BINDING) uniform sampler2DArray u_oceanMaps;
 
-// Shore map (optional; the includer defines OCEAN_SHORE_BINDING to enable it): an RGBA32F snapshot around
-// the camera, CPU-baked. R = raw terrain surface height (world Y, m); G = the WATER SURFACE LEVEL — sea
-// level over the open ocean, higher where rivers/lakes sit at altitude; B = 8-bit water flow direction
-// (0 = none, 1..255 = angle/2pi; nearest-fetched, drives the wave-travel rotation: toward land through
-// the surf zone, easing back to the wind heading offshore — plus generator-authored river directions.
-// See HeightMapBaker's applyFlowField); A = spare. The
-// water depth is derived live as water level - height; it drives fake shoaling + the shoreline surf band,
-// and the clipmap lifts its vertices by water level - sea level. When the includer also defines
-// TERRAIN_HEIGHT_BINDING, the coarser fog terrain cascades (terrain_height.inc.glsl — the same terrain
-// height AND water level over a much larger range) supply both beyond this map's reach, so distant
-// coastlines still shoal, far lakes keep their level, and waves never poke through far-away land.
-#ifdef OCEAN_SHORE_BINDING
-layout (binding = OCEAN_SHORE_BINDING) uniform sampler2D u_shoreHeight;
-#endif
+// Terrain data (the includer defines TERRAIN_HEIGHT_BINDING to enable it): the shared camera-centered
+// terrain-data cascades (terrain_height.inc.glsl — terrain height + WATER SURFACE LEVEL, sea level over
+// open ocean, higher where rivers/lakes sit at altitude). The water depth is derived live as water
+// level - height; it drives fake shoaling + the shoreline surf band, and the clipmap lifts its
+// vertices by water level - sea level.
 #ifdef TERRAIN_HEIGHT_BINDING
 #include "terrain_height.inc.glsl"
 #endif
 
-// (terrain height, water surface level) at worldXZ. Outside the shore map — or without one
-// (u_oceanParams4.x = 0) — terrain falls back to the fog cascades then the open-ocean bottom, and the
-// water level to sea level; each handover blends over an edge band so leaving a map's region never pops.
+// (terrain height, water surface level) at worldXZ; open-ocean bottom / sea level without terrain data.
 vec2 oceanSampleShoreData(vec2 worldXZ)
 {
     float height = u_oceanParams2.w - u_oceanParams1.z; // open-ocean bottom: sea level - depth D
@@ -48,21 +37,6 @@ vec2 oceanSampleShoreData(vec2 worldXZ)
         const vec4 td = terrainDataAt(worldXZ); // .x = terrain height, .y = water level
         height = td.x;
         level = td.y;
-    }
-#endif
-#ifdef OCEAN_SHORE_BINDING
-    const float invRange = u_oceanParams4.x;
-    if (invRange > 0.0)
-    {
-        const vec2 uv = (worldXZ - u_oceanParams3.xy) * invRange + 0.5;
-        const vec2 e = min(uv, vec2(1.0) - uv);
-        const float inMap = clamp(min(e.x, e.y) * 20.0, 0.0, 1.0);
-        if (inMap > 0.0)
-        {
-            const vec2 hw = textureLod(u_shoreHeight, uv, 0.0).xy;
-            height = mix(height, hw.x, inMap);
-            level  = mix(level, hw.y, inMap);
-        }
     }
 #endif
     return vec2(height, level);
@@ -82,46 +56,17 @@ float oceanWaterOffset(vec2 worldXZ)
     return oceanSampleShoreData(worldXZ).y - u_oceanParams2.w;
 }
 
-// Local wave-travel basis: the shore map bakes a FLOW DIRECTION (channel B, 8 bits: 0 = none, 1..255 =
-// angle/2pi — toward land through the surf zone, authored river directions) that replaces the global
-// wind locally. Returns (cos, sin) of the flow-vs-wind rotation.
+// Local wave-travel basis from the baked flow direction (terrainFlowEncAt: 0 = none, 1..255 =
+// angle/2pi). Returns (cos, sin) of the flow-vs-wind rotation.
 //
-// DISABLED (returns identity): rotating the SAMPLE DOMAIN does not work. The rotation pivots on the
-// world origin, so two texels one 8-bit angle step apart (2pi/254) sample the wave field
-// |worldXZ| * 0.025 m apart — the sea creases along every quantization contour, worse with distance
-// from the origin. The baked flow steers the SIMULATION's wind instead (OceanGenerator's
-// steeredWindAngle): the spectrum regenerates every frame, so turning its wind makes the whole field
-// genuinely travel toward the local shore, continuous by construction. Kept for a future per-pixel
-// take — that needs a formulation whose error does not grow with |worldXZ| (blending pre-rotated
-// fields, a local pivot per wave patch, ...). If re-enabled: nearest-texel only (packed angles wrap),
-// every pass sampling the wave field MUST apply the same rotation or the prepass depth and the drawn
-// surface diverge, and mind the wind convention — the field TRAVELS AGAINST u_oceanParams0.xy (the
-// spectrum's dominant term is h0(k) e^{i(k.x + wt)}), so the delta below needs flowAngle vs the
-// TRAVEL heading (windAngle + pi), not the wind vector's own angle.
-#define OCEAN_FLOW_SAMPLE_ROTATION 0
+// DISABLED (returns identity): rotating the SAMPLE DOMAIN does not work — the rotation pivots on the
+// world origin, so two texels one 8-bit angle step apart sample the wave field |worldXZ| * 0.025 m
+// apart and the sea creases along every quantization contour. The baked flow steers the SIMULATION's
+// wind instead (OceanGenerator::steeredWindAngle). If a per-pixel take ever returns it needs an error
+// formulation independent of |worldXZ|, every wave-sampling pass must apply the identical rotation,
+// and mind the wind convention: the field TRAVELS AGAINST u_oceanParams0.xy.
 vec2 oceanFlowRotation(vec2 worldXZ)
 {
-#if OCEAN_FLOW_SAMPLE_ROTATION
-#ifdef OCEAN_SHORE_BINDING
-    const float invRange = u_oceanParams4.x;
-    if (invRange > 0.0)
-    {
-        const vec2 uv = (worldXZ - u_oceanParams3.xy) * invRange + 0.5;
-        if (all(greaterThan(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0))))
-        {
-            const ivec2 res = textureSize(u_shoreHeight, 0);
-            const uint enc = uint(texelFetch(u_shoreHeight, clamp(ivec2(uv * vec2(res)), ivec2(0), res - 1), 0).z + 0.5);
-            if (enc > 0u)
-            {
-                const float flowAngle = (float(enc) - 1.0) * (6.28318530718 / 254.0);
-                const float windAngle = atan(u_oceanParams0.y, u_oceanParams0.x);
-                const float d = flowAngle - windAngle;
-                return vec2(cos(d), sin(d));
-            }
-        }
-    }
-#endif
-#endif
     return vec2(1.0, 0.0);
 }
 
@@ -138,14 +83,12 @@ vec2 oceanFlowToWorld(vec2 v, vec2 fr) { return vec2(fr.x * v.x - fr.y * v.y, fr
 // footprint buried by a positive margin can never clip live water; the margin absorbs the decimeter
 // disagreement between the baked maps and the LOD'd terrain mesh.
 // The taps read oceanSampleShoreDepth — the EXACT field the waves shoal/lift by. Tier selection: the
-// finest map that covers the footprint AND whose 5x5 tap budget can span it at <= 1.5-texel spacing
-// (shore map, then the near fog cascade, err = half a texel each); everything else — big coarse-ring
-// footprints included — goes to the FAR tier: ONE center sample, no grid, with the flat
-// "Ocean/Shore/Far cull error (m)" allowance (0 = the far tier off). A tier that can't take the
-// footprint must FALL THROUGH, never bail: bailing carved never-cull rings (the shore map's edge
-// band, and coarse rings whose footprint outgrew the shore texels mid-interior). Water the far tier's
-// single sample misses (narrow rivers, partial-footprint coasts) can lose triangles — sub-pixel at
-// that distance, accepted; raise the far error if it ever shows.
+// near cascade where it covers the footprint AND its 5x5 tap budget can span it at <= 1.5-texel
+// spacing (err = half a texel); everything else — big coarse-ring footprints included — goes to the
+// FAR tier: ONE center sample, no grid, with the flat "Ocean/Shore/Far cull error (m)" allowance
+// (0 = the far tier off). A tier that can't take the footprint must FALL THROUGH, never bail:
+// bailing carved never-cull rings. Water the far tier's single sample misses (narrow rivers,
+// partial-footprint coasts) can lose triangles — sub-pixel at that distance, accepted.
 // Both displacement passes (prepass + forward) MUST apply the same test or their geometry diverges.
 bool oceanVertexCulled(vec2 worldXZ, float cellSize)
 {
@@ -168,24 +111,9 @@ bool oceanVertexCulled(vec2 worldXZ, float cellSize)
     float err = 0.0;
     bool farTier = false; // far cascade: one center sample, no footprint grid
     // Tier gates: "reach <= 3 * texel" is exactly "a 5x5 grid spans the footprint at <= 1.5-texel
-    // spacing" — a footprint too big for a fine map's tap budget falls through to the coarser tier.
-#ifdef OCEAN_SHORE_BINDING
-    const float invShore = u_oceanParams4.x;
-    if (invShore > 0.0)
-    {
-        const vec2 uvS = (worldXZ - u_oceanParams3.xy) * invShore + 0.5;
-        const vec2 eS = min(uvS, vec2(1.0) - uvS);
-        const float e = min(eS.x, eS.y);
-        const float t = 1.0 / (float(textureSize(u_shoreHeight, 0).x) * invShore);
-        if (e - reach * invShore >= 0.06 && reach <= 3.0 * t) // full-weight interior (blend band ends at 0.05)
-        {
-            texel = t;
-            err = 0.5 * t;
-        }
-    }
-#endif
+    // spacing" — a footprint too big for the near map's tap budget falls through to the far tier.
 #ifdef TERRAIN_HEIGHT_BINDING
-    if (texel < 0.0 && terrainHeightMapPresent())
+    if (terrainHeightMapPresent())
     {
         const vec2 rel = worldXZ - u_fogParams5.xy;
         const float cheb = max(abs(rel.x), abs(rel.y));

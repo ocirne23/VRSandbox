@@ -40,9 +40,7 @@ public:
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, RecordParams& params, uint32 viewIndex = 0);
     // Rewrites one slot of the texture array (binding 6) with a streamed texture's current view.
     void updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view);
-    // Points the ocean shore terrain height binding (4) at the active ping-pong image (refreshed per frame).
-    void updateOceanShoreDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView shoreView, vk::Sampler shoreSampler);
-    // Points the fog terrain height cascade binding (5) at the active ping-pong image (refreshed per frame).
+    // Points the terrain-data cascade binding (5) at the active ping-pong image (refreshed per frame).
     void updateTerrainHeightDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView terrainView, vk::Sampler terrainSampler);
 
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }

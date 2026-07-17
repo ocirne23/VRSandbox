@@ -315,13 +315,7 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eFragment
         });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_shoreHeight (shore terrain height map)
-        .binding = 18,
-        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-        .descriptorCount = 1,
-        .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment
-    });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_terrainHeight (fog terrain cascades: shore-map fallback)
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // u_terrainHeight (terrain-data cascades: ocean depth/water level)
         .binding = 19,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
         .descriptorCount = 1,
@@ -337,7 +331,7 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
     });
 
     // Per-binding flags (parallel to descriptorSetBindings): the AO (13), TLAS (11) and baked terrain
-    // height (18/19) bindings are refreshed after the (cached) draw CB is recorded -> UPDATE_AFTER_BIND;
+    // height (19) bindings are refreshed after the (cached) draw CB is recorded -> UPDATE_AFTER_BIND;
     // the texture array (20) is variable-count (allocated at the live texture capacity), only partially
     // written, and UPDATE_AFTER_BIND so the TextureStreamer can rewrite swapped slots without re-recording
     // the cached draw CBs.
@@ -345,7 +339,7 @@ void StaticMeshGraphicsPipeline::buildPipelineLayout(GraphicsPipelineLayout& gra
     for (size_t i = 0; i < descriptorSetBindings.size(); ++i)
     {
         if (descriptorSetBindings[i].binding == 11 || descriptorSetBindings[i].binding == 13
-            || descriptorSetBindings[i].binding == 18 || descriptorSetBindings[i].binding == 19)
+            || descriptorSetBindings[i].binding == 19)
             graphicsPipelineLayout.descriptorBindingFlags[i] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
         else if (descriptorSetBindings[i].binding == 20)
             graphicsPipelineLayout.descriptorBindingFlags[i] = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount | vk::DescriptorBindingFlagBits::eUpdateAfterBind;
@@ -361,20 +355,11 @@ void StaticMeshGraphicsPipeline::updateTextureDescriptor(vk::DescriptorSet descr
     Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
 
-void StaticMeshGraphicsPipeline::updateOceanShoreDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView shoreView, vk::Sampler shoreSampler)
-{
-    // Refreshed every frame (UPDATE_AFTER_BIND): the shore terrain height map is a ping-pong pair whose
-    // active image swaps when the CPU re-bakes it, without touching the cached draw CBs.
-    vk::DescriptorImageInfo imageInfo{ .sampler = shoreSampler, .imageView = shoreView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
-    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 18, .descriptorCount = 1,
-        .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
-    Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
-}
-
 void StaticMeshGraphicsPipeline::updateTerrainHeightDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView terrainView, vk::Sampler terrainSampler)
 {
-    // Same scheme for the fog terrain height cascades (19): the ocean VS/FS fall back to them for water
-    // depth outside the shore map's range.
+    // Refreshed every frame (UPDATE_AFTER_BIND): the terrain-data cascades (19) are a ping-pong pair
+    // whose active image swaps when the CPU re-bakes it, without touching the cached draw CBs. The
+    // ocean VS/FS read them for water depth/level.
     vk::DescriptorImageInfo imageInfo{ .sampler = terrainSampler, .imageView = terrainView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
     vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 19, .descriptorCount = 1,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };

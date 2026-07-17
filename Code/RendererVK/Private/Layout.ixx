@@ -139,11 +139,6 @@ export namespace RendererVKLayout
     // FFT ocean simulation (OceanSimulationPipeline / ocean_*.cs.glsl). Injected into every shader compile.
     constexpr uint32 OCEAN_FFT_SIZE = 512; // FFT grid resolution per cascade (power of two)
     constexpr uint32 OCEAN_CASCADES = 3;   // spectral band-split cascades (different patch sizes)
-    constexpr uint32 OCEAN_SHORE_RES = 1024; // shore map resolution (CPU-baked; RES*RES RGBA texels: terrain
-                                             // height, water level, flow dir, spare). Halved from 2048 when
-                                             // the map went RG->RGBA so its memory stayed flat (~0.5m -> 1m
-                                             // texels over the default 1km range)
-
     constexpr uint32 MAX_TERRAIN_SPLAT_MATERIALS = 24; // UBO capacity for terrain splat materials (ground + rock + beach + snow)
 
     struct MeshVertex
@@ -314,10 +309,10 @@ export namespace RendererVKLayout
         glm::vec4 oceanAbsorption; // rgb = water extinction sigma_t (1/m, Beer-Lambert), w = perceptual roughness
         glm::vec4 oceanScatter;    // rgb = in-scatter albedo color, w = scatter intensity
         glm::vec4 oceanFoam;       // rgb = foam albedo, w = Jacobian foam bias (higher = more whitecaps)
-        glm::vec4 oceanParams3;    // xy = shore depth map world center XZ, z = turbulence decay/frame,
+        glm::vec4 oceanParams3;    // xy unused, z = turbulence decay/frame,
                                    // w = vertex displacement mip bias (Detail bias; the clipmap rings carry
                                    // their cell size per vertex, so the mip itself is baked into the mesh)
-        glm::vec4 oceanParams4;    // x = 1 / shore map world size (0 = no shore map),
+        glm::vec4 oceanParams4;    // x unused,
                                    // y = turbulence spread (diffusion/frame), z = shoal depth scale (per-
                                    // cascade shoaling: waves fade below depth = scale * patch size),
                                    // w = instant-foam edge width (both thresholds' smoothstep)

@@ -58,6 +58,11 @@ export namespace Procedural
 		// heights around it (so it regenerates chunks) — the ocean floats on this rather than owning a
 		// second copy. Valid even while terrain is disabled, so the ocean can still run on its own.
 		float seaLevel() const { return m_seaLevel; }
+		// CPU copy of the ACTIVE baked terrain-data map (the same texels setFogTerrainHeightMap shipped
+		// to the GPU) — the ocean samples it for buoyancy water depth/level and wind-steering flow votes.
+		// nullptr while no bake has shipped / terrain is disabled; a re-bake swaps in a NEW object, so
+		// consumers holding the old shared_ptr keep a coherent snapshot.
+		std::shared_ptr<const BakedTerrainData> activeTerrainData() const { return m_terrainMapData; }
 
 	private:
 		struct Request
@@ -173,6 +178,7 @@ export namespace Procedural
 		bool  m_flowFieldEnabled = true;
 		HeightMapBaker m_terrainMapBaker;
 		bool  m_terrainMapUploaded = false;    // a map is live in the renderer (cleared on disable)
+		std::shared_ptr<const BakedTerrainData> m_terrainMapData; // CPU copy of the active bake (activeTerrainData)
 
 		// --- Terrain splat textures: source images baked to BC .dds (Assets/Local/TerrainTex) on a
 		// background thread at startup (skipped when the cache is fresh), then registered once ---

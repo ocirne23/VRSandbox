@@ -65,9 +65,7 @@ public:
     void updateTlasDescriptor(vk::DescriptorSet descriptorSet, vk::AccelerationStructureKHR tlas);
     // Rewrites one slot of the texture array (binding 20) with a streamed texture's current view.
     void updateTextureDescriptor(vk::DescriptorSet descriptorSet, uint32 slotIdx, vk::ImageView view);
-    // Points the ocean shore terrain height binding (18) at the active ping-pong image (refreshed per frame).
-    void updateOceanShoreDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView shoreView, vk::Sampler shoreSampler);
-    // Points the fog terrain height cascade binding (19) at the active ping-pong image (refreshed per frame).
+    // Points the terrain-data cascade binding (19) at the active ping-pong image (refreshed per frame).
     void updateTerrainHeightDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView terrainView, vk::Sampler terrainSampler);
     void update(uint32 frameIdx, std::vector<ObjectContainer*>& objectContainers);
     // Ocean variant: light refraction/reflection ray hits with the grid lights (OCEAN_HIT_LIGHTS define).

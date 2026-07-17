@@ -78,10 +78,8 @@ namespace Procedural
 		Tweak::floatVar("Ocean/Foam", "Foam boost", &m_foamBoost, 0.0f, 2.0f, 0.01f);
 		Tweak::floatVar("Ocean/Foam", "Turbidity", &m_turbidity, 0.0f, 1.0f, 0.01f);
 
-		// Shore interaction: only active while the terrain streamer is enabled (its height field is what
-		// gets baked). Range/scale changes re-bake on the fly; the old map stays active meanwhile.
-		Tweak::boolean("Ocean/Shore", "Shore interaction", &m_shoreEnabled);
-		Tweak::floatVar("Ocean/Shore", "Range (m)", &m_shoreRange, 256.0f, 8192.0f, 32.0f);
+		// Shore interaction: driven by the terrain streamer's baked terrain-data map (nothing baked here;
+		// no data while terrain rendering is disabled — the ocean then behaves as open sea).
 		Tweak::floatVar("Ocean/Shore", "Shoal depth scale", &m_shoalScale, 0.0f, 0.1f, 0.001f);
 		Tweak::floatVar("Ocean/Shore", "Shore foam depth (m)", &m_shoreFoamDepth, 0.0f, 8.0f, 0.05f);
 		Tweak::floatVar("Ocean/Shore", "Shore foam max", &m_shoreFoamMax, 0.0f, 1.0f, 0.01f);
@@ -255,34 +253,6 @@ namespace Procedural
 		m_node = std::move(node);
 	}
 
-	// Shore bake: an OCEAN_SHORE_RES^2 snapshot of (terrain height, water level) pairs covering
-	// m_shoreRange meters around the camera (HeightMapBaker, sampled from the SAME terrain sampler the
-	// terrain streamer renders from, so the water agrees with the drawn ground). The shaders derive the
-	// water depth live as water level - height and lift the clipmap by water level - sea level (lakes/
-	// rivers at altitude); beyond this map's range they fall back to the coarser fog terrain cascades
-	// (TerrainStreamer's bake of the same fields).
-	void OceanGenerator::updateShoreMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& terrain,
-	                                   const WaterReach* reach, const FlowField* flow)
-	{
-		const bool active = m_shoreEnabled && terrain != nullptr;
-		HeightMapBaker::Baked baked;
-		if (m_shoreBaker.update(baked, active, terrain, glm::vec2(camera.position.x, camera.position.z),
-			glm::vec2(glm::max(m_shoreRange, 256.0f), 0.0f), RendererVKLayout::OCEAN_SHORE_RES, 1, 4,
-			true, reach, flow)) // shore layout: h, water, flow, spare
-		{
-			renderer.setOceanShoreMap(baked.texels, baked.center, baked.ranges.x);
-			m_shoreHeights = std::move(baked.texels); // CPU copy: sampleShoreDepth (buoyancy) reads this
-			m_shoreCenter = baked.center;
-			m_shoreActiveRange = baked.ranges.x;
-			m_shoreValid = true;
-		}
-		if (!active && m_shoreValid)
-		{
-			renderer.clearOceanShoreMap(); // the shaders fall back to the fog terrain cascades / open ocean
-			m_shoreValid = false;
-		}
-	}
-
 	// Baked flow -> simulation wind. The FFT field travels along the wind its SPECTRUM was built with, and
 	// the spectrum regenerates every frame — so turning that wind is the one continuous way to make the
 	// whole sea (every cascade, chop, foam) genuinely travel toward the local shore. The per-pixel
@@ -307,20 +277,22 @@ namespace Procedural
 			m_windSteerSynced = true;
 		}
 		glm::vec2 sum(0.0f);
-		if (m_shoreValid && m_shoreActiveRange > 0.0f && m_windSteerRange > 0.0f)
+		if (m_terrainData && m_terrainData->ranges.x > 0.0f && m_windSteerRange > 0.0f)
 		{
-			const int32 res = (int32)RendererVKLayout::OCEAN_SHORE_RES;
-			const float texel = m_shoreActiveRange / (float)res;
+			// Votes from the near cascade of the streamer's baked terrain-data map. The flow direction
+			// rides bits 8-15 of the bit-cast packed climate channel (HeightMapBaker's data-map layout).
+			const int32 res = (int32)m_terrainData->res;
+			const float texel = m_terrainData->ranges.x / (float)res;
 			const int32 radius = (int32)(m_windSteerRange / texel);
-			const int32 step = glm::max(radius / 16, 1); // <= 33x33 taps of the CPU shore copy
-			const glm::vec2 rel = glm::vec2(camera.position.x, camera.position.z) - m_shoreCenter;
+			const int32 step = glm::max(radius / 16, 1); // <= 33x33 taps of the CPU copy
+			const glm::vec2 rel = glm::vec2(camera.position.x, camera.position.z) - m_terrainData->center;
 			const int32 cx = (int32)std::floor(rel.x / texel) + res / 2;
 			const int32 cy = (int32)std::floor(rel.y / texel) + res / 2;
 			for (int32 y = glm::max(cy - radius, 0); y <= glm::min(cy + radius, res - 1); y += step)
 				for (int32 x = glm::max(cx - radius, 0); x <= glm::min(cx + radius, res - 1); x += step)
 				{
-					const float* t = &m_shoreHeights[((size_t)y * res + x) * 4];
-					const uint32 enc = (uint32)(t[2] + 0.5f);
+					const float* t = &m_terrainData->texels[((size_t)y * res + x) * 4];
+					const uint32 enc = (std::bit_cast<uint32>(t[2]) >> 8) & 255u;
 					if (enc == 0u || t[0] >= t[1]) // undirected or dry ground: abstains
 						continue;
 					const float a = (float)(enc - 1u) * (6.283185307f / 254.0f);
@@ -340,8 +312,8 @@ namespace Procedural
 		return m_steeredWindAngle;
 	}
 
-	void OceanGenerator::update(Renderer& renderer, const Camera& camera, std::shared_ptr<const ITerrainSampler> terrain,
-	                           const WaterReach* reach, float seaLevel, const FlowField* flow)
+	void OceanGenerator::update(Renderer& renderer, const Camera& camera,
+	                           std::shared_ptr<const BakedTerrainData> terrainData, float seaLevel)
 	{
 		// ONE sea level, owned by the terrain (see the header). Adopted here every frame rather than
 		// tweaked separately: this used to be its own slider, and the two silently forked — the water plane
@@ -349,8 +321,9 @@ namespace Procedural
 		// wrong. The swash gate fades on |baked water level - sea level|, so a metre of disagreement turned
 		// the swash off planet-wide.
 		m_seaLevel = seaLevel;
-		if (m_enabled)
-			updateShoreMap(renderer, camera, terrain, reach, flow);
+		// Adopt the streamer's active bake (the GPU passes read the same one): buoyancy and wind steering
+		// sample this snapshot until the next update.
+		m_terrainData = std::move(terrainData);
 
 		// Push the spectrum/shading params every frame; `enabled` also gates the GPU FFT simulation.
 		const float windAngle = steeredWindAngle(camera); // base wind, turned toward the local shore flow
@@ -458,26 +431,26 @@ namespace Procedural
 		return std::bit_cast<float>(o);
 	}
 
-	// (water depth, water surface level) at (x, z) from the CPU copy of the baked shore map — the CPU
-	// mirror of the shaders' oceanSampleShoreData (depth = local water level - terrain height). Outside
-	// the map: open-ocean depth at sea level. Two knowing omissions vs the shader: the fog-cascade
-	// fallback and the edge blend band — buoyancy queries only matter near the camera, well inside the
-	// shore map's full-weight interior.
+	// (water depth, water surface level) at (x, z) from the terrain-data map's CPU copy (near cascade) —
+	// the CPU mirror of the shaders' oceanSampleShoreData (depth = local water level - terrain height).
+	// Outside the near cascade / without terrain data: open-ocean depth at sea level. One knowing
+	// omission vs the shader: the far-cascade fallback — buoyancy queries only matter near the camera,
+	// well inside the near cascade's range.
 	glm::vec2 OceanGenerator::sampleShoreData(float x, float z) const
 	{
-		if (!m_shoreValid || m_shoreHeights.empty() || m_shoreActiveRange <= 1.0f)
+		if (!m_terrainData || m_terrainData->texels.empty() || m_terrainData->ranges.x <= 1.0f)
 			return glm::vec2(m_depth, m_seaLevel);
-		constexpr uint32 RES = RendererVKLayout::OCEAN_SHORE_RES;
-		const float u = (x - m_shoreCenter.x) / m_shoreActiveRange + 0.5f;
-		const float v = (z - m_shoreCenter.y) / m_shoreActiveRange + 0.5f;
+		const uint32 res = m_terrainData->res;
+		const float u = (x - m_terrainData->center.x) / m_terrainData->ranges.x + 0.5f;
+		const float v = (z - m_terrainData->center.y) / m_terrainData->ranges.x + 0.5f;
 		if (u <= 0.0f || u >= 1.0f || v <= 0.0f || v >= 1.0f)
 			return glm::vec2(m_depth, m_seaLevel);
-		const float tx = glm::clamp(u * (float)RES - 0.5f, 0.0f, (float)RES - 1.001f);
-		const float tz = glm::clamp(v * (float)RES - 0.5f, 0.0f, (float)RES - 1.001f);
+		const float tx = glm::clamp(u * (float)res - 0.5f, 0.0f, (float)res - 1.001f);
+		const float tz = glm::clamp(v * (float)res - 0.5f, 0.0f, (float)res - 1.001f);
 		const uint32 x0 = (uint32)tx, z0 = (uint32)tz;
 		const float fx = tx - (float)x0, fz = tz - (float)z0;
 		const auto at = [&](uint32 i, uint32 j) { // (terrain height, water level) of the RGBA texel
-			const float* t = &m_shoreHeights[((size_t)j * RES + i) * 4];
+			const float* t = &m_terrainData->texels[((size_t)j * res + i) * 4];
 			return glm::vec2(t[0], t[1]);
 		};
 		const glm::vec2 hw = glm::mix(glm::mix(at(x0, z0), at(x0 + 1, z0), fx),

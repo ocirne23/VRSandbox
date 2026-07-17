@@ -1,3 +1,4 @@
+#define SCRIPT_BUILD 1
 #include "ScriptAPI.h"
 
 SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void* scriptData)
@@ -8,7 +9,7 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
 
 //@graph 1
 //@node 0 Update 374 -128
-//@node 1 GetCamera 201 -89
+//@node 1 GetCamera 201 -113
 //@node 2 SetEntity 546 -122
 //@node 3 Div 336 -9
 //@pin 2 1 self

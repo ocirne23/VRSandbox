@@ -300,11 +300,11 @@ export struct OceanParams
     float turbidity        = 0.4f;  // entrained-bubble strength: milky brightening + extra roughness of
                                     // turbulent water (the wake stays visible after the foam thins)
 
-    // Shore interaction: the CPU-baked shore terrain height map (Renderer::setOceanShoreMap, baked by
-    // Procedural::OceanGenerator; center/range live in the renderer's BakedWorldMap, not here) drives fake
-    // shoaling — each cascade's displacement fades out below depth = shoalScale * its patch size, so long
-    // swell dies offshore while chop runs almost to the beach and waves never poke through land — plus a
-    // surf/foam band where the water column vanishes at the waterline.
+    // Shore interaction: the baked terrain-data cascades (Renderer::setFogTerrainHeightMap, baked by the
+    // terrain streamer) drive fake shoaling — each cascade's displacement fades out below depth =
+    // shoalScale * its patch size, so long swell dies offshore while chop runs almost to the beach and
+    // waves never poke through land — plus a surf/foam band where the water column vanishes at the
+    // waterline.
     float shoalScale     = 0.015f; // shoaling depth as a fraction of each cascade's patch size
     float shoreFoamDepth = 8.0f;  // water-column height (m) below which the waterline churns white; 0 = off
     float shoreFoamMax   = 0.75f; // surf band opacity cap: shore foam coverage never exceeds this, so the

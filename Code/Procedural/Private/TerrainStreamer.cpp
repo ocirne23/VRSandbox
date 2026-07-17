@@ -732,7 +732,7 @@ namespace Procedural
 		if (m_terrainMapBaker.update(baked, active, maps, glm::vec2(camera.position.x, camera.position.z),
 			glm::vec2(glm::max(m_terrainMapRange, 256.0f), farRange),
 			RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES, 4, // RGBA: height, water level, fog|flow|temp|hum, altitude
-			false, reach, activeFlowField()))
+			reach, activeFlowField()))
 		{
 			// Decode what actually went into the packed climate channel, per cascade, exactly as
 			// terrain_height.inc.glsl does. The bake is the one link in the chain nothing else can see: a
@@ -762,12 +762,18 @@ namespace Procedural
 				}
 			}
 			renderer.setFogTerrainHeightMap(baked.texels, baked.center, baked.ranges, maps->seaLevel());
+			// Keep the shipped texels as the CPU copy (activeTerrainData): the ocean samples them for
+			// buoyancy and wind steering. A NEW object per bake — consumers' shared_ptrs stay coherent.
+			m_terrainMapData = std::make_shared<const BakedTerrainData>(BakedTerrainData{
+				std::move(baked.texels), baked.center, baked.ranges,
+				RendererVKLayout::FOG_TERRAIN_RES, RendererVKLayout::FOG_TERRAIN_CASCADES });
 			m_terrainMapUploaded = true;
 		}
 		if (!active && m_terrainMapUploaded)
 		{
 			renderer.clearFogTerrainHeightMap(); // fog reverts to the flat base; ocean/coloring lose their data
 			m_terrainMapUploaded = false;
+			m_terrainMapData = nullptr;
 		}
 	}
 

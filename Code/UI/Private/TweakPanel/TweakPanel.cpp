@@ -134,9 +134,18 @@ namespace
 		}
 	};
 
-	void renderCategory(CategoryNode& node, int depth)
+	void renderCategory(CategoryNode& node, int depth, std::string_view parentPath)
 	{
+		// Visible text is node.name; everything after "##" is the (hidden) ImGui ID.
+		// Use the full category path as the ID so categories that share a display
+		// name in different branches (e.g. Physics/World vs Ocean/World) don't collide.
+		std::string path(parentPath);
+		path += '/';
+		path += node.name;
+
 		std::string label(node.name);
+		label += "##";
+		label += path;
 
 		bool open;
 		if (depth == 0)
@@ -150,7 +159,7 @@ namespace
 				drawVar(TweakRegistry::get().vars()[i], i);
 
 			for (CategoryNode& child : node.children)
-				renderCategory(child, depth + 1);
+				renderCategory(child, depth + 1, path);
 
 			if (depth != 0)
 				ImGui::TreePop();
@@ -189,5 +198,5 @@ void TweakPanel::render()
 	}
 
 	for (CategoryNode& child : root.children)
-		renderCategory(child, 0);
+		renderCategory(child, 0, {});
 }

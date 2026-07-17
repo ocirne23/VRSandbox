@@ -183,6 +183,7 @@ int main()
         for (EntityChange& change : scriptEvents.takeEntityChanges()) handleEntityChange(change);
         for (EntityChange& change : ui.takeEntityChanges()) handleEntityChange(change);
 
+        Globals::scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
         physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); }); // fixed-step; entities sync to body poses in their update below
 
         // Collider wireframes ("Physics/Debug/Draw colliders" tweak): box3d debug draw decomposed into
@@ -253,10 +254,10 @@ int main()
         terrain.update(renderer, camera);
         // ... and the collider tiles under/around the camera (clears itself while terrain is disabled).
         terrainCollider.update(camera.position, terrain.activeClimateMaps());
-        // The terrain's height field feeds the ocean's shore-depth bake (shoaling + surf at the coast)
-        // and drives the object scattering (both clear themselves while terrain is disabled).
-        ocean.update(renderer, camera, terrain.activeClimateMaps(), terrain.activeWaterReach(), terrain.seaLevel(),
-                     terrain.activeFlowField());
+        // The terrain's baked data map feeds the ocean's water depth/level (shoaling + surf at the
+        // coast, buoyancy) and its height field drives the object scattering (both clear themselves
+        // while terrain is disabled).
+        ocean.update(renderer, camera, terrain.activeTerrainData(), terrain.seaLevel());
         scatter.update(renderer, camera, terrain.activeClimateMaps());
 
         // Particle effects + decals: turns emitter rates/bursts into GPU spawn requests and submits the

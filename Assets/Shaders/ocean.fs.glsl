@@ -14,7 +14,6 @@
 // temporal turbulence (ocean_foam.cs.glsl), one RT sun shadow ray. Ray budgets: "Ocean/RT" tweaks.
 
 #include "shared.inc.glsl"
-#define OCEAN_SHORE_BINDING 18
 #define TERRAIN_HEIGHT_BINDING 19
 #define OCEAN_SURFACE_SAMPLE_BIAS (u_oceanParams6.x) // "Glint sharpness": finer shading-normal mips
 #include "ocean_wave.inc.glsl"

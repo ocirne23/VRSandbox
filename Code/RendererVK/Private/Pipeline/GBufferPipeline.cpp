@@ -36,17 +36,14 @@ void GBufferPipeline::buildPipelineLayout(GraphicsPipelineLayout& layout, uint32
         .binding = 2, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment });
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // FFT ocean maps (VS displaces MATERIAL_FLAG_OCEAN instances)
         .binding = 3, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // ocean shore terrain height map (VS shoaling fade)
-        .binding = 4, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
-    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // fog terrain height cascades (VS: shore-map fallback)
+    descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{ // terrain-data cascades (VS: ocean water depth/level)
         .binding = 5, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex });
     // Texture array (binding 6 = highest, eVariableDescriptorCount) for the fragment alpha-mask test.
     descriptorSetBindings.push_back(vk::DescriptorSetLayoutBinding{
         .binding = 6, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxTextures, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     layout.descriptorBindingFlags.resize(descriptorSetBindings.size());
-    // Baked terrain height maps (4/5): ping-pong images refreshed per frame without re-recording the
+    // Baked terrain-data cascades (5): ping-pong image refreshed per frame without re-recording the
     // cached prepass CB.
-    layout.descriptorBindingFlags[layout.descriptorBindingFlags.size() - 3] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
     layout.descriptorBindingFlags[layout.descriptorBindingFlags.size() - 2] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
     layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::ePartiallyBound | vk::DescriptorBindingFlagBits::eVariableDescriptorCount | vk::DescriptorBindingFlagBits::eUpdateAfterBind;
 
@@ -73,20 +70,11 @@ void GBufferPipeline::updateTextureDescriptor(vk::DescriptorSet descriptorSet, u
     Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
 }
 
-void GBufferPipeline::updateOceanShoreDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView shoreView, vk::Sampler shoreSampler)
-{
-    // Points the ocean shore terrain height binding (4, UPDATE_AFTER_BIND) at the active ping-pong image;
-    // refreshed every frame so a CPU re-bake swaps images without re-recording the cached prepass CB.
-    vk::DescriptorImageInfo imageInfo{ .sampler = shoreSampler, .imageView = shoreView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
-    vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 4, .descriptorCount = 1,
-        .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
-    Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
-}
-
 void GBufferPipeline::updateTerrainHeightDescriptor(vk::DescriptorSet descriptorSet, vk::ImageView terrainView, vk::Sampler terrainSampler)
 {
-    // Same scheme for the fog terrain height cascades (5): the ocean VS falls back to them for water
-    // depth outside the shore map's range.
+    // Points the terrain-data cascade binding (5, UPDATE_AFTER_BIND) at the active ping-pong image;
+    // refreshed every frame so a CPU re-bake swaps images without re-recording the cached prepass CB.
+    // The ocean branch of the prepass VS reads it for water depth/level.
     vk::DescriptorImageInfo imageInfo{ .sampler = terrainSampler, .imageView = terrainView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
     vk::WriteDescriptorSet write{ .dstSet = descriptorSet, .dstBinding = 5, .descriptorCount = 1,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
