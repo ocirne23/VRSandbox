@@ -163,7 +163,7 @@ export namespace Procedural
 		// terrain coloring; height / water level / fog|falloff|temp|hum / altitude per texel) ---
 		bool  m_terrainMapEnabled = true;
 		bool  m_terrainMapDebugLog = false; // log the decoded climate range of every baked cascade
-		float m_terrainMapRange = 2048.0f;     // near cascade world size (m), centered on the camera
+		float m_terrainMapRange = 4096.0f;     // near cascade world size (m), centered on the camera
 		float m_terrainMapFarRange = 8192.0f;  // far cascade world size (m; same texel count, coarser texels)
 		// Ocean reach: how close real ocean must be for water here to still be the sea. Beyond it the baked
 		// water level sinks below the ground, which is what stops the ocean running swash up every inland

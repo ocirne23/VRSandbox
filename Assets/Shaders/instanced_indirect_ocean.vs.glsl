@@ -74,7 +74,10 @@ void main()
     vec3 localPos = in_pos;
     localPos.xz = mix(localPos.xz, floor(localPos.xz / (2.0 * ringCell) + 0.5) * (2.0 * ringCell), ringMorph);
     vec3 basePos = quat_transform(localPos * inst_scale, inst_quat) + inst_pos;
-    if (oceanVertexCulled(basePos.xz, ringCell))
+    // ONE shore fetch per vertex, shared by the land cull, the water-table lift and the displacement
+    // (they each re-fetched it before). The prepass MUST share it the same way.
+    const vec2 shoreHW = oceanSampleShoreData(basePos.xz); // (terrain height, water level)
+    if (oceanVertexCulled(basePos.xz, ringCell, shoreHW))
     {
         // Whole triangle footprint is buried under land: a NaN position discards every primitive using
         // this vertex before rasterization (the G-buffer prepass applies the identical test).
@@ -84,8 +87,8 @@ void main()
         gl_Position = vec4(uintBitsToFloat(0x7FC00000u));
         return;
     }
-    basePos.y += oceanWaterOffset(basePos.xz); // lift onto the local water table (lakes/rivers at altitude)
-    out_pos = basePos + oceanSampleDisplacement(basePos.xz, ringCell, ringMorph);
+    basePos.y += shoreHW.y - u_oceanParams2.w; // lift onto the local water table (lakes/rivers at altitude)
+    out_pos = basePos + oceanSampleDisplacement(basePos.xz, ringCell, ringMorph, shoreHW);
     out_tbn = mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0));
     out_uv  = basePos.xz;
 

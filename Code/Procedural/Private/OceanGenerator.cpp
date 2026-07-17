@@ -101,6 +101,9 @@ namespace Procedural
 		// coarse far bake cannot resolve may lose triangles out there — speed over accuracy; raise it
 		// if that shows, 0 = never cull from far data.
 		Tweak::floatVar("Ocean/Shore", "Far cull error (m)", &m_farCullError, 0.0f, 20.0f, 0.25f);
+		// Whole-sector skip when the baked terrain buries a sector's entire footprint (see the header):
+		// deep inland the ocean then costs nothing at all.
+		Tweak::boolean("Ocean/Shore", "Dry sector cull", &m_drySectorCull);
 
 		// Ray-tracing budget: the water shader traces the scene TLAS per pixel for refraction (seeing
 		// geometry through the water) and reflection (scenery mirrored in it). Refraction range = how far
@@ -182,6 +185,7 @@ namespace Procedural
 						mx = glm::max(mx, p);
 					}
 					s.localCenter = (mn + mx) * 0.5f;
+					s.halfXZ = glm::vec2(mx.x - mn.x, mx.z - mn.z) * 0.5f;
 					s.radius = glm::length((mx - mn) * 0.5f) + 8.0f; // headroom for wave/swash displacement
 					s.spatialEntry = SpatialEntry(Globals::spatialIndex.registerEntry(
 						glm::dvec3(s.localCenter) + glm::dvec3(0.0, m_seaLevel, 0.0), s.radius, 0ull,
@@ -368,6 +372,36 @@ namespace Procedural
 		// sample this snapshot until the next update.
 		m_terrainData = std::move(terrainData);
 
+		// A new bake rebuilds the dry-sector block grid: per-block MAX of (water level - height) over the
+		// COARSEST cascade (largest coverage; its max is at least as wet as any finer view of the same
+		// ground). One ~quarter-ms pass per shipped bake — every ~range/4 of camera travel.
+		if (m_terrainData.get() != m_dryGridSource)
+		{
+			m_dryGridSource = m_terrainData.get();
+			m_dryGridValid = false;
+			if (m_terrainData && m_terrainData->cascades > 0 && m_terrainData->res > 0)
+			{
+				const uint32 res = m_terrainData->res;
+				const uint32 farCascade = m_terrainData->cascades - 1;
+				const float* texels = m_terrainData->texels.data() + (size_t)farCascade * res * res * 4;
+				m_blockMaxDepth.fill(-FLT_MAX);
+				const uint32 blockTexels = (res + DRY_BLOCKS - 1) / DRY_BLOCKS;
+				for (uint32 j = 0; j < res; ++j)
+				{
+					float* row = &m_blockMaxDepth[(size_t)(j / blockTexels) * DRY_BLOCKS];
+					for (uint32 i = 0; i < res; ++i)
+					{
+						const float* t = &texels[((size_t)j * res + i) * 4];
+						float& blockMax = row[i / blockTexels];
+						blockMax = glm::max(blockMax, t[1] - t[0]); // water level - terrain height
+					}
+				}
+				m_dryGridCenter = m_terrainData->center;
+				m_dryGridRange = m_terrainData->ranges[(int)glm::min(farCascade, 1u)];
+				m_dryGridValid = m_dryGridRange > 1.0f;
+			}
+		}
+
 		// Push the spectrum/shading params every frame; `enabled` also gates the GPU FFT simulation.
 		const float windAngle = steeredWindAngle(camera); // base wind, turned toward the local shore flow
 		OceanParams params;
@@ -441,10 +475,30 @@ namespace Procedural
 		const float pz = std::floor(camera.position.z / snap + 0.5f) * snap;
 		const Transform xf(glm::vec3(px, m_seaLevel, pz), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 
+		// Dry-sector test: skippable only when every block the footprint overlaps is buried deeper than
+		// the same terms the vertex cull demands (margin + swash reach + far error + slack) — so a
+		// skipped sector could never have contributed geometry. Out-of-range footprints count as wet.
+		const float wetNeed = glm::max(m_cullMargin, 0.0f) + swashReach() + glm::max(m_farCullError, 0.0f) + 2.0f;
+		const auto sectorDry = [&](const Sector& s) {
+			if (!m_drySectorCull || !m_dryGridValid)
+				return false;
+			const glm::vec2 center(px + s.localCenter.x, pz + s.localCenter.z);
+			const float scale = float(DRY_BLOCKS) / m_dryGridRange;
+			const glm::vec2 bMin = (center - s.halfXZ - m_dryGridCenter) * scale + float(DRY_BLOCKS) * 0.5f;
+			const glm::vec2 bMax = (center + s.halfXZ - m_dryGridCenter) * scale + float(DRY_BLOCKS) * 0.5f;
+			if (bMin.x < 0.0f || bMin.y < 0.0f || bMax.x >= float(DRY_BLOCKS) || bMax.y >= float(DRY_BLOCKS))
+				return false; // reaches past the baked data: unknown terrain, keep it
+			for (int y = (int)bMin.y; y <= (int)bMax.y; ++y)
+				for (int x = (int)bMin.x; x <= (int)bMax.x; ++x)
+					if (m_blockMaxDepth[(size_t)y * DRY_BLOCKS + x] > -wetNeed)
+						return false;
+			return true;
+		};
+
 		// Push the visible sectors, terrain-chunk style: re-center each sector's spatial entry on the
-		// snapped node position, then gate on the Main-pass stamp (Spatial/Culling >= Cull). The ocean
-		// draws PASS_MAIN only, so a main-culled sector has nothing to push at all — and the GPU
-		// per-instance frustum cull refines whatever the CPU gate lets through.
+		// snapped node position, then gate on the dry test and the Main-pass stamp (Spatial/Culling >=
+		// Cull). The ocean draws PASS_MAIN only, so a culled sector has nothing to push at all — and the
+		// GPU per-instance frustum cull refines whatever the CPU gates let through.
 		const SpatialCullingConfig& culling = Globals::spatialIndex.getCullingConfig();
 		const bool gate = culling.mode >= int(ESpatialCullMode::Cull);
 		for (Sector& s : m_sectors)
@@ -455,6 +509,8 @@ namespace Procedural
 			if (s.spatialEntry.isValid())
 				Globals::spatialIndex.updateEntry(s.spatialEntry.handle(),
 					glm::dvec3(px + s.localCenter.x, m_seaLevel + s.localCenter.y, pz + s.localCenter.z), s.radius);
+			if (sectorDry(s))
+				continue;
 			if (gate && s.spatialEntry.isValid()
 				&& !(Globals::spatialIndex.getPassMask(s.spatialEntry.handle()) & SpatialPassBit_Main))
 				continue;

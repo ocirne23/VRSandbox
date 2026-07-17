@@ -88,7 +88,7 @@ export namespace Procedural
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---
 		bool  m_enabled = true;
 		float m_seaLevel = 0.0f;   // mirrors the terrain's datum; set every update(), never tweaked here
-		float m_ringCell = 2.0ff;     // ring 0 cell size (m); doubles per ring. Reach = ringCell*res/2*2^(rings-1)
+		float m_ringCell = 2.0f;     // ring 0 cell size (m); doubles per ring. Reach = ringCell*res/2*2^(rings-1)
 		int   m_ringRes = 256;         // cells per axis per ring (ring 0 is a full grid, outer rings are annuli)
 		int   m_rings = 5;             // ring count (defaults: 16m fine region, ~1km reach)
 		// One coarse quad band appended past the outermost ring, stretching its edge lattice out to the
@@ -182,9 +182,24 @@ export namespace Procedural
 			RenderNode node;
 			SpatialEntry spatialEntry;
 			glm::vec3 localCenter = glm::vec3(0.0f); // mesh-local bounds center (the node snap adds on top)
+			glm::vec2 halfXZ = glm::vec2(0.0f);      // mesh-local XZ half extents (dry-sector test footprint)
 			float radius = 0.0f; // bounds sphere radius; the XZ half-diagonal dominates, so it also covers
 			                     // the vertical wave/swash displacement the flat mesh knows nothing about
 		};
 		std::vector<Sector> m_sectors;
+
+		// Dry-sector cull: sectors whose whole footprint is buried under land per the baked terrain data
+		// are skipped before anything reaches the GPU (a camera deep inland then renders no water at all).
+		// Conservative by construction — a per-block MAX of (water level - height) over the COARSEST
+		// cascade, rebuilt once per adopted bake, and a sector only skips when every block it overlaps is
+		// dry beyond the same burial terms the vertex cull demands; footprints leaving the baked range
+		// always count as wet (unknown terrain = open-ocean fallback in the shaders).
+		bool  m_drySectorCull = true;
+		static constexpr uint32 DRY_BLOCKS = 32;
+		std::array<float, DRY_BLOCKS * DRY_BLOCKS> m_blockMaxDepth{};
+		bool  m_dryGridValid = false;
+		const BakedTerrainData* m_dryGridSource = nullptr; // bake identity the block grid was built from
+		glm::vec2 m_dryGridCenter = glm::vec2(0.0f);
+		float m_dryGridRange = 0.0f;
 	};
 }

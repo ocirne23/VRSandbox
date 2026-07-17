@@ -42,7 +42,8 @@ export namespace Procedural
 	// This applies to SUBMERGED ground as much as to dry land: a plateau at -0.05 m is under water by
 	// definition, so a land-only rule could never drain one, and those are exactly what V3 produces —
 	// kilometres of sea-level film with no ocean within reach of it. The clipmap rides the baked level
-	// (oceanWaterOffset), so sinking it here actually removes the water rather than merely muting its swash.
+	// (the water-table lift in the ocean VS), so sinking it here actually removes the water rather than
+	// merely muting its swash.
 	// A real shelving bay is kept wet by the RADIUS instead: its apron is too shallow to seed itself, but it
 	// sits close to water that does. Radius shorter than the apron = the sea retreats off it.
 	//
@@ -127,7 +128,7 @@ export namespace Procedural
 			// SUBMERGED GROUND IS DROPPED TOO, deliberately. It is the whole point: a plateau sitting at
 			// -0.05 m is under water by definition, so a land-only rule can never take its water away, and
 			// V3 grows plenty of them — vast films of sea, kilometres inland, that no swell has ever reached.
-			// The ocean's clipmap rides the baked level (oceanWaterOffset = level - sea level), so sinking it
+			// The ocean's clipmap rides the baked level (the VS water-table lift = level - sea level), so sinking it
 			// here genuinely drains them rather than just muting their swash.
 			//
 			// What protects a REAL shelving bay is the reach RADIUS, not a land test: its apron is shallow

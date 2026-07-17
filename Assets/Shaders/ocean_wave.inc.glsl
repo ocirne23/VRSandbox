@@ -49,13 +49,6 @@ float oceanSampleShoreDepth(vec2 worldXZ)
     return hw.y - hw.x;
 }
 
-// Vertical lift raising the sea-level clipmap onto the local water table (0 over the open ocean). Both
-// displacement passes (prepass + forward) MUST apply this identically, before sampling the displacement.
-float oceanWaterOffset(vec2 worldXZ)
-{
-    return oceanSampleShoreData(worldXZ).y - u_oceanParams2.w;
-}
-
 // Local wave-travel basis from the baked flow direction (terrainFlowEncAt: 0 = none, 1..255 =
 // angle/2pi). Returns (cos, sin) of the flow-vs-wind rotation.
 //
@@ -82,15 +75,17 @@ vec2 oceanFlowToWorld(vec2 v, vec2 fr) { return vec2(fr.x * v.x - fr.y * v.y, fr
 // which discards those primitives before rasterization. Waves shoal-fade to zero at depth <= 0, so a
 // footprint buried by a positive margin can never clip live water; the margin absorbs the decimeter
 // disagreement between the baked maps and the LOD'd terrain mesh.
-// The taps read oceanSampleShoreDepth — the EXACT field the waves shoal/lift by. Tier selection: the
-// near cascade where it covers the footprint AND its 5x5 tap budget can span it at <= 1.5-texel
-// spacing (err = half a texel); everything else — big coarse-ring footprints included — goes to the
-// FAR tier: ONE center sample, no grid, with the flat "Ocean/Shore/Far cull error (m)" allowance
-// (0 = the far tier off). A tier that can't take the footprint must FALL THROUGH, never bail:
-// bailing carved never-cull rings. Water the far tier's single sample misses (narrow rivers,
-// partial-footprint coasts) can lose triangles — sub-pixel at that distance, accepted.
+// The taps read oceanSampleShoreDepth — the EXACT field the waves shoal/lift by; shoreHW is the
+// vertex's own (terrain height, water level), fetched ONCE by the caller and shared with the water
+// lift + displacement. Tier selection: the near cascade where it covers the footprint AND its 5x5 tap
+// budget can span it at <= 1.5-texel spacing (err = half a texel); everything else — big coarse-ring
+// footprints included — goes to the FAR tier: ONE center sample, no grid, with the flat
+// "Ocean/Shore/Far cull error (m)" allowance (0 = the far tier off). A tier that can't take the
+// footprint must FALL THROUGH, never bail: bailing carved never-cull rings. Water the far tier's
+// single sample misses (narrow rivers, partial-footprint coasts) can lose triangles — sub-pixel at
+// that distance, accepted.
 // Both displacement passes (prepass + forward) MUST apply the same test or their geometry diverges.
-bool oceanVertexCulled(vec2 worldXZ, float cellSize)
+bool oceanVertexCulled(vec2 worldXZ, float cellSize, vec2 shoreHW)
 {
     const float margin = u_oceanParams7.x;
     if (margin <= 0.0)
@@ -147,8 +142,8 @@ bool oceanVertexCulled(vec2 worldXZ, float cellSize)
     // alive: those vertices sit on land but can still rise above the terrain with an incoming wave.
     const float need = margin + u_oceanParams7.w + err;
 
-    if (oceanSampleShoreDepth(worldXZ) >= -need)
-        return false; // water at the vertex: done (the common case over open water — one tap and out)
+    if (shoreHW.y - shoreHW.x >= -need)
+        return false; // water at the vertex: done (the common case over open water — no fetch at all)
 
     // Far tier: that single center sample decides — no footprint grid, pure speed. A triangle edge
     // reaching from this buried vertex over nearby unresolved water is sub-pixel at that distance.
@@ -213,11 +208,11 @@ float oceanSwashWeight(float depth, float waterLevel)
 }
 
 // Sum of all cascades' displacement at an undisplaced (morphed) world XZ. Choppy lambda (u_oceanParams0.w)
-// is applied here so it stays live (the maps store raw Tessendorf Dx/Dz).
-vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph)
+// is applied here so it stays live (the maps store raw Tessendorf Dx/Dz). shoreHW = the vertex's
+// (terrain height, water level), fetched once by the caller (shared with the cull + water lift).
+vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph, vec2 shoreHW)
 {
     const float chop = u_oceanParams0.w;
-    const vec2 shoreHW = oceanSampleShoreData(worldXZ); // (terrain height, water level)
     const float depth = shoreHW.y - shoreHW.x;
     vec3 disp = vec3(0.0);
     float sw = 0.0;
@@ -457,10 +452,11 @@ float oceanSampleTurbulence(vec2 worldXZ, float footprint)
 }
 
 // Vertex-shader variant with explicit LOD (the G-buffer prepass writes this as the reference normal).
-vec3 oceanSampleNormalLod(vec2 worldXZ, float cellSize, float morph)
+// shoreHW = the vertex's (terrain height, water level), fetched once by the caller.
+vec3 oceanSampleNormalLod(vec2 worldXZ, float cellSize, float morph, vec2 shoreHW)
 {
     const float chop = u_oceanParams0.w;
-    const float depth = oceanSampleShoreDepth(worldXZ);
+    const float depth = shoreHW.y - shoreHW.x;
     if (depth <= 0.0)
         return vec3(0.0, 1.0, 0.0); // buried under land: all shoal fades are zero — flat
     const vec2 fr = oceanFlowRotation(worldXZ);           // same rotation as the displacement passes
