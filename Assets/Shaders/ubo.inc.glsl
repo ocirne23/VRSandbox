@@ -177,6 +177,16 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_lodParams0; // x = screen-space error threshold (px, bias pre-applied), y = hysteresis band,
                        // z = fallback full-res pixels (authored chains), w = mipPixelScale (px per unit/dist)
     vec4 u_lodParams1; // x = force LOD level (< 0 = off), y = fallback-metric level bias, z = enabled (0/1), w unused
+
+    // Forcefield bubbles (keep in sync with RendererVKLayout::Ubo; force_field.inc.glsl consumes these)
+    vec4 u_forceTeamColors[MAX_FORCE_TEAMS]; // rgb = linear team color, w unused
+    vec4 u_forceParams0; // x = iso threshold, y = rim power, z = rim intensity, w = shell base alpha
+    vec4 u_forceParams1; // x = contact glow intensity, y = contact glow width (opposing/own ratio band),
+                         // z = geometry glow distance (m), w = march steps
+    vec4 u_forceParams2; // x = pattern scale (1/m), y = pattern scroll speed, z = pattern intensity,
+                         // w = force gain (readback scale)
+    vec4 u_forceParams3; // x = interior alpha (shell opacity floor seen from inside),
+                         // y = backface alpha (far/inner surface visibility from outside), zw unused
 };
 
 // View index selecting which u_views[] entry the convenience macros / reconstruction helpers read. Defaults

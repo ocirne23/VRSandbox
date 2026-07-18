@@ -93,6 +93,78 @@ export namespace RendererVKLayout
     };
     static_assert(sizeof(DecalInfo) == 96);
 
+    // Forcefield bubbles (Force library / ForceFieldPipeline / force_*.glsl). Emitters are analytic
+    // influence-field sources with COMPACT SUPPORT (field is exactly 0 beyond the directional reach):
+    // same-team fields sum (metaball merging), the bubble surface is the equal-field equilibrium
+    // against the strongest opposing team (or the iso threshold, uncontested). The live slot table is
+    // compact-uploaded per frame; per-emitter applied forces and point queries are GPU-computed and
+    // read back slot-indexed ~2 frames latent. Sizing constants are injected into every shader compile.
+    constexpr uint32 MAX_FORCE_EMITTERS = 8192;     // live emitter slots (64 B each)
+    constexpr uint32 MAX_FORCE_TEAMS = 8;           // fixed team count (per-point field accumulators)
+    constexpr uint32 MAX_FORCE_QUERIES = 1024;      // persistent gameplay point-query slots
+    constexpr uint32 MAX_FORCE_BIG_EMITTERS = 64;   // reach above the tweak threshold bypasses the grid
+    constexpr uint32 FORCE_SIM_GROUP_SIZE = 64;
+
+    // ForceEmitterGpu::teamFlags.y bits.
+    constexpr uint32 FORCE_FLAG_ACTIVE = 1u << 0;   // clear = destroyed/free slot: skipped everywhere
+    constexpr uint32 FORCE_FLAG_BIG = 1u << 1;      // reach above the threshold: global list, not the grid
+
+    // Force emitter hash grid (uniform 32 m cells, NOT camera-adaptive — gameplay queries happen
+    // anywhere). Fixed per-cell emitter capacity; cells bump-allocate from the data buffer with the
+    // light grid's overflow-inflated-counter growth contract (checkForceGridCapacity).
+    constexpr uint32 FORCE_CELL_MAX_EMITTERS = 64;  // packed uint16 indices per occupied cell (must stay even)
+    constexpr uint32 INITIAL_FORCE_TABLE_ENTRIES = 4096; // power of two (doubling preserves this)
+    constexpr size_t INITIAL_FORCE_GRID_DATA_SIZE = 1024 * 1024;
+
+    // Per-emitter GPU config, re-uploaded (compacted) every frame for every live slot.
+    // Keep in sync with force_field.inc.glsl.
+    struct alignas(16) ForceEmitterGpu
+    {
+        glm::vec4 posReach{ 0.0f, 0.0f, 0.0f, 1.0f };   // xyz = world position, w = Reach (m)
+        glm::vec4 dirFocus{ 0.0f, 1.0f, 0.0f, 0.0f };   // xyz = normalized direction, w = focus >= 0 (0 = sphere)
+        glm::vec4 outputParams{ 1.0f, 1.0f, 0.0f, 0.0f };// x = Output (field strength), y = shell alpha mult, zw unused
+                                                         // (z was a per-emitter pattern phase — removed: the pattern
+                                                         // must be purely world-anchored or merged shells seam)
+        glm::uvec4 teamFlags{ 0u, 0u, 0u, 0u };         // x = team [0, MAX_FORCE_TEAMS), y = FORCE_FLAG_* bits, zw unused
+    };
+    static_assert(sizeof(ForceEmitterGpu) == 64);
+
+    // GPU layout of the per-frame compacted emitter buffer: count header + big-emitter index list +
+    // live emitters (matches the buffer block force_field.inc.glsl declares). Big emitters (max
+    // directional reach above the tweak threshold) bypass the grid — every evaluation scans the big
+    // list linearly with a sphere reject, so a 300 m dome doesn't flood thousands of cells.
+    struct alignas(16) ForceEmittersGpu
+    {
+        uint32 count;
+        uint32 bigCount;
+        uint32 _pad0, _pad1;
+        uint32 bigIndices[MAX_FORCE_BIG_EMITTERS]; // compact indices of grid-bypassing emitters
+        ForceEmitterGpu emitters[MAX_FORCE_EMITTERS];
+    };
+    constexpr size_t FORCE_EMITTER_HEADER_SIZE = sizeof(ForceEmittersGpu) - sizeof(ForceEmitterGpu) * MAX_FORCE_EMITTERS;
+
+    // One registered point query (mapped per frame) and its GPU-written result (read back).
+    struct alignas(16) ForceQueryGpu
+    {
+        glm::vec4 posActive{ 0.0f }; // xyz = world position, w = 1 active / 0 inactive slot
+    };
+    // Per-frame mapped query input buffer (count header + slot array; matches force_query.cs.glsl).
+    struct alignas(16) ForceQueriesGpu
+    {
+        uint32 count;
+        uint32 _pad0, _pad1, _pad2;
+        ForceQueryGpu queries[MAX_FORCE_QUERIES];
+    };
+    constexpr size_t FORCE_QUERY_HEADER_SIZE = sizeof(ForceQueriesGpu) - sizeof(ForceQueryGpu) * MAX_FORCE_QUERIES;
+    struct alignas(16) ForceQueryResult
+    {
+        uint32 owningTeam;       // strongest team; MAX_FORCE_TEAMS = outside every bubble
+        float ownField;          // that team's field at the point
+        float bestOpposingField; // strongest other team's field
+        uint32 frameStamp;       // m_frameCounter when computed (0 = never: slot not yet evaluated)
+    };
+    static_assert(sizeof(ForceQueryResult) == 16);
+
     // Mesh/material indices are stored as uint16 in InMeshInstance, so growth clamps to this.
     constexpr uint32 MESH_MATERIAL_INDEX_LIMIT = USHRT_MAX
         - 1;
@@ -384,6 +456,16 @@ export namespace RendererVKLayout
         glm::vec4 lodParams0; // x = screen-space error threshold (px, bias pre-applied), y = hysteresis band,
                               // z = fallback full-res pixels (authored chains), w = mipPixelScale (px per unit/dist)
         glm::vec4 lodParams1; // x = force LOD level (< 0 = off), y = fallback-metric level bias, z = enabled (0/1), w unused
+
+        // Forcefield bubbles (Force library / ForceFieldPipeline; keep in sync with ubo.inc.glsl)
+        glm::vec4 forceTeamColors[MAX_FORCE_TEAMS]; // rgb = linear team color, w unused
+        glm::vec4 forceParams0; // x = iso threshold, y = rim power, z = rim intensity, w = shell base alpha
+        glm::vec4 forceParams1; // x = contact glow intensity, y = contact glow width (opposing/own ratio band),
+                                // z = geometry glow distance (m), w = march steps
+        glm::vec4 forceParams2; // x = pattern scale (1/m), y = pattern scroll speed, z = pattern intensity,
+                                // w = force gain (readback scale)
+        glm::vec4 forceParams3; // x = interior alpha (shell opacity floor seen from inside),
+                                // y = backface alpha (far/inner surface visibility from outside), zw unused
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

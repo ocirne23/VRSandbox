@@ -173,6 +173,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_debugLinePipeline.initialize(sceneRenderPass);
     m_particlePipeline.initialize(sceneRenderPass, m_maxTextures, m_numTextureDescriptors, m_sceneViewCount);
     m_decalPipeline.initialize(sceneRenderPass, m_maxTextures, m_numTextureDescriptors, m_sceneViewCount);
+    m_forceFieldPipeline.initialize(sceneRenderPass, m_sceneViewCount);
 
 
     m_shadowCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
@@ -217,6 +218,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
         perFrame.particleSimCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.particleCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.decalCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.forceFieldCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
+        perFrame.forceComputeCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.taaCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.eyeAdaptCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
         perFrame.compositeCommandBuffer.initialize(vk::CommandBufferLevel::eSecondary);
@@ -410,6 +413,7 @@ void Renderer::reloadShaders()
     m_debugLinePipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_particlePipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_decalPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
+    m_forceFieldPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
     m_taaPipeline.reloadShaders();
     m_eyeAdaptationPipeline.reloadShaders();
     m_compositePipeline.reloadShaders(m_renderPass);
@@ -546,6 +550,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     syncTextureDescriptorCapacity();
 
     checkLightGridCapacity();
+    checkForceGridCapacity();
 
     m_meshInstanceCounter = 0;
     m_instanceOverflowStart = UINT32_MAX;
@@ -764,6 +769,20 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         glm::max(ocean.rtReflectionRange, 50.0f), glm::clamp(ocean.rtReflectionMaxRough, 0.0f, 1.0f));
 
     ubo.terrainParams = m_terrainParams;
+
+    { // Forcefield bubbles (Force library pushes m_forceFieldParams every frame; all UBO-driven = live)
+        const ForceFieldParams& force = m_forceFieldParams;
+        for (uint32 i = 0; i < RendererVKLayout::MAX_FORCE_TEAMS; ++i)
+            ubo.forceTeamColors[i] = glm::vec4(force.teamColors[i], 0.0f);
+        ubo.forceParams0 = glm::vec4(glm::max(force.isoThreshold, 1e-3f), glm::max(force.rimPower, 0.1f),
+            glm::max(force.rimIntensity, 0.0f), glm::clamp(force.shellAlpha, 0.0f, 1.0f));
+        ubo.forceParams1 = glm::vec4(glm::max(force.contactGlowIntensity, 0.0f), glm::max(force.contactGlowWidth, 1e-3f),
+            glm::max(force.geoGlowDistance, 0.0f), (float)glm::clamp(force.marchSteps, 8, 256));
+        ubo.forceParams2 = glm::vec4(glm::max(force.patternScale, 0.0f), force.patternSpeed,
+            glm::max(force.patternIntensity, 0.0f), force.forceGain);
+        ubo.forceParams3 = glm::vec4(glm::clamp(force.interiorAlpha, 0.0f, 1.0f),
+            glm::clamp(force.backfaceAlpha, 0.0f, 1.0f), 0.0f, 0.0f);
+    }
 
     const TerrainTexTweaks& tex = m_terrainTexTweaks;
     // Every start/full pair is ordered here rather than in the shader: an inverted pair from the tweak
@@ -993,6 +1012,142 @@ void Renderer::destroyParticleEmitter(uint32 slot)
     m_retiredParticleEmitters.emplace_back(slot, m_frameCounter);
 }
 
+uint32 Renderer::createForceEmitter(const RendererVKLayout::ForceEmitterGpu& desc)
+{
+    // Recycle retired slots once every frame that could still deliver their slot-indexed force
+    // readback has drained (particle emitter slot pattern).
+    for (size_t i = 0; i < m_retiredForceEmitters.size();)
+    {
+        if (m_frameCounter - m_retiredForceEmitters[i].second > RendererVKLayout::NUM_FRAMES_IN_FLIGHT + 2)
+        {
+            m_freeForceEmitterSlots.push_back(m_retiredForceEmitters[i].first);
+            m_retiredForceEmitters.erase(m_retiredForceEmitters.begin() + i);
+        }
+        else
+            ++i;
+    }
+    uint32 slot;
+    if (!m_freeForceEmitterSlots.empty())
+    {
+        slot = m_freeForceEmitterSlots.back();
+        m_freeForceEmitterSlots.pop_back();
+    }
+    else
+    {
+        if (m_forceEmitters.size() >= RendererVKLayout::MAX_FORCE_EMITTERS)
+            return UINT32_MAX;
+        m_forceEmitters.emplace_back();
+        slot = (uint32)m_forceEmitters.size() - 1;
+    }
+    m_forceEmitters[slot] = desc;
+    m_forceEmitters[slot].teamFlags.y |= RendererVKLayout::FORCE_FLAG_ACTIVE;
+    return slot;
+}
+
+void Renderer::updateForceEmitter(uint32 slot, const RendererVKLayout::ForceEmitterGpu& desc)
+{
+    assert(slot < m_forceEmitters.size());
+    m_forceEmitters[slot] = desc;
+}
+
+void Renderer::destroyForceEmitter(uint32 slot)
+{
+    assert(slot < m_forceEmitters.size());
+    m_forceEmitters[slot].teamFlags.y &= ~RendererVKLayout::FORCE_FLAG_ACTIVE;
+    m_retiredForceEmitters.emplace_back(slot, m_frameCounter);
+}
+
+uint32 Renderer::createForceQuerySlot()
+{
+    for (size_t i = 0; i < m_retiredForceQuerySlots.size();)
+    {
+        if (m_frameCounter - m_retiredForceQuerySlots[i].second > RendererVKLayout::NUM_FRAMES_IN_FLIGHT + 2)
+        {
+            m_freeForceQuerySlots.push_back(m_retiredForceQuerySlots[i].first);
+            m_retiredForceQuerySlots.erase(m_retiredForceQuerySlots.begin() + i);
+        }
+        else
+            ++i;
+    }
+    uint32 slot;
+    if (!m_freeForceQuerySlots.empty())
+    {
+        slot = m_freeForceQuerySlots.back();
+        m_freeForceQuerySlots.pop_back();
+    }
+    else
+    {
+        if (m_forceQueries.size() >= RendererVKLayout::MAX_FORCE_QUERIES)
+            return UINT32_MAX;
+        m_forceQueries.emplace_back();
+        slot = (uint32)m_forceQueries.size() - 1;
+    }
+    m_forceQueries[slot].posActive = glm::vec4(0.0f); // inactive until the first setForceQuery
+    return slot;
+}
+
+void Renderer::setForceQuery(uint32 slot, const glm::vec3& pos)
+{
+    assert(slot < m_forceQueries.size());
+    m_forceQueries[slot].posActive = glm::vec4(pos, 1.0f);
+}
+
+void Renderer::destroyForceQuerySlot(uint32 slot)
+{
+    assert(slot < m_forceQueries.size());
+    m_forceQueries[slot].posActive = glm::vec4(0.0f);
+    m_retiredForceQuerySlots.emplace_back(slot, m_frameCounter);
+}
+
+glm::vec4 Renderer::getForceEmitterReadback(uint32 slot) const
+{
+    const std::span<const glm::vec4> forces = m_forceFieldPipeline.getForceReadback(m_swapChain.getCurrentFrameIndex());
+    return slot < forces.size() ? forces[slot] : glm::vec4(0.0f);
+}
+
+RendererVKLayout::ForceQueryResult Renderer::getForceQueryReadback(uint32 slot) const
+{
+    const std::span<const RendererVKLayout::ForceQueryResult> results = m_forceFieldPipeline.getQueryReadback(m_swapChain.getCurrentFrameIndex());
+    return slot < results.size() ? results[slot] : RendererVKLayout::ForceQueryResult{ RendererVKLayout::MAX_FORCE_TEAMS, 0.0f, 0.0f, 0u };
+}
+
+void Renderer::setForceFieldParams(const ForceFieldParams& params)
+{
+    // The grid toggle is a compile-time shader define (FORCE_GRID): rebuild the force pipelines,
+    // same GPU-idle + reload pattern as the ocean hit-lighting tweak.
+    if (params.useGrid != m_forceFieldPipeline.getUseGrid())
+    {
+        if (Globals::device.getGraphicsQueue().waitIdle() == vk::Result::eSuccess)
+        {
+            m_forceFieldPipeline.setUseGrid(params.useGrid);
+            m_forceFieldPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass());
+            setHaveToRecordCommandBuffers();
+        }
+    }
+    m_forceFieldParams = params;
+}
+
+void Renderer::checkForceGridCapacity()
+{
+    // Light-grid growth contract: read LAST frame's demand counters and grow before the buffers
+    // fill (overflowing inserts drop for one frame but keep incrementing the counter, so the
+    // readback measures true demand).
+    if (!m_forceFieldParams.enabled || !m_forceFieldPipeline.getUseGrid())
+        return;
+    const uint32 prevIdx = (m_swapChain.getCurrentFrameIndex() + RendererVKLayout::NUM_FRAMES_IN_FLIGHT - 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    const ForceFieldPipeline::GridDemand demand = m_forceFieldPipeline.getGridDemand(prevIdx);
+    const bool tableHigh = demand.numCells > m_forceFieldPipeline.getTableEntries() / 4;
+    const bool dataHigh = (size_t)demand.dataCounter * sizeof(uint32) > m_forceFieldPipeline.getGridDataSize() / 4 * 3;
+    if (tableHigh || dataHigh)
+    {
+        waitForGpuAndFlushStaging();
+        m_forceFieldPipeline.growGridBuffers(
+            dataHigh ? (size_t)(demand.dataCounter * sizeof(uint32) * 1.5f) : m_forceFieldPipeline.getGridDataSize(),
+            tableHigh ? demand.numCells * 8 : m_forceFieldPipeline.getTableEntries());
+        setHaveToRecordCommandBuffers();
+    }
+}
+
 uint16 Renderer::loadEffectTexture(const char* filePath, bool sRGB)
 {
     const uint16 idx = Globals::textureManager.upload(filePath, true, sRGB);
@@ -1102,6 +1257,8 @@ void Renderer::present()
             dt * m_particleTimeScale, m_particleCollision, particleResetCarried);
         m_particleSpawnRequests.clear();
         m_decalPipeline.upload(frameIdx, m_decalCounter);
+        // Compacts the ACTIVE emitter slots + uploads query positions (fence-safe here).
+        m_forceFieldPipeline.upload(frameIdx, m_forceEmitters, m_forceQueries, m_forceFieldParams.bigReachThreshold);
 
         if (m_particleLogStats && m_frameCounter % 120 == 0)
         {
@@ -2024,6 +2181,51 @@ void Renderer::recordDecals(uint32 frameIdx)
     cb.end();
 }
 
+// Forcefield shell draw for one eye, inside the eye's scene-colour render pass after the debug
+// overlays (so particles/fog layer on top of the bubbles).
+void Renderer::recordForceFieldInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBuffer vkCb = cb.getCommandBuffer();
+    const vk::Extent2D extent = m_swapChain.getLayout().extent;
+    const glm::ivec2 vpSize = m_viewportRect.getSize();
+    const vk::Viewport viewport{ .x = (float)m_viewportRect.min.x, .y = (float)m_viewportRect.max.y,
+        .width = (float)vpSize.x, .height = -((float)vpSize.y), .minDepth = 0.0f, .maxDepth = 1.0f };
+    const vk::Rect2D scissor{ .offset = vk::Offset2D{ 0, 0 }, .extent = extent };
+    vkCb.setViewport(0, { viewport });
+    vkCb.setScissor(0, { scissor });
+    ForceFieldPipeline::DrawParams drawParams{
+        .ubo = frameData.ubo,
+        .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
+        // Runs inside the scene pass, where depth-prepass reuse holds the image in DEPTH_STENCIL_READ_ONLY.
+        .gbufferDepthLayout = m_depthPrepassReuse ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eShaderReadOnlyOptimal,
+        .gbufferSampler = frameData.gbuffer.getSampler(),
+    };
+    m_forceFieldPipeline.recordDraw(cb, frameIdx, eyeIndex, drawParams);
+}
+
+void Renderer::recordForceField(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = frameData.sceneColor.getRenderPass() };
+    CommandBuffer& cb = frameData.forceFieldCommandBuffer;
+    cb.begin(false, &inheritance);
+    recordForceFieldInto(cb, frameIdx, 0);
+    cb.end();
+}
+
+// Force grid build + per-emitter force / point-query dispatches (outside any render pass, after the
+// light grid). All dispatches ride mapped indirect buffers, so emitter/query changes never re-record.
+void Renderer::recordForceCompute(uint32 frameIdx)
+{
+    PerFrameData& frameData = m_perFrameData[frameIdx];
+    CommandBuffer& cb = frameData.forceComputeCommandBuffer;
+    vk::CommandBufferInheritanceInfo inheritance;
+    cb.begin(false, &inheritance);
+    m_forceFieldPipeline.recordCompute(cb, frameIdx, frameData.ubo);
+    cb.end();
+}
+
 void Renderer::recordAO(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
@@ -2438,6 +2640,7 @@ void Renderer::recordCommandBuffers()
         recordOceanSim(frameIdx); // executed only while an ocean is active (m_oceanParams.enabled)
         recordIndirectCull(frameIdx);
         recordLightGrid(frameIdx);
+        recordForceCompute(frameIdx); // indirect dispatches: emitter/query changes never re-record
         recordParticleSim(frameIdx); // indirect dispatches: emitter/spawn changes never re-record
         recordShadowCull(frameIdx);
         recordShadowDraw(frameIdx);
@@ -2456,6 +2659,7 @@ void Renderer::recordCommandBuffers()
             if (m_debugLinePipeline.hasBuffers())
                 recordDebugLines(frameIdx);
             recordDecals(frameIdx);
+            recordForceField(frameIdx);
             recordParticles(frameIdx);
             recordAO(frameIdx);
             recordFogApply(frameIdx);
@@ -2533,6 +2737,12 @@ void Renderer::recordCommandBuffers()
             vkCommandBuffer.executeCommands(1, &vkOceanSimCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
         vkCommandBuffer.executeCommands(1, &vkLightGridCommandBuffer);
+        // Forcefield grid build + force/query compute (Force library readbacks land ~2 frames later).
+        if (m_forceFieldParams.enabled)
+        {
+            vk::CommandBuffer vkForceComputeCommandBuffer = frameData.forceComputeCommandBuffer.getCommandBuffer();
+            vkCommandBuffer.executeCommands(1, &vkForceComputeCommandBuffer);
+        }
         // Particle emit/simulate (outside any render pass; reads LAST frame's G-buffer for collision,
         // writes the alive list + indirect draw args the in-pass billboard draw consumes).
         if (m_particlesEnabled)
@@ -2616,6 +2826,8 @@ void Renderer::recordCommandBuffers()
                     recordStaticMeshInto(commandBuffer, frameIdx, eye);
                     if (m_decalsEnabled)
                         recordDecalsInto(commandBuffer, frameIdx, eye);
+                    if (m_forceFieldParams.enabled)
+                        recordForceFieldInto(commandBuffer, frameIdx, eye);
                     if (m_particlesEnabled)
                         recordParticlesInto(commandBuffer, frameIdx, eye);
                     if (m_fogParams.enabled)
@@ -2725,6 +2937,11 @@ void Renderer::recordCommandBuffers()
             {
                 vk::CommandBuffer vkDebugLineCommandBuffer = frameData.debugLineCommandBuffer.getCommandBuffer();
                 vkCommandBuffer.executeCommands(1, &vkDebugLineCommandBuffer);
+            }
+            if (m_forceFieldParams.enabled) // after debug lines, before particles/fog (those layer on top)
+            {
+                vk::CommandBuffer vkForceFieldCommandBuffer = frameData.forceFieldCommandBuffer.getCommandBuffer();
+                vkCommandBuffer.executeCommands(1, &vkForceFieldCommandBuffer);
             }
             if (m_particlesEnabled)
             {

@@ -1,0 +1,153 @@
+export module Force:System;
+
+import Core;
+import Core.glm;
+import RendererVK;
+
+// Forcefield bubble manager (Globals::forceSystem). Emitters project analytic influence-field
+// "bubbles": same-team fields SUM (metaball merging), a point belongs to a team where that team's
+// field beats the iso threshold and every other team's field, and the bubble surface is the
+// equal-field equilibrium between teams — squish and focused-lobe "pierce" fall out of the math,
+// no simulation. The renderer ray-marches the surface (ForceFieldPipeline); per-emitter applied
+// force and point queries are computed on the GPU and read back ~2 frames latent.
+// update() runs once per frame on the main thread (after the entity update, before present) and is
+// the only place renderer emitter state is written; ForceEmitter::setTransform/setOutput/... only
+// store into the instance's own slot, so they are safe from the parallel entity update pass (one
+// writer per instance). create/destroy are main-thread.
+
+export class ForceSystem;
+
+// RAII handle to a live emitter. Move-only, like ParticleEffect/PhysicsBody.
+export class ForceEmitter final
+{
+public:
+    ForceEmitter() = default;
+    ForceEmitter(ForceEmitter&& move) noexcept : m_handle(move.m_handle) { move.m_handle = 0; }
+    ForceEmitter& operator=(ForceEmitter&& move) noexcept;
+    ForceEmitter(const ForceEmitter&) = delete;
+    ~ForceEmitter() { destroy(); }
+
+    bool isValid() const { return m_handle != 0; }
+    void destroy();
+
+    // Safe from the parallel entity update (writes only this instance's own slot).
+    void setTransform(const glm::vec3& pos, const glm::vec3& direction);
+    void setPosition(const glm::vec3& pos);
+    void setOutput(float output);
+    void setReach(float reach);
+    void setFocus(float focus);
+    void setTeam(uint32 team); // main-thread (rare)
+
+    // GPU readback results, ~2 frames old (zero until the first readback lands). Force is the
+    // opposing teams' field pressure integrated over this emitter's own bubble; pressure is the
+    // mean opposing field strength (how hard the emitter is being pushed on overall).
+    glm::vec3 getAppliedForce() const;
+    float getPressure() const;
+
+private:
+    friend class ForceSystem;
+    explicit ForceEmitter(uint64 handle) : m_handle(handle) {}
+    uint64 m_handle = 0; // instance index | generation << 32; 0 = invalid (generations start at 1)
+};
+
+// RAII handle to a registered world-space point query: "which team's bubble (after deformation)
+// contains this point?" Results are GPU-computed and land ~2 frames after the position is set.
+export class ForceQuery final
+{
+public:
+    ForceQuery() = default;
+    ForceQuery(ForceQuery&& move) noexcept : m_handle(move.m_handle) { move.m_handle = 0; }
+    ForceQuery& operator=(ForceQuery&& move) noexcept;
+    ForceQuery(const ForceQuery&) = delete;
+    ~ForceQuery() { destroy(); }
+
+    bool isValid() const { return m_handle != 0; }
+    void destroy();
+
+    // Safe from the parallel entity update (writes only this instance's own slot).
+    void setPosition(const glm::vec3& pos);
+
+    struct Result
+    {
+        uint32 owningTeam = 0;      // strongest team at the point (only meaningful when inside)
+        bool inside = false;        // inside owningTeam's bubble (field > iso and beats all others)
+        float ownField = 0.0f;      // the owning team's field strength at the point
+        float opposingField = 0.0f; // best opposing team's field strength
+        bool valid = false;         // false until the first readback for this slot lands
+    };
+    Result getResult() const; // latched by ForceSystem::update, ~2 frames old
+
+private:
+    friend class ForceSystem;
+    explicit ForceQuery(uint64 handle) : m_handle(handle) {}
+    uint64 m_handle = 0;
+};
+
+export class ForceSystem final
+{
+public:
+    void initialize(); // registers the "Force" tweaks; call from main before world spawns
+    // Pushes every live emitter's GPU config + the query positions to the renderer and latches the
+    // GPU readbacks (applied forces, query results). Call once per frame from the main loop, after
+    // world.update, before present.
+    void update(Renderer& renderer, float deltaSec);
+
+    // direction only matters with focus > 0 (focus 0 = spherical bubble). output must exceed the
+    // iso threshold for a bubble to exist at all; reach is the field's hard falloff-to-zero radius
+    // (the visible bubble is smaller: r = reach * sqrt(1 - sqrt(iso/output))).
+    ForceEmitter createEmitter(uint32 team, const glm::vec3& pos, const glm::vec3& direction,
+        float output, float reach, float focus = 0.0f);
+    ForceQuery createQuery(const glm::vec3& pos);
+
+    uint32 getNumEmitters() const { return m_numLiveEmitters; }
+    const ForceFieldParams& getParams() const { return m_params; }
+
+private:
+    friend class ForceEmitter;
+    friend class ForceQuery;
+
+    struct EmitterInstance
+    {
+        uint32 generation = 0; // 0 = free slot
+        uint32 rendererSlot = UINT32_MAX;
+        uint32 team = 0;
+        float output = 1.0f;
+        float reach = 1.0f;
+        float focus = 0.0f;
+        glm::vec3 pos{ 0.0f };
+        glm::vec3 dir{ 0.0f, 1.0f, 0.0f };
+        float phaseSeed = 0.0f;
+        glm::vec3 appliedForce{ 0.0f }; // latched from the GPU readback
+        float pressure = 0.0f;
+    };
+    struct QueryInstance
+    {
+        uint32 generation = 0; // 0 = free slot
+        uint32 rendererSlot = UINT32_MAX;
+        glm::vec3 pos{ 0.0f };
+        ForceQuery::Result result;
+    };
+
+    EmitterInstance* resolveEmitter(uint64 handle);
+    const EmitterInstance* resolveEmitter(uint64 handle) const;
+    QueryInstance* resolveQuery(uint64 handle);
+    void destroyEmitter(uint64 handle);
+    void destroyQuery(uint64 handle);
+    void debugDrawEmitter(Renderer& renderer, const EmitterInstance& inst) const;
+
+    std::vector<EmitterInstance> m_emitters; // indexed by handle low 32 bits; slots recycled by generation
+    std::vector<uint32> m_freeEmitters;
+    std::vector<QueryInstance> m_queries;
+    std::vector<uint32> m_freeQueries;
+    uint32 m_numLiveEmitters = 0;
+    uint32 m_generationCounter = 1;
+
+    ForceFieldParams m_params; // owns the "Force" tweaks, pushed to the renderer every update
+    bool m_debugDraw = false;
+    bool m_debugDrawQueries = false;
+};
+
+export namespace Globals
+{
+    ForceSystem forceSystem;
+}

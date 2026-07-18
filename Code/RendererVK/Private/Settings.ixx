@@ -344,6 +344,47 @@ export struct OceanParams
                                    // misses take), reflections to the atmosphere. 0 = unlimited
 };
 
+// Forcefield bubbles (Force library / ForceFieldPipeline / force_*.glsl). The Force library owns
+// these tweaks (TweakPanel "Force" categories) and hands the struct to Renderer::setForceFieldParams
+// every frame, like OceanParams; the values are UBO-driven, so all of them are live.
+export struct ForceFieldParams
+{
+    bool enabled = true;             // gates the shell draw + force compute passes
+    float isoThreshold = 0.15f;      // field strength where an uncontested bubble surface sits
+    int marchSteps = 48;             // ray-march steps through a shell proxy's ray interval
+    float bigReachThreshold = 48.0f; // max directional reach (m) above which an emitter bypasses the
+                                     // grid into the globally-scanned big-emitter list
+    bool useGrid = true;             // hash-grid candidate gathering; off = brute-force scan of every
+                                     // emitter per evaluation (small scenes / A-B correctness check).
+                                     // Toggling rebuilds the force pipelines (FORCE_GRID define)
+    float forceGain = 1.0f;          // scale on the read-back per-emitter applied forces
+    float shellAlpha = 0.25f;        // base shell opacity (rim-weighted in the shader)
+    float interiorAlpha = 0.35f;     // shell opacity floor when seen from INSIDE the bubble (the rim
+                                     // math reads near-zero head-on from within; this keeps the dome visible)
+    float backfaceAlpha = 0.35f;     // visibility of the far/inner shell surface seen from OUTSIDE,
+                                     // composited behind the front surface (0 = single-surface shell)
+    float rimPower = 3.0f;           // fresnel rim exponent
+    float rimIntensity = 1.5f;       // rim emissive gain
+    float contactGlowIntensity = 4.0f; // seam glow where opposing bubbles press (equal-field zone)
+    float contactGlowWidth = 0.15f;    // opposing/own field ratio band that reads as contact
+    float geoGlowDistance = 0.5f;      // glow band where the shell intersects scene geometry (m)
+    float patternScale = 0.6f;       // animated surface pattern frequency (1/m)
+    float patternSpeed = 0.3f;       // pattern scroll speed
+    float patternIntensity = 0.5f;
+    // Per-team shell colors (linear rgb); 8 = RendererVKLayout::MAX_FORCE_TEAMS (static_asserted
+    // where both are visible — Settings deliberately doesn't import :Layout).
+    glm::vec3 teamColors[8] = {
+        { 0.20f, 0.55f, 1.00f }, // 0 blue
+        { 1.00f, 0.30f, 0.15f }, // 1 red
+        { 0.25f, 1.00f, 0.35f }, // 2 green
+        { 0.70f, 0.30f, 1.00f }, // 3 purple
+        { 1.00f, 0.85f, 0.20f }, // 4 yellow
+        { 1.00f, 0.25f, 0.70f }, // 5 magenta
+        { 0.20f, 1.00f, 0.90f }, // 6 teal
+        { 0.90f, 0.95f, 1.00f }, // 7 white
+    };
+};
+
 export struct Stats
 {
     uint32 numLights;

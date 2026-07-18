@@ -24,6 +24,7 @@ import Threading;
 import App.InputControls;
 import Procedural;
 import Particle;
+import Force;
 
 int main()
 {
@@ -63,6 +64,9 @@ int main()
 
     ParticleSystem& particleSystem = Globals::particleSystem;
     particleSystem.initialize(); // before any world spawn: ParticleComponents register effects on spawn
+
+    ForceSystem& forceSystem = Globals::forceSystem;
+    forceSystem.initialize();
 
     Globals::scriptHost.setCurrentScriptPath("Scripts/Graph.scr");
     ScriptEventManager& scriptEvents = Globals::scriptEvents;
@@ -263,6 +267,11 @@ int main()
         // Particle effects + decals: turns emitter rates/bursts into GPU spawn requests and submits the
         // live decal set (after world.update so effects follow this frame's entity transforms).
         particleSystem.update(renderer, (float)deltaSec);
+
+        // Forcefield bubbles: test force-balls follow their bodies + feed the read-back force into
+        // physics, then the system pushes live emitter state + query positions and latches readbacks.
+        controls.update((float)deltaSec);
+        forceSystem.update(renderer, (float)deltaSec);
 
         if (gizmo.isVisible())
             gizmo.getGizmoEntity()->update(renderer, (float)deltaSec);

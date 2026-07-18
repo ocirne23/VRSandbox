@@ -162,6 +162,14 @@ static std::string buildLayoutPreamble()
     def("PARTICLE_FLAG_KILL", PARTICLE_FLAG_KILL, "u");
     def("PARTICLE_TEX_NONE", PARTICLE_TEX_NONE, "u");
     def("DECAL_FLAG_LIT", DECAL_FLAG_LIT, "u");
+    def("MAX_FORCE_EMITTERS", MAX_FORCE_EMITTERS, "u");
+    def("MAX_FORCE_TEAMS", MAX_FORCE_TEAMS, "u");
+    def("MAX_FORCE_QUERIES", MAX_FORCE_QUERIES, "u");
+    def("MAX_FORCE_BIG_EMITTERS", MAX_FORCE_BIG_EMITTERS, "u");
+    def("FORCE_SIM_GROUP_SIZE", FORCE_SIM_GROUP_SIZE, "u");
+    def("FORCE_FLAG_ACTIVE", FORCE_FLAG_ACTIVE, "u");
+    def("FORCE_FLAG_BIG", FORCE_FLAG_BIG, "u");
+    def("FORCE_CELL_MAX_EMITTERS", FORCE_CELL_MAX_EMITTERS, "u");
     return s;
 }
 

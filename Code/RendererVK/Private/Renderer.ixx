@@ -41,6 +41,7 @@ import :SceneColor;
 import :DebugLinePipeline;
 import :ParticlePipeline;
 import :DecalPipeline;
+import :ForceFieldPipeline;
 import :TaaPipeline;
 import :CompositePipeline;
 import :EyeAdaptationPipeline;
@@ -51,6 +52,9 @@ import :Settings;
 import :RenderNode;
 
 import Core.fwd;
+
+static_assert(std::size(ForceFieldParams{}.teamColors) == RendererVKLayout::MAX_FORCE_TEAMS,
+    "ForceFieldParams::teamColors must cover MAX_FORCE_TEAMS (Settings.ixx doesn't import :Layout)");
 
 export enum class EValidation { ENABLED, DISABLED };
 export enum class EVSync { ENABLED, DISABLED };
@@ -169,6 +173,30 @@ public:
     // Loads a standalone texture (path relative to Assets/) into the bindless array for particle
     // emitters / decals to reference (ParticleEmitterGpu::texFlags.x, DecalInfo::params.x).
     uint16 loadEffectTexture(const char* filePath, bool sRGB = true);
+
+    // ---- Forcefield bubbles (driven by the Force library) ----
+    // Emitter slot management is main-thread (the Force system's serial update is the only writer).
+    // Every live slot's GPU config is re-uploaded (compacted) each frame, so updateForceEmitter is
+    // the per-frame transform/param push. Returns UINT32_MAX when all MAX_FORCE_EMITTERS are taken.
+    uint32 createForceEmitter(const RendererVKLayout::ForceEmitterGpu& desc);
+    void updateForceEmitter(uint32 slot, const RendererVKLayout::ForceEmitterGpu& desc);
+    // Deactivates the slot; it recycles after the in-flight frames have drained (the per-emitter
+    // force readback is slot-indexed, so a slot must not be re-issued while stale results can land).
+    void destroyForceEmitter(uint32 slot);
+    // Persistent gameplay point-query slots (stable indices across the ~2-frame readback latency —
+    // deliberately NOT a lock-free per-frame push). Same main-thread + retirement contract as the
+    // emitter slots. Returns UINT32_MAX when all MAX_FORCE_QUERIES slots are taken.
+    uint32 createForceQuerySlot();
+    void setForceQuery(uint32 slot, const glm::vec3& pos);
+    void destroyForceQuerySlot(uint32 slot);
+    // GPU readbacks, slot-indexed, ~2 frames old; valid to read between beginFrame and present.
+    // Force: xyz = applied force (opposing-field pressure integral), w = mean opposing pressure.
+    glm::vec4 getForceEmitterReadback(uint32 slot) const;
+    RendererVKLayout::ForceQueryResult getForceQueryReadback(uint32 slot) const;
+    // Field/shading params: the Force library owns the tweaks and pushes the struct every frame
+    // (setOceanParams pattern). Everything lands in the per-frame UBO (live) except useGrid, which
+    // rebuilds the force pipelines (FORCE_GRID define) like the ocean hit-lighting toggle.
+    void setForceFieldParams(const ForceFieldParams& params);
 
     void setAmbientLight(const glm::vec3& color, float intensity) { m_skyParams.ambientColor = color; m_skyParams.ambientIntensity = intensity; }
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
@@ -372,6 +400,10 @@ private:
     void recordParticlesInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordDecals(uint32 frameIdx);
     void recordDecalsInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
+    void recordForceField(uint32 frameIdx);
+    void recordForceFieldInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
+    void recordForceCompute(uint32 frameIdx);
+    void checkForceGridCapacity();
     void recordAO(uint32 frameIdx);
     void recordVolumetricFog(uint32 frameIdx);
     void recordFogApply(uint32 frameIdx);
@@ -545,6 +577,7 @@ private:
     DebugLinePipeline m_debugLinePipeline;
     ParticlePipeline m_particlePipeline;
     DecalPipeline m_decalPipeline;
+    ForceFieldPipeline m_forceFieldPipeline;
     // CPU emitter slot table, re-uploaded per frame; retired slots keep their KILL flag alive until the
     // sim has drained their particles, then recycle.
     std::vector<RendererVKLayout::ParticleEmitterGpu> m_particleEmitters;
@@ -561,6 +594,16 @@ private:
     // dropping every spawn. True at startup: the first simulating frame initializes the pool.
     bool m_particleResetPending = true;
     bool m_decalsEnabled = true;
+    // CPU force-emitter slot table (Force library), compact-uploaded per frame; destroyed slots stay
+    // reserved (FORCE_FLAG_ACTIVE cleared) until the in-flight frames drain, then recycle — the
+    // per-emitter force readback is slot-indexed and must never pair a new emitter with stale results.
+    std::vector<RendererVKLayout::ForceEmitterGpu> m_forceEmitters;
+    std::vector<uint32> m_freeForceEmitterSlots;
+    std::vector<std::pair<uint32, uint32>> m_retiredForceEmitters; // slot, retire frame
+    std::vector<RendererVKLayout::ForceQueryGpu> m_forceQueries;   // persistent query slots (same contract)
+    std::vector<uint32> m_freeForceQuerySlots;
+    std::vector<std::pair<uint32, uint32>> m_retiredForceQuerySlots;
+    ForceFieldParams m_forceFieldParams;
     PerWorker<std::vector<DebugLinePipeline::LineVertex>> m_debugLineVerts; // per-worker CPU staging, merged in present()
     std::vector<DebugLinePipeline::LineVertex> m_debugLineMergedVerts;
 
@@ -729,6 +772,8 @@ private:
         CommandBuffer particleSimCommandBuffer;
         CommandBuffer particleCommandBuffer;
         CommandBuffer decalCommandBuffer;
+        CommandBuffer forceFieldCommandBuffer;
+        CommandBuffer forceComputeCommandBuffer;
         CommandBuffer taaCommandBuffer;
         CommandBuffer eyeAdaptCommandBuffer;
         CommandBuffer compositeCommandBuffer;

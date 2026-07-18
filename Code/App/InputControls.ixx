@@ -19,6 +19,7 @@ import Entity;
 import Script;
 import Physics;
 import Audio;
+import Force;
 
 export class InputControls
 {
@@ -30,6 +31,14 @@ private:
     std::vector<RendererVKLayout::LightInfo>& spawnedLights;
     std::vector<EntityPtr>& spawnedLightGeom;
     std::vector<PhysicsJoint>& spawnedJoints;
+    std::vector<ForceEmitter> spawnedForceEmitters; // test forcefields (keys N/M/H/B); RAII, cleared before globals die
+    std::vector<ForceQuery> spawnedForceQueries;    // territory-query test grid (key J)
+    struct ForceBall // physics body carrying a forcefield: enemy bubbles knock it back (key F)
+    {
+        EntityPtr entity;
+        ForceEmitter emitter;
+    };
+    std::vector<ForceBall> forceBalls;
     KeyboardListener* pKeyboardListener;
 
 public:
@@ -55,6 +64,25 @@ public:
 		auto& input = Globals::input;
 		input.removeKeyboardListener(pKeyboardListener);
 	}
+
+    // Per-frame maintenance of the test force-balls: the emitter follows the simulated body and the
+    // GPU-read-back applied force (opposing bubbles pressing on it) feeds back as a physics impulse.
+    // Call after world.update (body poses synced), before forceSystem.update pushes emitter state.
+    void update(float deltaSec)
+    {
+        for (ForceBall& ball : forceBalls)
+        {
+            if (!ball.entity || !ball.emitter.isValid())
+                continue;
+            PhysicsComponent* pc = getComponent<PhysicsComponent>(ball.entity);
+            if (!pc || !pc->body.isValid())
+                continue;
+            ball.emitter.setPosition(pc->body.getPosition());
+            const glm::vec3 force = ball.emitter.getAppliedForce();
+            if (glm::dot(force, force) > 1e-8f)
+                pc->body.applyImpulse(force * deltaSec);
+        }
+    }
 
     void handleKeyEvent(const SDL_KeyboardEvent& evt)
     {
@@ -178,6 +206,66 @@ public:
                 world.addRootEntity(std::move(e));
             }
         }
+        // N/M: spawn a forcefield emitter (team 0/1) in front of the camera; holding Shift makes it a
+        // focused "spear" lobe aimed along the view. B clears all test emitters.
+        if ((evt.scancode == SDL_Scancode::SDL_SCANCODE_N || evt.scancode == SDL_Scancode::SDL_SCANCODE_M)
+            && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN && !evt.repeat)
+        {
+            const uint32 team = evt.scancode == SDL_Scancode::SDL_SCANCODE_N ? 0u : 1u;
+            const bool focused = (evt.mod & SDL_KMOD_SHIFT) != 0;
+            const glm::vec3 dir = cameraController.getDirection();
+            const glm::vec3 pos = cameraController.getPosition() + dir * 6.0f;
+            spawnedForceEmitters.push_back(Globals::forceSystem.createEmitter(
+                team, pos, dir, 1.0f, 10.0f, focused ? 2.0f : 0.0f));
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_B && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            spawnedForceEmitters.clear();
+            spawnedForceQueries.clear();
+            forceBalls.clear();
+        }
+        // H: forcefield stress burst — 500 random emitters (random team/reach/focus) in a 150 m disc
+        // around the camera. Press repeatedly to stack toward the 5000-emitter target; B clears.
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_H && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            const glm::vec3 center = cameraController.getPosition();
+            for (int i = 0; i < 500; ++i)
+            {
+                const glm::vec2 disc = glm::diskRand(150.0f);
+                const glm::vec3 pos = center + glm::vec3(disc.x, glm::linearRand(-4.0f, 12.0f), disc.y);
+                const uint32 team = (uint32)glm::linearRand(0.0f, 3.99f);
+                const float focus = glm::linearRand(0.0f, 1.0f) < 0.25f ? glm::linearRand(1.0f, 2.5f) : 0.0f;
+                spawnedForceEmitters.push_back(Globals::forceSystem.createEmitter(team, pos,
+                    glm::sphericalRand(1.0f), glm::linearRand(0.5f, 1.5f), glm::linearRand(1.5f, 5.0f), focus));
+            }
+        }
+        // F: throw a physics sphere carrying a small team-1 forcefield — enemy bubbles knock it back
+        // via the GPU force readback (see update()).
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_F && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            const glm::vec3 dir = cameraController.getDirection();
+            const Transform spawnAt(cameraController.getPosition() + dir, 0.25f, glm::normalize(cameraController.getOrientation()));
+            if (EntityPtr e = world.spawn("physicsSphere", spawnAt))
+            {
+                if (PhysicsComponent* pc = getComponent<PhysicsComponent>(e))
+                    pc->body.setLinearVelocity(dir * 12.0f);
+                ForceBall ball;
+                ball.emitter = Globals::forceSystem.createEmitter(1u, spawnAt.pos, glm::vec3(0, 1, 0), 1.0f, 2.0f);
+                ball.entity = e;
+                forceBalls.push_back(std::move(ball));
+                world.addRootEntity(std::move(e));
+            }
+        }
+        // J: drop an 11x11 territory-query grid at the camera's height in front of it ("Force/Debug/
+        // Draw queries" colors each point by the team whose bubble contains it, grey = uncontrolled).
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_J && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            const glm::vec3 center = cameraController.getPosition() + cameraController.getDirection() * 10.0f;
+            for (int x = -5; x <= 5; ++x)
+                for (int z = -5; z <= 5; ++z)
+                    spawnedForceQueries.push_back(Globals::forceSystem.createQuery(center + glm::vec3(x * 2.0f, 0.0f, z * 2.0f)));
+        }
+
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_7 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
             for (int i = 0; i < 100; ++i)

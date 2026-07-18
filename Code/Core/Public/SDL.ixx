@@ -80,6 +80,8 @@ export const char* SDL_PROP_WINDOW_CREATE_X11_WINDOW_NUMBER                   = 
 // cross the module boundary, so it's re-exported here as a real typed constant for checking SDL_KeyboardEvent::mod.
 #undef SDL_KMOD_CTRL
 export constexpr uint16 SDL_KMOD_CTRL = 0x0040u | 0x0080u; // SDL_KMOD_LCTRL | SDL_KMOD_RCTRL
+#undef SDL_KMOD_SHIFT
+export constexpr uint16 SDL_KMOD_SHIFT = 0x0001u | 0x0002u; // SDL_KMOD_LSHIFT | SDL_KMOD_RSHIFT
 
 #undef SDL_WINDOW_FULLSCREEN
 #undef SDL_WINDOW_OPENGL              
