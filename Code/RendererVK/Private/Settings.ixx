@@ -219,7 +219,7 @@ export struct TAAParams
     float taaFeedback = 0.9f;
     // History weight cap on OCEAN pixels: waves animate but the reprojection is camera-only (no motion
     // vectors), so full-weight history blurs the specular sparkle away. Lower = crisper, shimmerier water.
-    float taaOceanFeedback = 0.5f;
+    float taaOceanFeedback = 0.2f;
 
     void registerTweaks(const std::function<void()>& onReRecord);
 };
