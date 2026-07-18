@@ -15,26 +15,43 @@ static float forceDistributionGain(float t, float D)
     return 0.15f + std::exp(-b * b);
 }
 
-// Field-weighted mean of the distribution gain over the emitter's shape — the budget integral E in
-// w = Output/E * falloff * gain, making conservation exact. The lateral integral of the falloff
-// collapses in the warped-sphere coordinates (substituting the warp turns each axial station into
-// q^-m * (1-X^2)^3 up to a constant), so this is a cheap 1D quadrature. Cached per emitter
-// (depends only on focus + distribution).
-static float forceDistributionMean(float focus, float D)
+// The emitter's total field budget integral (gain-weighted, in shared quadrature units): the
+// lateral integral of the falloff collapses in the warped-sphere coordinates (substituting the
+// warp turns each axial station into q^-m * (1-X^2)^3 up to a constant), so this is a cheap 1D
+// quadrature. Cached per emitter (depends only on focus + distribution; width scales the total by
+// width^2 analytically and reach by reach^3 — reach is deliberately NOT normalized away, so a
+// bigger bubble is more total power at the same density, not a fainter one).
+static float forceShapeBudget(float focus, float D)
 {
     const float m = 1.0f - 2.0f * glm::clamp(focus, 0.0f, 1.0f);
-    double num = 0.0;
-    double den = 0.0;
+    double sum = 0.0;
     constexpr int NUM_SAMPLES = 64;
     for (int i = 0; i < NUM_SAMPLES; ++i)
     {
         const float X = -1.0f + (i + 0.5f) * (2.0f / NUM_SAMPLES);
         const float q = glm::clamp((1.0f - X) / (1.0f + X), 1e-4f, 1e4f);
-        const double w = std::pow((double)q, (double)-m) * std::pow(1.0 - (double)X * X, 3.0);
-        num += w * forceDistributionGain((X + 1.0f) * 0.5f, D);
-        den += w;
+        sum += std::pow((double)q, (double)-m) * std::pow(1.0 - (double)X * X, 3.0)
+            * forceDistributionGain((X + 1.0f) * 0.5f, D);
     }
-    return glm::clamp((float)(num / den), 1e-3f, 2.0f);
+    return (float)sum;
+}
+
+// Reference: the plain gain-free sphere (focus 0.5, width 1) — an emitter with any focus/
+// distribution/width carries exactly this shape's total, so Output is a balance-able budget and
+// narrowing/pinching visibly DENSIFIES the field instead of shedding power.
+static float forceReferenceBudget()
+{
+    static const float ref = [] {
+        double sum = 0.0;
+        constexpr int NUM_SAMPLES = 64;
+        for (int i = 0; i < NUM_SAMPLES; ++i)
+        {
+            const float X = -1.0f + (i + 0.5f) * (2.0f / NUM_SAMPLES);
+            sum += std::pow(1.0 - (double)X * X, 3.0);
+        }
+        return (float)sum;
+    }();
+    return ref;
 }
 
 float ForceSystem::refreshDistributionScale(EmitterInstance& inst) const
@@ -43,11 +60,12 @@ float ForceSystem::refreshDistributionScale(EmitterInstance& inst) const
     const float D = glm::clamp(inst.distribution, 0.0f, 1.0f);
     if (inst.distNormFocus != f || inst.distNormD != D)
     {
-        inst.distNormE = forceDistributionMean(f, D);
+        inst.distNormE = forceShapeBudget(f, D);
         inst.distNormFocus = f;
         inst.distNormD = D;
     }
-    return 1.0f / inst.distNormE;
+    const float W = glm::clamp(inst.width, 0.05f, 4.0f);
+    return forceReferenceBudget() / (glm::max(inst.distNormE, 1e-6f) * W * W);
 }
 
 static uint32 packDebugColor(const glm::vec3& c)
@@ -399,8 +417,9 @@ void ForceSystem::debugDrawEmitter(Renderer& renderer, const EmitterInstance& in
 
     const float R = glm::max(inst.reach, 1e-3f);
     const float m = 1.0f - 2.0f * glm::clamp(inst.focus, 0.0f, 1.0f);
+    const float W = glm::clamp(inst.width, 0.05f, 4.0f);
     // Same fold the upload applies (cache is fresh: update() refreshed it before drawing).
-    const float foldedOutput = inst.output / glm::max(inst.distNormE, 1e-3f);
+    const float foldedOutput = inst.output * forceReferenceBudget() / (glm::max(inst.distNormE, 1e-6f) * W * W);
     // Iso lateral half-width at axial station t, closed form (mirrors forceContribution):
     //   O' * (1 - u^2)^2 * g(t) = iso  ->  u^2 = 1 - sqrt(iso / (O' g))
     //   lat = (R/2) * sqrt((u^2 - X^2) * q^-m) where positive, X = 2t - 1, q = (1-X)/(1+X)

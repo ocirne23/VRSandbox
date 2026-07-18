@@ -123,8 +123,8 @@ private:
         float focus = 0.0f;
         float distribution = 0.5f;
         float width = 1.0f;
-        // Cached field-weighted mean of the distribution gain over the shape (the budget integral —
-        // 1D quadrature; depends only on focus + distribution, refreshed when either changes).
+        // Cached gain-weighted shape budget integral (1D quadrature; depends only on focus +
+        // distribution, refreshed when either changes; width scales the total analytically).
         float distNormE = 1.0f;
         float distNormFocus = -1.0f;
         float distNormD = -1.0f;
@@ -141,8 +141,9 @@ private:
         ForceQuery::Result result;
     };
 
-    // Refreshes the cached distribution budget integral if focus/distribution changed and returns
-    // the factor Output is multiplied by before upload (1 / E[gain] — exact conservation).
+    // Refreshes the cached shape budget integral if focus/distribution changed and returns the
+    // factor Output is multiplied by before upload: referenceBudget / (shapeBudget * width^2) —
+    // TOTAL output is invariant across focus/distribution/width (reach still scales the total).
     float refreshDistributionScale(EmitterInstance& inst) const;
     EmitterInstance* resolveEmitter(uint64 handle);
     const EmitterInstance* resolveEmitter(uint64 handle) const;

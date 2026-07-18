@@ -42,7 +42,6 @@ private:
     std::vector<ForceBall> forceBalls;
     KeyboardListener* pKeyboardListener;
     
-    float spawnDistance = 6.0f;   // far enough that a default-reach bubble doesn't swallow the camera
     float output = 1.0f;          // must exceed the iso threshold (default 0.15) or no bubble exists
     float reach = 4.0f;           // TOTAL extent: the bubble spans pos .. pos + dir * reach
     float focus = 0.5f;           // shape pinch: 0.5 = sphere spanning the line, 0 = cone pointed at
@@ -63,7 +62,6 @@ public:
 		std::vector<PhysicsJoint>& spawnedJoints)
         : gizmo(gizmo), cameraController(cameraController), world(world), spawnedLights(spawnedLights), spawnedLightGeom(spawnedLightGeom), spawnedJoints(spawnedJoints)
     {
-		Tweak::floatVar("Force/Emitter", "SpawnDistance", &spawnDistance, 0.0f, 50.0f, 0.1f);
 		Tweak::floatVar("Force/Emitter", "Output", &output, 0.2f, 10.0f, 0.01f); // stay above iso (0.15)
 		Tweak::floatVar("Force/Emitter", "Reach", &reach, 0.1f, 100.0f, 0.1f);
 		Tweak::floatVar("Force/Emitter", "Focus", &focus, 0.0f, 1.0f, 0.01f);
@@ -229,7 +227,7 @@ public:
             && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN && !evt.repeat)
         {
             const glm::vec3 dir = cameraController.getDirection();
-            const glm::vec3 pos = cameraController.getPosition() + dir * spawnDistance;
+            const glm::vec3 pos = cameraController.getPosition() - (dir * reach * 0.5f);
             ForceEmitter emitter = Globals::forceSystem.createEmitter(team, pos, dir, output, reach, focus, distribution, width);
             spawnedForceEmitters.push_back(std::move(emitter));
         }
