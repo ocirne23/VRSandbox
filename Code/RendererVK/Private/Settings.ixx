@@ -369,6 +369,10 @@ export struct ForceFieldParams
     float contactGlowWidth = 0.15f;    // opposing/own field ratio band that reads as contact
     float contactWallAlpha = 0.5f;     // visibility of the interior equilibrium WALL between two
                                        // pressed opposing bubbles (0 = only the outer seam glows)
+    bool densityView = false;          // DEBUG: draw bubbles as a heatmap of the strongest field along
+                                       // the view ray instead of the shell (tip power/merging readout);
+                                       // white contour marks the iso threshold
+    float densityRange = 2.0f;         // field value that maps to the heatmap's white end
     float junctionSmoothing = 0.5f;    // smooth-max width (fraction of iso) rounding the crease where
                                        // shells meet the wall: continuous normals kill the junction
                                        // jaggies; 0 = hard crease. Queries use the same function, so

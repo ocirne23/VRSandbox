@@ -9,6 +9,7 @@ import Core.Frustum;
 import Core.Time;
 import Core.glm;
 import Core.Camera;
+import Core.Tweaks;
 
 import Animation;
 import File;
@@ -40,8 +41,17 @@ private:
     };
     std::vector<ForceBall> forceBalls;
     KeyboardListener* pKeyboardListener;
-	MouseListener* pMouseListener;
-    float mouseScrollAmount = 1.0f;
+    
+    float spawnDistance = 6.0f;   // far enough that a default-reach bubble doesn't swallow the camera
+    float output = 1.0f;          // must exceed the iso threshold (default 0.15) or no bubble exists
+    float reach = 4.0f;           // TOTAL extent: the bubble spans pos .. pos + dir * reach
+    float focus = 0.5f;           // shape pinch: 0.5 = sphere spanning the line, 0 = cone pointed at
+                                  // the emitter, 1 = cone pointed at the target
+    int32 team = 0;
+    float distribution = 0.5f;    // where the output density sits along the line (0 = emitter end,
+                                  // 1 = target end); budget-conserving bump
+    float width = 1.0f;           // lateral scale (reach untouched): 1 = round, < 1 = narrower/sharper
+
 public:
 
     InputControls(
@@ -53,15 +63,15 @@ public:
 		std::vector<PhysicsJoint>& spawnedJoints)
         : gizmo(gizmo), cameraController(cameraController), world(world), spawnedLights(spawnedLights), spawnedLightGeom(spawnedLightGeom), spawnedJoints(spawnedJoints)
     {
+		Tweak::floatVar("Force/Emitter", "SpawnDistance", &spawnDistance, 0.0f, 50.0f, 0.1f);
+		Tweak::floatVar("Force/Emitter", "Output", &output, 0.2f, 10.0f, 0.01f); // stay above iso (0.15)
+		Tweak::floatVar("Force/Emitter", "Reach", &reach, 0.1f, 100.0f, 0.1f);
+		Tweak::floatVar("Force/Emitter", "Focus", &focus, 0.0f, 1.0f, 0.01f);
+		Tweak::intVar("Force/Emitter", "Team", &team, 0, 7, 1);
+		Tweak::floatVar("Force/Emitter", "Distribution", &distribution, 0.0f, 1.0f, 0.01f);
+		Tweak::floatVar("Force/Emitter", "Width", &width, 0.05f, 2.0f, 0.01f);
 
         auto& input = Globals::input;
-		pMouseListener = input.addMouseListener();
-
-        pMouseListener->onMouseWheelMoved = [this](const SDL_MouseWheelEvent& evt) { 
-            mouseScrollAmount += (float)(evt.direction == SDL_MOUSEWHEEL_NORMAL ? evt.y : -evt.y) * 0.1f;
-			mouseScrollAmount = glm::clamp(mouseScrollAmount, 0.1f, 10.0f);
-        };
-
         pKeyboardListener = input.addKeyboardListener();
         pKeyboardListener->onKeyPressed = [this](const SDL_KeyboardEvent& evt) { handleKeyEvent(evt); };
         pKeyboardListener->onKeyReleased = [this](const SDL_KeyboardEvent& evt) { handleKeyEvent(evt); };
@@ -85,7 +95,7 @@ public:
             PhysicsComponent* pc = getComponent<PhysicsComponent>(ball.entity);
             if (!pc || !pc->body.isValid())
                 continue;
-            ball.emitter.setPosition(pc->body.getPosition());
+            ball.emitter.setPosition(pc->body.getPosition() - glm::vec3(0, 1, 0)); // keep the span centered on the ball
             const glm::vec3 force = ball.emitter.getAppliedForce();
             const float pressure = ball.emitter.getPressure();
             if (glm::dot(force, force) > 1e-8f)
@@ -215,17 +225,26 @@ public:
                 world.addRootEntity(std::move(e));
             }
         }
-        // N/M: spawn a forcefield emitter (team 0/1) in front of the camera; holding Shift makes it a
-        // focused "spear" lobe aimed along the view. B clears all test emitters.
-        if ((evt.scancode == SDL_Scancode::SDL_SCANCODE_N || evt.scancode == SDL_Scancode::SDL_SCANCODE_M)
+        if ((evt.scancode == SDL_Scancode::SDL_SCANCODE_N)
             && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN && !evt.repeat)
         {
-            const uint32 team = evt.scancode == SDL_Scancode::SDL_SCANCODE_N ? 0u : 1u;
-            const bool focused = (evt.mod & SDL_KMOD_SHIFT) != 0;
             const glm::vec3 dir = cameraController.getDirection();
-            const glm::vec3 pos = cameraController.getPosition() + dir * 6.0f;
-            spawnedForceEmitters.push_back(Globals::forceSystem.createEmitter(
-                team, pos, dir, 1.0f, mouseScrollAmount * mouseScrollAmount, focused ? 2.0f : 0.0f));
+            const glm::vec3 pos = cameraController.getPosition() + dir * spawnDistance;
+            ForceEmitter emitter = Globals::forceSystem.createEmitter(team, pos, dir, output, reach, focus, distribution, width);
+            spawnedForceEmitters.push_back(std::move(emitter));
+        }
+        if ((evt.scancode == SDL_Scancode::SDL_SCANCODE_M)
+            && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN && !evt.repeat)
+        {
+			if (spawnedForceEmitters.empty())
+				return;
+			ForceEmitter& emitter = spawnedForceEmitters.back();
+			emitter.setOutput(output);
+			emitter.setReach(reach);
+			emitter.setFocus(focus);
+			emitter.setTeam(team);
+			emitter.setDistribution(distribution);
+			emitter.setWidth(width);
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_B && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
@@ -242,10 +261,10 @@ public:
             {
                 const glm::vec2 disc = glm::diskRand(150.0f);
                 const glm::vec3 pos = center + glm::vec3(disc.x, glm::linearRand(-4.0f, 12.0f), disc.y);
-                const uint32 team = (uint32)glm::linearRand(0.0f, 3.99f);
-                const float focus = glm::linearRand(0.0f, 1.0f) < 0.25f ? glm::linearRand(1.0f, 2.5f) : 0.0f;
-                spawnedForceEmitters.push_back(Globals::forceSystem.createEmitter(team, pos,
-                    glm::sphericalRand(1.0f), glm::linearRand(0.5f, 1.5f), glm::linearRand(1.5f, 5.0f), focus));
+                const uint32 team2 = (uint32)glm::linearRand(0.0f, 3.99f);
+                const float focus2 = glm::linearRand(0.0f, 1.0f) < 0.25f ? glm::linearRand(0.7f, 1.0f) : 0.5f;
+                spawnedForceEmitters.push_back(Globals::forceSystem.createEmitter(team2, pos,
+                    glm::sphericalRand(1.0f), glm::linearRand(0.5f, 1.5f), glm::linearRand(1.5f, 5.0f), focus2));
             }
         }
         // F: throw a physics sphere carrying a small team-1 forcefield — enemy bubbles knock it back
@@ -259,7 +278,8 @@ public:
                 if (PhysicsComponent* pc = getComponent<PhysicsComponent>(e))
                     pc->body.setLinearVelocity(dir * 12.0f);
                 ForceBall ball;
-                ball.emitter = Globals::forceSystem.createEmitter(1u, spawnAt.pos, glm::vec3(0, 1, 0), 1.0f, 2.0f);
+                // Sphere spanning pos .. pos + dir * reach: offset the emitter down so it CENTERS on the ball.
+                ball.emitter = Globals::forceSystem.createEmitter(1u, spawnAt.pos - glm::vec3(0, 1, 0), glm::vec3(0, 1, 0), 1.0f, 2.0f);
                 ball.entity = e;
                 forceBalls.push_back(std::move(ball));
                 world.addRootEntity(std::move(e));

@@ -180,7 +180,7 @@ void ForceFieldPipeline::upload(uint32 frameIdx, std::span<const ForceEmitterGpu
         out.teamFlags.z = slot; // slot-indexed readback target
         // Big emitters bypass the grid into the globally-scanned list; when the list is full the
         // overflow inserts into the grid anyway (large footprint, but never a hole in the field).
-        const float maxReach = e.posReach.w * (1.0f + e.dirFocus.w);
+        const float maxReach = e.posReach.w; // Reach IS the max extent (the bubble spans the output line)
         if (maxReach > bigReachThreshold && bigCount < MAX_FORCE_BIG_EMITTERS)
         {
             out.teamFlags.y |= FORCE_FLAG_BIG;

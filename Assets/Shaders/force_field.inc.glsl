@@ -1,17 +1,22 @@
 // Forcefield bubble field math — THE single definition, consumed by the shell draw
 // (force_shell.vs/fs.glsl) and the grid/force/query compute passes. Keep the lobe in sync with the
-// CPU mirror in Code/Force/Private/System.cpp (forceLobe) — the debug rings and gameplay reason
+// CPU mirror in Code/Force/Private/System.cpp (forceDistributionGain + the debug rings' closed-form
+// iso profile) — the debug rings and gameplay reason
 // about the same field the pixels shade.
 //
-// Emitter contribution at x (COMPACT SUPPORT — exactly 0 beyond the directional reach):
-//   dHat = normalize(x - pos), c = dot(dHat, dir)
-//   L(c, f) = mix(1/(1 + 0.5f), 1 + f, pow(max(c, 0), 2 + f))   // focus lobe; f = 0 -> sphere
-//   Reff = Reach * L;  u = r / Reff
-//   w = Output * (1 - u^2)^2   for u < 1, else 0                 // quartic falloff, C1 at the edge
+// Emitter model: the bubble spans EXACTLY the "output line" pos -> pos + dir * Reach, whatever the
+// shape. In normalized coords (X = axial position mapped to [-1, 1], Y = lateral / (Reach/2)):
+//   u^2 = X^2 + Y^2 * ((1 - X) / (1 + X))^m,   m = 1 - 2*focus
+//   w = Output * (1 - u^2)^2 * distGain(t)     for u < 1, else 0 (COMPACT SUPPORT, C1 falloff)
+// focus 0.5 (m = 0) is an EXACT sphere spanning the line; focus 0 an exact cone with its point at
+// the emitter; focus 1 the cone pointed at the target — one "pinch" slider, reach never changes.
+// distGain is a smooth bump at t = Distribution along the line (0 = density at the emitter end,
+// 1 = at the target), with its budget normalization pre-folded into Output on the CPU
+// (System.cpp forceDistributionMean) so total emitted field is conserved exactly.
 // A team's field phi[t] is the SUM of its emitters' w (merging). A point is inside team t where
 // phi[t] > iso AND phi[t] beats every other team; the drawn surface is
 //   F = phi[best] - max(iso, phi[secondBest]) = 0
-// — the equal-field pressure equilibrium, so squish and focused-lobe pierce need no simulation.
+// — the equal-field pressure equilibrium, so squish and focused-cone pierce need no simulation.
 //
 // This include declares the compacted emitter buffer itself; the consumer sets
 // FORCE_EMITTERS_BINDING before including (default 1). Candidate enumeration: with FORCE_GRID
@@ -28,9 +33,11 @@
 
 struct ForceEmitterData
 {
-    vec4 posReach;     // xyz = world position, w = Reach (m)
-    vec4 dirFocus;     // xyz = normalized direction, w = focus >= 0 (0 = sphere)
-    vec4 outputParams; // x = Output (field strength), y = shell alpha mult, zw unused
+    vec4 posReach;     // xyz = world position, w = Reach (m): bubble spans pos .. pos + dir * Reach
+    vec4 dirFocus;     // xyz = normalized direction, w = focus [0,1] (0.5 = sphere, 0/1 = cones)
+    vec4 outputParams; // x = Output (distribution budget fold pre-applied), y = shell alpha mult,
+                       // z = distribution [0,1] (axial density bump position),
+                       // w = width (lateral scale: 1 = round, < 1 pinches the shape narrower)
     uvec4 teamFlags;   // x = team [0, MAX_FORCE_TEAMS), y = FORCE_FLAG_* bits, z = source slot (readback), w unused
 };
 
@@ -46,54 +53,47 @@ layout (binding = FORCE_EMITTERS_BINDING, std430) readonly buffer ForceEmitters
 #include "force_grid.inc.glsl"
 #endif
 
-// Directional reach shaping — a smooth CONE, so a focused emitter reads as a spear/triangle: the
-// silhouette runs a STRAIGHT edge from the tip at Reach*(1+f) forward to the base (half-width
-// Reach) at the emitter plane, with a spherical cap behind. Polar cone: r(theta) = T/(c + T*s).
-// (The previous pow() lobe was flat over the whole back hemisphere and superlinear at the front —
-// a back bulb + waist + fat forward blob, not a spear.) The smooth-relu of c keeps it C1; focus 0
-// stays an exact sphere (cone blended in over f < 0.5).
-float forceLobe(float c, float f)
+// The axial density bump: smooth gaussian at t = Distribution along the output line, with a floor
+// so no part of the bubble goes dead. The budget fold (1 / field-weighted mean of this) is
+// pre-applied to Output on the CPU.
+float forceDistributionGain(float t, float D)
 {
-    const float T = 1.0 + f;
-    // EXACT sine in the cone term — deriving it from a smoothed cosine pinned it at a floor near
-    // the axis, which flattened the last degrees of taper into a constant-radius tube with a flat
-    // cap (jar neck). The cap blend below is the only smoothing the junction needs.
-    const float s = sqrt(max(1.0 - c * c, 0.0));
-    const float cone = T / (max(c, 0.0) + T * max(s, 1e-4));
-    const float L = mix(1.0, cone, smoothstep(-0.1, 0.1, c)); // spherical cap behind -> cone ahead
-    return mix(1.0, L, min(f * 2.0, 1.0));
+    const float b = (t - D) * (1.0 / 0.45);
+    return 0.15 + exp(-b * b);
 }
 
-// One emitter's field contribution at x.
+// One emitter's field contribution at x (see the header comment for the model).
 float forceContribution(vec3 x, ForceEmitterData e)
 {
     const vec3 d = x - e.posReach.xyz;
-    const float r2 = dot(d, d);
-    const float maxReach = e.posReach.w * (1.0 + e.dirFocus.w);
-    if (r2 >= maxReach * maxReach)
-        return 0.0;
-    const float r = sqrt(max(r2, 1e-8));
-    const float c = dot(d / r, e.dirFocus.xyz);
-    const float reff = e.posReach.w * forceLobe(c, e.dirFocus.w);
-    const float u2 = r2 / (reff * reff);
+    const float R = e.posReach.w;
+    const float z = dot(d, e.dirFocus.xyz);
+    if (z <= 0.0 || z >= R)
+        return 0.0; // the bubble spans exactly the output line: nothing behind pos or past target
+    const float lat2 = max(dot(d, d) - z * z, 0.0);
+    const float X = z * (2.0 / R) - 1.0;        // axial [-1 at emitter .. 1 at target]
+    const float invW = 1.0 / e.outputParams.w;  // width: pure lateral scale, reach untouched
+    const float Y2 = lat2 * (4.0 / (R * R)) * (invW * invW); // lateral, in (width*R/2)^2 units
+    const float m = 1.0 - 2.0 * e.dirFocus.w;   // focus 0.5 -> 0 (sphere); 0/1 -> +-1 (cones)
+    const float q = clamp((1.0 - X) / (1.0 + X), 1e-4, 1e4);
+    const float u2 = X * X + Y2 * pow(q, m);
     if (u2 >= 1.0)
         return 0.0;
-    const float q = 1.0 - u2;
-    return e.outputParams.x * q * q;
+    const float qq = 1.0 - u2;
+    return e.outputParams.x * qq * qq * forceDistributionGain(z / R, e.outputParams.z);
 }
 
 // Conservative local bounds of an emitter's field support, shared by the proxy VS, the FS ray
 // interval, and the grid insert so they always agree. Local frame: +Z = emitter direction. The
-// cone lobe never exceeds Reach laterally or behind (base half-width = Reach at the emitter
-// plane, spherical cap behind), so the box is simply Reach sideways/back (+5% slack) and
-// Reach*(1+f) forward.
+// support spans exactly [0, Reach] axially; max lateral half-width is R/2 for the sphere growing
+// to R at the full cones — bounded by (R/2)*(1 + |m|). Small slack covers normal-tap offsets.
 void forceEmitterBounds(ForceEmitterData e, out float side, out float forward, out float back)
 {
-    const float f = e.dirFocus.w;
-    const float reach = e.posReach.w;
-    side = reach * 1.05;
-    forward = reach * (1.0 + f);
-    back = reach * 1.05;
+    const float R = e.posReach.w;
+    const float m = abs(1.0 - 2.0 * e.dirFocus.w);
+    side = 0.5 * R * (1.0 + m) * e.outputParams.w * 1.03;
+    forward = R * 1.02;
+    back = R * 0.02;
 }
 
 // Orthonormal RIGHT-HANDED frame with +Z = dir (right x up == dir). Handedness is load-bearing: a
@@ -260,51 +260,6 @@ vec3 forceSurfaceNormal(vec3 x, uint team, float iso, float h)
               + k.yxy * forceSurfaceForTeam(x + k.yxy * h, team, iso)
               + k.xxx * forceSurfaceForTeam(x + k.xxx * h, team, iso);
     return -normalize(grad + vec3(0.0, 1e-6, 0.0));
-}
-
-// Analytic spherical-approximation gradient of the STRONGEST opposing team's field (treats Reff as
-// locally constant per emitter — exact at focus 0, directionally correct enough for gameplay
-// knockback). Also returns that team's field strength (the "pressure" scalar). Compute passes only.
-vec3 forceOpposingGradient(vec3 x, uint team, out float opposingPhi)
-{
-    float phi[MAX_FORCE_TEAMS];
-    vec3 gradPerTeam[MAX_FORCE_TEAMS];
-    for (uint t = 0u; t < MAX_FORCE_TEAMS; ++t)
-    {
-        phi[t] = 0.0;
-        gradPerTeam[t] = vec3(0.0);
-    }
-    const uint cell = forceCandidateCell(x);
-    const uint n = forceNumCandidates(cell);
-    for (uint k = 0u; k < n; ++k)
-    {
-        const ForceEmitterData e = fe_emitters[forceCandidateIdx(cell, k)];
-        if (e.teamFlags.x == team)
-            continue;
-        const vec3 d = x - e.posReach.xyz;
-        const float r2 = dot(d, d);
-        const float r = sqrt(max(r2, 1e-8));
-        const float c = dot(d / r, e.dirFocus.xyz);
-        const float reff = e.posReach.w * forceLobe(c, e.dirFocus.w);
-        const float u2 = r2 / (reff * reff);
-        if (u2 >= 1.0)
-            continue;
-        const float q = 1.0 - u2;
-        phi[e.teamFlags.x] += e.outputParams.x * q * q;
-        // dw/dr = -4 * Output * u * (1 - u^2) / Reff, along dHat
-        gradPerTeam[e.teamFlags.x] += (-4.0 * e.outputParams.x * sqrt(u2) * q / reff) * (d / r);
-    }
-    opposingPhi = 0.0;
-    vec3 grad = vec3(0.0);
-    for (uint t = 0u; t < MAX_FORCE_TEAMS; ++t)
-    {
-        if (t != team && phi[t] > opposingPhi)
-        {
-            opposingPhi = phi[t];
-            grad = gradPerTeam[t];
-        }
-    }
-    return grad;
 }
 
 #endif

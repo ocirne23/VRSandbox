@@ -189,6 +189,8 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                          // y = backface alpha (far/inner surface visibility from outside),
                          // z = contact wall alpha (interior equilibrium pane),
                          // w = junction smoothing (smooth-max width as a fraction of iso)
+    vec4 u_forceParams4; // x = density debug view (0/1: heatmap of peak field along the ray),
+                         // y = density range (field value mapping to white), zw unused
 };
 
 // View index selecting which u_views[] entry the convenience macros / reconstruction helpers read. Defaults

@@ -8,16 +8,46 @@ import :System;
 
 using namespace RendererVKLayout;
 
-// CPU mirror of the shader lobe (force_field.inc.glsl): a smooth CONE — straight silhouette from
-// the tip at Reach*(1+f) forward to the Reach-wide base at the emitter plane, spherical cap
-// behind. focus 0 = exact sphere (cone blended in over f < 0.5). Keep in sync with the shader.
-static float forceLobe(float cosAngle, float focus)
+// CPU mirror of the shader's axial density bump (force_field.inc.glsl forceDistributionGain).
+static float forceDistributionGain(float t, float D)
 {
-    const float T = 1.0f + focus;
-    const float s = std::sqrt(std::max(1.0f - cosAngle * cosAngle, 0.0f)); // exact sine: see the shader
-    const float cone = T / (std::max(cosAngle, 0.0f) + T * std::max(s, 1e-4f));
-    const float L = glm::mix(1.0f, cone, glm::smoothstep(-0.1f, 0.1f, cosAngle));
-    return glm::mix(1.0f, L, std::min(focus * 2.0f, 1.0f));
+    const float b = (t - D) * (1.0f / 0.45f);
+    return 0.15f + std::exp(-b * b);
+}
+
+// Field-weighted mean of the distribution gain over the emitter's shape — the budget integral E in
+// w = Output/E * falloff * gain, making conservation exact. The lateral integral of the falloff
+// collapses in the warped-sphere coordinates (substituting the warp turns each axial station into
+// q^-m * (1-X^2)^3 up to a constant), so this is a cheap 1D quadrature. Cached per emitter
+// (depends only on focus + distribution).
+static float forceDistributionMean(float focus, float D)
+{
+    const float m = 1.0f - 2.0f * glm::clamp(focus, 0.0f, 1.0f);
+    double num = 0.0;
+    double den = 0.0;
+    constexpr int NUM_SAMPLES = 64;
+    for (int i = 0; i < NUM_SAMPLES; ++i)
+    {
+        const float X = -1.0f + (i + 0.5f) * (2.0f / NUM_SAMPLES);
+        const float q = glm::clamp((1.0f - X) / (1.0f + X), 1e-4f, 1e4f);
+        const double w = std::pow((double)q, (double)-m) * std::pow(1.0 - (double)X * X, 3.0);
+        num += w * forceDistributionGain((X + 1.0f) * 0.5f, D);
+        den += w;
+    }
+    return glm::clamp((float)(num / den), 1e-3f, 2.0f);
+}
+
+float ForceSystem::refreshDistributionScale(EmitterInstance& inst) const
+{
+    const float f = glm::clamp(inst.focus, 0.0f, 1.0f);
+    const float D = glm::clamp(inst.distribution, 0.0f, 1.0f);
+    if (inst.distNormFocus != f || inst.distNormD != D)
+    {
+        inst.distNormE = forceDistributionMean(f, D);
+        inst.distNormFocus = f;
+        inst.distNormD = D;
+    }
+    return 1.0f / inst.distNormE;
 }
 
 static uint32 packDebugColor(const glm::vec3& c)
@@ -79,6 +109,18 @@ void ForceEmitter::setFocus(float focus)
 {
     if (ForceSystem::EmitterInstance* inst = Globals::forceSystem.resolveEmitter(m_handle))
         inst->focus = focus;
+}
+
+void ForceEmitter::setDistribution(float distribution)
+{
+    if (ForceSystem::EmitterInstance* inst = Globals::forceSystem.resolveEmitter(m_handle))
+        inst->distribution = distribution;
+}
+
+void ForceEmitter::setWidth(float width)
+{
+    if (ForceSystem::EmitterInstance* inst = Globals::forceSystem.resolveEmitter(m_handle))
+        inst->width = width;
 }
 
 void ForceEmitter::setTeam(uint32 team)
@@ -164,25 +206,34 @@ void ForceSystem::initialize()
         Tweak::color3("Force/Teams", teamNames[i], &m_params.teamColors[i]);
     Tweak::boolean("Force/Debug", "Draw emitters", &m_debugDraw);
     Tweak::boolean("Force/Debug", "Draw queries", &m_debugDrawQueries);
+    Tweak::boolean("Force/Debug", "Density view", &m_params.densityView);
+    Tweak::floatVar("Force/Debug", "Density range", &m_params.densityRange, 0.1f, 10.0f, 0.05f);
 }
 
+// outputScale = the distribution budget fold (refreshDistributionScale): the GPU sees Output
+// pre-divided by the gain's field-weighted mean, so total emitted field stays exactly conserved.
 static ForceEmitterGpu buildEmitterGpu(const glm::vec3& pos, const glm::vec3& dir, float output,
-    float reach, float focus, uint32 team, float phaseSeed)
+    float reach, float focus, uint32 team, float distribution, float width, float outputScale)
 {
     ForceEmitterGpu gpu;
     gpu.posReach = glm::vec4(pos, glm::max(reach, 1e-3f));
     const glm::vec3 d = glm::dot(dir, dir) > 1e-6f ? glm::normalize(dir) : glm::vec3(0.0f, 1.0f, 0.0f);
-    gpu.dirFocus = glm::vec4(d, glm::max(focus, 0.0f));
-    gpu.outputParams = glm::vec4(glm::max(output, 0.0f), 1.0f, phaseSeed, 0.0f);
+    gpu.dirFocus = glm::vec4(d, glm::clamp(focus, 0.0f, 1.0f));
+    gpu.outputParams = glm::vec4(glm::max(output, 0.0f) * outputScale, 1.0f,
+        glm::clamp(distribution, 0.0f, 1.0f), glm::clamp(width, 0.05f, 4.0f));
     gpu.teamFlags = glm::uvec4(glm::min(team, MAX_FORCE_TEAMS - 1), FORCE_FLAG_ACTIVE, 0u, 0u);
     return gpu;
 }
 
 ForceEmitter ForceSystem::createEmitter(uint32 team, const glm::vec3& pos, const glm::vec3& direction,
-    float output, float reach, float focus)
+    float output, float reach, float focus, float distribution, float width)
 {
+    EmitterInstance staged;
+    staged.focus = focus;
+    staged.distribution = distribution;
+    const float outputScale = refreshDistributionScale(staged);
     const uint32 slot = Globals::rendererVK.createForceEmitter(
-        buildEmitterGpu(pos, direction, output, reach, focus, team, 0.0f));
+        buildEmitterGpu(pos, direction, output, reach, focus, team, distribution, width, outputScale));
     if (slot == UINT32_MAX)
     {
         printf("ForceSystem: out of force emitter slots (%u live)\n", m_numLiveEmitters);
@@ -211,8 +262,11 @@ ForceEmitter ForceSystem::createEmitter(uint32 team, const glm::vec3& pos, const
     inst.focus = focus;
     inst.pos = pos;
     inst.dir = direction;
-    inst.phaseSeed = 0.0f; // per-emitter pattern phase removed: any per-emitter shading term prints
-                           // a seam where merged shells switch owners (the pattern is world-anchored)
+    inst.distribution = distribution;
+    inst.width = width;
+    inst.distNormE = staged.distNormE;
+    inst.distNormFocus = staged.distNormFocus;
+    inst.distNormD = staged.distNormD;
     ++m_numLiveEmitters;
     return ForceEmitter(((uint64)inst.generation << 32) | idx);
 }
@@ -298,7 +352,8 @@ void ForceSystem::update(Renderer& renderer, float)
         if (inst.generation == 0)
             continue;
         renderer.updateForceEmitter(inst.rendererSlot,
-            buildEmitterGpu(inst.pos, inst.dir, inst.output, inst.reach, inst.focus, inst.team, inst.phaseSeed));
+            buildEmitterGpu(inst.pos, inst.dir, inst.output, inst.reach, inst.focus, inst.team,
+                inst.distribution, inst.width, refreshDistributionScale(inst)));
         // Latch the GPU force readback (slot-indexed, ~2 frames old; zero until the first lands).
         const glm::vec4 readback = renderer.getForceEmitterReadback(inst.rendererSlot);
         inst.appliedForce = glm::vec3(readback);
@@ -329,10 +384,11 @@ void ForceSystem::update(Renderer& renderer, float)
     }
 }
 
-// Draws the emitter's UNCONTESTED iso surface (what its bubble looks like alone): two longitudinal
-// rings through the direction axis + the equatorial ring, all following the focus lobe, plus a
-// direction tick. Deformation against other bubbles only exists in the field evaluation — this is
-// the authoring view of reach/output/focus, not the equilibrium surface.
+// Draws the emitter's UNCONTESTED iso surface (what its bubble looks like alone): the closed-form
+// profile of the warped-sphere shape solved for the iso threshold — four half-profiles in the two
+// axial planes + a circle at the widest station + the output line pos -> target. Deformation
+// against other bubbles only exists in the field evaluation — this is the authoring view of
+// reach/focus/distribution, not the equilibrium surface.
 void ForceSystem::debugDrawEmitter(Renderer& renderer, const EmitterInstance& inst) const
 {
     const glm::vec3 dir = glm::dot(inst.dir, inst.dir) > 1e-6f ? glm::normalize(inst.dir) : glm::vec3(0.0f, 1.0f, 0.0f);
@@ -341,35 +397,62 @@ void ForceSystem::debugDrawEmitter(Renderer& renderer, const EmitterInstance& in
     const glm::vec3 up = glm::cross(right, dir);
     const uint32 color = packDebugColor(m_params.teamColors[glm::min(inst.team, MAX_FORCE_TEAMS - 1)]);
 
-    // Isolated-bubble radius: field output*(1-u^2)^2 = iso  =>  u = sqrt(1 - sqrt(iso/output)).
-    const float isoFrac = inst.output > m_params.isoThreshold
-        ? std::sqrt(1.0f - std::sqrt(m_params.isoThreshold / inst.output)) : 0.0f;
-    const auto isoRadius = [&](float cosAngle) {
-        return glm::max(inst.reach, 1e-3f) * forceLobe(cosAngle, inst.focus) * isoFrac;
+    const float R = glm::max(inst.reach, 1e-3f);
+    const float m = 1.0f - 2.0f * glm::clamp(inst.focus, 0.0f, 1.0f);
+    // Same fold the upload applies (cache is fresh: update() refreshed it before drawing).
+    const float foldedOutput = inst.output / glm::max(inst.distNormE, 1e-3f);
+    // Iso lateral half-width at axial station t, closed form (mirrors forceContribution):
+    //   O' * (1 - u^2)^2 * g(t) = iso  ->  u^2 = 1 - sqrt(iso / (O' g))
+    //   lat = (R/2) * sqrt((u^2 - X^2) * q^-m) where positive, X = 2t - 1, q = (1-X)/(1+X)
+    const auto isoLateral = [&](float t) {
+        const float g = forceDistributionGain(t, glm::clamp(inst.distribution, 0.0f, 1.0f));
+        const float peak = foldedOutput * g;
+        if (peak <= m_params.isoThreshold)
+            return 0.0f; // density trough below iso: no surface at this station
+        const float u2 = 1.0f - std::sqrt(m_params.isoThreshold / peak);
+        const float X = t * 2.0f - 1.0f;
+        const float y2 = u2 - X * X;
+        if (y2 <= 0.0f)
+            return 0.0f;
+        const float q = glm::clamp((1.0f - X) / (1.0f + X), 1e-4f, 1e4f);
+        return 0.5f * R * glm::clamp(inst.width, 0.05f, 4.0f) * std::sqrt(y2 * std::pow(q, -m));
     };
 
-    constexpr int SEG = 32;
-    constexpr float STEP = 6.2831853f / SEG;
+    constexpr int STATIONS = 32;
+    float maxLat = 0.0f;
+    float maxLatT = 0.5f;
     for (const glm::vec3& planeAxis : { right, up })
     {
-        glm::vec3 prev = inst.pos + dir * isoRadius(1.0f);
+        for (const float side : { 1.0f, -1.0f })
+        {
+            glm::vec3 prev = inst.pos;
+            for (int i = 1; i <= STATIONS; ++i)
+            {
+                const float t = (float)i / STATIONS;
+                const float lat = isoLateral(t);
+                const glm::vec3 p = inst.pos + dir * (t * R) + planeAxis * (side * lat);
+                renderer.addDebugLine(prev, p, color);
+                prev = p;
+                if (lat > maxLat)
+                {
+                    maxLat = lat;
+                    maxLatT = t;
+                }
+            }
+        }
+    }
+    if (maxLat > 0.0f)
+    {
+        constexpr int SEG = 32;
+        const glm::vec3 ringCenter = inst.pos + dir * (maxLatT * R);
+        glm::vec3 prev = ringCenter + right * maxLat;
         for (int i = 1; i <= SEG; ++i)
         {
-            const float theta = STEP * i;
-            const float c = std::cos(theta);
-            const glm::vec3 p = inst.pos + (dir * c + planeAxis * std::sin(theta)) * isoRadius(c);
+            const float phi = (6.2831853f / SEG) * i;
+            const glm::vec3 p = ringCenter + (right * std::cos(phi) + up * std::sin(phi)) * maxLat;
             renderer.addDebugLine(prev, p, color);
             prev = p;
         }
     }
-    const float equator = isoRadius(0.0f);
-    glm::vec3 prev = inst.pos + right * equator;
-    for (int i = 1; i <= SEG; ++i)
-    {
-        const float phi = STEP * i;
-        const glm::vec3 p = inst.pos + (right * std::cos(phi) + up * std::sin(phi)) * equator;
-        renderer.addDebugLine(prev, p, color);
-        prev = p;
-    }
-    renderer.addDebugLine(inst.pos, inst.pos + dir * glm::max(isoRadius(1.0f) * 1.15f, 0.25f), color);
+    renderer.addDebugLine(inst.pos, inst.pos + dir * R, color); // the output line (emitter -> target)
 }

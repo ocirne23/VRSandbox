@@ -120,11 +120,14 @@ export namespace RendererVKLayout
     // Keep in sync with force_field.inc.glsl.
     struct alignas(16) ForceEmitterGpu
     {
-        glm::vec4 posReach{ 0.0f, 0.0f, 0.0f, 1.0f };   // xyz = world position, w = Reach (m)
-        glm::vec4 dirFocus{ 0.0f, 1.0f, 0.0f, 0.0f };   // xyz = normalized direction, w = focus >= 0 (0 = sphere)
-        glm::vec4 outputParams{ 1.0f, 1.0f, 0.0f, 0.0f };// x = Output (field strength), y = shell alpha mult, zw unused
-                                                         // (z was a per-emitter pattern phase — removed: the pattern
-                                                         // must be purely world-anchored or merged shells seam)
+        glm::vec4 posReach{ 0.0f, 0.0f, 0.0f, 1.0f };   // xyz = world position, w = Reach (m): the bubble
+                                                         // spans EXACTLY pos .. pos + dir * Reach
+        glm::vec4 dirFocus{ 0.0f, 1.0f, 0.0f, 0.5f };   // xyz = normalized direction, w = focus [0,1]
+                                                         // (0.5 = sphere, 0 = cone point at emitter, 1 = at target)
+        glm::vec4 outputParams{ 1.0f, 1.0f, 0.5f, 1.0f };// x = Output (distribution budget fold pre-applied),
+                                                         // y = shell alpha mult, z = distribution [0,1]
+                                                         // (axial density bump position), w = width
+                                                         // (lateral scale: 1 = round, < 1 = narrower)
         glm::uvec4 teamFlags{ 0u, 0u, 0u, 0u };         // x = team [0, MAX_FORCE_TEAMS), y = FORCE_FLAG_* bits, zw unused
     };
     static_assert(sizeof(ForceEmitterGpu) == 64);
@@ -468,6 +471,8 @@ export namespace RendererVKLayout
                                 // y = backface alpha (far/inner surface visibility from outside),
                                 // z = contact wall alpha (interior equilibrium pane),
                                 // w = junction smoothing (smooth-max width as a fraction of iso)
+        glm::vec4 forceParams4; // x = density debug view (0/1: heatmap of peak field along the ray),
+                                // y = density range (field value mapping to white), zw unused
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

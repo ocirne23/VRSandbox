@@ -148,6 +148,22 @@ vec4 forceShadeHit(vec3 rayOrigin, vec3 rayDir, float tHit, uint hitTeam, bool c
     return vec4(color * alpha + color * 0.15 * layerScale, alpha);
 }
 
+// Heat gradient for the density debug view: blue -> cyan -> green -> yellow -> red -> white.
+vec3 forceHeatColor(float t)
+{
+    const vec3 c0 = vec3(0.0, 0.0, 0.3);
+    const vec3 c1 = vec3(0.0, 0.4, 1.0);
+    const vec3 c2 = vec3(0.0, 1.0, 0.3);
+    const vec3 c3 = vec3(1.0, 1.0, 0.0);
+    const vec3 c4 = vec3(1.0, 0.2, 0.0);
+    const vec3 c5 = vec3(1.0);
+    if (t < 0.2) return mix(c0, c1, t * 5.0);
+    if (t < 0.4) return mix(c1, c2, (t - 0.2) * 5.0);
+    if (t < 0.6) return mix(c2, c3, (t - 0.4) * 5.0);
+    if (t < 0.8) return mix(c3, c4, (t - 0.6) * 5.0);
+    return mix(c4, c5, (t - 0.8) * 5.0);
+}
+
 // Shades the equilibrium WALL between two opposing pressed bubbles (phi_A == phi_B, both above
 // iso): a white-hot energy pane blending both team colors, its own visibility on "Contact wall
 // alpha". fade in [0,1] dissolves the pane at its rim (where min(phi_A, phi_B) approaches iso), so
@@ -203,6 +219,40 @@ void main()
     }
     if (t1 <= t0)
         discard;
+
+    // DEBUG density view: heatmap of the STRONGEST team field along the ray instead of the shell —
+    // tip concentration, lobe merging and the budget fold read directly; a white contour marks the
+    // iso threshold (the bubble boundary). Overlapping proxies dedup via dominance at the peak.
+    if (u_forceParams4.x > 0.5)
+    {
+        const int densitySteps = int(u_forceParams1.w);
+        const float densityDt = (t1 - t0) / float(densitySteps);
+        float maxPhi = 0.0;
+        float tMax = t0;
+        uint maxTeam = 0u;
+        for (int i = 0; i <= densitySteps; ++i)
+        {
+            const float t = t0 + densityDt * float(i);
+            uint bt;
+            float bp, sp, Fd;
+            forceSampleField(rayOrigin + rayDir * t, iso, bt, bp, sp, Fd);
+            if (bp > maxPhi)
+            {
+                maxPhi = bp;
+                tMax = t;
+                maxTeam = bt;
+            }
+        }
+        if (maxPhi <= 1e-4)
+            discard;
+        if (forceDominantEmitter(rayOrigin + rayDir * tMax, maxTeam) != v_emitterIdx)
+            discard;
+        vec3 heat = forceHeatColor(clamp(maxPhi / u_forceParams4.y, 0.0, 1.0));
+        const float contour = 1.0 - smoothstep(0.0, 0.08, abs(maxPhi - iso) / iso);
+        heat = mix(heat, vec3(1.0), contour * 0.8);
+        out_color = vec4(heat * 0.8, 0.8);
+        return;
+    }
 
     // Fixed-step march compositing up to two crossings of F (front shell + the surface behind it).
     const int steps = int(u_forceParams1.w);

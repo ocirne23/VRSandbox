@@ -34,8 +34,15 @@ public:
     void setTransform(const glm::vec3& pos, const glm::vec3& direction);
     void setPosition(const glm::vec3& pos);
     void setOutput(float output);
-    void setReach(float reach);
-    void setFocus(float focus);
+    void setReach(float reach);   // total extent: the bubble spans pos .. pos + dir * reach
+    void setFocus(float focus);   // shape pinch [0,1]: 0.5 = sphere spanning the line, 0 = cone
+                                  // pointed at the emitter, 1 = cone pointed at the target
+    // Where the output density sits along the line [0,1] (0 = emitter end, 1 = target end), as a
+    // smooth budget-conserving bump — Output stays the total; concentration comes from the rest.
+    void setDistribution(float distribution);
+    // Lateral scale, reach untouched: 1 = round (focus 0.5 = perfect sphere), < 1 pinches every
+    // shape narrower (cones keep their straight taper at a sharper angle, spheres go prolate).
+    void setWidth(float width);
     void setTeam(uint32 team); // main-thread (rare)
 
     // GPU readback results, ~2 frames old (zero until the first readback lands). Force is the
@@ -96,7 +103,7 @@ public:
     // iso threshold for a bubble to exist at all; reach is the field's hard falloff-to-zero radius
     // (the visible bubble is smaller: r = reach * sqrt(1 - sqrt(iso/output))).
     ForceEmitter createEmitter(uint32 team, const glm::vec3& pos, const glm::vec3& direction,
-        float output, float reach, float focus = 0.0f);
+        float output, float reach, float focus = 0.5f, float distribution = 0.5f, float width = 1.0f);
     ForceQuery createQuery(const glm::vec3& pos);
 
     uint32 getNumEmitters() const { return m_numLiveEmitters; }
@@ -114,9 +121,15 @@ private:
         float output = 1.0f;
         float reach = 1.0f;
         float focus = 0.0f;
+        float distribution = 0.5f;
+        float width = 1.0f;
+        // Cached field-weighted mean of the distribution gain over the shape (the budget integral —
+        // 1D quadrature; depends only on focus + distribution, refreshed when either changes).
+        float distNormE = 1.0f;
+        float distNormFocus = -1.0f;
+        float distNormD = -1.0f;
         glm::vec3 pos{ 0.0f };
         glm::vec3 dir{ 0.0f, 1.0f, 0.0f };
-        float phaseSeed = 0.0f;
         glm::vec3 appliedForce{ 0.0f }; // latched from the GPU readback
         float pressure = 0.0f;
     };
@@ -128,6 +141,9 @@ private:
         ForceQuery::Result result;
     };
 
+    // Refreshes the cached distribution budget integral if focus/distribution changed and returns
+    // the factor Output is multiplied by before upload (1 / E[gain] — exact conservation).
+    float refreshDistributionScale(EmitterInstance& inst) const;
     EmitterInstance* resolveEmitter(uint64 handle);
     const EmitterInstance* resolveEmitter(uint64 handle) const;
     QueryInstance* resolveQuery(uint64 handle);

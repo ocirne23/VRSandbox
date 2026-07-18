@@ -6,6 +6,7 @@ module;
 #define NOMINMAX
 #include <onnxruntime/onnxruntime_cxx_api.h>
 #include <onnxruntime/dml_provider_factory.h>
+#include <comdef.h>
 
 module Procedural;
 
