@@ -8,14 +8,16 @@ import :System;
 
 using namespace RendererVKLayout;
 
-// CPU mirror of the shader lobe (force_field.inc.glsl): directional reach shaping. focus 0 = exact
-// sphere; higher focus grows the forward reach x(1+f) and shrinks side/back, with the blend exponent
-// sharpening so high focus reads as a spear. C1 in cosAngle (exponent >= 2), so surfaces stay smooth.
+// CPU mirror of the shader lobe (force_field.inc.glsl): a smooth CONE — straight silhouette from
+// the tip at Reach*(1+f) forward to the Reach-wide base at the emitter plane, spherical cap
+// behind. focus 0 = exact sphere (cone blended in over f < 0.5). Keep in sync with the shader.
 static float forceLobe(float cosAngle, float focus)
 {
-    const float side = 1.0f / (1.0f + 0.5f * focus);
-    const float forward = 1.0f + focus;
-    return glm::mix(side, forward, std::pow(std::max(cosAngle, 0.0f), 2.0f + focus));
+    const float T = 1.0f + focus;
+    const float s = std::sqrt(std::max(1.0f - cosAngle * cosAngle, 0.0f)); // exact sine: see the shader
+    const float cone = T / (std::max(cosAngle, 0.0f) + T * std::max(s, 1e-4f));
+    const float L = glm::mix(1.0f, cone, glm::smoothstep(-0.1f, 0.1f, cosAngle));
+    return glm::mix(1.0f, L, std::min(focus * 2.0f, 1.0f));
 }
 
 static uint32 packDebugColor(const glm::vec3& c)
@@ -151,6 +153,8 @@ void ForceSystem::initialize()
     Tweak::floatVar("Force/Shell", "Rim intensity", &m_params.rimIntensity, 0.0f, 8.0f);
     Tweak::floatVar("Force/Glow", "Contact intensity", &m_params.contactGlowIntensity, 0.0f, 16.0f);
     Tweak::floatVar("Force/Glow", "Contact width", &m_params.contactGlowWidth, 0.01f, 1.0f);
+    Tweak::floatVar("Force/Glow", "Contact wall alpha", &m_params.contactWallAlpha, 0.0f, 1.0f);
+    Tweak::floatVar("Force/Shell", "Junction smoothing", &m_params.junctionSmoothing, 0.0f, 2.0f);
     Tweak::floatVar("Force/Glow", "Geometry distance (m)", &m_params.geoGlowDistance, 0.0f, 4.0f);
     Tweak::floatVar("Force/Pattern", "Scale (1/m)", &m_params.patternScale, 0.01f, 8.0f);
     Tweak::floatVar("Force/Pattern", "Scroll speed", &m_params.patternSpeed, 0.0f, 4.0f);

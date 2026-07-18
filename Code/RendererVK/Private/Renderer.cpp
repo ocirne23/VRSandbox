@@ -781,7 +781,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         ubo.forceParams2 = glm::vec4(glm::max(force.patternScale, 0.0f), force.patternSpeed,
             glm::max(force.patternIntensity, 0.0f), force.forceGain);
         ubo.forceParams3 = glm::vec4(glm::clamp(force.interiorAlpha, 0.0f, 1.0f),
-            glm::clamp(force.backfaceAlpha, 0.0f, 1.0f), 0.0f, 0.0f);
+            glm::clamp(force.backfaceAlpha, 0.0f, 1.0f), glm::clamp(force.contactWallAlpha, 0.0f, 1.0f),
+            glm::clamp(force.junctionSmoothing, 0.0f, 2.0f));
     }
 
     const TerrainTexTweaks& tex = m_terrainTexTweaks;

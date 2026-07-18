@@ -351,22 +351,28 @@ export struct ForceFieldParams
 {
     bool enabled = true;             // gates the shell draw + force compute passes
     float isoThreshold = 0.15f;      // field strength where an uncontested bubble surface sits
-    int marchSteps = 48;             // ray-march steps through a shell proxy's ray interval
+    int marchSteps = 10;             // ray-march steps through a shell proxy's ray interval
     float bigReachThreshold = 48.0f; // max directional reach (m) above which an emitter bypasses the
                                      // grid into the globally-scanned big-emitter list
     bool useGrid = true;             // hash-grid candidate gathering; off = brute-force scan of every
                                      // emitter per evaluation (small scenes / A-B correctness check).
                                      // Toggling rebuilds the force pipelines (FORCE_GRID define)
     float forceGain = 1.0f;          // scale on the read-back per-emitter applied forces
-    float shellAlpha = 0.25f;        // base shell opacity (rim-weighted in the shader)
-    float interiorAlpha = 0.35f;     // shell opacity floor when seen from INSIDE the bubble (the rim
+    float shellAlpha = 0.33f;        // base shell opacity (rim-weighted in the shader)
+    float interiorAlpha = 0.0f;     // shell opacity floor when seen from INSIDE the bubble (the rim
                                      // math reads near-zero head-on from within; this keeps the dome visible)
-    float backfaceAlpha = 0.35f;     // visibility of the far/inner shell surface seen from OUTSIDE,
+    float backfaceAlpha = 1.0f;     // visibility of the far/inner shell surface seen from OUTSIDE,
                                      // composited behind the front surface (0 = single-surface shell)
     float rimPower = 3.0f;           // fresnel rim exponent
     float rimIntensity = 1.5f;       // rim emissive gain
-    float contactGlowIntensity = 4.0f; // seam glow where opposing bubbles press (equal-field zone)
+    float contactGlowIntensity = 0.33f; // seam glow where opposing bubbles press (equal-field zone)
     float contactGlowWidth = 0.15f;    // opposing/own field ratio band that reads as contact
+    float contactWallAlpha = 0.5f;     // visibility of the interior equilibrium WALL between two
+                                       // pressed opposing bubbles (0 = only the outer seam glows)
+    float junctionSmoothing = 0.5f;    // smooth-max width (fraction of iso) rounding the crease where
+                                       // shells meet the wall: continuous normals kill the junction
+                                       // jaggies; 0 = hard crease. Queries use the same function, so
+                                       // the gameplay inside-test always matches the drawn surface
     float geoGlowDistance = 0.5f;      // glow band where the shell intersects scene geometry (m)
     float patternScale = 0.6f;       // animated surface pattern frequency (1/m)
     float patternSpeed = 0.3f;       // pattern scroll speed

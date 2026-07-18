@@ -46,11 +46,22 @@ layout (binding = FORCE_EMITTERS_BINDING, std430) readonly buffer ForceEmitters
 #include "force_grid.inc.glsl"
 #endif
 
-// Directional reach shaping. C1 in c (exponent >= 2), so field surfaces stay smooth.
+// Directional reach shaping — a smooth CONE, so a focused emitter reads as a spear/triangle: the
+// silhouette runs a STRAIGHT edge from the tip at Reach*(1+f) forward to the base (half-width
+// Reach) at the emitter plane, with a spherical cap behind. Polar cone: r(theta) = T/(c + T*s).
+// (The previous pow() lobe was flat over the whole back hemisphere and superlinear at the front —
+// a back bulb + waist + fat forward blob, not a spear.) The smooth-relu of c keeps it C1; focus 0
+// stays an exact sphere (cone blended in over f < 0.5).
 float forceLobe(float c, float f)
 {
-    const float side = 1.0 / (1.0 + 0.5 * f);
-    return mix(side, 1.0 + f, pow(max(c, 0.0), 2.0 + f));
+    const float T = 1.0 + f;
+    // EXACT sine in the cone term — deriving it from a smoothed cosine pinned it at a floor near
+    // the axis, which flattened the last degrees of taper into a constant-radius tube with a flat
+    // cap (jar neck). The cap blend below is the only smoothing the junction needs.
+    const float s = sqrt(max(1.0 - c * c, 0.0));
+    const float cone = T / (max(c, 0.0) + T * max(s, 1e-4));
+    const float L = mix(1.0, cone, smoothstep(-0.1, 0.1, c)); // spherical cap behind -> cone ahead
+    return mix(1.0, L, min(f * 2.0, 1.0));
 }
 
 // One emitter's field contribution at x.
@@ -72,20 +83,17 @@ float forceContribution(vec3 x, ForceEmitterData e)
 }
 
 // Conservative local bounds of an emitter's field support, shared by the proxy VS, the FS ray
-// interval, and the grid insert so they always agree. Local frame: +Z = emitter direction.
-//   forward = Reach * (1 + f); back = Reach * side lobe; side = Reach * max lateral extent of the
-// lobe (analytic optimum of sin(theta) * L(cos theta), + 5% slack).
+// interval, and the grid insert so they always agree. Local frame: +Z = emitter direction. The
+// cone lobe never exceeds Reach laterally or behind (base half-width = Reach at the emitter
+// plane, spherical cap behind), so the box is simply Reach sideways/back (+5% slack) and
+// Reach*(1+f) forward.
 void forceEmitterBounds(ForceEmitterData e, out float side, out float forward, out float back)
 {
     const float f = e.dirFocus.w;
     const float reach = e.posReach.w;
-    const float s = 1.0 / (1.0 + 0.5 * f);
-    const float p = 2.0 + f;
-    const float a = p / (p + 1.0);
-    const float m = sqrt(1.0 - a) * pow(a, p * 0.5); // max of sin(t)*cos(t)^p
-    side = reach * min(s + (1.0 + f - s) * m, 1.0 + f) * 1.05;
+    side = reach * 1.05;
     forward = reach * (1.0 + f);
-    back = reach * s;
+    back = reach * 1.05;
 }
 
 // Orthonormal RIGHT-HANDED frame with +Z = dir (right x up == dir). Handedness is load-bearing: a
@@ -134,6 +142,24 @@ void forceAccumulate(vec3 x, out float phi[MAX_FORCE_TEAMS])
     }
 }
 
+// C1 smooth max (k = blend width; 0 = hard max). Used for the surface's opposing bound so the
+// shells meet the equilibrium wall in a rounded fillet instead of a hard crease — the crease's
+// discontinuous normals printed march-step-sized classification jaggies along the junction.
+float forceSmoothMax(float a, float b, float k)
+{
+    const float h = max(k - abs(a - b), 0.0) / max(k, 1e-5);
+    return max(a, b) + h * h * k * 0.25;
+}
+
+// The bound a team's field must beat to be "inside": iso or the strongest opposing field, smoothly
+// blended (u_forceParams3.w = junction smoothing as a fraction of iso; scale-free since the rim
+// region lives at field values ~iso). The query compute uses the same function, so gameplay
+// "inside" matches the drawn surface exactly.
+float forceOpposingBound(float iso, float opposing)
+{
+    return forceSmoothMax(iso, opposing, u_forceParams3.w * iso);
+}
+
 // The render surface function F for a FIXED team t (marched/refined/differentiated holding the hit
 // team constant): positive inside t's bubble, zero on its surface.
 float forceSurfaceForTeam(vec3 x, uint team, float iso)
@@ -144,7 +170,7 @@ float forceSurfaceForTeam(vec3 x, uint team, float iso)
     for (uint t = 0u; t < MAX_FORCE_TEAMS; ++t)
         if (t != team)
             opposing = max(opposing, phi[t]);
-    return phi[team] - max(iso, opposing);
+    return phi[team] - forceOpposingBound(iso, opposing);
 }
 
 // A fixed team's own field and its best opposing field at x.
@@ -173,7 +199,7 @@ void forceSampleField(vec3 x, float iso, out uint bestTeam, out float bestPhi, o
     for (uint t = 0u; t < MAX_FORCE_TEAMS; ++t)
         if (t != bestTeam)
             secondPhi = max(secondPhi, phi[t]);
-    F = bestPhi - max(iso, secondPhi);
+    F = bestPhi - forceOpposingBound(iso, secondPhi);
 }
 
 // The strongest single contributor of `team` at x — the OWNER of a shell surface point. Every proxy
@@ -200,6 +226,27 @@ uint forceDominantEmitter(vec3 x, uint team)
         }
     }
     return bestIdx;
+}
+
+// Signed field difference between two teams: positive on teamA's side, zero exactly on the
+// equilibrium WALL between two pressed bubbles. F itself only dips to 0 there without changing
+// sign (best/second swap), so the interior wall must be detected and refined on THIS function.
+float forceTeamDiff(vec3 x, uint teamA, uint teamB)
+{
+    float phi[MAX_FORCE_TEAMS];
+    forceAccumulate(x, phi);
+    return phi[teamA] - phi[teamB];
+}
+
+// Normal of the equilibrium wall (gradient of the team difference), pointing toward teamA's side.
+vec3 forceWallNormal(vec3 x, uint teamA, uint teamB, float h)
+{
+    const vec2 k = vec2(1.0, -1.0);
+    vec3 grad = k.xyy * forceTeamDiff(x + k.xyy * h, teamA, teamB)
+              + k.yyx * forceTeamDiff(x + k.yyx * h, teamA, teamB)
+              + k.yxy * forceTeamDiff(x + k.yxy * h, teamA, teamB)
+              + k.xxx * forceTeamDiff(x + k.xxx * h, teamA, teamB);
+    return normalize(grad + vec3(0.0, 1e-6, 0.0));
 }
 
 // Outward surface normal at a hit via 4-tap tetrahedral finite differences of F (team held fixed).

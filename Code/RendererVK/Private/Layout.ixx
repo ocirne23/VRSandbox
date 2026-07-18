@@ -465,7 +465,9 @@ export namespace RendererVKLayout
         glm::vec4 forceParams2; // x = pattern scale (1/m), y = pattern scroll speed, z = pattern intensity,
                                 // w = force gain (readback scale)
         glm::vec4 forceParams3; // x = interior alpha (shell opacity floor seen from inside),
-                                // y = backface alpha (far/inner surface visibility from outside), zw unused
+                                // y = backface alpha (far/inner surface visibility from outside),
+                                // z = contact wall alpha (interior equilibrium pane),
+                                // w = junction smoothing (smooth-max width as a fraction of iso)
     };
 
     struct alignas(16) RenderNodeTransform : Transform {};

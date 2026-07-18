@@ -40,7 +40,8 @@ private:
     };
     std::vector<ForceBall> forceBalls;
     KeyboardListener* pKeyboardListener;
-
+	MouseListener* pMouseListener;
+    float mouseScrollAmount = 1.0f;
 public:
 
     InputControls(
@@ -54,6 +55,13 @@ public:
     {
 
         auto& input = Globals::input;
+		pMouseListener = input.addMouseListener();
+
+        pMouseListener->onMouseWheelMoved = [this](const SDL_MouseWheelEvent& evt) { 
+            mouseScrollAmount += (float)(evt.direction == SDL_MOUSEWHEEL_NORMAL ? evt.y : -evt.y) * 0.1f;
+			mouseScrollAmount = glm::clamp(mouseScrollAmount, 0.1f, 10.0f);
+        };
+
         pKeyboardListener = input.addKeyboardListener();
         pKeyboardListener->onKeyPressed = [this](const SDL_KeyboardEvent& evt) { handleKeyEvent(evt); };
         pKeyboardListener->onKeyReleased = [this](const SDL_KeyboardEvent& evt) { handleKeyEvent(evt); };
@@ -79,8 +87,9 @@ public:
                 continue;
             ball.emitter.setPosition(pc->body.getPosition());
             const glm::vec3 force = ball.emitter.getAppliedForce();
+            const float pressure = ball.emitter.getPressure();
             if (glm::dot(force, force) > 1e-8f)
-                pc->body.applyImpulse(force * deltaSec);
+                pc->body.applyImpulse(force * deltaSec * 40000.0f * pressure);
         }
     }
 
@@ -216,7 +225,7 @@ public:
             const glm::vec3 dir = cameraController.getDirection();
             const glm::vec3 pos = cameraController.getPosition() + dir * 6.0f;
             spawnedForceEmitters.push_back(Globals::forceSystem.createEmitter(
-                team, pos, dir, 1.0f, 10.0f, focused ? 2.0f : 0.0f));
+                team, pos, dir, 1.0f, mouseScrollAmount * mouseScrollAmount, focused ? 2.0f : 0.0f));
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_B && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {

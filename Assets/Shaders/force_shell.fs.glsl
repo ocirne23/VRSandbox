@@ -31,7 +31,10 @@ float forceHash(vec3 p)
     uint n = q.x ^ q.y ^ q.z;
     n = n * 747796405u + 2891336453u;
     n = ((n >> ((n >> 28u) + 4u)) ^ n) * 277803737u;
-    return float((n >> 22u) ^ n) * (1.0 / 1023.0 / 1024.0 / 1024.0);
+    // The xor spans the full 32 bits: normalize by 2^32 so the noise stays in [0, 1). An undersized
+    // divisor here returned [0, 4) and drove the ridged crest shaping (1 - |2f - 1|)^3 hugely
+    // NEGATIVE — the pattern then subtracted color in the premultiplied blend (black blotches).
+    return float((n >> 22u) ^ n) * (1.0 / 4294967296.0);
 }
 
 float forceValueNoise(vec3 p)
@@ -45,35 +48,29 @@ float forceValueNoise(vec3 p)
                    mix(forceHash(i + vec3(0, 1, 1)), forceHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
 }
 
-// Distance-to-hex-border in a pointy-top hex tiling: 0 at cell centers, 0.5 on the borders.
-float forceHexDist(vec2 p)
-{
-    const vec2 r = vec2(1.0, 1.7320508);
-    const vec2 a = mod(p, r) - r * 0.5;
-    const vec2 b = mod(p - r * 0.5, r) - r * 0.5;
-    const vec2 gv = dot(a, a) < dot(b, b) ? a : b;
-    const vec2 q = abs(gv);
-    return max(q.x * 0.8660254 + q.y * 0.5, q.y);
-}
-
-// Triplanar hexagonal energy pattern + drifting noise ripple, purely WORLD-anchored: moving emitters
-// slide through a stable pattern, and merged same-team shells shade seamlessly across their
-// ownership boundary (any per-emitter term here would print a seam where the dominant owner flips).
+// Flowing wave pattern: domain-warped 3D value noise shaped into soft ridged crests — drifting
+// energy swells with no repeating tiling. Purely WORLD-anchored and per-emitter-free: moving
+// emitters slide through a stable pattern and merged shells shade seamlessly across their ownership
+// boundary (any per-emitter term here would print a seam where the dominant owner flips). The
+// normal is unused (3D noise needs no triplanar projection), kept for signature stability.
 float forcePattern(vec3 worldPos, vec3 n)
 {
     const float scale = u_forceParams2.x;
     const float t = u_timeSeconds * u_forceParams2.y;
-    vec3 w = n * n;
-    w *= w;
-    w /= (w.x + w.y + w.z);
-    const float hexX = forceHexDist(worldPos.yz * scale + t * 0.31);
-    const float hexY = forceHexDist(worldPos.zx * scale + t * 0.27);
-    const float hexZ = forceHexDist(worldPos.xy * scale + t * 0.23);
-    const float hex = smoothstep(0.38, 0.5, hexX) * w.x
-                    + smoothstep(0.38, 0.5, hexY) * w.y
-                    + smoothstep(0.38, 0.5, hexZ) * w.z;
-    const float ripple = forceValueNoise(worldPos * scale * 2.7 + vec3(0.0, t * 1.7, 0.0));
-    return hex * (0.65 + 0.35 * ripple) + ripple * ripple * 0.35;
+    const vec3 p = worldPos * scale;
+    // Low-frequency warp fields drifting at different rates: these bend the wave bands into
+    // meandering, non-repeating swirls instead of straight noise bands.
+    const vec3 warp = vec3(
+        forceValueNoise(p * 0.8 + vec3(0.0, t * 0.55, 0.0)),
+        forceValueNoise(p * 0.8 + vec3(5.2, 1.3, -t * 0.45)),
+        forceValueNoise(p * 0.8 + vec3(9.7, 4.1, t * 0.35))) - 0.5;
+    // Main wave crests: ridged shaping of a warped mid-frequency field (bright meandering bands).
+    const float f1 = forceValueNoise(p * 1.7 + warp * 3.0 + vec3(0.0, 0.0, t * 0.25));
+    float crest = 1.0 - abs(f1 * 2.0 - 1.0);
+    crest *= crest * crest;
+    // Finer counter-drifting shimmer riding the same warp.
+    const float f2 = forceValueNoise(p * 3.6 - warp * 2.0 + vec3(t * 0.4, 0.0, 0.0));
+    return crest * (0.8 + 0.5 * f2) + f2 * f2 * 0.25;
 }
 
 // Shades one refined surface crossing. Returns PREMULTIPLIED rgb + alpha, ready to composite
@@ -83,10 +80,15 @@ float forcePattern(vec3 worldPos, vec3 n)
 vec4 forceShadeHit(vec3 rayOrigin, vec3 rayDir, float tHit, uint hitTeam, bool cameraInsideField, float sceneDist)
 {
     const vec3 hitPos = rayOrigin + rayDir * tHit;
-    float ownPhi, opposingPhi;
-    forceTeamSample(hitPos, hitTeam, ownPhi, opposingPhi);
+    float phi[MAX_FORCE_TEAMS];
+    forceAccumulate(hitPos, phi);
+    const float ownPhi = phi[hitTeam];
     if (ownPhi <= 0.0)
         return vec4(0.0);
+    float opposingPhi = 0.0;
+    for (uint t = 0u; t < MAX_FORCE_TEAMS; ++t)
+        if (t != hitTeam)
+            opposingPhi = max(opposingPhi, phi[t]);
 
     const float iso = u_forceParams0.x;
     const float h = max(0.005 * fe_emitters[v_emitterIdx].posReach.w, 0.01);
@@ -95,7 +97,20 @@ vec4 forceShadeHit(vec3 rayOrigin, vec3 rayDir, float tHit, uint hitTeam, bool c
     if (viewedFromInside)
         n = -n;
 
-    const vec3 teamColor = u_forceTeamColors[hitTeam].rgb;
+    // Field-weighted team color (sharpened phi^4 weights): isolated bubbles keep their pure color,
+    // but toward the junction both sides converge to the same mix — so whichever surface (or side)
+    // a pixel's march classified, it shades the same there. Hard per-team lookups printed
+    // march-step-sized color jaggies along the junction rim.
+    vec3 teamColor = vec3(0.0);
+    float weightSum = 0.0;
+    for (uint t = 0u; t < MAX_FORCE_TEAMS; ++t)
+    {
+        float w = phi[t] * phi[t];
+        w *= w;
+        teamColor += u_forceTeamColors[t].rgb * w;
+        weightSum += w;
+    }
+    teamColor /= max(weightSum, 1e-12);
     const float fresnel = pow(1.0 - clamp(dot(n, -rayDir), 0.0, 1.0), u_forceParams0.y);
     // Contact glow: the equilibrium seam lights up as the best opposing field approaches our own.
     const float contact = smoothstep(1.0 - u_forceParams1.y, 1.0, opposingPhi / max(ownPhi, 1e-4));
@@ -131,6 +146,25 @@ vec4 forceShadeHit(vec3 rayOrigin, vec3 rayDir, float tHit, uint hitTeam, bool c
     alpha = clamp(alpha, 0.0, 1.0) * layerScale;
     // Premultiplied + a slight additive lift so rims/glow bloom over the scene.
     return vec4(color * alpha + color * 0.15 * layerScale, alpha);
+}
+
+// Shades the equilibrium WALL between two opposing pressed bubbles (phi_A == phi_B, both above
+// iso): a white-hot energy pane blending both team colors, its own visibility on "Contact wall
+// alpha". fade in [0,1] dissolves the pane at its rim (where min(phi_A, phi_B) approaches iso), so
+// the edge is analytic instead of stair-stepping with the march sampling. Premultiplied rgb + alpha.
+vec4 forceShadeWall(vec3 rayOrigin, vec3 rayDir, float tWall, uint teamA, uint teamB, float fade)
+{
+    const vec3 pos = rayOrigin + rayDir * tWall;
+    const float h = max(0.005 * fe_emitters[v_emitterIdx].posReach.w, 0.01);
+    vec3 n = forceWallNormal(pos, teamA, teamB, h);
+    if (dot(n, rayDir) > 0.0)
+        n = -n;
+    const float fresnel = pow(1.0 - clamp(dot(n, -rayDir), 0.0, 1.0), u_forceParams0.y);
+    const float pattern = forcePattern(pos, n) * u_forceParams2.z;
+    const vec3 mixed = mix(u_forceTeamColors[teamA].rgb, u_forceTeamColors[teamB].rgb, 0.5);
+    vec3 color = mix(mixed, vec3(1.0), 0.6) * u_forceParams1.x * (0.5 + 0.5 * pattern + fresnel);
+    float alpha = clamp(u_forceParams3.z * (0.35 + 0.4 * fresnel + 0.25 * pattern), 0.0, 1.0) * fade;
+    return vec4(color * alpha + color * 0.15 * fade, alpha);
 }
 
 void main()
@@ -192,34 +226,86 @@ void main()
     vec3 accumColor = vec3(0.0);
     float accumAlpha = 0.0;
     int numShaded = 0;
-    for (int i = 1; i <= steps && numShaded < 2; ++i)
+    for (int i = 1; i <= steps && numShaded < 3; ++i)
     {
         const float t = t0 + dt * float(i);
         forceSampleField(rayOrigin + rayDir * t, iso, bestTeam, bestPhi, secondPhi, F);
         const bool entryCrossing = F > 0.0;
-        if (entryCrossing != (fPrev > 0.0))
+        const bool surfaceCrossing = entryCrossing != (fPrev > 0.0);
+        // Winning team flipped with at least one endpoint inside: the ray crossed the equilibrium
+        // WALL between two pressed bubbles. F never changes sign there (it dips to 0 as best/second
+        // swap), so the wall refines on the team difference, which does. One-endpoint-inside counts
+        // because near the pane's RIM the skin crossing and the wall sit inside a single step —
+        // requiring both endpoints inside made the pane's edge stair-step with the sampling.
+        const bool teamFlip = bestTeam != prevTeam && (entryCrossing || fPrev > 0.0);
+        if (surfaceCrossing || teamFlip)
         {
-            // The bubble's team is the INSIDE end's strongest team; bisect on [tPrev, t] holding it
-            // fixed. 6 refinements: neighbouring pixels can be shaded by DIFFERENT proxies whose
-            // march intervals differ — the residual hit error must stay below the normal's finite-
-            // difference step or the fresnel visibly steps at the ownership boundary of merged shells.
-            const uint hitTeam = entryCrossing ? bestTeam : prevTeam;
-            float lo = tPrev, hi = t;
-            for (int b = 0; b < 6; ++b)
+            float tHit = -1.0;
+            uint hitTeam = 0u;
+            if (surfaceCrossing)
             {
-                const float mid = (lo + hi) * 0.5;
-                const float fm = forceSurfaceForTeam(rayOrigin + rayDir * mid, hitTeam, iso);
-                if ((fm > 0.0) == entryCrossing) hi = mid; else lo = mid;
+                // The bubble's team is the INSIDE end's strongest team; bisect on [tPrev, t] holding
+                // it fixed. 6 refinements: neighbouring pixels can be shaded by DIFFERENT proxies
+                // whose march intervals differ — the residual hit error must stay below the normal's
+                // finite-difference step or the fresnel steps at merged shells' ownership boundary.
+                hitTeam = entryCrossing ? bestTeam : prevTeam;
+                float lo = tPrev, hi = t;
+                for (int b = 0; b < 6; ++b)
+                {
+                    const float mid = (lo + hi) * 0.5;
+                    const float fm = forceSurfaceForTeam(rayOrigin + rayDir * mid, hitTeam, iso);
+                    if ((fm > 0.0) == entryCrossing) hi = mid; else lo = mid;
+                }
+                tHit = (lo + hi) * 0.5;
             }
-            const float tHit = (lo + hi) * 0.5;
-            // Ownership: only the crossing's dominant proxy shades it; unowned crossings still
-            // advance the march (their owner's own fragment draws them).
-            if (forceDominantEmitter(rayOrigin + rayDir * tHit, hitTeam) == v_emitterIdx)
+            float tWall = -1.0;
+            float wallFade = 0.0;
+            if (teamFlip)
             {
-                const vec4 layer = forceShadeHit(rayOrigin, rayDir, tHit, hitTeam, cameraInsideField, sceneDist);
-                accumColor += (1.0 - accumAlpha) * layer.rgb;
-                accumAlpha += (1.0 - accumAlpha) * layer.a;
-                ++numShaded;
+                float lo = tPrev, hi = t;
+                for (int b = 0; b < 6; ++b)
+                {
+                    const float mid = (lo + hi) * 0.5;
+                    if (forceTeamDiff(rayOrigin + rayDir * mid, prevTeam, bestTeam) > 0.0) lo = mid; else hi = mid;
+                }
+                tWall = (lo + hi) * 0.5;
+                // The pane exists where BOTH pressed fields are above iso; fade it out toward the
+                // rim analytically (also rejects spurious flips between weak far-apart fields).
+                float wallOwn, wallOpposing;
+                forceTeamSample(rayOrigin + rayDir * tWall, prevTeam, wallOwn, wallOpposing);
+                wallFade = smoothstep(iso, iso * 1.3, min(wallOwn, wallOpposing));
+                if (wallFade <= 0.001)
+                    tWall = -1.0;
+            }
+            // Composite this step's events in ray order (a rim step can hold skin AND wall), each
+            // ownership-checked so exactly one proxy shades it; unowned events still advance the march.
+            for (int ev = 0; ev < 2 && numShaded < 3; ++ev)
+            {
+                const bool wallFirst = tWall >= 0.0 && (tHit < 0.0 || tWall < tHit);
+                if (wallFirst)
+                {
+                    if (forceDominantEmitter(rayOrigin + rayDir * tWall, prevTeam) == v_emitterIdx)
+                    {
+                        const vec4 layer = forceShadeWall(rayOrigin, rayDir, tWall, prevTeam, bestTeam, wallFade);
+                        accumColor += (1.0 - accumAlpha) * layer.rgb;
+                        accumAlpha += (1.0 - accumAlpha) * layer.a;
+                        ++numShaded;
+                    }
+                    tWall = -1.0;
+                }
+                else if (tHit >= 0.0)
+                {
+                    if (forceDominantEmitter(rayOrigin + rayDir * tHit, hitTeam) == v_emitterIdx)
+                    {
+                        const vec4 layer = forceShadeHit(rayOrigin, rayDir, tHit, hitTeam, cameraInsideField, sceneDist);
+                        accumColor += (1.0 - accumAlpha) * layer.rgb;
+                        accumAlpha += (1.0 - accumAlpha) * layer.a;
+                        ++numShaded;
+                    }
+                    tHit = -1.0;
+                }
+                else
+                    break;
             }
         }
         prevTeam = bestTeam;
