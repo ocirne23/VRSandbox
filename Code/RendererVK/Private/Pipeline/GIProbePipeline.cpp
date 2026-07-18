@@ -241,6 +241,8 @@ void GIProbePipeline::buildDebugLayout(GraphicsPipelineLayout& layout)
     layout.vertexShader.text = FileSystem::readFileStr(layout.vertexShader.debugFilePath);
     layout.fragmentShader.text = FileSystem::readFileStr(layout.fragmentShader.debugFilePath);
     layout.cullMode = vk::CullModeFlagBits::eNone; // procedural cube, winding not guaranteed
+    if (m_debugDepthReadOnly) // depth-prepass reuse: read-only scene depth, no writes allowed
+        layout.depthWriteEnable = false;
 
     auto& b = layout.descriptorSetLayoutBindings;
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex }); // UBO (mvp + viewPos)

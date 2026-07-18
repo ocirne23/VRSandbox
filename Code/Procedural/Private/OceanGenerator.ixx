@@ -122,8 +122,7 @@ export namespace Procedural
 		glm::vec3 m_scatterColor = glm::vec3(0.047f, 0.1f, 0.15f);
 		float m_scatterStrength = 1.0f;
 		float m_roughness = 0.07f;
-		float m_glintSharpness = 0.75f; // negative mip bias on the FS surface samples: crisper glitter
-		float m_glintFilter = 0.5f;     // scale on the roughness-widening variance (spec AA + LEAN)
+		float m_glintFilter = 1.0f;     // scale on the roughness-widening variance (spec AA + LEAN)
 		float m_sssStrength = 0.66f;     // crest SSS: back-lit crests glow the scatter color, per meter of height
 		float m_sssPower = 1.0f;        // crest SSS toward-the-sun view lobe exponent
 		bool  m_hitLighting = false; // grid lights at refraction/reflection ray hits (pipeline reload on toggle)

@@ -61,7 +61,6 @@ namespace Procedural
 		Tweak::floatVar("Ocean/Shading", "Roughness", &m_roughness, 0.02f, 0.5f, 0.001f);
 		// Sharper sun glints: sharpness biases the shading-normal mips finer (some shimmer past ~1.5),
 		// filtering scales the roughness-widening variance terms (0 = raw sharp GGX, 1 = fully filtered).
-		Tweak::floatVar("Ocean/Shading", "Glint sharpness", &m_glintSharpness, 0.0f, 3.0f, 0.05f);
 		Tweak::floatVar("Ocean/Shading", "Glint filtering", &m_glintFilter, 0.0f, 2.0f, 0.05f);
 		// Crest SSS (Sea of Thieves-style): sun shining through back-lit crests, scaled by wave height.
 		Tweak::floatVar("Ocean/Shading", "SSS strength", &m_sssStrength, 0.0f, 4.0f, 0.01f);
@@ -420,7 +419,6 @@ namespace Procedural
 		params.scatterColor = m_scatterColor;
 		params.scatterStrength = m_scatterStrength;
 		params.roughness = m_roughness;
-		params.glintSharpness = m_glintSharpness;
 		params.glintFilter = m_glintFilter;
 		params.sssStrength = m_sssStrength;
 		params.sssPower = m_sssPower;

@@ -52,17 +52,19 @@ void SceneColor::destroy()
     vk::Device vkDevice = Globals::device.getDevice();
     if (m_sampler)      vkDevice.destroySampler(m_sampler);
     for (vk::Framebuffer& fb : m_framebuffers) { if (fb) vkDevice.destroyFramebuffer(fb); fb = nullptr; }
+    for (vk::Framebuffer& fb : m_reuseFramebuffers) { if (fb) vkDevice.destroyFramebuffer(fb); fb = nullptr; }
     if (m_renderPass)   vkDevice.destroyRenderPass(m_renderPass);
+    if (m_reuseRenderPass) vkDevice.destroyRenderPass(m_reuseRenderPass);
     for (vk::ImageView& v : m_colorLayerViews) { if (v) vkDevice.destroyImageView(v); v = nullptr; }
     for (vk::ImageView& v : m_depthLayerViews) { if (v) vkDevice.destroyImageView(v); v = nullptr; }
     Globals::gpuAllocator.destroyImage(m_colorImage, m_colorMemory);
     Globals::gpuAllocator.destroyImage(m_depthImage, m_depthMemory);
-    m_sampler = nullptr; m_renderPass = nullptr;
+    m_sampler = nullptr; m_renderPass = nullptr; m_reuseRenderPass = nullptr;
     m_colorImage = nullptr; m_depthImage = nullptr;
     m_colorMemory = nullptr; m_depthMemory = nullptr;
 }
 
-bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height, uint32 viewCount)
+bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height, uint32 viewCount, const std::array<vk::ImageView, 2>& prepassDepthViews)
 {
     vk::Device vkDevice = Globals::device.getDevice();
     destroy();
@@ -76,6 +78,7 @@ bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height,
     if (!createImage(vkDevice, width, height, colorFormat,
         vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc,
         viewCount, m_colorImage, m_colorMemory, "SceneColor.color")) return false;
+    // Own depth: used only when "Depth prepass reuse" is OFF (the reuse pass binds the G-buffer depth).
     if (!createImage(vkDevice, width, height, SCENE_DEPTH_FORMAT,
         vk::ImageUsageFlagBits::eDepthStencilAttachment, viewCount, m_depthImage, m_depthMemory, "SceneColor.depth")) return false;
 
@@ -95,7 +98,7 @@ bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height,
             .initialLayout = vk::ImageLayout::eUndefined,
             .finalLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
         },
-        vk::AttachmentDescription2{ // 1: depth (not sampled)
+        vk::AttachmentDescription2{ // 1: depth (own transient depth; the tweak-OFF path rebuilds it from scratch)
             .format = SCENE_DEPTH_FORMAT,
             .samples = vk::SampleCountFlagBits::e1,
             .loadOp = vk::AttachmentLoadOp::eClear,
@@ -174,6 +177,69 @@ bool SceneColor::initialize(vk::Format colorFormat, uint32 width, uint32 height,
         auto fbResult = vkDevice.createFramebuffer(fbInfo);
         if (fbResult.result != vk::Result::eSuccess) { assert(false && "scenecolor framebuffer"); return false; }
         m_framebuffers[i] = fbResult.value;
+    }
+
+    // ---- Depth-prepass-reuse variant of the pass ("Depth prepass reuse" tweak): same colour attachment,
+    // but the DEPTH attachment is the G-BUFFER's depth, bound READ-ONLY with no copy. The forward pass
+    // tests eGreaterOrEqual directly against the prepass depth (bit-identical rasterization) and writes
+    // none of its own — every scene pipeline flips depthWrite off in this mode, which is also what makes
+    // the forward pass's own u_gbufferDepth sampling legal (read-only depth + sampled is allowed where a
+    // writable attachment would be a feedback loop). loadOp LOAD + storeOp STORE + SHADER_READ_ONLY on
+    // both ends hand the untouched prepass depth straight back to TAA/fog after the pass; the render pass
+    // itself performs both layout transitions.
+    {
+        // Render-pass COMPATIBILITY (validation-enforced for pipelines created against the main pass and
+        // for the cached secondaries' inheritance) allows the two passes to differ ONLY in attachment
+        // load/store ops and layouts — the dependency array must be IDENTICAL, so the reuse pass carries
+        // the main pass's dependencies verbatim and the depth's SHADER_READ_ONLY <-> DEPTH_READ_ONLY
+        // layout round-trip is done with explicit barriers around the pass instead
+        // (Renderer::recordReuseDepthBarrier). initial == final == the reference layout: this pass
+        // performs no depth transitions itself.
+        std::array<vk::AttachmentDescription2, 2> reuseAttachments{
+            attachments[0], // colour: identical to the main pass
+            vk::AttachmentDescription2{
+                .format = SCENE_DEPTH_FORMAT, // == the G-buffer depth format
+                .samples = vk::SampleCountFlagBits::e1,
+                .loadOp = vk::AttachmentLoadOp::eLoad,
+                .storeOp = vk::AttachmentStoreOp::eStore,
+                .initialLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+                .finalLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+            },
+        };
+        vk::AttachmentReference2 reuseDepthRef{ .attachment = 1, .layout = vk::ImageLayout::eDepthStencilReadOnlyOptimal, .aspectMask = vk::ImageAspectFlagBits::eDepth };
+        vk::SubpassDescription2 reuseSubpass{
+            .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &colorRef,
+            .pDepthStencilAttachment = &reuseDepthRef,
+        };
+        vk::RenderPassCreateInfo2 reuseRpInfo{
+            .attachmentCount = (uint32)reuseAttachments.size(),
+            .pAttachments = reuseAttachments.data(),
+            .subpassCount = 1,
+            .pSubpasses = &reuseSubpass,
+            .dependencyCount = (uint32)dependencies.size(),
+            .pDependencies = dependencies.data(),
+        };
+        auto reuseRpResult = vkDevice.createRenderPass2(reuseRpInfo);
+        if (reuseRpResult.result != vk::Result::eSuccess) { assert(false && "scenecolor reuse renderpass"); return false; }
+        m_reuseRenderPass = reuseRpResult.value;
+
+        for (uint32 i = 0; i < viewCount; ++i)
+        {
+            std::array<vk::ImageView, 2> reuseFbViews{ m_colorLayerViews[i], prepassDepthViews[i] };
+            vk::FramebufferCreateInfo reuseFbInfo{
+                .renderPass = m_reuseRenderPass,
+                .attachmentCount = (uint32)reuseFbViews.size(),
+                .pAttachments = reuseFbViews.data(),
+                .width = width,
+                .height = height,
+                .layers = 1,
+            };
+            auto reuseFbResult = vkDevice.createFramebuffer(reuseFbInfo);
+            if (reuseFbResult.result != vk::Result::eSuccess) { assert(false && "scenecolor reuse framebuffer"); return false; }
+            m_reuseFramebuffers[i] = reuseFbResult.value;
+        }
     }
 
     vk::SamplerCreateInfo samplerInfo{

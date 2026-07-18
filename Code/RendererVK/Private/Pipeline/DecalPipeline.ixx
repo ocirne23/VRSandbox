@@ -38,6 +38,8 @@ public:
         Buffer& ubo;
         Buffer& giGridDataBuffer;
         vk::ImageView gbufferDepthView;
+        // DEPTH_STENCIL_READ_ONLY while depth-prepass reuse binds this image as the scene pass depth.
+        vk::ImageLayout gbufferDepthLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
         vk::ImageView gbufferNormalView;
         vk::Sampler   gbufferSampler;
     };

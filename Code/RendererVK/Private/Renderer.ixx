@@ -255,6 +255,9 @@ public:
         // TerrainStreamer scales these by V3's world scale, like the crag thresholds.
         float cragWanderAmp = 150.0f;      // metres at the model's true scale; 0 = off
         float cragWanderWavelength = 2000.0f; // metres at the model's true scale
+        // View distance beyond which splat layers fetch albedo only (no normal/ARM taps, shaded with the
+        // geometric normal). Real-world metres (NOT model scale). <= 0 = always full detail.
+        float splatDetailDistance = 400.0f;
     };
     void setTerrainTextureParams(const TerrainTexTweaks& params) { m_terrainTexTweaks = params; }
     // Deepest current ocean wave trough below the calm water level (m, >= 0; the OceanGenerator estimates
@@ -355,6 +358,10 @@ private:
     void recordStaticMeshInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordGBuffer(uint32 frameIdx);
     void recordGBufferInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
+    // Depth-prepass reuse: transitions this eye's G-buffer depth SHADER_READ_ONLY <-> DEPTH_READ_ONLY
+    // around the scene pass (the reuse render pass performs no transitions itself — its dependency array
+    // must stay identical to the main pass's for render-pass compatibility).
+    void recordReuseDepthBarrier(vk::CommandBuffer cb, vk::Image gbufferDepth, uint32 eyeIndex, bool toAttachment);
     void recordAOInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordFogApplyInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
     void recordTaaInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex);
@@ -592,6 +599,8 @@ private:
     bool m_windowMinimized = false;
     bool m_vsyncEnabled = true;
     bool m_wireframe = false; // "Renderer/Wireframe" tweak: forward scene variants rasterize as lines
+    bool m_depthPrepassReuse = true; // "Depth prepass reuse" tweak: forward pass reuses the G-buffer prepass depth for early-Z
+    glm::vec2 m_prevTaaJitter{ 0.0f }; // last frame's TAA jitter (ubo.taaJitter.zw): consumers of the PREV depth image compensate with it
     uint32 m_sceneViewCount = 1; // 2 in VR: SceneColor + forward pass are multiview (one layer per eye)
 
     // VR: per-eye LDR composite targets

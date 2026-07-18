@@ -16,6 +16,9 @@
 // in out_uv. The G-buffer prepass (gbuffer.vs.glsl, OCEAN branch) MUST keep identical morph + lod +
 // cull math or its depth diverges from the drawn surface.
 
+// Depth-prepass reuse (gbuffer.vs.glsl) needs bit-exact positions across programs — see the note there.
+invariant gl_Position;
+
 #include "shared.inc.glsl"
 
 #define TERRAIN_HEIGHT_BINDING 19

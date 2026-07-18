@@ -33,8 +33,10 @@ public:
         vk::Sampler   currentColorSampler;
         vk::ImageView gbufferDepthView;      // this frame's camera depth (SHADER_READ_ONLY)
         vk::ImageView prevGbufferDepthView;  // last frame's camera depth (SHADER_READ_ONLY)
+        vk::ImageView gbufferNormalView;     // this frame's normals; .a = ocean flag (SHADER_READ_ONLY)
         vk::Sampler   gbufferSampler;
         float feedback;                      // history weight; 0 disables accumulation
+        float oceanFeedback;                 // history weight cap on ocean pixels (waves animate without motion vectors)
     };
     void record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const RecordParams& params);
 

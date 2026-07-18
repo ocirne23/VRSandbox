@@ -60,7 +60,10 @@ layout (binding = UBO_BINDING, std140) uniform UBO
 
     vec4 u_screenSize;   // xy = full render-target resolution (px); zw = 1/xy
     vec4 u_viewportRect; // xy = viewport min, zw = viewport size, normalized to [0,1] of the full render target
-    vec4 u_taaJitter;    // xy = TAA sub-pixel jitter in NDC, applied in clip space by raster vertex shaders only
+    vec4 u_taaJitter;    // xy = this frame's TAA sub-pixel jitter in NDC, zw = LAST frame's. ALL raster
+                         // passes apply xy in clip space (prepass included: the forward early-Z tests its
+                         // depth directly, read-only); mvp/invMvp/prevMvp stay unjittered and geometric
+                         // consumers of sampled depth compensate via taaJitterUv (shared.inc.glsl)
 
     // Volumetric fog (packing documented in vol_fog.inc.glsl)
     vec4 u_fogParams0;   // x = global density (1/m), y = height base, z = height falloff (1/m), w = range (m)
@@ -93,7 +96,8 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_groundParams;  // rgb = ground albedo * intensity (sky-sphere ground plane + the skyRadiance
                           // ground-bounce tint for downward GI/fog rays), w = horizon terrain fraction
                           // (virtual sky probe projection: fraction of above-horizon sky treated as ground)
-    vec4 u_aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
+    vec4 u_aoParams;      // x = RTAO enabled (0/1), y = GI strength, z = RTAO max distance (m; past it the
+                          // AO image is exactly (N, 1) so the upsample is skipped; 0 = no falloff), w unused
     vec4 u_giVisParams;   // x = Chebyshev variance floor (fraction of spacing), y = Chebyshev power, z = probe weight floor, w = mean scale (footprint widening)
 
     // Ocean (FFT/Tessendorf water; ocean_*.cs.glsl simulation + ocean.fs.glsl shading)
@@ -113,7 +117,9 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // y = turbidity (entrained-bubble milkiness + roughness),
                             // z = shore foam depth (m; surf band width at the waterline, 0 = off),
                             // w = breaking-crest foam threshold (downward crest accel in g units)
-    vec4 u_oceanParams6;    // x = glint mip bias (negative = sharper shading normals),
+    vec4 u_oceanParams6;    // x = far-cascade land-cull error allowance (m; flat burial slack the cull
+                            //     demands when only far terrain data covers the footprint, 0 = never cull
+                            //     from far data — moved here from the removed params10),
                             // y = glint variance filter scale (spec AA + LEAN roughness),
                             // z = crest SSS strength (0 = off), w = crest SSS forward-lobe power
     vec4 u_oceanParams7;    // x = land cull margin (m): clipmap triangles whose whole footprint is
@@ -136,9 +142,6 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // y = RT refraction ray range (m: underwater visibility of traced geometry),
                             // z = RT reflection ray range (m),
                             // w = RT reflection roughness cutoff (rougher pixels skip the mirror ray)
-    vec4 u_oceanParams10;   // x = far-cascade land-cull error allowance (m; flat burial slack the cull
-                            // demands when only far terrain data covers the footprint, 0 = never cull
-                            // from far data), yzw unused
     vec4 u_terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                             // 0 = no terrain mesh up — fences the ocean land cull),
                             // y = temperature lapse rate, C per WORLD metre above sea level (<= 0; pairs
@@ -163,7 +166,8 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_terrainTexParams4; // x = slope where snow starts sliding off, y = slope where none remains,
                               // z = humidity at/below which cold ground stays bare (polar desert), w unused
     vec4 u_terrainTexParams5; // x = crag wander amplitude (m; 0 = off), y = crag wander frequency (1/m),
-                              // zw unused
+                              // z = splat detail distance (m; <= 0 = always full detail — beyond it splat
+                              // layers fetch albedo only and shade with the geometric normal), w unused
     vec4 u_terrainSplatClimate[MAX_TERRAIN_SPLAT_MATERIALS]; // ground/rock CLIMATE BOX: xy = t01 range,
                               // zw = h01 range. Weight is 1 inside and Gaussian-decays outside, so a full
                               // 0..1 range on an axis means "this axis does not matter for this entry".

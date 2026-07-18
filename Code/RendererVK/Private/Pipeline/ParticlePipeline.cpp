@@ -339,7 +339,8 @@ void ParticlePipeline::recordDraw(CommandBuffer& commandBuffer, uint32 frameIdx,
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_poolBuffer) } },
         DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_aliveBuffers[1 - parity]) } },
         DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(m_emitterBuffers[frameIdx]) } },
-        DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferDepthView) } },
+        DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = {
+            vk::DescriptorImageInfo{ .sampler = params.gbufferSampler, .imageView = params.gbufferDepthView, .imageLayout = params.gbufferDepthLayout } } },
         DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.giGridDataBuffer) } },
         DescriptorSetUpdateInfo{ .binding = 20, .type = vk::DescriptorType::eCombinedImageSampler },
     };

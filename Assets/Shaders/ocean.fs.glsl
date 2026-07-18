@@ -15,7 +15,6 @@
 
 #include "shared.inc.glsl"
 #define TERRAIN_HEIGHT_BINDING 19
-#define OCEAN_SURFACE_SAMPLE_BIAS (u_oceanParams6.x) // "Glint sharpness": finer shading-normal mips
 #include "ocean_wave.inc.glsl"
 
 struct MaterialInfo

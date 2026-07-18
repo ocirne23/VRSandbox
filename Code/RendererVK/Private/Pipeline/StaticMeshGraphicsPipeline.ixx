@@ -74,6 +74,10 @@ public:
     // Global wireframe ("Renderer/Wireframe" tweak): scene variants rasterize as lines.
     // Takes effect on the next reloadShaders (the Renderer reloads when the tweak flips).
     void setWireframe(bool enabled) { m_wireframe = enabled; }
+    // Depth-prepass reuse: the scene pass binds the G-buffer prepass depth READ-ONLY, so no scene variant
+    // may write depth (rebuild via reloadShaders after flipping, like wireframe). Default matches the
+    // Renderer's m_depthPrepassReuse default.
+    void setDepthReadOnly(bool readOnly) { m_depthReadOnly = readOnly; }
     vk::DescriptorSetLayout getDescriptorSetLayout() const { return m_graphicsPipeline.getDescriptorSetLayout(); }
     const IndirectExecutionSet& getIndirectExecutionSet() const { return m_indirectExecutionSet; }
     const IndirectCommandsLayout& getIndirectCommandsLayout() const { return m_indirectCommandsLayout; }
@@ -90,6 +94,7 @@ private:
     bool m_stereo = false;
     bool m_oceanHitLights = false; // OCEAN_HIT_LIGHTS define on the ocean fragment variant
     bool m_wireframe = false;      // global wireframe: scene variants get vk::PolygonMode::eLine
+    bool m_depthReadOnly = true;   // depth-prepass reuse: all scene variants depthWrite off (read-only depth attachment)
 
     vk::DeviceSize m_preprocessSize = 0;
     std::array<Buffer, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_preprocessBuffers;            // opaque pass

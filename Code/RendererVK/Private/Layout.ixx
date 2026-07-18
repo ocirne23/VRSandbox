@@ -267,9 +267,13 @@ export namespace RendererVKLayout
         glm::vec4 viewportRect; // xy = viewport min, zw = viewport size, both normalized to [0,1] of the full
                                 // render target. The scene renders through this sub-rect (editor viewport panel),
                                 // so screen-space reconstruction must map full-frame UV through it.
-        glm::vec4 taaJitter;    // xy = this frame's TAA sub-pixel jitter in NDC (0 when TAA disabled). Applied in
-                                // clip space by the rasterization vertex shaders ONLY; mvp/invMvp/prevMvp stay
-                                // unjittered so reconstruction/reprojection (TAA, RTAO) is wobble-free. zw unused.
+        glm::vec4 taaJitter;    // xy = this frame's TAA sub-pixel jitter in NDC (0 when TAA disabled), zw =
+                                // LAST frame's. ALL raster passes apply xy in clip space — the G-buffer
+                                // prepass included, so the forward pass's depth-prepass reuse tests its
+                                // depth DIRECTLY, bound read-only (conservative unjittered prefills could
+                                // not cover sub-pixel slits/grazing silhouettes). mvp/invMvp/prevMvp stay
+                                // unjittered; TAA/AO-temporal/RTAO compensate sampled depth analytically
+                                // (taaJitterUv in shared.inc.glsl), zw compensating the PREV depth image.
 
         // Volumetric fog (packing documented in vol_fog.inc.glsl)
         glm::vec4 fogParams0; // x = global density (1/m), y = height base, z = height falloff (1/m), w = range (m)
@@ -299,7 +303,8 @@ export namespace RendererVKLayout
 
         glm::vec4 atmosParams;   // x = Rayleigh scale height (m), y = Mie scale height (m), z = Mie extinction ratio, w = ozone strength
         glm::vec4 groundParams;  // rgb = ground albedo * intensity, w = horizon terrain fraction (fallback ambient)
-        glm::vec4 aoParams;      // x = RTAO enabled (0/1), y = GI strength, zw unused
+        glm::vec4 aoParams;      // x = RTAO enabled (0/1), y = GI strength, z = RTAO max distance (m; the
+                                 // forward pass skips its AO upsample past it; 0 = no falloff), w unused
         glm::vec4 giVisParams;   // x = Chebyshev variance floor (fraction of spacing), y = Chebyshev power, z = probe weight floor, w = mean scale (footprint widening)
 
         // Ocean (FFT/Tessendorf water; OceanSimulationPipeline + ocean_*.cs.glsl / ocean.fs.glsl)
@@ -320,7 +325,9 @@ export namespace RendererVKLayout
                                    // y = turbidity (entrained-bubble milkiness + roughness),
                                    // z = shore foam depth (m; surf band width at the waterline, 0 = off),
                                    // w = breaking-crest foam threshold (downward crest accel in g units)
-        glm::vec4 oceanParams6;    // x = glint mip bias (negative = sharper shading normals),
+        glm::vec4 oceanParams6;    // x = far-cascade land-cull error allowance (m; flat burial slack the
+                                   //     cull demands when only far terrain data covers the footprint,
+                                   //     0 = never cull from far data — moved here from the removed params10),
                                    // y = glint variance filter scale (spec AA + LEAN roughness),
                                    // z = crest SSS strength (0 = off), w = crest SSS forward-lobe power
         glm::vec4 oceanParams7;    // x = land cull margin (m): clipmap triangles whose whole footprint is
@@ -338,9 +345,6 @@ export namespace RendererVKLayout
                                    // y = RT refraction ray range (m: underwater visibility),
                                    // z = RT reflection ray range (m),
                                    // w = RT reflection roughness cutoff (rougher = sky fallback)
-        glm::vec4 oceanParams10;   // x = far-cascade land-cull error allowance (m; flat burial slack the
-                                   //     cull demands when only far terrain data covers the footprint,
-                                   //     0 = never cull from far data), yzw unused
         glm::vec4 terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                                    // 0 = no terrain mesh up — fences the ocean land cull),
                                    // y = temperature lapse rate, C per WORLD metre above sea level (<= 0;
@@ -367,8 +371,9 @@ export namespace RendererVKLayout
                                      // z = humidity at/below which cold ground stays bare (polar desert),
                                      // w = unused
         glm::vec4 terrainTexParams5; // x = crag wander amplitude (m; 0 = off), y = crag wander frequency
-                                     // (1/m), zw unused. Breaks the rock boundary off the elevation contour
-                                     // the crag test would otherwise trace — see terrainSplat.
+                                     // (1/m), z = splat detail distance (m; <= 0 = always full detail),
+                                     // w unused. The wander breaks the rock boundary off the elevation
+                                     // contour the crag test would otherwise trace — see terrainSplat.
         glm::vec4 terrainSplatClimate[MAX_TERRAIN_SPLAT_MATERIALS]; // ground/rock CLIMATE BOX in the
                                      // (t01, h01) space: xy = temperature range, zw = humidity range.
                                      // Weight is 1 inside the box and Gaussian-decays outside it, so a

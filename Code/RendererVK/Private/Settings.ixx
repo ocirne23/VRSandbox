@@ -217,6 +217,9 @@ export struct TAAParams
 {
     bool  taaEnabled = true;
     float taaFeedback = 0.9f;
+    // History weight cap on OCEAN pixels: waves animate but the reprojection is camera-only (no motion
+    // vectors), so full-weight history blurs the specular sparkle away. Lower = crisper, shimmerier water.
+    float taaOceanFeedback = 0.5f;
 
     void registerTweaks(const std::function<void()>& onReRecord);
 };
@@ -270,12 +273,6 @@ export struct OceanParams
     glm::vec3 scatterColor = glm::vec3(0.012f, 0.08f, 0.085f);
     float scatterStrength  = 1.0f;
     float roughness        = 0.07f; // perceptual micro-roughness (widens the sun glint)
-    // Glint shaping: sharpness is a NEGATIVE mip bias on the fragment shader's surface samples — the
-    // shading normal resolves finer wave detail near the camera, so highlights break into crisp glitter
-    // instead of following mip-softened blobs (the LEAN variance shrinks to match: it measures exactly
-    // what the filtering removed). Filtering scales the roughness-widening variance terms (geometric
-    // spec AA + LEAN); below 1 trades a touch of shimmer for a visibly tighter sun glint.
-    float glintSharpness   = 0.75f; // 0 = trilinear (old look); higher = sharper (some shimmer past ~1.5)
     float glintFilter      = 0.5f;  // 1 = full variance widening, 0 = none (raw sharp GGX)
     // Crest subsurface scattering (Sea of Thieves-style): back-lit wave crests glow the scatter color,
     // scaled by height above the calm water line. Power shapes the toward-the-sun view lobe.

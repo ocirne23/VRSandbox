@@ -97,7 +97,9 @@ void main()
     if (nLen < 0.5) { imageStore(u_aoOut, px, vec4(0.0, 0.0, 1.0, 1.0)); return; }
     const vec3 N = nRaw / nLen;
 
-    const vec3 worldPos = worldPosFromDepth(uv, depth);
+    // The depth image is jittered (exact depth-prepass reuse); reconstruct at the surface's true
+    // unjittered position so ray origins don't wobble sub-pixel with the jitter — see taaJitterUv.
+    const vec3 worldPos = worldPosFromDepth(uv - taaJitterUv(u_taaJitter.xy), depth);
     const float viewDist = length(u_viewPos - worldPos);
 
     // Past the AO max distance the result is always "no occlusion", so skip the ray loop entirely.

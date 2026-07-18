@@ -56,6 +56,13 @@ vec3 worldPosFromDepthMat(vec2 uv, float depth, mat4 invM)
 // g_viewIndex at VIEW_CENTER (centre view); per-eye passes set it to the eye they process.
 vec3 worldPosFromDepth(vec2 uv, float depth) { return worldPosFromDepthMat(uv, depth, u_invMvp); }
 
+// ALL raster passes (G-buffer prepass included — the forward early-Z tests its depth directly, read-only)
+// apply the TAA sub-pixel jitter in clip space, so image content at pixel uv is the surface at
+// uv - taaJitterUv(u_taaJitter.xy). Geometric consumers of sampled depth (reprojection, world-pos
+// reconstruction: TAA, AO temporal, RTAO) subtract it for exact positions — mvp/invMvp/prevMvp stay
+// unjittered. Pass u_taaJitter.zw (LAST frame's jitter) when interpreting the previous depth image.
+vec2 taaJitterUv(vec2 jitterNdc) { return vec2(jitterNdc.x, -jitterNdc.y) * 0.5 * u_viewportRect.zw; }
+
 // Project a world position to a previous-frame full-frame screen UV (inverse of the mapping above): NDC ->
 // viewport-local UV -> full-frame UV through u_viewportRect. Uses the current view's previous matrix.
 vec2 prevScreenUVMat(vec3 worldPos, mat4 prevM, out float clipW)

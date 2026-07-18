@@ -87,16 +87,16 @@ namespace
 		// blend comes from the Gaussian tails just outside the edges, so entries should MEET, not straddle.
 		//                temperature C           precipitation mm/yr
 		{ .tempMinC = ANY_COLD, .tempMaxC = -4.0f,   .precipMinMm = ANY_DRY,  .precipMaxMm = ANY_WET, .stem = "gravel_ground_01" },        // polar/alpine scree: frost-shattered rubble. The substrate beside (and under) the snow, at ANY humidity — above the snow line there is no vegetation left for humidity to decide
-		{ .tempMinC = -6.0f,    .tempMaxC = 0.0f,    .precipMinMm = 250.0f,   .precipMaxMm = ANY_WET, .stem = "rocky_trail" },             // tundra: moss and lichen over stony ground
+		{ .tempMinC = -5.0f,    .tempMaxC = 0.0f,    .precipMinMm = 250.0f,   .precipMaxMm = ANY_WET, .stem = "rocky_trail" },             // tundra: moss and lichen over stony ground
 		{ .tempMinC = -1.0f,    .tempMaxC = 5.0f,    .precipMinMm = 300.0f,   .precipMaxMm = 1500.0f, .stem = "forest_ground_04" },        // taiga / boreal forest floor: needle litter
-		{ .tempMinC = 2.0f,     .tempMaxC = 19.0f,   .precipMinMm = ANY_DRY,  .precipMaxMm = 400.0f,  .stem = "dry_ground_01" },           // cold desert / dry steppe
+		{ .tempMinC = 4.0f,     .tempMaxC = 19.0f,   .precipMinMm = ANY_DRY,  .precipMaxMm = 400.0f,  .stem = "dry_ground_01" },           // cold desert / dry steppe
 		{ .tempMinC = 4.0f,     .tempMaxC = 20.0f,   .precipMinMm = 400.0f,   .precipMaxMm = 1000.0f, .stem = "Grass001",                  // temperate grassland / prairie
 		  .diffSrc = "Textures/Terrain/Grass001/Grass001_2K-JPG_Color.jpg", .norSrc = "Textures/Terrain/Grass001/Grass001_2K-JPG_NormalGL.jpg", .armSrc = "Textures/Terrain/Grass001/Grass001_arm_2k.jpg" },
 		{ .tempMinC = 5.0f,     .tempMaxC = 18.0f,   .precipMinMm = 1000.0f,  .precipMaxMm = 1900.0f, .stem = "forest_floor" },            // temperate seasonal forest: broadleaf litter
 		{ .tempMinC = 3.0f,     .tempMaxC = 15.0f,   .precipMinMm = 1800.0f,  .precipMaxMm = ANY_WET, .stem = "Moss002",                   // temperate rainforest: deep moss
 		  .diffSrc = "Textures/Terrain/Moss002/Moss002_2K-JPG_Color.jpg", .norSrc = "Textures/Terrain/Moss002/Moss002_2K-JPG_NormalGL.jpg", .armSrc = "Textures/Terrain/Moss002/Moss002_arm_2k.jpg" },
 		{ .tempMinC = 20.0f,    .tempMaxC = ANY_HOT, .precipMinMm = ANY_DRY,  .precipMaxMm = 300.0f,  .stem = "sand_01" },                 // subtropical desert: dune sand
-		{ .tempMinC = 19.0f,    .tempMaxC = ANY_HOT, .precipMinMm = 250.0f,   .precipMaxMm = 1300.0f, .stem = "red_laterite_soil_stones" },// savanna / dry tropics: iron-red laterite
+		{ .tempMinC = 19.0f,    .tempMaxC = ANY_HOT, .precipMinMm = 450.0f,   .precipMaxMm = 1300.0f, .stem = "red_laterite_soil_stones" },// savanna / dry tropics: iron-red laterite. 450 floor: at 250 this box bridged the steppe|sand seam and drew a red isotherm sliver across every desert
 		{ .tempMinC = 18.0f,    .tempMaxC = ANY_HOT, .precipMinMm = 1300.0f,  .precipMaxMm = 2100.0f, .stem = "leaves_forest_ground" },    // tropical forest floor: leaf litter
 		{ .tempMinC = 16.0f,    .tempMaxC = ANY_HOT, .precipMinMm = 2000.0f,  .precipMaxMm = ANY_WET, .stem = "mud_forest" },              // wetland / swamp: saturated mud
 
@@ -105,7 +105,7 @@ namespace
 		{ .kind = ESourceKind::Rock, .tempMinC = ANY_COLD, .tempMaxC = 1.0f,    .precipMinMm = ANY_DRY, .precipMaxMm = ANY_WET, .stem = "gray_rocks" },           // alpine/polar granite: the rock the snow caps sit on and the faces it slides off
 		{ .kind = ESourceKind::Rock, .tempMinC = 0.0f,     .tempMaxC = 13.0f,   .precipMinMm = 1100.0f, .precipMaxMm = ANY_WET, .stem = "rock_pitted_mossy" },    // cool + wet: lichened, moss-pitted
 		{ .kind = ESourceKind::Rock, .tempMinC = 0.0f,     .tempMaxC = 16.0f,   .precipMinMm = 250.0f,  .precipMaxMm = 1100.0f, .stem = "rock_3" },               // temperate: plain weathered stone
-		{ .kind = ESourceKind::Rock, .tempMinC = 14.0f,    .tempMaxC = 24.0f,   .precipMinMm = 200.0f,  .precipMaxMm = 900.0f,  .stem = "worn_rock_natural_01" }, // warm + dry: wind-worn sandstone
+		{ .kind = ESourceKind::Rock, .tempMinC = 15.0f,    .tempMaxC = 24.0f,   .precipMinMm = 200.0f,  .precipMaxMm = 900.0f,  .stem = "worn_rock_natural_01" }, // warm + dry: wind-worn sandstone
 		{ .kind = ESourceKind::Rock, .tempMinC = 23.0f,    .tempMaxC = ANY_HOT, .precipMinMm = ANY_DRY, .precipMaxMm = 450.0f,  .stem = "terrain_red_01" },       // hot + arid: oxidised red rock
 		{ .kind = ESourceKind::Rock, .tempMinC = 15.0f,    .tempMaxC = ANY_HOT, .precipMinMm = 900.0f,  .precipMaxMm = ANY_WET, .stem = "dark_rock" },            // warm + wet: dark basalt
 
@@ -300,6 +300,9 @@ namespace Procedural
 		// below, so they hold their look across "Meters per pixel".
 		Tweak::floatVar("Terrain/Textures", "Crag wander (m)", &m_texCragWanderAmp, 0.0f, 600.0f, 5.0f);
 		Tweak::floatVar("Terrain/Textures", "Crag wander wavelength (m)", &m_texCragWanderWavelength, 200.0f, 20000.0f, 100.0f);
+		// Beyond this view distance the splat layers fetch albedo only (no normal/ARM taps, geometric
+		// normal shading) — the minified detail mips carry no visible signal there. 0 = never simplify.
+		Tweak::floatVar("Terrain/Textures", "Splat detail distance (m)", &m_texSplatDetailDistance, 0.0f, 5000.0f, 25.0f);
 		Tweak::floatVar("Terrain/Textures", "Crag relief start (m)", &m_texCragStart, 0.0f, 200.0f);
 		Tweak::floatVar("Terrain/Textures", "Crag relief full (m)", &m_texCragFull, 0.0f, 400.0f);
 		Tweak::floatVar("Terrain/Textures", "Beach band (m)", &m_texBeachBand, 0.0f, 20.0f);
@@ -423,6 +426,7 @@ namespace Procedural
 			.snowAridity = m_texSnowAridity,
 			.cragWanderAmp = m_texCragWanderAmp * cragScale,
 			.cragWanderWavelength = m_texCragWanderWavelength * cragScale,
+			.splatDetailDistance = m_texSplatDetailDistance, // camera-space metres: NOT model-scaled
 		});
 
 		if (!m_texSetRegistered)

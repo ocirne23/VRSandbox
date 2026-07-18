@@ -73,6 +73,18 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
         m_staticMeshGraphicsPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass(), m_maxTextures);
         setHaveToRecordCommandBuffers();
     });
+    // Depth prepass reuse binds the G-buffer prepass depth READ-ONLY as the scene pass depth (no copy):
+    // flipping it swaps the scene render pass AND every scene pipeline's depthWrite, so rebuild like the
+    // wireframe toggle.
+    Tweak::boolean("Spatial", "Depth prepass reuse", &m_depthPrepassReuse, [this]() {
+        if (Globals::device.getGraphicsQueue().waitIdle() != vk::Result::eSuccess)
+            return;
+        m_staticMeshGraphicsPipeline.setDepthReadOnly(m_depthPrepassReuse);
+        m_staticMeshGraphicsPipeline.reloadShaders(m_perFrameData[0].sceneColor.getRenderPass(), m_maxTextures);
+        m_giProbePipeline.setDebugDepthReadOnly(m_depthPrepassReuse);
+        m_giProbePipeline.reloadDebugShaders(m_perFrameData[0].sceneColor.getRenderPass());
+        setHaveToRecordCommandBuffers();
+    });
     // Live toggles: the primary CB re-records every frame, so no re-record callback is needed.
     Tweak::boolean("Particles", "Enabled", &m_particlesEnabled);
     Tweak::boolean("Particles", "Depth collision", &m_particleCollision);
@@ -131,11 +143,17 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
 
     m_sceneViewCount = Globals::openXR.isEnabled() ? 2u : 1u;
 
+    // G-buffer first: the SceneColor reuse render pass binds its depth views directly (depth-prepass reuse).
     for (PerFrameData& perFrame : m_perFrameData)
-        perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height, m_sceneViewCount);
+    {
+        perFrame.gbuffer.initialize(ext.width, ext.height, m_sceneViewCount);
+        perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height, m_sceneViewCount,
+            { perFrame.gbuffer.getDepthView(0), perFrame.gbuffer.getDepthView(m_sceneViewCount > 1 ? 1 : 0) });
+    }
     const vk::RenderPass sceneRenderPass = m_perFrameData[0].sceneColor.getRenderPass();
 
     m_maxTextures = Globals::textureManager.getDescriptorCap(); // fixed layout cap; live count grows separately
+    m_staticMeshGraphicsPipeline.setDepthReadOnly(m_depthPrepassReuse); // tweak may have restored a saved value
     m_staticMeshGraphicsPipeline.initialize(sceneRenderPass, m_maxUniqueMeshes, m_maxTextures, m_sceneViewCount > 1);
     m_rtaoPipeline.initialize(&m_rtaoParams, ext.width, ext.height, m_maxTextures, m_numTextureDescriptors, m_sceneViewCount);
     m_oceanSimPipeline.initialize();
@@ -150,6 +168,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
     m_lightGridComputePipeline.initialize();
     m_accelStructure.initialize(m_maxUniqueMeshes);
     m_giProbePipeline.initialize(m_maxGiTlasInstances, m_maxTextures, m_numTextureDescriptors);
+    m_giProbePipeline.setDebugDepthReadOnly(m_depthPrepassReuse);
     m_giProbePipeline.initializeDebug(sceneRenderPass);
     m_debugLinePipeline.initialize(sceneRenderPass);
     m_particlePipeline.initialize(sceneRenderPass, m_maxTextures, m_numTextureDescriptors, m_sceneViewCount);
@@ -158,10 +177,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
 
     m_shadowCullComputePipeline.initialize(m_maxInstanceData, m_maxUniqueMeshes);
     for (PerFrameData& perFrame : m_perFrameData)
-    {
-        perFrame.gbuffer.initialize(ext.width, ext.height, m_sceneViewCount);
         perFrame.shadowMap.initialize();
-    }
     m_shadowMapGraphicsPipeline.initialize(m_perFrameData[0].shadowMap, m_maxUniqueMeshes, m_maxTextures);
     m_gbufferPipeline.initialize(m_perFrameData[0].gbuffer, m_maxTextures);
 
@@ -326,7 +342,8 @@ void Renderer::recreateWindowSurface(Window& window)
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.gbuffer.initialize(ext.width, ext.height, m_sceneViewCount);
-        perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height, m_sceneViewCount);
+        perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height, m_sceneViewCount,
+            { perFrame.gbuffer.getDepthView(0), perFrame.gbuffer.getDepthView(m_sceneViewCount > 1 ? 1 : 0) });
     }
     createEyeCompositeTargets(); // VR: resize the per-eye LDR composite targets
 
@@ -358,7 +375,8 @@ void Renderer::recreateSwapchain()
     for (PerFrameData& perFrame : m_perFrameData)
     {
         perFrame.gbuffer.initialize(ext.width, ext.height, m_sceneViewCount);
-        perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height, m_sceneViewCount);
+        perFrame.sceneColor.initialize(RendererVKLayout::SCENE_COLOR_FORMAT, ext.width, ext.height, m_sceneViewCount,
+            { perFrame.gbuffer.getDepthView(0), perFrame.gbuffer.getDepthView(m_sceneViewCount > 1 ? 1 : 0) });
     }
     createEyeCompositeTargets(); // VR: resize the per-eye LDR composite targets
 
@@ -620,11 +638,17 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         (float)m_viewportRect.min.y / (float)swapExtent.height,
         (float)viewportSize.x / (float)swapExtent.width,
         (float)viewportSize.y / (float)swapExtent.height);
-    ubo.taaJitter = glm::vec4(taaJitterNdc, 0.0f, 0.0f);
+    // zw = LAST frame's jitter: TAA/AO-temporal compensate both frames' jittered depth images during
+    // reprojection (all raster passes jitter, the prepass included — see taaJitterUv in shared.inc.glsl).
+    ubo.taaJitter = glm::vec4(taaJitterNdc, m_prevTaaJitter);
+    m_prevTaaJitter = taaJitterNdc;
     // RTAO and the GI probe contribution both need the acceleration structures, so both fold in the RT
     // master toggle; GI additionally gates on its own switch.
+    // z = the RTAO max distance: past it the trace writes exactly (N, 1.0) (rtao.cs.glsl early-out), so
+    // the forward pass skips its depth-aware AO upsample there and uses those values directly.
     ubo.aoParams = glm::vec4((m_rtParams.enabled && m_rtaoParams.enabled) ? 1.0f : 0.0f,
-        (m_rtParams.enabled && m_rtParams.giEnabled) ? m_giProbePipeline.getStrength() : 0.0f, 0.0f, 0.0f);
+        (m_rtParams.enabled && m_rtParams.giEnabled) ? m_giProbePipeline.getStrength() : 0.0f,
+        m_rtaoParams.maxDistance, 0.0f);
     ubo.giVisParams = m_giProbePipeline.getVisibilityParams();
     ubo.frameIndex = m_frameCounter;
 
@@ -727,7 +751,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanParams4 = glm::vec4(0.0f,
         glm::clamp(ocean.foamSpread * 0.25f, 0.0f, 0.95f), glm::max(ocean.shoalScale, 0.0f), glm::max(ocean.foamSoftness, 0.02f));
     ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), glm::max(ocean.shoreFoamDepth, 0.0f), glm::max(ocean.foamBreakAccel, 0.01f));
-    ubo.oceanParams6 = glm::vec4(-glm::clamp(ocean.glintSharpness, 0.0f, 3.0f), glm::max(ocean.glintFilter, 0.0f),
+    ubo.oceanParams6 = glm::vec4(glm::max(ocean.farCullError, 0.0f), glm::max(ocean.glintFilter, 0.0f),
         glm::max(ocean.sssStrength, 0.0f), glm::max(ocean.sssPower, 1.0f));
     // Swash reach: conservative max run-up height from the wave-amplitude readback (trough estimate ~
     // crest scale) — sizes the on-land sampling band and keeps the vertex cull off the wet beach.
@@ -738,7 +762,6 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         glm::max(ocean.swashFlow, 0.0f), glm::max(ocean.rtRayCutoffDist, 0.0f));
     ubo.oceanParams9 = glm::vec4(glm::max(ocean.troughMargin, 0.0f), glm::max(ocean.rtRefractionRange, 10.0f),
         glm::max(ocean.rtReflectionRange, 50.0f), glm::clamp(ocean.rtReflectionMaxRough, 0.0f, 1.0f));
-    ubo.oceanParams10 = glm::vec4(glm::max(ocean.farCullError, 0.0f), 0.0f, 0.0f, 0.0f);
 
     ubo.terrainParams = m_terrainParams;
 
@@ -756,7 +779,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.terrainTexParams4 = glm::vec4(tex.snowSlopeStart, glm::max(tex.snowSlopeFull, tex.snowSlopeStart + 1e-3f),
         tex.snowAridity, 0.0f);
     ubo.terrainTexParams5 = glm::vec4(glm::max(tex.cragWanderAmp, 0.0f),
-        1.0f / glm::max(tex.cragWanderWavelength, 1.0f), 0.0f, 0.0f);
+        1.0f / glm::max(tex.cragWanderWavelength, 1.0f), tex.splatDetailDistance, 0.0f);
     static_assert(sizeof(ubo.terrainSplatClimate) == sizeof(m_terrainSplatClimate));
     memcpy(ubo.terrainSplatClimate, m_terrainSplatClimate, sizeof(m_terrainSplatClimate));
     // The splat textures belong to no rendered instance's material, so the projected-size priority pass
@@ -1690,10 +1713,31 @@ void Renderer::recordShadowDraw(uint32 frameIdx)
     cb.end();
 }
 
+void Renderer::recordReuseDepthBarrier(vk::CommandBuffer cb, vk::Image gbufferDepth, uint32 eyeIndex, bool toAttachment)
+{
+    // Reads only on both sides (the reuse pass tests depth read-only; AO/fog/TAA sample) — nothing to
+    // flush, so srcAccess stays empty and the barrier is an execution dependency + the layout transition.
+    const vk::ImageMemoryBarrier2 barrier{
+        .srcStageMask = toAttachment ? (vk::PipelineStageFlagBits2::eFragmentShader | vk::PipelineStageFlagBits2::eComputeShader)
+                                     : (vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests),
+        .srcAccessMask = vk::AccessFlags2(),
+        .dstStageMask = toAttachment ? (vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests)
+                                     : (vk::PipelineStageFlagBits2::eFragmentShader | vk::PipelineStageFlagBits2::eComputeShader),
+        .dstAccessMask = toAttachment ? vk::AccessFlags2(vk::AccessFlagBits2::eDepthStencilAttachmentRead)
+                                      : vk::AccessFlags2(vk::AccessFlagBits2::eShaderSampledRead),
+        .oldLayout = toAttachment ? vk::ImageLayout::eShaderReadOnlyOptimal : vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+        .newLayout = toAttachment ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eShaderReadOnlyOptimal,
+        .image = gbufferDepth,
+        .subresourceRange = { vk::ImageAspectFlagBits::eDepth, 0, 1, eyeIndex, 1 },
+    };
+    cb.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier });
+}
+
 void Renderer::recordStaticMesh(uint32 frameIdx)
 {
     PerFrameData& frameData = m_perFrameData[frameIdx];
-    vk::CommandBufferInheritanceInfo inheritance{ .renderPass = frameData.sceneColor.getRenderPass() };
+    vk::CommandBufferInheritanceInfo inheritance{
+        .renderPass = m_depthPrepassReuse ? frameData.sceneColor.getReuseRenderPass() : frameData.sceneColor.getRenderPass() };
     CommandBuffer& cb = frameData.staticMeshCommandBuffer;
     cb.begin(false, &inheritance);
     recordStaticMeshInto(cb, frameIdx, 0);
@@ -1791,6 +1835,7 @@ void Renderer::recordGBuffer(uint32 frameIdx)
     cb.end();
 }
 
+
 // AO trace+denoise for one eye (compute, no render pass); reads that eye's G-buffer, writes that eye's AO.
 void Renderer::recordAOInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex)
 {
@@ -1829,6 +1874,8 @@ void Renderer::recordFogApplyInto(CommandBuffer& cb, uint32 frameIdx, uint32 eye
     VolumetricFogPipeline::ApplyParams params{
         .ubo = frameData.ubo,
         .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
+        // Runs inside the scene pass, where depth-prepass reuse holds the image in DEPTH_STENCIL_READ_ONLY.
+        .gbufferDepthLayout = m_depthPrepassReuse ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eShaderReadOnlyOptimal,
         .gbufferSampler = frameData.gbuffer.getSampler(),
     };
     m_volumetricFogPipeline.recordApply(cb, frameIdx, eyeIndex, params);
@@ -1847,8 +1894,10 @@ void Renderer::recordTaaInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIndex
         .currentColorSampler = sceneColor.getSampler(),
         .gbufferDepthView = gbuffer.getDepthView(eyeIndex),
         .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(eyeIndex),
+        .gbufferNormalView = gbuffer.getNormalView(eyeIndex),
         .gbufferSampler = gbuffer.getSampler(),
         .feedback = m_taaParams.taaEnabled ? m_taaParams.taaFeedback : 0.0f,
+        .oceanFeedback = m_taaParams.taaEnabled ? m_taaParams.taaOceanFeedback : 0.0f,
     };
     m_taaPipeline.record(cb, frameIdx, eyeIndex, taaParams);
 }
@@ -1923,6 +1972,8 @@ void Renderer::recordParticlesInto(CommandBuffer& cb, uint32 frameIdx, uint32 ey
         .ubo = frameData.ubo,
         .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
         .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
+        // Runs inside the scene pass, where depth-prepass reuse holds the image in DEPTH_STENCIL_READ_ONLY.
+        .gbufferDepthLayout = m_depthPrepassReuse ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eShaderReadOnlyOptimal,
         .gbufferSampler = frameData.gbuffer.getSampler(),
     };
     m_particlePipeline.recordDraw(cb, frameIdx, eyeIndex, drawParams);
@@ -1955,6 +2006,8 @@ void Renderer::recordDecalsInto(CommandBuffer& cb, uint32 frameIdx, uint32 eyeIn
         .ubo = frameData.ubo,
         .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
         .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
+        // Runs inside the scene pass, where depth-prepass reuse holds the image in DEPTH_STENCIL_READ_ONLY.
+        .gbufferDepthLayout = m_depthPrepassReuse ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eShaderReadOnlyOptimal,
         .gbufferNormalView = frameData.gbuffer.getNormalView(eyeIndex),
         .gbufferSampler = frameData.gbuffer.getSampler(),
     };
@@ -2044,6 +2097,8 @@ void Renderer::recordFogApply(uint32 frameIdx)
     VolumetricFogPipeline::ApplyParams params{
         .ubo = frameData.ubo,
         .gbufferDepthView = frameData.gbuffer.getDepthView(),
+        // Runs inside the scene pass, where depth-prepass reuse holds the image in DEPTH_STENCIL_READ_ONLY.
+        .gbufferDepthLayout = m_depthPrepassReuse ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eShaderReadOnlyOptimal,
         .gbufferSampler = frameData.gbuffer.getSampler(),
     };
     m_volumetricFogPipeline.recordApply(cb, frameIdx, 0, params);
@@ -2065,8 +2120,10 @@ void Renderer::recordTaa(uint32 frameIdx)
         .currentColorSampler = sceneColor.getSampler(),
         .gbufferDepthView = gbuffer.getDepthView(),
         .prevGbufferDepthView = m_perFrameData[prevFrameIdx].gbuffer.getDepthView(),
+        .gbufferNormalView = gbuffer.getNormalView(),
         .gbufferSampler = gbuffer.getSampler(),
         .feedback = m_taaParams.taaEnabled ? m_taaParams.taaFeedback : 0.0f,
+        .oceanFeedback = m_taaParams.taaEnabled ? m_taaParams.taaOceanFeedback : 0.0f,
     };
     m_taaPipeline.record(cb, frameIdx, 0, taaParams);
     cb.end();
@@ -2545,10 +2602,12 @@ void Renderer::recordCommandBuffers()
                 if (tlas)
                     m_staticMeshGraphicsPipeline.updateTlasDescriptor(frameData.staticMeshPipelineDescriptorSet[eye].getDescriptorSet(), tlas);
 
-                { // Forward (+ fog apply) into this eye's SceneColor layer
+                { // Forward (+ fog apply) into this eye's SceneColor layer; depth = prepass depth read-only when reusing
+                    if (m_depthPrepassReuse)
+                        recordReuseDepthBarrier(vkCommandBuffer, gbuffer.getDepthImage(), eye, true);
                     const vk::RenderPassBeginInfo eyeRpBegin{
-                        .renderPass = sceneColor.getRenderPass(),
-                        .framebuffer = sceneColor.getFramebuffer(eye),
+                        .renderPass = m_depthPrepassReuse ? sceneColor.getReuseRenderPass() : sceneColor.getRenderPass(),
+                        .framebuffer = m_depthPrepassReuse ? sceneColor.getReuseFramebuffer(eye) : sceneColor.getFramebuffer(eye),
                         .renderArea = sceneArea,
                         .clearValueCount = (uint32)sceneClears.size(),
                         .pClearValues = sceneClears.data(),
@@ -2562,6 +2621,8 @@ void Renderer::recordCommandBuffers()
                     if (m_fogParams.enabled)
                         recordFogApplyInto(commandBuffer, frameIdx, eye);
                     vkCommandBuffer.endRenderPass();
+                    if (m_depthPrepassReuse) // this eye's prepass depth back to sampled (TAA next)
+                        recordReuseDepthBarrier(vkCommandBuffer, gbuffer.getDepthImage(), eye, false);
                 }
 
                 // Scene colour -> TAA compute sampled read. Explicit image barrier (not a global memory barrier -
@@ -2640,9 +2701,13 @@ void Renderer::recordCommandBuffers()
             if (tlas)
                 m_staticMeshGraphicsPipeline.updateTlasDescriptor(frameData.staticMeshPipelineDescriptorSet[0].getDescriptorSet(), tlas);
 
+            // Depth-prepass reuse: the scene pass binds the G-buffer depth READ-ONLY; the explicit
+            // barriers do the sampled<->attachment layout round-trip. Off = own cleared depth, rebuilt.
+            if (m_depthPrepassReuse)
+                recordReuseDepthBarrier(vkCommandBuffer, gbuffer.getDepthImage(), 0, true);
             const vk::RenderPassBeginInfo sceneRpBegin{
-                .renderPass = sceneColor.getRenderPass(),
-                .framebuffer = sceneColor.getFramebuffer(),
+                .renderPass = m_depthPrepassReuse ? sceneColor.getReuseRenderPass() : sceneColor.getRenderPass(),
+                .framebuffer = m_depthPrepassReuse ? sceneColor.getReuseFramebuffer(0) : sceneColor.getFramebuffer(),
                 .renderArea = sceneArea,
                 .clearValueCount = (uint32)sceneClears.size(),
                 .pClearValues = sceneClears.data(),
@@ -2669,6 +2734,8 @@ void Renderer::recordCommandBuffers()
             if (m_fogParams.enabled)
                 vkCommandBuffer.executeCommands(1, &vkFogApplyCommandBuffer);
             vkCommandBuffer.endRenderPass();
+            if (m_depthPrepassReuse) // prepass depth back to sampled for TAA/fog/next-frame consumers
+                recordReuseDepthBarrier(vkCommandBuffer, gbuffer.getDepthImage(), 0, false);
 
             // SceneColor's render pass has no 0->EXTERNAL dependency of its own (must stay dependency-identical
             // to the swapchain pass, see SceneColor.cpp), so its finalLayout->SHADER_READ_ONLY transition at

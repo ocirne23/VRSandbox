@@ -9,7 +9,7 @@ layout (location = 0) in vec3 in_normal;
 layout (location = 1) in vec2 in_uv;
 layout (location = 2) in flat uint in_meshIdxMaterialIdx;
 
-layout (location = 0) out vec4 out_normal; // world-space normal, xyz (w unused)
+layout (location = 0) out vec4 out_normal; // world-space normal, xyz; w = ocean flag (TAA lowers its history weight on animated water)
 
 struct MaterialInfo
 {
@@ -33,5 +33,8 @@ void main()
         if (texture(u_textures[nonuniformEXT(diffuseTexIdx)], in_uv).a < material.opacity)
             discard;
     }
-    out_normal = vec4(normalize(in_normal), 0.0);
+    // w = ocean flag: waves animate but the TAA reprojection is camera-only (no motion vectors), so its
+    // history lands on the WRONG wave every frame and accumulating it blurs the specular sparkle away.
+    // TAA reads this to lower its history weight on water (TAA/Ocean feedback tweak).
+    out_normal = vec4(normalize(in_normal), (material.flags & MATERIAL_FLAG_OCEAN) != 0u ? 1.0 : 0.0);
 }

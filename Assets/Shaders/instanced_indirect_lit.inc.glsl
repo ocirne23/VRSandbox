@@ -137,7 +137,7 @@ vec3 doSunLight(vec3 worldPos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOver
 // so each tap's bilinear weight is scaled by its world-space distance to the shaded point. Tap depths
 // come from the full-res depth at the tap's UV (the half-res texel center), which is close enough to
 // the depth the trace actually used.
-vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
+vec4 sampleAOBilateral(vec2 fullUv, vec3 pos, float viewDist)
 {
 	const vec2 aoRes   = ceil(u_screenSize.xy * 0.5);
 	const vec2 aoTexel = 1.0 / aoRes;
@@ -147,7 +147,7 @@ vec4 sampleAOBilateral(vec2 fullUv, vec3 pos)
 	const float bw[4] = float[]((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
 	const vec2 offs[4] = vec2[](vec2(0.0), vec2(aoTexel.x, 0.0), vec2(0.0, aoTexel.y), aoTexel);
 
-	const float sigmaZ = max(0.05 * length(pos - u_viewPos), 0.02);
+	const float sigmaZ = max(0.05 * viewDist, 0.02);
 	vec4 sum = vec4(0.0);
 	float wsum = 0.0;
 	for (int i = 0; i < 4; ++i)
@@ -177,9 +177,14 @@ vec3 computeLitColor(vec3 worldPos, vec3 V, vec3 N, vec3 materialColor, float ro
 
 	float ao = 1.0;
 	vec3 bentN = N;
-	if (u_aoParams.x > 0.5)
+	// Past the RTAO max distance (u_aoParams.z) the trace writes exactly (N, 1.0) — no occlusion, bent
+	// normal = surface normal (rtao.cs.glsl early-out) — so the depth-aware upsample (up to 8 taps + 4
+	// world-pos reconstructions) would only re-fetch those constants. Skip it and use them directly;
+	// z = 0 (falloff disabled) keeps the upsample everywhere.
+	const float aoViewDist = length(worldPos - u_viewPos);
+	if (u_aoParams.x > 0.5 && (u_aoParams.z <= 0.0 || aoViewDist < u_aoParams.z))
 	{
-		const vec4 aoSample = sampleAOBilateral(gl_FragCoord.xy * u_screenSize.zw, worldPos);
+		const vec4 aoSample = sampleAOBilateral(gl_FragCoord.xy * u_screenSize.zw, worldPos, aoViewDist);
 		ao = aoSample.w;
 		// Evaluate the indirect irradiance along the bent normal rather than the surface normal: in concave
 		// areas it points toward the open hemisphere, so the low-frequency probe SH stops leaking light from

@@ -142,6 +142,7 @@ void TAAParams::registerTweaks(const std::function<void()>& onReRecord)
 {
     Tweak::boolean("TAA", "Enabled", &taaEnabled, onReRecord);
     Tweak::floatVar("TAA", "History Feedback", &taaFeedback, 0.0f, 0.98f, 0.01f, onReRecord);
+    Tweak::floatVar("TAA", "Ocean feedback", &taaOceanFeedback, 0.0f, 0.98f, 0.01f, onReRecord);
 }
 
 void MeshLodParams::registerTweaks()

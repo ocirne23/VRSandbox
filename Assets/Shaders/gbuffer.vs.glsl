@@ -3,13 +3,19 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 
+// The forward pass early-Z tests DIRECTLY against this depth via eGreaterOrEqual (bound read-only as the
+// scene pass's depth attachment — "Depth prepass reuse"), which requires BIT-EXACT gl_Position between
+// this shader and every forward vertex shader: invariant guarantees the compiler cannot optimize the
+// shared expressions differently across programs. Declared in all four scene VS files.
+invariant gl_Position;
+
 #include "shared.inc.glsl"
 #define OCEAN_MAPS_BINDING 3
 #define TERRAIN_HEIGHT_BINDING 5
 #include "ocean_wave.inc.glsl"
 
 // View index (0 = centre/desktop, 1 = left eye, 2 = right eye). The G-buffer is rendered once per eye into
-// its own layer, like the forward pass; selects the matching view. No TAA jitter (this is the reference depth).
+// its own layer, like the forward pass; selects the matching view.
 layout (push_constant) uniform ViewPC { uint u_viewIndex; };
 
 struct InMeshInstancesData
@@ -94,4 +100,11 @@ void main()
     out_uv = in_uv;
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;
     gl_Position = u_mvp * vec4(worldPos, 1.0);
+    // TAA jitter, IDENTICAL to the forward vertex shaders (invariant gl_Position + the same expression =
+    // bit-exact): the forward pass early-Z tests directly against this depth, so prepass and forward
+    // coverage/depth must match exactly — conservative unjittered prefills were tried and cannot cover
+    // sub-pixel slits/grazing silhouettes (depths the prepass never recorded at any nearby texel).
+    // Geometric consumers of this jittered depth (TAA/AO-temporal/RTAO reprojection+reconstruction)
+    // compensate the known jitter analytically — see taaJitterUv in shared.inc.glsl.
+    gl_Position.xy += u_taaJitter.xy * gl_Position.w; // TAA sub-pixel jitter (clip space)
 }

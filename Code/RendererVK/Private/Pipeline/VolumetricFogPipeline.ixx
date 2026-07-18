@@ -50,6 +50,8 @@ public:
     {
         Buffer& ubo;
         vk::ImageView gbufferDepthView;
+        // DEPTH_STENCIL_READ_ONLY while depth-prepass reuse binds this image as the scene pass depth.
+        vk::ImageLayout gbufferDepthLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
         vk::Sampler   gbufferSampler;
     };
     // Records the fullscreen apply draw; the caller has begun a command buffer inside the scene-color

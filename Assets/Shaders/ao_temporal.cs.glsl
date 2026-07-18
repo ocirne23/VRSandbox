@@ -32,11 +32,13 @@ void main()
     const float depth = texture(u_curDepth, uv).r;
     if (depth <= 0.0) { imageStore(u_accumOut, px, raw); return; } // background (reversed-Z far = 0)
 
-    const vec3 worldPos = worldPosFromDepth(uv, depth); // disocclusion test only
+    // The depth image is jittered (exact depth-prepass reuse); compensate geometric uses — see taaJitterUv.
+    const vec2 uvUnjit = uv - taaJitterUv(u_taaJitter.xy);
+    const vec3 worldPos = worldPosFromDepth(uvUnjit, depth); // disocclusion test only
 
     float clipW;
     // Clip-space reprojection: precision independent of the camera's world position (see shared.inc.glsl).
-    const vec2 prevUv = prevScreenUVClip(uv, depth, clipW);
+    const vec2 prevUv = prevScreenUVClip(uvUnjit, depth, clipW);
 
     // Bilateral 2x2 history fetch: validate each bilinear tap against its own reprojected position
     // instead of fetching with plain bilinear after a single-point disocclusion test. At silhouettes the
@@ -62,7 +64,9 @@ void main()
         for (int i = 0; i < 4; ++i)
         {
             const vec2 tapUv = base + offs[i];
-            const float prevDepth = texture(u_prevDepth, tapUv).r;
+            // Last frame's depth is jittered by LAST frame's jitter: the surface at unjittered tapUv
+            // lives at tapUv + prevJitter — fetch there, reconstruct at tapUv.
+            const float prevDepth = texture(u_prevDepth, tapUv + taaJitterUv(u_taaJitter.zw)).r;
             if (prevDepth <= 0.0)
                 continue;
             const vec3 prevWorld = worldPosFromDepthMat(tapUv, prevDepth, u_prevInvMvp);

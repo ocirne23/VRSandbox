@@ -86,9 +86,9 @@ bool oceanVertexCulled(vec2 worldXZ, float cellSize, vec2 shoreHW)
         else
         {
             const float invFar = u_fogParams5.z;
-            if (u_oceanParams10.x <= 0.0 || invFar <= 0.0 || (cheb + reach) * invFar >= 0.48)
+            if (u_oceanParams6.x <= 0.0 || invFar <= 0.0 || (cheb + reach) * invFar >= 0.48)
                 return false; // far cull off / footprint reaches the far map's clamp-to-edge border
-            err = u_oceanParams10.x;
+            err = u_oceanParams6.x;
         }
     }
 #endif
@@ -201,14 +201,6 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph, vec2 sho
 //              microfacet roughness (the elongated sun glitter at distance)
 //   accel    : vertical acceleration (breaking-crest foam driver)
 //   shoreHW  : the (terrain height, water level) fetch, returned for the caller to reuse
-// OCEAN_SURFACE_SAMPLE_BIAS ("Glint sharpness") biases the mips finer; the texture() bias overload is
-// fragment-stage-only, so non-fragment includers (the foam compute) compile the plain call.
-#ifdef OCEAN_SURFACE_SAMPLE_BIAS
-#define OCEAN_SURFACE_TEX(uvw) texture(u_oceanMaps, uvw, OCEAN_SURFACE_SAMPLE_BIAS)
-#else
-#define OCEAN_SURFACE_TEX(uvw) texture(u_oceanMaps, uvw)
-#endif
-
 void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out vec2 slopeVar, out float accel, out vec2 shoreHW)
 {
     const float chop = u_oceanParams0.w;
@@ -235,9 +227,9 @@ void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out ve
     for (int c = 0; c < OCEAN_CASCADES; ++c)
     {
         const vec2 uv = sampleXZ / u_oceanParams2[c];
-        const vec4 g = OCEAN_SURFACE_TEX(vec3(uv, float(OCEAN_CASCADES + c)));
-        const vec4 d = OCEAN_SURFACE_TEX(vec3(uv, float(c)));
-        const vec4 m = OCEAN_SURFACE_TEX(vec3(uv, float(2 * OCEAN_CASCADES + c)));
+        const vec4 g = texture(u_oceanMaps, vec3(uv, float(OCEAN_CASCADES + c)));
+        const vec4 d = texture(u_oceanMaps, vec3(uv, float(c)));
+        const vec4 m = texture(u_oceanMaps, vec3(uv, float(2 * OCEAN_CASCADES + c)));
         // Same shoal fade as the displacement, so shading tracks the flattened geometry (variance ~ fade^2).
         const float fade = oceanShoalFade(depth, u_oceanParams2[c]);
         slopeSum += g.xy * fade;

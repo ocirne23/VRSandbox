@@ -205,6 +205,8 @@ export namespace Procedural
 		// the model's true scale, like the crag thresholds it modulates. See the tweak registration.
 		float m_texCragWanderAmp = 66.0f;
 		float m_texCragWanderWavelength = 400.0f;
+		// View distance (real-world m) beyond which splats fetch albedo only; <= 0 = always full detail.
+		float m_texSplatDetailDistance = 1500.0f;
 		float m_texCragStart = 34.0f;      // crag relief start (m above macro altitude)
 		float m_texCragFull = 400.0f;
 		float m_texBeachBand = 2.5f;       // beach band height (m above water level)

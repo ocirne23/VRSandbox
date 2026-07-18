@@ -79,6 +79,9 @@ public:
     // initializeDebug must be called after the main render pass exists.
     void initializeDebug(vk::RenderPass renderPass);
     void reloadDebugShaders(vk::RenderPass renderPass);
+    // Depth-prepass reuse: the scene pass depth is read-only, so the debug spheres may not write depth
+    // (they lose self-sorting; debug-only). Rebuild via reloadDebugShaders after flipping.
+    void setDebugDepthReadOnly(bool readOnly) { m_debugDepthReadOnly = readOnly; }
     void recordDebugDraw(CommandBuffer& commandBuffer, uint32 frameIdx, Buffer& ubo, float radius, uint32 mode);
 
     Buffer& getTlasInstanceBuffer(uint32 frameIdx) { return m_tlasInstanceBuffer[frameIdx]; }
@@ -132,4 +135,5 @@ private:
     std::array<DescriptorSet, RendererVKLayout::NUM_FRAMES_IN_FLIGHT> m_debugSets;
 
     bool m_cleared = false;
+    bool m_debugDepthReadOnly = true; // scene pass depth is read-only under depth-prepass reuse
 };

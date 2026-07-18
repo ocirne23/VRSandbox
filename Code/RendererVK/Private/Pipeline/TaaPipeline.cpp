@@ -16,6 +16,7 @@ namespace
         uint32 height;
         float  feedback;
         uint32 viewIndex;
+        float  oceanFeedback; // history weight cap on ocean pixels (waves animate without motion vectors)
     };
 
     auto imgInfoGeneral(vk::ImageView view) { return vk::DescriptorImageInfo{ .imageView = view, .imageLayout = vk::ImageLayout::eGeneral }; }
@@ -32,6 +33,7 @@ void TaaPipeline::buildLayout(ComputePipelineLayout& layout)
     for (uint32 i = 1; i <= 4; ++i)
         b.push_back(vk::DescriptorSetLayoutBinding{ .binding = i, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 5, .descriptorType = vk::DescriptorType::eStorageImage, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute });
+    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 6, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute }); // normals (.a = ocean flag)
     layout.pushConstantRanges.push_back(vk::PushConstantRange{ .stageFlags = vk::ShaderStageFlagBits::eCompute, .offset = 0, .size = sizeof(TaaPC) });
 }
 
@@ -189,18 +191,19 @@ void TaaPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 e
     auto uboInfo = vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = sizeof(RendererVKLayout::Ubo) };
     DescriptorSet& set = m_sets[cur];
     vk::DescriptorSet vkSet = set.getDescriptorSet();
-    std::array<DescriptorSetUpdateInfo, 6> updates{
+    std::array<DescriptorSetUpdateInfo, 7> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer, .bufferInfos = { uboInfo } },
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.currentColorSampler, params.currentColorView) } },
         DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledGeneral(m_sampler, m_resolved.view[prevIdx]) } },
         DescriptorSetUpdateInfo{ .binding = 3, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferDepthView) } },
         DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.prevGbufferDepthView) } },
         DescriptorSetUpdateInfo{ .binding = 5, .type = vk::DescriptorType::eStorageImage, .imageInfos = { imgInfoGeneral(m_resolved.view[cur]) } },
+        DescriptorSetUpdateInfo{ .binding = 6, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledRO(params.gbufferSampler, params.gbufferNormalView) } },
     };
     commandBuffer.cmdUpdateDescriptorSets(pipelineLayout, vk::PipelineBindPoint::eCompute, vkSet, updates);
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_pipeline.getPipeline());
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout, 0, 1, &vkSet, 0, nullptr);
-    TaaPC pc{ .width = m_width, .height = m_height, .feedback = params.feedback, .viewIndex = viewIndex };
+    TaaPC pc{ .width = m_width, .height = m_height, .feedback = params.feedback, .viewIndex = viewIndex, .oceanFeedback = params.oceanFeedback };
     cmd.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
     cmd.dispatch(gx, gy, 1);
 

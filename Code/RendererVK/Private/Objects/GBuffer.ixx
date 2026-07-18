@@ -29,6 +29,7 @@ public:
     vk::ImageView getNormalView(uint32 eye) const { return m_normalViews[eye]; }
     vk::ImageView getDepthView() const    { return m_depthViews[0]; }
     vk::ImageView getDepthView(uint32 eye) const { return m_depthViews[eye]; }
+    vk::Image getDepthImage() const       { return m_depthImage; } // bound read-only as the scene pass depth (depth-prepass reuse)
     vk::Sampler getSampler() const        { return m_sampler; } // nearest, clamp (point sampling for reconstruction)
     uint32 getViewCount() const { return m_viewCount; }
     uint32 getWidth() const  { return m_width; }
