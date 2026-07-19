@@ -1,3 +1,7 @@
+module;
+
+#include <zstd/zstd.h> // the disk tile cache's compressor; see the tile-cache block below
+
 module Procedural;
 
 import Core;
@@ -35,24 +39,303 @@ namespace Procedural
 		// One cached rectangle of the field. Both detail levels share this shape; `width` says which.
 		struct FieldTile
 		{
-			std::vector<float> elev;   // metres in the MODEL's frame, SIGNED (seabed stays negative)
-			std::vector<float> macro;  // the COARSE stage's surface (7.68 km/px), resampled to this tile: the
-			                           // reference the shader measures crag relief against. Identical in
-			                           // meaning on both detail levels, which is the point.
-			std::vector<float> temp;   // degrees C, at THIS tile's own elevation
-			// The lapse rate that temperature was derived with, C per MODEL metre, clamped [-0.012, 0].
-			// Carried so the terrain shader can re-derive temperature at the MESH elevation: the coarse level
-			// reports temperature at its 7.68 km-averaged elevation and cannot know a peak's real height, so
-			// without this the far cascade omits peak cold entirely (measured: up to 10.6 C too warm).
-			std::vector<float> beta;
-			std::vector<float> precip; // mm/yr
-			int32 width = 0;           // TILE_W or CTILE_W
+			std::vector<float> elev;    // metres in the MODEL's frame, SIGNED (seabed stays negative)
+			std::vector<float> macro;   // the COARSE stage's surface (7.68 km/px), resampled to this tile: the
+			                            // reference the shader measures crag relief against. Identical in
+			                            // meaning on both detail levels, which is the point.
+			// Degrees C AT SEA LEVEL — the same baseline everything else in the engine carries (the baked
+			// terrain-data map, TerrainPoint::temperatureSeaLevel). Temperature at height is baseline +
+			// the one global lapse (cfg.lapseRate) x elevation, applied at sample time. The model's own
+			// temperature-at-elevation and its per-region regressed rate are DERIVATION inputs, undone at
+			// tile build (the model constructed temp as tSea + beta*elev, so tSea is recovered exactly);
+			// carrying them here just made every sample redo that subtraction and cost a whole extra plane.
+			std::vector<float> tempSea;
+			std::vector<float> precip;  // mm/yr
+			int32 width = 0;            // TILE_W or CTILE_W
 		};
 		using FieldTilePtr = std::shared_ptr<const FieldTile>;
 
 		uint64 tileKey(int32 ti, int32 tj)
 		{
 			return ((uint64)(uint32)ti << 32) | (uint64)(uint32)tj;
+		}
+
+		// -------------------------------------------------------------------------------------------------
+		// Disk tile cache: Local/Diffusion/<seed>/{full|coarse}_x<j>_z<i>.tile (cwd is Assets/). Inference
+		// is deterministic per (seed, precision, tile), so a tile generated once never needs the GPU again —
+		// a cached fetch is a ~0.7 MB read instead of ~1.5 s of diffusion. Per-seed folders make a reseed a
+		// different directory rather than an invalidation, and fp16 gets its own suffix because precision
+		// CHANGES the terrain for a given seed (it is part of the world, not a perf knob — see
+		// TerrainConfigV3::useFp16).
+		// -------------------------------------------------------------------------------------------------
+		constexpr uint32 TILE_CACHE_MAGIC = 0x43445456; // 'VTDC'
+		// Bump when FieldTile's layout or ANYTHING in the pipeline that shapes its content changes
+		// (stages, strides, the coarse beta regression, ...): stale files fail the check and regenerate
+		// in place, exactly like the cooked scene cache.
+		// v2: planes are uint16, quantized over a per-plane [min, max] carried in the file — half the
+		// bytes of raw floats, and the worst-case error (range/65535) is centimetres on the steepest
+		// tile, far below the pipeline's own ~6 cm overlap tolerance. Saving ROUNDTRIPS the tile through
+		// the quantizer, so RAM and disk always hold bit-identical values: a tile can never change
+		// across an eviction/reload cycle, which is what keeps chunk borders crack-free.
+		// v3: the quantized plane is then delta-coded (wraparound, row-major linear), byte-SPLIT for the
+		// 16-bit planes (all low bytes, then all high bytes) and zstd-compressed. The transform is what
+		// earns the ratio: deltas of a smooth field are small, so after the split the high-byte half is
+		// almost all zeros and the entropy concentrates in the low bytes. Lossless by construction — the
+		// float values are untouched, only the integer container is recoded — and per plane the STORED
+		// form wins if compression can't beat it, so a file is never larger than its uncompressed self.
+		// v4: one fewer plane and two thinner ones. The beta plane is GONE (the baseline is recovered at
+		// tile build now — see FieldTile::tempSea), and tempSea + precip store 8-bit: the rest of the
+		// engine already encodes them at 8 bits (the baked map's [-25, 50] C channel, the 8-bit humidity),
+		// so 16 bits here was precision no consumer could ever see. Per-tile [min, max] makes the 8-bit
+		// step FINER than the map's fixed-range one on any tile narrower than the full climate range.
+		// 10 B/px -> 6 B/px before zstd even starts.
+		constexpr uint32 TILE_CACHE_VERSION = 4;
+		constexpr int32 TILE_CACHE_ZSTD_LEVEL = 9; // write-once cache: spend a little more than default
+
+		enum class EPlaneCodec : uint8
+		{
+			Stored = 0, // raw quantized values, n * (bytes per value)
+			Zstd = 1,   // zstd(delta [+ byte-split when 16-bit])
+		};
+
+		// Quantized plane -> delta bytes (16-bit additionally byte-split: lo half, then hi half), and
+		// back. Wraparound arithmetic makes the roundtrip exact for any input.
+		void deltaSplit16(const uint16* q, size_t n, uint8* out)
+		{
+			uint16 prev = 0;
+			for (size_t i = 0; i < n; i++)
+			{
+				const uint16 d = (uint16)(q[i] - prev);
+				prev = q[i];
+				out[i] = (uint8)(d & 0xFF);
+				out[n + i] = (uint8)(d >> 8);
+			}
+		}
+		void unsplitUndelta16(const uint8* in, size_t n, uint16* q)
+		{
+			uint16 prev = 0;
+			for (size_t i = 0; i < n; i++)
+			{
+				const uint16 d = (uint16)(in[i] | ((uint16)in[n + i] << 8));
+				prev = (uint16)(prev + d);
+				q[i] = prev;
+			}
+		}
+		void delta8(const uint8* q, size_t n, uint8* out)
+		{
+			uint8 prev = 0;
+			for (size_t i = 0; i < n; i++)
+			{
+				out[i] = (uint8)(q[i] - prev);
+				prev = q[i];
+			}
+		}
+		void undelta8(const uint8* in, size_t n, uint8* q)
+		{
+			uint8 prev = 0;
+			for (size_t i = 0; i < n; i++)
+			{
+				prev = (uint8)(prev + in[i]);
+				q[i] = prev;
+			}
+		}
+
+		struct TileCacheHeader
+		{
+			uint32 magic = 0;
+			uint32 version = 0;
+			uint64 seed = 0;
+			int32 ti = 0;
+			int32 tj = 0;
+			int32 width = 0;
+			uint32 pad = 0;
+		};
+
+		std::filesystem::path tileCachePath(uint64 seed, bool fp16, bool coarse, int32 ti, int32 tj)
+		{
+			// j <-> x, i <-> z: the same axis convention sampleFromBlock documents.
+			return std::filesystem::path("Local/Diffusion")
+				/ (fp16 ? std::format("{}_fp16", seed) : std::format("{}", seed))
+				/ std::format("{}_x{}_z{}.tile", coarse ? "coarse" : "full", tj, ti);
+		}
+
+		struct PlaneHeader
+		{
+			float minV = 0.0f;
+			float maxV = 0.0f;
+		};
+
+		// The file's fixed plane schema — order and bit depth. Loader and writer MUST agree; a change here
+		// is a TILE_CACHE_VERSION bump.
+		struct PlaneSchema
+		{
+			std::vector<float> FieldTile::* plane;
+			bool eightBit;
+		};
+		constexpr PlaneSchema TILE_PLANES[] = {
+			{ &FieldTile::elev,    false }, // geometry: 8 bits would terrace metres-high steps
+			{ &FieldTile::macro,   false }, // crag relief reference: same reason
+			{ &FieldTile::tempSea, true  }, // consumers are 8-bit anyway (baked map channel)
+			{ &FieldTile::precip,  true  }, // humidity is 8-bit anyway
+		};
+
+		FieldTilePtr loadTileFromDisk(const std::filesystem::path& path, uint64 seed, int32 ti, int32 tj,
+		                              int32 expectWidth)
+		{
+			std::ifstream f(path, std::ios::binary);
+			if (!f)
+				return nullptr;
+
+			TileCacheHeader h;
+			f.read((char*)&h, sizeof(h));
+			// A mismatch is not an error, it is a miss: truncated writes, old versions and hand-copied
+			// files from another seed folder all just regenerate and overwrite.
+			if (!f || h.magic != TILE_CACHE_MAGIC || h.version != TILE_CACHE_VERSION
+				|| h.seed != seed || h.ti != ti || h.tj != tj || h.width != expectWidth)
+				return nullptr;
+
+			const size_t plane = (size_t)h.width * h.width;
+			auto t = std::make_shared<FieldTile>();
+			t->width = h.width;
+			std::vector<uint16> q16(plane);
+			std::vector<uint8> q8(plane), raw(plane * 2), comp;
+			for (const PlaneSchema& ps : TILE_PLANES)
+			{
+				const size_t rawBytes = ps.eightBit ? plane : plane * 2;
+				PlaneHeader ph;
+				uint8 codec = 0;
+				uint32 payloadSize = 0;
+				f.read((char*)&ph, sizeof(ph));
+				f.read((char*)&codec, sizeof(codec));
+				f.read((char*)&payloadSize, sizeof(payloadSize));
+				if (!f || payloadSize == 0 || payloadSize > rawBytes)
+					return nullptr;
+
+				if ((EPlaneCodec)codec == EPlaneCodec::Stored)
+				{
+					if (payloadSize != rawBytes)
+						return nullptr;
+					f.read((char*)(ps.eightBit ? (void*)q8.data() : (void*)q16.data()),
+					       (std::streamsize)payloadSize);
+					if (!f)
+						return nullptr;
+				}
+				else if ((EPlaneCodec)codec == EPlaneCodec::Zstd)
+				{
+					comp.resize(payloadSize);
+					f.read((char*)comp.data(), (std::streamsize)payloadSize);
+					if (!f)
+						return nullptr;
+					const size_t n = ZSTD_decompress(raw.data(), rawBytes, comp.data(), comp.size());
+					if (ZSTD_isError(n) || n != rawBytes)
+						return nullptr;
+					if (ps.eightBit)
+						undelta8(raw.data(), plane, q8.data());
+					else
+						unsplitUndelta16(raw.data(), plane, q16.data());
+				}
+				else
+					return nullptr;
+
+				// MUST match the writer's roundtrip expression exactly (same step, same order of
+				// operations) — bit-identical dequantization is what the crack-free guarantee rests on.
+				const float maxQ = ps.eightBit ? 255.0f : 65535.0f;
+				const float step = (ph.maxV - ph.minV) / maxQ;
+				std::vector<float>& v = (*t).*ps.plane;
+				v.resize(plane);
+				for (size_t i = 0; i < plane; i++)
+					v[i] = ph.minV + (float)(ps.eightBit ? q8[i] : q16[i]) * step;
+			}
+			// One trailing probe: exactly at EOF means the file is whole, anything else is truncation
+			// or trailing garbage.
+			char probe;
+			if (!f || (f.read(&probe, 1), !f.eof()))
+				return nullptr;
+			return t;
+		}
+
+		// NOT const: every plane is roundtripped through its quantized form in place, so the tile the RAM
+		// cache ends up holding is exactly what a later load returns.
+		void saveTileToDisk(const std::filesystem::path& path, FieldTile& t, uint64 seed,
+		                    int32 ti, int32 tj)
+		{
+			std::error_code ec;
+			std::filesystem::create_directories(path.parent_path(), ec);
+
+			std::ofstream f(path, std::ios::binary | std::ios::trunc);
+			if (!f)
+			{
+				Log::warning(std::format("[Diffusion] tile cache write failed: {}", path.string()));
+				return;
+			}
+			TileCacheHeader h;
+			h.magic = TILE_CACHE_MAGIC;
+			h.version = TILE_CACHE_VERSION;
+			h.seed = seed;
+			h.ti = ti;
+			h.tj = tj;
+			h.width = t.width;
+			f.write((const char*)&h, sizeof(h));
+
+			const size_t plane = (size_t)t.width * t.width;
+			std::vector<uint16> q16(plane);
+			std::vector<uint8> q8(plane), raw(plane * 2);
+			std::vector<uint8> comp(ZSTD_compressBound(plane * 2));
+			for (const PlaneSchema& ps : TILE_PLANES)
+			{
+				std::vector<float>& v = t.*ps.plane;
+				float lo = v[0], hi = v[0];
+				for (float x : v)
+				{
+					lo = std::min(lo, x);
+					hi = std::max(hi, x);
+				}
+				const PlaneHeader ph{ lo, hi };
+				f.write((const char*)&ph, sizeof(ph));
+				const float maxQ = ps.eightBit ? 255.0f : 65535.0f;
+				const float range = hi - lo;
+				const float scale = range > 0.0f ? maxQ / range : 0.0f;
+				const float step = range / maxQ; // the loader's expression, reused for the roundtrip
+				for (size_t i = 0; i < plane; i++)
+				{
+					const uint32 qi = (uint32)std::min(maxQ, std::round((v[i] - lo) * scale));
+					if (ps.eightBit)
+						q8[i] = (uint8)qi;
+					else
+						q16[i] = (uint16)qi;
+					v[i] = lo + (float)qi * step;
+				}
+
+				const size_t rawBytes = ps.eightBit ? plane : plane * 2;
+				if (ps.eightBit)
+					delta8(q8.data(), plane, raw.data());
+				else
+					deltaSplit16(q16.data(), plane, raw.data());
+				const size_t n = ZSTD_compress(comp.data(), comp.size(), raw.data(), rawBytes,
+				                               TILE_CACHE_ZSTD_LEVEL);
+				// Per plane, smaller form wins: a plane the transform can't help (it can only expand on
+				// data that is already noise-dense) falls back to stored, so a file never loses to its
+				// uncompressed self.
+				if (!ZSTD_isError(n) && n < rawBytes)
+				{
+					const uint8 codec = (uint8)EPlaneCodec::Zstd;
+					const uint32 payloadSize = (uint32)n;
+					f.write((const char*)&codec, sizeof(codec));
+					f.write((const char*)&payloadSize, sizeof(payloadSize));
+					f.write((const char*)comp.data(), (std::streamsize)n);
+				}
+				else
+				{
+					const uint8 codec = (uint8)EPlaneCodec::Stored;
+					const uint32 payloadSize = (uint32)rawBytes;
+					f.write((const char*)&codec, sizeof(codec));
+					f.write((const char*)&payloadSize, sizeof(payloadSize));
+					f.write((const char*)(ps.eightBit ? (const void*)q8.data() : (const void*)q16.data()),
+					        (std::streamsize)rawBytes);
+				}
+			}
+			// A write cut short (crash, full disk) leaves a file the loader's size probe rejects, so the
+			// worst case is a regenerate — no tmp+rename dance needed, same contract as the .vsc cache.
 		}
 
 		// -------------------------------------------------------------------------------------------------
@@ -104,6 +387,9 @@ namespace Procedural
 
 			void setSeed(uint64 seed)
 			{
+				// Mirror first, unconditionally (this runs even before isReady): the disk cache builds its
+				// per-seed paths from this without taking the pipeline lock.
+				m_activeSeed.store(seed, std::memory_order_relaxed);
 				if (!isReady())
 					return;
 				JobMutex::Scope lk(m_pipelineMutex);
@@ -133,6 +419,7 @@ namespace Procedural
 			void setPrecision(EPrecision p)
 			{
 				std::lock_guard<std::mutex> lk(m_loadMutex);
+				m_activeFp16.store(p == EPrecision::Fp16, std::memory_order_relaxed); // disk-cache path mirror
 				if (p == m_precision)
 					return;
 				if (!m_loadStarted)
@@ -212,6 +499,10 @@ namespace Procedural
 				}
 				{
 					JobMutex::Scope lk(m_pipelineMutex);
+					// What the live pipeline was actually built with — the disk cache labels SAVES with this
+					// (readable wherever m_pipeline is non-null under the lock), never with the request-side
+					// mirror, so a precision flip racing a generation can't file a tile under the wrong folder.
+					m_pipelinePrecision = precision;
 					m_pipeline = std::move(p);
 				}
 				m_ready.store(true, std::memory_order_release);
@@ -291,6 +582,14 @@ namespace Procedural
 			// worker thread (unregistered threads still just block).
 			JobMutex m_pipelineMutex;
 			std::unique_ptr<WorldPipeline> m_pipeline;
+			EPrecision m_pipelinePrecision = EPrecision::Fp32; // guarded by m_pipelineMutex; see loadWorker
+
+			// Request-side mirrors for building disk-cache paths WITHOUT the pipeline lock (a disk hit must
+			// not queue behind another tile's inference). Guesses, not authority: a load that raced a
+			// reseed/precision flip just misses (the header validates) and falls through to generation,
+			// which labels its save from the pipeline itself.
+			std::atomic<uint64> m_activeSeed{ 1337 };
+			std::atomic<bool> m_activeFp16{ false };
 
 			std::mutex m_cacheMutex;
 			Lru m_cache;
@@ -332,6 +631,19 @@ namespace Procedural
 				{
 					auto task = std::make_shared<std::function<FieldTilePtr()>>([this, ti, tj]() -> FieldTilePtr
 					{
+						// Disk first, WITHOUT the pipeline lock: a cached tile must not queue behind another
+						// tile's ~1.5 s inference. The post-load mirror re-check pins the race where a reseed
+						// lands between path building and here — a changed seed drops the loaded tile and
+						// falls through to generation against the live pipeline.
+						{
+							const uint64 seed = m_activeSeed.load(std::memory_order_relaxed);
+							const bool fp16 = m_activeFp16.load(std::memory_order_relaxed);
+							FieldTilePtr t = loadTileFromDisk(tileCachePath(seed, fp16, false, ti, tj),
+							                                  seed, ti, tj, TILE_W);
+							if (t && m_activeSeed.load(std::memory_order_relaxed) == seed)
+								return t;
+						}
+
 						// One inference at a time: the tile store is not thread-safe.
 						JobMutex::Scope lk(m_pipelineMutex);
 						if (!m_pipeline)
@@ -349,11 +661,23 @@ namespace Procedural
 						t->width = TILE_W;
 						t->elev = std::move(elev);
 						t->macro = std::move(macro);
-						t->temp.assign(climate.begin(), climate.begin() + (ptrdiff_t)plane);
 						t->precip.assign(climate.begin() + (ptrdiff_t)(2 * plane),
 						                 climate.begin() + (ptrdiff_t)(3 * plane));
-						t->beta.assign(climate.begin() + (ptrdiff_t)(4 * plane),  // channel 4 = lapse rate
-						               climate.begin() + (ptrdiff_t)(5 * plane));
+						// Recover the SEA-LEVEL baseline here, once, instead of storing (temp, beta) and
+						// redoing the subtraction per sample: computeClimate constructed channel 0 as
+						// tSea + beta*max(0, elev), so undoing it with the same elevation is exact.
+						t->tempSea.resize(plane);
+						const float* temp = climate.data();                     // channel 0
+						const float* beta = climate.data() + (size_t)4 * plane; // channel 4 = lapse rate
+						for (size_t i = 0; i < plane; i++)
+							t->tempSea[i] = temp[i] - beta[i] * std::max(0.0f, t->elev[i]);
+
+						// Labeled from the pipeline itself — the seed/precision this tile was ACTUALLY built
+						// with — never the mirrors. The write is ~1 MB against ~1.5 s of inference, so holding
+						// the lock for it costs nothing.
+						const uint64 seed = m_pipeline->seed();
+						saveTileToDisk(tileCachePath(seed, m_pipelinePrecision == EPrecision::Fp16, false, ti, tj),
+						               *t, seed, ti, tj);
 						return t;
 					});
 					pending = std::make_shared<PendingTile>();
@@ -399,6 +723,21 @@ namespace Procedural
 				std::lock_guard<std::mutex> ck(m_cacheMutex);
 				if (FieldTilePtr hit = m_coarseCache.get(key))
 					return hit;
+			}
+
+			// Disk before the pipeline lock, same shape as fetchTile's load (including the mirror re-check).
+			{
+				const uint64 seed = m_activeSeed.load(std::memory_order_relaxed);
+				const bool fp16 = m_activeFp16.load(std::memory_order_relaxed);
+				FieldTilePtr t = loadTileFromDisk(tileCachePath(seed, fp16, true, ti, tj),
+				                                  seed, ti, tj, CTILE_W);
+				if (t && m_activeSeed.load(std::memory_order_relaxed) == seed)
+				{
+					std::lock_guard<std::mutex> ck(m_cacheMutex);
+					m_coarseCache.put(key, t);
+					evictLocked();
+					return t;
+				}
 			}
 
 			// No pending-dedup here, unlike fetchTile: a coarse tile is a handful of 64x64 model calls, and
@@ -460,8 +799,7 @@ namespace Procedural
 				auto t = std::make_shared<FieldTile>();
 				t->width = CTILE_W;
 				t->elev.resize(plane);
-				t->temp.resize(plane);
-				t->beta.resize(plane);
+				t->tempSea.resize(plane);
 				t->precip.resize(plane);
 				for (int32 r = 0; r < CTILE_W; r++)
 					for (int32 c = 0; c < CTILE_W; c++)
@@ -470,15 +808,15 @@ namespace Procedural
 						const size_t src = (size_t)(r + CBETA_PAD) * pw + (c + CBETA_PAD);
 						t->elev[dst] = pElev[src];
 						t->precip[dst] = pPrecip[src];
-						t->beta[dst] = betaG.at(r, c);
-						// The FITTED temperature, not the model's raw coarse value. This looks like it throws
-						// information away — the raw value carries a residual the fit does not — but the full
-						// path already threw exactly that away: computeClimate CONSTRUCTS its temperature as
-						// tSea + beta*elev and never uses the raw coarse temperature at all. Keeping the raw
-						// value here leaves the two levels disagreeing by that residual even after the shader
-						// corrects for elevation (measured: 1.53 C mean, 8.9 C max). Fitting both the same
-						// way is what actually makes them converge.
-						t->temp[dst] = tSea.at(r, c) + betaG.at(r, c) * pElevLand.data[src];
+						// The FITTED baseline, not one derived from the model's raw coarse temperature. The
+						// raw value carries a residual the fit does not — but the full path already threw
+						// exactly that away: computeClimate CONSTRUCTS its temperature as tSea + beta*elev
+						// and never uses the raw coarse temperature at all (keeping the raw value here left
+						// the two levels disagreeing by that residual: measured 1.53 C mean, 8.9 C max).
+						// Fitting both the same way is what actually makes them converge — and since the
+						// full path's tile build now UNDOES that construction to get its baseline back,
+						// this path just stores its fit directly.
+						t->tempSea[dst] = tSea.at(r, c);
 					}
 				// At 7.68 km per pixel the coarse level IS the macro surface, so macro == elev and this
 				// path's own (elev - macro) is zero — a coarse tile cannot tell a crag from flat ground.
@@ -488,6 +826,11 @@ namespace Procedural
 				// levels hand it the same reference and cannot disagree.
 				t->macro = t->elev;
 				tile = t;
+
+				// Same contract as fetchTile's save: labeled from the pipeline, inside its lock.
+				const uint64 seed = m_pipeline->seed();
+				saveTileToDisk(tileCachePath(seed, m_pipelinePrecision == EPrecision::Fp16, true, ti, tj),
+				               *t, seed, ti, tj);
 			}
 
 			std::lock_guard<std::mutex> ck(m_cacheMutex);
@@ -506,8 +849,7 @@ namespace Procedural
 	{
 		float elev = 0.0f;     // metres in the MODEL's frame (before worldScale/heightScale)
 		float macro = 0.0f;    // the low-frequency band of elev, same frame
-		float temp = 15.0f;    // C, at the sampled elevation
-		float beta = -0.0065f; // lapse rate, C per MODEL metre (see FieldTile::beta)
+		float tempSea = 15.0f; // C, the SEA-LEVEL baseline (see FieldTile::tempSea)
 		float precip = 800.0f; // mm/yr
 		float slope = 0.0f;    // m/m in WORLD space (already through worldScale * heightScale)
 		bool valid = false;
@@ -638,8 +980,7 @@ namespace Procedural
 
 		s.elev = bilerp(tile->elev);
 		s.macro = bilerp(tile->macro);
-		s.temp = bilerp(tile->temp);
-		s.beta = bilerp(tile->beta);
+		s.tempSea = bilerp(tile->tempSea);
 		s.precip = bilerp(tile->precip);
 
 		// Central differences over the lattice -> WORLD slope. The halo is what lets this work at a tile
@@ -721,11 +1062,10 @@ namespace Procedural
 	// snow-line tweak scales with altitude, so it is folded into lapseOf instead.
 	float TerrainGenV3::temperatureSeaLevelFrom(double worldX, double worldZ, const Sample& s) const
 	{
-		// s.beta — the model's OWN regressed rate — is used here and only here: it is what the model's
-		// temperature was built with, so undoing it is the only way to recover the baseline underneath.
-		// The rate applied on top is ours (lapseOf), which is why the two differ.
-		const float tBase = s.temp - s.beta * std::max(0.0f, s.elev);
-		return tBase + climateWander(worldX, worldZ) + m_cfg.temperatureOffset;
+		// The baseline is recovered at TILE BUILD now (the model's temp = tSea + beta*elev round-trip
+		// is undone there, once per pixel instead of once per sample), so this is just the shaping layer:
+		// the microclimate wander and the planet-wide offset.
+		return s.tempSea + climateWander(worldX, worldZ) + m_cfg.temperatureOffset;
 	}
 
 	// Temperature at the point's FULL surface height (model elevation + the procedural detail).

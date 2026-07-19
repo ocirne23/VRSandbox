@@ -76,7 +76,8 @@ export namespace Procedural
 		// absolute temperature, which nothing consumes. Using one number instead frees those bits, makes the
 		// snow line a dial rather than a model output, and keeps every consumer able to re-derive the
 		// temperature at any height from the baseline alone.
-		// The regressed rate is still read internally, to recover that baseline from the model's temperature.
+		// The regressed rate is still read internally — at tile build — to recover that baseline from the
+		// model's temperature; the tiles then carry only the baseline (FieldTile::tempSea).
 		// Default -0.008 = the measured mean of what the model regresses (its own values run -0.012..-0.004
 		// above 1000 m, so this sits mid-range; Earth's environmental lapse is ~-0.0065).
 		float lapseRate = -0.008f;

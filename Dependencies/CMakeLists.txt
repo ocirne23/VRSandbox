@@ -26,3 +26,10 @@
 # ("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"), build the meshoptimizer
 # target in Release + Debug, copy the .libs over (Debug -> meshoptimizerd.lib) and src/meshoptimizer.h
 # to Include/meshoptimizer.
+#
+# zstd source is kept in zstd/ (v1.5.7, lib + build/cmake only). Rebuilding Lib/zstd(d).lib:
+# cmake -B <tmp> -S zstd/build/cmake -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+#   -DZSTD_BUILD_PROGRAMS=OFF -DZSTD_BUILD_TESTS=OFF -DZSTD_BUILD_SHARED=OFF -DZSTD_BUILD_STATIC=ON
+#   -DZSTD_LEGACY_SUPPORT=OFF -DZSTD_MULTITHREAD_SUPPORT=OFF
+# then build the libzstd_static target in Release + Debug and copy lib/<Config>/zstd_static.lib over
+# (Debug -> zstdd.lib), plus lib/zstd.h and lib/zstd_errors.h to Include/zstd.
