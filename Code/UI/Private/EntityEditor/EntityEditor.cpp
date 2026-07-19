@@ -239,6 +239,9 @@ void EntityEditor::refreshDraftsFromEntity()
 	m_particleDraft = m_hasParticle && getParticleSpawnInfo(e) ? *getParticleSpawnInfo(e) : ParticleComponent::SpawnInfo{};
 	strncpy_s(m_particleEffectBuf, sizeof(m_particleEffectBuf), m_particleDraft.effectPath.c_str(), sizeof(m_particleEffectBuf) - 1);
 
+	m_hasForce = hasComponent<ForceComponent>(e);
+	m_forceDraft = m_hasForce && getForceSpawnInfo(e) ? *getForceSpawnInfo(e) : ForceComponent::SpawnInfo{};
+
 	m_hasScript = hasComponent<ScriptComponent>(e);
 	m_scriptDraft = m_hasScript && getScriptSpawnInfo(e) ? *getScriptSpawnInfo(e) : ScriptComponent::SpawnInfo{};
 	if (m_hasScript)
@@ -326,7 +329,7 @@ void EntityEditor::closeCurrent()
 	m_selected = EntityPtr();
 	m_path.clear();
 	m_baselineText.clear();
-	m_hasScene = m_hasRender = m_hasAnimator = m_hasPhysics = m_hasAudio = m_hasParticle = m_hasScript = false;
+	m_hasScene = m_hasRender = m_hasAnimator = m_hasPhysics = m_hasAudio = m_hasParticle = m_hasForce = m_hasScript = false;
 	m_ownsEntity = true;
 	m_wasPacked = false;
 }
@@ -1132,6 +1135,84 @@ void EntityEditor::renderParticleSection()
 	ImGui::PopID();
 }
 
+void EntityEditor::renderForceSection()
+{
+	if (!m_hasForce)
+	{
+		if (ImGui::Button("+ Add Force"))
+		{
+			m_hasForce = true;
+			m_forceDraft = ForceComponent::SpawnInfo{};
+			commitRespawn();
+		}
+		return;
+	}
+
+	if (!ImGui::CollapsingHeader("Force", ImGuiTreeNodeFlags_DefaultOpen))
+		return;
+	ImGui::PushID("force");
+
+	// Every field respawns the entity on commit (the emitter is created from the SpawnInfo), so edits
+	// commit on release rather than per drag frame.
+	int team = int(m_forceDraft.team);
+	if (ImGui::DragInt("Team", &team, 0.1f, 0, 7)) // Force clamps to MAX_FORCE_TEAMS silently
+		m_forceDraft.team = uint32(glm::clamp(team, 0, 7));
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		commitRespawn();
+
+	ImGui::DragFloat("Output", &m_forceDraft.output, 0.05f, 0.0f, 1000.0f);
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		commitRespawn();
+
+	ImGui::DragFloat("Reach", &m_forceDraft.reach, 0.05f, 0.01f, 10000.0f);
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		commitRespawn();
+
+	ImGui::SliderFloat("Focus", &m_forceDraft.focus, 0.0f, 1.0f);
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		commitRespawn();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("0.5 = sphere spanning the reach line, 0/1 = cones pointed at the emitter/target");
+
+	ImGui::SliderFloat("Distribution", &m_forceDraft.distribution, 0.0f, 1.0f);
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		commitRespawn();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Where the output density sits along the line (0 = emitter end, 1 = target end)");
+
+	ImGui::DragFloat("Width", &m_forceDraft.width, 0.01f, 0.01f, 4.0f);
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		commitRespawn();
+
+	ImGui::DragFloat3("Direction", &m_forceDraft.direction.x, 0.01f);
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		commitRespawn();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Bubble axis in entity space; only matters when Focus != 0.5");
+
+	ImGui::DragFloat3("Offset", &m_forceDraft.offset.x, 0.01f);
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		commitRespawn();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Span START in entity space — the bubble runs Offset .. Offset + Direction * Reach");
+
+	if (ImGui::Button("Centre on entity"))
+	{
+		// The emitter marks the start of the span, so half a reach backwards puts the entity in the middle.
+		const float len2 = glm::dot(m_forceDraft.direction, m_forceDraft.direction);
+		const glm::vec3 axis = len2 > 1e-12f ? m_forceDraft.direction * glm::inversesqrt(len2) : glm::vec3(0.0f, 0.0f, -1.0f);
+		m_forceDraft.offset = axis * (m_forceDraft.reach * -0.5f);
+		commitRespawn();
+	}
+
+	if (ImGui::Button("Remove Force"))
+	{
+		m_hasForce = false;
+		commitRespawn();
+	}
+	ImGui::PopID();
+}
+
 void EntityEditor::renderScriptSection()
 {
 	if (!m_hasScript)
@@ -1209,6 +1290,7 @@ void EntityEditor::renderComponents()
 	renderPhysicsSection();
 	renderAudioSection();
 	renderParticleSection();
+	renderForceSection();
 	renderScriptSection();
 }
 
@@ -1367,6 +1449,13 @@ void EntityEditor::commitRespawn()
 	{
 		auto info = std::make_shared<ParticleComponent::SpawnInfo>(m_particleDraft);
 		typeBits |= uint16(1 << EComponentID_Particle);
+		infos.push_back(std::move(info));
+	}
+
+	if (m_hasForce)
+	{
+		auto info = std::make_shared<ForceComponent::SpawnInfo>(m_forceDraft);
+		typeBits |= uint16(1 << EComponentID_Force);
 		infos.push_back(std::move(info));
 	}
 

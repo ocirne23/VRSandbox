@@ -19,6 +19,7 @@ import Script;
 import Physics;
 import Audio;
 import Particle;
+import Force;
 import Spatial;
 
 Transform composeTransform(const Transform& parent, const Transform& local)
@@ -574,6 +575,28 @@ void ParticleComponent::update(Entity& entity, const Transform& world, float del
     hasLastPos = true;
 }
 
+void ForceComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
+{
+    const float dirLen2 = glm::dot(info.direction, info.direction);
+    localDirection = dirLen2 > 1e-12f ? info.direction * glm::inversesqrt(dirLen2) : glm::vec3(0.0f, 0.0f, -1.0f);
+    localOffset = info.offset;
+    emitter = Globals::forceSystem.createEmitter(info.team,
+        base.pos + base.quat * (localOffset * base.scale), base.quat * localDirection,
+        info.output, info.reach, info.focus, info.distribution, info.width);
+}
+
+void ForceComponent::destroy(Entity& entity, const SpawnInfo&)
+{
+    emitter.destroy();
+}
+
+void ForceComponent::update(Entity& entity, const Transform& world)
+{
+    if (!emitter.isValid())
+        return;
+    emitter.setTransform(world.pos + world.quat * (localOffset * world.scale), world.quat * localDirection);
+}
+
 void AudioComponent::spawn(Entity& entity, const SpawnInfo& spawnInfo, const Transform& base)
 {
     info = &spawnInfo;
@@ -850,6 +873,33 @@ void writeParticleSpawnInfo(const ParticleComponent::SpawnInfo& info, AssetNode&
     out.set("Effect", info.effectPath);
     if (!info.emitting)
         out.set("Emitting", info.emitting);
+}
+
+const ForceComponent::SpawnInfo* getForceSpawnInfo(const Entity* entity)
+{
+    if (!entity->spawnTemplate || !hasComponent<ForceComponent>(entity))
+        return nullptr;
+
+    size_t idx = 0;
+    for (uint16 i = 0; i < uint16(EComponentID_Force); ++i)
+        if (entity->typeBits & (1 << i))
+            ++idx;
+    if (idx >= entity->spawnTemplate->spawnInfos.size())
+        return nullptr;
+    return static_cast<const ForceComponent::SpawnInfo*>(entity->spawnTemplate->spawnInfos[idx].get());
+}
+
+void writeForceSpawnInfo(const ForceComponent::SpawnInfo& info, AssetNode& out)
+{
+    const ForceComponent::SpawnInfo defaults;
+    out.set("Output", info.output);
+    out.set("Reach", info.reach);
+    if (info.team != defaults.team)                 out.addChild("Team").values.emplace_back(std::to_string(info.team));
+    if (info.direction != defaults.direction)       out.set("Direction", info.direction);
+    if (info.offset != defaults.offset)             out.set("Offset", info.offset);
+    if (info.focus != defaults.focus)               out.set("Focus", info.focus);
+    if (info.distribution != defaults.distribution) out.set("Distribution", info.distribution);
+    if (info.width != defaults.width)               out.set("Width", info.width);
 }
 
 int componentIdFromName(std::string_view name)

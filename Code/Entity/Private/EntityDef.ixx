@@ -31,7 +31,8 @@ export enum EComponentID : uint16
     EComponentID_Physics  = 3,
     EComponentID_Audio    = 4,
     EComponentID_Particle = 5,
-    EComponentID_Script   = 6, // should be last so all other components are available on spawn
+    EComponentID_Force    = 6,
+    EComponentID_Script   = 7, // should be last so all other components are available on spawn
 };
 
 export class Entity

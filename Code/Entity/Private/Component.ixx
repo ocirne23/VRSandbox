@@ -11,6 +11,7 @@ import Script;
 import Physics;
 import Audio;
 import Particle;
+import Force;
 import Spatial;
 
 import RendererVK;
@@ -33,7 +34,7 @@ export void breakContiguousAllocationFromRoot(Entity* root);
 // (refcount 1) — i.e. destroying the tree is guaranteed to destroy all of them.
 export bool contiguousTreeSolelyOwned(Entity* entity);
 
-export constexpr uint16 MaxInlineComponentTypes = 7;
+export constexpr uint16 MaxInlineComponentTypes = 8;
 export constexpr uint16 ComponentAlignment = 16;
 
 export struct SceneComponent
@@ -342,6 +343,43 @@ export struct ParticleComponent
     void deserialize(const AssetNode&) {}
 };
 
+// A forcefield bubble attached to the entity ("Component Force" in .pre files): creates a ForceEmitter
+// (Force library) and keeps it on the entity's world transform every update. The field is authored in
+// the entity's local frame and spans `Offset` .. `Offset + Direction * Reach` — the emitter sits at the
+// START of that span, not its centre, so an entity-centred sphere wants Offset = -Direction * Reach/2.
+// Reach is world units and does NOT scale with the entity (the field is a gameplay volume, not geometry).
+// Gameplay retunes the field and reads the GPU-latched applied force / pressure through `emitter`;
+// there is no authored on/off, so a script silences one with emitter.setOutput(0).
+export struct ForceComponent
+{
+    static constexpr EComponentID getId() { return EComponentID_Force; }
+
+    ~ForceComponent() {}
+
+    ForceEmitter emitter;
+    glm::vec3 localDirection = glm::vec3(0.0f, 0.0f, -1.0f); // bubble axis in entity space (entity forward)
+    glm::vec3 localOffset    = glm::vec3(0.0f);              // span start in entity space, scaled by the entity
+
+    struct SpawnInfo
+    {
+        uint32 team = 0;                                    // [0, MAX_FORCE_TEAMS); same-team fields merge
+        glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f); // local bubble axis; only matters when focus != 0.5
+        glm::vec3 offset = glm::vec3(0.0f);                 // local span start
+        float output = 1.0f;       // total field strength; must beat the iso threshold to show a bubble
+        float reach = 5.0f;        // total extent along the axis
+        float focus = 0.5f;        // 0.5 = sphere spanning the line, 0/1 = cones pointed at emitter/target
+        float distribution = 0.5f; // where the density sits along the line (0 = emitter end, 1 = target end)
+        float width = 1.0f;        // lateral scale, reach untouched
+    };
+
+    void spawn(Entity& entity, const SpawnInfo& info, const Transform& base);
+    void destroy(Entity& entity, const SpawnInfo& info);
+    void update(Entity& entity, const Transform& world); // emitter follows the entity (position + axis)
+
+    void serialize(AssetNode&) const {}
+    void deserialize(const AssetNode&) {}
+};
+
 export Transform composeTransform(const Transform& parent, const Transform& local);
 
 export const RenderComponent::SpawnInfo* getRenderSpawnInfo(const Entity* entity);
@@ -349,6 +387,7 @@ export const AnimatorComponent::SpawnInfo* getAnimatorSpawnInfo(const Entity* en
 export const PhysicsComponent::SpawnInfo* getPhysicsSpawnInfo(const Entity* entity);
 export const AudioComponent::SpawnInfo* getAudioSpawnInfo(const Entity* entity);
 export const ParticleComponent::SpawnInfo* getParticleSpawnInfo(const Entity* entity);
+export const ForceComponent::SpawnInfo* getForceSpawnInfo(const Entity* entity);
 export const ScriptComponent::SpawnInfo* getScriptSpawnInfo(const Entity* entity);
 
 // Serializes a render spawn recipe into a "Component Render" node; mirror of World::buildRenderSpawnInfo.
@@ -366,6 +405,9 @@ export void writeAudioSpawnInfo(const AudioComponent::SpawnInfo& info, AssetNode
 // Serializes a particle spawn recipe into a "Component Particle" node.
 export void writeParticleSpawnInfo(const ParticleComponent::SpawnInfo& info, AssetNode& out);
 
+// Serializes a force spawn recipe into a "Component Force" node.
+export void writeForceSpawnInfo(const ForceComponent::SpawnInfo& info, AssetNode& out);
+
 export constexpr const char* componentTypeName(EComponentID id)
 {
     switch (id)
@@ -376,6 +418,7 @@ export constexpr const char* componentTypeName(EComponentID id)
     case EComponentID_Physics: return "Physics";
     case EComponentID_Audio:  return "Audio";
     case EComponentID_Particle: return "Particle";
+    case EComponentID_Force:  return "Force";
     case EComponentID_Script: return "Script";
     default:                  return "Unknown";
     }
@@ -392,6 +435,7 @@ export namespace EntityComponentDetail
         alignUp(uint16(sizeof(PhysicsComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(AudioComponent)),   ComponentAlignment),
         alignUp(uint16(sizeof(ParticleComponent)), ComponentAlignment),
+        alignUp(uint16(sizeof(ForceComponent)),   ComponentAlignment),
         alignUp(uint16(sizeof(ScriptComponent)),  ComponentAlignment),
     };
     static_assert(EComponentID_Scene == 0);
@@ -400,7 +444,8 @@ export namespace EntityComponentDetail
     static_assert(EComponentID_Physics == 3);
     static_assert(EComponentID_Audio == 4);
     static_assert(EComponentID_Particle == 5);
-    static_assert(EComponentID_Script == 6);
+    static_assert(EComponentID_Force == 6);
+    static_assert(EComponentID_Script == 7);
 
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);
 }

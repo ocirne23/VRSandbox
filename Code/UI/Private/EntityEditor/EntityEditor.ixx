@@ -53,6 +53,7 @@ private:
 	void renderPhysicsSection();
 	void renderAudioSection();
 	void renderParticleSection();
+	void renderForceSection();
 	void renderScriptSection();
 
 	// Editing an already-live scene entity in place (via "Open Selected") vs. a dedicated one this editor
@@ -122,6 +123,7 @@ private:
 	bool m_hasPhysics  = false;
 	bool m_hasAudio    = false;
 	bool m_hasParticle = false;
+	bool m_hasForce    = false;
 	bool m_hasScript   = false;
 
 	RenderComponent::SpawnInfo   m_renderDraft;
@@ -129,6 +131,7 @@ private:
 	PhysicsComponent::SpawnInfo  m_physicsDraft;
 	AudioComponent::SpawnInfo    m_audioDraft;
 	ParticleComponent::SpawnInfo m_particleDraft;
+	ForceComponent::SpawnInfo    m_forceDraft;
 	ScriptComponent::SpawnInfo   m_scriptDraft;
 
 	char m_particleEffectBuf[256] = {}; // edit buffer for m_particleDraft.effectPath

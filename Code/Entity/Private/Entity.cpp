@@ -101,6 +101,11 @@ void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float 
         if (!frozen)
             particle->update(*this, world, deltaSeconds); // effect follows the entity (position + velocity)
 
+    // Not frozen-gated: placing the bubble is not simulation, and an editor document being dragged by the
+    // gizmo still has to carry its field along.
+    if (ForceComponent* force = getComponent<ForceComponent>(this))
+        force->update(*this, world);
+
     if (sc)
         for (const EntityPtr& child : sc->children)
             child->updateTree(renderer, world, deltaSeconds, frozen);
@@ -245,6 +250,13 @@ void Entity::createComponent(EComponentID id, uint16 componentOffset, const void
         pc->spawn(*this, *static_cast<const ParticleComponent::SpawnInfo*>(info), base);
         break;
     }
+    case EComponentID_Force:
+    {
+        ForceComponent* fc = reinterpret_cast<ForceComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        new (fc) ForceComponent();
+        fc->spawn(*this, *static_cast<const ForceComponent::SpawnInfo*>(info), base);
+        break;
+    }
     case EComponentID_Script:
     {
         ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
@@ -303,6 +315,13 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
         pc->~ParticleComponent();
         break;
     }
+    case EComponentID_Force:
+    {
+        ForceComponent* fc = reinterpret_cast<ForceComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        fc->destroy(*this, *static_cast<const ForceComponent::SpawnInfo*>(info));
+        fc->~ForceComponent();
+        break;
+    }
     case EComponentID_Script:
     {
         ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
@@ -325,6 +344,7 @@ void Entity::serializeComponent(EComponentID id, AssetNode& out)
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->serialize(out);  break;
     case EComponentID_Audio:  getComponent<AudioComponent>(this)->serialize(out);    break;
     case EComponentID_Particle: getComponent<ParticleComponent>(this)->serialize(out); break;
+    case EComponentID_Force:  getComponent<ForceComponent>(this)->serialize(out);    break;
     case EComponentID_Script: getComponent<ScriptComponent>(this)->serialize(out);   break;
     default: break;
     }
@@ -340,6 +360,7 @@ void Entity::deserializeComponent(EComponentID id, const AssetNode& in)
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->deserialize(in);  break;
     case EComponentID_Audio:  getComponent<AudioComponent>(this)->deserialize(in);    break;
     case EComponentID_Particle: getComponent<ParticleComponent>(this)->deserialize(in); break;
+    case EComponentID_Force:  getComponent<ForceComponent>(this)->deserialize(in);    break;
     case EComponentID_Script: getComponent<ScriptComponent>(this)->deserialize(in);   break;
     default: break;
     }

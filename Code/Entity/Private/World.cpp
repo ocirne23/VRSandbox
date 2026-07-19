@@ -728,6 +728,21 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             Log::warning("Scene: entity '" + tmpl.displayName + "' has a Particle component without an Effect path, skipping");
     }
 
+    if (const AssetNode* forceNode = findComponentNode(node, "Force"))
+    {
+        auto info = std::make_shared<ForceComponent::SpawnInfo>();
+        if (const AssetNode* n = forceNode->find("Team"))         info->team = uint32(glm::max(n->asInt(), 0));
+        if (const AssetNode* n = forceNode->find("Direction"))    info->direction = n->asVec3(info->direction);
+        if (const AssetNode* n = forceNode->find("Offset"))       info->offset = n->asVec3(info->offset);
+        if (const AssetNode* n = forceNode->find("Output"))       info->output = n->asFloat(0, info->output);
+        if (const AssetNode* n = forceNode->find("Reach"))        info->reach = n->asFloat(0, info->reach);
+        if (const AssetNode* n = forceNode->find("Focus"))        info->focus = n->asFloat(0, info->focus);
+        if (const AssetNode* n = forceNode->find("Distribution")) info->distribution = n->asFloat(0, info->distribution);
+        if (const AssetNode* n = forceNode->find("Width"))        info->width = n->asFloat(0, info->width);
+        typeBits |= uint16(1 << EComponentID_Force);
+        tmpl.spawnInfos.emplace_back(std::move(info));
+    }
+
     if (const AssetNode* scriptNode = findComponentNode(node, "Script"))
     {
         auto info = std::make_shared<ScriptComponent::SpawnInfo>();
