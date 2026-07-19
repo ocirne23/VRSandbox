@@ -224,7 +224,7 @@ void VolumetricFogPipeline::reloadShaders(vk::RenderPass renderPass)
 void VolumetricFogPipeline::record(CommandBuffer& commandBuffer, uint32 frameIdx, const RecordParams& params)
 {
     vk::CommandBuffer cmd = commandBuffer.getCommandBuffer();
-    const uint32 prevIdx = (frameIdx + 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
+    const uint32 prevIdx = (frameIdx + RendererVKLayout::NUM_FRAMES_IN_FLIGHT - 1) % RendererVKLayout::NUM_FRAMES_IN_FLIGHT;
     const uint32 gx = (RendererVKLayout::VOL_FROXEL_X + 7) / 8;
     const uint32 gy = (RendererVKLayout::VOL_FROXEL_Y + 7) / 8;
 
