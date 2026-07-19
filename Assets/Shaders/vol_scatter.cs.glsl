@@ -151,6 +151,31 @@ float volRayVisibility(vec3 origin, vec3 dir, float tMax)
     return rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionTriangleEXT ? 0.0 : 1.0;
 }
 
+// Sun visibility for DISTANT froxels from the baked terrain height cascades: both TLAS rays (instances
+// range-bounded by RT/GI/TLAS Range) and the PCSS cascades run out of data well before a long fog range,
+// leaving far fog uniformly lit. Marching the height map keeps mountains shadowing the fog out to the
+// far cascade's reach, for a few texture taps instead of a full-length ray. The occlusion test is a SOFT
+// horizon (how far the ray clears the terrain, relative to a penumbra that widens with distance — the
+// sun cone half-angle, u_fogParams4.w): fully deterministic, so unlike a jittered binary march it needs
+// no temporal integration at all — far fog shadows hold perfectly still under camera motion.
+float terrainSunVisibility(vec3 pos, vec3 sunDir)
+{
+    if (sunDir.y <= 0.0)
+        return 0.0; // sun below the horizon
+    const float spread = max(u_fogParams4.w, 0.015); // penumbra growth per meter along the ray
+    float vis = 1.0;
+    float t = 25.0; // exponential steps, ~12.8km reach
+    for (int i = 0; i < 10; ++i)
+    {
+        const vec3 p = pos + sunDir * t;
+        vis = min(vis, clamp((p.y - terrainHeightAt(p.xz)) / (t * spread + 4.0), 0.0, 1.0));
+        if (vis <= 0.0)
+            return 0.0;
+        t *= 2.0;
+    }
+    return vis;
+}
+
 // Radiance scattered toward the camera from one grid light: same type encoding (point/spot/rect/tube)
 // and falloff as the surface path, but with the HG phase in place of the NdotL/BRDF.
 vec3 volLightScatter(LightInfo light, vec3 pos, vec3 viewDir, float g, bool shadowRays)

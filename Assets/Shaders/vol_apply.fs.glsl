@@ -27,11 +27,12 @@ layout (location = 0) out vec4 out_color;
 // The fog volume itself is built once for the centre view, sampled here at each eye's reconstructed world pos.
 layout (push_constant) uniform ViewPC { uint u_viewIndex; };
 
-// (fog base world Y, terrain height) at worldXZ — the same terrain-follow datum vol_scatter builds per froxel.
-vec2 volFarFieldGround(vec2 worldXZ)
+// (fog base world Y, terrain height) at worldXZ — the terrain-follow datum vol_scatter builds per froxel,
+// with the macro altitude weighted by `follow` (0 = the layer sits at sea level).
+vec2 volFarFieldGround(vec2 worldXZ, float follow)
 {
     const vec4 d = terrainDataAt(worldXZ);
-    return vec2(u_fogParams0.y + u_fogParams3.x * (u_fogParams5.w + max(d.w, 0.0)), d.x);
+    return vec2(u_fogParams0.y + u_fogParams3.x * (u_fogParams5.w + max(d.w, 0.0) * follow), d.x);
 }
 
 // Height fog over the ray segment [t0, t1] (t0 = the froxel volume's far plane), in the same
@@ -41,6 +42,12 @@ vec2 volFarFieldGround(vec2 worldXZ)
 // exactly closed-form per sub-segment (a linear ground just subtracts its slope from the ray's). Nothing
 // samples density, so there is no integration error: step count only sets how finely the km-scale ground
 // profile is tracked.
+//
+// Terrain follow and the regional fields both FADE OUT along the ray. They are local properties, while the
+// tail past the march is unbounded and inherits the last sub-segment — at full strength one sample governs
+// an infinite integral, so a zero-fog region erases the horizon along its azimuth and a high macro altitude
+// puts the base above the ray, filling the sky over that spot with a column of fog. Full weight at t0 keeps
+// the seam with the froxel volume exact; by `reach` both have settled to the global medium at sea level.
 vec4 volFarField(vec3 dir, float t0, float t1)
 {
     const float density = u_fogParams0.x * u_fogParams9.y;
@@ -48,9 +55,10 @@ vec4 volFarField(vec3 dir, float t0, float t1)
         return vec4(0.0, 0.0, 0.0, 1.0);
     const float falloff = u_fogParams0.z * u_fogParams9.z;
     const float tauOpaque = 12.0; // transmittance < 1e-5
+    const bool followsTerrain = terrainHeightMapPresent() && u_fogParams3.x > 0.0;
 
     float tau;
-    if (!terrainHeightMapPresent() || u_fogParams3.x <= 0.0)
+    if (!followsTerrain)
     {
         tau = volAnalyticOpticalDepth(u_viewPos, dir, t0, t1, u_fogParams0.y, falloff, density);
     }
@@ -63,26 +71,28 @@ vec4 volFarField(vec3 dir, float t0, float t1)
         const float tEnd = min(t1, t0 + reach);
         const int steps = max(int(u_fogParams9.w), 1);
 
-        vec2 gPrev = volFarFieldGround(u_viewPos.xz + dir.xz * t0);
+        vec2 gPrev = volFarFieldGround(u_viewPos.xz + dir.xz * t0, 1.0);
         float tPrev = t0;
         tau = 0.0;
-        // Carried out of the loop: the tail continues with the last sub-segment's medium, since the map
-        // has no data past `reach` either. Letting it fall back to the unmodulated density instead puts a
-        // step in d(tau)/dt at a fixed distance, which reads as the fog abruptly thickening out there.
-        float dens = density;
+        float dens = density; // last sub-segment's medium; the tail continues on it
         float k = falloff;
 
         for (int i = 1; i <= steps; ++i)
         {
             const float tNext = mix(t0, tEnd, float(i) / float(steps));
-            const vec2 gNext = volFarFieldGround(u_viewPos.xz + dir.xz * tNext);
+            const vec2 gNext = volFarFieldGround(u_viewPos.xz + dir.xz * tNext,
+                                                 1.0 - smoothstep(0.25 * reach, reach, tNext - t0));
             const float len = tNext - tPrev;
 
-            if (u_fogParams6.z > 0.0) // regional fog fields, as vol_scatter applies them per froxel
+            const float midT = 0.5 * (tPrev + tNext);
+            const float wRegion = u_fogParams6.z * (1.0 - smoothstep(0.0, reach, midT - t0));
+            dens = density;
+            k = falloff;
+            if (wRegion > 0.001) // regional fields, as vol_scatter applies them per froxel
             {
-                const vec4 climate = terrainClimateNearestAt(u_viewPos.xz + dir.xz * (0.5 * (tPrev + tNext)));
-                dens = density * mix(1.0, climate.x, u_fogParams6.z);
-                k = falloff * mix(1.0, fogFalloffFromTemperature(terrainTemperatureAt(climate, 0.5 * (gPrev.y + gNext.y))), u_fogParams6.z);
+                const vec4 climate = terrainClimateNearestAt(u_viewPos.xz + dir.xz * midT);
+                dens *= mix(1.0, climate.x, wRegion);
+                k *= mix(1.0, fogFalloffFromTemperature(terrainTemperatureAt(climate, 0.5 * (gPrev.y + gNext.y))), wRegion);
             }
 
             tau += volAnalyticOpticalDepthLinear(u_viewPos.y + dir.y * tPrev - gPrev.x,
@@ -104,7 +114,7 @@ vec4 volFarField(vec3 dir, float t0, float t1)
         return vec4(0.0, 0.0, 0.0, 1.0);
 
     // Lighting is constant over the segment, so the single-scatter integral collapses: d(tau)/dt is the
-    // extinction, hence integral(rho * exp(-tau)) == 1 - T. Sun is unshadowed — the froxel volume's terrain
+    // extinction, hence integral(rho * exp(-tau)) == 1 - T. Sun unshadowed: the froxel volume's terrain
     // shadow march is a sparse min() that only holds up filtered and temporally blended.
     const vec3 sunDir = normalize(u_sunDirection.xyz);
     vec3 inLight = atmosTransmittanceToLight(0.0, sunDir, u_skyUp) * u_sunColor.rgb
