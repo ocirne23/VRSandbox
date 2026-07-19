@@ -213,6 +213,9 @@ public:
     {
         m_terrainParams = glm::vec4(meshRadius, glm::min(lapseRate, 0.0f), seaLevel, 0.0f);
     }
+    // The streamed-mesh coverage radius above (0 = no terrain mesh up). CPU-side ocean culling must
+    // fence on the SAME value its vertex shaders do, or it deletes water the VS would have drawn.
+    float getTerrainMeshRadius() const { return m_terrainParams.x; }
     // One terrain splat material: BC-compressed .dds paths (relative to Assets/). Which climate it covers
     // is NOT here — see setTerrainSplatClimate; textures are heavy and change ~never, the climate boxes
     // are two dozen floats and track live tweaks.

@@ -111,9 +111,9 @@ export namespace Procedural
 		// --- Tweak-backed configuration (source of truth; the generator/ChunkParams are built from these) ---
 		bool  m_enabled = true;
 		int   m_seed = 62500;
-		int   m_chunkSize = 512;
+		int   m_chunkSize = 1024;
 		int   m_lod0Res = 512;
-		int   m_ringRadius = 4;   // max generation range from the camera chunk, in chunks
+		int   m_ringRadius = 32;   // max generation range from the camera chunk, in chunks
 		float m_lodStep = 1.0f;   // LOD0 band width in chunks (fractional ok); each next LOD band is twice as wide (geometric)
 		int   m_maxLod = 4;
 		float m_seaLevel = 0.0f;

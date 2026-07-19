@@ -20,6 +20,12 @@ layout (binding = OCEAN_MAPS_BINDING) uniform sampler2DArray u_oceanMaps;
 
 // (terrain height, water surface level) at worldXZ; open-ocean bottom / sea level without terrain data.
 // Depth derives live as level - height; the clipmap lifts its vertices by level - sea level.
+//
+// Fades back to open ocean across the outermost cascade's border. The sampler is clamp-to-edge, so
+// past the map its border texel extends forever: where that texel is land, every wave shoal-fades to
+// nothing and the sea reads dead flat, with a DEAD-STRAIGHT seam running to the horizon (the square
+// map edge in perspective). Beyond the data the world model is open sea — which is what the horizon
+// band exists to draw — so blend to it rather than trusting the clamp.
 vec2 oceanSampleShoreData(vec2 worldXZ)
 {
     float height = u_oceanParams2.w - u_oceanParams1.z; // open-ocean bottom: sea level - depth D
@@ -27,9 +33,15 @@ vec2 oceanSampleShoreData(vec2 worldXZ)
 #ifdef TERRAIN_HEIGHT_BINDING
     if (terrainHeightMapPresent())
     {
-        const vec4 td = terrainDataAt(worldXZ); // .x = terrain height, .y = water level
-        height = td.x;
-        level = td.y;
+        const float invOuter = u_fogParams5.z > 0.0 ? u_fogParams5.z : u_fogParams3.y; // far cascade, else near
+        const vec2 uv = abs((worldXZ - u_fogParams5.xy) * invOuter); // 0.5 = the map's edge
+        const float w = 1.0 - smoothstep(0.40, 0.49, max(uv.x, uv.y));
+        if (w > 0.0)
+        {
+            const vec4 td = terrainDataAt(worldXZ); // .x = terrain height, .y = water level
+            height = mix(height, td.x, w);
+            level = mix(level, td.y, w);
+        }
     }
 #endif
     return vec2(height, level);
@@ -99,6 +111,30 @@ bool oceanVertexCulled(vec2 worldXZ, float cellSize, vec2 shoreHW)
     return shoreHW.y - shoreHW.x < -(margin + u_oceanParams7.w + err);
 }
 
+// The water depth the WAVES use: the baked depth, floored at "Ocean/Shore/Horizon depth" once past
+// "Horizon depth range" (0 = off, always take the map literally).
+//
+// At range the depth field cannot be trusted to be deep enough. The far cascade point-samples a
+// coarse surface, its texels average shore slopes into the water, TerrainGenV3 returns height ==
+// water level (depth EXACTLY 0) for any sample it could not resolve, and the vertical scale
+// compresses real shelves by metersPerPixel/30 — every one of those errs SHALLOW. That is the
+// dangerous direction: depth drives the shoal fade, which scales the wave slopes and (as fade^2) the
+// LEAN variance standing in for filtered-out slopes, so a shallow reading strips the surface of
+// microfacet roughness, collapses alpha to its 0.02 floor and mirror-reflects the sky — pixel for
+// pixel what wind 0 looks like. Reading too DEEP out there costs nothing visible.
+//
+// Only the assumed SEABED moves, never the surface, so this cannot put water over land. The land cull
+// deliberately keeps reading the RAW depth: culling is about what is buried, not about what the waves
+// should look like.
+float oceanEffectiveDepth(vec2 worldXZ, float depth)
+{
+    const float range = u_oceanParams4.x;
+    if (range <= 0.0)
+        return depth;
+    const float t = smoothstep(range * 0.5, range, distance(worldXZ, u_viewPos.xz));
+    return max(depth, u_oceanParams3.y * t);
+}
+
 // Fake shoaling: a cascade fades out below depth = "Shoal depth scale" * its patch size — long swell
 // dies offshore, chop runs to the beach, everything reaches zero at the waterline.
 float oceanShoalFade(float depth, float patchSize)
@@ -138,7 +174,7 @@ float oceanSwashWeight(float depth, float waterLevel)
 vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph, vec2 shoreHW)
 {
     const float chop = u_oceanParams0.w;
-    const float depth = shoreHW.y - shoreHW.x;
+    const float depth = oceanEffectiveDepth(worldXZ, shoreHW.y - shoreHW.x);
     vec3 disp = vec3(0.0);
     float sw = 0.0;
     // Buried deeper than the swash band: all fades are zero — skip the fetches (bit-identical result).
@@ -155,6 +191,18 @@ vec3 oceanSampleDisplacement(vec2 worldXZ, float cellSize, float morph, vec2 sho
             disp += vec3(d.x * chop, d.y, d.z * chop) * oceanShoalFade(depth, L);
             rawY += d.y;
             rawXZ += d.xz;
+        }
+        // Breaking limit: a wave cannot stand taller than the water it is in (Miche/McCowan, H ~ 0.78 d).
+        // The per-cascade shoal fade models when a BAND starts feeling the bottom, which is a function of
+        // its wavelength and cannot express this: with cascade sizes 8x apart, whatever fade depth suits
+        // the swell leaves the mid band at full amplitude in a metre of water. Scales the whole shoaled
+        // sum (chop included) rather than clipping the crest, so shallow water gets proportionally
+        // smaller waves instead of flat-topped ones; rational soft limit, same shape as the backflow cap.
+        // Applied to the cascade sum ONLY — the swash and its backflow ride the raw field on purpose.
+        if (u_oceanParams10.x > 0.0 && depth > 0.0)
+        {
+            const float cap = u_oceanParams10.x * depth;
+            disp *= cap / (cap + abs(disp.y));
         }
         sw = oceanSwashWeight(depth, shoreHW.y);
         // Swash backflow: the raw chop slides the tongue seaward as the wave recedes. Gated by the
@@ -205,7 +253,7 @@ void oceanSampleSurface(vec2 worldXZ, out vec2 slope, out float jacobian, out ve
 {
     const float chop = u_oceanParams0.w;
     shoreHW = oceanSampleShoreData(worldXZ);
-    const float depth = shoreHW.y - shoreHW.x;
+    const float depth = oceanEffectiveDepth(worldXZ, shoreHW.y - shoreHW.x);
     // Buried under land: flat calm surface (with swash on, the run-up band still shades).
     if (depth <= (u_oceanParams7.z > 0.0 ? -u_oceanParams7.w : 0.0))
     {
@@ -306,7 +354,7 @@ float oceanSampleTurbulence(vec2 worldXZ, float footprint)
 vec3 oceanSampleNormalLod(vec2 worldXZ, float cellSize, float morph, vec2 shoreHW)
 {
     const float chop = u_oceanParams0.w;
-    const float depth = shoreHW.y - shoreHW.x;
+    const float depth = oceanEffectiveDepth(worldXZ, shoreHW.y - shoreHW.x);
     if (depth <= 0.0)
         return vec3(0.0, 1.0, 0.0); // buried under land: flat
     const vec2 fr = oceanFlowRotation(worldXZ);

@@ -88,18 +88,25 @@ export namespace Procedural
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---
 		bool  m_enabled = true;
 		float m_seaLevel = 0.0f;   // mirrors the terrain's datum; set every update(), never tweaked here
-		float m_ringCell = 2.0f;     // ring 0 cell size (m); doubles per ring. Reach = ringCell*res/2*2^(rings-1)
+		// Reach = ringCell * res/2 * 2^(rings-1), and every ring costs the same vertex count whatever its
+		// cell size — so buy near-field detail by trading cell size for ring COUNT, not by biasing the mip
+		// (a finer mip samples detail the mesh cannot hold and simply aliases). At 2 m cells the finest
+		// cascade sat inside ~3 texels and was averaged out of the geometry entirely; 0.5 m gives it ~13
+		// and it comes back as real chop. 0.5 x 7 rings holds the same 4 km reach 2 x 5 rings had.
+		float m_ringCell = 0.5f;       // ring 0 cell size (m); doubles per ring
 		int   m_ringRes = 256;         // cells per axis per ring (ring 0 is a full grid, outer rings are annuli)
-		int   m_rings = 5;             // ring count (defaults: 16m fine region, ~1km reach)
+		int   m_rings = 7;             // ring count (defaults: 128 m fine region, ~4 km reach)
 		// One coarse quad band appended past the outermost ring, stretching its edge lattice out to the
 		// camera far plane — the sea meets the horizon in every direction instead of ending at the ring
 		// reach. Its inner edge sits on the last ring's fully-morphed (2x cell) lattice at the matching
 		// mip, so the seam is watertight by the same CDLOD construction the rings use.
 		bool  m_horizonBand = true;
+		float m_horizonLevelOffset = -0.5f; // vertical shift (m) of the band only; negative sinks it under
+		                                   // distant near-sea-level terrain (it is cull-exempt)
 		float m_lastFar = 0.0f;        // camera far plane the current grid was built for (change = rebuild)
 		// Bias on the ring-matched displacement mip (negative = sample finer than the ring's Nyquist:
 		// slightly more detail, some sampling shimmer while moving). With fixed-cell rings 0 should be fine.
-		float m_detailBias = 0.0f;
+		float m_detailBias = 0.3f;
 
 		// --- Spectrum (TMA/JONSWAP + finite-depth dispersion) + shading; all live via setOceanParams ---
 		float m_windSpeed = 20.0f;     // U10 (m/s): the main sea-state knob
@@ -116,7 +123,14 @@ export namespace Procedural
 		float m_amplitude = 1.0f;      // artistic scale on the spectrum (1 = physical)
 		float m_choppiness = 1.1f;     // horizontal displacement lambda
 		float m_normalStrength = 1.0f;
-		glm::vec3 m_cascadeSizes = glm::vec3(384.0f, 47.0f, 6.3f); // FFT patch sizes (m)
+		// FFT patch sizes (m). Each cascade TILES with its own size, so the largest one sets how often the
+		// sea visibly repeats: at wind 20 / fetch 300 km the JONSWAP peak is a ~200 m wavelength, and the
+		// old 384 m patch held under two of them — the same crest pair every 384 m, ~10 times across the
+		// view. These hold ~7.7 instead. Scaled as a SET on purpose: the band split hands cascade c+1
+		// everything below 0.5*Nyquist(L_c), so growing only cascade 0 would push 15 m waves into a 47 m
+		// tile and just move the repetition down a cascade. Ratios (8.17, 7.52) stay non-rational so the
+		// three tilings never re-align.
+		glm::vec3 m_cascadeSizes = glm::vec3(1536.0f, 188.0f, 25.0f);
 
 		glm::vec3 m_absorption = glm::vec3(0.897f, 0.082f, 0.15f);  // Beer-Lambert extinction (1/m)
 		glm::vec3 m_scatterColor = glm::vec3(0.047f, 0.1f, 0.15f);
@@ -139,7 +153,21 @@ export namespace Procedural
 		float m_turbidity = 0.0f;    // entrained bubbles: milky brightening + roughness of the wake
 
 		// --- Shore interaction (driven by the streamer's baked terrain-data map) ---
-		float m_shoalScale = 0.02f;     // waves fade below depth = scale * cascade patch size
+		// Waves fade below depth = scale * cascade patch size. Cut 4x alongside the 4x cascade sizes so the
+		// ABSOLUTE fade depths (and so the whole coastline look) are unchanged by that change — raise it
+		// if you want the bigger swell to start feeling the bottom further out, which is the physical truth.
+		float m_shoalScale = 0.005f;
+		// Past m_horizonDepthRange the waves assume at least m_horizonDepth of water, whatever the baked
+		// map says. Distant depth errors all run SHALLOW (coarse texels average shore slopes into the
+		// water, V3 reports depth exactly 0 for unresolved samples, vertScale compresses real shelves)
+		// and shallow is ruinous: it fades out the waves AND the LEAN variance, leaving a sky mirror
+		// that looks exactly like wind 0. Only the seabed moves, never the surface. 0 range = off.
+		float m_horizonDepth = 2.0f;
+		float m_horizonDepthRange = 3000.0f;
+		// Breaking limit (max wave height as a fraction of depth). The per-cascade shoal fade keys on each
+		// band's WAVELENGTH, so with cascade sizes 8x apart no single fade depth can both let the swell
+		// live offshore and keep the mid band down in a metre of water — this is the other half.
+		float m_waveHeightLimit = 1.0f;
 		float m_shoreFoamDepth = 8.0f;  // surf band: water-column height (m) that churns white; 0 = off
 		float m_shoreFoamMax = 0.75f;   // surf band opacity cap: keeps the refracted bottom visible through the foam
 		float m_swashAmp = 0.5f;        // swash run-up: un-shoaled wave height riding up the beach (0 = hard cutoff)
@@ -182,6 +210,7 @@ export namespace Procedural
 			SpatialEntry spatialEntry;
 			glm::vec3 localCenter = glm::vec3(0.0f); // mesh-local bounds center (the node snap adds on top)
 			glm::vec2 halfXZ = glm::vec2(0.0f);      // mesh-local XZ half extents (dry-sector test footprint)
+			bool horizonBand = false;                // never under-terrain-culled (see rebuildGrid)
 			float radius = 0.0f; // bounds sphere radius; the XZ half-diagonal dominates, so it also covers
 			                     // the vertical wave/swash displacement the flat mesh knows nothing about
 		};

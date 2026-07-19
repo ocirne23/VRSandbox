@@ -299,7 +299,9 @@ void main()
     const float shoreFoamDepth = u_oceanParams5.z;
     if (shoreFoamDepth > 0.0)
     {
-        const float shoreDepth = shoreHW.y - shoreHW.x;
+        // Same floored depth the waves use: a distant too-shallow reading otherwise drives the
+        // waterline lace term (column < 0.35 * Shore foam depth) across whole bays as a white wash.
+        const float shoreDepth = oceanEffectiveDepth(in_uv, shoreHW.y - shoreHW.x);
         const float waveH = in_pos.y - shoreHW.y;               // surface height above the LOCAL calm water level
         const float column = max(shoreDepth, 0.0) + waveH;      // instantaneous water column at this pixel
         const float nearShore = 1.0 - smoothstep(shoreFoamDepth, 4.0 * shoreFoamDepth, shoreDepth);

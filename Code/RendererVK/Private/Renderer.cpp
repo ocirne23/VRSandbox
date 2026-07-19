@@ -752,8 +752,9 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanAbsorption = glm::vec4(ocean.absorption, ocean.roughness);
     ubo.oceanScatter = glm::vec4(ocean.scatterColor, ocean.scatterStrength);
     ubo.oceanFoam = glm::vec4(ocean.foamColor, ocean.foamBias);
-    ubo.oceanParams3 = glm::vec4(0.0f, 0.0f, glm::clamp(ocean.foamDecay, 0.0f, 0.999f), glm::clamp(ocean.detailBias, -4.0f, 4.0f));
-    ubo.oceanParams4 = glm::vec4(0.0f,
+    ubo.oceanParams3 = glm::vec4(ocean.horizonLevelOffset, glm::max(ocean.horizonDepth, 0.0f),
+        glm::clamp(ocean.foamDecay, 0.0f, 0.999f), glm::clamp(ocean.detailBias, -4.0f, 4.0f));
+    ubo.oceanParams4 = glm::vec4(glm::max(ocean.horizonDepthRange, 0.0f),
         glm::clamp(ocean.foamSpread * 0.25f, 0.0f, 0.95f), glm::max(ocean.shoalScale, 0.0f), glm::max(ocean.foamSoftness, 0.02f));
     ubo.oceanParams5 = glm::vec4(glm::max(ocean.foamBoost, 0.0f), glm::clamp(ocean.turbidity, 0.0f, 1.0f), glm::max(ocean.shoreFoamDepth, 0.0f), glm::max(ocean.foamBreakAccel, 0.01f));
     ubo.oceanParams6 = glm::vec4(glm::max(ocean.farCullError, 0.0f), glm::max(ocean.glintFilter, 0.0f),
@@ -767,6 +768,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         glm::max(ocean.swashFlow, 0.0f), glm::max(ocean.rtRayCutoffDist, 0.0f));
     ubo.oceanParams9 = glm::vec4(glm::max(ocean.troughMargin, 0.0f), glm::max(ocean.rtRefractionRange, 10.0f),
         glm::max(ocean.rtReflectionRange, 50.0f), glm::clamp(ocean.rtReflectionMaxRough, 0.0f, 1.0f));
+    ubo.oceanParams10 = glm::vec4(glm::max(ocean.waveHeightLimit, 0.0f), 0.0f, 0.0f, 0.0f);
 
     ubo.terrainParams = m_terrainParams;
 

@@ -72,7 +72,11 @@ void main()
     // position (snapping in world space aligned to an absolute lattice the node need not sit on, which
     // opened gaps at coarse-ring boundaries). floor(x+0.5) instead of round(): odd vertices sit exactly
     // at .5 and GLSL round() is implementation-defined there.
-    const float ringCell = in_uv.x;
+    // Negative cell size = HORIZON BAND vertex: exempt from the land cull. Its triangles run from the
+    // ring edge out to the far plane, so they break the cull's +-3-cell footprint assumption — culling
+    // one buried inner vertex would tear a huge slice out of the horizon.
+    const float ringCell = abs(in_uv.x);
+    const bool horizonBand = in_uv.x < 0.0;
     const float ringMorph = in_uv.y;
     vec3 localPos = in_pos;
     localPos.xz = mix(localPos.xz, floor(localPos.xz / (2.0 * ringCell) + 0.5) * (2.0 * ringCell), ringMorph);
@@ -80,7 +84,7 @@ void main()
     // ONE shore fetch per vertex, shared by the land cull, the water-table lift and the displacement
     // (they each re-fetched it before). The prepass MUST share it the same way.
     const vec2 shoreHW = oceanSampleShoreData(basePos.xz); // (terrain height, water level)
-    if (oceanVertexCulled(basePos.xz, ringCell, shoreHW))
+    if (!horizonBand && oceanVertexCulled(basePos.xz, ringCell, shoreHW))
     {
         // Whole triangle footprint is buried under land: a NaN position discards every primitive using
         // this vertex before rasterization (the G-buffer prepass applies the identical test).
@@ -91,7 +95,19 @@ void main()
         return;
     }
     basePos.y += shoreHW.y - u_oceanParams2.w; // lift onto the local water table (lakes/rivers at altitude)
-    out_pos = basePos + oceanSampleDisplacement(basePos.xz, ringCell, ringMorph, shoreHW);
+    out_pos = basePos;
+    if (horizonBand)
+    {
+        // The band is FLAT: no wave displacement, just "Horizon level offset" (a pure Y shift — routing
+        // it through shoreHW would change the depth and re-shoal the waves). Its triangles span
+        // kilometres, so displacing their vertices interpolates the wave field across the entire
+        // horizon and the far sea visibly heaves with the sea state; the coarse ring-matched mip damps
+        // that but never removes it. The FS still shades the band with wave normals, which is all that
+        // resolves at this range — and skipping the fetches makes band vertices nearly free.
+        out_pos.y += u_oceanParams3.x;
+    }
+    else
+        out_pos += oceanSampleDisplacement(basePos.xz, ringCell, ringMorph, shoreHW);
     out_tbn = mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0));
     out_uv  = basePos.xz;
 

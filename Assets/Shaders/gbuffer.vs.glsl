@@ -75,7 +75,8 @@ void main()
     {
         // Morph in MESH-LOCAL space (exact lattice) then re-transform — identical math to the forward
         // ocean vertex shader (instanced_indirect_ocean.vs.glsl), see the comment there.
-        const float ringCell = in_uv.x;
+        const float ringCell = abs(in_uv.x);
+        const bool horizonBand = in_uv.x < 0.0; // exempt from the land cull (see the forward VS)
         const float ringMorph = in_uv.y;
         vec3 localPos = in_pos;
         localPos.xz = mix(localPos.xz, floor(localPos.xz / (2.0 * ringCell) + 0.5) * (2.0 * ringCell), ringMorph);
@@ -84,7 +85,7 @@ void main()
         // ONE shore fetch per vertex, shared by cull/lift/displacement/normal — identical to the
         // forward pass, so the prepass depth and the drawn geometry stay in lockstep.
         const vec2 shoreHW = oceanSampleShoreData(baseXZ); // (terrain height, water level)
-        if (oceanVertexCulled(baseXZ, ringCell, shoreHW))
+        if (!horizonBand && oceanVertexCulled(baseXZ, ringCell, shoreHW))
         {
             // Buried under land: cull the primitives — identical test to the forward OCEAN vertex shader.
             out_normal = vec3(0.0, 1.0, 0.0);
@@ -94,8 +95,17 @@ void main()
             return;
         }
         worldPos.y += shoreHW.y - u_oceanParams2.w; // water-table lift — identical to the forward pass
-        worldPos += oceanSampleDisplacement(baseXZ, ringCell, ringMorph, shoreHW);
-        out_normal = oceanSampleNormalLod(baseXZ, ringCell, ringMorph, shoreHW);
+        if (horizonBand)
+        {
+            // Flat + "Horizon level offset", identical to the forward pass (see the comment there).
+            worldPos.y += u_oceanParams3.x;
+            out_normal = vec3(0.0, 1.0, 0.0);
+        }
+        else
+        {
+            worldPos += oceanSampleDisplacement(baseXZ, ringCell, ringMorph, shoreHW);
+            out_normal = oceanSampleNormalLod(baseXZ, ringCell, ringMorph, shoreHW);
+        }
     }
     out_uv = in_uv;
     out_meshIdxMaterialIdx = inst.meshIdxMaterialIdx;

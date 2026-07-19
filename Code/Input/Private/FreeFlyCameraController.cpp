@@ -38,7 +38,6 @@ void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, g
     // The controller outlives the registration (owned by main for the app's lifetime).
     Tweak::boolean("Editor", "Lock To World Up", &m_lockToWorldUp);
     Tweak::floatVar("Editor", "Speed", &m_speed, 0.1f, 200.0f, 0.1f);
-    Tweak::floatVar("Editor", "Max Look Delta", &m_maxLookDelta, 10.0f, 2000.0f, 5.0f);
     Tweak::floatVar("Editor", "Camera Near", &m_near, 0.001f, 10.0f, 0.001f);
     Tweak::floatVar("Editor", "Camera Far", &m_far, 500.0f, 262114.0f, 500.0f);
 

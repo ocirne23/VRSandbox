@@ -107,9 +107,14 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_oceanAbsorption; // rgb = water extinction sigma_t (1/m, Beer-Lambert), w = perceptual roughness
     vec4 u_oceanScatter;    // rgb = in-scatter albedo color, w = scatter intensity
     vec4 u_oceanFoam;       // rgb = foam albedo, w = Jacobian foam bias (higher = more whitecaps)
-    vec4 u_oceanParams3;    // xy unused, z = turbulence decay per frame,
+    vec4 u_oceanParams3;    // x = horizon band level offset (m, usually negative: sinks only the
+                            // horizon band so it stays under distant near-sea-level terrain),
+                            // y = horizon depth (m): minimum water depth the waves assume past
+                            // u_oceanParams4.x (only the seabed moves, not the surface),
+                            // z = turbulence decay per frame,
                             // w = vertex displacement mip bias (Detail bias; ring cell size rides per vertex)
-    vec4 u_oceanParams4;    // x unused,
+    vec4 u_oceanParams4;    // x = horizon depth RANGE (m): camera distance past which the waves assume
+                            // at least u_oceanParams3.y of water, whatever the map says (0 = literal),
                             // y = turbulence spread (diffusion/frame),
                             // z = shoal depth scale (waves fade below depth = scale * cascade patch size),
                             // w = instant-foam edge width (both thresholds' smoothstep)
@@ -142,6 +147,8 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // y = RT refraction ray range (m: underwater visibility of traced geometry),
                             // z = RT reflection ray range (m),
                             // w = RT reflection roughness cutoff (rougher pixels skip the mirror ray)
+    vec4 u_oceanParams10;   // x = wave height limit as a fraction of water depth (breaking limit;
+                            // scales the shoaled cascade sum, 0 = unbounded), yzw unused
     vec4 u_terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                             // 0 = no terrain mesh up — fences the ocean land cull),
                             // y = temperature lapse rate, C per WORLD metre above sea level (<= 0; pairs

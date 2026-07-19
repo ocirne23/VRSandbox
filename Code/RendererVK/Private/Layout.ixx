@@ -389,10 +389,17 @@ export namespace RendererVKLayout
         glm::vec4 oceanAbsorption; // rgb = water extinction sigma_t (1/m, Beer-Lambert), w = perceptual roughness
         glm::vec4 oceanScatter;    // rgb = in-scatter albedo color, w = scatter intensity
         glm::vec4 oceanFoam;       // rgb = foam albedo, w = Jacobian foam bias (higher = more whitecaps)
-        glm::vec4 oceanParams3;    // xy unused, z = turbulence decay/frame,
+        glm::vec4 oceanParams3;    // x = horizon band level offset (m, usually negative: sinks ONLY the
+                                   //     horizon-band ring, which is exempt from the land cull and so
+                                   //     would otherwise draw over distant near-sea-level terrain),
+                                   // y = horizon depth (m): the minimum water depth the waves assume
+                                   //     past oceanParams4.x (only the seabed moves, not the surface),
+                                   // z = turbulence decay/frame,
                                    // w = vertex displacement mip bias (Detail bias; the clipmap rings carry
                                    // their cell size per vertex, so the mip itself is baked into the mesh)
-        glm::vec4 oceanParams4;    // x unused,
+        glm::vec4 oceanParams4;    // x = horizon depth RANGE (m): camera distance past which the waves
+                                   //     assume at least oceanParams3.y of water whatever the map says
+                                   //     (distant depth readings all err shallow; 0 = take it literally),
                                    // y = turbulence spread (diffusion/frame), z = shoal depth scale (per-
                                    // cascade shoaling: waves fade below depth = scale * patch size),
                                    // w = instant-foam edge width (both thresholds' smoothstep)
@@ -420,6 +427,8 @@ export namespace RendererVKLayout
                                    // y = RT refraction ray range (m: underwater visibility),
                                    // z = RT reflection ray range (m),
                                    // w = RT reflection roughness cutoff (rougher = sky fallback)
+        glm::vec4 oceanParams10;   // x = wave height limit as a fraction of water depth (breaking limit;
+                                   //     scales the shoaled cascade sum, 0 = unbounded), yzw unused
         glm::vec4 terrainParams;   // x = streamed terrain mesh coverage radius (m, radial from camera XZ;
                                    // 0 = no terrain mesh up — fences the ocean land cull),
                                    // y = temperature lapse rate, C per WORLD metre above sea level (<= 0;

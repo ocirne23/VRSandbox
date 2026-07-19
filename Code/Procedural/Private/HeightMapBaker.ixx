@@ -53,7 +53,7 @@ export namespace Procedural
 	{
 		float radius = 4.0f;   // world metres of ocean proximity that still counts as shore
 		float feather = 70.0f;  // world metres over which the drop eases in (no hard line on a beach)
-		float drop = 2.0f;      // how far below sea level to sink unreachable water. Must clear the swash
+		float drop = 1.0f;      // how far below sea level to sink unreachable water. Must clear the swash
 		                        // gate's 1 m fade with room to spare; also pushes the beach overlay off.
 		// How deep water must be to count as OCEAN and seed reach for the ground around it. Without it any
 		// texel a hair under sea level qualifies, so one shallow inland dip vouches for every hollow within

@@ -34,6 +34,10 @@ namespace Procedural
 		// reaches the horizon; its geometry is band-limited to the coarsest mips (near-flat), which is
 		// exactly what sub-pixel waves at that distance resolve to anyway.
 		Tweak::boolean("Ocean", "Horizon band", &m_horizonBand, gridDirty);
+		// The band is exempt from the land cull (its triangles far exceed the cull's footprint bound),
+		// so it draws over distant terrain: sink it a little and its crests stay under ground sitting
+		// near sea level. Only the band moves, so large values leave a step at its inner seam.
+		Tweak::floatVar("Ocean", "Horizon level offset (m)", &m_horizonLevelOffset, -20.0f, 5.0f, 0.1f);
 		// Negative = displacement sampled finer than the ring's Nyquist (slight shimmer while moving);
 		// with fixed-cell rings the default 0 is already motion-stable.
 		Tweak::floatVar("Ocean", "Detail bias", &m_detailBias, -2.0f, 2.0f, 0.05f);
@@ -80,6 +84,15 @@ namespace Procedural
 		// Shore interaction: driven by the terrain streamer's baked terrain-data map (nothing baked here;
 		// no data while terrain rendering is disabled — the ocean then behaves as open sea).
 		Tweak::floatVar("Ocean/Shore", "Shoal depth scale", &m_shoalScale, 0.0f, 0.1f, 0.001f);
+		// Past "range" the waves assume at least "Horizon depth" of water whatever the map says (see the
+		// header): distant depth readings all err shallow, and shallow reads as a dead mirror sea. Only
+		// the assumed seabed moves — the surface stays put, so this cannot put water over land.
+		Tweak::floatVar("Ocean/Shore", "Horizon depth (m)", &m_horizonDepth, 0.0f, 200.0f, 1.0f);
+		Tweak::floatVar("Ocean/Shore", "Horizon depth range (m)", &m_horizonDepthRange, 0.0f, 8000.0f, 50.0f);
+		// A wave cannot stand taller than the water it is in (H/d ~ 0.78 when it breaks). The shoal fade
+		// alone cannot enforce this: it fades a band by its WAVELENGTH, so the mid cascade still runs at
+		// full height in shallow water. Scales the shoaled sum, so waves shrink instead of flat-topping.
+		Tweak::floatVar("Ocean/Shore", "Wave height limit (x depth)", &m_waveHeightLimit, 0.0f, 2.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shore", "Shore foam depth (m)", &m_shoreFoamDepth, 0.0f, 8.0f, 0.05f);
 		Tweak::floatVar("Ocean/Shore", "Shore foam max", &m_shoreFoamMax, 0.0f, 1.0f, 0.01f);
 		Tweak::floatVar("Ocean/Shore", "Swash amplitude", &m_swashAmp, 0.0f, 2.0f, 0.01f);
@@ -145,6 +158,7 @@ namespace Procedural
 		// Wraps the accumulated arrays into one sector: container + node + SpatialIndex registration
 		// (SpatialLayer_Terrain like terrain chunks — render culling only, invisible to gameplay
 		// queries; no spawn guard, sectors surround the camera and stamp on the next markVisibleSet).
+		bool emittingHorizonBand = false;
 		const auto emitSector = [&]() {
 			if (indices.empty())
 				return;
@@ -185,6 +199,7 @@ namespace Procedural
 					}
 					s.localCenter = (mn + mx) * 0.5f;
 					s.halfXZ = glm::vec2(mx.x - mn.x, mx.z - mn.z) * 0.5f;
+					s.horizonBand = emittingHorizonBand;
 					s.radius = glm::length((mx - mn) * 0.5f) + 8.0f; // headroom for wave/swash displacement
 					s.spatialEntry = SpatialEntry(Globals::spatialIndex.registerEntry(
 						glm::dvec3(s.localCenter) + glm::dvec3(0.0, m_seaLevel, 0.0), s.radius, 0ull,
@@ -257,6 +272,11 @@ namespace Procedural
 		// is what sub-pixel waves at that distance resolve to anyway; shading stays per-pixel regardless.
 		// Chebyshev half-extent = far plane covers every Euclidean far-plane point (diagonals clip first).
 		// One sector per side (corner vertices duplicated between sides — identical, watertight).
+		// The cell size is stored NEGATED: that flags the band to the vertex shaders, which take abs()
+		// for the mip/morph math and skip the land cull. The cull deletes a vertex once its +-3-cell
+		// footprint is buried, which assumes no co-triangle vertex lies further away — true for the
+		// rings, FALSE here (a band triangle spans from the ring edge out to the far plane), so one
+		// buried inner vertex would take a kilometre-wide slice of the horizon with it.
 		if (m_horizonBand && m_lastFar > 0.0f)
 		{
 			const float lastCell = c0 * float(1 << (rings - 1));
@@ -266,6 +286,7 @@ namespace Procedural
 				const float step = 2.0f * lastCell;
 				const float scale = m_lastFar / outerH;
 				const int M = N / 2; // segments per side on the morphed lattice
+				emittingHorizonBand = true;
 				const glm::vec2 corners[5] = {
 					{ -outerH, -outerH }, { outerH, -outerH }, { outerH, outerH }, { -outerH, outerH }, { -outerH, -outerH } };
 				for (int side = 0; side < 4; ++side)
@@ -277,14 +298,14 @@ namespace Procedural
 						const glm::vec2 p = a + d * float(k);
 						positions.push_back(glm::vec3(p.x, 0.0f, p.y));
 						normals.push_back(glm::vec3(0.0f, 1.0f, 0.0f));
-						texCoords.push_back(glm::vec3(step, 0.0f, 0.0f));
+						texCoords.push_back(glm::vec3(-step, 0.0f, 0.0f)); // negative = horizon band
 					}
 					for (int k = 0; k <= M; ++k)
 					{
 						const glm::vec2 p = (a + d * float(k)) * scale;
 						positions.push_back(glm::vec3(p.x, 0.0f, p.y));
 						normals.push_back(glm::vec3(0.0f, 1.0f, 0.0f));
-						texCoords.push_back(glm::vec3(step * scale, 0.0f, 0.0f));
+						texCoords.push_back(glm::vec3(-step * scale, 0.0f, 0.0f)); // negative = horizon band
 					}
 					for (uint32 k = 0; k < (uint32)M; ++k)
 					{
@@ -409,6 +430,7 @@ namespace Procedural
 		params.windSpeed = m_windSpeed;
 		params.fetchKm = m_fetchKm;
 		params.depth = m_depth;
+		params.horizonLevelOffset = m_horizonLevelOffset;
 		params.amplitude = m_amplitude;
 		params.choppiness = m_choppiness;
 		params.normalStrength = m_normalStrength;
@@ -432,6 +454,9 @@ namespace Procedural
 		params.foamBoost = m_foamBoost;
 		params.turbidity = m_turbidity;
 		params.shoalScale = m_shoalScale;
+		params.horizonDepth = m_horizonDepth;
+		params.horizonDepthRange = m_horizonDepthRange;
+		params.waveHeightLimit = m_waveHeightLimit;
 		params.shoreFoamDepth = m_shoreFoamDepth;
 		params.shoreFoamMax = m_shoreFoamMax;
 		params.swashAmp = m_swashAmp;
@@ -476,11 +501,25 @@ namespace Procedural
 		// Dry-sector test: skippable only when every block the footprint overlaps is buried deeper than
 		// the same terms the vertex cull demands (margin + swash reach + far error + slack) — so a
 		// skipped sector could never have contributed geometry. Out-of-range footprints count as wet.
+		//
+		// FENCED ON THE STREAMED MESH RADIUS, exactly like oceanVertexCulled: past the terrain mesh
+		// nothing is drawn to hide the water, so the VS deliberately never culls out there and the sea
+		// is what fills the horizon. A CPU test that skipped those sectors on baked "land" would delete
+		// water the VS was going to draw — which is what left no horizon water behind unloaded terrain.
+		// So a sector is only skippable when its WHOLE footprint sits under loaded mesh; anything
+		// reaching past it renders, and the VS still culls the buried part per vertex. The horizon
+		// band always reaches past the mesh, so it is never dropped here (and, if the streamer's ring
+		// ever grew out to cover it, being under real mesh is exactly when dropping it is right).
+		const float meshRadius = renderer.getTerrainMeshRadius();
+		const glm::vec2 camXZ(camera.position.x, camera.position.z);
 		const float wetNeed = glm::max(m_cullMargin, 0.0f) + swashReach() + glm::max(m_farCullError, 0.0f) + 2.0f;
 		const auto sectorDry = [&](const Sector& s) {
-			if (!m_drySectorCull || !m_dryGridValid)
-				return false;
+			if (!m_drySectorCull || !m_dryGridValid || meshRadius <= 0.0f || s.horizonBand)
+				return false; // the band is the horizon itself: never dropped for terrain
 			const glm::vec2 center(px + s.localCenter.x, pz + s.localCenter.z);
+			// Farthest footprint corner from the camera (the VS fences radially the same way).
+			if (glm::length(glm::abs(center - camXZ) + s.halfXZ) >= meshRadius)
+				return false;
 			const float scale = float(DRY_BLOCKS) / m_dryGridRange;
 			const glm::vec2 bMin = (center - s.halfXZ - m_dryGridCenter) * scale + float(DRY_BLOCKS) * 0.5f;
 			const glm::vec2 bMax = (center + s.halfXZ - m_dryGridCenter) * scale + float(DRY_BLOCKS) * 0.5f;
@@ -661,10 +700,19 @@ namespace Procedural
 			{
 				const float L = glm::max(m_cascadeSizes[c], 1.0f);
 				const glm::vec3 d = sampleCascade(c, L);
+				// oceanShoalFade. The shader's "Horizon depth" floor is knowingly omitted: it only
+				// engages a kilometre out, and nothing floats there.
 				disp += glm::vec3(d.x * m_choppiness, d.y, d.z * m_choppiness)
-					* glm::smoothstep(0.0f, glm::max(shoal * L, 0.01f), depth); // oceanShoalFade
+					* glm::smoothstep(0.0f, glm::max(shoal * L, 0.01f), depth);
 				rawY += d.y;
 				rawXZ += glm::vec2(d.x, d.z);
+			}
+			// Breaking limit, mirroring the shader: scale the shoaled sum so a wave never stands taller
+			// than a fraction of the water it is in (the swash still rides the raw field).
+			if (m_waveHeightLimit > 0.0f && depth > 0.0f)
+			{
+				const float cap = m_waveHeightLimit * depth;
+				disp *= cap / (cap + std::fabs(disp.y));
 			}
 			sw = swashWeight(depth, shoreHW.y);
 			// Backflow: the tongue slides seaward as the wave recedes, gated by its thickness above the

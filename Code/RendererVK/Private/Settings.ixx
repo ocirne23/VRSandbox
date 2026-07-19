@@ -259,10 +259,18 @@ export struct OceanParams
     float fetchKm     = 300.0f; // fetch (km): distance the wind has blown over; longer = bigger swell
     float depth       = 100.0f; // ocean depth D (m): finite-depth dispersion + TMA shallow-water attenuation
                                 // (shallow values like 35 visibly mute the long swell — by design)
+    float horizonLevelOffset = -0.5f; // vertical shift (m, usually negative) of the HORIZON BAND only.
+                                // The band is exempt from the land cull (its triangles are far larger
+                                // than the cull's footprint bound), so it draws over distant terrain;
+                                // sinking it a little keeps its crests under near-sea-level ground.
     float amplitude   = 1.0f;   // artistic scale on the spectrum amplitude (1 = physical)
     float choppiness  = 1.1f;   // horizontal displacement lambda (0 = heightfield only, higher = sharper crests)
     float normalStrength = 1.0f; // artistic scale on the shading slopes
-    glm::vec3 cascadeSizes = glm::vec3(384.0f, 47.0f, 6.3f); // FFT patch sizes (m); non-rational ratios hide tiling
+    glm::vec3 cascadeSizes = glm::vec3(1536.0f, 188.0f, 25.0f); // FFT patch sizes (m); each TILES with its
+                                // own size, so the largest sets how often the sea repeats — keep it many
+                                // times the peak wavelength. Non-rational ratios keep the three from
+                                // re-aligning; scale them as a SET (the band split ties cascade c+1's
+                                // range to L_c, so growing one alone just moves the repetition down)
     float seaLevel    = 0.0f;   // world Y of the calm water plane
     float detailBias  = 0.0f;   // bias on the ring-matched vertex displacement mip (negative = finer;
                                 // the clipmap rings carry their cell size per vertex, so 0 is motion-stable)
@@ -302,7 +310,22 @@ export struct OceanParams
     // shoalScale * its patch size, so long swell dies offshore while chop runs almost to the beach and
     // waves never poke through land — plus a surf/foam band where the water column vanishes at the
     // waterline.
-    float shoalScale     = 0.015f; // shoaling depth as a fraction of each cascade's patch size
+    float shoalScale     = 0.005f; // shoaling depth as a fraction of each cascade's patch size (scaled
+                                // down with the cascade sizes above to hold the absolute depths)
+    // Horizon depth: past horizonDepthRange the waves assume AT LEAST horizonDepth of water, whatever
+    // the baked map says. Every distant depth error runs shallow — coarse texels average shore slopes
+    // into the water, the generator reports depth exactly 0 for samples it could not resolve, and the
+    // vertical scale compresses real shelves — and shallow is the ruinous direction: it fades the waves
+    // out AND (via fade^2) the LEAN variance, leaving a mirror that reflects the sky exactly like wind 0.
+    // Only the assumed seabed moves, never the surface, so it cannot put water over land; the land cull
+    // still reads the raw map. 0 range = off.
+    float horizonDepth      = 30.0f;
+    float horizonDepthRange = 1500.0f;
+    // Breaking limit: max wave height as a fraction of the local depth (real waves break near H/d ~ 0.78,
+    // crest ~ 0.39 d). The per-cascade shoal fade cannot express this — it keys on each band's WAVELENGTH,
+    // so with cascade sizes 8x apart any fade depth that suits the swell leaves the mid band at full
+    // amplitude in a metre of water. Scales the shoaled sum rather than clipping crests. 0 = unbounded.
+    float waveHeightLimit = 0.5f;
     float shoreFoamDepth = 8.0f;  // water-column height (m) below which the waterline churns white; 0 = off
     float shoreFoamMax   = 0.75f; // surf band opacity cap: shore foam coverage never exceeds this, so the
                                   // refracted bottom stays visible through the lace (whitecaps unaffected)
