@@ -2,56 +2,115 @@
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
 
   <!--
-    Entity inline components are packed in the bytes that follow the Entity header,
-    in EComponentID order, each gated by a bit in typeBits and aligned to ComponentAlignment (16).
-    The Entity header itself is padded up to 16 before the first component.
+    Entity inline components are packed in the bytes that follow the Entity header, in EComponentID
+    order, each gated by a bit in typeBits and aligned to ComponentAlignment (16). The Entity header
+    itself is padded up to 16 before the first component.
 
-    Offsets are reconstructed here exactly like getComponentByteOffset():
-      base        = alignUp(sizeof(Entity), 16)
-      scene  @ base                                   if typeBits & 1
-      zone   @ base + (scene?)                        if typeBits & 2
-      cull   @ base + (scene?) + (zone?)              if typeBits & 4
-      render @ base + (scene?) + (zone?) + (cull?)    if typeBits & 8
-    where each (X?) term is alignUp(sizeof(X), 16) when component X is present, else 0.
+    Offsets are reconstructed here exactly like getComponentByteOffset() (Component.ixx):
+      base = alignUp(sizeof(Entity), 16), then for every component id BELOW the one being addressed,
+      add alignUp(sizeof(ThatComponent), 16) when its bit is set in typeBits.
+
+    Component order (EComponentID in EntityDef.ixx) — keep in sync when adding a component type:
+      Scene 0x01, Render 0x02, Animator 0x04, Physics 0x08,
+      Audio 0x10, Particle 0x20, Force 0x40, Script 0x80
   -->
 
   <Type Name="Entity">
-    <DisplayString Condition="name._Mypair._Myval2._Myres &gt;= 16">{name._Mypair._Myval2._Bx._Ptr,sb}</DisplayString>
-    <DisplayString>{name._Mypair._Myval2._Bx._Buf,sb}</DisplayString>
+    <DisplayString Condition="displayName._Mypair._Myval2 == 0">[unnamed] ({typeBits,x})</DisplayString>
+    <DisplayString>{displayName._Mypair._Myval2,sb}</DisplayString>
     <Expand>
       <Item Name="pos">pos</Item>
       <Item Name="rot">rot</Item>
       <Item Name="scale">scale</Item>
-      <Item Name="name">name</Item>
+      <Item Name="name">displayName._Mypair._Myval2,sb</Item>
       <Item Name="parent">parent</Item>
       <Item Name="spawnTemplate">spawnTemplate</Item>
       <Item Name="refCount">refCount</Item>
       <Item Name="typeBits">typeBits,x</Item>
-      <Item Name="ecsComponentCount">ecsComponentCount</Item>
-      <Item Name="zoneIdx">zoneIdx</Item>
+      <Item Name="flags">flags,x</Item>
 
-      <Item Name="[Scene]"  Condition="(typeBits &amp; 0x1) != 0">
-        *(SceneComponent*)((char*)this
-          + ((sizeof(Entity)+15)&amp;~0xF))
-      </Item>
-      <Item Name="[Zone]"   Condition="(typeBits &amp; 0x2) != 0">
-        *(ZoneComponent*)((char*)this
-          + ((sizeof(Entity)+15)&amp;~0xF)
-          + (((typeBits &amp; 0x1) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0))
-      </Item>
-      <Item Name="[Cull]"   Condition="(typeBits &amp; 0x4) != 0">
-        *(CullingComponent*)((char*)this
-          + ((sizeof(Entity)+15)&amp;~0xF)
-          + (((typeBits &amp; 0x1) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
-          + (((typeBits &amp; 0x2) != 0) ? ((sizeof(ZoneComponent)+15)&amp;~0xF) : 0))
-      </Item>
-      <Item Name="[Render]" Condition="(typeBits &amp; 0x8) != 0">
-        *(RenderComponent*)((char*)this
-          + ((sizeof(Entity)+15)&amp;~0xF)
-          + (((typeBits &amp; 0x1) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
-          + (((typeBits &amp; 0x2) != 0) ? ((sizeof(ZoneComponent)+15)&amp;~0xF) : 0)
-          + (((typeBits &amp; 0x4) != 0) ? ((sizeof(CullingComponent)+15)&amp;~0xF) : 0))
-      </Item>
+      <!-- The inline components, folded into one node. Expressions inside a Synthetic still evaluate in
+           the Entity's context, so the offset arithmetic below is unchanged by the nesting. -->
+      <Synthetic Name="[Components]">
+        <DisplayString>{(int)((typeBits &amp; 0x01) != 0) + (int)((typeBits &amp; 0x02) != 0) + (int)((typeBits &amp; 0x04) != 0) + (int)((typeBits &amp; 0x08) != 0) + (int)((typeBits &amp; 0x10) != 0) + (int)((typeBits &amp; 0x20) != 0) + (int)((typeBits &amp; 0x40) != 0) + (int)((typeBits &amp; 0x80) != 0)} of 8 (typeBits={typeBits,x})</DisplayString>
+        <Expand>
+          <Item Name="[Scene]" Condition="(typeBits &amp; 0x01) != 0">
+            *(SceneComponent*)((char*)this
+              + ((sizeof(Entity)+15)&amp;~0xF))
+          </Item>
+          <Item Name="[Render]" Condition="(typeBits &amp; 0x02) != 0">
+            *(RenderComponent*)((char*)this
+              + ((sizeof(Entity)+15)&amp;~0xF)
+              + (((typeBits &amp; 0x01) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0))
+          </Item>
+          <Item Name="[Animator]" Condition="(typeBits &amp; 0x04) != 0">
+            *(AnimatorComponent*)((char*)this
+              + ((sizeof(Entity)+15)&amp;~0xF)
+              + (((typeBits &amp; 0x01) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x02) != 0) ? ((sizeof(RenderComponent)+15)&amp;~0xF) : 0))
+          </Item>
+          <Item Name="[Physics]" Condition="(typeBits &amp; 0x08) != 0">
+            *(PhysicsComponent*)((char*)this
+              + ((sizeof(Entity)+15)&amp;~0xF)
+              + (((typeBits &amp; 0x01) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x02) != 0) ? ((sizeof(RenderComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x04) != 0) ? ((sizeof(AnimatorComponent)+15)&amp;~0xF) : 0))
+          </Item>
+          <Item Name="[Audio]" Condition="(typeBits &amp; 0x10) != 0">
+            *(AudioComponent*)((char*)this
+              + ((sizeof(Entity)+15)&amp;~0xF)
+              + (((typeBits &amp; 0x01) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x02) != 0) ? ((sizeof(RenderComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x04) != 0) ? ((sizeof(AnimatorComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x08) != 0) ? ((sizeof(PhysicsComponent)+15)&amp;~0xF) : 0))
+          </Item>
+          <Item Name="[Particle]" Condition="(typeBits &amp; 0x20) != 0">
+            *(ParticleComponent*)((char*)this
+              + ((sizeof(Entity)+15)&amp;~0xF)
+              + (((typeBits &amp; 0x01) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x02) != 0) ? ((sizeof(RenderComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x04) != 0) ? ((sizeof(AnimatorComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x08) != 0) ? ((sizeof(PhysicsComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x10) != 0) ? ((sizeof(AudioComponent)+15)&amp;~0xF) : 0))
+          </Item>
+          <Item Name="[Force]" Condition="(typeBits &amp; 0x40) != 0">
+            *(ForceComponent*)((char*)this
+              + ((sizeof(Entity)+15)&amp;~0xF)
+              + (((typeBits &amp; 0x01) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x02) != 0) ? ((sizeof(RenderComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x04) != 0) ? ((sizeof(AnimatorComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x08) != 0) ? ((sizeof(PhysicsComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x10) != 0) ? ((sizeof(AudioComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x20) != 0) ? ((sizeof(ParticleComponent)+15)&amp;~0xF) : 0))
+          </Item>
+          <Item Name="[Script]" Condition="(typeBits &amp; 0x80) != 0">
+            *(ScriptComponent*)((char*)this
+              + ((sizeof(Entity)+15)&amp;~0xF)
+              + (((typeBits &amp; 0x01) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x02) != 0) ? ((sizeof(RenderComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x04) != 0) ? ((sizeof(AnimatorComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x08) != 0) ? ((sizeof(PhysicsComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x10) != 0) ? ((sizeof(AudioComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x20) != 0) ? ((sizeof(ParticleComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x40) != 0) ? ((sizeof(ForceComponent)+15)&amp;~0xF) : 0))
+          </Item>
+        </Expand>
+      </Synthetic>
+
+      <!-- EEntityFlags decoded (EntityDef.ixx) -->
+      <Item Name="[enabled]">(flags &amp; 0x02) != 0</Item>
+      <Item Name="[frozen]">(flags &amp; 0x04) != 0</Item>
+      <Item Name="[prefabInstance]">(flags &amp; 0x01) != 0</Item>
+      <Item Name="[rootAllocation]">(flags &amp; 0x08) != 0</Item>
+      <Item Name="[contiguousAllocation]">(flags &amp; 0x10) != 0</Item>
+
+      <!-- Children are reachable through the Scene component; surfaced here so the tree walks in one click. -->
+      <Synthetic Name="[children]" Condition="(typeBits &amp; 0x01) != 0">
+        <DisplayString>{((SceneComponent*)((char*)this + ((sizeof(Entity)+15)&amp;~0xF)))-&gt;children}</DisplayString>
+        <Expand>
+          <ExpandedItem>((SceneComponent*)((char*)this + ((sizeof(Entity)+15)&amp;~0xF)))-&gt;children</ExpandedItem>
+        </Expand>
+      </Synthetic>
     </Expand>
   </Type>
 

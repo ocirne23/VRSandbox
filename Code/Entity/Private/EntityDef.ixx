@@ -64,7 +64,6 @@ public:
 
     uint16 refCount = 0;
     uint16 typeBits = 0;
-    uint8 ecsComponentCount = 0;
     uint8 flags = 0; // EEntityFlags bitmask
 
     void update(Renderer& renderer, float deltaSeconds) { updateTree(renderer, Transform(), deltaSeconds); }
