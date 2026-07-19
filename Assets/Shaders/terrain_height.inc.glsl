@@ -138,6 +138,32 @@ uint terrainFlowEncAt(vec2 worldXZ)
     return (floatBitsToUint(texelFetch(u_terrainHeight, ivec3(t, useFar ? 1 : 0), 0).z) >> 8) & 255u;
 }
 
+// Sun visibility for DISTANT points from the baked terrain height cascades: both TLAS rays (instances
+// range-bounded by RT/GI/TLAS Range) and the PCSS cascades run out of data well before a long fog range,
+// leaving far fog uniformly lit. Marching the height map keeps mountains shadowing the fog out to the
+// far cascade's reach, for a few texture taps instead of a full-length ray. The occlusion test is a SOFT
+// horizon (how far the ray clears the terrain, relative to a penumbra that widens with distance — the
+// sun cone half-angle, u_fogParams4.w): fully deterministic, so unlike a jittered binary march it needs
+// no temporal integration at all — far fog shadows hold perfectly still under camera motion. That is
+// also what lets the ANALYTIC far field (vol_apply) use it: it has no history to hide noise in.
+float terrainSunVisibility(vec3 pos, vec3 sunDir)
+{
+    if (sunDir.y <= 0.0)
+        return 0.0; // sun below the horizon
+    const float spread = max(u_fogParams4.w, 0.015); // penumbra growth per meter along the ray
+    float vis = 1.0;
+    float t = 25.0; // exponential steps, ~12.8km reach
+    for (int i = 0; i < 10; ++i)
+    {
+        const vec3 p = pos + sunDir * t;
+        vis = min(vis, clamp((p.y - terrainHeightAt(p.xz)) / (t * spread + 4.0), 0.0, 1.0));
+        if (vis <= 0.0)
+            return 0.0;
+        t *= 2.0;
+    }
+    return vis;
+}
+
 // Cheap nearest-texel variant for volume consumers (froxel fog): regional fog is km-scale, texel
 // granularity never shows there, and the froxel grid samples this a million times a frame.
 vec4 terrainClimateNearestAt(vec2 worldXZ)

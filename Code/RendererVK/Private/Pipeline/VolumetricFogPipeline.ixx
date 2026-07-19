@@ -16,7 +16,10 @@ import :Layout;
 //                  blended against last frame's reprojected grid (ping-ponged across frames in flight).
 //   2. integrate : front-to-back accumulation along Z -> in-scatter + transmittance at every slice.
 //   3. apply     : fullscreen blend in the scene-color pass (before TAA), sampling the integrated volume at
-//                  each pixel's G-buffer depth: out = inScatter + sceneColor * transmittance.
+//                  each pixel's G-buffer depth: out = inScatter + sceneColor * transmittance. Everything
+//                  PAST the volume's far plane is added by the analytic far field (a closed-form height-fog
+//                  integral, vol_fog.inc.glsl) rather than by more slices, so the volume's range is a
+//                  near-field quality knob and not a view distance — see vol_apply.fs.glsl.
 // The grid resolution is fixed (independent of the window size), so no swapchain-recreate handling is needed.
 export class VolumetricFogPipeline final
 {
@@ -49,6 +52,8 @@ public:
     struct ApplyParams
     {
         Buffer& ubo;
+        // GI probe SH volume: the analytic far field's ambient is the virtual sky probe (giEvalSkySH).
+        Buffer& giGridDataBuffer;
         vk::ImageView gbufferDepthView;
         // DEPTH_STENCIL_READ_ONLY while depth-prepass reuse binds this image as the scene pass depth.
         vk::ImageLayout gbufferDepthLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
@@ -58,10 +63,12 @@ public:
     // render pass and set the viewport/scissor. eye selects the per-eye depth/projection (0 = desktop/left).
     void recordApply(CommandBuffer& commandBuffer, uint32 frameIdx, uint32 eye, const ApplyParams& params);
 
-    // Points this slot's scatter set at the fog terrain height map (Renderer's BakedWorldMap; binding 10
-    // is UPDATE_AFTER_BIND and refreshed every frame, so a re-bake's ping-pong flip never re-records the
-    // cached fog CB). The scatter pass raises the height-fog base by a fraction of the local terrain
-    // height (Fog/Terrain Follow), so fog pools in valleys and clears the peaks.
+    // Points ALL of this slot's sets at the fog terrain height map (Renderer's BakedWorldMap): the scatter
+    // set's binding 10 and every eye's apply set binding 3, both UPDATE_AFTER_BIND and refreshed every
+    // frame, so a re-bake's ping-pong flip never re-records the cached fog CBs. The scatter pass raises the
+    // height-fog base by a fraction of the local terrain height (Fog/Terrain Follow), so fog pools in
+    // valleys and clears the peaks; the apply pass's far field marches the same ground past the volume.
+    // One call covers the whole pipeline — do not split it per set, or a new set gets forgotten.
     void updateTerrainDescriptor(uint32 frameIdx, vk::ImageView terrainView, vk::Sampler terrainSampler);
 
 private:

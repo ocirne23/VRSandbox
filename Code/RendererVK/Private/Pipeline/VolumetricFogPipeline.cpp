@@ -69,6 +69,16 @@ void VolumetricFogPipeline::buildApplyLayout(GraphicsPipelineLayout& layout)
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 1, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
     b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 2, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+    // 3 = terrain data cascades (the far field marches the same terrain-follow ground the scatter pass
+    // samples per froxel), 4 = GI probe SH volume (its ambient is the virtual sky probe).
+    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 3, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+    layout.descriptorBindingFlags.resize(b.size());
+    // Like the scatter set's copy: the apply draw lives in a CACHED scene-colour CB, so a re-bake's
+    // ping-pong flip must be able to swap the image without re-recording.
+    layout.descriptorBindingFlags.back() = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
+    b.push_back(vk::DescriptorSetLayoutBinding{ .binding = 4, .descriptorType = vk::DescriptorType::eStorageBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment });
+    layout.descriptorBindingFlags.resize(b.size());
+    layout.descriptorBindingFlags.resize(b.size());
     // Eye index (per-eye depth reconstruction + projection; 0 on desktop / left eye).
     layout.pushConstantRanges.push_back(vk::PushConstantRange{
         .stageFlags = vk::ShaderStageFlagBits::eFragment, .offset = 0, .size = sizeof(uint32) });
@@ -300,11 +310,13 @@ void VolumetricFogPipeline::recordApply(CommandBuffer& commandBuffer, uint32 fra
     DescriptorSet& set = m_applySets[applySlot(frameIdx, eye)];
     vk::DescriptorSet vkSet = set.getDescriptorSet();
     auto uboInfo = vk::DescriptorBufferInfo{ .buffer = params.ubo.getBuffer(), .range = sizeof(RendererVKLayout::Ubo) };
-    std::array<DescriptorSetUpdateInfo, 3> updates{
+    std::array<DescriptorSetUpdateInfo, 4> updates{
         DescriptorSetUpdateInfo{ .binding = 0, .type = vk::DescriptorType::eUniformBuffer, .bufferInfos = { uboInfo } },
         DescriptorSetUpdateInfo{ .binding = 1, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = {
             vk::DescriptorImageInfo{ .sampler = params.gbufferSampler, .imageView = params.gbufferDepthView, .imageLayout = params.gbufferDepthLayout } } },
         DescriptorSetUpdateInfo{ .binding = 2, .type = vk::DescriptorType::eCombinedImageSampler, .imageInfos = { sampledGeneral(m_sampler, m_integrated.view[frameIdx]) } },
+        // Binding 3 (terrain) is UPDATE_AFTER_BIND, written per frame by updateApplyTerrainDescriptor.
+        DescriptorSetUpdateInfo{ .binding = 4, .type = vk::DescriptorType::eStorageBuffer, .bufferInfos = { bufInfo(params.giGridDataBuffer) } },
     };
     commandBuffer.cmdUpdateDescriptorSets(m_applyPipeline.getPipelineLayout(), vk::PipelineBindPoint::eGraphics, vkSet, updates);
     cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_applyPipeline.getPipeline());
@@ -318,7 +330,13 @@ void VolumetricFogPipeline::updateTerrainDescriptor(uint32 frameIdx, vk::ImageVi
     // Points the terrain height binding (10, UPDATE_AFTER_BIND) at the active ping-pong image; refreshed
     // every frame so a CPU re-bake swaps images without re-recording the cached fog CB.
     vk::DescriptorImageInfo imageInfo{ .sampler = terrainSampler, .imageView = terrainView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
-    vk::WriteDescriptorSet write{ .dstSet = m_scatterSets[frameIdx].getDescriptorSet(), .dstBinding = 10, .descriptorCount = 1,
+    // Scatter set (binding 10), then every eye's apply set (binding 3) for the far field's ground march.
+    std::array<vk::WriteDescriptorSet, 1 + MAX_VIEWS> writes{};
+    uint32 numWrites = 0;
+    writes[numWrites++] = vk::WriteDescriptorSet{ .dstSet = m_scatterSets[frameIdx].getDescriptorSet(), .dstBinding = 10, .descriptorCount = 1,
         .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
-    Globals::device.getDevice().updateDescriptorSets(1, &write, 0, nullptr);
+    for (uint32 eye = 0; eye < m_applyViewCount; ++eye)
+        writes[numWrites++] = vk::WriteDescriptorSet{ .dstSet = m_applySets[applySlot(frameIdx, eye)].getDescriptorSet(), .dstBinding = 3, .descriptorCount = 1,
+            .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &imageInfo };
+    Globals::device.getDevice().updateDescriptorSets(numWrites, writes.data(), 0, nullptr);
 }

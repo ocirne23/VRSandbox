@@ -77,6 +77,10 @@ void FogParams::registerTweaks()
     Tweak::color3("Fog", "Albedo", &albedo, &albedoIntensity);
     Tweak::floatVar("Fog", "Anisotropy", &anisotropy, -0.9f, 0.95f, 0.01f);
     Tweak::floatVar("Fog", "Range", &range, 32.0f, 4096.0f, 32.0f);
+    Tweak::boolean("Fog/Far Field", "Enabled", &farField);
+    Tweak::floatVar("Fog/Far Field", "Density Scale", &farFieldDensity, 0.0f, 4.0f, 0.05f);
+    Tweak::floatVar("Fog/Far Field", "Thickness Scale", &farFieldThickness, 0.1f, 20.0f, 0.1f);
+    Tweak::intVar("Fog/Far Field", "Ground Steps", &farFieldSteps, 1, 32);
     Tweak::floatVar("Fog", "Slice Power", &slicePower, 0.4f, 1.5f, 0.01f);
     Tweak::floatVar("Fog", "Noise Scale", &noiseScale, 0.005f, 1.0f, 0.005f);
     Tweak::floatVar("Fog", "Noise Strength", &noiseStrength, 0.0f, 1.0f, 0.01f);

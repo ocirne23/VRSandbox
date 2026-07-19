@@ -734,6 +734,10 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         glm::max(fog.causticStrength, 0.0f),   // z: underwater caustic focus strength (surfaces + fog shafts)
         glm::max(fog.causticDepthFade, 0.0f)); // w: caustic contrast decay with depth (1/m)
     ubo.fogParams8 = glm::vec4(fog.underwaterOffset, glm::max(fog.causticShoreFade, 0.0f), 0.0f, 0.0f);
+    // z multiplies the NEAR field's height falloff (fogParams0.z): the far field runs the same model, so a
+    // thickness SCALE, not an independent layer. w = ground samples along the far segment.
+    ubo.fogParams9 = glm::vec4(fog.farField ? 1.0f : 0.0f, glm::max(fog.farFieldDensity, 0.0f),
+        1.0f / glm::clamp(fog.farFieldThickness, 0.01f, 100.0f), (float)glm::max(fog.farFieldSteps, 1));
 
     ubo.moonParams = glm::vec4(glm::normalize(sky.moonDirection), cosf(glm::radians(sky.moonSizeDeg)));
     ubo.starParams = glm::vec4(sky.starSize, sky.starSizeVar, sky.starBrightness, sky.starColorVar);
@@ -2034,6 +2038,7 @@ void Renderer::recordFogApplyInto(CommandBuffer& cb, uint32 frameIdx, uint32 eye
     vkCb.setScissor(0, vk::Rect2D{ .offset = vk::Offset2D{ vpMin.x, vpMin.y }, .extent = vk::Extent2D{ (uint32)vpSize.x, (uint32)vpSize.y } });
     VolumetricFogPipeline::ApplyParams params{
         .ubo = frameData.ubo,
+        .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
         .gbufferDepthView = frameData.gbuffer.getDepthView(eyeIndex),
         // Runs inside the scene pass, where depth-prepass reuse holds the image in DEPTH_STENCIL_READ_ONLY.
         .gbufferDepthLayout = m_depthPrepassReuse ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -2302,6 +2307,7 @@ void Renderer::recordFogApply(uint32 frameIdx)
 
     VolumetricFogPipeline::ApplyParams params{
         .ubo = frameData.ubo,
+        .giGridDataBuffer = m_giProbePipeline.getGiGridDataBuffer(),
         .gbufferDepthView = frameData.gbuffer.getDepthView(),
         // Runs inside the scene pass, where depth-prepass reuse holds the image in DEPTH_STENCIL_READ_ONLY.
         .gbufferDepthLayout = m_depthPrepassReuse ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eShaderReadOnlyOptimal,
