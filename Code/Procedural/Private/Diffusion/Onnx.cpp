@@ -114,7 +114,8 @@ namespace Procedural::Diffusion
 				// DirectML REQUIRES both of these. The Java addDirectML sets them for you; the C++ API does
 				// not, and session creation fails without them.
 				opts.DisableMemPattern();
-				opts.SetExecutionMode(ORT_SEQUENTIAL);
+				//opts.SetExecutionMode(ORT_SEQUENTIAL);
+				opts.SetExecutionMode(ORT_PARALLEL);
 				try
 				{
 					Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_DML(opts, 0));

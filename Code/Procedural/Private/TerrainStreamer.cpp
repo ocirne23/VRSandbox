@@ -322,7 +322,7 @@ namespace Procedural
 		// NOTE ON COST: lowering it compresses the world (mountains become reachable sooner) but is
 		// quadratically MORE expensive — the same view distance then spans more model pixels, so more tiles
 		// must be generated. 30 -> 15 is ~4x the inference work for the same ring radius.
-		Tweak::floatVar("Terrain/V3", "Meters per pixel", &m_v3MetersPerPixel, 1.0f, 60.0f, 0.5f, dirty); // 30 = true scale
+		Tweak::floatVar("Terrain/V3", "Meters per pixel", &m_v3MetersPerPixel, 0.05f, 30.0f, 0.05f, dirty); // 30 = true scale
 		Tweak::floatVar("Terrain/V3", "Height scale", &m_v3HeightScale, 0.0f, 4.0f, 0.05f, dirty);
 		// The model's climate is real-world calibrated and the biome attractors are expressed in real units
 		// to match, so both of these default to 0 (= the model's own climate). "Extra lapse" pushes the

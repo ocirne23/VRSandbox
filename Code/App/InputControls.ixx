@@ -97,7 +97,7 @@ public:
             const glm::vec3 force = ball.emitter.getAppliedForce();
             const float pressure = ball.emitter.getPressure();
             if (glm::dot(force, force) > 1e-8f)
-                pc->body.applyImpulse(force * deltaSec * 40000.0f * pressure);
+                pc->body.applyImpulse(force * deltaSec * 10000.0f * pressure);
         }
     }
 

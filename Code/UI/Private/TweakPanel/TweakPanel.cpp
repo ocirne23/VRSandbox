@@ -18,6 +18,13 @@ namespace
 		ImGui::SetNextItemWidth(-1.0f);
 	}
 
+	// Right-clicking a slider/drag enters text-input mode (same as ctrl+click)
+	void typeValueOnRightClick()
+	{
+		if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+			ImGui::SetKeyboardFocusHere(-1);
+	}
+
 	void drawVar(const TweakVar& var, int index)
 	{
 		ImGui::PushID(index);
@@ -36,19 +43,23 @@ namespace
 				changed = ImGui::DragFloat("##v", v, var.speed, var.min, FLT_MAX, formatStr.c_str());
 			else
 				changed = ImGui::SliderFloat("##v", v, var.min, var.max, formatStr.c_str());
+			typeValueOnRightClick();
 			break;
 		}
 		case ETweakType::Float2:
 			drawLabel(var);
 			changed = ImGui::DragFloat2("##v", static_cast<float*>(var.data), var.speed);
+			typeValueOnRightClick();
 			break;
 		case ETweakType::Float3:
 			drawLabel(var);
 			changed = ImGui::DragFloat3("##v", static_cast<float*>(var.data), var.speed);
+			typeValueOnRightClick();
 			break;
 		case ETweakType::Float4:
 			drawLabel(var);
 			changed = ImGui::DragFloat4("##v", static_cast<float*>(var.data), var.speed);
+			typeValueOnRightClick();
 			break;
 		case ETweakType::Color3:
 		{
@@ -60,6 +71,7 @@ namespace
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(-1.0f);
 				changed |= ImGui::DragFloat("##intensity", var.intensity, var.speed, var.min, var.max, "x %.3f");
+				typeValueOnRightClick();
 			}
 			else
 			{
@@ -83,6 +95,7 @@ namespace
 				changed = ImGui::DragInt("##v", v, var.speed, static_cast<int>(var.min), INT_MAX);
 			else
 				changed = ImGui::SliderInt("##v", v, static_cast<int>(var.min), static_cast<int>(var.max));
+			typeValueOnRightClick();
 			break;
 		}
 		case ETweakType::Enum:
