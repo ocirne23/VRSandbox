@@ -26,14 +26,12 @@ export enum EEntityFlags : uint8
 export enum EComponentID : uint16
 {
     EComponentID_Scene    = 0,
-    EComponentID_Zone     = 1,
-    EComponentID_Cull     = 2,
-    EComponentID_Render   = 3,
-    EComponentID_Animator = 4,
-    EComponentID_Physics  = 5,
-    EComponentID_Audio    = 6,
-    EComponentID_Particle = 7,
-    EComponentID_Script   = 8, // should be last so all other components are available on spawn
+    EComponentID_Render   = 1,
+    EComponentID_Animator = 2,
+    EComponentID_Physics  = 3,
+    EComponentID_Audio    = 4,
+    EComponentID_Particle = 5,
+    EComponentID_Script   = 6, // should be last so all other components are available on spawn
 };
 
 export class Entity

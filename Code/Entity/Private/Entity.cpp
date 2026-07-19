@@ -320,8 +320,6 @@ void Entity::serializeComponent(EComponentID id, AssetNode& out)
     switch (id)
     {
     case EComponentID_Scene:  getComponent<SceneComponent>(this)->serialize(out);   break;
-    case EComponentID_Zone:   getComponent<ZoneComponent>(this)->serialize(out);     break;
-    case EComponentID_Cull:   getComponent<CullingComponent>(this)->serialize(out);  break;
     case EComponentID_Render: getComponent<RenderComponent>(this)->serialize(out);   break;
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->serialize(out); break;
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->serialize(out);  break;
@@ -337,8 +335,6 @@ void Entity::deserializeComponent(EComponentID id, const AssetNode& in)
     switch (id)
     {
     case EComponentID_Scene:  getComponent<SceneComponent>(this)->deserialize(in);   break;
-    case EComponentID_Zone:   getComponent<ZoneComponent>(this)->deserialize(in);     break;
-    case EComponentID_Cull:   getComponent<CullingComponent>(this)->deserialize(in);  break;
     case EComponentID_Render: getComponent<RenderComponent>(this)->deserialize(in);   break;
     case EComponentID_Animator: getComponent<AnimatorComponent>(this)->deserialize(in); break;
     case EComponentID_Physics: getComponent<PhysicsComponent>(this)->deserialize(in);  break;

@@ -33,7 +33,7 @@ export void breakContiguousAllocationFromRoot(Entity* root);
 // (refcount 1) — i.e. destroying the tree is guaranteed to destroy all of them.
 export bool contiguousTreeSolelyOwned(Entity* entity);
 
-export constexpr uint16 MaxInlineComponentTypes = 9;
+export constexpr uint16 MaxInlineComponentTypes = 7;
 export constexpr uint16 ComponentAlignment = 16;
 
 export struct SceneComponent
@@ -63,36 +63,6 @@ export struct SceneComponent
 
     void serialize(AssetNode&) const {}
     void deserialize(const AssetNode&) {}
-};
-
-export struct ZoneComponent
-{
-    static constexpr EComponentID getId() { return EComponentID_Zone; }
-    std::vector<EntityPtr> entities;
-
-    void serialize(AssetNode&) const {}
-    void deserialize(const AssetNode&) {}
-};
-
-export struct CullingComponent
-{
-    static constexpr EComponentID getId() { return EComponentID_Cull; }
-    float radius = 0.0f;
-    glm::vec3 center = glm::vec3(0.0f);
-    glm::vec3 extent = glm::vec3(0.0f);
-
-    void serialize(AssetNode& out) const
-    {
-        out.set("Radius", radius);
-        out.set("Center", center);
-        out.set("Extent", extent);
-    }
-    void deserialize(const AssetNode& in)
-    {
-        if (const AssetNode* n = in.find("Radius")) radius = n->asFloat();
-        if (const AssetNode* n = in.find("Center")) center = n->asVec3();
-        if (const AssetNode* n = in.find("Extent")) extent = n->asVec3();
-    }
 };
 
 export struct RenderComponent
@@ -401,8 +371,6 @@ export constexpr const char* componentTypeName(EComponentID id)
     switch (id)
     {
     case EComponentID_Scene:  return "Scene";
-    case EComponentID_Zone:   return "Zone";
-    case EComponentID_Cull:   return "Cull";
     case EComponentID_Render: return "Render";
     case EComponentID_Animator: return "Animator";
     case EComponentID_Physics: return "Physics";
@@ -419,8 +387,6 @@ export namespace EntityComponentDetail
     constexpr T alignUp(T value, T alignment) { return (value + alignment - 1) & ~(alignment - 1); }
     inline constexpr std::array<uint16, MaxInlineComponentTypes> inlineSizes {
         alignUp(uint16(sizeof(SceneComponent)),   ComponentAlignment),
-        alignUp(uint16(sizeof(ZoneComponent)),    ComponentAlignment),
-        alignUp(uint16(sizeof(CullingComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(RenderComponent)),  ComponentAlignment),
         alignUp(uint16(sizeof(AnimatorComponent)), ComponentAlignment),
         alignUp(uint16(sizeof(PhysicsComponent)), ComponentAlignment),
@@ -429,14 +395,12 @@ export namespace EntityComponentDetail
         alignUp(uint16(sizeof(ScriptComponent)),  ComponentAlignment),
     };
     static_assert(EComponentID_Scene == 0);
-    static_assert(EComponentID_Zone == 1);
-    static_assert(EComponentID_Cull == 2);
-    static_assert(EComponentID_Render == 3);
-    static_assert(EComponentID_Animator == 4);
-    static_assert(EComponentID_Physics == 5);
-    static_assert(EComponentID_Audio == 6);
-    static_assert(EComponentID_Particle == 7);
-    static_assert(EComponentID_Script == 8);
+    static_assert(EComponentID_Render == 1);
+    static_assert(EComponentID_Animator == 2);
+    static_assert(EComponentID_Physics == 3);
+    static_assert(EComponentID_Audio == 4);
+    static_assert(EComponentID_Particle == 5);
+    static_assert(EComponentID_Script == 6);
 
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);
 }

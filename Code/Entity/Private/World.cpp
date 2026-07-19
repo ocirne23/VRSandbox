@@ -675,7 +675,6 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 
-    static_assert(EComponentID_Render == 3);
     // A Hull/Mesh physics shape (parsed below) sources its geometry from the render container, so the
     // collision snapshot is captured while the container's scene data is loaded — one import, not two.
     const AssetNode* physicsNode = findComponentNode(node, "Physics");
@@ -695,7 +694,6 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 
-    static_assert(EComponentID_Animator == 4);
     if (const AssetNode* animatorNode = findComponentNode(node, "Animator"))
         if (std::shared_ptr<AnimatorComponent::SpawnInfo> info = buildAnimatorSpawnInfo(*animatorNode, renderContainerName, tmpl.displayName))
         {
@@ -703,14 +701,12 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 
-    static_assert(EComponentID_Physics == 5);
     if (physicsNode) // found above, before the render container load
     {
         typeBits |= uint16(1 << EComponentID_Physics);
         tmpl.spawnInfos.emplace_back(buildPhysicsSpawnInfo(*physicsNode, renderContainerName, renderNodePath, tmpl.displayName));
     }
 
-    static_assert(EComponentID_Audio == 6);
     if (const AssetNode* audioNode = findComponentNode(node, "Audio"))
         if (std::shared_ptr<AudioComponent::SpawnInfo> info = buildAudioSpawnInfo(*audioNode, tmpl.displayName))
         {
@@ -718,7 +714,6 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 
-    static_assert(EComponentID_Particle == 7);
     if (const AssetNode* particleNode = findComponentNode(node, "Particle"))
     {
         auto info = std::make_shared<ParticleComponent::SpawnInfo>();
@@ -733,7 +728,6 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             Log::warning("Scene: entity '" + tmpl.displayName + "' has a Particle component without an Effect path, skipping");
     }
 
-    static_assert(EComponentID_Script == 8);
     if (const AssetNode* scriptNode = findComponentNode(node, "Script"))
     {
         auto info = std::make_shared<ScriptComponent::SpawnInfo>();
