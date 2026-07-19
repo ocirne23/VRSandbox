@@ -774,6 +774,8 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.oceanParams10 = glm::vec4(glm::max(ocean.waveHeightLimit, 0.0f), 0.0f, 0.0f, 0.0f);
 
     ubo.terrainParams = m_terrainParams;
+    ubo.terrainShadowParams = glm::vec4(glm::max(m_shadowParams.terrainMarchStart, 0.0f),
+        glm::max(m_shadowParams.terrainMarchBias, 1.0f), glm::max(m_shadowParams.terrainMarchSpread, 0.002f), 0.0f);
 
     { // Forcefield bubbles (Force library pushes m_forceFieldParams every frame; all UBO-driven = live)
         const ForceFieldParams& force = m_forceFieldParams;
@@ -805,7 +807,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
     ubo.terrainTexParams4 = glm::vec4(tex.snowSlopeStart, glm::max(tex.snowSlopeFull, tex.snowSlopeStart + 1e-3f),
         tex.snowAridity, 0.0f);
     ubo.terrainTexParams5 = glm::vec4(glm::max(tex.cragWanderAmp, 0.0f),
-        1.0f / glm::max(tex.cragWanderWavelength, 1.0f), tex.splatDetailDistance, 0.0f);
+        1.0f / glm::max(tex.cragWanderWavelength, 1.0f), 0.0f, 0.0f);
     static_assert(sizeof(ubo.terrainSplatClimate) == sizeof(m_terrainSplatClimate));
     memcpy(ubo.terrainSplatClimate, m_terrainSplatClimate, sizeof(m_terrainSplatClimate));
     // The splat textures belong to no rendered instance's material, so the projected-size priority pass

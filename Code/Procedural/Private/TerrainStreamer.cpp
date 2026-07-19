@@ -302,7 +302,6 @@ namespace Procedural
 		Tweak::floatVar("Terrain/Textures", "Crag wander wavelength (m)", &m_texCragWanderWavelength, 200.0f, 20000.0f, 100.0f);
 		// Beyond this view distance the splat layers fetch albedo only (no normal/ARM taps, geometric
 		// normal shading) — the minified detail mips carry no visible signal there. 0 = never simplify.
-		Tweak::floatVar("Terrain/Textures", "Splat detail distance (m)", &m_texSplatDetailDistance, 0.0f, 5000.0f, 25.0f);
 		Tweak::floatVar("Terrain/Textures", "Crag relief start (m)", &m_texCragStart, 0.0f, 200.0f);
 		Tweak::floatVar("Terrain/Textures", "Crag relief full (m)", &m_texCragFull, 0.0f, 400.0f);
 		Tweak::floatVar("Terrain/Textures", "Beach band (m)", &m_texBeachBand, 0.0f, 20.0f);
@@ -426,7 +425,6 @@ namespace Procedural
 			.snowAridity = m_texSnowAridity,
 			.cragWanderAmp = m_texCragWanderAmp * cragScale,
 			.cragWanderWavelength = m_texCragWanderWavelength * cragScale,
-			.splatDetailDistance = m_texSplatDetailDistance, // camera-space metres: NOT model-scaled
 		});
 
 		if (!m_texSetRegistered)

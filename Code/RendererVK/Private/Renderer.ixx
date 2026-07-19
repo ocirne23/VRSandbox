@@ -286,9 +286,6 @@ public:
         // TerrainStreamer scales these by V3's world scale, like the crag thresholds.
         float cragWanderAmp = 150.0f;      // metres at the model's true scale; 0 = off
         float cragWanderWavelength = 2000.0f; // metres at the model's true scale
-        // View distance beyond which splat layers fetch albedo only (no normal/ARM taps, shaded with the
-        // geometric normal). Real-world metres (NOT model scale). <= 0 = always full detail.
-        float splatDetailDistance = 400.0f;
     };
     void setTerrainTextureParams(const TerrainTexTweaks& params) { m_terrainTexTweaks = params; }
     // Deepest current ocean wave trough below the calm water level (m, >= 0; the OceanGenerator estimates

@@ -156,6 +156,11 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                             // y = temperature lapse rate, C per WORLD metre above sea level (<= 0; pairs
                             //     with the climate pack's baked sea-level baseline — terrainTemperatureAt),
                             // z = sea level (world Y, live from the streamer), w unused
+    vec4 u_terrainShadowParams; // long-range sun shadows marched off the terrain height cascades, for the
+                            // ground the cascades and the TLAS cannot reach:
+                            // x = camera distance where the march fades in (m; 0 = off),
+                            // y = first sample distance (m) = self-shadow bias vs the map's texels,
+                            // z = penumbra growth per metre along the sun ray, w unused
 
     // TERRAIN variant texture splatting (keep in sync with RendererVKLayout::Ubo). Materials are
     // contiguous, in the order the shader composites them bottom-up:
@@ -175,8 +180,7 @@ layout (binding = UBO_BINDING, std140) uniform UBO
     vec4 u_terrainTexParams4; // x = slope where snow starts sliding off, y = slope where none remains,
                               // z = humidity at/below which cold ground stays bare (polar desert), w unused
     vec4 u_terrainTexParams5; // x = crag wander amplitude (m; 0 = off), y = crag wander frequency (1/m),
-                              // z = splat detail distance (m; <= 0 = always full detail — beyond it splat
-                              // layers fetch albedo only and shade with the geometric normal), w unused
+                              // zw unused
     vec4 u_terrainSplatClimate[MAX_TERRAIN_SPLAT_MATERIALS]; // ground/rock CLIMATE BOX: xy = t01 range,
                               // zw = h01 range. Weight is 1 inside and Gaussian-decays outside, so a full
                               // 0..1 range on an axis means "this axis does not matter for this entry".

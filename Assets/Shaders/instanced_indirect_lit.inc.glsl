@@ -111,6 +111,23 @@ vec3 doSunLight(vec3 worldPos, vec3 V, vec3 N, vec3 specularCol, vec3 matColOver
 	if (max(dot(N, L), 0.0) <= 0.0)
 		return vec3(0.0);
 	float visibility = u_rtSunShadow > 0.5 ? traceSunVisibility(worldPos, N) : sampleSunShadow(worldPos, N);
+	// Long-range terrain shadows. BOTH sources above run out of data well inside the streamed mesh ring —
+	// the cascades end at Shadows/Max distance (3 km default), the RT path's instances at RT/TLAS Range
+	// (4 km) — while terrain meshes run to ~33 km, so distant ground otherwise sits uniformly lit behind a
+	// hard terminator. The baked height cascades still cover all of it, so march them there and take the
+	// DARKER of the two: inside the fade band both terms see the same ridge (min is a no-op, no double
+	// darkening), past it only the march survives. Skipped up close, where the map's texels are coarser
+	// than the geometry they would be shadowing and could only produce acne.
+	// Reach is bias * 2^10 — ~77 km at the default 150 m, comfortably past the far cascade's own range.
+	if (u_terrainShadowParams.x > 0.0 && terrainHeightMapPresent())
+	{
+		const float fadeIn = smoothstep(u_terrainShadowParams.x, u_terrainShadowParams.x * 1.25, distance(worldPos, u_viewPos));
+		if (fadeIn > 0.0)
+		{
+			const float terrainVis = terrainSunVisibility(worldPos, L, u_terrainShadowParams.y, 10, u_terrainShadowParams.z, 4.0);
+			visibility = min(visibility, mix(1.0, terrainVis, fadeIn));
+		}
+	}
 	vec3 lightRadiance = atmosTransmittanceToLight(0.0, L, u_skyUp) * u_sunColor.rgb * visibility * u_eclipseParams.x;
 	// Underwater: the sun crossed the wavy surface — caustic focus + Beer-Lambert absorption
 	// (underwater_light.inc.glsl), so seabed/submerged objects get the dancing light patterns. One

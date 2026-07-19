@@ -177,7 +177,7 @@ export namespace RendererVKLayout
     constexpr uint32 INITIAL_LOD_STATE_SLOTS = 1024; // per-instance LOD hysteresis state slots, grown on demand
     constexpr size_t MAX_LIGHTS = USHRT_MAX - 1;
     // Sun shadow cascaded shadow maps.
-    constexpr uint32 NUM_SHADOW_CASCADES = 6;
+    constexpr uint32 NUM_SHADOW_CASCADES = 4;
     constexpr uint32 SHADOW_MAP_RESOLUTION = 2048;
 
     // Per-render-node pass visibility bits (in_nodePassMasks, written at renderNode() push time):
@@ -436,6 +436,11 @@ export namespace RendererVKLayout
                                    // y = temperature lapse rate, C per WORLD metre above sea level (<= 0;
                                    //     pairs with the map's baked sea-level baseline — terrainTemperatureAt),
                                    // z = sea level (world Y, live from the streamer), w unused
+        glm::vec4 terrainShadowParams; // long-range sun shadows marched off the terrain height cascades,
+                                   // for the ground the cascades and the TLAS cannot reach (ShadowParams):
+                                   // x = camera distance where the march fades in (m; 0 = off),
+                                   // y = first sample distance (m) = self-shadow bias vs the map's texels,
+                                   // z = penumbra growth per metre along the sun ray, w unused
 
         // TERRAIN variant texture splatting (Renderer::setTerrainSplatMaterials; keep in sync with
         // ubo.inc.glsl). Materials are CONTIGUOUS in the material buffer, in the order the shader
@@ -457,9 +462,8 @@ export namespace RendererVKLayout
                                      // z = humidity at/below which cold ground stays bare (polar desert),
                                      // w = unused
         glm::vec4 terrainTexParams5; // x = crag wander amplitude (m; 0 = off), y = crag wander frequency
-                                     // (1/m), z = splat detail distance (m; <= 0 = always full detail),
-                                     // w unused. The wander breaks the rock boundary off the elevation
-                                     // contour the crag test would otherwise trace — see terrainSplat.
+                                     // (1/m), zw unused. The wander breaks the rock boundary off the
+                                     // elevation contour the crag test would otherwise trace — see terrainSplat.
         glm::vec4 terrainSplatClimate[MAX_TERRAIN_SPLAT_MATERIALS]; // ground/rock CLIMATE BOX in the
                                      // (t01, h01) space: xy = temperature range, zw = humidity range.
                                      // Weight is 1 inside the box and Gaussian-decays outside it, so a

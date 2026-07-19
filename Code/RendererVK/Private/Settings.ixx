@@ -91,7 +91,7 @@ export struct SkyParams
 // "Shadows" category. Consumed per frame by computeSunCascades, so changes apply live.
 export struct ShadowParams
 {
-    float maxDistance = 3000.0f; // farthest camera distance receiving sun shadows (m). Lower = every
+    float maxDistance = 2000.0f; // farthest camera distance receiving sun shadows (m). Lower = every
                                 // cascade covers less ground = sharper shadows everywhere, at range cost.
     float splitLambda = 0.95f;  // cascade split scheme: 0 = uniform splits, 1 = logarithmic (resolution
                                 // bunches up near the camera)
@@ -100,6 +100,23 @@ export struct ShadowParams
                                 // small clips casters out of the depth map and their shadows pop away.
     float depthBias = 0.001f;    // sun cascade depth bias
     float normalBias = 1.0f;     // sun cascade normal bias (texels)
+
+    // Long-range terrain sun shadows. Past maxDistance (and past the RT path's TLAS range) both shadow
+    // sources run out of data, so distant ground goes uniformly lit — a hard terminator across a mesh
+    // ring that reaches ~33 km. The baked terrain height cascades still have data far beyond that, so
+    // distant pixels cone-march them instead (terrainSunVisibility) and take the darker of the two. These
+    // apply to BOTH shadow modes; only the terrain map has to be up.
+    float terrainMarchStart = 1000.0f; // camera distance where the march fades in (m; 0 = off). Sits
+                                // inside maxDistance on purpose: inside the overlap both terms see the
+                                // same ridge, so the handover has nothing to show.
+    float terrainMarchBias = 150.0f;   // first sample distance up the sun ray (m). THE self-shadow knob:
+                                // the map's texels are 8 m near / 132 m far and carry none of the sub-
+                                // texel relief that is actually rendered, so a surface point sits on a
+                                // heightfield coarser than itself. Too small = acne on lit slopes.
+    float terrainMarchSpread = 0.02f;  // penumbra growth per metre along the ray. Deliberately far wider
+                                // than the true sun disc (~0.005): the softness is what keeps the map's
+                                // texels from resolving as stair-steps, and what keeps the doubling
+                                // sample spacing self-consistent (this is a cone trace, not a point march).
     void registerTweaks();
 };
 

@@ -126,25 +126,15 @@ struct TerrainSample
 
 // One splat material with world-XZ UVs; tangent basis = world X/Z reoriented onto the geometric
 // normal. matIdx diverges between neighbouring pixels at climate borders -> nonuniformEXT.
-// detail = false (beyond the splat detail distance, u_terrainTexParams5.z): albedo only — at that
-// minification the normal/ARM mips carry no visible signal, so the surface shades with the geometric
-// normal and the no-ARM constants, skipping 2 of the 3 taps.
-TerrainSample sampleTerrainXZ(uint matIdx, vec2 uv, vec3 geoN, bool detail)
+TerrainSample sampleTerrainXZ(uint matIdx, vec2 uv, vec3 geoN)
 {
 	const MaterialInfo material = in_materialInfos[nonuniformEXT(matIdx)];
 	const uint diffuseTexIdx = material.diffuseNormalTexIdx & 0xFFFFu;
+	const uint normalTexIdx = material.diffuseNormalTexIdx >> 16;
+	const uint armTexIdx    = material.metalRoughnessTexIdxAlphaMode & 0xFFFFu;
 
 	TerrainSample s;
 	s.albedo = texture(u_textures[nonuniformEXT(diffuseTexIdx)], uv).rgb;
-	s.normal = geoN;
-	s.ao = 1.0;
-	s.rough = 0.9;
-	s.metal = 0.0;
-	if (!detail)
-		return s;
-
-	const uint normalTexIdx = material.diffuseNormalTexIdx >> 16;
-	const uint armTexIdx    = material.metalRoughnessTexIdxAlphaMode & 0xFFFFu;
 	const vec3 arm = armTexIdx != 0xFFFFu ? texture(u_textures[nonuniformEXT(armTexIdx)], uv).rgb : vec3(1.0, 0.9, 0.0);
 	s.ao = arm.r;
 	s.rough = max(arm.g, 0.01);
@@ -181,7 +171,7 @@ vec3 decodeTriplanarNormal(vec3 ns, bool bc5)
 // The branch is coherent across a quad except on the exact plane-crossover diagonal, where one pixel may
 // get a slightly wrong mip; invisible in practice.
 #define TRIPLANAR_WMIN 0.05
-TerrainSample sampleTerrainTriplanar(uint matIdx, vec3 worldPos, vec3 geoN, float uvScale, bool detail)
+TerrainSample sampleTerrainTriplanar(uint matIdx, vec3 worldPos, vec3 geoN, float uvScale)
 {
 	const MaterialInfo material = in_materialInfos[nonuniformEXT(matIdx)];
 	const uint diffuseTexIdx = material.diffuseNormalTexIdx & 0xFFFFu;
@@ -200,36 +190,27 @@ TerrainSample sampleTerrainTriplanar(uint matIdx, vec3 worldPos, vec3 geoN, floa
 	vec3 albedo = vec3(0.0);
 	vec3 arm = vec3(0.0);
 	vec3 nrm = vec3(0.0);
-	const bool hasArm = detail && armTexIdx != 0xFFFFu; // !detail: albedo-only planes, like sampleTerrainXZ
+	const bool hasArm = armTexIdx != 0xFFFFu;
 	if (use.x)
 	{
 		albedo += texture(u_textures[nonuniformEXT(diffuseTexIdx)], uvX).rgb * w.x;
-		if (detail)
-		{
-			const vec3 tn = decodeTriplanarNormal(texture(u_textures[nonuniformEXT(normalTexIdx)], uvX).xyz, bc5);
-			nrm += vec3(tn.z * sign(geoN.x), tn.y, tn.x) * w.x;
-			if (hasArm) arm += texture(u_textures[nonuniformEXT(armTexIdx)], uvX).rgb * w.x;
-		}
+		const vec3 tn = decodeTriplanarNormal(texture(u_textures[nonuniformEXT(normalTexIdx)], uvX).xyz, bc5);
+		nrm += vec3(tn.z * sign(geoN.x), tn.y, tn.x) * w.x;
+		if (hasArm) arm += texture(u_textures[nonuniformEXT(armTexIdx)], uvX).rgb * w.x;
 	}
 	if (use.y)
 	{
 		albedo += texture(u_textures[nonuniformEXT(diffuseTexIdx)], uvY).rgb * w.y;
-		if (detail)
-		{
-			const vec3 tn = decodeTriplanarNormal(texture(u_textures[nonuniformEXT(normalTexIdx)], uvY).xyz, bc5);
-			nrm += vec3(tn.x, tn.z * sign(geoN.y), tn.y) * w.y;
-			if (hasArm) arm += texture(u_textures[nonuniformEXT(armTexIdx)], uvY).rgb * w.y;
-		}
+		const vec3 tn = decodeTriplanarNormal(texture(u_textures[nonuniformEXT(normalTexIdx)], uvY).xyz, bc5);
+		nrm += vec3(tn.x, tn.z * sign(geoN.y), tn.y) * w.y;
+		if (hasArm) arm += texture(u_textures[nonuniformEXT(armTexIdx)], uvY).rgb * w.y;
 	}
 	if (use.z)
 	{
 		albedo += texture(u_textures[nonuniformEXT(diffuseTexIdx)], uvZ).rgb * w.z;
-		if (detail)
-		{
-			const vec3 tn = decodeTriplanarNormal(texture(u_textures[nonuniformEXT(normalTexIdx)], uvZ).xyz, bc5);
-			nrm += vec3(tn.x, tn.y, tn.z * sign(geoN.z)) * w.z;
-			if (hasArm) arm += texture(u_textures[nonuniformEXT(armTexIdx)], uvZ).rgb * w.z;
-		}
+		const vec3 tn = decodeTriplanarNormal(texture(u_textures[nonuniformEXT(normalTexIdx)], uvZ).xyz, bc5);
+		nrm += vec3(tn.x, tn.y, tn.z * sign(geoN.z)) * w.z;
+		if (hasArm) arm += texture(u_textures[nonuniformEXT(armTexIdx)], uvZ).rgb * w.z;
 	}
 	if (!hasArm)
 		arm = vec3(1.0, 0.9, 0.0);
@@ -239,7 +220,7 @@ TerrainSample sampleTerrainTriplanar(uint matIdx, vec3 worldPos, vec3 geoN, floa
 	s.ao = arm.r;
 	s.rough = max(arm.g, 0.01);
 	s.metal = arm.b;
-	s.normal = detail ? normalize(nrm + geoN * 2.0) : geoN; // biased toward geoN: detail, not replacement
+	s.normal = normalize(nrm + geoN * 2.0); // biased toward geoN: detail, not replacement
 	return s;
 }
 
@@ -338,7 +319,7 @@ ClimatePick pickClimate(vec2 climate, int first, int count, float invS2)
 // The full splatted terrain surface; neutral mid-gray before a texture set is registered.
 // All four layer coverages are computed FIRST (cheap ALU) so fully buried layers never sample: a
 // snow-capped peak collapses to the 3 snow taps, a sheer cliff face skips ground + beach.
-TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f, bool detail)
+TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f)
 {
 	const int baseMat = int(u_terrainTexParams0.x);
 	const int numGround = int(u_terrainTexParams0.y);
@@ -395,7 +376,7 @@ TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f, bool detai
 	// Full snow cover: everything beneath is hidden — the whole splat is the snow sample alone.
 	if (snowW >= TERRAIN_LAYER_OPAQUE)
 	{
-		TerrainSample surf = sampleTerrainXZ(snowMatIdx, worldPos.xz * u_terrainTexParams2.w, geoN, detail);
+		TerrainSample surf = sampleTerrainXZ(snowMatIdx, worldPos.xz * u_terrainTexParams2.w, geoN);
 		surf.normal = normalize(surf.normal);
 		return surf;
 	}
@@ -405,11 +386,11 @@ TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f, bool detai
 	if (beachW < TERRAIN_LAYER_OPAQUE && rockW < TERRAIN_LAYER_OPAQUE)
 	{
 		const ClimatePick g = pickClimate(climate, 0, numGround, invS2);
-		surf = sampleTerrainXZ(uint(baseMat + g.i0), uvGround, geoN, detail);
+		surf = sampleTerrainXZ(uint(baseMat + g.i0), uvGround, geoN);
 		if (g.n1 > TERRAIN_BLEND_EPS)
-			terrainMixInto(surf, sampleTerrainXZ(uint(baseMat + g.i1), uvGround, geoN, detail), g.n1 / max(1.0 - g.n2, 1e-4));
+			terrainMixInto(surf, sampleTerrainXZ(uint(baseMat + g.i1), uvGround, geoN), g.n1 / max(1.0 - g.n2, 1e-4));
 		if (g.n2 > TERRAIN_BLEND_EPS)
-			terrainMixInto(surf, sampleTerrainXZ(uint(baseMat + g.i2), uvGround, geoN, detail), g.n2);
+			terrainMixInto(surf, sampleTerrainXZ(uint(baseMat + g.i2), uvGround, geoN), g.n2);
 	}
 	else
 		surf = TerrainSample(vec3(0.0), geoN, 0.9, 0.0, 1.0);
@@ -417,7 +398,7 @@ TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f, bool detai
 	// 2. Beach (invisible under a full rock face).
 	if (beachW > 0.004 && rockW < TERRAIN_LAYER_OPAQUE)
 	{
-		const TerrainSample beach = sampleTerrainXZ(uint(baseMat + numGround + numRock), uvGround, geoN, detail);
+		const TerrainSample beach = sampleTerrainXZ(uint(baseMat + numGround + numRock), uvGround, geoN);
 		if (beachW >= TERRAIN_LAYER_OPAQUE)
 			surf = beach;
 		else
@@ -428,11 +409,11 @@ TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f, bool detai
 	if (rockW > 0.004)
 	{
 		const ClimatePick r = pickClimate(climate, numGround, numRock, invS2);
-		TerrainSample rock = sampleTerrainTriplanar(uint(baseMat + r.i0), worldPos, geoN, u_terrainTexParams1.y, detail);
+		TerrainSample rock = sampleTerrainTriplanar(uint(baseMat + r.i0), worldPos, geoN, u_terrainTexParams1.y);
 		if (r.n1 > TERRAIN_BLEND_EPS)
-			terrainMixInto(rock, sampleTerrainTriplanar(uint(baseMat + r.i1), worldPos, geoN, u_terrainTexParams1.y, detail), r.n1 / max(1.0 - r.n2, 1e-4));
+			terrainMixInto(rock, sampleTerrainTriplanar(uint(baseMat + r.i1), worldPos, geoN, u_terrainTexParams1.y), r.n1 / max(1.0 - r.n2, 1e-4));
 		if (r.n2 > TERRAIN_BLEND_EPS)
-			terrainMixInto(rock, sampleTerrainTriplanar(uint(baseMat + r.i2), worldPos, geoN, u_terrainTexParams1.y, detail), r.n2);
+			terrainMixInto(rock, sampleTerrainTriplanar(uint(baseMat + r.i2), worldPos, geoN, u_terrainTexParams1.y), r.n2);
 		if (rockW >= TERRAIN_LAYER_OPAQUE)
 			surf = rock;
 		else
@@ -441,7 +422,7 @@ TerrainSample terrainSplat(vec3 worldPos, vec3 geoN, TerrainFields f, bool detai
 
 	// 4. Snow (partial cover; full cover returned above).
 	if (snowW > 0.004)
-		terrainMixInto(surf, sampleTerrainXZ(snowMatIdx, worldPos.xz * u_terrainTexParams2.w, geoN, detail), snowW);
+		terrainMixInto(surf, sampleTerrainXZ(snowMatIdx, worldPos.xz * u_terrainTexParams2.w, geoN), snowW);
 
 	surf.normal = normalize(surf.normal);
 	return surf;
@@ -463,10 +444,7 @@ void main()
 	return;
 #endif
 
-	// Splat detail distance (u_terrainTexParams5.z, "Terrain/Textures" tweak; <= 0 = always full detail):
-	// beyond it every splat layer fetches albedo only and shades with the geometric normal.
-	const bool splatDetail = u_terrainTexParams5.z <= 0.0 || viewDist < u_terrainTexParams5.z;
-	const TerrainSample surf = terrainSplat(in_pos, geoN, fields, splatDetail);
+	const TerrainSample surf = terrainSplat(in_pos, geoN, fields);
 	// We already sampled the terrain data cascade for fields.waterLevel; hand it to the lit core so
 	// doSunLight's underwater test reuses it instead of re-fetching the same cascade.
 	g_waterLevelOverride = fields.waterLevel;

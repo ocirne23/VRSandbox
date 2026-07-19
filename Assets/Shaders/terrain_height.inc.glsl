@@ -15,8 +15,9 @@
 //   A = MACRO ALTITUDE (m above sea level, pass-1.5 field) — the terrain coloring splits "mountain"
 //       (height far above it) from "high-altitude flatland" (height ~ altitude); bilinear-safe
 // Consumers: the volumetric fog's terrain-following height base + regional density
-// (vol_scatter.cs.glsl) and the ocean's depth/water-level fallback outside its own shore map
-// (ocean_wave.inc.glsl).
+// (vol_scatter.cs.glsl), the ocean's depth/water-level fallback outside its own shore map
+// (ocean_wave.inc.glsl), and the long-range sun shadow march below (terrainSunVisibility — shared by the
+// fog and every lit surface, which is why it lives here rather than in either consumer).
 //
 // UBO packing (requires ubo.inc.glsl):
 //   u_fogParams5.xy = world center XZ, u_fogParams3.y = 1 / near cascade world size (0 = no map),
@@ -50,6 +51,40 @@ vec4 terrainDataAt(vec2 worldXZ)
 
 // Raw terrain surface height (world Y, m) at worldXZ.
 float terrainHeightAt(vec2 worldXZ) { return terrainDataAt(worldXZ).x; }
+
+// Sun visibility marched off the height cascades, for receivers the ordinary sun shadow sources cannot
+// reach: the PCSS cascades end at Shadows/Max distance and the RT path's instances are bounded by RT/TLAS
+// Range, both far short of a terrain mesh ring that runs to ~33 km, so distant ground would otherwise sit
+// uniformly lit behind a hard terminator. The map still has data out to its far cascade.
+//
+// Steps DOUBLE from startT, so the reach is startT * 2^steps and the sample spacing grows with distance.
+// That is not an approximation to apologise for: the occlusion test is a SOFT horizon — how far the ray
+// clears the terrain, over a penumbra that widens with t — so the widening spacing stays matched to the
+// widening penumbra and the whole thing behaves as a cone trace. Two consequences worth relying on:
+// it is fully deterministic (no jitter, so no temporal integration, so far shadows hold perfectly still
+// under camera motion — unlike a jittered binary march), and an occluder missed inside a late gap
+// degrades into a softer edge rather than popping.
+//   startT = first sample distance (m). On a SURFACE receiver this is the self-shadow bias: the sample
+//            must clear both the map's own texel size (8 m near / 132 m far) and the sub-texel relief the
+//            map does not carry at all (the generator's slope-masked noise is finer than either cascade).
+//   spread = penumbra growth per metre. Floor it well above the true sun disc (~0.005): the softness is
+//            what stops the map's texels resolving as stair-steps.
+float terrainSunVisibility(vec3 pos, vec3 sunDir, float startT, int steps, float spread, float bias)
+{
+    if (sunDir.y <= 0.0)
+        return 0.0; // sun below the horizon
+    float vis = 1.0;
+    float t = startT;
+    for (int i = 0; i < steps; ++i)
+    {
+        const vec3 p = pos + sunDir * t;
+        vis = min(vis, clamp((p.y - terrainHeightAt(p.xz)) / (t * spread + bias), 0.0, 1.0));
+        if (vis <= 0.0)
+            return 0.0;
+        t *= 2.0;
+    }
+    return vis;
+}
 
 // Fog height-falloff from temperature: cold air hugs the ground, warm air lets fog tower. Recomputed
 // rather than baked — it is a pure function of temperature, so storing it wasted 8 bits of the packed
