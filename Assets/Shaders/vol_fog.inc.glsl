@@ -17,9 +17,8 @@
 //                 instead of TLAS rays / cascade taps, which both run out of data at distance),
 //                 z = regional fog strength (baked thickness/falloff modulation, 0 = uniform),
 //                 w = underwater density multiplier (on the global density, below the local water surface)
-//   u_fogParams9: x = analytic far field enabled (> 0.5), y = far field density scale (on the global
-//                 density, beyond the froxel volume), z = multiplier on the NEAR field's height falloff
-//                 (fogParams0.z — same model, optionally thicker at range), w = ground samples per ray
+//   u_fogParams9: far field (past the froxel volume; vol_apply) — x = enabled (> 0.5), y = density scale,
+//                 z = multiplier on the near field's height falloff (fogParams0.z), w = ground samples per ray
 
 #ifndef VOL_FOG_INC_GLSL
 #define VOL_FOG_INC_GLSL
@@ -55,61 +54,44 @@ float volPhaseHG(float cosTheta, float g)
     return (1.0 - g2) / (4.0 * PI * denom * sqrt(denom));
 }
 
-// ---- Analytic far field (beyond the froxel volume; vol_apply) -----------------------------------------
-// Past the volume's far plane the medium is only the global height fog: local lights, fog volumes and
-// density noise have all faded out by then, leaving one exponential-in-altitude layer and one directional
-// light. In a FLAT world that has a closed form, so the far field needs neither froxels nor a raymarch.
-// That is the entire point — an integration scheme is what bands and what destabilises under camera
-// motion, and there is none here: the result is a pure function of position and direction, exact every
-// frame, with no history, no slices and no reconstruction to alias.
-//
-// The profile mirrors heightFogMean in vol_scatter EXACTLY, including the below-base plateau. The two
-// must agree or the handover at the far plane shows a step:
-//   p(y) = 1                      for y <= base
-//        = exp(-k * (y - base))   for y >  base
-// Antiderivative in height with G(0) = 0 and G'(h) = p(base + h):
+// ---- Analytic height fog (the far field beyond the froxel volume; vol_apply) ---------------------------
+// Density profile, matching heightFogMean in vol_scatter including the below-base plateau (they must agree
+// or the handover at the volume's far plane steps):
+//   p(y) = 1 for y <= base, exp(-k * (y - base)) above it
+// Antiderivative in height, G(0) = 0, G'(h) = p(base + h).
 float volHeightAntideriv(float h, float k)
 {
-    // k -> 0 degenerates to G(h) = h, which the h <= 0 branch already returns; guard the divide.
-    return (h <= 0.0 || k < 1e-6) ? h : (1.0 - exp(-k * h)) / k;
+    return (h <= 0.0 || k < 1e-6) ? h : (1.0 - exp(-k * h)) / k; // k -> 0 degenerates to G(h) = h
 }
 
-// Optical depth over a stretch where the height above the fog base runs LINEARLY: from hStart, at `slope`
-// metres of height per metre travelled, for `len` metres. This is the primitive everything else uses.
+// Optical depth over a stretch where the height above the base runs linearly: from hStart, at `slope`
+// metres of height per metre travelled, for `len` metres.
 //
-// It is linear in h that matters, not in the ray: if the fog BASE also varies linearly along the ray (a
-// terrain-following layer over ground interpolated between two samples), h stays linear and the ground's
-// slope simply subtracts from the ray's. So a terrain-following medium can be integrated EXACTLY in
-// pieces, with no density sampling anywhere — see volFarField in vol_apply.fs.glsl.
+// Linearity in h is what this needs, not a straight ray through a flat layer — so if the base itself
+// varies linearly (a terrain-following layer over ground interpolated between two samples), its slope
+// just subtracts from the ray's and the result stays exact. That is what lets volFarField follow terrain
+// piecewise without ever sampling density.
 float volAnalyticOpticalDepthLinear(float hStart, float slope, float len, float k, float density)
 {
     if (len <= 0.0)
         return 0.0;
-    // Near-horizontal: h barely moves and the 1/slope below blows up. The profile is effectively constant,
-    // so the integral is just length x density. This is the COMMON case (looking at the horizon), not a
-    // rare edge — without the guard it NaNs a band across the middle of the screen.
+    // Near-horizontal is the common case (the horizon), not a rare edge: without this the 1/slope below
+    // NaNs a band across the middle of the screen.
     if (abs(slope) < 1e-5)
         return density * len * (hStart <= 0.0 ? 1.0 : exp(-k * hStart));
     return density * (volHeightAntideriv(hStart + slope * len, k) - volHeightAntideriv(hStart, k)) / slope;
 }
 
-// Optical depth of a FLAT-based height fog between distances t0 and t1 along the ray (camPos, dir).
-// Correct for any t1 including "infinite" (pass a huge t1 and the limits fall out: an upward ray converges
-// on G = 1/k, a level or downward one saturates to zero transmittance).
+// Flat-based height fog between distances t0 and t1 along the ray. Correct for any t1 including
+// VOL_FAR_INFINITY: an upward ray converges on G = 1/k, a level or downward one saturates to zero
+// transmittance.
 float volAnalyticOpticalDepth(vec3 camPos, vec3 dir, float t0, float t1, float base, float k, float density)
 {
     return volAnalyticOpticalDepthLinear(camPos.y + dir.y * t0 - base, dir.y, max(t1 - t0, 0.0), k, density);
 }
 
-// NOTE: there is deliberately no inverse of the above. Solving t for a given optical depth (to place the
-// far field's terrain/sun sample point) needs Ginv, whose 1/k asymptote is unreachable for any ray that
-// climbs out of the fog layer — the log clamps, t saturates, and the sample point jumps discontinuously
-// across dir.y = 0, which draws a straight fog line at eye level. vol_apply places that point with a
-// near-end profile approximation instead; see volFarField.
-
-// Stand-in for "infinitely far" (sky pixels). Large enough that every limit above resolves exactly in
-// fp32 — a downward/level ray's optical depth saturates exp() to 0, an upward ray's converges on 1/k —
-// and small enough that density * t stays well inside range.
+// "Infinitely far" (sky pixels): large enough that the limits above resolve exactly in fp32, small enough
+// that density * t stays in range.
 #define VOL_FAR_INFINITY 1.0e7
 
 #endif

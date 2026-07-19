@@ -17,9 +17,8 @@ import :Layout;
 //   2. integrate : front-to-back accumulation along Z -> in-scatter + transmittance at every slice.
 //   3. apply     : fullscreen blend in the scene-color pass (before TAA), sampling the integrated volume at
 //                  each pixel's G-buffer depth: out = inScatter + sceneColor * transmittance. Everything
-//                  PAST the volume's far plane is added by the analytic far field (a closed-form height-fog
-//                  integral, vol_fog.inc.glsl) rather than by more slices, so the volume's range is a
-//                  near-field quality knob and not a view distance — see vol_apply.fs.glsl.
+//                  past the volume's far plane is added analytically instead of with more slices, so the
+//                  volume's range is a near-field quality knob and not a view distance (vol_apply.fs.glsl).
 // The grid resolution is fixed (independent of the window size), so no swapchain-recreate handling is needed.
 export class VolumetricFogPipeline final
 {
@@ -52,8 +51,7 @@ public:
     struct ApplyParams
     {
         Buffer& ubo;
-        // GI probe SH volume: the analytic far field's ambient is the virtual sky probe (giEvalSkySH).
-        Buffer& giGridDataBuffer;
+        Buffer& giGridDataBuffer; // far field ambient (virtual sky probe)
         vk::ImageView gbufferDepthView;
         // DEPTH_STENCIL_READ_ONLY while depth-prepass reuse binds this image as the scene pass depth.
         vk::ImageLayout gbufferDepthLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
@@ -67,8 +65,8 @@ public:
     // set's binding 10 and every eye's apply set binding 3, both UPDATE_AFTER_BIND and refreshed every
     // frame, so a re-bake's ping-pong flip never re-records the cached fog CBs. The scatter pass raises the
     // height-fog base by a fraction of the local terrain height (Fog/Terrain Follow), so fog pools in
-    // valleys and clears the peaks; the apply pass's far field marches the same ground past the volume.
-    // One call covers the whole pipeline — do not split it per set, or a new set gets forgotten.
+    // valleys and clears the peaks; the far field marches the same ground past the volume. Covers the whole
+    // pipeline in one call — keep it that way, or a set added later gets missed.
     void updateTerrainDescriptor(uint32 frameIdx, vk::ImageView terrainView, vk::Sampler terrainSampler);
 
 private:

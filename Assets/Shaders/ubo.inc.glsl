@@ -80,10 +80,8 @@ layout (binding = UBO_BINDING, std140) uniform UBO
                          // z = underwater caustic strength (0 = off), w = caustic depth fade (1/m)
     vec4 u_fogParams8;   // x = underwater fog boundary offset off the local water surface (m),
                          // y = caustic shore fade depth (m; contrast ramps in over this much water, 0 = off), zw unused
-    vec4 u_fogParams9;   // ANALYTIC FAR FIELD (past the froxel volume's far plane, closed form rather than
-                         // more slices — see vol_fog.inc.glsl): x = enabled, y = density scale (on the
-                         // global density), z = multiplier on the NEAR field's height falloff (fogParams0.z
-                         // — same model, optionally thicker at range), w = ground samples along the segment
+    vec4 u_fogParams9;   // far field (past the froxel volume; vol_apply): x = enabled, y = density scale,
+                         // z = multiplier on the near field's height falloff (fogParams0.z), w = ground samples
 
     vec4 u_moonParams;   // xyz = normalized direction towards the moon, w = cos of the moon disc radius
 

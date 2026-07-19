@@ -118,31 +118,19 @@ export struct FogParams
     glm::vec3 albedo = glm::vec3(1.0f, 1.0f, 1.0f);
     float albedoIntensity = 1.0f;  // > 1 is a non-physical gain (emissive-ish fog)
     float anisotropy = 0.15f;      // HG phase g (0 = isotropic, ->1 = forward scattering)
-    float range = 1024.0f;         // froxel grid far distance (m). With the analytic far field on this is a
-                                   // near-field QUALITY knob, not a view distance: the froxels are only
-                                   // worth their cost where the medium has structure (local lights, fog
-                                   // volumes, noise), so shortening the range concentrates the same 128
-                                   // slices where that structure is and hands the rest to the far field.
-    bool  farField = true;         // analytic far field beyond `range`: the global height fog has a closed
-                                   // form in a flat world, so everything past the volume is solved exactly
-                                   // per pixel instead of sliced. Unbounded (the horizon fully fogs, upward
-                                   // rays converge on finite optical depth) and, having no integration
-                                   // scheme at all, it cannot band and cannot crawl under camera motion.
-    float farFieldDensity = 1.0f;  // scale on the global density out there, so distant haze can be dialled
-                                   // without touching near-field fog. 1 = physically continuous with it
-    float farFieldThickness = 1.0f; // multiplier on heightFalloff's SCALE HEIGHT past the froxel volume
-                                   // (1 = the same layer as the near field, > 1 = thicker at range). The
-                                   // far field otherwise runs the near field's model outright — same
-                                   // density, same falloff, same Terrain Follow, same Region strength —
-                                   // so the two are continuous by default and there is nothing to match
-                                   // by hand; this and Density Scale exist only to let distant haze
-                                   // deviate, since near fog is usually authored far thicker than
-                                   // anything you would want over tens of km
-    int   farFieldSteps = 8;       // ground samples along the far segment. NOT a density raymarch: each
-                                   // sub-segment between samples is solved exactly (linear ground keeps
-                                   // the closed form), so this only sets how finely the km-scale ground
-                                   // profile is tracked — it cannot band, and low counts degrade by
-                                   // smoothing terrain-follow, not by adding noise
+    float range = 1024.0f;         // froxel grid far distance (m). With the far field on, this is a
+                                   // near-field quality knob rather than a view distance: shortening it
+                                   // concentrates the same 128 slices where the medium actually has
+                                   // structure (local lights, fog volumes, noise)
+    bool  farField = true;         // extend the fog past `range` analytically instead of with more slices
+                                   // (vol_apply's volFarField); unbounded, so the horizon fully fogs
+    float farFieldDensity = 1.0f;  // far-field deviations from the near field's own fog. At 1/1 the two are
+    float farFieldThickness = 1.0f; // one continuous medium; near fog is usually authored far thicker than
+                                   // anything readable over tens of km, hence the knobs. Thickness scales
+                                   // heightFalloff's scale height (> 1 = thicker at range)
+    int   farFieldSteps = 4;       // ground samples along the far segment. Each sub-segment between them is
+                                   // solved exactly, so this sets how finely terrain-follow tracks the
+                                   // ground, and low counts smooth it rather than adding noise
     float slicePower = 1.0f;       // froxel Z distribution exponent: 1 = plain exponential slices, < 1
                                    // shifts Z resolution from near to far (worth ~0.7-0.85 at long ranges)
     float terrainShadowDist = 512.0f; // froxels beyond this distance sun-shadow by marching the terrain

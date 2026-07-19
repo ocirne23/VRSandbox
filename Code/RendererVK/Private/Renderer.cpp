@@ -734,8 +734,7 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn)
         glm::max(fog.causticStrength, 0.0f),   // z: underwater caustic focus strength (surfaces + fog shafts)
         glm::max(fog.causticDepthFade, 0.0f)); // w: caustic contrast decay with depth (1/m)
     ubo.fogParams8 = glm::vec4(fog.underwaterOffset, glm::max(fog.causticShoreFade, 0.0f), 0.0f, 0.0f);
-    // z multiplies the NEAR field's height falloff (fogParams0.z): the far field runs the same model, so a
-    // thickness SCALE, not an independent layer. w = ground samples along the far segment.
+    // z: thickness scale inverted into a falloff multiplier on fogParams0.z. w: far-field ground samples.
     ubo.fogParams9 = glm::vec4(fog.farField ? 1.0f : 0.0f, glm::max(fog.farFieldDensity, 0.0f),
         1.0f / glm::clamp(fog.farFieldThickness, 0.01f, 100.0f), (float)glm::max(fog.farFieldSteps, 1));
 

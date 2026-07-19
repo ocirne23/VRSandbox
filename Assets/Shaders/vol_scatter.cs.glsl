@@ -151,9 +151,6 @@ float volRayVisibility(vec3 origin, vec3 dir, float tMax)
     return rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionTriangleEXT ? 0.0 : 1.0;
 }
 
-// terrainSunVisibility (the distant-froxel height-map sun march) lives in terrain_height.inc.glsl —
-// the analytic far field in vol_apply shades with the same function, so the handover matches.
-
 // Radiance scattered toward the camera from one grid light: same type encoding (point/spot/rect/tube)
 // and falloff as the surface path, but with the HG phase in place of the NdotL/BRDF.
 vec3 volLightScatter(LightInfo light, vec3 pos, vec3 viewDir, float g, bool shadowRays)

@@ -144,8 +144,7 @@ uint terrainFlowEncAt(vec2 worldXZ)
 // far cascade's reach, for a few texture taps instead of a full-length ray. The occlusion test is a SOFT
 // horizon (how far the ray clears the terrain, relative to a penumbra that widens with distance — the
 // sun cone half-angle, u_fogParams4.w): fully deterministic, so unlike a jittered binary march it needs
-// no temporal integration at all — far fog shadows hold perfectly still under camera motion. That is
-// also what lets the ANALYTIC far field (vol_apply) use it: it has no history to hide noise in.
+// no temporal integration at all — far fog shadows hold perfectly still under camera motion.
 float terrainSunVisibility(vec3 pos, vec3 sunDir)
 {
     if (sunDir.y <= 0.0)

@@ -365,11 +365,8 @@ export namespace RendererVKLayout
                               // z = underwater caustic strength (0 = off), w = caustic depth fade (1/m)
         glm::vec4 fogParams8; // x = underwater fog boundary offset off the local water surface (m),
                               // y = caustic shore fade depth (m; 0 = off), zw unused
-        glm::vec4 fogParams9; // ANALYTIC FAR FIELD (everything past the froxel volume's far plane, solved
-                              // in closed form instead of with more slices — see vol_fog.inc.glsl):
-                              // x = enabled, y = density scale (on the global density), z = multiplier on
-                              // the NEAR field's height falloff (same model, optionally thicker at range),
-                              // w = ground samples along the far segment
+        glm::vec4 fogParams9; // far field (past the froxel volume; vol_apply): x = enabled, y = density
+                              // scale, z = multiplier on the near field's height falloff, w = ground samples
 
         glm::vec4 moonParams; // xyz = normalized direction towards the moon, w = cos of the moon disc radius
 
