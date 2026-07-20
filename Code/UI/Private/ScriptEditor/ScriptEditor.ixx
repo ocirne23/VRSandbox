@@ -1,11 +1,11 @@
-export module UI:TextEditor;
+export module UI:ScriptEditor;
 
 import Core;
 
-// Standalone plain-text (.txt) file editor panel ("Text Editor" window) — a plain file editor with
+// Standalone plain-text (.txt) file editor panel ("Script Editor" window) — a plain file editor with
 // standard text-editing functionality (selection, copy/cut/paste, undo/redo, word/line navigation, all
 // native to ImGui's multiline input). Unrelated to the visual Script (Node Editor) panel.
-export class TextEditor
+export class ScriptEditor
 {
 public:
 

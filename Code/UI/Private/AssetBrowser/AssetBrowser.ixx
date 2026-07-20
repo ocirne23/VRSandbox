@@ -22,7 +22,7 @@ public:
 	std::string takeScriptOpenRequest()   { return std::move(m_scriptOpenRequest); }
 	std::string takeScriptCreateRequest() { return std::move(m_scriptCreateRequest); }
 
-	// Text (.txt) files: the UI drains this and drives the Script Editor panel.
+	// Text (.txt) files: the UI drains this and drives the Text Editor panel.
 	std::string takeTextOpenRequest() { return std::move(m_textOpenRequest); }
 
 	// .pre files: the UI drains this and drives the Entity Editor panel.

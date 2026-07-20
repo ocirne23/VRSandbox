@@ -14,6 +14,7 @@ import :PropertiesPanel;
 import :OutputLog;
 import :TweakPanel;
 import :TextEditor;
+import :ScriptEditor;
 
 UI::~UI()
 {
@@ -111,6 +112,7 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             ImGui::DockBuilderDockWindow("Content",       dock_id_down);
             ImGui::DockBuilderDockWindow("Entity Editor",  dock_id_properties);
             ImGui::DockBuilderDockWindow("Script",        dock_id_up);
+            ImGui::DockBuilderDockWindow("Text Editor",   dock_id_up);
             ImGui::DockBuilderDockWindow("Script Editor", dock_id_up);
             ImGui::DockBuilderDockWindow("Viewport",   dock_id_up);
             ImGui::DockBuilderFinish(dockspace_id);
@@ -252,8 +254,14 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
     }
 
     {
-        ImGui::Begin("Script Editor");
+        ImGui::Begin("Text Editor");
         m_textEditor.render();
+        ImGui::End();
+    }
+
+    {
+        ImGui::Begin("Script Editor");
+        m_scriptEditor.render();
         ImGui::End();
     }
 
@@ -339,7 +347,7 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         if (std::string editPath = m_assetBrowser.takeEntityEditRequest(); !editPath.empty())
             m_entityEditor.requestOpen(editPath);
 
-        // Route the asset browser's "Open Text File" action into the Script Editor.
+        // Route the asset browser's "Open Text File" action into the Text Editor.
         if (std::string textPath = m_assetBrowser.takeTextOpenRequest(); !textPath.empty())
             m_textEditor.requestOpen(textPath);
     }

@@ -18,6 +18,7 @@ import :EntityEditor;
 import :OutputLog;
 import :TweakPanel;
 import :TextEditor;
+import :ScriptEditor;
 
 import RendererVK;
 
@@ -103,6 +104,7 @@ private:
 	OutputLog       m_outputLog;
 	TweakPanel      m_tweakPanel;
 	TextEditor      m_textEditor;
+	ScriptEditor    m_scriptEditor;
 };
 
 export namespace Globals
