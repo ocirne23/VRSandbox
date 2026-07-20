@@ -22,6 +22,7 @@ export enum EDataType : uint8
     Quat,
     String,
     Entity,   // opaque Entity* handle (script-side pointer, never dereferenced by graph code directly)
+    Pointer,  // opaque component pointer (e.g. ScriptComponent*), produced by Get Component; only in scope on its true branch
     Wildcard,
 };
 
@@ -96,6 +97,7 @@ export uint32 dataTypeColor(EDataType type)
         case EDataType::Quat:   return rgb(180, 130, 255);
         case EDataType::String: return rgb(255, 120, 255);
         case EDataType::Entity: return rgb(255, 150, 60);
+        case EDataType::Pointer: return rgb(110, 140, 200);
         case EDataType::Wildcard: return rgb(150, 150, 150);
     }
     return rgb(200, 200, 200);
@@ -146,6 +148,7 @@ export const char* dataTypeToken(EDataType type)
         case EDataType::Quat:     return "Quat";
         case EDataType::String:   return "String";
         case EDataType::Entity:   return "Entity";
+        case EDataType::Pointer:  return "Pointer";
         case EDataType::Wildcard: return "Wild";
     }
     return "Float";
@@ -159,9 +162,22 @@ export EDataType dataTypeFromToken(std::string_view token)
     return EDataType::Float;
 }
 
-// Value types a Script Data member (persistent struct field) may have. String is excluded on purpose: an
-// std::string can't live in the POD block that crosses the script ABI.
+// Value types a Script Data member (persistent per-instance struct field) may have. Deliberately excluded:
+// String (an std::string can't live in the POD block that crosses the script ABI) and the raw handle types
+// Entity / Pointer — a component/entity handle persisted across frames would dangle once its target is
+// destroyed, so handles must be re-fetched each frame (see entityGetForceComponent), never stored.
 export inline constexpr EDataType memberTypes[] = { EDataType::Int, EDataType::Float, EDataType::Bool, EDataType::Vec3 };
+
+// Enforce that exclusion so a handle can never be persisted: adding Entity/Pointer (or Exec/String) to
+// memberTypes above would let a graph stash a pointer that outlives its target, and fails this build instead.
+constexpr bool memberTypesAreStorablePod()
+{
+    for (EDataType t : memberTypes)
+        if (t == EDataType::Exec || t == EDataType::String || t == EDataType::Entity || t == EDataType::Pointer)
+            return false;
+    return true;
+}
+static_assert(memberTypesAreStorablePod(), "Script Data members must be POD value types — no handles (Entity/Pointer) or Exec/String");
 
 // C++ type name for a member field, used both for the struct declaration and the in-node type button label.
 export const char* memberCppType(EDataType type)
@@ -210,6 +226,7 @@ export std::string defaultValueForType(EDataType type)
         case EDataType::Quat:   return "glm::quat{ 1.0f, 0.0f, 0.0f, 0.0f }"; // identity (w,x,y,z)
         case EDataType::String: return "";
         case EDataType::Entity: return "self";
+        case EDataType::Pointer: return "nullptr"; // Pointer pins are output-only; no input default is ever emitted
         default:                return "0.0f";
     }
 }
@@ -678,6 +695,60 @@ export const std::vector<NodeDef>& nodeRegistry()
             { "Children",  D::Int,    "", 0, "ctx->entityGetChildCount($0)" },
             { "Bounds R",  D::Float,  "", 0, "ctx->entityGetBoundsRadius($0)" } },
         "" });
+
+    // ---- force component (all via ABI thunks, so they work in a sandboxed script DLL) ----
+    // Get Force Component: resolves the entity's ForceComponent ONCE in the if-condition and branches on it —
+    // true runs when the entity has one (the Component handle is bound and in scope on that chain), break
+    // continues past the if whether or not it was present (like the If node, no else). The handle is a single
+    // lookup shared by every Get/Set Force that reads it, and it is out of scope on the break chain, so it can
+    // only be used where the component is known to exist. Feed the Component pin into Get/Set Force.
+    r.push_back({ "GetForceComponent", "Get Force Component", "Force", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" } },
+        { { "true", D::Exec, "" }, { "break", D::Exec, "" },
+            { "Component", D::Pointer, "", 0, "forceComp@" } },
+        "if (void* forceComp@ = ctx->entityGetForceComponent($1))\n{\n"
+        + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+
+    // Get Force: reads the live field values off the Component handle (from Get Force Component). Valid is true
+    // when the handle is non-null (the entity has a ForceComponent); the getters return type defaults for null.
+    // Output/Reach/Focus/Distribution/Width/Team are the authored values; Applied Force/Pressure are the
+    // ~2-frame-old GPU readbacks; Local Direction/Offset are the emitter's entity-space placement.
+    r.push_back({ "GetForce", "Get Force", "Force", false,
+        { { "Component", D::Pointer, "nullptr" } },
+        { { "Valid",         D::Bool,  "", 0, "($0 != nullptr)" },
+            { "Output",        D::Float, "", 0, "ctx->forceGetOutput($0)" },
+            { "Reach",         D::Float, "", 0, "ctx->forceGetReach($0)" },
+            { "Focus",         D::Float, "", 0, "ctx->forceGetFocus($0)" },
+            { "Distribution",  D::Float, "", 0, "ctx->forceGetDistribution($0)" },
+            { "Width",         D::Float, "", 0, "ctx->forceGetWidth($0)" },
+            { "Team",          D::Int,   "", 0, "ctx->forceGetTeam($0)" },
+            { "Applied Force", D::Vec3,  "", 0, "ctx->forceGetAppliedForce($0)" },
+            { "Pressure",      D::Float, "", 0, "ctx->forceGetPressure($0)" },
+            { "Local Direction", D::Vec3, "", 0, "ctx->forceGetLocalDirection($0)" },
+            { "Local Offset",  D::Vec3,  "", 0, "ctx->forceGetLocalOffset($0)" },
+            { "Centered",      D::Bool,  "", 0, "(ctx->forceGetCentered($0) != 0)" } },
+        "" });
+
+    // Set Force: writes only the fields you actually connect (?k conditional blocks, like Set Entity), through
+    // the Component handle. Output/Reach/Focus/Distribution/Width/Team hit the live emitter; Local Direction/
+    // Offset write the component fields that reposition the emitter relative to the entity next update. A null
+    // handle no-ops. Team clamps a negative to 0; Local Direction is re-normalized host-side.
+    r.push_back({ "SetForce", "Set Force", "Force", true,
+        { { "", D::Exec, "" },
+            { "Component",    D::Pointer, "nullptr" },
+            { "Output",       D::Float, "1.0f" },
+            { "Reach",        D::Float, "5.0f" },
+            { "Focus",        D::Float, "0.5f" },
+            { "Distribution", D::Float, "0.5f" },
+            { "Width",        D::Float, "1.0f" },
+            { "Team",         D::Int,   "0" },
+            { "Local Direction", D::Vec3, "glm::vec3{ 0.0f, 0.0f, -1.0f }" },
+            { "Local Offset",    D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
+            { "Centered",        D::Bool, "true" } },
+        { { "", D::Exec, "" } },
+        "?2{ctx->forceSetOutput($1, $2);\n}?3{ctx->forceSetReach($1, $3);\n}?4{ctx->forceSetFocus($1, $4);\n}"
+        "?5{ctx->forceSetDistribution($1, $5);\n}?6{ctx->forceSetWidth($1, $6);\n}?7{ctx->forceSetTeam($1, $7);\n}"
+        "?8{ctx->forceSetLocalDirection($1, $8);\n}?9{ctx->forceSetLocalOffset($1, $9);\n}?10{ctx->forceSetCentered($1, $10);\n}#0" });
 
     // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks). Position/
     // Scale/Rotation assign straight into the Entity mirror; Rotation converts degrees -> quat with glm::.

@@ -14,10 +14,5 @@ set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER Engine)
 
 apply_compile_settings(${PROJECT_NAME})
 
-# Scripts #include "ScriptAPI.h" and are compiled at runtime from the Assets working dir,
-# so keep a copy of the ABI header next to the scripts. This is the single source of truth.
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/Assets/Scripts"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/Public/ScriptAPI.h"
-        "${CMAKE_SOURCE_DIR}/Assets/Scripts/ScriptAPI.h")
+# Scripts #include "ScriptAPI.h" and are compiled at runtime from the Assets working dir; ScriptHost
+# points the compiler's /I straight at Code/Script/Public (the single source of truth), so no copy is kept.

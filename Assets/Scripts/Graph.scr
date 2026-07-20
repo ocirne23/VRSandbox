@@ -1,4 +1,3 @@
-#include "ScriptAPI.h"
 
 static void Graph_IsPrime(const ScriptContext* ctx, Entity* self, int param0, bool& ret0);
 

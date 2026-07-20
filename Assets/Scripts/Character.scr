@@ -1,4 +1,3 @@
-#include "ScriptAPI.h"
 
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
 {
@@ -15,6 +14,9 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float dt, void
     self->rot = glm::quat(glm::radians(glm::vec3{ 0.0f, (ctx->elapsedSeconds * 50.0f), 0.0f }));
 }
 
+REGISTER_ON_SPAWN()
+REGISTER_ON_DESTROY()
+REGISTER_UPDATE()
 //@graph 1
 //@node 0 Update 462 -112
 //@node 1 GetElapsedTime 224 -25

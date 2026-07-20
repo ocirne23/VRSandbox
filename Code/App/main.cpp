@@ -118,6 +118,7 @@ int main()
     world.addRootEntity(world.spawnAssetFile("Entities/skysphere.pre", Transform(spawnOffset), true));
     world.addRootEntity(world.spawnAssetFile("Entities/character.pre", Transform(spawnOffset), true));
     world.addRootEntity(world.spawnAssetFile("Entities/particle.pre", Transform(spawnOffset), true));
+    world.addRootEntity(world.spawnAssetFile("Entities/SphereField.pre", Transform(spawnOffset), true));
 
     GizmoController gizmo;
     gizmo.initialize(world);

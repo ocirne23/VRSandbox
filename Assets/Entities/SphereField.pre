@@ -1,9 +1,10 @@
-Prefab NewPrefab
-	Name SphereField
+Prefab SphereField
 	Position 0 0 0
 	Rotation 0 -0 0
 	Scale 1
 	Component Force
 		Output 1
 		Reach 5
-		Offset -0 -0 2.5
+	Component Script
+		Path Scripts/SphereField.scr
+		Enabled true

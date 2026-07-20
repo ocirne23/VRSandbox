@@ -1456,8 +1456,14 @@ std::string Scene::generateCpp()
         ed::SetCurrentEditor(m_nodeEditorContext);
 
     std::string code;
-    code += "#define SCRIPT_BUILD 1\n";
-    code += "#include \"ScriptAPI.h\"\n";
+    // The .scr holds ONLY namespace-body-safe code: an optional Script Data struct, helper functions, and the
+    // SCRIPT_EXPORT entry-point functions, followed by the //@graph metadata (all comments). It does NOT
+    // #include ScriptAPI.h or pick a build mode — the compiler wrapper supplies those, so the same file serves
+    // both back-ends. ScriptHost force-includes ScriptAPI.h (+ /DSCRIPT_BUILD) when building the hot-reload DLL;
+    // the App-Scripts aggregate (cooked build) includes ScriptAPI.h once and #includes each .scr straight into
+    // its own namespace (real imported Entity, SCRIPT_STATIC_BUILD) so many scripts link into the engine binary
+    // with no name clashes. Keeping the file body-only is exactly what makes that namespace #include legal.
+    const bool functionScript = isFunctionScript();
 
     // The Script Data node becomes a persistent struct. The host reads its byte size through ScriptDataSize()
     // (letting the compiler settle padding/alignment) to allocate the block handed back in as `scriptData`.
@@ -1472,12 +1478,9 @@ std::string Scene::generateCpp()
         code += "SCRIPT_EXPORT unsigned int ScriptDataSize() { return (unsigned int)sizeof(ScriptData); }\n";
     }
 
-    // Function definitions (this script's own, plus any it imports) come before the entry points that call
-    // them. A dedicated function script defines functions and nothing else — it emits no entry points.
+    // Helper functions (uniquely named <stem>_<func>) before the entry points that call them.
     code += "\n";
     emitFunctions(code);
-
-    const bool functionScript = isFunctionScript();
 
     if (Node* entry = !functionScript ? findEntry("OnSpawn") : nullptr)
     {
@@ -1593,6 +1596,18 @@ std::string Scene::generateCpp()
 
         code += "}\n\n";
     }
+
+    // Self-describe which entry points this file defines. Empty in the DLL build (the entries are C exports found
+    // by name); in the cooked build each expands to a static registration of that function. Placed after the
+    // definitions (so the macros can take their addresses) and before the //@graph comments.
+    code += "\n";
+    if (dataNode)                                       code += "REGISTER_SCRIPT_DATA_SIZE()\n";
+    if (!functionScript && findEntry("OnSpawn"))        code += "REGISTER_ON_SPAWN()\n";
+    if (!functionScript && findEntry("OnDestroy"))      code += "REGISTER_ON_DESTROY()\n";
+    if (!functionScript && findEntry("OnPhysicsEvent")) code += "REGISTER_ON_PHYSICS_EVENT()\n";
+    if (!functionScript && findEventEntry())            code += "REGISTER_ON_EVENT()\n";
+    if (!functionScript && findEntry("Update"))         code += "REGISTER_UPDATE()\n";
+    code += "\n";
 
     code += serializeGraph();
     return code;

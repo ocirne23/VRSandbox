@@ -17,6 +17,7 @@ import Core.Camera;
 import RendererVK;
 import Animation;
 import Physics;
+import Force;
 import Spatial;
 import :Entity;
 import :Component;
@@ -34,7 +35,12 @@ static_assert(offsetof(Entity, scale)  == 12, "ScriptAPI.h Entity mirror out of 
 static_assert(offsetof(Entity, rot)    == 16, "ScriptAPI.h Entity mirror out of sync: rot");
 static_assert(offsetof(Entity, parent) == 32, "ScriptAPI.h Entity mirror out of sync: parent");
 
-namespace
+// The thunks have C linkage (external) so the cooked App-Scripts aggregate — a separate module — can call them
+// by name (a plain C++ function here would have module linkage, invisible to it). The small helpers below ride
+// along in the same block; their names are file-unique so the external linkage is harmless.
+#pragma warning(push)
+#pragma warning(disable: 4190) // extern "C" thunks return glm::vec3; harmless — same MSVC + glm on both sides of the ABI
+extern "C"
 {
     // ---- context thunks -----------------------------------------------------
 
@@ -50,6 +56,19 @@ namespace
 		std::vsnprintf(&formattedString[0], size, message, args);
         Log::info(formattedString);
         va_end(args);
+    }
+    // va_list backing for logf, so the cooked build's inline logf method (which captures varargs into a va_list)
+    // has something to forward to — you can't pass `...` straight through to another variadic function.
+    void thunk_vlogf(const char* fmt, va_list ap)
+    {
+        if (!fmt) return;
+        va_list ap2; va_copy(ap2, ap);
+        const int n = std::vsnprintf(nullptr, 0, fmt, ap2); va_end(ap2);
+        if (n < 0) return;
+        std::string s(static_cast<size_t>(n) + 1, '\0');
+        std::vsnprintf(&s[0], s.size(), fmt, ap);
+        s.resize(static_cast<size_t>(n));
+        Log::info(s);
     }
     int thunk_isKeyDown(const char* keyName)
     {
@@ -176,7 +195,7 @@ namespace
         return 1;
     }
 
-    int thunk_sceneQueryRadius(glm::vec3 position, float radius, Entity** outEntities, int maxOut)
+    int thunk_spatialQueryRadius(glm::vec3 position, float radius, Entity** outEntities, int maxOut)
     {
         if (!outEntities || maxOut <= 0)
             return 0;
@@ -188,7 +207,7 @@ namespace
         return count;
     }
 
-    Entity* thunk_sceneGetNearestEntity(glm::vec3 position, float maxRadius, Entity* exclude)
+    Entity* thunk_spatialGetNearestEntity(glm::vec3 position, float maxRadius, Entity* exclude)
     {
         return reinterpret_cast<Entity*>(Globals::spatialIndex.queryNearest(
             glm::dvec3(position), maxRadius, SpatialLayer_Render, reinterpret_cast<uint64>(exclude)));
@@ -260,12 +279,107 @@ namespace
             ac->stopSound(alias ? alias : "");
     }
 
+    // ---- force field ---- entityGetForceComponent resolves the component once and returns it as an opaque
+    // handle; the force* thunks take that handle and cast it straight back (asForce null-checks), so a chain of
+    // get/sets skips the repeated getComponent lookup. Getters read the emitter's authored state / GPU
+    // readbacks or the component's local placement fields; setters write them.
+    void* thunk_entityGetForceComponent(Entity* en) { return en ? getComponent<ForceComponent>(en) : nullptr; }
+    ForceComponent* asForce(void* p) { return static_cast<ForceComponent*>(p); }
+
+    float thunk_forceGetOutput(void* p)       { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getOutput() : 0.0f; }
+    float thunk_forceGetReach(void* p)        { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getReach() : 0.0f; }
+    float thunk_forceGetFocus(void* p)        { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getFocus() : 0.5f; }
+    float thunk_forceGetDistribution(void* p) { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getDistribution() : 0.5f; }
+    float thunk_forceGetWidth(void* p)        { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getWidth() : 1.0f; }
+    int   thunk_forceGetTeam(void* p)         { ForceComponent* fc = asForce(p); return fc ? int(fc->emitter.getTeam()) : 0; }
+    glm::vec3 thunk_forceGetAppliedForce(void* p) { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getAppliedForce() : glm::vec3(0.0f); }
+    float thunk_forceGetPressure(void* p)     { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getPressure() : 0.0f; }
+    glm::vec3 thunk_forceGetLocalDirection(void* p) { ForceComponent* fc = asForce(p); return fc ? fc->localDirection : glm::vec3(0.0f, 0.0f, -1.0f); }
+    glm::vec3 thunk_forceGetLocalOffset(void* p)    { ForceComponent* fc = asForce(p); return fc ? fc->localOffset : glm::vec3(0.0f); }
+    int   thunk_forceGetCentered(void* p)           { ForceComponent* fc = asForce(p); return (fc && fc->centered) ? 1 : 0; }
+
+    void thunk_forceSetOutput(void* p, float v)       { if (ForceComponent* fc = asForce(p)) fc->emitter.setOutput(v); }
+    void thunk_forceSetReach(void* p, float v)        { if (ForceComponent* fc = asForce(p)) fc->emitter.setReach(v); }
+    void thunk_forceSetFocus(void* p, float v)        { if (ForceComponent* fc = asForce(p)) fc->emitter.setFocus(v); }
+    void thunk_forceSetDistribution(void* p, float v) { if (ForceComponent* fc = asForce(p)) fc->emitter.setDistribution(v); }
+    void thunk_forceSetWidth(void* p, float v)        { if (ForceComponent* fc = asForce(p)) fc->emitter.setWidth(v); }
+    void thunk_forceSetTeam(void* p, int v)           { if (ForceComponent* fc = asForce(p)) fc->emitter.setTeam(uint32(glm::max(v, 0))); }
+    void thunk_forceSetLocalOffset(void* p, glm::vec3 v) { if (ForceComponent* fc = asForce(p)) fc->localOffset = v; }
+    void thunk_forceSetCentered(void* p, int v)       { if (ForceComponent* fc = asForce(p)) fc->centered = (v != 0); }
+
+    void thunk_forceSetLocalDirection(void* p, glm::vec3 v)
+    {
+        if (ForceComponent* fc = asForce(p))
+        {
+            // Match spawn: store a unit axis so the per-frame follow doesn't scale the field direction.
+            const float len2 = glm::dot(v, v);
+            fc->localDirection = len2 > 1e-12f ? v * glm::inversesqrt(len2) : glm::vec3(0.0f, 0.0f, -1.0f);
+        }
+    }
+
 }
+#pragma warning(pop)
 
 // Binds the ABI function-pointer table to the engine thunks. Globals::scriptContext is constructed at
 // startup, so the context is ready before any script runs. (Scripts never construct a ScriptContext, so
 // their DLLs never need this definition.)
 ScriptContext::ScriptContext()
+    : log(&thunk_log)
+    , logf(&thunk_logf)
+    , isKeyDown(&thunk_isKeyDown)
+    , spawnPointLight(&thunk_spawnPointLight)
+    , setSun(&thunk_setSun)
+    , spawnEntity(&thunk_spawnEntity)
+    , destroyEntity(&thunk_destroyEntity)
+    , entityGetName(&thunk_entityGetName)
+    , entityGetEnabled(&thunk_entityGetEnabled)
+    , entityGetChildCount(&thunk_entityGetChildCount)
+    , entityGetBoundsRadius(&thunk_entityGetBoundsRadius)
+    , entityFindChild(&thunk_entityFindChild)
+    , entityGetChildAt(&thunk_entityGetChildAt)
+    , entitySetEnabled(&thunk_entitySetEnabled)
+    , entitySetAnimFloat(&thunk_entitySetAnimFloat)
+    , entitySetAnimBool(&thunk_entitySetAnimBool)
+    , entitySetAnimTrigger(&thunk_entitySetAnimTrigger)
+    , entityAddChild(&thunk_entityAddChild)
+    , entityRemoveChild(&thunk_entityRemoveChild)
+    , entityRemoveChildAt(&thunk_entityRemoveChildAt)
+    , physicsSetGravity(&thunk_physicsSetGravity)
+    , physicsRayCast(&thunk_physicsRayCast)
+    , entityHasPhysics(&thunk_entityHasPhysics)
+    , entityIsPhysicsAwake(&thunk_entityIsPhysicsAwake)
+    , entityGetVelocity(&thunk_entityGetVelocity)
+    , entitySetVelocity(&thunk_entitySetVelocity)
+    , entityApplyImpulse(&thunk_entityApplyImpulse)
+    , entityTeleportPhysics(&thunk_entityTeleportPhysics)
+    , sendEvent(&thunk_sendEvent)
+    , sendEventToEntity(&thunk_sendEventToEntity)
+    , entityTriggerAudio(&thunk_entityTriggerAudio)
+    , entityStopAudio(&thunk_entityStopAudio)
+    , physicsContactGetPoint(&thunk_physicsContactGetPoint)
+    , spatialQueryRadius(&thunk_spatialQueryRadius)
+    , spatialGetNearestEntity(&thunk_spatialGetNearestEntity)
+    , entityGetForceComponent(&thunk_entityGetForceComponent)
+    , forceGetOutput(&thunk_forceGetOutput)
+    , forceGetReach(&thunk_forceGetReach)
+    , forceGetFocus(&thunk_forceGetFocus)
+    , forceGetDistribution(&thunk_forceGetDistribution)
+    , forceGetWidth(&thunk_forceGetWidth)
+    , forceGetTeam(&thunk_forceGetTeam)
+    , forceGetAppliedForce(&thunk_forceGetAppliedForce)
+    , forceGetPressure(&thunk_forceGetPressure)
+    , forceGetLocalDirection(&thunk_forceGetLocalDirection)
+    , forceGetLocalOffset(&thunk_forceGetLocalOffset)
+    , forceGetCentered(&thunk_forceGetCentered)
+    , forceSetOutput(&thunk_forceSetOutput)
+    , forceSetReach(&thunk_forceSetReach)
+    , forceSetFocus(&thunk_forceSetFocus)
+    , forceSetDistribution(&thunk_forceSetDistribution)
+    , forceSetWidth(&thunk_forceSetWidth)
+    , forceSetTeam(&thunk_forceSetTeam)
+    , forceSetLocalDirection(&thunk_forceSetLocalDirection)
+    , forceSetLocalOffset(&thunk_forceSetLocalOffset)
+    , forceSetCentered(&thunk_forceSetCentered)
 {
     deltaSeconds = 0.0f;
     elapsedSeconds = 0.0f;
@@ -273,42 +387,6 @@ ScriptContext::ScriptContext()
     cameraDirection = glm::vec3(0.0f, 0.0f, -1.0f);
     cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
     cameraFovDeg = 45.0f;
-
-    log = &thunk_log;
-    logf = &thunk_logf;
-    isKeyDown = &thunk_isKeyDown;
-    spawnPointLight = &thunk_spawnPointLight;
-    setSun = &thunk_setSun;
-    spawnEntity = &thunk_spawnEntity;
-    destroyEntity = &thunk_destroyEntity;
-    entityGetName = &thunk_entityGetName;
-    entityGetEnabled = &thunk_entityGetEnabled;
-    entityGetChildCount = &thunk_entityGetChildCount;
-    entityGetBoundsRadius = &thunk_entityGetBoundsRadius;
-    entityFindChild = &thunk_entityFindChild;
-    entityGetChildAt = &thunk_entityGetChildAt;
-    entitySetEnabled = &thunk_entitySetEnabled;
-    entitySetAnimFloat = &thunk_entitySetAnimFloat;
-    entitySetAnimBool = &thunk_entitySetAnimBool;
-    entitySetAnimTrigger = &thunk_entitySetAnimTrigger;
-    entityAddChild = &thunk_entityAddChild;
-    entityRemoveChild = &thunk_entityRemoveChild;
-    entityRemoveChildAt = &thunk_entityRemoveChildAt;
-    physicsSetGravity = &thunk_physicsSetGravity;
-    physicsRayCast = &thunk_physicsRayCast;
-    entityHasPhysics = &thunk_entityHasPhysics;
-    entityIsPhysicsAwake = &thunk_entityIsPhysicsAwake;
-    entityGetVelocity = &thunk_entityGetVelocity;
-    entitySetVelocity = &thunk_entitySetVelocity;
-    entityApplyImpulse = &thunk_entityApplyImpulse;
-    entityTeleportPhysics = &thunk_entityTeleportPhysics;
-    sendEvent = &thunk_sendEvent;
-    sendEventToEntity = &thunk_sendEventToEntity;
-    entityTriggerAudio = &thunk_entityTriggerAudio;
-    entityStopAudio = &thunk_entityStopAudio;
-    physicsContactGetPoint = &thunk_physicsContactGetPoint;
-    spatialQueryRadius = &thunk_sceneQueryRadius;
-    spatialGetNearestEntity = &thunk_sceneGetNearestEntity;
 }
 
 // Refreshes the per-frame fields; called once a frame (main.cpp) before any script runs this frame.

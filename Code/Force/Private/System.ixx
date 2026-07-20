@@ -51,6 +51,15 @@ public:
     glm::vec3 getAppliedForce() const;
     float getPressure() const;
 
+    // Authored-field getters mirroring the setters above — read the live instance state (valid immediately,
+    // unlike the GPU-latched applied force / pressure). Return the type's default for an invalid handle.
+    float getOutput() const;
+    float getReach() const;
+    float getFocus() const;
+    float getDistribution() const;
+    float getWidth() const;
+    uint32 getTeam() const;
+
 private:
     friend class ForceSystem;
     explicit ForceEmitter(uint64 handle) : m_handle(handle) {}

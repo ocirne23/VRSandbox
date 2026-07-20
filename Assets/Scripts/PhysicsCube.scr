@@ -1,4 +1,3 @@
-#include "ScriptAPI.h"
 
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
 {
@@ -14,6 +13,8 @@ SCRIPT_EXPORT void OnPhysicsEvent(const ScriptContext* ctx, Entity* self, Entity
     }
 }
 
+REGISTER_ON_SPAWN()
+REGISTER_ON_PHYSICS_EVENT()
 //@graph 1
 //@node 0 OnSpawn 448 16
 //@node 1 TriggerAudio 624 -66

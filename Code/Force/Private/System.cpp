@@ -161,6 +161,48 @@ float ForceEmitter::getPressure() const
     return 0.0f;
 }
 
+float ForceEmitter::getOutput() const
+{
+    if (const ForceSystem::EmitterInstance* inst = Globals::forceSystem.resolveEmitter(m_handle))
+        return inst->output;
+    return 0.0f;
+}
+
+float ForceEmitter::getReach() const
+{
+    if (const ForceSystem::EmitterInstance* inst = Globals::forceSystem.resolveEmitter(m_handle))
+        return inst->reach;
+    return 0.0f;
+}
+
+float ForceEmitter::getFocus() const
+{
+    if (const ForceSystem::EmitterInstance* inst = Globals::forceSystem.resolveEmitter(m_handle))
+        return inst->focus;
+    return 0.5f;
+}
+
+float ForceEmitter::getDistribution() const
+{
+    if (const ForceSystem::EmitterInstance* inst = Globals::forceSystem.resolveEmitter(m_handle))
+        return inst->distribution;
+    return 0.5f;
+}
+
+float ForceEmitter::getWidth() const
+{
+    if (const ForceSystem::EmitterInstance* inst = Globals::forceSystem.resolveEmitter(m_handle))
+        return inst->width;
+    return 1.0f;
+}
+
+uint32 ForceEmitter::getTeam() const
+{
+    if (const ForceSystem::EmitterInstance* inst = Globals::forceSystem.resolveEmitter(m_handle))
+        return inst->team;
+    return 0;
+}
+
 // ---- ForceQuery handle ----
 
 ForceQuery& ForceQuery::operator=(ForceQuery&& move) noexcept

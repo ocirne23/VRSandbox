@@ -580,8 +580,12 @@ void ForceComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfor
     const float dirLen2 = glm::dot(info.direction, info.direction);
     localDirection = dirLen2 > 1e-12f ? info.direction * glm::inversesqrt(dirLen2) : glm::vec3(0.0f, 0.0f, -1.0f);
     localOffset = info.offset;
-    emitter = Globals::forceSystem.createEmitter(info.team,
-        base.pos + base.quat * (localOffset * base.scale), base.quat * localDirection,
+    centered = info.centered;
+    const glm::vec3 worldDir = base.quat * localDirection;
+    glm::vec3 pos = base.pos + base.quat * (localOffset * base.scale);
+    if (centered)
+        pos -= worldDir * (info.reach * 0.5f); // half a reach back so a zero offset sits the bubble on the entity
+    emitter = Globals::forceSystem.createEmitter(info.team, pos, worldDir,
         info.output, info.reach, info.focus, info.distribution, info.width);
 }
 
@@ -594,7 +598,11 @@ void ForceComponent::update(Entity& entity, const Transform& world)
 {
     if (!emitter.isValid())
         return;
-    emitter.setTransform(world.pos + world.quat * (localOffset * world.scale), world.quat * localDirection);
+    const glm::vec3 worldDir = world.quat * localDirection;
+    glm::vec3 pos = world.pos + world.quat * (localOffset * world.scale);
+    if (centered)
+        pos -= worldDir * (emitter.getReach() * 0.5f); // reach is world units, so the centering isn't entity-scaled
+    emitter.setTransform(pos, worldDir);
 }
 
 void AudioComponent::spawn(Entity& entity, const SpawnInfo& spawnInfo, const Transform& base)
@@ -900,6 +908,7 @@ void writeForceSpawnInfo(const ForceComponent::SpawnInfo& info, AssetNode& out)
     if (info.focus != defaults.focus)               out.set("Focus", info.focus);
     if (info.distribution != defaults.distribution) out.set("Distribution", info.distribution);
     if (info.width != defaults.width)               out.set("Width", info.width);
+    if (info.centered != defaults.centered)         out.set("Centered", info.centered);
 }
 
 int componentIdFromName(std::string_view name)

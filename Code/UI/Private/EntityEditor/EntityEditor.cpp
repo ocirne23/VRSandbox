@@ -1194,16 +1194,12 @@ void EntityEditor::renderForceSection()
 	if (ImGui::IsItemDeactivatedAfterEdit())
 		commitRespawn();
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Span START in entity space — the bubble runs Offset .. Offset + Direction * Reach");
+		ImGui::SetTooltip("Entity-space offset from the anchor — Centered: the bubble centre; otherwise the span start");
 
-	if (ImGui::Button("Centre on entity"))
-	{
-		// The emitter marks the start of the span, so half a reach backwards puts the entity in the middle.
-		const float len2 = glm::dot(m_forceDraft.direction, m_forceDraft.direction);
-		const glm::vec3 axis = len2 > 1e-12f ? m_forceDraft.direction * glm::inversesqrt(len2) : glm::vec3(0.0f, 0.0f, -1.0f);
-		m_forceDraft.offset = axis * (m_forceDraft.reach * -0.5f);
+	if (ImGui::Checkbox("Centered", &m_forceDraft.centered))
 		commitRespawn();
-	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Pull the emitter back half a reach so a zero Offset centres the bubble on the entity");
 
 	if (ImGui::Button("Remove Force"))
 	{

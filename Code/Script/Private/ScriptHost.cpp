@@ -1,8 +1,54 @@
+#ifdef SCRIPTS_STATIC
+module;
+// Cooked build: the registry the compiled-in scripts self-register with needs the ABI structs (ScriptStaticEntries).
+#include "ScriptAPI.h"
+#endif
 module Script;
 
 import Core;
 import Core.Windows;
 import Core.Log;
+
+#ifdef SCRIPTS_STATIC
+// Cooked build: scripts compiled into the engine (App-Scripts aggregate) register their entry-point functions here
+// at static-init via the REGISTER_*() macros in each .scr. A Meyers singleton so it is constructed before any
+// registrar runs, whatever the cross-TU init order. ScriptHost::getOrLoad resolves script paths against this
+// instead of invoking cl / LoadLibrary.
+struct StaticScriptFns { void* fns[VR_SCRIPT_ENTRY_COUNT] = {}; };
+
+static std::unordered_map<std::string, StaticScriptFns>& staticScriptRegistry()
+{
+    static std::unordered_map<std::string, StaticScriptFns> reg;
+    return reg;
+}
+
+static const StaticScriptFns* findStaticEntries(const std::string& path)
+{
+    auto& reg = staticScriptRegistry();
+    if (auto it = reg.find(path); it != reg.end())
+        return &it->second;
+    // Lenient match: prefabs spell the path "Scripts/X.scr"; the aggregate registered whatever VR_CURRENT_SCRIPT
+    // held. Compare on forward-slash-normalized paths, allowing one to be a tail of the other (rel vs abs).
+    std::string norm = path;
+    for (char& c : norm) if (c == '\\') c = '/';
+    for (auto& [k, v] : reg)
+    {
+        std::string nk = k;
+        for (char& c : nk) if (c == '\\') c = '/';
+        if (norm == nk || norm.ends_with(nk) || nk.ends_with(norm))
+            return &v;
+    }
+    return nullptr;
+}
+
+// Called from each script's REGISTER_*() macro (declared in ScriptAPI.h). extern "C" + file scope so it is one
+// external symbol the App-Scripts aggregate links against.
+extern "C" void vrRegisterScriptEntry(const char* scriptPath, int kind, void* fn)
+{
+    if (scriptPath && fn && kind >= 0 && kind < VR_SCRIPT_ENTRY_COUNT)
+        staticScriptRegistry()[scriptPath].fns[kind] = fn;
+}
+#endif
 
 namespace
 {
@@ -173,7 +219,7 @@ bool ScriptHost::compile(const std::string& sourcePath, const fs::path& pdbPath,
 
     const fs::path assetsDir = fs::current_path();
     const fs::path outDir = assetsDir / "Local" / "Scripts";
-    const fs::path includeDir = assetsDir / "Scripts";                          // ScriptAPI.h lives here (copied at build)
+    const fs::path includeDir = assetsDir.parent_path() / "Code" / "Script" / "Public"; // the one ScriptAPI.h (ABI source of truth)
     const fs::path glmInclude = assetsDir.parent_path() / "Dependencies" / "Include"; // header-only glm for Vec3 math
     std::error_code ec; fs::create_directories(outDir, ec);
 
@@ -201,6 +247,7 @@ bool ScriptHost::compile(const std::string& sourcePath, const fs::path& pdbPath,
     bat += "cl /nologo /LD /std:c++20 /MD /Od /Zi /EHsc /arch:AVX2 /wd4100 /DSCRIPT_BUILD"; // /wd4100: unused params; /DSCRIPT_BUILD: Entity is the layout mirror
     bat += " /I\"" + includeDir.string() + "\"";
     bat += " /I\"" + glmInclude.string() + "\""; // ScriptAPI.h includes <glm/glm.hpp> (Vec3 = glm::vec3)
+    bat += " /FI\"" + (includeDir / "ScriptAPI.h").string() + "\""; // the .scr is body-only; force-include the ABI header (also cooked into the App-Scripts aggregate)
     bat += " /Fo\"" + objPath.string() + "\"";
     bat += " /Fd\"" + compPdb.string() + "\"";
     bat += " /Fe\"" + dllPath.string() + "\"";
@@ -290,6 +337,35 @@ const ScriptModule* ScriptHost::getOrLoad(const std::string& path, bool forceRec
     auto it = scripts.find(key);
     if (it != scripts.end() && !forceRecompile)
         return &it->second.entries;
+
+#ifdef SCRIPTS_STATIC
+    // Cooked build: the script is baked into the engine binary and self-registered — resolve it from the registry
+    // (no cl, no LoadLibrary). forceRecompile is meaningless here (nothing to rebuild at runtime).
+    if (const StaticScriptFns* e = findStaticEntries(path))
+    {
+        CachedScript& slot = scripts.emplace(key, CachedScript{}).first->second;
+        slot.entries.scriptPath     = path;
+        slot.entries.onSpawn        = e->fns[VR_SCRIPT_ON_SPAWN];
+        slot.entries.update         = e->fns[VR_SCRIPT_UPDATE];
+        slot.entries.onDestroy      = e->fns[VR_SCRIPT_ON_DESTROY];
+        slot.entries.onEvent        = e->fns[VR_SCRIPT_ON_EVENT];
+        slot.entries.onPhysicsEvent = e->fns[VR_SCRIPT_ON_PHYSICS_EVENT];
+        slot.entries.dataSize       = e->fns[VR_SCRIPT_DATA_SIZE] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_DATA_SIZE])() : 0;
+        slot.entries.eventNames.clear();
+        if (void* ec = e->fns[VR_SCRIPT_EVENT_COUNT]; ec && e->fns[VR_SCRIPT_EVENT_NAME])
+        {
+            auto nameFn = reinterpret_cast<const char*(*)(int)>(e->fns[VR_SCRIPT_EVENT_NAME]);
+            for (int i = 0, n = reinterpret_cast<int(*)()>(ec)(); i < n; ++i)
+                slot.entries.eventNames.emplace_back(nameFn(i));
+        }
+        if (m_scriptLoadedCallback)
+            m_scriptLoadedCallback(&slot.entries, {});
+        Log::info("Static script resolved from the compiled-in registry: " + path);
+        return &slot.entries;
+    }
+    Log::error("Static script not found in the compiled-in registry (rebuild App-Scripts after adding/renaming a .scr?): " + path);
+    return nullptr;
+#endif
 
     // First load this session and not forced: if an existing DLL's mtime matches the source's (we stamp
     // it to match after each compile), the source is unchanged since it was built — load it, skip cl.

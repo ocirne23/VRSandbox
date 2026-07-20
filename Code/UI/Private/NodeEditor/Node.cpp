@@ -252,9 +252,11 @@ namespace
                 buf[k] = (k + 1 < sizeof(buf) && k < value.size()) ? value[k] : '\0';
             ImGui::PushID(&pin);
             ImGui::SetNextItemWidth(defaultFieldWidth(pin));
-            // An Entity pin defaults to `self`; there's no literal to type, you retarget it by dragging a link
-            // into the pin. Show the value read-only so it can't be edited into an invalid expression.
-            const ImGuiInputTextFlags flags = pin.dataType == EDataType::Entity ? ImGuiInputTextFlags_ReadOnly : 0;
+            // An Entity pin defaults to `self` and a Pointer pin to `nullptr`; there's no literal to type, you
+            // retarget it by dragging a link into the pin. Show the value read-only so it can't be edited into
+            // an invalid expression.
+            const ImGuiInputTextFlags flags =
+                (pin.dataType == EDataType::Entity || pin.dataType == EDataType::Pointer) ? ImGuiInputTextFlags_ReadOnly : 0;
             if (ImGui::InputText("##v", buf, sizeof(buf), flags) && !(flags & ImGuiInputTextFlags_ReadOnly))
                 pin.defaultValue = buf; // echoed live as typed; validated/reformatted once editing ends below
             // Type-check on commit (not per-keystroke, so partial input like "-" or "3." can still be typed):
