@@ -123,151 +123,158 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
 
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoBackground);
+        const bool viewportOpen = ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoBackground);
 
-        const ImVec2 size = ImGui::GetContentRegionAvail();
-        const ImVec2 viewportPos = ImGui::GetCursorScreenPos();
-        m_viewportRect = Rect(glm::ivec2(viewportPos.x, viewportPos.y), glm::ivec2(viewportPos.x + size.x, viewportPos.y + size.y));
-
+        // Focus/grab tracking stays unconditional (not gated on viewportOpen below): if we skipped this
+        // while the Viewport tab is in the background, m_isViewportFocused would stay stuck at whatever it
+        // was on the last visible frame instead of dropping to false — e.g. camera-look input would keep
+        // responding to mouse/keyboard after the user switched to another tab entirely.
         const ImGuiContext* ctx = ImGui::GetCurrentContext();
         const bool isViewportGrabbed = (ctx->MovingWindow == ctx->CurrentWindow);
         const bool wasViewportGrabbed = m_isViewportGrabbed && !isViewportGrabbed;
         m_isViewportGrabbed = isViewportGrabbed;
-        const bool isViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_DockHierarchy) && !m_isViewportGrabbed && !wasViewportGrabbed;
+        const bool isViewportFocused = viewportOpen && ImGui::IsWindowFocused(ImGuiFocusedFlags_DockHierarchy) && !m_isViewportGrabbed && !wasViewportGrabbed;
         m_hasViewportGainedFocus = isViewportFocused && !m_isViewportFocused;
         m_isViewportFocused = isViewportFocused;
 
-        const ImRect dropRect(viewportPos, ImVec2(viewportPos.x + size.x, viewportPos.y + size.y));
-        if (ImGui::BeginDragDropTargetCustom(dropRect, ImGui::GetID("##viewport_drop")))
+        if (viewportOpen)
         {
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_FILE"))
+            const ImVec2 size = ImGui::GetContentRegionAvail();
+            const ImVec2 viewportPos = ImGui::GetCursorScreenPos();
+            m_viewportRect = Rect(glm::ivec2(viewportPos.x, viewportPos.y), glm::ivec2(viewportPos.x + size.x, viewportPos.y + size.y));
+
+            const ImRect dropRect(viewportPos, ImVec2(viewportPos.x + size.x, viewportPos.y + size.y));
+            if (ImGui::BeginDragDropTargetCustom(dropRect, ImGui::GetID("##viewport_drop")))
             {
-                const char* droppedPath = static_cast<const char*>(payload->Data);
-                const ImVec2 mouse = ImGui::GetMousePos();
-                m_viewportChanges.push_back({ EntityChange::CreateViewport{
-                    glm::ivec2(int(mouse.x), int(mouse.y)), std::string(droppedPath) } });
-            }
-            ImGui::EndDragDropTarget();
-        }
-
-        ImGui::End();
-        ImGui::PopStyleVar(1);
-    }
-
-    {
-        ImGui::Begin("Script");
-
-        if (ImGui::Button("New"))
-            m_scene.newGraph();
-        ImGui::SameLine();
-        if (ImGui::Button("Save"))
-            m_scene.save();
-        ImGui::SameLine();
-        if (ImGui::Button("Save As..."))
-            ImGui::OpenPopup("Save Script As");
-        ImGui::SameLine();
-        if (ImGui::Button("Compile & Run"))
-        {
-            m_scene.save();
-            m_scriptReloadRequests.push_back(m_scene.scriptPath());
-        }
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s  (right-click canvas to add nodes)",
-            std::filesystem::path(m_scene.scriptPath()).filename().string().c_str());
-
-        if (ImGui::BeginPopup("Save Script As"))
-        {
-            static char nameBuf[128] = "MyScript";
-            ImGui::TextUnformatted("File name (saved under Scripts/ as .scr):");
-            ImGui::SetNextItemWidth(220.0f);
-            const bool entered = ImGui::InputText("##saveas", nameBuf, sizeof(nameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
-            ImGui::SameLine();
-            if ((ImGui::Button("Save##as") || entered) && nameBuf[0] != '\0')
-            {
-                std::string name = nameBuf;
-                if (!name.ends_with(".scr")) name += ".scr";
-                m_scene.setScriptPath("Scripts/" + name);
-                m_scene.save();
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::EndPopup();
-        }
-
-        if (m_openUnsavedScriptPopup)
-        {
-            ImGui::OpenPopup("Unsaved Script Changes");
-            m_openUnsavedScriptPopup = false;
-        }
-        if (ImGui::BeginPopupModal("Unsaved Script Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-        {
-            ImGui::Text("'%s' has unsaved changes.",
-                std::filesystem::path(m_scene.scriptPath()).filename().string().c_str());
-            ImGui::Text("Switch to '%s'?",
-                std::filesystem::path(m_pendingScriptOpen).filename().string().c_str());
-            ImGui::Separator();
-            const bool save = ImGui::Button("Save");
-            ImGui::SameLine();
-            const bool discard = ImGui::Button("Discard");
-            ImGui::SameLine();
-            const bool cancel = ImGui::Button("Cancel");
-            if (save)
-                m_scene.save();
-            if (save || discard)
-                m_scene.open(m_pendingScriptOpen);
-            if (save || discard || cancel)
-            {
-                m_pendingScriptOpen.clear();
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::EndPopup();
-        }
-
-        // Feed the Trigger Audio nodes the sound aliases of the entity that owns the open script (its
-        // AudioComponent). Unknown while the selection doesn't own the open script, so a script opened
-        // standalone (asset browser) keeps whatever alias pins its file declared.
-        {
-            std::vector<std::string> aliases;
-            bool aliasesKnown = false;
-            if (Entity* selected = m_sceneView.getSelected())
-                if (ScriptComponent* script = getComponent<ScriptComponent>(selected);
-                    script && script->scriptModule && script->scriptModule->scriptPath == m_scene.scriptPath())
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_FILE"))
                 {
-                    aliasesKnown = true;
-                    if (AudioComponent* audio = getComponent<AudioComponent>(selected))
-                        for (const AudioComponent::SoundDesc& sound : audio->getSounds())
-                            aliases.push_back(sound.alias);
+                    const char* droppedPath = static_cast<const char*>(payload->Data);
+                    const ImVec2 mouse = ImGui::GetMousePos();
+                    m_viewportChanges.push_back({ EntityChange::CreateViewport{
+                        glm::ivec2(int(mouse.x), int(mouse.y)), std::string(droppedPath) } });
                 }
-            m_scene.setAudioAliases(aliasesKnown ? &aliases : nullptr);
+                ImGui::EndDragDropTarget();
+            }
         }
 
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        // NoScrollWithMouse/NoScrollbar: otherwise this child can pick up its own scroll offset (e.g. once
-        // its content size ever grows past its visible rect for a frame) and starts eating the mouse wheel
-        // itself before the node editor's own scroll-to-zoom gets a chance to see it.
-        ImGui::BeginChild("ScriptCanvas", ImVec2(0.0f, 0.0f), false,
-            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoScrollbar);
-        m_scene.update(deltaSec);
-        ImGui::EndChild();
+        ImGui::End();
         ImGui::PopStyleVar(1);
+    }
 
+    {
+        if (ImGui::Begin("Script"))
+        {
+            if (ImGui::Button("New"))
+                m_scene.newGraph();
+            ImGui::SameLine();
+            if (ImGui::Button("Save"))
+                m_scene.save();
+            ImGui::SameLine();
+            if (ImGui::Button("Save As..."))
+                ImGui::OpenPopup("Save Script As");
+            ImGui::SameLine();
+            if (ImGui::Button("Compile & Run"))
+            {
+                m_scene.save();
+                m_scriptReloadRequests.push_back(m_scene.scriptPath());
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s  (right-click canvas to add nodes)",
+                std::filesystem::path(m_scene.scriptPath()).filename().string().c_str());
+
+            if (ImGui::BeginPopup("Save Script As"))
+            {
+                static char nameBuf[128] = "MyScript";
+                ImGui::TextUnformatted("File name (saved under Scripts/ as .scr):");
+                ImGui::SetNextItemWidth(220.0f);
+                const bool entered = ImGui::InputText("##saveas", nameBuf, sizeof(nameBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+                ImGui::SameLine();
+                if ((ImGui::Button("Save##as") || entered) && nameBuf[0] != '\0')
+                {
+                    std::string name = nameBuf;
+                    if (!name.ends_with(".scr")) name += ".scr";
+                    m_scene.setScriptPath("Scripts/" + name);
+                    m_scene.save();
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+
+            if (m_openUnsavedScriptPopup)
+            {
+                ImGui::OpenPopup("Unsaved Script Changes");
+                m_openUnsavedScriptPopup = false;
+            }
+            if (ImGui::BeginPopupModal("Unsaved Script Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("'%s' has unsaved changes.",
+                    std::filesystem::path(m_scene.scriptPath()).filename().string().c_str());
+                ImGui::Text("Switch to '%s'?",
+                    std::filesystem::path(m_pendingScriptOpen).filename().string().c_str());
+                ImGui::Separator();
+                const bool save = ImGui::Button("Save");
+                ImGui::SameLine();
+                const bool discard = ImGui::Button("Discard");
+                ImGui::SameLine();
+                const bool cancel = ImGui::Button("Cancel");
+                if (save)
+                    m_scene.save();
+                if (save || discard)
+                    m_scene.open(m_pendingScriptOpen);
+                if (save || discard || cancel)
+                {
+                    m_pendingScriptOpen.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+
+            // Feed the Trigger Audio nodes the sound aliases of the entity that owns the open script (its
+            // AudioComponent). Unknown while the selection doesn't own the open script, so a script opened
+            // standalone (asset browser) keeps whatever alias pins its file declared.
+            {
+                std::vector<std::string> aliases;
+                bool aliasesKnown = false;
+                if (Entity* selected = m_sceneView.getSelected())
+                    if (ScriptComponent* script = getComponent<ScriptComponent>(selected);
+                        script && script->scriptModule && script->scriptModule->scriptPath == m_scene.scriptPath())
+                    {
+                        aliasesKnown = true;
+                        if (AudioComponent* audio = getComponent<AudioComponent>(selected))
+                            for (const AudioComponent::SoundDesc& sound : audio->getSounds())
+                                aliases.push_back(sound.alias);
+                    }
+                m_scene.setAudioAliases(aliasesKnown ? &aliases : nullptr);
+            }
+
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            // NoScrollWithMouse/NoScrollbar: otherwise this child can pick up its own scroll offset (e.g. once
+            // its content size ever grows past its visible rect for a frame) and starts eating the mouse wheel
+            // itself before the node editor's own scroll-to-zoom gets a chance to see it.
+            ImGui::BeginChild("ScriptCanvas", ImVec2(0.0f, 0.0f), false,
+                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoScrollbar);
+            m_scene.update(deltaSec);
+            ImGui::EndChild();
+            ImGui::PopStyleVar(1);
+        }
         ImGui::End();
     }
 
     {
-        ImGui::Begin("Text Editor");
-        m_textEditor.render();
+        if (ImGui::Begin("Text Editor"))
+            m_textEditor.render();
         ImGui::End();
     }
 
     {
-        ImGui::Begin("Script Editor");
-        m_scriptEditor.render();
+        if (ImGui::Begin("Script Editor"))
+            m_scriptEditor.render();
         ImGui::End();
     }
 
     {
-        ImGui::Begin("Scene");
-        m_sceneView.render(rootEntities);
+        if (ImGui::Begin("Scene"))
+            m_sceneView.render(rootEntities);
         ImGui::End();
     }
 
@@ -283,13 +290,13 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
     }
 
     {
-        ImGui::Begin("Log");
-        m_outputLog.render();
+        if (ImGui::Begin("Log"))
+            m_outputLog.render();
         ImGui::End();
     }
 
+    if (ImGui::Begin("Stats"))
     {
-        ImGui::Begin("Stats");
         ImGui::Text("numMeshInstances: %i (%.1f%%)", m_renderStats.numMeshInstances, (float)m_renderStats.numMeshInstances / m_renderStats.maxMeshInstances * 100.0f);
         ImGui::Text("numInstanceOffsets: %i (%.1f%%)", m_renderStats.numInstanceOffsets, (float)m_renderStats.numInstanceOffsets / m_renderStats.maxInstanceOffsets * 100.0f);
         ImGui::Text("numMeshTypes: %i (%.1f%%)", m_renderStats.numMeshTypes, (float)m_renderStats.numMeshTypes / m_renderStats.maxMeshTypes * 100.0f);
@@ -325,12 +332,12 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         ImGui::Text("meshLOD groups: %u, picks L0-L4: %u/%u/%u/%u/%u", m_renderStats.numMeshLodGroups,
             m_renderStats.lodInstanceCounts[0], m_renderStats.lodInstanceCounts[1], m_renderStats.lodInstanceCounts[2],
             m_renderStats.lodInstanceCounts[3], m_renderStats.lodInstanceCounts[4]);
-        ImGui::End();
     }
+    ImGui::End();
 
     {
-        ImGui::Begin("Content");
-        m_assetBrowser.render();
+        if (ImGui::Begin("Content"))
+            m_assetBrowser.render();
         ImGui::End();
 
         // Route .scr file actions from the asset browser into the Script editor.
@@ -353,26 +360,27 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
     }
 
     {
-        ImGui::Begin("Tweaks");
-        m_tweakPanel.render();
+        if (ImGui::Begin("Tweaks"))
+            m_tweakPanel.render();
         ImGui::End();
     }
 
     {
-        ImGui::Begin("Entity Editor");
-        m_entityEditor.render(m_sceneView.getSelected());
-
-        if (ImGui::BeginDragDropTargetCustom(
-            ImRect(ImGui::GetWindowPos(),
-                ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowSize().x,
-                       ImGui::GetWindowPos().y + ImGui::GetWindowSize().y)),
-            ImGui::GetID("##ee_drop")))
+        if (ImGui::Begin("Entity Editor"))
         {
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_FILE"))
-                m_entityEditor.requestOpen(static_cast<const char*>(payload->Data));
-            ImGui::EndDragDropTarget();
-        }
+            m_entityEditor.render(m_sceneView.getSelected());
 
+            if (ImGui::BeginDragDropTargetCustom(
+                ImRect(ImGui::GetWindowPos(),
+                    ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowSize().x,
+                           ImGui::GetWindowPos().y + ImGui::GetWindowSize().y)),
+                ImGui::GetID("##ee_drop")))
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_FILE"))
+                    m_entityEditor.requestOpen(static_cast<const char*>(payload->Data));
+                ImGui::EndDragDropTarget();
+            }
+        }
         ImGui::End();
 
         // Route the entity editor's "Select Prefab" action into the asset browser.
@@ -381,8 +389,8 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
     }
 
     {
-        ImGui::Begin("Properties");
-        m_propertiesPanel.render(m_sceneView.getSelected());
+        if (ImGui::Begin("Properties"))
+            m_propertiesPanel.render(m_sceneView.getSelected());
         ImGui::End();
     }
 }
