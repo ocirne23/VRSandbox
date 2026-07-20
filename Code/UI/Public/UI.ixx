@@ -17,6 +17,7 @@ import :PropertiesPanel;
 import :EntityEditor;
 import :OutputLog;
 import :TweakPanel;
+import :TextEditor;
 
 import RendererVK;
 
@@ -101,6 +102,7 @@ private:
 	EntityEditor    m_entityEditor;
 	OutputLog       m_outputLog;
 	TweakPanel      m_tweakPanel;
+	TextEditor      m_textEditor;
 };
 
 export namespace Globals

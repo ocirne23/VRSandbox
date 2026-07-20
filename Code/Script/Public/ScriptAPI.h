@@ -43,6 +43,9 @@ class Entity;
 #endif
 struct Camera; // engine render camera; only the host-only update() below touches it (scripts never see it)
 
+#pragma warning(push)
+#pragma warning(disable: 4190) // has C-linkage specified, but returns 'glm::vec<3,float,glm::packed_highp>' which is incompatible with..
+
 // The ctx-> function set (all but log/logf), listed once as (return type, name, params, call args) with the docs.
 // The host expands it into the const function-pointer TABLE; the cooked build (SCRIPT_STATIC_BUILD) into inline
 // forwarders + the engine-side thunk_* decls, so ctx->foo(x) inlines under LTCG. log/logf are declared by hand
@@ -195,6 +198,8 @@ typedef struct ScriptContext
 #endif // __cplusplus
 #endif // SCRIPT_STATIC_BUILD (inline forwarders) vs. the pointer table
 } ScriptContext;
+
+#pragma warning(pop)
 
 // Entry points a script DLL exports. ScriptUpdate is required; Init/Shutdown are optional. `self` is the
 // entity the script is running on (null for none); entity nodes pass it to the entity* functions.

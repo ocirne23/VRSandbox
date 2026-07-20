@@ -36,6 +36,11 @@ static bool isScriptFile(const std::string& ext)
 	return ext == ".scr";
 }
 
+static bool isTextFile(const std::string& ext)
+{
+	return ext == ".txt";
+}
+
 static bool isSpawnableFile(const std::filesystem::path& p)
 {
 	return p.extension() == ".pre";
@@ -51,6 +56,7 @@ static const char* fileIcon(const std::filesystem::path& p)
 	if (isPrefabFile(ext))                 return "[Pre]";
 	if (isObjectContainer(ext))            return "[OC]";
 	if (isScriptFile(ext))                 return "[Scr]";
+	if (isTextFile(ext))                   return "[Txt]";
 	return "[Fil]";
 }
 
@@ -64,20 +70,26 @@ static ImVec4 fileColor(const std::filesystem::path& p)
 	if (isPrefabFile(ext))                  return ImVec4(0.9f, 0.5f,  1.0f, 1.0f);   // purple
 	if (isObjectContainer(ext))             return ImVec4(0.5f, 1.0f,  0.9f, 1.0f);   // light teal
 	if (isScriptFile(ext))                  return ImVec4(0.5f, 1.0f,  0.6f, 1.0f);   // script green
+	if (isTextFile(ext))                    return ImVec4(0.75f, 0.75f, 0.75f, 1.0f); // light grey
 	return ImVec4(0.85f, 0.85f, 0.85f, 1.0f);                                         // grey
 }
 
 static void assetDragSource(const std::filesystem::path& p)
 {
+	if (std::filesystem::is_directory(p))
+		return; // dragging a folder isn't meaningful to any current drop target
+
 	const bool spawnable = isSpawnableFile(p);
 	const bool script = p.extension() == ".scr";
-	if (!spawnable && !script)
-		return;
 	if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
 	{
 		const std::string path = p.string();
-		ImGui::SetDragDropPayload(spawnable ? "ASSET_FILE" : "SCRIPT_FILE", path.c_str(), path.size() + 1);
-		ImGui::Text(spawnable ? "Spawn %s" : "Assign %s", p.filename().string().c_str());
+		// Every file is draggable: spawnable/.scr keep their dedicated payload (viewport spawn / script
+		// assign), anything else falls back to TEXT_FILE so it can be dropped onto the Script Editor and
+		// viewed/edited as plain text.
+		const char* payloadTag = spawnable ? "ASSET_FILE" : script ? "SCRIPT_FILE" : "TEXT_FILE";
+		ImGui::SetDragDropPayload(payloadTag, path.c_str(), path.size() + 1);
+		ImGui::Text(spawnable ? "Spawn %s" : script ? "Assign %s" : "View %s as text", p.filename().string().c_str());
 		ImGui::EndDragDropSource();
 	}
 }
@@ -428,6 +440,8 @@ void AssetBrowser::renderContentGrid()
 					navigateTo(p);
 				else if (isScriptFile(p.extension().string()))
 					m_scriptOpenRequest = p.string();
+				else if (isTextFile(p.extension().string()))
+					m_textOpenRequest = p.string();
 			}
 
 			renderContextMenu(p);
@@ -505,7 +519,14 @@ void AssetBrowser::renderContentList()
 			assetDragSource(p);
 
 			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-				if (entry.is_directory()) navigateTo(p); else if (isScriptFile(p.extension().string())) m_scriptOpenRequest = p.string();
+			{
+				if (entry.is_directory())
+					navigateTo(p);
+				else if (isScriptFile(p.extension().string()))
+					m_scriptOpenRequest = p.string();
+				else if (isTextFile(p.extension().string()))
+					m_textOpenRequest = p.string();
+			}
 
 			renderContextMenu(p);
 
@@ -582,6 +603,13 @@ void AssetBrowser::renderContextMenu(const std::filesystem::path& p)
 			m_scriptOpenRequest = p.string();
 	}
 
+	if (isTextFile(p.extension().string()))
+	{
+		ImGui::Separator();
+		if (ImGui::MenuItem("Open Text File"))
+			m_textOpenRequest = p.string();
+	}
+
 	if (isSpawnableFile(p))
 	{
 		ImGui::Separator();
@@ -632,6 +660,12 @@ void AssetBrowser::renderNewAssetContextMenu()
 		return;
 	if (ImGui::MenuItem("New Script"))
 		m_scriptCreateRequest = makeUniqueAssetPath("NewScript", ".scr").string();
+	if (ImGui::MenuItem("New Text File"))
+	{
+		const std::filesystem::path path = makeUniqueAssetPath("NewText", ".txt");
+		if (FileSystem::writeFileStr(path.string(), ""))
+			m_textOpenRequest = path.string();
+	}
 	if (ImGui::MenuItem("New Prefab"))
 	{
 		const std::filesystem::path path = makeUniqueAssetPath("NewPrefab", ".pre");
