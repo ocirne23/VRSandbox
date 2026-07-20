@@ -789,63 +789,87 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "", D::Exec, "" } },
         "ctx->entitySetAnimTrigger($1, $2);\n#0" });
 
-    // Get Child Entity: looks up a direct child by name on the given entity (self by default) and branches
-    // depending on whether it exists; the found child is exposed as an Entity output only valid on the Found
-    // branch (see the emitted `child@` local).
+    // ---- scene component (child hierarchy) ----
+    // Get Scene Component: resolves the entity's SceneComponent ONCE in the if-condition and branches on it
+    // (same shape as Get Force Component). The Component handle is a single lookup shared by every child
+    // read/write below, in scope only on the true chain. Feed the Component pin into the child nodes.
+    r.push_back({ "GetSceneComponent", "Get Scene Component", "Entity", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" } },
+        { { "true", D::Exec, "" }, { "break", D::Exec, "" },
+            { "Component", D::Pointer, "", 0, "sceneComp@" } },
+        "if (void* sceneComp@ = ctx->entityGetSceneComponent($1))\n{\n"
+        + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+
+    // Get Child Entity: looks up a direct child by name on the given SceneComponent (from Get Scene Component)
+    // and branches on whether it exists; the found child is exposed as an Entity output only valid on the
+    // Found branch (see the emitted `child@` local).
     r.push_back({ "GetChildEntity", "Get Child Entity", "Entity", true,
-        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Name", D::String, "" } },
+        { { "", D::Exec, "" }, { "Component", D::Pointer, "nullptr" }, { "Name", D::String, "" } },
         { { "Found", D::Exec, "" }, { "Not Found", D::Exec, "" }, { "Child", D::Entity, "", 0, "child@" } },
-        "Entity* child@ = ctx->entityFindChild($1, $2);\n"
+        "Entity* child@ = ctx->sceneFindChild($1, $2);\n"
         "if (child@)\n{\n" + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n"
         "else\n{\n" + std::string(1, INDENT_UP) + "#1" + std::string(1, INDENT_DOWN) + "}\n" });
 
-    // Add Child: reparents Child under Parent (both self by default -- connect real values before using).
+    // Add Child: reparents Child under the SceneComponent's owner entity (the parent). Component from Get
+    // Scene Component; Child self by default -- connect a real value before using.
     r.push_back({ "AddChild", "Add Child", "Entity", true,
-        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Child", D::Entity, "self" } },
+        { { "", D::Exec, "" }, { "Component", D::Pointer, "nullptr" }, { "Child", D::Entity, "self" } },
         { { "", D::Exec, "" } },
-        "ctx->entityAddChild($1, $2);\n#0" });
+        "ctx->sceneAddChild($1, $2);\n#0" });
 
-    // Remove Child: detaches Child from Parent, making it a root entity (no-op if Child isn't Parent's).
+    // Remove Child: detaches Child from the SceneComponent's owner, making it a root entity (no-op if Child
+    // isn't parented there).
     r.push_back({ "RemoveChild", "Remove Child", "Entity", true,
-        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Child", D::Entity, "self" } },
+        { { "", D::Exec, "" }, { "Component", D::Pointer, "nullptr" }, { "Child", D::Entity, "self" } },
         { { "", D::Exec, "" } },
-        "ctx->entityRemoveChild($1, $2);\n#0" });
+        "ctx->sceneRemoveChild($1, $2);\n#0" });
 
-    // Remove Child At Index: same as Remove Child, but looks the child up by index instead of by handle.
+    // Remove Child At Index: same as Remove Child, but looks the child up by index on the SceneComponent.
     r.push_back({ "RemoveChildIdx", "Remove Child At Index", "Entity", true,
-        { { "", D::Exec, "" }, { "Parent", D::Entity, "self" }, { "Index", D::Int, "0" } },
+        { { "", D::Exec, "" }, { "Component", D::Pointer, "nullptr" }, { "Index", D::Int, "0" } },
         { { "", D::Exec, "" } },
-        "ctx->entityRemoveChildAt($1, $2);\n#0" });
+        "ctx->sceneRemoveChildAt($1, $2);\n#0" });
 
     // ---- physics (target the entity's PhysicsComponent body; entities without one no-op / read zero) ----
+    // Get Physics Component: resolves the entity's PhysicsComponent (with a valid body) ONCE and branches on
+    // it (same shape as Get Force Component). Feed the Component pin into the physics read/write nodes.
+    r.push_back({ "GetPhysicsComponent", "Get Physics Component", "Physics", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" } },
+        { { "true", D::Exec, "" }, { "break", D::Exec, "" },
+            { "Component", D::Pointer, "", 0, "physComp@" } },
+        "if (void* physComp@ = ctx->entityGetPhysicsComponent($1))\n{\n"
+        + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+
+    // Get Physics: reads off the PhysicsComponent handle (from Get Physics Component). Valid is true when the
+    // handle is non-null (the entity has a body); the getters return zero for null.
     r.push_back({ "GetPhysics", "Get Physics", "Physics", false,
-        { { "Entity", D::Entity, "self" } },
-        { { "Velocity", D::Vec3,  "", 0, "ctx->entityGetVelocity($0)" },
-            { "Speed",    D::Float, "", 0, "glm::length(ctx->entityGetVelocity($0))" },
-            { "Has Body", D::Bool,  "", 0, "(ctx->entityHasPhysics($0) != 0)" },
-            { "Awake",    D::Bool,  "", 0, "(ctx->entityIsPhysicsAwake($0) != 0)" } },
+        { { "Component", D::Pointer, "nullptr" } },
+        { { "Valid",    D::Bool,  "", 0, "($0 != nullptr)" },
+            { "Velocity", D::Vec3,  "", 0, "ctx->physicsGetVelocity($0)" },
+            { "Speed",    D::Float, "", 0, "glm::length(ctx->physicsGetVelocity($0))" },
+            { "Awake",    D::Bool,  "", 0, "(ctx->physicsIsAwake($0) != 0)" } },
         "" });
 
     r.push_back({ "SetVelocity", "Set Velocity", "Physics", true,
-        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "velocity", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
+        { { "", D::Exec, "" }, { "Component", D::Pointer, "nullptr" }, { "velocity", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
         { { "", D::Exec, "" } },
-        "ctx->entitySetVelocity($1, $2);\n#0" });
+        "ctx->physicsSetVelocity($1, $2);\n#0" });
 
     r.push_back({ "ApplyImpulse", "Apply Impulse", "Physics", true,
-        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "impulse", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
+        { { "", D::Exec, "" }, { "Component", D::Pointer, "nullptr" }, { "impulse", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
         { { "", D::Exec, "" } },
-        "ctx->entityApplyImpulse($1, $2);\n#0" });
+        "ctx->physicsApplyImpulse($1, $2);\n#0" });
 
     // Teleport Body: moves a DYNAMIC body directly (a dynamic body overwrites the entity transform every
     // frame, so Set Entity has no lasting effect on it). Kinematic/static bodies follow the entity, so
     // move those with Set Entity instead; on them this node is a no-op.
     r.push_back({ "TeleportBody", "Teleport Body", "Physics", true,
         { { "", D::Exec, "" },
-            { "Entity",   D::Entity, "self" },
+            { "Component", D::Pointer, "nullptr" },
             { "position", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
             { "rotation", D::Vec3, "glm::vec3{ 0.0f, 0.0f, 0.0f }" } },
         { { "", D::Exec, "" } },
-        "ctx->entityTeleportPhysics($1, $2, $3);\n#0" });
+        "ctx->physicsTeleport($1, $2, $3);\n#0" });
 
     // Ray Cast: closest hit against the physics world; the hit outputs are only valid on the Hit branch.
     r.push_back({ "RayCast", "Ray Cast", "Physics", true,
@@ -883,15 +907,16 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "Parent", D::Entity, "" } },
         "$0->parent" });
 
+    // Get Child Count / Get Child At Index: read off the SceneComponent handle (from Get Scene Component).
     r.push_back({ "GetChildCount", "Get Child Count", "Entity", false,
-        { { "Entity", D::Entity, "self" } },
+        { { "Component", D::Pointer, "nullptr" } },
         { { "Count", D::Int, "" } },
-        "ctx->entityGetChildCount($0)" });
+        "ctx->sceneGetChildCount($0)" });
 
     r.push_back({ "GetChildIdx", "Get Child At Index", "Entity", false,
-        { { "Entity", D::Entity, "self" }, { "Index", D::Int, "0" } },
+        { { "Component", D::Pointer, "nullptr" }, { "Index", D::Int, "0" } },
         { { "Child", D::Entity, "" } },
-        "ctx->entityGetChildAt($0, $1)" });
+        "ctx->sceneGetChildAt($0, $1)" });
 
     // ---- spatial queries (backed by the SpatialIndex) ----
 
@@ -915,24 +940,36 @@ export const std::vector<NodeDef>& nodeRegistry()
         + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
 
     // ---- audio (target the entity's AudioComponent; entities without one no-op) ----
+    // Get Audio Component: resolves the entity's AudioComponent ONCE and branches on it (same shape as Get
+    // Force Component). Feed the Component pin into Trigger Audio / Stop Audio to skip the per-call lookup.
+    r.push_back({ "GetAudioComponent", "Get Audio Component", "Audio", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" } },
+        { { "true", D::Exec, "" }, { "break", D::Exec, "" },
+            { "Component", D::Pointer, "", 0, "audioComp@" } },
+        "if (void* audioComp@ = ctx->entityGetAudioComponent($1))\n{\n"
+        + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+
     // Trigger Audio is special-cased (isTriggerAudioType): its exec input pins are the alias entries of the
-    // target entity's AudioComponent â€” flow entering an alias pin plays that sound. The Position/Volume/Pitch
-    // inputs override the sound's authored settings only when connected (a connected Position also pins the
-    // sound at that world position instead of following the entity). Codegen is emitTriggerAudioStmt.
+    // target entity's AudioComponent â€” flow entering an alias pin plays that sound. Component (from Get Audio
+    // Component) is the resolved AudioComponent; Entity is still needed so a spatial sound can follow it. The
+    // Position/Volume/Pitch inputs override the sound's authored settings only when connected (a connected
+    // Position also pins the sound at that world position instead of following the entity). Codegen is
+    // emitTriggerAudioStmt.
     r.push_back({ "TriggerAudio", "Trigger Audio", "Audio", true,
-        { { "Entity",   D::Entity, "self" },
+        { { "Component", D::Pointer, "nullptr" },
+            { "Entity",   D::Entity, "self" },
             { "Position", D::Vec3,   "default" },
             { "Volume",   D::Float,  "default" },
             { "Pitch",    D::Float,  "default" } },
         { { "", D::Exec, "" } },
         "" });
 
-    // Stop Audio: stops a playing sound by alias (looping sounds keep playing until stopped); an empty
-    // alias stops every sound on the entity.
+    // Stop Audio: stops a playing sound by alias on the AudioComponent handle (looping sounds keep playing
+    // until stopped); an empty alias stops every sound on the component.
     r.push_back({ "StopAudio", "Stop Audio", "Audio", true,
-        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" }, { "alias", D::String, "" } },
+        { { "", D::Exec, "" }, { "Component", D::Pointer, "nullptr" }, { "alias", D::String, "" } },
         { { "", D::Exec, "" } },
-        "ctx->entityStopAudio($1, $2);\n#0" });
+        "ctx->audioStop($1, $2);\n#0" });
 
     // Send Event: fires a named On Event entry on every script listening for it (matched by name at runtime).
     r.push_back({ "SendEvent", "Send Event", "Events", true,

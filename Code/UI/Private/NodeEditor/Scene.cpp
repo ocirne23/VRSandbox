@@ -547,6 +547,7 @@ namespace
                     return pin.get();
             return nullptr;
         };
+        const Pin* componentPin = findInput("Component");
         const Pin* entityPin = findInput("Entity");
         const Pin* positionPin = findInput("Position");
         const Pin* volumePin = findInput("Volume");
@@ -568,7 +569,10 @@ namespace
         {
             return (pin && !isDefaultToken(pin->defaultValue)) ? emitDataExpr(cg, pin, dataStack, hoist) : std::string(fallback);
         };
-        std::string out = "ctx->entityTriggerAudio(" + expr(entityPin, "self") + ", " + quoteStringLiteral(alias) + ", " +
+        // Component comes from Get Audio Component (a Pointer pin; nullptr default when unconnected). Entity is
+        // still passed so a spatial sound can follow it.
+        const std::string componentExpr = componentPin ? emitDataExpr(cg, componentPin, dataStack, hoist) : std::string("nullptr");
+        std::string out = "ctx->audioTrigger(" + componentExpr + ", " + expr(entityPin, "self") + ", " + quoteStringLiteral(alias) + ", " +
             std::to_string(overrideMask) + ", " + expr(positionPin, "glm::vec3(0,0,0)") + ", " +
             expr(volumePin, "1.0f") + ", " + expr(pitchPin, "1.0f") + ");\n";
 

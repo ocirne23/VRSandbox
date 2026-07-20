@@ -62,36 +62,20 @@ struct Camera; // engine render camera; only the host-only update() below touche
     /* ---- entity reads ---- */ \
     X(const char*, entityGetName,          (Entity* entity), (entity)) \
     X(int,         entityGetEnabled,       (Entity* entity), (entity)) \
-    X(int,         entityGetChildCount,    (Entity* entity), (entity)) \
+    X(int,         entityGetChildCount,    (Entity* entity), (entity)) /* used by the Get Entity node's Children output; child hierarchy nodes go through the SceneComponent handle (below) */ \
     X(float,       entityGetBoundsRadius,  (Entity* entity), (entity)) /* world-space render bounds radius (0 if no mesh) */ \
-    X(Entity*,     entityFindChild,        (Entity* entity, const char* name), (entity, name)) /* direct child by name, null if none match */ \
-    X(Entity*,     entityGetChildAt,       (Entity* entity, int index), (entity, index)) /* direct child by index, null if out of range */ \
     /* ---- entity writes ---- */ \
     X(void,        entitySetEnabled,       (Entity* entity, int enabled), (entity, enabled)) \
     X(void,        entitySetAnimFloat,     (Entity* entity, const char* param, float value), (entity, param, value)) \
     X(void,        entitySetAnimBool,      (Entity* entity, const char* param, int value), (entity, param, value)) \
     X(void,        entitySetAnimTrigger,   (Entity* entity, const char* param), (entity, param)) \
-    X(void,        entityAddChild,         (Entity* parent, Entity* child), (parent, child)) /* reparents child under parent (no-op on a cycle, or if parent has no scene component) */ \
-    X(void,        entityRemoveChild,      (Entity* parent, Entity* child), (parent, child)) /* detaches child, becoming a root entity (no-op if child isn't parent's) */ \
-    X(void,        entityRemoveChildAt,    (Entity* parent, int index), (parent, index)) /* same as entityRemoveChild, by child index */ \
-    /* ---- physics ---- target the entity's PhysicsComponent body; no-op / return zero when there is none. */ \
+    /* ---- physics (global) ---- */ \
     X(void,        physicsSetGravity,      (glm::vec3 gravity), (gravity)) \
     X(int,         physicsRayCast,         (glm::vec3 origin, glm::vec3 translation, glm::vec3* outPoint, glm::vec3* outNormal, float* outFraction), (origin, translation, outPoint, outNormal, outFraction)) /* ray = origin + translation, 1 on hit */ \
-    X(int,         entityHasPhysics,       (Entity* entity), (entity)) \
-    X(int,         entityIsPhysicsAwake,   (Entity* entity), (entity)) \
-    X(glm::vec3,   entityGetVelocity,      (Entity* entity), (entity)) \
-    X(void,        entitySetVelocity,      (Entity* entity, glm::vec3 velocity), (entity, velocity)) \
-    X(void,        entityApplyImpulse,     (Entity* entity, glm::vec3 impulse), (entity, impulse)) /* world space, at the center of mass, wakes the body */ \
-    X(void,        entityTeleportPhysics,  (Entity* entity, glm::vec3 position, glm::vec3 eulerDeg), (entity, position, eulerDeg)) /* dynamic bodies only; move kinematic/static via the Entity mirror */ \
     /* ---- events ---- fire an On Event entry by NAME. sendEvent reaches every listening script; sendEventToEntity \
        reaches only the given entity's script. */ \
     X(void,        sendEvent,              (const char* eventName), (eventName)) \
     X(void,        sendEventToEntity,      (Entity* entity, const char* eventName), (entity, eventName)) \
-    /* ---- audio ---- target the entity's AudioComponent; no-op without one (or the alias). overrideMask picks which \
-       overrides replace the authored settings: 1 = position (also pins the sound there vs following the entity), \
-       2 = volume, 4 = pitch. entityStopAudio with a null/empty alias stops every sound on the entity. */ \
-    X(void,        entityTriggerAudio,     (Entity* entity, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch), (entity, alias, overrideMask, position, volume, pitch)) \
-    X(void,        entityStopAudio,        (Entity* entity, const char* alias), (entity, alias)) \
     /* ---- physics contact queries ---- resolve an On Physics Event contactId to its first manifold point in world \
        space, valid only for the frame the event fired; returns 0 (outputs untouched) for a stale id or sensor event. */ \
     X(int,         physicsContactGetPoint, (long long contactId, glm::vec3* outPoint, glm::vec3* outNormal), (contactId, outPoint, outNormal)) \
@@ -125,7 +109,33 @@ struct Camera; // engine render camera; only the host-only update() below touche
     X(void,        forceSetTeam,           (void* forceComponent, int team), (forceComponent, team)) \
     X(void,        forceSetLocalDirection, (void* forceComponent, glm::vec3 direction), (forceComponent, direction)) \
     X(void,        forceSetLocalOffset,    (void* forceComponent, glm::vec3 offset), (forceComponent, offset)) \
-    X(void,        forceSetCentered,       (void* forceComponent, int centered), (forceComponent, centered))
+    X(void,        forceSetCentered,       (void* forceComponent, int centered), (forceComponent, centered)) \
+    /* ---- scene component ---- entityGetSceneComponent resolves the entity's SceneComponent ONCE into an opaque \
+       handle (null if none); the scene* calls take that handle so a chain of child reads/writes never repeats the \
+       lookup. Fetch it fresh each frame. Add/Remove recover the owning (parent) entity from the handle. */ \
+    X(void*,       entityGetSceneComponent,(Entity* entity), (entity)) \
+    X(int,         sceneGetChildCount,     (void* sceneComponent), (sceneComponent)) \
+    X(Entity*,     sceneFindChild,         (void* sceneComponent, const char* name), (sceneComponent, name)) /* direct child by name, null if none match */ \
+    X(Entity*,     sceneGetChildAt,        (void* sceneComponent, int index), (sceneComponent, index)) /* direct child by index, null if out of range */ \
+    X(void,        sceneAddChild,          (void* parentSceneComponent, Entity* child), (parentSceneComponent, child)) /* reparents child under the component's owner (no-op on a cycle / wrong current parent) */ \
+    X(void,        sceneRemoveChild,       (void* parentSceneComponent, Entity* child), (parentSceneComponent, child)) /* detaches child, becoming a root entity (no-op if not the component owner's child) */ \
+    X(void,        sceneRemoveChildAt,     (void* parentSceneComponent, int index), (parentSceneComponent, index)) /* same as sceneRemoveChild, by child index */ \
+    /* ---- physics component ---- entityGetPhysicsComponent resolves the entity's PhysicsComponent (with a valid \
+       body) ONCE into an opaque handle (null if none); the physics* calls take that handle so a chain never repeats \
+       the lookup. Getters return zero for a null handle, setters no-op. Teleport moves DYNAMIC bodies only. */ \
+    X(void*,       entityGetPhysicsComponent,(Entity* entity), (entity)) \
+    X(int,         physicsIsAwake,         (void* physicsComponent), (physicsComponent)) \
+    X(glm::vec3,   physicsGetVelocity,     (void* physicsComponent), (physicsComponent)) \
+    X(void,        physicsSetVelocity,     (void* physicsComponent, glm::vec3 velocity), (physicsComponent, velocity)) \
+    X(void,        physicsApplyImpulse,    (void* physicsComponent, glm::vec3 impulse), (physicsComponent, impulse)) /* world space, at the center of mass, wakes the body */ \
+    X(void,        physicsTeleport,        (void* physicsComponent, glm::vec3 position, glm::vec3 eulerDeg), (physicsComponent, position, eulerDeg)) /* dynamic bodies only */ \
+    /* ---- audio component ---- entityGetAudioComponent resolves the entity's AudioComponent ONCE into an opaque \
+       handle (null if none); audioTrigger/audioStop take that handle so they never repeat the lookup. audioTrigger \
+       still needs the entity so a spatial sound can follow it. overrideMask: 1 = position (also pins the sound \
+       there), 2 = volume, 4 = pitch. audioStop with a null/empty alias stops every sound on the component. */ \
+    X(void*,       entityGetAudioComponent,(Entity* entity), (entity)) \
+    X(void,        audioTrigger,           (void* audioComponent, Entity* entity, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch), (audioComponent, entity, alias, overrideMask, position, volume, pitch)) \
+    X(void,        audioStop,              (void* audioComponent, const char* alias), (audioComponent, alias))
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,

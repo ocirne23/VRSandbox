@@ -119,50 +119,11 @@ extern "C"
 			return rc->node.getWorldBounds().radius;
         return 0.0f;
     }
-    Entity* thunk_entityFindChild(Entity* en, const char* name)
-    {
-        if (!en || !name) return nullptr;
-        if (SceneComponent* sc = getComponent<SceneComponent>(en))
-            for (const EntityPtr& child : sc->children)
-                if (std::string_view(child->getName()) == name)
-                    return child.get();
-        return nullptr;
-    }
-    Entity* thunk_entityGetChildAt(Entity* en, int index)
-    {
-        if (SceneComponent* sc = getComponent<SceneComponent>(en))
-            if (index >= 0 && index < (int)sc->children.size())
-                return sc->children[index].get();
-        return nullptr;
-    }
 
     void thunk_entitySetEnabled(Entity* en, int enabled)              { en->setEnabled(enabled != 0); }
     void thunk_entitySetAnimFloat(Entity* en, const char* p, float v) { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setFloat(p, v); }
     void thunk_entitySetAnimBool(Entity * en, const char* p, int v)   { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setBool(p, v != 0); }
     void thunk_entitySetAnimTrigger(Entity* en, const char* p)        { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setTrigger(p); }
-
-    // Reparents child under parent. If child was previously a root entity (owned directly by App's `entities`
-    // list rather than a SceneComponent), that ref is now stale -- queue it for removal so it isn't updated
-    // twice (once via `entities`, once via parent's descendant chain).
-    void thunk_entityAddChild(Entity* parent, Entity* child)
-    {
-        if (!child || child->parent != parent) return;
-        Globals::scriptEvents.addReparentRequest(EntityPtr(child), EntityPtr(parent));
-    }
-
-    // Detaches child from parent, making it root again. Claim ownership (heap-boxed, see scriptRootAdditions)
-    // before reparentEntity(nullptr) runs: it only guarantees the entity survives its own call, not any longer,
-    // so without an external ref taken first the entity would be destroyed the instant it's detached.
-    void thunk_entityRemoveChild(Entity* parent, Entity* child)
-    {
-        if (!child || child->parent != parent) return;
-        Globals::scriptEvents.addReparentRequest(EntityPtr(child), EntityPtr(nullptr));
-    }
-
-    void thunk_entityRemoveChildAt(Entity* parent, int index)
-    {
-        thunk_entityRemoveChild(parent, thunk_entityGetChildAt(parent, index));
-    }
 
     // ---- physics thunks ----
 
@@ -213,35 +174,6 @@ extern "C"
             glm::dvec3(position), maxRadius, SpatialLayer_Render, reinterpret_cast<uint64>(exclude)));
     }
 
-    int thunk_entityHasPhysics(Entity* en)     { return physicsOf(en) ? 1 : 0; }
-    int thunk_entityIsPhysicsAwake(Entity* en) { PhysicsComponent* pc = physicsOf(en); return (pc && pc->body.isAwake()) ? 1 : 0; }
-
-    glm::vec3 thunk_entityGetVelocity(Entity* en)
-    {
-        PhysicsComponent* pc = physicsOf(en);
-        return pc ? pc->body.getLinearVelocity() : glm::vec3(0.0f);
-    }
-
-    void thunk_entitySetVelocity(Entity* en, glm::vec3 velocity)
-    {
-        if (PhysicsComponent* pc = physicsOf(en))
-            pc->body.setLinearVelocity(velocity);
-    }
-
-    void thunk_entityApplyImpulse(Entity* en, glm::vec3 impulse)
-    {
-        if (PhysicsComponent* pc = physicsOf(en))
-            pc->body.applyImpulse(impulse);
-    }
-
-    void thunk_entityTeleportPhysics(Entity* en, glm::vec3 position, glm::vec3 eulerDeg)
-    {
-        PhysicsComponent* pc = physicsOf(en);
-        if (!pc || pc->bodyType != EPhysicsBodyType::Dynamic)
-            return; // kinematic/static bodies follow the entity; move those through the Entity mirror
-        pc->body.setTransform(position, glm::quat(glm::radians(eulerDeg)));
-    }
-
     void thunk_sendEvent(const char* eventName)
     {
         if (eventName)
@@ -253,30 +185,6 @@ extern "C"
             return;
         if (ScriptComponent* sc = getComponent<ScriptComponent>(en))
             sc->fireEvent(*en, eventName); // targeted: only this entity's script
-    }
-
-    // ---- audio thunks ----
-
-    void thunk_entityTriggerAudio(Entity* en, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch)
-    {
-        if (!en || !alias)
-            return;
-        AudioComponent* ac = getComponent<AudioComponent>(en);
-        if (!ac)
-            return;
-        AudioComponent::TriggerOverrides overrides;
-        if (overrideMask & 1) overrides.position = position;
-        if (overrideMask & 2) overrides.volume = volume;
-        if (overrideMask & 4) overrides.pitch = pitch;
-        ac->trigger(*en, alias, overrides);
-    }
-
-    void thunk_entityStopAudio(Entity* en, const char* alias)
-    {
-        if (!en)
-            return;
-        if (AudioComponent* ac = getComponent<AudioComponent>(en))
-            ac->stopSound(alias ? alias : "");
     }
 
     // ---- force field ---- entityGetForceComponent resolves the component once and returns it as an opaque
@@ -317,6 +225,97 @@ extern "C"
         }
     }
 
+    // ---- scene component ---- entityGetSceneComponent resolves the component once and returns it as an opaque
+    // handle; the scene* thunks cast it back (asScene null-checks), so a chain of child reads/writes skips the
+    // repeated getComponent lookup. Add/Remove recover the owning (parent) entity from the handle
+    // (SceneComponent is component 0, always at a fixed offset from the Entity — see SceneComponent::getEntity).
+    SceneComponent* asScene(void* p) { return static_cast<SceneComponent*>(p); }
+    void* thunk_entityGetSceneComponent(Entity* en) { return en ? getComponent<SceneComponent>(en) : nullptr; }
+
+    int thunk_sceneGetChildCount(void* p) { SceneComponent* sc = asScene(p); return sc ? (int)sc->children.size() : 0; }
+    Entity* thunk_sceneFindChild(void* p, const char* name)
+    {
+        SceneComponent* sc = asScene(p);
+        if (!sc || !name) return nullptr;
+        for (const EntityPtr& child : sc->children)
+            if (std::string_view(child->getName()) == name)
+                return child.get();
+        return nullptr;
+    }
+    Entity* thunk_sceneGetChildAt(void* p, int index)
+    {
+        SceneComponent* sc = asScene(p);
+        if (sc && index >= 0 && index < (int)sc->children.size())
+            return sc->children[index].get();
+        return nullptr;
+    }
+
+    // Reparents child under the component's owner (the parent). If child was a root entity, the App-owned ref is
+    // now stale — queued for removal so it isn't updated twice (see thunk_entityAddChild's original note).
+    void thunk_sceneAddChild(void* p, Entity* child)
+    {
+        SceneComponent* sc = asScene(p);
+        if (!sc || !child) return;
+        Entity* parent = sc->getEntity();
+        if (child->parent != parent) return;
+        Globals::scriptEvents.addReparentRequest(EntityPtr(child), EntityPtr(parent));
+    }
+
+    // Detaches child from the component's owner, making it root again. Claim ownership before reparentEntity
+    // (see thunk_entityRemoveChild's original note).
+    void thunk_sceneRemoveChild(void* p, Entity* child)
+    {
+        SceneComponent* sc = asScene(p);
+        if (!sc || !child) return;
+        Entity* parent = sc->getEntity();
+        if (child->parent != parent) return;
+        Globals::scriptEvents.addReparentRequest(EntityPtr(child), EntityPtr(nullptr));
+    }
+
+    void thunk_sceneRemoveChildAt(void* p, int index)
+    {
+        thunk_sceneRemoveChild(p, thunk_sceneGetChildAt(p, index));
+    }
+
+    // ---- physics component ---- entityGetPhysicsComponent returns physicsOf (validity-checked) as an opaque
+    // handle; the physics* thunks cast it back, skipping the repeated getComponent + body-valid lookup.
+    void* thunk_entityGetPhysicsComponent(Entity* en) { return physicsOf(en); }
+
+    int thunk_physicsIsAwake(void* p) { PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); return (pc && pc->body.isAwake()) ? 1 : 0; }
+    glm::vec3 thunk_physicsGetVelocity(void* p) { PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); return pc ? pc->body.getLinearVelocity() : glm::vec3(0.0f); }
+    void thunk_physicsSetVelocity(void* p, glm::vec3 v) { if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p)) pc->body.setLinearVelocity(v); }
+    void thunk_physicsApplyImpulse(void* p, glm::vec3 v) { if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p)) pc->body.applyImpulse(v); }
+    void thunk_physicsTeleport(void* p, glm::vec3 position, glm::vec3 eulerDeg)
+    {
+        PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
+        if (!pc || pc->bodyType != EPhysicsBodyType::Dynamic)
+            return; // kinematic/static bodies follow the entity; move those through the Entity mirror
+        pc->body.setTransform(position, glm::quat(glm::radians(eulerDeg)));
+    }
+
+    // ---- audio component ---- entityGetAudioComponent returns the AudioComponent as an opaque handle; the
+    // audio* thunks cast it back, skipping the repeated getComponent lookup. audioTrigger still needs the entity
+    // so a spatial sound can follow it.
+    void* thunk_entityGetAudioComponent(Entity* en) { return en ? getComponent<AudioComponent>(en) : nullptr; }
+
+    void thunk_audioTrigger(void* p, Entity* en, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch)
+    {
+        AudioComponent* ac = static_cast<AudioComponent*>(p);
+        if (!ac || !en || !alias)
+            return;
+        AudioComponent::TriggerOverrides overrides;
+        if (overrideMask & 1) overrides.position = position;
+        if (overrideMask & 2) overrides.volume = volume;
+        if (overrideMask & 4) overrides.pitch = pitch;
+        ac->trigger(*en, alias, overrides);
+    }
+
+    void thunk_audioStop(void* p, const char* alias)
+    {
+        if (AudioComponent* ac = static_cast<AudioComponent*>(p))
+            ac->stopSound(alias ? alias : "");
+    }
+
 }
 #pragma warning(pop)
 
@@ -335,27 +334,14 @@ ScriptContext::ScriptContext()
     , entityGetEnabled(&thunk_entityGetEnabled)
     , entityGetChildCount(&thunk_entityGetChildCount)
     , entityGetBoundsRadius(&thunk_entityGetBoundsRadius)
-    , entityFindChild(&thunk_entityFindChild)
-    , entityGetChildAt(&thunk_entityGetChildAt)
     , entitySetEnabled(&thunk_entitySetEnabled)
     , entitySetAnimFloat(&thunk_entitySetAnimFloat)
     , entitySetAnimBool(&thunk_entitySetAnimBool)
     , entitySetAnimTrigger(&thunk_entitySetAnimTrigger)
-    , entityAddChild(&thunk_entityAddChild)
-    , entityRemoveChild(&thunk_entityRemoveChild)
-    , entityRemoveChildAt(&thunk_entityRemoveChildAt)
     , physicsSetGravity(&thunk_physicsSetGravity)
     , physicsRayCast(&thunk_physicsRayCast)
-    , entityHasPhysics(&thunk_entityHasPhysics)
-    , entityIsPhysicsAwake(&thunk_entityIsPhysicsAwake)
-    , entityGetVelocity(&thunk_entityGetVelocity)
-    , entitySetVelocity(&thunk_entitySetVelocity)
-    , entityApplyImpulse(&thunk_entityApplyImpulse)
-    , entityTeleportPhysics(&thunk_entityTeleportPhysics)
     , sendEvent(&thunk_sendEvent)
     , sendEventToEntity(&thunk_sendEventToEntity)
-    , entityTriggerAudio(&thunk_entityTriggerAudio)
-    , entityStopAudio(&thunk_entityStopAudio)
     , physicsContactGetPoint(&thunk_physicsContactGetPoint)
     , spatialQueryRadius(&thunk_spatialQueryRadius)
     , spatialGetNearestEntity(&thunk_spatialGetNearestEntity)
@@ -380,6 +366,22 @@ ScriptContext::ScriptContext()
     , forceSetLocalDirection(&thunk_forceSetLocalDirection)
     , forceSetLocalOffset(&thunk_forceSetLocalOffset)
     , forceSetCentered(&thunk_forceSetCentered)
+    , entityGetSceneComponent(&thunk_entityGetSceneComponent)
+    , sceneGetChildCount(&thunk_sceneGetChildCount)
+    , sceneFindChild(&thunk_sceneFindChild)
+    , sceneGetChildAt(&thunk_sceneGetChildAt)
+    , sceneAddChild(&thunk_sceneAddChild)
+    , sceneRemoveChild(&thunk_sceneRemoveChild)
+    , sceneRemoveChildAt(&thunk_sceneRemoveChildAt)
+    , entityGetPhysicsComponent(&thunk_entityGetPhysicsComponent)
+    , physicsIsAwake(&thunk_physicsIsAwake)
+    , physicsGetVelocity(&thunk_physicsGetVelocity)
+    , physicsSetVelocity(&thunk_physicsSetVelocity)
+    , physicsApplyImpulse(&thunk_physicsApplyImpulse)
+    , physicsTeleport(&thunk_physicsTeleport)
+    , entityGetAudioComponent(&thunk_entityGetAudioComponent)
+    , audioTrigger(&thunk_audioTrigger)
+    , audioStop(&thunk_audioStop)
 {
     deltaSeconds = 0.0f;
     elapsedSeconds = 0.0f;
