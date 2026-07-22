@@ -481,10 +481,10 @@ namespace
 		}
 	}
 
-	// `includeParameterized` is true only for STATEMENT candidates, where the editor stages every argument
-	// before the call commits (ScriptEditor's CallArgValue flow). A parameterized call as a VALUE term has no
-	// such staging, and inserting one would land placeholder arguments in the document -- which the editor
-	// never does -- so value contexts only offer parameter-less functions.
+	// `includeParameterized` is false only where a call's arguments can't be staged before it lands -- the
+	// editor stages arguments for call STATEMENTS and for call VALUES inside chain composes (ScriptEditor's
+	// CallArgValue flow), but not, e.g., for another call's own argument slot (no nested staging), and
+	// placeholder arguments never land in the document.
 	void addFunctionCandidates(std::vector<Candidate>& out, const DSLScriptFile& file,
 		const std::vector<std::unique_ptr<DSLSymbol>>& builtins, const std::string& typedPrefix,
 		bool includeParameterized, auto&& accept)
@@ -661,7 +661,7 @@ std::vector<Candidate> AutoCompleteRules::candidatesFor(DSLType expectedType, co
 
 	const auto matchesExpected = [&](DSLType type) { return type == expectedType; };
 	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::Variable, excludeVariable, matchesExpected);
-	addFunctionCandidates(out, file, builtins, typedPrefix, /*includeParameterized*/ false, matchesExpected);
+	addFunctionCandidates(out, file, builtins, typedPrefix, /*includeParameterized*/ true, matchesExpected);
 
 	// Free-typed literal entry: only offered once what's typed actually reads as a value of the expected type
 	// (any text is valid String content; Int/Float need looksLike*Literal to hold) -- "bla" must never become
@@ -754,7 +754,7 @@ std::vector<Candidate> AutoCompleteRules::candidatesForAnyValue(const DSLCodeLin
 	std::vector<Candidate> out;
 	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::Variable, nullptr, [](DSLType) { return true; });
 	// A statement-only (Void-returning) call has nothing to compare, so those are excluded here.
-	addFunctionCandidates(out, file, builtins, typedPrefix, /*includeParameterized*/ false, [](DSLType type) { return type != DSLType::Void; });
+	addFunctionCandidates(out, file, builtins, typedPrefix, /*includeParameterized*/ true, [](DSLType type) { return type != DSLType::Void; });
 	sortExactMatchFirst(out, typedPrefix);
 	return out;
 }

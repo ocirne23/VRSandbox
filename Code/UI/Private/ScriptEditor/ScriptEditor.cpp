@@ -4875,6 +4875,128 @@ DSLSymbol* ScriptEditor::referenceHighlightTarget(DSLSymbol* symbol) const
 	}
 }
 
+namespace
+{
+	// Syntax palette (VS-dark-ish): flow keywords purple, declaration keywords blue, types teal, functions
+	// yellow, variables light blue, numbers green, strings orange, operators/glue dim, placeholders dimmer.
+	constexpr ImVec4 kColFlowKeyword{ 0.773f, 0.525f, 0.753f, 1.0f }; // if/elseif/else/while/for/return/break, `end`
+	constexpr ImVec4 kColDeclKeyword{ 0.337f, 0.612f, 0.839f, 1.0f }; // "function"/"ref" glue words, true/false
+	constexpr ImVec4 kColType{ 0.306f, 0.788f, 0.690f, 1.0f };
+	constexpr ImVec4 kColFunction{ 0.863f, 0.863f, 0.667f, 1.0f };
+	constexpr ImVec4 kColVariable{ 0.612f, 0.863f, 0.996f, 1.0f };
+	constexpr ImVec4 kColNumber{ 0.710f, 0.808f, 0.659f, 1.0f };
+	constexpr ImVec4 kColString{ 0.808f, 0.569f, 0.471f, 1.0f };
+	constexpr ImVec4 kColPunct{ 0.65f, 0.65f, 0.65f, 1.0f };
+	constexpr ImVec4 kColPlaceholder{ 0.48f, 0.48f, 0.48f, 1.0f };
+
+	// `syntheticEnd` overrides everything: an `end` line's single span points at its block's HEADER symbol
+	// (possibly a FunctionDeclaration), but the word itself is a flow keyword.
+	ImVec4 syntaxSpanColor(const SyntaxSpan& span, bool syntheticEnd)
+	{
+		if (syntheticEnd || span.symbol == nullptr)
+			return syntheticEnd ? kColFlowKeyword : kColPunct;
+		switch (span.symbol->type)
+		{
+		case ST::FlowControl:
+			return kColFlowKeyword;
+		case ST::TypeDeclaration:
+			return kColType;
+		case ST::FunctionDeclaration: // the name span -- or the return-type span, whose text is a type name
+			return span.slot.kind == SlotRef::Kind::FunctionReturnType ? kColType : kColFunction;
+		case ST::FunctionCall:
+			return kColFunction;
+		case ST::VariableDeclaration:
+		case ST::VariableReference:
+		case ST::MemberAccess:
+			return kColVariable;
+		case ST::Constant:
+		{
+			const DSLType type = std::get<DSLSymbol::Constant>(span.symbol->data).type;
+			return type == DSLType::String ? kColString : type == DSLType::Bool ? kColDeclKeyword : kColNumber;
+		}
+		case ST::Expression: // operator spans and a group's ')'
+			return kColPunct;
+		case ST::Placeholder:
+			return kColPlaceholder;
+		default:
+			return kColPunct;
+		}
+	}
+
+	// One colored run of text on the current visual line. `firstPiece` chains subsequent runs with
+	// SameLine(0,0), so a whole line renders as adjacent items with zero spacing -- column math elsewhere
+	// (highlights, click hit-testing) stays character-based and unaffected.
+	void drawPiece(const char* begin, const char* end, const ImVec4& color, bool& firstPiece)
+	{
+		if (begin >= end)
+			return;
+		if (!firstPiece)
+			ImGui::SameLine(0.0f, 0.0f);
+		firstPiece = false;
+		ImGui::PushStyleColor(ImGuiCol_Text, color);
+		ImGui::TextUnformatted(begin, end);
+		ImGui::PopStyleColor();
+	}
+
+	// Unspanned glue is punctuation ('=', parens, commas, "->", spacing) -- except the keyword words hiding in
+	// it: "function " and "ref " render as glue, and deserve their keyword color.
+	void drawGlue(const char* begin, const char* end, bool& firstPiece)
+	{
+		const char* p = begin;
+		while (p < end)
+		{
+			if (std::isalpha(static_cast<unsigned char>(*p)))
+			{
+				const char* wordEnd = p;
+				while (wordEnd < end && std::isalpha(static_cast<unsigned char>(*wordEnd)))
+					++wordEnd;
+				const std::string_view word(p, wordEnd);
+				drawPiece(p, wordEnd, (word == "function" || word == "ref") ? kColDeclKeyword : kColPunct, firstPiece);
+				p = wordEnd;
+			}
+			else
+			{
+				const char* runEnd = p;
+				while (runEnd < end && !std::isalpha(static_cast<unsigned char>(*runEnd)))
+					++runEnd;
+				drawPiece(p, runEnd, kColPunct, firstPiece);
+				p = runEnd;
+			}
+		}
+	}
+
+	// The column range [fromCol, toCol) of `line`, syntax-colored: spans in their symbol's color, the glue
+	// between them via drawGlue. Always emits at least one item so the ImGui line advances and callers can
+	// chain more pieces after it with SameLine.
+	void drawHighlightedRange(const SyntaxLine& line, int fromCol, int toCol, bool& firstPiece)
+	{
+		const bool syntheticEnd = (line.sourceLine == nullptr);
+		const char* text = line.text.data();
+		int cursor = fromCol;
+		for (const SyntaxSpan& span : line.spans)
+		{
+			if (span.endCol <= fromCol)
+				continue;
+			if (span.startCol >= toCol)
+				break;
+			const int glueEnd = std::clamp(span.startCol, fromCol, toCol);
+			if (glueEnd > cursor)
+				drawGlue(text + cursor, text + glueEnd, firstPiece);
+			const int pieceBegin = std::max(span.startCol, fromCol);
+			const int pieceEnd = std::min(span.endCol, toCol);
+			drawPiece(text + pieceBegin, text + pieceEnd, syntaxSpanColor(span, syntheticEnd), firstPiece);
+			cursor = std::max(cursor, pieceEnd);
+		}
+		if (toCol > cursor)
+			drawGlue(text + cursor, text + toCol, firstPiece);
+		if (firstPiece)
+		{
+			ImGui::TextUnformatted(""); // empty range (blank line / empty side of a compose) -- still an item
+			firstPiece = false;
+		}
+	}
+}
+
 void ScriptEditor::renderTextArea()
 {
 	ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * m_fontScale);
@@ -4975,16 +5097,21 @@ void ScriptEditor::renderTextArea()
 
 			if (composing)
 			{
-				ImGui::TextUnformatted(line.text.data(), line.text.data() + selStart);
+				// The surrounding committed text keeps its syntax colors; the live composed text stays the
+				// default color -- in-progress input reads distinctly inside its highlight box.
+				bool firstPiece = true;
+				drawHighlightedRange(line, 0, selStart, firstPiece);
 				ImGui::SameLine(0.0f, 0.0f);
 				ImGui::TextUnformatted(composedText.c_str());
-				ImGui::SameLine(0.0f, 0.0f);
-				ImGui::TextUnformatted(line.text.data() + selEnd, line.text.data() + line.text.size());
+				bool postFirst = false; // already mid-line -- the post pieces chain themselves (and an empty
+				                        // post range must NOT leave a dangling SameLine)
+				drawHighlightedRange(line, selEnd, static_cast<int>(line.text.size()), postFirst);
 				continue;
 			}
 		}
 
-		ImGui::TextUnformatted(line.text.c_str());
+		bool firstPiece = true;
+		drawHighlightedRange(line, 0, static_cast<int>(line.text.size()), firstPiece);
 	}
 
 	// Click to select the nearest span on the clicked line (cancels any in-progress composition first, same

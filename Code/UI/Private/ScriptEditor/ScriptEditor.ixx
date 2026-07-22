@@ -151,16 +151,19 @@ import :ScriptLang;
 // reachable from it (restoreHeadAndCollect) -- replaced operands must not linger in the line's flat ownership
 // list, where isVariableReferenced-style scans would still count them as uses.
 
-// One term in a compound "value [op value]*" expression being composed (see the comment above): either a plain
-// matched candidate, or (isGroup) an entire parenthesized sub-expression, itself a nested (groupTerms, groupOps)
-// sequence built the exact same way. Purely transient staging data -- nothing here is a real DSLSymbol until
-// the whole thing commits (see ScriptEditor::buildExpressionFromTerms).
+// One term in a compound "value [op value]*" expression being composed (see the comment above): a plain
+// matched candidate, a RESOLVED parameterized call (a Function candidate plus its staged arguments -- see the
+// CallArgValue value sub-flow), or (isGroup) an entire parenthesized sub-expression, itself a nested
+// (groupTerms, groupOps) sequence built the exact same way. Purely transient staging data -- nothing here is a
+// real DSLSymbol until the whole thing commits (see ScriptEditor::buildExpressionFromTerms).
 struct PendingExprTerm
 {
 	bool isGroup = false;
 	Candidate candidate;                     // meaningful if !isGroup
 	std::vector<PendingExprTerm> groupTerms; // meaningful if isGroup
 	std::vector<DSLOperator> groupOps;       // meaningful if isGroup -- groupOps.size() == groupTerms.size() - 1
+	std::vector<Candidate> callArgs;         // non-empty = a parameterized call's staged arguments, one per
+	std::vector<std::string> callArgRawTexts; // parameter (raw comma-component text for vector parameters)
 };
 
 // One nesting level of the expression being composed (one entry per currently-open paren depth, index 0 = the
@@ -362,8 +365,16 @@ private:
 	// restorable, caller falls through.
 	bool tryWidenCallStatementEdit();
 	std::string callComposePrefix() const;  // "name(param0 = <resolved>, param1 = " -- rebuilt from the staged-call state each stage
+	std::string callStagePrefix() const;    // callComposePrefix, led by the suspended chain compose's own prefix when staging a call VALUE
 	DSLType currentCallParamType() const;   // the parameter the CallArgValue stage is currently composing a value for
-	void commitCallStatement();             // the last argument's confirm: commits the whole call in one shot -- no placeholder ever lands
+	void commitCallStatement();             // the last argument's confirm: commits the call line -- or returns the resolved call TERM to the suspended chain
+	// A matched parameterized-Function candidate in a chain compose can't be consumed bare (its call needs
+	// arguments, and placeholders never land) -- '(', an operator, or a confirm over it opens the CallArgValue
+	// sub-flow instead. False = not such a candidate; the caller proceeds normally.
+	bool tryBeginValueCallStaging();
+	DSLSymbol* buildCallFromStagedArgs(DSLSymbol* funcSymbol, const std::vector<Candidate>& argCandidates,
+		const std::vector<std::string>& argRawTexts, DSLCodeLine& line); // shared by commitCallStatement and call-term builds
+	void restoreTermIntoBox(PendingExprTerm&& term); // back into the live compose: groups/resolved calls as the pending term, plain candidates as typed text
 	std::string forVarPrefix() const;       // "for <type> <name> = " -- before the loop var's own initial value
 	std::string forVarDeclPrefix() const;   // forVarPrefix() + the resolved initial value -- the whole loop-var clause
 	std::string forConditionPrefix() const; // forVarDeclPrefix() + ", <name> <op> <value>" -- the whole condition clause too
@@ -527,14 +538,18 @@ private:
 	int m_composeCoverStart = -1;
 	int m_composeCoverEnd = -1;
 
-	// Building a parameterized call statement (CallArgValue): each argument's value resolves fully -- a picked
-	// candidate, or (vector-typed parameters) free-typed comma components in the parallel raw-text slot --
-	// before the next one starts; the call itself only commits once EVERY argument is in hand
-	// (commitCallStatement), so an argument placeholder never appears in the document. The current parameter's
-	// index is m_callArgCandidates.size().
+	// Building a parameterized call (CallArgValue): each argument's value resolves fully -- a picked candidate,
+	// or (vector-typed parameters) free-typed comma components in the parallel raw-text slot -- before the next
+	// one starts; the call itself only completes once EVERY argument is in hand (commitCallStatement), so an
+	// argument placeholder never appears in the document. The current parameter's index is
+	// m_callArgCandidates.size(). Two contexts share this state: a call STATEMENT (m_callValueReturnMode ==
+	// None -- completion commits the line), and a call VALUE inside a suspended chain compose ("bool b =
+	// func(1, x)" -- completion returns a resolved PendingExprTerm to that mode's box instead; the suspended
+	// chain state survives untouched, exactly like the comparison-value handover).
 	DSLSymbol* m_callFunc = nullptr;
 	std::vector<Candidate> m_callArgCandidates;
 	std::vector<std::string> m_callArgRawTexts;
+	ComposeMode m_callValueReturnMode = ComposeMode::None;
 
 	std::string m_pendingFunctionName;            // FunctionDeclareName's resolved name, once confirmed
 	std::vector<DSLType> m_pendingParamTypes;     // accumulated parameter types, parallel to m_pendingParamNames
