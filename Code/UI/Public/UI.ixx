@@ -3,6 +3,7 @@
 import Core;
 import Core.Rect;
 import Core.glm;
+import Core.SDL;
 import Entity;
 
 import UI.fwd;
@@ -76,6 +77,8 @@ public:
     // edited elsewhere, so it doesn't hijack that field's own copy/paste.
     void copyScriptSelection();
     void pasteScriptSelection();
+
+    void handleKeyEvent(SDL_Event evt);
 
 private:
 

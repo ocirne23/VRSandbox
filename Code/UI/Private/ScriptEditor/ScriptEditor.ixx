@@ -1,47 +1,604 @@
 export module UI:ScriptEditor;
 
 import Core;
+import Core.SDL;
+import :DSL;
+import :ScriptLang;
 
-// Standalone plain-text (.txt) file editor panel ("Script Editor" window) — a plain file editor with
-// standard text-editing functionality (selection, copy/cut/paste, undo/redo, word/line navigation, all
-// native to ImGui's multiline input). Unrelated to the visual Script (Node Editor) panel.
+// The DSL editor panel ("Script Editor" window). Displays a DSLScriptFile via Syntax::format and navigates it
+// with a TOKEN cursor: the selection unit is "which rendered span (and therefore which DSLSymbol) is current,"
+// never a text-character offset. Raw SDL keyboard events reach this class via Input::update -> UI::handleKeyEvent
+// -> here, ahead of ImGui's own WantCaptureKeyboard gate, because the document view never claims keyboard
+// capture itself (it's a hand-drawn, non-interactive display).
+//
+// Editing: typing (or Backspace) while a symbol/placeholder is selected begins composing -- the live text
+// renders INLINE in place of the selected span, inside its highlight rectangle (renderTextArea), with the
+// candidate list (AutoCompleteRules, filtered against whatever the selected span's SlotRef expects) floating
+// below it (renderAutocompletePopup). Space advances between a line's stages; only Enter (or a closing gesture
+// like a call's ')') COMMITS a line -- see confirmCompose's allowCommit. Confirming most candidates (a keyword, an existing
+// variable/function, a literal) applies immediately via applyCandidate, replacing the slot's occupant wholesale
+// -- which is also where the "always compilable" guarantee lives: a freshly-inserted call gets Placeholder
+// arguments for everything it requires, matching its callee's declared types.
+//
+// Declaring a brand-new variable and building an if/while condition are both STAGED flows across the SAME
+// inline text instead of a single-step replacement, and neither touches the document until their FINAL step:
+// everything resolved so far lives only in m_composePrefix/m_pending*/m_condition* -- Escape (or navigating
+// away) at any point cancels cleanly with nothing ever written, and there's no way to end up with a half-built
+// statement sitting in the document. Declaring: pick a type keyword ("float "), free-type a name ("float
+// test"), confirm again (now composing the initializer, "float test = "), then pick/type a value and confirm
+// once more to apply the whole declaration in one shot, landing the cursor on the initializer just composed.
+// Declaring a vec2/vec3/vec4 is a special case of that last step: instead of picking one candidate, the
+// initializer is a comma-separated list of exactly as many float components as the type needs ("vec3 test =
+// 1.0,2.0,3.0"), built directly into a positional vecN(...) call -- see applyDeclareVariable/buildVectorLiteral.
+// If/while: pick "if"/"while" ("if "), pick ANY in-scope variable or non-Void-returning function as the left
+// operand ("if height "), pick a comparator ("if height <= "), then pick/type a right-hand value matching the
+// left operand's type -- only THEN does the whole `if a op b` commit as one FlowControl+Expression, replacing
+// the original statement slot in a single step (see applyConditionalStatement). Backspace on an empty compose
+// box steps back one stage in either flow instead of losing everything typed.
+//
+// Enter (NOT composing) inserts a fresh blank statement slot right after the current line -- one level deeper
+// if that line opens a block (if/while/function), else as a plain sibling, or (sitting on a synthetic `end`)
+// as a sibling right after the block that `end` closes -- the ONLY way new lines appear; nothing is
+// auto-appended on confirm. Backspace (not composing) normally begins editing the current selection (same as
+// typing a character, minus the character), except on the specific span each statement kind is deletable
+// from, where it removes instead -- covering every line kind, so there's no separate "delete" key/gesture at
+// all. Deleting a bare assignment/compound-assign (its own operator span) or a call statement (its own name
+// span) or a return/break (its own keyword span) just removes that one line outright (deleteLine) -- none of
+// them open a block or declare a name, so there's nothing else to check or preserve. Selecting the TYPE portion
+// of a local variable declaration's own line (e.g. "float" in `float test = 1.0` -- not a function parameter's
+// or for-loop counter's type, both embedded in a different line's own head symbol) removes that whole
+// declaration line too, but only when nothing else in its function still references it
+// (AutoCompleteRules::isVariableReferenced) -- a still-used declaration can't be removed out from under its
+// uses. Selecting an if/while's own keyword removes the whole header AND its synthetic `end`, un-nesting its
+// OWN body by one scopeLevel so its contents survive as plain siblings in the enclosing scope
+// (deleteBlockKeepBody) -- "remove this wrapper", not "delete everything inside it" -- but ONLY when any
+// attached elseif/else chain is entirely empty too (attachedElseChainEmpty): otherwise there's no safe
+// destination for THEIR content (same reasoning as an else/elseif's own deletion, below) and the whole
+// if/while is left alone; when the chain IS empty, its (empty) header lines are consumed along with the
+// original header rather than left dangling with no "if" left to continue from. Selecting an else/elseif's own
+// keyword removes just that one header line (deleteLine is enough -- its body, if any, is already at the SAME
+// scopeLevel as the branch before it, so no un-nesting/renumbering would be needed even if it weren't empty)
+// but ONLY when its OWN branch is empty too -- a non-empty branch has no safe place for its content to go
+// (silently merging it into the PRECEDING branch would reorder which condition guards which statements), so
+// it's left alone. Selecting a function's or a for-loop's own keyword removes the whole header + body +
+// synthetic `end` (deleteEmptyBlock) but ONLY when the body is empty -- unlike if/while, neither's body can be
+// safely kept/un-nested (bare statements can't sit outside any function; a for-loop's body likely references
+// the loop variable, which wouldn't exist anymore) -- and a function is additionally required to be uncalled
+// anywhere (AutoCompleteRules::isFunctionReferenced); otherwise the header is left alone entirely rather than
+// risking lost content or an accidental wholesale replace. Finer-grained deletion (a single call argument, a
+// non-empty for-loop or else-chain's own content) is still M7 backlog.
+//
+// Selecting any VariableReference/VariableDeclaration or FunctionCall/FunctionDeclaration (not composing)
+// outlines every OTHER occurrence of the SAME declaration/function across the document, in a distinct color
+// from the cursor's own fill+outline highlight (renderTextArea, referenceHighlightTarget resolves a span's
+// symbol to the canonical declaration it refers to -- itself, if it already is one -- so a reference and its
+// declaration, or two calls to the same function, are recognized as the same target regardless of which one is
+// currently selected). Purely a read-only visual aid; selecting/typing is unaffected.
+//
+// Declaring a new function is a top-level-only statement candidate ("function ", only offered where
+// atLine.scopeLevel == 0 -- see AutoCompleteRules::candidatesFor): free-type a name (FunctionDeclareName, same
+// collision-checked free-typing as a variable's DeclareName), then build its parameter list as a run of
+// "type name" pairs (FunctionParamType picks a type from the same keyword list variables use, FunctionParamName
+// free-types that parameter's name) -- typing ',' mid-name finalizes it and starts the next parameter's type
+// pick; typing ')' (or confirming) finalizes the current parameter if named and closes the list into the
+// FunctionDeclareDone stage -- Enter commits the WHOLE function in one shot (commitFunctionDeclaration), '-'
+// first appends a "-> type" pick -- same "nothing touches the document until the end" guarantee as declaring
+// a variable or an if/while condition. Landing spot is the new function's own body
+// (seeded like completing an if/while), ready to type its first statement. A function's return type is a
+// SEPARATE, always-available slot -- rendered blank when Void, selectable on any function (brand-new or
+// pre-existing) at any time to set/change it via the same type-keyword list (see SlotRef::Kind::FunctionReturnType).
+//
+// Declaring a new for-loop ("for ", offered anywhere a statement is, like if/while) stages its loop variable
+// exactly like a plain local declaration (ForVarType picks a type, ForVarName free-types the name with the same
+// collision check, ForVarValue composes the initial value -- vec2/3/4 the same comma-component special case as
+// a plain DeclareValue), then its condition (ForConditionLeft, SEEDED with the loop variable and extendable
+// into a compound chain like "i + 2"; ForConditionOp picks the comparator, ForConditionValue composes the
+// bound) and increment (ForIncrementOp picks a compound-assign operator -- +=/-=/*=//=/%=, never a plain `=`,
+// ForIncrementValue composes the step against the implicit loop variable). Every VALUE clause is a full
+// compound chain; the not-yet-committed loop variable rides through them as a SENTINEL candidate resolved at
+// build time (m_forBuildLoopVar). Step-back (Backspace on an empty compose box) restores each resolved clause
+// for further editing. Nothing touches the document until the very last step's confirm (commitForStatement),
+// same "never half-built" guarantee as if/while/function; landing spot is the new loop's own body, seeded like
+// completing an if/while/function.
+//
+// A value being composed for a brand-new declaration (DeclareValue) or a reassignment's value (ReassignValue,
+// below) can be an ARBITRARY-length compound expression instead of a single value, with parenthesized grouping
+// for precedence: once a candidate is matched, typing an arithmetic operator (+,-,*,/,%) commits it as a term
+// and starts composing the next one, and this repeats indefinitely -- "float f = a + 2.0 + b + c + getValue() *
+// 5" and "f = (a + b) * 2.0" both work. Nothing is a real DSLSymbol until the whole thing commits: the
+// in-progress structure lives in m_exprStack (one ExprFrame per open paren depth; a term is either a resolved
+// Candidate or, once a nested ')' closes, an entire PendingExprTerm sub-tree) plus m_exprPendingGroup for a
+// just-closed group awaiting its own next action. '(' (only when nothing's been typed for the CURRENT term yet)
+// pushes a fresh, empty ExprFrame -- a "parent edit block" that stays in progress until its ')' closes it;
+// ')' (only if a paren is actually open) closes the innermost one, folding it into one atomic term for whatever
+// encloses it. Confirming (Enter) only finalizes when every paren is closed AND either nothing was ever
+// typed (falls back to a Placeholder, same tolerance as before) or the trailing term is fully resolved -- never
+// a broken "a +" with nothing after it (exprTryFinalize) -- the "always compilable" invariant applied to
+// expressions: an open paren simply cannot be committed. The final commit (buildExpressionFromTerms) stores the
+// flat term/operator sequence VERBATIM as an Expression chain -- parenthesized groups become nested `grouped`
+// Expressions, and precedence is the transpiler's job at emit time, never encoded into the stored structure
+// (see DSL.ixx) -- which is exactly what keeps every term and operator individually addressable/editable
+// afterwards. Backspace on an empty compose box undoes exactly one action at a time -- the last operator+term,
+// the last '(' if nothing's inside it yet, or reopening the innermost just-closed ')' with its own last term
+// restored for further editing -- before finally stepping back to DeclareName (or cancelling, for Reassign)
+// once nothing remains; m_composePrefix is always fully rebuilt from m_exprStack after each such change
+// (exprComposePrefixFromStack) rather than hand-patched, so forward typing and backward undo can never drift
+// out of sync with each other. Reassigning an EXISTING variable ("name = ", offered as a Reassign candidate for
+// every in-scope variable in the SAME Void statement list functions already appear in) works exactly like
+// declaring one, minus the type/name steps -- nothing touches the document until ReassignValue's confirm
+// (commitReassignStatement), landing on the assignment statement itself (no new lines seeded -- reassignment
+// doesn't open a block).
+//
+// COMMITTED expressions stay fully editable in place, one span at a time -- and this is also how every OTHER
+// value slot (call arguments, a return's value, either side of an if/while/for condition, a vector literal's
+// components, a for-loop's clause values) grows into a compound chain, since their staged authoring flows stay
+// single-value. Selecting any operand/value span and typing begins EditExpr: a replacement segment composed
+// through the SAME m_exprStack machinery (so it can itself be compound/parenthesized), committed by
+// applyEditExpr -- a single term replaces the occupant outright; a multi-term segment splices into the
+// surrounding arithmetic chain flat, or becomes one nested sub-chain when the surroundings are a
+// comparison/assignment side (their Expressions stay exactly binary by construction). Selecting a value and
+// typing an arithmetic operator instead INSERTS: the composed segment chains in right after that value
+// (splicing into its arithmetic parent chain, or wrapping a standalone/structural-side value into a fresh
+// chain with itself as the first operand) -- gated on the slot's element type being numeric, so `canJump() +
+// ...` is never offered. Selecting an OPERATOR span and typing an operator character begins ReplaceOperator:
+// a candidate list of the SAME class (arithmetic/comparison/assign) as the current operator, confirmed into
+// operators[i] in place -- flat storage means no restructuring, `a + b * c` re-reads correctly the moment `+`
+// becomes `*`. Backspace on a chain operand removes it together with its adjacent arithmetic operator;
+// Backspace on an arithmetic operator span removes it together with the operand AFTER it; either way a chain
+// left with one operand unwraps to just that operand (repointSymbol), and a comparison/assignment's own
+// operator/sides never delete this way (their Backspace keeps the statement-level behaviors below). Every
+// in-place edit ends by restoring the line's post-order head and garbage-collecting symbols no longer
+// reachable from it (restoreHeadAndCollect) -- replaced operands must not linger in the line's flat ownership
+// list, where isVariableReferenced-style scans would still count them as uses.
+
+// One term in a compound "value [op value]*" expression being composed (see the comment above): either a plain
+// matched candidate, or (isGroup) an entire parenthesized sub-expression, itself a nested (groupTerms, groupOps)
+// sequence built the exact same way. Purely transient staging data -- nothing here is a real DSLSymbol until
+// the whole thing commits (see ScriptEditor::buildExpressionFromTerms).
+struct PendingExprTerm
+{
+	bool isGroup = false;
+	Candidate candidate;                     // meaningful if !isGroup
+	std::vector<PendingExprTerm> groupTerms; // meaningful if isGroup
+	std::vector<DSLOperator> groupOps;       // meaningful if isGroup -- groupOps.size() == groupTerms.size() - 1
+};
+
+// One nesting level of the expression being composed (one entry per currently-open paren depth, index 0 = the
+// outermost/top level). `terms`/`ops` hold everything ALREADY resolved at this level; the term currently being
+// typed/matched lives OUTSIDE this struct, in the ordinary m_candidates/m_pendingWord compose-box state (or, if
+// a ')' just closed a nested group, in ScriptEditor::m_exprPendingGroup) until an operator, a ')', or the final
+// confirm consumes it into `terms`/`ops`. `ops.size() == terms.size()` means "awaiting the next term" (a
+// dangling trailing operator, or -- when both are empty -- nothing typed yet); `ops.size() == terms.size() - 1`
+// never persists as a resting state (every action that completes a term also either adds a dangling operator or
+// closes/pops the frame), so callers can treat the `ops.size() == terms.size()` check as the sole invariant.
+struct ExprFrame
+{
+	std::vector<PendingExprTerm> terms;
+	std::vector<DSLOperator> ops;
+};
+
+// One fully-resolved arithmetic chain (terms + the operators between them) a staged flow holds for a value
+// position -- a comparison side, a for-loop clause, an initializer's worth of expression. `terms` is non-empty
+// once resolved; ops.size() == terms.size() - 1. A single plain value is a one-term chain.
+struct PendingExprChain
+{
+	std::vector<PendingExprTerm> terms;
+	std::vector<DSLOperator> ops;
+};
+
+// One resolved term of a LOGICAL (&&/||) chain being staged through the Condition* stages -- either a full
+// comparison ("i + 2 > n * 2") or a bare bool value ("canJump()"), each side itself a compound chain. Purely
+// transient, like PendingExprTerm: nothing is a real DSLSymbol until the whole condition/value commits
+// (ScriptEditor::buildStagedBool).
+struct PendingLogicalTerm
+{
+	bool isComparison = false;
+	PendingExprChain left;                       // the bare bool value when !isComparison
+	DSLOperator comparator = DSLOperator::Equal; // meaningful if isComparison
+	PendingExprChain right;                      // meaningful if isComparison
+};
+
 export class ScriptEditor
 {
 public:
 
 	void render();
-
-	// Queues an open/new request, going through the unsaved-changes guard first. Safe to call from the
-	// toolbar, a drag-drop of ASSET_FILE onto the panel, or the asset browser's "Open Text File" action.
-	void requestOpen(const std::string& path);
-	void requestNew();
-
-	bool isDirty() const { return m_hasDoc && m_text != m_baselineText; }
-	const std::string& path() const { return m_path; }
+	void handleKeyEvent(const SDL_Event& evt);
 
 private:
 
-	void renderToolbar();
-	void renderUnsavedPopup();
-	void renderSaveAsPopup();
+	void buildExampleDocument(); // one-time construction of the hardcoded example DSL document + builtins
+	void renderTextArea();
+	void renderAutocompletePopup();
+	DSLSymbol* pushSymbol(DSLCodeLine& line, DSLSymbol::SymbolType type, DSLSymbol::Data data); // constructs a fresh symbol owned by `line`, returns the raw ptr -- shared by every apply/commit function below
 
-	void doOpen(const std::string& path);
-	void doNew();
-	void save();      // writes to m_path if set, else opens the Save As popup
-	void saveAs(const std::string& path);
+	void moveHorizontal(int delta);  // Left/Right, Tab/Shift-Tab (not composing): next/prev span
+	void moveVertical(int delta);    // Up/Down (not composing): the adjacent line's LAST span (end-of-line, like deleteLine's landing)
+	void moveHome();
+	void moveEnd();
+	void clampCursor();
+	void insertLineAfterCursor(); // Enter (not composing): a fresh blank statement slot after the current line
+	void deleteLine(DSLCodeLine& line); // Backspace on a blank statement placeholder: remove it outright
+	void deleteBlockKeepBody(DSLSymbol* headSymbol); // Backspace on an if/while keyword: remove it, keep+unindent its body
+	bool attachedElseChainEmpty(const DSLSymbol* headSymbol) const; // no elseif/else chain, or every branch in it is empty
+	bool isBlockBodyEmpty(const DSLSymbol* headSymbol) const; // body is nothing, or exactly one blank statement placeholder -- any block header
+	// The function-deletion guard's body check: empty (isBlockBodyEmpty), or exactly one `return` line -- the
+	// return a return type auto-seeds shouldn't pin an otherwise-empty function in place.
+	bool isFunctionBodyDeletable(const DSLSymbol* headSymbol) const;
+	// A non-Void function's BOTTOM return -- the `return` sitting as the last body-level line before `end` --
+	// can never be deleted on its own (its VALUE stays freely editable; removing the whole function, or
+	// clearing/changing the return type, are the sanctioned ways it goes). Earlier/nested returns stay free.
+	bool isProtectedBottomReturn(const DSLCodeLine* line) const;
+	// A return-type CHANGE rewrites the function's returns: every existing `return` line is removed (their
+	// values were typed against the old type), and a non-Void new type seeds a fresh `return |` compose at the
+	// body's end (m_pendingComposeReturnValue) -- a function with a return type always gets nudged to return
+	// something. Void sets no landing; callers keep their own.
+	void applyFunctionReturnChange(DSLSymbol* funcSymbol, DSLType newReturnType);
+	void deleteEmptyBlock(DSLSymbol* headSymbol); // Backspace on an EMPTY block header (function or for): remove header+body+end
+	DSLSymbol* referenceHighlightTarget(DSLSymbol* symbol) const; // -> the VariableDeclaration/FunctionDeclaration `symbol` refers to (itself, if it already is one), or nullptr
 
-	bool        m_hasDoc = false; // false until New/Open — lets the toolbar/text area gate on "no document open"
-	std::string m_path;           // empty until first save/open
-	std::string m_text;
-	std::string m_baselineText;   // text at last load/save, for dirty-tracking
+	// FilterCandidates: normal single-step slot fill. DeclareName/DeclareValue: declaring a brand-new variable.
+	// ConditionLeft/ConditionOp/ConditionRight: building an if/while condition. Rename: selecting an EXISTING
+	// VariableDeclaration's own name (its declaration site, not a use of it) always free-types a replacement
+	// name instead of going through slot-based candidate replacement -- a declaration's name isn't a value with
+	// candidates, and AutoCompleteRules can't invent a new identifier anyway. m_composePrefix holds whatever's
+	// already been resolved-but-not-yet-applied ("float ", then "float test = "; or "if height <= "); m_pendingWord
+	// is always the LIVE-typed suffix after it -- the compose box shows their concatenation.
+	enum class ComposeMode
+	{
+		None, FilterCandidates, DeclareName, DeclareValue, Rename, ConditionLeft, ConditionOp, ConditionRight,
+		FunctionDeclareName, FunctionParamType, FunctionParamName, FunctionReturnType,
+		ForVarType, ForVarName, ForVarValue, ForConditionOp, ForConditionValue, ForIncrementOp, ForIncrementValue,
+		ReassignValue,
+		EditExpr,        // in-place expression editing: replacing one value-slot occupant/chain operand, or
+		                 // inserting new operator+term segments after one -- see the class comment
+		ReplaceOperator, // swapping one operator of an existing Expression chain for another of the same class
+		ReturnValue,     // a value-returning function's `return`: the value composes BEFORE the line commits
+		CallArgValue,    // a parameterized call statement: arguments compose one by one before the call commits
+		ForConditionLeft, // the for-condition's LEFT side -- seeded with the loop variable, extendable into a
+		                  // compound chain ("i + 2 < ..."); a comparator advances to ForConditionOp
+		ReassignOp,      // picking a reassignment statement's operator (=, +=, -=, *=, /=, %=) -- entered by
+		                 // typing an operator character over a matched Reassign candidate; Space-confirming the
+		                 // candidate instead skips this stage and authors a plain `=`
+		FunctionDeclareDone,       // the ')' just closed a declared function's parameter list: Enter commits
+		                           // it, '-' opens the return-type pick, Backspace reopens the parameter list
+		FunctionDeclareReturnType, // picking the "-> type" for the function being declared; confirm commits the
+		                           // whole function WITH it (distinct from FunctionReturnType, which edits an
+		                           // already-committed header's return-type span directly)
+	};
 
-	enum class PendingSwitch { None, New, OpenPath };
-	PendingSwitch m_pendingSwitch = PendingSwitch::None;
-	std::string   m_pendingSwitchPath;
-	bool          m_openUnsavedPopup = false;
+	// Editing.
+	void beginCompose();
+	void refreshCandidates();
+	void cancelCompose();
+	// `allowCommit` false (Space) advances STAGES within a line but never finishes/commits it -- only Enter
+	// (or an explicit closing gesture like a call's ')') passes true. This is what lets a space be typed
+	// harmlessly before "&&"/an operator without accidentally committing the line so far.
+	void confirmCompose(bool allowCommit = true);
+	const Candidate* selectedCandidate() const; // the currently-highlighted candidate, or nullptr when the list is empty
+	// The one-stop stage transition every staged flow uses: sets the compose box to `prefix` (+ `pendingWord`,
+	// for step-backs that restore previously-typed text), switches to `mode`, and rebuilds the candidate list
+	// against the new mode/text (a no-op for free-typing modes, which end up with an empty list).
+	void enterCompose(ComposeMode mode, std::string prefix, std::string pendingWord = {});
+	bool hasCandidateList() const; // does the CURRENT compose mode show an arrow-cyclable candidate list
+	void applyCandidate(const Candidate& candidate);
+	DSLCodeLine* currentLineHeadOrCancel(); // resolves the LineHead slot's line at the cursor, or cancelCompose()+nullptr if not there
+	DSLSymbol* buildValueFromCandidate(const Candidate& candidate, DSLCodeLine& line); // Variable/Function/Literal/true/false only
+	// Resolves an initializer/assignment's right-hand value: vec2/3/4 tries buildVectorLiteral on `rawText`
+	// FIRST; otherwise, if `terms` is non-empty, builds the full expression chain from it
+	// (buildExpressionFromTerms); an empty `terms` falls back to a type-appropriate Placeholder (defensive --
+	// the confirms refuse empty values, so it shouldn't occur in practice). Shared by applyDeclareVariable,
+	// the reassign/redeclare commits, and commitForStatement's loop-variable init.
+	DSLSymbol* resolveValueOrPlaceholder(DSLType type, const std::string& rawText,
+		const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, DSLCodeLine& line);
+	DSLSymbol* buildExpressionTerm(const PendingExprTerm& term, DSLCodeLine& line); // a plain candidate, or (isGroup) a nested `grouped` chain via buildExpressionFromTerms
+	// Builds a flat term/operator sequence into a real Expression chain VERBATIM -- no precedence folding
+	// (DSLSymbol::Expression stores exactly what was authored; the transpiler applies precedence at emit time,
+	// see DSL.ixx); parenthesized groups become nested Expressions with `grouped` set. `terms`/`ops` come from
+	// a fully-finalized ExprFrame (ops.size() == terms.size() - 1), never a still-composing one. `terms` must
+	// be non-empty; a single plain term returns unwrapped (no Expression node), while a single GROUP keeps its
+	// authored parens -- they're the edit anchor later "chain after the parens" edits hang off, never stripped
+	// as redundant.
+	DSLSymbol* buildExpressionFromTerms(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, DSLCodeLine& line);
+	// True if the compound expression can be finalized right now (every paren closed, and either nothing was
+	// ever typed or the trailing term is fully resolved) -- fills `outTerms`/`outOps` and consumes any pending
+	// group/candidate into them. False means "keep composing", e.g. an open paren or a dangling operator with
+	// nothing typed for its right-hand term yet.
+	bool exprTryFinalize(std::vector<PendingExprTerm>& outTerms, std::vector<DSLOperator>& outOps);
+	std::string exprBasePrefix() const; // "type name = " (DeclareValue) or "name = " (ReassignValue) -- everything before the expression itself
+	std::string exprBasePrefixFor(ComposeMode mode) const; // exprBasePrefix's worker, for a mode OTHER than the current one (the comparison-value flow's stages)
+	std::string conditionFlowBasePrefix() const; // what precedes the condition being staged: the flow keyword ("if "), or the value mode's own base ("bool b = ")
+	void commitBoolValue(const PendingLogicalTerm& finalTerm); // the staged comparison/logical chain IS a value ("bool b = i < 5") -- routes per m_conditionValueReturnMode
+	std::string exprComposePrefixFromStack() const; // renders m_exprStack (+ m_exprPendingGroup, if any) back to text -- always assigned to m_composePrefix after any state change, forward or backward, so the two can never drift apart
+	std::string exprTermText(const PendingExprTerm& term) const; // recursive -- "(" + ... + ")" for a group, else candidateDisplayText
+	void applyDeclareVariable(const std::string& name, DSLType type, const std::vector<PendingExprTerm>& terms,
+		const std::vector<DSLOperator>& ops, const std::string& rawInitializerText, DSLCodeLine& line);
+	// DeclareValue's confirm when m_redeclareTarget is set: applies the (possibly renamed) name + freshly
+	// composed initializer IN PLACE on the existing declaration -- see m_redeclareTarget's comment.
+	void commitRedeclare(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawInitializerText);
+	// ConditionRight's (or a bare-bool ConditionLeft's) confirm: commits the whole if/while header (or a
+	// chain's new elseif) -- the condition is `finalTerm` appended to whatever m_logicalTerms/m_logicalOps
+	// accumulated ("if i > 0 && i != 42"), built via buildStagedBool.
+	void applyConditionalStatement(const PendingLogicalTerm& finalTerm);
+	// The staged condition/bool-value as ONE value symbol: a single comparison/bare value, or a flat logical
+	// chain of them (`terms`+`finalTerm` joined by `ops`). Captured pre-cancel by every caller.
+	DSLSymbol* buildStagedBool(const std::vector<PendingLogicalTerm>& terms, const std::vector<DSLOperator>& ops,
+		const PendingLogicalTerm& finalTerm, DSLCodeLine& line);
+	std::string stagedConditionPrefix() const; // conditionFlowBasePrefix() + every accumulated logical term + its trailing &&/||
 
-	bool m_openSaveAsPopup = false;
-	char m_saveAsBuf[256] = "NewText";
+	// Chain-stage plumbing (the staged flows' value slots ARE m_exprStack composes -- see PendingExprChain):
+	std::string chainDisplayText(const PendingExprChain& chain) const; // terms joined by their operator characters
+	// Consumes the live compose (stack + matched candidate / pending group) into `out` -- false keeps composing
+	// (open paren, dangling operator, or nothing typed). Same finalize rules as a declaration's value.
+	bool captureComposedChain(PendingExprChain& out);
+	void restoreChainIntoCompose(const PendingExprChain& chain); // the reverse: all but the last term into the stack, the last back into the box
+	// One-stop entry into any chain-composing stage: resets the stack, optionally restores a prior chain, and
+	// derives the prefix from exprBasePrefixFor(mode) so forward/backward transitions can't drift.
+	void enterChainStage(ComposeMode mode, const PendingExprChain* restore = nullptr);
+	DSLType composedChainPeekType() const; // the live compose's element type WITHOUT consuming it (first stack term, else the matched candidate)
+	bool isChainComposeMode() const; // the current mode composes a value chain through m_exprStack (the vector-component variants don't)
+	PendingExprChain loopVarSeedChain() const; // a one-term chain holding the staged loop variable's SENTINEL candidate (see m_forBuildLoopVar)
+	void applyElseStatement(DSLSymbol* chainHead, DSLCodeLine& originLine); // "else" picked inside a branch: appends the else at the chain's end, consuming the blank origin line
+	DSLSymbol* buildVectorLiteral(DSLType vectorType, const std::vector<std::string>& components, DSLCodeLine& line);
+	DSLSymbol* vectorBuiltinFor(DSLType vectorType) const;
+	DSLCodeLine& insertLineAfter(DSLCodeLine& afterLine, int scopeLevel);
+	DSLSymbol* seedStatementPlaceholder(DSLCodeLine& line);
+	std::string functionDeclarePrefix() const; // rebuilds "function name(type0 name0, type1 name1" from pending state
+	std::string currentParamPrefix() const;    // functionDeclarePrefix() + the CURRENT parameter's "[, ][ref ]type " lead-in
+	bool isPendingParamNameTaken(const std::string& name) const;
+	void commitFunctionDeclaration(); // FunctionParamType/Name's ')'-or-confirm: commits the whole new function declaration
+	// Backspace on a function's (blank) return-type span: the staged Declare-function flow re-opens over the
+	// EXISTING header at its last parameter's name (or the function name, when parameter-less), whole-line box
+	// -- further Backspace peels parameter by parameter, then the name, then (guarded) the function itself.
+	void beginWidenFunctionHeader(DSLSymbol* funcSymbol);
+	// commitFunctionDeclaration when m_flowEditLine is set: re-applies the header IN PLACE -- the
+	// FunctionDeclaration symbol survives (call sites reference it), and parameters keep their symbols
+	// positionally wherever the type is unchanged (body statements and named call arguments reference them).
+	// REFUSES (keeps composing) when the signature changed while the function is called anywhere, or when a
+	// removed/retyped parameter is still referenced in the body -- nothing may dangle.
+	void commitFunctionRedeclare();
+	// Backspacing out of an empty argument-value edit on a committed call STATEMENT widens into the staged
+	// CallArgValue flow at that argument (earlier arguments restored); false = not such a position/not
+	// restorable, caller falls through.
+	bool tryWidenCallStatementEdit();
+	std::string callComposePrefix() const;  // "name(param0 = <resolved>, param1 = " -- rebuilt from the staged-call state each stage
+	DSLType currentCallParamType() const;   // the parameter the CallArgValue stage is currently composing a value for
+	void commitCallStatement();             // the last argument's confirm: commits the whole call in one shot -- no placeholder ever lands
+	std::string forVarPrefix() const;       // "for <type> <name> = " -- before the loop var's own initial value
+	std::string forVarDeclPrefix() const;   // forVarPrefix() + the resolved initial value -- the whole loop-var clause
+	std::string forConditionPrefix() const; // forVarDeclPrefix() + ", <name> <op> <value>" -- the whole condition clause too
+	void commitForStatement(); // ForIncrementValue's confirm: commits the whole new for-loop
+	DSLType reassignTargetType() const; // m_reassignTarget's own declared type
+	// Same `terms`/`ops` convention as applyDeclareVariable, for a `name = value` statement instead.
+	void commitReassignStatement(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawInitializerText);
+	// ReassignValue's confirm when m_reassignEditExpr is set: swaps only the right-hand value in place.
+	void commitReassignInPlace(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawInitializerText);
+	void clearLineToBlankStatement(DSLCodeLine& line); // the staged flows' final Backspace: line becomes a selected blank statement placeholder
 
-	float m_fontScale = 1.0f; // Ctrl+scroll zoom over the text area, applied via ImGui::PushFont(NULL, size)
+	// In-place expression editing (EditExpr/ReplaceOperator -- see the class comment).
+	void beginEditExprReplace(const SyntaxSpan& span); // compose a replacement for an existing value-slot occupant / chain operand
+	void beginEditExprInsert(const SyntaxSpan& span, DSLOperator leadOp, const std::string& anchorText); // an operator typed over a selected value: compose the term(s) to chain in after it
+	// Backspace on a committed group's ')' span: reopens the group for re-composing -- its contents seed the
+	// expression stack exactly as they were mid-authoring right before the ')' was typed (paren open, last term
+	// restored into the box), so the whole group must be re-closed and re-confirmed as one unit. False if any
+	// inner term can't round-trip into compose form (placeholders, member accesses, dot-calls) -- caller falls
+	// back to plain replace-editing.
+	bool beginReopenGroup(const SyntaxSpan& span);
+	void computeComposeCover(const SyntaxSpan& groupCloseSpan); // the reopened group's full rendered column range -- what the compose box replaces
+	// Backspacing out of an empty in-place edit on a flow-control header's value span widens into the matching
+	// STAGED flow (if/elseif/while condition -> ConditionLeft/Right, return -> ReturnValue, for clauses -> the
+	// matching For* stage, with the whole staged state restored from the committed clauses). False = not such a
+	// position, or content that can't round-trip into staged form (compound sides, member accesses) -- caller
+	// falls through to the other step-back behaviors.
+	bool tryWidenFlowHeaderEdit();
+	// Same widening for a COMPARISON that is a bool VALUE ("bool test = i < 5"'s operands): re-enters the
+	// comparison-value staged flow (ConditionLeft/Right with m_conditionValueReturnMode) with the owning
+	// declaration's/assignment's re-edit context restored, so the peel continues out through "bool test = |"
+	// and beyond exactly like every other value.
+	bool tryWidenComparisonValueEdit();
+	// EditExpr's confirm: splice/wrap/replace per m_edit* state. `rawVectorText` non-empty = a vector-typed
+	// slot's comma-separated components (pre-validated), replacing the occupant with a vecN literal.
+	void applyEditExpr(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawVectorText);
+	void writeSlot(const SlotRef& slot, DSLSymbol* newSymbol); // repoints the slot's owning field at newSymbol (never LineHead)
+	void repointSymbol(DSLCodeLine& line, DSLSymbol* oldSymbol, DSLSymbol* newSymbol); // every structural field in `line` pointing at oldSymbol -> newSymbol (chain unwrap)
+	// After any in-line structural edit: moves `originalHead` back to symbols.back() (the post-order convention,
+	// see DSL.ixx) and sweeps symbols no longer reachable from it -- replaced operands/operators must not linger
+	// in the line's flat ownership list, where isVariableReferenced-style scans would still count them as uses.
+	void restoreHeadAndCollect(DSLCodeLine& line, DSLSymbol* originalHead);
+	void deleteChainOperand(DSLSymbol* exprSymbol, int operandIndex);   // Backspace on a chain term: remove it + its adjacent arithmetic operator
+	void deleteChainOperator(DSLSymbol* exprSymbol, int operatorIndex); // Backspace on a chain operator: remove it + the operand AFTER it
+	// Lands the cursor on the END of a just-committed value -- a grouped chain's own ')' span, else an
+	// ungrouped chain's last operand (recursively), else the value itself -- matching where typing left off.
+	void selectExpressionTail(DSLSymbol* value);
+	void finishChainShrink(DSLSymbol* exprSymbol, DSLSymbol* originalHead, int selectOperand); // shared tail: unwrap a 1-operand chain, restore head order, GC, land the cursor
+
+	DSL m_document;
+	std::vector<std::unique_ptr<DSLSymbol>> m_builtins; // vec2/vec3/vec4/print/component-method decls; stand-in
+	                                                     // for a shared builtin registry (M5 formalizes one properly)
+	DSLSymbol* m_vec2Func = nullptr; // remembered for declaring vec2/3/4 variables via comma-separated components
+	DSLSymbol* m_vec3Func = nullptr; // (see applyDeclareVariable's DeclareValue handling) -- set in buildExampleDocument
+	DSLSymbol* m_vec4Func = nullptr;
+	std::vector<SyntaxLine> m_formatted; // rebuilt from m_document each render() -- cheap at this document size
+	bool m_compact = false;              // M4 adds the toolbar toggle; M3 always renders expanded
+
+	int m_cursorLine = 0; // index into m_formatted
+	int m_cursorSpan = 0; // index into m_formatted[m_cursorLine].spans
+
+	// Set by applyCandidate/applyDeclareVariable/applyConditionalStatement to whatever should be selected once
+	// m_formatted is recomputed against the just-mutated document (resolved by symbol-pointer scan in render()).
+	// m_pendingSelectOperatorIndex additionally picks WHICH span of that symbol when it's an Expression with
+	// several operator spans (>= 0 after replacing an operator; -1 = first span wins, the common case), and
+	// m_pendingSelectGroupClose targets a grouped Expression's own closing-')' span instead (typing ')' on a
+	// group's last operand steps the selection out there -- see handleKeyEvent).
+	DSLSymbol* m_pendingSelectTarget = nullptr;
+	int m_pendingSelectOperatorIndex = -1;
+	bool m_pendingSelectGroupClose = false;
+	// Set alongside m_pendingSelectTarget when the selected-to line is a freshly seeded RETURN slot: once the
+	// re-format lands the cursor there, the ReturnValue compose opens immediately ("return |") -- see
+	// applyFunctionReturnChange. Escape leaves the blank statement line.
+	bool m_pendingComposeReturnValue = false;
+	// >= 0: instead of a symbol scan, select the LAST span of this formatted-line index once m_formatted is
+	// recomputed -- how deleteLine lands the cursor at the END of the line above the one removed (the spot
+	// typing would continue from), which a symbol-based select can't express (a line's head span is its name/
+	// keyword, not its last element).
+	int m_pendingSelectLineEnd = -1;
+
+	ComposeMode m_composeMode = ComposeMode::None;
+	std::string m_composePrefix;
+	std::string m_pendingWord;
+	std::vector<Candidate> m_candidates;
+	int m_candidateSelected = 0;
+	DSLType m_pendingDeclareType = DSLType::Void; // DeclareName/DeclareValue: which type was picked in step 1
+	std::string m_pendingDeclareName;             // DeclareValue: the name resolved in step 2
+	DSLSymbol* m_renameTarget = nullptr;           // Rename: the VariableDeclaration being renamed
+
+	// Non-null: the DeclareName/DeclareValue staged flow is RE-authoring this EXISTING declaration instead of
+	// building a brand-new one -- entered by Backspacing out of an empty whole-initializer edit (see
+	// handleKeyEvent's EditExpr step-back), widening the compose box to the ENTIRE line ("float test = |",
+	// exactly like a new declaration mid-flow) so continued Backspace peels further: into the name (rename),
+	// then -- only when nothing references the variable -- clearing the whole line back to a blank statement.
+	// Committing goes through commitRedeclare, never applyDeclareVariable: the existing VariableDeclaration
+	// symbol's IDENTITY must survive (name/initializer swapped in place) so every VariableReference elsewhere
+	// keeps pointing at it. Cancelling anywhere leaves the document untouched, same as every staged flow.
+	DSLSymbol* m_redeclareTarget = nullptr;
+
+	// The compound expression being composed for DeclareValue's initializer OR ReassignValue's value -- shared
+	// by both (see the class comment above and ScriptEditor.cpp's expr* helpers). Reset to one empty frame
+	// whenever either mode is (re-)entered. m_exprPendingGroup/m_exprHasPendingGroup hold whatever a ')' most
+	// recently resolved, until an operator, an enclosing ')', or the final confirm consumes it.
+	std::vector<ExprFrame> m_exprStack;
+	PendingExprTerm m_exprPendingGroup;
+	bool m_exprHasPendingGroup = false;
+
+	// Reassigning an EXISTING variable (`name op value`) -- picked from the Void statement list's Reassign
+	// candidates. ReassignValue stages the value (via the SAME m_exprStack mechanism as DeclareValue); nothing
+	// touches the document until it confirms (commitReassignStatement). m_reassignOp is the assignment operator
+	// the statement authors with -- plain `=` unless the ReassignOp stage picked a compound one ("i += 1").
+	DSLSymbol* m_reassignTarget = nullptr;
+	DSLOperator m_reassignOp = DSLOperator::Assign;
+
+	// Non-null: ReassignValue is RE-authoring this EXISTING assignment statement (the line-head Expression)
+	// instead of building a new line -- the assignment-statement counterpart of m_redeclareTarget, entered the
+	// same way (Backspacing out of an empty right-hand-value edit widens the compose box to the whole line,
+	// showing the statement's ACTUAL operator -- `thing += |`, not a hardcoded `=`). Commits through
+	// commitReassignInPlace, which swaps ONLY the right-hand value on the existing statement (target and
+	// operator untouched); one more Backspace from the widened dialog clears the line to a blank statement
+	// (no reference guard needed -- an assignment declares nothing).
+	DSLSymbol* m_reassignEditExpr = nullptr;
+
+	// EditExpr: editing an existing expression in place. m_editSlot is where the edited value lives (captured
+	// at entry; the document never changes while composing, so it can't go stale). m_editChainExpr is the
+	// Expression whose operand list gets spliced (null = the slot's occupant is treated as a standalone value:
+	// replaced wholesale, or -- for an insert -- wrapped into a fresh chain with itself as the first operand,
+	// which is also how a comparison/assignment SIDE grows a nested sub-chain). The composed segment itself
+	// lives in the same m_exprStack machinery DeclareValue/ReassignValue use, so parens/operators behave
+	// identically; nothing touches the document until applyEditExpr.
+	SlotRef m_editSlot;
+	DSLSymbol* m_editChainExpr = nullptr;
+	int m_editOperandIndex = 0;                  // operand being replaced, or the insert-after anchor's index
+	bool m_editInsert = false;                   // false: replace the anchor; true: insert after it (m_editLeadOp leads the new segment)
+	DSLOperator m_editLeadOp = DSLOperator::Add;
+	DSLSymbol* m_editAnchorSymbol = nullptr;     // the slot's current occupant (standalone insert wraps around it)
+	std::string m_editAnchorText;                // its rendered text -- the compose box shows "anchor op ..." while inserting
+	DSLType m_editValueType = DSLType::Void;     // the chain's element type, constraining every composed term's candidates
+
+	// ReplaceOperator: which operator of which Expression chain is being swapped (candidates come from the
+	// CURRENT operator's own class -- arithmetic/comparison/assign -- so a `+` can become `*` but never `<=`).
+	DSLSymbol* m_replaceOpExpr = nullptr;
+	int m_replaceOpIndex = 0;
+
+	// Non-null: a Condition*/ReturnValue/For* staged flow is RE-authoring this EXISTING flow-control header
+	// line -- entered by Backspacing out of an empty in-place edit on one of its value spans (see
+	// tryWidenFlowHeaderEdit), the header-line counterpart of m_redeclareTarget/m_reassignEditExpr. The header
+	// only changes when the staged flow re-confirms IN FULL (no body is seeded -- the block already has one);
+	// Backspacing past the first stage applies the same guarded deletion as Backspacing the keyword itself
+	// (if/while: empty else-chain, body kept un-nested; elseif: own branch empty; for: empty body; return:
+	// unconditional). m_flowEditLoopVar (for-loops only) is the existing loop-variable declaration, preserved
+	// IN PLACE on commit -- body statements reference it, so its identity must survive re-authoring; its TYPE
+	// stays fixed for the same reason (the ForVarType stage is never re-entered on a re-edit).
+	DSLCodeLine* m_flowEditLine = nullptr;
+	DSLSymbol* m_flowEditLoopVar = nullptr;
+
+	// >= 0: the compose box replaces this COLUMN RANGE of the cursor line instead of just the selected span --
+	// set by beginReopenGroup (the box must cover the group's whole "(...)" render, not only its ')' span).
+	// Stable while composing: the document doesn't change mid-compose, so the line renders identically each
+	// frame. The whole-line flows (m_redeclareTarget/m_reassignEditExpr) take precedence over this in
+	// renderTextArea when a step-back transitions from one into the other.
+	int m_composeCoverStart = -1;
+	int m_composeCoverEnd = -1;
+
+	// Building a parameterized call statement (CallArgValue): each argument's value resolves fully -- a picked
+	// candidate, or (vector-typed parameters) free-typed comma components in the parallel raw-text slot --
+	// before the next one starts; the call itself only commits once EVERY argument is in hand
+	// (commitCallStatement), so an argument placeholder never appears in the document. The current parameter's
+	// index is m_callArgCandidates.size().
+	DSLSymbol* m_callFunc = nullptr;
+	std::vector<Candidate> m_callArgCandidates;
+	std::vector<std::string> m_callArgRawTexts;
+
+	std::string m_pendingFunctionName;            // FunctionDeclareName's resolved name, once confirmed
+	std::vector<DSLType> m_pendingParamTypes;     // accumulated parameter types, parallel to m_pendingParamNames
+	std::vector<std::string> m_pendingParamNames; // accumulated parameter names, parallel to m_pendingParamTypes
+	std::vector<bool> m_pendingParamRefs;         // parallel `ref` flags -- always false when AUTHORING (the flow can't
+	                                               // create ref params); restored from an existing header on a re-edit
+	                                               // so its display and commit round-trip them (see beginWidenFunctionHeader)
+	DSLType m_pendingParamType = DSLType::Void;    // FunctionParamName: type just picked for the CURRENT (not yet named) parameter
+	bool m_pendingParamRef = false;                // FunctionParamName: the CURRENT parameter's restored ref flag (false when authoring)
+	DSLType m_pendingReturnType = DSLType::Void;   // the staged flow's "-> type" (FunctionDeclareReturnType); Void when
+	                                                // never picked; restored from the header on a re-edit so it round-trips
+
+	// Building a new for-loop: ForVarType/Name/Value stage the loop variable exactly like declaring a plain
+	// local (type, then name, then initial value); ForConditionLeft (seeded with the loop variable, extendable
+	// to "i + 2") + ForConditionOp/Value stage the condition; the increment's left stays implicitly the loop
+	// variable, ForIncrementOp/Value pick the compound-assign operator + step. Every VALUE clause is a full
+	// compound chain (PendingExprChain, composed through m_exprStack). Nothing touches the document until
+	// ForIncrementValue's confirm (commitForStatement) -- and since the loop variable doesn't EXIST until then,
+	// its own appearances inside the clauses ride as SENTINEL Variable candidates (refSymbol null, label =
+	// m_forVarName), resolved to the real symbol via m_forBuildLoopVar at build time.
+	DSLType m_forVarType = DSLType::Void;
+	std::string m_forVarName;
+	std::string m_forVarInitRawText;        // vector components typed, if m_forVarType is a vector (see buildVectorLiteral)
+	PendingExprChain m_forVarInitChain;     // meaningful whenever m_forVarType isn't a vector
+	PendingExprChain m_forConditionLeftChain;
+	Candidate m_forConditionOpCandidate;    // keeps both .op and .label -- the label re-displays in the compose box on step-back
+	PendingExprChain m_forConditionValueChain;
+	Candidate m_forIncrementOpCandidate;
+	PendingExprChain m_forIncrementValueChain;
+	DSLSymbol* m_forBuildLoopVar = nullptr; // build-time only: what sentinel loop-var candidates resolve to
+
+	// Non-null: the condition flow is authoring a NEW elseif branch for the chain this If/ElseIf head opens --
+	// picked as an "elseif" statement candidate INSIDE that branch (m_conditionOriginLine is the blank line it
+	// was typed on, consumed at commit). applyConditionalStatement then inserts the new header AFTER the
+	// enclosing branch's block at its level, instead of replacing the cursor line. The parallel "else" pick
+	// needs no staging at all (no condition) -- it applies immediately via applyElseStatement.
+	DSLSymbol* m_conditionChainHeader = nullptr;
+	DSLCodeLine* m_conditionOriginLine = nullptr;
+
+	// Not None: the ConditionOp/ConditionRight stages are building a COMPARISON VALUE for that value mode
+	// ("bool b = i < 5" -- entered by typing a comparator over a matched candidate in a Bool-typed
+	// DeclareValue/ReassignValue/EditExpr), not a flow-control header. ConditionRight's confirm then routes to
+	// commitComparisonValue, and Backspacing out of ConditionOp returns to the value mode with the lead
+	// candidate restored. The value modes' own context members (m_pendingDeclare*/m_reassign*/m_edit*) stay
+	// intact across the mode switch -- only cancelCompose clears them.
+	ComposeMode m_conditionValueReturnMode = ComposeMode::None;
+
+	DSLFlowControl m_conditionControl = DSLFlowControl::If; // ConditionLeft/Op/Right: If, While, or a chain's new ElseIf
+	PendingExprChain m_conditionLeftChain;                  // ConditionOp/Right: the resolved (possibly compound) left side
+
+	// The LOGICAL (&&/||) chain accumulated so far while staging a condition or bool value: typing '&'/'|'
+	// after a resolved term (ConditionRight's comparison, or a bool-valued ConditionLeft pick) pushes it here
+	// with its operator and loops back to ConditionLeft for the next term; the final term rides into
+	// applyConditionalStatement/commitBoolValue instead. Sizes stay equal while awaiting the next term.
+	// Cleared at every condition-flow entry; Backspace at an empty ConditionLeft pops one term back open.
+	std::vector<PendingLogicalTerm> m_logicalTerms;
+	std::vector<DSLOperator> m_logicalOps;
+	DSLOperator m_conditionOp = DSLOperator::Equal;         // ConditionRight: the resolved comparator
+
+	bool m_hasFocus = false;
+	bool m_built = false;
+
+	float m_fontScale = 1.0f;
+	float m_textOriginX = 0.0f, m_textOriginY = 0.0f;
+	float m_cursorScreenX = 0.0f, m_cursorScreenY = 0.0f; // current selection's screen rect, for popup placement
+	float m_lineHeight = 0.0f;
 };

@@ -4,6 +4,7 @@ import Core;
 import Core.imgui;
 import Core.Log;
 import Core.glm;
+import Core.SDL;
 import Entity;
 
 import :imgui_node_editor;
@@ -15,6 +16,70 @@ import :OutputLog;
 import :TweakPanel;
 import :TextEditor;
 import :ScriptEditor;
+import :DSL;
+import :Transpiler;
+
+namespace
+{
+	// M1 walking-skeleton test (see the DSL editor plan's Milestone 1): hardcodes
+	//   function update(deltaSec) print("DSL walking skeleton: Update ran") end
+	// directly as DSLSymbols (bypassing the not-yet-built editor/parser), transpiles it, and writes the result
+	// to Assets/Scripts/DslWalkingSkeletonTest.scr. Point an entity's Script Path (Properties panel) at
+	// "Scripts/DslWalkingSkeletonTest.scr" and run the app to see the log line on Update. Temporary -- removed
+	// once M6 wires the real editor save/open + Compile & Run against an authored DSL document.
+	std::string generateDslWalkingSkeletonTestScript()
+	{
+		DSLScriptFile scriptFile;
+
+		auto addLine = [&](int scopeLevel) -> DSLCodeLine&
+		{
+			auto line = std::make_unique<DSLCodeLine>();
+			line->scopeLevel = scopeLevel;
+			DSLCodeLine& lineRef = *line;
+			scriptFile.lines.push_back(std::move(line));
+			return lineRef;
+		};
+		auto addSymbol = [](DSLCodeLine& line, DSLSymbol::SymbolType type, auto&& data) -> DSLSymbol&
+		{
+			auto symbol = std::make_unique<DSLSymbol>();
+			symbol->type = type;
+			symbol->data = std::forward<decltype(data)>(data);
+			symbol->line = &line;
+			DSLSymbol& symbolRef = *symbol;
+			line.symbols.push_back(std::move(symbol));
+			return symbolRef;
+		};
+
+		// function update(float deltaSec)
+		DSLCodeLine& header = addLine(0);
+		DSLSymbol& deltaSecType = addSymbol(header, DSLSymbol::SymbolType::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
+		DSLSymbol& deltaSecParam = addSymbol(header, DSLSymbol::SymbolType::VariableDeclaration, DSLSymbol::VariableDeclaration{ "deltaSec", &deltaSecType });
+		addSymbol(header, DSLSymbol::SymbolType::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "update", { &deltaSecParam }, DSLType::Void });
+
+		// Builtin `print` -- per DSL.ixx's ownership model, a builtin declaration isn't owned by any line; a
+		// local here stands in for the static builtin registry M3/M5 will introduce.
+		DSLSymbol printBuiltin;
+		printBuiltin.type = DSLSymbol::SymbolType::FunctionDeclaration;
+		printBuiltin.data = DSLSymbol::FunctionDeclaration{ "print", {}, DSLType::Void };
+
+		// print("DSL walking skeleton: Update ran")
+		DSLCodeLine& body = addLine(1);
+		DSLSymbol& literal = addSymbol(body, DSLSymbol::SymbolType::Constant, DSLSymbol::Constant{ DSLType::String, "DSL walking skeleton: Update ran" });
+		addSymbol(body, DSLSymbol::SymbolType::FunctionCall, DSLSymbol::FunctionCall{ &printBuiltin, nullptr, { DSLSymbol::CallArgument{ nullptr, &literal } } });
+
+		std::string code;
+		for (const std::string& line : Transpiler::transpile(scriptFile.lines))
+		{
+			code += line;
+			code += "\n";
+		}
+
+		const std::string path = "Scripts/DslWalkingSkeletonTest.scr";
+		std::ofstream file(path, std::ios::out | std::ios::binary | std::ios::trunc);
+		file.write(code.data(), code.size());
+		return path;
+	}
+}
 
 UI::~UI()
 {
@@ -268,7 +333,15 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
 
     {
         if (ImGui::Begin("Script Editor"))
+        {
             m_scriptEditor.render();
+
+            ImGui::Separator();
+            if (ImGui::Button("[DSL M1] Generate + Compile Walking-Skeleton Test"))
+                m_scriptReloadRequests.push_back(generateDslWalkingSkeletonTestScript());
+            ImGui::SameLine();
+            ImGui::TextDisabled("writes Scripts/DslWalkingSkeletonTest.scr -- point an entity's Script Path at it to run");
+        }
         ImGui::End();
     }
 
@@ -407,6 +480,11 @@ void UI::pasteScriptSelection()
     if (ImGui::GetIO().WantTextInput)
         return; // ditto for paste
     m_scene.requestPaste();
+}
+
+void UI::handleKeyEvent(SDL_Event evt)
+{
+    m_scriptEditor.handleKeyEvent(evt);
 }
 
 void UI::requestOpenScript(const std::string& path)

@@ -109,7 +109,7 @@ export namespace Procedural
 		void updateFogHeightMap(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& maps, float farRange);
 
 		// --- Tweak-backed configuration (source of truth; the generator/ChunkParams are built from these) ---
-		bool  m_enabled = true;
+		bool  m_enabled = false;
 		int   m_seed = 62500;
 		int   m_chunkSize = 1024;
 		int   m_lod0Res = 512;
