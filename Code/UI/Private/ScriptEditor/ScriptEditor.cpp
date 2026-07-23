@@ -6385,7 +6385,13 @@ void ScriptEditor::saveDocument()
 		return;
 	m_document.filePath = path;
 	if (ScriptLoader::save(m_document, path, Transpiler::transpile(m_document, m_bindings)))
+	{
 		Log::info("Script saved to " + path);
+		// The saved file's generated-C++ header is always current (see ScriptLoader::save) -- queue it for
+		// ScriptHost to (re)compile + hot-reload, same as the node editor's "Compile & Run" (UI.cpp); drained
+		// by main.cpp via UI::takeScriptReloadRequests, which merges this queue in.
+		m_pendingReloadRequests.push_back(path);
+	}
 	else
 		Log::error("Failed to write " + path);
 }

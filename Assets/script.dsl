@@ -44,10 +44,8 @@ REGISTER_ON_EVENT()
 
 SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, void* scriptData)
 {
-	ctx->log("Update dsl");
 	for (int i = 0; i < (*(ScriptData*)scriptData).num; i += 1)
 	{
-		ctx->log("Update dsl num");
 	}
 }
 
@@ -79,9 +77,7 @@ REGISTER_ON_PHYSICS_EVENT()
 //@end
 //@
 //@function Update(float deltaSeconds)
-//@	print(string message = "Update dsl")
 //@	for int i = 0, i < self.data.num, i += 1
-//@		print(string message = "Update dsl num")
 //@	end
 //@end
 //@

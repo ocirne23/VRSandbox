@@ -33,7 +33,7 @@ static bool isObjectContainer(const std::string& ext)
 
 static bool isScriptFile(const std::string& ext)
 {
-	return ext == ".scr";
+	return ext == ".scr" || ext == ".dsl"; // node-graph-generated / DSL-editor-generated -- both run through ScriptHost the same way
 }
 
 static bool isTextFile(const std::string& ext)
@@ -80,13 +80,13 @@ static void assetDragSource(const std::filesystem::path& p)
 		return; // dragging a folder isn't meaningful to any current drop target
 
 	const bool spawnable = isSpawnableFile(p);
-	const bool script = p.extension() == ".scr";
+	const bool script = isScriptFile(p.extension().string());
 	if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
 	{
 		const std::string path = p.string();
-		// Every file is draggable: spawnable/.scr keep their dedicated payload (viewport spawn / script
-		// assign), anything else falls back to TEXT_FILE so it can be dropped onto the Script Editor and
-		// viewed/edited as plain text.
+		// Every file is draggable: spawnable/script (.scr or .dsl) keep their dedicated payload (viewport
+		// spawn / script assign), anything else falls back to TEXT_FILE so it can be dropped onto the Script
+		// Editor and viewed/edited as plain text.
 		const char* payloadTag = spawnable ? "ASSET_FILE" : script ? "SCRIPT_FILE" : "TEXT_FILE";
 		ImGui::SetDragDropPayload(payloadTag, path.c_str(), path.size() + 1);
 		ImGui::Text(spawnable ? "Spawn %s" : script ? "Assign %s" : "View %s as text", p.filename().string().c_str());

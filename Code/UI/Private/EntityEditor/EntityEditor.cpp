@@ -127,8 +127,9 @@ static std::vector<std::string> splitComma(const std::string& s)
 	return out;
 }
 
-// All .scr files under Assets/ (the working directory), as forward-slash paths relative to it — the
-// same form ScriptComponent::scriptPath uses. Assets/Local holds generated script build output, not sources.
+// All .scr/.dsl files under Assets/ (the working directory), as forward-slash paths relative to it — the
+// same form ScriptComponent::scriptPath uses (ScriptHost loads either the same way). Assets/Local holds
+// generated script build output, not sources.
 static void gatherScriptFiles(std::vector<std::string>& out)
 {
 	out.clear();
@@ -142,7 +143,8 @@ static void gatherScriptFiles(std::vector<std::string>& out)
 				it.disable_recursion_pending();
 			continue;
 		}
-		if (it->path().extension() != ".scr")
+		const std::filesystem::path ext = it->path().extension();
+		if (ext != ".scr" && ext != ".dsl")
 			continue;
 		out.push_back(std::filesystem::relative(it->path(), root, ec).generic_string());
 	}

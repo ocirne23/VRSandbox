@@ -217,6 +217,16 @@ public:
 	// components, "1.0,2.0,3.0") also fires whatever gameplay action that key is bound to.
 	bool hasFocus() const { return m_hasFocus; }
 
+	// Script paths a save just wrote fresh generated C++ into (see saveDocument) -- UI::takeScriptReloadRequests
+	// merges these in with the node editor's own "Compile & Run" queue, so main.cpp's drain loop
+	// (Globals::scriptHost.getOrLoad(path, true)) picks either kind up the same way.
+	std::vector<std::string> takeReloadRequests()
+	{
+		std::vector<std::string> requests = std::move(m_pendingReloadRequests);
+		m_pendingReloadRequests.clear();
+		return requests;
+	}
+
 private:
 
 	void buildExampleDocument(); // one-time construction of the starting document (empty update()) + sidebar/builtins
@@ -734,7 +744,11 @@ private:
 	bool m_hasFocus = false;
 	bool m_built = false;
 
-	char m_pathBuf[256] = "script.dsl"; // toolbar path field -- relative to Assets/ (the working directory)
+	std::vector<std::string> m_pendingReloadRequests; // paths saveDocument just wrote, pending takeReloadRequests
+
+	char m_pathBuf[256] = "Scripts/script.dsl"; // toolbar path field -- relative to Assets/ (the working
+	                                             // directory); alongside .scr, so gatherScriptFiles/the cooked
+	                                             // build's aggregate glob (Assets/Scripts/*) both find it
 	float m_sidebarWidth = 240.0f; // drag-resizable via the splitter between the sidebar and the text area
 
 	// SCRIPT DATA sidebar section: the pending new-field controls (type combo + free-typed name), reset once

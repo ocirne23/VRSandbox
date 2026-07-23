@@ -68,11 +68,16 @@ public:
     void onOpened(EntityPtr root, const std::string& path) { m_entityEditor.onOpened(root, path); }
     void onEntityRespawned(EntityPtr oldEntity, EntityPtr newEntity) { m_entityEditor.onRespawned(oldEntity, newEntity); }
 
-    // Script paths the Script panel asked the host to (re)compile + hot-reload this frame.
+    // Script paths the Script panel (node graph) OR the DSL Script Editor asked the host to (re)compile +
+    // hot-reload this frame -- the node editor's own "Compile & Run" (m_scriptReloadRequests, UI.cpp) merged
+    // with every path the DSL editor just saved (ScriptEditor::takeReloadRequests -- a save there always writes
+    // fresh generated C++, so it's ready to (re)compile the moment it lands).
     std::vector<std::string> takeScriptReloadRequests()
     {
         std::vector<std::string> requests = std::move(m_scriptReloadRequests);
         m_scriptReloadRequests.clear();
+        std::vector<std::string> dslRequests = m_scriptEditor.takeReloadRequests();
+        requests.insert(requests.end(), std::make_move_iterator(dslRequests.begin()), std::make_move_iterator(dslRequests.end()));
         return requests;
     }
 

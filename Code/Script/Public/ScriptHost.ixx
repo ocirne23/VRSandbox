@@ -36,8 +36,11 @@ export struct ScriptModule
 
 export typedef void(*ScriptLoadedCallback)(const ScriptModule* script, const std::vector<std::string>& oldEventNames);
 
-// Compiles visual scripts (.scr) to self-contained DLLs via the installed MSVC toolchain and caches them
-// by path. Pure compile/load only: it knows nothing about the engine — no renderer, entity or input.
+// Compiles visual scripts to self-contained DLLs via the installed MSVC toolchain and caches them by path.
+// Extension-agnostic: a .scr (node-graph-generated) and a .dsl (DSL-editor-generated, see Code/Script/Private/
+// DSL/Transpiler.ixx) are both just a source file whose body-only C++ compiles under the same ScriptAPI.h ABI --
+// getOrLoad never inspects the extension, only the file's content. Pure compile/load only: it knows nothing
+// about the engine — no renderer, entity or input.
 export class ScriptHost final
 {
 public:
