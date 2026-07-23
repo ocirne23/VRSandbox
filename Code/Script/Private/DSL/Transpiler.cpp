@@ -245,29 +245,35 @@ namespace
 			emitLine("}");
 		}
 
-		// One function: header line + every body line up to (not including) `bodyEnd`. Blocks mirror
-		// Syntax::format's scopeLevel derivation -- an elseif/else continues its chain's open block.
-		void emitFunction(int headerIndex, int bodyEnd)
+		// A function's full C++ signature (return type, name, ctx/self/scriptData + declared params, or the exact
+		// real ABI shape for a recognized entry point) with no trailing ';' or '{' -- shared by the forward
+		// declaration pass (transpile) and emitFunction's own header line, so the two can never drift apart.
+		//
+		// A recognized ScriptAPI entry point (ScriptEditor's EXPORTS toggles, see EntryPointDef) transpiles
+		// to its EXACT real exported signature -- `cppSuffix` spells out everything after "ctx, self"
+		// verbatim, including parameters no DSLType can represent yet (scriptData always; OnPhysicsEvent's
+		// other/contactId), which the DSL body simply never references, and is marked SCRIPT_EXPORT: the host
+		// resolves it by exact name (GetProcAddress in the DLL build; the REGISTER_*() macro in the cooked
+		// build), so it must keep C linkage/dllexport. Every OTHER function is a plain internal helper --
+		// `static`, never SCRIPT_EXPORT -- exactly like the node editor's own generated helper functions
+		// (Scene.cpp's emitFunctions): nothing outside this file ever calls one by name, so it has no ABI
+		// surface to keep, and `static` avoids needlessly exporting it from the DLL (or, in the cooked build's
+		// per-script namespace, needlessly widening its linkage beyond that namespace).
+		//
+		// `ctx`/`self` are auto-injected as the first two parameters either way, invisible to the DSL author,
+		// so self.thing/thunk-function calls resolve without one (see the ScriptBindings emit templates, all
+		// written in terms of these two names) and so user-function calls (callText) can thread them straight
+		// through too. Non-entry functions ALSO get `scriptData` as their 3rd (self.data needs it in scope
+		// wherever it's dotted into, not just from an entry point) -- an entry point already has one,
+		// positioned wherever the real ABI puts it (see cppSuffix).
+		std::string functionSignature(int headerIndex)
 		{
 			const DSLSymbol::FunctionDeclaration& func =
 				std::get<DSLSymbol::FunctionDeclaration>(document.file.lines[headerIndex]->head()->data);
-
-			// A recognized ScriptAPI entry point (ScriptEditor's EXPORTS toggles, see EntryPointDef) transpiles
-			// to its EXACT real exported signature -- `cppSuffix` spells out everything after "ctx, self"
-			// verbatim, including parameters no DSLType can represent yet (scriptData always; OnPhysicsEvent's
-			// other/contactId), which the DSL body simply never references. Every other function keeps the
-			// generic ctx/self + declared-params shape.
 			const EntryPointDef* entry = bindings.entryPointFor(func.name);
 
-			// Every generated function is a free, dllexported function (like the node system's generated .scr
-			// code) -- no wrapper class. `ctx`/`self` are auto-injected as the first two parameters, invisible
-			// to the DSL author, so self.thing/thunk-function calls resolve without one (see the ScriptBindings
-			// emit templates, all written in terms of these two names) and so user-function calls (callText)
-			// can thread them straight through too. Non-entry functions ALSO get `scriptData` as their 3rd
-			// (self.data needs it in scope wherever it's dotted into, not just from an entry point) -- an entry
-			// point already has one, positioned wherever the real ABI puts it (see cppSuffix).
-			std::string signature = std::string("SCRIPT_EXPORT ") + cppTypeName(func.returnType) + " " + func.name
-				+ "(const ScriptContext* ctx, Entity* self";
+			std::string signature = std::string(entry != nullptr ? "SCRIPT_EXPORT " : "static ")
+				+ cppTypeName(func.returnType) + " " + func.name + "(const ScriptContext* ctx, Entity* self";
 			if (entry != nullptr)
 			{
 				signature += entry->cppSuffix;
@@ -285,7 +291,18 @@ namespace
 				}
 			}
 			signature += ")";
-			emitLine(signature);
+			return signature;
+		}
+
+		// One function: header line + every body line up to (not including) `bodyEnd`. Blocks mirror
+		// Syntax::format's scopeLevel derivation -- an elseif/else continues its chain's open block.
+		void emitFunction(int headerIndex, int bodyEnd)
+		{
+			const DSLSymbol::FunctionDeclaration& func =
+				std::get<DSLSymbol::FunctionDeclaration>(document.file.lines[headerIndex]->head()->data);
+			const EntryPointDef* entry = bindings.entryPointFor(func.name);
+
+			emitLine(functionSignature(headerIndex));
 			openBlock();
 
 			std::vector<int> openScopes; // scopeLevel of each currently-open nested block's header
@@ -432,9 +449,26 @@ std::string Transpiler::transpile(const DSL& document, const ScriptBindings& bin
 		emitter.emitLine("REGISTER_SCRIPT_DATA_SIZE()");
 	}
 
+	// Forward-declare every DSL function up front, in document order, so call order in the .dsl never matters --
+	// a function can call one authored later in the file (the editor itself has no such restriction: any
+	// in-scope function name is a valid call candidate regardless of where it's declared). Repeating the
+	// leading qualifier (SCRIPT_EXPORT or static, see functionSignature) on both the declaration and the
+	// definition below is standard practice either way; functionSignature is the single source of truth for both.
+	bool anyFunctions = false;
+	for (int i = 0; i < static_cast<int>(document.file.lines.size()); ++i)
+	{
+		const DSLSymbol* head = document.file.lines[i]->head();
+		if (head == nullptr || head->type != ST::FunctionDeclaration)
+			continue;
+		if (!anyFunctions)
+		{
+			emitter.emitLine("");
+			anyFunctions = true;
+		}
+		emitter.emitLine(emitter.functionSignature(i) + ";");
+	}
+
 	// One free, dllexported function per DSL function, at file scope -- no wrapper class (see emitFunction).
-	// A real hookup into ScriptHost (the exported entry-point names Update/OnSpawn/... and their REGISTER_*()
-	// macros) is separate, not-yet-done follow-up work; every DSL function transpiles uniformly for now.
 	for (int i = 0; i < static_cast<int>(document.file.lines.size()); ++i)
 	{
 		const DSLSymbol* head = document.file.lines[i]->head();

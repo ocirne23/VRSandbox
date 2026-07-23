@@ -8,6 +8,12 @@ struct ScriptData
 SCRIPT_EXPORT unsigned int ScriptDataSize(void) { return sizeof(ScriptData); }
 REGISTER_SCRIPT_DATA_SIZE()
 
+SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData);
+SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scriptData);
+SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData);
+SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, void* scriptData);
+static bool isPrime(const ScriptContext* ctx, Entity* self, void* scriptData, int n);
+
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
 {
 	ctx->log("OnSpawn dsl");
@@ -46,19 +52,20 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 {
 	for (int i = 0; i < (*(ScriptData*)scriptData).num; i += 1)
 	{
+		ctx->physicsSetVelocity(ctx->entityGetPhysicsComponent(self), glm::vec3(0.0f, 1.0f, 0.0f));
 	}
+	isPrime(ctx, self, scriptData, 4);
 }
 
 REGISTER_UPDATE()
 
-SCRIPT_EXPORT void OnPhysicsEvent(const ScriptContext* ctx, Entity* self, Entity* other, int begin, int sensor, long long contactId, void* scriptData)
+static bool isPrime(const ScriptContext* ctx, Entity* self, void* scriptData, int n)
 {
-
+	return false;
 }
 
-REGISTER_ON_PHYSICS_EVENT()
-
 //@@dsl 1
+//@@require Physics
 //@@data int num
 //@@event OnHit
 //@
@@ -78,10 +85,12 @@ REGISTER_ON_PHYSICS_EVENT()
 //@
 //@function Update(float deltaSeconds)
 //@	for int i = 0, i < self.data.num, i += 1
+//@		self.physics.setVelocity(vec3 velocity = vec3(0, 1, 0))
 //@	end
+//@	isPrime(int n = 4)
 //@end
 //@
-//@function OnPhysicsEvent(int begin, int sensor)
-//@	
+//@function isPrime(int n) -> bool
+//@	return false
 //@end
 //@@end
