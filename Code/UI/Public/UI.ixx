@@ -20,6 +20,7 @@ import :OutputLog;
 import :TweakPanel;
 import :TextEditor;
 import :ScriptEditor;
+import :ScriptLoader;
 
 import RendererVK;
 

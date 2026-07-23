@@ -210,9 +210,13 @@ public:
 
 private:
 
-	void buildExampleDocument(); // one-time construction of the hardcoded example DSL document + builtins
+	void buildExampleDocument(); // one-time construction of the starting document (empty update()) + sidebar/builtins
 	void renderTextArea();
 	void renderAutocompletePopup();
+	void saveDocument(); // toolbar Save / Ctrl+S: writes m_document to m_pathBuf (ScriptLoader::save). Safe
+	                     // mid-compose -- a compose never touches the document, so exactly the committed state saves
+	void loadDocument(); // toolbar Load: replaces the document from m_pathBuf (ScriptLoader::load); on success every
+	                     // selection/compose state resets (all old symbol pointers are dead), on failure nothing changes
 	DSLSymbol* pushSymbol(DSLCodeLine& line, DSLSymbol::SymbolType type, DSLSymbol::Data data); // constructs a fresh symbol owned by `line`, returns the raw ptr -- shared by every apply/commit function below
 
 	void moveHorizontal(int delta);  // Left/Right, Tab/Shift-Tab (not composing): next/prev span
@@ -613,6 +617,8 @@ private:
 
 	bool m_hasFocus = false;
 	bool m_built = false;
+
+	char m_pathBuf[256] = "script.dsl"; // toolbar path field -- relative to Assets/ (the working directory)
 
 	float m_fontScale = 1.0f;
 	float m_textOriginX = 0.0f, m_textOriginY = 0.0f;

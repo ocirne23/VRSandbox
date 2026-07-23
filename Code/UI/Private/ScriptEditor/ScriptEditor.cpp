@@ -1,11 +1,13 @@
 module UI;
 
 import Core;
+import Core.Log;
 import Core.imgui;
 import Core.SDL;
 import :DSL;
 import :ScriptLang;
 import :ScriptEditor;
+import :ScriptLoader;
 
 using ST = DSLSymbol::SymbolType;
 
@@ -3689,6 +3691,14 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 	const bool ctrl = (evt.key.mod & SDL_KMOD_CTRL) != 0;
 	const bool composing = m_composeMode != ComposeMode::None;
 
+	// Ctrl+S saves from anywhere, composing included -- a compose never touches the document, so what lands on
+	// disk is exactly the committed state.
+	if (ctrl && evt.key.scancode == SDL_SCANCODE_S)
+	{
+		saveDocument();
+		return;
+	}
+
 	switch (static_cast<int>(evt.key.scancode))
 	{
 	case SDL_SCANCODE_LEFT:
@@ -5266,7 +5276,56 @@ void ScriptEditor::render()
 	if (!m_hasFocus && m_composeMode != ComposeMode::None)
 		cancelCompose(); // panel lost focus mid-composition -- don't leave an unresolved edit hanging
 
+	// Save/Load toolbar. While the path field is being typed into, ImGui's WantTextInput keeps handleKeyEvent
+	// out, so the document cursor and the field never fight over keys.
+	ImGui::SetNextItemWidth(240.0f);
+	ImGui::InputText("##dsl_path", m_pathBuf, sizeof(m_pathBuf));
+	ImGui::SameLine();
+	if (ImGui::Button("Save"))
+		saveDocument();
+	ImGui::SameLine();
+	if (ImGui::Button("Load"))
+		loadDocument();
+
 	ImGui::Separator();
 
 	renderTextArea();
+}
+
+void ScriptEditor::saveDocument()
+{
+	const std::string path = m_pathBuf;
+	if (path.empty())
+		return;
+	if (ScriptLoader::save(m_document, path))
+	{
+		m_document.filePath = path;
+		Log::info("Script saved to " + path);
+	}
+	else
+		Log::error("Failed to write " + path);
+}
+
+void ScriptEditor::loadDocument()
+{
+	const std::string path = m_pathBuf;
+	if (path.empty())
+		return;
+	cancelCompose(); // resolve any in-flight edit against the OLD document before replacing it
+	const ScriptLoader::LoadResult result = ScriptLoader::load(m_document, path, m_builtins);
+	if (!result.success)
+	{
+		Log::error("Failed to load script: " + result.error);
+		return;
+	}
+	m_document.filePath = path;
+	// Every symbol pointer from the replaced document is dead -- reset all selection/landing state.
+	m_cursorLine = 0;
+	m_cursorSpan = 0;
+	m_pendingSelectTarget = nullptr;
+	m_pendingSelectOperatorIndex = -1;
+	m_pendingSelectGroupClose = false;
+	m_pendingSelectLineEnd = -1;
+	m_pendingComposeReturnValue = false;
+	Log::info("Script loaded from " + path);
 }
