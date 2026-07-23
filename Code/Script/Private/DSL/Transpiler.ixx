@@ -26,9 +26,12 @@ import :ScriptBindings;
 // OnPhysicsEvent -- see ScriptBindings' EntryPointDef, created/locked via ScriptEditor's EXPORTS sidebar
 // toggles) transpiles to its EXACT real exported signature and gets its REGISTER_*() macro, so it IS a real,
 // loadable ScriptHost entry point; every other DSL function keeps the generic ctx/self + declared-params shape.
-// OnEvent additionally emits a zero-events ScriptEventCount/ScriptEventName stub, since the DSL has no way to
-// author NAMED On Event entries yet. NOT YET DONE: the required-components assignment mask (a script should
-// only bind to an entity that has every component it required) is separate, still not-yet-done follow-up work.
+// OnEvent additionally emits ScriptEventCount/ScriptEventName driven by this document's OWN named entries
+// (DSL::eventNames, authored via the EVENTS sidebar section) -- self.events.<name> is that SAME list's index
+// as a compile-time constant (memberText), so the host's name->index resolution always agrees with what the
+// body compares OnEvent's own eventIdx parameter against. NOT YET DONE: the required-components assignment
+// mask (a script should only bind to an entity that has every component it required) is separate, still
+// not-yet-done follow-up work.
 export class Transpiler
 {
 public:

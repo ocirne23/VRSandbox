@@ -24,11 +24,21 @@ REGISTER_ON_DESTROY()
 
 SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData)
 {
-
+	if (eventIdx == 0)
+	{
+		ctx->log("OnHit dsl");
+	}
 }
 
-SCRIPT_EXPORT int ScriptEventCount(void) { return 0; }
-SCRIPT_EXPORT const char* ScriptEventName(int) { return ""; }
+SCRIPT_EXPORT int ScriptEventCount(void) { return 1; }
+SCRIPT_EXPORT const char* ScriptEventName(int eventIdx)
+{
+	switch (eventIdx)
+	{
+		case 0: return "OnHit";
+		default: return "";
+	}
+}
 
 REGISTER_ON_EVENT()
 
@@ -52,22 +62,29 @@ REGISTER_ON_PHYSICS_EVENT()
 
 //@@dsl 1
 //@@data int num
+//@@event OnHit
 //@
 //@function OnSpawn()
 //@	print(string message = "OnSpawn dsl")
 //@end
+//@
 //@function OnDestroy()
 //@	print(string message = "OnDestroy dsl")
 //@end
+//@
 //@function OnEvent(int eventIdx)
-//@	
+//@	if eventIdx == self.events.OnHit
+//@		print(string message = "OnHit dsl")
+//@	end
 //@end
+//@
 //@function Update(float deltaSeconds)
 //@	print(string message = "Update dsl")
 //@	for int i = 0, i < self.data.num, i += 1
 //@		print(string message = "Update dsl num")
 //@	end
 //@end
+//@
 //@function OnPhysicsEvent(int begin, int sensor)
 //@	
 //@end

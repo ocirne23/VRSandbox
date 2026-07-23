@@ -451,6 +451,8 @@ private:
 	// Whether any statement dots into self.data.<name> -- guards removing a SCRIPT DATA field still in use, the
 	// per-document twin of isComponentMemberReferenced.
 	bool isDataFieldReferenced(const std::string& name) const;
+	// Same guard for self.events.<name> -- a named On Event entry still in use.
+	bool isEventReferenced(const std::string& name) const;
 	// The receiver expression a dotted path names: the root's VariableReference, wrapped in one MemberAccess
 	// per path segment ("pos.x" -> self->pos->x), each hop's type stamped from the registry. Empty path = just
 	// the reference. Shared by member values, member-assign targets, and dot-call receivers.
@@ -739,6 +741,8 @@ private:
 	// added. Immediate-mode ImGui state, unrelated to the main text area's ComposeMode staging.
 	DSLType m_pendingDataFieldType = DSLType::Int;
 	char m_pendingDataFieldName[64] = "";
+	// EVENTS sidebar section: the pending new-event-name field, same idiom (no type -- an event is just a name).
+	char m_pendingEventName[64] = "";
 
 	float m_fontScale = 1.0f;
 	float m_textOriginX = 0.0f, m_textOriginY = 0.0f;

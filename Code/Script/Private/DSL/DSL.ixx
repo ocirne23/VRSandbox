@@ -107,6 +107,12 @@ export enum class DSLType : uint16
 	// DSL::dataFields directly wherever a receiver of this type is resolved (ScriptLang.cpp's receiverCandidates,
 	// ScriptEditor's chain-building, ScriptLoader's dot-chain parser, Transpiler's memberText).
 	ScriptData,
+	// The document's OWN named On Event entries (self.events.<name>, see DSL::eventNames) -- same per-document
+	// binding pattern as ScriptData: self.events' own member ("events") is a real static BindingMember, while
+	// its members (one read-only Int per name, the entry's index) are looked up against DSL::eventNames
+	// directly. The index IS the name's position in that list -- also what Transpiler emits ScriptEventName's
+	// switch from, so the two always agree.
+	ScriptEvents,
 	FirstStruct = 256,  // + struct registry index (see dslStructType/dslStructIndex)
 };
 
@@ -115,14 +121,16 @@ export constexpr int dslStructIndex(DSLType type) { return static_cast<int>(type
 export constexpr DSLType dslStructType(int index) { return static_cast<DSLType>(static_cast<int>(DSLType::FirstStruct) + index); }
 
 // Engine-object kinds are BINDINGS (dotted into for their members/functions), never values: excluded from
-// variable/reassign candidates, literal slots, and declarable types alike. ScriptData (self.data) is included
-// here too -- same binding-only treatment, even though it has no ScriptBindings::objectFor() row of its own
-// (per-document instead, see DSLType::ScriptData); every objectFor(ScriptData) call already handles "no match"
-// gracefully (skip/continue), which is exactly the right behavior for a type resolved elsewhere.
+// variable/reassign candidates, literal slots, and declarable types alike. ScriptData/ScriptEvents (self.data/
+// self.events) are included here too -- same binding-only treatment, even though neither has a
+// ScriptBindings::objectFor() row of its own (per-document instead); every objectFor() call on one of them
+// already handles "no match" gracefully (skip/continue), which is exactly the right behavior for a type
+// resolved elsewhere.
 export inline bool dslIsEngineObjectType(DSLType type)
 {
 	return type == DSLType::World || type == DSLType::Entity || type == DSLType::PhysicsComponent
-		|| type == DSLType::AudioComponent || type == DSLType::ForceComponent || type == DSLType::ScriptData;
+		|| type == DSLType::AudioComponent || type == DSLType::ForceComponent || type == DSLType::ScriptData
+		|| type == DSLType::ScriptEvents;
 }
 
 // A type with further members/functions reachable by dotting into it -- an engine-defined STRUCT value
@@ -493,6 +501,11 @@ public:
 	// self.data casts the host's zeroed scriptData block to. Insertion order (append on add, like
 	// requiredComponents); names unique within this list (enforced at add time).
 	std::vector<DSLDataField> dataFields;
+	// This script's named On Event entries, reachable in the body as self.events.<name> (a read-only Int, the
+	// entry's INDEX -- compare against OnEvent's own eventIdx parameter). Insertion order = index order, also
+	// what Transpiler's ScriptEventName switch emits from, so the host's name->index resolution agrees with
+	// self.events.<name>'s own compile-time value. Names unique within this list (enforced at add time).
+	std::vector<std::string> eventNames;
 };
 
 export inline bool dslIsComponentRequired(const DSL& document, DSLComponentKind kind)
@@ -510,4 +523,15 @@ export inline const DSLDataField* dslFindDataField(const DSL& document, const st
 		if (field.name == name)
 			return &field;
 	return nullptr;
+}
+
+// `name`'s index in `document.eventNames` (-1 if none) -- the ONE lookup every self.events.<name> resolution
+// site shares (ScriptLang.cpp's receiverCandidates, ScriptEditor's chain-building, ScriptLoader's dot-chain
+// parser, Transpiler's memberText/ScriptEventName), so they can't drift apart on what index a name means.
+export inline int dslFindEventIndex(const DSL& document, const std::string& name)
+{
+	for (size_t i = 0; i < document.eventNames.size(); ++i)
+		if (document.eventNames[i] == name)
+			return static_cast<int>(i);
+	return -1;
 }

@@ -219,6 +219,7 @@ namespace
 		const ScriptBindings& bindings;
 		const std::vector<DSLComponentKind>& requiredComponents; // the FILE's "//@@require" set, parsed before any line
 		const std::vector<DSLDataField>& dataFields;             // the FILE's "//@@data" fields, parsed before any line
+		const std::vector<std::string>& eventNames;              // the FILE's "//@@event" names, parsed before any line
 
 		std::vector<std::unique_ptr<DSLCodeLine>> outLines;
 		std::vector<DSLSymbol*> userFunctions;  // pass-1 FunctionDeclaration heads, document order
@@ -269,6 +270,14 @@ namespace
 				if (field.name == name)
 					return &field;
 			return nullptr;
+		}
+
+		int findEventIndex(const std::string& name) const
+		{
+			for (size_t i = 0; i < eventNames.size(); ++i)
+				if (eventNames[i] == name)
+					return static_cast<int>(i);
+			return -1;
 		}
 
 		DSLSymbol* findFunction(const std::string& name, bool requiresReceiver) const
@@ -495,7 +504,8 @@ namespace
 						return parseCall(t.subspan(i + 3, t.size() - (i + 3) - 1), line, func, receiver);
 					}
 					// A member hop -- its value type stamps from the registry (see MemberAccess in DSL.ixx), or
-					// from this document's OWN fields when dotting through self.data (DSLType::ScriptData).
+					// from this document's OWN fields/events when dotting through self.data/self.events
+					// (DSLType::ScriptData/ScriptEvents).
 					DSLType memberType;
 					if (receiverType == DSLType::ScriptData)
 					{
@@ -503,6 +513,12 @@ namespace
 						if (field == nullptr)
 							return failValue("'" + ownerName + "' has no member '" + memberName + "'");
 						memberType = field->type;
+					}
+					else if (receiverType == DSLType::ScriptEvents)
+					{
+						if (findEventIndex(memberName) < 0)
+							return failValue("'" + ownerName + "' has no member '" + memberName + "'");
+						memberType = DSLType::Int;
 					}
 					else
 					{
@@ -683,6 +699,13 @@ namespace
 					if (field == nullptr)
 						return failValue("no member '" + memberName + "' to assign to");
 					memberType = field->type;
+				}
+				else if (targetType == DSLType::ScriptEvents)
+				{
+					// self.events's own entries are always read-only (a compile-time index, see memberText).
+					if (findEventIndex(memberName) < 0)
+						return failValue("no member '" + memberName + "' to assign to");
+					return failValue("member '" + memberName + "' is read-only");
 				}
 				else
 				{
@@ -903,6 +926,8 @@ bool ScriptLoader::save(DSL& document, const std::string& path, const std::strin
 	}
 	for (const DSLDataField& field : document.dataFields)
 		file << "//@@data " << dslTypeName(field.type) << ' ' << field.name << '\n';
+	for (const std::string& eventName : document.eventNames)
+		file << "//@@event " << eventName << '\n';
 	for (const SyntaxLine& line : Syntax::format(document.file, /*compact*/ false))
 	{
 		file << "//@";
@@ -938,6 +963,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	std::vector<BlockLine> blockLines;
 	std::vector<DSLComponentKind> requiredComponents;
 	std::vector<DSLDataField> dataFields;
+	std::vector<std::string> eventNames;
 	{
 		std::string raw;
 		int lineNo = 0;
@@ -1010,6 +1036,26 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 				dataFields.push_back(DSLDataField{ fieldName, type });
 				continue;
 			}
+			if (raw.rfind("//@@event", 0) == 0)
+			{
+				// "//@@event <name>" -- one named On Event entry (self.events.<name>), index = position in this list.
+				std::string rest = raw.substr(9);
+				rest.erase(0, rest.find_first_not_of(" \t"));
+				std::vector<Token> tokens;
+				std::string tokenError;
+				if (!tokenizeLine(rest, tokens, tokenError))
+					return failAt(lineNo, tokenError);
+				if (tokens.size() != 1 || tokens[0].kind != Token::Kind::Identifier)
+					return failAt(lineNo, "malformed //@@event line (expected \"//@@event <name>\")");
+				const std::string& eventName = tokens[0].text;
+				if (AutoCompleteRules::isReservedWord(eventName))
+					return failAt(lineNo, "'" + eventName + "' is reserved");
+				for (const std::string& existing : eventNames)
+					if (existing == eventName)
+						return failAt(lineNo, "'" + eventName + "' is declared twice in //@@event");
+				eventNames.push_back(eventName);
+				continue;
+			}
 			if (raw == kBlockEnd || raw.rfind("//@", 0) != 0)
 			{
 				done = true;
@@ -1048,7 +1094,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 		line.kind = line.tokens.empty() ? BlockLine::Kind::Blank : BlockLine::Kind::Code;
 	}
 
-	Parser parser{ document.sidebar, builtins, bindings, requiredComponents, dataFields };
+	Parser parser{ document.sidebar, builtins, bindings, requiredComponents, dataFields, eventNames };
 
 	// Pass 1: function headers, so pass 2's body statements resolve forward calls.
 	std::vector<std::unique_ptr<DSLCodeLine>> headers(blockLines.size());
@@ -1162,6 +1208,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	document.file.lines = std::move(rebuilt.lines);
 	document.requiredComponents = std::move(requiredComponents);
 	document.dataFields = std::move(dataFields);
+	document.eventNames = std::move(eventNames);
 	result.success = true;
 	return result;
 }

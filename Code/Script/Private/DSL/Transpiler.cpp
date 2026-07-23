@@ -160,8 +160,16 @@ namespace
 		std::string memberText(const DSLSymbol* symbol)
 		{
 			const DSLSymbol::MemberAccess& m = std::get<DSLSymbol::MemberAccess>(symbol->data);
-			const std::string receiverText = expressionText(m.receiver); // recursion makes chains compose ("self.pos" -> ".x")
 			const DSLType receiverType = dslValueType(m.receiver);
+			// self.events.<name> IS its index, a compile-time constant -- "self.events" itself is never even
+			// rendered (no receiverText needed): the name->index mapping is this document's OWN (DSL::eventNames),
+			// the same one ScriptEventName's switch emits from, so the two can never disagree.
+			if (receiverType == DSLType::ScriptEvents)
+			{
+				const int index = dslFindEventIndex(document, m.memberName);
+				return std::to_string(index >= 0 ? index : 0); // defensive -- authored/loaded names always exist
+			}
+			const std::string receiverText = expressionText(m.receiver); // recursion makes chains compose ("self.pos" -> ".x")
 			// self.data's own fields are this DOCUMENT's, not the static registry (DSLType::ScriptData) -- "data"
 			// itself dereferences to a VALUE ("(*(ScriptData*)scriptData)", see ScriptBindings' self.data emit),
 			// so every field hop composes with "." exactly like any other member chain.
@@ -311,13 +319,22 @@ namespace
 			if (entry != nullptr)
 			{
 				// OnEvent's REGISTER_ON_EVENT() also registers ScriptEventCount/ScriptEventName (see
-				// ScriptAPI.h) -- the DSL has no way to author NAMED On Event entries yet, so these declare
-				// zero, which is what keeps the static/cooked build linkable until that lands.
+				// ScriptAPI.h) -- driven by this document's OWN named entries (DSL::eventNames, authored via the
+				// EVENTS sidebar section), the SAME list self.events.<name> indexes into (memberText), so the
+				// host's name->index resolution always agrees with what the body compares eventIdx against.
 				if (func.name == "OnEvent")
 				{
 					emitLine("");
-					emitLine("SCRIPT_EXPORT int ScriptEventCount(void) { return 0; }");
-					emitLine("SCRIPT_EXPORT const char* ScriptEventName(int) { return \"\"; }");
+					emitLine("SCRIPT_EXPORT int ScriptEventCount(void) { return " + std::to_string(document.eventNames.size()) + "; }");
+					emitLine("SCRIPT_EXPORT const char* ScriptEventName(int eventIdx)");
+					openBlock();
+					emitLine("switch (eventIdx)");
+					openBlock();
+					for (size_t i = 0; i < document.eventNames.size(); ++i)
+						emitLine("case " + std::to_string(i) + ": return \"" + document.eventNames[i] + "\";");
+					emitLine("default: return \"\";");
+					closeBlock();
+					closeBlock();
 				}
 				emitLine("");
 				emitLine(entry->registerMacro);

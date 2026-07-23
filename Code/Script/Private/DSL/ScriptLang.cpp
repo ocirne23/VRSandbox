@@ -23,6 +23,7 @@ const char* dslTypeName(DSLType type)
 	case DSLType::AudioComponent:   return "AudioComponent";
 	case DSLType::ForceComponent:   return "ForceComponent";
 	case DSLType::ScriptData:       return "ScriptData";
+	case DSLType::ScriptEvents:     return "ScriptEvents";
 	default:                        return "?";
 	}
 }
@@ -833,6 +834,28 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 			c.refSymbol = receiverDecl;
 			c.declareType = field.type;
 			c.memberWritable = true;
+			addIfMatches(out, c, typedPrefix);
+		}
+		sortExactMatchFirst(out, typedPrefix);
+		return out;
+	}
+
+	// self.events: one read-only Int per document.eventNames entry (its index) -- never offered in statement
+	// context (not writable, and Int isn't chainable, so there's no valid bare-statement form at all).
+	if (receiverType == DSLType::ScriptEvents)
+	{
+		const bool statementContext = expectedType == DSLType::Void && !anyValue;
+		for (const std::string& name : document.eventNames)
+		{
+			const bool accepted = !statementContext && (anyValue || expectedType == DSLType::Int);
+			if (!accepted)
+				continue;
+			Candidate c;
+			c.label = name;
+			c.kind = Candidate::Kind::Member;
+			c.refSymbol = receiverDecl;
+			c.declareType = DSLType::Int;
+			c.memberWritable = false;
 			addIfMatches(out, c, typedPrefix);
 		}
 		sortExactMatchFirst(out, typedPrefix);

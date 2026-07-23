@@ -95,6 +95,11 @@ namespace
 					// value member, matching pos's own "$r->pos" -> ".x" chaining convention. Its own fields
 					// come from DSL::dataFields, not this table -- see dslFindDataField.
 					{ "data",    T::ScriptData,        "(*(ScriptData*)scriptData)", /*writable*/ false },
+					// The emit template here is never actually reached: Transpiler's memberText special-cases a
+					// ScriptEvents receiver to emit the literal index directly (see dslFindEventIndex), so
+					// "self.events" itself is never recursed into for its own text. Its own members come from
+					// DSL::eventNames, not this table.
+					{ "events",  T::ScriptEvents,      "$r",                          /*writable*/ false },
 				} },
 			{ "physics", T::PhysicsComponent, /*sidebarTopLevel*/ false,
 				{

@@ -61,6 +61,19 @@ namespace
 		return std::isdigit(static_cast<unsigned char>(c)) && !isFirstChar;
 	}
 
+	// Whole-string form of isIdentifierChar -- what the SCRIPT DATA/EVENTS sidebar sections validate a freshly
+	// typed name against before adding it (those are plain ImGui::InputText fields, unfiltered per-keystroke
+	// unlike the main text area's DeclareName compose): non-empty, and every character legal at its position.
+	bool isValidIdentifierName(const std::string& name)
+	{
+		if (name.empty())
+			return false;
+		for (size_t i = 0; i < name.size(); ++i)
+			if (!isIdentifierChar(name[i], i == 0))
+				return false;
+		return true;
+	}
+
 	// Declaring a vec2/3/4 (DeclareValue, free-typed components -- see applyDeclareVariable) accepts digits,
 	// '.', '-' (negative components, e.g. `vec3(0, -1, 0)`), and ',' as the component separator -- notably NOT
 	// letters, since a component is always a number here, never a variable reference.
@@ -2237,6 +2250,8 @@ DSLType ScriptEditor::resolveMemberType(DSLType receiverType, const std::string&
 		const DSLDataField* field = dslFindDataField(m_document, name);
 		return field != nullptr ? field->type : DSLType::Void;
 	}
+	if (receiverType == DSLType::ScriptEvents)
+		return dslFindEventIndex(m_document, name) >= 0 ? DSLType::Int : DSLType::Void;
 	const BindingMember* member = m_bindings.findMember(receiverType, name);
 	return member != nullptr ? member->type : DSLType::Void;
 }
@@ -5934,6 +5949,21 @@ bool ScriptEditor::isDataFieldReferenced(const std::string& name) const
 	return false;
 }
 
+bool ScriptEditor::isEventReferenced(const std::string& name) const
+{
+	// The per-document twin of isDataFieldReferenced -- an event's own MemberAccess ("self.events.<name>") is
+	// distinguished by its RECEIVER resolving to DSLType::ScriptEvents.
+	for (const std::unique_ptr<DSLCodeLine>& line : m_document.file.lines)
+		for (const std::unique_ptr<DSLSymbol>& s : line->symbols)
+			if (s->type == ST::MemberAccess)
+			{
+				const DSLSymbol::MemberAccess& m = std::get<DSLSymbol::MemberAccess>(s->data);
+				if (m.memberName == name && dslValueType(m.receiver) == DSLType::ScriptEvents)
+					return true;
+			}
+	return false;
+}
+
 DSLSymbol* ScriptEditor::findEntryFunctionHead(const char* name) const
 {
 	for (const std::unique_ptr<DSLCodeLine>& line : m_document.file.lines)
@@ -6139,8 +6169,8 @@ void ScriptEditor::renderSidebarPanel()
 		if (ImGui::SmallButton("Add"))
 		{
 			const std::string name = m_pendingDataFieldName;
-			if (name.empty())
-				Log::warning("Enter a name before adding a script data field");
+			if (!isValidIdentifierName(name))
+				Log::warning("'" + name + "' isn't a valid field name");
 			else if (AutoCompleteRules::isReservedWord(name))
 				Log::warning("'" + name + "' is reserved");
 			else if (dslFindDataField(m_document, name) != nullptr)
@@ -6150,6 +6180,49 @@ void ScriptEditor::renderSidebarPanel()
 				m_document.dataFields.push_back(DSLDataField{ name, m_pendingDataFieldType });
 				m_pendingDataFieldName[0] = '\0';
 			}
+		}
+	}
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	// EVENTS: this document's own named On Event entries (self.events.<name>, a read-only Int -- the entry's
+	// index, compare against OnEvent's eventIdx), serialized as .dsl "//@@event <name>" lines. Just a name, no
+	// type -- unlike SCRIPT DATA fields, there's nothing else to pick.
+	ImGui::TextDisabled("EVENTS");
+	for (size_t i = 0; i < m_document.eventNames.size(); ++i)
+	{
+		const std::string& name = m_document.eventNames[i];
+		ImGui::PushID(static_cast<int>(i));
+		firstSegment = true;
+		seg(kColType, "int");
+		seg(kColPunct, " ");
+		seg(kColVariable, name.c_str());
+		ImGui::SameLine();
+		if (ImGui::SmallButton("x"))
+		{
+			if (!isEventReferenced(name))
+				m_document.eventNames.erase(m_document.eventNames.begin() + static_cast<std::ptrdiff_t>(i));
+			else
+				Log::warning("Can't remove '" + name + "' -- the script still references it");
+		}
+		ImGui::PopID();
+	}
+	ImGui::SetNextItemWidth(170.0f);
+	ImGui::InputText("##eventName", m_pendingEventName, sizeof(m_pendingEventName));
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Add##addEvent"))
+	{
+		const std::string name = m_pendingEventName;
+		if (!isValidIdentifierName(name))
+			Log::warning("'" + name + "' isn't a valid event name");
+		else if (AutoCompleteRules::isReservedWord(name))
+			Log::warning("'" + name + "' is reserved");
+		else if (dslFindEventIndex(m_document, name) >= 0)
+			Log::warning("'" + name + "' is already an event");
+		else
+		{
+			m_document.eventNames.push_back(name);
+			m_pendingEventName[0] = '\0';
 		}
 	}
 
