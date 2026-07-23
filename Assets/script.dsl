@@ -1,4 +1,5 @@
 //@@dsl 1
+//@@require Physics
 //@function update(float deltaSec)
 //@	
 //@end

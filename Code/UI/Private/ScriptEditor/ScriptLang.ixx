@@ -2,6 +2,7 @@ export module UI:ScriptLang;
 
 import Core;
 import :DSL;
+import :ScriptBindings;
 
 // Human-readable name for a DSLType, as used in rendered code ("float", "vec3", "PhysicsComponent") and in the
 // editor's compose UI (e.g. building up "float " before a variable name is typed). One canonical spelling
@@ -119,12 +120,18 @@ export struct Candidate
 		KeywordElseIf, KeywordElse, // offered only on a statement slot INSIDE an if/elseif branch -- confirming
 		                            // grows the chain with a new branch after the enclosing one (the elseif
 		                            // stages its condition first, like any if; else needs the chain else-less)
+		BindingObject, // a sidebar engine-object binding ("physics", "self") -- consumable only by dotting into
+		               // it: '.' (or a confirm) opens its member/function list (see receiverCandidates)
+		Member,        // one MEMBER of a binding object ("pos"): refSymbol = the RECEIVER's declaration,
+		               // declareType = the member's value type -- resolves to a MemberAccess
 	};
 	std::string label;
 	Kind kind = Kind::Variable;
 	DSLSymbol* refSymbol = nullptr;
 	DSLType declareType = DSLType::Void;
 	DSLOperator op = DSLOperator::Equal;
+	DSLSymbol* receiver = nullptr; // Function candidates from receiverCandidates: the binding object's own
+	                               // sidebar declaration the call dots into (null = a free call)
 };
 
 // "What can be typed here" -- kept independent from Syntax/Transpiler (see the DSL editor's architecture: three
@@ -158,6 +165,14 @@ public:
 	static std::vector<Candidate> candidatesForAnyValue(const DSLCodeLine& atLine, const DSLScriptFile& file,
 		const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
 		const std::string& typedPrefix);
+
+	// Functions/members reachable by dotting into `receiverDecl` (a sidebar binding object's declaration).
+	// expectedType Void + !anyValue = statement context (every function -- a call statement may ignore its
+	// result -- and no members, a bare member access isn't a statement); anyValue = condition-lead style
+	// (non-Void functions + every member); otherwise a value slot of exactly that type. Every returned
+	// candidate carries `receiver` (functions) / `refSymbol` (members) = receiverDecl.
+	static std::vector<Candidate> receiverCandidates(const ScriptBindings& bindings, DSLSymbol* receiverDecl,
+		DSLType expectedType, bool anyValue, const std::string& typedPrefix);
 
 	// The six comparison operators (==, !=, <, >, <=, >=) offered while building an if/while condition's middle
 	// term, filtered by typedPrefix same as any other candidate list (typing "<" narrows to "<" and "<=").

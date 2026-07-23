@@ -3,6 +3,7 @@ export module UI:ScriptEditor;
 import Core;
 import Core.SDL;
 import :DSL;
+import :ScriptBindings;
 import :ScriptLang;
 
 // The DSL editor panel ("Script Editor" window). Displays a DSLScriptFile via Syntax::format and navigates it
@@ -269,6 +270,11 @@ private:
 		                 // candidate instead skips this stage and authors a plain `=`
 		CommentText,     // free-typing a comment line's text ("# ..."): every printable character -- Space
 		                 // included -- is content; Enter commits, Backspace past empty deletes/cancels
+		MemberSelect,    // dotted into a sidebar binding object ("physics." / "self."): picking from its
+		                 // registry functions/members (AutoCompleteRules::receiverCandidates) -- a function
+		                 // flows into CallArgValue staging with the receiver riding along (m_callReceiver), a
+		                 // member resolves to a MemberAccess term; Backspace-empty steps back to the mode the
+		                 // '.' was typed in (m_memberReturnMode) with the object's name restored
 		FunctionDeclareDone,       // the ')' just closed a declared function's parameter list: Enter commits
 		                           // it, '-' opens the return-type pick, Backspace reopens the parameter list
 		FunctionDeclareReturnType, // picking the "-> type" for the function being declared; confirm commits the
@@ -378,7 +384,17 @@ private:
 	// arguments, and placeholders never land) -- '(', an operator, or a confirm over it opens the CallArgValue
 	// sub-flow instead. False = not such a candidate; the caller proceeds normally.
 	bool tryBeginValueCallStaging();
-	DSLSymbol* buildCallFromStagedArgs(DSLSymbol* funcSymbol, const std::vector<Candidate>& argCandidates,
+	// Dotting into a matched BindingObject candidate ('.', or a confirm over it): captures the current mode as
+	// the return context and opens the receiver's member/function list (ComposeMode::MemberSelect).
+	void enterMemberSelect(DSLSymbol* receiverDecl);
+	// The value constraints of the CURRENT compose stage -- what a MemberSelect entered from it filters
+	// receiver candidates by (Void + !anyValue = statement context). Mirrors refreshCandidates' per-mode logic.
+	DSLType valueContextExpectedType(ComposeMode mode, bool& outAnyValue) const;
+	// Whether any statement in the document references `object`'s binding (its sidebar declaration or one of
+	// its functions) -- guards un-requiring a component that's still in use.
+	bool isBindingObjectReferenced(const BindingObject& object) const;
+	void renderSidebarPanel(); // the Entity/Engine bindings browser + required-component checkboxes
+	DSLSymbol* buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbol* receiverDecl, const std::vector<Candidate>& argCandidates,
 		const std::vector<std::string>& argRawTexts, DSLCodeLine& line); // shared by commitCallStatement and call-term builds
 	void restoreTermIntoBox(PendingExprTerm&& term); // back into the live compose: groups/resolved calls as the pending term, plain candidates as typed text
 	std::string forVarPrefix() const;       // "for <type> <name> = " -- before the loop var's own initial value
@@ -430,11 +446,10 @@ private:
 	void finishChainShrink(DSLSymbol* exprSymbol, DSLSymbol* originalHead, int selectOperand); // shared tail: unwrap a 1-operand chain, restore head order, GC, land the cursor
 
 	DSL m_document;
-	std::vector<std::unique_ptr<DSLSymbol>> m_builtins; // vec2/vec3/vec4/print/component-method decls; stand-in
-	                                                     // for a shared builtin registry (M5 formalizes one properly)
-	DSLSymbol* m_vec2Func = nullptr; // remembered for declaring vec2/3/4 variables via comma-separated components
-	DSLSymbol* m_vec3Func = nullptr; // (see applyDeclareVariable's DeclareValue handling) -- set in buildExampleDocument
-	DSLSymbol* m_vec4Func = nullptr;
+	ScriptBindings m_bindings; // THE engine-exposure registry -- builds m_document.sidebar + m_builtins once
+	                           // (stable symbol identity) and answers every receiver/member/emit lookup
+	std::vector<std::unique_ptr<DSLSymbol>> m_builtins; // every registry FunctionDeclaration (engine free
+	                                                     // functions + requiresReceiver object functions)
 	std::vector<SyntaxLine> m_formatted; // rebuilt from m_document each render() -- cheap at this document size
 	bool m_compact = false;              // M4 adds the toolbar toggle; M3 always renders expanded
 
@@ -553,9 +568,19 @@ private:
 	// func(1, x)" -- completion returns a resolved PendingExprTerm to that mode's box instead; the suspended
 	// chain state survives untouched, exactly like the comparison-value handover).
 	DSLSymbol* m_callFunc = nullptr;
+	DSLSymbol* m_callReceiver = nullptr; // the binding object's sidebar declaration a dot-call stages against
+	                                     // ("physics.applyImpulse(...)"); null = a free call
 	std::vector<Candidate> m_callArgCandidates;
 	std::vector<std::string> m_callArgRawTexts;
 	ComposeMode m_callValueReturnMode = ComposeMode::None;
+
+	// MemberSelect (dotted into a binding object): the receiver's sidebar declaration, the mode the '.' was
+	// typed in (stage results return there; Backspace-empty restores it), and the value constraints captured
+	// at entry (what receiverCandidates filters by -- see valueContextExpectedType).
+	DSLSymbol* m_memberReceiver = nullptr;
+	ComposeMode m_memberReturnMode = ComposeMode::None;
+	DSLType m_memberExpectedType = DSLType::Void;
+	bool m_memberAnyValue = false;
 
 	std::string m_pendingFunctionName;            // FunctionDeclareName's resolved name, once confirmed
 	std::vector<DSLType> m_pendingParamTypes;     // accumulated parameter types, parallel to m_pendingParamNames

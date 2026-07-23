@@ -3,6 +3,7 @@ module UI;
 import Core;
 import Core.Log;
 import :DSL;
+import :ScriptBindings;
 import :ScriptLang;
 import :ScriptLoader;
 
@@ -210,6 +211,8 @@ namespace
 	{
 		const std::vector<std::unique_ptr<DSLSymbol>>& sidebar;
 		const std::vector<std::unique_ptr<DSLSymbol>>& builtins;
+		const ScriptBindings& bindings;
+		const std::vector<DSLComponentKind>& requiredComponents; // the FILE's "//@@require" set, parsed before any line
 
 		std::vector<std::unique_ptr<DSLCodeLine>> outLines;
 		std::vector<DSLSymbol*> userFunctions;  // pass-1 FunctionDeclaration heads, document order
@@ -266,6 +269,25 @@ namespace
 					&& std::get<DSLSymbol::FunctionDeclaration>(s->data).name == name)
 					return s.get();
 			return nullptr;
+		}
+
+		static DSLType declaredType(const DSLSymbol* varDecl)
+		{
+			const DSLSymbol::VariableDeclaration& decl = std::get<DSLSymbol::VariableDeclaration>(varDecl->data);
+			return std::get<DSLSymbol::TypeDeclaration>(decl.typeSymbol->data).type;
+		}
+
+		// A reference to a component binding's object is only legal when the file's "//@@require" set names its
+		// component -- the loader-side twin of the editor's candidate gating.
+		bool checkBindingUsable(DSLSymbol* decl)
+		{
+			const BindingObject* object = bindings.objectForDecl(decl);
+			if (object == nullptr)
+				return true;
+			if (object->requiredComponent != DSLComponentKind::None
+				&& std::find(requiredComponents.begin(), requiredComponents.end(), object->requiredComponent) == requiredComponents.end())
+				return fail(std::string("'") + object->name + "' is used but its component isn't in the //@@require line");
+			return true;
 		}
 
 		// A numeric literal adopts the slot's expected type when it IS numeric -- the same Constant the editor's
@@ -405,6 +427,8 @@ namespace
 					DSLSymbol* decl = findVariable(first.text);
 					if (decl == nullptr)
 						return failValue("unknown identifier '" + first.text + "'");
+					if (dslIsEngineObjectType(declaredType(decl)))
+						return failValue("'" + first.text + "' is a binding object -- it can only be dotted into");
 					return push(line, ST::VariableReference, DSLSymbol::VariableReference{ decl });
 				}
 				return failValue("expected a value, got '" + first.text + "'");
@@ -421,15 +445,33 @@ namespace
 				DSLSymbol* receiverDecl = findVariable(first.text);
 				if (receiverDecl == nullptr)
 					return failValue("unknown identifier '" + first.text + "'");
+				if (!checkBindingUsable(receiverDecl))
+					return nullptr;
+				const DSLType receiverType = declaredType(receiverDecl);
 				DSLSymbol* receiverRef = push(line, ST::VariableReference, DSLSymbol::VariableReference{ receiverDecl });
 				const std::string& memberName = t[2].text;
 				if (t.size() == 3)
-					return push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ receiverRef, memberName });
+				{
+					// A binding member -- its value type stamps from the registry (see MemberAccess in DSL.ixx).
+					const BindingMember* member = bindings.findMember(receiverType, memberName);
+					if (member == nullptr)
+						return failValue("'" + first.text + "' has no member '" + memberName + "'");
+					return push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ receiverRef, memberName, member->type });
+				}
 				if (t[3].kind == Token::Kind::Symbol && t[3].text == "(" && matchParen(t, 3) == static_cast<int>(t.size()) - 1)
 				{
-					DSLSymbol* func = findFunction(memberName, /*requiresReceiver*/ true);
+					// Dot-calls resolve against the RECEIVER's own registry object (not a global name scan), so
+					// same-named functions on different objects can never cross-resolve.
+					DSLSymbol* func = nullptr;
+					if (const BindingObject* object = bindings.objectFor(receiverType); object != nullptr)
+					{
+						const std::span<DSLSymbol* const> functionSymbols = bindings.functionSymbols(*object);
+						for (size_t i = 0; i < object->functions.size(); ++i)
+							if (memberName == object->functions[i].name)
+								func = functionSymbols[i];
+					}
 					if (func == nullptr)
-						return failValue("unknown method '" + memberName + "'");
+						return failValue("'" + first.text + "' has no function '" + memberName + "'");
 					return parseCall(t.subspan(4, t.size() - 5), line, func, receiverRef);
 				}
 				return failValue("unexpected tokens after '" + first.text + "." + memberName + "'");
@@ -554,8 +596,9 @@ namespace
 			DSLSymbol* target = findVariable(t[0].text);
 			if (target == nullptr)
 				return failValue("unknown identifier '" + t[0].text + "'");
-			const DSLSymbol::VariableDeclaration& targetDecl = std::get<DSLSymbol::VariableDeclaration>(target->data);
-			const DSLType targetType = std::get<DSLSymbol::TypeDeclaration>(targetDecl.typeSymbol->data).type;
+			const DSLType targetType = declaredType(target);
+			if (dslIsEngineObjectType(targetType))
+				return failValue("'" + t[0].text + "' is a binding object -- it can't be assigned to");
 
 			DSLSymbol* targetRef = push(line, ST::VariableReference, DSLSymbol::VariableReference{ target });
 			DSLSymbol* value = parseExpression(t.subspan(2), line, targetType);
@@ -735,6 +778,13 @@ bool ScriptLoader::save(DSL& document, const std::string& path)
 		return false;
 
 	file << "//@@dsl 1\n";
+	if (!document.requiredComponents.empty())
+	{
+		file << "//@@require ";
+		for (size_t i = 0; i < document.requiredComponents.size(); ++i)
+			file << (i > 0 ? ", " : "") << dslComponentKindName(document.requiredComponents[i]);
+		file << '\n';
+	}
 	for (const SyntaxLine& line : Syntax::format(document.file, /*compact*/ false))
 	{
 		file << "//@";
@@ -746,7 +796,8 @@ bool ScriptLoader::save(DSL& document, const std::string& path)
 	return file.good();
 }
 
-ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& path, const std::vector<std::unique_ptr<DSLSymbol>>& builtins)
+ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& path, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
+	const ScriptBindings& bindings)
 {
 	LoadResult result;
 	const auto failAt = [&](int lineNo, const std::string& what) -> LoadResult
@@ -763,9 +814,11 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	}
 
 	// Extract the "//@@dsl" block: every following "//@"-prefixed line until "//@@end" (or the first
-	// unprefixed line/EOF), prefixes stripped. Anything outside the block -- the future transpiled C++,
-	// ordinary "//" comments included -- is ignored entirely.
+	// unprefixed line/EOF), prefixes stripped; "//@@require" directive lines carry the file's required
+	// components. Anything outside the block -- the future transpiled C++, ordinary "//" comments included --
+	// is ignored entirely.
 	std::vector<BlockLine> blockLines;
+	std::vector<DSLComponentKind> requiredComponents;
 	{
 		std::string raw;
 		int lineNo = 0;
@@ -784,6 +837,34 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 					if (version != "1")
 						return failAt(lineNo, "unsupported format version '" + version + "' (this build reads version 1)");
 					inBlock = true;
+				}
+				continue;
+			}
+			if (raw.rfind("//@@require", 0) == 0)
+			{
+				// Comma-separated component kind names, matched against dslComponentKindName's spellings.
+				std::string rest = raw.substr(11);
+				size_t start = 0;
+				while (start <= rest.size())
+				{
+					size_t comma = rest.find(',', start);
+					if (comma == std::string::npos)
+						comma = rest.size();
+					std::string name = rest.substr(start, comma - start);
+					name.erase(0, name.find_first_not_of(" \t"));
+					name.erase(name.find_last_not_of(" \t") + 1);
+					start = comma + 1;
+					if (name.empty())
+						continue;
+					bool matched = false;
+					for (int kind = 0; kind < static_cast<int>(DSLComponentKind::Count); ++kind)
+						if (name == dslComponentKindName(static_cast<DSLComponentKind>(kind)))
+						{
+							requiredComponents.push_back(static_cast<DSLComponentKind>(kind));
+							matched = true;
+						}
+					if (!matched)
+						return failAt(lineNo, "unknown component kind '" + name + "' in //@@require");
 				}
 				continue;
 			}
@@ -825,7 +906,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 		line.kind = line.tokens.empty() ? BlockLine::Kind::Blank : BlockLine::Kind::Code;
 	}
 
-	Parser parser{ document.sidebar, builtins };
+	Parser parser{ document.sidebar, builtins, bindings, requiredComponents };
 
 	// Pass 1: function headers, so pass 2's body statements resolve forward calls.
 	std::vector<std::unique_ptr<DSLCodeLine>> headers(blockLines.size());
@@ -937,6 +1018,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	}
 
 	document.file.lines = std::move(rebuilt.lines);
+	document.requiredComponents = std::move(requiredComponents);
 	result.success = true;
 	return result;
 }

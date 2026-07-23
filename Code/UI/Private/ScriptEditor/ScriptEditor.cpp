@@ -208,11 +208,17 @@ namespace
 	// too, or e.g. "canJump() == true" would misleadingly read as "canJump == true" before it's even committed.
 	std::string candidateDisplayText(const Candidate& candidate)
 	{
+		// A binding object's MEMBER reads with its receiver ("self.pos") -- refSymbol IS the receiver's
+		// declaration for Kind::Member (see receiverCandidates).
+		if (candidate.kind == Candidate::Kind::Member)
+			return std::get<DSLSymbol::VariableDeclaration>(candidate.refSymbol->data).name + "." + candidate.label;
 		if (candidate.kind != Candidate::Kind::Function)
 			return candidate.label;
 
 		const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(candidate.refSymbol->data);
-		std::string text = candidate.label + "(";
+		std::string text = (candidate.receiver != nullptr
+			? std::get<DSLSymbol::VariableDeclaration>(candidate.receiver->data).name + "." : std::string())
+			+ candidate.label + "(";
 		for (size_t i = 0; i < callee.parameterVarDeclarations.size(); ++i)
 		{
 			if (i > 0)
@@ -280,79 +286,18 @@ namespace
 	}
 }
 
-// Builds the sidebar bindings and built-in functions/types once at startup, then seeds the document with a
-// single empty entry-point function -- a starting point for the user to build from, not a worked example.
+// Builds the binding registry (sidebar objects + builtin functions -- see ScriptBindings) once at startup,
+// then seeds the document with a single empty entry-point function -- a starting point to build from.
 void ScriptEditor::buildExampleDocument()
 {
-	// Sidebar bindings and builtins aren't owned by any line (see DSL.ixx), so they can't go through pushSymbol
-	// -- same construction, minus the line back-pointer, into their own container. Line-owned symbols below use
-	// the class-wide pushSymbol directly.
-	auto addTo = [](std::vector<std::unique_ptr<DSLSymbol>>& container, DSLSymbol::SymbolType type, DSLSymbol::Data data) -> DSLSymbol*
-	{
-		auto symbol = std::make_unique<DSLSymbol>();
-		symbol->type = type;
-		symbol->data = std::move(data);
-		DSLSymbol* ptr = symbol.get();
-		container.push_back(std::move(symbol));
-		return ptr;
-	};
-	auto addSidebar = [&](DSLSymbol::SymbolType type, DSLSymbol::Data data) { return addTo(m_document.sidebar, type, std::move(data)); };
-	auto addBuiltin = [&](DSLSymbol::SymbolType type, DSLSymbol::Data data) { return addTo(m_builtins, type, std::move(data)); };
+	m_bindings.build(m_document.sidebar, m_builtins);
+
 	auto newLine = [](int scopeLevel) -> std::unique_ptr<DSLCodeLine>
 	{
 		auto line = std::make_unique<DSLCodeLine>();
 		line->scopeLevel = scopeLevel;
 		return line;
 	};
-
-	// ---- sidebar: World world / Entity self / PhysicsComponent physics ----
-	DSLSymbol* worldType   = addSidebar(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::World });
-	addSidebar(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "world", worldType });
-	DSLSymbol* selfType    = addSidebar(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Entity });
-	addSidebar(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "self", selfType });
-	DSLSymbol* physicsType = addSidebar(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::PhysicsComponent });
-	addSidebar(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "physics", physicsType });
-
-	// ---- builtins (vec2/vec3/vec4/print/PhysicsComponent+World methods) -- not owned by any line, see DSL.ixx ----
-	// vec2/3/4 carry real Float parameters so autocomplete-inserted calls (e.g. picking one as an if/while
-	// condition operand) know to fill in the right number of placeholder arguments -- isPositionalCall keeps
-	// those rendered positionally ("vec3(<float>, <float>, <float>)"), not "vec3(x = ..., y = ..., z = ...)".
-	// Remembered as members too: declaring a vec2/3/4 variable builds one of these directly from typed
-	// components (see applyDeclareVariable), bypassing the regular candidate list entirely.
-	auto addVecBuiltin = [&](const char* name, DSLType returnType, int componentCount) -> DSLSymbol*
-	{
-		static const char* const kComponentNames[] = { "x", "y", "z", "w" };
-		std::vector<DSLSymbol*> params;
-		for (int i = 0; i < componentCount; ++i)
-		{
-			DSLSymbol* componentType = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
-			params.push_back(addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ kComponentNames[i], componentType }));
-		}
-		return addBuiltin(ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ name, params, returnType, /*requiresReceiver*/ false, /*isPositionalCall*/ true });
-	};
-	m_vec2Func = addVecBuiltin("vec2", DSLType::Vector2, 2);
-	m_vec3Func = addVecBuiltin("vec3", DSLType::Vector3, 3);
-	m_vec4Func = addVecBuiltin("vec4", DSLType::Vector4, 4);
-
-	addBuiltin(ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "print", {}, DSLType::Void });
-
-	addBuiltin(ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "getMass", {}, DSLType::Float, /*requiresReceiver*/ true });
-
-	DSLSymbol* applyForceDirType   = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Vector3 });
-	DSLSymbol* applyForceDirParam  = addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "direction", applyForceDirType });
-	DSLSymbol* applyForceForceType = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
-	DSLSymbol* applyForceForceParam = addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "force", applyForceForceType });
-	addBuiltin(ST::FunctionDeclaration,
-		DSLSymbol::FunctionDeclaration{ "applyForce", { applyForceDirParam, applyForceForceParam }, DSLType::Void, /*requiresReceiver*/ true });
-
-	DSLSymbol* rayCastPosType     = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Vector3 });
-	DSLSymbol* rayCastPosParam    = addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "pos", rayCastPosType });
-	DSLSymbol* rayCastDirType     = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Vector3 });
-	DSLSymbol* rayCastDirParam    = addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "dir", rayCastDirType });
-	DSLSymbol* rayCastMaxDistType = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
-	DSLSymbol* rayCastMaxDistParam = addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "maxRayDist", rayCastMaxDistType });
-	addBuiltin(ST::FunctionDeclaration,
-		DSLSymbol::FunctionDeclaration{ "rayCast", { rayCastPosParam, rayCastDirParam, rayCastMaxDistParam }, DSLType::Float, /*requiresReceiver*/ true });
 
 	// ---- update(deltaSec): the sole starting function, empty -- the user builds everything else from here ----
 	auto updateHeader = newLine(0);
@@ -542,6 +487,36 @@ void ScriptEditor::beginCompose()
 
 void ScriptEditor::refreshCandidates()
 {
+	// The sidebar binding objects ("self", and each REQUIRED component) offered wherever a dot-into makes
+	// sense -- consumable only via '.'/confirm into MemberSelect, never as bare values (see receiverCandidates).
+	// An exact-name match goes first, same courtesy sortExactMatchFirst gives the regular lists.
+	auto appendBindingObjects = [&]()
+	{
+		for (const std::unique_ptr<DSLSymbol>& s : m_document.sidebar)
+		{
+			if (s->type != ST::VariableDeclaration)
+				continue;
+			const BindingObject* object = m_bindings.objectForDecl(s.get());
+			if (object == nullptr)
+				continue;
+			if (object->requiredComponent != DSLComponentKind::None && !dslIsComponentRequired(m_document, object->requiredComponent))
+				continue;
+			const std::string label = object->name;
+			if (m_pendingWord.size() > label.size())
+				continue;
+			bool matches = true;
+			for (size_t i = 0; i < m_pendingWord.size() && matches; ++i)
+				matches = std::tolower(static_cast<unsigned char>(label[i])) == std::tolower(static_cast<unsigned char>(m_pendingWord[i]));
+			if (!matches)
+				continue;
+			Candidate c{ label, Candidate::Kind::BindingObject, s.get() };
+			if (label.size() == m_pendingWord.size())
+				m_candidates.insert(m_candidates.begin(), std::move(c));
+			else
+				m_candidates.push_back(std::move(c));
+		}
+	};
+
 	// The in-place editing modes anchor to state captured at entry (the cursor span they started from may
 	// carry no slot of its own -- e.g. a chain operator span past the first), not to the current span.
 	if (m_composeMode == ComposeMode::ReplaceOperator)
@@ -555,6 +530,13 @@ void ScriptEditor::refreshCandidates()
 		m_candidateSelected = 0;
 		return;
 	}
+	if (m_composeMode == ComposeMode::MemberSelect)
+	{
+		m_candidates = AutoCompleteRules::receiverCandidates(m_bindings, m_memberReceiver,
+			m_memberExpectedType, m_memberAnyValue, m_pendingWord);
+		m_candidateSelected = 0;
+		return;
+	}
 	if (m_composeMode == ComposeMode::EditExpr)
 	{
 		if (m_editSlot.line == nullptr || isVectorType(m_editValueType))
@@ -564,6 +546,7 @@ void ScriptEditor::refreshCandidates()
 		m_candidates = (m_editValueType == DSLType::Void)
 			? AutoCompleteRules::candidatesForAnyValue(*m_editSlot.line, m_document.file, m_document.sidebar, m_builtins, m_pendingWord)
 			: AutoCompleteRules::candidatesFor(m_editValueType, *m_editSlot.line, m_document.file, m_document.sidebar, m_builtins, m_pendingWord, excludeVariable, /*offerComparisonLeads*/ true);
+		appendBindingObjects();
 		m_candidateSelected = 0;
 		return;
 	}
@@ -690,6 +673,29 @@ void ScriptEditor::refreshCandidates()
 	default:
 		return; // DeclareName/Rename/FunctionDeclareName/FunctionParamName/ForVarName: free-typing an identifier, nothing to filter against
 	}
+
+	// Binding objects join every statement/value list (never the operator/type-keyword pickers above -- those
+	// broke out through their own cases' breaks but are excluded here).
+	switch (m_composeMode)
+	{
+	case ComposeMode::FilterCandidates:
+	case ComposeMode::DeclareValue:
+	case ComposeMode::ConditionLeft:
+	case ComposeMode::ConditionRight:
+	case ComposeMode::ForConditionLeft:
+	case ComposeMode::ForVarValue:
+	case ComposeMode::ForConditionValue:
+	case ComposeMode::ForIncrementValue:
+	case ComposeMode::ReassignValue:
+	case ComposeMode::ReturnValue:
+		appendBindingObjects();
+		break;
+	default:
+		// Deliberately NOT CallArgValue: an argument stays a single plain candidate -- dotting into a binding
+		// there would nest member staging inside call staging, the same nesting the parameterized-call
+		// exclusion already rules out.
+		break;
+	}
 	m_candidateSelected = 0;
 }
 
@@ -714,9 +720,14 @@ void ScriptEditor::cancelCompose()
 	m_editAnchorSymbol = nullptr;
 	m_replaceOpExpr = nullptr;
 	m_callFunc = nullptr;
+	m_callReceiver = nullptr;
 	m_callArgCandidates.clear();
 	m_callArgRawTexts.clear();
 	m_callValueReturnMode = ComposeMode::None;
+	m_memberReceiver = nullptr;
+	m_memberReturnMode = ComposeMode::None;
+	m_memberExpectedType = DSLType::Void;
+	m_memberAnyValue = false;
 	m_flowEditLine = nullptr;
 	m_flowEditLoopVar = nullptr;
 	m_composeCoverStart = -1;
@@ -762,6 +773,7 @@ bool ScriptEditor::hasCandidateList() const
 	case ComposeMode::ReplaceOperator:
 	case ComposeMode::ReturnValue:
 	case ComposeMode::ReassignOp:
+	case ComposeMode::MemberSelect:
 		return true;
 	case ComposeMode::EditExpr:
 		return !isVectorType(m_editValueType); // vector slots free-type comma components
@@ -789,6 +801,75 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 	// can happen to it -- there is no bare form to confirm (placeholder arguments never exist).
 	if (isChainComposeMode() && tryBeginValueCallStaging())
 		return;
+
+	// A matched BindingObject candidate has no bare form either -- confirming it (like typing '.') dots into
+	// its member/function list.
+	if (m_composeMode != ComposeMode::MemberSelect)
+	{
+		const Candidate* picked = selectedCandidate();
+		if (hasCandidateList() && picked != nullptr && picked->kind == Candidate::Kind::BindingObject)
+		{
+			enterMemberSelect(picked->refSymbol);
+			return;
+		}
+	}
+
+	if (m_composeMode == ComposeMode::MemberSelect)
+	{
+		const Candidate* picked = selectedCandidate();
+		if (picked == nullptr)
+			return;
+		const ComposeMode back = m_memberReturnMode;
+		const bool statementContext = back == ComposeMode::FilterCandidates;
+
+		if (picked->kind == Candidate::Kind::Function
+			&& !std::get<DSLSymbol::FunctionDeclaration>(picked->refSymbol->data).parameterVarDeclarations.empty())
+		{
+			// Stage the dot-call's arguments -- completion commits the line (statement) or returns the
+			// resolved term to the suspended chain (value), commitCallStatement's two existing paths.
+			m_callValueReturnMode = statementContext ? ComposeMode::None : back;
+			m_callFunc = picked->refSymbol;
+			m_callReceiver = picked->receiver;
+			m_callArgCandidates.clear();
+			m_callArgRawTexts.clear();
+			m_memberReceiver = nullptr;
+			m_memberReturnMode = ComposeMode::None;
+			enterCompose(ComposeMode::CallArgValue, callStagePrefix());
+			return;
+		}
+		if (picked->kind != Candidate::Kind::Function && picked->kind != Candidate::Kind::Member)
+			return;
+
+		if (statementContext)
+		{
+			// A zero-argument dot-call statement ("physics.isAwake()") commits its whole line -- Enter only.
+			// (Members never reach here: receiverCandidates offers none in a statement context.)
+			if (picked->kind != Candidate::Kind::Function || !allowCommit)
+				return;
+			const Candidate chosen = *picked;
+			DSLCodeLine* linePtr = currentLineHeadOrCancel();
+			if (linePtr == nullptr)
+				return;
+			DSLCodeLine& line = *linePtr;
+			cancelCompose();
+			line.symbols.clear();
+			m_pendingSelectTarget = buildValueFromCandidate(chosen, line);
+			return;
+		}
+
+		// Value context: the member / zero-argument dot-call becomes an already-resolved pending term of the
+		// suspended chain compose -- exactly commitCallStatement's value-branch delivery.
+		PendingExprTerm term;
+		term.candidate = *picked;
+		m_memberReceiver = nullptr;
+		m_memberReturnMode = ComposeMode::None;
+		enterCompose(back, "");
+		m_exprPendingGroup = std::move(term);
+		m_exprHasPendingGroup = true;
+		m_candidates.clear(); // nothing is being typed right after the resolved term -- operators continue it
+		m_composePrefix = exprBasePrefix() + exprComposePrefixFromStack();
+		return;
+	}
 
 	if (m_composeMode == ComposeMode::CommentText)
 	{
@@ -1526,7 +1607,16 @@ DSLSymbol* ScriptEditor::buildValueFromCandidate(const Candidate& candidate, DSL
 			// parameter each fills, per CallArgument's convention (see DSL.ixx).
 			args.push_back(DSLSymbol::CallArgument{ callee.isPositionalCall ? nullptr : param, argPlaceholder });
 		}
-		return pushSymbol(line, ST::FunctionCall, DSLSymbol::FunctionCall{ candidate.refSymbol, nullptr, args });
+		// A dot-call carries its receiver (a binding object's sidebar declaration -- see receiverCandidates).
+		DSLSymbol* receiverRef = (candidate.receiver != nullptr)
+			? pushSymbol(line, ST::VariableReference, DSLSymbol::VariableReference{ candidate.receiver }) : nullptr;
+		return pushSymbol(line, ST::FunctionCall, DSLSymbol::FunctionCall{ candidate.refSymbol, receiverRef, args });
+	}
+	case Candidate::Kind::Member:
+	{
+		// refSymbol = the RECEIVER's declaration; declareType = the member's registry-stamped value type.
+		DSLSymbol* receiverRef = pushSymbol(line, ST::VariableReference, DSLSymbol::VariableReference{ candidate.refSymbol });
+		return pushSymbol(line, ST::MemberAccess, DSLSymbol::MemberAccess{ receiverRef, candidate.label, candidate.declareType });
 	}
 	case Candidate::Kind::Literal:
 		// A string literal's label carries its quotes for display; the stored Constant holds the CONTENT
@@ -1542,13 +1632,7 @@ DSLSymbol* ScriptEditor::buildValueFromCandidate(const Candidate& candidate, DSL
 
 DSLSymbol* ScriptEditor::vectorBuiltinFor(DSLType vectorType) const
 {
-	switch (vectorType)
-	{
-	case DSLType::Vector2: return m_vec2Func;
-	case DSLType::Vector3: return m_vec3Func;
-	case DSLType::Vector4: return m_vec4Func;
-	default:               return nullptr;
-	}
+	return m_bindings.vectorBuiltin(vectorType);
 }
 
 // Builds a positional vecN(<c0>, <c1>, ...) call (owned by `line`) directly from typed components -- returns
@@ -1642,9 +1726,9 @@ DSLSymbol* ScriptEditor::buildExpressionTerm(const PendingExprTerm& term, DSLCod
 	if (!term.isGroup)
 	{
 		// A resolved parameterized call carries its STAGED arguments (see the CallArgValue value sub-flow) --
-		// never placeholder ones.
+		// never placeholder ones. A dot-call's receiver rides in the candidate itself.
 		if (!term.callArgs.empty())
-			return buildCallFromStagedArgs(term.candidate.refSymbol, term.callArgs, term.callArgRawTexts, line);
+			return buildCallFromStagedArgs(term.candidate.refSymbol, term.candidate.receiver, term.callArgs, term.callArgRawTexts, line);
 		return buildValueFromCandidate(term.candidate, line);
 	}
 	DSLSymbol* built = buildExpressionFromTerms(term.groupTerms, term.groupOps, line);
@@ -1680,10 +1764,12 @@ std::string ScriptEditor::exprTermText(const PendingExprTerm& term) const
 {
 	if (!term.isGroup)
 	{
-		// A resolved parameterized call shows its actual staged arguments -- "func(1, x)".
+		// A resolved parameterized call shows its actual staged arguments -- "func(1, x)" / "physics.teleport(...)".
 		if (!term.callArgs.empty())
 		{
-			std::string text = term.candidate.label + "(";
+			std::string text = (term.candidate.receiver != nullptr
+				? std::get<DSLSymbol::VariableDeclaration>(term.candidate.receiver->data).name + "." : std::string())
+				+ term.candidate.label + "(";
 			for (size_t i = 0; i < term.callArgs.size(); ++i)
 			{
 				if (i > 0)
@@ -1878,7 +1964,10 @@ void ScriptEditor::restoreChainIntoCompose(const PendingExprChain& chain)
 // as the PENDING term (further Backspace unpacks it); a plain candidate re-opens as its typed text.
 void ScriptEditor::restoreTermIntoBox(PendingExprTerm&& term)
 {
-	if (term.isGroup || !term.callArgs.empty())
+	// Receiver-carrying calls and members can't restore as typed text -- their label alone would never
+	// re-resolve through the normal candidate lists -- so they ride as an already-resolved pending term too.
+	if (term.isGroup || !term.callArgs.empty()
+		|| term.candidate.receiver != nullptr || term.candidate.kind == Candidate::Kind::Member)
 	{
 		m_exprPendingGroup = std::move(term);
 		m_exprHasPendingGroup = true;
@@ -2374,7 +2463,9 @@ DSLType ScriptEditor::currentCallParamType() const
 std::string ScriptEditor::callComposePrefix() const
 {
 	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(m_callFunc->data);
-	std::string text = callee.name + "(";
+	std::string text = (m_callReceiver != nullptr
+		? std::get<DSLSymbol::VariableDeclaration>(m_callReceiver->data).name + "." : std::string())
+		+ callee.name + "(";
 	const size_t shownParams = std::min(m_callArgCandidates.size() + 1, callee.parameterVarDeclarations.size());
 	for (size_t i = 0; i < shownParams; ++i)
 	{
@@ -2412,15 +2503,71 @@ bool ScriptEditor::tryBeginValueCallStaging()
 		return false;
 	m_callValueReturnMode = m_composeMode;
 	m_callFunc = picked->refSymbol;
+	m_callReceiver = picked->receiver;
 	m_callArgCandidates.clear();
 	m_callArgRawTexts.clear();
 	enterCompose(ComposeMode::CallArgValue, callStagePrefix());
 	return true;
 }
 
+// The value constraints of `mode`'s current slot -- mirrors refreshCandidates' per-mode candidate queries, so
+// a MemberSelect entered from any stage filters the receiver's functions/members the same way the stage itself
+// filters plain candidates. Void + !outAnyValue = a statement context.
+DSLType ScriptEditor::valueContextExpectedType(ComposeMode mode, bool& outAnyValue) const
+{
+	outAnyValue = false;
+	const DSLType liveChainType = (!m_exprStack.empty() && !m_exprStack[0].terms.empty())
+		? chainElementType(m_exprStack[0].terms) : DSLType::Void;
+	switch (mode)
+	{
+	case ComposeMode::DeclareValue:
+		return m_pendingDeclareType;
+	case ComposeMode::ConditionLeft:
+	case ComposeMode::ForConditionLeft:
+		outAnyValue = liveChainType == DSLType::Void;
+		return liveChainType;
+	case ComposeMode::ConditionRight:
+		return chainElementType(m_conditionLeftChain.terms);
+	case ComposeMode::ForVarValue:
+	case ComposeMode::ForIncrementValue:
+		return m_forVarType;
+	case ComposeMode::ForConditionValue:
+	{
+		const DSLType boundType = chainElementType(m_forConditionLeftChain.terms);
+		return boundType != DSLType::Void ? boundType : m_forVarType;
+	}
+	case ComposeMode::ReassignValue:
+		return reassignTargetType();
+	case ComposeMode::ReturnValue:
+	{
+		const SyntaxSpan* span = currentSpan(m_formatted, m_cursorLine, m_cursorSpan);
+		return (span != nullptr && span->slot.line != nullptr)
+			? AutoCompleteRules::enclosingFunctionReturnType(*span->slot.line, m_document.file) : DSLType::Void;
+	}
+	case ComposeMode::CallArgValue:
+		return currentCallParamType();
+	case ComposeMode::EditExpr:
+		outAnyValue = m_editValueType == DSLType::Void;
+		return m_editValueType;
+	default:
+		return DSLType::Void; // FilterCandidates: a statement slot
+	}
+}
+
+// See the declaration in ScriptEditor.ixx: '.' (or a confirm) over a matched BindingObject candidate opens the
+// receiver's member/function list; the current stage suspends exactly like the call-value sub-flow.
+void ScriptEditor::enterMemberSelect(DSLSymbol* receiverDecl)
+{
+	m_memberReceiver = receiverDecl;
+	m_memberReturnMode = m_composeMode;
+	m_memberExpectedType = valueContextExpectedType(m_composeMode, m_memberAnyValue);
+	const std::string& name = std::get<DSLSymbol::VariableDeclaration>(receiverDecl->data).name;
+	enterCompose(ComposeMode::MemberSelect, m_composePrefix + name + ".");
+}
+
 // See the declaration in ScriptEditor.ixx: the fully-staged arguments become real CallArgument values -- a
 // picked candidate or a complete vector component list each, never a placeholder.
-DSLSymbol* ScriptEditor::buildCallFromStagedArgs(DSLSymbol* funcSymbol, const std::vector<Candidate>& argCandidates,
+DSLSymbol* ScriptEditor::buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbol* receiverDecl, const std::vector<Candidate>& argCandidates,
 	const std::vector<std::string>& argRawTexts, DSLCodeLine& line)
 {
 	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(funcSymbol->data);
@@ -2434,7 +2581,9 @@ DSLSymbol* ScriptEditor::buildCallFromStagedArgs(DSLSymbol* funcSymbol, const st
 			: buildVectorLiteral(paramType, splitOnCommas(argRawTexts[i]), line);
 		args.push_back(DSLSymbol::CallArgument{ callee.isPositionalCall ? nullptr : callee.parameterVarDeclarations[i], value });
 	}
-	return pushSymbol(line, ST::FunctionCall, DSLSymbol::FunctionCall{ funcSymbol, nullptr, args });
+	DSLSymbol* receiverRef = (receiverDecl != nullptr)
+		? pushSymbol(line, ST::VariableReference, DSLSymbol::VariableReference{ receiverDecl }) : nullptr;
+	return pushSymbol(line, ST::FunctionCall, DSLSymbol::FunctionCall{ funcSymbol, receiverRef, args });
 }
 
 // The last argument's confirm. A call VALUE (m_callValueReturnMode) returns the resolved term to the suspended
@@ -2448,10 +2597,12 @@ void ScriptEditor::commitCallStatement()
 		PendingExprTerm term;
 		term.candidate = Candidate{ std::get<DSLSymbol::FunctionDeclaration>(m_callFunc->data).name,
 			Candidate::Kind::Function, m_callFunc };
+		term.candidate.receiver = m_callReceiver;
 		term.callArgs = m_callArgCandidates;
 		term.callArgRawTexts = m_callArgRawTexts;
 		m_callValueReturnMode = ComposeMode::None;
 		m_callFunc = nullptr;
+		m_callReceiver = nullptr;
 		m_callArgCandidates.clear();
 		m_callArgRawTexts.clear();
 		// The suspended chain compose (m_exprStack + the mode's own context) survived untouched -- resume it
@@ -2471,12 +2622,13 @@ void ScriptEditor::commitCallStatement()
 		return;
 	DSLCodeLine& line = *linePtr;
 	DSLSymbol* func = m_callFunc;
+	DSLSymbol* receiver = m_callReceiver;
 	const std::vector<Candidate> argCandidates = m_callArgCandidates;
 	const std::vector<std::string> argRawTexts = m_callArgRawTexts;
 	cancelCompose();
 
 	line.symbols.clear();
-	buildCallFromStagedArgs(func, argCandidates, argRawTexts, line);
+	buildCallFromStagedArgs(func, receiver, argCandidates, argRawTexts, line);
 	m_pendingSelectLineEnd = m_cursorLine; // end of the committed call (its last argument), typing-continues style
 }
 
@@ -2715,13 +2867,37 @@ namespace
 				Candidate{ std::get<DSLSymbol::VariableDeclaration>(r.declaration->data).name, Candidate::Kind::Variable, r.declaration }, {}, {} };
 			return true;
 		}
+		case ST::MemberAccess:
+		{
+			// A binding member ("self.pos"): refSymbol = the receiver's declaration, declareType = the stamped
+			// value type -- the exact Candidate shape receiverCandidates hands out.
+			const DSLSymbol::MemberAccess& m = std::get<DSLSymbol::MemberAccess>(symbol->data);
+			if (m.receiver == nullptr || m.receiver->type != ST::VariableReference)
+				return false;
+			DSLSymbol* receiverDecl = std::get<DSLSymbol::VariableReference>(m.receiver->data).declaration;
+			if (receiverDecl == nullptr)
+				return false;
+			out = PendingExprTerm{ false, Candidate{ m.memberName, Candidate::Kind::Member, receiverDecl, m.type }, {}, {} };
+			return true;
+		}
 		case ST::FunctionCall:
 		{
 			const DSLSymbol::FunctionCall& call = std::get<DSLSymbol::FunctionCall>(symbol->data);
-			if (call.receiver != nullptr || call.functionSymbol == nullptr)
+			if (call.functionSymbol == nullptr)
 				return false;
+			// A dot-call restores WITH its receiver riding in the candidate (see buildExpressionTerm).
+			DSLSymbol* receiverDecl = nullptr;
+			if (call.receiver != nullptr)
+			{
+				if (call.receiver->type != ST::VariableReference)
+					return false;
+				receiverDecl = std::get<DSLSymbol::VariableReference>(call.receiver->data).declaration;
+				if (receiverDecl == nullptr)
+					return false;
+			}
 			const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
 			PendingExprTerm term{ false, Candidate{ callee.name, Candidate::Kind::Function, call.functionSymbol }, {}, {} };
+			term.candidate.receiver = receiverDecl;
 			if (!call.arguments.empty())
 			{
 				if (callee.parameterVarDeclarations.size() != call.arguments.size())
@@ -3260,8 +3436,17 @@ bool ScriptEditor::tryWidenCallStatementEdit()
 	if (callSymbol->line == nullptr || callSymbol->line->head() != callSymbol)
 		return false; // only call STATEMENTS re-stage; a call nested in some larger value has no staged flow
 	const DSLSymbol::FunctionCall& call = std::get<DSLSymbol::FunctionCall>(callSymbol->data);
-	if (call.functionSymbol == nullptr || call.receiver != nullptr)
+	if (call.functionSymbol == nullptr)
 		return false;
+	DSLSymbol* receiverDecl = nullptr;
+	if (call.receiver != nullptr)
+	{
+		if (call.receiver->type != ST::VariableReference)
+			return false;
+		receiverDecl = std::get<DSLSymbol::VariableReference>(call.receiver->data).declaration;
+		if (receiverDecl == nullptr)
+			return false;
+	}
 	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
 	const int argIndex = m_editSlot.argIndex;
 	if (argIndex < 0 || argIndex >= static_cast<int>(call.arguments.size())
@@ -3286,6 +3471,7 @@ bool ScriptEditor::tryWidenCallStatementEdit()
 	}
 
 	m_callFunc = call.functionSymbol;
+	m_callReceiver = receiverDecl;
 	m_callArgCandidates = std::move(candidates);
 	m_callArgRawTexts = std::move(rawTexts);
 	m_flowEditLine = callSymbol->line;
@@ -4282,14 +4468,24 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			}
 			else if (m_callValueReturnMode != ComposeMode::None)
 			{
-				// A call VALUE abandons its staging: back to the suspended chain compose, name re-typed.
+				// A call VALUE abandons its staging: back to the suspended chain compose, name re-typed -- a
+				// dot-call reopens its receiver's MemberSelect instead (the bare method name would never
+				// re-resolve through the plain candidate lists).
 				const ComposeMode back = m_callValueReturnMode;
+				DSLSymbol* receiver = m_callReceiver;
 				const std::string name = std::get<DSLSymbol::FunctionDeclaration>(m_callFunc->data).name;
 				m_callValueReturnMode = ComposeMode::None;
 				m_callFunc = nullptr;
-				enterCompose(back, "", name);
+				m_callReceiver = nullptr;
+				enterCompose(back, "", receiver != nullptr ? std::string() : name);
 				m_composePrefix = exprBasePrefix() + exprComposePrefixFromStack();
 				refreshCandidates();
+				if (receiver != nullptr)
+				{
+					enterMemberSelect(receiver);
+					m_pendingWord = name;
+					refreshCandidates();
+				}
 			}
 			else if (m_flowEditLine != nullptr)
 			{
@@ -4297,10 +4493,33 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 				cancelCompose();
 				deleteLine(line);
 			}
+			else if (m_callReceiver != nullptr)
+			{
+				// A fresh dot-call STATEMENT abandons back into its receiver's MemberSelect, method name re-typed.
+				DSLSymbol* receiver = m_callReceiver;
+				const std::string name = std::get<DSLSymbol::FunctionDeclaration>(m_callFunc->data).name;
+				cancelCompose();
+				enterCompose(ComposeMode::FilterCandidates, "");
+				enterMemberSelect(receiver);
+				m_pendingWord = name;
+				refreshCandidates();
+			}
 			else
 			{
 				cancelCompose();
 			}
+		}
+		else if (m_composeMode == ComposeMode::MemberSelect)
+		{
+			// Backspacing past the '.' returns to the stage it was typed in, the object's name restored as
+			// typed text (it re-matches its BindingObject candidate there).
+			DSLSymbol* receiver = m_memberReceiver;
+			const ComposeMode back = m_memberReturnMode;
+			const std::string name = std::get<DSLSymbol::VariableDeclaration>(receiver->data).name;
+			const std::string prefix = m_composePrefix.substr(0, m_composePrefix.size() - name.size() - 1);
+			m_memberReceiver = nullptr;
+			m_memberReturnMode = ComposeMode::None;
+			enterCompose(back, prefix, name);
 		}
 		else if (m_composeMode == ComposeMode::DeclareName && m_redeclareTarget != nullptr)
 		{
@@ -4354,6 +4573,20 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		if (hasCandidateList())
 			refreshCandidates();
 		return;
+	}
+
+	// '.' over a TYPED-and-matched binding object ("physics" + '.') dots into its member/function list -- any
+	// stage that offers BindingObject candidates supports it (see refreshCandidates). Typed text only, so a
+	// stray '.' can never resolve the highlighted default; elsewhere the character falls through (e.g. as a
+	// float literal's decimal point).
+	if (c == '.' && composing && !m_pendingWord.empty() && hasCandidateList())
+	{
+		const Candidate* picked = selectedCandidate();
+		if (picked != nullptr && picked->kind == Candidate::Kind::BindingObject)
+		{
+			enterMemberSelect(picked->refSymbol);
+			return;
+		}
 	}
 
 	// '#' turns a statement slot into a comment line ("# ..."), committing on Enter like any statement.
@@ -5217,6 +5450,110 @@ void ScriptEditor::renderAutocompletePopup()
 	ImGui::End();
 }
 
+bool ScriptEditor::isBindingObjectReferenced(const BindingObject& object) const
+{
+	// Every use of the binding -- a dot-call's receiver, a member access's receiver -- is a VariableReference
+	// to its sidebar declaration, owned flat by some line (see DSL.ixx's ownership model).
+	const DSLSymbol* decl = m_bindings.objectDecl(object);
+	if (decl == nullptr)
+		return false;
+	for (const std::unique_ptr<DSLCodeLine>& line : m_document.file.lines)
+		for (const std::unique_ptr<DSLSymbol>& s : line->symbols)
+			if (s->type == ST::VariableReference && std::get<DSLSymbol::VariableReference>(s->data).declaration == decl)
+				return true;
+	return false;
+}
+
+// The bindings browser: an Entity section (self + one row per requirable component, checkbox = the script
+// requires it) and an Engine section (the free functions). Auto-populated from the registry; read-only apart
+// from the require checkboxes. Un-requiring a component the script still references is refused.
+void ScriptEditor::renderSidebarPanel()
+{
+	ImGui::BeginChild("##dsl_sidebar", ImVec2(240.0f, 0.0f), true);
+
+	bool firstSegment = true;
+	auto seg = [&firstSegment](const ImVec4& color, const char* text)
+	{
+		if (!firstSegment)
+			ImGui::SameLine(0.0f, 0.0f);
+		ImGui::TextColored(color, "%s", text);
+		firstSegment = false;
+	};
+	auto drawFunction = [&](const BindingFunc& func)
+	{
+		firstSegment = true;
+		if (func.returnType != DSLType::Void)
+		{
+			seg(kColType, dslTypeName(func.returnType));
+			seg(kColPunct, " ");
+		}
+		seg(kColFunction, func.name);
+		seg(kColPunct, "(");
+		for (size_t i = 0; i < func.params.size(); ++i)
+		{
+			if (i > 0)
+				seg(kColPunct, ", ");
+			seg(kColType, dslTypeName(func.params[i].type));
+			seg(kColPunct, " ");
+			seg(kColVariable, func.params[i].name);
+		}
+		seg(kColPunct, ")");
+	};
+	auto drawObjectContents = [&](const BindingObject& object)
+	{
+		for (const BindingMember& member : object.members)
+		{
+			firstSegment = true;
+			seg(kColType, dslTypeName(member.type));
+			seg(kColPunct, " ");
+			seg(kColVariable, member.name);
+		}
+		for (const BindingFunc& func : object.functions)
+			drawFunction(func);
+	};
+
+	ImGui::TextDisabled("ENTITY");
+	for (const BindingObject& object : m_bindings.objects())
+	{
+		if (object.name == nullptr)
+			continue;
+
+		if (object.requiredComponent != DSLComponentKind::None)
+		{
+			bool checkboxValue = dslIsComponentRequired(m_document, object.requiredComponent);
+			if (ImGui::Checkbox((std::string("##req_") + object.name).c_str(), &checkboxValue))
+			{
+				if (checkboxValue)
+					m_document.requiredComponents.push_back(object.requiredComponent);
+				else if (!isBindingObjectReferenced(object))
+					std::erase(m_document.requiredComponents, object.requiredComponent);
+				else
+					Log::warning(std::string("Can't un-require '") + object.name + "' -- the script still references it");
+			}
+			ImGui::SameLine();
+			if (!dslIsComponentRequired(m_document, object.requiredComponent))
+			{
+				ImGui::TextDisabled("%s %s", dslTypeName(object.type), object.name);
+				continue;
+			}
+		}
+		if (ImGui::TreeNode(object.name, "%s %s", dslTypeName(object.type), object.name))
+		{
+			drawObjectContents(object);
+			ImGui::TreePop();
+		}
+	}
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::TextDisabled("ENGINE");
+	for (const BindingObject& object : m_bindings.objects())
+		if (object.name == nullptr)
+			drawObjectContents(object);
+
+	ImGui::EndChild();
+}
+
 void ScriptEditor::render()
 {
 	if (!m_built)
@@ -5276,6 +5613,10 @@ void ScriptEditor::render()
 	if (!m_hasFocus && m_composeMode != ComposeMode::None)
 		cancelCompose(); // panel lost focus mid-composition -- don't leave an unresolved edit hanging
 
+	renderSidebarPanel();
+	ImGui::SameLine();
+	ImGui::BeginChild("##dsl_main", ImVec2(0.0f, 0.0f), false);
+
 	// Save/Load toolbar. While the path field is being typed into, ImGui's WantTextInput keeps handleKeyEvent
 	// out, so the document cursor and the field never fight over keys.
 	ImGui::SetNextItemWidth(240.0f);
@@ -5290,6 +5631,8 @@ void ScriptEditor::render()
 	ImGui::Separator();
 
 	renderTextArea();
+
+	ImGui::EndChild();
 }
 
 void ScriptEditor::saveDocument()
@@ -5312,7 +5655,7 @@ void ScriptEditor::loadDocument()
 	if (path.empty())
 		return;
 	cancelCompose(); // resolve any in-flight edit against the OLD document before replacing it
-	const ScriptLoader::LoadResult result = ScriptLoader::load(m_document, path, m_builtins);
+	const ScriptLoader::LoadResult result = ScriptLoader::load(m_document, path, m_builtins, m_bindings);
 	if (!result.success)
 	{
 		Log::error("Failed to load script: " + result.error);

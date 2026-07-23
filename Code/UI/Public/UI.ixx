@@ -19,6 +19,7 @@ import :EntityEditor;
 import :OutputLog;
 import :TweakPanel;
 import :TextEditor;
+import :ScriptBindings;
 import :ScriptEditor;
 import :ScriptLoader;
 

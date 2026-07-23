@@ -2,6 +2,7 @@ export module UI:ScriptLoader;
 
 import Core;
 import :DSL;
+import :ScriptBindings;
 
 // Save/load for the DSL editor's native on-disk format (.dsl). The format IS the editor's EXPANDED view:
 // save() writes the exact text Syntax::format renders (fully typed), one line per SyntaxLine, each prefixed
@@ -37,8 +38,11 @@ public:
 	// keep getting the default sidebar, so that stays backward compatible).
 	static bool save(DSL& document, const std::string& path);
 
-	// Parses a file save() wrote and REPLACES document.file.lines on success; on failure the document is left
-	// untouched. document.sidebar and `builtins` are the name-resolution context (they must be the same fixed
-	// sets the editor composes against, or references would resolve to nothing).
-	static LoadResult load(DSL& document, const std::string& path, const std::vector<std::unique_ptr<DSLSymbol>>& builtins);
+	// Parses a file save() wrote and REPLACES document.file.lines (+ requiredComponents, from the file's
+	// "//@@require" line) on success; on failure the document is left untouched. document.sidebar, `builtins`
+	// and `bindings` are the name-resolution context (the same fixed sets the editor composes against --
+	// binding members stamp their types from the registry, dot-calls resolve per receiver type, and a
+	// reference to an un-required component's binding is a load error).
+	static LoadResult load(DSL& document, const std::string& path, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
+		const ScriptBindings& bindings);
 };

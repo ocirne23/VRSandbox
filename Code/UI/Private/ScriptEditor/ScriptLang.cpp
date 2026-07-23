@@ -20,6 +20,8 @@ const char* dslTypeName(DSLType type)
 	case DSLType::World:            return "World";
 	case DSLType::Entity:           return "Entity";
 	case DSLType::PhysicsComponent: return "PhysicsComponent";
+	case DSLType::AudioComponent:   return "AudioComponent";
+	case DSLType::ForceComponent:   return "ForceComponent";
 	default:                        return "?";
 	}
 }
@@ -481,7 +483,13 @@ namespace
 			if (var == excludeVariable)
 				continue;
 			const DSLSymbol::VariableDeclaration& v = std::get<DSLSymbol::VariableDeclaration>(var->data);
-			if (!accept(std::get<DSLSymbol::TypeDeclaration>(v.typeSymbol->data).type))
+			const DSLType varType = std::get<DSLSymbol::TypeDeclaration>(v.typeSymbol->data).type;
+			// Engine-object bindings (self/physics/...) are never plain values or assignment targets --
+			// they're offered as Kind::BindingObject dot-into candidates instead (ScriptEditor appends those,
+			// gated on the script's required-components set).
+			if (dslIsEngineObjectType(varType))
+				continue;
+			if (!accept(varType))
 				continue;
 			Candidate c;
 			c.label = v.name;
@@ -787,6 +795,49 @@ namespace
 		sortExactMatchFirst(out, typedPrefix);
 		return out;
 	}
+}
+
+std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBindings& bindings, DSLSymbol* receiverDecl,
+	DSLType expectedType, bool anyValue, const std::string& typedPrefix)
+{
+	std::vector<Candidate> out;
+	const DSLSymbol::VariableDeclaration& decl = std::get<DSLSymbol::VariableDeclaration>(receiverDecl->data);
+	const DSLType receiverType = std::get<DSLSymbol::TypeDeclaration>(decl.typeSymbol->data).type;
+	const BindingObject* object = bindings.objectFor(receiverType);
+	if (object == nullptr)
+		return out;
+
+	const bool statementContext = expectedType == DSLType::Void && !anyValue;
+	const std::span<DSLSymbol* const> functionSymbols = bindings.functionSymbols(*object);
+	for (size_t i = 0; i < object->functions.size(); ++i)
+	{
+		const DSLType returnType = object->functions[i].returnType;
+		const bool accepted = statementContext
+			|| (anyValue ? returnType != DSLType::Void : returnType == expectedType);
+		if (!accepted)
+			continue;
+		Candidate c;
+		c.label = object->functions[i].name;
+		c.kind = Candidate::Kind::Function;
+		c.refSymbol = functionSymbols[i];
+		c.receiver = receiverDecl;
+		addIfMatches(out, c, typedPrefix);
+	}
+	if (!statementContext)
+		for (const BindingMember& member : object->members)
+		{
+			if (!anyValue && member.type != expectedType)
+				continue;
+			Candidate c;
+			c.label = member.name;
+			c.kind = Candidate::Kind::Member;
+			c.refSymbol = receiverDecl; // the RECEIVER -- the member itself has no symbol, only registry data
+			c.declareType = member.type;
+			addIfMatches(out, c, typedPrefix);
+		}
+
+	sortExactMatchFirst(out, typedPrefix);
+	return out;
 }
 
 std::vector<Candidate> AutoCompleteRules::comparisonOperatorCandidates(const std::string& typedPrefix)

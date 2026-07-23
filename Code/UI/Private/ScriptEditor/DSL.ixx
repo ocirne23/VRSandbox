@@ -94,10 +94,44 @@ enum class DSLType
 	Vector3,
 	Vector4,
 	Function,           // reserved: a symbol whose value IS a function reference; unused by the current example
-	World,              // -- sidebar-bindable engine object kinds; grow this list as more
-	Entity,             //    component types need sidebar exposure (Scene/Force/Audio, ...)
+	World,              // -- sidebar-bindable engine object kinds (never user-declarable; see
+	Entity,             //    dslIsEngineObjectType below and the ScriptBindings registry) --
 	PhysicsComponent,
+	AudioComponent,
+	ForceComponent,
 };
+
+// Engine-object kinds are BINDINGS (dotted into for their members/functions), never values: excluded from
+// variable/reassign candidates, literal slots, and declarable types alike.
+export inline bool dslIsEngineObjectType(DSLType type)
+{
+	return type == DSLType::World || type == DSLType::Entity || type == DSLType::PhysicsComponent
+		|| type == DSLType::AudioComponent || type == DSLType::ForceComponent;
+}
+
+// The component kinds a script can REQUIRE (see DSL::requiredComponents below) -- an editor-side mirror of the
+// scriptable subset of Entity's component types, deliberately not the engine's own EComponentID.
+export enum class DSLComponentKind : uint8
+{
+	Physics,
+	Audio,
+	Force,
+	Count,
+	None = Count, // sentinel: a binding that is always available (self / engine globals)
+};
+
+// The kind's serialized spelling (the .dsl "//@@require Physics, Audio" line) -- by-name so the enum can grow
+// without breaking saved files.
+export inline const char* dslComponentKindName(DSLComponentKind kind)
+{
+	switch (kind)
+	{
+	case DSLComponentKind::Physics: return "Physics";
+	case DSLComponentKind::Audio:   return "Audio";
+	case DSLComponentKind::Force:   return "Force";
+	default:                        return "?";
+	}
+}
 enum class DSLFlowControl
 {
 	If,
@@ -239,10 +273,13 @@ public:
 	};
 	// Field-style access on a receiver, e.g. `self.pos` -- NOT a call (see
 	// FunctionCall::receiver for method-style dot-calls like physics.getMass()).
+	// `type` is stamped from the ScriptBindings member registry when the access is
+	// authored/loaded, so dslValueType stays registry-free.
 	struct MemberAccess
 	{
 		DSLSymbol* receiver = nullptr; // -> VariableReference
 		std::string memberName;
+		DSLType type = DSLType::Void;
 	};
 	// A whole-line comment ("# ...") -- pure annotation: no cross-references, never a value, freely deletable.
 	// The Transpiler emits it as a C++ comment.
@@ -339,7 +376,7 @@ export inline DSLType dslValueType(const DSLSymbol* symbol)
 	case DSLSymbol::SymbolType::Placeholder:
 		return std::get<DSLSymbol::Placeholder>(symbol->data).expectedType;
 	case DSLSymbol::SymbolType::MemberAccess:
-		return std::get<DSLSymbol::MemberAccess>(symbol->data).memberName == "pos" ? DSLType::Vector3 : DSLType::Void;
+		return std::get<DSLSymbol::MemberAccess>(symbol->data).type; // stamped from the member registry at author/load time
 	case DSLSymbol::SymbolType::Expression:
 	{
 		const DSLSymbol::Expression& e = std::get<DSLSymbol::Expression>(symbol->data);
@@ -410,6 +447,20 @@ export class DSL
 {
 public:
 	std::string filePath;
-	std::vector<std::unique_ptr<DSLSymbol>> sidebar; // VariableDeclaration entries (World/Entity/component kinds); line == nullptr
+	std::vector<std::unique_ptr<DSLSymbol>> sidebar; // VariableDeclaration entries (self + engine-object kinds,
+	                                                  // built once by ScriptBindings); line == nullptr. ALL bindings
+	                                                  // exist here for stable identity -- requiredComponents below
+	                                                  // gates which are offered/legal, never which are built
 	DSLScriptFile file;
+	// The component kinds this script REQUIRES on its entity (authored via the sidebar panel's checkboxes,
+	// serialized as the .dsl "//@@require" line). Only required components' bindings appear in autocomplete,
+	// and M6's transpiler exports the set so a script is only assignable to entities that have them all --
+	// which is what makes every component binding non-null by construction.
+	std::vector<DSLComponentKind> requiredComponents;
 };
+
+export inline bool dslIsComponentRequired(const DSL& document, DSLComponentKind kind)
+{
+	return std::find(document.requiredComponents.begin(), document.requiredComponents.end(), kind)
+		!= document.requiredComponents.end();
+}
