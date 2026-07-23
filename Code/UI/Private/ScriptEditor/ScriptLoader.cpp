@@ -771,12 +771,19 @@ namespace
 	};
 }
 
-bool ScriptLoader::save(DSL& document, const std::string& path)
+bool ScriptLoader::save(DSL& document, const std::string& path, const std::string& generatedCode)
 {
 	std::ofstream file(path, std::ios::out | std::ios::binary | std::ios::trunc);
 	if (!file.is_open())
 		return false;
 
+	if (!generatedCode.empty())
+	{
+		file << generatedCode;
+		if (generatedCode.back() != '\n')
+			file << '\n';
+		file << '\n';
+	}
 	file << "//@@dsl 1\n";
 	if (!document.requiredComponents.empty())
 	{

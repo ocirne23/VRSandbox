@@ -8,6 +8,7 @@ import :DSL;
 import :ScriptLang;
 import :ScriptEditor;
 import :ScriptLoader;
+import :Transpiler;
 
 using ST = DSLSymbol::SymbolType;
 
@@ -5640,11 +5641,9 @@ void ScriptEditor::saveDocument()
 	const std::string path = m_pathBuf;
 	if (path.empty())
 		return;
-	if (ScriptLoader::save(m_document, path))
-	{
-		m_document.filePath = path;
+	m_document.filePath = path; // the transpiler derives the generated class name from it
+	if (ScriptLoader::save(m_document, path, Transpiler::transpile(m_document, m_bindings)))
 		Log::info("Script saved to " + path);
-	}
 	else
 		Log::error("Failed to write " + path);
 }

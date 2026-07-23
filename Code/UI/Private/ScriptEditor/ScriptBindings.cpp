@@ -19,15 +19,15 @@ namespace
 		static const std::vector<BindingObject> table = {
 			{ "self", T::Entity, DSLComponentKind::None, "self",
 				{
-					{ "setEnabled",     T::Void,  { { "enabled", T::Bool } },                      "ctx.entitySetEnabled(self, $1)" },
-					{ "setAnimFloat",   T::Void,  { { "param", T::String }, { "value", T::Float } }, "ctx.entitySetAnimFloat(self, $1, $2)" },
-					{ "setAnimBool",    T::Void,  { { "param", T::String }, { "value", T::Bool } },  "ctx.entitySetAnimBool(self, $1, $2)" },
-					{ "setAnimTrigger", T::Void,  { { "param", T::String } },                      "ctx.entitySetAnimTrigger(self, $1)" },
-					{ "getChildCount",  T::Int,   {},                                             "ctx.entityGetChildCount(self)" },
-					{ "getBoundsRadius",T::Float, {},                                             "ctx.entityGetBoundsRadius(self)" },
+					{ "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "$r.setEnabled($1)" },
+					{ "setAnimFloat",   T::Void,  { { "param", T::String }, { "value", T::Float } }, "$r.setAnimFloat($1, $2)" },
+					{ "setAnimBool",    T::Void,  { { "param", T::String }, { "value", T::Bool } },  "$r.setAnimBool($1, $2)" },
+					{ "setAnimTrigger", T::Void,  { { "param", T::String } },                        "$r.setAnimTrigger($1)" },
+					{ "getChildCount",  T::Int,   {},                                               "$r.getChildCount()" },
+					{ "getBoundsRadius",T::Float, {},                                               "$r.getBoundsRadius()" },
 				},
 				{
-					{ "pos", T::Vector3, "self->pos" },
+					{ "pos", T::Vector3, "$r.pos" },
 				} },
 			{ "physics", T::PhysicsComponent, DSLComponentKind::Physics, "ctx->entityGetPhysicsComponent(self)",
 				{

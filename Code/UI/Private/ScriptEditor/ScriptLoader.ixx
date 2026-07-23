@@ -32,11 +32,13 @@ public:
 		std::string error; // human-readable, "<path>(<line>): <what>" -- empty on success
 	};
 
-	// Writes document.file as a "//"-commented expanded-view DSL block. False = the file couldn't be opened
-	// for writing. Sidebar bindings and builtins are fixed editor context, deliberately NOT serialized -- a
-	// future version adds "//@bind" lines when M5 makes the sidebar user-editable (old files without them just
-	// keep getting the default sidebar, so that stays backward compatible).
-	static bool save(DSL& document, const std::string& path);
+	// Writes `generatedCode` (the Transpiler's C++ output -- may be empty) followed by document.file as a
+	// "//@"-commented expanded-view DSL block: ONE dual-purpose file whose only non-comment content is the
+	// generated C++, with the DSL source riding below as the marker block load() reads back (it ignores
+	// everything outside the markers, the generated code included). False = the file couldn't be opened for
+	// writing. Sidebar bindings/builtins are fixed editor context, never serialized; the require set rides as
+	// the "//@@require" directive line.
+	static bool save(DSL& document, const std::string& path, const std::string& generatedCode);
 
 	// Parses a file save() wrote and REPLACES document.file.lines (+ requiredComponents, from the file's
 	// "//@@require" line) on success; on failure the document is left untouched. document.sidebar, `builtins`
