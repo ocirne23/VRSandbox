@@ -732,6 +732,9 @@ bool AutoCompleteRules::isFunctionNameTaken(const std::string& name, const DSLSc
 {
 	using ST = DSLSymbol::SymbolType;
 
+	if (isReservedWord(name))
+		return true;
+
 	for (const std::unique_ptr<DSLSymbol>& s : builtins)
 		if (s->type == ST::FunctionDeclaration && std::get<DSLSymbol::FunctionDeclaration>(s->data).name == name)
 			return true;
@@ -976,10 +979,43 @@ DSLType AutoCompleteRules::expectedTypeForSlot(const SlotRef& slot, const DSLScr
 	}
 }
 
+bool AutoCompleteRules::isReservedWord(const std::string& name)
+{
+	// Every fixed word the grammar's statement/expression parsers (ScriptLang.cpp's flowControlKeyword,
+	// ScriptLoader.cpp's matching literal checks) match LITERALLY -- a name equal to one of these would silently
+	// misparse as the keyword instead of an identifier once the document round-trips through the loader's
+	// plain-text parser. "end" is deliberately NOT here: it's never a real stored symbol (DSL.ixx -- purely a
+	// synthetic render/load artifact recognized only as a whole line consisting of exactly that one token, see
+	// ScriptLoader.cpp), and no legitimate statement is ever just a bare identifier with nothing else (a
+	// declaration needs a type before the name, an assignment an operator, a call parens), so a variable/
+	// function actually named "end" can never produce that single-token line -- safe to allow.
+	static const char* const kKeywords[] = {
+		"if", "elseif", "else", "while", "for", "return", "break", "function", "true", "false",
+		"ctx", "self" // the Transpiler's auto-injected context parameter (see Transpiler::emitFunction)
+	};
+	for (const char* keyword : kKeywords)
+		if (name == keyword)
+			return true;
+
+	// Type keywords -- the exact set typeKeywordCandidates offers (primitives + every registered struct), so
+	// this stays in sync automatically as the struct registry grows.
+	for (DSLType t : { DSLType::Int, DSLType::Float, DSLType::Bool, DSLType::String })
+		if (name == dslTypeName(t))
+			return true;
+	for (const BindingStruct& structDef : Globals::scriptBindings.structs())
+		if (name == structDef.name)
+			return true;
+
+	return false;
+}
+
 bool AutoCompleteRules::isNameInScope(const std::string& name, const DSLCodeLine& atLine, const DSLScriptFile& file,
 	const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, DSLSymbol* excludeVariable)
 {
 	using ST = DSLSymbol::SymbolType;
+
+	if (isReservedWord(name))
+		return true;
 
 	// Sidebar bindings are visible everywhere.
 	for (const std::unique_ptr<DSLSymbol>& s : sidebar)

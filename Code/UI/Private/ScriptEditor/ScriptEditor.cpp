@@ -2520,6 +2520,8 @@ std::string ScriptEditor::currentParamPrefix() const
 
 bool ScriptEditor::isPendingParamNameTaken(const std::string& name) const
 {
+	if (AutoCompleteRules::isReservedWord(name))
+		return true;
 	for (const std::string& existing : m_pendingParamNames)
 		if (existing == name)
 			return true;
@@ -6126,7 +6128,7 @@ void ScriptEditor::saveDocument()
 	const std::string path = m_pathBuf;
 	if (path.empty())
 		return;
-	m_document.filePath = path; // the transpiler derives the generated class name from it
+	m_document.filePath = path;
 	if (ScriptLoader::save(m_document, path, Transpiler::transpile(m_document, m_bindings)))
 		Log::info("Script saved to " + path);
 	else

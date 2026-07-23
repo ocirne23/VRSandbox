@@ -586,6 +586,10 @@ namespace
 			if (t.size() < 2 || t[1].kind != Token::Kind::Identifier)
 				return failValue("expected a variable name after '" + t[0].text + "'");
 			const std::string& name = t[1].text;
+			// The loader-side twin of the editor's isNameInScope gate -- keywords/"ctx" are reserved exactly
+			// like an actual collision (see AutoCompleteRules::isReservedWord).
+			if (AutoCompleteRules::isReservedWord(name))
+				return failValue("'" + name + "' is reserved");
 			for (DSLSymbol* var : scopeVars)
 				if (std::get<DSLSymbol::VariableDeclaration>(var->data).name == name)
 					return failValue("'" + name + "' is already declared in this function");
@@ -747,6 +751,13 @@ namespace
 				return nullptr;
 			}
 			const std::string& name = t[1].text;
+			// The loader-side twin of the editor's isFunctionNameTaken gate -- keywords/"ctx" are reserved
+			// exactly like an actual collision (see AutoCompleteRules::isReservedWord).
+			if (AutoCompleteRules::isReservedWord(name))
+			{
+				fail("'" + name + "' is reserved");
+				return nullptr;
+			}
 			for (DSLSymbol* func : userFunctions)
 				if (std::get<DSLSymbol::FunctionDeclaration>(func->data).name == name)
 				{
@@ -783,6 +794,11 @@ namespace
 						|| part[1].kind != Token::Kind::Identifier)
 					{
 						fail("malformed parameter in 'function " + name + "' (expected \"[ref] type name\")");
+						return nullptr;
+					}
+					if (AutoCompleteRules::isReservedWord(part[1].text))
+					{
+						fail("'function " + name + "' can't declare a parameter named '" + part[1].text + "' -- it's reserved");
 						return nullptr;
 					}
 					for (DSLSymbol* prev : params)

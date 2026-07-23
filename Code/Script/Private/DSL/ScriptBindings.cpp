@@ -61,65 +61,74 @@ namespace
 	}
 
 	// THE exposure table for binding OBJECTS + the Engine free-function section. One BindingFunc row exposes
-	// one engine function; emit templates ("$r" = the object's generated-class member, "$1..$n" = arguments,
-	// "ctx." = the global context) are consumed by M6's transpiler. Everything maps to the existing
-	// ScriptContext ABI (ScriptAPI.h) -- entries needing DSL-side Entity VALUES (spawnEntity returning one)
-	// stay deferred until Entity becomes a first-class value.
+	// one engine function; emit templates ("$r" = the receiver's own emitted expression, "$1..$n" = arguments)
+	// are consumed by Transpiler's callText/memberText. Every generated function gets `ctx`/`self` auto-injected
+	// as its first two parameters (see Transpiler::emitFunction), so templates reference them directly by name
+	// ("ctx->...", the literal "self") rather than through any wrapper object -- self's own functions/members
+	// call straight through the real ctx-> thunks, and a component member (self.physics) IS the handle-fetch
+	// expression itself, re-evaluated at each use (no caching, unlike the node graph's explicit "Get Component"
+	// node). Entries needing DSL-side Entity VALUES (spawnEntity returning one) stay deferred until Entity
+	// becomes a first-class value.
 	const std::vector<BindingObject>& bindingTable()
 	{
 		using T = DSLType;
 		static const std::vector<BindingObject> table = {
 			// physics/audio/force are NOT sidebar-top-level -- they're reached only through self's own members
 			// below (self.physics.applyImpulse(...)), never as a bare "physics" identifier.
-			{ "self", T::Entity, "self", /*sidebarTopLevel*/ true,
+			{ "self", T::Entity, /*sidebarTopLevel*/ true,
 				{
-					{ "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "$r.setEnabled($1)" },
-					{ "setAnimFloat",   T::Void,  { { "param", T::String }, { "value", T::Float } }, "$r.setAnimFloat($1, $2)" },
-					{ "setAnimBool",    T::Void,  { { "param", T::String }, { "value", T::Bool } },  "$r.setAnimBool($1, $2)" },
-					{ "setAnimTrigger", T::Void,  { { "param", T::String } },                        "$r.setAnimTrigger($1)" },
-					{ "getChildCount",  T::Int,   {},                                               "$r.getChildCount()" },
-					{ "getBoundsRadius",T::Float, {},                                               "$r.getBoundsRadius()" },
+					{ "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "ctx->entitySetEnabled($r, $1)" },
+					{ "setAnimFloat",   T::Void,  { { "param", T::String }, { "value", T::Float } }, "ctx->entitySetAnimFloat($r, $1, $2)" },
+					{ "setAnimBool",    T::Void,  { { "param", T::String }, { "value", T::Bool } },  "ctx->entitySetAnimBool($r, $1, $2)" },
+					{ "setAnimTrigger", T::Void,  { { "param", T::String } },                        "ctx->entitySetAnimTrigger($r, $1)" },
+					{ "getChildCount",  T::Int,   {},                                               "ctx->entityGetChildCount($r)" },
+					{ "getBoundsRadius",T::Float, {},                                               "ctx->entityGetBoundsRadius($r)" },
 				},
 				{
-					{ "pos",     kVec3,               "$r.pos" },
-					{ "physics", T::PhysicsComponent, "$r.physics", /*writable*/ false, DSLComponentKind::Physics },
-					{ "audio",   T::AudioComponent,   "$r.audio",   /*writable*/ false, DSLComponentKind::Audio },
-					{ "force",   T::ForceComponent,   "$r.force",   /*writable*/ false, DSLComponentKind::Force },
+					{ "pos",     kVec3,               "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
+					{ "physics", T::PhysicsComponent, "ctx->entityGetPhysicsComponent($r)", /*writable*/ false, DSLComponentKind::Physics },
+					{ "audio",   T::AudioComponent,   "ctx->entityGetAudioComponent($r)",   /*writable*/ false, DSLComponentKind::Audio },
+					{ "force",   T::ForceComponent,   "ctx->entityGetForceComponent($r)",   /*writable*/ false, DSLComponentKind::Force },
 				} },
-			{ "physics", T::PhysicsComponent, "ctx->entityGetPhysicsComponent(self)", /*sidebarTopLevel*/ false,
+			{ "physics", T::PhysicsComponent, /*sidebarTopLevel*/ false,
 				{
-					{ "getVelocity",  kVec3,   {},                                          "$r.getVelocity()" },
-					{ "setVelocity",  T::Void, { { "velocity", kVec3 } },                   "$r.setVelocity($1)" },
-					{ "applyImpulse", T::Void, { { "impulse", kVec3 } },                    "$r.applyImpulse($1)" },
-					{ "isAwake",      T::Bool, {},                                          "$r.isAwake()" },
-					{ "teleport",     T::Void, { { "position", kVec3 }, { "eulerDeg", kVec3 } }, "$r.teleport($1, $2)" },
+					{ "getVelocity",  kVec3,   {},                                          "ctx->physicsGetVelocity($r)" },
+					{ "setVelocity",  T::Void, { { "velocity", kVec3 } },                   "ctx->physicsSetVelocity($r, $1)" },
+					{ "applyImpulse", T::Void, { { "impulse", kVec3 } },                    "ctx->physicsApplyImpulse($r, $1)" },
+					{ "isAwake",      T::Bool, {},                                          "(ctx->physicsIsAwake($r) != 0)" },
+					{ "teleport",     T::Void, { { "position", kVec3 }, { "eulerDeg", kVec3 } }, "ctx->physicsTeleport($r, $1, $2)" },
 				},
 				{} },
-			{ "audio", T::AudioComponent, "ctx->entityGetAudioComponent(self)", /*sidebarTopLevel*/ false,
+			{ "audio", T::AudioComponent, /*sidebarTopLevel*/ false,
 				{
-					{ "trigger", T::Void, { { "alias", T::String } }, "$r.trigger($1)" },
-					{ "stop",    T::Void, { { "alias", T::String } }, "$r.stop($1)" },
+					// audioTrigger's full ABI takes an override mask + position/volume/pitch; the DSL's one-arg
+					// trigger(alias) always plays unmodified (mask 0, defaults ignored by the host in that case).
+					{ "trigger", T::Void, { { "alias", T::String } }, "ctx->audioTrigger($r, self, $1, 0, glm::vec3(0.0f), 1.0f, 1.0f)" },
+					{ "stop",    T::Void, { { "alias", T::String } }, "ctx->audioStop($r, $1)" },
 				},
 				{} },
-			{ "force", T::ForceComponent, "ctx->entityGetForceComponent(self)", /*sidebarTopLevel*/ false,
+			{ "force", T::ForceComponent, /*sidebarTopLevel*/ false,
 				{
-					{ "getOutput",   T::Float, {},                          "$r.getOutput()" },
-					{ "setOutput",   T::Void,  { { "output", T::Float } },  "$r.setOutput($1)" },
-					{ "getReach",    T::Float, {},                          "$r.getReach()" },
-					{ "setReach",    T::Void,  { { "reach", T::Float } },   "$r.setReach($1)" },
-					{ "setTeam",     T::Void,  { { "team", T::Int } },      "$r.setTeam($1)" },
-					{ "getPressure", T::Float, {},                          "$r.getPressure()" },
+					{ "getOutput",   T::Float, {},                          "ctx->forceGetOutput($r)" },
+					{ "setOutput",   T::Void,  { { "output", T::Float } },  "ctx->forceSetOutput($r, $1)" },
+					{ "getReach",    T::Float, {},                          "ctx->forceGetReach($r)" },
+					{ "setReach",    T::Void,  { { "reach", T::Float } },   "ctx->forceSetReach($r, $1)" },
+					{ "setTeam",     T::Void,  { { "team", T::Int } },      "ctx->forceSetTeam($r, $1)" },
+					{ "getPressure", T::Float, {},                          "ctx->forceGetPressure($r)" },
 				},
 				{} },
-			// The Engine section: FREE calls in the DSL, ctx.* in generated C++.
-			{ nullptr, T::Void, nullptr, /*sidebarTopLevel*/ false,
+			// The Engine section: FREE calls in the DSL, ctx-> thunks in generated C++ (ctx is always in scope --
+			// every generated function receives it, see Transpiler::emitFunction).
+			{ nullptr, T::Void, /*sidebarTopLevel*/ false,
 				{
-					{ "print",           T::Void,  {},                                                       "ctx.log($1)" }, // vararg; M6 handles {} interpolation
-					{ "rayCast",         T::Float, { { "pos", kVec3 }, { "dir", kVec3 }, { "maxRayDist", T::Float } }, "ctx.physicsRayCastDistance($1, $2, $3)" },
-					{ "isKeyDown",       T::Bool,  { { "keyName", T::String } },                             "(ctx.isKeyDown($1) != 0)" },
-					{ "sendEvent",       T::Void,  { { "eventName", T::String } },                           "ctx.sendEvent($1)" },
-					{ "setSun",          T::Void,  { { "direction", kVec3 }, { "color", kVec3 }, { "intensity", T::Float } }, "ctx.setSun($1, $2, $3)" },
-					{ "spawnPointLight", T::Void,  { { "position", kVec3 }, { "range", T::Float }, { "color", kVec3 }, { "intensity", T::Float } }, "ctx.spawnPointLight($1, $2, $3, $4)" },
+					{ "print",           T::Void,  {},                                                       "ctx->log($1)" }, // vararg; string interpolation is future work
+					// NOTE: no physicsRayCastDistance thunk exists yet on the real ABI (only physicsRayCast,
+					// which returns hit/miss + out-params) -- this entry stays a placeholder until that's added.
+					{ "rayCast",         T::Float, { { "pos", kVec3 }, { "dir", kVec3 }, { "maxRayDist", T::Float } }, "ctx->physicsRayCastDistance($1, $2, $3)" },
+					{ "isKeyDown",       T::Bool,  { { "keyName", T::String } },                             "(ctx->isKeyDown($1) != 0)" },
+					{ "sendEvent",       T::Void,  { { "eventName", T::String } },                           "ctx->sendEvent($1)" },
+					{ "setSun",          T::Void,  { { "direction", kVec3 }, { "color", kVec3 }, { "intensity", T::Float } }, "ctx->setSun($1, $2, $3)" },
+					{ "spawnPointLight", T::Void,  { { "position", kVec3 }, { "range", T::Float }, { "color", kVec3 }, { "intensity", T::Float } }, "ctx->spawnPointLight($1, $2, $3, $4)" },
 				},
 				{} },
 		};

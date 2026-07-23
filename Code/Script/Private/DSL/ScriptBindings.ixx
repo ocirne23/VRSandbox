@@ -8,13 +8,15 @@ import :DSL;
 // one BindingFunc row here; exposing brand-new C++ additionally costs the ABI's own minimal trio (X-macro row +
 // thunk + ctor init line in Code/Entity/Private/ScriptContext.cpp).
 //
-// The user's transpilation model (M6, emit templates stored here but unconsumed until then): each script
-// becomes a generated C++ class whose MEMBERS are the entity's own things -- `self`, plus one wrapper member
-// per REQUIRED component, each initialized once at entry-point entry (`memberEmit`) -- so DSL
-// `physics.applyImpulse(...)` transpiles to member-pattern access ("$r" in a function's `emit` is that
-// member); global engine functionality goes through the ctx struct ("ctx." emits). A script declares which
-// components it requires (DSL::requiredComponents); assignment-time validation (M6) guarantees required
-// members are never null.
+// The transpilation model (Transpiler.cpp): each DSL function becomes its own free `SCRIPT_EXPORT` function,
+// like the node system's generated .scr code -- no wrapper class, no per-component member. `ctx`/`self` are
+// auto-injected as every generated function's first two parameters (invisible to the DSL author), so a
+// binding's `emit` template can reference them directly ("$r" = the receiver's own emitted expression, "$1..$n"
+// = arguments): self's own functions/members call straight through the real ctx-> thunks (e.g.
+// "ctx->entitySetEnabled($r, $1)"), and a component member (self.physics) resolves to the raw handle-fetch
+// expression itself ("ctx->entityGetPhysicsComponent($r)") -- re-fetched at each use, no caching. A script
+// declares which components it requires (DSL::requiredComponents); assignment-time validation (future work)
+// guarantees required members are never null.
 //
 // Editor-side, the registry replaces the hardcoded builtins: build() constructs the SAME two DSLSymbol vectors
 // every consumer (AutoCompleteRules/ScriptLoader/editor) already reads -- sidebar VariableDeclarations for the
@@ -35,7 +37,7 @@ export struct BindingFunc
 	const char* name;
 	DSLType returnType;
 	std::vector<BindingParam> params;
-	const char* emit;               // M6 template: "$r" = the owning object's class member (empty owner = "ctx."), "$1..$n" = args
+	const char* emit;               // "$r" = the receiver's own emitted expression (empty for a free/Engine call), "$1..$n" = args
 	bool isPositionalCall = false;  // terse constructors (vec2/3/4): call sites render positionally
 };
 
@@ -43,7 +45,8 @@ export struct BindingMember
 {
 	const char* name;
 	DSLType type;
-	const char* emit;     // M6 template: e.g. "$r.pos" -- "$r" is the receiver's own emitted expression
+	const char* emit;     // e.g. "$r->pos" (a real field) or "ctx->entityGetPhysicsComponent($r)" (a handle
+	                       // fetch) -- "$r" is the receiver's own emitted expression
 	bool writable = true; // false = read-only in the DSL (no `x.member = ...` statements)
 	// None = always available; else this member (e.g. self.physics) is only offered/legal while the script
 	// requires this component -- the member-level twin of BindingObject::requiredComponent used to be.
@@ -71,7 +74,6 @@ export struct BindingObject
 {
 	const char* name;                // the DSL identifier; nullptr = the Engine (free-function) section
 	DSLType type;                    // the object's engine-object DSLType (Void for the Engine section)
-	const char* memberEmit;          // M6: the generated class member's initializer, e.g. "ctx->entityGetPhysicsComponent(self)"
 	bool sidebarTopLevel = true;     // false = no root-level sidebar VariableDeclaration/candidate of its own
 	                                  // (see ScriptBindings::build) -- reachable only via another binding's member
 	std::vector<BindingFunc> functions;
@@ -109,7 +111,8 @@ public:
 	// The struct's own member functions' built symbols, parallel to structFor(type)->functions.
 	std::span<DSLSymbol* const> structFunctionSymbols(DSLType type) const;
 
-	// M6 hook: the emit template a built function symbol was declared with (nullptr if not a registry symbol).
+	// The emit template a built function symbol was declared with (nullptr if not a registry symbol) -- what
+	// Transpiler's callText substitutes against.
 	const char* emitFor(const DSLSymbol* funcDecl) const;
 
 private:

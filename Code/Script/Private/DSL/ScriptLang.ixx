@@ -218,6 +218,16 @@ public:
 	// declared return type (DSLType::Void if none is found).
 	static DSLType enclosingFunctionReturnType(const DSLCodeLine& atLine, const DSLScriptFile& file);
 
+	// Whether `name` is a word the GRAMMAR itself gives meaning to -- a flow-control/declaration keyword (if,
+	// elseif, else, while, for, return, break, function, end), a boolean literal (true, false), a type keyword
+	// (int/float/bool/string plus every registered struct name, the same set typeKeywordCandidates offers), or
+	// "ctx" (the Transpiler's auto-injected context parameter, see Transpiler::emitFunction). A variable/
+	// function/parameter named one of these would silently misparse as the keyword when the document round-
+	// trips through ScriptLoader's plain text-based parser (which matches these words literally) -- the ONE
+	// place this list lives, so isNameInScope/isFunctionNameTaken/the editor's parameter check/the loader's own
+	// checks can't drift apart.
+	static bool isReservedWord(const std::string& name);
+
 	// Whether `name` collides with any variable declared anywhere in atLine's enclosing function (sidebar
 	// bindings always count too) -- used to block declaring or renaming a variable to an already-taken name.
 	// Deliberately broader than candidatesFor's in-scope-variables scan (which is direction-sensitive, only
