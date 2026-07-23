@@ -6341,6 +6341,24 @@ void ScriptEditor::render()
 	if (!m_hasFocus && m_composeMode != ComposeMode::None)
 		cancelCompose(); // panel lost focus mid-composition -- don't leave an unresolved edit hanging
 
+	// Any file dragged out of the asset browser carries a SCRIPT_FILE payload for both .scr and .dsl (see
+	// AssetBrowser::isScriptFile) -- accept a drop anywhere over this window and open it here when it's a .dsl.
+	// A dropped .scr belongs in the node editor instead, so it's left alone rather than force-opened into the
+	// wrong format.
+	if (ImGui::BeginDragDropTargetCustom(
+		ImRect(ImGui::GetWindowPos(), ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowSize().x,
+			ImGui::GetWindowPos().y + ImGui::GetWindowSize().y)),
+		ImGui::GetID("##dsl_drop")))
+	{
+		if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCRIPT_FILE"))
+		{
+			const std::string droppedPath = static_cast<const char*>(payload->Data);
+			if (std::filesystem::path(droppedPath).extension() == ".dsl")
+				requestOpen(droppedPath);
+		}
+		ImGui::EndDragDropTarget();
+	}
+
 	renderSidebarPanel();
 	ImGui::SameLine();
 
@@ -6418,4 +6436,12 @@ void ScriptEditor::loadDocument()
 	m_pendingSelectLineEnd = -1;
 	m_pendingComposeReturnValue = false;
 	Log::info("Script loaded from " + path);
+}
+
+void ScriptEditor::requestOpen(const std::string& path)
+{
+	if (path.empty() || path == m_document.filePath)
+		return; // already the active document
+	strncpy_s(m_pathBuf, sizeof(m_pathBuf), path.c_str(), sizeof(m_pathBuf) - 1);
+	loadDocument();
 }

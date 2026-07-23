@@ -284,15 +284,23 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
         ImGui::End();
     }
 
-    // When the hierarchy selection changes to an entity carrying a script, make that script active in the
-    // editor (guarded by the unsaved-changes prompt below if the current graph has pending edits).
+    // When the hierarchy selection changes to an entity carrying a script, make that script active in whichever
+    // editor owns its format: a .scr into the node editor (guarded by the unsaved-changes prompt below if the
+    // current graph has pending edits), a .dsl straight into the Script Editor (no such prompt there -- see
+    // ScriptEditor::requestOpen).
     if (Entity* selected = m_sceneView.getSelected(); selected != m_scriptSelectionTracked)
     {
         m_scriptSelectionTracked = selected;
         if (selected)
             if (ScriptComponent* script = getComponent<ScriptComponent>(selected))
-				if (script->scriptModule && script->scriptModule->scriptPath != m_scene.scriptPath())
-					requestOpenScript(script->scriptModule->scriptPath);
+                if (script->scriptModule)
+                {
+                    const std::string& path = script->scriptModule->scriptPath;
+                    if (std::filesystem::path(path).extension() == ".dsl")
+                        m_scriptEditor.requestOpen(path);
+                    else if (path != m_scene.scriptPath())
+                        requestOpenScript(path);
+                }
     }
 
     {
@@ -346,9 +354,16 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             m_assetBrowser.render();
         ImGui::End();
 
-        // Route .scr file actions from the asset browser into the Script editor.
+        // Route script file actions from the asset browser (double-click, right-click "Open Script") into
+        // whichever editor owns the format: .dsl into the Script Editor, everything else (.scr) into the node
+        // editor, same split as the Scene-selection routing above.
         if (std::string openPath = m_assetBrowser.takeScriptOpenRequest(); !openPath.empty())
-            m_scene.open(openPath);
+        {
+            if (std::filesystem::path(openPath).extension() == ".dsl")
+                m_scriptEditor.requestOpen(openPath);
+            else
+                m_scene.open(openPath);
+        }
         if (std::string createPath = m_assetBrowser.takeScriptCreateRequest(); !createPath.empty())
         {
             m_scene.newGraph();

@@ -227,6 +227,15 @@ public:
 		return requests;
 	}
 
+	// Makes `path` the active document, same effect as typing it into the toolbar field and pressing Load --
+	// used by UI.cpp to follow the Scene hierarchy selection onto a .dsl-scripted entity (mirroring the node
+	// editor's requestOpenScript) and to route the asset browser's open/drag actions for .dsl files here instead
+	// of into the node editor. No unsaved-changes prompt: unlike the node graph, this editor has no separate
+	// dirty flag to guard (every edit already lives in m_document; Save is the only thing that ever touches
+	// disk), so switching documents is exactly what the toolbar's own Load button already does. No-op if `path`
+	// is empty or already the open document.
+	void requestOpen(const std::string& path);
+
 private:
 
 	void buildExampleDocument(); // one-time construction of the starting document (empty update()) + sidebar/builtins
