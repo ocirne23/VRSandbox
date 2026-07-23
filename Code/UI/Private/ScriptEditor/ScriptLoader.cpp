@@ -19,7 +19,10 @@ namespace
 {
 	using ST = DSLSymbol::SymbolType;
 
-	constexpr const char* kBlockEnd = "//@end";
+	// Every DSL line is prefixed "//@" (not a bare "//") so ordinary C++ comments in the future transpiled
+	// output can never be mistaken for DSL content; the block markers double the '@' ("//@@dsl"/"//@@end")
+	// since a DSL `end` line itself serializes as "//@end".
+	constexpr const char* kBlockEnd = "//@@end";
 
 	// ---- tokens ----
 
@@ -731,10 +734,10 @@ bool ScriptLoader::save(DSL& document, const std::string& path)
 	if (!file.is_open())
 		return false;
 
-	file << "//@dsl 1\n";
+	file << "//@@dsl 1\n";
 	for (const SyntaxLine& line : Syntax::format(document.file, /*compact*/ false))
 	{
-		file << "//";
+		file << "//@";
 		for (int i = 0; i < line.scopeLevel; ++i)
 			file << '\t';
 		file << line.text << '\n';
@@ -759,8 +762,9 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 		return result;
 	}
 
-	// Extract the "//@dsl" block: everything between the marker and "//@end" (or the first non-"//" line/EOF),
-	// prefixes stripped. Anything outside the block -- the future transpiled C++ -- is ignored entirely.
+	// Extract the "//@@dsl" block: every following "//@"-prefixed line until "//@@end" (or the first
+	// unprefixed line/EOF), prefixes stripped. Anything outside the block -- the future transpiled C++,
+	// ordinary "//" comments included -- is ignored entirely.
 	std::vector<BlockLine> blockLines;
 	{
 		std::string raw;
@@ -773,9 +777,9 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 				raw.pop_back();
 			if (!inBlock)
 			{
-				if (raw.rfind("//@dsl", 0) == 0)
+				if (raw.rfind("//@@dsl", 0) == 0)
 				{
-					std::string version = raw.substr(6);
+					std::string version = raw.substr(7);
 					version.erase(0, version.find_first_not_of(" \t"));
 					if (version != "1")
 						return failAt(lineNo, "unsupported format version '" + version + "' (this build reads version 1)");
@@ -783,18 +787,18 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 				}
 				continue;
 			}
-			if (raw == kBlockEnd || raw.rfind("//", 0) != 0)
+			if (raw == kBlockEnd || raw.rfind("//@", 0) != 0)
 			{
 				done = true;
 				continue;
 			}
 			BlockLine& line = blockLines.emplace_back();
 			line.fileLineNo = lineNo;
-			line.text = raw.substr(2);
+			line.text = raw.substr(3);
 		}
 		if (!inBlock && blockLines.empty())
 		{
-			result.error = "'" + path + "' has no //@dsl block";
+			result.error = "'" + path + "' has no //@@dsl block";
 			return result;
 		}
 	}

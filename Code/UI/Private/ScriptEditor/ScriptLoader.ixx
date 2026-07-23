@@ -5,10 +5,12 @@ import :DSL;
 
 // Save/load for the DSL editor's native on-disk format (.dsl). The format IS the editor's EXPANDED view:
 // save() writes the exact text Syntax::format renders (fully typed), one line per SyntaxLine, each prefixed
-// "//" and bracketed by "//@dsl <version>" ... "//@end" markers -- the whole DSL block reads as C++ comments,
-// leaving the rest of the file free to hold the transpiled C++ itself later (one dual-purpose file: everything
-// that is not valid C++ stays commented out). load() is the exact inverse: it finds the marker block, strips
-// the "//" prefixes, and parses the expanded-view text back into DSLSymbol structures -- names resolve against
+// "//@" and bracketed by "//@@dsl <version>" ... "//@@end" markers -- the whole DSL block reads as C++
+// comments, leaving the rest of the file free to hold the transpiled C++ itself later (one dual-purpose file:
+// everything that is not valid C++ stays commented out; the "@" keeps DSL lines distinguishable from the
+// generated code's own ordinary "//" comments, and the markers double it since a DSL `end` line serializes as
+// "//@end"). load() is the exact inverse: it finds the marker block, strips the "//@" prefixes, and parses the
+// expanded-view text back into DSLSymbol structures -- names resolve against
 // the document's own functions (two passes, so forward calls work), its sidebar bindings, and the editor's
 // builtin registry. References are stored by NAME, never by index, which is what keeps old files loadable as
 // the builtin/sidebar lists evolve.
