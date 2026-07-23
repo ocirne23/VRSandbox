@@ -44,6 +44,9 @@ namespace
 	// a marker comment rather than guessing, since M1 deliberately doesn't cover the rest of the grammar yet.
 	std::string emitStatement(const DSLSymbol& head)
 	{
+		if (head.type == DSLSymbol::SymbolType::Comment)
+			return "\t// " + std::get<DSLSymbol::Comment>(head.data).text;
+
 		if (head.type != DSLSymbol::SymbolType::FunctionCall)
 			return "\t// TODO(DSL M1): unsupported statement kind";
 

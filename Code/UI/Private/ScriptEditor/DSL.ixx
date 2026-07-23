@@ -244,6 +244,12 @@ public:
 		DSLSymbol* receiver = nullptr; // -> VariableReference
 		std::string memberName;
 	};
+	// A whole-line comment ("# ...") -- pure annotation: no cross-references, never a value, freely deletable.
+	// The Transpiler emits it as a C++ comment.
+	struct Comment
+	{
+		std::string text;
+	};
 	// A yet-unfilled slot -- what keeps the document "always compilable" even mid-edit. `expectedType` names
 	// what belongs here: DSLType::Void means a whole STATEMENT slot (AutoCompleteRules offers if/while/return/
 	// break/declare-variable/call-statement candidates); any other DSLType means a VALUE slot of that type
@@ -267,11 +273,12 @@ public:
 		FlowControl,
 		Expression,
 		MemberAccess,
+		Comment,
 		Placeholder,
 	};
 	// Named so code building a symbol from one of the alternatives above (e.g. ScriptEditor's pushSymbol helper)
 	// can take it as a plain, non-template parameter -- any alternative converts to this implicitly.
-	using Data = std::variant<Constant, TypeDeclaration, VariableReference, VariableDeclaration, FunctionCall, FunctionDeclaration, FlowControl, Expression, MemberAccess, Placeholder>;
+	using Data = std::variant<Constant, TypeDeclaration, VariableReference, VariableDeclaration, FunctionCall, FunctionDeclaration, FlowControl, Expression, MemberAccess, Comment, Placeholder>;
 
 	SymbolType type;
 	Data data;

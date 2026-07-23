@@ -711,6 +711,13 @@ void ScriptEditor::beginCompose()
 		return;
 	}
 
+	// A comment's span re-opens its free-text compose with the text restored for editing.
+	if (span->symbol != nullptr && span->symbol->type == ST::Comment)
+	{
+		enterCompose(ComposeMode::CommentText, "# ", std::get<DSLSymbol::Comment>(span->symbol->data).text);
+		return;
+	}
+
 	// A function's own NAME span (its declaration header -- call sites carry FunctionCall symbols instead, so
 	// this can only match there) renames the function, same idiom as a variable's declaration name: call sites
 	// reference the symbol and follow automatically. Never the generic statement-slot replacement its LineHead
@@ -998,6 +1005,21 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 	// can happen to it -- there is no bare form to confirm (placeholder arguments never exist).
 	if (isChainComposeMode() && tryBeginValueCallStaging())
 		return;
+
+	if (m_composeMode == ComposeMode::CommentText)
+	{
+		if (!allowCommit)
+			return; // a comment line commits whole -- Enter only (Space is content, handled before confirm)
+		DSLCodeLine* linePtr = currentLineHeadOrCancel();
+		if (linePtr == nullptr)
+			return;
+		DSLCodeLine& line = *linePtr;
+		const std::string text = m_pendingWord;
+		cancelCompose();
+		line.symbols.clear();
+		m_pendingSelectTarget = pushSymbol(line, ST::Comment, DSLSymbol::Comment{ text });
+		return;
+	}
 
 	if (m_composeMode == ComposeMode::Rename)
 	{
@@ -1723,6 +1745,11 @@ DSLSymbol* ScriptEditor::buildValueFromCandidate(const Candidate& candidate, DSL
 		return pushSymbol(line, ST::FunctionCall, DSLSymbol::FunctionCall{ candidate.refSymbol, nullptr, args });
 	}
 	case Candidate::Kind::Literal:
+		// A string literal's label carries its quotes for display; the stored Constant holds the CONTENT
+		// (rendering re-adds the quotes).
+		if (candidate.declareType == DSLType::String)
+			return pushSymbol(line, ST::Constant,
+				DSLSymbol::Constant{ DSLType::String, candidate.label.substr(1, candidate.label.size() - 2) });
 		return pushSymbol(line, ST::Constant, DSLSymbol::Constant{ candidate.declareType, candidate.label });
 	default:
 		return nullptr; // statement-only kinds (If/While/Return/Break/DeclareType) never reach here
@@ -2891,7 +2918,8 @@ namespace
 		case ST::Constant:
 		{
 			const DSLSymbol::Constant& c = std::get<DSLSymbol::Constant>(symbol->data);
-			out = PendingExprTerm{ false, Candidate{ c.value, Candidate::Kind::Literal, nullptr, c.type }, {}, {} };
+			const std::string label = (c.type == DSLType::String) ? "\"" + c.value + "\"" : c.value;
+			out = PendingExprTerm{ false, Candidate{ label, Candidate::Kind::Literal, nullptr, c.type }, {}, {} };
 			return true;
 		}
 		case ST::VariableReference:
@@ -4419,6 +4447,17 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			// Step back to re-edit the condition's bound, restored.
 			enterChainStage(ComposeMode::ForConditionValue, &m_forConditionValueChain);
 		}
+		else if (m_composeMode == ComposeMode::CommentText)
+		{
+			// Fully backspaced away: an existing comment line deletes; a fresh one just cancels back to the
+			// statement it was typed over.
+			const SyntaxSpan* span = currentSpan(m_formatted, m_cursorLine, m_cursorSpan);
+			DSLCodeLine* commentLine = (span != nullptr && span->symbol != nullptr && span->symbol->type == ST::Comment)
+				? span->symbol->line : nullptr;
+			cancelCompose();
+			if (commentLine != nullptr)
+				deleteLine(*commentLine);
+		}
 		else if (m_composeMode == ComposeMode::ReassignOp)
 		{
 			// Step back into the statement compose with the target's name re-typed for further editing.
@@ -4508,6 +4547,56 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 	const char c = charFromKeycode(static_cast<int>(evt.key.key), shift);
 	if (c == 0)
 		return;
+
+	// FREE-TEXT sub-states come before everything -- Space is content there, not a stage advance: a comment's
+	// text, and an OPEN string literal (leading '"' not yet closed) inside any value compose.
+	if (m_composeMode == ComposeMode::CommentText)
+	{
+		m_pendingWord += c;
+		return;
+	}
+	if (composing && !m_pendingWord.empty() && m_pendingWord.front() == '"'
+		&& (m_pendingWord.size() == 1 || m_pendingWord.back() != '"'))
+	{
+		m_pendingWord += c;
+		if (hasCandidateList())
+			refreshCandidates();
+		return;
+	}
+
+	// '#' turns a statement slot into a comment line ("# ..."), committing on Enter like any statement.
+	if (c == '#')
+	{
+		if (m_composeMode == ComposeMode::FilterCandidates && m_pendingWord.empty())
+		{
+			enterCompose(ComposeMode::CommentText, "# ");
+			return;
+		}
+		if (!composing)
+		{
+			const SyntaxSpan* span = currentSpan(m_formatted, m_cursorLine, m_cursorSpan);
+			if (span != nullptr && span->slot.kind == SlotRef::Kind::LineHead)
+				enterCompose(ComposeMode::CommentText, "# ");
+		}
+		return;
+	}
+
+	// '"' opens a string literal in any value compose (in-place edits included via beginCompose); the block
+	// above then swallows every character until the closing quote.
+	if (c == '"')
+	{
+		if (!composing)
+			beginCompose(); // a value span opens its in-place edit; a non-editable span leaves mode None
+		if (m_pendingWord.empty()
+			&& (isChainComposeMode()
+				|| (m_composeMode == ComposeMode::CallArgValue && !isVectorType(currentCallParamType()))))
+		{
+			m_pendingWord += c;
+			if (hasCandidateList())
+				refreshCandidates();
+		}
+		return;
+	}
 
 	if (c == ' ')
 	{
@@ -4987,6 +5076,8 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		beginCompose();
 	if (m_composeMode != ComposeMode::None)
 	{
+		if (!m_pendingWord.empty() && m_pendingWord.front() == '"')
+			return; // a CLOSED string literal takes no more characters -- confirm/operate on it, or Backspace in
 		m_pendingWord += c;
 		if (hasCandidateList())
 			refreshCandidates();
@@ -5026,6 +5117,7 @@ namespace
 	constexpr ImVec4 kColVariable{ 0.612f, 0.863f, 0.996f, 1.0f };
 	constexpr ImVec4 kColNumber{ 0.710f, 0.808f, 0.659f, 1.0f };
 	constexpr ImVec4 kColString{ 0.808f, 0.569f, 0.471f, 1.0f };
+	constexpr ImVec4 kColComment{ 0.416f, 0.600f, 0.333f, 1.0f };
 	constexpr ImVec4 kColPunct{ 0.65f, 0.65f, 0.65f, 1.0f };
 	constexpr ImVec4 kColPlaceholder{ 0.48f, 0.48f, 0.48f, 1.0f };
 
@@ -5056,6 +5148,8 @@ namespace
 		}
 		case ST::Expression: // operator spans and a group's ')'
 			return kColPunct;
+		case ST::Comment:
+			return kColComment;
 		case ST::Placeholder:
 			return kColPlaceholder;
 		default:
@@ -5390,7 +5484,6 @@ void ScriptEditor::render()
 	if (!m_hasFocus && m_composeMode != ComposeMode::None)
 		cancelCompose(); // panel lost focus mid-composition -- don't leave an unresolved edit hanging
 
-	ImGui::TextDisabled("Type over a value/operator to replace it; +-*/% after a value extends the expression. Space: next part. Enter: commit line / new line.");
 	ImGui::Separator();
 
 	renderTextArea();

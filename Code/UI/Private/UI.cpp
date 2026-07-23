@@ -333,15 +333,7 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
 
     {
         if (ImGui::Begin("Script Editor"))
-        {
             m_scriptEditor.render();
-
-            ImGui::Separator();
-            if (ImGui::Button("[DSL M1] Generate + Compile Walking-Skeleton Test"))
-                m_scriptReloadRequests.push_back(generateDslWalkingSkeletonTestScript());
-            ImGui::SameLine();
-            ImGui::TextDisabled("writes Scripts/DslWalkingSkeletonTest.scr -- point an entity's Script Path at it to run");
-        }
         ImGui::End();
     }
 

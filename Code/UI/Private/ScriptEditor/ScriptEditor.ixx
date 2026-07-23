@@ -263,6 +263,8 @@ private:
 		ReassignOp,      // picking a reassignment statement's operator (=, +=, -=, *=, /=, %=) -- entered by
 		                 // typing an operator character over a matched Reassign candidate; Space-confirming the
 		                 // candidate instead skips this stage and authors a plain `=`
+		CommentText,     // free-typing a comment line's text ("# ..."): every printable character -- Space
+		                 // included -- is content; Enter commits, Backspace past empty deletes/cancels
 		FunctionDeclareDone,       // the ')' just closed a declared function's parameter list: Enter commits
 		                           // it, '-' opens the return-type pick, Backspace reopens the parameter list
 		FunctionDeclareReturnType, // picking the "-> type" for the function being declared; confirm commits the

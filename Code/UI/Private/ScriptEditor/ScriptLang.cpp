@@ -297,6 +297,13 @@ namespace
 			appendSpan(symbol, outText, start, outSpans, slot);
 			break;
 		}
+		case ST::Comment:
+		{
+			const size_t start = outText.size();
+			outText += "# " + std::get<DSLSymbol::Comment>(symbol->data).text;
+			appendSpan(symbol, outText, start, outSpans, slot);
+			break;
+		}
 		case ST::Placeholder:
 		{
 			const DSLSymbol::Placeholder& p = std::get<DSLSymbol::Placeholder>(symbol->data);
@@ -411,8 +418,11 @@ namespace
 
 	bool isValidLiteralTextImpl(DSLType type, const std::string& text)
 	{
+		// A string literal is QUOTED, exactly once: `"..."` -- an unquoted word in a string slot names a
+		// variable/function, never a literal (the quotes are what disambiguate `s2 = s1` from `s2 = "s1"`).
 		if (type == DSLType::String)
-			return true;
+			return text.size() >= 2 && text.front() == '"' && text.back() == '"'
+				&& text.find('"', 1) == text.size() - 1;
 		if (type == DSLType::Int)
 			return looksLikeIntLiteral(text);
 		if (type == DSLType::Float)
