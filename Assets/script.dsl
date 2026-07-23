@@ -7,6 +7,11 @@ struct Script_script
 
 	void update(float deltaSec)
 	{
+		glm::vec3 test = glm::vec3(1.0f, 2.0f, 3.0f);
+		float a = test.x;
+		float b = 4.0f;
+		test.y = b;
+
 		physics.teleport(glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(1.0f, 2.0f, 3.0f));
 		if (physics.isAwake())
 		{
@@ -50,6 +55,11 @@ struct Script_script
 //@@dsl 1
 //@@require Physics
 //@function update(float deltaSec)
+//@	vec3 test = vec3(1, 2, 3)
+//@	float a = test.x
+//@	float b = 4.0
+//@	test.y = b
+//@	
 //@	physics.teleport(vec3 position = vec3(1, 2, 3), vec3 eulerDeg = vec3(1, 2, 3))
 //@	if physics.isAwake()
 //@		if isKeyDown(string keyName = "f")

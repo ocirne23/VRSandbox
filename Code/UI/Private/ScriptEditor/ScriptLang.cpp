@@ -6,6 +6,9 @@ import :ScriptLang;
 
 const char* dslTypeName(DSLType type)
 {
+	// Struct types are dynamic -- their spelling lives in the registry (see DSLType::FirstStruct).
+	if (const BindingStruct* structDef = Globals::scriptBindings.structFor(type); structDef != nullptr)
+		return structDef->name;
 	switch (type)
 	{
 	case DSLType::Void:             return "void";
@@ -13,9 +16,6 @@ const char* dslTypeName(DSLType type)
 	case DSLType::Float:            return "float";
 	case DSLType::String:          return "string";
 	case DSLType::Bool:             return "bool";
-	case DSLType::Vector2:          return "vec2";
-	case DSLType::Vector3:          return "vec3";
-	case DSLType::Vector4:          return "vec4";
 	case DSLType::Function:         return "function";
 	case DSLType::World:            return "World";
 	case DSLType::Entity:           return "Entity";
@@ -681,6 +681,12 @@ std::vector<Candidate> AutoCompleteRules::candidatesFor(DSLType expectedType, co
 	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::Variable, excludeVariable, matchesExpected);
 	addFunctionCandidates(out, file, builtins, typedPrefix, /*includeParameterized*/ true, matchesExpected);
 
+	// Struct-typed variables that DON'T match the slot are still offered as dot-into WAYPOINTS ("test" in a
+	// Float slot, toward "test.x") -- Kind::BindingObject, consumable only by '.'/confirm into MemberSelect,
+	// never as the bare value (matching ones already appeared as plain Variable candidates above).
+	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::BindingObject, excludeVariable,
+		[&](DSLType type) { return dslIsStructType(type) && type != expectedType; });
+
 	// Free-typed literal entry: only offered once what's typed actually reads as a value of the expected type
 	// (any text is valid String content; Int/Float need looksLike*Literal to hold) -- "bla" must never become
 	// a confirmable Float/Int constant just because no variable/function happens to be named that either.
@@ -705,14 +711,18 @@ bool AutoCompleteRules::isValidLiteralText(DSLType type, const std::string& text
 std::vector<Candidate> AutoCompleteRules::typeKeywordCandidates(const std::string& typedPrefix)
 {
 	std::vector<Candidate> out;
-	for (DSLType t : { DSLType::Int, DSLType::Float, DSLType::Bool, DSLType::String, DSLType::Vector2, DSLType::Vector3, DSLType::Vector4 })
+	auto add = [&](DSLType t)
 	{
 		Candidate c;
 		c.label = dslTypeName(t);
 		c.kind = Candidate::Kind::DeclareType;
 		c.declareType = t;
 		addIfMatches(out, c, typedPrefix);
-	}
+	};
+	for (DSLType t : { DSLType::Int, DSLType::Float, DSLType::Bool, DSLType::String })
+		add(t);
+	for (size_t i = 0; i < Globals::scriptBindings.structs().size(); ++i)
+		add(dslStructType(static_cast<int>(i))); // every engine-defined struct is a declarable type
 	sortExactMatchFirst(out, typedPrefix);
 	return out;
 }
@@ -798,43 +808,60 @@ namespace
 }
 
 std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBindings& bindings, DSLSymbol* receiverDecl,
-	DSLType expectedType, bool anyValue, const std::string& typedPrefix)
+	DSLType receiverType, DSLType expectedType, bool anyValue, const std::string& typedPrefix)
 {
 	std::vector<Candidate> out;
-	const DSLSymbol::VariableDeclaration& decl = std::get<DSLSymbol::VariableDeclaration>(receiverDecl->data);
-	const DSLType receiverType = std::get<DSLSymbol::TypeDeclaration>(decl.typeSymbol->data).type;
-	const BindingObject* object = bindings.objectFor(receiverType);
-	if (object == nullptr)
+
+	// A receiver is a binding OBJECT (physics/self) or any STRUCT-typed value -- same candidate shapes either
+	// way, sourced from the matching registry side.
+	const std::vector<BindingFunc>* functions = nullptr;
+	const std::vector<BindingMember>* members = nullptr;
+	std::span<DSLSymbol* const> functionSymbols;
+	if (const BindingObject* object = bindings.objectFor(receiverType); object != nullptr)
+	{
+		functions = &object->functions;
+		members = &object->members;
+		functionSymbols = bindings.functionSymbols(*object);
+	}
+	else if (const BindingStruct* structDef = bindings.structFor(receiverType); structDef != nullptr)
+	{
+		functions = &structDef->functions;
+		members = &structDef->members;
+		functionSymbols = bindings.structFunctionSymbols(receiverType);
+	}
+	else
 		return out;
 
 	const bool statementContext = expectedType == DSLType::Void && !anyValue;
-	const std::span<DSLSymbol* const> functionSymbols = bindings.functionSymbols(*object);
-	for (size_t i = 0; i < object->functions.size(); ++i)
+	for (size_t i = 0; i < functions->size(); ++i)
 	{
-		const DSLType returnType = object->functions[i].returnType;
+		const DSLType returnType = (*functions)[i].returnType;
 		const bool accepted = statementContext
 			|| (anyValue ? returnType != DSLType::Void : returnType == expectedType);
 		if (!accepted)
 			continue;
 		Candidate c;
-		c.label = object->functions[i].name;
+		c.label = (*functions)[i].name;
 		c.kind = Candidate::Kind::Function;
 		c.refSymbol = functionSymbols[i];
 		c.receiver = receiverDecl;
 		addIfMatches(out, c, typedPrefix);
 	}
-	if (!statementContext)
-		for (const BindingMember& member : object->members)
-		{
-			if (!anyValue && member.type != expectedType)
-				continue;
-			Candidate c;
-			c.label = member.name;
-			c.kind = Candidate::Kind::Member;
-			c.refSymbol = receiverDecl; // the RECEIVER -- the member itself has no symbol, only registry data
-			c.declareType = member.type;
-			addIfMatches(out, c, typedPrefix);
-		}
+	for (const BindingMember& member : *members)
+	{
+		// Value contexts type-filter; a STATEMENT context offers only WRITABLE members (the lead-in of a
+		// member-assignment, `v.x = ...`).
+		const bool accepted = statementContext ? member.writable
+			: (anyValue || member.type == expectedType || dslIsStructType(member.type));
+		if (!accepted)
+			continue;
+		Candidate c;
+		c.label = member.name;
+		c.kind = Candidate::Kind::Member;
+		c.refSymbol = receiverDecl; // the chain's ROOT -- the member itself has no symbol, only registry data
+		c.declareType = member.type;
+		addIfMatches(out, c, typedPrefix);
+	}
 
 	sortExactMatchFirst(out, typedPrefix);
 	return out;

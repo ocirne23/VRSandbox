@@ -83,23 +83,29 @@ import Core;
 
 export class DSLCodeLine;
 
-enum class DSLType
+// A type is either one of the fixed builtin kinds below, or a DYNAMIC engine-defined struct: value
+// `FirstStruct + N` names entry N of the ScriptBindings struct registry (vec2/vec3/vec4 are the first three
+// table rows -- adding a new engine struct is one table row, no enum edit). Struct types carry members,
+// a positional constructor, and callable member functions, all defined by the registry.
+enum class DSLType : uint16
 {
 	Void,               // no value (a function with no return type)
 	Int,
 	Float,
 	String,
 	Bool,
-	Vector2,
-	Vector3,
-	Vector4,
 	Function,           // reserved: a symbol whose value IS a function reference; unused by the current example
 	World,              // -- sidebar-bindable engine object kinds (never user-declarable; see
 	Entity,             //    dslIsEngineObjectType below and the ScriptBindings registry) --
 	PhysicsComponent,
 	AudioComponent,
 	ForceComponent,
+	FirstStruct = 256,  // + struct registry index (see dslStructType/dslStructIndex)
 };
+
+export constexpr bool dslIsStructType(DSLType type) { return type >= DSLType::FirstStruct; }
+export constexpr int dslStructIndex(DSLType type) { return static_cast<int>(type) - static_cast<int>(DSLType::FirstStruct); }
+export constexpr DSLType dslStructType(int index) { return static_cast<DSLType>(static_cast<int>(DSLType::FirstStruct) + index); }
 
 // Engine-object kinds are BINDINGS (dotted into for their members/functions), never values: excluded from
 // variable/reassign candidates, literal slots, and declarable types alike.
@@ -271,13 +277,13 @@ public:
 		std::vector<DSLOperator> operators;
 		bool grouped = false; // explicit parentheses around this whole chain (only meaningful as another chain's operand)
 	};
-	// Field-style access on a receiver, e.g. `self.pos` -- NOT a call (see
-	// FunctionCall::receiver for method-style dot-calls like physics.getMass()).
+	// Field-style access on a receiver, e.g. `self.pos` or `self.pos.x` -- NOT a call (see
+	// FunctionCall::receiver for method-style dot-calls like physics.getVelocity()).
 	// `type` is stamped from the ScriptBindings member registry when the access is
 	// authored/loaded, so dslValueType stays registry-free.
 	struct MemberAccess
 	{
-		DSLSymbol* receiver = nullptr; // -> VariableReference
+		DSLSymbol* receiver = nullptr; // -> VariableReference, or a nested MemberAccess (chained access)
 		std::string memberName;
 		DSLType type = DSLType::Void;
 	};

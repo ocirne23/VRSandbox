@@ -218,7 +218,9 @@ namespace
 
 		const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(candidate.refSymbol->data);
 		std::string text = (candidate.receiver != nullptr
-			? std::get<DSLSymbol::VariableDeclaration>(candidate.receiver->data).name + "." : std::string())
+			? std::get<DSLSymbol::VariableDeclaration>(candidate.receiver->data).name + "."
+				+ (candidate.receiverPath.empty() ? std::string() : candidate.receiverPath + ".")
+			: std::string())
 			+ candidate.label + "(";
 		for (size_t i = 0; i < callee.parameterVarDeclarations.size(); ++i)
 		{
@@ -232,22 +234,47 @@ namespace
 		return text;
 	}
 
-	// True for Vector2/3/4 -- these declare via a special comma-separated-components initializer instead of
-	// the normal candidate list (see applyDeclareVariable).
-	bool isVectorType(DSLType type)
+	DSLType declaredTypeOf(const DSLSymbol* varDecl)
 	{
-		return type == DSLType::Vector2 || type == DSLType::Vector3 || type == DSLType::Vector4;
+		const DSLSymbol::VariableDeclaration& decl = std::get<DSLSymbol::VariableDeclaration>(varDecl->data);
+		return std::get<DSLSymbol::TypeDeclaration>(decl.typeSymbol->data).type;
 	}
 
-	int vectorComponentCount(DSLType type)
+	std::string joinedMemberPath(const std::vector<std::string>& path)
 	{
-		switch (type)
+		std::string text;
+		for (const std::string& segment : path)
+			text += (text.empty() ? "" : ".") + segment;
+		return text;
+	}
+
+	std::vector<std::string> splitMemberPath(const std::string& dottedPath)
+	{
+		std::vector<std::string> path;
+		size_t start = 0;
+		while (start < dottedPath.size())
 		{
-		case DSLType::Vector2: return 2;
-		case DSLType::Vector3: return 3;
-		case DSLType::Vector4: return 4;
-		default:               return 0;
+			const size_t dot = dottedPath.find('.', start);
+			path.push_back(dottedPath.substr(start, dot == std::string::npos ? std::string::npos : dot - start));
+			if (dot == std::string::npos)
+				break;
+			start = dot + 1;
 		}
+		return path;
+	}
+
+	// The comma-component shorthand ("vec3 test = 1,2,3") is REMOVED: struct types (vec2/3/4 and every future
+	// engine struct) compose as ordinary value slots -- their registry constructor is a normal parameterized
+	// call staged like any other, so computed components work too. Every branch gated on this is now dead and
+	// awaits a cleanup pass; returning false here is what turned them all off at once.
+	bool isVectorType(DSLType)
+	{
+		return false;
+	}
+
+	int vectorComponentCount(DSLType)
+	{
+		return 0;
 	}
 
 	// Splits "1.0,2.0,3.0" into its comma-separated parts (no trimming needed: space is never accepted as a
@@ -533,7 +560,7 @@ void ScriptEditor::refreshCandidates()
 	}
 	if (m_composeMode == ComposeMode::MemberSelect)
 	{
-		m_candidates = AutoCompleteRules::receiverCandidates(m_bindings, m_memberReceiver,
+		m_candidates = AutoCompleteRules::receiverCandidates(m_bindings, m_memberReceiver, m_memberReceiverType,
 			m_memberExpectedType, m_memberAnyValue, m_pendingWord);
 		m_candidateSelected = 0;
 		return;
@@ -663,8 +690,10 @@ void ScriptEditor::refreshCandidates()
 			return; // vector parameters free-type comma components, like every other vector value stage
 		m_candidates = AutoCompleteRules::candidatesFor(currentCallParamType(), atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord);
 		// An ARGUMENT can't itself be a parameterized call (argument staging doesn't nest, and placeholder
-		// arguments never exist) -- parameter-less calls remain fine.
-		std::erase_if(m_candidates, [](const Candidate& c) { return isParameterizedFunction(c); });
+		// arguments never exist) -- parameter-less calls remain fine. Dot-into waypoints are out for the same
+		// reason: MemberSelect's result delivery needs a chain compose to return into, which an argument isn't.
+		std::erase_if(m_candidates, [](const Candidate& c)
+			{ return isParameterizedFunction(c) || c.kind == Candidate::Kind::BindingObject; });
 		// A `ref` parameter receives the callee's OUTPUT -- only an actual variable can stand there.
 		const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(m_callFunc->data);
 		if (std::get<DSLSymbol::VariableDeclaration>(callee.parameterVarDeclarations[m_callArgCandidates.size()]->data).isRef)
@@ -722,13 +751,17 @@ void ScriptEditor::cancelCompose()
 	m_replaceOpExpr = nullptr;
 	m_callFunc = nullptr;
 	m_callReceiver = nullptr;
+	m_callReceiverPath.clear();
 	m_callArgCandidates.clear();
 	m_callArgRawTexts.clear();
 	m_callValueReturnMode = ComposeMode::None;
 	m_memberReceiver = nullptr;
+	m_memberPath.clear();
+	m_memberReceiverType = DSLType::Void;
 	m_memberReturnMode = ComposeMode::None;
 	m_memberExpectedType = DSLType::Void;
 	m_memberAnyValue = false;
+	m_reassignMemberPath.clear();
 	m_flowEditLine = nullptr;
 	m_flowEditLoopVar = nullptr;
 	m_composeCoverStart = -1;
@@ -831,23 +864,48 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 			m_callValueReturnMode = statementContext ? ComposeMode::None : back;
 			m_callFunc = picked->refSymbol;
 			m_callReceiver = picked->receiver;
+			m_callReceiverPath = joinedMemberPath(m_memberPath);
 			m_callArgCandidates.clear();
 			m_callArgRawTexts.clear();
 			m_memberReceiver = nullptr;
 			m_memberReturnMode = ComposeMode::None;
+			m_memberPath.clear();
 			enterCompose(ComposeMode::CallArgValue, callStagePrefix());
 			return;
 		}
 		if (picked->kind != Candidate::Kind::Function && picked->kind != Candidate::Kind::Member)
 			return;
 
+		// A picked candidate carries the FULL chain context: functions remember the path they're called
+		// through (receiverPath), a member's own path rides in its label ("pos.x", root = refSymbol).
+		Candidate chosen = *picked;
+		if (chosen.kind == Candidate::Kind::Function)
+			chosen.receiverPath = joinedMemberPath(m_memberPath);
+		else if (!m_memberPath.empty())
+			chosen.label = joinedMemberPath(m_memberPath) + "." + chosen.label;
+
 		if (statementContext)
 		{
-			// A zero-argument dot-call statement ("physics.isAwake()") commits its whole line -- Enter only.
-			// (Members never reach here: receiverCandidates offers none in a statement context.)
-			if (picked->kind != Candidate::Kind::Function || !allowCommit)
+			if (chosen.kind == Candidate::Kind::Member)
+			{
+				// A writable member as an assignment TARGET: stage `root.path = value` through the Reassign
+				// flow ('=' authored; compound member assigns are a later nicety).
+				m_reassignTarget = m_memberReceiver;
+				m_reassignMemberPath.clear();
+				for (const std::string& segment : m_memberPath)
+					m_reassignMemberPath.push_back(segment);
+				m_reassignMemberPath.push_back(picked->label);
+				m_reassignOp = DSLOperator::Assign;
+				m_reassignEditExpr = nullptr;
+				m_memberReceiver = nullptr;
+				m_memberReturnMode = ComposeMode::None;
+				m_memberPath.clear();
+				enterChainStage(ComposeMode::ReassignValue);
 				return;
-			const Candidate chosen = *picked;
+			}
+			// A zero-argument dot-call statement ("physics.isAwake()") commits its whole line -- Enter only.
+			if (!allowCommit)
+				return;
 			DSLCodeLine* linePtr = currentLineHeadOrCancel();
 			if (linePtr == nullptr)
 				return;
@@ -858,12 +916,19 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 			return;
 		}
 
-		// Value context: the member / zero-argument dot-call becomes an already-resolved pending term of the
-		// suspended chain compose -- exactly commitCallStatement's value-branch delivery.
+		// Value context: a struct-typed member that doesn't MATCH the slot's type is only a waypoint -- it
+		// must keep dotting toward a matching leaf ('.' extends it), never deliver as the value itself.
+		if (chosen.kind == Candidate::Kind::Member && !m_memberAnyValue && m_memberExpectedType != DSLType::Void
+			&& chosen.declareType != m_memberExpectedType)
+			return;
+
+		// The member / zero-argument dot-call becomes an already-resolved pending term of the suspended chain
+		// compose -- exactly commitCallStatement's value-branch delivery.
 		PendingExprTerm term;
-		term.candidate = *picked;
+		term.candidate = std::move(chosen);
 		m_memberReceiver = nullptr;
 		m_memberReturnMode = ComposeMode::None;
+		m_memberPath.clear();
 		enterCompose(back, "");
 		m_exprPendingGroup = std::move(term);
 		m_exprHasPendingGroup = true;
@@ -1608,17 +1673,14 @@ DSLSymbol* ScriptEditor::buildValueFromCandidate(const Candidate& candidate, DSL
 			// parameter each fills, per CallArgument's convention (see DSL.ixx).
 			args.push_back(DSLSymbol::CallArgument{ callee.isPositionalCall ? nullptr : param, argPlaceholder });
 		}
-		// A dot-call carries its receiver (a binding object's sidebar declaration -- see receiverCandidates).
+		// A dot-call carries its receiver chain (root declaration + dotted path -- see receiverCandidates).
 		DSLSymbol* receiverRef = (candidate.receiver != nullptr)
-			? pushSymbol(line, ST::VariableReference, DSLSymbol::VariableReference{ candidate.receiver }) : nullptr;
+			? buildReceiverChain(candidate.receiver, candidate.receiverPath, line) : nullptr;
 		return pushSymbol(line, ST::FunctionCall, DSLSymbol::FunctionCall{ candidate.refSymbol, receiverRef, args });
 	}
 	case Candidate::Kind::Member:
-	{
-		// refSymbol = the RECEIVER's declaration; declareType = the member's registry-stamped value type.
-		DSLSymbol* receiverRef = pushSymbol(line, ST::VariableReference, DSLSymbol::VariableReference{ candidate.refSymbol });
-		return pushSymbol(line, ST::MemberAccess, DSLSymbol::MemberAccess{ receiverRef, candidate.label, candidate.declareType });
-	}
+		// refSymbol = the chain's ROOT declaration; label = the dotted member path ("pos" / "pos.x").
+		return buildReceiverChain(candidate.refSymbol, candidate.label, line);
 	case Candidate::Kind::Literal:
 		// A string literal's label carries its quotes for display; the stored Constant holds the CONTENT
 		// (rendering re-adds the quotes).
@@ -1631,9 +1693,9 @@ DSLSymbol* ScriptEditor::buildValueFromCandidate(const Candidate& candidate, DSL
 	}
 }
 
-DSLSymbol* ScriptEditor::vectorBuiltinFor(DSLType vectorType) const
+DSLSymbol* ScriptEditor::vectorBuiltinFor(DSLType) const
 {
-	return m_bindings.vectorBuiltin(vectorType);
+	return nullptr; // the comma shorthand is gone -- struct constructors stage as ordinary calls now
 }
 
 // Builds a positional vecN(<c0>, <c1>, ...) call (owned by `line`) directly from typed components -- returns
@@ -1729,7 +1791,8 @@ DSLSymbol* ScriptEditor::buildExpressionTerm(const PendingExprTerm& term, DSLCod
 		// A resolved parameterized call carries its STAGED arguments (see the CallArgValue value sub-flow) --
 		// never placeholder ones. A dot-call's receiver rides in the candidate itself.
 		if (!term.callArgs.empty())
-			return buildCallFromStagedArgs(term.candidate.refSymbol, term.candidate.receiver, term.callArgs, term.callArgRawTexts, line);
+			return buildCallFromStagedArgs(term.candidate.refSymbol, term.candidate.receiver, term.candidate.receiverPath,
+				term.callArgs, term.callArgRawTexts, line);
 		return buildValueFromCandidate(term.candidate, line);
 	}
 	DSLSymbol* built = buildExpressionFromTerms(term.groupTerms, term.groupOps, line);
@@ -1769,7 +1832,9 @@ std::string ScriptEditor::exprTermText(const PendingExprTerm& term) const
 		if (!term.callArgs.empty())
 		{
 			std::string text = (term.candidate.receiver != nullptr
-				? std::get<DSLSymbol::VariableDeclaration>(term.candidate.receiver->data).name + "." : std::string())
+				? std::get<DSLSymbol::VariableDeclaration>(term.candidate.receiver->data).name + "."
+					+ (term.candidate.receiverPath.empty() ? std::string() : term.candidate.receiverPath + ".")
+				: std::string())
 				+ term.candidate.label + "(";
 			for (size_t i = 0; i < term.callArgs.size(); ++i)
 			{
@@ -1802,7 +1867,10 @@ std::string ScriptEditor::exprBasePrefixFor(ComposeMode mode) const
 		const char* opText = (m_reassignEditExpr != nullptr)
 			? dslOperatorText(std::get<DSLSymbol::Expression>(m_reassignEditExpr->data).operators[0])
 			: dslOperatorText(m_reassignOp);
-		return std::get<DSLSymbol::VariableDeclaration>(m_reassignTarget->data).name + " " + opText + " ";
+		std::string target = std::get<DSLSymbol::VariableDeclaration>(m_reassignTarget->data).name;
+		if (!m_reassignMemberPath.empty())
+			target += "." + joinedMemberPath(m_reassignMemberPath); // a member-assign statement ("self.pos.x = ...")
+		return target + " " + opText + " ";
 	}
 	// Inserting after an existing value: the compose box (which renders in place of the anchor's own span)
 	// keeps showing that anchor plus the operator that started the insert; a replacement shows segment only.
@@ -2035,8 +2103,14 @@ DSLType ScriptEditor::reassignTargetType() const
 {
 	if (m_reassignTarget == nullptr)
 		return DSLType::Void;
-	const DSLSymbol::VariableDeclaration& v = std::get<DSLSymbol::VariableDeclaration>(m_reassignTarget->data);
-	return std::get<DSLSymbol::TypeDeclaration>(v.typeSymbol->data).type;
+	DSLType type = declaredTypeOf(m_reassignTarget);
+	// A member-assign statement's value composes against the written MEMBER's type, not the root's.
+	for (const std::string& segment : m_reassignMemberPath)
+	{
+		const BindingMember* member = m_bindings.findMember(type, segment);
+		type = (member != nullptr) ? member->type : DSLType::Void;
+	}
+	return type;
 }
 
 // Fills a LineHead statement slot with a `name = value` reassignment of an EXISTING variable (m_reassignTarget),
@@ -2051,6 +2125,7 @@ void ScriptEditor::commitReassignStatement(const std::vector<PendingExprTerm>& t
 		return;
 	DSLCodeLine& line = *linePtr;
 	DSLSymbol* target = m_reassignTarget;
+	const std::string memberPath = joinedMemberPath(m_reassignMemberPath);
 	const DSLType targetType = reassignTargetType();
 	const DSLOperator assignOp = m_reassignOp; // plain `=`, or the ReassignOp stage's compound pick ("i += 1")
 	cancelCompose();
@@ -2058,7 +2133,9 @@ void ScriptEditor::commitReassignStatement(const std::vector<PendingExprTerm>& t
 	line.symbols.clear();
 
 	DSLSymbol* value = resolveValueOrPlaceholder(targetType, rawInitializerText, terms, ops, line);
-	DSLSymbol* targetRef = pushSymbol(line, ST::VariableReference, DSLSymbol::VariableReference{ target });
+	// The target: the variable itself, or -- for a member-assign statement -- its dotted member chain
+	// ("self.pos.x = ...", see m_reassignMemberPath).
+	DSLSymbol* targetRef = buildReceiverChain(target, memberPath, line);
 	pushSymbol(line, ST::Expression, DSLSymbol::Expression{ { targetRef, value }, { assignOp } });
 
 	selectExpressionTail(value);
@@ -2465,7 +2542,9 @@ std::string ScriptEditor::callComposePrefix() const
 {
 	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(m_callFunc->data);
 	std::string text = (m_callReceiver != nullptr
-		? std::get<DSLSymbol::VariableDeclaration>(m_callReceiver->data).name + "." : std::string())
+		? std::get<DSLSymbol::VariableDeclaration>(m_callReceiver->data).name + "."
+			+ (m_callReceiverPath.empty() ? std::string() : m_callReceiverPath + ".")
+		: std::string())
 		+ callee.name + "(";
 	const size_t shownParams = std::min(m_callArgCandidates.size() + 1, callee.parameterVarDeclarations.size());
 	for (size_t i = 0; i < shownParams; ++i)
@@ -2557,9 +2636,30 @@ DSLType ScriptEditor::valueContextExpectedType(ComposeMode mode, bool& outAnyVal
 
 // See the declaration in ScriptEditor.ixx: '.' (or a confirm) over a matched BindingObject candidate opens the
 // receiver's member/function list; the current stage suspends exactly like the call-value sub-flow.
+// Re-applies a dotted member path onto a just-entered MemberSelect (the reverse of the '.'-extension steps) --
+// how an abandoned chained dot-call staging ("self.pos.length(|" backspaced empty) reopens at its member list.
+void ScriptEditor::restoreMemberPath(const std::string& dottedPath)
+{
+	size_t start = 0;
+	while (start < dottedPath.size())
+	{
+		const size_t dot = dottedPath.find('.', start);
+		const std::string segment = dottedPath.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+		m_memberPath.push_back(segment);
+		const BindingMember* member = m_bindings.findMember(m_memberReceiverType, segment);
+		m_memberReceiverType = (member != nullptr) ? member->type : DSLType::Void;
+		m_composePrefix += segment + ".";
+		if (dot == std::string::npos)
+			break;
+		start = dot + 1;
+	}
+}
+
 void ScriptEditor::enterMemberSelect(DSLSymbol* receiverDecl)
 {
 	m_memberReceiver = receiverDecl;
+	m_memberPath.clear();
+	m_memberReceiverType = declaredTypeOf(receiverDecl);
 	m_memberReturnMode = m_composeMode;
 	m_memberExpectedType = valueContextExpectedType(m_composeMode, m_memberAnyValue);
 	const std::string& name = std::get<DSLSymbol::VariableDeclaration>(receiverDecl->data).name;
@@ -2568,7 +2668,28 @@ void ScriptEditor::enterMemberSelect(DSLSymbol* receiverDecl)
 
 // See the declaration in ScriptEditor.ixx: the fully-staged arguments become real CallArgument values -- a
 // picked candidate or a complete vector component list each, never a placeholder.
-DSLSymbol* ScriptEditor::buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbol* receiverDecl, const std::vector<Candidate>& argCandidates,
+DSLSymbol* ScriptEditor::buildReceiverChain(DSLSymbol* rootDecl, const std::string& dottedPath, DSLCodeLine& line)
+{
+	DSLSymbol* current = pushSymbol(line, ST::VariableReference, DSLSymbol::VariableReference{ rootDecl });
+	DSLType currentType = declaredTypeOf(rootDecl);
+	size_t start = 0;
+	while (start < dottedPath.size())
+	{
+		const size_t dot = dottedPath.find('.', start);
+		const std::string name = dottedPath.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+		const BindingMember* member = m_bindings.findMember(currentType, name);
+		const DSLType memberType = (member != nullptr) ? member->type : DSLType::Void;
+		current = pushSymbol(line, ST::MemberAccess, DSLSymbol::MemberAccess{ current, name, memberType });
+		currentType = memberType;
+		if (dot == std::string::npos)
+			break;
+		start = dot + 1;
+	}
+	return current;
+}
+
+DSLSymbol* ScriptEditor::buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbol* receiverDecl, const std::string& receiverPath,
+	const std::vector<Candidate>& argCandidates,
 	const std::vector<std::string>& argRawTexts, DSLCodeLine& line)
 {
 	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(funcSymbol->data);
@@ -2582,8 +2703,7 @@ DSLSymbol* ScriptEditor::buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbo
 			: buildVectorLiteral(paramType, splitOnCommas(argRawTexts[i]), line);
 		args.push_back(DSLSymbol::CallArgument{ callee.isPositionalCall ? nullptr : callee.parameterVarDeclarations[i], value });
 	}
-	DSLSymbol* receiverRef = (receiverDecl != nullptr)
-		? pushSymbol(line, ST::VariableReference, DSLSymbol::VariableReference{ receiverDecl }) : nullptr;
+	DSLSymbol* receiverRef = (receiverDecl != nullptr) ? buildReceiverChain(receiverDecl, receiverPath, line) : nullptr;
 	return pushSymbol(line, ST::FunctionCall, DSLSymbol::FunctionCall{ funcSymbol, receiverRef, args });
 }
 
@@ -2599,11 +2719,13 @@ void ScriptEditor::commitCallStatement()
 		term.candidate = Candidate{ std::get<DSLSymbol::FunctionDeclaration>(m_callFunc->data).name,
 			Candidate::Kind::Function, m_callFunc };
 		term.candidate.receiver = m_callReceiver;
+		term.candidate.receiverPath = m_callReceiverPath;
 		term.callArgs = m_callArgCandidates;
 		term.callArgRawTexts = m_callArgRawTexts;
 		m_callValueReturnMode = ComposeMode::None;
 		m_callFunc = nullptr;
 		m_callReceiver = nullptr;
+		m_callReceiverPath.clear();
 		m_callArgCandidates.clear();
 		m_callArgRawTexts.clear();
 		// The suspended chain compose (m_exprStack + the mode's own context) survived untouched -- resume it
@@ -2624,12 +2746,13 @@ void ScriptEditor::commitCallStatement()
 	DSLCodeLine& line = *linePtr;
 	DSLSymbol* func = m_callFunc;
 	DSLSymbol* receiver = m_callReceiver;
+	const std::string receiverPath = m_callReceiverPath;
 	const std::vector<Candidate> argCandidates = m_callArgCandidates;
 	const std::vector<std::string> argRawTexts = m_callArgRawTexts;
 	cancelCompose();
 
 	line.symbols.clear();
-	buildCallFromStagedArgs(func, receiver, argCandidates, argRawTexts, line);
+	buildCallFromStagedArgs(func, receiver, receiverPath, argCandidates, argRawTexts, line);
 	m_pendingSelectLineEnd = m_cursorLine; // end of the committed call (its last argument), typing-continues style
 }
 
@@ -2842,6 +2965,26 @@ namespace
 {
 	bool vectorRawTextFromValue(const DSLSymbol* value, std::string& out); // defined below -- termFromSymbol restores vector arguments through it
 
+	// Walks a receiver expression (a VariableReference, or a MemberAccess chain over one) down to its ROOT
+	// declaration, collecting the dotted member path ("" when `symbol` IS the plain reference). False = any
+	// other shape (nothing else is a legal receiver).
+	bool receiverChainToRoot(const DSLSymbol* symbol, DSLSymbol*& outRootDecl, std::string& outPath)
+	{
+		std::string path;
+		const DSLSymbol* current = symbol;
+		while (current != nullptr && current->type == ST::MemberAccess)
+		{
+			const DSLSymbol::MemberAccess& m = std::get<DSLSymbol::MemberAccess>(current->data);
+			path = m.memberName + (path.empty() ? "" : "." + path);
+			current = m.receiver;
+		}
+		if (current == nullptr || current->type != ST::VariableReference)
+			return false;
+		outRootDecl = std::get<DSLSymbol::VariableReference>(current->data).declaration;
+		outPath = std::move(path);
+		return outRootDecl != nullptr;
+	}
+
 	// The REVERSE of buildExpressionTerm: converts a committed value symbol back into the compose-flow's
 	// PendingExprTerm form, so an existing parenthesized group can reopen for editing exactly as if it were
 	// still being typed (beginReopenGroup). False = not round-trippable: placeholders, member accesses, and
@@ -2870,15 +3013,14 @@ namespace
 		}
 		case ST::MemberAccess:
 		{
-			// A binding member ("self.pos"): refSymbol = the receiver's declaration, declareType = the stamped
-			// value type -- the exact Candidate shape receiverCandidates hands out.
-			const DSLSymbol::MemberAccess& m = std::get<DSLSymbol::MemberAccess>(symbol->data);
-			if (m.receiver == nullptr || m.receiver->type != ST::VariableReference)
+			// A member chain ("self.pos.x"): refSymbol = the chain's ROOT declaration, label = the dotted
+			// path, declareType = the OUTER member's stamped type -- receiverCandidates' exact shape.
+			DSLSymbol* rootDecl = nullptr;
+			std::string path;
+			if (!receiverChainToRoot(symbol, rootDecl, path))
 				return false;
-			DSLSymbol* receiverDecl = std::get<DSLSymbol::VariableReference>(m.receiver->data).declaration;
-			if (receiverDecl == nullptr)
-				return false;
-			out = PendingExprTerm{ false, Candidate{ m.memberName, Candidate::Kind::Member, receiverDecl, m.type }, {}, {} };
+			out = PendingExprTerm{ false, Candidate{ path, Candidate::Kind::Member, rootDecl,
+				std::get<DSLSymbol::MemberAccess>(symbol->data).type }, {}, {} };
 			return true;
 		}
 		case ST::FunctionCall:
@@ -2886,19 +3028,20 @@ namespace
 			const DSLSymbol::FunctionCall& call = std::get<DSLSymbol::FunctionCall>(symbol->data);
 			if (call.functionSymbol == nullptr)
 				return false;
-			// A dot-call restores WITH its receiver riding in the candidate (see buildExpressionTerm).
+			// A dot-call restores WITH its receiver chain riding in the candidate (see buildExpressionTerm).
 			DSLSymbol* receiverDecl = nullptr;
+			std::string receiverPath;
 			if (call.receiver != nullptr)
 			{
-				if (call.receiver->type != ST::VariableReference)
+				std::string fullPath;
+				if (!receiverChainToRoot(call.receiver, receiverDecl, fullPath))
 					return false;
-				receiverDecl = std::get<DSLSymbol::VariableReference>(call.receiver->data).declaration;
-				if (receiverDecl == nullptr)
-					return false;
+				receiverPath = std::move(fullPath); // "" for a direct dot-call (receiver = the root reference)
 			}
 			const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
 			PendingExprTerm term{ false, Candidate{ callee.name, Candidate::Kind::Function, call.functionSymbol }, {}, {} };
 			term.candidate.receiver = receiverDecl;
+			term.candidate.receiverPath = std::move(receiverPath);
 			if (!call.arguments.empty())
 			{
 				if (callee.parameterVarDeclarations.size() != call.arguments.size())
@@ -3440,14 +3583,9 @@ bool ScriptEditor::tryWidenCallStatementEdit()
 	if (call.functionSymbol == nullptr)
 		return false;
 	DSLSymbol* receiverDecl = nullptr;
-	if (call.receiver != nullptr)
-	{
-		if (call.receiver->type != ST::VariableReference)
-			return false;
-		receiverDecl = std::get<DSLSymbol::VariableReference>(call.receiver->data).declaration;
-		if (receiverDecl == nullptr)
-			return false;
-	}
+	std::string receiverPath;
+	if (call.receiver != nullptr && !receiverChainToRoot(call.receiver, receiverDecl, receiverPath))
+		return false;
 	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
 	const int argIndex = m_editSlot.argIndex;
 	if (argIndex < 0 || argIndex >= static_cast<int>(call.arguments.size())
@@ -3473,9 +3611,121 @@ bool ScriptEditor::tryWidenCallStatementEdit()
 
 	m_callFunc = call.functionSymbol;
 	m_callReceiver = receiverDecl;
+	m_callReceiverPath = std::move(receiverPath);
 	m_callArgCandidates = std::move(candidates);
 	m_callArgRawTexts = std::move(rawTexts);
 	m_flowEditLine = callSymbol->line;
+	enterCompose(ComposeMode::CallArgValue, callStagePrefix());
+	return true;
+}
+
+bool ScriptEditor::tryWidenValueCallEdit()
+{
+	if (m_editChainExpr != nullptr || m_editSlot.kind != SlotRef::Kind::CallArgumentValue || m_editSlot.parent == nullptr)
+		return false;
+	DSLSymbol* callSymbol = m_editSlot.parent;
+	if (callSymbol->line == nullptr || callSymbol->line->head() == callSymbol)
+		return false; // a call STATEMENT's arguments take tryWidenCallStatementEdit instead
+	const DSLSymbol::FunctionCall& call = std::get<DSLSymbol::FunctionCall>(callSymbol->data);
+	if (call.functionSymbol == nullptr)
+		return false;
+	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
+	const int argIndex = m_editSlot.argIndex;
+	if (argIndex < 0 || argIndex >= static_cast<int>(call.arguments.size())
+		|| callee.parameterVarDeclarations.size() != call.arguments.size())
+		return false;
+
+	// Everything restorable resolves BEFORE any state mutates -- a refusal must leave no trace.
+	DSLSymbol* receiverDecl = nullptr;
+	std::string receiverPath;
+	if (call.receiver != nullptr && !receiverChainToRoot(call.receiver, receiverDecl, receiverPath))
+		return false;
+	std::vector<Candidate> candidates;
+	for (int i = 0; i < argIndex; ++i)
+	{
+		Candidate candidate;
+		if (!candidateFromSymbol(call.arguments[i].value, candidate))
+			return false;
+		candidates.push_back(std::move(candidate));
+	}
+
+	// Which VALUE slot the call occupies decides the suspended context its staging returns into: a
+	// declaration's whole initializer re-opens the redeclare flow, an assignment's right-hand side the
+	// reassign-edit flow -- the exact contexts the plain whole-value Backspace widens into.
+	DSLCodeLine& line = *callSymbol->line;
+	DSLSymbol* head = line.head();
+	ComposeMode returnMode = ComposeMode::None;
+	if (head != nullptr && head->type == ST::VariableDeclaration
+		&& std::get<DSLSymbol::VariableDeclaration>(head->data).initialValue == callSymbol)
+	{
+		m_redeclareTarget = head;
+		m_pendingDeclareType = declaredTypeOf(head);
+		m_pendingDeclareName = std::get<DSLSymbol::VariableDeclaration>(head->data).name;
+		returnMode = ComposeMode::DeclareValue;
+	}
+	else if (head != nullptr && head->type == ST::Expression)
+	{
+		const DSLSymbol::Expression& assign = std::get<DSLSymbol::Expression>(head->data);
+		DSLSymbol* targetRoot = nullptr;
+		std::string targetPath;
+		if (assign.operators.size() == 1 && dslIsAssignOperator(assign.operators[0])
+			&& assign.operands.size() == 2 && assign.operands[1] == callSymbol
+			&& receiverChainToRoot(assign.operands[0], targetRoot, targetPath))
+		{
+			m_reassignEditExpr = head;
+			m_reassignTarget = targetRoot;
+			m_reassignMemberPath = splitMemberPath(targetPath);
+			returnMode = ComposeMode::ReassignValue;
+		}
+	}
+	else if (head != nullptr && head->type == ST::FunctionCall)
+	{
+		// The call is itself an ARGUMENT of the line's call STATEMENT ("foo(test = vec3(1,|"): backspacing out
+		// of its argument re-opens the OUTER statement's staging at that argument -- the inner call re-authors
+		// whole, since arguments are single stages that never nest.
+		const DSLSymbol::FunctionCall& outer = std::get<DSLSymbol::FunctionCall>(head->data);
+		if (outer.functionSymbol == nullptr)
+			return false;
+		const DSLSymbol::FunctionDeclaration& outerCallee = std::get<DSLSymbol::FunctionDeclaration>(outer.functionSymbol->data);
+		int outerArgIndex = -1;
+		for (size_t i = 0; i < outer.arguments.size(); ++i)
+			if (outer.arguments[i].value == callSymbol)
+				outerArgIndex = static_cast<int>(i);
+		if (outerArgIndex < 0 || outerCallee.parameterVarDeclarations.size() != outer.arguments.size())
+			return false;
+		DSLSymbol* outerReceiverDecl = nullptr;
+		std::string outerReceiverPath;
+		if (outer.receiver != nullptr && !receiverChainToRoot(outer.receiver, outerReceiverDecl, outerReceiverPath))
+			return false;
+		std::vector<Candidate> outerCandidates;
+		for (int i = 0; i < outerArgIndex; ++i)
+		{
+			Candidate candidate;
+			if (!candidateFromSymbol(outer.arguments[i].value, candidate))
+				return false;
+			outerCandidates.push_back(std::move(candidate));
+		}
+		m_callFunc = outer.functionSymbol;
+		m_callReceiver = outerReceiverDecl;
+		m_callReceiverPath = std::move(outerReceiverPath);
+		m_callArgCandidates = std::move(outerCandidates);
+		m_callArgRawTexts.assign(m_callArgCandidates.size(), std::string());
+		m_callValueReturnMode = ComposeMode::None; // a STATEMENT call -- completion commits the line
+		m_flowEditLine = callSymbol->line;
+		enterCompose(ComposeMode::CallArgValue, callStagePrefix());
+		return true;
+	}
+	if (returnMode == ComposeMode::None)
+		return false;
+
+	m_callFunc = call.functionSymbol;
+	m_callReceiver = receiverDecl;
+	m_callReceiverPath = std::move(receiverPath);
+	m_callArgCandidates = std::move(candidates);
+	m_callArgRawTexts.assign(m_callArgCandidates.size(), std::string());
+	m_callValueReturnMode = returnMode;
+	m_exprStack.assign(1, ExprFrame{}); // the suspended chain: empty -- the call is its sole term, being re-staged
+	m_exprHasPendingGroup = false;
 	enterCompose(ComposeMode::CallArgValue, callStagePrefix());
 	return true;
 }
@@ -4182,13 +4432,17 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 				// Backspacing out of an empty right-hand-value edit on an assignment STATEMENT (the chain is
 				// its own line's head -- never a for-clause or nested chain) widens the same way a
 				// declaration's initializer does: the staged Reassign flow re-opens over the existing line,
-				// showing its actual operator ("thing += |") -- see m_reassignEditExpr's comment in the .ixx.
+				// showing its actual operator ("thing += |" / "test.x = |") -- member-assign targets restore
+				// their dotted path too. See m_reassignEditExpr's comment in the .ixx.
 				const DSLSymbol::Expression& assign = std::get<DSLSymbol::Expression>(m_editChainExpr->data);
+				DSLSymbol* targetRoot = nullptr;
+				std::string targetPath;
 				if (!assign.operators.empty() && dslIsAssignOperator(assign.operators[0])
-					&& assign.operands[0]->type == ST::VariableReference)
+					&& receiverChainToRoot(assign.operands[0], targetRoot, targetPath))
 				{
 					m_reassignEditExpr = m_editChainExpr;
-					m_reassignTarget = std::get<DSLSymbol::VariableReference>(assign.operands[0]->data).declaration;
+					m_reassignTarget = targetRoot;
+					m_reassignMemberPath = splitMemberPath(targetPath);
 					enterChainStage(ComposeMode::ReassignValue);
 				}
 				else
@@ -4206,6 +4460,12 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			{
 				// Same widening for a call STATEMENT's argument: the staged CallArgValue flow re-opens at that
 				// argument with the earlier ones restored -- see tryWidenCallStatementEdit.
+			}
+			else if (m_composeMode == ComposeMode::EditExpr && !m_editInsert && tryWidenValueCallEdit())
+			{
+				// Same widening for a call VALUE's argument ("vec3 test = vec3(1,|"): the staging re-opens
+				// with the owning declaration's/assignment's flow as the suspended return context, so the
+				// peel continues out through the whole line -- see tryWidenValueCallEdit.
 			}
 			else if (m_composeMode == ComposeMode::EditExpr && !m_editInsert && tryWidenComparisonValueEdit())
 			{
@@ -4239,9 +4499,28 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			}
 			else if (m_composeMode == ComposeMode::ReassignValue && m_reassignTarget != nullptr)
 			{
-				// The NEW-statement flow steps back to re-pick the assignment operator, name kept.
-				enterCompose(ComposeMode::ReassignOp,
-					std::get<DSLSymbol::VariableDeclaration>(m_reassignTarget->data).name + " ");
+				if (!m_reassignMemberPath.empty())
+				{
+					// A fresh member-assign steps back into its MemberSelect, the written member re-typed
+					// ("test.x = |" -> "test.|x") -- the '.'-flow's own reverse.
+					DSLSymbol* root = m_reassignTarget;
+					std::vector<std::string> path = m_reassignMemberPath;
+					m_reassignTarget = nullptr;
+					m_reassignMemberPath.clear();
+					const std::string last = path.back();
+					path.pop_back();
+					enterCompose(ComposeMode::FilterCandidates, "");
+					enterMemberSelect(root);
+					restoreMemberPath(joinedMemberPath(path));
+					m_pendingWord = last;
+					refreshCandidates();
+				}
+				else
+				{
+					// The NEW-statement flow steps back to re-pick the assignment operator, name kept.
+					enterCompose(ComposeMode::ReassignOp,
+						std::get<DSLSymbol::VariableDeclaration>(m_reassignTarget->data).name + " ");
+				}
 			}
 			else if (m_composeMode == ComposeMode::ReturnValue && m_flowEditLine != nullptr
 				&& !isProtectedBottomReturn(m_flowEditLine))
@@ -4474,16 +4753,19 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 				// re-resolve through the plain candidate lists).
 				const ComposeMode back = m_callValueReturnMode;
 				DSLSymbol* receiver = m_callReceiver;
+				const std::string receiverPath = m_callReceiverPath;
 				const std::string name = std::get<DSLSymbol::FunctionDeclaration>(m_callFunc->data).name;
 				m_callValueReturnMode = ComposeMode::None;
 				m_callFunc = nullptr;
 				m_callReceiver = nullptr;
+				m_callReceiverPath.clear();
 				enterCompose(back, "", receiver != nullptr ? std::string() : name);
 				m_composePrefix = exprBasePrefix() + exprComposePrefixFromStack();
 				refreshCandidates();
 				if (receiver != nullptr)
 				{
 					enterMemberSelect(receiver);
+					restoreMemberPath(receiverPath);
 					m_pendingWord = name;
 					refreshCandidates();
 				}
@@ -4498,10 +4780,12 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			{
 				// A fresh dot-call STATEMENT abandons back into its receiver's MemberSelect, method name re-typed.
 				DSLSymbol* receiver = m_callReceiver;
+				const std::string receiverPath = m_callReceiverPath;
 				const std::string name = std::get<DSLSymbol::FunctionDeclaration>(m_callFunc->data).name;
 				cancelCompose();
 				enterCompose(ComposeMode::FilterCandidates, "");
 				enterMemberSelect(receiver);
+				restoreMemberPath(receiverPath);
 				m_pendingWord = name;
 				refreshCandidates();
 			}
@@ -4512,15 +4796,33 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		}
 		else if (m_composeMode == ComposeMode::MemberSelect)
 		{
-			// Backspacing past the '.' returns to the stage it was typed in, the object's name restored as
-			// typed text (it re-matches its BindingObject candidate there).
-			DSLSymbol* receiver = m_memberReceiver;
-			const ComposeMode back = m_memberReturnMode;
-			const std::string name = std::get<DSLSymbol::VariableDeclaration>(receiver->data).name;
-			const std::string prefix = m_composePrefix.substr(0, m_composePrefix.size() - name.size() - 1);
-			m_memberReceiver = nullptr;
-			m_memberReturnMode = ComposeMode::None;
-			enterCompose(back, prefix, name);
+			if (!m_memberPath.empty())
+			{
+				// Peel one chain segment: "self.pos.|" steps back to "self.|pos", the segment re-typed.
+				const std::string segment = m_memberPath.back();
+				m_memberPath.pop_back();
+				DSLType type = declaredTypeOf(m_memberReceiver);
+				for (const std::string& walked : m_memberPath)
+				{
+					const BindingMember* member = m_bindings.findMember(type, walked);
+					type = (member != nullptr) ? member->type : DSLType::Void;
+				}
+				m_memberReceiverType = type;
+				const std::string prefix = m_composePrefix.substr(0, m_composePrefix.size() - segment.size() - 1);
+				enterCompose(ComposeMode::MemberSelect, prefix, segment); // member-select context survives (see enterMemberSelect)
+			}
+			else
+			{
+				// Backspacing past the '.' returns to the stage it was typed in, the object's name restored
+				// as typed text (it re-matches its BindingObject/Variable candidate there).
+				DSLSymbol* receiver = m_memberReceiver;
+				const ComposeMode back = m_memberReturnMode;
+				const std::string name = std::get<DSLSymbol::VariableDeclaration>(receiver->data).name;
+				const std::string prefix = m_composePrefix.substr(0, m_composePrefix.size() - name.size() - 1);
+				m_memberReceiver = nullptr;
+				m_memberReturnMode = ComposeMode::None;
+				enterCompose(back, prefix, name);
+			}
 		}
 		else if (m_composeMode == ComposeMode::DeclareName && m_redeclareTarget != nullptr)
 		{
@@ -4586,6 +4888,24 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		if (picked != nullptr && picked->kind == Candidate::Kind::BindingObject)
 		{
 			enterMemberSelect(picked->refSymbol);
+			return;
+		}
+		// A struct-typed VARIABLE dots into its members/functions the same way ("v." -> x/y/z/length()...) --
+		// as a value (Kind::Variable) or at a statement's start (Kind::Reassign, the member-assign lead-in).
+		if (picked != nullptr && (picked->kind == Candidate::Kind::Variable || picked->kind == Candidate::Kind::Reassign)
+			&& picked->refSymbol != nullptr
+			&& m_composeMode != ComposeMode::MemberSelect && dslIsStructType(declaredTypeOf(picked->refSymbol)))
+		{
+			enterMemberSelect(picked->refSymbol);
+			return;
+		}
+		// A struct-typed MEMBER matched mid-MemberSelect extends the chain ("self.pos." -> x/y/z/length()...).
+		if (picked != nullptr && picked->kind == Candidate::Kind::Member
+			&& m_composeMode == ComposeMode::MemberSelect && dslIsStructType(picked->declareType))
+		{
+			m_memberPath.push_back(picked->label);
+			m_memberReceiverType = picked->declareType;
+			enterCompose(ComposeMode::MemberSelect, m_composePrefix + picked->label + ".");
 			return;
 		}
 	}
@@ -5263,7 +5583,7 @@ void ScriptEditor::renderTextArea()
 	m_lineHeight = ImGui::GetTextLineHeightWithSpacing();
 
 	const ImVec2 avail = ImGui::GetContentRegionAvail();
-	ImGui::BeginChild("##se_view", avail, ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+	ImGui::BeginChild("##se_view", avail, ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
 
 	ImGuiIO& io = ImGui::GetIO();
 	if (ImGui::IsWindowHovered() && io.KeyCtrl && io.MouseWheel != 0.0f)
@@ -5470,7 +5790,7 @@ bool ScriptEditor::isBindingObjectReferenced(const BindingObject& object) const
 // from the require checkboxes. Un-requiring a component the script still references is refused.
 void ScriptEditor::renderSidebarPanel()
 {
-	ImGui::BeginChild("##dsl_sidebar", ImVec2(240.0f, 0.0f), true);
+	ImGui::BeginChild("##dsl_sidebar", ImVec2(m_sidebarWidth, 0.0f), ImGuiChildFlags_None);
 
 	bool firstSegment = true;
 	auto seg = [&firstSegment](const ImVec4& color, const char* text)
@@ -5552,6 +5872,38 @@ void ScriptEditor::renderSidebarPanel()
 		if (object.name == nullptr)
 			drawObjectContents(object);
 
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::TextDisabled("TYPES");
+	for (const BindingStruct& structDef : m_bindings.structs())
+	{
+		if (!ImGui::TreeNode(structDef.name))
+			continue;
+		// the constructor, then members, then member functions
+		firstSegment = true;
+		seg(kColType, structDef.name);
+		seg(kColPunct, "(");
+		for (size_t i = 0; i < structDef.constructorParams.size(); ++i)
+		{
+			if (i > 0)
+				seg(kColPunct, ", ");
+			seg(kColType, dslTypeName(structDef.constructorParams[i].type));
+			seg(kColPunct, " ");
+			seg(kColVariable, structDef.constructorParams[i].name);
+		}
+		seg(kColPunct, ")");
+		for (const BindingMember& member : structDef.members)
+		{
+			firstSegment = true;
+			seg(kColType, dslTypeName(member.type));
+			seg(kColPunct, " ");
+			seg(kColVariable, member.name);
+		}
+		for (const BindingFunc& func : structDef.functions)
+			drawFunction(func);
+		ImGui::TreePop();
+	}
+
 	ImGui::EndChild();
 }
 
@@ -5615,6 +5967,21 @@ void ScriptEditor::render()
 		cancelCompose(); // panel lost focus mid-composition -- don't leave an unresolved edit hanging
 
 	renderSidebarPanel();
+	ImGui::SameLine();
+
+	ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.28f, 0.28f, 0.28f, 0.60f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.50f, 0.50f, 0.50f, 0.80f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.50f, 0.50f, 0.50f, 1.00f));
+	ImGui::Button("##dsl_sidebar_splitter", ImVec2(4.0f, -1.0f));
+	if (ImGui::IsItemActive())
+	{
+		m_sidebarWidth += ImGui::GetIO().MouseDelta.x;
+		m_sidebarWidth  = std::clamp(m_sidebarWidth, 80.0f, 600.0f);
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+	ImGui::PopStyleColor(3);
+
 	ImGui::SameLine();
 	ImGui::BeginChild("##dsl_main", ImVec2(0.0f, 0.0f), false);
 

@@ -12,6 +12,9 @@ namespace
 
 	const char* cppTypeName(DSLType type)
 	{
+		// Engine-defined structs carry their own C++ spelling in the registry.
+		if (const BindingStruct* structDef = Globals::scriptBindings.structFor(type); structDef != nullptr)
+			return structDef->cppName;
 		switch (type)
 		{
 		case DSLType::Void:    return "void";
@@ -19,9 +22,6 @@ namespace
 		case DSLType::Float:   return "float";
 		case DSLType::Bool:    return "bool";
 		case DSLType::String:  return "const char*";
-		case DSLType::Vector2: return "glm::vec2";
-		case DSLType::Vector3: return "glm::vec3";
-		case DSLType::Vector4: return "glm::vec4";
 		default:               return "/* unsupported DSLType */ void*"; // engine-object kinds never declare values
 		}
 	}
@@ -84,16 +84,7 @@ namespace
 			}
 		}
 
-		// The generated-class member a receiver reference stands for -- its BindingObject's own name.
-		std::string receiverMemberName(const DSLSymbol* receiverRef) const
-		{
-			const DSLSymbol* decl = std::get<DSLSymbol::VariableReference>(receiverRef->data).declaration;
-			if (const BindingObject* object = bindings.objectForDecl(decl); object != nullptr)
-				return object->name;
-			return declOf(decl).name; // defensive -- receivers are always binding objects today
-		}
-
-		// "$r" -> the receiver member, "$1".."$9" -> the argument in that CALLEE-parameter position.
+		// "$r" -> the receiver's emitted expression, "$1".."$9" -> the argument in that CALLEE-parameter position.
 		static std::string substituteTemplate(const char* emitTemplate, const std::string& receiverName,
 			const std::vector<std::string>& args)
 		{
@@ -156,7 +147,9 @@ namespace
 					}
 					args.assign(1, std::move(joined));
 				}
-				const std::string receiverName = (call.receiver != nullptr) ? receiverMemberName(call.receiver) : std::string();
+				// The receiver is its own emitted EXPRESSION (a class member like "physics", or a chained
+				// member access like "self.pos"), so emit templates compose textually.
+				const std::string receiverName = (call.receiver != nullptr) ? expressionText(call.receiver) : std::string();
 				return substituteTemplate(emitTemplate, receiverName, args);
 			}
 
@@ -174,11 +167,10 @@ namespace
 		std::string memberText(const DSLSymbol* symbol)
 		{
 			const DSLSymbol::MemberAccess& m = std::get<DSLSymbol::MemberAccess>(symbol->data);
-			const std::string receiverName = receiverMemberName(m.receiver);
-			const DSLSymbol* receiverDecl = std::get<DSLSymbol::VariableReference>(m.receiver->data).declaration;
-			if (const BindingMember* member = bindings.findMember(declaredType(receiverDecl), m.memberName); member != nullptr)
-				return substituteTemplate(member->emit, receiverName, {});
-			return receiverName + "." + m.memberName; // defensive -- authored/loaded members always exist in the registry
+			const std::string receiverText = expressionText(m.receiver); // recursion makes chains compose ("self.pos" -> ".x")
+			if (const BindingMember* member = bindings.findMember(dslValueType(m.receiver), m.memberName); member != nullptr)
+				return substituteTemplate(member->emit, receiverText, {});
+			return receiverText + "." + m.memberName; // defensive -- authored/loaded members always exist in the registry
 		}
 
 		std::string expressionText(const DSLSymbol* symbol)
@@ -217,15 +209,15 @@ namespace
 			{
 				// Committed documents never hold value placeholders (the editor's no-placeholder rule) -- emit
 				// a type default anyway rather than broken text if one ever slips through.
-				switch (std::get<DSLSymbol::Placeholder>(symbol->data).expectedType)
+				const DSLType expected = std::get<DSLSymbol::Placeholder>(symbol->data).expectedType;
+				if (const BindingStruct* structDef = bindings.structFor(expected); structDef != nullptr)
+					return std::string(structDef->cppName) + "()";
+				switch (expected)
 				{
-				case DSLType::Float:   return "0.0f";
-				case DSLType::Bool:    return "false";
-				case DSLType::String:  return "\"\"";
-				case DSLType::Vector2: return "glm::vec2(0.0f)";
-				case DSLType::Vector3: return "glm::vec3(0.0f)";
-				case DSLType::Vector4: return "glm::vec4(0.0f)";
-				default:               return "0";
+				case DSLType::Float:  return "0.0f";
+				case DSLType::Bool:   return "false";
+				case DSLType::String: return "\"\"";
+				default:              return "0";
 				}
 			}
 			default:

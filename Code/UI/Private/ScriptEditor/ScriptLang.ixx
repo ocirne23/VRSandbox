@@ -130,8 +130,11 @@ export struct Candidate
 	DSLSymbol* refSymbol = nullptr;
 	DSLType declareType = DSLType::Void;
 	DSLOperator op = DSLOperator::Equal;
-	DSLSymbol* receiver = nullptr; // Function candidates from receiverCandidates: the binding object's own
-	                               // sidebar declaration the call dots into (null = a free call)
+	DSLSymbol* receiver = nullptr; // Function candidates from receiverCandidates: the receiver chain's ROOT
+	                               // declaration (a sidebar binding or a struct-typed variable; null = free call)
+	std::string receiverPath;      // the dotted member path between the root and the call, "" for a direct
+	                               // dot-call -- "pos" in `self.pos.length()`. For Kind::Member the PATH rides
+	                               // in `label` instead ("pos.x"), always relative to refSymbol as the root
 };
 
 // "What can be typed here" -- kept independent from Syntax/Transpiler (see the DSL editor's architecture: three
@@ -166,13 +169,16 @@ public:
 		const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
 		const std::string& typedPrefix);
 
-	// Functions/members reachable by dotting into `receiverDecl` (a sidebar binding object's declaration).
-	// expectedType Void + !anyValue = statement context (every function -- a call statement may ignore its
-	// result -- and no members, a bare member access isn't a statement); anyValue = condition-lead style
-	// (non-Void functions + every member); otherwise a value slot of exactly that type. Every returned
-	// candidate carries `receiver` (functions) / `refSymbol` (members) = receiverDecl.
+	// Functions/members reachable by dotting into a receiver of `receiverType` -- a sidebar binding object
+	// (physics/self) or any engine-defined STRUCT value (vec3 and friends). `receiverDecl` is the chain's ROOT
+	// declaration, carried into every candidate (`receiver` for functions, `refSymbol` for members) -- for a
+	// chained access (`self.pos.x`) the type is the PATH END's, while the root stays the decl. expectedType
+	// Void + !anyValue = statement context (every function -- a call statement may ignore its result -- plus
+	// WRITABLE members, the lead-in of a member assignment); anyValue = condition-lead style (non-Void
+	// functions + every member); otherwise a value slot of that type (struct-typed members always pass, so a
+	// chain can continue through them toward a matching leaf).
 	static std::vector<Candidate> receiverCandidates(const ScriptBindings& bindings, DSLSymbol* receiverDecl,
-		DSLType expectedType, bool anyValue, const std::string& typedPrefix);
+		DSLType receiverType, DSLType expectedType, bool anyValue, const std::string& typedPrefix);
 
 	// The six comparison operators (==, !=, <, >, <=, >=) offered while building an if/while condition's middle
 	// term, filtered by typedPrefix same as any other candidate list (typing "<" narrows to "<" and "<=").

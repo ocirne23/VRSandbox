@@ -115,12 +115,17 @@ namespace
 
 	bool typeFromKeyword(const std::string& word, DSLType& out)
 	{
-		for (DSLType t : { DSLType::Int, DSLType::Float, DSLType::Bool, DSLType::String, DSLType::Vector2, DSLType::Vector3, DSLType::Vector4 })
+		for (DSLType t : { DSLType::Int, DSLType::Float, DSLType::Bool, DSLType::String })
 			if (word == dslTypeName(t))
 			{
 				out = t;
 				return true;
 			}
+		if (const DSLType structType = Globals::scriptBindings.structTypeByName(word); structType != DSLType::Void)
+		{
+			out = structType;
+			return true;
+		}
 		return false;
 	}
 
@@ -275,6 +280,27 @@ namespace
 		{
 			const DSLSymbol::VariableDeclaration& decl = std::get<DSLSymbol::VariableDeclaration>(varDecl->data);
 			return std::get<DSLSymbol::TypeDeclaration>(decl.typeSymbol->data).type;
+		}
+
+		// A dotted call's callee, resolved against the RECEIVER's own registry side -- a binding object's
+		// functions or a struct type's member functions -- never a global name scan.
+		DSLSymbol* findReceiverFunction(DSLType receiverType, const std::string& name) const
+		{
+			if (const BindingObject* object = bindings.objectFor(receiverType); object != nullptr)
+			{
+				const std::span<DSLSymbol* const> symbols = bindings.functionSymbols(*object);
+				for (size_t i = 0; i < object->functions.size(); ++i)
+					if (name == object->functions[i].name)
+						return symbols[i];
+			}
+			if (const BindingStruct* structDef = bindings.structFor(receiverType); structDef != nullptr)
+			{
+				const std::span<DSLSymbol* const> symbols = bindings.structFunctionSymbols(receiverType);
+				for (size_t i = 0; i < structDef->functions.size(); ++i)
+					if (name == structDef->functions[i].name)
+						return symbols[i];
+			}
+			return nullptr;
 		}
 
 		// A reference to a component binding's object is only legal when the file's "//@@require" set names its
@@ -437,44 +463,46 @@ namespace
 			if (first.kind != Token::Kind::Identifier)
 				return failValue("expected a value, got '" + first.text + "'");
 
-			// receiver.member / receiver.method(...)
+			// receiver.member(.member...)  /  receiver(.member...).method(...)
 			if (t[1].kind == Token::Kind::Symbol && t[1].text == ".")
 			{
-				if (t.size() < 3 || t[2].kind != Token::Kind::Identifier)
-					return failValue("expected a member name after '" + first.text + ".'");
 				DSLSymbol* receiverDecl = findVariable(first.text);
 				if (receiverDecl == nullptr)
 					return failValue("unknown identifier '" + first.text + "'");
 				if (!checkBindingUsable(receiverDecl))
 					return nullptr;
-				const DSLType receiverType = declaredType(receiverDecl);
-				DSLSymbol* receiverRef = push(line, ST::VariableReference, DSLSymbol::VariableReference{ receiverDecl });
-				const std::string& memberName = t[2].text;
-				if (t.size() == 3)
+				DSLType receiverType = declaredType(receiverDecl);
+				DSLSymbol* receiver = push(line, ST::VariableReference, DSLSymbol::VariableReference{ receiverDecl });
+				std::string ownerName = first.text;
+				size_t i = 1; // at each loop head t[i] is the '.'
+				while (true)
 				{
-					// A binding member -- its value type stamps from the registry (see MemberAccess in DSL.ixx).
+					if (i + 1 >= t.size() || t[i + 1].kind != Token::Kind::Identifier)
+						return failValue("expected a member name after '" + ownerName + ".'");
+					const std::string memberName = t[i + 1].text;
+					// "name(" terminates the chain as a method call on everything walked so far.
+					if (i + 2 < t.size() && t[i + 2].kind == Token::Kind::Symbol && t[i + 2].text == "(")
+					{
+						if (matchParen(t, static_cast<int>(i + 2)) != static_cast<int>(t.size()) - 1)
+							return failValue("unexpected tokens after '" + ownerName + "." + memberName + "(...)'");
+						DSLSymbol* func = findReceiverFunction(receiverType, memberName);
+						if (func == nullptr)
+							return failValue("'" + ownerName + "' has no function '" + memberName + "'");
+						return parseCall(t.subspan(i + 3, t.size() - (i + 3) - 1), line, func, receiver);
+					}
+					// A member hop -- its value type stamps from the registry (see MemberAccess in DSL.ixx).
 					const BindingMember* member = bindings.findMember(receiverType, memberName);
 					if (member == nullptr)
-						return failValue("'" + first.text + "' has no member '" + memberName + "'");
-					return push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ receiverRef, memberName, member->type });
+						return failValue("'" + ownerName + "' has no member '" + memberName + "'");
+					receiver = push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ receiver, memberName, member->type });
+					receiverType = member->type;
+					ownerName += "." + memberName;
+					i += 2;
+					if (i >= t.size())
+						return receiver; // the chain itself is the value
+					if (!(t[i].kind == Token::Kind::Symbol && t[i].text == "."))
+						return failValue("unexpected tokens after '" + ownerName + "'");
 				}
-				if (t[3].kind == Token::Kind::Symbol && t[3].text == "(" && matchParen(t, 3) == static_cast<int>(t.size()) - 1)
-				{
-					// Dot-calls resolve against the RECEIVER's own registry object (not a global name scan), so
-					// same-named functions on different objects can never cross-resolve.
-					DSLSymbol* func = nullptr;
-					if (const BindingObject* object = bindings.objectFor(receiverType); object != nullptr)
-					{
-						const std::span<DSLSymbol* const> functionSymbols = bindings.functionSymbols(*object);
-						for (size_t i = 0; i < object->functions.size(); ++i)
-							if (memberName == object->functions[i].name)
-								func = functionSymbols[i];
-					}
-					if (func == nullptr)
-						return failValue("'" + first.text + "' has no function '" + memberName + "'");
-					return parseCall(t.subspan(4, t.size() - 5), line, func, receiverRef);
-				}
-				return failValue("unexpected tokens after '" + first.text + "." + memberName + "'");
 			}
 
 			// name(...)
@@ -583,28 +611,60 @@ namespace
 			return decl;
 		}
 
-		// "[ref] name <assign-op> value" -> the binary assign-class Expression head (see DSL.ixx: assignments
-		// stay exactly [target, value], compound right-hand sides nest as sub-chains).
+		// Index of the assignment operator following a (possibly dotted) target at the statement's start
+		// ("self.pos.x += ..." -> the '+=' index), or 0 when the line doesn't read as an assignment.
+		static size_t assignmentOpPosition(std::span<const Token> t)
+		{
+			size_t i = (t.size() > 1 && t[0].kind == Token::Kind::Identifier && t[0].text == "ref") ? 1 : 0;
+			if (i >= t.size() || t[i].kind != Token::Kind::Identifier)
+				return 0;
+			++i;
+			while (i + 1 < t.size() && t[i].kind == Token::Kind::Symbol && t[i].text == "."
+				&& t[i + 1].kind == Token::Kind::Identifier)
+				i += 2;
+			DSLOperator op = DSLOperator::Assign;
+			if (i < t.size() && t[i].kind == Token::Kind::Symbol && operatorFromText(t[i].text, op) && dslIsAssignOperator(op))
+				return i;
+			return 0;
+		}
+
+		// "[ref] name(.member)* <assign-op> value" -> the binary assign-class Expression head (see DSL.ixx:
+		// assignments stay exactly [target, value]); a dotted target is a member-assign statement, every hop
+		// registry-validated and the written member required writable.
 		DSLSymbol* parseAssignment(std::span<const Token> t, DSLCodeLine& line)
 		{
 			if (t[0].kind == Token::Kind::Identifier && t[0].text == "ref" && t.size() > 1)
 				t = t.subspan(1); // rendering artifact of assigning into a ref parameter -- the target's decl carries the flag
+			const size_t opAt = assignmentOpPosition(t);
 			DSLOperator op = DSLOperator::Assign;
-			if (t.size() < 3 || t[0].kind != Token::Kind::Identifier
-				|| !(t[1].kind == Token::Kind::Symbol && operatorFromText(t[1].text, op) && dslIsAssignOperator(op)))
+			if (opAt == 0 || t.size() < opAt + 2 || !operatorFromText(t[opAt].text, op))
 				return failValue("expected an assignment");
-			DSLSymbol* target = findVariable(t[0].text);
-			if (target == nullptr)
+			DSLSymbol* rootDecl = findVariable(t[0].text);
+			if (rootDecl == nullptr)
 				return failValue("unknown identifier '" + t[0].text + "'");
-			const DSLType targetType = declaredType(target);
-			if (dslIsEngineObjectType(targetType))
+			if (!checkBindingUsable(rootDecl))
+				return nullptr;
+			DSLType targetType = declaredType(rootDecl);
+			if (opAt == 1 && dslIsEngineObjectType(targetType))
 				return failValue("'" + t[0].text + "' is a binding object -- it can't be assigned to");
 
-			DSLSymbol* targetRef = push(line, ST::VariableReference, DSLSymbol::VariableReference{ target });
-			DSLSymbol* value = parseExpression(t.subspan(2), line, targetType);
+			DSLSymbol* target = push(line, ST::VariableReference, DSLSymbol::VariableReference{ rootDecl });
+			for (size_t i = 2; i < opAt; i += 2) // member hops sit at 2, 4, ... opAt-1
+			{
+				const std::string& memberName = t[i].text;
+				const BindingMember* member = bindings.findMember(targetType, memberName);
+				if (member == nullptr)
+					return failValue("no member '" + memberName + "' to assign to");
+				if (i + 2 > opAt && !member->writable)
+					return failValue("member '" + memberName + "' is read-only");
+				target = push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ target, memberName, member->type });
+				targetType = member->type;
+			}
+
+			DSLSymbol* value = parseExpression(t.subspan(opAt + 1), line, targetType);
 			if (value == nullptr)
 				return nullptr;
-			return push(line, ST::Expression, DSLSymbol::Expression{ { targetRef, value }, { op } });
+			return push(line, ST::Expression, DSLSymbol::Expression{ { target, value }, { op } });
 		}
 
 		// "for" already consumed; `t` holds the three comma-separated clauses. The loop variable registers into
@@ -662,10 +722,8 @@ namespace
 			if (typeFromKeyword(first.text, declType))
 				return parseDeclaration(t, line);
 
-			// "[ref] name <assign-op> ..." -> assignment; anything else must be a call statement.
-			const size_t opAt = (first.text == "ref") ? 2 : 1;
-			DSLOperator op = DSLOperator::Assign;
-			if (t.size() > opAt && t[opAt].kind == Token::Kind::Symbol && operatorFromText(t[opAt].text, op) && dslIsAssignOperator(op))
+			// "[ref] name(.member)* <assign-op> ..." -> assignment; anything else must be a call statement.
+			if (assignmentOpPosition(t) != 0)
 				return parseAssignment(t, line);
 
 			DSLSymbol* head = parseTerm(t, line, DSLType::Void);

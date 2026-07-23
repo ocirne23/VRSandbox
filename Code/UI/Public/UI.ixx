@@ -42,6 +42,9 @@ public:
 
     bool isViewportGrabbed() const { return m_isViewportGrabbed; }
     bool isViewportFocused() const { return m_isViewportFocused; }
+    // True while the Script Editor panel (or any child of it) holds ImGui focus -- see ScriptEditor::hasFocus.
+    // Input.cpp's global-shortcut gate checks this the same way it already checks WantCaptureKeyboard/WantTextInput.
+    bool isScriptEditorFocused() const { return m_scriptEditorOpen && m_scriptEditor.hasFocus(); }
     bool hasViewportGainedFocused() const { return m_hasViewportGainedFocus; }
     const Rect& getViewportRect() const { return m_viewportRect; }
 

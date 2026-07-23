@@ -208,6 +208,12 @@ public:
 
 	void render();
 	void handleKeyEvent(const SDL_Event& evt);
+	// True while this panel (or any of its children) holds ImGui focus -- the DSL text area handles raw SDL
+	// key events itself rather than through a normal ImGui widget (see the class comment), so ImGui's own
+	// WantCaptureKeyboard/WantTextInput never reflect it; callers that gate global keyboard shortcuts (e.g.
+	// InputControls' demo key bindings) need this instead, or typing a digit here (a vector literal's
+	// components, "1.0,2.0,3.0") also fires whatever gameplay action that key is bound to.
+	bool hasFocus() const { return m_hasFocus; }
 
 private:
 
@@ -376,6 +382,11 @@ private:
 	// CallArgValue flow at that argument (earlier arguments restored); false = not such a position/not
 	// restorable, caller falls through.
 	bool tryWidenCallStatementEdit();
+	// The same argument-widening for a call VALUE -- a constructor/call occupying a declaration's whole
+	// initializer ("vec3 test = vec3(1,|") or an assignment's whole right-hand side: the CallArgValue staging
+	// re-opens at that argument WITH the owning flow's context (redeclare / reassign-edit) as the suspended
+	// return mode, so continued Backspace peels through the call, then the value stage, the name, and beyond.
+	bool tryWidenValueCallEdit();
 	std::string callComposePrefix() const;  // "name(param0 = <resolved>, param1 = " -- rebuilt from the staged-call state each stage
 	std::string callStagePrefix() const;    // callComposePrefix, led by the suspended chain compose's own prefix when staging a call VALUE
 	DSLType currentCallParamType() const;   // the parameter the CallArgValue stage is currently composing a value for
@@ -384,9 +395,10 @@ private:
 	// arguments, and placeholders never land) -- '(', an operator, or a confirm over it opens the CallArgValue
 	// sub-flow instead. False = not such a candidate; the caller proceeds normally.
 	bool tryBeginValueCallStaging();
-	// Dotting into a matched BindingObject candidate ('.', or a confirm over it): captures the current mode as
-	// the return context and opens the receiver's member/function list (ComposeMode::MemberSelect).
+	// Dotting into a matched BindingObject/struct-variable candidate ('.', or a confirm over it): captures the
+	// current mode as the return context and opens the receiver's member/function list (ComposeMode::MemberSelect).
 	void enterMemberSelect(DSLSymbol* receiverDecl);
+	void restoreMemberPath(const std::string& dottedPath); // re-applies a dotted chain onto a fresh MemberSelect
 	// The value constraints of the CURRENT compose stage -- what a MemberSelect entered from it filters
 	// receiver candidates by (Void + !anyValue = statement context). Mirrors refreshCandidates' per-mode logic.
 	DSLType valueContextExpectedType(ComposeMode mode, bool& outAnyValue) const;
@@ -394,7 +406,12 @@ private:
 	// its functions) -- guards un-requiring a component that's still in use.
 	bool isBindingObjectReferenced(const BindingObject& object) const;
 	void renderSidebarPanel(); // the Entity/Engine bindings browser + required-component checkboxes
-	DSLSymbol* buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbol* receiverDecl, const std::vector<Candidate>& argCandidates,
+	// The receiver expression a dotted path names: the root's VariableReference, wrapped in one MemberAccess
+	// per path segment ("pos.x" -> self->pos->x), each hop's type stamped from the registry. Empty path = just
+	// the reference. Shared by member values, member-assign targets, and dot-call receivers.
+	DSLSymbol* buildReceiverChain(DSLSymbol* rootDecl, const std::string& dottedPath, DSLCodeLine& line);
+	DSLSymbol* buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbol* receiverDecl, const std::string& receiverPath,
+		const std::vector<Candidate>& argCandidates,
 		const std::vector<std::string>& argRawTexts, DSLCodeLine& line); // shared by commitCallStatement and call-term builds
 	void restoreTermIntoBox(PendingExprTerm&& term); // back into the live compose: groups/resolved calls as the pending term, plain candidates as typed text
 	std::string forVarPrefix() const;       // "for <type> <name> = " -- before the loop var's own initial value
@@ -446,8 +463,9 @@ private:
 	void finishChainShrink(DSLSymbol* exprSymbol, DSLSymbol* originalHead, int selectOperand); // shared tail: unwrap a 1-operand chain, restore head order, GC, land the cursor
 
 	DSL m_document;
-	ScriptBindings m_bindings; // THE engine-exposure registry -- builds m_document.sidebar + m_builtins once
-	                           // (stable symbol identity) and answers every receiver/member/emit lookup
+	ScriptBindings& m_bindings = Globals::scriptBindings; // THE engine-exposure registry (global -- dslTypeName
+	                           // and the loader/transpiler consult it too); builds m_document.sidebar +
+	                           // m_builtins once (stable symbol identity), answers receiver/member/emit lookups
 	std::vector<std::unique_ptr<DSLSymbol>> m_builtins; // every registry FunctionDeclaration (engine free
 	                                                     // functions + requiresReceiver object functions)
 	std::vector<SyntaxLine> m_formatted; // rebuilt from m_document each render() -- cheap at this document size
@@ -568,19 +586,31 @@ private:
 	// func(1, x)" -- completion returns a resolved PendingExprTerm to that mode's box instead; the suspended
 	// chain state survives untouched, exactly like the comparison-value handover).
 	DSLSymbol* m_callFunc = nullptr;
-	DSLSymbol* m_callReceiver = nullptr; // the binding object's sidebar declaration a dot-call stages against
+	DSLSymbol* m_callReceiver = nullptr; // the receiver chain's ROOT declaration a dot-call stages against
 	                                     // ("physics.applyImpulse(...)"); null = a free call
+	std::string m_callReceiverPath;      // dotted member path root->call, "" for a direct dot-call ("pos" in
+	                                     // `self.pos.length()`)
 	std::vector<Candidate> m_callArgCandidates;
 	std::vector<std::string> m_callArgRawTexts;
 	ComposeMode m_callValueReturnMode = ComposeMode::None;
 
-	// MemberSelect (dotted into a binding object): the receiver's sidebar declaration, the mode the '.' was
-	// typed in (stage results return there; Backspace-empty restores it), and the value constraints captured
-	// at entry (what receiverCandidates filters by -- see valueContextExpectedType).
+	// MemberSelect (dotted into a binding object or a struct-typed variable): the chain's ROOT declaration,
+	// the member PATH walked so far ("pos" after `self.pos.` -- each '.' over a struct-typed member appends),
+	// the type at the path's end (what the candidate list keys on), the mode the first '.' was typed in
+	// (stage results return there; Backspace-empty peels the path then restores the root), and the value
+	// constraints captured at entry (see valueContextExpectedType).
 	DSLSymbol* m_memberReceiver = nullptr;
+	std::vector<std::string> m_memberPath;
+	DSLType m_memberReceiverType = DSLType::Void;
 	ComposeMode m_memberReturnMode = ComposeMode::None;
 	DSLType m_memberExpectedType = DSLType::Void;
 	bool m_memberAnyValue = false;
+
+	// Non-empty: the Reassign flow targets a MEMBER of m_reassignTarget instead of the variable itself
+	// ("self.pos.x = ..."): the dotted path from the root declaration to the written member. Entered by
+	// confirming a writable Member candidate in a STATEMENT MemberSelect; commitReassignStatement builds the
+	// MemberAccess chain as the assignment's target.
+	std::vector<std::string> m_reassignMemberPath;
 
 	std::string m_pendingFunctionName;            // FunctionDeclareName's resolved name, once confirmed
 	std::vector<DSLType> m_pendingParamTypes;     // accumulated parameter types, parallel to m_pendingParamNames
@@ -644,6 +674,7 @@ private:
 	bool m_built = false;
 
 	char m_pathBuf[256] = "script.dsl"; // toolbar path field -- relative to Assets/ (the working directory)
+	float m_sidebarWidth = 240.0f; // drag-resizable via the splitter between the sidebar and the text area
 
 	float m_fontScale = 1.0f;
 	float m_textOriginX = 0.0f, m_textOriginY = 0.0f;
