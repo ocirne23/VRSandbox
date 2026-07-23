@@ -165,9 +165,11 @@ public:
 	// function, regardless of type. No free-typed literal option here: a bare literal's type would be
 	// ambiguous (Int? Float? String?) with nothing yet to disambiguate it against -- comparisons in this DSL
 	// always lead with a variable/call (`height <= 0.1`, `counter < 5`), matching the example program.
+	// `excludeVariable` (optional) drops one declaration -- a declaration's own initializer (or a `&&`/`||`
+	// chain grown from it) must never be able to reference the not-yet-existing variable it's building.
 	static std::vector<Candidate> candidatesForAnyValue(const DSLCodeLine& atLine, const DSLScriptFile& file,
 		const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
-		const std::string& typedPrefix);
+		const std::string& typedPrefix, DSLSymbol* excludeVariable = nullptr);
 
 	// Functions/members reachable by dotting into a receiver of `receiverType` -- a sidebar binding object
 	// (physics/self) or any engine-defined STRUCT value (vec3 and friends). `receiverDecl` is the chain's ROOT

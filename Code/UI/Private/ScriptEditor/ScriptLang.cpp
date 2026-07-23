@@ -777,10 +777,10 @@ bool AutoCompleteRules::isFunctionReferenced(const DSLSymbol* funcDecl, const DS
 
 std::vector<Candidate> AutoCompleteRules::candidatesForAnyValue(const DSLCodeLine& atLine, const DSLScriptFile& file,
 	const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
-	const std::string& typedPrefix)
+	const std::string& typedPrefix, DSLSymbol* excludeVariable)
 {
 	std::vector<Candidate> out;
-	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::Variable, nullptr, [](DSLType) { return true; });
+	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::Variable, excludeVariable, [](DSLType) { return true; });
 	// A statement-only (Void-returning) call has nothing to compare, so those are excluded here.
 	addFunctionCandidates(out, file, builtins, typedPrefix, /*includeParameterized*/ true, [](DSLType type) { return type != DSLType::Void; });
 	sortExactMatchFirst(out, typedPrefix);

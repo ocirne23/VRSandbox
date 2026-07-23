@@ -152,6 +152,19 @@ import :ScriptLang;
 // reachable from it (restoreHeadAndCollect) -- replaced operands must not linger in the line's flat ownership
 // list, where isVariableReferenced-style scans would still count them as uses.
 
+struct PendingExprTerm; // fwd decl -- PendingExprChain (below) needs it before PendingExprTerm needs PendingExprChain back
+
+// One fully-resolved arithmetic chain (terms + the operators between them) a staged flow holds for a value
+// position -- a comparison side, a for-loop clause, an initializer's worth of expression, or (see
+// PendingExprTerm::callArgs) ONE ARGUMENT of a staged call, itself possibly compound or containing a nested
+// call. `terms` is non-empty once resolved; ops.size() == terms.size() - 1. A single plain value is a
+// one-term chain.
+struct PendingExprChain
+{
+	std::vector<PendingExprTerm> terms;
+	std::vector<DSLOperator> ops;
+};
+
 // One term in a compound "value [op value]*" expression being composed (see the comment above): a plain
 // matched candidate, a RESOLVED parameterized call (a Function candidate plus its staged arguments -- see the
 // CallArgValue value sub-flow), or (isGroup) an entire parenthesized sub-expression, itself a nested
@@ -163,8 +176,8 @@ struct PendingExprTerm
 	Candidate candidate;                     // meaningful if !isGroup
 	std::vector<PendingExprTerm> groupTerms; // meaningful if isGroup
 	std::vector<DSLOperator> groupOps;       // meaningful if isGroup -- groupOps.size() == groupTerms.size() - 1
-	std::vector<Candidate> callArgs;         // non-empty = a parameterized call's staged arguments, one per
-	std::vector<std::string> callArgRawTexts; // parameter (raw comma-component text for vector parameters)
+	std::vector<PendingExprChain> callArgs;  // non-empty = a parameterized call's staged arguments, one FULL
+	                                          // (possibly compound/nested-call) chain per callee parameter
 };
 
 // One nesting level of the expression being composed (one entry per currently-open paren depth, index 0 = the
@@ -176,15 +189,6 @@ struct PendingExprTerm
 // never persists as a resting state (every action that completes a term also either adds a dangling operator or
 // closes/pops the frame), so callers can treat the `ops.size() == terms.size()` check as the sole invariant.
 struct ExprFrame
-{
-	std::vector<PendingExprTerm> terms;
-	std::vector<DSLOperator> ops;
-};
-
-// One fully-resolved arithmetic chain (terms + the operators between them) a staged flow holds for a value
-// position -- a comparison side, a for-loop clause, an initializer's worth of expression. `terms` is non-empty
-// once resolved; ops.size() == terms.size() - 1. A single plain value is a one-term chain.
-struct PendingExprChain
 {
 	std::vector<PendingExprTerm> terms;
 	std::vector<DSLOperator> ops;
@@ -297,6 +301,14 @@ private:
 	// harmlessly before "&&"/an operator without accidentally committing the line so far.
 	void confirmCompose(bool allowCommit = true);
 	const Candidate* selectedCandidate() const; // the currently-highlighted candidate, or nullptr when the list is empty
+	// Space on a TERMINAL compose stage (the value/argument IS the whole line -- only Enter/')' finishes it, so
+	// Space would otherwise do nothing at all): completes the box to the currently-matched candidate's full
+	// text instead, mirroring the completion every OTHER stage's Space already performs as part of advancing.
+	// Parameterized functions are excluded -- those resolve through tryBeginValueCallStaging instead (typed
+	// text required there too, "the highlighted default must never resolve off a stray key"). Returns true if
+	// it consumed the keystroke (something was completed); false = nothing to complete, caller's plain
+	// `if (!allowCommit) return;` behavior is unchanged either way.
+	bool tryCompleteCandidateOnSpace();
 	// The one-stop stage transition every staged flow uses: sets the compose box to `prefix` (+ `pendingWord`,
 	// for step-backs that restore previously-typed text), switches to `mode`, and rebuilds the candidate list
 	// against the new mode/text (a no-op for free-typing modes, which end up with an empty list).
@@ -328,7 +340,20 @@ private:
 	bool exprTryFinalize(std::vector<PendingExprTerm>& outTerms, std::vector<DSLOperator>& outOps);
 	std::string exprBasePrefix() const; // "type name = " (DeclareValue) or "name = " (ReassignValue) -- everything before the expression itself
 	std::string exprBasePrefixFor(ComposeMode mode) const; // exprBasePrefix's worker, for a mode OTHER than the current one (the comparison-value flow's stages)
+	// exprBasePrefixFor(mode) + exprComposePrefixFromStack(), generalized for a possibly-CallArgValue `mode`
+	// (which has no exprBasePrefixFor case of its own -- a call's own lead-in text is per-stage cached in
+	// CallStage::outerLeadText instead, via callStagePrefix()). `mode` is whichever compose is CURRENTLY
+	// suspended in the live m_exprStack/m_callStack.back() at the call site -- callers capture this BEFORE
+	// saving/resetting either, so the live state still reflects it.
+	std::string chainLeadTextFor(ComposeMode mode) const;
 	std::string conditionFlowBasePrefix() const; // what precedes the condition being staged: the flow keyword ("if "), or the value mode's own base ("bool b = ")
+	// The declaration being built/re-edited through the CURRENT comparison/logical-chain handoff
+	// (m_conditionValueReturnMode), if any -- excluded from ConditionLeft/Right's own candidate lists so
+	// "bool test = ... && test" can never reference the not-yet-existing symbol it's building. A REASSIGNMENT's
+	// own target is deliberately NOT covered here (returns nullptr for ReassignValue) -- "b = b && ready"
+	// (reading the variable's OLD value before it's overwritten) is legitimate, unlike a fresh/re-declared
+	// initializer, which has no prior value to read.
+	DSLSymbol* conditionValueExcludeVariable() const;
 	void commitBoolValue(const PendingLogicalTerm& finalTerm); // the staged comparison/logical chain IS a value ("bool b = i < 5") -- routes per m_conditionValueReturnMode
 	std::string exprComposePrefixFromStack() const; // renders m_exprStack (+ m_exprPendingGroup, if any) back to text -- always assigned to m_composePrefix after any state change, forward or backward, so the two can never drift apart
 	std::string exprTermText(const PendingExprTerm& term) const; // recursive -- "(" + ... + ")" for a group, else candidateDisplayText
@@ -411,8 +436,7 @@ private:
 	// the reference. Shared by member values, member-assign targets, and dot-call receivers.
 	DSLSymbol* buildReceiverChain(DSLSymbol* rootDecl, const std::string& dottedPath, DSLCodeLine& line);
 	DSLSymbol* buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbol* receiverDecl, const std::string& receiverPath,
-		const std::vector<Candidate>& argCandidates,
-		const std::vector<std::string>& argRawTexts, DSLCodeLine& line); // shared by commitCallStatement and call-term builds
+		const std::vector<PendingExprChain>& argChains, DSLCodeLine& line); // shared by commitCallStatement and call-term builds
 	void restoreTermIntoBox(PendingExprTerm&& term); // back into the live compose: groups/resolved calls as the pending term, plain candidates as typed text
 	std::string forVarPrefix() const;       // "for <type> <name> = " -- before the loop var's own initial value
 	std::string forVarDeclPrefix() const;   // forVarPrefix() + the resolved initial value -- the whole loop-var clause
@@ -577,22 +601,37 @@ private:
 	int m_composeCoverStart = -1;
 	int m_composeCoverEnd = -1;
 
-	// Building a parameterized call (CallArgValue): each argument's value resolves fully -- a picked candidate,
-	// or (vector-typed parameters) free-typed comma components in the parallel raw-text slot -- before the next
-	// one starts; the call itself only completes once EVERY argument is in hand (commitCallStatement), so an
-	// argument placeholder never appears in the document. The current parameter's index is
-	// m_callArgCandidates.size(). Two contexts share this state: a call STATEMENT (m_callValueReturnMode ==
-	// None -- completion commits the line), and a call VALUE inside a suspended chain compose ("bool b =
-	// func(1, x)" -- completion returns a resolved PendingExprTerm to that mode's box instead; the suspended
-	// chain state survives untouched, exactly like the comparison-value handover).
-	DSLSymbol* m_callFunc = nullptr;
-	DSLSymbol* m_callReceiver = nullptr; // the receiver chain's ROOT declaration a dot-call stages against
-	                                     // ("physics.applyImpulse(...)"); null = a free call
-	std::string m_callReceiverPath;      // dotted member path root->call, "" for a direct dot-call ("pos" in
-	                                     // `self.pos.length()`)
-	std::vector<Candidate> m_callArgCandidates;
-	std::vector<std::string> m_callArgRawTexts;
-	ComposeMode m_callValueReturnMode = ComposeMode::None;
+	// One level of a (possibly NESTED) parameterized call's argument staging -- CallArgValue is a proper
+	// chain-composing mode (see isChainComposeMode): each argument is a FULL chain (m_exprStack), which may
+	// itself contain a call, so a call passed AS an argument to another call pushes its own CallStage here (via
+	// tryBeginValueCallStaging, generic to every chain mode) instead of clobbering the enclosing one.
+	struct CallStage
+	{
+		DSLSymbol* func = nullptr;
+		DSLSymbol* receiver = nullptr;  // the receiver chain's ROOT declaration a dot-call stages against
+		                                 // ("physics.applyImpulse(...)"); null = a free call
+		std::string receiverPath;       // dotted member path root->call, "" for a direct dot-call ("pos" in
+		                                 // `self.pos.length()`)
+		std::vector<PendingExprChain> argChains; // confirmed arguments so far, one full chain each
+		ComposeMode returnMode = ComposeMode::None; // None = a STATEMENT call (completion commits the line);
+		                                             // else the mode THIS call's resolved value returns into
+		                                             // once every argument is in hand (may itself be
+		                                             // CallArgValue -- a call nested in another call's argument)
+		std::string outerLeadText;              // the SUSPENDED context's own lead-in text ("bool b = ", or an
+		                                         // enclosing call's own "outer(arg0 = "), captured ONCE at push
+		                                         // time (see chainLeadTextFor) -- constant for this stage's whole
+		                                         // lifetime; callStagePrefix() prepends it to this call's own text
+		std::vector<ExprFrame> savedExprStack;  // the ENCLOSING compose's m_exprStack, frozen while THIS call's
+		                                         // own arguments stage -- restored once it resolves or is abandoned
+		PendingExprTerm savedPendingGroup;
+		bool savedHasPendingGroup = false;
+	};
+	// Building a parameterized call: m_callStack.back() is always the level CURRENTLY staging (its own
+	// m_exprStack composes the argument in progress); an argument placeholder never appears in the document --
+	// the call only completes once EVERY argument is in hand (commitCallStatement), which pops this level and,
+	// if CallStage::returnMode != None, delivers the resolved call as a PendingExprTerm into the level (or
+	// chain mode) beneath, restoring ITS OWN m_exprStack exactly where it left off.
+	std::vector<CallStage> m_callStack;
 
 	// MemberSelect (dotted into a binding object or a struct-typed variable): the chain's ROOT declaration,
 	// the member PATH walked so far ("pos" after `self.pos.` -- each '.' over a struct-typed member appends),
