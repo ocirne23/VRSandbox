@@ -875,6 +875,21 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		const ComposeMode back = m_memberReturnMode;
 		const bool statementContext = back == ComposeMode::FilterCandidates;
 
+		// Completes the CURRENTLY-TYPED SEGMENT ("phy" -> "physics") to the picked candidate's own bare name --
+		// NOT candidateDisplayText/tryCompleteCandidateOnSpace, which render the FULL receiver-prefixed text
+		// ("self.physics") and would double up against m_composePrefix's own "self." lead-in. What lets
+		// Space/Enter turn "self.phy" into "self.physics" instead of silently doing nothing when the candidate
+		// can't resolve as a bare value/statement yet (see the two refusal sites below) -- '.' (or further
+		// typing) continues the chain from there.
+		auto completeSegment = [&]()
+		{
+			if (!m_pendingWord.empty() && m_pendingWord != picked->label)
+			{
+				m_pendingWord = picked->label;
+				refreshCandidates();
+			}
+		};
+
 		if (picked->kind == Candidate::Kind::Function
 			&& !std::get<DSLSymbol::FunctionDeclaration>(picked->refSymbol->data).parameterVarDeclarations.empty())
 		{
@@ -921,7 +936,10 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 				// must keep dotting toward an actual call ('.' extends it, same refusal as the value-context
 				// waypoint case below); confirming it here would otherwise stage a bogus "physics = ..." assign.
 				if (!picked->memberWritable)
+				{
+					completeSegment();
 					return;
+				}
 				// A writable member as an assignment TARGET: stage `root.path = value` through the Reassign
 				// flow ('=' authored; compound member assigns are a later nicety).
 				m_reassignTarget = m_memberReceiver;
@@ -950,11 +968,14 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 			return;
 		}
 
-		// Value context: a struct-typed member that doesn't MATCH the slot's type is only a waypoint -- it
-		// must keep dotting toward a matching leaf ('.' extends it), never deliver as the value itself.
+		// Value context: a chainable member that doesn't MATCH the slot's type is only a waypoint -- it must
+		// keep dotting toward a matching leaf ('.' extends it), never deliver as the value itself.
 		if (chosen.kind == Candidate::Kind::Member && !m_memberAnyValue && m_memberExpectedType != DSLType::Void
 			&& chosen.declareType != m_memberExpectedType)
+		{
+			completeSegment();
 			return;
+		}
 
 		// The member / zero-argument dot-call becomes an already-resolved pending term of the suspended chain
 		// compose -- exactly commitCallStatement's value-branch delivery.
@@ -5900,14 +5921,17 @@ void ScriptEditor::renderSidebarPanel()
 		}
 		seg(kColPunct, ")");
 	};
-	// Recursive (std::function, since it calls itself): a plain data member draws as "type name"; a CHAINABLE
-	// member (self.physics and friends) draws as its own tree node -- checkbox-gated when component-bound --
-	// browsing the matching binding object's own members/functions, mirroring how the DSL itself dots into it.
+	// Recursive (std::function, since it calls itself): a plain data member (including struct-typed ones like
+	// "vec3 pos" -- their own shape is browsable separately, under TYPES) draws as "type name"; an ENGINE-OBJECT
+	// member (self.physics and friends) draws as its own tree node instead -- checkbox-gated when
+	// component-bound -- browsing the matching binding object's own members/functions, mirroring how the DSL
+	// itself dots into it. Struct types are deliberately excluded here even though they're also "chainable"
+	// (dslIsChainableType) -- objectFor only resolves binding OBJECTS, never structs (see ScriptBindings).
 	std::function<void(const BindingObject&)> drawObjectContents = [&](const BindingObject& object)
 	{
 		for (const BindingMember& member : object.members)
 		{
-			if (dslIsChainableType(member.type))
+			if (dslIsEngineObjectType(member.type))
 			{
 				const BindingObject* nested = m_bindings.objectFor(member.type);
 				if (nested == nullptr)
