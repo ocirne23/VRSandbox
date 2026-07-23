@@ -278,11 +278,8 @@ namespace
 	}
 }
 
-// Hardcodes the full example program from ScriptLang.ixx's comment (sidebar + update/doForce/canJump) directly
-// as DSLSymbols, bypassing the not-yet-built parser/autocomplete-insertion path (M3). Function SIGNATURES are
-// built before any BODY, since update()'s body calls doForce()/canJump() and needs their parameter
-// declarations to exist already for named-argument CallArgument::parameter cross-references -- bodies are then
-// built and everything is assembled into m_document.file.lines in the program's final order.
+// Builds the sidebar bindings and built-in functions/types once at startup, then seeds the document with a
+// single empty entry-point function -- a starting point for the user to build from, not a worked example.
 void ScriptEditor::buildExampleDocument()
 {
 	// Sidebar bindings and builtins aren't owned by any line (see DSL.ixx), so they can't go through pushSymbol
@@ -308,19 +305,18 @@ void ScriptEditor::buildExampleDocument()
 
 	// ---- sidebar: World world / Entity self / PhysicsComponent physics ----
 	DSLSymbol* worldType   = addSidebar(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::World });
-	DSLSymbol* worldVar    = addSidebar(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "world", worldType });
+	addSidebar(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "world", worldType });
 	DSLSymbol* selfType    = addSidebar(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Entity });
-	DSLSymbol* selfVar     = addSidebar(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "self", selfType });
+	addSidebar(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "self", selfType });
 	DSLSymbol* physicsType = addSidebar(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::PhysicsComponent });
-	DSLSymbol* physicsVar  = addSidebar(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "physics", physicsType });
+	addSidebar(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "physics", physicsType });
 
 	// ---- builtins (vec2/vec3/vec4/print/PhysicsComponent+World methods) -- not owned by any line, see DSL.ixx ----
 	// vec2/3/4 carry real Float parameters so autocomplete-inserted calls (e.g. picking one as an if/while
 	// condition operand) know to fill in the right number of placeholder arguments -- isPositionalCall keeps
-	// those rendered positionally ("vec3(<float>, <float>, <float>)"), matching the terse style every
-	// hand-authored vecN(...) call in this file already uses, not "vec3(x = ..., y = ..., z = ...)". Remembered
-	// as members too: declaring a vec2/3/4 variable builds one of these directly from typed components
-	// (see applyDeclareVariable), bypassing the regular candidate list entirely.
+	// those rendered positionally ("vec3(<float>, <float>, <float>)"), not "vec3(x = ..., y = ..., z = ...)".
+	// Remembered as members too: declaring a vec2/3/4 variable builds one of these directly from typed
+	// components (see applyDeclareVariable), bypassing the regular candidate list entirely.
 	auto addVecBuiltin = [&](const char* name, DSLType returnType, int componentCount) -> DSLSymbol*
 	{
 		static const char* const kComponentNames[] = { "x", "y", "z", "w" };
@@ -335,17 +331,16 @@ void ScriptEditor::buildExampleDocument()
 	m_vec2Func = addVecBuiltin("vec2", DSLType::Vector2, 2);
 	m_vec3Func = addVecBuiltin("vec3", DSLType::Vector3, 3);
 	m_vec4Func = addVecBuiltin("vec4", DSLType::Vector4, 4);
-	DSLSymbol* vec3Func = m_vec3Func; // kept as a local alias -- the rest of this function already refers to it by this name
 
-	DSLSymbol* printFunc = addBuiltin(ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "print", {}, DSLType::Void });
+	addBuiltin(ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "print", {}, DSLType::Void });
 
-	DSLSymbol* getMassFunc = addBuiltin(ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "getMass", {}, DSLType::Float, /*requiresReceiver*/ true });
+	addBuiltin(ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "getMass", {}, DSLType::Float, /*requiresReceiver*/ true });
 
 	DSLSymbol* applyForceDirType   = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Vector3 });
 	DSLSymbol* applyForceDirParam  = addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "direction", applyForceDirType });
 	DSLSymbol* applyForceForceType = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
 	DSLSymbol* applyForceForceParam = addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "force", applyForceForceType });
-	DSLSymbol* applyForceFunc = addBuiltin(ST::FunctionDeclaration,
+	addBuiltin(ST::FunctionDeclaration,
 		DSLSymbol::FunctionDeclaration{ "applyForce", { applyForceDirParam, applyForceForceParam }, DSLType::Void, /*requiresReceiver*/ true });
 
 	DSLSymbol* rayCastPosType     = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Vector3 });
@@ -354,233 +349,20 @@ void ScriptEditor::buildExampleDocument()
 	DSLSymbol* rayCastDirParam    = addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "dir", rayCastDirType });
 	DSLSymbol* rayCastMaxDistType = addBuiltin(ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
 	DSLSymbol* rayCastMaxDistParam = addBuiltin(ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "maxRayDist", rayCastMaxDistType });
-	DSLSymbol* rayCastFunc = addBuiltin(ST::FunctionDeclaration,
+	addBuiltin(ST::FunctionDeclaration,
 		DSLSymbol::FunctionDeclaration{ "rayCast", { rayCastPosParam, rayCastDirParam, rayCastMaxDistParam }, DSLType::Float, /*requiresReceiver*/ true });
 
-	// ---- function signatures, built before any body (see function comment) ----
+	// ---- update(deltaSec): the sole starting function, empty -- the user builds everything else from here ----
 	auto updateHeader = newLine(0);
 	DSLSymbol* deltaSecType  = pushSymbol(*updateHeader, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
 	DSLSymbol* deltaSecParam = pushSymbol(*updateHeader, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "deltaSec", deltaSecType });
 	pushSymbol(*updateHeader, ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "update", { deltaSecParam }, DSLType::Void });
-
-	auto doForceHeader = newLine(0);
-	DSLSymbol* dirType    = pushSymbol(*doForceHeader, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Vector3 });
-	DSLSymbol* dirParam   = pushSymbol(*doForceHeader, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "dir", dirType });
-	DSLSymbol* forceType  = pushSymbol(*doForceHeader, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
-	DSLSymbol* forceParam = pushSymbol(*doForceHeader, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "force", forceType });
-	DSLSymbol* appliedForceType  = pushSymbol(*doForceHeader, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
-	DSLSymbol* appliedForceParam = pushSymbol(*doForceHeader, ST::VariableDeclaration,
-		DSLSymbol::VariableDeclaration{ "appliedForce", appliedForceType, /*initialValue*/ nullptr, /*isRef*/ true });
-	DSLSymbol* doForceFunc = pushSymbol(*doForceHeader, ST::FunctionDeclaration,
-		DSLSymbol::FunctionDeclaration{ "doForce", { dirParam, forceParam, appliedForceParam }, DSLType::Void });
-
-	auto canJumpHeader = newLine(0);
-	DSLSymbol* canJumpFunc = pushSymbol(*canJumpHeader, ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "canJump", {}, DSLType::Bool });
-
-	// ==== update(deltaSec) body ====
-	std::vector<std::unique_ptr<DSLCodeLine>> updateBody;
-
-	{
-		// float applied = 0.0
-		auto line = newLine(1);
-		DSLSymbol* appliedType = pushSymbol(*line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
-		DSLSymbol* initVal = pushSymbol(*line, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "0.0" });
-		DSLSymbol* appliedVar = pushSymbol(*line, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "applied", appliedType, initVal });
-		updateBody.push_back(std::move(line));
-
-		// if canJump()
-		auto ifLine = newLine(1);
-		DSLSymbol* canJumpCall = pushSymbol(*ifLine, ST::FunctionCall, DSLSymbol::FunctionCall{ canJumpFunc, nullptr, {} });
-		pushSymbol(*ifLine, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::If, canJumpCall });
-		updateBody.push_back(std::move(ifLine));
-
-		// doForce(dir = vec3(0, 1, 0), force = 1.0, ref appliedForce = applied)
-		auto callLine = newLine(2);
-		DSLSymbol* vx = pushSymbol(*callLine, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "0" });
-		DSLSymbol* vy = pushSymbol(*callLine, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "1" });
-		DSLSymbol* vz = pushSymbol(*callLine, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "0" });
-		DSLSymbol* dirValue = pushSymbol(*callLine, ST::FunctionCall,
-			DSLSymbol::FunctionCall{ vec3Func, nullptr, { { nullptr, vx }, { nullptr, vy }, { nullptr, vz } } });
-		DSLSymbol* forceValue = pushSymbol(*callLine, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "1.0" });
-		DSLSymbol* appliedRefForCall = pushSymbol(*callLine, ST::VariableReference, DSLSymbol::VariableReference{ appliedVar });
-		pushSymbol(*callLine, ST::FunctionCall, DSLSymbol::FunctionCall{ doForceFunc, nullptr,
-			{ { dirParam, dirValue }, { forceParam, forceValue }, { appliedForceParam, appliedRefForCall } } });
-		updateBody.push_back(std::move(callLine));
-
-		// print("Jumped! (force: {})", applied)
-		auto printLine = newLine(2);
-		DSLSymbol* msg = pushSymbol(*printLine, ST::Constant, DSLSymbol::Constant{ DSLType::String, "Jumped! (force: {})" });
-		DSLSymbol* appliedRefForPrint = pushSymbol(*printLine, ST::VariableReference, DSLSymbol::VariableReference{ appliedVar });
-		pushSymbol(*printLine, ST::FunctionCall, DSLSymbol::FunctionCall{ printFunc, nullptr, { { nullptr, msg }, { nullptr, appliedRefForPrint } } });
-		updateBody.push_back(std::move(printLine));
-
-		// int thing = 1
-		auto thingLine = newLine(1);
-		DSLSymbol* thingType = pushSymbol(*thingLine, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Int });
-		DSLSymbol* thingInit = pushSymbol(*thingLine, ST::Constant, DSLSymbol::Constant{ DSLType::Int, "1" });
-		DSLSymbol* thingVar = pushSymbol(*thingLine, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "thing", thingType, thingInit });
-		updateBody.push_back(std::move(thingLine));
-
-		// for int counter = 0, counter < 5, counter += 1
-		auto forLine = newLine(1);
-		DSLSymbol* counterType = pushSymbol(*forLine, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Int });
-		DSLSymbol* counterInit = pushSymbol(*forLine, ST::Constant, DSLSymbol::Constant{ DSLType::Int, "0" });
-		DSLSymbol* counterVar = pushSymbol(*forLine, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "counter", counterType, counterInit });
-		DSLSymbol* counterRefCond = pushSymbol(*forLine, ST::VariableReference, DSLSymbol::VariableReference{ counterVar });
-		DSLSymbol* five = pushSymbol(*forLine, ST::Constant, DSLSymbol::Constant{ DSLType::Int, "5" });
-		DSLSymbol* condExpr = pushSymbol(*forLine, ST::Expression, DSLSymbol::Expression{ { counterRefCond, five }, { DSLOperator::LessThan } });
-		DSLSymbol* counterRefIncr = pushSymbol(*forLine, ST::VariableReference, DSLSymbol::VariableReference{ counterVar });
-		DSLSymbol* one = pushSymbol(*forLine, ST::Constant, DSLSymbol::Constant{ DSLType::Int, "1" });
-		DSLSymbol* incrExpr = pushSymbol(*forLine, ST::Expression, DSLSymbol::Expression{ { counterRefIncr, one }, { DSLOperator::AssignAdd } });
-		pushSymbol(*forLine, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::For, nullptr, counterVar, condExpr, incrExpr });
-		updateBody.push_back(std::move(forLine));
-
-		// print("counter is {}", counter)
-		auto printCounterLine = newLine(2);
-		DSLSymbol* counterMsg = pushSymbol(*printCounterLine, ST::Constant, DSLSymbol::Constant{ DSLType::String, "counter is {}" });
-		DSLSymbol* counterRefPrint = pushSymbol(*printCounterLine, ST::VariableReference, DSLSymbol::VariableReference{ counterVar });
-		pushSymbol(*printCounterLine, ST::FunctionCall,
-			DSLSymbol::FunctionCall{ printFunc, nullptr, { { nullptr, counterMsg }, { nullptr, counterRefPrint } } });
-		updateBody.push_back(std::move(printCounterLine));
-
-		// thing += counter
-		auto thingAddLine = newLine(2);
-		DSLSymbol* thingRefAdd = pushSymbol(*thingAddLine, ST::VariableReference, DSLSymbol::VariableReference{ thingVar });
-		DSLSymbol* counterRefAdd = pushSymbol(*thingAddLine, ST::VariableReference, DSLSymbol::VariableReference{ counterVar });
-		pushSymbol(*thingAddLine, ST::Expression, DSLSymbol::Expression{ { thingRefAdd, counterRefAdd }, { DSLOperator::AssignAdd } });
-		updateBody.push_back(std::move(thingAddLine));
-
-		// while thing > 5
-		auto whileLine = newLine(1);
-		DSLSymbol* thingRefWhile = pushSymbol(*whileLine, ST::VariableReference, DSLSymbol::VariableReference{ thingVar });
-		DSLSymbol* fiveWhile = pushSymbol(*whileLine, ST::Constant, DSLSymbol::Constant{ DSLType::Int, "5" });
-		DSLSymbol* whileCond = pushSymbol(*whileLine, ST::Expression, DSLSymbol::Expression{ { thingRefWhile, fiveWhile }, { DSLOperator::GreaterThan } });
-		pushSymbol(*whileLine, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::While, whileCond });
-		updateBody.push_back(std::move(whileLine));
-
-		// print("thing is {}", thing)
-		auto printThingLine = newLine(2);
-		DSLSymbol* thingMsg = pushSymbol(*printThingLine, ST::Constant, DSLSymbol::Constant{ DSLType::String, "thing is {}" });
-		DSLSymbol* thingRefPrint = pushSymbol(*printThingLine, ST::VariableReference, DSLSymbol::VariableReference{ thingVar });
-		pushSymbol(*printThingLine, ST::FunctionCall,
-			DSLSymbol::FunctionCall{ printFunc, nullptr, { { nullptr, thingMsg }, { nullptr, thingRefPrint } } });
-		updateBody.push_back(std::move(printThingLine));
-
-		// thing -= 5
-		auto thingSubLine = newLine(2);
-		DSLSymbol* thingRefSub = pushSymbol(*thingSubLine, ST::VariableReference, DSLSymbol::VariableReference{ thingVar });
-		DSLSymbol* fiveSub = pushSymbol(*thingSubLine, ST::Constant, DSLSymbol::Constant{ DSLType::Int, "5" });
-		pushSymbol(*thingSubLine, ST::Expression, DSLSymbol::Expression{ { thingRefSub, fiveSub }, { DSLOperator::AssignSubtract } });
-		updateBody.push_back(std::move(thingSubLine));
-
-		// Trailing "add a statement here" slot -- demonstrates M3's insertion flow directly against the
-		// example program instead of an empty throwaway function.
-		auto trailingLine = newLine(1);
-		pushSymbol(*trailingLine, ST::Placeholder, DSLSymbol::Placeholder{ DSLType::Void });
-		updateBody.push_back(std::move(trailingLine));
-	}
-
-	// ==== doForce(dir, force, ref appliedForce) body ====
-	std::vector<std::unique_ptr<DSLCodeLine>> doForceBody;
-	{
-		// float toApply = physics.getMass() * force
-		auto line = newLine(1);
-		DSLSymbol* toApplyType = pushSymbol(*line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
-		DSLSymbol* physicsRefForGetMass = pushSymbol(*line, ST::VariableReference, DSLSymbol::VariableReference{ physicsVar });
-		DSLSymbol* getMassCall = pushSymbol(*line, ST::FunctionCall, DSLSymbol::FunctionCall{ getMassFunc, physicsRefForGetMass, {} });
-		DSLSymbol* forceRef = pushSymbol(*line, ST::VariableReference, DSLSymbol::VariableReference{ forceParam });
-		DSLSymbol* massTimesForce = pushSymbol(*line, ST::Expression, DSLSymbol::Expression{ { getMassCall, forceRef }, { DSLOperator::Multiply } });
-		pushSymbol(*line, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "toApply", toApplyType, massTimesForce });
-		doForceBody.push_back(std::move(line));
-	}
-	// recover toApplyVar's pointer (it's the head of the line just built) for the following statements
-	DSLSymbol* toApplyVar = doForceBody.back()->head();
-	{
-		// physics.applyForce(direction = dir, force = toApply)
-		auto line = newLine(1);
-		DSLSymbol* physicsRefForApply = pushSymbol(*line, ST::VariableReference, DSLSymbol::VariableReference{ physicsVar });
-		DSLSymbol* dirRef = pushSymbol(*line, ST::VariableReference, DSLSymbol::VariableReference{ dirParam });
-		DSLSymbol* toApplyRef = pushSymbol(*line, ST::VariableReference, DSLSymbol::VariableReference{ toApplyVar });
-		pushSymbol(*line, ST::FunctionCall, DSLSymbol::FunctionCall{ applyForceFunc, physicsRefForApply,
-			{ { applyForceDirParam, dirRef }, { applyForceForceParam, toApplyRef } } });
-		doForceBody.push_back(std::move(line));
-
-		// ref appliedForce = toApply
-		auto refLine = newLine(1);
-		DSLSymbol* appliedForceRef = pushSymbol(*refLine, ST::VariableReference, DSLSymbol::VariableReference{ appliedForceParam });
-		DSLSymbol* toApplyRef2 = pushSymbol(*refLine, ST::VariableReference, DSLSymbol::VariableReference{ toApplyVar });
-		pushSymbol(*refLine, ST::Expression, DSLSymbol::Expression{ { appliedForceRef, toApplyRef2 }, { DSLOperator::Assign } });
-		doForceBody.push_back(std::move(refLine));
-	}
-
-	// ==== canJump() -> bool body ====
-	std::vector<std::unique_ptr<DSLCodeLine>> canJumpBody;
-	DSLSymbol* heightVar = nullptr;
-	{
-		// float height = world.rayCast(pos = self.pos + vec3(0, 0.5, 0), dir = vec3(0, -1, 0), maxRayDist = 1.0)
-		auto line = newLine(1);
-		DSLSymbol* heightType = pushSymbol(*line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
-
-		DSLSymbol* selfRef = pushSymbol(*line, ST::VariableReference, DSLSymbol::VariableReference{ selfVar });
-		DSLSymbol* selfPos = pushSymbol(*line, ST::MemberAccess, DSLSymbol::MemberAccess{ selfRef, "pos" });
-		DSLSymbol* offX = pushSymbol(*line, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "0" });
-		DSLSymbol* offY = pushSymbol(*line, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "0.5" });
-		DSLSymbol* offZ = pushSymbol(*line, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "0" });
-		DSLSymbol* offsetVec = pushSymbol(*line, ST::FunctionCall,
-			DSLSymbol::FunctionCall{ vec3Func, nullptr, { { nullptr, offX }, { nullptr, offY }, { nullptr, offZ } } });
-		DSLSymbol* posValue = pushSymbol(*line, ST::Expression, DSLSymbol::Expression{ { selfPos, offsetVec }, { DSLOperator::Add } });
-
-		DSLSymbol* dx = pushSymbol(*line, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "0" });
-		DSLSymbol* dy = pushSymbol(*line, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "-1" });
-		DSLSymbol* dz = pushSymbol(*line, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "0" });
-		DSLSymbol* dirValue = pushSymbol(*line, ST::FunctionCall,
-			DSLSymbol::FunctionCall{ vec3Func, nullptr, { { nullptr, dx }, { nullptr, dy }, { nullptr, dz } } });
-
-		DSLSymbol* maxDistValue = pushSymbol(*line, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "1.0" });
-
-		DSLSymbol* worldRef = pushSymbol(*line, ST::VariableReference, DSLSymbol::VariableReference{ worldVar });
-		DSLSymbol* rayCastValue = pushSymbol(*line, ST::FunctionCall, DSLSymbol::FunctionCall{ rayCastFunc, worldRef,
-			{ { rayCastPosParam, posValue }, { rayCastDirParam, dirValue }, { rayCastMaxDistParam, maxDistValue } } });
-
-		heightVar = pushSymbol(*line, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "height", heightType, rayCastValue });
-		canJumpBody.push_back(std::move(line));
-	}
-	{
-		// if height <= 0.1
-		auto ifLine = newLine(1);
-		DSLSymbol* heightRef = pushSymbol(*ifLine, ST::VariableReference, DSLSymbol::VariableReference{ heightVar });
-		DSLSymbol* threshold = pushSymbol(*ifLine, ST::Constant, DSLSymbol::Constant{ DSLType::Float, "0.1" });
-		DSLSymbol* cond = pushSymbol(*ifLine, ST::Expression, DSLSymbol::Expression{ { heightRef, threshold }, { DSLOperator::LessThanOrEqual } });
-		pushSymbol(*ifLine, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::If, cond });
-		canJumpBody.push_back(std::move(ifLine));
-
-		// return true
-		auto returnTrueLine = newLine(2);
-		DSLSymbol* trueVal = pushSymbol(*returnTrueLine, ST::Constant, DSLSymbol::Constant{ DSLType::Bool, "true" });
-		pushSymbol(*returnTrueLine, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::Return, trueVal });
-		canJumpBody.push_back(std::move(returnTrueLine));
-
-		// else
-		auto elseLine = newLine(1);
-		pushSymbol(*elseLine, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::Else, nullptr });
-		canJumpBody.push_back(std::move(elseLine));
-
-		// return false
-		auto returnFalseLine = newLine(2);
-		DSLSymbol* falseVal = pushSymbol(*returnFalseLine, ST::Constant, DSLSymbol::Constant{ DSLType::Bool, "false" });
-		pushSymbol(*returnFalseLine, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::Return, falseVal });
-		canJumpBody.push_back(std::move(returnFalseLine));
-	}
-
-	// ---- assemble in final document order: update, doForce, canJump ----
 	m_document.file.lines.push_back(std::move(updateHeader));
-	for (auto& line : updateBody) m_document.file.lines.push_back(std::move(line));
 
-	m_document.file.lines.push_back(std::move(doForceHeader));
-	for (auto& line : doForceBody) m_document.file.lines.push_back(std::move(line));
-
-	m_document.file.lines.push_back(std::move(canJumpHeader));
-	for (auto& line : canJumpBody) m_document.file.lines.push_back(std::move(line));
+	// A single blank statement slot for the body -- see render()'s "always one blank line" invariant.
+	auto blankBodyLine = newLine(1);
+	seedStatementPlaceholder(*blankBodyLine);
+	m_document.file.lines.push_back(std::move(blankBodyLine));
 }
 
 void ScriptEditor::clampCursor()

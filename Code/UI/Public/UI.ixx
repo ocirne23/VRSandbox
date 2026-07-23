@@ -85,6 +85,7 @@ private:
     bool m_isViewportGrabbed = false;
     bool m_isViewportFocused = false;
     bool m_hasViewportGainedFocus = false;
+    bool m_scriptEditorOpen = false;
     Rect m_viewportRect = Rect();
     std::vector<EntityChange> m_viewportChanges;   // assets dropped onto the viewport, drained via takeEntityChanges
     std::vector<std::string> m_scriptReloadRequests; // Script panel compile requests, drained via takeScriptReloadRequests

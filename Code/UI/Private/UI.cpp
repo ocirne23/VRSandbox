@@ -333,7 +333,12 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
 
     {
         if (ImGui::Begin("Script Editor"))
+        {
+            m_scriptEditorOpen = true;
             m_scriptEditor.render();
+        }
+        else
+            m_scriptEditorOpen = false;
         ImGui::End();
     }
 
@@ -476,7 +481,8 @@ void UI::pasteScriptSelection()
 
 void UI::handleKeyEvent(SDL_Event evt)
 {
-    m_scriptEditor.handleKeyEvent(evt);
+    if (m_scriptEditorOpen)
+        m_scriptEditor.handleKeyEvent(evt);
 }
 
 void UI::requestOpenScript(const std::string& path)
