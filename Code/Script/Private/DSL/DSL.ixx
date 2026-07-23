@@ -115,6 +115,11 @@ export inline bool dslIsEngineObjectType(DSLType type)
 		|| type == DSLType::AudioComponent || type == DSLType::ForceComponent;
 }
 
+// A type with further members/functions reachable by dotting into it -- an engine-defined STRUCT value
+// (vec2/3/4) or a bound engine-object kind (self.physics and friends). What decides whether a member that
+// doesn't itself match a value slot is still offered as a dot-into WAYPOINT rather than excluded outright.
+export inline bool dslIsChainableType(DSLType type) { return dslIsStructType(type) || dslIsEngineObjectType(type); }
+
 // The component kinds a script can REQUIRE (see DSL::requiredComponents below) -- an editor-side mirror of the
 // scriptable subset of Entity's component types, deliberately not the engine's own EComponentID.
 export enum class DSLComponentKind : uint8

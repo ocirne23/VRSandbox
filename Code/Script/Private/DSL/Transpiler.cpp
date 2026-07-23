@@ -392,16 +392,15 @@ std::string Transpiler::transpile(const DSL& document, const ScriptBindings& bin
 	emitter.emitLine("struct Script_" + classStem(document.filePath));
 	emitter.openBlock();
 
-	// The entity's things as MEMBERS: the global engine surface, the entity itself, and one wrapper per
-	// REQUIRED component (never null, per the require guarantee -- see DSL::requiredComponents). The wrapper
-	// types and their construction are the engine-hookup step's work.
+	// The entity's things as MEMBERS: the global engine surface and the entity itself -- component wrappers
+	// (physics/audio/force, never null per the require guarantee -- see DSL::requiredComponents) are DSL.ixx's
+	// members of self, not top-level here, so `self.physics` resolves through ScriptSelf's OWN matching member
+	// (memberText's "$r.physics" emit). Both the wrapper types and self's per-required-component members are
+	// the engine-hookup step's work.
 	emitter.emitLine("ScriptCtx ctx;");
 	for (const BindingObject& object : bindings.objects())
 	{
-		if (object.name == nullptr)
-			continue;
-		if (object.requiredComponent != DSLComponentKind::None
-			&& !dslIsComponentRequired(document, object.requiredComponent))
+		if (object.name == nullptr || !object.sidebarTopLevel)
 			continue;
 		emitter.emitLine(wrapperTypeName(object.name) + " " + object.name + ";");
 	}

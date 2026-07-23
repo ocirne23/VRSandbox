@@ -807,7 +807,7 @@ namespace
 	}
 }
 
-std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBindings& bindings, DSLSymbol* receiverDecl,
+std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBindings& bindings, const DSL& document, DSLSymbol* receiverDecl,
 	DSLType receiverType, DSLType expectedType, bool anyValue, const std::string& typedPrefix)
 {
 	std::vector<Candidate> out;
@@ -849,10 +849,13 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 	}
 	for (const BindingMember& member : *members)
 	{
-		// Value contexts type-filter; a STATEMENT context offers only WRITABLE members (the lead-in of a
-		// member-assignment, `v.x = ...`).
-		const bool accepted = statementContext ? member.writable
-			: (anyValue || member.type == expectedType || dslIsStructType(member.type));
+		if (member.requiredComponent != DSLComponentKind::None && !dslIsComponentRequired(document, member.requiredComponent))
+			continue;
+		// Value contexts type-filter (chainable members always pass, as dot-into waypoints toward a matching
+		// leaf); a STATEMENT context offers WRITABLE members (the lead-in of a member-assignment, `v.x = ...`)
+		// plus chainable-but-unwritable ones (`self.physics`, a waypoint toward a Void-returning dot-call).
+		const bool accepted = statementContext ? (member.writable || dslIsChainableType(member.type))
+			: (anyValue || member.type == expectedType || dslIsChainableType(member.type));
 		if (!accepted)
 			continue;
 		Candidate c;
@@ -860,6 +863,7 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 		c.kind = Candidate::Kind::Member;
 		c.refSymbol = receiverDecl; // the chain's ROOT -- the member itself has no symbol, only registry data
 		c.declareType = member.type;
+		c.memberWritable = member.writable;
 		addIfMatches(out, c, typedPrefix);
 	}
 

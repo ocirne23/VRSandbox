@@ -514,9 +514,11 @@ void ScriptEditor::beginCompose()
 
 void ScriptEditor::refreshCandidates()
 {
-	// The sidebar binding objects ("self", and each REQUIRED component) offered wherever a dot-into makes
-	// sense -- consumable only via '.'/confirm into MemberSelect, never as bare values (see receiverCandidates).
-	// An exact-name match goes first, same courtesy sortExactMatchFirst gives the regular lists.
+	// The sidebar-root binding objects (just "self" today) offered wherever a dot-into makes sense --
+	// consumable only via '.'/confirm into MemberSelect, never as bare values (see receiverCandidates).
+	// Component bindings (physics/audio/force) are reached through self's own members instead, gated there by
+	// requiredComponent -- see receiverCandidates. An exact-name match goes first, same courtesy
+	// sortExactMatchFirst gives the regular lists.
 	auto appendBindingObjects = [&]()
 	{
 		for (const std::unique_ptr<DSLSymbol>& s : m_document.sidebar)
@@ -525,8 +527,6 @@ void ScriptEditor::refreshCandidates()
 				continue;
 			const BindingObject* object = m_bindings.objectForDecl(s.get());
 			if (object == nullptr)
-				continue;
-			if (object->requiredComponent != DSLComponentKind::None && !dslIsComponentRequired(m_document, object->requiredComponent))
 				continue;
 			const std::string label = object->name;
 			if (m_pendingWord.size() > label.size())
@@ -559,7 +559,7 @@ void ScriptEditor::refreshCandidates()
 	}
 	if (m_composeMode == ComposeMode::MemberSelect)
 	{
-		m_candidates = AutoCompleteRules::receiverCandidates(m_bindings, m_memberReceiver, m_memberReceiverType,
+		m_candidates = AutoCompleteRules::receiverCandidates(m_bindings, m_document, m_memberReceiver, m_memberReceiverType,
 			m_memberExpectedType, m_memberAnyValue, m_pendingWord);
 		m_candidateSelected = 0;
 		return;
@@ -917,6 +917,11 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		{
 			if (chosen.kind == Candidate::Kind::Member)
 			{
+				// A non-writable, chainable member (self.physics) has no bare statement form of its own -- it
+				// must keep dotting toward an actual call ('.' extends it, same refusal as the value-context
+				// waypoint case below); confirming it here would otherwise stage a bogus "physics = ..." assign.
+				if (!picked->memberWritable)
+					return;
 				// A writable member as an assignment TARGET: stage `root.path = value` through the Reassign
 				// flow ('=' authored; compound member assigns are a later nicety).
 				m_reassignTarget = m_memberReceiver;
@@ -4978,9 +4983,10 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			enterMemberSelect(picked->refSymbol);
 			return;
 		}
-		// A struct-typed MEMBER matched mid-MemberSelect extends the chain ("self.pos." -> x/y/z/length()...).
+		// A chainable MEMBER matched mid-MemberSelect extends the chain ("self.pos." -> x/y/z/length()...,
+		// "self.physics." -> applyImpulse()...).
 		if (picked != nullptr && picked->kind == Candidate::Kind::Member
-			&& m_composeMode == ComposeMode::MemberSelect && dslIsStructType(picked->declareType))
+			&& m_composeMode == ComposeMode::MemberSelect && dslIsChainableType(picked->declareType))
 		{
 			m_memberPath.push_back(picked->label);
 			m_memberReceiverType = picked->declareType;
@@ -5845,23 +5851,23 @@ void ScriptEditor::renderAutocompletePopup()
 	ImGui::End();
 }
 
-bool ScriptEditor::isBindingObjectReferenced(const BindingObject& object) const
+bool ScriptEditor::isComponentMemberReferenced(DSLType memberType) const
 {
-	// Every use of the binding -- a dot-call's receiver, a member access's receiver -- is a VariableReference
-	// to its sidebar declaration, owned flat by some line (see DSL.ixx's ownership model).
-	const DSLSymbol* decl = m_bindings.objectDecl(object);
-	if (decl == nullptr)
-		return false;
+	// Every use of a component member (self.physics, dotted into as a call receiver or a chained access) is a
+	// MemberAccess stamped with that member's own type (see DSL.ixx's MemberAccess::type), owned flat by some
+	// line (see DSL.ixx's ownership model) -- no need to walk back to which VariableDeclaration it hangs off.
 	for (const std::unique_ptr<DSLCodeLine>& line : m_document.file.lines)
 		for (const std::unique_ptr<DSLSymbol>& s : line->symbols)
-			if (s->type == ST::VariableReference && std::get<DSLSymbol::VariableReference>(s->data).declaration == decl)
+			if (s->type == ST::MemberAccess && std::get<DSLSymbol::MemberAccess>(s->data).type == memberType)
 				return true;
 	return false;
 }
 
-// The bindings browser: an Entity section (self + one row per requirable component, checkbox = the script
-// requires it) and an Engine section (the free functions). Auto-populated from the registry; read-only apart
-// from the require checkboxes. Un-requiring a component the script still references is refused.
+// The bindings browser: an Entity section (self, its plain members, and one row per requirable component --
+// physics/audio/force -- nested UNDER self, checkbox = the script requires it, since they're only ever reached
+// as self.physics/self.audio/self.force) and an Engine section (the free functions). Auto-populated from the
+// registry; read-only apart from the require checkboxes. Un-requiring a component the script still references
+// is refused.
 void ScriptEditor::renderSidebarPanel()
 {
 	ImGui::BeginChild("##dsl_sidebar", ImVec2(m_sidebarWidth, 0.0f), ImGuiChildFlags_None);
@@ -5894,10 +5900,44 @@ void ScriptEditor::renderSidebarPanel()
 		}
 		seg(kColPunct, ")");
 	};
-	auto drawObjectContents = [&](const BindingObject& object)
+	// Recursive (std::function, since it calls itself): a plain data member draws as "type name"; a CHAINABLE
+	// member (self.physics and friends) draws as its own tree node -- checkbox-gated when component-bound --
+	// browsing the matching binding object's own members/functions, mirroring how the DSL itself dots into it.
+	std::function<void(const BindingObject&)> drawObjectContents = [&](const BindingObject& object)
 	{
 		for (const BindingMember& member : object.members)
 		{
+			if (dslIsChainableType(member.type))
+			{
+				const BindingObject* nested = m_bindings.objectFor(member.type);
+				if (nested == nullptr)
+					continue;
+				if (member.requiredComponent != DSLComponentKind::None)
+				{
+					bool checkboxValue = dslIsComponentRequired(m_document, member.requiredComponent);
+					if (ImGui::Checkbox((std::string("##req_") + member.name).c_str(), &checkboxValue))
+					{
+						if (checkboxValue)
+							m_document.requiredComponents.push_back(member.requiredComponent);
+						else if (!isComponentMemberReferenced(member.type))
+							std::erase(m_document.requiredComponents, member.requiredComponent);
+						else
+							Log::warning(std::string("Can't un-require '") + member.name + "' -- the script still references it");
+					}
+					ImGui::SameLine();
+					if (!dslIsComponentRequired(m_document, member.requiredComponent))
+					{
+						ImGui::TextDisabled("%s %s", dslTypeName(member.type), member.name);
+						continue;
+					}
+				}
+				if (ImGui::TreeNode(member.name, "%s %s", dslTypeName(member.type), member.name))
+				{
+					drawObjectContents(*nested);
+					ImGui::TreePop();
+				}
+				continue;
+			}
 			firstSegment = true;
 			seg(kColType, dslTypeName(member.type));
 			seg(kColPunct, " ");
@@ -5910,28 +5950,8 @@ void ScriptEditor::renderSidebarPanel()
 	ImGui::TextDisabled("ENTITY");
 	for (const BindingObject& object : m_bindings.objects())
 	{
-		if (object.name == nullptr)
+		if (object.name == nullptr || !object.sidebarTopLevel)
 			continue;
-
-		if (object.requiredComponent != DSLComponentKind::None)
-		{
-			bool checkboxValue = dslIsComponentRequired(m_document, object.requiredComponent);
-			if (ImGui::Checkbox((std::string("##req_") + object.name).c_str(), &checkboxValue))
-			{
-				if (checkboxValue)
-					m_document.requiredComponents.push_back(object.requiredComponent);
-				else if (!isBindingObjectReferenced(object))
-					std::erase(m_document.requiredComponents, object.requiredComponent);
-				else
-					Log::warning(std::string("Can't un-require '") + object.name + "' -- the script still references it");
-			}
-			ImGui::SameLine();
-			if (!dslIsComponentRequired(m_document, object.requiredComponent))
-			{
-				ImGui::TextDisabled("%s %s", dslTypeName(object.type), object.name);
-				continue;
-			}
-		}
 		if (ImGui::TreeNode(object.name, "%s %s", dslTypeName(object.type), object.name))
 		{
 			drawObjectContents(object);

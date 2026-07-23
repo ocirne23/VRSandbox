@@ -425,9 +425,9 @@ private:
 	// The value constraints of the CURRENT compose stage -- what a MemberSelect entered from it filters
 	// receiver candidates by (Void + !anyValue = statement context). Mirrors refreshCandidates' per-mode logic.
 	DSLType valueContextExpectedType(ComposeMode mode, bool& outAnyValue) const;
-	// Whether any statement in the document references `object`'s binding (its sidebar declaration or one of
-	// its functions) -- guards un-requiring a component that's still in use.
-	bool isBindingObjectReferenced(const BindingObject& object) const;
+	// Whether any statement in the document dots into a component-bound member of the given type (self.physics
+	// and friends) -- guards un-requiring a component that's still in use.
+	bool isComponentMemberReferenced(DSLType memberType) const;
 	void renderSidebarPanel(); // the Entity/Engine bindings browser + required-component checkboxes
 	// The receiver expression a dotted path names: the root's VariableReference, wrapped in one MemberAccess
 	// per path segment ("pos.x" -> self->pos->x), each hop's type stamped from the registry. Empty path = just

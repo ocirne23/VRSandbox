@@ -45,6 +45,9 @@ export struct BindingMember
 	DSLType type;
 	const char* emit;     // M6 template: e.g. "$r.pos" -- "$r" is the receiver's own emitted expression
 	bool writable = true; // false = read-only in the DSL (no `x.member = ...` statements)
+	// None = always available; else this member (e.g. self.physics) is only offered/legal while the script
+	// requires this component -- the member-level twin of BindingObject::requiredComponent used to be.
+	DSLComponentKind requiredComponent = DSLComponentKind::None;
 };
 
 // One engine-defined script STRUCT (vec2/vec3/vec4, and whatever the engine exposes later): a value type with
@@ -59,14 +62,18 @@ export struct BindingStruct
 	std::vector<BindingFunc> functions; // emit may wrap free functions: { "length", Float, {}, "glm::length($r)" }
 };
 
-// One sidebar object ("self", "physics", ...) or the Engine section (objectName == nullptr: its functions are
-// FREE calls in the DSL, `ctx.*` in C++).
+// One binding object ("self", "physics", ...) or the Engine section (objectName == nullptr: its functions are
+// FREE calls in the DSL, `ctx.*` in C++). Every object's functions/members are reachable through
+// ScriptBindings::objectFor(type) regardless of `sidebarTopLevel` -- physics/audio/force stay full binding
+// objects (findReceiverFunction et al. work on them exactly like self does), just not their OWN sidebar root:
+// they're reached only by dotting through self's matching member (self.physics), never as a bare identifier.
 export struct BindingObject
 {
 	const char* name;                // the DSL identifier; nullptr = the Engine (free-function) section
 	DSLType type;                    // the object's engine-object DSLType (Void for the Engine section)
-	DSLComponentKind requiredComponent; // None = always available (self / Engine); else only offered while required
 	const char* memberEmit;          // M6: the generated class member's initializer, e.g. "ctx->entityGetPhysicsComponent(self)"
+	bool sidebarTopLevel = true;     // false = no root-level sidebar VariableDeclaration/candidate of its own
+	                                  // (see ScriptBindings::build) -- reachable only via another binding's member
 	std::vector<BindingFunc> functions;
 	std::vector<BindingMember> members;
 };

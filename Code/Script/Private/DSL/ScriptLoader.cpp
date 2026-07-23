@@ -303,16 +303,13 @@ namespace
 			return nullptr;
 		}
 
-		// A reference to a component binding's object is only legal when the file's "//@@require" set names its
-		// component -- the loader-side twin of the editor's candidate gating.
-		bool checkBindingUsable(DSLSymbol* decl)
+		// A reference to a component-bound member (self.physics and friends) is only legal when the file's
+		// "//@@require" set names its component -- the loader-side twin of receiverCandidates' editor gating.
+		bool checkMemberUsable(const std::string& ownerName, const std::string& memberName, const BindingMember& member)
 		{
-			const BindingObject* object = bindings.objectForDecl(decl);
-			if (object == nullptr)
-				return true;
-			if (object->requiredComponent != DSLComponentKind::None
-				&& std::find(requiredComponents.begin(), requiredComponents.end(), object->requiredComponent) == requiredComponents.end())
-				return fail(std::string("'") + object->name + "' is used but its component isn't in the //@@require line");
+			if (member.requiredComponent != DSLComponentKind::None
+				&& std::find(requiredComponents.begin(), requiredComponents.end(), member.requiredComponent) == requiredComponents.end())
+				return fail("'" + ownerName + "." + memberName + "' is used but its component isn't in the //@@require line");
 			return true;
 		}
 
@@ -469,8 +466,6 @@ namespace
 				DSLSymbol* receiverDecl = findVariable(first.text);
 				if (receiverDecl == nullptr)
 					return failValue("unknown identifier '" + first.text + "'");
-				if (!checkBindingUsable(receiverDecl))
-					return nullptr;
 				DSLType receiverType = declaredType(receiverDecl);
 				DSLSymbol* receiver = push(line, ST::VariableReference, DSLSymbol::VariableReference{ receiverDecl });
 				std::string ownerName = first.text;
@@ -494,6 +489,8 @@ namespace
 					const BindingMember* member = bindings.findMember(receiverType, memberName);
 					if (member == nullptr)
 						return failValue("'" + ownerName + "' has no member '" + memberName + "'");
+					if (!checkMemberUsable(ownerName, memberName, *member))
+						return nullptr;
 					receiver = push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ receiver, memberName, member->type });
 					receiverType = member->type;
 					ownerName += "." + memberName;
@@ -642,13 +639,12 @@ namespace
 			DSLSymbol* rootDecl = findVariable(t[0].text);
 			if (rootDecl == nullptr)
 				return failValue("unknown identifier '" + t[0].text + "'");
-			if (!checkBindingUsable(rootDecl))
-				return nullptr;
 			DSLType targetType = declaredType(rootDecl);
 			if (opAt == 1 && dslIsEngineObjectType(targetType))
 				return failValue("'" + t[0].text + "' is a binding object -- it can't be assigned to");
 
 			DSLSymbol* target = push(line, ST::VariableReference, DSLSymbol::VariableReference{ rootDecl });
+			std::string ownerName = t[0].text;
 			for (size_t i = 2; i < opAt; i += 2) // member hops sit at 2, 4, ... opAt-1
 			{
 				const std::string& memberName = t[i].text;
@@ -657,8 +653,11 @@ namespace
 					return failValue("no member '" + memberName + "' to assign to");
 				if (i + 2 > opAt && !member->writable)
 					return failValue("member '" + memberName + "' is read-only");
+				if (!checkMemberUsable(ownerName, memberName, *member))
+					return nullptr;
 				target = push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ target, memberName, member->type });
 				targetType = member->type;
+				ownerName += "." + memberName;
 			}
 
 			DSLSymbol* value = parseExpression(t.subspan(opAt + 1), line, targetType);

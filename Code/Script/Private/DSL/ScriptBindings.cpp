@@ -69,7 +69,9 @@ namespace
 	{
 		using T = DSLType;
 		static const std::vector<BindingObject> table = {
-			{ "self", T::Entity, DSLComponentKind::None, "self",
+			// physics/audio/force are NOT sidebar-top-level -- they're reached only through self's own members
+			// below (self.physics.applyImpulse(...)), never as a bare "physics" identifier.
+			{ "self", T::Entity, "self", /*sidebarTopLevel*/ true,
 				{
 					{ "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "$r.setEnabled($1)" },
 					{ "setAnimFloat",   T::Void,  { { "param", T::String }, { "value", T::Float } }, "$r.setAnimFloat($1, $2)" },
@@ -79,9 +81,12 @@ namespace
 					{ "getBoundsRadius",T::Float, {},                                               "$r.getBoundsRadius()" },
 				},
 				{
-					{ "pos", kVec3, "$r.pos" },
+					{ "pos",     kVec3,               "$r.pos" },
+					{ "physics", T::PhysicsComponent, "$r.physics", /*writable*/ false, DSLComponentKind::Physics },
+					{ "audio",   T::AudioComponent,   "$r.audio",   /*writable*/ false, DSLComponentKind::Audio },
+					{ "force",   T::ForceComponent,   "$r.force",   /*writable*/ false, DSLComponentKind::Force },
 				} },
-			{ "physics", T::PhysicsComponent, DSLComponentKind::Physics, "ctx->entityGetPhysicsComponent(self)",
+			{ "physics", T::PhysicsComponent, "ctx->entityGetPhysicsComponent(self)", /*sidebarTopLevel*/ false,
 				{
 					{ "getVelocity",  kVec3,   {},                                          "$r.getVelocity()" },
 					{ "setVelocity",  T::Void, { { "velocity", kVec3 } },                   "$r.setVelocity($1)" },
@@ -90,13 +95,13 @@ namespace
 					{ "teleport",     T::Void, { { "position", kVec3 }, { "eulerDeg", kVec3 } }, "$r.teleport($1, $2)" },
 				},
 				{} },
-			{ "audio", T::AudioComponent, DSLComponentKind::Audio, "ctx->entityGetAudioComponent(self)",
+			{ "audio", T::AudioComponent, "ctx->entityGetAudioComponent(self)", /*sidebarTopLevel*/ false,
 				{
 					{ "trigger", T::Void, { { "alias", T::String } }, "$r.trigger($1)" },
 					{ "stop",    T::Void, { { "alias", T::String } }, "$r.stop($1)" },
 				},
 				{} },
-			{ "force", T::ForceComponent, DSLComponentKind::Force, "ctx->entityGetForceComponent(self)",
+			{ "force", T::ForceComponent, "ctx->entityGetForceComponent(self)", /*sidebarTopLevel*/ false,
 				{
 					{ "getOutput",   T::Float, {},                          "$r.getOutput()" },
 					{ "setOutput",   T::Void,  { { "output", T::Float } },  "$r.setOutput($1)" },
@@ -107,7 +112,7 @@ namespace
 				},
 				{} },
 			// The Engine section: FREE calls in the DSL, ctx.* in generated C++.
-			{ nullptr, T::Void, DSLComponentKind::None, nullptr,
+			{ nullptr, T::Void, nullptr, /*sidebarTopLevel*/ false,
 				{
 					{ "print",           T::Void,  {},                                                       "ctx.log($1)" }, // vararg; M6 handles {} interpolation
 					{ "rayCast",         T::Float, { { "pos", kVec3 }, { "dir", kVec3 }, { "maxRayDist", T::Float } }, "ctx.physicsRayCastDistance($1, $2, $3)" },
@@ -169,7 +174,7 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 	{
 		BuiltObject& built = m_built.emplace_back();
 		built.def = &object;
-		if (object.name != nullptr)
+		if (object.name != nullptr && object.sidebarTopLevel)
 		{
 			DSLSymbol* typeSymbol = addSymbol(sidebarOut, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ object.type });
 			built.decl = addSymbol(sidebarOut, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ object.name, typeSymbol });
