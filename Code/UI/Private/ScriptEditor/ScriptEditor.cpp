@@ -462,6 +462,10 @@ void ScriptEditor::beginCompose()
 		// function's signature belongs at the function.
 		if (m_formatted[m_cursorLine].sourceLine != span->symbol->line)
 			return;
+		// A parameter of a LOCKED entry-point function (its line's own head) -- its name/type/existence are
+		// fixed by the real ScriptAPI signature (see EntryPointDef), never user-editable.
+		if (isLockedEntryFunction(span->symbol->line->head()))
+			return;
 		m_renameTarget = span->symbol;
 		enterCompose(ComposeMode::Rename, "");
 		return;
@@ -480,6 +484,10 @@ void ScriptEditor::beginCompose()
 	// slot would otherwise get -- wholesale-replacing a header would dangle its parameters.
 	if (span->symbol != nullptr && span->symbol->type == ST::FunctionDeclaration && span->slot.kind == SlotRef::Kind::LineHead)
 	{
+		// A LOCKED entry-point function's own name is fixed -- it's the exported symbol ScriptHost looks up by
+		// that exact spelling (see EntryPointDef); renaming it would silently stop it being a real entry point.
+		if (isLockedEntryFunction(span->symbol))
+			return;
 		m_renameTarget = span->symbol;
 		enterCompose(ComposeMode::Rename, "");
 		return;
@@ -487,6 +495,9 @@ void ScriptEditor::beginCompose()
 
 	if (span->slot.kind == SlotRef::Kind::FunctionReturnType)
 	{
+		// A LOCKED entry-point function always returns void, non-negotiably (see EntryPointDef).
+		if (isLockedEntryFunction(span->symbol))
+			return;
 		// A called function's return type is load-bearing at every call site's typing -- it can only change
 		// while nothing references the function.
 		if (AutoCompleteRules::isFunctionReferenced(span->symbol, m_document.file))
@@ -1018,8 +1029,13 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		}
 		if (m_renameTarget->type == ST::FunctionDeclaration)
 		{
-			// Renaming a FUNCTION at its declaration header -- global collision rules, excluding itself.
-			if (AutoCompleteRules::isFunctionNameTaken(m_pendingWord, m_document.file, m_builtins, m_renameTarget))
+			// Renaming a FUNCTION at its declaration header -- global collision rules, excluding itself. An
+			// entry-point name (Update, OnSpawn, ...) is additionally off-limits here -- becoming one of those
+			// happens ONLY through its EXPORTS checkbox (toggleEntryFunction), which is what keeps every
+			// function actually named that way locked (isLockedEntryFunction) and genuinely ABI-shaped; renaming
+			// an ordinary function into the name would create an unlocked impostor instead.
+			if (AutoCompleteRules::isFunctionNameTaken(m_pendingWord, m_document.file, m_builtins, m_renameTarget)
+				|| isEntryPointName(m_pendingWord))
 				return; // name already taken -- keep editing instead of accepting the collision
 			std::get<DSLSymbol::FunctionDeclaration>(m_renameTarget->data).name = m_pendingWord;
 			m_pendingSelectTarget = m_renameTarget;
@@ -1296,6 +1312,11 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 	{
 		if (m_pendingWord.empty())
 			return; // need a name before moving on
+		// An entry-point name is off-limits here too (fresh declare AND re-declaring an existing function INTO
+		// one) -- see the Rename branch's comment; only toggleEntryFunction may create a function actually named
+		// this way.
+		if (isEntryPointName(m_pendingWord))
+			return;
 		// A re-authored function's own current name must not collide with itself.
 		if (AutoCompleteRules::isFunctionNameTaken(m_pendingWord, m_document.file, m_builtins,
 			m_flowEditLine != nullptr ? m_flowEditLine->head() : nullptr))
@@ -2209,6 +2230,17 @@ PendingExprChain ScriptEditor::loopVarSeedChain() const
 	return seed;
 }
 
+DSLType ScriptEditor::resolveMemberType(DSLType receiverType, const std::string& name) const
+{
+	if (receiverType == DSLType::ScriptData)
+	{
+		const DSLDataField* field = dslFindDataField(m_document, name);
+		return field != nullptr ? field->type : DSLType::Void;
+	}
+	const BindingMember* member = m_bindings.findMember(receiverType, name);
+	return member != nullptr ? member->type : DSLType::Void;
+}
+
 DSLType ScriptEditor::reassignTargetType() const
 {
 	if (m_reassignTarget == nullptr)
@@ -2216,10 +2248,7 @@ DSLType ScriptEditor::reassignTargetType() const
 	DSLType type = declaredTypeOf(m_reassignTarget);
 	// A member-assign statement's value composes against the written MEMBER's type, not the root's.
 	for (const std::string& segment : m_reassignMemberPath)
-	{
-		const BindingMember* member = m_bindings.findMember(type, segment);
-		type = (member != nullptr) ? member->type : DSLType::Void;
-	}
+		type = resolveMemberType(type, segment);
 	return type;
 }
 
@@ -2776,8 +2805,7 @@ void ScriptEditor::restoreMemberPath(const std::string& dottedPath)
 		const size_t dot = dottedPath.find('.', start);
 		const std::string segment = dottedPath.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
 		m_memberPath.push_back(segment);
-		const BindingMember* member = m_bindings.findMember(m_memberReceiverType, segment);
-		m_memberReceiverType = (member != nullptr) ? member->type : DSLType::Void;
+		m_memberReceiverType = resolveMemberType(m_memberReceiverType, segment);
 		m_composePrefix += segment + ".";
 		if (dot == std::string::npos)
 			break;
@@ -2807,8 +2835,7 @@ DSLSymbol* ScriptEditor::buildReceiverChain(DSLSymbol* rootDecl, const std::stri
 	{
 		const size_t dot = dottedPath.find('.', start);
 		const std::string name = dottedPath.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
-		const BindingMember* member = m_bindings.findMember(currentType, name);
-		const DSLType memberType = (member != nullptr) ? member->type : DSLType::Void;
+		const DSLType memberType = resolveMemberType(currentType, name);
 		current = pushSymbol(line, ST::MemberAccess, DSLSymbol::MemberAccess{ current, name, memberType });
 		currentType = memberType;
 		if (dot == std::string::npos)
@@ -4336,6 +4363,10 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			}
 			else if (selectedFunctionHeader)
 			{
+				// A LOCKED entry-point function can only go away via its EXPORTS checkbox (toggleEntryFunction) --
+				// never this way, regardless of body/reference state.
+				if (isLockedEntryFunction(span->symbol))
+					return;
 				// Only remove an uncalled function whose body is empty (or nothing but its auto-seeded return)
 				// this way -- otherwise leave it alone entirely (no fallback to beginCompose(), which would
 				// otherwise let a stray keystroke replace the whole header via the statement candidate list).
@@ -4344,6 +4375,10 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			}
 			else if (span != nullptr && span->slot.kind == SlotRef::Kind::FunctionReturnType)
 			{
+				// A LOCKED entry-point function's header (name/params/return type, all fixed by the real ABI --
+				// see EntryPointDef) never re-opens for editing this way.
+				if (isLockedEntryFunction(span->symbol))
+					return;
 				// Backspace at the header's END: a set return type clears first (one keystroke, like deleting
 				// a chain term) -- but only while nothing calls the function (a caller's typing depends on
 				// it); otherwise, and once blank, the staged Declare-function flow re-opens over the whole
@@ -4910,10 +4945,7 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 				m_memberPath.pop_back();
 				DSLType type = declaredTypeOf(m_memberReceiver);
 				for (const std::string& walked : m_memberPath)
-				{
-					const BindingMember* member = m_bindings.findMember(type, walked);
-					type = (member != nullptr) ? member->type : DSLType::Void;
-				}
+					type = resolveMemberType(type, walked);
 				m_memberReceiverType = type;
 				const std::string prefix = m_composePrefix.substr(0, m_composePrefix.size() - segment.size() - 1);
 				enterCompose(ComposeMode::MemberSelect, prefix, segment); // member-select context survives (see enterMemberSelect)
@@ -5886,6 +5918,83 @@ bool ScriptEditor::isComponentMemberReferenced(DSLType memberType) const
 	return false;
 }
 
+bool ScriptEditor::isDataFieldReferenced(const std::string& name) const
+{
+	// A field's own MemberAccess ("self.data.<name>") is distinguished from any OTHER member sharing the same
+	// spelling (e.g. self.pos vs. a field literally named "pos") by its RECEIVER's type -- only self.data's own
+	// members ever resolve to DSLType::ScriptData.
+	for (const std::unique_ptr<DSLCodeLine>& line : m_document.file.lines)
+		for (const std::unique_ptr<DSLSymbol>& s : line->symbols)
+			if (s->type == ST::MemberAccess)
+			{
+				const DSLSymbol::MemberAccess& m = std::get<DSLSymbol::MemberAccess>(s->data);
+				if (m.memberName == name && dslValueType(m.receiver) == DSLType::ScriptData)
+					return true;
+			}
+	return false;
+}
+
+DSLSymbol* ScriptEditor::findEntryFunctionHead(const char* name) const
+{
+	for (const std::unique_ptr<DSLCodeLine>& line : m_document.file.lines)
+	{
+		DSLSymbol* head = line->head();
+		if (line->scopeLevel == 0 && head != nullptr && head->type == ST::FunctionDeclaration
+			&& std::get<DSLSymbol::FunctionDeclaration>(head->data).name == name)
+			return head;
+	}
+	return nullptr;
+}
+
+bool ScriptEditor::isEntryPointName(const std::string& name) const
+{
+	return m_bindings.entryPointFor(name) != nullptr;
+}
+
+bool ScriptEditor::isLockedEntryFunction(const DSLSymbol* funcDecl) const
+{
+	if (funcDecl == nullptr || funcDecl->type != ST::FunctionDeclaration)
+		return false;
+	return isEntryPointName(std::get<DSLSymbol::FunctionDeclaration>(funcDecl->data).name);
+}
+
+void ScriptEditor::toggleEntryFunction(const EntryPointDef& def, bool enable)
+{
+	DSLSymbol* existing = findEntryFunctionHead(def.name);
+	if (enable)
+	{
+		if (existing != nullptr)
+			return; // already present (shouldn't happen -- the checkbox already reads as checked)
+
+		auto headerPtr = std::make_unique<DSLCodeLine>();
+		headerPtr->scopeLevel = 0;
+		DSLCodeLine& header = *headerPtr;
+		m_document.file.lines.push_back(std::move(headerPtr));
+
+		std::vector<DSLSymbol*> params;
+		for (const EntryPointParam& param : def.dslParams)
+		{
+			DSLSymbol* typeSymbol = pushSymbol(header, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ param.type });
+			params.push_back(pushSymbol(header, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ param.name, typeSymbol }));
+		}
+		pushSymbol(header, ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ def.name, std::move(params), DSLType::Void });
+
+		seedStatementPlaceholder(insertLineAfter(header, header.scopeLevel + 1));
+		return;
+	}
+
+	// Disable: only when nothing would be lost -- same guard/refusal convention as un-requiring a component
+	// still in use (renderSidebarPanel's checkboxes below).
+	if (existing == nullptr)
+		return;
+	if (!isFunctionBodyDeletable(existing) || AutoCompleteRules::isFunctionReferenced(existing, m_document.file))
+	{
+		Log::warning(std::string("Can't remove '") + def.name + "' -- it has a body, or is still called elsewhere");
+		return;
+	}
+	deleteEmptyBlock(existing);
+}
+
 // The bindings browser: an Entity section (self, its plain members, and one row per requirable component --
 // physics/audio/force -- nested UNDER self, checkbox = the script requires it, since they're only ever reached
 // as self.physics/self.audio/self.force) and an Engine section (the free functions). Auto-populated from the
@@ -5973,6 +6082,79 @@ void ScriptEditor::renderSidebarPanel()
 			drawFunction(func);
 	};
 
+	// EXPORTS: one checkbox per ScriptAPI.h entry point (see toggleEntryFunction) -- checked = a matching
+	// top-level function currently exists in the document. Checking one on seeds it with its locked parameters;
+	// unchecking removes it, refused while it has a real body or is still called (same pattern as the
+	// require-component checkboxes below).
+	ImGui::TextDisabled("EXPORTS");
+	for (const EntryPointDef& def : m_bindings.entryPoints())
+	{
+		bool checked = findEntryFunctionHead(def.name) != nullptr;
+		if (ImGui::Checkbox(def.name, &checked))
+			toggleEntryFunction(def, checked);
+	}
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	// SCRIPT DATA: this document's own persistent per-instance fields (self.data.<name>), authored here and
+	// serialized as .dsl "//@@data <type> <name>" lines (ScriptLoader). Removing a field is refused (same
+	// pattern as everything else in this panel) while the script still references it.
+	ImGui::TextDisabled("SCRIPT DATA");
+	for (size_t i = 0; i < m_document.dataFields.size(); ++i)
+	{
+		const DSLDataField& field = m_document.dataFields[i];
+		ImGui::PushID(static_cast<int>(i));
+		firstSegment = true;
+		seg(kColType, dslTypeName(field.type));
+		seg(kColPunct, " ");
+		seg(kColVariable, field.name.c_str());
+		ImGui::SameLine();
+		if (ImGui::SmallButton("x"))
+		{
+			if (!isDataFieldReferenced(field.name))
+				m_document.dataFields.erase(m_document.dataFields.begin() + static_cast<std::ptrdiff_t>(i));
+			else
+				Log::warning("Can't remove '" + field.name + "' -- the script still references it");
+		}
+		ImGui::PopID();
+	}
+	{
+		// The same declarable-type set typeKeywordCandidates offers (primitives + every registered struct).
+		std::vector<DSLType> typeOptions = { DSLType::Int, DSLType::Float, DSLType::Bool, DSLType::String };
+		for (size_t i = 0; i < m_bindings.structs().size(); ++i)
+			typeOptions.push_back(dslStructType(static_cast<int>(i)));
+
+		ImGui::SetNextItemWidth(80.0f);
+		if (ImGui::BeginCombo("##dataFieldType", dslTypeName(m_pendingDataFieldType)))
+		{
+			for (DSLType t : typeOptions)
+				if (ImGui::Selectable(dslTypeName(t), t == m_pendingDataFieldType))
+					m_pendingDataFieldType = t;
+			ImGui::EndCombo();
+		}
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(90.0f);
+		ImGui::InputText("##dataFieldName", m_pendingDataFieldName, sizeof(m_pendingDataFieldName));
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Add"))
+		{
+			const std::string name = m_pendingDataFieldName;
+			if (name.empty())
+				Log::warning("Enter a name before adding a script data field");
+			else if (AutoCompleteRules::isReservedWord(name))
+				Log::warning("'" + name + "' is reserved");
+			else if (dslFindDataField(m_document, name) != nullptr)
+				Log::warning("'" + name + "' is already a script data field");
+			else
+			{
+				m_document.dataFields.push_back(DSLDataField{ name, m_pendingDataFieldType });
+				m_pendingDataFieldName[0] = '\0';
+			}
+		}
+	}
+
+	ImGui::Spacing();
+	ImGui::Separator();
 	ImGui::TextDisabled("ENTITY");
 	for (const BindingObject& object : m_bindings.objects())
 	{

@@ -218,6 +218,7 @@ namespace
 		const std::vector<std::unique_ptr<DSLSymbol>>& builtins;
 		const ScriptBindings& bindings;
 		const std::vector<DSLComponentKind>& requiredComponents; // the FILE's "//@@require" set, parsed before any line
+		const std::vector<DSLDataField>& dataFields;             // the FILE's "//@@data" fields, parsed before any line
 
 		std::vector<std::unique_ptr<DSLCodeLine>> outLines;
 		std::vector<DSLSymbol*> userFunctions;  // pass-1 FunctionDeclaration heads, document order
@@ -259,6 +260,14 @@ namespace
 			for (const std::unique_ptr<DSLSymbol>& s : sidebar)
 				if (s->type == ST::VariableDeclaration && std::get<DSLSymbol::VariableDeclaration>(s->data).name == name)
 					return s.get();
+			return nullptr;
+		}
+
+		const DSLDataField* findDataField(const std::string& name) const
+		{
+			for (const DSLDataField& field : dataFields)
+				if (field.name == name)
+					return &field;
 			return nullptr;
 		}
 
@@ -485,14 +494,27 @@ namespace
 							return failValue("'" + ownerName + "' has no function '" + memberName + "'");
 						return parseCall(t.subspan(i + 3, t.size() - (i + 3) - 1), line, func, receiver);
 					}
-					// A member hop -- its value type stamps from the registry (see MemberAccess in DSL.ixx).
-					const BindingMember* member = bindings.findMember(receiverType, memberName);
-					if (member == nullptr)
-						return failValue("'" + ownerName + "' has no member '" + memberName + "'");
-					if (!checkMemberUsable(ownerName, memberName, *member))
-						return nullptr;
-					receiver = push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ receiver, memberName, member->type });
-					receiverType = member->type;
+					// A member hop -- its value type stamps from the registry (see MemberAccess in DSL.ixx), or
+					// from this document's OWN fields when dotting through self.data (DSLType::ScriptData).
+					DSLType memberType;
+					if (receiverType == DSLType::ScriptData)
+					{
+						const DSLDataField* field = findDataField(memberName);
+						if (field == nullptr)
+							return failValue("'" + ownerName + "' has no member '" + memberName + "'");
+						memberType = field->type;
+					}
+					else
+					{
+						const BindingMember* member = bindings.findMember(receiverType, memberName);
+						if (member == nullptr)
+							return failValue("'" + ownerName + "' has no member '" + memberName + "'");
+						if (!checkMemberUsable(ownerName, memberName, *member))
+							return nullptr;
+						memberType = member->type;
+					}
+					receiver = push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ receiver, memberName, memberType });
+					receiverType = memberType;
 					ownerName += "." + memberName;
 					i += 2;
 					if (i >= t.size())
@@ -557,7 +579,8 @@ namespace
 					}
 
 					// Expected value type: the named parameter's, or the callee's same-index parameter for a
-					// positional call -- print declares none, so its arguments infer per value.
+					// positional call -- an argument past the callee's declared count (shouldn't occur via the
+					// editor, which never authors more than it declares) infers per value instead.
 					const DSLSymbol* typeSource = param;
 					if (typeSource == nullptr && argIndex < callee.parameterVarDeclarations.size())
 						typeSource = callee.parameterVarDeclarations[argIndex];
@@ -652,15 +675,28 @@ namespace
 			for (size_t i = 2; i < opAt; i += 2) // member hops sit at 2, 4, ... opAt-1
 			{
 				const std::string& memberName = t[i].text;
-				const BindingMember* member = bindings.findMember(targetType, memberName);
-				if (member == nullptr)
-					return failValue("no member '" + memberName + "' to assign to");
-				if (i + 2 > opAt && !member->writable)
-					return failValue("member '" + memberName + "' is read-only");
-				if (!checkMemberUsable(ownerName, memberName, *member))
-					return nullptr;
-				target = push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ target, memberName, member->type });
-				targetType = member->type;
+				DSLType memberType;
+				if (targetType == DSLType::ScriptData)
+				{
+					// self.data's own fields are always writable (persistent data is meant to be read/write).
+					const DSLDataField* field = findDataField(memberName);
+					if (field == nullptr)
+						return failValue("no member '" + memberName + "' to assign to");
+					memberType = field->type;
+				}
+				else
+				{
+					const BindingMember* member = bindings.findMember(targetType, memberName);
+					if (member == nullptr)
+						return failValue("no member '" + memberName + "' to assign to");
+					if (i + 2 > opAt && !member->writable)
+						return failValue("member '" + memberName + "' is read-only");
+					if (!checkMemberUsable(ownerName, memberName, *member))
+						return nullptr;
+					memberType = member->type;
+				}
+				target = push(line, ST::MemberAccess, DSLSymbol::MemberAccess{ target, memberName, memberType });
+				targetType = memberType;
 				ownerName += "." + memberName;
 			}
 
@@ -865,6 +901,8 @@ bool ScriptLoader::save(DSL& document, const std::string& path, const std::strin
 			file << (i > 0 ? ", " : "") << dslComponentKindName(document.requiredComponents[i]);
 		file << '\n';
 	}
+	for (const DSLDataField& field : document.dataFields)
+		file << "//@@data " << dslTypeName(field.type) << ' ' << field.name << '\n';
 	for (const SyntaxLine& line : Syntax::format(document.file, /*compact*/ false))
 	{
 		file << "//@";
@@ -899,6 +937,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	// is ignored entirely.
 	std::vector<BlockLine> blockLines;
 	std::vector<DSLComponentKind> requiredComponents;
+	std::vector<DSLDataField> dataFields;
 	{
 		std::string raw;
 		int lineNo = 0;
@@ -948,6 +987,29 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 				}
 				continue;
 			}
+			if (raw.rfind("//@@data", 0) == 0)
+			{
+				// "//@@data <type> <name>" -- one persistent self.data field, in the exact "type name" shape a
+				// real declaration line uses, so it reuses the same tokenizer/typeFromKeyword machinery.
+				std::string rest = raw.substr(8);
+				rest.erase(0, rest.find_first_not_of(" \t"));
+				std::vector<Token> tokens;
+				std::string tokenError;
+				if (!tokenizeLine(rest, tokens, tokenError))
+					return failAt(lineNo, tokenError);
+				DSLType type = DSLType::Void;
+				if (tokens.size() != 2 || tokens[0].kind != Token::Kind::Identifier || !typeFromKeyword(tokens[0].text, type)
+					|| tokens[1].kind != Token::Kind::Identifier)
+					return failAt(lineNo, "malformed //@@data line (expected \"//@@data <type> <name>\")");
+				const std::string& fieldName = tokens[1].text;
+				if (AutoCompleteRules::isReservedWord(fieldName))
+					return failAt(lineNo, "'" + fieldName + "' is reserved");
+				for (const DSLDataField& existing : dataFields)
+					if (existing.name == fieldName)
+						return failAt(lineNo, "'" + fieldName + "' is declared twice in //@@data");
+				dataFields.push_back(DSLDataField{ fieldName, type });
+				continue;
+			}
 			if (raw == kBlockEnd || raw.rfind("//@", 0) != 0)
 			{
 				done = true;
@@ -986,7 +1048,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 		line.kind = line.tokens.empty() ? BlockLine::Kind::Blank : BlockLine::Kind::Code;
 	}
 
-	Parser parser{ document.sidebar, builtins, bindings, requiredComponents };
+	Parser parser{ document.sidebar, builtins, bindings, requiredComponents, dataFields };
 
 	// Pass 1: function headers, so pass 2's body statements resolve forward calls.
 	std::vector<std::unique_ptr<DSLCodeLine>> headers(blockLines.size());
@@ -1099,6 +1161,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 
 	document.file.lines = std::move(rebuilt.lines);
 	document.requiredComponents = std::move(requiredComponents);
+	document.dataFields = std::move(dataFields);
 	result.success = true;
 	return result;
 }

@@ -89,6 +89,12 @@ namespace
 					{ "physics", T::PhysicsComponent, "ctx->entityGetPhysicsComponent($r)", /*writable*/ false, DSLComponentKind::Physics },
 					{ "audio",   T::AudioComponent,   "ctx->entityGetAudioComponent($r)",   /*writable*/ false, DSLComponentKind::Audio },
 					{ "force",   T::ForceComponent,   "ctx->entityGetForceComponent($r)",   /*writable*/ false, DSLComponentKind::Force },
+					// "$r" is unused (no $r/$N marker) -- scriptData is a real parameter of EVERY generated
+					// function (see Transpiler::emitFunction), never derived from the receiver expression.
+					// Dereferenced (not just cast) so self.data.<field> reads through "." like any other
+					// value member, matching pos's own "$r->pos" -> ".x" chaining convention. Its own fields
+					// come from DSL::dataFields, not this table -- see dslFindDataField.
+					{ "data",    T::ScriptData,        "(*(ScriptData*)scriptData)", /*writable*/ false },
 				} },
 			{ "physics", T::PhysicsComponent, /*sidebarTopLevel*/ false,
 				{
@@ -121,7 +127,7 @@ namespace
 			// every generated function receives it, see Transpiler::emitFunction).
 			{ nullptr, T::Void, /*sidebarTopLevel*/ false,
 				{
-					{ "print",           T::Void,  {},                                                       "ctx->log($1)" }, // vararg; string interpolation is future work
+					{ "print",           T::Void,  { { "message", T::String } },                            "ctx->log($1)" }, // one plain string -- no {}-interpolation yet
 					// NOTE: no physicsRayCastDistance thunk exists yet on the real ABI (only physicsRayCast,
 					// which returns hit/miss + out-params) -- this entry stays a placeholder until that's added.
 					{ "rayCast",         T::Float, { { "pos", kVec3 }, { "dir", kVec3 }, { "maxRayDist", T::Float } }, "ctx->physicsRayCastDistance($1, $2, $3)" },
@@ -131,6 +137,26 @@ namespace
 					{ "spawnPointLight", T::Void,  { { "position", kVec3 }, { "range", T::Float }, { "color", kVec3 }, { "intensity", T::Float } }, "ctx->spawnPointLight($1, $2, $3, $4)" },
 				},
 				{} },
+		};
+		return table;
+	}
+
+	// THE 5 toggleable ScriptAPI.h entry points -- see EntryPointDef's comment for the shape/why. `cppSuffix`
+	// spells out the REAL exported signature's tail verbatim (matching the ScriptXxxFn typedefs exactly,
+	// scriptData/other/contactId included); `dslParams`' names/types must agree with its LEADING parameters.
+	const std::vector<EntryPointDef>& entryPointTable()
+	{
+		using T = DSLType;
+		static const std::vector<EntryPointDef> table = {
+			{ "OnSpawn",         {},                                            ", void* scriptData", "REGISTER_ON_SPAWN()" },
+			{ "OnDestroy",       {},                                            ", void* scriptData", "REGISTER_ON_DESTROY()" },
+			{ "Update",          { { "deltaSeconds", T::Float } },              ", float deltaSeconds, void* scriptData", "REGISTER_UPDATE()" },
+			// eventIdx only -- the DSL has no way to author NAMED On Event entries yet (ScriptEventCount/
+			// ScriptEventName), so Transpiler emits a zero-events stub alongside this one; see its comment.
+			{ "OnEvent",         { { "eventIdx", T::Int } },                    ", int eventIdx, void* scriptData", "REGISTER_ON_EVENT()" },
+			// `other` (Entity value) and `contactId` (int64) aren't representable by any DSLType yet, so they
+			// stay invisible/unreadable from the DSL body -- only begin/sensor are exposed.
+			{ "OnPhysicsEvent",  { { "begin", T::Int }, { "sensor", T::Int } }, ", Entity* other, int begin, int sensor, long long contactId, void* scriptData", "REGISTER_ON_PHYSICS_EVENT()" },
 		};
 		return table;
 	}
@@ -284,5 +310,18 @@ const char* ScriptBindings::emitFor(const DSLSymbol* funcDecl) const
 	for (const auto& [symbol, emit] : m_emits)
 		if (symbol == funcDecl)
 			return emit;
+	return nullptr;
+}
+
+std::span<const EntryPointDef> ScriptBindings::entryPoints() const
+{
+	return entryPointTable();
+}
+
+const EntryPointDef* ScriptBindings::entryPointFor(const std::string& name) const
+{
+	for (const EntryPointDef& def : entryPointTable())
+		if (name == def.name)
+			return &def;
 	return nullptr;
 }

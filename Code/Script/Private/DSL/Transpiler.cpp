@@ -26,6 +26,22 @@ namespace
 		}
 	}
 
+	// The type-appropriate default an unresolved value falls back to -- a committed document never actually
+	// holds one (the editor's no-placeholder rule refuses to confirm), but Placeholder/field-initializer emit
+	// both want the SAME rule if one ever slips through, so it's one switch, not two.
+	std::string defaultValueText(DSLType type, const ScriptBindings& bindings)
+	{
+		if (const BindingStruct* structDef = bindings.structFor(type); structDef != nullptr)
+			return std::string(structDef->cppName) + "()";
+		switch (type)
+		{
+		case DSLType::Float:  return "0.0f";
+		case DSLType::Bool:   return "false";
+		case DSLType::String: return "\"\"";
+		default:              return "0";
+		}
+	}
+
 	const DSLSymbol::VariableDeclaration& declOf(const DSLSymbol* varDecl)
 	{
 		return std::get<DSLSymbol::VariableDeclaration>(varDecl->data);
@@ -125,18 +141,6 @@ namespace
 
 			if (const char* emitTemplate = bindings.emitFor(call.functionSymbol); emitTemplate != nullptr)
 			{
-				// Vararg builtins (print: no declared parameters) pass every argument where "$1" sits.
-				if (callee.parameterVarDeclarations.empty() && args.size() > 1)
-				{
-					std::string joined;
-					for (size_t i = 0; i < args.size(); ++i)
-					{
-						if (i > 0)
-							joined += ", ";
-						joined += args[i];
-					}
-					args.assign(1, std::move(joined));
-				}
 				// The receiver is its own emitted EXPRESSION (a handle-fetch call like
 				// "ctx->entityGetPhysicsComponent(self)", or a chained member access like "self.pos"), so emit
 				// templates compose textually.
@@ -144,9 +148,10 @@ namespace
 				return substituteTemplate(emitTemplate, receiverName, args);
 			}
 
-			// A user function: ctx/self are auto-threaded through exactly like the callee's own signature (see
-			// emitFunction) -- invisible to the DSL author at both the declaration and every call site.
-			std::string text = callee.name + "(ctx, self";
+			// A user function: ctx/self/scriptData are auto-threaded through exactly like the callee's own
+			// signature (see emitFunction) -- invisible to the DSL author at both the declaration and every
+			// call site.
+			std::string text = callee.name + "(ctx, self, scriptData";
 			for (const std::string& arg : args)
 				text += ", " + arg;
 			return text + ")";
@@ -156,7 +161,13 @@ namespace
 		{
 			const DSLSymbol::MemberAccess& m = std::get<DSLSymbol::MemberAccess>(symbol->data);
 			const std::string receiverText = expressionText(m.receiver); // recursion makes chains compose ("self.pos" -> ".x")
-			if (const BindingMember* member = bindings.findMember(dslValueType(m.receiver), m.memberName); member != nullptr)
+			const DSLType receiverType = dslValueType(m.receiver);
+			// self.data's own fields are this DOCUMENT's, not the static registry (DSLType::ScriptData) -- "data"
+			// itself dereferences to a VALUE ("(*(ScriptData*)scriptData)", see ScriptBindings' self.data emit),
+			// so every field hop composes with "." exactly like any other member chain.
+			if (receiverType == DSLType::ScriptData)
+				return receiverText + "." + m.memberName;
+			if (const BindingMember* member = bindings.findMember(receiverType, m.memberName); member != nullptr)
 				return substituteTemplate(member->emit, receiverText, {});
 			return receiverText + "." + m.memberName; // defensive -- authored/loaded members always exist in the registry
 		}
@@ -194,20 +205,9 @@ namespace
 				return e.grouped ? "(" + text + ")" : text;
 			}
 			case ST::Placeholder:
-			{
 				// Committed documents never hold value placeholders (the editor's no-placeholder rule) -- emit
 				// a type default anyway rather than broken text if one ever slips through.
-				const DSLType expected = std::get<DSLSymbol::Placeholder>(symbol->data).expectedType;
-				if (const BindingStruct* structDef = bindings.structFor(expected); structDef != nullptr)
-					return std::string(structDef->cppName) + "()";
-				switch (expected)
-				{
-				case DSLType::Float:  return "0.0f";
-				case DSLType::Bool:   return "false";
-				case DSLType::String: return "\"\"";
-				default:              return "0";
-				}
-			}
+				return defaultValueText(std::get<DSLSymbol::Placeholder>(symbol->data).expectedType, bindings);
 			default:
 				return "0"; // no other symbol kind is a value
 			}
@@ -244,20 +244,37 @@ namespace
 			const DSLSymbol::FunctionDeclaration& func =
 				std::get<DSLSymbol::FunctionDeclaration>(document.file.lines[headerIndex]->head()->data);
 
+			// A recognized ScriptAPI entry point (ScriptEditor's EXPORTS toggles, see EntryPointDef) transpiles
+			// to its EXACT real exported signature -- `cppSuffix` spells out everything after "ctx, self"
+			// verbatim, including parameters no DSLType can represent yet (scriptData always; OnPhysicsEvent's
+			// other/contactId), which the DSL body simply never references. Every other function keeps the
+			// generic ctx/self + declared-params shape.
+			const EntryPointDef* entry = bindings.entryPointFor(func.name);
+
 			// Every generated function is a free, dllexported function (like the node system's generated .scr
 			// code) -- no wrapper class. `ctx`/`self` are auto-injected as the first two parameters, invisible
 			// to the DSL author, so self.thing/thunk-function calls resolve without one (see the ScriptBindings
 			// emit templates, all written in terms of these two names) and so user-function calls (callText)
-			// can thread them straight through too.
+			// can thread them straight through too. Non-entry functions ALSO get `scriptData` as their 3rd
+			// (self.data needs it in scope wherever it's dotted into, not just from an entry point) -- an entry
+			// point already has one, positioned wherever the real ABI puts it (see cppSuffix).
 			std::string signature = std::string("SCRIPT_EXPORT ") + cppTypeName(func.returnType) + " " + func.name
 				+ "(const ScriptContext* ctx, Entity* self";
-			for (size_t i = 0; i < func.parameterVarDeclarations.size(); ++i)
+			if (entry != nullptr)
 			{
-				signature += ", ";
-				const DSLSymbol::VariableDeclaration& param = declOf(func.parameterVarDeclarations[i]);
-				signature += cppTypeName(declaredType(func.parameterVarDeclarations[i]));
-				signature += param.isRef ? "& " : " "; // `ref` out-parameters become C++ references
-				signature += param.name;
+				signature += entry->cppSuffix;
+			}
+			else
+			{
+				signature += ", void* scriptData";
+				for (size_t i = 0; i < func.parameterVarDeclarations.size(); ++i)
+				{
+					signature += ", ";
+					const DSLSymbol::VariableDeclaration& param = declOf(func.parameterVarDeclarations[i]);
+					signature += cppTypeName(declaredType(func.parameterVarDeclarations[i]));
+					signature += param.isRef ? "& " : " "; // `ref` out-parameters become C++ references
+					signature += param.name;
+				}
 			}
 			signature += ")";
 			emitLine(signature);
@@ -290,6 +307,21 @@ namespace
 			}
 
 			closeBlock();
+
+			if (entry != nullptr)
+			{
+				// OnEvent's REGISTER_ON_EVENT() also registers ScriptEventCount/ScriptEventName (see
+				// ScriptAPI.h) -- the DSL has no way to author NAMED On Event entries yet, so these declare
+				// zero, which is what keeps the static/cooked build linkable until that lands.
+				if (func.name == "OnEvent")
+				{
+					emitLine("");
+					emitLine("SCRIPT_EXPORT int ScriptEventCount(void) { return 0; }");
+					emitLine("SCRIPT_EXPORT const char* ScriptEventName(int) { return \"\"; }");
+				}
+				emitLine("");
+				emitLine(entry->registerMacro);
+			}
 		}
 
 		void emitStatement(const DSLCodeLine& line, const DSLSymbol* head, const DSLSymbol::FlowControl* flow,
@@ -364,6 +396,24 @@ std::string Transpiler::transpile(const DSL& document, const ScriptBindings& bin
 	Emitter emitter{ document, bindings };
 
 	emitter.emitLine("// Generated by the DSL transpiler -- do not edit (the source is the //@@dsl block below).");
+
+	// self.data's backing struct + its ScriptDataSize() export -- what tells the host how big a per-entity
+	// block to allocate/zero (see ScriptAPI.h). Only emitted when the document actually declares fields; a
+	// script that never uses SCRIPT DATA gets no struct, no export, same as before this existed.
+	if (!document.dataFields.empty())
+	{
+		emitter.emitLine("");
+		emitter.emitLine("struct ScriptData");
+		emitter.emitLine("{");
+		++emitter.indent;
+		for (const DSLDataField& field : document.dataFields)
+			emitter.emitLine(std::string(cppTypeName(field.type)) + " " + field.name + " = " + defaultValueText(field.type, bindings) + ";");
+		--emitter.indent;
+		emitter.emitLine("};");
+		emitter.emitLine("");
+		emitter.emitLine("SCRIPT_EXPORT unsigned int ScriptDataSize(void) { return sizeof(ScriptData); }");
+		emitter.emitLine("REGISTER_SCRIPT_DATA_SIZE()");
+	}
 
 	// One free, dllexported function per DSL function, at file scope -- no wrapper class (see emitFunction).
 	// A real hookup into ScriptHost (the exported entry-point names Update/OnSpawn/... and their REGISTER_*()

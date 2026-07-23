@@ -22,6 +22,7 @@ const char* dslTypeName(DSLType type)
 	case DSLType::PhysicsComponent: return "PhysicsComponent";
 	case DSLType::AudioComponent:   return "AudioComponent";
 	case DSLType::ForceComponent:   return "ForceComponent";
+	case DSLType::ScriptData:       return "ScriptData";
 	default:                        return "?";
 	}
 }
@@ -815,6 +816,29 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 {
 	std::vector<Candidate> out;
 
+	// self.data: no functions, just the document's OWN fields (DSL::dataFields) -- always writable (persistent
+	// data is meant to be read/write), type-filtered the same way any other member is.
+	if (receiverType == DSLType::ScriptData)
+	{
+		const bool statementContext = expectedType == DSLType::Void && !anyValue;
+		for (const DSLDataField& field : document.dataFields)
+		{
+			const bool accepted = statementContext
+				|| (anyValue || field.type == expectedType || dslIsChainableType(field.type));
+			if (!accepted)
+				continue;
+			Candidate c;
+			c.label = field.name;
+			c.kind = Candidate::Kind::Member;
+			c.refSymbol = receiverDecl;
+			c.declareType = field.type;
+			c.memberWritable = true;
+			addIfMatches(out, c, typedPrefix);
+		}
+		sortExactMatchFirst(out, typedPrefix);
+		return out;
+	}
+
 	// A receiver is a binding OBJECT (physics/self) or any STRUCT-typed value -- same candidate shapes either
 	// way, sourced from the matching registry side.
 	const std::vector<BindingFunc>* functions = nullptr;
@@ -940,11 +964,11 @@ DSLType AutoCompleteRules::expectedTypeForSlot(const SlotRef& slot, const DSLScr
 		const DSLSymbol* paramSym = call.arguments[slot.argIndex].parameter;
 		if (paramSym == nullptr)
 		{
-			// Positional argument (vec3(0, 1, 0), print(...)) -- fall back to the CALLEE's parameter list by
-			// index, so e.g. a vector literal's components still edit as the Floats they are.
+			// Positional argument (vec3(0, 1, 0)) -- fall back to the CALLEE's parameter list by index, so e.g.
+			// a vector literal's components still edit as the Floats they are.
 			const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
 			if (slot.argIndex >= static_cast<int>(callee.parameterVarDeclarations.size()))
-				return DSLType::Void; // vararg-style builtin (print) -- no declared parameter to derive from
+				return DSLType::Void; // past the callee's declared count -- shouldn't occur via the editor
 			paramSym = callee.parameterVarDeclarations[slot.argIndex];
 		}
 		const DSLSymbol::VariableDeclaration& param = std::get<DSLSymbol::VariableDeclaration>(paramSym->data);
@@ -991,7 +1015,7 @@ bool AutoCompleteRules::isReservedWord(const std::string& name)
 	// function actually named "end" can never produce that single-token line -- safe to allow.
 	static const char* const kKeywords[] = {
 		"if", "elseif", "else", "while", "for", "return", "break", "function", "true", "false",
-		"ctx", "self" // the Transpiler's auto-injected context parameter (see Transpiler::emitFunction)
+		"ctx", "self", "ScriptData", "scriptData" // the Transpiler's auto-injected context parameter (see Transpiler::emitFunction)
 	};
 	for (const char* keyword : kKeywords)
 		if (name == keyword)

@@ -100,6 +100,13 @@ export enum class DSLType : uint16
 	PhysicsComponent,
 	AudioComponent,
 	ForceComponent,
+	// The document's OWN persistent per-instance data (self.data.*, see DSL::dataFields) -- a binding like the
+	// component kinds above (dotted into, never a value/declarable type -- dslIsEngineObjectType covers it too),
+	// but PER-DOCUMENT rather than a fixed ScriptBindings table row: self.data's own member ("data") is a real
+	// static BindingMember (ScriptBindings.cpp), while ITS members (the fields) are looked up against
+	// DSL::dataFields directly wherever a receiver of this type is resolved (ScriptLang.cpp's receiverCandidates,
+	// ScriptEditor's chain-building, ScriptLoader's dot-chain parser, Transpiler's memberText).
+	ScriptData,
 	FirstStruct = 256,  // + struct registry index (see dslStructType/dslStructIndex)
 };
 
@@ -108,11 +115,14 @@ export constexpr int dslStructIndex(DSLType type) { return static_cast<int>(type
 export constexpr DSLType dslStructType(int index) { return static_cast<DSLType>(static_cast<int>(DSLType::FirstStruct) + index); }
 
 // Engine-object kinds are BINDINGS (dotted into for their members/functions), never values: excluded from
-// variable/reassign candidates, literal slots, and declarable types alike.
+// variable/reassign candidates, literal slots, and declarable types alike. ScriptData (self.data) is included
+// here too -- same binding-only treatment, even though it has no ScriptBindings::objectFor() row of its own
+// (per-document instead, see DSLType::ScriptData); every objectFor(ScriptData) call already handles "no match"
+// gracefully (skip/continue), which is exactly the right behavior for a type resolved elsewhere.
 export inline bool dslIsEngineObjectType(DSLType type)
 {
 	return type == DSLType::World || type == DSLType::Entity || type == DSLType::PhysicsComponent
-		|| type == DSLType::AudioComponent || type == DSLType::ForceComponent;
+		|| type == DSLType::AudioComponent || type == DSLType::ForceComponent || type == DSLType::ScriptData;
 }
 
 // A type with further members/functions reachable by dotting into it -- an engine-defined STRUCT value
@@ -449,6 +459,16 @@ export inline int dslEnclosingFunctionHeader(const DSLScriptFile& file, int from
 	return -1;
 }
 
+// One field of the document's own persistent per-instance data (self.data.<name>, see DSL::dataFields) --
+// authored via the SCRIPT DATA sidebar section's add/remove controls, serialized as one .dsl "//@@data <type>
+// <name>" line each. `type` is never an engine-object kind (self.data.self makes no sense) -- only
+// Int/Float/Bool/String or an engine-defined struct (vec2/3/4).
+export struct DSLDataField
+{
+	std::string name;
+	DSLType type;
+};
+
 // Top-level document: one script's function bodies plus its sidebar of bound
 // engine objects (World/Entity/component instances the body may dot-call
 // into -- see ScriptLang.ixx's "sidebar" example section). Kept free of any
@@ -468,10 +488,26 @@ public:
 	// and M6's transpiler exports the set so a script is only assignable to entities that have them all --
 	// which is what makes every component binding non-null by construction.
 	std::vector<DSLComponentKind> requiredComponents;
+	// This script's persistent per-instance data fields, reachable in the body as self.data.<name> -- Transpiler
+	// emits them as a real "struct ScriptData { ... };" (+ ScriptDataSize()/REGISTER_SCRIPT_DATA_SIZE()) that
+	// self.data casts the host's zeroed scriptData block to. Insertion order (append on add, like
+	// requiredComponents); names unique within this list (enforced at add time).
+	std::vector<DSLDataField> dataFields;
 };
 
 export inline bool dslIsComponentRequired(const DSL& document, DSLComponentKind kind)
 {
 	return std::find(document.requiredComponents.begin(), document.requiredComponents.end(), kind)
 		!= document.requiredComponents.end();
+}
+
+// `name`'s field in `document.dataFields` (nullptr if none) -- the ONE lookup every self.data.<name> resolution
+// site shares (ScriptLang.cpp's receiverCandidates, ScriptEditor's chain-building, ScriptLoader's dot-chain
+// parser, Transpiler's memberText), so they can't drift apart on what counts as a match.
+export inline const DSLDataField* dslFindDataField(const DSL& document, const std::string& name)
+{
+	for (const DSLDataField& field : document.dataFields)
+		if (field.name == name)
+			return &field;
+	return nullptr;
 }

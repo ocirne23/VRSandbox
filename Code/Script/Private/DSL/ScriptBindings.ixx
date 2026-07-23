@@ -65,6 +65,32 @@ export struct BindingStruct
 	std::vector<BindingFunc> functions; // emit may wrap free functions: { "length", Float, {}, "glm::length($r)" }
 };
 
+export struct EntryPointParam
+{
+	const char* name;
+	DSLType type;
+};
+
+// One ScriptAPI.h entry point (ScriptOnSpawnFn, ScriptUpdateFn, ...) the sidebar can toggle a matching DSL
+// function on/off for. `dslParams` are its DSL-visible, LOCKED parameters (deltaSeconds, eventIdx, ...) -- what
+// ScriptEditor seeds the function with on toggle-on, and refuses to let the author add to/remove/retype/rename
+// afterward. `cppSuffix` is the REST of the real exported signature, verbatim, after "const ScriptContext* ctx,
+// Entity* self" -- raw text (not DSLType-driven) because the real ABI has parameters no DSLType can represent
+// yet: `scriptData` (opaque per-instance memory, never useful without a DSL-side ScriptData feature) on every
+// kind, and OnPhysicsEvent's `other` (an Entity VALUE -- Entity is a binding-only type today, see
+// dslIsEngineObjectType) and `contactId` (int64 -- DSLType has no 64-bit integer). Those stay invisible/
+// unreadable from DSL body code until the type system grows to cover them; `dslParams`' names/types MUST match
+// `cppSuffix`'s leading parameters exactly (same names, same order), since generated code and what the editor
+// shows the author must agree. `registerMacro` is the ScriptAPI.h REGISTER_*() call Transpiler emits after the
+// function -- a no-op in the DLL build, what makes the STATIC/cooked build find it by kind.
+export struct EntryPointDef
+{
+	const char* name; // the exported C symbol AND the DSL function's own name, e.g. "Update"
+	std::vector<EntryPointParam> dslParams;
+	const char* cppSuffix;
+	const char* registerMacro;
+};
+
 // One binding object ("self", "physics", ...) or the Engine section (objectName == nullptr: its functions are
 // FREE calls in the DSL, `ctx.*` in C++). Every object's functions/members are reachable through
 // ScriptBindings::objectFor(type) regardless of `sidebarTopLevel` -- physics/audio/force stay full binding
@@ -114,6 +140,12 @@ public:
 	// The emit template a built function symbol was declared with (nullptr if not a registry symbol) -- what
 	// Transpiler's callText substitutes against.
 	const char* emitFor(const DSLSymbol* funcDecl) const;
+
+	// The 5 toggleable ScriptAPI entry points (OnSpawn/OnDestroy/Update/OnEvent/OnPhysicsEvent), in sidebar
+	// display order. Static engine data -- unlike objects()/structs(), nothing here needs `build()`.
+	std::span<const EntryPointDef> entryPoints() const;
+	// `name`'s matching EntryPointDef (nullptr if `name` isn't one of the 5).
+	const EntryPointDef* entryPointFor(const std::string& name) const;
 
 private:
 	struct BuiltObject

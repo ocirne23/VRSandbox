@@ -253,6 +253,20 @@ private:
 	void deleteEmptyBlock(DSLSymbol* headSymbol); // Backspace on an EMPTY block header (function or for): remove header+body+end
 	DSLSymbol* referenceHighlightTarget(DSLSymbol* symbol) const; // -> the VariableDeclaration/FunctionDeclaration `symbol` refers to (itself, if it already is one), or nullptr
 
+	// The EXPORTS sidebar toggles: one checkbox per ScriptBindings::entryPoints() entry (OnSpawn/OnDestroy/
+	// Update/OnEvent/OnPhysicsEvent), checked = a matching top-level function currently exists. Checking one ON
+	// seeds the function (header, its LOCKED dslParams, one blank body line) and appends it to the document;
+	// checking one OFF removes it -- refused (Log::warning, checkbox stays effectively on) while it has a real
+	// body or is still called, same guard/message convention as un-requiring a component still in use.
+	DSLSymbol* findEntryFunctionHead(const char* name) const; // scopeLevel-0 FunctionDeclaration named `name`, or nullptr
+	void toggleEntryFunction(const EntryPointDef& def, bool enable);
+	// Whether `funcDecl` IS one of the 5 entry points (by name) -- gates every header-mutation guard below.
+	// Deliberately name-only (no separate "owned by a toggle" flag to track): reaching this identity at all
+	// means it must have come from toggleEntryFunction, since isEntryPointName blocks these names from the
+	// ordinary declare-function/rename flows (see confirmCompose's FunctionDeclareName/Rename handling).
+	bool isLockedEntryFunction(const DSLSymbol* funcDecl) const;
+	bool isEntryPointName(const std::string& name) const;
+
 	// FilterCandidates: normal single-step slot fill. DeclareName/DeclareValue: declaring a brand-new variable.
 	// ConditionLeft/ConditionOp/ConditionRight: building an if/while condition. Rename: selecting an EXISTING
 	// VariableDeclaration's own name (its declaration site, not a use of it) always free-types a replacement
@@ -422,6 +436,11 @@ private:
 	// current mode as the return context and opens the receiver's member/function list (ComposeMode::MemberSelect).
 	void enterMemberSelect(DSLSymbol* receiverDecl);
 	void restoreMemberPath(const std::string& dottedPath); // re-applies a dotted chain onto a fresh MemberSelect
+	// One member-chain hop's resolved type (Void = no such member) -- self.data's OWN fields come from
+	// m_document.dataFields (per-document, see DSLType::ScriptData), everything else from the static
+	// ScriptBindings registry (m_bindings.findMember). The ONE lookup every chain-walking site shares
+	// (restoreMemberPath, buildReceiverChain, the MemberSelect Backspace-peel walk, reassignTargetType).
+	DSLType resolveMemberType(DSLType receiverType, const std::string& name) const;
 	// The value constraints of the CURRENT compose stage -- what a MemberSelect entered from it filters
 	// receiver candidates by (Void + !anyValue = statement context). Mirrors refreshCandidates' per-mode logic.
 	DSLType valueContextExpectedType(ComposeMode mode, bool& outAnyValue) const;
@@ -429,6 +448,9 @@ private:
 	// and friends) -- guards un-requiring a component that's still in use.
 	bool isComponentMemberReferenced(DSLType memberType) const;
 	void renderSidebarPanel(); // the Entity/Engine bindings browser + required-component checkboxes
+	// Whether any statement dots into self.data.<name> -- guards removing a SCRIPT DATA field still in use, the
+	// per-document twin of isComponentMemberReferenced.
+	bool isDataFieldReferenced(const std::string& name) const;
 	// The receiver expression a dotted path names: the root's VariableReference, wrapped in one MemberAccess
 	// per path segment ("pos.x" -> self->pos->x), each hop's type stamped from the registry. Empty path = just
 	// the reference. Shared by member values, member-assign targets, and dot-call receivers.
@@ -712,6 +734,11 @@ private:
 
 	char m_pathBuf[256] = "script.dsl"; // toolbar path field -- relative to Assets/ (the working directory)
 	float m_sidebarWidth = 240.0f; // drag-resizable via the splitter between the sidebar and the text area
+
+	// SCRIPT DATA sidebar section: the pending new-field controls (type combo + free-typed name), reset once
+	// added. Immediate-mode ImGui state, unrelated to the main text area's ComposeMode staging.
+	DSLType m_pendingDataFieldType = DSLType::Int;
+	char m_pendingDataFieldName[64] = "";
 
 	float m_fontScale = 1.0f;
 	float m_textOriginX = 0.0f, m_textOriginY = 0.0f;
