@@ -19,9 +19,8 @@ import :EntityEditor;
 import :OutputLog;
 import :TweakPanel;
 import :TextEditor;
-import :ScriptBindings;
+import Script;
 import :ScriptEditor;
-import :ScriptLoader;
 
 import RendererVK;
 

@@ -2,9 +2,7 @@ export module UI:ScriptEditor;
 
 import Core;
 import Core.SDL;
-import :DSL;
-import :ScriptBindings;
-import :ScriptLang;
+import Script;
 
 // The DSL editor panel ("Script Editor" window). Displays a DSLScriptFile via Syntax::format and navigates it
 // with a TOKEN cursor: the selection unit is "which rendered span (and therefore which DSLSymbol) is current,"

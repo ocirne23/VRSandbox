@@ -4,11 +4,8 @@ import Core;
 import Core.Log;
 import Core.imgui;
 import Core.SDL;
-import :DSL;
-import :ScriptLang;
+import Script;
 import :ScriptEditor;
-import :ScriptLoader;
-import :Transpiler;
 
 using ST = DSLSymbol::SymbolType;
 

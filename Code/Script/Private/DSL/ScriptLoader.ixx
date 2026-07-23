@@ -1,4 +1,4 @@
-export module UI:ScriptLoader;
+export module Script:ScriptLoader;
 
 import Core;
 import :DSL;

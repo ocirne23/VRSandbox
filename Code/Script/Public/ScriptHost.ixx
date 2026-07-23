@@ -2,6 +2,15 @@ export module Script;
 
 import Core;
 
+// The DSL scripting-language subsystem (editor-agnostic: data model, autocomplete rules, the engine-exposure
+// registry, native save/load, and the C++ transpiler) -- UI's Script Editor panel is the only consumer today,
+// but none of this depends on UI/ImGui, so it lives here alongside the rest of the script pipeline.
+export import :DSL;
+export import :ScriptLang;
+export import :ScriptBindings;
+export import :ScriptLoader;
+export import :Transpiler;
+
 // Compiled-and-loaded script DLL: the raw entry-point function pointers. Typed as void* so this library
 // stays decoupled from the script ABI (ScriptAPI.h) and from the engine — the caller (Entity) owns the
 // ScriptContext and casts these. A null `update` marks a script that failed to compile.

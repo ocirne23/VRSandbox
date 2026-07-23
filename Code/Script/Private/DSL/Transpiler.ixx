@@ -1,4 +1,4 @@
-export module UI:Transpiler;
+export module Script:Transpiler;
 
 import Core;
 import :DSL;

@@ -1,4 +1,4 @@
-export module UI:ScriptBindings;
+export module Script:ScriptBindings;
 
 import Core;
 import :DSL;

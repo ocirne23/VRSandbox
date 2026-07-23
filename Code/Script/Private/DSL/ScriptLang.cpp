@@ -1,4 +1,4 @@
-module UI;
+module Script;
 
 import Core;
 import :DSL;

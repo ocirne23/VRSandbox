@@ -1,4 +1,4 @@
-export module UI:DSL;
+export module Script:DSL;
 
 import Core;
 
@@ -87,7 +87,7 @@ export class DSLCodeLine;
 // `FirstStruct + N` names entry N of the ScriptBindings struct registry (vec2/vec3/vec4 are the first three
 // table rows -- adding a new engine struct is one table row, no enum edit). Struct types carry members,
 // a positional constructor, and callable member functions, all defined by the registry.
-enum class DSLType : uint16
+export enum class DSLType : uint16
 {
 	Void,               // no value (a function with no return type)
 	Int,
@@ -138,7 +138,7 @@ export inline const char* dslComponentKindName(DSLComponentKind kind)
 	default:                        return "?";
 	}
 }
-enum class DSLFlowControl
+export enum class DSLFlowControl
 {
 	If,
 	ElseIf,
@@ -148,7 +148,7 @@ enum class DSLFlowControl
 	Return,
 	Break,
 };
-enum class DSLOperator
+export enum class DSLOperator
 {
 	Assign,
 	AssignAdd,

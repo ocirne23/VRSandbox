@@ -1,4 +1,4 @@
-export module UI:ScriptLang;
+export module Script:ScriptLang;
 
 import Core;
 import :DSL;
