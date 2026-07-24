@@ -628,7 +628,7 @@ void ScriptEditor::refreshCandidates()
 		break;
 	case ComposeMode::CallArgValue:
 	{
-		// A parameterized call/dot-into waypoint IS offered here now -- an argument is a full chain compose
+		// A parameterized call/dot-into waypoint is offered here too -- an argument is a full chain compose
 		// (m_exprStack), so a nested call stages via the same tryBeginValueCallStaging every other chain mode
 		// uses (see m_callStack), and dotting into a struct-typed value works too. excludeVariable matters once
 		// this call is a re-edit of an already-committed declaration's initializer (see callArgExcludeVariable) --
@@ -2581,11 +2581,11 @@ std::string ScriptEditor::callStagePrefix() const
 
 std::string ScriptEditor::chainLeadTextFor(ComposeMode mode) const
 {
-	return exprBasePrefixFor(mode); // now handles CallArgValue itself (see exprBasePrefixFor)
+	return exprBasePrefixFor(mode); // covers CallArgValue too (see its own case there)
 }
 
 // See the declaration in ScriptEditor.ixx: the chain compose suspends while the call's arguments stage -- a
-// new CallStage saves it (m_exprStack included, since CallArgValue is itself chain-composing now: an
+// new CallStage saves it (m_exprStack included, since CallArgValue is itself chain-composing: an
 // argument may contain another staged call, i.e. this same function firing again from WITHIN CallArgValue).
 bool ScriptEditor::tryBeginValueCallStaging(bool requireTypedText)
 {
@@ -5630,8 +5630,8 @@ void ScriptEditor::renderTextArea()
 	renderAutocompletePopup();
 }
 
-// Just the candidate list, floated below the cursor's own highlight rectangle -- the composed text itself now
-// renders inline in that rectangle (see renderTextArea), not in a separate box here. Nothing to show during
+// Just the candidate list, floated below the cursor's own highlight rectangle -- the composed text itself
+// renders inline in that rectangle instead (see renderTextArea), not in a separate box here. Nothing to show during
 // DeclareName/Rename (free-typing an identifier, no candidates to filter against).
 void ScriptEditor::renderAutocompletePopup()
 {

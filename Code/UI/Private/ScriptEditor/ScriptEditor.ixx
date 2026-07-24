@@ -392,14 +392,14 @@ private:
 	// initializer, which has no prior value to read.
 	DSLSymbol* conditionValueExcludeVariable() const;
 	// The declaration being built/re-edited that a staged call's OWN argument list must never reference back --
-	// same self-reference bug as conditionValueExcludeVariable, but for CallArgValue's candidate list, which
-	// used to pass no excludeVariable at all: composing "int test = testFunc(|" for the FIRST time never shows
-	// `test` (it doesn't exist as a symbol yet, brand-new declares never write one early), so the bug only
-	// surfaces when WIDENING back into an already-committed call argument (tryWidenValueCallEdit/
-	// tryWidenCallStatementEdit set m_redeclareTarget/m_editSlot exactly like a plain whole-value Backspace
-	// widen does) -- checked directly rather than switched on m_callStack.back().returnMode so it still holds
-	// at any nesting depth (an inner staged call's own returnMode is its immediate CallArgValue parent, not the
-	// outermost DeclareValue/EditExpr, but m_redeclareTarget/m_editSlot stay set across the whole nested chain).
+	// same self-reference concern as conditionValueExcludeVariable, applied to CallArgValue's candidate list.
+	// Composing "int test = testFunc(|" for the FIRST time never shows `test` regardless (it doesn't exist as a
+	// symbol yet, brand-new declares never write one early), so this only matters when WIDENING back into an
+	// already-committed call argument (tryWidenValueCallEdit/tryWidenCallStatementEdit set m_redeclareTarget/
+	// m_editSlot exactly like a plain whole-value Backspace widen does) -- checked directly rather than switched
+	// on m_callStack.back().returnMode so it still holds at any nesting depth (an inner staged call's own
+	// returnMode is its immediate CallArgValue parent, not the outermost DeclareValue/EditExpr, but
+	// m_redeclareTarget/m_editSlot stay set across the whole nested chain).
 	DSLSymbol* callArgExcludeVariable() const;
 	void commitBoolValue(const PendingLogicalTerm& finalTerm); // the staged comparison/logical chain IS a value ("bool b = i < 5") -- routes per m_conditionValueReturnMode
 	std::string exprComposePrefixFromStack() const; // renders m_exprStack (+ m_exprPendingGroup, if any) back to text -- always assigned to m_composePrefix after any state change, forward or backward, so the two can never drift apart
