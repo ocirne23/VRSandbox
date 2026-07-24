@@ -16,6 +16,7 @@ SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* s
 SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, ScriptData* scriptData);
 SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, ScriptData* scriptData);
 SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, ScriptData* scriptData);
+static int test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int n);
 
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* scriptData)
 {
@@ -57,10 +58,14 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 	{
 		ctx->physicsSetVelocity(scriptData->physics, glm::vec3(0.0f, 1.0f, 0.0f));
 	}
-
 }
 
 REGISTER_UPDATE()
+
+static int test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int n)
+{
+	return n;
+}
 
 //@@dsl 1
 //@@require PhysicsComponent
@@ -85,8 +90,10 @@ REGISTER_UPDATE()
 //@	for int i = 0, i < self.data.num, i += 1
 //@		self.physics.setVelocity(vec3 velocity = vec3(0, 1, 0))
 //@	end
-//@	
 //@end
 //@
+//@function test(int n) -> int
+//@	return n
+//@end
 //@
 //@@end

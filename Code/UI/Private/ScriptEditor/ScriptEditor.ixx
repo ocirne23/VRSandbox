@@ -339,6 +339,14 @@ private:
 	// it consumed the keystroke (something was completed); false = nothing to complete, caller's plain
 	// `if (!allowCommit) return;` behavior is unchanged either way.
 	bool tryCompleteCandidateOnSpace();
+	// Space on the SAME terminal stages as tryCompleteCandidateOnSpace, but for when there's nothing left to
+	// TYPE toward the highlighted candidate (nothing typed at all -- relying purely on the default/arrow-
+	// navigated selection -- or it's already spelled out in full): Space must still DO something with it
+	// instead of silently eating the keystroke, so this resolves it as a term right into the chain (the exact
+	// rule exprTryFinalize's own "awaiting a term" branch uses) and keeps composing -- an operator, or a later
+	// confirm, still finishes the value, same as MemberSelect's own value-context delivery. Tries
+	// tryCompleteCandidateOnSpace first, so partially-typed text still completes instead of resolving early.
+	void tryResolveCandidateOnSpace();
 	// The one-stop stage transition every staged flow uses: sets the compose box to `prefix` (+ `pendingWord`,
 	// for step-backs that restore previously-typed text), switches to `mode`, and rebuilds the candidate list
 	// against the new mode/text (a no-op for free-typing modes, which end up with an empty list).
@@ -383,6 +391,16 @@ private:
 	// (reading the variable's OLD value before it's overwritten) is legitimate, unlike a fresh/re-declared
 	// initializer, which has no prior value to read.
 	DSLSymbol* conditionValueExcludeVariable() const;
+	// The declaration being built/re-edited that a staged call's OWN argument list must never reference back --
+	// same self-reference bug as conditionValueExcludeVariable, but for CallArgValue's candidate list, which
+	// used to pass no excludeVariable at all: composing "int test = testFunc(|" for the FIRST time never shows
+	// `test` (it doesn't exist as a symbol yet, brand-new declares never write one early), so the bug only
+	// surfaces when WIDENING back into an already-committed call argument (tryWidenValueCallEdit/
+	// tryWidenCallStatementEdit set m_redeclareTarget/m_editSlot exactly like a plain whole-value Backspace
+	// widen does) -- checked directly rather than switched on m_callStack.back().returnMode so it still holds
+	// at any nesting depth (an inner staged call's own returnMode is its immediate CallArgValue parent, not the
+	// outermost DeclareValue/EditExpr, but m_redeclareTarget/m_editSlot stay set across the whole nested chain).
+	DSLSymbol* callArgExcludeVariable() const;
 	void commitBoolValue(const PendingLogicalTerm& finalTerm); // the staged comparison/logical chain IS a value ("bool b = i < 5") -- routes per m_conditionValueReturnMode
 	std::string exprComposePrefixFromStack() const; // renders m_exprStack (+ m_exprPendingGroup, if any) back to text -- always assigned to m_composePrefix after any state change, forward or backward, so the two can never drift apart
 	std::string exprTermText(const PendingExprTerm& term) const; // recursive -- "(" + ... + ")" for a group, else candidateDisplayText
@@ -445,8 +463,12 @@ private:
 	void commitCallStatement();             // the last argument's confirm: commits the call line -- or returns the resolved call TERM to the suspended chain
 	// A matched parameterized-Function candidate in a chain compose can't be consumed bare (its call needs
 	// arguments, and placeholders never land) -- '(', an operator, or a confirm over it opens the CallArgValue
-	// sub-flow instead. False = not such a candidate; the caller proceeds normally.
-	bool tryBeginValueCallStaging();
+	// sub-flow instead. False = not such a candidate; the caller proceeds normally. `requireTypedText` guards
+	// against a stray '('/operator keystroke resolving off whatever's default-highlighted with nothing typed --
+	// confirmCompose's Space/Enter path passes false instead: a confirm is itself a deliberate "use the
+	// highlighted entry" gesture (see tryResolveCandidateOnSpace's identical reasoning for a non-parameterized
+	// pick), unlike '('/an operator, which could equally mean "start a new group" or "continue the expression".
+	bool tryBeginValueCallStaging(bool requireTypedText = true);
 	// Dotting into a matched BindingObject/struct-variable candidate ('.', or a confirm over it): captures the
 	// current mode as the return context and opens the receiver's member/function list (ComposeMode::MemberSelect).
 	void enterMemberSelect(DSLSymbol* receiverDecl);

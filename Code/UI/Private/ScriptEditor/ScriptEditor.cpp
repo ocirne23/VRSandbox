@@ -625,8 +625,10 @@ void ScriptEditor::refreshCandidates()
 	{
 		// A parameterized call/dot-into waypoint IS offered here now -- an argument is a full chain compose
 		// (m_exprStack), so a nested call stages via the same tryBeginValueCallStaging every other chain mode
-		// uses (see m_callStack), and dotting into a struct-typed value works too.
-		m_candidates = AutoCompleteRules::candidatesFor(currentCallParamType(), atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord);
+		// uses (see m_callStack), and dotting into a struct-typed value works too. excludeVariable matters once
+		// this call is a re-edit of an already-committed declaration's initializer (see callArgExcludeVariable) --
+		// a brand-new declare's own name never appears here regardless, since it isn't a real symbol yet.
+		m_candidates = AutoCompleteRules::candidatesFor(currentCallParamType(), atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord, callArgExcludeVariable());
 		// A `ref` parameter receives the callee's OUTPUT -- only an actual variable can stand there, never a
 		// nested call/compound expression, so those (and dot-into waypoints) are excluded for it specifically.
 		const CallStage& stage = m_callStack.back();
@@ -726,6 +728,25 @@ bool ScriptEditor::tryCompleteCandidateOnSpace()
 	return true;
 }
 
+// See the declaration in ScriptEditor.ixx.
+void ScriptEditor::tryResolveCandidateOnSpace()
+{
+	if (tryCompleteCandidateOnSpace())
+		return;
+	if (m_exprStack.size() != 1 || m_exprHasPendingGroup)
+		return; // an open paren or an already-pending group has nothing new to add here
+	ExprFrame& top = m_exprStack[0];
+	if (top.ops.size() != top.terms.size())
+		return; // an operand is already resolved and nothing new was typed for the next one -- nothing to add yet
+	const Candidate* picked = selectedCandidate();
+	if (picked == nullptr || isParameterizedFunction(*picked))
+		return; // parameterized functions resolve through tryBeginValueCallStaging instead
+	top.terms.push_back(PendingExprTerm{ false, *picked, {}, {} });
+	m_pendingWord.clear();
+	refreshCandidates();
+	m_composePrefix = exprBasePrefix() + exprComposePrefixFromStack();
+}
+
 // See the declaration in ScriptEditor.ixx. Clearing the old candidate list before refreshing matters for the
 // free-typing modes (whose refresh is a no-op) -- they must not keep showing/cycling the PREVIOUS stage's list.
 void ScriptEditor::enterCompose(ComposeMode mode, std::string prefix, std::string pendingWord)
@@ -776,8 +797,10 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		return;
 
 	// A matched parameterized-Function candidate in a chain compose stages its arguments before anything else
-	// can happen to it -- there is no bare form to confirm (placeholder arguments never exist).
-	if (isChainComposeMode() && tryBeginValueCallStaging())
+	// can happen to it -- there is no bare form to confirm (placeholder arguments never exist). requireTypedText
+	// is false here: a confirm (Space or Enter) is itself the deliberate "use the highlighted entry" gesture, so
+	// it must stage the call even off a pure arrow-navigated/default selection with nothing typed.
+	if (isChainComposeMode() && tryBeginValueCallStaging(/*requireTypedText*/ false))
 		return;
 
 	// A matched BindingObject candidate has no bare form either -- confirming it (like typing '.') dots into
@@ -957,7 +980,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 			return;
 		}
 		if (m_renameTarget->line != nullptr
-			&& AutoCompleteRules::isNameInScope(m_pendingWord, *m_renameTarget->line, m_document.file, m_document.sidebar, m_renameTarget))
+			&& AutoCompleteRules::isNameInScope(m_pendingWord, *m_renameTarget->line, m_document.file, m_document.sidebar, m_builtins, m_renameTarget))
 			return; // name already taken in this scope -- keep editing instead of accepting the collision
 		std::get<DSLSymbol::VariableDeclaration>(m_renameTarget->data).name = m_pendingWord;
 		m_pendingSelectTarget = m_renameTarget;
@@ -977,7 +1000,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		}
 		// A re-declare's own current name must not count as a collision against itself (m_redeclareTarget is
 		// null for a brand-new declaration, changing nothing there).
-		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_redeclareTarget))
+		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_builtins, m_redeclareTarget))
 			return; // name already taken in this scope -- keep editing instead of accepting the collision
 		m_pendingDeclareName = m_pendingWord;
 		enterChainStage(ComposeMode::DeclareValue);
@@ -988,7 +1011,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 	{
 		if (!allowCommit)
 		{
-			tryCompleteCandidateOnSpace(); // can't finish the declaration (Enter only) -- but Space can still complete the box
+			tryResolveCandidateOnSpace(); // can't finish the declaration (Enter only) -- but Space can still resolve the highlighted term into the chain
 			return;
 		}
 		// No placeholder fallbacks: an incomplete value (nothing typed, or an unresolved compound expression)
@@ -1040,7 +1063,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 	{
 		if (!allowCommit)
 		{
-			tryCompleteCandidateOnSpace();
+			tryResolveCandidateOnSpace();
 			return; // finishing stage -- Enter only
 		}
 		// Same no-placeholder rule as DeclareValue: incomplete values refuse to confirm.
@@ -1061,7 +1084,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 	{
 		if (!allowCommit)
 		{
-			tryCompleteCandidateOnSpace();
+			tryResolveCandidateOnSpace();
 			return; // an in-place edit commits on confirm -- Enter only
 		}
 		std::vector<PendingExprTerm> terms;
@@ -1083,7 +1106,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 	{
 		if (!allowCommit)
 		{
-			tryCompleteCandidateOnSpace();
+			tryResolveCandidateOnSpace();
 			return; // finishing stage -- Enter only
 		}
 		// A value-returning function's `return` commits WITH its whole value in one shot -- possibly a
@@ -1121,7 +1144,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		if (!allowCommit && stage.returnMode == ComposeMode::None
 			&& stage.argChains.size() + 1 == callee.parameterVarDeclarations.size())
 		{
-			tryCompleteCandidateOnSpace(); // can't commit the call (Enter/')' only) -- but Space can still complete the box
+			tryResolveCandidateOnSpace(); // can't commit the call (Enter/')' only) -- but Space can still resolve this argument's highlighted term
 			return; // a call STATEMENT's final argument commits the line -- Enter/')' only; a call VALUE just resolves a term
 		}
 
@@ -1299,7 +1322,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		}
 		// A re-edited loop's own current name must not collide with itself (m_flowEditLoopVar is null when
 		// authoring a fresh loop, changing nothing there).
-		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_flowEditLoopVar))
+		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_builtins, m_flowEditLoopVar))
 			return; // name already taken in this scope -- keep editing instead of accepting the collision
 		m_forVarName = m_pendingWord;
 		m_forVarInitChain = PendingExprChain{};
@@ -1364,7 +1387,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 	{
 		if (!allowCommit)
 		{
-			tryCompleteCandidateOnSpace();
+			tryResolveCandidateOnSpace();
 			return; // the increment's value is the for-loop's LAST stage -- confirming commits (Enter only)
 		}
 		// Nothing valid to complete the increment with yet -- do NOT commit a broken/partial for-loop; same
@@ -1846,6 +1869,16 @@ DSLSymbol* ScriptEditor::conditionValueExcludeVariable() const
 	default:
 		return nullptr; // ReassignValue (and everything else): self-reference is legitimate or not applicable
 	}
+}
+
+// See the declaration in ScriptEditor.ixx.
+DSLSymbol* ScriptEditor::callArgExcludeVariable() const
+{
+	if (m_redeclareTarget != nullptr)
+		return m_redeclareTarget;
+	if (m_editSlot.kind == SlotRef::Kind::VariableDeclarationInitialValue)
+		return m_editSlot.parent;
+	return nullptr;
 }
 
 // See the declaration in ScriptEditor.ixx: the whole staged logical chain so far, ending in the dangling
@@ -2535,10 +2568,10 @@ std::string ScriptEditor::chainLeadTextFor(ComposeMode mode) const
 // See the declaration in ScriptEditor.ixx: the chain compose suspends while the call's arguments stage -- a
 // new CallStage saves it (m_exprStack included, since CallArgValue is itself chain-composing now: an
 // argument may contain another staged call, i.e. this same function firing again from WITHIN CallArgValue).
-bool ScriptEditor::tryBeginValueCallStaging()
+bool ScriptEditor::tryBeginValueCallStaging(bool requireTypedText)
 {
-	if (m_pendingWord.empty())
-		return false; // only over TYPED text -- the highlighted default must never resolve off a stray key
+	if (requireTypedText && m_pendingWord.empty())
+		return false; // only over TYPED text -- a stray '('/operator must never resolve off a default highlight
 	const Candidate* picked = selectedCandidate();
 	if (picked == nullptr || !isParameterizedFunction(*picked))
 		return false;
@@ -4030,8 +4063,11 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		if (composing) cancelCompose(); else moveHorizontal(+1);
 		return;
 	case SDL_SCANCODE_TAB:
-		// Plain navigation while not composing -- a dedicated "cycle argument placeholders" mode isn't implemented.
-		if (composing) cancelCompose(); else moveHorizontal(shift ? -1 : +1);
+		// An autocomplete confirm like Space while composing (same allowCommit=false -- Tab never finishes a
+		// line, only Enter does); with no compose active there's nothing to complete, so it falls back to plain
+		// horizontal navigation, same as Right/Left arrow. A dedicated "cycle argument placeholders" mode isn't
+		// implemented, so Shift is only meaningful for the navigation fallback.
+		if (composing) confirmCompose(/*allowCommit*/ false); else moveHorizontal(shift ? -1 : +1);
 		return;
 	case SDL_SCANCODE_HOME:
 		if (composing) cancelCompose(); else moveHome();

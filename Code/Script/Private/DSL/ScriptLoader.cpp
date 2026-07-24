@@ -622,6 +622,14 @@ namespace
 			for (const std::unique_ptr<DSLSymbol>& s : sidebar)
 				if (s->type == ST::VariableDeclaration && std::get<DSLSymbol::VariableDeclaration>(s->data).name == name)
 					return failValue("'" + name + "' is a sidebar binding");
+			// A variable can't shadow a function name either (see isNameInScope's own comment for why this is
+			// more than a style rule -- it'd make the function uncallable in the transpiled C++).
+			for (const std::unique_ptr<DSLSymbol>& s : builtins)
+				if (s->type == ST::FunctionDeclaration && std::get<DSLSymbol::FunctionDeclaration>(s->data).name == name)
+					return failValue("'" + name + "' is already a function name");
+			for (DSLSymbol* func : userFunctions)
+				if (std::get<DSLSymbol::FunctionDeclaration>(func->data).name == name)
+					return failValue("'" + name + "' is already a function name");
 
 			DSLSymbol* typeSymbol = push(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ type });
 			DSLSymbol* initValue = nullptr;
@@ -1099,6 +1107,11 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	// Pass 2: everything in order. The block-keyword structure (function/if/while/for open, elseif/else
 	// continue, end closes) drives every line's scopeLevel -- DSL.ixx's scope-only nesting model rebuilt.
 	std::vector<DSLSymbol*> openBlocks; // each entry = the open block's CURRENT header symbol
+	// Parallel to openBlocks: parser.scopeVars.size() from JUST BEFORE that block's own header ran (so a
+	// for-loop's counter, declared as part of parsing its header line, is included in what gets pruned) --
+	// the editor-side twin of ScriptLang.cpp's inScopeVariables scope-walk, restored on 'end'/branch-switch so
+	// a name declared inside a block (the loop counter included) can't resolve once the block's done with.
+	std::vector<size_t> openBlockScopeDepth;
 	for (size_t i = 0; i < blockLines.size(); ++i)
 	{
 		const BlockLine& src = blockLines[i];
@@ -1123,6 +1136,8 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 			if (openBlocks.empty())
 				return failAt(src.fileLineNo, "'end' with no open block");
 			openBlocks.pop_back();
+			parser.scopeVars.resize(openBlockScopeDepth.back());
+			openBlockScopeDepth.pop_back();
 			continue; // synthetic -- the formatter re-derives it from the scopeLevel step-down
 		}
 		if (word == "function")
@@ -1134,6 +1149,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 			parser.scopeVars = func.parameterVarDeclarations; // fresh function scope: its own parameters
 			parser.currentReturnType = func.returnType;
 			openBlocks.push_back(head);
+			openBlockScopeDepth.push_back(parser.scopeVars.size());
 			parser.outLines.push_back(std::move(headers[i]));
 			continue;
 		}
@@ -1144,6 +1160,10 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 				? &std::get<DSLSymbol::FlowControl>(top->data) : nullptr;
 			if (topFlow == nullptr || (topFlow->control != DSLFlowControl::If && topFlow->control != DSLFlowControl::ElseIf))
 				return failAt(src.fileLineNo, "'" + word + "' without a matching 'if'");
+			// The branch just finished goes out of scope before this sibling's own condition/body parses --
+			// same depth as when the chain opened (a branch switch doesn't nest deeper), so the snapshot itself
+			// doesn't change, only scopeVars gets pruned back to it.
+			parser.scopeVars.resize(openBlockScopeDepth.back());
 			auto line = std::make_unique<DSLCodeLine>();
 			line->scopeLevel = depth - 1; // continues the chain at its own header's level (see Syntax::format)
 			DSLSymbol* head = nullptr;
@@ -1163,11 +1183,17 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 
 		auto line = std::make_unique<DSLCodeLine>();
 		line->scopeLevel = depth;
+		const size_t scopeDepthBeforeHeader = parser.scopeVars.size(); // captured before parseStatement, so a
+		                                                                // block opener's OWN declaration (a for-
+		                                                                // loop's counter) is included if pruned
 		DSLSymbol* head = parser.parseStatement(src.tokens, *line);
 		if (head == nullptr)
 			return failAt(src.fileLineNo, parser.error);
 		if (Syntax::isBlockOpener(head))
+		{
 			openBlocks.push_back(head);
+			openBlockScopeDepth.push_back(scopeDepthBeforeHeader);
+		}
 		parser.outLines.push_back(std::move(line));
 	}
 

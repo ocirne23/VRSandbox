@@ -437,8 +437,13 @@ namespace
 
 	// Every VariableDeclaration reachable from `atLine`: sidebar bindings, this function's own parameters, and
 	// locals declared earlier in the SAME function (walking file.lines backward to the enclosing
-	// FunctionDeclaration header, whose own parameters are picked up there too). Cruder than real block scoping
-	// (doesn't exclude sibling if/else branches), but good enough in practice.
+	// FunctionDeclaration header, whose own parameters are picked up there too) -- but only through blocks
+	// atLine is CURRENTLY nested inside: a line deeper than atLine's own scopeLevel is a closed/sibling block
+	// (a finished loop, an inactive if-branch) once atLine isn't inside it too, so its locals are skipped
+	// entirely (jumping straight to just before that block's own header). A for-loop's own counter gets the
+	// SAME treatment one level up: it's declared ON the header line itself (at the header's own, shallower
+	// scopeLevel -- see commitForStatement), but scoped to just its body, so it's excluded once atLine sits at
+	// or past the loop's matching `end`.
 	std::vector<DSLSymbol*> inScopeVariables(const DSLCodeLine& atLine, const DSLScriptFile& file, const std::vector<std::unique_ptr<DSLSymbol>>& sidebar)
 	{
 		std::vector<DSLSymbol*> result;
@@ -446,9 +451,27 @@ namespace
 			if (s->type == ST::VariableDeclaration)
 				result.push_back(s.get());
 
-		for (int i = dslLineIndex(file, &atLine); i >= 0; --i)
+		const int atIndex = dslLineIndex(file, &atLine);
+		for (int i = atIndex; i >= 0; --i)
 		{
 			const DSLCodeLine& line = *file.lines[i];
+			if (line.scopeLevel > atLine.scopeLevel)
+			{
+				const int headerIndex = dslEnclosingBlockHeader(file, i);
+				if (headerIndex < 0)
+					break; // shouldn't happen (a deeper line always has an enclosing header) -- bail safely
+				if (atIndex >= dslBlockEnd(file, headerIndex))
+				{
+					i = headerIndex; // the loop's own --i steps to headerIndex - 1 next
+					continue;
+				}
+				// atLine is genuinely nested inside this same block -- its declarations count, fall through.
+			}
+			const DSLSymbol* head = line.head();
+			if (head != nullptr && head->type == ST::FlowControl
+				&& std::get<DSLSymbol::FlowControl>(head->data).control == DSLFlowControl::For
+				&& atIndex >= dslBlockEnd(file, i))
+				continue; // past this loop's `end` -- its own counter (declared on this header line) is out of scope
 			for (const std::unique_ptr<DSLSymbol>& s : line.symbols)
 				if (s->type == ST::VariableDeclaration)
 					result.push_back(s.get());
@@ -1059,7 +1082,8 @@ bool AutoCompleteRules::isReservedWord(const std::string& name)
 }
 
 bool AutoCompleteRules::isNameInScope(const std::string& name, const DSLCodeLine& atLine, const DSLScriptFile& file,
-	const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, DSLSymbol* excludeVariable)
+	const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
+	DSLSymbol* excludeVariable)
 {
 	using ST = DSLSymbol::SymbolType;
 
@@ -1071,6 +1095,11 @@ bool AutoCompleteRules::isNameInScope(const std::string& name, const DSLCodeLine
 		if (s->type == ST::VariableDeclaration && s.get() != excludeVariable
 			&& std::get<DSLSymbol::VariableDeclaration>(s->data).name == name)
 			return true;
+
+	// A variable can't shadow a function name either -- see isFunctionNameTaken for the same check in the
+	// other direction (declaring/renaming a FUNCTION to an already-taken name).
+	if (isFunctionNameTaken(name, file, builtins))
+		return true;
 
 	const int headerIndex = dslEnclosingFunctionHeader(file, dslLineIndex(file, &atLine));
 	if (headerIndex < 0)

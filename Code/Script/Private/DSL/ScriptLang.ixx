@@ -229,7 +229,11 @@ public:
 	static bool isReservedWord(const std::string& name);
 
 	// Whether `name` collides with any variable declared anywhere in atLine's enclosing function (sidebar
-	// bindings always count too) -- used to block declaring or renaming a variable to an already-taken name.
+	// bindings always count too), OR with any FUNCTION name (builtin or user-declared, same set
+	// isFunctionNameTaken checks) -- used to block declaring or renaming a variable to an already-taken name.
+	// The function check matters beyond naming clarity: a local variable shadowing a function of the same name
+	// makes that function uncallable for the rest of its scope in the transpiled C++ (a local hides a free
+	// function of the same name, same as plain C++), so this isn't just a style rule.
 	// Deliberately broader than candidatesFor's in-scope-variables scan (which is direction-sensitive, only
 	// "visible so far"): a collision must be caught regardless of whether the other declaration comes before
 	// or after this point, or sits at a shallower or deeper nesting level -- renaming an outer/earlier variable
@@ -237,7 +241,8 @@ public:
 	// `excludeVariable` (optional) ignores one declaration -- e.g. a rename's own prior name shouldn't count
 	// as a collision against itself.
 	static bool isNameInScope(const std::string& name, const DSLCodeLine& atLine, const DSLScriptFile& file,
-		const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, DSLSymbol* excludeVariable = nullptr);
+		const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
+		DSLSymbol* excludeVariable = nullptr);
 
 	// Whether `text` reads as a valid literal of `type` (String: always; Int/Float: must look like a real
 	// number -- see candidatesFor's literal-candidate check). Exported so ScriptEditor can apply the SAME rule
