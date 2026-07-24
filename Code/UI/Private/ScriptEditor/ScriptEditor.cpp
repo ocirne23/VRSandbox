@@ -269,32 +269,6 @@ namespace
 
 }
 
-// Builds the binding registry (sidebar objects + builtin functions -- see ScriptBindings) once at startup,
-// then seeds the document with a single empty entry-point function -- a starting point to build from.
-void ScriptEditor::buildExampleDocument()
-{
-	m_bindings.build(m_document.sidebar, m_builtins);
-
-	auto newLine = [](int scopeLevel) -> std::unique_ptr<DSLCodeLine>
-	{
-		auto line = std::make_unique<DSLCodeLine>();
-		line->scopeLevel = scopeLevel;
-		return line;
-	};
-
-	// ---- update(deltaSec): the sole starting function, empty -- the user builds everything else from here ----
-	auto updateHeader = newLine(0);
-	DSLSymbol* deltaSecType  = pushSymbol(*updateHeader, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ DSLType::Float });
-	DSLSymbol* deltaSecParam = pushSymbol(*updateHeader, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ "deltaSec", deltaSecType });
-	pushSymbol(*updateHeader, ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{ "update", { deltaSecParam }, DSLType::Void });
-	m_document.file.lines.push_back(std::move(updateHeader));
-
-	// A single blank statement slot for the body -- see render()'s "always one blank line" invariant.
-	auto blankBodyLine = newLine(1);
-	seedStatementPlaceholder(*blankBodyLine);
-	m_document.file.lines.push_back(std::move(blankBodyLine));
-}
-
 void ScriptEditor::clampCursor()
 {
 	if (m_formatted.empty())
@@ -5995,7 +5969,7 @@ void ScriptEditor::render()
 {
 	if (!m_built)
 	{
-		buildExampleDocument();
+		m_bindings.build(m_document.sidebar, m_builtins);
 		m_built = true;
 	}
 

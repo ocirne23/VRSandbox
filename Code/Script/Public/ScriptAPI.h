@@ -55,13 +55,8 @@ struct Camera; // engine render camera; only the host-only update() below touche
     X(int,         isKeyDown,              (const char* keyName), (keyName)) /* e.g. "Space", "A", "Left Shift" */ \
     X(void,        spawnPointLight,        (glm::vec3 position, float range, glm::vec3 color, float intensity), (position, range, color, intensity)) \
     X(void,        setSun,                 (glm::vec3 direction, glm::vec3 color, float intensity), (direction, color, intensity)) \
-    /* spawnEntity: spawns an asset/prefab at world position now and returns it (added to the scene root once this \
-       frame's scripts finish, but usable this frame) */ \
     X(Entity*,     spawnEntity,            (const char* assetPath, glm::vec3 position), (assetPath, position)) \
     X(void,        destroyEntity,          (Entity* entity), (entity)) /* queues the entity (e.g. self) for removal */ \
-    /* The entity* functions take an entity handle (ScriptUpdate receives it as `self`); they no-op / return zero \
-       for a null handle. Position/scale/rotation are NOT here — the Entity mirror exposes self->pos etc. as plain \
-       fields, so generated code reads/writes those + glm:: helpers directly instead of crossing the ABI. */ \
     /* ---- entity reads ---- */ \
     X(const char*, entityGetName,          (Entity* entity), (entity)) \
     X(int,         entityGetEnabled,       (Entity* entity), (entity)) \
@@ -76,23 +71,15 @@ struct Camera; // engine render camera; only the host-only update() below touche
     X(void,        physicsSetGravity,      (glm::vec3 gravity), (gravity)) \
     X(int,         physicsRayCast,         (glm::vec3 origin, glm::vec3 translation, glm::vec3* outPoint, glm::vec3* outNormal, float* outFraction), (origin, translation, outPoint, outNormal, outFraction)) /* ray = origin + translation, 1 on hit */ \
     X(float,       physicsRayCastDistance, (glm::vec3 origin, glm::vec3 dir, float maxDist), (origin, dir, maxDist)) /* dir need not be pre-normalized; distance to the closest hit within maxDist, or maxDist itself on a miss (never a sentinel outside the query range) */ \
-    /* ---- events ---- fire an On Event entry by NAME. sendEvent reaches every listening script; sendEventToEntity \
-       reaches only the given entity's script. */ \
+    /* ---- events ---- */ \
     X(void,        sendEvent,              (const char* eventName), (eventName)) \
     X(void,        sendEventToEntity,      (Entity* entity, const char* eventName), (entity, eventName)) \
-    /* ---- physics contact queries ---- resolve an On Physics Event contactId to its first manifold point in world \
-       space, valid only for the frame the event fired; returns 0 (outputs untouched) for a stale id or sensor event. */ \
+    /* ---- physics contact queries ---- */ \
     X(int,         physicsContactGetPoint, (long long contactId, glm::vec3* outPoint, glm::vec3* outNormal), (contactId, outPoint, outNormal)) \
-    /* ---- spatial queries ---- backed by the SpatialIndex. spatialQueryRadius fills outEntities with entities whose \
-       render bounds intersect the sphere (up to maxOut), returning the count; spatialGetNearestEntity returns the \
-       nearest-origin entity within maxRadius (null if none), skipping `exclude` (pass self). */ \
+    /* ---- spatial queries ---- */ \
     X(int,         spatialQueryRadius,     (glm::vec3 position, float radius, Entity** outEntities, int maxOut), (position, radius, outEntities, maxOut)) \
     X(Entity*,     spatialGetNearestEntity,(glm::vec3 position, float maxRadius, Entity* exclude), (position, maxRadius, exclude)) \
-    /* ---- force field ---- entityGetForceComponent resolves the entity's ForceComponent ONCE into an opaque handle \
-       (null if none); every force* call takes that handle and casts it back, so a chain of get/sets never repeats \
-       the lookup. Fetch it fresh each frame, don't cache across frames. Getters return a type default for a null \
-       handle, setters no-op. Applied force/pressure are ~2-frame-old GPU readbacks; team clamps a negative set to 0; \
-       local direction is re-normalized on set; local offset is the span start (reach stays world units). */ \
+    /* ---- force field ----  */ \
     X(void*,       entityGetForceComponent,(Entity* entity), (entity)) \
     X(float,       forceGetOutput,         (void* forceComponent), (forceComponent)) \
     X(float,       forceGetReach,          (void* forceComponent), (forceComponent)) \
@@ -114,9 +101,7 @@ struct Camera; // engine render camera; only the host-only update() below touche
     X(void,        forceSetLocalDirection, (void* forceComponent, glm::vec3 direction), (forceComponent, direction)) \
     X(void,        forceSetLocalOffset,    (void* forceComponent, glm::vec3 offset), (forceComponent, offset)) \
     X(void,        forceSetCentered,       (void* forceComponent, int centered), (forceComponent, centered)) \
-    /* ---- scene component ---- entityGetSceneComponent resolves the entity's SceneComponent ONCE into an opaque \
-       handle (null if none); the scene* calls take that handle so a chain of child reads/writes never repeats the \
-       lookup. Fetch it fresh each frame. Add/Remove recover the owning (parent) entity from the handle. */ \
+    /* ---- scene component ---- */ \
     X(void*,       entityGetSceneComponent,(Entity* entity), (entity)) \
     X(int,         sceneGetChildCount,     (void* sceneComponent), (sceneComponent)) \
     X(Entity*,     sceneFindChild,         (void* sceneComponent, const char* name), (sceneComponent, name)) /* direct child by name, null if none match */ \
@@ -124,19 +109,14 @@ struct Camera; // engine render camera; only the host-only update() below touche
     X(void,        sceneAddChild,          (void* parentSceneComponent, Entity* child), (parentSceneComponent, child)) /* reparents child under the component's owner (no-op on a cycle / wrong current parent) */ \
     X(void,        sceneRemoveChild,       (void* parentSceneComponent, Entity* child), (parentSceneComponent, child)) /* detaches child, becoming a root entity (no-op if not the component owner's child) */ \
     X(void,        sceneRemoveChildAt,     (void* parentSceneComponent, int index), (parentSceneComponent, index)) /* same as sceneRemoveChild, by child index */ \
-    /* ---- physics component ---- entityGetPhysicsComponent resolves the entity's PhysicsComponent (with a valid \
-       body) ONCE into an opaque handle (null if none); the physics* calls take that handle so a chain never repeats \
-       the lookup. Getters return zero for a null handle, setters no-op. Teleport moves DYNAMIC bodies only. */ \
+    /* ---- physics component ---- */ \
     X(void*,       entityGetPhysicsComponent,(Entity* entity), (entity)) \
     X(int,         physicsIsAwake,         (void* physicsComponent), (physicsComponent)) \
     X(glm::vec3,   physicsGetVelocity,     (void* physicsComponent), (physicsComponent)) \
     X(void,        physicsSetVelocity,     (void* physicsComponent, glm::vec3 velocity), (physicsComponent, velocity)) \
     X(void,        physicsApplyImpulse,    (void* physicsComponent, glm::vec3 impulse), (physicsComponent, impulse)) /* world space, at the center of mass, wakes the body */ \
     X(void,        physicsTeleport,        (void* physicsComponent, glm::vec3 position, glm::vec3 eulerDeg), (physicsComponent, position, eulerDeg)) /* dynamic bodies only */ \
-    /* ---- audio component ---- entityGetAudioComponent resolves the entity's AudioComponent ONCE into an opaque \
-       handle (null if none); audioTrigger/audioStop take that handle so they never repeat the lookup. audioTrigger \
-       still needs the entity so a spatial sound can follow it. overrideMask: 1 = position (also pins the sound \
-       there), 2 = volume, 4 = pitch. audioStop with a null/empty alias stops every sound on the component. */ \
+    /* ---- audio component ---- */ \
     X(void*,       entityGetAudioComponent,(Entity* entity), (entity)) \
     X(void,        audioTrigger,           (void* audioComponent, Entity* entity, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch), (audioComponent, entity, alias, overrideMask, position, volume, pitch)) \
     X(void,        audioStop,              (void* audioComponent, const char* alias), (audioComponent, alias))

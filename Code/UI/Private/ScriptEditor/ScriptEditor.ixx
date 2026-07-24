@@ -238,7 +238,6 @@ public:
 
 private:
 
-	void buildExampleDocument(); // one-time construction of the starting document (empty update()) + sidebar/builtins
 	void renderTextArea();
 	void renderAutocompletePopup();
 	void saveDocument(); // toolbar Save / Ctrl+S: writes m_document to m_pathBuf (ScriptLoader::save). Safe

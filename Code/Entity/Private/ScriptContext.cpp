@@ -19,9 +19,136 @@ import Animation;
 import Physics;
 import Force;
 import Spatial;
+import Script;
 import :Entity;
 import :Component;
 import :World;
+
+// See the declaration in ScriptContext.ixx. `vec2`/`vec4` need no name of their own outside their own struct
+// row (their self-referential member/function types spell DSLType::ThisBinding instead -- see structFor's
+// callers and the DSL.ixx comment), but `vec3` is referenced well beyond it (self.pos, physics component
+// functions, several Engine functions below), so its registerStruct return value is captured locally and reused
+// throughout -- same for the three registerComponentType calls (physics/audio/force): each ALSO exposes itself
+// as a self member as part of that one call (see ScriptBindings.ixx), so the return value only needs capturing
+// here for the component's OWN BindingObject `type` field just below.
+void registerScriptDslBindings()
+{
+    ScriptBindings& bindings = Globals::scriptBindings;
+    using T = DSLType;
+
+    const DSLType vec2 = bindings.registerStruct({ "vec2", "glm::vec2", { { "x", T::Float }, { "y", T::Float } }, "glm::vec2($1, $2)",
+        {
+            { "x", T::Float, "$r.x" },
+            { "y", T::Float, "$r.y" },
+        },
+        {
+            { "length",     T::Float, {},                              "glm::length($r)" },
+            { "normalized", T::ThisBinding, {},                        "glm::normalize($r)" },
+            { "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
+            { "distance",   T::Float, { { "other", T::ThisBinding } }, "glm::distance($r, $1)" },
+        } });
+    (void)(vec2);
+    const DSLType vec3 = bindings.registerStruct({ "vec3", "glm::vec3", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float } }, "glm::vec3($1, $2, $3)",
+        {
+            { "x", T::Float, "$r.x" },
+            { "y", T::Float, "$r.y" },
+            { "z", T::Float, "$r.z" },
+        },
+        {
+            { "length",     T::Float, {},                              "glm::length($r)" },
+            { "normalized", T::ThisBinding, {},                        "glm::normalize($r)" },
+            { "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
+            { "distance",   T::Float, { { "other", T::ThisBinding } }, "glm::distance($r, $1)" },
+        } });
+    const DSLType vec4 = bindings.registerStruct({ "vec4", "glm::vec4", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float }, { "w", T::Float } }, "glm::vec4($1, $2, $3, $4)",
+        {
+            { "x", T::Float, "$r.x" },
+            { "y", T::Float, "$r.y" },
+            { "z", T::Float, "$r.z" },
+            { "w", T::Float, "$r.w" },
+        },
+        {
+            { "length",     T::Float, {},                              "glm::length($r)" },
+            { "normalized", T::ThisBinding, {},                        "glm::normalize($r)" },
+            { "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
+            { "distance",   T::Float, { { "other", T::ThisBinding } }, "glm::distance($r, $1)" },
+        } });
+    (void)(vec4);
+    const DSLType quat = bindings.registerStruct({ "quat", "glm::quat", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float }, { "w", T::Float } }, "glm::quat($4, $1, $2, $3)",
+        {
+            { "x", T::Float, "$r.x" },
+            { "y", T::Float, "$r.y" },
+            { "z", T::Float, "$r.z" },
+            { "w", T::Float, "$r.w" },
+        },
+        {
+            { "length",     T::Float, {},                              "glm::length($r)" },
+            { "normalized", T::ThisBinding, {},                        "glm::normalize($r)" },
+            { "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
+        } });
+    bindings.registerObject({ "self", T::Entity, /*sidebarTopLevel*/ true,
+        {
+            { "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "ctx->entitySetEnabled($r, $1)" },
+            { "setAnimFloat",   T::Void,  { { "param", T::String }, { "value", T::Float } }, "ctx->entitySetAnimFloat($r, $1, $2)" },
+            { "setAnimBool",    T::Void,  { { "param", T::String }, { "value", T::Bool } },  "ctx->entitySetAnimBool($r, $1, $2)" },
+            { "setAnimTrigger", T::Void,  { { "param", T::String } },                        "ctx->entitySetAnimTrigger($r, $1)" },
+            { "getChildCount",  T::Int,   {},                                                "ctx->entityGetChildCount($r)" },
+            { "getBoundsRadius",T::Float, {},                                                "ctx->entityGetBoundsRadius($r)" },
+        },
+        {
+            { "pos",     vec3,        "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
+            { "scale",   T::Float,    "$r->scale" },
+            { "rot",     quat,        "$r->rot" },
+            { "data",    T::ScriptData,        "(*(ScriptData*)scriptData)", /*writable*/ false },
+            { "events",  T::ScriptEvents,      "$r",                         /*writable*/ false }, // special case in transpiler
+        } });
+
+    const DSLType physicsKind = bindings.registerComponentType("physics", "PhysicsComponent", "ctx->entityGetPhysicsComponent($r)");
+    const DSLType audioKind = bindings.registerComponentType("audio", "AudioComponent", "ctx->entityGetAudioComponent($r)");
+    const DSLType forceKind = bindings.registerComponentType("force", "ForceComponent", "ctx->entityGetForceComponent($r)");
+    bindings.registerObject({ "physics", physicsKind, /*sidebarTopLevel*/ false,
+        {
+            { "getVelocity",  vec3,   {},                                          "ctx->physicsGetVelocity($r)" },
+            { "setVelocity",  T::Void, { { "velocity", vec3 } },                   "ctx->physicsSetVelocity($r, $1)" },
+            { "applyImpulse", T::Void, { { "impulse", vec3 } },                    "ctx->physicsApplyImpulse($r, $1)" },
+            { "isAwake",      T::Bool, {},                                          "(ctx->physicsIsAwake($r) != 0)" },
+            { "teleport",     T::Void, { { "position", vec3 }, { "eulerDeg", vec3 } }, "ctx->physicsTeleport($r, $1, $2)" },
+        },
+        {} });
+    bindings.registerObject({ "audio", audioKind, /*sidebarTopLevel*/ false,
+        {
+            { "trigger", T::Void, { { "alias", T::String } }, "ctx->audioTrigger($r, self, $1, 0, glm::vec3(0.0f), 1.0f, 1.0f)" },
+            { "stop",    T::Void, { { "alias", T::String } }, "ctx->audioStop($r, $1)" },
+        },
+        {} });
+    bindings.registerObject({ "force", forceKind, /*sidebarTopLevel*/ false,
+        {
+            { "getOutput",   T::Float, {},                          "ctx->forceGetOutput($r)" },
+            { "setOutput",   T::Void,  { { "output", T::Float } },  "ctx->forceSetOutput($r, $1)" },
+            { "getReach",    T::Float, {},                          "ctx->forceGetReach($r)" },
+            { "setReach",    T::Void,  { { "reach", T::Float } },   "ctx->forceSetReach($r, $1)" },
+            { "setTeam",     T::Void,  { { "team", T::Int } },      "ctx->forceSetTeam($r, $1)" },
+            { "getPressure", T::Float, {},                          "ctx->forceGetPressure($r)" },
+        },
+        {} });
+    // free functions
+    bindings.registerObject({ nullptr, T::Void, /*sidebarTopLevel*/ false,
+        {
+            { "print",           T::Void,  { { "message", T::String } },                                     "ctx->log($1)" }, // one plain string -- no {}-interpolation yet
+            { "rayCast",         T::Float, { { "pos", vec3 }, { "dir", vec3 }, { "maxRayDist", T::Float } }, "ctx->physicsRayCastDistance($1, $2, $3)" },
+            { "isKeyDown",       T::Bool,  { { "keyName", T::String } },                                     "(ctx->isKeyDown($1) != 0)" },
+            { "sendEvent",       T::Void,  { { "eventName", T::String } },                                   "ctx->sendEvent($1)" },
+            { "setSun",          T::Void,  { { "direction", vec3 }, { "color", vec3 }, { "intensity", T::Float } },                       "ctx->setSun($1, $2, $3)" },
+            { "spawnPointLight", T::Void,  { { "position", vec3 }, { "range", T::Float }, { "color", vec3 }, { "intensity", T::Float } }, "ctx->spawnPointLight($1, $2, $3, $4)" },
+        },
+        {} });
+
+    bindings.registerEntryPoint({ "OnSpawn",         {},                                            ", void* scriptData", "REGISTER_ON_SPAWN()" });
+    bindings.registerEntryPoint({ "OnDestroy",       {},                                            ", void* scriptData", "REGISTER_ON_DESTROY()" });
+    bindings.registerEntryPoint({ "Update",          { { "deltaSeconds", T::Float } },              ", float deltaSeconds, void* scriptData", "REGISTER_UPDATE()" });
+    bindings.registerEntryPoint({ "OnEvent",         { { "eventIdx", T::Int } },                    ", int eventIdx, void* scriptData", "REGISTER_ON_EVENT()" });
+    bindings.registerEntryPoint({ "OnPhysicsEvent",  { { "begin", T::Int }, { "sensor", T::Int } }, ", Entity* other, int begin, int sensor, long long contactId, void* scriptData", "REGISTER_ON_PHYSICS_EVENT()" });
+}
 
 // Implements the script ABI (ScriptAPI.h) against the engine and drives per-entity script execution.
 // The Script library is a pure compiler/loader; this file owns the ScriptContext and all the thunks, so
@@ -417,4 +544,3 @@ void ScriptContext::update(const Camera& camera, float newDeltaSeconds, float ne
     cameraNear = camera.near;
     cameraFar = camera.far;
 }
-

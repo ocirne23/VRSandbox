@@ -71,6 +71,7 @@ int main()
     Globals::scriptHost.setCurrentScriptPath("Scripts/Graph.scr");
     ScriptEventManager& scriptEvents = Globals::scriptEvents;
     scriptEvents.initialize();
+    registerScriptDslBindings(); // must run before anything touches Globals::scriptBindings (ScriptEditor's build() included)
 
     Procedural::TerrainStreamer terrain;
     terrain.initialize();
