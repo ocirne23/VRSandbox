@@ -166,7 +166,7 @@ namespace
 			// the same one ScriptEventName's switch emits from, so the two can never disagree.
 			if (receiverType == DSLType::ScriptEvents)
 			{
-				const int index = dslFindEventIndex(document, m.memberName);
+				const int index = dslFindEventIndex(document.eventNames, m.memberName);
 				return std::to_string(index >= 0 ? index : 0); // defensive -- authored/loaded names always exist
 			}
 			const std::string receiverText = expressionText(m.receiver); // recursion makes chains compose ("self.pos" -> ".x")
@@ -468,7 +468,7 @@ std::string Transpiler::transpile(const DSL& document, const ScriptBindings& bin
 		emitter.emitLine(emitter.functionSignature(i) + ";");
 	}
 
-	// One free, dllexported function per DSL function, at file scope -- no wrapper class (see emitFunction).
+	// One function per DSL function, at file scope -- no wrapper class (see emitFunction/functionSignature).
 	for (int i = 0; i < static_cast<int>(document.file.lines.size()); ++i)
 	{
 		const DSLSymbol* head = document.file.lines[i]->head();

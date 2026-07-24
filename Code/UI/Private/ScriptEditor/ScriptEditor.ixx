@@ -65,7 +65,7 @@ import Script;
 // the loop variable, which wouldn't exist anymore) -- and a function is additionally required to be uncalled
 // anywhere (AutoCompleteRules::isFunctionReferenced); otherwise the header is left alone entirely rather than
 // risking lost content or an accidental wholesale replace. Finer-grained deletion (a single call argument, a
-// non-empty for-loop or else-chain's own content) is still M7 backlog.
+// non-empty for-loop or else-chain's own content) isn't implemented yet.
 //
 // Selecting any VariableReference/VariableDeclaration or FunctionCall/FunctionDeclaration (not composing)
 // outlines every OTHER occurrence of the SAME declaration/function across the document, in a distinct color
@@ -496,8 +496,8 @@ private:
 	// Backspace on a committed group's ')' span: reopens the group for re-composing -- its contents seed the
 	// expression stack exactly as they were mid-authoring right before the ')' was typed (paren open, last term
 	// restored into the box), so the whole group must be re-closed and re-confirmed as one unit. False if any
-	// inner term can't round-trip into compose form (placeholders, member accesses, dot-calls) -- caller falls
-	// back to plain replace-editing.
+	// inner term can't round-trip into compose form (a Placeholder, or a call whose arguments can't re-stage) --
+	// caller falls back to plain replace-editing.
 	bool beginReopenGroup(const SyntaxSpan& span);
 	void computeComposeCover(const SyntaxSpan& groupCloseSpan); // the reopened group's full rendered column range -- what the compose box replaces
 	// Backspacing out of an empty in-place edit on a flow-control header's value span widens into the matching
@@ -534,7 +534,7 @@ private:
 	std::vector<std::unique_ptr<DSLSymbol>> m_builtins; // every registry FunctionDeclaration (engine free
 	                                                     // functions + requiresReceiver object functions)
 	std::vector<SyntaxLine> m_formatted; // rebuilt from m_document each render() -- cheap at this document size
-	bool m_compact = false;              // M4 adds the toolbar toggle; M3 always renders expanded
+	bool m_compact = false;              // Syntax::format supports compact rendering; no toolbar toggle wires it up yet -- always expanded
 
 	int m_cursorLine = 0; // index into m_formatted
 	int m_cursorSpan = 0; // index into m_formatted[m_cursorLine].spans

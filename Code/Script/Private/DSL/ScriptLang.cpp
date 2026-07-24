@@ -86,7 +86,7 @@ namespace
 	// replace THIS symbol wholesale (see SlotRef) -- it's attached only to the symbol's own top-level
 	// identifying span; when recursing into a child, either a fresh slot is built (the three tracked
 	// positions: FlowControl::condition, CallArgument::value, VariableDeclaration::initialValue) or `{}` is
-	// passed (everywhere else -- not independently replaceable in M3).
+	// passed (everywhere else -- not independently replaceable).
 	void renderSymbol(DSLSymbol* symbol, bool compact, bool isFunctionParamContext, const SlotRef& slot, std::string& outText, std::vector<SyntaxSpan>& outSpans)
 	{
 		if (symbol == nullptr)
@@ -437,7 +437,7 @@ namespace
 	// Every VariableDeclaration reachable from `atLine`: sidebar bindings, this function's own parameters, and
 	// locals declared earlier in the SAME function (walking file.lines backward to the enclosing
 	// FunctionDeclaration header, whose own parameters are picked up there too). Cruder than real block scoping
-	// (doesn't exclude sibling if/else branches) but enough for M3.
+	// (doesn't exclude sibling if/else branches), but good enough in practice.
 	std::vector<DSLSymbol*> inScopeVariables(const DSLCodeLine& atLine, const DSLScriptFile& file, const std::vector<std::unique_ptr<DSLSymbol>>& sidebar)
 	{
 		std::vector<DSLSymbol*> result;
@@ -457,10 +457,11 @@ namespace
 		return result;
 	}
 
-	// Free-callable functions only: receiver-based builtins (physics.getMass(), world.rayCast(...) --
-	// FunctionDeclaration::requiresReceiver) are excluded, since M3's Function candidate always inserts a
+	// Free-callable functions only: receiver-based builtins (physics.getVelocity(), world.rayCast(...) --
+	// FunctionDeclaration::requiresReceiver) are excluded, since a plain Function candidate always inserts a
 	// receiver-less call (see ScriptEditor::applyCandidate) -- offering one here would silently produce a
-	// wrong, receiver-less call to a method that needs one. M5 formalizes inserting dot-calls properly.
+	// wrong, receiver-less call to a method that needs one. Dot-calls are only reachable by dotting into their
+	// receiver's BindingObject (receiverCandidates, below).
 	std::vector<DSLSymbol*> knownFunctions(const DSLScriptFile& file, const std::vector<std::unique_ptr<DSLSymbol>>& builtins)
 	{
 		std::vector<DSLSymbol*> result;

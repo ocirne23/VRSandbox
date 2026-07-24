@@ -146,6 +146,16 @@ extern "C"
         return hit.hit ? 1 : 0;
     }
 
+    // The DSL's single-expression rayCast(pos, dir, maxRayDist) -- wraps thunk_physicsRayCast's hit/miss +
+    // fraction into one distance value: maxDist itself on a miss (never a sentinel outside the query range),
+    // so e.g. `if rayCast(...) <= 0.1` reads correctly without a separate hit check.
+    float thunk_physicsRayCastDistance(glm::vec3 origin, glm::vec3 dir, float maxDist)
+    {
+        const glm::vec3 translation = glm::normalize(dir) * maxDist;
+        const PhysicsWorld::RayHit hit = Globals::physics.castRayClosest(origin, translation);
+        return hit.hit ? hit.fraction * maxDist : maxDist;
+    }
+
     int thunk_physicsContactGetPoint(long long contactId, glm::vec3* outPoint, glm::vec3* outNormal)
     {
         glm::vec3 point(0.0f), normal(0.0f);
@@ -340,6 +350,7 @@ ScriptContext::ScriptContext()
     , entitySetAnimTrigger(&thunk_entitySetAnimTrigger)
     , physicsSetGravity(&thunk_physicsSetGravity)
     , physicsRayCast(&thunk_physicsRayCast)
+    , physicsRayCastDistance(&thunk_physicsRayCastDistance)
     , sendEvent(&thunk_sendEvent)
     , sendEventToEntity(&thunk_sendEventToEntity)
     , physicsContactGetPoint(&thunk_physicsContactGetPoint)

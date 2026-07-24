@@ -264,21 +264,8 @@ namespace
 			return nullptr;
 		}
 
-		const DSLDataField* findDataField(const std::string& name) const
-		{
-			for (const DSLDataField& field : dataFields)
-				if (field.name == name)
-					return &field;
-			return nullptr;
-		}
-
-		int findEventIndex(const std::string& name) const
-		{
-			for (size_t i = 0; i < eventNames.size(); ++i)
-				if (eventNames[i] == name)
-					return static_cast<int>(i);
-			return -1;
-		}
+		const DSLDataField* findDataField(const std::string& name) const { return dslFindDataField(dataFields, name); }
+		int findEventIndex(const std::string& name) const { return dslFindEventIndex(eventNames, name); }
 
 		DSLSymbol* findFunction(const std::string& name, bool requiresReceiver) const
 		{

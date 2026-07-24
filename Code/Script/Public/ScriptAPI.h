@@ -75,6 +75,7 @@ struct Camera; // engine render camera; only the host-only update() below touche
     /* ---- physics (global) ---- */ \
     X(void,        physicsSetGravity,      (glm::vec3 gravity), (gravity)) \
     X(int,         physicsRayCast,         (glm::vec3 origin, glm::vec3 translation, glm::vec3* outPoint, glm::vec3* outNormal, float* outFraction), (origin, translation, outPoint, outNormal, outFraction)) /* ray = origin + translation, 1 on hit */ \
+    X(float,       physicsRayCastDistance, (glm::vec3 origin, glm::vec3 dir, float maxDist), (origin, dir, maxDist)) /* dir need not be pre-normalized; distance to the closest hit within maxDist, or maxDist itself on a miss (never a sentinel outside the query range) */ \
     /* ---- events ---- fire an On Event entry by NAME. sendEvent reaches every listening script; sendEventToEntity \
        reaches only the given entity's script. */ \
     X(void,        sendEvent,              (const char* eventName), (eventName)) \

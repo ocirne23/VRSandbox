@@ -29,7 +29,7 @@ import Core;
 // line's primary/defining symbol (the FunctionDeclaration on a function
 // header line, the top-level FunctionCall or Expression on a statement
 // line). This is a construction/bookkeeping convention only -- it has no
-// bearing on reading/render order, which the Syntax formatter (M2) derives
+// bearing on reading/render order, which the Syntax formatter derives
 // by walking the pointer relationships, not by iterating this vector in order.
 // Builtin function declarations (vec3/print/physics.applyForce/...) are NOT
 // owned by any line at all -- they live in a static registry (ScriptLang /
@@ -75,10 +75,9 @@ import Core;
 // a call site that targets it, or (checking VariableReference::declaration)
 // wherever it's assigned into (`ref appliedForce = toApply`).
 //
-// Comparison operator spelling: the example's "lesseq" (expanded view) vs
-// "<=" (compact view) is treated as an authoring slip, not a deliberate
-// per-view spelling scheme -- DSLOperator has exactly one canonical form per
-// operator, rendered the same symbolic way in both views. Revisit if wrong.
+// Comparison operators: DSLOperator has exactly one canonical form per
+// operator, rendered the same symbolic way ("<=", not "lesseq") in both
+// compact and expanded view.
 // ---------------------------------------------------------------------------
 
 export class DSLCodeLine;
@@ -257,9 +256,11 @@ public:
 		std::string name;
 		std::vector<DSLSymbol*> parameterVarDeclarations; // -> VariableDeclaration, owned by this decl's header line
 		DSLType returnType = DSLType::Void;
-		bool requiresReceiver = false; // builtin component methods (physics.getMass(), world.rayCast(...)) --
+		bool requiresReceiver = false; // builtin component methods (physics.getVelocity(), world.rayCast(...)) --
 		                                // AutoCompleteRules excludes these from plain call-statement/value
-		                                // candidates until M5 formalizes inserting a dot-call with its receiver
+		                                // candidates; they're only reachable by dotting into their receiver's
+		                                // BindingObject (ScriptEditor's MemberSelect flow, AutoCompleteRules::
+		                                // receiverCandidates)
 		bool isPositionalCall = false;  // terse builtin constructors (vec3(0,1,0)) -- editor-inserted calls get
 		                                 // positional CallArgument::parameter=nullptr slots instead of named
 		                                 // `x = ...` ones, even though parameterVarDeclarations is still populated
@@ -284,7 +285,7 @@ public:
 	// operators[i] sitting between operands[i] and operands[i+1]. operands.size() >= 2, with ONE exception: a
 	// `grouped` chain may hold a single operand and no operators at all -- authored parens around a lone value
 	// ("(a)") are kept verbatim, deliberate edit anchors rather than redundancy to strip.
-	// No precedence is encoded here -- `1 + 2 * 3` is one flat chain -- the transpiler (M6) applies ordinary
+	// No precedence is encoded here -- `1 + 2 * 3` is one flat chain -- the transpiler applies ordinary
 	// arithmetic precedence (*, /, % over +, -; left-associative) when emitting C++. Explicit parentheses are
 	// the ONLY structural nesting: an operand that is itself an Expression with `grouped` set renders in
 	// parens and always evaluates as one unit. Grouping is stored user intent, never derived from precedence,
@@ -321,7 +322,7 @@ public:
 	// break/declare-variable/call-statement candidates); any other DSLType means a VALUE slot of that type
 	// (offers matching constants/variables/functions). Confirming a candidate REPLACES the placeholder
 	// outright -- it never partially resolves. The editor renders one distinctly (e.g. "<float>") and
-	// Transpiler (M6) emits a type-appropriate default for any left unfilled, so a document with placeholders
+	// Transpiler emits a type-appropriate default for any left unfilled, so a document with placeholders
 	// still compiles.
 	struct Placeholder
 	{
@@ -379,8 +380,7 @@ public:
 // The DSLType `symbol` evaluates to when used as a VALUE -- what constrains candidate lists when editing one
 // operand of an existing expression in place. An Expression resolves through its operands: for an assignment
 // that's the target's own type, for a comparison/arithmetic chain any resolvable operand (all operands of a
-// chain share one type by construction). Void = unresolvable (a statement-only construct, or a MemberAccess
-// whose member isn't known here -- only `pos` exists until M5 formalizes a member registry).
+// chain share one type by construction). Void = unresolvable (a statement-only construct).
 export inline DSLType dslValueType(const DSLSymbol* symbol)
 {
 	if (symbol == nullptr)
@@ -492,9 +492,9 @@ public:
 	                                                  // gates which are offered/legal, never which are built
 	DSLScriptFile file;
 	// The component kinds this script REQUIRES on its entity (authored via the sidebar panel's checkboxes,
-	// serialized as the .dsl "//@@require" line). Only required components' bindings appear in autocomplete,
-	// and M6's transpiler exports the set so a script is only assignable to entities that have them all --
-	// which is what makes every component binding non-null by construction.
+	// serialized as the .dsl "//@@require" line). Only required components' bindings appear in autocomplete --
+	// engine-side enforcement (a script only assignable to entities that have every component it required,
+	// making every component binding non-null by construction) is separate future work.
 	std::vector<DSLComponentKind> requiredComponents;
 	// This script's persistent per-instance data fields, reachable in the body as self.data.<name> -- Transpiler
 	// emits them as a real "struct ScriptData { ... };" (+ ScriptDataSize()/REGISTER_SCRIPT_DATA_SIZE()) that
@@ -514,24 +514,25 @@ export inline bool dslIsComponentRequired(const DSL& document, DSLComponentKind 
 		!= document.requiredComponents.end();
 }
 
-// `name`'s field in `document.dataFields` (nullptr if none) -- the ONE lookup every self.data.<name> resolution
-// site shares (ScriptLang.cpp's receiverCandidates, ScriptEditor's chain-building, ScriptLoader's dot-chain
-// parser, Transpiler's memberText), so they can't drift apart on what counts as a match.
-export inline const DSLDataField* dslFindDataField(const DSL& document, const std::string& name)
+// `name`'s field in `fields` (nullptr if none) -- the ONE lookup every self.data.<name> resolution site shares
+// (ScriptEditor's chain-building, ScriptLoader's dot-chain parser -- which parses its own file-local dataFields
+// before they become DSL::dataFields, hence taking the vector directly rather than a whole DSL -- and
+// Transpiler's memberText), so they can't drift apart on what counts as a match.
+export inline const DSLDataField* dslFindDataField(const std::vector<DSLDataField>& fields, const std::string& name)
 {
-	for (const DSLDataField& field : document.dataFields)
+	for (const DSLDataField& field : fields)
 		if (field.name == name)
 			return &field;
 	return nullptr;
 }
 
-// `name`'s index in `document.eventNames` (-1 if none) -- the ONE lookup every self.events.<name> resolution
-// site shares (ScriptLang.cpp's receiverCandidates, ScriptEditor's chain-building, ScriptLoader's dot-chain
-// parser, Transpiler's memberText/ScriptEventName), so they can't drift apart on what index a name means.
-export inline int dslFindEventIndex(const DSL& document, const std::string& name)
+// `name`'s index in `names` (-1 if none) -- the ONE lookup every self.events.<name> resolution site shares
+// (ScriptEditor's chain-building, ScriptLoader's dot-chain parser, Transpiler's memberText/ScriptEventName), so
+// they can't drift apart on what index a name means.
+export inline int dslFindEventIndex(const std::vector<std::string>& names, const std::string& name)
 {
-	for (size_t i = 0; i < document.eventNames.size(); ++i)
-		if (document.eventNames[i] == name)
+	for (size_t i = 0; i < names.size(); ++i)
+		if (names[i] == name)
 			return static_cast<int>(i);
 	return -1;
 }

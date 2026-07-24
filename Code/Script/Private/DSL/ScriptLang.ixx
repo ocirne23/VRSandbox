@@ -85,7 +85,7 @@ export class Syntax
 {
 public:
 	// Takes a non-const DSLScriptFile so the returned spans/endOfSymbol carry mutable DSLSymbol* -- Syntax
-	// itself never mutates anything, but M3's editing operations act directly through these same pointers.
+	// itself never mutates anything, but ScriptEditor's editing operations act directly through these same pointers.
 	static std::vector<SyntaxLine> format(DSLScriptFile& file, bool compact);
 
 	// True if `head` (a line's own top-level symbol) opens a nested block -- i.e. the FOLLOWING lines at
@@ -148,7 +148,7 @@ export struct Candidate
 // for Bool), in-scope variables of that type, and functions returning that type. `atLine` anchors the in-scope
 // variable scan: sidebar + this function's own parameters + locals declared earlier in the SAME function
 // (walking file.lines backward from atLine to its enclosing FunctionDeclaration header) -- cruder than real
-// block scoping (doesn't distinguish sibling if/else branches) but enough for M3. `typedPrefix` filters by
+// block scoping (doesn't distinguish sibling if/else branches), but good enough in practice. `typedPrefix` filters by
 // case-insensitive substring-from-start, same convention the old word-list autocomplete used. `excludeVariable`
 // (optional) drops one specific VariableDeclaration from the in-scope-variables candidates -- used when
 // re-editing an EXISTING declaration's own initializer, so e.g. `float test = ...` can't offer `test` itself
@@ -269,86 +269,3 @@ public:
 	// not scoped to one function, since a function can be called from anywhere (see knownFunctions).
 	static bool isFunctionReferenced(const DSLSymbol* funcDecl, const DSLScriptFile& file);
 };
-
-/*
-// --------------
-// sidebar
-World world
-Entity self
-PhysicsComponent physics
-
-// --------------
-// main (compact view)
-function update(deltaSec)
-	float applied = 0.0
-	if canJump()
-		doForce(dir = vec3(0, 1, 0), force = 1.0, ref appliedForce = applied)
-		print("Jumped! (force: {})", applied)
-	end
-
-	int thing = 1;
-	for int counter = 0, counter < 5, counter += 1
-		print("counter is {}", counter)
-		thing += counter
-	end
-
-	while thing > 5
-		print("thing is {}", thing)
-		thing -= 5
-	end
-
-end
-
-function doForce(dir, force, ref appliedForce)
-	float toApply = physics.getMass() * force;
-	physics.applyForce(direction = dir, force = toApply)
-	ref appliedForce = toApply
-end
-
-function canJump()
-	float height = world.rayCast(pos = self.pos + vec3(0, 0.5, 0), dir = vec3(0, -1, 0), maxRayDist = 1.0);
-	if height <= 0.1
-		return true
-	else
-		return false
-	end
-end
-
-// --------------
-// main (expanded view)
-function update(float deltaSec)
-	float applied = 0.0
-	if canJump()
-		doForce(vec3 dir = vec3(0, 1, 0), float force = 1.0, ref float appliedForce = applied)
-		print("Jumped! (force: {})", applied)
-	end
-
-	int thing = 1;
-	for int counter = 0, counter < 5, counter += 1
-		print("counter is {}", counter)
-		thing += counter
-	end
-
-	while thing > 5
-		print("thing is {}", thing)
-		thing -= 5
-	end
-end
-
-function doForce(vec3 dir, float force, ref float appliedForce)
-	float toApply = physics.getMass() * force;
-	physics.applyForce(vec3 direction = dir, float force = toApply)
-	ref appliedForce = toApply
-end
-
-function canJump() -> bool
-	float height = world.rayCast(vec3 pos = self.pos + vec3(0, 0.5, 0), vec3 dir = vec3(0, -1, 0), float maxRayDist = 1.0);
-	if height lesseq 0.1
-		return true
-	else
-		return false
-	end
-end
-
-
-*/

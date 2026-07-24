@@ -2247,11 +2247,11 @@ DSLType ScriptEditor::resolveMemberType(DSLType receiverType, const std::string&
 {
 	if (receiverType == DSLType::ScriptData)
 	{
-		const DSLDataField* field = dslFindDataField(m_document, name);
+		const DSLDataField* field = dslFindDataField(m_document.dataFields, name);
 		return field != nullptr ? field->type : DSLType::Void;
 	}
 	if (receiverType == DSLType::ScriptEvents)
-		return dslFindEventIndex(m_document, name) >= 0 ? DSLType::Int : DSLType::Void;
+		return dslFindEventIndex(m_document.eventNames, name) >= 0 ? DSLType::Int : DSLType::Void;
 	const BindingMember* member = m_bindings.findMember(receiverType, name);
 	return member != nullptr ? member->type : DSLType::Void;
 }
@@ -2328,7 +2328,7 @@ void ScriptEditor::clearLineToBlankStatement(DSLCodeLine& line)
 // confirmCompose's ConditionLeft/ConditionOp/ConditionRight handling) -- nothing about the condition touches
 // the document until all three parts are in hand, so there is no way to end up with a half-built if/while
 // sitting in the file. Replaces the ORIGINAL statement-placeholder's LineHead slot wholesale, same as any other
-// statement replacement -- deleting the whole thing later (M7) is thus already just "replace this LineHead
+// statement replacement -- deleting the whole thing later is thus already just "replace this LineHead
 // with a placeholder again", no special-casing needed for a multi-field statement.
 void ScriptEditor::applyConditionalStatement(const PendingLogicalTerm& finalTerm)
 {
@@ -3155,10 +3155,11 @@ namespace
 
 	// The REVERSE of buildExpressionTerm: converts a committed value symbol back into the compose-flow's
 	// PendingExprTerm form, so an existing parenthesized group can reopen for editing exactly as if it were
-	// still being typed (beginReopenGroup). False = not round-trippable: placeholders, member accesses, and
-	// receiver-carrying dot-calls have no Candidate representation (yet -- M5 for dot-calls). A parameterized
-	// FunctionCall restores WITH its staged arguments -- or refuses when one can't re-stage (a compound
-	// argument, a vararg builtin): a restore never approximates, and placeholders never exist.
+	// still being typed (beginReopenGroup). False = not round-trippable: a Placeholder (committed documents never
+	// hold one, so this shouldn't occur in practice) or a call whose arguments can't re-stage. A parameterized
+	// FunctionCall restores WITH its staged arguments (receiver-carrying dot-calls included, see the receiver
+	// handling below) -- or refuses when one can't re-stage (a compound argument, a vararg builtin): a restore
+	// never approximates.
 	bool termFromSymbol(const DSLSymbol* symbol, PendingExprTerm& out)
 	{
 		switch (symbol->type)
@@ -4284,7 +4285,7 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		if (composing) cancelCompose(); else moveHorizontal(+1);
 		return;
 	case SDL_SCANCODE_TAB:
-		// M3: plain navigation while not composing; M7 may add "cycle argument placeholders" as a distinct mode.
+		// Plain navigation while not composing -- a dedicated "cycle argument placeholders" mode isn't implemented.
 		if (composing) cancelCompose(); else moveHorizontal(shift ? -1 : +1);
 		return;
 	case SDL_SCANCODE_HOME:
@@ -6173,7 +6174,7 @@ void ScriptEditor::renderSidebarPanel()
 				Log::warning("'" + name + "' isn't a valid field name");
 			else if (AutoCompleteRules::isReservedWord(name))
 				Log::warning("'" + name + "' is reserved");
-			else if (dslFindDataField(m_document, name) != nullptr)
+			else if (dslFindDataField(m_document.dataFields, name) != nullptr)
 				Log::warning("'" + name + "' is already a script data field");
 			else
 			{
@@ -6217,7 +6218,7 @@ void ScriptEditor::renderSidebarPanel()
 			Log::warning("'" + name + "' isn't a valid event name");
 		else if (AutoCompleteRules::isReservedWord(name))
 			Log::warning("'" + name + "' is reserved");
-		else if (dslFindEventIndex(m_document, name) >= 0)
+		else if (dslFindEventIndex(m_document.eventNames, name) >= 0)
 			Log::warning("'" + name + "' is already an event");
 		else
 		{

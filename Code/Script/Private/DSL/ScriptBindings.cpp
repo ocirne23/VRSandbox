@@ -133,8 +133,9 @@ namespace
 			{ nullptr, T::Void, /*sidebarTopLevel*/ false,
 				{
 					{ "print",           T::Void,  { { "message", T::String } },                            "ctx->log($1)" }, // one plain string -- no {}-interpolation yet
-					// NOTE: no physicsRayCastDistance thunk exists yet on the real ABI (only physicsRayCast,
-					// which returns hit/miss + out-params) -- this entry stays a placeholder until that's added.
+					// Distance to the closest hit within maxRayDist, or maxRayDist itself on a miss (see
+					// thunk_physicsRayCastDistance) -- never a sentinel outside the query range, so e.g.
+					// `if rayCast(...) <= 0.1` reads correctly without a separate hit check.
 					{ "rayCast",         T::Float, { { "pos", kVec3 }, { "dir", kVec3 }, { "maxRayDist", T::Float } }, "ctx->physicsRayCastDistance($1, $2, $3)" },
 					{ "isKeyDown",       T::Bool,  { { "keyName", T::String } },                             "(ctx->isKeyDown($1) != 0)" },
 					{ "sendEvent",       T::Void,  { { "eventName", T::String } },                           "ctx->sendEvent($1)" },
@@ -156,8 +157,8 @@ namespace
 			{ "OnSpawn",         {},                                            ", void* scriptData", "REGISTER_ON_SPAWN()" },
 			{ "OnDestroy",       {},                                            ", void* scriptData", "REGISTER_ON_DESTROY()" },
 			{ "Update",          { { "deltaSeconds", T::Float } },              ", float deltaSeconds, void* scriptData", "REGISTER_UPDATE()" },
-			// eventIdx only -- the DSL has no way to author NAMED On Event entries yet (ScriptEventCount/
-			// ScriptEventName), so Transpiler emits a zero-events stub alongside this one; see its comment.
+			// eventIdx only -- the document's own named entries (DSL::eventNames, EVENTS sidebar section) drive
+			// the real ScriptEventCount/ScriptEventName Transpiler emits alongside this one; see its comment.
 			{ "OnEvent",         { { "eventIdx", T::Int } },                    ", int eventIdx, void* scriptData", "REGISTER_ON_EVENT()" },
 			// `other` (Entity value) and `contactId` (int64) aren't representable by any DSLType yet, so they
 			// stay invisible/unreadable from the DSL body -- only begin/sensor are exposed.
