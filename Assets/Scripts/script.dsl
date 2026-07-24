@@ -16,7 +16,6 @@ SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* s
 SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, ScriptData* scriptData);
 SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, ScriptData* scriptData);
 SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, ScriptData* scriptData);
-static bool isPrime(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int n);
 
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* scriptData)
 {
@@ -58,15 +57,10 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 	{
 		ctx->physicsSetVelocity(scriptData->physics, glm::vec3(0.0f, 1.0f, 0.0f));
 	}
-	isPrime(ctx, self, scriptData, 4);
+
 }
 
 REGISTER_UPDATE()
-
-static bool isPrime(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int n)
-{
-	return false;
-}
 
 //@@dsl 1
 //@@require PhysicsComponent
@@ -91,10 +85,8 @@ static bool isPrime(const ScriptContext* ctx, Entity* self, ScriptData* scriptDa
 //@	for int i = 0, i < self.data.num, i += 1
 //@		self.physics.setVelocity(vec3 velocity = vec3(0, 1, 0))
 //@	end
-//@	isPrime(int n = 4)
+//@	
 //@end
 //@
-//@function isPrime(int n) -> bool
-//@	return false
-//@end
+//@
 //@@end
