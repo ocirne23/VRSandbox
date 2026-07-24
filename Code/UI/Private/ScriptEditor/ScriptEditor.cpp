@@ -74,14 +74,6 @@ namespace
 		return true;
 	}
 
-	// Declaring a vec2/3/4 (DeclareValue, free-typed components -- see applyDeclareVariable) accepts digits,
-	// '.', '-' (negative components, e.g. `vec3(0, -1, 0)`), and ',' as the component separator -- notably NOT
-	// letters, since a component is always a number here, never a variable reference.
-	bool isVectorComponentChar(char c)
-	{
-		return std::isdigit(static_cast<unsigned char>(c)) || c == '.' || c == '-' || c == ',';
-	}
-
 	// While picking an if/while condition's comparator (ConditionOp), only the symbols the six comparison
 	// operators are actually built from are meaningful -- letters/digits would never match any of them anyway.
 	bool isOperatorChar(char c)
@@ -275,55 +267,6 @@ namespace
 		return path;
 	}
 
-	// The comma-component shorthand ("vec3 test = 1,2,3") is REMOVED: struct types (vec2/3/4 and every future
-	// engine struct) compose as ordinary value slots -- their registry constructor is a normal parameterized
-	// call staged like any other, so computed components work too. Every branch gated on this is now dead and
-	// awaits a cleanup pass; returning false here is what turned them all off at once.
-	bool isVectorType(DSLType)
-	{
-		return false;
-	}
-
-	int vectorComponentCount(DSLType)
-	{
-		return 0;
-	}
-
-	// Splits "1.0,2.0,3.0" into its comma-separated parts (no trimming needed: space is never accepted as a
-	// vector-component character in the first place, see handleKeyEvent, so parts never contain whitespace).
-	std::vector<std::string> splitOnCommas(const std::string& text)
-	{
-		std::vector<std::string> parts;
-		std::string current;
-		for (char c : text)
-		{
-			if (c == ',')
-			{
-				parts.push_back(current);
-				current.clear();
-			}
-			else
-			{
-				current += c;
-			}
-		}
-		parts.push_back(current);
-		return parts;
-	}
-
-	// Whether `text` is a COMPLETE, valid comma-component list for `type` -- what every vector-typed value
-	// stage requires before its confirm goes through (the editor never commits a partial value; there are no
-	// placeholder fallbacks to lean on).
-	bool vectorComponentsValid(DSLType type, const std::string& text)
-	{
-		const std::vector<std::string> parts = splitOnCommas(text);
-		if (static_cast<int>(parts.size()) != vectorComponentCount(type))
-			return false;
-		for (const std::string& part : parts)
-			if (!AutoCompleteRules::isValidLiteralText(DSLType::Float, part))
-				return false;
-		return true;
-	}
 }
 
 // Builds the binding registry (sidebar objects + builtin functions -- see ScriptBindings) once at startup,
@@ -590,8 +533,8 @@ void ScriptEditor::refreshCandidates()
 	}
 	if (m_composeMode == ComposeMode::EditExpr)
 	{
-		if (m_editSlot.line == nullptr || isVectorType(m_editValueType))
-			return; // vector slots free-type comma components -- no list to filter
+		if (m_editSlot.line == nullptr)
+			return;
 		// Same self-reference exclusion as re-editing a declaration's initializer via the old slot path.
 		DSLSymbol* excludeVariable = (m_editSlot.kind == SlotRef::Kind::VariableDeclarationInitialValue) ? m_editSlot.parent : nullptr;
 		m_candidates = (m_editValueType == DSLType::Void)
@@ -634,12 +577,9 @@ void ScriptEditor::refreshCandidates()
 		m_candidates = AutoCompleteRules::candidatesFor(DSLType::Void, atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord);
 		break;
 	case ComposeMode::DeclareValue:
-		// vec2/3/4 build their initializer from typed comma-separated components instead (see
-		// applyDeclareVariable) -- nothing to filter, same as DeclareName's free-typing. Otherwise, every term
-		// of the (possibly compound) expression is constrained to the SAME declared type. When RE-authoring an
+		// Every term of the (possibly compound) expression is constrained to the SAME declared type -- vec2/3/4
+		// included, their constructor is a normal parameterized call staged like any other. When RE-authoring an
 		// existing declaration (m_redeclareTarget, else null = no-op) it can't offer itself as its own value.
-		if (isVectorType(m_pendingDeclareType))
-			return;
 		m_candidates = AutoCompleteRules::candidatesFor(m_pendingDeclareType, atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord, m_redeclareTarget, /*offerComparisonLeads*/ true);
 		break;
 	case ComposeMode::ConditionLeft:
@@ -673,9 +613,6 @@ void ScriptEditor::refreshCandidates()
 		m_candidates = AutoCompleteRules::typeKeywordCandidates(m_pendingWord);
 		break;
 	case ComposeMode::ForVarValue:
-		// vec2/3/4 build their initializer from typed comma-separated components instead, same as DeclareValue.
-		if (isVectorType(m_forVarType))
-			return;
 		m_candidates = AutoCompleteRules::candidatesFor(m_forVarType, atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord);
 		break;
 	case ComposeMode::ForConditionOp:
@@ -700,10 +637,7 @@ void ScriptEditor::refreshCandidates()
 		m_candidates = AutoCompleteRules::compoundAssignOperatorCandidates(m_pendingWord);
 		break;
 	case ComposeMode::ReassignValue:
-		// Same as DeclareValue: vec2/3/4 free-type their components instead; otherwise every term is
-		// constrained to the target variable's own type.
-		if (isVectorType(reassignTargetType()))
-			return;
+		// Same as DeclareValue: every term is constrained to the target variable's own type.
 		m_candidates = AutoCompleteRules::candidatesFor(reassignTargetType(), atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord, nullptr, /*offerComparisonLeads*/ true);
 		break;
 	case ComposeMode::ReassignOp:
@@ -851,19 +785,12 @@ bool ScriptEditor::hasCandidateList() const
 	case ComposeMode::ReturnValue:
 	case ComposeMode::ReassignOp:
 	case ComposeMode::MemberSelect:
-		return true;
 	case ComposeMode::EditExpr:
-		return !isVectorType(m_editValueType); // vector slots free-type comma components
 	case ComposeMode::CallArgValue:
-		return !isVectorType(currentCallParamType());
 	case ComposeMode::DeclareValue:
-		// vec2/3/4 free-type their components instead (see applyDeclareVariable) -- no list to show/cycle,
-		// same as DeclareName.
-		return !isVectorType(m_pendingDeclareType);
 	case ComposeMode::ForVarValue:
-		return !isVectorType(m_forVarType);
 	case ComposeMode::ReassignValue:
-		return !isVectorType(reassignTargetType());
+		return true;
 	default:
 		return false;
 	}
@@ -1090,42 +1017,20 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 			tryCompleteCandidateOnSpace(); // can't finish the declaration (Enter only) -- but Space can still complete the box
 			return;
 		}
-		// No placeholder fallbacks: an incomplete value (nothing typed, or a partial/invalid component list)
+		// No placeholder fallbacks: an incomplete value (nothing typed, or an unresolved compound expression)
 		// refuses to confirm -- the compose stays until the declaration is fully valid; Escape abandons cleanly.
-		if (isVectorType(m_pendingDeclareType) && !vectorComponentsValid(m_pendingDeclareType, m_pendingWord))
-			return;
 
 		// Re-authoring an EXISTING declaration commits in place (name + initializer swapped on the same
 		// symbol), never through the whole-line rebuild below -- see m_redeclareTarget's comment.
 		if (m_redeclareTarget != nullptr)
 		{
-			if (isVectorType(m_pendingDeclareType))
-			{
-				commitRedeclare({}, {}, m_pendingWord);
-				return;
-			}
 			std::vector<PendingExprTerm> terms;
 			std::vector<DSLOperator> ops;
 			if (!exprTryFinalize(terms, ops) || terms.empty())
 				return;
 			if (m_pendingDeclareType == DSLType::Bool && containsNonBoolTerm(terms))
 				return; // a numeric comparison lead isn't a bool value -- type a comparator to continue
-			commitRedeclare(terms, ops, "");
-			return;
-		}
-
-		if (isVectorType(m_pendingDeclareType))
-		{
-			// vec2/3/4: comma-separated components only, no expression chain involved.
-			DSLCodeLine* linePtr = currentLineHeadOrCancel();
-			if (linePtr == nullptr)
-				return;
-			DSLCodeLine& line = *linePtr;
-			const std::string name = m_pendingDeclareName;
-			const DSLType type = m_pendingDeclareType;
-			const std::string rawText = m_pendingWord;
-			cancelCompose();
-			applyDeclareVariable(name, type, {}, {}, rawText, line);
+			commitRedeclare(terms, ops);
 			return;
 		}
 
@@ -1143,7 +1048,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		const std::string name = m_pendingDeclareName;
 		const DSLType type = m_pendingDeclareType;
 		cancelCompose();
-		applyDeclareVariable(name, type, terms, ops, "", line);
+		applyDeclareVariable(name, type, terms, ops, line);
 		return;
 	}
 
@@ -1165,18 +1070,6 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 			return; // finishing stage -- Enter only
 		}
 		// Same no-placeholder rule as DeclareValue: incomplete values refuse to confirm.
-		if (isVectorType(reassignTargetType()))
-		{
-			if (!vectorComponentsValid(reassignTargetType(), m_pendingWord))
-				return;
-			const std::string rawText = m_pendingWord;
-			if (m_reassignEditExpr != nullptr)
-				commitReassignInPlace({}, {}, rawText);
-			else
-				commitReassignStatement({}, {}, rawText);
-			return;
-		}
-
 		std::vector<PendingExprTerm> terms;
 		std::vector<DSLOperator> ops;
 		if (!exprTryFinalize(terms, ops) || terms.empty())
@@ -1184,9 +1077,9 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		if (reassignTargetType() == DSLType::Bool && containsNonBoolTerm(terms))
 			return; // a numeric comparison lead isn't a bool value -- type a comparator to continue
 		if (m_reassignEditExpr != nullptr)
-			commitReassignInPlace(terms, ops, "");
+			commitReassignInPlace(terms, ops);
 		else
-			commitReassignStatement(terms, ops, "");
+			commitReassignStatement(terms, ops);
 		return;
 	}
 
@@ -1197,21 +1090,6 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 			tryCompleteCandidateOnSpace();
 			return; // an in-place edit commits on confirm -- Enter only
 		}
-		// A vector-typed slot free-types comma components (no candidate list, like DeclareValue's vectors):
-		// nothing typed leaves the occupant as-is; a partial/invalid list refuses to confirm.
-		if (isVectorType(m_editValueType))
-		{
-			if (m_pendingWord.empty())
-			{
-				cancelCompose();
-				return;
-			}
-			if (!vectorComponentsValid(m_editValueType, m_pendingWord))
-				return;
-			applyEditExpr({}, {}, m_pendingWord);
-			return;
-		}
-
 		std::vector<PendingExprTerm> terms;
 		std::vector<DSLOperator> ops;
 		if (!exprTryFinalize(terms, ops))
@@ -1223,7 +1101,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		}
 		if (m_editValueType == DSLType::Bool && containsNonBoolTerm(terms))
 			return; // a numeric comparison lead isn't a bool value -- type a comparator to continue
-		applyEditExpr(terms, ops, "");
+		applyEditExpr(terms, ops);
 		return;
 	}
 
@@ -1450,35 +1328,17 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_flowEditLoopVar))
 			return; // name already taken in this scope -- keep editing instead of accepting the collision
 		m_forVarName = m_pendingWord;
-		m_forVarInitRawText.clear();
 		m_forVarInitChain = PendingExprChain{};
-		if (isVectorType(m_forVarType))
-			enterCompose(ComposeMode::ForVarValue, forVarPrefix()); // comma components, no chain machinery
-		else
-			enterChainStage(ComposeMode::ForVarValue); // the init is a full compound chain ("= n - 1")
+		enterChainStage(ComposeMode::ForVarValue); // the init is a full compound chain ("= n - 1")
 		return;
 	}
 
 	if (m_composeMode == ComposeMode::ForVarValue)
 	{
-		// vec2/3/4 free-type their components instead (see commitForStatement/buildVectorLiteral) -- an
-		// incomplete/invalid component list refuses to advance, same no-placeholder rule as DeclareValue.
-		// Scalar inits are full compound chains ("for int i = n - 1").
-		if (isVectorType(m_forVarType))
-		{
-			if (!vectorComponentsValid(m_forVarType, m_pendingWord))
-				return;
-			m_forVarInitRawText = m_pendingWord;
-			m_forVarInitChain = PendingExprChain{};
-		}
-		else
-		{
-			PendingExprChain init;
-			if (!captureComposedChain(init))
-				return;
-			m_forVarInitChain = init;
-			m_forVarInitRawText.clear();
-		}
+		PendingExprChain init;
+		if (!captureComposedChain(init))
+			return;
+		m_forVarInitChain = init;
 		// The condition opens seeded with the loop variable as its left side -- extendable ("i + 2"), or a
 		// comparator character/confirm advances it as-is.
 		const PendingExprChain seed = loopVarSeedChain();
@@ -1700,7 +1560,6 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		// Staged flow starts here too: a for-loop never appears in the document until its loop variable,
 		// condition, AND increment are all resolved -- see commitForStatement and the class-level comment.
 		m_forVarName.clear();
-		m_forVarInitRawText.clear();
 		enterCompose(ComposeMode::ForVarType, "for ");
 		return;
 	}
@@ -1818,47 +1677,18 @@ DSLSymbol* ScriptEditor::buildValueFromCandidate(const Candidate& candidate, DSL
 	}
 }
 
-DSLSymbol* ScriptEditor::vectorBuiltinFor(DSLType) const
-{
-	return nullptr; // the comma shorthand is gone -- struct constructors stage as ordinary calls now
-}
-
-// Builds a positional vecN(<c0>, <c1>, ...) call (owned by `line`) directly from typed components -- returns
-// nullptr (no document mutation at all) if the component count doesn't match vectorType or any component isn't
-// a valid Float literal, so the caller can fall back exactly the way an unresolved scalar initializer does
-// (see applyDeclareVariable) rather than half-building something broken.
-DSLSymbol* ScriptEditor::buildVectorLiteral(DSLType vectorType, const std::vector<std::string>& components, DSLCodeLine& line)
-{
-	DSLSymbol* builtin = vectorBuiltinFor(vectorType);
-	if (builtin == nullptr || static_cast<int>(components.size()) != vectorComponentCount(vectorType))
-		return nullptr;
-	for (const std::string& component : components)
-		if (!AutoCompleteRules::isValidLiteralText(DSLType::Float, component))
-			return nullptr;
-
-	std::vector<DSLSymbol::CallArgument> args;
-	for (const std::string& component : components)
-	{
-		DSLSymbol* value = pushSymbol(line, ST::Constant, DSLSymbol::Constant{ DSLType::Float, component });
-		args.push_back(DSLSymbol::CallArgument{ nullptr, value }); // positional, matching isPositionalCall
-	}
-	return pushSymbol(line, ST::FunctionCall, DSLSymbol::FunctionCall{ builtin, nullptr, args });
-}
-
 // Fills a LineHead statement slot with a brand-new local variable declaration, `type name = value`, built in
-// ONE shot from the fully-resolved staged flow (see confirmCompose's DeclareName/DeclareValue handling). For a
-// vec2/3/4 type, `rawInitializerText` (the comma-separated components typed, e.g. "1.0,2.0,3.0") is tried FIRST
-// via buildVectorLiteral; otherwise the (possibly multi-term, possibly containing parenthesized groups)
-// expression `terms`/`ops` resolves the value; failing both, the initializer is left as a placeholder rather
-// than accepting whatever raw text was typed verbatim -- "bla" must never become a Float constant just because
-// it also isn't an existing variable.
+// ONE shot from the fully-resolved staged flow (see confirmCompose's DeclareName/DeclareValue handling). The
+// (possibly multi-term, possibly containing parenthesized groups) expression `terms`/`ops` resolves the value;
+// failing that, the initializer is left as a placeholder rather than accepting whatever raw text was typed
+// verbatim -- "bla" must never become a Float constant just because it also isn't an existing variable.
 void ScriptEditor::applyDeclareVariable(const std::string& name, DSLType type, const std::vector<PendingExprTerm>& terms,
-	const std::vector<DSLOperator>& ops, const std::string& rawInitializerText, DSLCodeLine& line)
+	const std::vector<DSLOperator>& ops, DSLCodeLine& line)
 {
 	line.symbols.clear();
 
 	DSLSymbol* typeDecl = pushSymbol(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ type });
-	DSLSymbol* value = resolveValueOrPlaceholder(type, rawInitializerText, terms, ops, line);
+	DSLSymbol* value = resolveValueOrPlaceholder(type, terms, ops, line);
 	pushSymbol(line, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ name, typeDecl, value });
 	selectExpressionTail(value); // land on the END of what was just composed, right where typing left off
 }
@@ -1868,7 +1698,7 @@ void ScriptEditor::applyDeclareVariable(const std::string& name, DSLType type, c
 // symbol, so every VariableReference elsewhere keeps pointing at it -- the one thing applyDeclareVariable's
 // wholesale line rebuild could never do. An empty compose (nothing typed for the value) leaves a type-matched
 // placeholder, same tolerance as a brand-new declaration.
-void ScriptEditor::commitRedeclare(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawInitializerText)
+void ScriptEditor::commitRedeclare(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops)
 {
 	DSLSymbol* target = m_redeclareTarget;
 	const DSLType type = m_pendingDeclareType;
@@ -1879,7 +1709,7 @@ void ScriptEditor::commitRedeclare(const std::vector<PendingExprTerm>& terms, co
 	DSLCodeLine& line = *target->line;
 	DSLSymbol* originalHead = line.head();
 
-	DSLSymbol* value = resolveValueOrPlaceholder(type, rawInitializerText, terms, ops, line);
+	DSLSymbol* value = resolveValueOrPlaceholder(type, terms, ops, line);
 	DSLSymbol::VariableDeclaration& decl = std::get<DSLSymbol::VariableDeclaration>(target->data);
 	decl.name = name;
 	decl.initialValue = value;
@@ -1890,15 +1720,9 @@ void ScriptEditor::commitRedeclare(const std::vector<PendingExprTerm>& terms, co
 
 // See the declaration in ScriptEditor.ixx: shared by applyDeclareVariable, commitReassignStatement, and
 // commitForStatement's loop-variable init.
-DSLSymbol* ScriptEditor::resolveValueOrPlaceholder(DSLType type, const std::string& rawText,
-	const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, DSLCodeLine& line)
+DSLSymbol* ScriptEditor::resolveValueOrPlaceholder(DSLType type, const std::vector<PendingExprTerm>& terms,
+	const std::vector<DSLOperator>& ops, DSLCodeLine& line)
 {
-	if (isVectorType(type))
-	{
-		DSLSymbol* vec = buildVectorLiteral(type, splitOnCommas(rawText), line);
-		if (vec != nullptr)
-			return vec;
-	}
 	if (!terms.empty())
 		return buildExpressionFromTerms(terms, ops, line);
 	return pushSymbol(line, ST::Placeholder, DSLSymbol::Placeholder{ type });
@@ -2219,10 +2043,10 @@ bool ScriptEditor::isChainComposeMode() const
 {
 	switch (m_composeMode)
 	{
-	case ComposeMode::DeclareValue:  return !isVectorType(m_pendingDeclareType);
-	case ComposeMode::ReassignValue: return !isVectorType(reassignTargetType());
-	case ComposeMode::EditExpr:      return !isVectorType(m_editValueType);
-	case ComposeMode::ForVarValue:   return !isVectorType(m_forVarType);
+	case ComposeMode::DeclareValue:
+	case ComposeMode::ReassignValue:
+	case ComposeMode::EditExpr:
+	case ComposeMode::ForVarValue:
 	case ComposeMode::ReturnValue:
 	case ComposeMode::ConditionLeft:
 	case ComposeMode::ConditionRight:
@@ -2269,10 +2093,10 @@ DSLType ScriptEditor::reassignTargetType() const
 
 // Fills a LineHead statement slot with a `name = value` reassignment of an EXISTING variable (m_reassignTarget),
 // built in ONE shot from the fully-resolved staged flow (see confirmCompose's ReassignValue handling) -- same
-// value-resolution rules (vector components / compound expression / placeholder fallback) and `terms`/`ops`
-// convention as applyDeclareVariable. Unlike a declaration, this doesn't open a block, so there's no body to
-// seed -- lands directly on the assignment itself.
-void ScriptEditor::commitReassignStatement(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawInitializerText)
+// value-resolution rules (compound expression / placeholder fallback) and `terms`/`ops` convention as
+// applyDeclareVariable. Unlike a declaration, this doesn't open a block, so there's no body to seed -- lands
+// directly on the assignment itself.
+void ScriptEditor::commitReassignStatement(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops)
 {
 	DSLCodeLine* linePtr = currentLineHeadOrCancel();
 	if (linePtr == nullptr)
@@ -2286,7 +2110,7 @@ void ScriptEditor::commitReassignStatement(const std::vector<PendingExprTerm>& t
 
 	line.symbols.clear();
 
-	DSLSymbol* value = resolveValueOrPlaceholder(targetType, rawInitializerText, terms, ops, line);
+	DSLSymbol* value = resolveValueOrPlaceholder(targetType, terms, ops, line);
 	// The target: the variable itself, or -- for a member-assign statement -- its dotted member chain
 	// ("self.pos.x = ...", see m_reassignMemberPath).
 	DSLSymbol* targetRef = buildReceiverChain(target, memberPath, line);
@@ -2298,7 +2122,7 @@ void ScriptEditor::commitReassignStatement(const std::vector<PendingExprTerm>& t
 // Re-commits an EXISTING assignment statement edited through the widened Reassign flow (see
 // m_reassignEditExpr): ONLY the right-hand value swaps, in place -- the target reference and the statement's
 // own operator (which may be a compound +=/-=/... the staged flow never authors) stay exactly as they were.
-void ScriptEditor::commitReassignInPlace(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawInitializerText)
+void ScriptEditor::commitReassignInPlace(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops)
 {
 	DSLSymbol* expr = m_reassignEditExpr;
 	const DSLType targetType = reassignTargetType();
@@ -2308,7 +2132,7 @@ void ScriptEditor::commitReassignInPlace(const std::vector<PendingExprTerm>& ter
 	DSLCodeLine& line = *expr->line;
 	DSLSymbol* originalHead = line.head();
 
-	DSLSymbol* value = resolveValueOrPlaceholder(targetType, rawInitializerText, terms, ops, line);
+	DSLSymbol* value = resolveValueOrPlaceholder(targetType, terms, ops, line);
 	std::get<DSLSymbol::Expression>(expr->data).operands[1] = value;
 
 	restoreHeadAndCollect(line, originalHead);
@@ -2931,11 +2755,10 @@ std::string ScriptEditor::forVarPrefix() const
 
 // forVarPrefix() + the resolved initial value (a possibly-compound chain) -- the whole loop-variable clause,
 // exactly as it'll read once committed. Only ever called after ForVarValue has confirmed, so the init chain is
-// always meaningful by then when the type isn't a vector.
+// always meaningful by then.
 std::string ScriptEditor::forVarDeclPrefix() const
 {
-	const std::string initText = isVectorType(m_forVarType) ? m_forVarInitRawText : chainDisplayText(m_forVarInitChain);
-	return forVarPrefix() + initText;
+	return forVarPrefix() + chainDisplayText(m_forVarInitChain);
 }
 
 // forVarDeclPrefix() + ", <left> <op> <value>" -- the whole condition clause too, once resolved (both sides
@@ -2963,7 +2786,6 @@ void ScriptEditor::commitForStatement()
 	DSLSymbol* existingLoopVar = m_flowEditLoopVar;
 	const DSLType varType = m_forVarType;
 	const std::string varName = m_forVarName;
-	const std::string varInitRawText = m_forVarInitRawText;
 	const PendingExprChain initChain = m_forVarInitChain;
 	const PendingExprChain conditionLeftChain = m_forConditionLeftChain;
 	const Candidate conditionOpCandidate = m_forConditionOpCandidate;
@@ -2982,7 +2804,7 @@ void ScriptEditor::commitForStatement()
 		m_forBuildLoopVar = existingLoopVar; // sentinel loop-var candidates in the chains resolve to it
 		DSLSymbol::VariableDeclaration& decl = std::get<DSLSymbol::VariableDeclaration>(existingLoopVar->data);
 		decl.name = varName;
-		decl.initialValue = resolveValueOrPlaceholder(varType, varInitRawText, initChain.terms, initChain.ops, line);
+		decl.initialValue = resolveValueOrPlaceholder(varType, initChain.terms, initChain.ops, line);
 
 		DSLSymbol* condLeft = buildExpressionFromTerms(conditionLeftChain.terms, conditionLeftChain.ops, line);
 		DSLSymbol* condRight = buildExpressionFromTerms(conditionValueChain.terms, conditionValueChain.ops, line);
@@ -3006,7 +2828,7 @@ void ScriptEditor::commitForStatement()
 	// Loop variable: type name = init (the init a full compound chain). Built FIRST so the sentinel loop-var
 	// candidates inside the condition/increment chains have a real symbol to resolve to (m_forBuildLoopVar).
 	DSLSymbol* typeDecl = pushSymbol(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ varType });
-	DSLSymbol* initValue = resolveValueOrPlaceholder(varType, varInitRawText, initChain.terms, initChain.ops, line);
+	DSLSymbol* initValue = resolveValueOrPlaceholder(varType, initChain.terms, initChain.ops, line);
 	DSLSymbol* loopVar = pushSymbol(line, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ varName, typeDecl, initValue });
 	m_forBuildLoopVar = loopVar;
 
@@ -3130,7 +2952,6 @@ namespace
 
 namespace
 {
-	bool vectorRawTextFromValue(const DSLSymbol* value, std::string& out); // defined below -- termFromSymbol restores vector arguments through it
 	bool chainFromSymbol(const DSLSymbol* symbol, PendingExprChain& out); // defined below -- mutually recursive with termFromSymbol (a call's arguments restore as full chains, which may themselves contain calls)
 
 	// Walks a receiver expression (a VariableReference, or a MemberAccess chain over one) down to its ROOT
@@ -3248,18 +3069,6 @@ namespace
 		}
 	}
 
-	// A committed value symbol as ONE plain staged candidate. False for anything a single candidate can't
-	// hold: a compound chain, or the non-round-trippable kinds termFromSymbol refuses (chainFromSymbol below
-	// is the multi-term variant the staged restores actually use).
-	bool candidateFromSymbol(const DSLSymbol* symbol, Candidate& out)
-	{
-		PendingExprTerm term;
-		if (!termFromSymbol(symbol, term) || term.isGroup)
-			return false;
-		out = term.candidate;
-		return true;
-	}
-
 	// A committed value back into a staged CHAIN: a flat (ungrouped) arithmetic Expression becomes its terms
 	// and operators; anything else round-trips as a single term. False = not restorable (see termFromSymbol).
 	bool chainFromSymbol(const DSLSymbol* symbol, PendingExprChain& out)
@@ -3289,26 +3098,6 @@ namespace
 		return true;
 	}
 
-	// A committed positional vecN(constants...) call back into "x,y,z" component text -- restoring a VECTOR
-	// loop variable's staged init. False if any argument isn't a plain constant.
-	bool vectorRawTextFromValue(const DSLSymbol* value, std::string& out)
-	{
-		if (value == nullptr || value->type != ST::FunctionCall)
-			return false;
-		std::string text;
-		const DSLSymbol::FunctionCall& call = std::get<DSLSymbol::FunctionCall>(value->data);
-		for (size_t i = 0; i < call.arguments.size(); ++i)
-		{
-			const DSLSymbol* component = call.arguments[i].value;
-			if (component == nullptr || component->type != ST::Constant)
-				return false;
-			if (i > 0)
-				text += ",";
-			text += std::get<DSLSymbol::Constant>(component->data).value;
-		}
-		out = std::move(text);
-		return true;
-	}
 }
 
 // See the declaration in ScriptEditor.ixx: post-order head restore + unreachable-symbol sweep, the shared tail
@@ -3647,9 +3436,7 @@ bool ScriptEditor::tryWidenFlowHeaderEdit()
 		return false;
 
 	PendingExprChain initChain;
-	std::string initRawText;
-	if (isVectorType(varType) ? !vectorRawTextFromValue(loopDecl.initialValue, initRawText)
-	                          : !chainFromSymbol(loopDecl.initialValue, initChain))
+	if (!chainFromSymbol(loopDecl.initialValue, initChain))
 		return false;
 	PendingExprChain conditionLeft, conditionValue, incrementValue;
 	if (!chainFromSymbol(cond.operands[0], conditionLeft)
@@ -3673,7 +3460,6 @@ bool ScriptEditor::tryWidenFlowHeaderEdit()
 
 	m_forVarType = varType;
 	m_forVarName = loopDecl.name;
-	m_forVarInitRawText = initRawText;
 	m_forVarInitChain = initChain;
 	m_forConditionLeftChain = conditionLeft;
 	m_forConditionOpCandidate = Candidate{ dslOperatorText(cond.operators[0]), Candidate::Kind::Comparator, nullptr, DSLType::Void, cond.operators[0] };
@@ -3684,11 +3470,8 @@ bool ScriptEditor::tryWidenFlowHeaderEdit()
 	m_flowEditLoopVar = fc.forLoopVar;
 
 	// The widened-to stage always starts EMPTY (its value was just backspaced away); everything else shows
-	// restored in the prefix. Vector inits keep their raw-component entry.
-	if (target == ComposeMode::ForVarValue && isVectorType(varType))
-		enterCompose(target, forVarPrefix());
-	else
-		enterChainStage(target);
+	// restored in the prefix.
+	enterChainStage(target);
 	return true;
 }
 
@@ -3936,7 +3719,7 @@ bool ScriptEditor::tryWidenComparisonValueEdit()
 // EditExpr's confirm: builds the composed segment's symbols and splices them into the document per the state
 // beginEditExprReplace/Insert captured. All shapes end the same way: head restored, orphans swept, cursor on
 // the last term just composed.
-void ScriptEditor::applyEditExpr(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawVectorText)
+void ScriptEditor::applyEditExpr(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops)
 {
 	const SlotRef slot = m_editSlot;
 	DSLSymbol* chainExpr = m_editChainExpr;
@@ -3944,7 +3727,6 @@ void ScriptEditor::applyEditExpr(const std::vector<PendingExprTerm>& terms, cons
 	const bool insert = m_editInsert;
 	const DSLOperator leadOp = m_editLeadOp;
 	DSLSymbol* anchor = m_editAnchorSymbol;
-	const DSLType valueType = m_editValueType;
 	cancelCompose();
 
 	if (slot.line == nullptr)
@@ -3953,20 +3735,9 @@ void ScriptEditor::applyEditExpr(const std::vector<PendingExprTerm>& terms, cons
 	DSLSymbol* originalHead = line.head();
 
 	std::vector<DSLSymbol*> built;
-	if (!rawVectorText.empty())
-	{
-		// A vector slot's comma components become one vecN literal (pre-validated by the confirm).
-		DSLSymbol* vec = buildVectorLiteral(valueType, splitOnCommas(rawVectorText), line);
-		if (vec == nullptr)
-			return; // defensive -- buildVectorLiteral mutates nothing on failure
-		built.push_back(vec);
-	}
-	else
-	{
-		built.reserve(terms.size());
-		for (const PendingExprTerm& term : terms)
-			built.push_back(buildExpressionTerm(term, line));
-	}
+	built.reserve(terms.size());
+	for (const PendingExprTerm& term : terms)
+		built.push_back(buildExpressionTerm(term, line));
 
 	if (chainExpr != nullptr)
 	{
@@ -4479,44 +4250,14 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			if (hasCandidateList())
 				refreshCandidates();
 		}
-		else if (isChainComposeMode() || m_composeMode == ComposeMode::DeclareValue
-			|| m_composeMode == ComposeMode::ReassignValue || m_composeMode == ComposeMode::EditExpr)
+		else if (isChainComposeMode())
 		{
-			// (The vector-typed DeclareValue/ReassignValue/EditExpr variants aren't chain modes but still
-			// step back through this ladder -- their isVector sub-branch and the widen terminals handle them.)
 			// Undoes exactly ONE action at a time within the compound expression being composed (see the class
 			// comment): the last operator+term, the last '(' if nothing's inside it yet, or reopening the
 			// innermost just-closed ')' with ITS OWN last term restored for further editing -- before finally
 			// stepping back out of value-composing entirely once nothing remains (DeclareValue -> re-edit the
 			// name; ReassignValue/EditExpr -> cancel, leaving the document exactly as it was).
-			const bool isVector = (m_composeMode == ComposeMode::DeclareValue && isVectorType(m_pendingDeclareType))
-				|| (m_composeMode == ComposeMode::ReassignValue && isVectorType(reassignTargetType()));
-			if (isVector)
-			{
-				// vec2/3/4: no expression chain involved (comma components only) -- step back out entirely
-				// (a widened assignment re-edit steps out by clearing the line, same as its scalar path below).
-				if (m_composeMode == ComposeMode::DeclareValue)
-				{
-					enterCompose(ComposeMode::DeclareName, std::string(dslTypeName(m_pendingDeclareType)) + " ", m_pendingDeclareName);
-				}
-				else if (m_reassignEditExpr != nullptr)
-				{
-					DSLCodeLine& line = *m_reassignEditExpr->line;
-					cancelCompose();
-					clearLineToBlankStatement(line);
-				}
-				else if (m_composeMode == ComposeMode::ReassignValue && m_reassignTarget != nullptr)
-				{
-					// New vector reassignment: same operator step-back as the scalar path below.
-					enterCompose(ComposeMode::ReassignOp,
-						std::get<DSLSymbol::VariableDeclaration>(m_reassignTarget->data).name + " ");
-				}
-				else
-				{
-					cancelCompose();
-				}
-			}
-			else if (m_exprHasPendingGroup && !m_exprPendingGroup.isGroup)
+			if (m_exprHasPendingGroup && !m_exprPendingGroup.isGroup)
 			{
 				// A resolved parameterized call un-resolves: its name returns to the box for editing; the
 				// arguments drop (type '(' to stage them again).
@@ -4734,17 +4475,13 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			}
 			else if (m_composeMode == ComposeMode::ForVarValue)
 			{
-				// (Non-vector -- the vector variant steps back in the outer ladder.) Re-edit the loop
-				// variable's name instead of losing it entirely.
+				// Re-edit the loop variable's name instead of losing it entirely.
 				enterCompose(ComposeMode::ForVarName, "for " + std::string(dslTypeName(m_forVarType)) + " ", m_forVarName);
 			}
 			else if (m_composeMode == ComposeMode::ForConditionLeft)
 			{
 				// Step back to re-edit the init clause, restored for further editing.
-				if (isVectorType(m_forVarType))
-					enterCompose(ComposeMode::ForVarValue, forVarPrefix(), m_forVarInitRawText);
-				else
-					enterChainStage(ComposeMode::ForVarValue, &m_forVarInitChain);
+				enterChainStage(ComposeMode::ForVarValue, &m_forVarInitChain);
 			}
 			else if (m_composeMode == ComposeMode::ForConditionValue)
 			{
@@ -5089,9 +4826,7 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 	{
 		if (!composing)
 			beginCompose(); // a value span opens its in-place edit; a non-editable span leaves mode None
-		if (m_pendingWord.empty()
-			&& (isChainComposeMode()
-				|| (m_composeMode == ComposeMode::CallArgValue && !isVectorType(currentCallParamType()))))
+		if (m_pendingWord.empty() && isChainComposeMode())
 		{
 			m_pendingWord += c;
 			if (hasCandidateList())
@@ -5252,21 +4987,10 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 	{
 		// The init clause resolves and the condition opens seeded with the loop variable as its left side,
 		// the comparator character pre-typed -- "for int i = n-1 <" reads straight through.
-		if (isVectorType(m_forVarType))
-		{
-			if (!vectorComponentsValid(m_forVarType, m_pendingWord))
-				return;
-			m_forVarInitRawText = m_pendingWord;
-			m_forVarInitChain = PendingExprChain{};
-		}
-		else
-		{
-			PendingExprChain init;
-			if (!captureComposedChain(init))
-				return;
-			m_forVarInitChain = init;
-			m_forVarInitRawText.clear();
-		}
+		PendingExprChain init;
+		if (!captureComposedChain(init))
+			return;
+		m_forVarInitChain = init;
 		m_forConditionLeftChain = loopVarSeedChain();
 		enterCompose(ComposeMode::ForConditionOp,
 			forVarDeclPrefix() + ", " + chainDisplayText(m_forConditionLeftChain) + " ", std::string(1, c));
@@ -5274,19 +4998,12 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 	}
 
 	// ',' right after a for-loop clause's value confirms it and advances to the next clause -- "for int i = 0,"
-	// then "i < 5," read straight through, no Space needed. Inside a VECTOR init the ',' keeps separating
-	// components until the count is full, then flips back to meaning "next clause" (call-argument rule). A
-	// confirm that refuses (nothing matched, invalid components) leaves the mode unchanged; the keystroke drops.
+	// then "i < 5," read straight through, no Space needed. A confirm that refuses (nothing matched) leaves the
+	// mode unchanged; the keystroke drops.
 	if ((m_composeMode == ComposeMode::ForVarValue || m_composeMode == ComposeMode::ForConditionValue) && c == ',')
 	{
-		const bool componentComma = m_composeMode == ComposeMode::ForVarValue && isVectorType(m_forVarType)
-			&& static_cast<int>(std::count(m_pendingWord.begin(), m_pendingWord.end(), ',')) < vectorComponentCount(m_forVarType) - 1;
-		if (!componentComma)
-		{
-			confirmCompose();
-			return;
-		}
-		// falls through -- appended as a component character by the vector filter below
+		confirmCompose();
+		return;
 	}
 
 	// Staging a parameterized call's arguments: ',' or ')' at the OUTERMOST level of the CURRENT argument's own
@@ -5547,15 +5264,6 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 	{
 		if (!isArithmeticOperatorChar(c) && !isOperatorChar(c) && c != '&' && c != '|')
 			return; // the union of all four operator classes' characters -- anything else means nothing here
-	}
-	else if ((m_composeMode == ComposeMode::DeclareValue && isVectorType(m_pendingDeclareType))
-		|| (m_composeMode == ComposeMode::ForVarValue && isVectorType(m_forVarType))
-		|| (m_composeMode == ComposeMode::ReassignValue && isVectorType(reassignTargetType()))
-		|| (m_composeMode == ComposeMode::EditExpr && isVectorType(m_editValueType))
-		|| (m_composeMode == ComposeMode::CallArgValue && isVectorType(currentCallParamType())))
-	{
-		if (!isVectorComponentChar(c))
-			return; // only digits/./-/, are meaningful while typing vector components
 	}
 	else if (m_composeMode == ComposeMode::DeclareName || m_composeMode == ComposeMode::Rename || willBeRename
 		|| m_composeMode == ComposeMode::FunctionDeclareName || m_composeMode == ComposeMode::FunctionParamName

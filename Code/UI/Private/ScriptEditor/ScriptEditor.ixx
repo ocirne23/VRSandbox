@@ -26,9 +26,9 @@ import Script;
 // statement sitting in the document. Declaring: pick a type keyword ("float "), free-type a name ("float
 // test"), confirm again (now composing the initializer, "float test = "), then pick/type a value and confirm
 // once more to apply the whole declaration in one shot, landing the cursor on the initializer just composed.
-// Declaring a vec2/vec3/vec4 is a special case of that last step: instead of picking one candidate, the
-// initializer is a comma-separated list of exactly as many float components as the type needs ("vec3 test =
-// 1.0,2.0,3.0"), built directly into a positional vecN(...) call -- see applyDeclareVariable/buildVectorLiteral.
+// Declaring a vec2/vec3/vec4 needs no special case: the type's registry constructor (e.g. "vec3(1.0, 2.0, 3.0)")
+// is an ordinary parameterized call, staged through the SAME CallArgValue sub-flow any other call uses, so
+// computed components work too -- see applyDeclareVariable.
 // If/while: pick "if"/"while" ("if "), pick ANY in-scope variable or non-Void-returning function as the left
 // operand ("if height "), pick a comparator ("if height <= "), then pick/type a right-hand value matching the
 // left operand's type -- only THEN does the whole `if a op b` commit as one FlowControl+Expression, replacing
@@ -89,8 +89,8 @@ import Script;
 //
 // Declaring a new for-loop ("for ", offered anywhere a statement is, like if/while) stages its loop variable
 // exactly like a plain local declaration (ForVarType picks a type, ForVarName free-types the name with the same
-// collision check, ForVarValue composes the initial value -- vec2/3/4 the same comma-component special case as
-// a plain DeclareValue), then its condition (ForConditionLeft, SEEDED with the loop variable and extendable
+// collision check, ForVarValue composes the initial value as a full chain, same as DeclareValue), then its
+// condition (ForConditionLeft, SEEDED with the loop variable and extendable
 // into a compound chain like "i + 2"; ForConditionOp picks the comparator, ForConditionValue composes the
 // bound) and increment (ForIncrementOp picks a compound-assign operator -- +=/-=/*=//=/%=, never a plain `=`,
 // ForIncrementValue composes the step against the implicit loop variable). Every VALUE clause is a full
@@ -348,12 +348,11 @@ private:
 	void applyCandidate(const Candidate& candidate);
 	DSLCodeLine* currentLineHeadOrCancel(); // resolves the LineHead slot's line at the cursor, or cancelCompose()+nullptr if not there
 	DSLSymbol* buildValueFromCandidate(const Candidate& candidate, DSLCodeLine& line); // Variable/Function/Literal/true/false only
-	// Resolves an initializer/assignment's right-hand value: vec2/3/4 tries buildVectorLiteral on `rawText`
-	// FIRST; otherwise, if `terms` is non-empty, builds the full expression chain from it
-	// (buildExpressionFromTerms); an empty `terms` falls back to a type-appropriate Placeholder (defensive --
-	// the confirms refuse empty values, so it shouldn't occur in practice). Shared by applyDeclareVariable,
-	// the reassign/redeclare commits, and commitForStatement's loop-variable init.
-	DSLSymbol* resolveValueOrPlaceholder(DSLType type, const std::string& rawText,
+	// Resolves an initializer/assignment's right-hand value: if `terms` is non-empty, builds the full expression
+	// chain from it (buildExpressionFromTerms); an empty `terms` falls back to a type-appropriate Placeholder
+	// (defensive -- the confirms refuse empty values, so it shouldn't occur in practice). Shared by
+	// applyDeclareVariable, the reassign/redeclare commits, and commitForStatement's loop-variable init.
+	DSLSymbol* resolveValueOrPlaceholder(DSLType type,
 		const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, DSLCodeLine& line);
 	DSLSymbol* buildExpressionTerm(const PendingExprTerm& term, DSLCodeLine& line); // a plain candidate, or (isGroup) a nested `grouped` chain via buildExpressionFromTerms
 	// Builds a flat term/operator sequence into a real Expression chain VERBATIM -- no precedence folding
@@ -389,10 +388,10 @@ private:
 	std::string exprComposePrefixFromStack() const; // renders m_exprStack (+ m_exprPendingGroup, if any) back to text -- always assigned to m_composePrefix after any state change, forward or backward, so the two can never drift apart
 	std::string exprTermText(const PendingExprTerm& term) const; // recursive -- "(" + ... + ")" for a group, else candidateDisplayText
 	void applyDeclareVariable(const std::string& name, DSLType type, const std::vector<PendingExprTerm>& terms,
-		const std::vector<DSLOperator>& ops, const std::string& rawInitializerText, DSLCodeLine& line);
+		const std::vector<DSLOperator>& ops, DSLCodeLine& line);
 	// DeclareValue's confirm when m_redeclareTarget is set: applies the (possibly renamed) name + freshly
 	// composed initializer IN PLACE on the existing declaration -- see m_redeclareTarget's comment.
-	void commitRedeclare(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawInitializerText);
+	void commitRedeclare(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops);
 	// ConditionRight's (or a bare-bool ConditionLeft's) confirm: commits the whole if/while header (or a
 	// chain's new elseif) -- the condition is `finalTerm` appended to whatever m_logicalTerms/m_logicalOps
 	// accumulated ("if i > 0 && i != 42"), built via buildStagedBool.
@@ -413,11 +412,9 @@ private:
 	// derives the prefix from exprBasePrefixFor(mode) so forward/backward transitions can't drift.
 	void enterChainStage(ComposeMode mode, const PendingExprChain* restore = nullptr);
 	DSLType composedChainPeekType() const; // the live compose's element type WITHOUT consuming it (first stack term, else the matched candidate)
-	bool isChainComposeMode() const; // the current mode composes a value chain through m_exprStack (the vector-component variants don't)
+	bool isChainComposeMode() const; // the current mode composes a value chain through m_exprStack
 	PendingExprChain loopVarSeedChain() const; // a one-term chain holding the staged loop variable's SENTINEL candidate (see m_forBuildLoopVar)
 	void applyElseStatement(DSLSymbol* chainHead, DSLCodeLine& originLine); // "else" picked inside a branch: appends the else at the chain's end, consuming the blank origin line
-	DSLSymbol* buildVectorLiteral(DSLType vectorType, const std::vector<std::string>& components, DSLCodeLine& line);
-	DSLSymbol* vectorBuiltinFor(DSLType vectorType) const;
 	DSLCodeLine& insertLineAfter(DSLCodeLine& afterLine, int scopeLevel);
 	DSLSymbol* seedStatementPlaceholder(DSLCodeLine& line);
 	std::string functionDeclarePrefix() const; // rebuilds "function name(type0 name0, type1 name1" from pending state
@@ -485,9 +482,9 @@ private:
 	void commitForStatement(); // ForIncrementValue's confirm: commits the whole new for-loop
 	DSLType reassignTargetType() const; // m_reassignTarget's own declared type
 	// Same `terms`/`ops` convention as applyDeclareVariable, for a `name = value` statement instead.
-	void commitReassignStatement(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawInitializerText);
+	void commitReassignStatement(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops);
 	// ReassignValue's confirm when m_reassignEditExpr is set: swaps only the right-hand value in place.
-	void commitReassignInPlace(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawInitializerText);
+	void commitReassignInPlace(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops);
 	void clearLineToBlankStatement(DSLCodeLine& line); // the staged flows' final Backspace: line becomes a selected blank statement placeholder
 
 	// In-place expression editing (EditExpr/ReplaceOperator -- see the class comment).
@@ -511,9 +508,8 @@ private:
 	// declaration's/assignment's re-edit context restored, so the peel continues out through "bool test = |"
 	// and beyond exactly like every other value.
 	bool tryWidenComparisonValueEdit();
-	// EditExpr's confirm: splice/wrap/replace per m_edit* state. `rawVectorText` non-empty = a vector-typed
-	// slot's comma-separated components (pre-validated), replacing the occupant with a vecN literal.
-	void applyEditExpr(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops, const std::string& rawVectorText);
+	// EditExpr's confirm: splice/wrap/replace per m_edit* state.
+	void applyEditExpr(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops);
 	void writeSlot(const SlotRef& slot, DSLSymbol* newSymbol); // repoints the slot's owning field at newSymbol (never LineHead)
 	void repointSymbol(DSLCodeLine& line, DSLSymbol* oldSymbol, DSLSymbol* newSymbol); // every structural field in `line` pointing at oldSymbol -> newSymbol (chain unwrap)
 	// After any in-line structural edit: moves `originalHead` back to symbols.back() (the post-order convention,
@@ -713,8 +709,7 @@ private:
 	// m_forVarName), resolved to the real symbol via m_forBuildLoopVar at build time.
 	DSLType m_forVarType = DSLType::Void;
 	std::string m_forVarName;
-	std::string m_forVarInitRawText;        // vector components typed, if m_forVarType is a vector (see buildVectorLiteral)
-	PendingExprChain m_forVarInitChain;     // meaningful whenever m_forVarType isn't a vector
+	PendingExprChain m_forVarInitChain;
 	PendingExprChain m_forConditionLeftChain;
 	Candidate m_forConditionOpCandidate;    // keeps both .op and .label -- the label re-displays in the compose box on step-back
 	PendingExprChain m_forConditionValueChain;
