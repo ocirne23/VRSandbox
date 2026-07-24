@@ -217,7 +217,7 @@ namespace
 		const std::vector<std::unique_ptr<DSLSymbol>>& sidebar;
 		const std::vector<std::unique_ptr<DSLSymbol>>& builtins;
 		const ScriptBindings& bindings;
-		const std::vector<DSLComponentKind>& requiredComponents; // the FILE's "//@@require" set, parsed before any line
+		const std::vector<DSLType>& requiredComponents; // the FILE's "//@@require" set, parsed before any line
 		const std::vector<DSLDataField>& dataFields;             // the FILE's "//@@data" fields, parsed before any line
 		const std::vector<std::string>& eventNames;              // the FILE's "//@@event" names, parsed before any line
 
@@ -312,7 +312,7 @@ namespace
 		// "//@@require" set names its component -- the loader-side twin of receiverCandidates' editor gating.
 		bool checkMemberUsable(const std::string& ownerName, const std::string& memberName, const BindingMember& member)
 		{
-			if (member.requiredComponent != DSLComponentKind::None
+			if (member.requiredComponent != DSLType::Void
 				&& std::find(requiredComponents.begin(), requiredComponents.end(), member.requiredComponent) == requiredComponents.end())
 				return fail("'" + ownerName + "." + memberName + "' is used but its component isn't in the //@@require line");
 			return true;
@@ -908,7 +908,10 @@ bool ScriptLoader::save(DSL& document, const std::string& path, const std::strin
 	{
 		file << "//@@require ";
 		for (size_t i = 0; i < document.requiredComponents.size(); ++i)
-			file << (i > 0 ? ", " : "") << dslComponentKindName(document.requiredComponents[i]);
+		{
+			const char* name = Globals::scriptBindings.componentTypeName(document.requiredComponents[i]);
+			file << (i > 0 ? ", " : "") << (name != nullptr ? name : "?");
+		}
 		file << '\n';
 	}
 	for (const DSLDataField& field : document.dataFields)
@@ -948,7 +951,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	// components. Anything outside the block -- the future transpiled C++, ordinary "//" comments included --
 	// is ignored entirely.
 	std::vector<BlockLine> blockLines;
-	std::vector<DSLComponentKind> requiredComponents;
+	std::vector<DSLType> requiredComponents;
 	std::vector<DSLDataField> dataFields;
 	std::vector<std::string> eventNames;
 	{
@@ -974,7 +977,9 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 			}
 			if (raw.rfind("//@@require", 0) == 0)
 			{
-				// Comma-separated component kind names, matched against dslComponentKindName's spellings.
+				// Comma-separated component type names, matched against every registered component's own name
+				// (ScriptBindings::componentTypeByName) -- never a struct name, even though one might otherwise
+				// spell the same word, see its own comment.
 				std::string rest = raw.substr(11);
 				size_t start = 0;
 				while (start <= rest.size())
@@ -988,15 +993,10 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 					start = comma + 1;
 					if (name.empty())
 						continue;
-					bool matched = false;
-					for (int kind = 0; kind < static_cast<int>(DSLComponentKind::Count); ++kind)
-						if (name == dslComponentKindName(static_cast<DSLComponentKind>(kind)))
-						{
-							requiredComponents.push_back(static_cast<DSLComponentKind>(kind));
-							matched = true;
-						}
-					if (!matched)
+					const DSLType componentType = Globals::scriptBindings.componentTypeByName(name);
+					if (componentType == DSLType::Void)
 						return failAt(lineNo, "unknown component kind '" + name + "' in //@@require");
+					requiredComponents.push_back(componentType);
 				}
 				continue;
 			}

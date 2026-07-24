@@ -65,7 +65,7 @@ static bool isPrime(const ScriptContext* ctx, Entity* self, void* scriptData, in
 }
 
 //@@dsl 1
-//@@require Physics
+//@@require PhysicsComponent
 //@@data int num
 //@@event OnHit
 //@

@@ -82,10 +82,14 @@ import Core;
 
 export class DSLCodeLine;
 
-// A type is either one of the fixed builtin kinds below, or a DYNAMIC engine-defined struct: value
-// `FirstStruct + N` names entry N of the ScriptBindings struct registry (vec2/vec3/vec4 are the first three
-// table rows -- adding a new engine struct is one table row, no enum edit). Struct types carry members,
-// a positional constructor, and callable member functions, all defined by the registry.
+// A type is either one of the fixed builtin kinds below, or a DYNAMIC engine-defined struct or COMPONENT type:
+// value `FirstStruct + N` names entry N of the ScriptBindings struct registry (vec2/vec3/vec4 are the first
+// three table rows), `FirstComponentType + N` entry N of the component-type registry (e.g. PhysicsComponent/
+// AudioComponent/ForceComponent -- none hardcoded here; whichever library owns that engine component registers
+// its own type by name, see ScriptBindings::registerComponentType) -- adding a new one of either is one
+// registry call, no enum edit. Struct types carry members, a positional constructor, and callable member
+// functions; component types carry members/functions too, but no constructor/positional-call shape (a
+// component handle is FETCHED off its owning entity, e.g. self.physics, never constructed).
 export enum class DSLType : uint16
 {
 	Void,               // no value (a function with no return type)
@@ -96,15 +100,12 @@ export enum class DSLType : uint16
 	Function,           // reserved: a symbol whose value IS a function reference; unused by the current example
 	World,              // -- sidebar-bindable engine object kinds (never user-declarable; see
 	Entity,             //    dslIsEngineObjectType below and the ScriptBindings registry) --
-	PhysicsComponent,
-	AudioComponent,
-	ForceComponent,
 	// The document's OWN persistent per-instance data (self.data.*, see DSL::dataFields) -- a binding like the
-	// component kinds above (dotted into, never a value/declarable type -- dslIsEngineObjectType covers it too),
-	// but PER-DOCUMENT rather than a fixed ScriptBindings table row: self.data's own member ("data") is a real
-	// static BindingMember (ScriptBindings.cpp), while ITS members (the fields) are looked up against
-	// DSL::dataFields directly wherever a receiver of this type is resolved (ScriptLang.cpp's receiverCandidates,
-	// ScriptEditor's chain-building, ScriptLoader's dot-chain parser, Transpiler's memberText).
+	// registered component types above (dotted into, never a value/declarable type -- dslIsEngineObjectType
+	// covers it too), but PER-DOCUMENT rather than a registry row: self.data's own member ("data") is a real static
+	// BindingMember (ScriptBindings.cpp), while ITS members (the fields) are looked up against DSL::dataFields
+	// directly wherever a receiver of this type is resolved (ScriptLang.cpp's receiverCandidates, ScriptEditor's
+	// chain-building, ScriptLoader's dot-chain parser, Transpiler's memberText).
 	ScriptData,
 	// The document's OWN named On Event entries (self.events.<name>, see DSL::eventNames) -- same per-document
 	// binding pattern as ScriptData: self.events' own member ("events") is a real static BindingMember, while
@@ -119,24 +120,29 @@ export enum class DSLType : uint16
 	// that struct's FunctionDeclaration symbols; no DSLSymbol ever actually holds this value, so nothing else
 	// (dslTypeName, the transpiler, the editor) needs to know about it.
 	ThisBinding,
-	FirstStruct = 256,  // + struct registry index (see dslStructType/dslStructIndex)
+	FirstComponentType = 128, // + registered component-type index (see dslComponentType/dslComponentTypeIndex)
+	FirstStruct = 256,        // + struct registry index (see dslStructType/dslStructIndex)
 };
+
+export constexpr bool dslIsComponentType(DSLType type) { return type >= DSLType::FirstComponentType && type < DSLType::FirstStruct; }
+export constexpr int dslComponentTypeIndex(DSLType type) { return static_cast<int>(type) - static_cast<int>(DSLType::FirstComponentType); }
+export constexpr DSLType dslComponentType(int index) { return static_cast<DSLType>(static_cast<int>(DSLType::FirstComponentType) + index); }
 
 export constexpr bool dslIsStructType(DSLType type) { return type >= DSLType::FirstStruct; }
 export constexpr int dslStructIndex(DSLType type) { return static_cast<int>(type) - static_cast<int>(DSLType::FirstStruct); }
 export constexpr DSLType dslStructType(int index) { return static_cast<DSLType>(static_cast<int>(DSLType::FirstStruct) + index); }
 
 // Engine-object kinds are BINDINGS (dotted into for their members/functions), never values: excluded from
-// variable/reassign candidates, literal slots, and declarable types alike. ScriptData/ScriptEvents (self.data/
-// self.events) are included here too -- same binding-only treatment, even though neither has a
-// ScriptBindings::objectFor() row of its own (per-document instead); every objectFor() call on one of them
-// already handles "no match" gracefully (skip/continue), which is exactly the right behavior for a type
-// resolved elsewhere.
+// variable/reassign candidates, literal slots, and declarable types alike. World/Entity are the two ALWAYS
+// present; ScriptData/ScriptEvents (self.data/self.events) get the same binding-only treatment despite being
+// per-document rather than a ScriptBindings::objectFor() row of their own (every objectFor() call on one of
+// them already handles "no match" gracefully -- skip/continue -- which is exactly right for a type resolved
+// elsewhere); every DYNAMICALLY registered component type (dslIsComponentType -- e.g. PhysicsComponent/
+// AudioComponent/ForceComponent, none hardcoded here, see registerComponentType) is one too.
 export inline bool dslIsEngineObjectType(DSLType type)
 {
-	return type == DSLType::World || type == DSLType::Entity || type == DSLType::PhysicsComponent
-		|| type == DSLType::AudioComponent || type == DSLType::ForceComponent || type == DSLType::ScriptData
-		|| type == DSLType::ScriptEvents;
+	return type == DSLType::World || type == DSLType::Entity || type == DSLType::ScriptData
+		|| type == DSLType::ScriptEvents || dslIsComponentType(type);
 }
 
 // A type with further members/functions reachable by dotting into it -- an engine-defined STRUCT value
@@ -144,29 +150,6 @@ export inline bool dslIsEngineObjectType(DSLType type)
 // doesn't itself match a value slot is still offered as a dot-into WAYPOINT rather than excluded outright.
 export inline bool dslIsChainableType(DSLType type) { return dslIsStructType(type) || dslIsEngineObjectType(type); }
 
-// The component kinds a script can REQUIRE (see DSL::requiredComponents below) -- an editor-side mirror of the
-// scriptable subset of Entity's component types, deliberately not the engine's own EComponentID.
-export enum class DSLComponentKind : uint8
-{
-	Physics,
-	Audio,
-	Force,
-	Count,
-	None = Count, // sentinel: a binding that is always available (self / engine globals)
-};
-
-// The kind's serialized spelling (the .dsl "//@@require Physics, Audio" line) -- by-name so the enum can grow
-// without breaking saved files.
-export inline const char* dslComponentKindName(DSLComponentKind kind)
-{
-	switch (kind)
-	{
-	case DSLComponentKind::Physics: return "Physics";
-	case DSLComponentKind::Audio:   return "Audio";
-	case DSLComponentKind::Force:   return "Force";
-	default:                        return "?";
-	}
-}
 export enum class DSLFlowControl
 {
 	If,
@@ -498,11 +481,13 @@ public:
 	                                                  // exist here for stable identity -- requiredComponents below
 	                                                  // gates which are offered/legal, never which are built
 	DSLScriptFile file;
-	// The component kinds this script REQUIRES on its entity (authored via the sidebar panel's checkboxes,
-	// serialized as the .dsl "//@@require" line). Only required components' bindings appear in autocomplete --
-	// engine-side enforcement (a script only assignable to entities that have every component it required,
-	// making every component binding non-null by construction) is separate future work.
-	std::vector<DSLComponentKind> requiredComponents;
+	// The component TYPES this script REQUIRES on its entity (authored via the sidebar panel's checkboxes,
+	// serialized as the .dsl "//@@require" line, matched by name against ScriptBindings::componentTypeName) --
+	// always one of the DSLTypes ScriptBindings::registerComponentType assigned, never a struct or anything
+	// else. Only required components' bindings appear in autocomplete -- engine-side enforcement (a script only
+	// assignable to entities that have every component it required, making every component binding non-null by
+	// construction) is separate future work.
+	std::vector<DSLType> requiredComponents;
 	// This script's persistent per-instance data fields, reachable in the body as self.data.<name> -- Transpiler
 	// emits them as a real "struct ScriptData { ... };" (+ ScriptDataSize()/REGISTER_SCRIPT_DATA_SIZE()) that
 	// self.data casts the host's zeroed scriptData block to. Insertion order (append on add, like
@@ -515,9 +500,9 @@ public:
 	std::vector<std::string> eventNames;
 };
 
-export inline bool dslIsComponentRequired(const DSL& document, DSLComponentKind kind)
+export inline bool dslIsComponentRequired(const DSL& document, DSLType componentType)
 {
-	return std::find(document.requiredComponents.begin(), document.requiredComponents.end(), kind)
+	return std::find(document.requiredComponents.begin(), document.requiredComponents.end(), componentType)
 		!= document.requiredComponents.end();
 }
 

@@ -5786,7 +5786,7 @@ void ScriptEditor::renderSidebarPanel()
 				const BindingObject* nested = m_bindings.objectFor(member.type);
 				if (nested == nullptr)
 					continue;
-				if (member.requiredComponent != DSLComponentKind::None)
+				if (member.requiredComponent != DSLType::Void)
 				{
 					bool checkboxValue = dslIsComponentRequired(m_document, member.requiredComponent);
 					if (ImGui::Checkbox((std::string("##req_") + member.name).c_str(), &checkboxValue))

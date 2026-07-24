@@ -9,22 +9,23 @@ const char* dslTypeName(DSLType type)
 	// Struct types are dynamic -- their spelling lives in the registry (see DSLType::FirstStruct).
 	if (const BindingStruct* structDef = Globals::scriptBindings.structFor(type); structDef != nullptr)
 		return structDef->name;
+	// So are registered component types (e.g. PhysicsComponent/AudioComponent/ForceComponent, none hardcoded
+	// here -- see DSLType::FirstComponentType).
+	if (const char* componentName = Globals::scriptBindings.componentTypeName(type); componentName != nullptr)
+		return componentName;
 	switch (type)
 	{
-	case DSLType::Void:             return "void";
-	case DSLType::Int:              return "int";
-	case DSLType::Float:            return "float";
-	case DSLType::String:          return "string";
-	case DSLType::Bool:             return "bool";
-	case DSLType::Function:         return "function";
-	case DSLType::World:            return "World";
-	case DSLType::Entity:           return "Entity";
-	case DSLType::PhysicsComponent: return "PhysicsComponent";
-	case DSLType::AudioComponent:   return "AudioComponent";
-	case DSLType::ForceComponent:   return "ForceComponent";
-	case DSLType::ScriptData:       return "ScriptData";
-	case DSLType::ScriptEvents:     return "ScriptEvents";
-	default:                        return "?";
+	case DSLType::Void:         return "void";
+	case DSLType::Int:          return "int";
+	case DSLType::Float:        return "float";
+	case DSLType::String:      return "string";
+	case DSLType::Bool:         return "bool";
+	case DSLType::Function:     return "function";
+	case DSLType::World:        return "World";
+	case DSLType::Entity:       return "Entity";
+	case DSLType::ScriptData:   return "ScriptData";
+	case DSLType::ScriptEvents: return "ScriptEvents";
+	default:                    return "?";
 	}
 }
 
@@ -900,7 +901,7 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 	}
 	for (const BindingMember& member : *members)
 	{
-		if (member.requiredComponent != DSLComponentKind::None && !dslIsComponentRequired(document, member.requiredComponent))
+		if (member.requiredComponent != DSLType::Void && !dslIsComponentRequired(document, member.requiredComponent))
 			continue;
 		// Value contexts type-filter (chainable members always pass, as dot-into waypoints toward a matching
 		// leaf); a STATEMENT context offers WRITABLE members (the lead-in of a member-assignment, `v.x = ...`)

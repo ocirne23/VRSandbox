@@ -33,6 +33,24 @@ void ScriptBindings::registerObject(BindingObject def) const
 	m_objectDefs.push_back(std::move(def));
 }
 
+DSLType ScriptBindings::registerComponentType(const char* memberName, const char* typeName, const char* memberEmit) const
+{
+	ensureBuiltinsRegistered();
+	const DSLType type = dslComponentType(static_cast<int>(m_componentTypeNames.size()));
+	m_componentTypeNames.push_back(typeName);
+	// self always exists by now (ensureBuiltinsRegistered registers it before this ever runs, built-in seeding
+	// included -- see the .ixx declaration) -- appended to IN PLACE, not re-registered, so every OTHER caller's
+	// earlier self.<member>s survive. The member's own gate IS `type` itself (see DSL::requiredComponents) --
+	// there's nothing else it could sensibly be.
+	for (BindingObject& object : m_objectDefs)
+		if (object.name != nullptr && std::string_view(object.name) == "self")
+		{
+			object.members.push_back({ memberName, type, memberEmit, /*writable*/ false, /*requiredComponent*/ type });
+			break;
+		}
+	return type;
+}
+
 void ScriptBindings::registerEntryPoint(EntryPointDef def) const
 {
 	ensureBuiltinsRegistered();
@@ -45,6 +63,15 @@ DSLType ScriptBindings::typeByName(const std::string& name) const
 	for (size_t i = 0; i < m_structDefs.size(); ++i)
 		if (name == m_structDefs[i].name)
 			return dslStructType(static_cast<int>(i));
+	return componentTypeByName(name);
+}
+
+DSLType ScriptBindings::componentTypeByName(const std::string& name) const
+{
+	ensureBuiltinsRegistered();
+	for (size_t i = 0; i < m_componentTypeNames.size(); ++i)
+		if (name == m_componentTypeNames[i])
+			return dslComponentType(static_cast<int>(i));
 	return DSLType::Void;
 }
 
@@ -52,7 +79,9 @@ DSLType ScriptBindings::typeByName(const std::string& name) const
 // row (their self-referential member/function types spell DSLType::ThisBinding instead -- see structFor's
 // callers and the DSL.ixx comment), but `vec3` is referenced well beyond it (self.pos, physics component
 // functions, several Engine functions below), so its registerStruct return value is captured locally and reused
-// throughout.
+// throughout -- same for the three registerComponentType calls (physics/audio/force): each ALSO exposes itself
+// as a self member as part of that one call (see the .ixx declaration), so the return value only needs
+// capturing here for the component's OWN BindingObject `type` field just below.
 void ScriptBindings::ensureBuiltinsRegistered() const
 {
 	if (m_builtinsRegistered)
@@ -108,8 +137,10 @@ void ScriptBindings::ensureBuiltinsRegistered() const
 	// node). Entries needing DSL-side Entity VALUES (spawnEntity returning one) stay deferred until Entity
 	// becomes a first-class value.
 
-	// physics/audio/force are NOT sidebar-top-level -- they're reached only through self's own members below
-	// (self.physics.applyImpulse(...)), never as a bare "physics" identifier.
+	// self registers FIRST, with only what's fixed/always-present -- functions, the real "pos" field, and the
+	// two per-document bindings (data/events). Component members (physics/audio/force below) attach to it
+	// AFTER, through registerComponentType, exactly the same way an external library's own component would --
+	// there's no special-cased "self" literal anywhere past this point.
 	registerObject({ "self", T::Entity, /*sidebarTopLevel*/ true,
 		{
 			{ "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "ctx->entitySetEnabled($r, $1)" },
@@ -120,10 +151,7 @@ void ScriptBindings::ensureBuiltinsRegistered() const
 			{ "getBoundsRadius",T::Float, {},                                               "ctx->entityGetBoundsRadius($r)" },
 		},
 		{
-			{ "pos",     vec3,                "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
-			{ "physics", T::PhysicsComponent, "ctx->entityGetPhysicsComponent($r)", /*writable*/ false, DSLComponentKind::Physics },
-			{ "audio",   T::AudioComponent,   "ctx->entityGetAudioComponent($r)",   /*writable*/ false, DSLComponentKind::Audio },
-			{ "force",   T::ForceComponent,   "ctx->entityGetForceComponent($r)",   /*writable*/ false, DSLComponentKind::Force },
+			{ "pos",     vec3,        "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
 			// "$r" is unused (no $r/$N marker) -- scriptData is a real parameter of EVERY generated function
 			// (see Transpiler::emitFunction), never derived from the receiver expression. Dereferenced (not
 			// just cast) so self.data.<field> reads through "." like any other value member, matching pos's
@@ -136,7 +164,14 @@ void ScriptBindings::ensureBuiltinsRegistered() const
 			// DSL::eventNames, not this table.
 			{ "events",  T::ScriptEvents,      "$r",                          /*writable*/ false },
 		} });
-	registerObject({ "physics", T::PhysicsComponent, /*sidebarTopLevel*/ false,
+
+	// physics/audio/force are NOT sidebar-top-level -- they're reached only through self.<memberName> above
+	// (self.physics.applyImpulse(...)), never as a bare "physics" identifier.
+	const DSLType physicsKind = registerComponentType("physics", "PhysicsComponent", "ctx->entityGetPhysicsComponent($r)");
+	const DSLType audioKind = registerComponentType("audio", "AudioComponent", "ctx->entityGetAudioComponent($r)");
+	const DSLType forceKind = registerComponentType("force", "ForceComponent", "ctx->entityGetForceComponent($r)");
+
+	registerObject({ "physics", physicsKind, /*sidebarTopLevel*/ false,
 		{
 			{ "getVelocity",  vec3,   {},                                          "ctx->physicsGetVelocity($r)" },
 			{ "setVelocity",  T::Void, { { "velocity", vec3 } },                   "ctx->physicsSetVelocity($r, $1)" },
@@ -145,7 +180,7 @@ void ScriptBindings::ensureBuiltinsRegistered() const
 			{ "teleport",     T::Void, { { "position", vec3 }, { "eulerDeg", vec3 } }, "ctx->physicsTeleport($r, $1, $2)" },
 		},
 		{} });
-	registerObject({ "audio", T::AudioComponent, /*sidebarTopLevel*/ false,
+	registerObject({ "audio", audioKind, /*sidebarTopLevel*/ false,
 		{
 			// audioTrigger's full ABI takes an override mask + position/volume/pitch; the DSL's one-arg
 			// trigger(alias) always plays unmodified (mask 0, defaults ignored by the host in that case).
@@ -153,7 +188,7 @@ void ScriptBindings::ensureBuiltinsRegistered() const
 			{ "stop",    T::Void, { { "alias", T::String } }, "ctx->audioStop($r, $1)" },
 		},
 		{} });
-	registerObject({ "force", T::ForceComponent, /*sidebarTopLevel*/ false,
+	registerObject({ "force", forceKind, /*sidebarTopLevel*/ false,
 		{
 			{ "getOutput",   T::Float, {},                          "ctx->forceGetOutput($r)" },
 			{ "setOutput",   T::Void,  { { "output", T::Float } },  "ctx->forceSetOutput($r, $1)" },
@@ -298,6 +333,16 @@ const BindingMember* ScriptBindings::findMember(DSLType receiverType, const std:
 		if (name == member.name)
 			return &member;
 	return nullptr;
+}
+
+const char* ScriptBindings::componentTypeName(DSLType type) const
+{
+	if (!dslIsComponentType(type))
+		return nullptr;
+	const int index = dslComponentTypeIndex(type);
+	if (index < 0 || index >= static_cast<int>(m_componentTypeNames.size()))
+		return nullptr;
+	return m_componentTypeNames[index];
 }
 
 std::span<const BindingStruct> ScriptBindings::structs() const
