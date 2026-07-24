@@ -218,6 +218,20 @@ void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
     {
         scriptDataSize = scriptModule->dataSize;
         scriptData = scriptDataSize ? std::make_unique<uint8[]>(scriptDataSize) : nullptr;
+
+        // Required-component pointers (//@@require) occupy the FRONT of ScriptData, one 8-byte slot per set bit
+        // in ascending EComponentID order (see ScriptRequiredComponentsFn in ScriptAPI.h) -- filled straight off
+        // getComponent<T>() here, engine-side, so self.physics/audio/force (Transpiler's "scriptData-><name>"
+        // emit) read an already-resolved pointer instead of re-fetching the handle on every access. Field order
+        // here MUST match the generated ScriptData struct's own field order (see Transpiler.cpp) -- components
+        // never move once spawned (fixed inline layout), so this only needs doing once, alongside (re)allocation.
+        if (scriptData && scriptModule->requiredComponents)
+        {
+            void** slot = reinterpret_cast<void**>(scriptData.get());
+            if (scriptModule->requiredComponents & (1u << EComponentID_Physics)) *slot++ = getComponent<PhysicsComponent>(&entity);
+            if (scriptModule->requiredComponents & (1u << EComponentID_Audio))   *slot++ = getComponent<AudioComponent>(&entity);
+            if (scriptModule->requiredComponents & (1u << EComponentID_Force))   *slot++ = getComponent<ForceComponent>(&entity);
+        }
     }
 
     if (scriptModule->onEvent)

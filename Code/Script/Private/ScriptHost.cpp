@@ -244,7 +244,7 @@ bool ScriptHost::compile(const std::string& sourcePath, const fs::path& pdbPath,
     std::string bat;
     bat += "@echo off\r\n";
     bat += "call \"" + vcvars + "\" >nul 2>&1\r\n";
-    bat += "cl /nologo /LD /std:c++20 /MD /Od /Zi /EHsc /arch:AVX2 /wd4100 /DSCRIPT_BUILD"; // /wd4100: unused params; /DSCRIPT_BUILD: Entity is the layout mirror
+    bat += "cl /nologo /LD /std:c++20 /Zc:preprocessor /MD /Od /Zi /EHsc /arch:AVX2 /wd4100 /DSCRIPT_BUILD"; // /wd4100: unused params; /DSCRIPT_BUILD: Entity is the layout mirror; /Zc:preprocessor: the conformant preprocessor ScriptCtxMacros.h's variadic-arity dispatch needs (the main engine build gets it implicitly via the VS project settings, this standalone cl invocation does not)
     bat += " /I\"" + includeDir.string() + "\"";
     bat += " /I\"" + glmInclude.string() + "\""; // ScriptAPI.h includes <glm/glm.hpp> (Vec3 = glm::vec3)
     bat += " /FI\"" + (includeDir / "ScriptAPI.h").string() + "\""; // the .scr is body-only; force-include the ABI header (also cooked into the App-Scripts aggregate)
@@ -309,6 +309,9 @@ bool ScriptHost::loadDll(CachedScript& slot, const fs::path& dll)
     slot.entries.dataSize = 0;
     if (auto sizeFn = (uint32(*)())GetProcAddress(m, "ScriptDataSize"))
         slot.entries.dataSize = sizeFn();
+    slot.entries.requiredComponents = 0;
+    if (auto reqFn = (uint32(*)())GetProcAddress(m, "ScriptRequiredComponents"))
+        slot.entries.requiredComponents = reqFn();
 
     const auto oldEventNames = std::move(slot.entries.eventNames);
 
@@ -351,6 +354,7 @@ const ScriptModule* ScriptHost::getOrLoad(const std::string& path, bool forceRec
         slot.entries.onEvent        = e->fns[VR_SCRIPT_ON_EVENT];
         slot.entries.onPhysicsEvent = e->fns[VR_SCRIPT_ON_PHYSICS_EVENT];
         slot.entries.dataSize       = e->fns[VR_SCRIPT_DATA_SIZE] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_DATA_SIZE])() : 0;
+        slot.entries.requiredComponents = e->fns[VR_SCRIPT_REQUIRED_COMPONENTS] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_REQUIRED_COMPONENTS])() : 0;
         slot.entries.eventNames.clear();
         if (void* ec = e->fns[VR_SCRIPT_EVENT_COUNT]; ec && e->fns[VR_SCRIPT_EVENT_NAME])
         {

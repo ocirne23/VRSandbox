@@ -92,29 +92,31 @@ void registerScriptDslBindings()
             { "pos",     vec3,        "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
             { "scale",   T::Float,    "$r->scale" },
             { "rot",     quat,        "$r->rot" },
-            { "data",    T::ScriptData,        "(*(ScriptData*)scriptData)", /*writable*/ false },
+            { "data",    T::ScriptData,        "(*scriptData)", /*writable*/ false },
             { "events",  T::ScriptEvents,      "$r",                         /*writable*/ false }, // special case in transpiler
         } });
 
-    const DSLType physicsKind = bindings.registerComponentType("physics", "PhysicsComponent", "ctx->entityGetPhysicsComponent($r)");
-    const DSLType audioKind = bindings.registerComponentType("audio", "AudioComponent", "ctx->entityGetAudioComponent($r)");
-    const DSLType forceKind = bindings.registerComponentType("force", "ForceComponent", "ctx->entityGetForceComponent($r)");
-    bindings.registerObject({ "physics", physicsKind, /*sidebarTopLevel*/ false,
+    const DSLType physicsType = bindings.registerComponentType("physics", "PhysicsComponent", EComponentID_Physics);
+    bindings.registerObject({ "physics", physicsType, /*sidebarTopLevel*/ false,
         {
-            { "getVelocity",  vec3,   {},                                          "ctx->physicsGetVelocity($r)" },
-            { "setVelocity",  T::Void, { { "velocity", vec3 } },                   "ctx->physicsSetVelocity($r, $1)" },
-            { "applyImpulse", T::Void, { { "impulse", vec3 } },                    "ctx->physicsApplyImpulse($r, $1)" },
-            { "isAwake",      T::Bool, {},                                          "(ctx->physicsIsAwake($r) != 0)" },
+            { "getVelocity",  vec3,   {},                                              "ctx->physicsGetVelocity($r)" },
+            { "setVelocity",  T::Void, { { "velocity", vec3 } },                       "ctx->physicsSetVelocity($r, $1)" },
+            { "applyImpulse", T::Void, { { "impulse", vec3 } },                        "ctx->physicsApplyImpulse($r, $1)" },
+            { "isAwake",      T::Bool, {},                                             "(ctx->physicsIsAwake($r) != 0)" },
             { "teleport",     T::Void, { { "position", vec3 }, { "eulerDeg", vec3 } }, "ctx->physicsTeleport($r, $1, $2)" },
         },
         {} });
-    bindings.registerObject({ "audio", audioKind, /*sidebarTopLevel*/ false,
+
+    const DSLType audioType = bindings.registerComponentType("audio", "AudioComponent", EComponentID_Audio);
+    bindings.registerObject({ "audio", audioType, /*sidebarTopLevel*/ false,
         {
             { "trigger", T::Void, { { "alias", T::String } }, "ctx->audioTrigger($r, self, $1, 0, glm::vec3(0.0f), 1.0f, 1.0f)" },
             { "stop",    T::Void, { { "alias", T::String } }, "ctx->audioStop($r, $1)" },
         },
         {} });
-    bindings.registerObject({ "force", forceKind, /*sidebarTopLevel*/ false,
+
+    const DSLType forceType = bindings.registerComponentType("force", "ForceComponent", EComponentID_Force);
+    bindings.registerObject({ "force", forceType, /*sidebarTopLevel*/ false,
         {
             { "getOutput",   T::Float, {},                          "ctx->forceGetOutput($r)" },
             { "setOutput",   T::Void,  { { "output", T::Float } },  "ctx->forceSetOutput($r, $1)" },
@@ -136,11 +138,16 @@ void registerScriptDslBindings()
         },
         {} });
 
-    bindings.registerEntryPoint({ "OnSpawn",         {},                                            ", void* scriptData", "REGISTER_ON_SPAWN()" });
-    bindings.registerEntryPoint({ "OnDestroy",       {},                                            ", void* scriptData", "REGISTER_ON_DESTROY()" });
-    bindings.registerEntryPoint({ "Update",          { { "deltaSeconds", T::Float } },              ", float deltaSeconds, void* scriptData", "REGISTER_UPDATE()" });
-    bindings.registerEntryPoint({ "OnEvent",         { { "eventIdx", T::Int } },                    ", int eventIdx, void* scriptData", "REGISTER_ON_EVENT()" });
-    bindings.registerEntryPoint({ "OnPhysicsEvent",  { { "begin", T::Int }, { "sensor", T::Int } }, ", Entity* other, int begin, int sensor, long long contactId, void* scriptData", "REGISTER_ON_PHYSICS_EVENT()" });
+    // cppSuffix's trailing "ScriptData* scriptData" is the GENERATED file's own concrete type (declared earlier
+    // in that same file) -- the real ABI typedefs (ScriptOnSpawnFn etc., ScriptAPI.h) still take "void*", since
+    // they're shared across every script and ScriptData's layout differs per script. The host only ever calls
+    // these through a reinterpret_cast to those typedefs, so the two need not textually match -- both are
+    // simple pointer-sized parameters, identical at the ABI/calling-convention level.
+    bindings.registerEntryPoint({ "OnSpawn",         {},                                            ", ScriptData* scriptData", "REGISTER_ON_SPAWN()" });
+    bindings.registerEntryPoint({ "OnDestroy",       {},                                            ", ScriptData* scriptData", "REGISTER_ON_DESTROY()" });
+    bindings.registerEntryPoint({ "Update",          { { "deltaSeconds", T::Float } },              ", float deltaSeconds, ScriptData* scriptData", "REGISTER_UPDATE()" });
+    bindings.registerEntryPoint({ "OnEvent",         { { "eventIdx", T::Int } },                    ", int eventIdx, ScriptData* scriptData", "REGISTER_ON_EVENT()" });
+    bindings.registerEntryPoint({ "OnPhysicsEvent",  { { "begin", T::Int }, { "sensor", T::Int } }, ", Entity* other, int begin, int sensor, long long contactId, ScriptData* scriptData", "REGISTER_ON_PHYSICS_EVENT()" });
 }
 
 #pragma warning(push)
@@ -377,14 +384,30 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     // ---- physics component ----
     void* thunk_entityGetPhysicsComponent(Entity* en) { return physicsOf(en); }
 
-    int thunk_physicsIsAwake(void* p) { PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); return (pc && pc->body.isAwake()) ? 1 : 0; }
-    glm::vec3 thunk_physicsGetVelocity(void* p) { PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); return pc ? pc->body.getLinearVelocity() : glm::vec3(0.0f); }
-    void thunk_physicsSetVelocity(void* p, glm::vec3 v) { if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p)) pc->body.setLinearVelocity(v); }
-    void thunk_physicsApplyImpulse(void* p, glm::vec3 v) { if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p)) pc->body.applyImpulse(v); }
+    int thunk_physicsIsAwake(void* p) 
+    { 
+        return static_cast<PhysicsComponent*>(p)->body.isAwake() ? 1 : 0;
+    }
+
+    glm::vec3 thunk_physicsGetVelocity(void* p) 
+    { 
+        return static_cast<PhysicsComponent*>(p)->body.getLinearVelocity(); 
+    }
+
+    void thunk_physicsSetVelocity(void* p, glm::vec3 v) 
+    { 
+        static_cast<PhysicsComponent*>(p)->body.setLinearVelocity(v); 
+    }
+
+    void thunk_physicsApplyImpulse(void* p, glm::vec3 v) 
+    { 
+        static_cast<PhysicsComponent*>(p)->body.applyImpulse(v); 
+    }
+
     void thunk_physicsTeleport(void* p, glm::vec3 position, glm::vec3 eulerDeg)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        if (!pc || pc->bodyType != EPhysicsBodyType::Dynamic)
+        if (pc->bodyType != EPhysicsBodyType::Dynamic)
             return; // kinematic/static bodies follow the entity; move those through the Entity mirror
         pc->body.setTransform(position, glm::quat(glm::radians(eulerDeg)));
     }

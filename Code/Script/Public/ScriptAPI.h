@@ -27,6 +27,14 @@ class Entity;
 #endif
 struct Camera; // engine render camera; only the host-only update() below touches it (scripts never see it)
 
+// Opaque component handles: forward-declared only, never dereferenced by generated script code (always passed
+// through to the matching ctx->component*() thunks, which take void* -- an object pointer converts to void*
+// implicitly, so no cast is needed at the call site). Lets ScriptData (see ScriptDataInitFn) cache a typed
+// pointer per required component instead of a bare void*, with no layout to keep in sync on either side.
+class PhysicsComponent;
+class AudioComponent;
+class ForceComponent;
+
 #pragma warning(push)
 #pragma warning(disable: 4190) // has C-linkage specified, but returns 'glm::vec<3,float,glm::packed_highp>' which is incompatible with..
 
@@ -160,6 +168,15 @@ typedef const char*  (*ScriptEventNameFn)(int eventIdx);
 typedef void         (*ScriptOnPhysicsEventFn)(const ScriptContext*, Entity* self, Entity* other, int begin, int sensor, long long contactId, void* scriptData);
 typedef unsigned int (*ScriptDataSizeFn)(void);
 
+// Optional export: which components the script requires (see //@@require), as an EComponentID bitmask
+// (Code/Entity/Private/EntityDef.ixx -- Script has no visibility into that enum, so this is just a plain
+// uint32 here). The host allocates one 8-byte pointer slot per set bit at the FRONT of ScriptData, in
+// ascending bit order, and fills each straight off getComponent<T>() right after allocating the block, before
+// OnSpawn runs -- so self.physics/audio/force (their emit is "scriptData-><name>", see
+// ScriptBindings::registerComponentType) always read an already-resolved pointer instead of re-fetching the
+// handle on every access. Absent (or 0) means the script requires no components.
+typedef unsigned int (*ScriptRequiredComponentsFn)(void);
+
 #ifdef __cplusplus
 }
 #endif
@@ -174,6 +191,7 @@ enum VrScriptEntryKind
     VR_SCRIPT_ON_EVENT,
     VR_SCRIPT_ON_PHYSICS_EVENT,
     VR_SCRIPT_DATA_SIZE,
+    VR_SCRIPT_REQUIRED_COMPONENTS,
     VR_SCRIPT_EVENT_COUNT,
     VR_SCRIPT_EVENT_NAME,
     VR_SCRIPT_ENTRY_COUNT
@@ -201,6 +219,7 @@ void vrRegisterScriptEntry(const char* scriptPath, int kind, void* fn);
 #define REGISTER_ON_DESTROY()        static const int _vrRegOnDestroy = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_DESTROY,      (void*)&OnDestroy), 0);
 #define REGISTER_ON_PHYSICS_EVENT()  static const int _vrRegOnPhys    = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_PHYSICS_EVENT,(void*)&OnPhysicsEvent), 0);
 #define REGISTER_SCRIPT_DATA_SIZE()  static const int _vrRegDataSize  = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_SIZE,       (void*)&ScriptDataSize), 0);
+#define REGISTER_SCRIPT_REQUIRED_COMPONENTS() static const int _vrRegReqComp = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_REQUIRED_COMPONENTS, (void*)&ScriptRequiredComponents), 0);
 #define REGISTER_ON_EVENT()          static const int _vrRegOnEvent   = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_EVENT,        (void*)&OnEvent), \
                                                                         vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_EVENT_COUNT,     (void*)&ScriptEventCount), \
                                                                         vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_EVENT_NAME,      (void*)&ScriptEventName), 0);
@@ -210,5 +229,6 @@ void vrRegisterScriptEntry(const char* scriptPath, int kind, void* fn);
 #define REGISTER_ON_DESTROY()
 #define REGISTER_ON_PHYSICS_EVENT()
 #define REGISTER_SCRIPT_DATA_SIZE()
+#define REGISTER_SCRIPT_REQUIRED_COMPONENTS()
 #define REGISTER_ON_EVENT()
 #endif

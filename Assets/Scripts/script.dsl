@@ -2,33 +2,37 @@
 
 struct ScriptData
 {
+	PhysicsComponent* physics;
 	int num = 0;
 };
 
 SCRIPT_EXPORT unsigned int ScriptDataSize(void) { return sizeof(ScriptData); }
 REGISTER_SCRIPT_DATA_SIZE()
 
-SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData);
-SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scriptData);
-SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData);
-SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, void* scriptData);
-static bool isPrime(const ScriptContext* ctx, Entity* self, void* scriptData, int n);
+SCRIPT_EXPORT unsigned int ScriptRequiredComponents(void) { return (1u << 3); }
+REGISTER_SCRIPT_REQUIRED_COMPONENTS()
 
-SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, void* scriptData)
+SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* scriptData);
+SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, ScriptData* scriptData);
+SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, ScriptData* scriptData);
+SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, ScriptData* scriptData);
+static bool isPrime(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int n);
+
+SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* scriptData)
 {
 	ctx->log("OnSpawn dsl");
 }
 
 REGISTER_ON_SPAWN()
 
-SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, void* scriptData)
+SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, ScriptData* scriptData)
 {
 	ctx->log("OnDestroy dsl");
 }
 
 REGISTER_ON_DESTROY()
 
-SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, void* scriptData)
+SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, ScriptData* scriptData)
 {
 	if (eventIdx == 0)
 	{
@@ -48,18 +52,18 @@ SCRIPT_EXPORT const char* ScriptEventName(int eventIdx)
 
 REGISTER_ON_EVENT()
 
-SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, void* scriptData)
+SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, ScriptData* scriptData)
 {
-	for (int i = 0; i < (*(ScriptData*)scriptData).num; i += 1)
+	for (int i = 0; i < (*scriptData).num; i += 1)
 	{
-		ctx->physicsSetVelocity(ctx->entityGetPhysicsComponent(self), glm::vec3(0.0f, 1.0f, 0.0f));
+		ctx->physicsSetVelocity(scriptData->physics, glm::vec3(0.0f, 1.0f, 0.0f));
 	}
 	isPrime(ctx, self, scriptData, 4);
 }
 
 REGISTER_UPDATE()
 
-static bool isPrime(const ScriptContext* ctx, Entity* self, void* scriptData, int n)
+static bool isPrime(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int n)
 {
 	return false;
 }

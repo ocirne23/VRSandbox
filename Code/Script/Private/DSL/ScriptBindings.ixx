@@ -13,10 +13,11 @@ import :DSL;
 // auto-injected as every generated function's first two parameters (invisible to the DSL author), so a
 // binding's `emit` template can reference them directly ("$r" = the receiver's own emitted expression, "$1..$n"
 // = arguments): self's own functions/members call straight through the real ctx-> thunks (e.g.
-// "ctx->entitySetEnabled($r, $1)"), and a component member (self.physics) resolves to the raw handle-fetch
-// expression itself ("ctx->entityGetPhysicsComponent($r)") -- re-fetched at each use, no caching. A script
-// declares which components it requires (DSL::requiredComponents); assignment-time validation (future work)
-// guarantees required members are never null.
+// "ctx->entitySetEnabled($r, $1)"), while a component member (self.physics) resolves to "scriptData-><name>" --
+// a pointer the HOST caches once, engine-side, right after allocating ScriptData (see ScriptRequiredComponentsFn
+// in ScriptAPI.h and ScriptComponent::spawn), not a per-access ctx-> fetch. A script declares which components
+// it requires (DSL::requiredComponents); assignment-time validation (future work) guarantees required members
+// are never null.
 //
 // EXTENSIBLE: registerStruct/registerObject/registerEntryPoint are public, so any library can expose its own
 // script bindings -- this registry has NO built-in content of its own (not even vec2/3/4 or self): every DSLType
@@ -60,8 +61,10 @@ export struct BindingMember
 {
 	const char* name;
 	DSLType type;
-	const char* emit;     // e.g. "$r->pos" (a real field) or "ctx->entityGetPhysicsComponent($r)" (a handle
-	                       // fetch) -- "$r" is the receiver's own emitted expression
+	std::string emit;     // e.g. "$r->pos" (a real field) or "scriptData->physics" (a host-cached pointer, see
+	                       // registerComponentType) -- "$r" is the receiver's own emitted expression; a
+	                       // std::string (not a literal-only const char*) since registerComponentType computes
+	                       // this one from the member name rather than taking it from the caller
 	bool writable = true; // false = read-only in the DSL (no `x.member = ...` statements)
 	// Void = always available; else this member (e.g. self.physics) is only offered/legal while the script
 	// requires this component -- always the member's OWN type for a registerComponentType member (see there),
@@ -134,11 +137,16 @@ public:
 	// call-from-anywhere/any-time guarantee as registerStruct.
 	void registerObject(BindingObject def);
 	// Registers one COMPONENT TYPE (e.g. "PhysicsComponent") -- returns the DSLType it's assigned AND, in the
-	// SAME call, exposes it as self.<memberName> (writable=false always -- a component handle is FETCHED off
-	// its owning entity, never assigned; gated by the returned type itself, see DSL::requiredComponents -- a
-	// component member is only offered/legal while the script requires it, so the gate and the member's own
-	// type are always the same value, never a separate parameter to keep in sync). Everything reachable off
-	// self/Entity is a component by construction: there is no separate step that patches self's own member
+	// SAME call, exposes it as self.<memberName>, emit "scriptData-><memberName>" (writable=false always -- a
+	// component handle is a HOST-cached pointer, never assigned; gated by the returned type itself, see
+	// DSL::requiredComponents -- a component member is only offered/legal while the script requires it, so the
+	// gate and the member's own type are always the same value, never a separate parameter to keep in sync).
+	// `componentBit` is the engine's own EComponentID bit for this component (Script has no visibility into
+	// that enum -- Entity's registerScriptDslBindings passes it as a plain int); it's what
+	// ScriptRequiredComponentsFn's bitmask is built from and what orders ScriptData's cached-pointer fields
+	// (see componentBit() below and Transpiler.cpp) -- MUST match the bit the engine itself scans in
+	// ScriptComponent::spawn, since neither side can see the other's ordering otherwise. Everything reachable
+	// off self/Entity is a component by construction: there is no separate step that patches self's own member
 	// list, so an external library registering its own component type (e.g. Particle exposing self.particle)
 	// never touches -- or even needs to know about -- self's registration, which the caller (Entity's
 	// registerScriptDslBindings) already guaranteed ran before this call. The returned type is also usable as
@@ -146,7 +154,7 @@ public:
 	// functions, reachable only by dotting through self.physics, matching the sidebarTopLevel=false pattern --
 	// with no positional-call shape to it (unlike registerStruct), since a component is fetched, never
 	// constructed.
-	DSLType registerComponentType(const char* memberName, const char* typeName, const char* memberEmit);
+	DSLType registerComponentType(const char* memberName, const char* typeName, int componentBit);
 	// Registers one toggleable ScriptAPI entry point (see EntryPointDef) -- same guarantee.
 	void registerEntryPoint(EntryPointDef def);
 
@@ -186,6 +194,10 @@ public:
 	// `type`'s registered name (nullptr if `type` isn't a registered component type) -- the reverse of
 	// registerComponentType/typeByName, what dslTypeName renders a component-type DSLType as.
 	const char* componentTypeName(DSLType type) const;
+	// `type`'s registered EComponentID bit (-1 if `type` isn't a registered component type) -- what
+	// Transpiler.cpp sorts ScriptData's required-component fields by and folds into ScriptRequiredComponents'
+	// bitmask; see registerComponentType.
+	int componentBit(DSLType type) const;
 
 	// ---- structs ----
 	std::span<const BindingStruct> structs() const; // every struct registered so far, in registration order
@@ -222,6 +234,7 @@ private:
 	std::vector<BindingStruct> m_structDefs;
 	std::vector<BindingObject> m_objectDefs;
 	std::vector<const char*> m_componentTypeNames; // index N = DSLType dslComponentType(N)
+	std::vector<int> m_componentBits;              // parallel to m_componentTypeNames -- the EComponentID bit
 	std::vector<EntryPointDef> m_entryPointDefs;
 
 	// Symbols built from the above by build() -- called once, well after every registration that should be

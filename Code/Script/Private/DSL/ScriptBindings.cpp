@@ -31,17 +31,20 @@ void ScriptBindings::registerObject(BindingObject def)
 	m_objectDefs.push_back(std::move(def));
 }
 
-DSLType ScriptBindings::registerComponentType(const char* memberName, const char* typeName, const char* memberEmit)
+DSLType ScriptBindings::registerComponentType(const char* memberName, const char* typeName, int componentBit)
 {
 	const DSLType type = dslComponentType(static_cast<int>(m_componentTypeNames.size()));
 	m_componentTypeNames.push_back(typeName);
+	m_componentBits.push_back(componentBit);
 	// self must already be registered by now (guaranteed by the caller -- see Entity's registerScriptDslBindings)
 	// -- appended to IN PLACE, not re-registered, so every OTHER caller's earlier self.<member>s survive. The
-	// member's own gate IS `type` itself (see DSL::requiredComponents) -- there's nothing else it could sensibly be.
+	// member's own gate IS `type` itself (see DSL::requiredComponents) -- there's nothing else it could sensibly
+	// be. The emit is purely mechanical ("scriptData->" + the member's own name) -- see the .ixx declaration for
+	// why there's no per-call fetch expression anymore: the host caches the pointer itself.
 	for (BindingObject& object : m_objectDefs)
 		if (object.name != nullptr && std::string_view(object.name) == "self")
 		{
-			object.members.push_back({ memberName, type, memberEmit, /*writable*/ false, /*requiredComponent*/ type });
+			object.members.push_back({ memberName, type, "scriptData->" + std::string(memberName), /*writable*/ false, /*requiredComponent*/ type });
 			break;
 		}
 	return type;
@@ -186,6 +189,16 @@ const char* ScriptBindings::componentTypeName(DSLType type) const
 	if (index < 0 || index >= static_cast<int>(m_componentTypeNames.size()))
 		return nullptr;
 	return m_componentTypeNames[index];
+}
+
+int ScriptBindings::componentBit(DSLType type) const
+{
+	if (!dslIsComponentType(type))
+		return -1;
+	const int index = dslComponentTypeIndex(type);
+	if (index < 0 || index >= static_cast<int>(m_componentBits.size()))
+		return -1;
+	return m_componentBits[index];
 }
 
 std::span<const BindingStruct> ScriptBindings::structs() const
