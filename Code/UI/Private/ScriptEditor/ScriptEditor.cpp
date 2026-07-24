@@ -509,8 +509,13 @@ void ScriptEditor::refreshCandidates()
 	{
 		if (m_editSlot.line == nullptr)
 			return;
-		// Same self-reference exclusion as re-editing a declaration's initializer via the old slot path.
-		DSLSymbol* excludeVariable = (m_editSlot.kind == SlotRef::Kind::VariableDeclarationInitialValue) ? m_editSlot.parent : nullptr;
+		// Self-reference exclusion: a VariableDeclaration line holds nothing but its own initializer tree, so
+		// whenever this edit's line is headed by one -- whether editing the initializer directly
+		// (VariableDeclarationInitialValue) or some value nested arbitrarily deep inside it (a call argument, a
+		// chain operand, ...) -- it's the SAME declaration this edit ultimately belongs to, and its own name
+		// can't appear as one of its own candidates ("int a = test(int n = |a|)" must never resolve to itself).
+		DSLSymbol* editLineHead = m_editSlot.line->head();
+		DSLSymbol* excludeVariable = (editLineHead != nullptr && editLineHead->type == ST::VariableDeclaration) ? editLineHead : nullptr;
 		m_candidates = (m_editValueType == DSLType::Void)
 			? AutoCompleteRules::candidatesForAnyValue(*m_editSlot.line, m_document.file, m_document.sidebar, m_builtins, m_pendingWord, excludeVariable)
 			: AutoCompleteRules::candidatesFor(m_editValueType, *m_editSlot.line, m_document.file, m_document.sidebar, m_builtins, m_pendingWord, excludeVariable, /*offerComparisonLeads*/ true);
