@@ -85,7 +85,8 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 	// DSLType::ThisBinding in `returnType`/a param's type to the struct's own concrete type -- Void everywhere
 	// else, where no BindingFunc ever spells ThisBinding.
 	auto buildFunction = [&](const char* name, DSLType returnType, const std::vector<BindingParam>& params,
-		const char* emit, bool requiresReceiver, bool isPositionalCall, DSLType selfType = DSLType::Void) -> DSLSymbol*
+		const char* emit, bool requiresReceiver, bool isPositionalCall, DSLType selfType = DSLType::Void,
+		bool isVariadic = false) -> DSLSymbol*
 	{
 		const auto resolveSelf = [selfType](DSLType t) { return t == DSLType::ThisBinding ? selfType : t; };
 		std::vector<DSLSymbol*> built;
@@ -96,7 +97,7 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 				DSLSymbol::VariableDeclaration{ param.name, paramType, nullptr, param.isRef }));
 		}
 		DSLSymbol* funcSymbol = addSymbol(builtinsOut, ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{
-			name, std::move(built), resolveSelf(returnType), requiresReceiver, isPositionalCall });
+			name, std::move(built), resolveSelf(returnType), requiresReceiver, isPositionalCall, isVariadic });
 		m_emits.emplace_back(funcSymbol, emit);
 		return funcSymbol;
 	};
@@ -111,7 +112,7 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 			def.constructorEmit, /*requiresReceiver*/ false, /*isPositionalCall*/ true, selfType);
 		for (const BindingFunc& func : def.functions)
 			built.functionSymbols.push_back(buildFunction(func.name, func.returnType, func.params, func.emit,
-				/*requiresReceiver*/ true, func.isPositionalCall, selfType));
+				/*requiresReceiver*/ true, func.isPositionalCall, selfType, func.isVariadic));
 	}
 
 	for (const BindingObject& object : m_objectDefs)
@@ -125,7 +126,7 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 		}
 		for (const BindingFunc& func : object.functions)
 			built.functionSymbols.push_back(buildFunction(func.name, func.returnType, func.params, func.emit,
-				/*requiresReceiver*/ object.name != nullptr, func.isPositionalCall));
+				/*requiresReceiver*/ object.name != nullptr, func.isPositionalCall, DSLType::Void, func.isVariadic));
 	}
 }
 

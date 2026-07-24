@@ -81,20 +81,31 @@ void registerScriptDslBindings()
         } });
     bindings.registerObject({ "self", T::Entity, /*sidebarTopLevel*/ true,
         {
+            // Entity is the DSL's one nullable type -- `self.parent` has no parent at the root, `scene.getChild`
+            // can be out of range. `exists()` is the shorthand for the `!= null` comparison (both spellings are
+            // offered; see Candidate::Kind::KeywordNull). Trivially true on `self` itself, which costs nothing.
+            { "exists",         T::Bool,  {},                                                "($r != nullptr)" },
             { "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "ctx->entitySetEnabled($r, $1)" },
-            { "setAnimFloat",   T::Void,  { { "param", T::String }, { "value", T::Float } }, "ctx->entitySetAnimFloat($r, $1, $2)" },
-            { "setAnimBool",    T::Void,  { { "param", T::String }, { "value", T::Bool } },  "ctx->entitySetAnimBool($r, $1, $2)" },
-            { "setAnimTrigger", T::Void,  { { "param", T::String } },                        "ctx->entitySetAnimTrigger($r, $1)" },
-            { "getChildCount",  T::Int,   {},                                                "ctx->entityGetChildCount($r)" },
-            { "getBoundsRadius",T::Float, {},                                                "ctx->entityGetBoundsRadius($r)" },
         },
         {
             { "pos",     vec3,        "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
             { "scale",   T::Float,    "$r->scale" },
             { "rot",     quat,        "$r->rot" },
+            { "parent",  T::Entity,   "$r->parent", /*writable*/ false },
             { "data",    T::ScriptData,        "(*scriptData)", /*writable*/ false },
             { "events",  T::ScriptEvents,      "$r",                         /*writable*/ false }, // special case in transpiler
         } });
+
+    const DSLType sceneType = bindings.registerComponentType("scene", "SceneComponent", EComponentID_Scene);
+    bindings.registerObject({ "scene", sceneType, /*sidebarTopLevel*/ false,
+        {
+            { "getNumChildren", T::Int,    {},                      ""},
+            { "getChild",       T::Entity, {{ "index", T::Int }},     ""},
+            { "removeChildIdx", T::Void,   {{ "index", T::Int }},     ""},
+            { "removeChild",    T::Void,   {{ "entity", T::Entity }}, ""},
+            { "addChild",       T::Void,   {{ "entity", T::Entity }}, ""},
+        },
+        {} });
 
     const DSLType physicsType = bindings.registerComponentType("physics", "PhysicsComponent", EComponentID_Physics);
     bindings.registerObject({ "physics", physicsType, /*sidebarTopLevel*/ false,
@@ -130,6 +141,10 @@ void registerScriptDslBindings()
     bindings.registerObject({ nullptr, T::Void, /*sidebarTopLevel*/ false,
         {
             { "print",           T::Void,  { { "message", T::String } },                                     "ctx->log($1)" }, // one plain string -- no {}-interpolation yet
+            // printf-style formatting: the format string, then any number of values ("$*" expands the tail,
+            // comma-prefixed, so a zero-vararg call still emits valid C++). The DSL doesn't check the format
+            // against the arguments -- same "author's responsibility" stance the rest of the ABI takes.
+            { "printf",          T::Void,  { { "format", T::String } },                                     "ctx->logf($1$*)", /*isPositionalCall*/ false, /*isVariadic*/ true },
             { "rayCast",         T::Float, { { "pos", vec3 }, { "dir", vec3 }, { "maxRayDist", T::Float } }, "ctx->physicsRayCastDistance($1, $2, $3)" },
             { "isKeyDown",       T::Bool,  { { "keyName", T::String } },                                     "(ctx->isKeyDown($1) != 0)" },
             { "sendEvent",       T::Void,  { { "eventName", T::String } },                                   "ctx->sendEvent($1)" },

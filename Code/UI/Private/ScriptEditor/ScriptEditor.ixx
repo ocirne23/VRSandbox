@@ -478,6 +478,14 @@ private:
 	// ScriptBindings registry (m_bindings.findMember). The ONE lookup every chain-walking site shares
 	// (restoreMemberPath, buildReceiverChain, the MemberSelect Backspace-peel walk, reassignTargetType).
 	DSLType resolveMemberType(DSLType receiverType, const std::string& name) const;
+	// Whether the member chain CURRENTLY walked in MemberSelect (m_memberReceiver + m_memberPath) is assignable
+	// through -- false as soon as any hop is a read-only member, since everything reachable through one is
+	// read-only too (`self.parent.pos = ...` would mutate an object the script only has read access to). What
+	// receiverCandidates' `receiverWritable` gets, so a member under such a path is never offered as an
+	// assignment lead-in (and its Candidate::memberWritable comes back false, which is what confirmCompose's
+	// statement-context branch refuses on). self.data is the deliberate exception -- see resolveMemberType's
+	// own ScriptData note and receiverCandidates.
+	bool isMemberPathWritable() const;
 	// The value constraints of the CURRENT compose stage -- what a MemberSelect entered from it filters
 	// receiver candidates by (Void + !anyValue = statement context). Mirrors refreshCandidates' per-mode logic.
 	DSLType valueContextExpectedType(ComposeMode mode, bool& outAnyValue) const;
@@ -497,6 +505,12 @@ private:
 	DSLSymbol* buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbol* receiverDecl, const std::string& receiverPath,
 		const std::vector<PendingExprChain>& argChains, DSLCodeLine& line); // shared by commitCallStatement and call-term builds
 	void restoreTermIntoBox(PendingExprTerm&& term); // back into the live compose: groups/resolved calls as the pending term, plain candidates as typed text
+	// A restored term that IS a member access reopens in MemberSelect (the stage that authored it) rather than
+	// as an inert resolved term: its last path segment becomes the typed word, the rest the receiver path. Only
+	// that state can be continued -- '.' needs typed text plus a live candidate list, and MemberSelect's own
+	// Backspace ladder is what peels a chain apart segment by segment. False = not a member term; the caller
+	// falls back to restoreTermIntoBox. Switches m_composeMode, which is why enterChainStage re-checks it.
+	bool tryRestoreMemberTermIntoMemberSelect(const PendingExprTerm& term);
 	std::string forVarPrefix() const;       // "for <type> <name> = " -- before the loop var's own initial value
 	std::string forVarDeclPrefix() const;   // forVarPrefix() + the resolved initial value -- the whole loop-var clause
 	std::string forConditionPrefix() const; // forVarDeclPrefix() + ", <name> <op> <value>" -- the whole condition clause too

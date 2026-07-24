@@ -53,8 +53,14 @@ export struct BindingFunc
 	const char* name;
 	DSLType returnType;
 	std::vector<BindingParam> params;
-	const char* emit;               // "$r" = the receiver's own emitted expression (empty for a free/Engine call), "$1..$n" = args
+	const char* emit;               // "$r" = the receiver's own emitted expression (empty for a free/Engine call),
+	                                 // "$1..$9" = args, "$*" = the variadic tail (see isVariadic)
 	bool isPositionalCall = false;  // terse constructors (vec2/3/4): call sites render positionally
+	// C varargs (printf): the declared params, then zero or more extra arguments of any value type. "$*" in
+	// `emit` expands to those extras, each preceded by ", " (empty when there are none), so a template reads
+	// "ctx->logf($1$*)" -- valid with or without a tail. See DSLSymbol::FunctionDeclaration::isVariadic for
+	// what it means downstream.
+	bool isVariadic = false;
 };
 
 export struct BindingMember

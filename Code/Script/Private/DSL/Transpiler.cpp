@@ -22,7 +22,8 @@ namespace
 		case DSLType::Float:   return "float";
 		case DSLType::Bool:    return "bool";
 		case DSLType::String:  return "const char*";
-		default:               return "/* unsupported DSLType */ void*"; // engine-object kinds never declare values
+		case DSLType::Entity:  return "Entity*"; // the ABI mirror struct (ScriptAPI.h) -- always by pointer, and nullable
+		default:               return "/* unsupported DSLType */ void*"; // the other engine-object kinds never declare values
 		}
 	}
 
@@ -38,6 +39,7 @@ namespace
 		case DSLType::Float:  return "0.0f";
 		case DSLType::Bool:   return "false";
 		case DSLType::String: return "\"\"";
+		case DSLType::Entity: return "nullptr";
 		default:              return "0";
 		}
 	}
@@ -86,13 +88,16 @@ namespace
 			{
 			case DSLType::Float:  return floatLiteral(c.value);
 			case DSLType::String: return "\"" + c.value + "\""; // content stored unquoted, no escapes in the DSL
+			case DSLType::Entity: return "nullptr";             // the ONLY Entity constant is `null` (see KeywordNull)
 			default:              return c.value;               // Int/Bool exactly as authored
 			}
 		}
 
-		// "$r" -> the receiver's emitted expression, "$1".."$9" -> the argument in that CALLEE-parameter position.
+		// "$r" -> the receiver's emitted expression, "$1".."$9" -> the argument in that CALLEE-parameter position,
+		// "$*" -> a VARIADIC callee's extra arguments, each preceded by ", " (nothing at all when there are none,
+		// so "ctx->logf($1$*)" is valid with or without a tail -- see BindingFunc::isVariadic).
 		static std::string substituteTemplate(const char* emitTemplate, const std::string& receiverName,
-			const std::vector<std::string>& args)
+			const std::vector<std::string>& args, const std::vector<std::string>& varargs = {})
 		{
 			std::string result;
 			for (const char* p = emitTemplate; *p != '\0'; ++p)
@@ -100,6 +105,13 @@ namespace
 				if (*p == '$' && p[1] == 'r')
 				{
 					result += receiverName;
+					++p;
+					continue;
+				}
+				if (*p == '$' && p[1] == '*')
+				{
+					for (const std::string& extra : varargs)
+						result += ", " + extra;
 					++p;
 					continue;
 				}
@@ -145,7 +157,12 @@ namespace
 				// "ctx->entityGetPhysicsComponent(self)", or a chained member access like "self.pos"), so emit
 				// templates compose textually.
 				const std::string receiverName = (call.receiver != nullptr) ? expressionText(call.receiver) : std::string();
-				return substituteTemplate(emitTemplate, receiverName, args);
+				// A variadic callee's extras sit past its declared parameters (always positional, so `args` holds
+				// them at their own indices) and reach the template through "$*" instead of "$1".."$9".
+				std::vector<std::string> varargs;
+				if (callee.isVariadic && args.size() > callee.parameterVarDeclarations.size())
+					varargs.assign(args.begin() + callee.parameterVarDeclarations.size(), args.end());
+				return substituteTemplate(emitTemplate, receiverName, args, varargs);
 			}
 
 			// A user function: ctx/self/scriptData are auto-threaded through exactly like the callee's own

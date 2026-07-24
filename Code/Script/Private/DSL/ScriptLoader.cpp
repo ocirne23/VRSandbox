@@ -375,11 +375,16 @@ namespace
 			DSLSymbol* left = parseArithmetic(t.subspan(0, splits[0]), line, DSLType::Void);
 			if (left == nullptr)
 				return nullptr;
-			DSLSymbol* right = parseArithmetic(t.subspan(splits[0] + 1), line, dslValueType(left));
+			const DSLType leftType = dslValueType(left);
+			DSLSymbol* right = parseArithmetic(t.subspan(splits[0] + 1), line, leftType);
 			if (right == nullptr)
 				return nullptr;
 			DSLOperator op = DSLOperator::Equal;
 			operatorFromText(t[splits[0]].text, op);
+			// Engine objects compare by identity / against null only -- the loader-side twin of the editor
+			// narrowing its comparison-operator list (AutoCompleteRules::isEqualityOnlyType).
+			if (AutoCompleteRules::isEqualityOnlyType(leftType) && op != DSLOperator::Equal && op != DSLOperator::NotEqual)
+				return failValue("'" + std::string(dslOperatorText(op)) + "' can't compare " + std::string(dslTypeName(leftType)) + " values");
 			return push(line, ST::Expression, DSLSymbol::Expression{ { left, right }, { op } });
 		}
 
@@ -452,6 +457,15 @@ namespace
 				{
 					if (first.text == "true" || first.text == "false")
 						return push(line, ST::Constant, DSLSymbol::Constant{ DSLType::Bool, first.text });
+					// The one Entity constant (see Candidate::Kind::KeywordNull) -- legal only where an Entity
+					// is expected, so a stray "null" in a numeric/string slot fails instead of silently typing
+					// itself as one.
+					if (first.text == "null")
+					{
+						if (expected != DSLType::Entity && expected != DSLType::Void)
+							return failValue("'null' is only valid where an Entity is expected");
+						return push(line, ST::Constant, DSLSymbol::Constant{ DSLType::Entity, "null" });
+					}
 					DSLSymbol* decl = findVariable(first.text);
 					if (decl == nullptr)
 						return failValue("unknown identifier '" + first.text + "'");
@@ -707,7 +721,10 @@ namespace
 					const BindingMember* member = bindings.findMember(targetType, memberName);
 					if (member == nullptr)
 						return failValue("no member '" + memberName + "' to assign to");
-					if (i + 2 > opAt && !member->writable)
+					// Every hop must be writable, not just the last: everything reachable through a read-only
+					// member is read-only too ("self.parent.pos = ..." would mutate an object the script only
+					// has read access to). self.data is the exception, handled by its own branch above.
+					if (!member->writable)
 						return failValue("member '" + memberName + "' is read-only");
 					if (!checkMemberUsable(ownerName, memberName, *member))
 						return nullptr;

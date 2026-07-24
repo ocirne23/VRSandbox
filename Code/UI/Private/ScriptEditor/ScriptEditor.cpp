@@ -129,6 +129,8 @@ namespace
 			return candidate.declareType;
 		if (candidate.kind == Candidate::Kind::KeywordTrue || candidate.kind == Candidate::Kind::KeywordFalse)
 			return DSLType::Bool;
+		if (candidate.kind == Candidate::Kind::KeywordNull)
+			return DSLType::Entity; // the DSL's one nullable type -- see Candidate::Kind::KeywordNull
 		if (candidate.kind == Candidate::Kind::Member)
 			return candidate.declareType; // the member's own registry-stamped type (see receiverCandidates)
 		return DSLType::Void;
@@ -138,8 +140,12 @@ namespace
 	// arguments stage through the CallArgValue sub-flow (never with placeholder arguments).
 	bool isParameterizedFunction(const Candidate& candidate)
 	{
-		return candidate.kind == Candidate::Kind::Function && candidate.refSymbol != nullptr
-			&& !std::get<DSLSymbol::FunctionDeclaration>(candidate.refSymbol->data).parameterVarDeclarations.empty();
+		if (candidate.kind != Candidate::Kind::Function || candidate.refSymbol == nullptr)
+			return false;
+		const DSLSymbol::FunctionDeclaration& f = std::get<DSLSymbol::FunctionDeclaration>(candidate.refSymbol->data);
+		// A variadic callee stages even with no declared parameters -- its argument list is still authored one
+		// argument at a time, just closed by ')' rather than by a count.
+		return !f.parameterVarDeclarations.empty() || f.isVariadic;
 	}
 
 	// The element type a chain of pending terms evaluates in -- the first resolvable term's type (groups
@@ -490,8 +496,12 @@ void ScriptEditor::refreshCandidates()
 	if (m_composeMode == ComposeMode::ReplaceOperator)
 	{
 		// Same class as the operator being replaced -- a `+` can become `*`, an `&&` an `||`, never a `<=`.
-		const DSLOperator current = std::get<DSLSymbol::Expression>(m_replaceOpExpr->data).operators[m_replaceOpIndex];
-		m_candidates = dslIsComparisonOperator(current) ? AutoCompleteRules::comparisonOperatorCandidates(m_pendingWord)
+		const DSLSymbol::Expression& replaceChain = std::get<DSLSymbol::Expression>(m_replaceOpExpr->data);
+		const DSLOperator current = replaceChain.operators[m_replaceOpIndex];
+		// A comparison's operand type narrows the swap set the same way authoring it did (Entity: == / != only).
+		const bool equalityOnly = m_replaceOpIndex < static_cast<int>(replaceChain.operands.size())
+			&& AutoCompleteRules::isEqualityOnlyType(dslValueType(replaceChain.operands[m_replaceOpIndex]));
+		m_candidates = dslIsComparisonOperator(current) ? AutoCompleteRules::comparisonOperatorCandidates(m_pendingWord, equalityOnly)
 			: dslIsAssignOperator(current) ? AutoCompleteRules::assignOperatorCandidates(m_pendingWord)
 			: dslIsLogicalOperator(current) ? AutoCompleteRules::logicalOperatorCandidates(m_pendingWord)
 			: AutoCompleteRules::arithmeticOperatorCandidates(m_pendingWord);
@@ -501,7 +511,7 @@ void ScriptEditor::refreshCandidates()
 	if (m_composeMode == ComposeMode::MemberSelect)
 	{
 		m_candidates = AutoCompleteRules::receiverCandidates(m_bindings, m_document, m_memberReceiver, m_memberReceiverType,
-			m_memberExpectedType, m_memberAnyValue, m_pendingWord);
+			m_memberExpectedType, m_memberAnyValue, isMemberPathWritable(), m_pendingWord);
 		m_candidateSelected = 0;
 		return;
 	}
@@ -573,7 +583,10 @@ void ScriptEditor::refreshCandidates()
 		break;
 	}
 	case ComposeMode::ConditionOp:
-		m_candidates = AutoCompleteRules::comparisonOperatorCandidates(m_pendingWord);
+		// An Entity left side compares by identity/against null only -- no ordering operators (see
+		// isEqualityOnlyType).
+		m_candidates = AutoCompleteRules::comparisonOperatorCandidates(m_pendingWord,
+			AutoCompleteRules::isEqualityOnlyType(chainElementType(m_conditionLeftChain.terms)));
 		break;
 	case ComposeMode::ConditionRight:
 		// Constrained to the left side's own type -- `height <= "hi"` isn't a sensible comparison.
@@ -633,12 +646,18 @@ void ScriptEditor::refreshCandidates()
 		// uses (see m_callStack), and dotting into a struct-typed value works too. excludeVariable matters once
 		// this call is a re-edit of an already-committed declaration's initializer (see callArgExcludeVariable) --
 		// a brand-new declare's own name never appears here regardless, since it isn't a real symbol yet.
-		m_candidates = AutoCompleteRules::candidatesFor(currentCallParamType(), atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord, callArgExcludeVariable());
+		// A variadic tail slot (Void, see currentCallParamType) takes any value, literals included -- there's no
+		// declared parameter to type it against, which is exactly printf's point.
+		const DSLType paramType = currentCallParamType();
+		m_candidates = (paramType == DSLType::Void)
+			? AutoCompleteRules::candidatesForAnyValue(atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord, callArgExcludeVariable(), /*offerLiterals*/ true)
+			: AutoCompleteRules::candidatesFor(paramType, atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord, callArgExcludeVariable());
 		// A `ref` parameter receives the callee's OUTPUT -- only an actual variable can stand there, never a
 		// nested call/compound expression, so those (and dot-into waypoints) are excluded for it specifically.
 		const CallStage& stage = m_callStack.back();
 		const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(stage.func->data);
-		if (std::get<DSLSymbol::VariableDeclaration>(callee.parameterVarDeclarations[stage.argChains.size()]->data).isRef)
+		if (stage.argChains.size() < callee.parameterVarDeclarations.size()
+			&& std::get<DSLSymbol::VariableDeclaration>(callee.parameterVarDeclarations[stage.argChains.size()]->data).isRef)
 			std::erase_if(m_candidates, [](const Candidate& c) { return c.kind != Candidate::Kind::Variable; });
 		break;
 	}
@@ -665,9 +684,11 @@ void ScriptEditor::refreshCandidates()
 	case ComposeMode::CallArgValue:
 	{
 		// Same ref-parameter exclusion as the erase above -- a `ref` slot only ever accepts a bare Variable.
+		// A variadic tail slot has no declaration to check, and never refuses them.
 		const CallStage& stage = m_callStack.back();
 		const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(stage.func->data);
-		if (!std::get<DSLSymbol::VariableDeclaration>(callee.parameterVarDeclarations[stage.argChains.size()]->data).isRef)
+		if (stage.argChains.size() >= callee.parameterVarDeclarations.size()
+			|| !std::get<DSLSymbol::VariableDeclaration>(callee.parameterVarDeclarations[stage.argChains.size()]->data).isRef)
 			appendBindingObjects();
 		break;
 	}
@@ -828,23 +849,21 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		const ComposeMode back = m_memberReturnMode;
 		const bool statementContext = back == ComposeMode::FilterCandidates;
 
-		// Completes the CURRENTLY-TYPED SEGMENT ("phy" -> "physics") to the picked candidate's own bare name --
-		// NOT candidateDisplayText/tryCompleteCandidateOnSpace, which render the FULL receiver-prefixed text
-		// ("self.physics") and would double up against m_composePrefix's own "self." lead-in. What lets
-		// Space/Enter turn "self.phy" into "self.physics" instead of silently doing nothing when the candidate
-		// can't resolve as a bare value/statement yet (see the two refusal sites below) -- '.' (or further
-		// typing) continues the chain from there.
-		auto completeSegment = [&]()
+		// A PARTIALLY-typed segment completes and STAYS in MemberSelect ("self.par" -> "self.parent"), one
+		// keystroke doing exactly one thing: the chain can then keep going ('.' needs both typed text and a
+		// live candidate list, see handleKeyEvent) and the NEXT confirm resolves it. Completing to the
+		// candidate's own bare name -- not candidateDisplayText, which renders the full receiver-prefixed
+		// "self.parent" and would double up against m_composePrefix's own "self." lead-in.
+		// Nothing left to complete (already spelled out in full, or an untouched default/arrow-navigated pick)
+		// means the confirm IS the deliberate "use this one" gesture, and falls through to resolve below.
+		if (!m_pendingWord.empty() && m_pendingWord != picked->label)
 		{
-			if (!m_pendingWord.empty() && m_pendingWord != picked->label)
-			{
-				m_pendingWord = picked->label;
-				refreshCandidates();
-			}
-		};
+			m_pendingWord = picked->label;
+			refreshCandidates();
+			return;
+		}
 
-		if (picked->kind == Candidate::Kind::Function
-			&& !std::get<DSLSymbol::FunctionDeclaration>(picked->refSymbol->data).parameterVarDeclarations.empty())
+		if (isParameterizedFunction(*picked))
 		{
 			// Stage the dot-call's arguments -- completion commits the line (statement) or returns the
 			// resolved term to the suspended chain (value), commitCallStatement's two existing paths. The
@@ -888,11 +907,10 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 				// A non-writable, chainable member (self.physics) has no bare statement form of its own -- it
 				// must keep dotting toward an actual call ('.' extends it, same refusal as the value-context
 				// waypoint case below); confirming it here would otherwise stage a bogus "physics = ..." assign.
+				// The segment is already complete by now (see the completion step above), so there's nothing
+				// left for this keystroke to do.
 				if (!picked->memberWritable)
-				{
-					completeSegment();
 					return;
-				}
 				// A writable member as an assignment TARGET: stage `root.path = value` through the Reassign
 				// flow ('=' authored; compound member assigns are a later nicety).
 				m_reassignTarget = m_memberReceiver;
@@ -922,13 +940,11 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		}
 
 		// Value context: a chainable member that doesn't MATCH the slot's type is only a waypoint -- it must
-		// keep dotting toward a matching leaf ('.' extends it), never deliver as the value itself.
+		// keep dotting toward a matching leaf ('.' extends it), never deliver as the value itself. Already
+		// completed above, so like the statement-context refusal there's nothing more to do here.
 		if (chosen.kind == Candidate::Kind::Member && !m_memberAnyValue && m_memberExpectedType != DSLType::Void
 			&& chosen.declareType != m_memberExpectedType)
-		{
-			completeSegment();
 			return;
-		}
 
 		// The member / zero-argument dot-call becomes an already-resolved pending term of the suspended chain
 		// compose -- exactly commitCallStatement's value-branch delivery.
@@ -942,6 +958,12 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		m_exprHasPendingGroup = true;
 		m_candidates.clear(); // nothing is being typed right after the resolved term -- operators continue it
 		m_composePrefix = exprBasePrefix() + exprComposePrefixFromStack();
+		// The resolved term IS this stage's operand, so the same keystroke advances the resumed stage too --
+		// landing on whatever comes next (a comparison's operator picker, the next call argument) instead of
+		// parking on an empty candidate list that needs a second confirm to get past. Safe to re-enter: the
+		// compose has fully transitioned to `back` by now, and with the candidate list cleared the re-entered
+		// call takes the plain "resolve the pending term" path rather than looping back into MemberSelect.
+		confirmCompose(allowCommit);
 		return;
 	}
 
@@ -1146,8 +1168,15 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		// anywhere else (see m_callStack).
 		CallStage& stage = m_callStack.back();
 		const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(stage.func->data);
-		if (!allowCommit && stage.returnMode == ComposeMode::None
-			&& stage.argChains.size() + 1 == callee.parameterVarDeclarations.size())
+		const size_t declaredCount = callee.parameterVarDeclarations.size();
+		// Past the declared parameters = composing a variadic callee's tail: no declaration to type/ref-check
+		// against, and no count that ends the list -- only ')' or Enter (allowCommit) closes one.
+		const bool inVarargs = callee.isVariadic && stage.argChains.size() >= declaredCount;
+
+		// A fixed-arity call STATEMENT's LAST argument commits the whole line, so Space stops short of it. A
+		// variadic one has no known last argument, so the guard can't apply -- Space just moves to the next slot.
+		if (!allowCommit && stage.returnMode == ComposeMode::None && !callee.isVariadic
+			&& stage.argChains.size() + 1 == declaredCount)
 		{
 			tryResolveCandidateOnSpace(); // can't commit the call (Enter/')' only) -- but Space can still resolve this argument's highlighted term
 			return; // a call STATEMENT's final argument commits the line -- Enter/')' only; a call VALUE just resolves a term
@@ -1156,19 +1185,31 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		std::vector<PendingExprTerm> terms;
 		std::vector<DSLOperator> ops;
 		if (!exprTryFinalize(terms, ops) || terms.empty())
-			return; // open paren, dangling operator, or nothing typed -- keep composing until valid
-		const DSLSymbol::VariableDeclaration& param = std::get<DSLSymbol::VariableDeclaration>(
-			callee.parameterVarDeclarations[stage.argChains.size()]->data);
-		const DSLType paramType = std::get<DSLSymbol::TypeDeclaration>(param.typeSymbol->data).type;
-		if (param.isRef && (terms.size() != 1 || !ops.empty() || terms[0].isGroup || !terms[0].callArgs.empty()
-			|| terms[0].candidate.kind != Candidate::Kind::Variable))
-			return; // a `ref` parameter receives the callee's OUTPUT -- only a bare existing variable, never a
-			         // compound expression or a nested call result
-		if (paramType == DSLType::Bool && containsNonBoolTerm(terms))
-			return; // a numeric comparison lead isn't a bool value -- type a comparator to continue
+		{
+			// Closing a variadic list on an EMPTY slot is how it ends -- zero varargs, or a ')' right after the
+			// last one. Every declared parameter already has a value by then (inVarargs implies it).
+			if (allowCommit && inVarargs)
+				commitCallStatement();
+			return; // otherwise: open paren, dangling operator, or nothing typed -- keep composing until valid
+		}
+		if (!inVarargs)
+		{
+			const DSLSymbol::VariableDeclaration& param = std::get<DSLSymbol::VariableDeclaration>(
+				callee.parameterVarDeclarations[stage.argChains.size()]->data);
+			const DSLType paramType = std::get<DSLSymbol::TypeDeclaration>(param.typeSymbol->data).type;
+			if (param.isRef && (terms.size() != 1 || !ops.empty() || terms[0].isGroup || !terms[0].callArgs.empty()
+				|| terms[0].candidate.kind != Candidate::Kind::Variable))
+				return; // a `ref` parameter receives the callee's OUTPUT -- only a bare existing variable, never a
+				         // compound expression or a nested call result
+			if (paramType == DSLType::Bool && containsNonBoolTerm(terms))
+				return; // a numeric comparison lead isn't a bool value -- type a comparator to continue
+		}
 
 		stage.argChains.push_back(PendingExprChain{ std::move(terms), std::move(ops) });
-		if (stage.argChains.size() == callee.parameterVarDeclarations.size())
+		// Fixed arity completes on its own count; a variadic list needs the closing gesture, which may be the
+		// very keystroke that just resolved this argument (")" straight after typing it).
+		if (callee.isVariadic ? (allowCommit && stage.argChains.size() >= declaredCount)
+			: stage.argChains.size() == declaredCount)
 			commitCallStatement();
 		else
 		{
@@ -1579,8 +1620,7 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		}
 	}
 
-	if (chosen.kind == Candidate::Kind::Function
-		&& !std::get<DSLSymbol::FunctionDeclaration>(chosen.refSymbol->data).parameterVarDeclarations.empty())
+	if (isParameterizedFunction(chosen))
 	{
 		// A parameterized call statement stages every argument before anything commits (CallArgValue) --
 		// the reason value-candidate lists exclude parameterized functions entirely (see addFunctionCandidates).
@@ -1639,6 +1679,9 @@ DSLSymbol* ScriptEditor::buildValueFromCandidate(const Candidate& candidate, DSL
 		return pushSymbol(line, ST::Constant, DSLSymbol::Constant{ DSLType::Bool, "true" });
 	case Candidate::Kind::KeywordFalse:
 		return pushSymbol(line, ST::Constant, DSLSymbol::Constant{ DSLType::Bool, "false" });
+	case Candidate::Kind::KeywordNull:
+		// Stored as the DSL spelling; Transpiler's constantText maps an Entity constant to "nullptr".
+		return pushSymbol(line, ST::Constant, DSLSymbol::Constant{ DSLType::Entity, "null" });
 	case Candidate::Kind::Variable:
 		// A null refSymbol is the SENTINEL loop variable of a for-loop still being staged (its symbol doesn't
 		// exist until commitForStatement builds it, then rides in via m_forBuildLoopVar).
@@ -1796,7 +1839,8 @@ std::string ScriptEditor::exprTermText(const PendingExprTerm& term) const
 			{
 				if (i > 0)
 					text += ", ";
-				if (!callee.isPositionalCall)
+				// Variadic extras sit past the declared parameters and show as bare positional values.
+				if (!callee.isPositionalCall && i < callee.parameterVarDeclarations.size())
 				{
 					const DSLSymbol::VariableDeclaration& param = std::get<DSLSymbol::VariableDeclaration>(callee.parameterVarDeclarations[i]->data);
 					if (param.isRef)
@@ -2020,12 +2064,43 @@ void ScriptEditor::restoreChainIntoCompose(const PendingExprChain& chain)
 	restoreTermIntoBox(std::move(last));
 }
 
+// See the declaration in ScriptEditor.ixx.
+bool ScriptEditor::tryRestoreMemberTermIntoMemberSelect(const PendingExprTerm& term)
+{
+	if (term.isGroup || !term.callArgs.empty() || term.candidate.kind != Candidate::Kind::Member
+		|| term.candidate.refSymbol == nullptr)
+		return false;
+	// A member candidate's label IS its dotted path relative to refSymbol ("parent", "pos.x"). Everything but
+	// the last segment re-walks as the receiver path; the last becomes the typed word, exactly the state the
+	// segment was confirmed from -- so '.' extends it, further Backspaces peel it apart segment by segment
+	// (MemberSelect's own ladder), and a confirm re-resolves it.
+	const std::string& path = term.candidate.label;
+	const size_t lastDot = path.rfind('.');
+	enterMemberSelect(term.candidate.refSymbol);
+	if (lastDot != std::string::npos)
+		restoreMemberPath(path.substr(0, lastDot));
+	m_pendingWord = (lastDot == std::string::npos) ? path : path.substr(lastDot + 1);
+	refreshCandidates();
+	return true;
+}
+
 // See the declaration in ScriptEditor.ixx: a group or a resolved parameterized call is atomic -- it re-opens
 // as the PENDING term (further Backspace unpacks it); a plain candidate re-opens as its typed text.
 void ScriptEditor::restoreTermIntoBox(PendingExprTerm&& term)
 {
-	// Receiver-carrying calls and members can't restore as typed text -- their label alone would never
-	// re-resolve through the normal candidate lists -- so they ride as an already-resolved pending term too.
+	// The lead-in the reopened term sits after. Derived HERE, the one place every restore funnels through:
+	// each caller has just changed the stack, and the member-picker path below builds its own prefix from the
+	// current one, so it has to be right before that runs. Callers must NOT recompute it afterwards -- doing so
+	// overwrites what that picker set up.
+	m_composePrefix = exprBasePrefix() + exprComposePrefixFromStack();
+	// A member chain reopens IN its member picker rather than as an inert resolved term -- the only state it
+	// can be extended, re-picked, or peeled apart from. It has no staged arguments to lose by doing so.
+	if (tryRestoreMemberTermIntoMemberSelect(term))
+		return;
+	// Receiver-carrying calls and groups can't restore as typed text -- their label alone would never
+	// re-resolve through the normal candidate lists -- so they ride as an already-resolved pending term. That
+	// keeps them ATOMIC: one more Backspace un-resolves them (dropping staged arguments), rather than this
+	// keystroke doing it.
 	if (term.isGroup || !term.callArgs.empty()
 		|| term.candidate.receiver != nullptr || term.candidate.kind == Candidate::Kind::Member)
 	{
@@ -2046,6 +2121,8 @@ void ScriptEditor::enterChainStage(ComposeMode mode, const PendingExprChain* res
 	enterCompose(mode, "");
 	if (restore != nullptr && !restore->terms.empty())
 		restoreChainIntoCompose(*restore);
+	if (m_composeMode != mode)
+		return; // the restore reopened a member chain in MemberSelect -- it owns the prefix/candidates now
 	m_composePrefix = exprBasePrefix() + exprComposePrefixFromStack();
 	refreshCandidates();
 }
@@ -2102,6 +2179,34 @@ DSLType ScriptEditor::resolveMemberType(DSLType receiverType, const std::string&
 		return dslFindEventIndex(m_document.eventNames, name) >= 0 ? DSLType::Int : DSLType::Void;
 	const BindingMember* member = m_bindings.findMember(receiverType, name);
 	return member != nullptr ? member->type : DSLType::Void;
+}
+
+// See the declaration in ScriptEditor.ixx.
+bool ScriptEditor::isMemberPathWritable() const
+{
+	if (m_memberReceiver == nullptr)
+		return true;
+	DSLType type = declaredTypeOf(m_memberReceiver);
+	for (const std::string& segment : m_memberPath)
+	{
+		if (type == DSLType::ScriptData)
+		{
+			// The script's own per-instance storage: its fields are always read/write, so a read-only `data`
+			// hop doesn't carry into them (the same exception receiverCandidates and ScriptLoader make).
+			const DSLDataField* field = dslFindDataField(m_document.dataFields, segment);
+			if (field == nullptr)
+				return false;
+			type = field->type;
+			continue;
+		}
+		if (type == DSLType::ScriptEvents)
+			return false; // an event index is a compile-time constant -- nothing under it is assignable
+		const BindingMember* member = m_bindings.findMember(type, segment);
+		if (member == nullptr || !member->writable)
+			return false; // unknown segments count as read-only too -- the safe direction
+		type = member->type;
+	}
+	return true;
 }
 
 DSLType ScriptEditor::reassignTargetType() const
@@ -2535,6 +2640,10 @@ DSLType ScriptEditor::currentCallParamType() const
 {
 	const CallStage& stage = m_callStack.back();
 	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(stage.func->data);
+	// Past the declared parameters = a variadic callee's tail, which constrains nothing: Void here means "any
+	// value" to refreshCandidates (see its CallArgValue case), not "statement slot".
+	if (stage.argChains.size() >= callee.parameterVarDeclarations.size())
+		return DSLType::Void;
 	const DSLSymbol::VariableDeclaration& param = std::get<DSLSymbol::VariableDeclaration>(
 		callee.parameterVarDeclarations[stage.argChains.size()]->data);
 	return std::get<DSLSymbol::TypeDeclaration>(param.typeSymbol->data).type;
@@ -2552,14 +2661,19 @@ std::string ScriptEditor::callComposePrefix() const
 			+ (stage.receiverPath.empty() ? std::string() : stage.receiverPath + ".")
 		: std::string())
 		+ callee.name + "(";
-	const size_t shownParams = std::min(stage.argChains.size() + 1, callee.parameterVarDeclarations.size());
+	// A variadic callee's tail has no declared parameters to cap this at -- every resolved argument shows, plus
+	// the slot being composed.
+	const size_t declaredCount = callee.parameterVarDeclarations.size();
+	const size_t shownParams = callee.isVariadic
+		? stage.argChains.size() + 1 : std::min(stage.argChains.size() + 1, declaredCount);
 	for (size_t i = 0; i < shownParams; ++i)
 	{
 		if (i > 0)
 			text += ", ";
-		const DSLSymbol::VariableDeclaration& param = std::get<DSLSymbol::VariableDeclaration>(callee.parameterVarDeclarations[i]->data);
-		if (!callee.isPositionalCall)
+		// Variadic extras are positional (no declaration behind them), so they show as bare values.
+		if (!callee.isPositionalCall && i < declaredCount)
 		{
+			const DSLSymbol::VariableDeclaration& param = std::get<DSLSymbol::VariableDeclaration>(callee.parameterVarDeclarations[i]->data);
 			if (param.isRef)
 				text += "ref ";
 			// Matches the committed call's own non-compact rendering (Syntax::renderSymbol's FunctionCall
@@ -2718,7 +2832,11 @@ DSLSymbol* ScriptEditor::buildCallFromStagedArgs(DSLSymbol* funcSymbol, DSLSymbo
 	for (size_t i = 0; i < argChains.size(); ++i)
 	{
 		DSLSymbol* value = buildExpressionFromTerms(argChains[i].terms, argChains[i].ops, line);
-		args.push_back(DSLSymbol::CallArgument{ callee.isPositionalCall ? nullptr : callee.parameterVarDeclarations[i], value });
+		// A variadic callee's extras have no declaration to name, so they land as positional arguments (the
+		// same parameter=nullptr shape a positional call's arguments use).
+		DSLSymbol* param = (callee.isPositionalCall || i >= callee.parameterVarDeclarations.size())
+			? nullptr : callee.parameterVarDeclarations[i];
+		args.push_back(DSLSymbol::CallArgument{ param, value });
 	}
 	DSLSymbol* receiverRef = (receiverDecl != nullptr) ? buildReceiverChain(receiverDecl, receiverPath, line) : nullptr;
 	return pushSymbol(line, ST::FunctionCall, DSLSymbol::FunctionCall{ funcSymbol, receiverRef, args });
@@ -3060,8 +3178,11 @@ namespace
 			term.candidate.receiverPath = std::move(receiverPath);
 			if (!call.arguments.empty())
 			{
-				if (callee.parameterVarDeclarations.size() != call.arguments.size())
-					return false; // vararg-style builtins (print) have no parameters to re-stage against
+				// A variadic call carries extras past its declared parameters -- everything from the declared
+				// count on is a positional tail argument, all of it restorable.
+				if (callee.isVariadic ? call.arguments.size() < callee.parameterVarDeclarations.size()
+					: call.arguments.size() != callee.parameterVarDeclarations.size())
+					return false; // arity doesn't line up with the declaration -- nothing sane to re-stage against
 				for (const DSLSymbol::CallArgument& arg : call.arguments)
 				{
 					PendingExprChain argChain;
@@ -3552,9 +3673,12 @@ bool ScriptEditor::tryWidenCallStatementEdit()
 		return false;
 	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
 	const int argIndex = m_editSlot.argIndex;
+	// A variadic call's extras sit past the declared count and stage the same way (see the CallArgValue flow);
+	// anything else must match its declaration exactly to have a staged flow to re-enter.
 	if (argIndex < 0 || argIndex >= static_cast<int>(call.arguments.size())
-		|| callee.parameterVarDeclarations.size() != call.arguments.size())
-		return false; // vararg-style builtins (print) have no declared parameters to stage against
+		|| (callee.isVariadic ? call.arguments.size() < callee.parameterVarDeclarations.size()
+			: call.arguments.size() != callee.parameterVarDeclarations.size()))
+		return false;
 
 	// Arguments BEFORE the edited one restore as already-resolved (possibly compound/nested-call) chains; the
 	// edited one (and everything after) re-authors forward, exactly like authoring the call fresh from there.
@@ -3595,8 +3719,10 @@ bool ScriptEditor::tryWidenValueCallEdit()
 		return false;
 	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
 	const int argIndex = m_editSlot.argIndex;
+	// Same variadic allowance as tryWidenCallStatementEdit -- extras past the declared count re-stage too.
 	if (argIndex < 0 || argIndex >= static_cast<int>(call.arguments.size())
-		|| callee.parameterVarDeclarations.size() != call.arguments.size())
+		|| (callee.isVariadic ? call.arguments.size() < callee.parameterVarDeclarations.size()
+			: call.arguments.size() != callee.parameterVarDeclarations.size()))
 		return false;
 
 	DSLCodeLine& line = *callSymbol->line;
@@ -4289,9 +4415,25 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			if (m_exprHasPendingGroup && !m_exprPendingGroup.isGroup)
 			{
 				// A resolved parameterized call un-resolves: its name returns to the box for editing; the
-				// arguments drop (type '(' to stage them again).
-				m_pendingWord = m_exprPendingGroup.candidate.label;
+				// arguments drop (type '(' to stage them again). A DOT-call reopens its receiver's member
+				// picker with the method name typed -- the bare name would re-resolve against nothing on its
+				// own (receiver-based functions are excluded from the plain candidate lists).
+				PendingExprTerm resolved = std::move(m_exprPendingGroup);
 				m_exprHasPendingGroup = false;
+				m_composePrefix = exprBasePrefix() + exprComposePrefixFromStack(); // now excludes the term itself
+				if (resolved.candidate.kind == Candidate::Kind::Function && resolved.candidate.receiver != nullptr)
+				{
+					const std::string name = resolved.candidate.label;
+					const std::string receiverPath = resolved.candidate.receiverPath;
+					enterMemberSelect(resolved.candidate.receiver);
+					restoreMemberPath(receiverPath);
+					m_pendingWord = name;
+					refreshCandidates();
+				}
+				else
+				{
+					m_pendingWord = resolved.candidate.label;
+				}
 			}
 			else if (m_exprHasPendingGroup)
 			{
@@ -4464,6 +4606,8 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 				const PendingLogicalTerm last = m_logicalTerms.back();
 				m_logicalTerms.pop_back();
 				m_logicalOps.pop_back();
+				// restoreChainIntoCompose derives the prefix (and may reopen a member chain in its own picker);
+				// the candidate list still has to catch up with the restored text either way.
 				if (last.isComparison)
 				{
 					m_conditionLeftChain = last.left;
@@ -4476,6 +4620,7 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 					enterCompose(ComposeMode::ConditionLeft, "");
 					restoreChainIntoCompose(last.left);
 				}
+				refreshCandidates();
 			}
 			else if (m_composeMode == ComposeMode::ConditionLeft && m_flowEditLine != nullptr)
 			{
@@ -4537,8 +4682,10 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 					m_exprStack.assign(1, ExprFrame{});
 					m_exprHasPendingGroup = false;
 					enterCompose(ComposeMode::CallArgValue, "");
+					// restoreChainIntoCompose derives the prefix itself (exprBasePrefixFor(CallArgValue) IS
+					// callStagePrefix()) -- recomputing it here would overwrite the member picker's own lead-in
+					// on the paths where the restored argument reopens one.
 					restoreChainIntoCompose(prev);
-					m_composePrefix = callStagePrefix() + exprComposePrefixFromStack();
 					refreshCandidates();
 				}
 				else if (stage.returnMode != ComposeMode::None)
@@ -4799,6 +4946,22 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		return;
 	}
 
+	// '(' right after a matched parameterized function's name is the natural "now its arguments" gesture.
+	// Routed through the CONFIRM rather than tryBeginValueCallStaging so every mode stages it the way that mode
+	// should: a statement slot, a value chain, and a dot-call mid-MemberSelect (which has to carry its receiver
+	// path -- a Function candidate's own receiverPath is empty until confirmCompose fills it from m_memberPath).
+	// Typed text required, same as every other resolve-off-a-candidate gesture -- without it, '(' still opens a
+	// group in a chain compose (handled further below).
+	if (c == '(' && composing && !m_pendingWord.empty() && hasCandidateList())
+	{
+		const Candidate* picked = selectedCandidate();
+		if (picked != nullptr && isParameterizedFunction(*picked))
+		{
+			confirmCompose(/*allowCommit*/ false);
+			return;
+		}
+	}
+
 	// '.' over a TYPED-and-matched binding object ("physics" + '.') dots into its member/function list -- any
 	// stage that offers BindingObject candidates supports it (see refreshCandidates). Typed text only, so a
 	// stray '.' can never resolve the highlighted default; elsewhere the character falls through (e.g. as a
@@ -5026,10 +5189,17 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		return;
 	}
 
+	// A "this value is done" keystroke (',' / ')') really targets the stage the value belongs to -- which, while
+	// a member chain is being dotted, is the SUSPENDED one underneath, not MemberSelect itself. confirmCompose
+	// resolves the member into that stage and advances it in the same keystroke, so both read through
+	// identically whether the argument ended on a plain value or on "self.pos.x".
+	const ComposeMode valueStageMode = (m_composeMode == ComposeMode::MemberSelect && m_memberReturnMode != ComposeMode::None)
+		? m_memberReturnMode : m_composeMode;
+
 	// ',' right after a for-loop clause's value confirms it and advances to the next clause -- "for int i = 0,"
 	// then "i < 5," read straight through, no Space needed. A confirm that refuses (nothing matched) leaves the
 	// mode unchanged; the keystroke drops.
-	if ((m_composeMode == ComposeMode::ForVarValue || m_composeMode == ComposeMode::ForConditionValue) && c == ',')
+	if ((valueStageMode == ComposeMode::ForVarValue || valueStageMode == ComposeMode::ForConditionValue) && c == ',')
 	{
 		confirmCompose();
 		return;
@@ -5040,9 +5210,11 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 	// inner paren is still open WITHIN this argument's own expression (e.g. composing "(a + b)" as one
 	// argument), both fall through instead -- ')' closes that paren via the generic chain-mode handling below,
 	// a ',' there isn't valid syntax and simply gets dropped like anywhere else.
-	if (m_composeMode == ComposeMode::CallArgValue && (c == ',' || c == ')') && m_exprStack.size() == 1)
+	if (valueStageMode == ComposeMode::CallArgValue && (c == ',' || c == ')') && m_exprStack.size() == 1)
 	{
-		confirmCompose();
+		// ',' advances to the next argument, ')' closes the call. The distinction is load-bearing for a VARIADIC
+		// callee, whose argument count never says when the list is done (see the CallArgValue confirm).
+		confirmCompose(/*allowCommit*/ c == ')');
 		return;
 	}
 

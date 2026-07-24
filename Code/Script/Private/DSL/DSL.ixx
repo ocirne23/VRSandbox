@@ -255,6 +255,13 @@ public:
 		                                 // positional CallArgument::parameter=nullptr slots instead of named
 		                                 // `x = ...` ones, even though parameterVarDeclarations is still populated
 		                                 // (it's what tells the editor how many/what-typed placeholders to create)
+		// Builtin C varargs (printf): after the declared parameters the call takes ZERO OR MORE extra arguments
+		// of any value type. Those extras are POSITIONAL (CallArgument::parameter = nullptr, like a positional
+		// call's) and live past parameterVarDeclarations' end, so nothing indexes a declaration for them --
+		// every parameterVarDeclarations[argIndex] lookup has to bound-check once this is set. An argument count
+		// no longer says when the list is done either: only ')' / Enter closes one (see ScriptEditor's
+		// CallArgValue staging). User-declared DSL functions are never variadic -- there's no way to author it.
+		bool isVariadic = false;
 		int numReferences = 0; // maintained by the editor: live FunctionCall count, guards rename/delete
 	};
 	// If/ElseIf/While carry their condition in `condition`; Return carries its

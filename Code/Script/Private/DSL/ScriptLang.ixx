@@ -115,6 +115,11 @@ export struct Candidate
 	enum class Kind
 	{
 		KeywordIf, KeywordWhile, KeywordReturn, KeywordBreak, KeywordTrue, KeywordFalse,
+		KeywordNull,   // the null Entity ("self.parent" has no parent, "scene.getChild(i)" was out of range) --
+		               // offered wherever an Entity VALUE is expected, and as the right side of an Entity
+		               // comparison; resolves to a Constant of type Entity holding "null" (Transpiler emits
+		               // "nullptr"). Entity is the only nullable type in the DSL: components are gated by the
+		               // require set, and the other engine objects are always present.
 		Variable, Function, DeclareType, Literal, Comparator, DeclareFunction, KeywordFor, AssignOperator, Reassign,
 		ArithmeticOperator, LogicalOperator,
 		KeywordElseIf, KeywordElse, // offered only on a statement slot INSIDE an if/elseif branch -- confirming
@@ -170,9 +175,13 @@ public:
 	// always lead with a variable/call (`height <= 0.1`, `counter < 5`), matching the example program.
 	// `excludeVariable` (optional) drops one declaration -- a declaration's own initializer (or a `&&`/`||`
 	// chain grown from it) must never be able to reference the not-yet-existing variable it's building.
+	// `offerLiterals` lifts the no-literal rule above for the one slot where nothing CAN disambiguate a
+	// literal's type and that's fine: a VARIADIC callee's extra arguments (printf's values), which have no
+	// declared parameter to match against. The typed text picks its own type -- quoted = String, digits = Int,
+	// digits with a '.' = Float -- plus true/false for Bool, exactly what a C vararg can carry.
 	static std::vector<Candidate> candidatesForAnyValue(const DSLCodeLine& atLine, const DSLScriptFile& file,
 		const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
-		const std::string& typedPrefix, DSLSymbol* excludeVariable = nullptr);
+		const std::string& typedPrefix, DSLSymbol* excludeVariable = nullptr, bool offerLiterals = false);
 
 	// Functions/members reachable by dotting into a receiver of `receiverType` -- a binding object (self) or any
 	// engine-defined STRUCT value (vec3 and friends). `receiverDecl` is the chain's ROOT declaration, carried
@@ -184,12 +193,20 @@ public:
 	// member); otherwise a value slot of that type (chainable members always pass, so a chain can continue
 	// through them toward a matching leaf). `document` gates component-bound members (self.physics/audio/force)
 	// by DSL::requiredComponents, the receiver-side twin of appendBindingObjects' top-level gating.
+	// `receiverWritable` is false once ANY member already walked to reach this receiver is read-only -- being
+	// read-only propagates down the whole chain (assigning into `self.parent.pos` would mutate an object the
+	// script only has read access to), so no member is offered as an assignment lead-in under such a path;
+	// chainable ones still are, since dotting further toward a call stays legal.
 	static std::vector<Candidate> receiverCandidates(const ScriptBindings& bindings, const DSL& document, DSLSymbol* receiverDecl,
-		DSLType receiverType, DSLType expectedType, bool anyValue, const std::string& typedPrefix);
+		DSLType receiverType, DSLType expectedType, bool anyValue, bool receiverWritable, const std::string& typedPrefix);
 
 	// The six comparison operators (==, !=, <, >, <=, >=) offered while building an if/while condition's middle
 	// term, filtered by typedPrefix same as any other candidate list (typing "<" narrows to "<" and "<=").
-	static std::vector<Candidate> comparisonOperatorCandidates(const std::string& typedPrefix);
+	// `equalityOnly` drops the four ORDERING operators, leaving == and != -- what an Entity comparison gets
+	// (identity/null tests are meaningful, "one entity is less than another" isn't).
+	static std::vector<Candidate> comparisonOperatorCandidates(const std::string& typedPrefix, bool equalityOnly = false);
+	// Whether comparing `type` should be restricted to == / != (see comparisonOperatorCandidates).
+	static bool isEqualityOnlyType(DSLType type);
 
 	// The five compound-assign operators (+=, -=, *=, /=, %=) offered while building a for-loop's increment
 	// clause (`counter += 1`) -- a plain `=` isn't offered here, matching the example program's convention that

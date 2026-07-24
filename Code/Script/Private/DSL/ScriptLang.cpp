@@ -704,6 +704,11 @@ std::vector<Candidate> AutoCompleteRules::candidatesFor(DSLType expectedType, co
 		}
 	}
 
+	// Entity is the DSL's one nullable type (see Candidate::Kind::KeywordNull) -- `null` fills any Entity slot,
+	// and is what an Entity comparison is almost always against ("if self.parent != null").
+	if (expectedType == DSLType::Entity)
+		addIfMatches(out, Candidate{ "null", Candidate::Kind::KeywordNull, nullptr, DSLType::Entity }, typedPrefix);
+
 	const auto matchesExpected = [&](DSLType type) { return type == expectedType; };
 	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::Variable, excludeVariable, matchesExpected);
 	addFunctionCandidates(out, file, builtins, typedPrefix, /*includeParameterized*/ true, matchesExpected);
@@ -807,9 +812,25 @@ bool AutoCompleteRules::isFunctionReferenced(const DSLSymbol* funcDecl, const DS
 
 std::vector<Candidate> AutoCompleteRules::candidatesForAnyValue(const DSLCodeLine& atLine, const DSLScriptFile& file,
 	const std::vector<std::unique_ptr<DSLSymbol>>& sidebar, const std::vector<std::unique_ptr<DSLSymbol>>& builtins,
-	const std::string& typedPrefix, DSLSymbol* excludeVariable)
+	const std::string& typedPrefix, DSLSymbol* excludeVariable, bool offerLiterals)
 {
 	std::vector<Candidate> out;
+	if (offerLiterals)
+	{
+		addIfMatches(out, Candidate{ "true", Candidate::Kind::KeywordTrue }, typedPrefix);
+		addIfMatches(out, Candidate{ "false", Candidate::Kind::KeywordFalse }, typedPrefix);
+		// The typed text names its own type -- see the declaration for why that's allowed here.
+		for (DSLType literalType : { DSLType::String, DSLType::Int, DSLType::Float })
+			if (!typedPrefix.empty() && isValidLiteralTextImpl(literalType, typedPrefix))
+			{
+				Candidate c;
+				c.label = typedPrefix;
+				c.kind = Candidate::Kind::Literal;
+				c.declareType = literalType;
+				out.push_back(c);
+				break; // the checks are mutually exclusive; first match wins
+			}
+	}
 	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::Variable, excludeVariable, [](DSLType) { return true; });
 	// A statement-only (Void-returning) call has nothing to compare, so those are excluded here.
 	addFunctionCandidates(out, file, builtins, typedPrefix, /*includeParameterized*/ true, [](DSLType type) { return type != DSLType::Void; });
@@ -838,12 +859,15 @@ namespace
 }
 
 std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBindings& bindings, const DSL& document, DSLSymbol* receiverDecl,
-	DSLType receiverType, DSLType expectedType, bool anyValue, const std::string& typedPrefix)
+	DSLType receiverType, DSLType expectedType, bool anyValue, bool receiverWritable, const std::string& typedPrefix)
 {
 	std::vector<Candidate> out;
 
 	// self.data: no functions, just the document's OWN fields (DSL::dataFields) -- always writable (persistent
-	// data is meant to be read/write), type-filtered the same way any other member is.
+	// data is meant to be read/write), type-filtered the same way any other member is. This is the one place a
+	// read-only hop does NOT propagate (`receiverWritable` is deliberately ignored here): the `data` member
+	// itself is read-only because the block can't be replaced wholesale, not because its contents are off
+	// limits -- they're the script's own storage. ScriptLoader's parseStatement keeps the same exception.
 	if (receiverType == DSLType::ScriptData)
 	{
 		const bool statementContext = expectedType == DSLType::Void && !anyValue;
@@ -926,10 +950,13 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 	{
 		if (member.requiredComponent != DSLType::Void && !dslIsComponentRequired(document, member.requiredComponent))
 			continue;
+		// A member is writable only if the whole path to it is (see `receiverWritable`) -- everything reachable
+		// through a read-only member is read-only too.
+		const bool writable = receiverWritable && member.writable;
 		// Value contexts type-filter (chainable members always pass, as dot-into waypoints toward a matching
 		// leaf); a STATEMENT context offers WRITABLE members (the lead-in of a member-assignment, `v.x = ...`)
 		// plus chainable-but-unwritable ones (`self.physics`, a waypoint toward a Void-returning dot-call).
-		const bool accepted = statementContext ? (member.writable || dslIsChainableType(member.type))
+		const bool accepted = statementContext ? (writable || dslIsChainableType(member.type))
 			: (anyValue || member.type == expectedType || dslIsChainableType(member.type));
 		if (!accepted)
 			continue;
@@ -938,7 +965,7 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 		c.kind = Candidate::Kind::Member;
 		c.refSymbol = receiverDecl; // the chain's ROOT -- the member itself has no symbol, only registry data
 		c.declareType = member.type;
-		c.memberWritable = member.writable;
+		c.memberWritable = writable;
 		addIfMatches(out, c, typedPrefix);
 	}
 
@@ -946,8 +973,17 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 	return out;
 }
 
-std::vector<Candidate> AutoCompleteRules::comparisonOperatorCandidates(const std::string& typedPrefix)
+bool AutoCompleteRules::isEqualityOnlyType(DSLType type)
 {
+	// Engine objects are compared by identity (or against null), never ordered. Struct types have no comparison
+	// story at all today, so they're left alone here -- nothing offers them as a comparison operand.
+	return dslIsEngineObjectType(type);
+}
+
+std::vector<Candidate> AutoCompleteRules::comparisonOperatorCandidates(const std::string& typedPrefix, bool equalityOnly)
+{
+	if (equalityOnly)
+		return operatorCandidates({ DSLOperator::Equal, DSLOperator::NotEqual }, Candidate::Kind::Comparator, typedPrefix);
 	return operatorCandidates({ DSLOperator::Equal, DSLOperator::NotEqual, DSLOperator::LessThanOrEqual,
 		DSLOperator::GreaterThanOrEqual, DSLOperator::LessThan, DSLOperator::GreaterThan },
 		Candidate::Kind::Comparator, typedPrefix);
@@ -1062,7 +1098,7 @@ bool AutoCompleteRules::isReservedWord(const std::string& name)
 	// declaration needs a type before the name, an assignment an operator, a call parens), so a variable/
 	// function actually named "end" can never produce that single-token line -- safe to allow.
 	static const char* const kKeywords[] = {
-		"if", "elseif", "else", "while", "for", "return", "break", "function", "true", "false",
+		"if", "elseif", "else", "while", "for", "return", "break", "function", "true", "false", "null",
 		"ctx", "self", "ScriptData", "scriptData" // the Transpiler's auto-injected context parameter (see Transpiler::emitFunction)
 	};
 	for (const char* keyword : kKeywords)
