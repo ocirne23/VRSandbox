@@ -458,7 +458,7 @@ inline Entity* SceneComponent::getEntity()
     return reinterpret_cast<Entity*>(reinterpret_cast<uint8*>(this) - EntityComponentDetail::entityBaseOffset);
 }
 
-export constexpr uint16 getComponentByteOffset(uint16 typeBits, EComponentID id)
+inline constexpr uint16 getComponentByteOffset(uint16 typeBits, EComponentID id)
 {
     uint16 offset = EntityComponentDetail::entityBaseOffset;
     for (uint16 i = 0; i < uint16(id) && i < MaxInlineComponentTypes; ++i)

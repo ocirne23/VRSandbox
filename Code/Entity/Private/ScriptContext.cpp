@@ -24,13 +24,6 @@ import :Entity;
 import :Component;
 import :World;
 
-// See the declaration in ScriptContext.ixx. `vec2`/`vec4` need no name of their own outside their own struct
-// row (their self-referential member/function types spell DSLType::ThisBinding instead -- see structFor's
-// callers and the DSL.ixx comment), but `vec3` is referenced well beyond it (self.pos, physics component
-// functions, several Engine functions below), so its registerStruct return value is captured locally and reused
-// throughout -- same for the three registerComponentType calls (physics/audio/force): each ALSO exposes itself
-// as a self member as part of that one call (see ScriptBindings.ixx), so the return value only needs capturing
-// here for the component's OWN BindingObject `type` field just below.
 void registerScriptDslBindings()
 {
     ScriptBindings& bindings = Globals::scriptBindings;
@@ -150,27 +143,11 @@ void registerScriptDslBindings()
     bindings.registerEntryPoint({ "OnPhysicsEvent",  { { "begin", T::Int }, { "sensor", T::Int } }, ", Entity* other, int begin, int sensor, long long contactId, void* scriptData", "REGISTER_ON_PHYSICS_EVENT()" });
 }
 
-// Implements the script ABI (ScriptAPI.h) against the engine and drives per-entity script execution.
-// The Script library is a pure compiler/loader; this file owns the ScriptContext and all the thunks, so
-// the renderer / SDL / animation dependencies live here in Entity (which already imports them) rather
-// than leaking into Script.
-
-// Scripts use a layout mirror of Entity (ScriptAPI.h, /DSCRIPT_BUILD) to read self->pos etc. directly. These
-// assert the real engine layout matches that mirror Ã¢â‚¬â€ if Entity's leading members move, update both.
-static_assert(offsetof(Entity, pos)    == 0,  "ScriptAPI.h Entity mirror out of sync: pos");
-static_assert(offsetof(Entity, scale)  == 12, "ScriptAPI.h Entity mirror out of sync: scale");
-static_assert(offsetof(Entity, rot)    == 16, "ScriptAPI.h Entity mirror out of sync: rot");
-static_assert(offsetof(Entity, parent) == 32, "ScriptAPI.h Entity mirror out of sync: parent");
-
-// The thunks have C linkage (external) so the cooked App-Scripts aggregate — a separate module — can call them
-// by name (a plain C++ function here would have module linkage, invisible to it). The small helpers below ride
-// along in the same block; their names are file-unique so the external linkage is harmless.
 #pragma warning(push)
-#pragma warning(disable: 4190) // extern "C" thunks return glm::vec3; harmless — same MSVC + glm on both sides of the ABI
-extern "C"
+#pragma warning(disable: 4190) // for glm types
+extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can call them
 {
     // ---- context thunks -----------------------------------------------------
-
     void thunk_log(const char* message) { Log::info(message ? message : ""); }
     void thunk_logf(const char* message, ...) 
     {
@@ -184,8 +161,7 @@ extern "C"
         Log::info(formattedString);
         va_end(args);
     }
-    // va_list backing for logf, so the cooked build's inline logf method (which captures varargs into a va_list)
-    // has something to forward to — you can't pass `...` straight through to another variadic function.
+
     void thunk_vlogf(const char* fmt, va_list ap)
     {
         if (!fmt) return;
@@ -197,6 +173,7 @@ extern "C"
         s.resize(static_cast<size_t>(n));
         Log::info(s);
     }
+
     int thunk_isKeyDown(const char* keyName)
     {
         const bool* keys = SDL_GetKeyboardState(nullptr);
@@ -213,9 +190,6 @@ extern "C"
         Globals::rendererVK.setSunLight(direction, color, intensity);
     }
 
-    // Spawns immediately (so the caller can use the result right away, e.g. parent it or set its transform)
-    // and hands the owning reference to App via scriptRootAdditions -- it isn't in `entities` yet, but the
-    // Entity object itself already exists and is safe to read/write/reparent this same frame.
     Entity* thunk_spawnEntity(const char* assetPath, glm::vec3 position)
     {
         if (!assetPath) return nullptr;
@@ -253,7 +227,6 @@ extern "C"
     void thunk_entitySetAnimTrigger(Entity* en, const char* p)        { if (AnimatorComponent* ac = getComponent<AnimatorComponent>(en)) ac->stateMachine.setTrigger(p); }
 
     // ---- physics thunks ----
-
     PhysicsComponent* physicsOf(Entity* en)
     {
         if (!en)
@@ -273,9 +246,6 @@ extern "C"
         return hit.hit ? 1 : 0;
     }
 
-    // The DSL's single-expression rayCast(pos, dir, maxRayDist) -- wraps thunk_physicsRayCast's hit/miss +
-    // fraction into one distance value: maxDist itself on a miss (never a sentinel outside the query range),
-    // so e.g. `if rayCast(...) <= 0.1` reads correctly without a separate hit check.
     float thunk_physicsRayCastDistance(glm::vec3 origin, glm::vec3 dir, float maxDist)
     {
         const glm::vec3 translation = glm::normalize(dir) * maxDist;
@@ -324,10 +294,7 @@ extern "C"
             sc->fireEvent(*en, eventName); // targeted: only this entity's script
     }
 
-    // ---- force field ---- entityGetForceComponent resolves the component once and returns it as an opaque
-    // handle; the force* thunks take that handle and cast it straight back (asForce null-checks), so a chain of
-    // get/sets skips the repeated getComponent lookup. Getters read the emitter's authored state / GPU
-    // readbacks or the component's local placement fields; setters write them.
+    // ---- force field ----
     void* thunk_entityGetForceComponent(Entity* en) { return en ? getComponent<ForceComponent>(en) : nullptr; }
     ForceComponent* asForce(void* p) { return static_cast<ForceComponent*>(p); }
 
@@ -362,10 +329,7 @@ extern "C"
         }
     }
 
-    // ---- scene component ---- entityGetSceneComponent resolves the component once and returns it as an opaque
-    // handle; the scene* thunks cast it back (asScene null-checks), so a chain of child reads/writes skips the
-    // repeated getComponent lookup. Add/Remove recover the owning (parent) entity from the handle
-    // (SceneComponent is component 0, always at a fixed offset from the Entity — see SceneComponent::getEntity).
+    // ---- scene component ----
     SceneComponent* asScene(void* p) { return static_cast<SceneComponent*>(p); }
     void* thunk_entityGetSceneComponent(Entity* en) { return en ? getComponent<SceneComponent>(en) : nullptr; }
 
@@ -387,8 +351,6 @@ extern "C"
         return nullptr;
     }
 
-    // Reparents child under the component's owner (the parent). If child was a root entity, the App-owned ref is
-    // now stale — queued for removal so it isn't updated twice (see thunk_entityAddChild's original note).
     void thunk_sceneAddChild(void* p, Entity* child)
     {
         SceneComponent* sc = asScene(p);
@@ -398,8 +360,6 @@ extern "C"
         Globals::scriptEvents.addReparentRequest(EntityPtr(child), EntityPtr(parent));
     }
 
-    // Detaches child from the component's owner, making it root again. Claim ownership before reparentEntity
-    // (see thunk_entityRemoveChild's original note).
     void thunk_sceneRemoveChild(void* p, Entity* child)
     {
         SceneComponent* sc = asScene(p);
@@ -414,8 +374,7 @@ extern "C"
         thunk_sceneRemoveChild(p, thunk_sceneGetChildAt(p, index));
     }
 
-    // ---- physics component ---- entityGetPhysicsComponent returns physicsOf (validity-checked) as an opaque
-    // handle; the physics* thunks cast it back, skipping the repeated getComponent + body-valid lookup.
+    // ---- physics component ----
     void* thunk_entityGetPhysicsComponent(Entity* en) { return physicsOf(en); }
 
     int thunk_physicsIsAwake(void* p) { PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); return (pc && pc->body.isAwake()) ? 1 : 0; }
@@ -430,9 +389,7 @@ extern "C"
         pc->body.setTransform(position, glm::quat(glm::radians(eulerDeg)));
     }
 
-    // ---- audio component ---- entityGetAudioComponent returns the AudioComponent as an opaque handle; the
-    // audio* thunks cast it back, skipping the repeated getComponent lookup. audioTrigger still needs the entity
-    // so a spatial sound can follow it.
+    // ---- audio component ----
     void* thunk_entityGetAudioComponent(Entity* en) { return en ? getComponent<AudioComponent>(en) : nullptr; }
 
     void thunk_audioTrigger(void* p, Entity* en, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch)
@@ -456,15 +413,10 @@ extern "C"
 }
 #pragma warning(pop)
 
-// Binds the ABI function-pointer table to the engine thunks. Globals::scriptContext is constructed at
-// startup, so the context is ready before any script runs. (Scripts never construct a ScriptContext, so
-// their DLLs never need this definition.)
 ScriptContext::ScriptContext()
     : log(&thunk_log)
     , logf(&thunk_logf)
-    // The rest of the pointer table, bound in the same order SCRIPT_CTX_FUNCS declares the fields (ScriptAPI.h)
-    // -- adding a function there is enough; it never needs a matching hand-written init line here.
-#define SCRIPT_CTX_INIT(ret, name, params, args) , name(&thunk_##name)
+#define SCRIPT_CTX_INIT(ret, name, ...) , name(&thunk_##name)
     SCRIPT_CTX_FUNCS(SCRIPT_CTX_INIT)
 #undef SCRIPT_CTX_INIT
 {
@@ -476,7 +428,6 @@ ScriptContext::ScriptContext()
     cameraFovDeg = 45.0f;
 }
 
-// Refreshes the per-frame fields; called once a frame (main.cpp) before any script runs this frame.
 void ScriptContext::update(const Camera& camera, float newDeltaSeconds, float newElapsedSeconds)
 {
     deltaSeconds = newDeltaSeconds;
@@ -491,3 +442,8 @@ void ScriptContext::update(const Camera& camera, float newDeltaSeconds, float ne
     cameraNear = camera.near;
     cameraFar = camera.far;
 }
+
+static_assert(offsetof(Entity, pos) == 0, "ScriptAPI.h Entity mirror out of sync: pos");
+static_assert(offsetof(Entity, scale) == 12, "ScriptAPI.h Entity mirror out of sync: scale");
+static_assert(offsetof(Entity, rot) == 16, "ScriptAPI.h Entity mirror out of sync: rot");
+static_assert(offsetof(Entity, parent) == 32, "ScriptAPI.h Entity mirror out of sync: parent");

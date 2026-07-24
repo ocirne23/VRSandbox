@@ -365,7 +365,7 @@ const ScriptModule* ScriptHost::getOrLoad(const std::string& path, bool forceRec
     }
     Log::error("Static script not found in the compiled-in registry (rebuild App-Scripts after adding/renaming a .scr?): " + path);
     return nullptr;
-#endif
+#else
 
     // First load this session and not forced: if an existing DLL's mtime matches the source's (we stamp
     // it to match after each compile), the source is unchanged since it was built — load it, skip cl.
@@ -456,6 +456,7 @@ const ScriptModule* ScriptHost::getOrLoad(const std::string& path, bool forceRec
 
     Log::info("Script loaded: " + path);
     return &slot.entries;
+#endif
 }
 
 void ScriptHost::unloadAll()
