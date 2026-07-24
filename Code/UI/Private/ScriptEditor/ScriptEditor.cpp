@@ -1774,9 +1774,14 @@ std::string ScriptEditor::exprTermText(const PendingExprTerm& term) const
 {
 	if (!term.isGroup)
 	{
-		// A resolved parameterized call shows its actual staged arguments -- "func(1, x)" / "physics.teleport(...)".
+		// A resolved parameterized call shows its actual staged arguments -- "func(1, x)" / "physics.teleport(...)"
+		// for a positional callee, or "func(int n = 1, ...)" for a named one, matching callComposePrefix's own
+		// per-argument rendering (and the committed call's, Syntax::renderSymbol's FunctionCall case) -- this is
+		// the SAME term shown here as a still-pending group once its own staging resolves, before the OUTER
+		// compose (this term is embedded in) itself commits.
 		if (!term.callArgs.empty())
 		{
+			const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(term.candidate.refSymbol->data);
 			std::string text = (term.candidate.receiver != nullptr
 				? std::get<DSLSymbol::VariableDeclaration>(term.candidate.receiver->data).name + "."
 					+ (term.candidate.receiverPath.empty() ? std::string() : term.candidate.receiverPath + ".")
@@ -1786,6 +1791,13 @@ std::string ScriptEditor::exprTermText(const PendingExprTerm& term) const
 			{
 				if (i > 0)
 					text += ", ";
+				if (!callee.isPositionalCall)
+				{
+					const DSLSymbol::VariableDeclaration& param = std::get<DSLSymbol::VariableDeclaration>(callee.parameterVarDeclarations[i]->data);
+					if (param.isRef)
+						text += "ref ";
+					text += std::string(dslTypeName(std::get<DSLSymbol::TypeDeclaration>(param.typeSymbol->data).type)) + " " + param.name + " = ";
+				}
 				text += chainDisplayText(term.callArgs[i]);
 			}
 			return text + ")";
@@ -2545,7 +2557,9 @@ std::string ScriptEditor::callComposePrefix() const
 		{
 			if (param.isRef)
 				text += "ref ";
-			text += param.name + " = ";
+			// Matches the committed call's own non-compact rendering (Syntax::renderSymbol's FunctionCall
+			// case): "[ref] type name = ", not just the bare name.
+			text += std::string(dslTypeName(std::get<DSLSymbol::TypeDeclaration>(param.typeSymbol->data).type)) + " " + param.name + " = ";
 		}
 		if (i < stage.argChains.size())
 			text += chainDisplayText(stage.argChains[i]);

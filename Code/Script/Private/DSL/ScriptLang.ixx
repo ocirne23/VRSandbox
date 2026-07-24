@@ -228,16 +228,20 @@ public:
 	// checks can't drift apart.
 	static bool isReservedWord(const std::string& name);
 
-	// Whether `name` collides with any variable declared anywhere in atLine's enclosing function (sidebar
-	// bindings always count too), OR with any FUNCTION name (builtin or user-declared, same set
-	// isFunctionNameTaken checks) -- used to block declaring or renaming a variable to an already-taken name.
-	// The function check matters beyond naming clarity: a local variable shadowing a function of the same name
-	// makes that function uncallable for the rest of its scope in the transpiled C++ (a local hides a free
-	// function of the same name, same as plain C++), so this isn't just a style rule.
-	// Deliberately broader than candidatesFor's in-scope-variables scan (which is direction-sensitive, only
-	// "visible so far"): a collision must be caught regardless of whether the other declaration comes before
-	// or after this point, or sits at a shallower or deeper nesting level -- renaming an outer/earlier variable
-	// to match one declared later inside a nested block is still a collision, not just the reverse.
+	// Whether `name` collides with any variable a declaration AT atLine would share scope with (sidebar bindings
+	// always count too), OR with any FUNCTION name (builtin or user-declared, same set isFunctionNameTaken
+	// checks) -- used to block declaring or renaming a variable to an already-taken name. The function check
+	// matters beyond naming clarity: a local variable shadowing a function of the same name makes that function
+	// uncallable for the rest of its scope in the transpiled C++ (a local hides a free function of the same
+	// name, same as plain C++), so this isn't just a style rule.
+	// Two-directional, both block-scope-aware (same rule inScopeVariables uses): BACKWARD catches anything
+	// currently reachable from atLine (a name already used earlier in an enclosing/still-open block); FORWARD
+	// catches anything declared from atLine through the close of ITS OWN enclosing block, at any nesting depth
+	// (nested blocks always see outward, so a name chosen here would collide with one a LATER nested branch
+	// already uses, even though that inner name isn't reachable FROM atLine yet -- e.g. renaming an outer
+	// variable to match one a later nested if-branch declares). A name from an ALREADY-CLOSED sibling block (a
+	// finished loop's own counter, a past if-branch's own local) collides with neither direction, so it's free
+	// to reuse.
 	// `excludeVariable` (optional) ignores one declaration -- e.g. a rename's own prior name shouldn't count
 	// as a collision against itself.
 	static bool isNameInScope(const std::string& name, const DSLCodeLine& atLine, const DSLScriptFile& file,

@@ -1101,21 +1101,26 @@ bool AutoCompleteRules::isNameInScope(const std::string& name, const DSLCodeLine
 	if (isFunctionNameTaken(name, file, builtins))
 		return true;
 
-	const int headerIndex = dslEnclosingFunctionHeader(file, dslLineIndex(file, &atLine));
-	if (headerIndex < 0)
-		return false;
+	const int atIndex = dslLineIndex(file, &atLine);
+	if (dslEnclosingFunctionHeader(file, atIndex) < 0)
+		return false; // outside any function -- nothing else here applies
 
-	const DSLSymbol::FunctionDeclaration& header = std::get<DSLSymbol::FunctionDeclaration>(file.lines[headerIndex]->head()->data);
-	for (DSLSymbol* param : header.parameterVarDeclarations)
-		if (param != excludeVariable && std::get<DSLSymbol::VariableDeclaration>(param->data).name == name)
+	// Backward: anything CURRENTLY reachable from atLine, via the SAME block-scoping rule inScopeVariables uses
+	// (parameters included -- they're seeded there too, from the function header's own line).
+	for (DSLSymbol* var : inScopeVariables(atLine, file, sidebar))
+		if (var != excludeVariable && std::get<DSLSymbol::VariableDeclaration>(var->data).name == name)
 			return true;
 
-	// Scan EVERY line belonging to this function -- deliberately not direction- or nesting-sensitive: a name
-	// collides whether the other declaration comes before or after this point, and whether it sits at a
-	// shallower or deeper scopeLevel (renaming an outer/earlier variable to match one declared later inside a
-	// nested block must be blocked too, not just the reverse).
-	const int blockEnd = dslBlockEnd(file, headerIndex);
-	for (int i = headerIndex + 1; i < blockEnd; ++i)
+	// Forward: a declaration made AT atLine stays visible for the rest of ITS OWN enclosing block, nested
+	// blocks included (they can always see outward) -- so anything declared from here through that block's
+	// close, AT ANY DEPTH, collides too. This is what still blocks e.g. renaming an outer variable to match one
+	// a LATER nested if-branch already declares (that inner name isn't reachable FROM atLine yet, so the
+	// backward scan above wouldn't catch it) -- while no longer flagging reuse of a name from an ALREADY-CLOSED
+	// sibling block (a finished loop's own counter, a past if-branch's own local), which the old whole-function
+	// flat scan used to block too.
+	const int enclosingHeader = dslEnclosingBlockHeader(file, atIndex);
+	const int scopeEnd = dslBlockEnd(file, enclosingHeader >= 0 ? enclosingHeader : dslEnclosingFunctionHeader(file, atIndex));
+	for (int i = atIndex; i < scopeEnd; ++i)
 		for (const std::unique_ptr<DSLSymbol>& s : file.lines[i]->symbols)
 			if (s->type == ST::VariableDeclaration && s.get() != excludeVariable
 				&& std::get<DSLSymbol::VariableDeclaration>(s->data).name == name)
