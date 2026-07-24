@@ -8,165 +8,6 @@ namespace
 {
 	using ST = DSLSymbol::SymbolType;
 
-	// The struct types' DSLType values are their table positions -- keep these three lists in sync.
-	constexpr DSLType kVec2 = dslStructType(0);
-	constexpr DSLType kVec3 = dslStructType(1);
-	constexpr DSLType kVec4 = dslStructType(2);
-
-	// THE struct table: engine-defined script value types. One row exposes a struct with its members, its
-	// positional constructor, and member functions (whose emit templates may wrap free functions -- "$r" is the
-	// receiver's own emitted expression, so chained accesses compose textually).
-	const std::vector<BindingStruct>& structTable()
-	{
-		using T = DSLType;
-		static const std::vector<BindingStruct> table = {
-			{ "vec2", "glm::vec2", { { "x", T::Float }, { "y", T::Float } }, "glm::vec2($1, $2)",
-				{
-					{ "x", T::Float, "$r.x" },
-					{ "y", T::Float, "$r.y" },
-				},
-				{
-					{ "length",     T::Float, {},                       "glm::length($r)" },
-					{ "normalized", kVec2,    {},                       "glm::normalize($r)" },
-					{ "dot",        T::Float, { { "other", kVec2 } },   "glm::dot($r, $1)" },
-					{ "distance",   T::Float, { { "other", kVec2 } },   "glm::distance($r, $1)" },
-				} },
-			{ "vec3", "glm::vec3", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float } }, "glm::vec3($1, $2, $3)",
-				{
-					{ "x", T::Float, "$r.x" },
-					{ "y", T::Float, "$r.y" },
-					{ "z", T::Float, "$r.z" },
-				},
-				{
-					{ "length",     T::Float, {},                       "glm::length($r)" },
-					{ "normalized", kVec3,    {},                       "glm::normalize($r)" },
-					{ "dot",        T::Float, { { "other", kVec3 } },   "glm::dot($r, $1)" },
-					{ "distance",   T::Float, { { "other", kVec3 } },   "glm::distance($r, $1)" },
-				} },
-			{ "vec4", "glm::vec4", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float }, { "w", T::Float } }, "glm::vec4($1, $2, $3, $4)",
-				{
-					{ "x", T::Float, "$r.x" },
-					{ "y", T::Float, "$r.y" },
-					{ "z", T::Float, "$r.z" },
-					{ "w", T::Float, "$r.w" },
-				},
-				{
-					{ "length",     T::Float, {},                       "glm::length($r)" },
-					{ "normalized", kVec4,    {},                       "glm::normalize($r)" },
-					{ "dot",        T::Float, { { "other", kVec4 } },   "glm::dot($r, $1)" },
-					{ "distance",   T::Float, { { "other", kVec4 } },   "glm::distance($r, $1)" },
-				} },
-		};
-		return table;
-	}
-
-	// THE exposure table for binding OBJECTS + the Engine free-function section. One BindingFunc row exposes
-	// one engine function; emit templates ("$r" = the receiver's own emitted expression, "$1..$n" = arguments)
-	// are consumed by Transpiler's callText/memberText. Every generated function gets `ctx`/`self` auto-injected
-	// as its first two parameters (see Transpiler::emitFunction), so templates reference them directly by name
-	// ("ctx->...", the literal "self") rather than through any wrapper object -- self's own functions/members
-	// call straight through the real ctx-> thunks, and a component member (self.physics) IS the handle-fetch
-	// expression itself, re-evaluated at each use (no caching, unlike the node graph's explicit "Get Component"
-	// node). Entries needing DSL-side Entity VALUES (spawnEntity returning one) stay deferred until Entity
-	// becomes a first-class value.
-	const std::vector<BindingObject>& bindingTable()
-	{
-		using T = DSLType;
-		static const std::vector<BindingObject> table = {
-			// physics/audio/force are NOT sidebar-top-level -- they're reached only through self's own members
-			// below (self.physics.applyImpulse(...)), never as a bare "physics" identifier.
-			{ "self", T::Entity, /*sidebarTopLevel*/ true,
-				{
-					{ "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "ctx->entitySetEnabled($r, $1)" },
-					{ "setAnimFloat",   T::Void,  { { "param", T::String }, { "value", T::Float } }, "ctx->entitySetAnimFloat($r, $1, $2)" },
-					{ "setAnimBool",    T::Void,  { { "param", T::String }, { "value", T::Bool } },  "ctx->entitySetAnimBool($r, $1, $2)" },
-					{ "setAnimTrigger", T::Void,  { { "param", T::String } },                        "ctx->entitySetAnimTrigger($r, $1)" },
-					{ "getChildCount",  T::Int,   {},                                               "ctx->entityGetChildCount($r)" },
-					{ "getBoundsRadius",T::Float, {},                                               "ctx->entityGetBoundsRadius($r)" },
-				},
-				{
-					{ "pos",     kVec3,               "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
-					{ "physics", T::PhysicsComponent, "ctx->entityGetPhysicsComponent($r)", /*writable*/ false, DSLComponentKind::Physics },
-					{ "audio",   T::AudioComponent,   "ctx->entityGetAudioComponent($r)",   /*writable*/ false, DSLComponentKind::Audio },
-					{ "force",   T::ForceComponent,   "ctx->entityGetForceComponent($r)",   /*writable*/ false, DSLComponentKind::Force },
-					// "$r" is unused (no $r/$N marker) -- scriptData is a real parameter of EVERY generated
-					// function (see Transpiler::emitFunction), never derived from the receiver expression.
-					// Dereferenced (not just cast) so self.data.<field> reads through "." like any other
-					// value member, matching pos's own "$r->pos" -> ".x" chaining convention. Its own fields
-					// come from DSL::dataFields, not this table -- see dslFindDataField.
-					{ "data",    T::ScriptData,        "(*(ScriptData*)scriptData)", /*writable*/ false },
-					// The emit template here is never actually reached: Transpiler's memberText special-cases a
-					// ScriptEvents receiver to emit the literal index directly (see dslFindEventIndex), so
-					// "self.events" itself is never recursed into for its own text. Its own members come from
-					// DSL::eventNames, not this table.
-					{ "events",  T::ScriptEvents,      "$r",                          /*writable*/ false },
-				} },
-			{ "physics", T::PhysicsComponent, /*sidebarTopLevel*/ false,
-				{
-					{ "getVelocity",  kVec3,   {},                                          "ctx->physicsGetVelocity($r)" },
-					{ "setVelocity",  T::Void, { { "velocity", kVec3 } },                   "ctx->physicsSetVelocity($r, $1)" },
-					{ "applyImpulse", T::Void, { { "impulse", kVec3 } },                    "ctx->physicsApplyImpulse($r, $1)" },
-					{ "isAwake",      T::Bool, {},                                          "(ctx->physicsIsAwake($r) != 0)" },
-					{ "teleport",     T::Void, { { "position", kVec3 }, { "eulerDeg", kVec3 } }, "ctx->physicsTeleport($r, $1, $2)" },
-				},
-				{} },
-			{ "audio", T::AudioComponent, /*sidebarTopLevel*/ false,
-				{
-					// audioTrigger's full ABI takes an override mask + position/volume/pitch; the DSL's one-arg
-					// trigger(alias) always plays unmodified (mask 0, defaults ignored by the host in that case).
-					{ "trigger", T::Void, { { "alias", T::String } }, "ctx->audioTrigger($r, self, $1, 0, glm::vec3(0.0f), 1.0f, 1.0f)" },
-					{ "stop",    T::Void, { { "alias", T::String } }, "ctx->audioStop($r, $1)" },
-				},
-				{} },
-			{ "force", T::ForceComponent, /*sidebarTopLevel*/ false,
-				{
-					{ "getOutput",   T::Float, {},                          "ctx->forceGetOutput($r)" },
-					{ "setOutput",   T::Void,  { { "output", T::Float } },  "ctx->forceSetOutput($r, $1)" },
-					{ "getReach",    T::Float, {},                          "ctx->forceGetReach($r)" },
-					{ "setReach",    T::Void,  { { "reach", T::Float } },   "ctx->forceSetReach($r, $1)" },
-					{ "setTeam",     T::Void,  { { "team", T::Int } },      "ctx->forceSetTeam($r, $1)" },
-					{ "getPressure", T::Float, {},                          "ctx->forceGetPressure($r)" },
-				},
-				{} },
-			// The Engine section: FREE calls in the DSL, ctx-> thunks in generated C++ (ctx is always in scope --
-			// every generated function receives it, see Transpiler::emitFunction).
-			{ nullptr, T::Void, /*sidebarTopLevel*/ false,
-				{
-					{ "print",           T::Void,  { { "message", T::String } },                            "ctx->log($1)" }, // one plain string -- no {}-interpolation yet
-					// Distance to the closest hit within maxRayDist, or maxRayDist itself on a miss (see
-					// thunk_physicsRayCastDistance) -- never a sentinel outside the query range, so e.g.
-					// `if rayCast(...) <= 0.1` reads correctly without a separate hit check.
-					{ "rayCast",         T::Float, { { "pos", kVec3 }, { "dir", kVec3 }, { "maxRayDist", T::Float } }, "ctx->physicsRayCastDistance($1, $2, $3)" },
-					{ "isKeyDown",       T::Bool,  { { "keyName", T::String } },                             "(ctx->isKeyDown($1) != 0)" },
-					{ "sendEvent",       T::Void,  { { "eventName", T::String } },                           "ctx->sendEvent($1)" },
-					{ "setSun",          T::Void,  { { "direction", kVec3 }, { "color", kVec3 }, { "intensity", T::Float } }, "ctx->setSun($1, $2, $3)" },
-					{ "spawnPointLight", T::Void,  { { "position", kVec3 }, { "range", T::Float }, { "color", kVec3 }, { "intensity", T::Float } }, "ctx->spawnPointLight($1, $2, $3, $4)" },
-				},
-				{} },
-		};
-		return table;
-	}
-
-	// THE 5 toggleable ScriptAPI.h entry points -- see EntryPointDef's comment for the shape/why. `cppSuffix`
-	// spells out the REAL exported signature's tail verbatim (matching the ScriptXxxFn typedefs exactly,
-	// scriptData/other/contactId included); `dslParams`' names/types must agree with its LEADING parameters.
-	const std::vector<EntryPointDef>& entryPointTable()
-	{
-		using T = DSLType;
-		static const std::vector<EntryPointDef> table = {
-			{ "OnSpawn",         {},                                            ", void* scriptData", "REGISTER_ON_SPAWN()" },
-			{ "OnDestroy",       {},                                            ", void* scriptData", "REGISTER_ON_DESTROY()" },
-			{ "Update",          { { "deltaSeconds", T::Float } },              ", float deltaSeconds, void* scriptData", "REGISTER_UPDATE()" },
-			// eventIdx only -- the document's own named entries (DSL::eventNames, EVENTS sidebar section) drive
-			// the real ScriptEventCount/ScriptEventName Transpiler emits alongside this one; see its comment.
-			{ "OnEvent",         { { "eventIdx", T::Int } },                    ", int eventIdx, void* scriptData", "REGISTER_ON_EVENT()" },
-			// `other` (Entity value) and `contactId` (int64) aren't representable by any DSLType yet, so they
-			// stay invisible/unreadable from the DSL body -- only begin/sensor are exposed.
-			{ "OnPhysicsEvent",  { { "begin", T::Int }, { "sensor", T::Int } }, ", Entity* other, int begin, int sensor, long long contactId, void* scriptData", "REGISTER_ON_PHYSICS_EVENT()" },
-		};
-		return table;
-	}
-
 	DSLSymbol* addSymbol(std::vector<std::unique_ptr<DSLSymbol>>& container, ST type, DSLSymbol::Data data)
 	{
 		auto symbol = std::make_unique<DSLSymbol>();
@@ -178,40 +19,220 @@ namespace
 	}
 }
 
+DSLType ScriptBindings::registerStruct(BindingStruct def) const
+{
+	ensureBuiltinsRegistered();
+	const DSLType type = dslStructType(static_cast<int>(m_structDefs.size()));
+	m_structDefs.push_back(std::move(def));
+	return type;
+}
+
+void ScriptBindings::registerObject(BindingObject def) const
+{
+	ensureBuiltinsRegistered();
+	m_objectDefs.push_back(std::move(def));
+}
+
+void ScriptBindings::registerEntryPoint(EntryPointDef def) const
+{
+	ensureBuiltinsRegistered();
+	m_entryPointDefs.push_back(std::move(def));
+}
+
+DSLType ScriptBindings::typeByName(const std::string& name) const
+{
+	ensureBuiltinsRegistered();
+	for (size_t i = 0; i < m_structDefs.size(); ++i)
+		if (name == m_structDefs[i].name)
+			return dslStructType(static_cast<int>(i));
+	return DSLType::Void;
+}
+
+// See the declaration in ScriptBindings.ixx. `vec2`/`vec4` need no name of their own outside their own struct
+// row (their self-referential member/function types spell DSLType::ThisBinding instead -- see structFor's
+// callers and the DSL.ixx comment), but `vec3` is referenced well beyond it (self.pos, physics component
+// functions, several Engine functions below), so its registerStruct return value is captured locally and reused
+// throughout.
+void ScriptBindings::ensureBuiltinsRegistered() const
+{
+	if (m_builtinsRegistered)
+		return;
+	m_builtinsRegistered = true; // set before the calls below -- they recurse back into this same guard
+
+	using T = DSLType;
+
+	registerStruct({ "vec2", "glm::vec2", { { "x", T::Float }, { "y", T::Float } }, "glm::vec2($1, $2)",
+		{
+			{ "x", T::Float, "$r.x" },
+			{ "y", T::Float, "$r.y" },
+		},
+		{
+			{ "length",     T::Float, {},                            "glm::length($r)" },
+			{ "normalized", T::ThisBinding, {},                      "glm::normalize($r)" },
+			{ "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
+			{ "distance",   T::Float, { { "other", T::ThisBinding } }, "glm::distance($r, $1)" },
+		} });
+	const DSLType vec3 = registerStruct({ "vec3", "glm::vec3", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float } }, "glm::vec3($1, $2, $3)",
+		{
+			{ "x", T::Float, "$r.x" },
+			{ "y", T::Float, "$r.y" },
+			{ "z", T::Float, "$r.z" },
+		},
+		{
+			{ "length",     T::Float, {},                            "glm::length($r)" },
+			{ "normalized", T::ThisBinding, {},                      "glm::normalize($r)" },
+			{ "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
+			{ "distance",   T::Float, { { "other", T::ThisBinding } }, "glm::distance($r, $1)" },
+		} });
+	registerStruct({ "vec4", "glm::vec4", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float }, { "w", T::Float } }, "glm::vec4($1, $2, $3, $4)",
+		{
+			{ "x", T::Float, "$r.x" },
+			{ "y", T::Float, "$r.y" },
+			{ "z", T::Float, "$r.z" },
+			{ "w", T::Float, "$r.w" },
+		},
+		{
+			{ "length",     T::Float, {},                            "glm::length($r)" },
+			{ "normalized", T::ThisBinding, {},                      "glm::normalize($r)" },
+			{ "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
+			{ "distance",   T::Float, { { "other", T::ThisBinding } }, "glm::distance($r, $1)" },
+		} });
+
+	// The exposure for binding OBJECTS + the Engine free-function section. One BindingFunc row exposes one
+	// engine function; emit templates ("$r" = the receiver's own emitted expression, "$1..$n" = arguments) are
+	// consumed by Transpiler's callText/memberText. Every generated function gets `ctx`/`self` auto-injected as
+	// its first two parameters (see Transpiler::emitFunction), so templates reference them directly by name
+	// ("ctx->...", the literal "self") rather than through any wrapper object -- self's own functions/members
+	// call straight through the real ctx-> thunks, and a component member (self.physics) IS the handle-fetch
+	// expression itself, re-evaluated at each use (no caching, unlike the node graph's explicit "Get Component"
+	// node). Entries needing DSL-side Entity VALUES (spawnEntity returning one) stay deferred until Entity
+	// becomes a first-class value.
+
+	// physics/audio/force are NOT sidebar-top-level -- they're reached only through self's own members below
+	// (self.physics.applyImpulse(...)), never as a bare "physics" identifier.
+	registerObject({ "self", T::Entity, /*sidebarTopLevel*/ true,
+		{
+			{ "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "ctx->entitySetEnabled($r, $1)" },
+			{ "setAnimFloat",   T::Void,  { { "param", T::String }, { "value", T::Float } }, "ctx->entitySetAnimFloat($r, $1, $2)" },
+			{ "setAnimBool",    T::Void,  { { "param", T::String }, { "value", T::Bool } },  "ctx->entitySetAnimBool($r, $1, $2)" },
+			{ "setAnimTrigger", T::Void,  { { "param", T::String } },                        "ctx->entitySetAnimTrigger($r, $1)" },
+			{ "getChildCount",  T::Int,   {},                                               "ctx->entityGetChildCount($r)" },
+			{ "getBoundsRadius",T::Float, {},                                               "ctx->entityGetBoundsRadius($r)" },
+		},
+		{
+			{ "pos",     vec3,                "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
+			{ "physics", T::PhysicsComponent, "ctx->entityGetPhysicsComponent($r)", /*writable*/ false, DSLComponentKind::Physics },
+			{ "audio",   T::AudioComponent,   "ctx->entityGetAudioComponent($r)",   /*writable*/ false, DSLComponentKind::Audio },
+			{ "force",   T::ForceComponent,   "ctx->entityGetForceComponent($r)",   /*writable*/ false, DSLComponentKind::Force },
+			// "$r" is unused (no $r/$N marker) -- scriptData is a real parameter of EVERY generated function
+			// (see Transpiler::emitFunction), never derived from the receiver expression. Dereferenced (not
+			// just cast) so self.data.<field> reads through "." like any other value member, matching pos's
+			// own "$r->pos" -> ".x" chaining convention. Its own fields come from DSL::dataFields, not this
+			// table -- see dslFindDataField.
+			{ "data",    T::ScriptData,        "(*(ScriptData*)scriptData)", /*writable*/ false },
+			// The emit template here is never actually reached: Transpiler's memberText special-cases a
+			// ScriptEvents receiver to emit the literal index directly (see dslFindEventIndex), so
+			// "self.events" itself is never recursed into for its own text. Its own members come from
+			// DSL::eventNames, not this table.
+			{ "events",  T::ScriptEvents,      "$r",                          /*writable*/ false },
+		} });
+	registerObject({ "physics", T::PhysicsComponent, /*sidebarTopLevel*/ false,
+		{
+			{ "getVelocity",  vec3,   {},                                          "ctx->physicsGetVelocity($r)" },
+			{ "setVelocity",  T::Void, { { "velocity", vec3 } },                   "ctx->physicsSetVelocity($r, $1)" },
+			{ "applyImpulse", T::Void, { { "impulse", vec3 } },                    "ctx->physicsApplyImpulse($r, $1)" },
+			{ "isAwake",      T::Bool, {},                                          "(ctx->physicsIsAwake($r) != 0)" },
+			{ "teleport",     T::Void, { { "position", vec3 }, { "eulerDeg", vec3 } }, "ctx->physicsTeleport($r, $1, $2)" },
+		},
+		{} });
+	registerObject({ "audio", T::AudioComponent, /*sidebarTopLevel*/ false,
+		{
+			// audioTrigger's full ABI takes an override mask + position/volume/pitch; the DSL's one-arg
+			// trigger(alias) always plays unmodified (mask 0, defaults ignored by the host in that case).
+			{ "trigger", T::Void, { { "alias", T::String } }, "ctx->audioTrigger($r, self, $1, 0, glm::vec3(0.0f), 1.0f, 1.0f)" },
+			{ "stop",    T::Void, { { "alias", T::String } }, "ctx->audioStop($r, $1)" },
+		},
+		{} });
+	registerObject({ "force", T::ForceComponent, /*sidebarTopLevel*/ false,
+		{
+			{ "getOutput",   T::Float, {},                          "ctx->forceGetOutput($r)" },
+			{ "setOutput",   T::Void,  { { "output", T::Float } },  "ctx->forceSetOutput($r, $1)" },
+			{ "getReach",    T::Float, {},                          "ctx->forceGetReach($r)" },
+			{ "setReach",    T::Void,  { { "reach", T::Float } },   "ctx->forceSetReach($r, $1)" },
+			{ "setTeam",     T::Void,  { { "team", T::Int } },      "ctx->forceSetTeam($r, $1)" },
+			{ "getPressure", T::Float, {},                          "ctx->forceGetPressure($r)" },
+		},
+		{} });
+	// The Engine section: FREE calls in the DSL, ctx-> thunks in generated C++ (ctx is always in scope -- every
+	// generated function receives it, see Transpiler::emitFunction).
+	registerObject({ nullptr, T::Void, /*sidebarTopLevel*/ false,
+		{
+			{ "print",           T::Void,  { { "message", T::String } },                            "ctx->log($1)" }, // one plain string -- no {}-interpolation yet
+			// Distance to the closest hit within maxRayDist, or maxRayDist itself on a miss (see
+			// thunk_physicsRayCastDistance) -- never a sentinel outside the query range, so e.g.
+			// `if rayCast(...) <= 0.1` reads correctly without a separate hit check.
+			{ "rayCast",         T::Float, { { "pos", vec3 }, { "dir", vec3 }, { "maxRayDist", T::Float } }, "ctx->physicsRayCastDistance($1, $2, $3)" },
+			{ "isKeyDown",       T::Bool,  { { "keyName", T::String } },                             "(ctx->isKeyDown($1) != 0)" },
+			{ "sendEvent",       T::Void,  { { "eventName", T::String } },                           "ctx->sendEvent($1)" },
+			{ "setSun",          T::Void,  { { "direction", vec3 }, { "color", vec3 }, { "intensity", T::Float } }, "ctx->setSun($1, $2, $3)" },
+			{ "spawnPointLight", T::Void,  { { "position", vec3 }, { "range", T::Float }, { "color", vec3 }, { "intensity", T::Float } }, "ctx->spawnPointLight($1, $2, $3, $4)" },
+		},
+		{} });
+
+	// THE 5 toggleable ScriptAPI.h entry points -- see EntryPointDef's comment for the shape/why. `cppSuffix`
+	// spells out the REAL exported signature's tail verbatim (matching the ScriptXxxFn typedefs exactly,
+	// scriptData/other/contactId included); `dslParams`' names/types must agree with its LEADING parameters.
+	registerEntryPoint({ "OnSpawn",         {},                                            ", void* scriptData", "REGISTER_ON_SPAWN()" });
+	registerEntryPoint({ "OnDestroy",       {},                                            ", void* scriptData", "REGISTER_ON_DESTROY()" });
+	registerEntryPoint({ "Update",          { { "deltaSeconds", T::Float } },              ", float deltaSeconds, void* scriptData", "REGISTER_UPDATE()" });
+	// eventIdx only -- the document's own named entries (DSL::eventNames, EVENTS sidebar section) drive the
+	// real ScriptEventCount/ScriptEventName Transpiler emits alongside this one; see its comment.
+	registerEntryPoint({ "OnEvent",         { { "eventIdx", T::Int } },                    ", int eventIdx, void* scriptData", "REGISTER_ON_EVENT()" });
+	// `other` (Entity value) and `contactId` (int64) aren't representable by any DSLType yet, so they stay
+	// invisible/unreadable from the DSL body -- only begin/sensor are exposed.
+	registerEntryPoint({ "OnPhysicsEvent",  { { "begin", T::Int }, { "sensor", T::Int } }, ", Entity* other, int begin, int sensor, long long contactId, void* scriptData", "REGISTER_ON_PHYSICS_EVENT()" });
+}
+
 void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, std::vector<std::unique_ptr<DSLSymbol>>& builtinsOut)
 {
+	ensureBuiltinsRegistered();
+
 	// One FunctionDeclaration builtin per exposed function -- what the editor/loader resolve against. Shared
 	// by binding-object functions, struct member functions (requiresReceiver=true), and struct constructors
-	// (free positional calls named like the struct itself).
+	// (free positional calls named like the struct itself). `selfType` (struct rows only) resolves any
+	// DSLType::ThisBinding in `returnType`/a param's type to the struct's own concrete type -- Void everywhere
+	// else, where no BindingFunc ever spells ThisBinding.
 	auto buildFunction = [&](const char* name, DSLType returnType, const std::vector<BindingParam>& params,
-		const char* emit, bool requiresReceiver, bool isPositionalCall) -> DSLSymbol*
+		const char* emit, bool requiresReceiver, bool isPositionalCall, DSLType selfType = DSLType::Void) -> DSLSymbol*
 	{
+		const auto resolveSelf = [selfType](DSLType t) { return t == DSLType::ThisBinding ? selfType : t; };
 		std::vector<DSLSymbol*> built;
 		for (const BindingParam& param : params)
 		{
-			DSLSymbol* paramType = addSymbol(builtinsOut, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ param.type });
+			DSLSymbol* paramType = addSymbol(builtinsOut, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ resolveSelf(param.type) });
 			built.push_back(addSymbol(builtinsOut, ST::VariableDeclaration,
 				DSLSymbol::VariableDeclaration{ param.name, paramType, nullptr, param.isRef }));
 		}
 		DSLSymbol* funcSymbol = addSymbol(builtinsOut, ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{
-			name, std::move(built), returnType, requiresReceiver, isPositionalCall });
+			name, std::move(built), resolveSelf(returnType), requiresReceiver, isPositionalCall });
 		m_emits.emplace_back(funcSymbol, emit);
 		return funcSymbol;
 	};
 
-	for (size_t i = 0; i < structTable().size(); ++i)
+	for (size_t i = 0; i < m_structDefs.size(); ++i)
 	{
-		const BindingStruct& def = structTable()[i];
+		const BindingStruct& def = m_structDefs[i];
+		const DSLType selfType = dslStructType(static_cast<int>(i));
 		BuiltStruct& built = m_builtStructs.emplace_back();
 		built.def = &def;
-		built.constructorFunc = buildFunction(def.name, dslStructType(static_cast<int>(i)), def.constructorParams,
-			def.constructorEmit, /*requiresReceiver*/ false, /*isPositionalCall*/ true);
+		built.constructorFunc = buildFunction(def.name, selfType, def.constructorParams,
+			def.constructorEmit, /*requiresReceiver*/ false, /*isPositionalCall*/ true, selfType);
 		for (const BindingFunc& func : def.functions)
 			built.functionSymbols.push_back(buildFunction(func.name, func.returnType, func.params, func.emit,
-				/*requiresReceiver*/ true, func.isPositionalCall));
+				/*requiresReceiver*/ true, func.isPositionalCall, selfType));
 	}
 
-	for (const BindingObject& object : bindingTable())
+	for (const BindingObject& object : m_objectDefs)
 	{
 		BuiltObject& built = m_built.emplace_back();
 		built.def = &object;
@@ -228,7 +249,8 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 
 std::span<const BindingObject> ScriptBindings::objects() const
 {
-	return bindingTable();
+	ensureBuiltinsRegistered();
+	return m_objectDefs;
 }
 
 const BindingObject* ScriptBindings::objectFor(DSLType type) const
@@ -280,7 +302,8 @@ const BindingMember* ScriptBindings::findMember(DSLType receiverType, const std:
 
 std::span<const BindingStruct> ScriptBindings::structs() const
 {
-	return structTable();
+	ensureBuiltinsRegistered();
+	return m_structDefs;
 }
 
 const BindingStruct* ScriptBindings::structFor(DSLType type) const
@@ -291,14 +314,6 @@ const BindingStruct* ScriptBindings::structFor(DSLType type) const
 	if (index < 0 || index >= static_cast<int>(m_builtStructs.size()))
 		return nullptr;
 	return m_builtStructs[index].def;
-}
-
-DSLType ScriptBindings::structTypeByName(const std::string& name) const
-{
-	for (size_t i = 0; i < m_builtStructs.size(); ++i)
-		if (name == m_builtStructs[i].def->name)
-			return dslStructType(static_cast<int>(i));
-	return DSLType::Void;
 }
 
 std::span<DSLSymbol* const> ScriptBindings::structFunctionSymbols(DSLType type) const
@@ -321,12 +336,14 @@ const char* ScriptBindings::emitFor(const DSLSymbol* funcDecl) const
 
 std::span<const EntryPointDef> ScriptBindings::entryPoints() const
 {
-	return entryPointTable();
+	ensureBuiltinsRegistered();
+	return m_entryPointDefs;
 }
 
 const EntryPointDef* ScriptBindings::entryPointFor(const std::string& name) const
 {
-	for (const EntryPointDef& def : entryPointTable())
+	ensureBuiltinsRegistered();
+	for (const EntryPointDef& def : m_entryPointDefs)
 		if (name == def.name)
 			return &def;
 	return nullptr;

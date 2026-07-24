@@ -121,7 +121,7 @@ namespace
 				out = t;
 				return true;
 			}
-		if (const DSLType structType = Globals::scriptBindings.structTypeByName(word); structType != DSLType::Void)
+		if (const DSLType structType = Globals::scriptBindings.typeByName(word); structType != DSLType::Void)
 		{
 			out = structType;
 			return true;

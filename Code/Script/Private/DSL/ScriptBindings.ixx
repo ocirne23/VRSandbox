@@ -18,12 +18,29 @@ import :DSL;
 // declares which components it requires (DSL::requiredComponents); assignment-time validation (future work)
 // guarantees required members are never null.
 //
+// EXTENSIBLE: registerStruct/registerObject/registerEntryPoint are public, so any library can expose its own
+// script bindings, not just Script itself -- the Script library's OWN vec2/vec3/vec4, self/physics/audio/
+// force/Engine, and the 5 ScriptAPI entry points register through this exact same path (see
+// ensureBuiltinsRegistered), so there's no "internal" registration mechanism a caller elsewhere can't also use.
+// registerStruct returns the DSLType it just assigned immediately, usable right away in a LATER registration
+// call's own parameter/return types; typeByName is the same lookup for an EXISTING struct (e.g. vec3) a new
+// registration wants to reference without needing that earlier call's return value handed to it directly.
+// Built-ins register themselves lazily, the first time ANY public method on this class is called, from
+// WHICHEVER call that happens to be -- so nothing needs to run "at startup" for them specifically. A cross-
+// library dependency (an external registration that references vec2/3/4 via typeByName) still needs sequencing
+// the caller controls, same as any other cross-library Globals dependency in this codebase (see
+// ScriptEventManager::initialize's comment) -- just call the referenced registration (or trigger the built-ins
+// via any ScriptBindings method) before the one that needs its result.
+//
 // Editor-side, the registry replaces the hardcoded builtins: build() constructs the SAME two DSLSymbol vectors
 // every consumer (AutoCompleteRules/ScriptLoader/editor) already reads -- sidebar VariableDeclarations for the
 // binding objects, builtin FunctionDeclarations for every function (engine free functions plus
-// requiresReceiver=true entries for object functions). ALL bindings are built regardless of the require set --
-// stable symbol identity forever; DSL::requiredComponents only gates what autocomplete OFFERS and what the
-// loader/panel accept.
+// requiresReceiver=true entries for object functions) -- from every struct/object registered SO FAR; a
+// registration made AFTER build() runs exists in the registry (queryable via typeByName/structs/objects) but
+// never gets symbols built for it, so every registration -- built-in or external -- needs to happen before the
+// one build() call (ScriptEditor's, currently). ALL bindings are built regardless of the require set -- stable
+// symbol identity forever; DSL::requiredComponents only gates what autocomplete OFFERS and what the loader/
+// panel accept.
 
 export struct BindingParam
 {
@@ -109,11 +126,31 @@ export struct BindingObject
 export class ScriptBindings
 {
 public:
-	// Constructs the sidebar/builtin symbol vectors from the table -- call ONCE (symbol identity must be
-	// stable for the lifetime of every document that references them).
+	// Registers one struct type (a value type with members/functions/positional constructor, e.g. vec2/3/4) and
+	// returns the DSLType it's assigned -- callable from ANY library, at any time, not just Script's own
+	// built-ins (see the class comment). The returned type is immediately usable as a parameter/return type of
+	// a LATER registerStruct/registerObject call from anyone; typeByName is the same lookup for an EXISTING
+	// struct this call didn't just register.
+	DSLType registerStruct(BindingStruct def) const;
+	// Registers one binding object (or the Engine free-function section, when def.name == nullptr) -- same
+	// call-from-anywhere/any-time guarantee as registerStruct.
+	void registerObject(BindingObject def) const;
+	// Registers one toggleable ScriptAPI entry point (see EntryPointDef) -- same guarantee.
+	void registerEntryPoint(EntryPointDef def) const;
+
+	// `name`'s DSLType among every struct registered so far (Void if none spells `name`) -- how a NEW
+	// registerStruct/registerObject call, from this library or any other, references an EXISTING struct (e.g.
+	// "vec3") as one of its own parameter/return types, without needing that struct's DSLType handed to it
+	// directly. Triggers the built-ins (see the class comment) if nothing has touched this registry yet.
+	DSLType typeByName(const std::string& name) const;
+
+	// Constructs the sidebar/builtin symbol vectors from every struct/object registered SO FAR -- call ONCE,
+	// after every registration whose symbols should exist (symbol identity must be stable for the lifetime of
+	// every document that references them); a registration made after this call exists in the registry but
+	// never gets symbols built for it.
 	void build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, std::vector<std::unique_ptr<DSLSymbol>>& builtinsOut);
 
-	// The full table, in sidebar-panel display order (Engine section last).
+	// The full table, in registration order (built-ins first; the Engine section last among them).
 	std::span<const BindingObject> objects() const;
 
 	// The BindingObject a receiver's engine-object type belongs to (nullptr for non-object types).
@@ -131,9 +168,8 @@ public:
 	const BindingMember* findMember(DSLType receiverType, const std::string& name) const;
 
 	// ---- structs ----
-	std::span<const BindingStruct> structs() const;
-	const BindingStruct* structFor(DSLType type) const;         // nullptr for non-struct types
-	DSLType structTypeByName(const std::string& name) const;     // Void when no struct spells `name`
+	std::span<const BindingStruct> structs() const; // every struct registered so far, in registration order
+	const BindingStruct* structFor(DSLType type) const; // nullptr for non-struct types
 	// The struct's own member functions' built symbols, parallel to structFor(type)->functions.
 	std::span<DSLSymbol* const> structFunctionSymbols(DSLType type) const;
 
@@ -141,13 +177,23 @@ public:
 	// Transpiler's callText substitutes against.
 	const char* emitFor(const DSLSymbol* funcDecl) const;
 
-	// The 5 toggleable ScriptAPI entry points (OnSpawn/OnDestroy/Update/OnEvent/OnPhysicsEvent), in sidebar
-	// display order. Static engine data -- unlike objects()/structs(), nothing here needs `build()`.
+	// The toggleable ScriptAPI entry points registered so far (the 5 built-in ones -- OnSpawn/OnDestroy/Update/
+	// OnEvent/OnPhysicsEvent -- plus any registerEntryPoint addition), in registration order. Doesn't need
+	// `build()`, unlike objects()/structs()' BUILT symbols.
 	std::span<const EntryPointDef> entryPoints() const;
-	// `name`'s matching EntryPointDef (nullptr if `name` isn't one of the 5).
+	// `name`'s matching EntryPointDef (nullptr if `name` isn't registered).
 	const EntryPointDef* entryPointFor(const std::string& name) const;
 
 private:
+	// Registers the Script library's own built-in bindings -- vec2/vec3/vec4, self/physics/audio/force/Engine,
+	// and the 5 ScriptAPI entry points -- through registerStruct/registerObject/registerEntryPoint exactly like
+	// any OTHER library would (see the class comment). Runs on the FIRST call to any public method on this
+	// class, from whichever call that happens to be; m_builtinsRegistered is set BEFORE the calls below, since
+	// they recurse back into this same guard through their own registerStruct/registerObject/registerEntryPoint
+	// calls -- registration order between libraries therefore never matters on its own, only that a call
+	// referencing an earlier one (via typeByName) is sequenced after it, the caller's own responsibility.
+	void ensureBuiltinsRegistered() const;
+
 	struct BuiltObject
 	{
 		const BindingObject* def = nullptr;
@@ -161,13 +207,25 @@ private:
 		std::vector<DSLSymbol*> functionSymbols; // parallel to def->functions
 	};
 
+	// Registered defs (registerStruct/registerObject/registerEntryPoint) -- `mutable` so the const query methods
+	// that read them (typeByName, objects(), structs(), entryPoints(), entryPointFor()) can also trigger
+	// ensureBuiltinsRegistered() lazily, the same as the registration methods themselves (also const: nothing
+	// about registering needs write access to the CALLER's own state, only this registry's).
+	mutable bool m_builtinsRegistered = false;
+	mutable std::vector<BindingStruct> m_structDefs;
+	mutable std::vector<BindingObject> m_objectDefs;
+	mutable std::vector<EntryPointDef> m_entryPointDefs;
+
+	// Symbols built from the above by build() -- unaffected by the mutable/const story above; build() is the
+	// one non-const method here, called once, well after every registration that should be included.
 	std::vector<BuiltObject> m_built;
 	std::vector<BuiltStruct> m_builtStructs;     // index N = DSLType dslStructType(N)
 	std::vector<std::pair<const DSLSymbol*, const char*>> m_emits; // function symbol -> emit template
 };
 
-// The one registry instance (house singleton pattern) -- built once by the Script Editor at startup; consulted
-// by dslTypeName (struct names), the loader, and the transpiler.
+// The one registry instance (house singleton pattern) -- registrations (built-in and external alike) accumulate
+// into it from wherever they're called, build() constructs symbols from them once (the Script Editor's own call,
+// currently); consulted by dslTypeName (struct names), the loader, and the transpiler too.
 export namespace Globals
 {
 	ScriptBindings scriptBindings;

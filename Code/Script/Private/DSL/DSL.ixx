@@ -112,6 +112,13 @@ export enum class DSLType : uint16
 	// directly. The index IS the name's position in that list -- also what Transpiler emits ScriptEventName's
 	// switch from, so the two always agree.
 	ScriptEvents,
+	// Build-time-only sentinel: inside ScriptBindings.cpp's struct table, a BindingFunc's return/param type of
+	// ThisBinding means "whichever struct this entry's OWN row belongs to" -- e.g. vec3's "normalized" returns
+	// ThisBinding instead of hardcoding vec3's own DSLType, so the row reads identically regardless of which
+	// struct it's for. ScriptBindings::build() resolves it to the real dslStructType() index while constructing
+	// that struct's FunctionDeclaration symbols; no DSLSymbol ever actually holds this value, so nothing else
+	// (dslTypeName, the transpiler, the editor) needs to know about it.
+	ThisBinding,
 	FirstStruct = 256,  // + struct registry index (see dslStructType/dslStructIndex)
 };
 
