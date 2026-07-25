@@ -530,6 +530,10 @@ private:
 	bool sequenceYields(DSLType sequenceType, DSLType elementType) const;
 	std::string ifComponentPrefix() const; // "ifcomponent <Type> <name> in " -- everything before the entity
 	void commitIfComponentStatement(const PendingExprChain& entity); // IfComponentSource's confirm
+	// The re-edit half of both commits above (foreach/ifcomponent headers are structurally identical): applies a
+	// new bound name + source to an EXISTING header, preserving the bound declaration's symbol identity.
+	void rebuildBoundHeaderSource(DSLCodeLine& line, DSLSymbol* boundVar, const std::string& boundName,
+		const PendingExprChain& source);
 	DSLType reassignTargetType() const; // m_reassignTarget's own declared type
 	// Same `terms`/`ops` convention as applyDeclareVariable, for a `name = value` statement instead.
 	void commitReassignStatement(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops);
@@ -673,10 +677,11 @@ private:
 	// tryWidenFlowHeaderEdit), the header-line counterpart of m_redeclareTarget/m_reassignEditExpr. The header
 	// only changes when the staged flow re-confirms IN FULL (no body is seeded -- the block already has one);
 	// Backspacing past the first stage applies the same guarded deletion as Backspacing the keyword itself
-	// (if/while: empty else-chain, body kept un-nested; elseif: own branch empty; for: empty body; return:
-	// unconditional). m_flowEditLoopVar (for-loops only) is the existing loop-variable declaration, preserved
-	// IN PLACE on commit -- body statements reference it, so its identity must survive re-authoring; its TYPE
-	// stays fixed for the same reason (the ForVarType stage is never re-entered on a re-edit).
+	// (if/while: empty else-chain, body kept un-nested; elseif: own branch empty; for/foreach/ifcomponent: empty
+	// body, plus an empty attached else for ifcomponent; return: unconditional). m_flowEditLoopVar is the
+	// declaration the header BINDS (a for-loop's counter, a foreach element, an ifcomponent component),
+	// preserved IN PLACE on commit -- body statements reference it, so its identity must survive re-authoring;
+	// its TYPE stays fixed for the same reason (the type stage is never re-entered on a re-edit).
 	DSLCodeLine* m_flowEditLine = nullptr;
 	DSLSymbol* m_flowEditLoopVar = nullptr;
 

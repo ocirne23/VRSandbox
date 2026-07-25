@@ -1418,7 +1418,9 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 			cancelCompose();
 			return;
 		}
-		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_builtins))
+		// A re-edited header's own current name must not collide with itself (m_flowEditLoopVar is null when
+		// authoring a fresh one, changing nothing there).
+		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_builtins, m_flowEditLoopVar))
 			return; // name already taken in this scope -- keep editing instead of accepting the collision
 		m_forEachElementName = m_pendingWord;
 		enterChainStage(ComposeMode::ForEachSource);
@@ -1463,7 +1465,8 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 			cancelCompose();
 			return;
 		}
-		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_builtins))
+		// Same self-collision exclusion as ForEachName above, for the same reason.
+		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_builtins, m_flowEditLoopVar))
 			return; // name already taken in this scope -- keep editing instead of accepting the collision
 		m_ifComponentName = m_pendingWord;
 		enterChainStage(ComposeMode::IfComponentSource);
@@ -3090,10 +3093,17 @@ void ScriptEditor::commitIfComponentStatement(const PendingExprChain& entity)
 	if (linePtr == nullptr)
 		return;
 	DSLCodeLine& line = *linePtr;
+	DSLSymbol* existingBoundVar = m_flowEditLoopVar;
 	const DSLType componentType = m_ifComponentType;
 	const std::string boundName = m_ifComponentName;
 	const bool reAuthoring = m_flowEditLine != nullptr;
 	cancelCompose();
+
+	if (existingBoundVar != nullptr)
+	{
+		rebuildBoundHeaderSource(line, existingBoundVar, boundName, entity);
+		return;
+	}
 
 	line.symbols.clear();
 	DSLSymbol* entityValue = buildExpressionFromTerms(entity.terms, entity.ops, line);
@@ -3103,6 +3113,24 @@ void ScriptEditor::commitIfComponentStatement(const PendingExprChain& entity)
 		DSLSymbol::FlowControl{ DSLFlowControl::IfComponent, entityValue, boundVar });
 	if (!reAuthoring)
 		m_pendingSelectTarget = seedStatementPlaceholder(insertLineAfter(line, line.scopeLevel + 1));
+}
+
+// The re-edit half of commitForEach/IfComponentStatement (both headers have the identical shape): only the bound
+// name and the source change. The declaration's symbol IDENTITY must survive -- body statements reference it --
+// so it's mutated in place on the SAME FlowControl head rather than rebuilt, and its TYPE stays fixed for the
+// same reason (the type stage is never re-entered on a re-edit, see m_flowEditLoopVar). Everything the old
+// source left behind is swept by the reachability pass.
+void ScriptEditor::rebuildBoundHeaderSource(DSLCodeLine& line, DSLSymbol* boundVar, const std::string& boundName,
+	const PendingExprChain& source)
+{
+	DSLSymbol* originalHead = line.head();
+	if (originalHead == nullptr || originalHead->type != ST::FlowControl)
+		return;
+	std::get<DSLSymbol::VariableDeclaration>(boundVar->data).name = boundName;
+	DSLSymbol* sourceValue = buildExpressionFromTerms(source.terms, source.ops, line);
+	std::get<DSLSymbol::FlowControl>(originalHead->data).condition = sourceValue;
+	restoreHeadAndCollect(line, originalHead);
+	selectExpressionTail(sourceValue); // end of the re-authored header; the body already exists
 }
 
 // See the declaration in ScriptEditor.ixx.
@@ -3124,10 +3152,17 @@ void ScriptEditor::commitForEachStatement(const PendingExprChain& sequence)
 	if (linePtr == nullptr)
 		return;
 	DSLCodeLine& line = *linePtr;
+	DSLSymbol* existingElementVar = m_flowEditLoopVar;
 	const DSLType elementType = m_forEachElementType;
 	const std::string elementName = m_forEachElementName;
 	const bool reAuthoring = m_flowEditLine != nullptr;
 	cancelCompose();
+
+	if (existingElementVar != nullptr)
+	{
+		rebuildBoundHeaderSource(line, existingElementVar, elementName, sequence);
+		return;
+	}
 
 	line.symbols.clear();
 	DSLSymbol* sequenceValue = buildExpressionFromTerms(sequence.terms, sequence.ops, line);
@@ -3804,6 +3839,34 @@ bool ScriptEditor::tryWidenFlowHeaderEdit()
 		m_conditionOp = cmp.operators[0];
 		m_flowEditLine = line;
 		enterChainStage(ComposeMode::ConditionRight);
+		return true;
+	}
+
+	if (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfComponent)
+	{
+		// Only the SOURCE re-stages: the bound declaration has no value slot of its own (the construct supplies
+		// the value), so there's exactly one span to widen from, and the flow reopens at its LAST stage with the
+		// type/name showing in the prefix -- further Backspace peels back through the name and, guarded, removes
+		// the header itself. The bound declaration is preserved on commit (see m_flowEditLoopVar).
+		if (m_editChainExpr != nullptr || m_editSlot.kind != SlotRef::Kind::FlowControlCondition
+			|| m_editSlot.parent != head || fc.forLoopVar == nullptr)
+			return false;
+		const DSLSymbol::VariableDeclaration& boundDecl = std::get<DSLSymbol::VariableDeclaration>(fc.forLoopVar->data);
+		const DSLType boundType = std::get<DSLSymbol::TypeDeclaration>(boundDecl.typeSymbol->data).type;
+		m_flowEditLine = line;
+		m_flowEditLoopVar = fc.forLoopVar;
+		if (fc.control == DSLFlowControl::ForEach)
+		{
+			m_forEachElementType = boundType;
+			m_forEachElementName = boundDecl.name;
+			enterChainStage(ComposeMode::ForEachSource);
+		}
+		else
+		{
+			m_ifComponentType = boundType;
+			m_ifComponentName = boundDecl.name;
+			enterChainStage(ComposeMode::IfComponentSource);
+		}
 		return true;
 	}
 
@@ -5094,15 +5157,28 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 				enterCompose(ComposeMode::ForVarType, "for ");
 			}
 		}
-		else if (m_composeMode == ComposeMode::ForEachName)
+		else if (m_composeMode == ComposeMode::ForEachName || m_composeMode == ComposeMode::IfComponentName)
 		{
-			// Same shape as ForVarName's fresh-authoring case: nothing free-typed before this stage, so reset
-			// to the element-type pick.
-			enterCompose(ComposeMode::ForEachType, "foreach ");
-		}
-		else if (m_composeMode == ComposeMode::IfComponentName)
-		{
-			enterCompose(ComposeMode::IfComponentType, "ifcomponent ");
+			const bool isForEach = m_composeMode == ComposeMode::ForEachName;
+			if (m_flowEditLine != nullptr)
+			{
+				// Same as ForVarName's re-edit case: the bound type is fixed on a re-edit, so past the name the
+				// next step is removing the header itself, under its own keyword's Backspace rule (empty body,
+				// and -- ifcomponent only -- an empty attached else).
+				DSLSymbol* head = m_flowEditLine->head();
+				if (head != nullptr && isBlockBodyEmpty(head) && attachedElseChainEmpty(head))
+				{
+					cancelCompose();
+					deleteEmptyBlock(head);
+				}
+			}
+			else
+			{
+				// Same shape as ForVarName's fresh-authoring case: nothing free-typed before this stage, so
+				// reset to the type pick.
+				enterCompose(isForEach ? ComposeMode::ForEachType : ComposeMode::IfComponentType,
+					isForEach ? "foreach " : "ifcomponent ");
+			}
 		}
 		else if (m_composeMode == ComposeMode::ForVarValue)
 		{
