@@ -463,6 +463,8 @@ private:
 	// initializer ("vec3 test = vec3(1,|") or an assignment's whole right-hand side: the CallArgValue staging
 	// re-opens at that argument WITH the owning flow's context (redeclare / reassign-edit) as the suspended
 	// return mode, so continued Backspace peels through the call, then the value stage, the name, and beyond.
+	// Calls nest to any depth ("float t = myvec.dot(vec3(1, 2, |"): the walk outward rebuilds ONE CallStage per
+	// level, the same stack forward authoring would have pushed, so the peel out mirrors the way in.
 	bool tryWidenValueCallEdit();
 	std::string callComposePrefix() const;  // "name(param0 = <resolved>, param1 = " -- rebuilt from the staged-call state each stage
 	std::string callStagePrefix() const;    // callComposePrefix, led by the suspended chain compose's own prefix when staging a call VALUE

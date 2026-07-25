@@ -826,8 +826,14 @@ bool AutoCompleteRules::isFunctionNameTaken(const std::string& name, const DSLSc
 	if (isReservedWord(name))
 		return true;
 
+	// Only BARE-callable builtins reserve a global name. A receiver-based one (a struct's `dot`/`length`, an
+	// object's `getVelocity`, an array's `push`) is only ever reachable through its receiver -- it's excluded
+	// from every plain candidate list (see candidatesForAnyValue) and the loader resolves a bare identifier
+	// against requiresReceiver=false only -- so a local or function of the same name is never ambiguous, and its
+	// generated C++ is a qualified/member call either way.
 	for (const std::unique_ptr<DSLSymbol>& s : builtins)
-		if (s->type == ST::FunctionDeclaration && std::get<DSLSymbol::FunctionDeclaration>(s->data).name == name)
+		if (s->type == ST::FunctionDeclaration && !std::get<DSLSymbol::FunctionDeclaration>(s->data).requiresReceiver
+			&& std::get<DSLSymbol::FunctionDeclaration>(s->data).name == name)
 			return true;
 	for (const std::unique_ptr<DSLCodeLine>& line : file.lines)
 		if (line->head() != nullptr && line->head() != excludeFunction && line->head()->type == ST::FunctionDeclaration

@@ -4018,58 +4018,82 @@ bool ScriptEditor::tryWidenValueCallEdit()
 		return false;
 	DSLSymbol* callSymbol = m_editSlot.parent;
 	if (callSymbol->line == nullptr || callSymbol->line->head() == callSymbol)
-		return false; // a call STATEMENT's arguments take tryWidenCallStatementEdit instead
-	const DSLSymbol::FunctionCall& call = std::get<DSLSymbol::FunctionCall>(callSymbol->data);
-	if (call.functionSymbol == nullptr)
-		return false;
-	const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
-	const int argIndex = m_editSlot.argIndex;
-	// Same variadic allowance as tryWidenCallStatementEdit -- extras past the declared count re-stage too.
-	if (argIndex < 0 || argIndex >= static_cast<int>(call.arguments.size())
-		|| (callee.isVariadic ? call.arguments.size() < callee.parameterVarDeclarations.size()
-			: call.arguments.size() != callee.parameterVarDeclarations.size()))
-		return false;
-
+		return false; // a call STATEMENT's own arguments take tryWidenCallStatementEdit instead
 	DSLCodeLine& line = *callSymbol->line;
+
+	// Walk OUTWARD through however many calls nest this one -- "float t = myvec.dot(vec3(1, 2, |" is a call
+	// inside a call inside a declaration. Every level becomes its own CallStage, exactly the stack forward
+	// authoring would have built (each '(' pushes one, see tryBeginValueCallStaging), so the peel back out
+	// mirrors the way in: argument by argument, then call by call, then the owning value stage.
+	struct Level { DSLSymbol* call; int argIndex; }; // argIndex = the argument OF THIS CALL the peel re-enters at
+	std::vector<Level> levels{ { callSymbol, m_editSlot.argIndex } };
+	while (line.head() != levels.back().call && levels.size() <= line.symbols.size())
+	{
+		// Which call (if any) holds this level as an argument. Every symbol on the line is a peer in its flat
+		// `symbols` list (see DSL.ixx's ownership model), so this is a scan, not a tree walk.
+		DSLSymbol* child = levels.back().call;
+		DSLSymbol* outer = nullptr;
+		int outerArg = -1;
+		for (const std::unique_ptr<DSLSymbol>& s : line.symbols)
+		{
+			if (s->type != ST::FunctionCall)
+				continue;
+			const DSLSymbol::FunctionCall& candidate = std::get<DSLSymbol::FunctionCall>(s->data);
+			for (size_t i = 0; i < candidate.arguments.size() && outer == nullptr; ++i)
+				if (candidate.arguments[i].value == child)
+				{
+					outer = s.get();
+					outerArg = static_cast<int>(i);
+				}
+			if (outer != nullptr)
+				break;
+		}
+		if (outer == nullptr)
+			break; // this level sits in a non-call slot -- the owning-context resolve below decides if we stage it
+		levels.push_back({ outer, outerArg });
+	}
+	std::reverse(levels.begin(), levels.end()); // outermost first: the order the stack is built in
+
+	// Everything restorable resolves BEFORE any state mutates -- a refusal must leave no trace. Per level:
+	// the receiver path, and the arguments preceding the one the peel re-enters at.
+	struct Restored { DSLSymbol* func; DSLSymbol* receiver; std::string receiverPath; std::vector<PendingExprChain> argChains; };
+	std::vector<Restored> restored;
+	for (const Level& level : levels)
+	{
+		const DSLSymbol::FunctionCall& call = std::get<DSLSymbol::FunctionCall>(level.call->data);
+		if (call.functionSymbol == nullptr)
+			return false;
+		const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
+		// Same variadic allowance as tryWidenCallStatementEdit -- extras past the declared count re-stage too.
+		if (level.argIndex < 0 || level.argIndex >= static_cast<int>(call.arguments.size())
+			|| (callee.isVariadic ? call.arguments.size() < callee.parameterVarDeclarations.size()
+				: call.arguments.size() != callee.parameterVarDeclarations.size()))
+			return false;
+		Restored& entry = restored.emplace_back();
+		entry.func = call.functionSymbol;
+		if (call.receiver != nullptr && !receiverChainToRoot(call.receiver, entry.receiver, entry.receiverPath))
+			return false;
+		for (int i = 0; i < level.argIndex; ++i)
+		{
+			PendingExprChain chain;
+			if (!chainFromSymbol(call.arguments[i].value, chain))
+				return false;
+			entry.argChains.push_back(std::move(chain));
+		}
+	}
+
+	// Which slot the OUTERMOST call occupies decides the suspended context the whole stack returns into: the
+	// line's own statement, a declaration's whole initializer (the redeclare flow), or an assignment's whole
+	// right-hand side (the reassign-edit flow) -- the exact contexts the plain whole-value Backspace widens into.
 	DSLSymbol* head = line.head();
-
-	// The call is itself an ARGUMENT of the line's call STATEMENT ("foo(test = vec3(1,|"): backspacing out of
-	// its argument re-opens the OUTER statement's own staging at that argument -- delegate to
-	// tryWidenCallStatementEdit's identical logic (restore earlier args, re-author forward) by pointing
-	// m_editSlot at the outer call's matching argument. (Nesting deeper than this one level isn't supported yet.)
-	if (head != nullptr && head->type == ST::FunctionCall)
-	{
-		const DSLSymbol::FunctionCall& outer = std::get<DSLSymbol::FunctionCall>(head->data);
-		int outerArgIndex = -1;
-		for (size_t i = 0; i < outer.arguments.size(); ++i)
-			if (outer.arguments[i].value == callSymbol)
-				outerArgIndex = static_cast<int>(i);
-		if (outerArgIndex < 0)
-			return false;
-		m_editSlot = SlotRef{ SlotRef::Kind::CallArgumentValue, head, callSymbol->line, outerArgIndex };
-		return tryWidenCallStatementEdit();
-	}
-
-	// Everything restorable resolves BEFORE any state mutates -- a refusal must leave no trace.
-	DSLSymbol* receiverDecl = nullptr;
-	std::string receiverPath;
-	if (call.receiver != nullptr && !receiverChainToRoot(call.receiver, receiverDecl, receiverPath))
-		return false;
-	std::vector<PendingExprChain> argChains;
-	for (int i = 0; i < argIndex; ++i)
-	{
-		PendingExprChain chain;
-		if (!chainFromSymbol(call.arguments[i].value, chain))
-			return false;
-		argChains.push_back(std::move(chain));
-	}
-
-	// Which VALUE slot the call occupies decides the suspended context its staging returns into: a
-	// declaration's whole initializer re-opens the redeclare flow, an assignment's right-hand side the
-	// reassign-edit flow -- the exact contexts the plain whole-value Backspace widens into.
+	DSLSymbol* outermost = levels[0].call;
 	ComposeMode returnMode = ComposeMode::None;
-	if (head != nullptr && head->type == ST::VariableDeclaration
-		&& std::get<DSLSymbol::VariableDeclaration>(head->data).initialValue == callSymbol)
+	if (head == outermost)
+	{
+		m_flowEditLine = &line; // a call STATEMENT: peeling past its first argument deletes the line
+	}
+	else if (head != nullptr && head->type == ST::VariableDeclaration
+		&& std::get<DSLSymbol::VariableDeclaration>(head->data).initialValue == outermost)
 	{
 		m_redeclareTarget = head;
 		m_pendingDeclareType = declaredTypeOf(head);
@@ -4082,7 +4106,7 @@ bool ScriptEditor::tryWidenValueCallEdit()
 		DSLSymbol* targetRoot = nullptr;
 		std::string targetPath;
 		if (assign.operators.size() == 1 && dslIsAssignOperator(assign.operators[0])
-			&& assign.operands.size() == 2 && assign.operands[1] == callSymbol
+			&& assign.operands.size() == 2 && assign.operands[1] == outermost
 			&& receiverChainToRoot(assign.operands[0], targetRoot, targetPath))
 		{
 			m_reassignEditExpr = head;
@@ -4090,19 +4114,35 @@ bool ScriptEditor::tryWidenValueCallEdit()
 			m_reassignMemberPath = splitMemberPath(targetPath);
 			returnMode = ComposeMode::ReassignValue;
 		}
+		else
+		{
+			return false;
+		}
 	}
-	if (returnMode == ComposeMode::None)
+	else
+	{
 		return false;
+	}
 
 	m_callStack.clear(); // safe: EditExpr (the only caller) never has a call already staging
-	CallStage& stage = m_callStack.emplace_back();
-	stage.func = call.functionSymbol;
-	stage.receiver = receiverDecl;
-	stage.receiverPath = std::move(receiverPath);
-	stage.argChains = std::move(argChains);
-	stage.returnMode = returnMode;
-	stage.outerLeadText = exprBasePrefixFor(returnMode); // "type name = " / "target op = " -- m_pendingDeclare*/m_reassign* are already set above
-	stage.savedExprStack.assign(1, ExprFrame{}); // the resumed mode's own chain: empty -- the call is its sole term, being re-staged
+	// "type name = " / "target op = " for a value context (m_pendingDeclare*/m_reassign* are set above), empty
+	// for a statement. Each nested level's lead is then the ENCLOSING stage's full prefix at the moment it
+	// would have been pushed -- which is what callStagePrefix() reads off the stack top, so build in order.
+	std::string lead = exprBasePrefixFor(returnMode);
+	for (size_t i = 0; i < restored.size(); ++i)
+	{
+		CallStage& stage = m_callStack.emplace_back();
+		stage.func = restored[i].func;
+		stage.receiver = restored[i].receiver;
+		stage.receiverPath = std::move(restored[i].receiverPath);
+		stage.argChains = std::move(restored[i].argChains);
+		// Only the outermost resumes the owning context; an inner one resumes the argument compose of the
+		// stage around it, with its own name re-typed there (see the CallArgValue Backspace ladder).
+		stage.returnMode = (i == 0) ? returnMode : ComposeMode::CallArgValue;
+		stage.outerLeadText = lead;
+		stage.savedExprStack.assign(1, ExprFrame{}); // the resumed chain: empty -- the call is its sole term, being re-staged
+		lead = callStagePrefix();
+	}
 
 	m_exprStack.assign(1, ExprFrame{}); // fresh compose for the argument being widened
 	m_exprHasPendingGroup = false;

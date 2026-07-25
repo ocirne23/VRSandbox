@@ -677,9 +677,12 @@ namespace
 				if (s->type == ST::VariableDeclaration && std::get<DSLSymbol::VariableDeclaration>(s->data).name == name)
 					return failValue("'" + name + "' is a sidebar binding");
 			// A variable can't shadow a function name either (see isNameInScope's own comment for why this is
-			// more than a style rule -- it'd make the function uncallable in the transpiled C++).
+			// more than a style rule -- it'd make the function uncallable in the transpiled C++). Receiver-based
+			// builtins are exempt: `dot`/`length`/`push` are only reachable through a receiver, so nothing about
+			// them is shadowable (see isFunctionNameTaken).
 			for (const std::unique_ptr<DSLSymbol>& s : builtins)
-				if (s->type == ST::FunctionDeclaration && std::get<DSLSymbol::FunctionDeclaration>(s->data).name == name)
+				if (s->type == ST::FunctionDeclaration && !std::get<DSLSymbol::FunctionDeclaration>(s->data).requiresReceiver
+					&& std::get<DSLSymbol::FunctionDeclaration>(s->data).name == name)
 					return failValue("'" + name + "' is already a function name");
 			for (DSLSymbol* func : userFunctions)
 				if (std::get<DSLSymbol::FunctionDeclaration>(func->data).name == name)
@@ -951,8 +954,10 @@ namespace
 					fail("function '" + name + "' is declared twice");
 					return nullptr;
 				}
+			// Receiver-based builtins are exempt, same as for variable names above (see isFunctionNameTaken).
 			for (const std::unique_ptr<DSLSymbol>& s : builtins)
-				if (s->type == ST::FunctionDeclaration && std::get<DSLSymbol::FunctionDeclaration>(s->data).name == name)
+				if (s->type == ST::FunctionDeclaration && !std::get<DSLSymbol::FunctionDeclaration>(s->data).requiresReceiver
+					&& std::get<DSLSymbol::FunctionDeclaration>(s->data).name == name)
 				{
 					fail("'" + name + "' is a builtin function");
 					return nullptr;
