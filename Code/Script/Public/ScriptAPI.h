@@ -44,6 +44,17 @@ class SceneComponent;
 // a layout change) fails lookup and every operation degrades to a no-op / default rather than touching memory.
 typedef unsigned int VrArray;
 
+// One raycast result, returned BY VALUE (a POD of ABI-legal members, like every other type crossing here).
+// `hit` is what the DSL branches on: the whole struct is exposed as a `RayHit?`, so a miss takes the else
+// branch of an `ifexist` and the other fields are only reachable once a hit is proven.
+struct VrRayHit
+{
+    int       hit;      // 0 = nothing within range; every other field is then meaningless
+    glm::vec3 point;    // world-space contact position
+    glm::vec3 normal;   // world-space surface normal at `point`
+    float     distance; // along the ray from its origin
+};
+
 #pragma warning(push)
 #pragma warning(disable: 4190) // has C-linkage specified, but returns 'glm::vec<3,float,glm::packed_highp>' which is incompatible with..
 
@@ -134,7 +145,36 @@ typedef unsigned int VrArray;
     X(int,         arrayGet,               (VrArray, handle), (int, index), (int, elemSize), (void*, outValue)) /* 1 on success; 0 (outValue untouched) for a stale/empty handle or an out-of-range index -- the ONLY bounds check callers need */ \
     X(void,        arraySet,               (VrArray, handle), (int, index), (int, elemSize), (const void*, value)) /* no-op when out of range */ \
     X(int,         arrayCount,             (VrArray, handle)) /* 0 for a stale/empty handle */ \
-    X(void,        arrayClear,             (VrArray, handle))
+    X(void,        arrayClear,             (VrArray, handle)) \
+    /* ---- AnimatorComponent ---- the state machine's parameters ARE its gameplay interface (see
+       Animation:StateMachine): a script sets floats/bools/triggers and the graph's own transitions decide what
+       plays, rather than a script naming clips directly. The older entitySetAnim* trio does the same thing off
+       an Entity and is kept for the visual-script nodes built against it; these take the component handle, so
+       the DSL reaches them through self.animator / `ifcomponent` like every other component. A null handle is a
+       no-op (or a zero/empty read) throughout, same contract as the physics/audio/force blocks. */ \
+    X(void*,       entityGetAnimatorComponent,(Entity*, entity)) \
+    X(void,        animatorSetFloat,       (void*, animator), (const char*, name), (float, value)) \
+    X(void,        animatorSetBool,        (void*, animator), (const char*, name), (int, value)) \
+    X(void,        animatorSetTrigger,     (void*, animator), (const char*, name)) /* consumed by the next transition that tests it */ \
+    X(float,       animatorGetFloat,       (void*, animator), (const char*, name)) /* 0 when never set */ \
+    X(int,         animatorGetBool,        (void*, animator), (const char*, name)) \
+    X(const char*, animatorGetStateName,   (void*, animator)) /* the state currently playing; "" with no graph */ \
+    X(float,       animatorGetTimeInState, (void*, animator)) /* seconds since the current state was entered */ \
+    X(float,       animatorGetSpeed,       (void*, animator)) /* the resolved playback rate for that state */ \
+    X(int,         animatorGetEnabled,     (void*, animator)) \
+    X(void,        animatorSetEnabled,     (void*, animator), (int, enabled))     /* ---- randomness ---- ENGINE-side on purpose: a generator living in the script DLL would reset its state
+       on every hot-reload, so a script's "random" sequence would restart mid-run. One shared stream. */     X(float,       randomFloat,            (float, minValue), (float, maxValue))     X(int,         randomInt,              (int, minValue), (int, maxValue)) /* both ends INCLUSIVE */ \
+    /* ---- world ---- the ambient state a script acts on rather than owns. physicsRayCast (above) reports its
+       hit through out-pointers, which the DSL has no spelling for; this returns the same information by value
+       so it can be exposed as a `RayHit?` and read only after the hit is proven. */ \
+    X(VrRayHit,    worldRayCast,           (glm::vec3, origin), (glm::vec3, direction), (float, maxDistance)) /* direction need not be normalized */ \
+    X(glm::vec3,   worldGetSunDirection,   (int, unused)) /* the arity macros have no zero-parameter form; pass 0 */ \
+    /* One world-space debug line for this frame only (the renderer's per-frame list, cleared every present) --
+       drawn unlit and depth-tested. `color` is 0xAABBGGRR. */ \
+    X(void,        worldDrawLine,          (glm::vec3, from), (glm::vec3, to), (glm::vec3, color)) \
+    /* First ROOT entity with this display name, or null. Roots only -- a whole-scene search would be a
+       different (and far more expensive) operation, and the name is not unique either way. */ \
+    X(Entity*,     worldFindRootEntity,    (const char*, displayName))
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,
@@ -239,6 +279,34 @@ template<class T> void vrArrSet(const ScriptContext* ctx, VrArray h, int i, cons
 { ctx->arraySet(h, i, (int)sizeof(T), &v); }
 template<class T> void vrArrPush(const ScriptContext* ctx, Entity* self, VrArray* h, int kind, const T& v)
 { ctx->arrayPush(self, h, kind, (int)sizeof(T), &v); }
+
+// ---- math helpers ----
+// The `math.*` bindings are otherwise one-to-one glm/std calls emitted inline. These few are here because their
+// formula USES AN ARGUMENT MORE THAN ONCE: substituting the argument's expression twice would evaluate it twice,
+// so `math.remap(rollDice(), ...)` would roll two different numbers. A function parameter evaluates once.
+// Angles are DEGREES throughout the DSL surface, so these are too.
+inline float vrInverseLerp(float a, float b, float v) { return (b == a) ? 0.0f : (v - a) / (b - a); }
+inline float vrRemap(float v, float inMin, float inMax, float outMin, float outMax)
+{ return outMin + vrInverseLerp(inMin, inMax, v) * (outMax - outMin); }
+inline float vrMoveTowards(float current, float target, float maxDelta)
+{ const float d = target - current; return (d * d <= maxDelta * maxDelta) ? target : current + (d < 0.0f ? -maxDelta : maxDelta); }
+// The signed difference from `a` to `b`, always in [-180, 180] -- the short way around.
+inline float vrDeltaAngle(float a, float b)
+{ float d = std::fmod(b - a, 360.0f); if (d > 180.0f) d -= 360.0f; if (d < -180.0f) d += 360.0f; return d; }
+inline float vrWrapAngle(float deg) { return vrDeltaAngle(0.0f, deg); }
+inline float vrLerpAngle(float a, float b, float t) { return a + vrDeltaAngle(a, b) * t; }
+inline float vrMoveTowardsAngle(float current, float target, float maxDelta)
+{ return current + vrMoveTowards(0.0f, vrDeltaAngle(current, target), maxDelta); }
+// Uniform on the unit sphere (z picked uniformly, then the ring around it -- equal-area, unlike normalizing
+// three uniform components). Built on randomFloat rather than being its own ABI row: the engine owns the one
+// generator, and this is pure arithmetic on top of it.
+inline glm::vec3 vrRandomUnitVector(const ScriptContext* ctx)
+{
+    const float z = ctx->randomFloat(-1.0f, 1.0f);
+    const float a = ctx->randomFloat(0.0f, 6.28318530718f);
+    const float r = std::sqrt(1.0f - z * z);
+    return glm::vec3(r * std::cos(a), r * std::sin(a), z);
+}
 #endif
 
 // ---- static/cooked build registry ----

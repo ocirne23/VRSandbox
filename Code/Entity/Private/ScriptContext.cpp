@@ -152,22 +152,24 @@ void registerScriptDslBindings()
             { "axis",       vec3,           {},                                                   "glm::axis($r)" },
             { "angleDeg",   T::Float,       {},                                                   "glm::degrees(glm::angle($r))" },
         } });
-    // "self.parent" has no parent at the root, so it is NOT an Entity value -- it's an Entity? reachable only
-    // through "ifexist Entity p in self.parent". That makes the null check impossible to forget (there is no
-    // spelling that skips it) and leaves nothing in the DSL needing a manual one. The member's own emit is just
-    // "$r", so the field is read exactly once, here in the check.
-    const DSLType optionalEntityType = bindings.registerOptionalType("OptionalEntity", T::Entity,
-        "($v = $r->parent) != nullptr");
+    // An Entity that may not be there ("self.parent" at the root, a spawn that failed, a query that found
+    // nothing). NOT an Entity value: the only way in is "ifexist Entity e in <the Entity? expression>", which
+    // makes the null check impossible to forget and leaves nothing in the DSL needing a manual one.
+    //
+    // The lookup is GENERIC -- "$r" is whatever expression produced the optional, so one type serves a member
+    // (self.parent) and a function return (world.spawn / world.nearestEntity) with no per-source variant. Each
+    // of those supplies its own emit; this only tests it, once.
+    const DSLType optionalEntityType = bindings.registerOptionalType("Entity?", T::Entity, "($v = $r) != nullptr");
 
     bindings.registerObject({ "self", T::Entity, /*sidebarTopLevel*/ true,
         {
-            { "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "ctx->entitySetEnabled($r, $1)" },
+            { "setEnabled",     T::Void,  { { "enabled", T::Bool } }, "ctx->entitySetEnabled($r, $1)" },
         },
         {
             { "pos",     vec3,        "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
             { "scale",   T::Float,    "$r->scale" },
             { "rot",     quat,        "$r->rot" },
-            { "parent",  optionalEntityType, "$r", /*writable*/ false },
+            { "parent",  optionalEntityType, "$r->parent", /*writable*/ false },
             // Both belong to the SCRIPT, not to the entity: `data`'s emit ignores the receiver entirely and
             // `events` resolves against this document's own list, so neither means anything on another entity.
             { "data",    T::ScriptData,   "(*scriptData)", /*writable*/ false, /*selfOnly*/ true },
@@ -189,6 +191,9 @@ void registerScriptDslBindings()
     bindings.registerObject({ "scene", sceneType, /*sidebarTopLevel*/ false,
         {
             { "getNumChildren", T::Int,    {},                             "ctx->sceneGetChildCount($r)"},
+            // First DIRECT child with this display name -- an Entity?, since there may be none. Not recursive:
+            // "my child called X" is a different question from "anything under me called X".
+            { "findChild",      optionalEntityType, {{ "name", T::String }},    "ctx->sceneFindChild($r, $1)"},
             { "getChild",       T::Entity, {{ "index", T::Int }},          "ctx->sceneGetChildAt($r, $1)"},
             { "removeChildIdx", T::Void,   {{ "index", T::Int }},          "ctx->sceneRemoveChildAt($r, $1)"},
             { "removeChild",    T::Void,   {{ "entity", T::Entity }},      "ctx->sceneRemoveChild($r, $1)"},
@@ -198,6 +203,31 @@ void registerScriptDslBindings()
             // A MEMBER, not an accessor call: "self.scene.children" is the collection itself. Read-only -- the
             // list belongs to the engine, and add/removeChild are how it changes.
             { "children", entityListType, "$r", /*writable*/ false },
+        } });
+
+    // Animation is the ANIMATOR's surface, not the entity's: a script drives the state machine's parameters and
+    // the graph's own transitions decide what plays (see Animation:StateMachine). Nothing here names a clip --
+    // that's the .apl author's job, and going around it would desync the graph from what's actually playing.
+    const DSLType animatorType = bindings.registerComponentType("animator", "AnimatorComponent", EComponentID_Animator,
+        "ctx->entityGetAnimatorComponent($r)");
+    bindings.registerObject({ "animator", animatorType, /*sidebarTopLevel*/ false,
+        {
+            { "setFloat",   T::Void,  { { "name", T::String }, { "value", T::Float } }, "ctx->animatorSetFloat($r, $1, $2)" },
+            { "setBool",    T::Void,  { { "name", T::String }, { "value", T::Bool } },  "ctx->animatorSetBool($r, $1, $2)" },
+            // Consumed by the next transition that tests it -- fire-and-forget, so there is no getter.
+            { "setTrigger", T::Void,  { { "name", T::String } },                        "ctx->animatorSetTrigger($r, $1)" },
+            { "getFloat",   T::Float, { { "name", T::String } },                        "ctx->animatorGetFloat($r, $1)" },
+            { "getBool",    T::Bool,  { { "name", T::String } },                        "(ctx->animatorGetBool($r, $1) != 0)" },
+            // Pausing the animator without touching its parameters. A FUNCTION, not a writable member: a
+            // member's emit is used verbatim as an assignment TARGET, so only a real lvalue ("$r->pos") can be
+            // writable -- a getter call can't sit on the left of an `=`.
+            { "setEnabled", T::Void,  { { "enabled", T::Bool } },                       "ctx->animatorSetEnabled($r, $1)" },
+        },
+        {
+            { "state",       T::String, "ctx->animatorGetStateName($r)",   /*writable*/ false },
+            { "timeInState", T::Float,  "ctx->animatorGetTimeInState($r)", /*writable*/ false },
+            { "speed",       T::Float,  "ctx->animatorGetSpeed($r)",       /*writable*/ false },
+            { "enabled",     T::Bool,   "(ctx->animatorGetEnabled($r) != 0)", /*writable*/ false },
         } });
 
     const DSLType physicsType = bindings.registerComponentType("physics", "PhysicsComponent", EComponentID_Physics,
@@ -234,23 +264,165 @@ void registerScriptDslBindings()
         },
         {} });
     // free functions
+    // A raycast result. Registered as a plain struct so its fields read normally once a hit is proven, and
+    // wrapped in an optional so proving it is the only way in: "ifexist RayHit h in world.rayCast(...)". The
+    // constructor takes no arguments -- a RayHit is something the engine hands back, never something a script
+    // builds -- and every field is read-only for the same reason.
+    const DSLType rayHitType = bindings.registerStruct({ "RayHit", "VrRayHit", {}, "VrRayHit()",
+        {
+            { "point",    vec3,     "$r.point",    /*writable*/ false },
+            { "normal",   vec3,     "$r.normal",   /*writable*/ false },
+            { "distance", T::Float, "$r.distance", /*writable*/ false },
+        },
+        {} });
+    const DSLType optionalRayHitType = bindings.registerOptionalType("OptionalRayHit", rayHitType,
+        "(($v = $r).hit != 0)");
+
+    // Everything mathematical lives under one prefix, so "math." is the single thing to type to see what is
+    // available. A NAMESPACE, not an object with state: its functions require a receiver like any binding
+    // object's (which is what makes `sin(x)` unauthorable and `math.sin(x)` the only spelling), but none of
+    // their emits mention "$r", so the generated C++ is a direct glm/std call with no receiver in sight.
+    //
+    // ANGLES ARE DEGREES across the whole DSL surface (quatFromEuler, quat.angleDeg, and these) -- the
+    // conversion lives in the emit, so a script never handles radians unless it asks for them by name.
+    const DSLType mathType = bindings.registerNamespace("math");
+    bindings.registerObject({ "math", mathType, /*sidebarTopLevel*/ true,
+        {
+            // -- basics --
+            { "abs",        T::Float, { { "x", T::Float } },                                        "glm::abs($1)" },
+            { "sign",       T::Float, { { "x", T::Float } },                                        "glm::sign($1)" },
+            { "min",        T::Float, { { "a", T::Float }, { "b", T::Float } },                     "glm::min($1, $2)" },
+            { "max",        T::Float, { { "a", T::Float }, { "b", T::Float } },                     "glm::max($1, $2)" },
+            { "clamp",      T::Float, { { "x", T::Float }, { "low", T::Float }, { "high", T::Float } }, "glm::clamp($1, $2, $3)" },
+            { "saturate",   T::Float, { { "x", T::Float } },                                        "glm::clamp($1, 0.0f, 1.0f)" },
+            { "sqrt",       T::Float, { { "x", T::Float } },                                        "glm::sqrt($1)" },
+            { "pow",        T::Float, { { "base", T::Float }, { "exponent", T::Float } },           "glm::pow($1, $2)" },
+            { "exp",        T::Float, { { "x", T::Float } },                                        "glm::exp($1)" },
+            { "log",        T::Float, { { "x", T::Float } },                                        "glm::log($1)" },
+            { "log2",       T::Float, { { "x", T::Float } },                                        "glm::log2($1)" },
+            // Sign follows the DIVIDEND (C fmod semantics), so math.mod(-1, 4) is -1, not 3.
+            { "mod",        T::Float, { { "x", T::Float }, { "y", T::Float } },                     "std::fmod($1, $2)" },
+
+            // -- rounding --
+            { "floor",      T::Float, { { "x", T::Float } },                                        "glm::floor($1)" },
+            { "ceil",       T::Float, { { "x", T::Float } },                                        "glm::ceil($1)" },
+            { "round",      T::Float, { { "x", T::Float } },                                        "glm::round($1)" },
+            { "trunc",      T::Float, { { "x", T::Float } },                                        "glm::trunc($1)" },
+            { "fract",      T::Float, { { "x", T::Float } },                                        "glm::fract($1)" },
+            { "toInt",      T::Int,   { { "x", T::Float } },                                        "((int)($1))" }, // truncates, like C++
+
+            // -- interpolation / ranges --
+            { "lerp",         T::Float, { { "a", T::Float }, { "b", T::Float }, { "t", T::Float } }, "glm::mix($1, $2, $3)" },
+            // 0 when the input range is empty, rather than a division by zero.
+            { "inverseLerp",  T::Float, { { "a", T::Float }, { "b", T::Float }, { "value", T::Float } }, "vrInverseLerp($1, $2, $3)" },
+            { "remap",        T::Float, { { "value", T::Float }, { "inMin", T::Float }, { "inMax", T::Float }, { "outMin", T::Float }, { "outMax", T::Float } }, "vrRemap($1, $2, $3, $4, $5)" },
+            { "step",         T::Float, { { "edge", T::Float }, { "x", T::Float } },                 "glm::step($1, $2)" },
+            { "smoothstep",   T::Float, { { "edge0", T::Float }, { "edge1", T::Float }, { "x", T::Float } }, "glm::smoothstep($1, $2, $3)" },
+            // Frame-rate independent approach: never overshoots the target.
+            { "moveTowards",  T::Float, { { "current", T::Float }, { "target", T::Float }, { "maxDelta", T::Float } }, "vrMoveTowards($1, $2, $3)" },
+
+            // -- trigonometry (degrees in, degrees out) --
+            { "sin",        T::Float, { { "angleDeg", T::Float } },                                 "glm::sin(glm::radians($1))" },
+            { "cos",        T::Float, { { "angleDeg", T::Float } },                                 "glm::cos(glm::radians($1))" },
+            { "tan",        T::Float, { { "angleDeg", T::Float } },                                 "glm::tan(glm::radians($1))" },
+            { "asin",       T::Float, { { "x", T::Float } },                                        "glm::degrees(glm::asin(glm::clamp($1, -1.0f, 1.0f)))" },
+            { "acos",       T::Float, { { "x", T::Float } },                                        "glm::degrees(glm::acos(glm::clamp($1, -1.0f, 1.0f)))" },
+            { "atan",       T::Float, { { "x", T::Float } },                                        "glm::degrees(glm::atan($1))" },
+            { "atan2",      T::Float, { { "y", T::Float }, { "x", T::Float } },                     "glm::degrees(glm::atan($1, $2))" },
+            // For the rare case a raw radian value is wanted (feeding a shader constant, say).
+            { "toRadians",  T::Float, { { "degrees", T::Float } },                                  "glm::radians($1)" },
+            { "toDegrees",  T::Float, { { "radians", T::Float } },                                  "glm::degrees($1)" },
+
+            // -- angles -- the wrap-around cases hand-rolled arithmetic gets wrong
+            { "wrapAngle",        T::Float, { { "angleDeg", T::Float } },                           "vrWrapAngle($1)" },      // -> [-180, 180]
+            { "deltaAngle",       T::Float, { { "fromDeg", T::Float }, { "toDeg", T::Float } },     "vrDeltaAngle($1, $2)" }, // the short way around
+            { "lerpAngle",        T::Float, { { "a", T::Float }, { "b", T::Float }, { "t", T::Float } }, "vrLerpAngle($1, $2, $3)" },
+            { "moveTowardsAngle", T::Float, { { "currentDeg", T::Float }, { "targetDeg", T::Float }, { "maxDelta", T::Float } }, "vrMoveTowardsAngle($1, $2, $3)" },
+
+            // -- randomness -- one engine-side stream, so a hot-reload does not restart the sequence
+            { "randomFloat",      T::Float, { { "min", T::Float }, { "max", T::Float } },           "ctx->randomFloat($1, $2)" },
+            { "randomInt",        T::Int,   { { "min", T::Int }, { "max", T::Int } },               "ctx->randomInt($1, $2)" }, // both ends inclusive
+            { "randomUnitVector", vec3,     {},                                                     "vrRandomUnitVector(ctx)" },
+
+            // -- rotations -- the constructors that used to sit at top level
+            { "quatFromEuler",     quat,   { { "eulerDeg", vec3 } },                                "glm::quat(glm::radians($1))" },
+            { "quatFromAxisAngle", quat,   { { "axis", vec3 }, { "angleDeg", T::Float } },          "glm::angleAxis(glm::radians($2), glm::normalize($1))" },
+            { "quatIdentity",      quat,   {},                                                      "glm::quat(1.0f, 0.0f, 0.0f, 0.0f)" },
+            // The rotation whose -Z faces `forward` (the engine forward axis) with +Y as close to `up` as possible.
+            { "quatLookRotation",  quat,   { { "forward", vec3 }, { "up", vec3 } },                 "glm::quatLookAt(glm::normalize($1), glm::normalize($2))" },
+        },
+        {
+            { "pi",      T::Float, "3.14159265358979f", /*writable*/ false },
+            { "tau",     T::Float, "6.28318530717959f", /*writable*/ false },
+            { "epsilon", T::Float, "1.0e-6f",           /*writable*/ false },
+        } });
+
+    // The render camera, as a read-only view onto the per-frame fields ScriptContext already carries (see its
+    // `Per-frame data` block -- ScriptContext::update refreshes them once a frame). Every emit here reads a
+    // FIELD, not a call, so none of them mention "$r": the object exists purely to group them under a name.
+    const DSLType cameraType = bindings.registerNamespace("Camera");
+    bindings.registerObject({ "Camera", cameraType, /*sidebarTopLevel*/ false,
+        {},
+        {
+            { "position",  vec3,     "ctx->cameraPosition",  /*writable*/ false },
+            { "direction", vec3,     "ctx->cameraDirection", /*writable*/ false }, // normalized, the way it looks
+            { "up",        vec3,     "ctx->cameraUp",        /*writable*/ false },
+            { "right",     vec3,     "glm::normalize(glm::cross(ctx->cameraDirection, ctx->cameraUp))", /*writable*/ false },
+            { "fovDeg",    T::Float, "ctx->cameraFovDeg",    /*writable*/ false },
+            { "nearPlane", T::Float, "ctx->cameraNear",      /*writable*/ false },
+            { "farPlane",  T::Float, "ctx->cameraFar",       /*writable*/ false },
+        } });
+
+    // The ambient state a script ACTS ON rather than owns: spawning, the physics world, the sky, global events.
+    // Everything an entity owns stays on self/its components -- the split is "whose state is this", which is
+    // also why nothing here takes an entity as a receiver.
+    bindings.registerObject({ "world", T::World, /*sidebarTopLevel*/ true,
+        {
+            // -- entities -- spawn returns an Entity?: a bad path or a failed spawn has no entity to give back,
+            // and the DSL has no null, so the caller proves it with `ifexist` like any other optional.
+            { "spawn",         optionalEntityType, { { "assetPath", T::String }, { "position", vec3 } }, "ctx->spawnEntity($1, $2)" },
+            { "destroy",       T::Void,  { { "entity", T::Entity } },                                    "ctx->destroyEntity($1)" },
+            // By display name, ROOTS only -- names are not unique, so this is "the first one", and a
+            // whole-scene search would be a different and far more expensive operation.
+            { "findRootEntity", optionalEntityType, { { "displayName", T::String } },              "ctx->worldFindRootEntity($1)" },
+            // Nearest OTHER entity within the radius (pass self as `exclude` to skip yourself).
+            { "nearestEntity", optionalEntityType, { { "position", vec3 }, { "maxRadius", T::Float }, { "exclude", T::Entity } }, "ctx->spatialGetNearestEntity($1, $2, $3)" },
+
+            // -- raycasts -- the full hit is an optional, so point/normal/distance can only be read once the
+            // hit is proven; rayCastDistance is the cheap form when only "how far to the wall" matters (it
+            // reports maxDistance itself on a miss, never a sentinel outside the query range).
+            { "rayCast",         optionalRayHitType, { { "origin", vec3 }, { "direction", vec3 }, { "maxDistance", T::Float } }, "ctx->worldRayCast($1, $2, $3)" },
+            { "rayCastDistance", T::Float, { { "origin", vec3 }, { "direction", vec3 }, { "maxDistance", T::Float } },           "ctx->physicsRayCastDistance($1, $2, $3)" },
+
+            // -- events -- global, or delivered to one entity's own script
+            { "sendEvent",   T::Void, { { "eventName", T::String } },                              "ctx->sendEvent($1)" },
+            { "sendEventTo", T::Void, { { "entity", T::Entity }, { "eventName", T::String } },     "ctx->sendEventToEntity($1, $2)" },
+
+            // -- sky / lighting --
+            { "setSun",          T::Void, { { "direction", vec3 }, { "color", vec3 }, { "intensity", T::Float } },                      "ctx->setSun($1, $2, $3)" },
+            { "spawnPointLight", T::Void, { { "position", vec3 }, { "range", T::Float }, { "color", vec3 }, { "intensity", T::Float } }, "ctx->spawnPointLight($1, $2, $3, $4)" },
+
+            // -- physics globals --
+            { "setGravity",  T::Void, { { "gravity", vec3 } },                                     "ctx->physicsSetGravity($1)" },
+
+            // -- debug drawing -- this frame only, so calling it every Update is how a line stays on screen
+            { "drawLine",    T::Void, { { "from", vec3 }, { "to", vec3 }, { "color", vec3 } },     "ctx->worldDrawLine($1, $2, $3)" },
+        },
+        {
+            // Normalized, pointing the way the sunlight TRAVELS (not toward the sun).
+            { "sunDirection", vec3,     "ctx->worldGetSunDirection(0)", /*writable*/ false },
+            // Seconds since startup -- the same clock deltaSeconds comes from, already on the context.
+            { "time",         T::Float, "ctx->elapsedSeconds",          /*writable*/ false },
+            { "camera",       cameraType, "ctx",                        /*writable*/ false }, // "$r" unused by its members
+        } });
+
     bindings.registerObject({ nullptr, T::Void, /*sidebarTopLevel*/ false,
         {
-            { "print",           T::Void,  { { "message", T::String } },                                     "ctx->log($1)" }, // one plain string -- no {}-interpolation yet
             // printf-style formatting: the format string, then any number of values ("$*" expands the tail,
             // comma-prefixed, so a zero-vararg call still emits valid C++). The DSL doesn't check the format
             // against the arguments -- same "author's responsibility" stance the rest of the ABI takes.
             { "printf",          T::Void,  { { "format", T::String } },                                     "ctx->logf($1$*)", /*isPositionalCall*/ false, /*isVariadic*/ true },
-            { "rayCast",         T::Float, { { "pos", vec3 }, { "dir", vec3 }, { "maxRayDist", T::Float } }, "ctx->physicsRayCastDistance($1, $2, $3)" },
             { "isKeyDown",       T::Bool,  { { "keyName", T::String } },                                     "(ctx->isKeyDown($1) != 0)" },
-            { "sendEvent",       T::Void,  { { "eventName", T::String } },                                   "ctx->sendEvent($1)" },
-            // Building a rotation: the raw quat(x,y,z,w) constructor is technically available but never what an
-            // author means. Angles are DEGREES throughout the DSL surface (quat.euler/angleDeg return them too).
-            { "quatFromEuler",     quat,   { { "eulerDeg", vec3 } },                                 "glm::quat(glm::radians($1))" },
-            { "quatFromAxisAngle", quat,   { { "axis", vec3 }, { "angleDeg", T::Float } },           "glm::angleAxis(glm::radians($2), glm::normalize($1))" },
-            { "quatIdentity",      quat,   {},                                                       "glm::quat(1.0f, 0.0f, 0.0f, 0.0f)" },
-            { "setSun",          T::Void,  { { "direction", vec3 }, { "color", vec3 }, { "intensity", T::Float } },                       "ctx->setSun($1, $2, $3)" },
-            { "spawnPointLight", T::Void,  { { "position", vec3 }, { "range", T::Float }, { "color", vec3 }, { "intensity", T::Float } }, "ctx->spawnPointLight($1, $2, $3, $4)" },
         },
         {} });
 
@@ -747,6 +919,142 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     {
         if (AudioComponent* ac = static_cast<AudioComponent*>(p))
             ac->stopSound(alias ? alias : "");
+    }
+
+    // ---- animator component ----
+    // Everything routes through the state machine, which is the animator's gameplay interface: a script sets
+    // parameters and the graph decides what plays. Reads of a never-set parameter return the type's zero (the
+    // state machine's own contract), so there is no "does this parameter exist" question to answer.
+    AnimStateMachine* animatorMachineOf(void* p)
+    {
+        AnimatorComponent* ac = static_cast<AnimatorComponent*>(p);
+        return (ac != nullptr && ac->hasStateMachine) ? &ac->stateMachine : nullptr;
+    }
+
+    void* thunk_entityGetAnimatorComponent(Entity* en) { return en ? getComponent<AnimatorComponent>(en) : nullptr; }
+
+    void thunk_animatorSetFloat(void* p, const char* name, float value)
+    {
+        if (AnimStateMachine* sm = animatorMachineOf(p); sm != nullptr && name != nullptr)
+            sm->setFloat(name, value);
+    }
+
+    void thunk_animatorSetBool(void* p, const char* name, int value)
+    {
+        if (AnimStateMachine* sm = animatorMachineOf(p); sm != nullptr && name != nullptr)
+            sm->setBool(name, value != 0);
+    }
+
+    void thunk_animatorSetTrigger(void* p, const char* name)
+    {
+        if (AnimStateMachine* sm = animatorMachineOf(p); sm != nullptr && name != nullptr)
+            sm->setTrigger(name);
+    }
+
+    float thunk_animatorGetFloat(void* p, const char* name)
+    {
+        AnimStateMachine* sm = animatorMachineOf(p);
+        return (sm != nullptr && name != nullptr) ? sm->getFloat(name) : 0.0f;
+    }
+
+    int thunk_animatorGetBool(void* p, const char* name)
+    {
+        AnimStateMachine* sm = animatorMachineOf(p);
+        return (sm != nullptr && name != nullptr && sm->getBool(name)) ? 1 : 0;
+    }
+
+    const char* thunk_animatorGetStateName(void* p)
+    {
+        // Points into the state machine's own storage -- valid until the graph is rebuilt, the same lifetime
+        // entityGetName's result has (see internString's comment in ScriptAPI.h: engine strings aren't interned).
+        AnimStateMachine* sm = animatorMachineOf(p);
+        return sm != nullptr ? sm->getCurrentStateName().c_str() : "";
+    }
+
+    float thunk_animatorGetTimeInState(void* p)
+    {
+        AnimStateMachine* sm = animatorMachineOf(p);
+        return sm != nullptr ? sm->getTimeInState() : 0.0f;
+    }
+
+    float thunk_animatorGetSpeed(void* p)
+    {
+        const AnimatorComponent* ac = static_cast<const AnimatorComponent*>(p);
+        return ac != nullptr ? ac->resolvePlaybackSpeed() : 0.0f;
+    }
+
+    int thunk_animatorGetEnabled(void* p)
+    {
+        const AnimatorComponent* ac = static_cast<const AnimatorComponent*>(p);
+        return (ac != nullptr && ac->enabled) ? 1 : 0;
+    }
+
+    void thunk_animatorSetEnabled(void* p, int enabled)
+    {
+        if (AnimatorComponent* ac = static_cast<AnimatorComponent*>(p))
+            ac->enabled = enabled != 0;
+    }
+
+    // ---- randomness ----
+    // One generator for every script, living HERE rather than in a script DLL: a DLL-local one would reset its
+    // state on each hot-reload, restarting the sequence mid-run. Not seeded from the clock -- a fixed seed means
+    // a run is reproducible, which is worth more during development than unpredictability across launches.
+    std::mt19937& scriptRng()
+    {
+        static std::mt19937 rng(0x5eed5eedu);
+        return rng;
+    }
+
+    float thunk_randomFloat(float minValue, float maxValue)
+    {
+        if (!(minValue < maxValue))
+            return minValue; // empty or inverted range -- one deterministic answer beats an assert in gameplay code
+        return std::uniform_real_distribution<float>(minValue, maxValue)(scriptRng());
+    }
+
+    // ---- world ----
+    VrRayHit thunk_worldRayCast(glm::vec3 origin, glm::vec3 direction, float maxDistance)
+    {
+        VrRayHit out{};
+        const float len = glm::length(direction);
+        if (len <= 0.0f || maxDistance <= 0.0f)
+            return out; // a degenerate ray misses rather than asserting -- gameplay code shouldn't have to guard
+        const PhysicsWorld::RayHit hit = Globals::physics.castRayClosest(origin, (direction / len) * maxDistance);
+        if (!hit.hit)
+            return out;
+        out.hit = 1;
+        out.point = hit.point;
+        out.normal = hit.normal;
+        out.distance = hit.fraction * maxDistance;
+        return out;
+    }
+
+    glm::vec3 thunk_worldGetSunDirection(int) { return Globals::rendererVK.getSkyParams().sunDirection; }
+
+    Entity* thunk_worldFindRootEntity(const char* displayName)
+    {
+        if (!displayName) return nullptr;
+        // Linear over the root list: it is short (a scene's top level), and there is no name index to keep in
+        // sync. Unnamed entities have a null name, which never matches.
+        for (const EntityPtr& root : Globals::world.rootEntities())
+            if (const char* name = root->getName(); name != nullptr && std::string_view(name) == displayName)
+                return root.get();
+        return nullptr;
+    }
+
+    void thunk_worldDrawLine(glm::vec3 from, glm::vec3 to, glm::vec3 color)
+    {
+        // The DSL speaks in linear 0..1 colours like everything else here; the renderer wants packed 0xAABBGGRR.
+        const auto channel = [](float v) { return static_cast<uint32>(glm::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
+        Globals::rendererVK.addDebugLine(from, to,
+            0xFF000000u | (channel(color.z) << 16) | (channel(color.y) << 8) | channel(color.x));
+    }
+
+    int thunk_randomInt(int minValue, int maxValue)
+    {
+        if (minValue > maxValue)
+            return minValue;
+        return std::uniform_int_distribution<int>(minValue, maxValue)(scriptRng()); // both ends inclusive
     }
 
 }

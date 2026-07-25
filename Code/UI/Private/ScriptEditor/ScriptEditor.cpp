@@ -764,6 +764,19 @@ void ScriptEditor::refreshCandidates()
 		return; // DeclareName/Rename/FunctionDeclareName/FunctionParamName/ForVarName: free-typing an identifier, nothing to filter against
 	}
 
+	// A CLOSED string literal is a COMPLETE value and can be nothing else: quotes cannot appear in an
+	// identifier, so every other candidate here matched on something other than what was typed. Leaving them
+	// selectable let Space act on one instead of on the string -- completing the box to that candidate text, or
+	// dotting into it (the classic symptom: `f("abc"` + Space turning into `f("abc"self.`). Nothing further
+	// can be typed into one either (see handleTextInput), so the literal is the only thing left to confirm.
+	if (m_pendingWord.size() >= 2 && m_pendingWord.front() == '"' && m_pendingWord.back() == '"'
+		&& m_pendingWord.find('"', 1) == m_pendingWord.size() - 1)
+	{
+		std::erase_if(m_candidates, [](const Candidate& c) { return c.kind != Candidate::Kind::Literal; });
+		m_candidateSelected = 0;
+		return; // binding objects must not be appended below either
+	}
+
 	// Binding objects join every statement/value list (never the operator/type-keyword pickers above -- those
 	// broke out through their own cases' breaks but are excluded here).
 	switch (m_composeMode)
@@ -6710,6 +6723,10 @@ void ScriptEditor::renderSidebarPanel()
 			seg(kColPunct, " ");
 			seg(kColVariable, func.params[i].name);
 		}
+		// A variadic callee takes any number of extra values after its declared parameters (see
+		// BindingFunc::isVariadic) -- shown, since nothing else in the signature would say so.
+		if (func.isVariadic)
+			seg(kColPunct, func.params.empty() ? "..." : ", ...");
 		seg(kColPunct, ")");
 	};
 	// Recursive (std::function, since it calls itself): a plain data member (including struct-typed ones like
@@ -6900,7 +6917,7 @@ void ScriptEditor::renderSidebarPanel()
 
 	ImGui::Spacing();
 	ImGui::Separator();
-	ImGui::TextDisabled("ENTITY");
+	ImGui::TextDisabled("VARIABLES");
 	for (const BindingObject& object : m_bindings.objects())
 	{
 		if (object.name == nullptr || !object.sidebarTopLevel)
@@ -6914,7 +6931,7 @@ void ScriptEditor::renderSidebarPanel()
 
 	ImGui::Spacing();
 	ImGui::Separator();
-	ImGui::TextDisabled("ENGINE");
+	ImGui::TextDisabled("GLOBAL");
 	for (const BindingObject& object : m_bindings.objects())
 		if (object.name == nullptr)
 			drawObjectContents(object, /*isRoot*/ true);

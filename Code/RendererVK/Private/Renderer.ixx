@@ -201,6 +201,7 @@ public:
     void setAmbientLight(const glm::vec3& color, float intensity) { m_skyParams.ambientColor = color; m_skyParams.ambientIntensity = intensity; }
     void setSkyRadiance(const glm::vec3& color, float intensity) { m_skyParams.skyRadianceColor = color; m_skyParams.skyRadianceIntensity = intensity; }
     void setSkyParams(const SkyParams& sky) { m_skyParams = sky; }
+    const SkyParams& getSkyParams() const { return m_skyParams; }
     void setFogParams(const FogParams& fog) { m_fogParams = fog; }
     // Live terrain state for the shaders: meshRadius = radius (m, radial from the camera XZ) inside which
     // streamed terrain chunks are guaranteed resident — the fence for the ocean's land cull (0 = no

@@ -86,7 +86,7 @@ export namespace Procedural
 		void estimateWaveTrough(); // sparse re-scan of the readback for the deepest current trough (underwater fog boundary)
 
 		// --- Clipmap geometry config (a change rebuilds the mesh) ---
-		bool  m_enabled = true;
+		bool  m_enabled = false;
 		float m_seaLevel = 0.0f;   // mirrors the terrain's datum; set every update(), never tweaked here
 		// Reach = ringCell * res/2 * 2^(rings-1), and every ring costs the same vertex count whatever its
 		// cell size — so buy near-field detail by trading cell size for ring COUNT, not by biasing the mip

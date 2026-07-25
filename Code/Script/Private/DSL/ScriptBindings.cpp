@@ -98,6 +98,15 @@ DSLType ScriptBindings::registerOptionalType(const char* name, DSLType valueType
 	return type;
 }
 
+DSLType ScriptBindings::registerNamespace(const char* name)
+{
+	// Same derived-type range as sequences/optionals; a namespace fills NEITHER half, which is exactly how
+	// dslTypeName tells the three apart (see there).
+	const DSLType type = dslSequenceType(static_cast<int>(m_sequenceTypeNames.size()));
+	m_sequenceTypeNames.push_back(name);
+	return type;
+}
+
 void ScriptBindings::registerEntryPoint(EntryPointDef def)
 {
 	m_entryPointDefs.push_back(std::move(def));

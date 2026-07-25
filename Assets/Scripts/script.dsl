@@ -22,14 +22,14 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* scriptData)
 {
-	ctx->log(ctx->internString("OnSpawn dsl"));
+	ctx->logf(ctx->internString("OnSpawn dsl"));
 }
 
 REGISTER_ON_SPAWN()
 
 SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, ScriptData* scriptData)
 {
-	ctx->log(ctx->internString("OnDestroy dsl"));
+	ctx->logf(ctx->internString("OnDestroy dsl"));
 }
 
 REGISTER_ON_DESTROY()
@@ -38,7 +38,7 @@ SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx,
 {
 	if (eventIdx == 0)
 	{
-		ctx->log(ctx->internString("OnHit dsl"));
+		ctx->logf(ctx->internString("OnHit dsl"));
 	}
 }
 
@@ -81,18 +81,17 @@ REGISTER_UPDATE()
 //@@data int num
 //@@data int[] list
 //@@event OnHit
-//@
 //@function OnSpawn()
-//@	print(string message = "OnSpawn dsl")
+//@	printf(string format = "OnSpawn dsl")
 //@end
 //@
 //@function OnDestroy()
-//@	print(string message = "OnDestroy dsl")
+//@	printf(string format = "OnDestroy dsl")
 //@end
 //@
 //@function OnEvent(int eventIdx)
 //@	if eventIdx == self.events.OnHit
-//@		print(string message = "OnHit dsl")
+//@		printf(string format = "OnHit dsl")
 //@	end
 //@end
 //@

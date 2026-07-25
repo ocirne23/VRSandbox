@@ -228,6 +228,11 @@ public:
 	// is a boolean expression over "$r" (the exposing member's receiver) and "$v" (the bound variable), e.g.
 	// "($v = $r->parent) != nullptr". The exposing member's own emit is just "$r", so nothing is fetched twice.
 	DSLType registerOptionalType(const char* name, DSLType valueType, const char* lookupEmit);
+	// Registers one NAMESPACE type -- a binding object with no runtime value at all, just a name to group
+	// functions under ("math.sin(x)"). Its functions require a receiver like any other object's, which is what
+	// makes them reachable ONLY through the prefix; their emits simply never mention "$r", so nothing about the
+	// receiver reaches the generated C++ (which calls glm/std directly).
+	DSLType registerNamespace(const char* name);
 	// Registers one toggleable ScriptAPI entry point (see EntryPointDef) -- same guarantee.
 	void registerEntryPoint(EntryPointDef def);
 

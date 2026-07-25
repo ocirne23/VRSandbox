@@ -44,7 +44,7 @@ int main()
     cameraController.initialize(spawnPos, glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
-    renderer.initialize(window, EValidation::DISABLED, EVSync::DISABLED, EVr::DISABLED); // ENABLED DISABLED
+    renderer.initialize(window, EValidation::DISABLED, EVSync::ENABLED, EVr::DISABLED); // ENABLED DISABLED
 
     UI& ui = Globals::ui;
     ui.initialize();
@@ -115,11 +115,11 @@ int main()
     std::vector<PhysicsJoint> spawnedJoints;
 
     const glm::vec3 spawnOffset = spawnPos - glm::vec3(0, 1, 1);
-    world.addRootEntity(world.spawnAssetFile("Entities/sponza.pre", Transform(spawnOffset), true));
-    world.addRootEntity(world.spawnAssetFile("Entities/skysphere.pre", Transform(spawnOffset), true));
-    world.addRootEntity(world.spawnAssetFile("Entities/character.pre", Transform(spawnOffset), true));
-    world.addRootEntity(world.spawnAssetFile("Entities/particle.pre", Transform(spawnOffset), true));
-    world.addRootEntity(world.spawnAssetFile("Entities/SphereField.pre", Transform(spawnOffset), true));
+    //world.addRootEntity(world.spawnAssetFile("Entities/sponza.pre", Transform(spawnOffset), true));
+    //world.addRootEntity(world.spawnAssetFile("Entities/skysphere.pre", Transform(spawnOffset), true));
+    //world.addRootEntity(world.spawnAssetFile("Entities/character.pre", Transform(spawnOffset), true));
+    //world.addRootEntity(world.spawnAssetFile("Entities/particle.pre", Transform(spawnOffset), true));
+    //world.addRootEntity(world.spawnAssetFile("Entities/SphereField.pre", Transform(spawnOffset), true));
 
     GizmoController gizmo;
     gizmo.initialize(world);

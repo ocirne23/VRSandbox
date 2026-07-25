@@ -32,10 +32,12 @@ const char* dslTypeName(DSLType type)
 		auto it = names.find(static_cast<uint16>(type));
 		if (it == names.end())
 		{
-			// Which half the registration filled in decides how it reads: a collection ("Entity[]") or a value
-			// that may not be there ("Entity?"). See registerSequenceType / registerOptionalType.
+			// Which half the registration filled in decides how it reads: a collection ("Entity[]"), a value
+			// that may not be there ("Entity?"), or -- neither -- a plain NAMESPACE, which reads as its own
+			// registered name ("math"). See registerSequenceType / registerOptionalType / registerNamespace.
 			const BindingObject* object = Globals::scriptBindings.objectFor(type);
-			std::string name = "?";
+			const char* registered = Globals::scriptBindings.sequenceTypeName(type);
+			std::string name = (registered != nullptr) ? registered : "?";
 			if (object != nullptr && object->sequenceElementType != DSLType::Void)
 				name = std::string(dslTypeName(object->sequenceElementType)) + "[]";
 			else if (object != nullptr && object->lookupValueType != DSLType::Void)
