@@ -4400,10 +4400,12 @@ void ScriptEditor::applyFunctionReturnChange(DSLSymbol* funcSymbol, DSLType newR
 	m_pendingComposeReturnValue = true;
 }
 
-// Backspace on an EMPTY block header (a function, already checked uncalled too, or a for-loop -- caller has
-// already checked isBlockBodyEmpty): removes the header AND its whole (blank) body AND its synthetic `end` in
-// one range-erase -- unlike deleteBlockKeepBody, there's no un-nesting step since there's nothing worth keeping
-// (a for-loop's body couldn't be safely kept anyway -- see the class comment).
+// Backspace on an EMPTY block header (a function, already checked uncalled too, or a for/foreach/ifcomponent --
+// caller has already checked isBlockBodyEmpty): removes the header AND its whole (blank) body AND its synthetic
+// `end` in one range-erase -- unlike deleteBlockKeepBody, there's no un-nesting step since there's nothing worth
+// keeping (a for-loop's or foreach's body couldn't be safely kept anyway -- see the class comment). An attached
+// else chain (only an ifcomponent can have one here, and the caller has verified it empty too) goes with it, for
+// the same reason deleteBlockKeepBody consumes one: a continuation with nothing left to continue from dangles.
 void ScriptEditor::deleteEmptyBlock(DSLSymbol* headSymbol)
 {
 	if (headSymbol == nullptr || headSymbol->line == nullptr)
@@ -4414,7 +4416,23 @@ void ScriptEditor::deleteEmptyBlock(DSLSymbol* headSymbol)
 	if (headerIndex < 0)
 		return;
 
-	lines.erase(lines.begin() + headerIndex, lines.begin() + dslBlockEnd(m_document.file, headerIndex));
+	const int headerScopeLevel = lines[headerIndex]->scopeLevel;
+	const int bodyEnd = dslBlockEnd(m_document.file, headerIndex);
+
+	// Always erasing right at bodyEnd: removing one chained segment slides the next into that same position.
+	while (bodyEnd < static_cast<int>(lines.size()) && lines[bodyEnd]->scopeLevel == headerScopeLevel)
+	{
+		const DSLSymbol* branchHead = lines[bodyEnd]->head();
+		if (branchHead == nullptr || branchHead->type != ST::FlowControl)
+			break;
+		const DSLFlowControl control = std::get<DSLSymbol::FlowControl>(branchHead->data).control;
+		if (control != DSLFlowControl::ElseIf && control != DSLFlowControl::Else)
+			break;
+
+		lines.erase(lines.begin() + bodyEnd, lines.begin() + dslBlockEnd(m_document.file, bodyEnd));
+	}
+
+	lines.erase(lines.begin() + headerIndex, lines.begin() + bodyEnd);
 
 	// Same end-of-previous-line landing as deleteLine/deleteBlockKeepBody (the cursor sat on the header).
 	m_pendingSelectLineEnd = std::max(0, m_cursorLine - 1);
@@ -4580,12 +4598,15 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 					beginWidenFunctionHeader(span->symbol);
 				}
 			}
-			else if (selectedControl != nullptr && *selectedControl == DSLFlowControl::For)
+			else if (selectedControl != nullptr && (*selectedControl == DSLFlowControl::For
+				|| *selectedControl == DSLFlowControl::ForEach || *selectedControl == DSLFlowControl::IfComponent))
 			{
-				// Selected the for's own keyword -- only remove it (header + body + synthetic `end`) when its
-				// body is empty: unlike if/while, a for-loop's body can't be safely kept/un-nested (statements
-				// inside likely reference the loop variable, which would no longer exist once the header is gone).
-				if (isBlockBodyEmpty(span->symbol))
+				// Selected the for/foreach/ifcomponent's own keyword -- only remove it (header + body + synthetic
+				// `end`) when its body is empty: unlike if/while, these bodies can't be safely kept/un-nested
+				// (statements inside likely reference the name the header binds -- loop counter, element, or
+				// component -- which would no longer exist once the header is gone). An ifcomponent additionally
+				// needs its attached else branch empty, exactly as an if does, and deleteEmptyBlock takes it too.
+				if (isBlockBodyEmpty(span->symbol) && attachedElseChainEmpty(span->symbol))
 					deleteEmptyBlock(span->symbol);
 			}
 			else if (selectedDeclarationType != nullptr)
