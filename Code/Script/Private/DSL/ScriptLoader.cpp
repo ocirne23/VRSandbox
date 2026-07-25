@@ -647,6 +647,14 @@ namespace
 					DSLSymbol* value = parseExpression(valueSpan, line, expected);
 					if (value == nullptr)
 						return nullptr;
+					// The loader-side twin of the editor's ref-argument gate (see ScriptEditor's CallArgValue
+					// confirm): a `ref` parameter takes the callee's OUTPUT, so only a bare existing variable
+					// can stand there. Without this a hand-edited file reaches the transpiler and fails in cl
+					// with a reference-binding error instead of a DSL diagnostic.
+					if (typeSource != nullptr && std::get<DSLSymbol::VariableDeclaration>(typeSource->data).isRef
+						&& value->type != ST::VariableReference)
+						return failValue("argument " + std::to_string(argIndex + 1) + " of '" + callee.name
+							+ "' is a 'ref' parameter -- it needs a variable, not an expression");
 					built.push_back(DSLSymbol::CallArgument{ param, value });
 				}
 			}

@@ -122,6 +122,9 @@ export struct Candidate
 		               // require set, and the other engine objects are always present.
 		Variable, Function, DeclareType, Literal, Comparator, DeclareFunction, KeywordFor, KeywordForEach,
 		KeywordIfComponent, // "ifcomponent" -- stages a component type, a name, and the entity to fetch from
+		KeywordRef,    // "ref" -- a MODIFIER, not a pick: offered alongside the type keywords wherever a
+		               // by-reference binding is allowed (a function parameter today), confirming it sets the
+		               // flag and returns to the SAME stage with "ref " in the prefix, awaiting the type
 		AssignOperator, Reassign,
 		ArithmeticOperator, LogicalOperator,
 		KeywordElseIf, KeywordElse, // offered only on a statement slot INSIDE an if/elseif branch -- confirming

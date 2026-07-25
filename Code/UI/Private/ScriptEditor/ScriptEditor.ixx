@@ -442,6 +442,9 @@ private:
 	DSLCodeLine& insertLineAfter(DSLCodeLine& afterLine, int scopeLevel);
 	DSLSymbol* seedStatementPlaceholder(DSLCodeLine& line);
 	std::string functionDeclarePrefix() const; // rebuilds "function name(type0 name0, type1 name1" from pending state
+	// The FunctionParamType stage's lead-in: functionDeclarePrefix() + this parameter's own "ref " once picked.
+	// currentParamPrefix() is this plus the resolved type -- i.e. the NAME stage's lead-in.
+	std::string paramTypeStagePrefix() const;
 	std::string currentParamPrefix() const;    // functionDeclarePrefix() + the CURRENT parameter's "[, ][ref ]type " lead-in
 	bool isPendingParamNameTaken(const std::string& name) const;
 	void commitFunctionDeclaration(); // FunctionParamType/Name's ')'-or-confirm: commits the whole new function declaration

@@ -605,6 +605,18 @@ void ScriptEditor::refreshCandidates()
 		injectLoopVarCandidate(liveChainType);
 		break;
 	case ComposeMode::FunctionParamType:
+		m_candidates = AutoCompleteRules::typeKeywordCandidates(m_pendingWord);
+		// Plus "ref" -- an out/in-out parameter (transpiles to a C++ `T&`). A MODIFIER, so it's offered only
+		// while it isn't already set on the parameter being authored, and picking it comes BACK here for the
+		// type. Entity/component types take it too: `ref` there means "repoint the caller's variable", which
+		// is as legitimate as writing through the handle it already holds.
+		if (!m_pendingParamRef)
+		{
+			Candidate refKeyword{ "ref", Candidate::Kind::KeywordRef };
+			if (m_pendingWord.empty() || refKeyword.label.compare(0, m_pendingWord.size(), m_pendingWord) == 0)
+				m_candidates.push_back(std::move(refKeyword));
+		}
+		break;
 	case ComposeMode::FunctionReturnType:
 	case ComposeMode::FunctionDeclareReturnType:
 	case ComposeMode::ForVarType:
@@ -1311,19 +1323,27 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		m_pendingParamTypes.clear();
 		m_pendingParamNames.clear();
 		m_pendingParamRefs.clear();
-		enterCompose(ComposeMode::FunctionParamType, functionDeclarePrefix());
+		m_pendingParamRef = false; // see paramTypeStagePrefix -- "ref" is picked per parameter, from here on
+		enterCompose(ComposeMode::FunctionParamType, paramTypeStagePrefix());
 		return;
 	}
 
 	if (m_composeMode == ComposeMode::FunctionParamType)
 	{
-		// Confirming (rather than typing ')', see handleKeyEvent) always picks the highlighted type and moves
+		// Confirming (rather than typing ')', see handleKeyEvent) always picks the highlighted entry and moves
 		// on to naming this parameter -- same list-then-free-type idiom as declaring a variable.
 		const Candidate* picked = selectedCandidate();
 		if (picked == nullptr)
 			return;
+		if (picked->kind == Candidate::Kind::KeywordRef)
+		{
+			// A modifier, not the pick: flag the parameter and come straight back for its type, "ref " now
+			// showing in the prefix (it's dropped from the list while set, so it can't stack).
+			m_pendingParamRef = true;
+			enterCompose(ComposeMode::FunctionParamType, paramTypeStagePrefix());
+			return;
+		}
 		m_pendingParamType = picked->declareType;
-		m_pendingParamRef = false; // freshly authored parameters are never by-reference (see m_pendingParamRefs)
 		enterCompose(ComposeMode::FunctionParamName, currentParamPrefix());
 		return;
 	}
@@ -2678,10 +2698,16 @@ std::string ScriptEditor::functionDeclarePrefix() const
 	return text;
 }
 
+// The TYPE stage's lead-in: everything resolved so far, plus this parameter's own "ref " once picked (the type
+// itself is what's being composed, so it isn't part of the prefix yet).
+std::string ScriptEditor::paramTypeStagePrefix() const
+{
+	return functionDeclarePrefix() + (m_pendingParamNames.empty() ? "" : ", ") + (m_pendingParamRef ? "ref " : "");
+}
+
 std::string ScriptEditor::currentParamPrefix() const
 {
-	return functionDeclarePrefix() + (m_pendingParamNames.empty() ? "" : ", ")
-		+ (m_pendingParamRef ? "ref " : "") + dslTypeName(m_pendingParamType) + " ";
+	return paramTypeStagePrefix() + dslTypeName(m_pendingParamType) + " ";
 }
 
 bool ScriptEditor::isPendingParamNameTaken(const std::string& name) const
@@ -5145,13 +5171,16 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		}
 		else if (m_composeMode == ComposeMode::FunctionParamName)
 		{
-			// Step back to re-pick this parameter's type instead of losing it entirely.
-			enterCompose(ComposeMode::FunctionParamType, functionDeclarePrefix() + (m_pendingParamNames.empty() ? "" : ", "));
+			// Step back to re-pick this parameter's type instead of losing it entirely -- its own "ref" (if
+			// any) survives, and the type stage's next Backspace is what drops that.
+			enterCompose(ComposeMode::FunctionParamType, paramTypeStagePrefix());
 		}
 		else if (m_composeMode == ComposeMode::FunctionDeclareDone)
 		{
-			// Undo the ')': reopen the parameter list, back in the add-another-or-close state.
-			enterCompose(ComposeMode::FunctionParamType, functionDeclarePrefix() + (m_pendingParamNames.empty() ? "" : ", "));
+			// Undo the ')': reopen the parameter list, back in the add-another-or-close state -- a FRESH
+			// parameter slot, so no "ref" carries into it.
+			m_pendingParamRef = false;
+			enterCompose(ComposeMode::FunctionParamType, paramTypeStagePrefix());
 		}
 		else if (m_composeMode == ComposeMode::FunctionDeclareReturnType)
 		{
@@ -5160,7 +5189,14 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 		}
 		else if (m_composeMode == ComposeMode::FunctionParamType)
 		{
-			if (!m_pendingParamNames.empty())
+			if (m_pendingParamRef)
+			{
+				// Undo the "ref" first -- it was its own keystroke, so it takes its own Backspace, and the
+				// stage stays put awaiting a type (or another "ref", now back in the list).
+				m_pendingParamRef = false;
+				enterCompose(ComposeMode::FunctionParamType, paramTypeStagePrefix());
+			}
+			else if (!m_pendingParamNames.empty())
 			{
 				// Step back into the PREVIOUS parameter's name instead of losing it.
 				const std::string restoredName = m_pendingParamNames.back();
@@ -5478,7 +5514,8 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 			m_pendingParamTypes.push_back(m_pendingParamType);
 			m_pendingParamNames.push_back(m_pendingWord);
 			m_pendingParamRefs.push_back(m_pendingParamRef);
-			enterCompose(ComposeMode::FunctionParamType, functionDeclarePrefix() + ", ");
+			m_pendingParamRef = false; // a FRESH parameter starts by-value; "ref" is picked per parameter
+			enterCompose(ComposeMode::FunctionParamType, paramTypeStagePrefix());
 			return;
 		}
 		if (c == ')')

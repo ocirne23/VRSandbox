@@ -19,7 +19,7 @@ SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* s
 SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, ScriptData* scriptData);
 SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, ScriptData* scriptData);
 SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, ScriptData* scriptData);
-static int test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int n);
+static bool test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, float& a);
 
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* scriptData)
 {
@@ -67,13 +67,15 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 		ctx->physicsApplyImpulse(scriptData->physics, glm::vec3(1.0f, 2.0f, 3.0f));
 	}
 	float f = deltaSeconds;
+	vrArrPush<int>(ctx, self, &(*scriptData).list, 1, 5);
 }
 
 REGISTER_UPDATE()
 
-static int test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int n)
+static bool test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, float& a)
 {
-	return n;
+	a *= 2.0f;
+	return true;
 }
 
 //@@dsl 1
@@ -107,8 +109,9 @@ static int test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, 
 //@	self.data.list.push(int value = 5)
 //@end
 //@
-//@function test(int n) -> int
-//@	return n
+//@function test(ref float a) -> bool
+//@	ref a *= 2
+//@	return true
 //@end
 //@
 //@@end
