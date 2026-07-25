@@ -249,6 +249,9 @@ namespace
 		// from scopeVars) but must still not be redeclared: the generated C++ scopes the condition
 		// declaration across the whole if/else, so a redeclaration there would silently shadow it.
 		std::vector<std::string> reservedNames;
+		// The open block headers enclosing the line being parsed -- owned here (not by the load driver) so
+		// statement parsers can ask what they're nested inside; see checkContainerNotIterated.
+		std::vector<DSLSymbol*> openBlocks;
 		DSLType currentReturnType = DSLType::Void;
 		std::string error;                      // first failure -- everything bails out through fail()/failValue()
 
@@ -341,10 +344,21 @@ namespace
 			return nullptr;
 		}
 
-		// A reference to a component-bound member (self.physics and friends) is only legal when the file's
-		// "//@@require" set names its component -- the loader-side twin of receiverCandidates' editor gating.
-		bool checkMemberUsable(const std::string& ownerName, const std::string& memberName, const BindingMember& member)
+		// A reference to a component-bound member (self.physics and friends) is the HOST-CACHED pointer for this
+		// script's own entity, so it's legal only directly on `self` (a sidebar binding, reached with no member
+		// path walked -- `self.parent.physics` and `e.physics` are other entities and would silently read self's
+		// component instead), and only when the file's "//@@require" set names it. The loader-side twin of
+		// receiverCandidates' editor gating; `ifexist`/`ifcomponent` is how another entity's component is reached.
+		bool checkMemberUsable(const std::string& ownerName, const std::string& memberName, const BindingMember& member,
+			const DSLSymbol* rootDecl, bool receiverIsRoot)
 		{
+			// A self-only member (see BindingMember::selfOnly) belongs to the SCRIPT, not to whichever entity it
+			// was read through -- its emit ignores the receiver, so reaching it off another entity would
+			// silently resolve to this script's own. Only `self` itself, with no member path walked.
+			if (member.selfOnly && (rootDecl == nullptr || rootDecl->line != nullptr || !receiverIsRoot))
+				return fail("'" + ownerName + "." + memberName + "' belongs to this script's own entity"
+					+ (member.requiredComponent != DSLType::Void
+						? std::string(" -- use 'ifcomponent' to reach another entity's") : std::string()));
 			if (member.requiredComponent != DSLType::Void
 				&& std::find(requiredComponents.begin(), requiredComponents.end(), member.requiredComponent) == requiredComponents.end())
 				return fail("'" + ownerName + "." + memberName + "' is used but its component isn't in the //@@require line");
@@ -490,15 +504,6 @@ namespace
 				{
 					if (first.text == "true" || first.text == "false")
 						return push(line, ST::Constant, DSLSymbol::Constant{ DSLType::Bool, first.text });
-					// The one Entity constant (see Candidate::Kind::KeywordNull) -- legal only where an Entity
-					// is expected, so a stray "null" in a numeric/string slot fails instead of silently typing
-					// itself as one.
-					if (first.text == "null")
-					{
-						if (expected != DSLType::Entity && expected != DSLType::Void)
-							return failValue("'null' is only valid where an Entity is expected");
-						return push(line, ST::Constant, DSLSymbol::Constant{ DSLType::Entity, "null" });
-					}
 					DSLSymbol* decl = findVariable(first.text);
 					if (decl == nullptr)
 						return failValue("unknown identifier '" + first.text + "'");
@@ -564,7 +569,8 @@ namespace
 						const BindingMember* member = bindings.findMember(receiverType, memberName);
 						if (member == nullptr)
 							return failValue("'" + ownerName + "' has no member '" + memberName + "'");
-						if (!checkMemberUsable(ownerName, memberName, *member))
+						// i == 1 is the FIRST hop, i.e. the receiver is still the bare root declaration.
+						if (!checkMemberUsable(ownerName, memberName, *member, receiverDecl, i == 1))
 							return nullptr;
 						memberType = member->type;
 					}
@@ -659,7 +665,34 @@ namespace
 				}
 			}
 
+			if (!checkContainerNotIterated(funcSymbol, receiverRef))
+				return nullptr;
 			return push(line, ST::FunctionCall, DSLSymbol::FunctionCall{ funcSymbol, receiverRef, std::move(built) });
+		}
+
+		// Refuses a container-MUTATING call (an array's push/clear) made while a foreach/ifexist in an enclosing
+		// block is iterating that same container -- the loader twin of the editor's own filtering. A diagnostic
+		// for a logic mistake, not a safety mechanism: element bindings are copies with a range-checked
+		// write-back, so what this catches is "your loop won't do what you think", not corruption.
+		bool checkContainerNotIterated(const DSLSymbol* funcSymbol, const DSLSymbol* receiver)
+		{
+			if (funcSymbol == nullptr || receiver == nullptr)
+				return true;
+			const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(funcSymbol->data);
+			if (!callee.mutatesContainer)
+				return true;
+			for (const DSLSymbol* open : openBlocks)
+			{
+				if (open == nullptr || open->type != ST::FlowControl)
+					continue;
+				const DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(open->data);
+				if (fc.control != DSLFlowControl::ForEach && fc.control != DSLFlowControl::IfExist)
+					continue;
+				if (dslSameStorage(fc.condition, receiver))
+					return fail("'" + callee.name + "' changes this container while a "
+						+ (fc.control == DSLFlowControl::ForEach ? "'foreach'" : "'ifexist'") + " is reading it");
+			}
+			return true;
 		}
 
 		// "type name [= value]" -> a VariableDeclaration head, registered into scopeVars. Locals and the
@@ -745,6 +778,13 @@ namespace
 			DSLType targetType = declaredType(rootDecl);
 			if (opAt == 1 && dslIsEngineObjectType(targetType))
 				return failValue("'" + t[0].text + "' is a binding object -- it can't be assigned to");
+			// The loader-side twin of addVariableCandidates' element-binding rule: a non-`ref` foreach/ifexist
+			// element is a COPY, so a write to it (or to one of its members) would be silently discarded at the
+			// end of the block. Entity elements are handles, not copies, so they stay writable.
+			if (!dslIsEngineObjectType(targetType)
+				&& !std::get<DSLSymbol::VariableDeclaration>(rootDecl->data).isRef
+				&& isElementBinding(rootDecl))
+				return failValue("'" + t[0].text + "' binds a copy -- declare it 'ref' to write through it");
 
 			DSLSymbol* target = push(line, ST::VariableReference, DSLSymbol::VariableReference{ rootDecl });
 			std::string ownerName = t[0].text;
@@ -777,7 +817,8 @@ namespace
 					// has read access to). self.data is the exception, handled by its own branch above.
 					if (!member->writable)
 						return failValue("member '" + memberName + "' is read-only");
-					if (!checkMemberUsable(ownerName, memberName, *member))
+					// i == 2 is the FIRST hop here (the target's own name is at 0, its '.' at 1).
+					if (!checkMemberUsable(ownerName, memberName, *member, rootDecl, i == 2))
 						return nullptr;
 					memberType = member->type;
 				}
@@ -816,10 +857,16 @@ namespace
 		// a for-loop's counter it carries no initializer.
 		DSLSymbol* parseForEach(std::span<const Token> t, DSLCodeLine& line)
 		{
+			bool isRef = false;
+			if (!t.empty() && t[0].kind == Token::Kind::Identifier && t[0].text == "ref")
+			{
+				isRef = true;
+				t = t.subspan(1);
+			}
 			DSLType elementType = DSLType::Void;
 			if (t.size() < 4 || t[0].kind != Token::Kind::Identifier || !typeFromKeyword(t[0].text, elementType)
 				|| t[1].kind != Token::Kind::Identifier)
-				return failValue("expected \"foreach <type> <name> in <sequence>\"");
+				return failValue("expected \"foreach [ref] <type> <name> in <sequence>\"");
 			if (t[2].kind != Token::Kind::Identifier || t[2].text != "in")
 				return failValue("expected 'in' after the foreach element name");
 			const std::string elementName = t[1].text;
@@ -843,8 +890,12 @@ namespace
 				return failValue("'" + std::string(dslTypeName(sequenceType)) + "' yields "
 					+ dslTypeName(object->sequenceElementType) + ", not " + dslTypeName(elementType));
 
+			if (!checkRefBinding(isRef, elementType, *object, "foreach"))
+				return nullptr;
+
 			DSLSymbol* typeSymbol = push(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ elementType });
-			DSLSymbol* elementVar = push(line, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ elementName, typeSymbol });
+			DSLSymbol* elementVar = push(line, ST::VariableDeclaration,
+				DSLSymbol::VariableDeclaration{ elementName, typeSymbol, nullptr, isRef });
 			scopeVars.push_back(elementVar);
 			return push(line, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::ForEach, sequence, elementVar });
 		}
@@ -883,6 +934,113 @@ namespace
 			return push(line, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::IfComponent, entity, boundVar });
 		}
 
+		// "ifexist" already consumed; `t` holds "[ref] <type> <name> in <container> [at <key>]". The container's
+		// own registration decides everything: whether it can be looked up at all, what type the key is, what
+		// the element yields, and whether `ref` is allowed -- see BindingObject's lookup fields.
+		DSLSymbol* parseIfExist(std::span<const Token> t, DSLCodeLine& line)
+		{
+			bool isRef = false;
+			if (!t.empty() && t[0].kind == Token::Kind::Identifier && t[0].text == "ref")
+			{
+				isRef = true;
+				t = t.subspan(1);
+			}
+			DSLType elementType = DSLType::Void;
+			if (t.size() < 4 || t[0].kind != Token::Kind::Identifier || !typeFromKeyword(t[0].text, elementType)
+				|| t[1].kind != Token::Kind::Identifier)
+				return failValue("expected \"ifexist [ref] <type> <name> in <container> [at <key>]\"");
+			if (t[2].kind != Token::Kind::Identifier || t[2].text != "in")
+				return failValue("expected 'in' after the ifexist variable name");
+			const std::string boundName = t[1].text;
+			if (AutoCompleteRules::isReservedWord(boundName))
+				return failValue("'" + boundName + "' is reserved");
+			for (DSLSymbol* var : scopeVars)
+				if (std::get<DSLSymbol::VariableDeclaration>(var->data).name == boundName)
+					return failValue("'" + boundName + "' is already declared in this function");
+			if (isReservedInChain(boundName))
+				return failValue("'" + boundName + "' is bound by the enclosing 'ifcomponent'/'ifexist'");
+
+			// Split the container from the optional "at <key>" -- the LAST top-level `at`, so a key expression
+			// containing one of its own can't confuse the split (nothing today can, but the rule is cheap).
+			size_t atPos = t.size();
+			for (size_t i = 3, depth = 0; i < t.size(); ++i)
+			{
+				if (t[i].kind == Token::Kind::Symbol && t[i].text == "(") ++depth;
+				else if (t[i].kind == Token::Kind::Symbol && t[i].text == ")") { if (depth > 0) --depth; }
+				else if (depth == 0 && t[i].kind == Token::Kind::Identifier && t[i].text == "at") atPos = i;
+			}
+			if (atPos == 3)
+				return failValue("expected a container before 'at'");
+
+			// The container resolves FIRST, so it can't see the element the statement is about to bind.
+			DSLSymbol* container = parseExpression(t.subspan(3, atPos - 3), line, DSLType::Void);
+			if (container == nullptr)
+				return nullptr;
+			const DSLType containerType = dslValueType(container);
+			const BindingObject* object = Globals::scriptBindings.objectFor(containerType);
+			if (object == nullptr || object->lookupValueType == DSLType::Void || object->lookupEmit == nullptr)
+				return failValue("'" + std::string(dslTypeName(containerType)) + "' can't be looked up");
+			if (object->lookupValueType != elementType)
+				return failValue("'" + std::string(dslTypeName(containerType)) + "' holds "
+					+ dslTypeName(object->lookupValueType) + ", not " + dslTypeName(elementType));
+
+			DSLSymbol* key = nullptr;
+			if (object->lookupKeyType != DSLType::Void)
+			{
+				if (atPos >= t.size())
+					return failValue("'" + std::string(dslTypeName(containerType)) + "' needs an 'at <key>'");
+				key = parseExpression(t.subspan(atPos + 1), line, object->lookupKeyType);
+				if (key == nullptr)
+					return nullptr;
+				if (dslValueType(key) != object->lookupKeyType)
+					return failValue("the 'at' key must be " + std::string(dslTypeName(object->lookupKeyType)));
+			}
+			else if (atPos < t.size())
+			{
+				return failValue("'" + std::string(dslTypeName(containerType)) + "' takes no 'at <key>'");
+			}
+
+			if (!checkRefBinding(isRef, elementType, *object, "ifexist"))
+				return nullptr;
+
+			DSLSymbol* typeSymbol = push(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ elementType });
+			DSLSymbol* boundVar = push(line, ST::VariableDeclaration,
+				DSLSymbol::VariableDeclaration{ boundName, typeSymbol, nullptr, isRef });
+			scopeVars.push_back(boundVar);
+			return push(line, ST::FlowControl,
+				DSLSymbol::FlowControl{ DSLFlowControl::IfExist, container, boundVar, key });
+		}
+
+		// Whether `varDecl` is the ELEMENT a foreach/ifexist header binds -- the loader twin of ScriptLang's
+		// isElementBinding, and the only kind of binding `ref` means anything on.
+		bool isElementBinding(const DSLSymbol* varDecl) const
+		{
+			if (varDecl == nullptr || varDecl->line == nullptr)
+				return false;
+			const DSLSymbol* head = varDecl->line->head();
+			if (head == nullptr || head->type != ST::FlowControl)
+				return false;
+			const DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(head->data);
+			return fc.forLoopVar == varDecl
+				&& (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfExist);
+		}
+
+		// The loader-side twin of the editor's `ref`-binding rules, shared by ifexist and foreach: a container
+		// that declares its elements read-only refuses `ref` outright (clearer than an assignment-to-read-only
+		// complaint at the use site), and a HANDLE-typed element has nothing to copy back -- writes already
+		// reach the real object through it, so `ref` there would be a no-op pretending to mean something.
+		bool checkRefBinding(bool isRef, DSLType elementType, const BindingObject& container, const char* keyword)
+		{
+			if (!isRef)
+				return true;
+			if (dslIsEngineObjectType(elementType))
+				return fail(std::string("'") + keyword + " ref' isn't allowed on " + dslTypeName(elementType)
+					+ " -- it's already a handle, writes through it reach the real object");
+			if (!container.elementWritable)
+				return fail("this container's elements can't be modified");
+			return true;
+		}
+
 		// One body/statement line. Never a function header, else/elseif, end, comment, or blank -- the load
 		// driver handles those (they need block-stack context). Returns the line's new head symbol, or null.
 		DSLSymbol* parseStatement(std::span<const Token> t, DSLCodeLine& line)
@@ -918,6 +1076,8 @@ namespace
 				return parseForEach(t.subspan(1), line);
 			if (first.text == "ifcomponent")
 				return parseIfComponent(t.subspan(1), line);
+			if (first.text == "ifexist")
+				return parseIfExist(t.subspan(1), line);
 
 			DSLType declType = DSLType::Void;
 			if (typeFromKeyword(first.text, declType))
@@ -1256,7 +1416,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 
 	// Pass 2: everything in order. The block-keyword structure (function/if/while/for open, elseif/else
 	// continue, end closes) drives every line's scopeLevel -- DSL.ixx's scope-only nesting model rebuilt.
-	std::vector<DSLSymbol*> openBlocks; // each entry = the open block's CURRENT header symbol
+	std::vector<DSLSymbol*>& openBlocks = parser.openBlocks; // each entry = the open block's CURRENT header symbol
 	// Parallel to openBlocks: parser.scopeVars.size() from JUST BEFORE that block's own header ran (so a
 	// for-loop's counter, declared as part of parsing its header line, is included in what gets pruned) --
 	// the editor-side twin of ScriptLang.cpp's inScopeVariables scope-walk, restored on 'end'/branch-switch so
@@ -1312,18 +1472,20 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 			const DSLSymbol* top = openBlocks.empty() ? nullptr : openBlocks.back();
 			const DSLSymbol::FlowControl* topFlow = (top != nullptr && top->type == ST::FlowControl)
 				? &std::get<DSLSymbol::FlowControl>(top->data) : nullptr;
-			// ifcomponent chains an else but never an elseif -- nothing bool to continue from a component fetch.
+			// ifcomponent/ifexist chain an else but never an elseif -- nothing bool to continue from a fetch.
+			const bool boundHeader = topFlow != nullptr
+				&& (topFlow->control == DSLFlowControl::IfComponent || topFlow->control == DSLFlowControl::IfExist);
 			const bool chainable = topFlow != nullptr
 				&& (topFlow->control == DSLFlowControl::If || topFlow->control == DSLFlowControl::ElseIf
-					|| (topFlow->control == DSLFlowControl::IfComponent && word == "else"));
+					|| (boundHeader && word == "else"));
 			if (!chainable)
 				return failAt(src.fileLineNo, "'" + word + "' without a matching 'if'");
 			// The branch just finished goes out of scope before this sibling's own condition/body parses --
 			// same depth as when the chain opened (a branch switch doesn't nest deeper), so the snapshot itself
 			// doesn't change, only scopeVars gets pruned back to it.
-			// An ifcomponent's binding stops being READABLE here but stays reserved for the rest of the chain --
-			// redeclaring it in the else would shadow the condition declaration in the emitted C++.
-			if (topFlow->control == DSLFlowControl::IfComponent && topFlow->forLoopVar != nullptr)
+			// An ifcomponent's/ifexist's binding stops being READABLE here but stays reserved for the rest of
+			// the chain -- redeclaring it in the else would shadow the condition declaration in the emitted C++.
+			if (boundHeader && topFlow->forLoopVar != nullptr)
 				parser.reservedNames.push_back(std::get<DSLSymbol::VariableDeclaration>(topFlow->forLoopVar->data).name);
 			parser.scopeVars.resize(openBlockScopeDepth.back());
 			auto line = std::make_unique<DSLCodeLine>();

@@ -190,6 +190,11 @@ export enum class DSLFlowControl
 	// has one. The DSL's way to reach any entity's components but self's own required ones: the check isn't
 	// something the author can forget, and the bound variable can't exist outside the branch that proved it.
 	IfComponent,
+	// "ifexist <Type> <name> in <container> at <key>" -- binds ONE element of a container (an array element, a
+	// map value, any registered lookup) and enters only when the lookup succeeded. The DSL's ONLY indexed read:
+	// there is no unchecked container access to author, so an out-of-range index can't reach memory -- the
+	// bounds check IS the construct. `at` is optional for a container whose lookup takes no key.
+	IfExist,
 	Return,
 	Break,
 };
@@ -295,6 +300,12 @@ public:
 		// no longer says when the list is done either: only ')' / Enter closes one (see ScriptEditor's
 		// CallArgValue staging). User-declared DSL functions are never variadic -- there's no way to author it.
 		bool isVariadic = false;
+		// Builtin only: this call MUTATES the container it's made on (an array's push/clear). Calling it while
+		// a foreach/ifexist in an enclosing block is reading that same container is refused -- a diagnostic for
+		// a logic mistake, not a safety mechanism (element bindings are copies with a range-checked write-back,
+		// so nothing can corrupt). Mirrors BindingFunc::mutatesContainer, carried here so consumers read it off
+		// the symbol they already have instead of looking the registration back up.
+		bool mutatesContainer = false;
 		int numReferences = 0; // maintained by the editor: live FunctionCall count, guards rename/delete
 	};
 	// If/ElseIf/While carry their condition in `condition`; Return carries its
@@ -310,12 +321,16 @@ public:
 	// impossible to author an out-of-range access through one.
 	// IfComponent has the same shape: forLoopVar is the bound COMPONENT
 	// declaration, `condition` the ENTITY it's fetched from.
+	// IfExist is that shape plus a key: forLoopVar is the bound ELEMENT
+	// declaration, `condition` the CONTAINER, and forCondition the `at` key
+	// (null when the container's lookup takes none). The element declaration's
+	// `isRef` is what asks for a write-back -- see the Transpiler.
 	struct FlowControl
 	{
 		DSLFlowControl control;
 		DSLSymbol* condition = nullptr;
-		DSLSymbol* forLoopVar = nullptr;   // For/ForEach: -> VariableDeclaration (For: initialValue = init clause)
-		DSLSymbol* forCondition = nullptr; // For only: -> Expression
+		DSLSymbol* forLoopVar = nullptr;   // For/ForEach/IfComponent/IfExist: -> VariableDeclaration
+		DSLSymbol* forCondition = nullptr; // For: -> Expression; IfExist: the `at` key value
 		DSLSymbol* forIncrement = nullptr; // For only: -> Expression
 	};
 	// An operator CHAIN, stored FLAT and exactly as authored: operators.size() == operands.size() - 1,
@@ -466,6 +481,34 @@ export inline int dslLineIndex(const DSLScriptFile& file, const DSLCodeLine* lin
 		if (file.lines[i].get() == line)
 			return i;
 	return -1;
+}
+
+// Decomposes a value expression into the DECLARATION it roots at plus the dotted member path walked from
+// there ("self.data.scores" -> {self, "data.scores"}). False for anything that isn't a plain variable/member
+// chain -- a call, a literal, an operator chain. Together the pair IDENTIFIES the storage a value names, which
+// is what "is this the same container?" comparisons need (see the mutate-while-iterating rule).
+export inline bool dslChainToRoot(const DSLSymbol* value, const DSLSymbol*& outRoot, std::string& outPath)
+{
+	outPath.clear();
+	while (value != nullptr && value->type == DSLSymbol::SymbolType::MemberAccess)
+	{
+		const DSLSymbol::MemberAccess& access = std::get<DSLSymbol::MemberAccess>(value->data);
+		outPath = outPath.empty() ? access.memberName : access.memberName + "." + outPath;
+		value = access.receiver;
+	}
+	if (value == nullptr || value->type != DSLSymbol::SymbolType::VariableReference)
+		return false;
+	outRoot = std::get<DSLSymbol::VariableReference>(value->data).declaration;
+	return outRoot != nullptr;
+}
+
+// Whether two value expressions name the SAME storage -- same root declaration, same member path.
+export inline bool dslSameStorage(const DSLSymbol* a, const DSLSymbol* b)
+{
+	const DSLSymbol* rootA = nullptr;
+	const DSLSymbol* rootB = nullptr;
+	std::string pathA, pathB;
+	return dslChainToRoot(a, rootA, pathA) && dslChainToRoot(b, rootB, pathB) && rootA == rootB && pathA == pathB;
 }
 
 // First index past the block opened at `headerIndex` -- every following line with a DEEPER scopeLevel belongs

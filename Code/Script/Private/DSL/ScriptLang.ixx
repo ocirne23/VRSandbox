@@ -31,6 +31,9 @@ export struct SlotRef
 		FunctionReturnType,              // -> parent is the FunctionDeclaration symbol; always present/selectable
 		                                 // in expanded view (rendered blank when returnType == Void), so a
 		                                 // function's return type can be set or changed at any time
+		IfExistKey,                      // -> parent is the IfExist FlowControl symbol: its `at <key>` value,
+		                                 // separate from FlowControlCondition (the container) so the two
+		                                 // re-edit independently
 		ExpressionOperand,               // -> parent is the Expression (operator chain) symbol; argIndex selects
 		                                 // which operand -- what in-place term replace/insert/delete acts on
 	};
@@ -115,13 +118,10 @@ export struct Candidate
 	enum class Kind
 	{
 		KeywordIf, KeywordWhile, KeywordReturn, KeywordBreak, KeywordTrue, KeywordFalse,
-		KeywordNull,   // the null Entity ("self.parent" has no parent, "scene.getChild(i)" was out of range) --
-		               // offered wherever an Entity VALUE is expected, and as the right side of an Entity
-		               // comparison; resolves to a Constant of type Entity holding "null" (Transpiler emits
-		               // "nullptr"). Entity is the only nullable type in the DSL: components are gated by the
-		               // require set, and the other engine objects are always present.
 		Variable, Function, DeclareType, Literal, Comparator, DeclareFunction, KeywordFor, KeywordForEach,
 		KeywordIfComponent, // "ifcomponent" -- stages a component type, a name, and the entity to fetch from
+		KeywordIfExist,     // "ifexist" -- stages an element type, a name, the container, and (if it takes one)
+		                    // the key; the DSL's only indexed container read, bounds check included
 		KeywordRef,    // "ref" -- a MODIFIER, not a pick: offered alongside the type keywords wherever a
 		               // by-reference binding is allowed (a function parameter today), confirming it sets the
 		               // flag and returns to the SAME stage with "ref " in the prefix, awaiting the type
@@ -202,8 +202,17 @@ public:
 	// read-only propagates down the whole chain (assigning into `self.parent.pos` would mutate an object the
 	// script only has read access to), so no member is offered as an assignment lead-in under such a path;
 	// chainable ones still are, since dotting further toward a call stays legal.
+	// `receiverIsRoot` = the receiver expression is the root declaration ITSELF, with no member path walked yet.
+	// Component members need it: they're self's HOST-CACHED pointers, so `self.physics` is valid but
+	// `self.parent.physics` is not -- both are Entity-typed and share the same root, and only the path length
+	// tells them apart (the other entity's component is reached with `ifcomponent` instead).
+	// `atLine`/`file`/`receiverPath` locate the receiver in the document, which is what the mutate-while-
+	// iterating refusal needs: a container-mutating function (push/clear) isn't offered while a foreach/ifexist
+	// in an enclosing block is reading that same storage.
 	static std::vector<Candidate> receiverCandidates(const ScriptBindings& bindings, const DSL& document, DSLSymbol* receiverDecl,
-		DSLType receiverType, DSLType expectedType, bool anyValue, bool receiverWritable, const std::string& typedPrefix);
+		DSLType receiverType, DSLType expectedType, bool anyValue, bool receiverWritable, bool receiverIsRoot,
+		const DSLCodeLine* atLine, const DSLScriptFile& file, const std::string& receiverPath,
+		const std::string& typedPrefix);
 
 	// The six comparison operators (==, !=, <, >, <=, >=) offered while building an if/while condition's middle
 	// term, filtered by typedPrefix same as any other candidate list (typing "<" narrows to "<" and "<=").

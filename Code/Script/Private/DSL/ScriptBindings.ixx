@@ -61,6 +61,11 @@ export struct BindingFunc
 	// "ctx->logf($1$*)" -- valid with or without a tail. See DSLSymbol::FunctionDeclaration::isVariadic for
 	// what it means downstream.
 	bool isVariadic = false;
+	// This function MUTATES the container it's called on (an array's push/clear): calling it while a
+	// foreach/ifexist is iterating that same container is refused, in the editor and the loader alike. A
+	// diagnostic for a logic mistake, not a safety mechanism -- element bindings are copies with a
+	// write-back, so a missed case can't corrupt anything (see the ref/write-back design).
+	bool mutatesContainer = false;
 };
 
 export struct BindingMember
@@ -72,9 +77,17 @@ export struct BindingMember
 	                       // std::string (not a literal-only const char*) since registerComponentType computes
 	                       // this one from the member name rather than taking it from the caller
 	bool writable = true; // false = read-only in the DSL (no `x.member = ...` statements)
+	// This member belongs to the SCRIPT, not to the entity it's read through: its emit ignores "$r" (self.data
+	// is "(*scriptData)") or resolves against host-cached state (self.physics is "scriptData->physics"), so
+	// reaching it off any other entity would silently read this script's own. Legal only directly on `self`,
+	// with no member path walked -- enforced in receiverCandidates, ScriptLoader's checkMemberUsable, and the
+	// sidebar tree alike. Another entity's components go through `ifcomponent`; its script data isn't reachable
+	// at all, which is correct -- a script's data is private to its own instance.
+	bool selfOnly = false;
 	// Void = always available; else this member (e.g. self.physics) is only offered/legal while the script
 	// requires this component -- always the member's OWN type for a registerComponentType member (see there),
-	// but held separately since not every BindingMember is one (e.g. self.pos is never gated).
+	// but held separately since not every BindingMember is one (e.g. self.pos is never gated). Implies
+	// selfOnly, which registerComponentType sets alongside it.
 	DSLType requiredComponent = DSLType::Void;
 };
 
@@ -138,6 +151,30 @@ export struct BindingObject
 	DSLType sequenceElementType = DSLType::Void;
 	const char* sequenceCountEmit = nullptr; // "ctx->sceneGetChildCount($r)"
 	const char* sequenceAtEmit = nullptr;    // "ctx->sceneGetChildAt($r, $i)"
+
+	// Makes this object LOOKUP-ABLE by `ifexist`: "ifexist float item in <this> at <key>" binds one element
+	// only when the lookup succeeds, so a failed/out-of-range access can't be written at all. `lookupEmit` is a
+	// BOOLEAN expression over "$r" (the receiver), "$1" (the key) and "$v" (the bound variable, already declared
+	// and default-initialized by the generated code) -- an array's is a range-checked read
+	// ("ctx->arrayGet($r, $1, (int)sizeof($v), &$v)"), a nullable getter's would be an assign-and-test
+	// ("($v = ctx->find($r, $1)) != nullptr"). Void valueType = not lookup-able.
+	//
+	// Deliberately NOT synthesized from the sequence pair above: a bounds check derived from `sequenceCountEmit`
+	// would evaluate the receiver twice, and would be the WRONG check for any container whose lookup can fail
+	// for reasons other than range (a map's key miss). Each container states its own.
+	DSLType lookupKeyType = DSLType::Void;
+	DSLType lookupValueType = DSLType::Void;
+	const char* lookupEmit = nullptr;
+	// Whether a bound element may be WRITTEN (`ifexist ref`/`foreach ref`) -- the container's own call, the same
+	// way BindingMember::writable is the member's. False = the binding is read-only however it's reached, and
+	// `ref` on it is refused outright ("this container's elements can't be modified") rather than silently
+	// dropping the write. Only meaningful alongside a sequence or lookup registration.
+	bool elementWritable = false;
+	// The element write-back for a `ref` binding of a BY-VALUE element: a statement expression over "$r", "$1"
+	// (the index/key) and "$v". Required when elementWritable and the element type is by-value; a handle-typed
+	// element (Entity) needs none -- writes go straight through the handle. See the ref/write-back design: a
+	// copy back beats an interior pointer, which push/clear would dangle.
+	const char* elementSetEmit = nullptr;
 };
 
 export class ScriptBindings
@@ -174,13 +211,23 @@ public:
 	// registered here is the OTHER path: a pointer the host cached for this script, non-null by construction
 	// because //@@require guarantees the component exists, and offered only on a `self` receiver.
 	DSLType registerComponentType(const char* memberName, const char* typeName, int componentBit, const char* fetchEmit);
-	// Registers one SEQUENCE type -- a read-only, iterate-only view over an engine collection, returned by the
-	// accessor that exposes it ("self.scene.getChildren()" -> "EntityList"). Nothing is copied: that accessor's
-	// emit is just "$r", so the value IS its receiver's expression, and these two templates run against it --
-	// `countEmit` with "$r", `atEmit` with "$r" plus "$i" for the loop index. foreach is the only consumer, so
-	// an out-of-range access can't be authored; `atEmit` should still be range-safe on its own terms.
-	// Distinct from an ARRAY (T[]), which is storage the script owns a handle to.
-	DSLType registerSequenceType(const char* name, DSLType elementType, const char* countEmit, const char* atEmit);
+	// Registers one SEQUENCE type -- a read-only view over an engine collection, exposed by the member/accessor
+	// that names it ("self.scene.children"). It SPELLS as "<element>[]" (see dslTypeName): to the author it's an
+	// indexable collection like any other, and only the emits differ. Nothing is copied -- the exposing member's
+	// emit is just "$r", so the value IS its receiver's expression, and these templates run against it:
+	// `countEmit` with "$r", `atEmit` with "$r" plus "$i" for the index, and `lookupEmit` (optional) with "$r",
+	// "$1" for the key and "$v" for the bound variable, which is what makes it usable from `ifexist` as well as
+	// `foreach`. `atEmit` must be range-safe on its own terms; `lookupEmit` must REPORT the miss.
+	// Distinct from an ARRAY (T[]), which is storage the script owns a handle to and can write through.
+	DSLType registerSequenceType(const char* name, DSLType elementType, const char* countEmit, const char* atEmit,
+		const char* lookupEmit = nullptr);
+	// Registers one OPTIONAL type -- a value that may not be there ("self.parent" at the root). Spelled
+	// "<value>?" (see dslTypeName) and reachable ONLY through `ifexist`, which is the point: it is not a value
+	// of its own, so it cannot be read, passed, or dotted into without the existence check having succeeded,
+	// and there is no way to forget one. Same lookup contract as a keyed container minus the key -- `lookupEmit`
+	// is a boolean expression over "$r" (the exposing member's receiver) and "$v" (the bound variable), e.g.
+	// "($v = $r->parent) != nullptr". The exposing member's own emit is just "$r", so nothing is fetched twice.
+	DSLType registerOptionalType(const char* name, DSLType valueType, const char* lookupEmit);
 	// Registers one toggleable ScriptAPI entry point (see EntryPointDef) -- same guarantee.
 	void registerEntryPoint(EntryPointDef def);
 

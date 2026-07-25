@@ -47,13 +47,14 @@ DSLType ScriptBindings::registerComponentType(const char* memberName, const char
 		if (object.name != nullptr && std::string_view(object.name) == "self")
 		{
 			object.members.push_back({ memberName, type, "scriptData->" + std::string(memberName),
-				/*writable*/ false, /*requiredComponent*/ type });
+				/*writable*/ false, /*selfOnly*/ true, /*requiredComponent*/ type });
 			break;
 		}
 	return type;
 }
 
-DSLType ScriptBindings::registerSequenceType(const char* name, DSLType elementType, const char* countEmit, const char* atEmit)
+DSLType ScriptBindings::registerSequenceType(const char* name, DSLType elementType, const char* countEmit,
+	const char* atEmit, const char* lookupEmit)
 {
 	const DSLType type = dslSequenceType(static_cast<int>(m_sequenceTypeNames.size()));
 	m_sequenceTypeNames.push_back(name);
@@ -67,6 +68,32 @@ DSLType ScriptBindings::registerSequenceType(const char* name, DSLType elementTy
 	object.sequenceElementType = elementType;
 	object.sequenceCountEmit = countEmit;
 	object.sequenceAtEmit = atEmit;
+	if (lookupEmit != nullptr)
+	{
+		// Indexable from `ifexist` too. Elements stay READ-ONLY: this is a view over an engine collection, not
+		// storage the script owns, so there is no write-back to offer and `ref` is refused on it.
+		object.lookupKeyType = DSLType::Int;
+		object.lookupValueType = elementType;
+		object.lookupEmit = lookupEmit;
+	}
+	m_objectDefs.push_back(std::move(object));
+	return type;
+}
+
+DSLType ScriptBindings::registerOptionalType(const char* name, DSLType valueType, const char* lookupEmit)
+{
+	// Shares the sequence type range: both are DERIVED access types (a BindingObject carrying only templates),
+	// distinguished by which half is filled in -- sequence* makes it iterable, lookup* makes it ifexist-able.
+	// An optional fills only the lookup half, and takes no key.
+	const DSLType type = dslSequenceType(static_cast<int>(m_sequenceTypeNames.size()));
+	m_sequenceTypeNames.push_back(name);
+	BindingObject object;
+	object.name = name;
+	object.type = type;
+	object.sidebarTopLevel = false;
+	object.lookupKeyType = DSLType::Void;
+	object.lookupValueType = valueType;
+	object.lookupEmit = lookupEmit;
 	m_objectDefs.push_back(std::move(object));
 	return type;
 }
@@ -107,7 +134,7 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 	// else, where no BindingFunc ever spells ThisBinding.
 	auto buildFunction = [&](const char* name, DSLType returnType, const std::vector<BindingParam>& params,
 		const char* emit, bool requiresReceiver, bool isPositionalCall, DSLType selfType = DSLType::Void,
-		bool isVariadic = false) -> DSLSymbol*
+		bool isVariadic = false, bool mutatesContainer = false) -> DSLSymbol*
 	{
 		const auto resolveSelf = [selfType](DSLType t) { return t == DSLType::ThisBinding ? selfType : t; };
 		std::vector<DSLSymbol*> built;
@@ -118,7 +145,8 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 				DSLSymbol::VariableDeclaration{ param.name, paramType, nullptr, param.isRef }));
 		}
 		DSLSymbol* funcSymbol = addSymbol(builtinsOut, ST::FunctionDeclaration, DSLSymbol::FunctionDeclaration{
-			name, std::move(built), resolveSelf(returnType), requiresReceiver, isPositionalCall, isVariadic });
+			name, std::move(built), resolveSelf(returnType), requiresReceiver, isPositionalCall, isVariadic,
+			mutatesContainer });
 		m_emits.emplace_back(funcSymbol, emit);
 		return funcSymbol;
 	};
@@ -153,8 +181,10 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 			arrayObject.type = dslArrayOf(elementType); // dotting into an array-typed value
 			arrayObject.sidebarTopLevel = false;
 			arrayObject.functions = {
-				{ "push",  DSLType::Void, { { "value", elementType } }, pushEmit },
-				{ "clear", DSLType::Void, {},                           "ctx->arrayClear($r)" },
+				{ "push",  DSLType::Void, { { "value", elementType } }, pushEmit,
+					/*isPositionalCall*/ false, /*isVariadic*/ false, /*mutatesContainer*/ true },
+				{ "clear", DSLType::Void, {},                           "ctx->arrayClear($r)",
+					/*isPositionalCall*/ false, /*isVariadic*/ false, /*mutatesContainer*/ true },
 			};
 			arrayObject.members = {
 				{ "count", DSLType::Int, "ctx->arrayCount($r)", /*writable*/ false },
@@ -164,6 +194,19 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 			arrayObject.sequenceCountEmit = "ctx->arrayCount($r)";
 			m_arrayEmits.push_back(std::make_unique<std::string>("vrArrGet<" + elementName + ">(ctx, $r, $i)"));
 			arrayObject.sequenceAtEmit = m_arrayEmits.back()->c_str();
+
+			// ...and indexable, but ONLY through `ifexist`: arrayGet's own return value IS the bounds check
+			// (1 on success, outValue untouched otherwise -- see ScriptAPI.h), which is exactly the flag the
+			// construct branches on. There is deliberately no unchecked read anywhere in the DSL.
+			arrayObject.lookupKeyType = DSLType::Int;
+			arrayObject.lookupValueType = elementType;
+			arrayObject.lookupEmit = "ctx->arrayGet($r, $1, (int)sizeof($v), &$v)";
+			// Elements are writable via a `ref` binding; the write-back re-resolves the handle and range-checks
+			// at write time, so a body that pushed or cleared drops the write instead of corrupting anything.
+			arrayObject.elementWritable = true;
+			m_arrayEmits.push_back(std::make_unique<std::string>(
+				"vrArrSet<" + elementName + ">(ctx, $r, $1, $v)"));
+			arrayObject.elementSetEmit = m_arrayEmits.back()->c_str();
 			m_objectDefs.push_back(std::move(arrayObject));
 		}
 	}
@@ -178,7 +221,7 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 			def.constructorEmit, /*requiresReceiver*/ false, /*isPositionalCall*/ true, selfType);
 		for (const BindingFunc& func : def.functions)
 			built.functionSymbols.push_back(buildFunction(func.name, func.returnType, func.params, func.emit,
-				/*requiresReceiver*/ true, func.isPositionalCall, selfType, func.isVariadic));
+				/*requiresReceiver*/ true, func.isPositionalCall, selfType, func.isVariadic, func.mutatesContainer));
 	}
 
 	for (const BindingObject& object : m_objectDefs)
@@ -192,7 +235,8 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 		}
 		for (const BindingFunc& func : object.functions)
 			built.functionSymbols.push_back(buildFunction(func.name, func.returnType, func.params, func.emit,
-				/*requiresReceiver*/ object.name != nullptr, func.isPositionalCall, DSLType::Void, func.isVariadic));
+				/*requiresReceiver*/ object.name != nullptr, func.isPositionalCall, DSLType::Void, func.isVariadic,
+				func.mutatesContainer));
 	}
 }
 

@@ -83,7 +83,9 @@ namespace
 			// dangles once that DLL is unloaded, so anything outliving the call (a persistent ScriptData
 			// string, an array element) would break on the next hot-reload. See internString in ScriptAPI.h.
 			case DSLType::String: return "ctx->internString(\"" + c.value + "\")"; // content stored unquoted, no escapes in the DSL
-			case DSLType::Entity: return "nullptr";             // the ONLY Entity constant is `null` (see KeywordNull)
+			// An Entity has no literal form in the DSL -- this is only the default an `ifexist` binding is
+			// declared with before its lookup runs.
+			case DSLType::Entity: return "nullptr";
 			default:              return c.value;               // Int/Bool exactly as authored
 			}
 		}
@@ -133,6 +135,23 @@ namespace
 			{
 				if (*p == '$' && p[1] == 'r') { result += receiverName; ++p; continue; }
 				if (*p == '$' && p[1] == 'i') { result += indexName; ++p; continue; }
+				result += *p;
+			}
+			return result;
+		}
+
+		// The lookup/write-back templates (BindingObject::lookupEmit / elementSetEmit): "$r" the container,
+		// "$1" the key or index, "$v" the bound variable -- which the generated code has already declared, so
+		// the template can both read it and take its address.
+		static std::string substituteElement(const char* emitTemplate, const std::string& receiverName,
+			const std::string& keyName, const std::string& varName)
+		{
+			std::string result;
+			for (const char* p = emitTemplate; *p != '\0'; ++p)
+			{
+				if (*p == '$' && p[1] == 'r') { result += receiverName; ++p; continue; }
+				if (*p == '$' && p[1] == '1') { result += keyName; ++p; continue; }
+				if (*p == '$' && p[1] == 'v') { result += varName; ++p; continue; }
 				result += *p;
 			}
 			return result;
@@ -260,6 +279,62 @@ namespace
 
 		// ---- statements / blocks ----
 
+		// One currently-open nested block. `trailing` is a statement emitted just before the closing brace --
+		// the write-back of a `ref` element binding, which has to be the LAST thing in the block whichever way
+		// the block ends up closed (a sibling at the same level, an else, or the function's end).
+		struct OpenScope
+		{
+			int scopeLevel;
+			std::string trailing;
+		};
+
+		// Whether the block opened at `headerIndex` assigns to `boundVar` anywhere -- directly (`p = ...`) or
+		// through a member (`p.x = ...`). What decides if a `ref` binding needs its write-back at all: a
+		// read-only body pays nothing. Every symbol on a line is a peer in its flat `symbols` list (see DSL.ixx's
+		// ownership model), so a scan finds nested assignments without a tree walk.
+		bool blockAssignsTo(const DSLSymbol* boundVar, int headerIndex) const
+		{
+			const int blockEnd = dslBlockEnd(document.file, headerIndex);
+			for (int i = headerIndex + 1; i < blockEnd; ++i)
+				for (const std::unique_ptr<DSLSymbol>& s : document.file.lines[i]->symbols)
+				{
+					if (s->type != ST::Expression)
+						continue;
+					const DSLSymbol::Expression& e = std::get<DSLSymbol::Expression>(s->data);
+					if (e.operators.empty() || !dslIsAssignOperator(e.operators[0]) || e.operands.empty())
+						continue;
+					// Walk the target back to its root declaration -- "p" and "p.x" both root at boundVar.
+					const DSLSymbol* target = e.operands[0];
+					while (target != nullptr && target->type == ST::MemberAccess)
+						target = std::get<DSLSymbol::MemberAccess>(target->data).receiver;
+					if (target != nullptr && target->type == ST::VariableReference
+						&& std::get<DSLSymbol::VariableReference>(target->data).declaration == boundVar)
+						return true;
+				}
+			return false;
+		}
+
+		// The write-back statement for a `ref` element binding, or "" when none is needed: the binding isn't
+		// `ref`, the body never assigns to it, the container declared its elements read-only, or the element is
+		// HANDLE-typed (an Entity is already a reference -- writes reach the real object through it, so there is
+		// nothing to copy back). `keyText` is the loop index for a foreach, the `at` key for an ifexist.
+		std::string elementWriteBack(const DSLCodeLine& line, const DSLSymbol::FlowControl* flow,
+			const DSLSymbol::VariableDeclaration& bound, const std::string& keyText)
+		{
+			if (!bound.isRef || flow->condition == nullptr)
+				return {};
+			const DSLType elemType = std::get<DSLSymbol::TypeDeclaration>(bound.typeSymbol->data).type;
+			if (dslIsEngineObjectType(elemType))
+				return {}; // a handle, not a copy
+			const BindingObject* container = bindings.objectFor(dslValueType(flow->condition));
+			if (container == nullptr || !container->elementWritable || container->elementSetEmit == nullptr)
+				return {};
+			const int headerIndex = dslLineIndex(document.file, &line);
+			if (headerIndex < 0 || !blockAssignsTo(flow->forLoopVar, headerIndex))
+				return {};
+			return substituteElement(container->elementSetEmit, expressionText(flow->condition), keyText, bound.name) + ";";
+		}
+
 		void openBlock()
 		{
 			emitLine("{");
@@ -332,7 +407,10 @@ namespace
 			emitLine(functionSignature(headerIndex));
 			openBlock();
 
-			std::vector<int> openScopes; // scopeLevel of each currently-open nested block's header
+			// One entry per currently-open nested block: its header's scopeLevel, plus a statement (if any) to
+			// emit just BEFORE the closing brace -- what a `ref` binding's write-back rides on (see IfExist/
+			// ForEach), so the copy back lands at the end of the block whichever way the block is closed.
+			std::vector<OpenScope> openScopes;
 			for (int i = headerIndex + 1; i < bodyEnd; ++i)
 			{
 				const DSLCodeLine& line = *document.file.lines[i];
@@ -342,10 +420,12 @@ namespace
 				const bool continuation = flow != nullptr
 					&& (flow->control == DSLFlowControl::ElseIf || flow->control == DSLFlowControl::Else);
 
-				while (!openScopes.empty() && openScopes.back() >= line.scopeLevel)
+				while (!openScopes.empty() && openScopes.back().scopeLevel >= line.scopeLevel)
 				{
-					if (continuation && openScopes.back() == line.scopeLevel)
+					if (continuation && openScopes.back().scopeLevel == line.scopeLevel)
 						break;
+					if (!openScopes.back().trailing.empty())
+						emitLine(openScopes.back().trailing);
 					closeBlock();
 					openScopes.pop_back();
 				}
@@ -386,7 +466,7 @@ namespace
 		}
 
 		void emitStatement(const DSLCodeLine& line, const DSLSymbol* head, const DSLSymbol::FlowControl* flow,
-			std::vector<int>& openScopes)
+			std::vector<OpenScope>& openScopes)
 		{
 			if (head == nullptr || head->type == ST::Placeholder)
 			{
@@ -421,7 +501,7 @@ namespace
 				emitLine(std::string(flow->control == DSLFlowControl::If ? "if" : "while")
 					+ " (" + expressionText(flow->condition) + ")");
 				openBlock();
-				openScopes.push_back(line.scopeLevel);
+				openScopes.push_back({ line.scopeLevel, {} });
 				return;
 			case DSLFlowControl::ElseIf:
 			case DSLFlowControl::Else:
@@ -446,7 +526,7 @@ namespace
 					? substituteTemplate(fetchEmit, expressionText(flow->condition), {}) : std::string("nullptr");
 				emitLine("if (" + std::string(cppTypeName(componentType)) + " " + bound.name + " = " + fetchText + ")");
 				openBlock();
-				openScopes.push_back(line.scopeLevel);
+				openScopes.push_back({ line.scopeLevel, {} });
 				return;
 			}
 			case DSLFlowControl::ForEach:
@@ -470,14 +550,34 @@ namespace
 					+ indexName + " < " + indexName + "End; ++" + indexName + ")");
 				openBlock();
 				emitLine(std::string(cppTypeName(elemType)) + " " + elem.name + " = " + atText + ";");
-				openScopes.push_back(line.scopeLevel);
+				openScopes.push_back({ line.scopeLevel, elementWriteBack(line, flow, elem, indexName) });
+				return;
+			}
+			case DSLFlowControl::IfExist:
+			{
+				// The lookup's own success flag IS the condition -- there is no separate bounds check to emit,
+				// and no way to author the read without it. The element is declared in the if's INIT-statement
+				// so the lookup can write through it and the branch can read it; C++ scopes that declaration
+				// across an attached `else` too, which is exactly why the DSL reserves the name there (see
+				// isChainComponentBinding) even though it isn't readable in that branch.
+				const DSLSymbol::VariableDeclaration& bound = std::get<DSLSymbol::VariableDeclaration>(flow->forLoopVar->data);
+				const DSLType elemType = std::get<DSLSymbol::TypeDeclaration>(bound.typeSymbol->data).type;
+				const std::string receiver = expressionText(flow->condition);
+				const std::string keyText = (flow->forCondition != nullptr) ? expressionText(flow->forCondition) : std::string();
+				const BindingObject* container = bindings.objectFor(dslValueType(flow->condition));
+				const std::string testText = (container != nullptr && container->lookupEmit != nullptr)
+					? substituteElement(container->lookupEmit, receiver, keyText, bound.name) : std::string("false");
+				emitLine("if (" + std::string(cppTypeName(elemType)) + " " + bound.name + " = "
+					+ defaultValueText(elemType, bindings) + "; " + testText + ")");
+				openBlock();
+				openScopes.push_back({ line.scopeLevel, elementWriteBack(line, flow, bound, keyText) });
 				return;
 			}
 			case DSLFlowControl::For:
 				emitLine("for (" + declarationText(flow->forLoopVar) + "; "
 					+ expressionText(flow->forCondition) + "; " + expressionText(flow->forIncrement) + ")");
 				openBlock();
-				openScopes.push_back(line.scopeLevel);
+				openScopes.push_back({ line.scopeLevel, {} });
 				return;
 			case DSLFlowControl::Return:
 				emitLine(flow->condition != nullptr ? "return " + expressionText(flow->condition) + ";" : "return;");

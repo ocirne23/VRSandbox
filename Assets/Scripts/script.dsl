@@ -19,7 +19,6 @@ SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* s
 SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, ScriptData* scriptData);
 SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, ScriptData* scriptData);
 SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, ScriptData* scriptData);
-static bool test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, float& a);
 
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* scriptData)
 {
@@ -64,19 +63,18 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 	for (int vrIdx0 = 0, vrIdx0End = ctx->sceneGetChildCount(scriptData->scene); vrIdx0 < vrIdx0End; ++vrIdx0)
 	{
 		Entity* e = ctx->sceneGetChildAt(scriptData->scene, vrIdx0);
-		ctx->physicsApplyImpulse(scriptData->physics, glm::vec3(1.0f, 2.0f, 3.0f));
+		if (void* phys = ctx->entityGetPhysicsComponent(e))
+		{
+			ctx->physicsApplyImpulse(phys, glm::vec3(1.0f, 2.0f, 3.0f));
+		}
 	}
-	float f = deltaSeconds;
-	vrArrPush<int>(ctx, self, &(*scriptData).list, 1, 5);
+	if (int i = 0; ctx->arrayGet((*scriptData).list, 0, (int)sizeof(i), &i))
+	{
+		ctx->logf(ctx->internString("%i"), i);
+	}
 }
 
 REGISTER_UPDATE()
-
-static bool test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, float& a)
-{
-	a *= 2.0f;
-	return true;
-}
 
 //@@dsl 1
 //@@require PhysicsComponent, SceneComponent
@@ -102,16 +100,14 @@ static bool test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData,
 //@	for int i = 0, i < self.data.num, i += 1
 //@		self.physics.setVelocity(vec3 velocity = vec3(0, 1, 0))
 //@	end
-//@	foreach Entity e in self.scene.getChildren()
-//@		e.physics.applyImpulse(vec3 impulse = vec3(1, 2, 3))
+//@	foreach Entity e in self.scene.children
+//@		ifcomponent PhysicsComponent phys in e
+//@			phys.applyImpulse(vec3 impulse = vec3(1, 2, 3))
+//@		end
 //@	end
-//@	float f = deltaSeconds
-//@	self.data.list.push(int value = 5)
-//@end
-//@
-//@function test(ref float a) -> bool
-//@	ref a *= 2
-//@	return true
+//@	ifexist int i in self.data.list at 0
+//@		printf(string format = "%i", i)
+//@	end
 //@end
 //@
 //@@end

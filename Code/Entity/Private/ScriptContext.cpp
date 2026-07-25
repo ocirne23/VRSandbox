@@ -152,43 +152,53 @@ void registerScriptDslBindings()
             { "axis",       vec3,           {},                                                   "glm::axis($r)" },
             { "angleDeg",   T::Float,       {},                                                   "glm::degrees(glm::angle($r))" },
         } });
+    // "self.parent" has no parent at the root, so it is NOT an Entity value -- it's an Entity? reachable only
+    // through "ifexist Entity p in self.parent". That makes the null check impossible to forget (there is no
+    // spelling that skips it) and leaves nothing in the DSL needing a manual one. The member's own emit is just
+    // "$r", so the field is read exactly once, here in the check.
+    const DSLType optionalEntityType = bindings.registerOptionalType("OptionalEntity", T::Entity,
+        "($v = $r->parent) != nullptr");
+
     bindings.registerObject({ "self", T::Entity, /*sidebarTopLevel*/ true,
         {
-            // Entity is the DSL's one nullable type -- `self.parent` has no parent at the root, `scene.getChild`
-            // can be out of range. `exists()` is the shorthand for the `!= null` comparison (both spellings are
-            // offered; see Candidate::Kind::KeywordNull). Trivially true on `self` itself, which costs nothing.
-            { "exists",         T::Bool,  {},                                                "($r != nullptr)" },
             { "setEnabled",     T::Void,  { { "enabled", T::Bool } },                        "ctx->entitySetEnabled($r, $1)" },
         },
         {
             { "pos",     vec3,        "$r->pos" }, // self is Entity* -- a real field of the ABI mirror struct
             { "scale",   T::Float,    "$r->scale" },
             { "rot",     quat,        "$r->rot" },
-            { "parent",  T::Entity,   "$r->parent", /*writable*/ false },
-            { "data",    T::ScriptData,        "(*scriptData)", /*writable*/ false },
-            { "events",  T::ScriptEvents,      "$r",                         /*writable*/ false }, // special case in transpiler
+            { "parent",  optionalEntityType, "$r", /*writable*/ false },
+            // Both belong to the SCRIPT, not to the entity: `data`'s emit ignores the receiver entirely and
+            // `events` resolves against this document's own list, so neither means anything on another entity.
+            { "data",    T::ScriptData,   "(*scriptData)", /*writable*/ false, /*selfOnly*/ true },
+            { "events",  T::ScriptEvents, "$r",            /*writable*/ false, /*selfOnly*/ true }, // special case in transpiler
         } });
 
-    // The child list as its own iterate-only type, so walking it reads as "foreach Entity child in
-    // self.scene.getChildren()" -- a component isn't a collection, and shouldn't be iterable as one. Nothing is
-    // copied to produce it: getChildren's emit is just "$r", so the value IS the SceneComponent handle and
-    // these two templates run straight against it. sceneGetChildAt is null-safe past the end on its own, so the
-    // loop stays sound even if the child list changes mid-iteration.
+    // The child list as its own collection type, so walking it reads as "foreach Entity e in
+    // self.scene.children" -- a component isn't a collection, and shouldn't be iterable as one. It SPELLS as
+    // "Entity[]" (see dslTypeName): to a script it's an indexable collection like any other. Nothing is copied
+    // to produce it -- the `children` member's emit is just "$r", so the value IS the SceneComponent handle and
+    // these templates run straight against it. sceneGetChildAt is null-safe past the end on its own, which is
+    // what keeps the loop sound if the child list changes mid-iteration AND what lets `ifexist` test the miss.
     const DSLType entityListType = bindings.registerSequenceType("EntityList", T::Entity,
-        "ctx->sceneGetChildCount($r)", "ctx->sceneGetChildAt($r, $i)");
+        "ctx->sceneGetChildCount($r)", "ctx->sceneGetChildAt($r, $i)",
+        "($v = ctx->sceneGetChildAt($r, $1)) != nullptr");
 
     const DSLType sceneType = bindings.registerComponentType("scene", "SceneComponent", EComponentID_Scene,
         "ctx->entityGetSceneComponent($r)");
     bindings.registerObject({ "scene", sceneType, /*sidebarTopLevel*/ false,
         {
-            { "getChildren",    entityListType, {},                        "$r"},
             { "getNumChildren", T::Int,    {},                             "ctx->sceneGetChildCount($r)"},
             { "getChild",       T::Entity, {{ "index", T::Int }},          "ctx->sceneGetChildAt($r, $1)"},
             { "removeChildIdx", T::Void,   {{ "index", T::Int }},          "ctx->sceneRemoveChildAt($r, $1)"},
             { "removeChild",    T::Void,   {{ "entity", T::Entity }},      "ctx->sceneRemoveChild($r, $1)"},
             { "addChild",       T::Void,   {{ "entity", T::Entity }},      "ctx->sceneAddChild($r, $1)"},
         },
-        {} });
+        {
+            // A MEMBER, not an accessor call: "self.scene.children" is the collection itself. Read-only -- the
+            // list belongs to the engine, and add/removeChild are how it changes.
+            { "children", entityListType, "$r", /*writable*/ false },
+        } });
 
     const DSLType physicsType = bindings.registerComponentType("physics", "PhysicsComponent", EComponentID_Physics,
         "ctx->entityGetPhysicsComponent($r)");
@@ -406,9 +416,13 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
             return 0;
         if (array->elemKind == kEntityElemKind)
         {
-            // A refcounted element whose entity has since died reads back as null -- testable in the DSL, which
-            // is the whole reason entities are storable at all.
-            *static_cast<Entity**>(outValue) = array->entities[index].get();
+            // A refcounted element whose entity has since died reports a MISS, exactly like an out-of-range
+            // index -- the DSL has no null Entity to hand back, and `ifexist` is the only way to read one, so
+            // "the slot is there but its entity is gone" and "the slot isn't there" are the same answer.
+            Entity* entity = array->entities[index].get();
+            if (entity == nullptr)
+                return 0;
+            *static_cast<Entity**>(outValue) = entity;
             return 1;
         }
         if (array->elemKind == kStringElemKind)

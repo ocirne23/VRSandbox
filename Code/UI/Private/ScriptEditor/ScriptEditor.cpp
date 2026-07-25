@@ -129,8 +129,6 @@ namespace
 			return candidate.declareType;
 		if (candidate.kind == Candidate::Kind::KeywordTrue || candidate.kind == Candidate::Kind::KeywordFalse)
 			return DSLType::Bool;
-		if (candidate.kind == Candidate::Kind::KeywordNull)
-			return DSLType::Entity; // the DSL's one nullable type -- see Candidate::Kind::KeywordNull
 		if (candidate.kind == Candidate::Kind::Member)
 			return candidate.declareType; // the member's own registry-stamped type (see receiverCandidates)
 		return DSLType::Void;
@@ -516,8 +514,13 @@ void ScriptEditor::refreshCandidates()
 	}
 	if (m_composeMode == ComposeMode::MemberSelect)
 	{
+		// The line being composed on (null if the cursor isn't on a real slot) -- only the mutate-while-iterating
+		// refusal needs it, and that simply doesn't apply when there's no line to be enclosed by.
+		const SyntaxSpan* memberSpan = currentSpan(m_formatted, m_cursorLine, m_cursorSpan);
+		const DSLCodeLine* memberLine = (memberSpan != nullptr) ? memberSpan->slot.line : nullptr;
 		m_candidates = AutoCompleteRules::receiverCandidates(m_bindings, m_document, m_memberReceiver, m_memberReceiverType,
-			m_memberExpectedType, m_memberAnyValue, isMemberPathWritable(), m_pendingWord);
+			m_memberExpectedType, m_memberAnyValue, isMemberPathWritable(), m_memberPath.empty(),
+			memberLine, m_document.file, joinedMemberPath(m_memberPath), m_pendingWord);
 		m_candidateSelected = 0;
 		return;
 	}
@@ -623,23 +626,36 @@ void ScriptEditor::refreshCandidates()
 		m_candidates = AutoCompleteRules::typeKeywordCandidates(m_pendingWord);
 		break;
 	case ComposeMode::ForEachType:
+	case ComposeMode::IfExistType:
 	{
-		// Every element type something registered is iterable as -- the primitives/structs a T[] can hold, plus
-		// Entity for the engine collections. Offering the type first (rather than inferring it from the
-		// sequence) keeps the flow uniform with `for`, and the source stage then filters BY it.
+		// Every element type something registered holds -- the primitives/structs a T[] can hold, plus Entity
+		// for the engine collections. Offering the type first (rather than inferring it from the container)
+		// keeps the flow uniform with `for`, and the source stage then filters BY it.
 		m_candidates = AutoCompleteRules::typeKeywordCandidates(m_pendingWord);
 		Candidate entityElement{ dslTypeName(DSLType::Entity), Candidate::Kind::DeclareType, nullptr, DSLType::Entity };
 		if (m_pendingWord.empty() || entityElement.label.compare(0, m_pendingWord.size(), m_pendingWord) == 0)
 			m_candidates.push_back(std::move(entityElement));
+		// "ref" binds the element by reference instead of by value (see the write-back in the Transpiler) --
+		// the same modifier-then-type shape a function parameter uses, dropped once picked so it can't stack.
+		if (!(m_composeMode == ComposeMode::ForEachType ? m_forEachRef : m_ifExistRef))
+		{
+			Candidate refKeyword{ "ref", Candidate::Kind::KeywordRef };
+			if (m_pendingWord.empty() || refKeyword.label.compare(0, m_pendingWord.size(), m_pendingWord) == 0)
+				m_candidates.push_back(std::move(refKeyword));
+		}
 		break;
 	}
 	case ComposeMode::ForEachSource:
 		// Only values that actually iterate as the picked element type -- an array of it, or a registered
-		// sequence (self.scene.getChildren()). Chainable waypoints still come through appendBindingObjects
-		// below, so "self." can be dotted into to reach one.
+		// sequence (self.scene.children) -- PLUS anything chainable, kept as a dot-into waypoint toward one
+		// ("e." reaching e.scene.children). A waypoint can't be confirmed bare: this stage's own confirm
+		// re-checks the resolved chain. Sidebar roots come through appendBindingObjects below.
 		m_candidates = AutoCompleteRules::candidatesForAnyValue(atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord);
 		std::erase_if(m_candidates, [&](const Candidate& c)
-			{ return !sequenceYields(candidateValueType(c), m_forEachElementType); });
+			{
+				const DSLType type = candidateValueType(c);
+				return !sequenceYields(type, m_forEachElementType) && !dslIsChainableType(type);
+			});
 		break;
 	case ComposeMode::IfComponentType:
 	{
@@ -662,6 +678,31 @@ void ScriptEditor::refreshCandidates()
 		// The entity to fetch from -- any Entity-valued expression.
 		m_candidates = AutoCompleteRules::candidatesFor(DSLType::Entity, atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord);
 		break;
+	case ComposeMode::IfExistSource:
+		// Only values that actually YIELD the picked type through a registered lookup -- an array of it, or an
+		// optional like self.parent -- PLUS anything chainable, kept as a dot-into waypoint toward one ("e."
+		// reaching e.parent). A waypoint can't be confirmed bare: this stage's own confirm re-checks the
+		// resolved chain. Sidebar roots come through appendBindingObjects below.
+		m_candidates = AutoCompleteRules::candidatesForAnyValue(atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord);
+		std::erase_if(m_candidates, [&](const Candidate& c)
+			{
+				const DSLType type = candidateValueType(c);
+				const BindingObject* object = m_bindings.objectFor(type);
+				const bool looksUp = object != nullptr && object->lookupEmit != nullptr
+					&& object->lookupValueType == m_ifExistType
+					// A `ref` binding additionally needs the container to allow element writes at all.
+					&& !(m_ifExistRef && !object->elementWritable);
+				return !looksUp && !dslIsChainableType(type);
+			});
+		break;
+	case ComposeMode::IfExistKey:
+	{
+		// The KEY's type comes from the container, not the element (Int for an array index).
+		const BindingObject* container = ifExistContainer();
+		m_candidates = AutoCompleteRules::candidatesFor(container != nullptr ? container->lookupKeyType : DSLType::Void,
+			atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord);
+		break;
+	}
 	case ComposeMode::ForVarValue:
 		m_candidates = AutoCompleteRules::candidatesFor(m_forVarType, atLine, m_document.file, m_document.sidebar, m_builtins, m_pendingWord);
 		break;
@@ -739,6 +780,8 @@ void ScriptEditor::refreshCandidates()
 	case ComposeMode::ReturnValue:
 	case ComposeMode::ForEachSource:   // "self." dots toward self.scene.getChildren() / self.data.<array>
 	case ComposeMode::IfComponentSource: // and toward self / self.parent as the entity to fetch from
+	case ComposeMode::IfExistSource:   // ...and toward self.data.<array> as the container to look up in
+	case ComposeMode::IfExistKey:      // (the key is an ordinary value -- self.data.<field> can supply it)
 		appendBindingObjects();
 		break;
 	case ComposeMode::CallArgValue:
@@ -815,22 +858,23 @@ bool ScriptEditor::tryCompleteCandidateOnSpace()
 }
 
 // See the declaration in ScriptEditor.ixx.
-void ScriptEditor::tryResolveCandidateOnSpace()
+bool ScriptEditor::tryResolveCandidateOnSpace()
 {
 	if (tryCompleteCandidateOnSpace())
-		return;
+		return true;
 	if (m_exprStack.size() != 1 || m_exprHasPendingGroup)
-		return; // an open paren or an already-pending group has nothing new to add here
+		return false; // an open paren or an already-pending group has nothing new to add here
 	ExprFrame& top = m_exprStack[0];
 	if (top.ops.size() != top.terms.size())
-		return; // an operand is already resolved and nothing new was typed for the next one -- nothing to add yet
+		return false; // an operand is already resolved and nothing new was typed for the next one -- nothing to add
 	const Candidate* picked = selectedCandidate();
 	if (picked == nullptr || isParameterizedFunction(*picked))
-		return; // parameterized functions resolve through tryBeginValueCallStaging instead
+		return false; // parameterized functions resolve through tryBeginValueCallStaging instead
 	top.terms.push_back(PendingExprTerm{ false, *picked, {}, {} });
 	m_pendingWord.clear();
 	refreshCandidates();
 	m_composePrefix = exprBasePrefix() + exprComposePrefixFromStack();
+	return true;
 }
 
 // See the declaration in ScriptEditor.ixx. Clearing the old candidate list before refreshing matters for the
@@ -861,6 +905,9 @@ bool ScriptEditor::hasCandidateList() const
 	case ComposeMode::ForEachSource:
 	case ComposeMode::IfComponentType:
 	case ComposeMode::IfComponentSource:
+	case ComposeMode::IfExistType:
+	case ComposeMode::IfExistSource:
+	case ComposeMode::IfExistKey:
 	case ComposeMode::ForConditionLeft:
 	case ComposeMode::ForConditionOp:
 	case ComposeMode::ForConditionValue:
@@ -1423,8 +1470,103 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		const Candidate* picked = selectedCandidate();
 		if (picked == nullptr)
 			return;
+		if (picked->kind == Candidate::Kind::KeywordRef)
+		{
+			// A modifier, not the pick -- flag it and come straight back for the element type (see the
+			// FunctionParamType stage, which uses the identical shape).
+			m_forEachRef = true;
+			enterCompose(ComposeMode::ForEachType, forEachTypeStagePrefix());
+			return;
+		}
+		// An engine-object element (Entity) is already a handle -- writes through it reach the real object, so
+		// `ref` would be a no-op pretending to mean something. Refuse the combination rather than ignore it.
+		if (m_forEachRef && dslIsEngineObjectType(picked->declareType))
+			return;
 		m_forEachElementType = picked->declareType;
-		enterCompose(ComposeMode::ForEachName, "foreach " + std::string(dslTypeName(m_forEachElementType)) + " ");
+		enterCompose(ComposeMode::ForEachName, forEachTypeStagePrefix() + dslTypeName(m_forEachElementType) + " ");
+		return;
+	}
+
+	if (m_composeMode == ComposeMode::IfExistType)
+	{
+		const Candidate* picked = selectedCandidate();
+		if (picked == nullptr)
+			return;
+		if (picked->kind == Candidate::Kind::KeywordRef)
+		{
+			m_ifExistRef = true;
+			enterCompose(ComposeMode::IfExistType, ifExistTypeStagePrefix());
+			return;
+		}
+		if (m_ifExistRef && dslIsEngineObjectType(picked->declareType))
+			return; // same handle rule as foreach above
+		m_ifExistType = picked->declareType;
+		enterCompose(ComposeMode::IfExistName, ifExistTypeStagePrefix() + dslTypeName(m_ifExistType) + " ");
+		return;
+	}
+
+	if (m_composeMode == ComposeMode::IfExistName)
+	{
+		if (m_pendingWord.empty())
+			return; // need a name before moving on
+		const SyntaxSpan* span = currentSpan(m_formatted, m_cursorLine, m_cursorSpan);
+		if (span == nullptr || span->slot.line == nullptr)
+		{
+			cancelCompose();
+			return;
+		}
+		// Same self-collision exclusion as ForEachName (m_flowEditLoopVar is null when authoring fresh).
+		if (AutoCompleteRules::isNameInScope(m_pendingWord, *span->slot.line, m_document.file, m_document.sidebar, m_builtins, m_flowEditLoopVar))
+			return; // name already taken in this scope -- keep editing instead of accepting the collision
+		m_ifExistName = m_pendingWord;
+		m_ifExistContainerChain = PendingExprChain{};
+		enterChainStage(ComposeMode::IfExistSource);
+		return;
+	}
+
+	if (m_composeMode == ComposeMode::IfExistSource)
+	{
+		// Unlike foreach's sequence, the container is NOT the last stage -- the key follows it -- so Space
+		// advances to it once the container is fully resolved, the same way it advances every other mid-flow
+		// stage. It only resolves-and-stops when the keystroke itself did something (completed a word, or
+		// consumed a candidate into the chain): one keystroke, one action.
+		if (!allowCommit && tryResolveCandidateOnSpace())
+			return;
+		PendingExprChain container;
+		if (!captureComposedChain(container))
+			return; // open paren, dangling operator, or nothing typed -- keep composing
+		const BindingObject* object = m_bindings.objectFor(chainElementType(container.terms));
+		if (object == nullptr || object->lookupEmit == nullptr || object->lookupValueType != m_ifExistType)
+			return;
+		if (m_ifExistRef && !object->elementWritable)
+			return; // the container declared its elements read-only -- see checkRefBinding's loader twin
+		m_ifExistContainerChain = container;
+		// A container whose lookup takes no key has nothing left to author, so this IS its last stage --
+		// committing the whole statement stays Enter-only, like every other flow header's final step.
+		if (object->lookupKeyType == DSLType::Void)
+		{
+			if (allowCommit)
+				commitIfExistStatement(PendingExprChain{});
+			return;
+		}
+		enterChainStage(ComposeMode::IfExistKey);
+		return;
+	}
+
+	if (m_composeMode == ComposeMode::IfExistKey)
+	{
+		if (!allowCommit)
+		{
+			tryResolveCandidateOnSpace();
+			return; // the key is the LAST stage -- confirming commits the statement (Enter only)
+		}
+		PendingExprChain key;
+		if (!captureComposedChain(key))
+			return;
+		const BindingObject* container = ifExistContainer();
+		if (container == nullptr || chainElementType(key.terms) != container->lookupKeyType)
+			return;
+		commitIfExistStatement(key);
 		return;
 	}
 
@@ -1778,7 +1920,8 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		// Same staging rule: nothing lands until the element type/name AND the sequence are all resolved.
 		m_forEachElementName.clear();
 		m_forEachElementType = DSLType::Void;
-		enterCompose(ComposeMode::ForEachType, "foreach ");
+		m_forEachRef = false;
+		enterCompose(ComposeMode::ForEachType, forEachTypeStagePrefix());
 		return;
 	}
 
@@ -1787,6 +1930,16 @@ void ScriptEditor::confirmCompose(bool allowCommit)
 		m_ifComponentName.clear();
 		m_ifComponentType = DSLType::Void;
 		enterCompose(ComposeMode::IfComponentType, "ifcomponent ");
+		return;
+	}
+
+	if (chosen.kind == Candidate::Kind::KeywordIfExist)
+	{
+		m_ifExistName.clear();
+		m_ifExistType = DSLType::Void;
+		m_ifExistRef = false;
+		m_ifExistContainerChain = PendingExprChain{};
+		enterCompose(ComposeMode::IfExistType, ifExistTypeStagePrefix());
 		return;
 	}
 
@@ -1862,9 +2015,6 @@ DSLSymbol* ScriptEditor::buildValueFromCandidate(const Candidate& candidate, DSL
 		return pushSymbol(line, ST::Constant, DSLSymbol::Constant{ DSLType::Bool, "true" });
 	case Candidate::Kind::KeywordFalse:
 		return pushSymbol(line, ST::Constant, DSLSymbol::Constant{ DSLType::Bool, "false" });
-	case Candidate::Kind::KeywordNull:
-		// Stored as the DSL spelling; Transpiler's constantText maps an Entity constant to "nullptr".
-		return pushSymbol(line, ST::Constant, DSLSymbol::Constant{ DSLType::Entity, "null" });
 	case Candidate::Kind::Variable:
 		// A null refSymbol is the SENTINEL loop variable of a for-loop still being staged (its symbol doesn't
 		// exist until commitForStatement builds it, then rides in via m_forBuildLoopVar).
@@ -2086,6 +2236,10 @@ std::string ScriptEditor::exprBasePrefixFor(ComposeMode mode) const
 		return forEachPrefix();
 	if (mode == ComposeMode::IfComponentSource)
 		return ifComponentPrefix();
+	if (mode == ComposeMode::IfExistSource)
+		return ifExistPrefix();
+	if (mode == ComposeMode::IfExistKey)
+		return ifExistKeyPrefix();
 	// A call argument's own lead-in ("outer context + funcName(arg0 = ..., arg1 = ") -- cached per-stage in
 	// CallStage::outerLeadText (see callStagePrefix), never re-derived dynamically here, so this can't recurse
 	// even when the SUSPENDED context being captured is itself another CallArgValue level (nested calls).
@@ -2343,6 +2497,8 @@ bool ScriptEditor::isChainComposeMode() const
 	case ComposeMode::ForIncrementValue:
 	case ComposeMode::ForEachSource:
 	case ComposeMode::IfComponentSource:
+	case ComposeMode::IfExistSource:
+	case ComposeMode::IfExistKey:
 	case ComposeMode::CallArgValue: // an argument is a full chain compose too, per-parameter (see m_callStack)
 		return true;
 	default:
@@ -2947,10 +3103,17 @@ DSLType ScriptEditor::valueContextExpectedType(ComposeMode mode, bool& outAnyVal
 	case ComposeMode::IfComponentSource:
 		return DSLType::Entity;
 	case ComposeMode::ForEachSource:
-		// Any iterable of the element type -- MemberSelect can't express that constraint (it filters by a
-		// single expected type), so it offers everything and the ForEachSource confirm does the checking.
+	case ComposeMode::IfExistSource:
+		// Any iterable/lookup-able of the element type -- MemberSelect can't express that constraint (it filters
+		// by a single expected type), so it offers everything and the stage's own confirm does the checking.
 		outAnyValue = true;
 		return DSLType::Void;
+	case ComposeMode::IfExistKey:
+	{
+		// The key's type is the CONTAINER's, so dotting toward one filters by exactly what the lookup takes.
+		const BindingObject* container = ifExistContainer();
+		return container != nullptr ? container->lookupKeyType : DSLType::Void;
+	}
 	case ComposeMode::ForConditionValue:
 	{
 		const DSLType boundType = chainElementType(m_forConditionLeftChain.terms);
@@ -3100,15 +3263,92 @@ std::string ScriptEditor::forVarPrefix() const
 }
 
 // "foreach <type> <name> in " -- everything up to (not including) the sequence being composed.
+// The TYPE stages' lead-ins: the keyword plus this binding's own "ref " once picked (the type itself is what's
+// being composed, so it isn't part of the prefix yet) -- the same shape paramTypeStagePrefix has.
+std::string ScriptEditor::forEachTypeStagePrefix() const
+{
+	return std::string("foreach ") + (m_forEachRef ? "ref " : "");
+}
+
+std::string ScriptEditor::ifExistTypeStagePrefix() const
+{
+	return std::string("ifexist ") + (m_ifExistRef ? "ref " : "");
+}
+
 std::string ScriptEditor::forEachPrefix() const
 {
-	return "foreach " + std::string(dslTypeName(m_forEachElementType)) + " " + m_forEachElementName + " in ";
+	return forEachTypeStagePrefix() + dslTypeName(m_forEachElementType) + " " + m_forEachElementName + " in ";
 }
 
 // "ifcomponent <Type> <name> in " -- everything up to (not including) the entity being composed.
 std::string ScriptEditor::ifComponentPrefix() const
 {
 	return "ifcomponent " + std::string(dslTypeName(m_ifComponentType)) + " " + m_ifComponentName + " in ";
+}
+
+std::string ScriptEditor::ifExistPrefix() const
+{
+	return "ifexist " + std::string(m_ifExistRef ? "ref " : "") + dslTypeName(m_ifExistType) + " "
+		+ m_ifExistName + " in ";
+}
+
+std::string ScriptEditor::ifExistKeyPrefix() const
+{
+	return ifExistPrefix() + chainDisplayText(m_ifExistContainerChain) + " at ";
+}
+
+// See the declaration in ScriptEditor.ixx.
+const BindingObject* ScriptEditor::ifExistContainer() const
+{
+	if (m_ifExistContainerChain.terms.empty())
+		return nullptr;
+	return m_bindings.objectFor(chainElementType(m_ifExistContainerChain.terms));
+}
+
+// See the declaration in ScriptEditor.ixx: the ifexist counterpart of commitForEach/IfComponentStatement --
+// same one-shot build and seeded body line, plus the optional `at` key.
+void ScriptEditor::commitIfExistStatement(const PendingExprChain& key)
+{
+	DSLCodeLine* linePtr = (m_flowEditLine != nullptr) ? m_flowEditLine : currentLineHeadOrCancel();
+	if (linePtr == nullptr)
+		return;
+	DSLCodeLine& line = *linePtr;
+	DSLSymbol* existingBoundVar = m_flowEditLoopVar;
+	const DSLType elementType = m_ifExistType;
+	const std::string elementName = m_ifExistName;
+	const bool isRef = m_ifExistRef;
+	const bool reAuthoring = m_flowEditLine != nullptr;
+	const PendingExprChain container = m_ifExistContainerChain;
+	const bool hasKey = !key.terms.empty();
+	cancelCompose();
+
+	DSLSymbol* originalHead = reAuthoring ? line.head() : nullptr;
+	if (existingBoundVar == nullptr)
+		line.symbols.clear();
+
+	DSLSymbol* containerValue = buildExpressionFromTerms(container.terms, container.ops, line);
+	DSLSymbol* keyValue = hasKey ? buildExpressionFromTerms(key.terms, key.ops, line) : nullptr;
+	if (existingBoundVar != nullptr)
+	{
+		// RE-EDIT: the bound declaration's identity must survive (body statements reference it), same contract
+		// as rebuildBoundHeaderSource -- but ifexist has the extra key field, so it repoints both in place.
+		std::get<DSLSymbol::VariableDeclaration>(existingBoundVar->data).name = elementName;
+		std::get<DSLSymbol::VariableDeclaration>(existingBoundVar->data).isRef = isRef;
+		DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(originalHead->data);
+		fc.condition = containerValue;
+		fc.forCondition = keyValue;
+		restoreHeadAndCollect(line, originalHead);
+		selectExpressionTail(keyValue != nullptr ? keyValue : containerValue);
+		return;
+	}
+
+	DSLSymbol* typeDecl = pushSymbol(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ elementType });
+	DSLSymbol* boundVar = pushSymbol(line, ST::VariableDeclaration,
+		DSLSymbol::VariableDeclaration{ elementName, typeDecl, nullptr, isRef });
+	m_pendingSelectTarget = pushSymbol(line, ST::FlowControl,
+		DSLSymbol::FlowControl{ DSLFlowControl::IfExist, containerValue, boundVar, keyValue });
+	if (!reAuthoring)
+		m_pendingSelectTarget = seedStatementPlaceholder(insertLineAfter(line, line.scopeLevel + 1));
 }
 
 // See the declaration in ScriptEditor.ixx: the ifcomponent counterpart of commitForEachStatement -- same
@@ -3127,7 +3367,7 @@ void ScriptEditor::commitIfComponentStatement(const PendingExprChain& entity)
 
 	if (existingBoundVar != nullptr)
 	{
-		rebuildBoundHeaderSource(line, existingBoundVar, boundName, entity);
+		rebuildBoundHeaderSource(line, existingBoundVar, boundName, /*boundIsRef*/ false, entity);
 		return;
 	}
 
@@ -3147,12 +3387,13 @@ void ScriptEditor::commitIfComponentStatement(const PendingExprChain& entity)
 // same reason (the type stage is never re-entered on a re-edit, see m_flowEditLoopVar). Everything the old
 // source left behind is swept by the reachability pass.
 void ScriptEditor::rebuildBoundHeaderSource(DSLCodeLine& line, DSLSymbol* boundVar, const std::string& boundName,
-	const PendingExprChain& source)
+	bool boundIsRef, const PendingExprChain& source)
 {
 	DSLSymbol* originalHead = line.head();
 	if (originalHead == nullptr || originalHead->type != ST::FlowControl)
 		return;
 	std::get<DSLSymbol::VariableDeclaration>(boundVar->data).name = boundName;
+	std::get<DSLSymbol::VariableDeclaration>(boundVar->data).isRef = boundIsRef;
 	DSLSymbol* sourceValue = buildExpressionFromTerms(source.terms, source.ops, line);
 	std::get<DSLSymbol::FlowControl>(originalHead->data).condition = sourceValue;
 	restoreHeadAndCollect(line, originalHead);
@@ -3181,19 +3422,21 @@ void ScriptEditor::commitForEachStatement(const PendingExprChain& sequence)
 	DSLSymbol* existingElementVar = m_flowEditLoopVar;
 	const DSLType elementType = m_forEachElementType;
 	const std::string elementName = m_forEachElementName;
+	const bool elementIsRef = m_forEachRef;
 	const bool reAuthoring = m_flowEditLine != nullptr;
 	cancelCompose();
 
 	if (existingElementVar != nullptr)
 	{
-		rebuildBoundHeaderSource(line, existingElementVar, elementName, sequence);
+		rebuildBoundHeaderSource(line, existingElementVar, elementName, elementIsRef, sequence);
 		return;
 	}
 
 	line.symbols.clear();
 	DSLSymbol* sequenceValue = buildExpressionFromTerms(sequence.terms, sequence.ops, line);
 	DSLSymbol* typeDecl = pushSymbol(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ elementType });
-	DSLSymbol* elementVar = pushSymbol(line, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ elementName, typeDecl });
+	DSLSymbol* elementVar = pushSymbol(line, ST::VariableDeclaration,
+		DSLSymbol::VariableDeclaration{ elementName, typeDecl, nullptr, elementIsRef });
 	m_pendingSelectTarget = pushSymbol(line, ST::FlowControl,
 		DSLSymbol::FlowControl{ DSLFlowControl::ForEach, sequenceValue, elementVar });
 	if (!reAuthoring)
@@ -3868,23 +4111,44 @@ bool ScriptEditor::tryWidenFlowHeaderEdit()
 		return true;
 	}
 
-	if (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfComponent)
+	if (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfComponent
+		|| fc.control == DSLFlowControl::IfExist)
 	{
-		// Only the SOURCE re-stages: the bound declaration has no value slot of its own (the construct supplies
-		// the value), so there's exactly one span to widen from, and the flow reopens at its LAST stage with the
-		// type/name showing in the prefix -- further Backspace peels back through the name and, guarded, removes
-		// the header itself. The bound declaration is preserved on commit (see m_flowEditLoopVar).
-		if (m_editChainExpr != nullptr || m_editSlot.kind != SlotRef::Kind::FlowControlCondition
-			|| m_editSlot.parent != head || fc.forLoopVar == nullptr)
+		// The bound declaration has no value slot of its own (the construct supplies the value), so the spans
+		// that can widen are the SOURCE and -- ifexist only -- the KEY. The flow reopens at the matching stage
+		// with everything before it showing in the prefix; further Backspace peels back through the name and,
+		// guarded, removes the header itself. The bound declaration is preserved on commit (m_flowEditLoopVar).
+		const bool onKey = m_editSlot.kind == SlotRef::Kind::IfExistKey;
+		if (m_editChainExpr != nullptr || fc.forLoopVar == nullptr || m_editSlot.parent != head
+			|| (!onKey && m_editSlot.kind != SlotRef::Kind::FlowControlCondition))
 			return false;
 		const DSLSymbol::VariableDeclaration& boundDecl = std::get<DSLSymbol::VariableDeclaration>(fc.forLoopVar->data);
 		const DSLType boundType = std::get<DSLSymbol::TypeDeclaration>(boundDecl.typeSymbol->data).type;
+		if (fc.control == DSLFlowControl::IfExist)
+		{
+			// The container has to round-trip first: the key stage's own candidates are typed off it, and
+			// re-authoring the container is exactly what the source stage does.
+			PendingExprChain container;
+			if (!chainFromSymbol(fc.condition, container))
+				return false;
+			m_ifExistType = boundType;
+			m_ifExistName = boundDecl.name;
+			m_ifExistRef = boundDecl.isRef;
+			m_ifExistContainerChain = container;
+			m_flowEditLine = line;
+			m_flowEditLoopVar = fc.forLoopVar;
+			enterChainStage(onKey ? ComposeMode::IfExistKey : ComposeMode::IfExistSource);
+			return true;
+		}
+		if (onKey)
+			return false; // only ifexist has a key
 		m_flowEditLine = line;
 		m_flowEditLoopVar = fc.forLoopVar;
 		if (fc.control == DSLFlowControl::ForEach)
 		{
 			m_forEachElementType = boundType;
 			m_forEachElementName = boundDecl.name;
+			m_forEachRef = boundDecl.isRef;
 			enterChainStage(ComposeMode::ForEachSource);
 		}
 		else
@@ -4728,7 +4992,8 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 				}
 			}
 			else if (selectedControl != nullptr && (*selectedControl == DSLFlowControl::For
-				|| *selectedControl == DSLFlowControl::ForEach || *selectedControl == DSLFlowControl::IfComponent))
+				|| *selectedControl == DSLFlowControl::ForEach || *selectedControl == DSLFlowControl::IfComponent
+				|| *selectedControl == DSLFlowControl::IfExist))
 			{
 				// Selected the for/foreach/ifcomponent's own keyword -- only remove it (header + body + synthetic
 				// `end`) when its body is empty: unlike if/while, these bodies can't be safely kept/un-nested
@@ -5055,6 +5320,17 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 				enterCompose(ComposeMode::IfComponentName,
 					"ifcomponent " + std::string(dslTypeName(m_ifComponentType)) + " ", m_ifComponentName);
 			}
+			else if (m_composeMode == ComposeMode::IfExistKey)
+			{
+				// Step back to re-edit the container, restored -- the key stage exists only because THAT
+				// container declared a key type, so the container is what has to be re-picked first.
+				enterChainStage(ComposeMode::IfExistSource, &m_ifExistContainerChain);
+			}
+			else if (m_composeMode == ComposeMode::IfExistSource)
+			{
+				enterCompose(ComposeMode::IfExistName,
+					ifExistTypeStagePrefix() + dslTypeName(m_ifExistType) + " ", m_ifExistName);
+			}
 			else if (m_composeMode == ComposeMode::ForConditionLeft)
 			{
 				// Step back to re-edit the init clause, restored for further editing.
@@ -5233,11 +5509,12 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 				enterCompose(ComposeMode::ForVarType, "for ");
 			}
 		}
-		else if (m_composeMode == ComposeMode::ForEachName || m_composeMode == ComposeMode::IfComponentName)
-		{
-			const bool isForEach = m_composeMode == ComposeMode::ForEachName;
-			if (m_flowEditLine != nullptr)
+		else if (m_composeMode == ComposeMode::ForEachName || m_composeMode == ComposeMode::IfComponentName
+				|| m_composeMode == ComposeMode::IfExistName)
 			{
+				const ComposeMode nameMode = m_composeMode;
+				if (m_flowEditLine != nullptr)
+				{
 				// Same as ForVarName's re-edit case: the bound type is fixed on a re-edit, so past the name the
 				// next step is removing the header itself, under its own keyword's Backspace rule (empty body,
 				// and -- ifcomponent only -- an empty attached else).
@@ -5248,12 +5525,35 @@ void ScriptEditor::handleKeyEvent(const SDL_Event& evt)
 					deleteEmptyBlock(head);
 				}
 			}
-			else
+			else if (nameMode == ComposeMode::ForEachName)
 			{
 				// Same shape as ForVarName's fresh-authoring case: nothing free-typed before this stage, so
-				// reset to the type pick.
-				enterCompose(isForEach ? ComposeMode::ForEachType : ComposeMode::IfComponentType,
-					isForEach ? "foreach " : "ifcomponent ");
+				// reset to the type pick (the "ref" already picked survives -- the type stage's own Backspace
+				// is what drops that, exactly as in a function's parameter list).
+				enterCompose(ComposeMode::ForEachType, forEachTypeStagePrefix());
+			}
+			else if (nameMode == ComposeMode::IfExistName)
+			{
+				enterCompose(ComposeMode::IfExistType, ifExistTypeStagePrefix());
+			}
+			else
+			{
+				enterCompose(ComposeMode::IfComponentType, "ifcomponent ");
+			}
+		}
+		else if (m_composeMode == ComposeMode::ForEachType || m_composeMode == ComposeMode::IfExistType)
+		{
+			// A picked "ref" takes its own Backspace first (its own keystroke put it there), and the stage
+			// stays put awaiting a type -- with "ref" back in the list.
+			const bool isForEach = m_composeMode == ComposeMode::ForEachType;
+			if (isForEach ? m_forEachRef : m_ifExistRef)
+			{
+				(isForEach ? m_forEachRef : m_ifExistRef) = false;
+				enterCompose(m_composeMode, isForEach ? forEachTypeStagePrefix() : ifExistTypeStagePrefix());
+			}
+			else
+			{
+				cancelCompose(); // nothing staged behind it -- the whole (untouched) statement flow abandons
 			}
 		}
 		else if (m_composeMode == ComposeMode::ForVarValue)
@@ -6418,14 +6718,32 @@ void ScriptEditor::renderSidebarPanel()
 	// component-bound -- browsing the matching binding object's own members/functions, mirroring how the DSL
 	// itself dots into it. Struct types are deliberately excluded here even though they're also "chainable"
 	// (dslIsChainableType) -- objectFor only resolves binding OBJECTS, never structs (see ScriptBindings).
-	std::function<void(const BindingObject&)> drawObjectContents = [&](const BindingObject& object)
+	//
+	// `isRoot` is false once any member has been walked into, and COMPONENT members are drawn only at the root.
+	// They're self's host-cached pointers and the checkbox edits THIS script's //@@require set, so offering them
+	// under a nested Entity (self.parent) would read as "require the parent's physics", which is not a thing --
+	// another entity's components are reached with `ifcomponent`. The same root-only rule the candidate lists
+	// and the loader enforce (see receiverCandidates' receiverIsRoot / checkMemberUsable).
+	std::function<void(const BindingObject&, bool)> drawObjectContents = [&](const BindingObject& object, bool isRoot)
 	{
 		for (const BindingMember& member : object.members)
 		{
 			if (dslIsEngineObjectType(member.type))
 			{
-				const BindingObject* nested = m_bindings.objectFor(member.type);
+				// A member of the object's OWN type (self.parent is an Entity, like self) draws as a plain
+				// leaf: expanding it would repeat the surface already on screen, and would keep going
+				// (parent.parent.parent...) with nothing new at any depth. Reaching that entity's members is
+				// what the DSL's own dotting is for; the sidebar is a browser, not a path builder.
+				const BindingObject* nested = (member.type == object.type) ? nullptr : m_bindings.objectFor(member.type);
 				if (nested == nullptr)
+				{
+					firstSegment = true;
+					seg(kColType, dslTypeName(member.type));
+					seg(kColPunct, " ");
+					seg(kColVariable, member.name);
+					continue;
+				}
+				if (member.selfOnly && !isRoot)
 					continue;
 				if (member.requiredComponent != DSLType::Void)
 				{
@@ -6448,7 +6766,7 @@ void ScriptEditor::renderSidebarPanel()
 				}
 				if (ImGui::TreeNode(member.name, "%s %s", dslTypeName(member.type), member.name))
 				{
-					drawObjectContents(*nested);
+					drawObjectContents(*nested, /*isRoot*/ false);
 					ImGui::TreePop();
 				}
 				continue;
@@ -6589,7 +6907,7 @@ void ScriptEditor::renderSidebarPanel()
 			continue;
 		if (ImGui::TreeNode(object.name, "%s %s", dslTypeName(object.type), object.name))
 		{
-			drawObjectContents(object);
+			drawObjectContents(object, /*isRoot*/ true);
 			ImGui::TreePop();
 		}
 	}
@@ -6599,7 +6917,7 @@ void ScriptEditor::renderSidebarPanel()
 	ImGui::TextDisabled("ENGINE");
 	for (const BindingObject& object : m_bindings.objects())
 		if (object.name == nullptr)
-			drawObjectContents(object);
+			drawObjectContents(object, /*isRoot*/ true);
 
 	ImGui::Spacing();
 	ImGui::Separator();

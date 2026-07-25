@@ -320,13 +320,17 @@ private:
 		FunctionDeclareReturnType, // picking the "-> type" for the function being declared; confirm commits the
 		                           // whole function WITH it (distinct from FunctionReturnType, which edits an
 		                           // already-committed header's return-type span directly)
-		// "foreach <type> <name> in <sequence>", staged like every other flow header -- nothing lands in the
-		// document until the sequence resolves. ForEachSource is a chain compose whose candidates are filtered
-		// to values yielding the picked element type (see sequenceYields).
+		// "foreach [ref] <type> <name> in <sequence>", staged like every other flow header -- nothing lands in
+		// the document until the sequence resolves. ForEachSource is a chain compose whose candidates are
+		// filtered to values yielding the picked element type (see sequenceYields). "ref" is offered in the TYPE
+		// stage as a modifier, exactly like a function parameter's (see paramTypeStagePrefix).
 		ForEachType, ForEachName, ForEachSource,
 		// "ifcomponent <ComponentType> <name> in <entity>" -- the same three-stage shape as foreach, with the
 		// type picked from the registered component types and the source constrained to an Entity.
 		IfComponentType, IfComponentName, IfComponentSource,
+		// "ifexist [ref] <type> <name> in <container> at <key>" -- foreach's shape plus a key stage, skipped
+		// for a container whose lookup takes none. The DSL's only indexed container read.
+		IfExistType, IfExistName, IfExistSource, IfExistKey,
 	};
 
 	// Editing.
@@ -353,7 +357,10 @@ private:
 	// rule exprTryFinalize's own "awaiting a term" branch uses) and keeps composing -- an operator, or a later
 	// confirm, still finishes the value, same as MemberSelect's own value-context delivery. Tries
 	// tryCompleteCandidateOnSpace first, so partially-typed text still completes instead of resolving early.
-	void tryResolveCandidateOnSpace();
+	// True when the keystroke DID something (completed a partially-typed word, or consumed the highlighted
+	// candidate into the chain as a resolved term) -- a stage that has somewhere to advance to uses that to keep
+	// one keystroke doing exactly one thing: resolve now, advance on the next.
+	bool tryResolveCandidateOnSpace();
 	// The one-stop stage transition every staged flow uses: sets the compose box to `prefix` (+ `pendingWord`,
 	// for step-backs that restore previously-typed text), switches to `mode`, and rebuilds the candidate list
 	// against the new mode/text (a no-op for free-typing modes, which end up with an empty list).
@@ -527,7 +534,10 @@ private:
 	std::string forVarDeclPrefix() const;   // forVarPrefix() + the resolved initial value -- the whole loop-var clause
 	std::string forConditionPrefix() const; // forVarDeclPrefix() + ", <name> <op> <value>" -- the whole condition clause too
 	void commitForStatement(); // ForIncrementValue's confirm: commits the whole new for-loop
-	std::string forEachPrefix() const; // "foreach <type> <name> in " -- everything before the sequence
+	// The TYPE stages' lead-ins: the keyword plus this binding's own "ref " once picked (see paramTypeStagePrefix).
+	std::string forEachTypeStagePrefix() const;
+	std::string ifExistTypeStagePrefix() const;
+	std::string forEachPrefix() const; // "foreach [ref] <type> <name> in " -- everything before the sequence
 	void commitForEachStatement(const PendingExprChain& sequence); // ForEachSource's confirm: commits the whole loop
 	// Whether `sequenceType` iterates as `elementType` -- a registered BindingSequence (self.scene) or an array
 	// of it. What ForEachSource filters its candidates by, so only iterable values of the right element type
@@ -535,10 +545,16 @@ private:
 	bool sequenceYields(DSLType sequenceType, DSLType elementType) const;
 	std::string ifComponentPrefix() const; // "ifcomponent <Type> <name> in " -- everything before the entity
 	void commitIfComponentStatement(const PendingExprChain& entity); // IfComponentSource's confirm
+	std::string ifExistPrefix() const;    // "ifexist [ref] <type> <name> in " -- everything before the container
+	std::string ifExistKeyPrefix() const; // ...plus the resolved container and " at "
+	// The container the staged flow has resolved so far (null until IfExistSource confirms) -- what the key
+	// stage reads lookupKeyType off, and what decides whether there IS a key stage at all.
+	const BindingObject* ifExistContainer() const;
+	void commitIfExistStatement(const PendingExprChain& key); // IfExistSource/Key's confirm
 	// The re-edit half of both commits above (foreach/ifcomponent headers are structurally identical): applies a
 	// new bound name + source to an EXISTING header, preserving the bound declaration's symbol identity.
 	void rebuildBoundHeaderSource(DSLCodeLine& line, DSLSymbol* boundVar, const std::string& boundName,
-		const PendingExprChain& source);
+		bool boundIsRef, const PendingExprChain& source);
 	DSLType reassignTargetType() const; // m_reassignTarget's own declared type
 	// Same `terms`/`ops` convention as applyDeclareVariable, for a `name = value` statement instead.
 	void commitReassignStatement(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops);
@@ -783,11 +799,21 @@ private:
 	// referenced by the sequence (it isn't in scope until the body), so no sentinel candidate is needed here.
 	DSLType m_forEachElementType = DSLType::Void;
 	std::string m_forEachElementName;
+	bool m_forEachRef = false; // the element binds by reference (write-back on assignment, see the Transpiler)
 
 	// The staged ifcomponent flow (IfComponentType -> IfComponentName -> IfComponentSource, committed by
 	// commitIfComponentStatement) -- structurally identical to the foreach one above.
 	DSLType m_ifComponentType = DSLType::Void;
 	std::string m_ifComponentName;
+
+	// The staged ifexist flow (IfExistType -> IfExistName -> IfExistSource -> IfExistKey, committed by
+	// commitIfExistStatement). The container resolves BEFORE the key, because the container is what declares
+	// the key's type (BindingObject::lookupKeyType) -- and a container that declares none skips the key stage
+	// and commits straight from the source.
+	DSLType m_ifExistType = DSLType::Void;
+	std::string m_ifExistName;
+	bool m_ifExistRef = false;
+	PendingExprChain m_ifExistContainerChain;
 
 	// Non-null: the condition flow is authoring a NEW elseif branch for the chain this If/ElseIf head opens --
 	// picked as an "elseif" statement candidate INSIDE that branch (m_conditionOriginLine is the blank line it
