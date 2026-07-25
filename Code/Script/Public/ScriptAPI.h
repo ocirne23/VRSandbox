@@ -34,6 +34,15 @@ struct Camera; // engine render camera; only the host-only update() below touche
 class PhysicsComponent;
 class AudioComponent;
 class ForceComponent;
+class SceneComponent;
+
+// Handle to an engine-owned dynamic array (the DSL's `T[]`). A plain POD id so it can live in a script's
+// persistent ScriptData block: the ELEMENTS live engine-side, keyed by this id, which means a hot-reload that
+// keeps the block also keeps the contents with nothing to copy, and the script never owns heap memory.
+// 0 = no array yet -- a zeroed ScriptData block is therefore a set of empty arrays, and the first push creates
+// one lazily. The id is generation-tagged engine-side, so a STALE or garbage value (a reinterpreted field after
+// a layout change) fails lookup and every operation degrades to a no-op / default rather than touching memory.
+typedef unsigned int VrArray;
 
 #pragma warning(push)
 #pragma warning(disable: 4190) // has C-linkage specified, but returns 'glm::vec<3,float,glm::packed_highp>' which is incompatible with..
@@ -106,7 +115,26 @@ class ForceComponent;
     /* ---- audio component ---- */ \
     X(void*,       entityGetAudioComponent,(Entity*, entity)) \
     X(void,        audioTrigger,           (void*, audioComponent), (Entity*, entity), (const char*, alias), (int, overrideMask), (glm::vec3, position), (float, volume), (float, pitch)) \
-    X(void,        audioStop,              (void*, audioComponent), (const char*, alias))
+    X(void,        audioStop,              (void*, audioComponent), (const char*, alias)) \
+    /* Every DSL string LITERAL is emitted as a call to this rather than as a bare C++ literal: a literal lives
+       in the script DLL's .rdata, which is unmapped on hot-reload, so anything that outlives one call (a
+       persistent ScriptData field, an array element) would be left pointing at freed pages. The engine interns
+       the text permanently and hands back a pointer that outlives any DLL. The intern set only ever holds the
+       distinct literals scripts contain -- a small, finite set -- so it never needs freeing. Strings from
+       ELSEWHERE (entityGetName and friends) are not interned and still only live as long as their owner. */ \
+    X(const char*, internString,           (const char*, text)) \
+    /* ---- engine-owned dynamic arrays (see VrArray) ---- generic over the element type: the caller passes the
+       element's size and a pointer to/for the value, so one set of functions serves every T the DSL can hold.
+       `elemKind` is DSLType's own value for the element -- the engine needs it because two kinds aren't stored
+       as the caller's bytes at all: Entity elements become refcounted EntityPtrs (a destroyed entity then reads
+       back null instead of dangling) and string elements are COPIED engine-side (a script DLL's .rdata is
+       unmapped on reload). Values are copied in/out rather than exposing an interior pointer, so no caller can
+       hold or corrupt the storage. */ \
+    X(void,        arrayPush,              (Entity*, owner), (VrArray*, handle), (int, elemKind), (int, elemSize), (const void*, value)) /* creates on *handle == 0 and writes the new id back through `handle` */ \
+    X(int,         arrayGet,               (VrArray, handle), (int, index), (int, elemSize), (void*, outValue)) /* 1 on success; 0 (outValue untouched) for a stale/empty handle or an out-of-range index -- the ONLY bounds check callers need */ \
+    X(void,        arraySet,               (VrArray, handle), (int, index), (int, elemSize), (const void*, value)) /* no-op when out of range */ \
+    X(int,         arrayCount,             (VrArray, handle)) /* 0 for a stale/empty handle */ \
+    X(void,        arrayClear,             (VrArray, handle))
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,
@@ -177,6 +205,13 @@ typedef unsigned int (*ScriptDataSizeFn)(void);
 // handle on every access. Absent (or 0) means the script requires no components.
 typedef unsigned int (*ScriptRequiredComponentsFn)(void);
 
+// Optional export: a hash of ScriptData's LAYOUT (every field's type and name, in order). Size alone can't tell
+// a layout change from a no-op -- "int a; int b;" and "float a; float b;" are the same size, and reinterpreting
+// one as the other silently corrupts every field, VrArray handles included. The host keeps a script's existing
+// data block across a hot-reload only while this value matches; otherwise it drops the block (freeing the
+// arrays those handles owned) and starts from a zeroed one. Absent = treat every reload as a layout change.
+typedef unsigned int (*ScriptDataLayoutIdFn)(void);
+
 #ifdef __cplusplus
 }
 #endif
@@ -191,6 +226,7 @@ enum VrScriptEntryKind
     VR_SCRIPT_ON_EVENT,
     VR_SCRIPT_ON_PHYSICS_EVENT,
     VR_SCRIPT_DATA_SIZE,
+    VR_SCRIPT_DATA_LAYOUT_ID,
     VR_SCRIPT_REQUIRED_COMPONENTS,
     VR_SCRIPT_EVENT_COUNT,
     VR_SCRIPT_EVENT_NAME,
@@ -218,7 +254,8 @@ void vrRegisterScriptEntry(const char* scriptPath, int kind, void* fn);
 #define REGISTER_UPDATE()            static const int _vrRegUpdate    = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_UPDATE,          (void*)&Update), 0);
 #define REGISTER_ON_DESTROY()        static const int _vrRegOnDestroy = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_DESTROY,      (void*)&OnDestroy), 0);
 #define REGISTER_ON_PHYSICS_EVENT()  static const int _vrRegOnPhys    = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_PHYSICS_EVENT,(void*)&OnPhysicsEvent), 0);
-#define REGISTER_SCRIPT_DATA_SIZE()  static const int _vrRegDataSize  = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_SIZE,       (void*)&ScriptDataSize), 0);
+#define REGISTER_SCRIPT_DATA_SIZE()  static const int _vrRegDataSize  = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_SIZE,       (void*)&ScriptDataSize), \
+                                                                        vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_LAYOUT_ID,  (void*)&ScriptDataLayoutId), 0);
 #define REGISTER_SCRIPT_REQUIRED_COMPONENTS() static const int _vrRegReqComp = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_REQUIRED_COMPONENTS, (void*)&ScriptRequiredComponents), 0);
 #define REGISTER_ON_EVENT()          static const int _vrRegOnEvent   = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_EVENT,        (void*)&OnEvent), \
                                                                         vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_EVENT_COUNT,     (void*)&ScriptEventCount), \

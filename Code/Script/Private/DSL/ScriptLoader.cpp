@@ -59,6 +59,11 @@ namespace
 				size_t j = i + 1;
 				while (j < text.size() && isIdentChar(text[j]))
 					++j;
+				// A trailing "[]" belongs to the identifier: an ARRAY type reads as one word ("int[]"), so
+				// typeFromKeyword's suffix check is the only place that knows about brackets and nothing else
+				// in the grammar has to tokenize them. They appear nowhere else -- there's no index syntax.
+				if (j + 1 < text.size() && text[j] == '[' && text[j + 1] == ']')
+					j += 2;
 				out.push_back({ Token::Kind::Identifier, text.substr(i, j - i) });
 				i = j;
 				continue;
@@ -115,12 +120,28 @@ namespace
 
 	bool typeFromKeyword(const std::string& word, DSLType& out)
 	{
+		// "int[]" and friends: an ARRAY of whatever precedes the brackets. Written as one word rather than
+		// three tokens so nothing else in the grammar has to know about brackets (they aren't tokenized at all).
+		if (word.size() > 2 && word.compare(word.size() - 2, 2, "[]") == 0)
+		{
+			DSLType elementType = DSLType::Void;
+			if (!typeFromKeyword(word.substr(0, word.size() - 2), elementType) || dslIsArrayType(elementType))
+				return false; // unknown element, or an attempt to nest -- arrays are one level only
+			out = dslArrayOf(elementType);
+			return true;
+		}
 		for (DSLType t : { DSLType::Int, DSLType::Float, DSLType::Bool, DSLType::String })
 			if (word == dslTypeName(t))
 			{
 				out = t;
 				return true;
 			}
+		// Entity is not a DECLARABLE type on its own, but it is a valid array element and a foreach element.
+		if (word == dslTypeName(DSLType::Entity))
+		{
+			out = DSLType::Entity;
+			return true;
+		}
 		if (const DSLType structType = Globals::scriptBindings.typeByName(word); structType != DSLType::Void)
 		{
 			out = structType;
@@ -224,6 +245,10 @@ namespace
 		std::vector<std::unique_ptr<DSLCodeLine>> outLines;
 		std::vector<DSLSymbol*> userFunctions;  // pass-1 FunctionDeclaration heads, document order
 		std::vector<DSLSymbol*> scopeVars;      // the current function's parameters + locals so far (reset per function)
+		// Names bound by an enclosing `ifcomponent` that are no longer READABLE (an else branch pruned them
+		// from scopeVars) but must still not be redeclared: the generated C++ scopes the condition
+		// declaration across the whole if/else, so a redeclaration there would silently shadow it.
+		std::vector<std::string> reservedNames;
 		DSLType currentReturnType = DSLType::Void;
 		std::string error;                      // first failure -- everything bails out through fail()/failValue()
 
@@ -251,6 +276,14 @@ namespace
 			DSLSymbol* ptr = symbol.get();
 			line.symbols.push_back(std::move(symbol));
 			return ptr;
+		}
+
+		bool isReservedInChain(const std::string& name) const
+		{
+			for (const std::string& reserved : reservedNames)
+				if (reserved == name)
+					return true;
+			return false;
 		}
 
 		DSLSymbol* findVariable(const std::string& name) const
@@ -469,7 +502,12 @@ namespace
 					DSLSymbol* decl = findVariable(first.text);
 					if (decl == nullptr)
 						return failValue("unknown identifier '" + first.text + "'");
-					if (dslIsEngineObjectType(declaredType(decl)))
+					// A SIDEBAR binding (physics/audio/...) has no bare value form -- only dotting into it. Two
+					// things do have one: any LOCAL of an engine-object type (a foreach's Entity element, an
+					// ifcomponent binding), and `self`, which is a genuine Entity value. Told apart by the
+					// owning line + the type, same as the editor's candidate lists.
+					if (dslIsEngineObjectType(declaredType(decl)) && decl->line == nullptr
+						&& declaredType(decl) != DSLType::Entity)
 						return failValue("'" + first.text + "' is a binding object -- it can only be dotted into");
 					return push(line, ST::VariableReference, DSLSymbol::VariableReference{ decl });
 				}
@@ -633,6 +671,8 @@ namespace
 			for (DSLSymbol* var : scopeVars)
 				if (std::get<DSLSymbol::VariableDeclaration>(var->data).name == name)
 					return failValue("'" + name + "' is already declared in this function");
+			if (isReservedInChain(name))
+				return failValue("'" + name + "' is bound by the enclosing 'ifcomponent'");
 			for (const std::unique_ptr<DSLSymbol>& s : sidebar)
 				if (s->type == ST::VariableDeclaration && std::get<DSLSymbol::VariableDeclaration>(s->data).name == name)
 					return failValue("'" + name + "' is a sidebar binding");
@@ -760,6 +800,78 @@ namespace
 			return push(line, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::For, nullptr, loopVar, condition, increment });
 		}
 
+		// "foreach" already consumed; `t` holds "<type> <name> in <sequence>". The element declaration registers
+		// into scope for the body but is NOT a value slot of its own -- the loop supplies each value, so unlike
+		// a for-loop's counter it carries no initializer.
+		DSLSymbol* parseForEach(std::span<const Token> t, DSLCodeLine& line)
+		{
+			DSLType elementType = DSLType::Void;
+			if (t.size() < 4 || t[0].kind != Token::Kind::Identifier || !typeFromKeyword(t[0].text, elementType)
+				|| t[1].kind != Token::Kind::Identifier)
+				return failValue("expected \"foreach <type> <name> in <sequence>\"");
+			if (t[2].kind != Token::Kind::Identifier || t[2].text != "in")
+				return failValue("expected 'in' after the foreach element name");
+			const std::string elementName = t[1].text;
+			if (AutoCompleteRules::isReservedWord(elementName))
+				return failValue("'" + elementName + "' is reserved");
+			for (DSLSymbol* var : scopeVars)
+				if (std::get<DSLSymbol::VariableDeclaration>(var->data).name == elementName)
+					return failValue("'" + elementName + "' is already declared in this function");
+			if (isReservedInChain(elementName))
+				return failValue("'" + elementName + "' is bound by the enclosing 'ifcomponent'");
+
+			// The sequence resolves FIRST, so it can't see the element the loop is about to declare.
+			DSLSymbol* sequence = parseExpression(t.subspan(3), line, DSLType::Void);
+			if (sequence == nullptr)
+				return nullptr;
+			const DSLType sequenceType = dslValueType(sequence);
+			const BindingObject* object = bindings.objectFor(sequenceType);
+			if (object == nullptr || object->sequenceElementType == DSLType::Void)
+				return failValue("'" + std::string(dslTypeName(sequenceType)) + "' isn't iterable");
+			if (object->sequenceElementType != elementType)
+				return failValue("'" + std::string(dslTypeName(sequenceType)) + "' yields "
+					+ dslTypeName(object->sequenceElementType) + ", not " + dslTypeName(elementType));
+
+			DSLSymbol* typeSymbol = push(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ elementType });
+			DSLSymbol* elementVar = push(line, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ elementName, typeSymbol });
+			scopeVars.push_back(elementVar);
+			return push(line, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::ForEach, sequence, elementVar });
+		}
+
+		// "ifcomponent" already consumed; `t` holds "<ComponentType> <name> in <entity>". Same shape as
+		// parseForEach, and the bound variable registers into scope the same way -- crudely for the whole
+		// function rather than just the branch, matching how every other block's declarations are scoped here.
+		DSLSymbol* parseIfComponent(std::span<const Token> t, DSLCodeLine& line)
+		{
+			if (t.size() < 4 || t[0].kind != Token::Kind::Identifier || t[1].kind != Token::Kind::Identifier)
+				return failValue("expected \"ifcomponent <ComponentType> <name> in <entity>\"");
+			const DSLType componentType = Globals::scriptBindings.componentTypeByName(t[0].text);
+			if (componentType == DSLType::Void)
+				return failValue("'" + t[0].text + "' isn't a component type");
+			if (t[2].kind != Token::Kind::Identifier || t[2].text != "in")
+				return failValue("expected 'in' after the ifcomponent variable name");
+			const std::string boundName = t[1].text;
+			if (AutoCompleteRules::isReservedWord(boundName))
+				return failValue("'" + boundName + "' is reserved");
+			for (DSLSymbol* var : scopeVars)
+				if (std::get<DSLSymbol::VariableDeclaration>(var->data).name == boundName)
+					return failValue("'" + boundName + "' is already declared in this function");
+			if (isReservedInChain(boundName))
+				return failValue("'" + boundName + "' is bound by the enclosing 'ifcomponent'");
+
+			// The entity resolves FIRST, so it can't see the component the statement is about to bind.
+			DSLSymbol* entity = parseExpression(t.subspan(3), line, DSLType::Entity);
+			if (entity == nullptr)
+				return nullptr;
+			if (dslValueType(entity) != DSLType::Entity)
+				return failValue("ifcomponent needs an Entity after 'in'");
+
+			DSLSymbol* typeSymbol = push(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ componentType });
+			DSLSymbol* boundVar = push(line, ST::VariableDeclaration, DSLSymbol::VariableDeclaration{ boundName, typeSymbol });
+			scopeVars.push_back(boundVar);
+			return push(line, ST::FlowControl, DSLSymbol::FlowControl{ DSLFlowControl::IfComponent, entity, boundVar });
+		}
+
 		// One body/statement line. Never a function header, else/elseif, end, comment, or blank -- the load
 		// driver handles those (they need block-stack context). Returns the line's new head symbol, or null.
 		DSLSymbol* parseStatement(std::span<const Token> t, DSLCodeLine& line)
@@ -791,6 +903,10 @@ namespace
 			}
 			if (first.text == "for")
 				return parseFor(t.subspan(1), line);
+			if (first.text == "foreach")
+				return parseForEach(t.subspan(1), line);
+			if (first.text == "ifcomponent")
+				return parseIfComponent(t.subspan(1), line);
 
 			DSLType declType = DSLType::Void;
 			if (typeFromKeyword(first.text, declType))
@@ -1040,6 +1156,10 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 					|| tokens[1].kind != Token::Kind::Identifier)
 					return failAt(lineNo, "malformed //@@data line (expected \"//@@data <type> <name>\")");
 				const std::string& fieldName = tokens[1].text;
+				// Entity isn't storable in either form -- see DSLDataField. The loader-side twin of the SCRIPT
+				// DATA panel simply not offering it.
+				if (type == DSLType::Entity || dslArrayElementType(type) == DSLType::Entity)
+					return failAt(lineNo, "'" + std::string(dslTypeName(type)) + "' can't be stored in script data");
 				if (AutoCompleteRules::isReservedWord(fieldName))
 					return failAt(lineNo, "'" + fieldName + "' is reserved");
 				for (const DSLDataField& existing : dataFields)
@@ -1129,6 +1249,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	// the editor-side twin of ScriptLang.cpp's inScopeVariables scope-walk, restored on 'end'/branch-switch so
 	// a name declared inside a block (the loop counter included) can't resolve once the block's done with.
 	std::vector<size_t> openBlockScopeDepth;
+	std::vector<size_t> openBlockReservedDepth; // parallel: reservedNames size when that block opened
 	for (size_t i = 0; i < blockLines.size(); ++i)
 	{
 		const BlockLine& src = blockLines[i];
@@ -1155,6 +1276,8 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 			openBlocks.pop_back();
 			parser.scopeVars.resize(openBlockScopeDepth.back());
 			openBlockScopeDepth.pop_back();
+			parser.reservedNames.resize(openBlockReservedDepth.back());
+			openBlockReservedDepth.pop_back();
 			continue; // synthetic -- the formatter re-derives it from the scopeLevel step-down
 		}
 		if (word == "function")
@@ -1167,6 +1290,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 			parser.currentReturnType = func.returnType;
 			openBlocks.push_back(head);
 			openBlockScopeDepth.push_back(parser.scopeVars.size());
+			openBlockReservedDepth.push_back(parser.reservedNames.size());
 			parser.outLines.push_back(std::move(headers[i]));
 			continue;
 		}
@@ -1175,11 +1299,19 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 			const DSLSymbol* top = openBlocks.empty() ? nullptr : openBlocks.back();
 			const DSLSymbol::FlowControl* topFlow = (top != nullptr && top->type == ST::FlowControl)
 				? &std::get<DSLSymbol::FlowControl>(top->data) : nullptr;
-			if (topFlow == nullptr || (topFlow->control != DSLFlowControl::If && topFlow->control != DSLFlowControl::ElseIf))
+			// ifcomponent chains an else but never an elseif -- nothing bool to continue from a component fetch.
+			const bool chainable = topFlow != nullptr
+				&& (topFlow->control == DSLFlowControl::If || topFlow->control == DSLFlowControl::ElseIf
+					|| (topFlow->control == DSLFlowControl::IfComponent && word == "else"));
+			if (!chainable)
 				return failAt(src.fileLineNo, "'" + word + "' without a matching 'if'");
 			// The branch just finished goes out of scope before this sibling's own condition/body parses --
 			// same depth as when the chain opened (a branch switch doesn't nest deeper), so the snapshot itself
 			// doesn't change, only scopeVars gets pruned back to it.
+			// An ifcomponent's binding stops being READABLE here but stays reserved for the rest of the chain --
+			// redeclaring it in the else would shadow the condition declaration in the emitted C++.
+			if (topFlow->control == DSLFlowControl::IfComponent && topFlow->forLoopVar != nullptr)
+				parser.reservedNames.push_back(std::get<DSLSymbol::VariableDeclaration>(topFlow->forLoopVar->data).name);
 			parser.scopeVars.resize(openBlockScopeDepth.back());
 			auto line = std::make_unique<DSLCodeLine>();
 			line->scopeLevel = depth - 1; // continues the chain at its own header's level (see Syntax::format)
@@ -1210,6 +1342,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 		{
 			openBlocks.push_back(head);
 			openBlockScopeDepth.push_back(scopeDepthBeforeHeader);
+			openBlockReservedDepth.push_back(parser.reservedNames.size());
 		}
 		parser.outLines.push_back(std::move(line));
 	}

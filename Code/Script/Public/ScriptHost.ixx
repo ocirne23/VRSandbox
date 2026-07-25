@@ -25,6 +25,8 @@ export struct ScriptModule
     void* onEvent = nullptr;   // ScriptOnEventFn
     void* onPhysicsEvent = nullptr; // ScriptOnPhysicsEventFn
     uint32 dataSize = 0;       // bytes of persistent ScriptData the script declares (0 = none), from ScriptDataSize()
+    uint32 dataLayoutId = 0;   // hash of ScriptData's field layout, from ScriptDataLayoutId() -- a reload that
+                                // changes it can't reuse an existing block (see ScriptDataLayoutIdFn)
     uint32 requiredComponents = 0; // EComponentID bitmask (0 = none), from ScriptRequiredComponents()
 	std::vector<std::string> eventNames; // in the order the script declared them
 

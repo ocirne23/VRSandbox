@@ -29,18 +29,46 @@ void registerScriptDslBindings()
     ScriptBindings& bindings = Globals::scriptBindings;
     using T = DSLType;
 
+    // The vector/quaternion surface. Every emit is a plain glm call, so the generated C++ stays exactly what
+    // the same expression would be written by hand -- and everything here resolves out of the two headers
+    // ScriptAPI.h already includes (<glm/glm.hpp> and <glm/gtc/quaternion.hpp>), so script DLLs need nothing
+    // extra. "$r" (the receiver) is parenthesized wherever it lands inside a larger expression, since it can be
+    // an arbitrary composed chain. T::ThisBinding means "this struct's own type", so the shared rows below read
+    // identically for vec2/3/4 (see DSLType::ThisBinding).
+    //
+    // Registration ORDER carries the cross-type dependencies: a function's parameter/return types must already
+    // exist, so vec2 comes first (vec3.xy needs it), then vec3 (vec4.xyz, and every quat function that speaks
+    // vec3), then vec4, then quat. That's also why rotating a vector lives on quat as rotate(vec3) rather than
+    // on vec3 as rotatedBy(quat) -- the latter would need quat before quat exists.
     const DSLType vec2 = bindings.registerStruct({ "vec2", "glm::vec2", { { "x", T::Float }, { "y", T::Float } }, "glm::vec2($1, $2)",
         {
             { "x", T::Float, "$r.x" },
             { "y", T::Float, "$r.y" },
         },
         {
-            { "length",     T::Float, {},                              "glm::length($r)" },
-            { "normalized", T::ThisBinding, {},                        "glm::normalize($r)" },
-            { "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
-            { "distance",   T::Float, { { "other", T::ThisBinding } }, "glm::distance($r, $1)" },
+            { "length",          T::Float,       {},                                                   "glm::length($r)" },
+            // Comparing or sorting by distance rarely needs the square root -- glm::length2 lives in an
+            // extension header that isn't included, so the dot product with itself stands in for it.
+            { "lengthSquared",   T::Float,       {},                                                   "glm::dot($r, $r)" },
+            { "normalized",      T::ThisBinding, {},                                                   "glm::normalize($r)" },
+            { "dot",             T::Float,       { { "other", T::ThisBinding } },                      "glm::dot($r, $1)" },
+            { "distance",        T::Float,       { { "other", T::ThisBinding } },                      "glm::distance($r, $1)" },
+            { "distanceSquared", T::Float,       { { "other", T::ThisBinding } },                      "glm::dot(($r) - ($1), ($r) - ($1))" },
+            // Scaling by a scalar can't be written as an operator: a chain constrains every term to one type.
+            { "scaled",          T::ThisBinding, { { "factor", T::Float } },                           "(($r) * ($1))" },
+            { "negated",         T::ThisBinding, {},                                                   "(-($r))" },
+            { "lerp",            T::ThisBinding, { { "target", T::ThisBinding }, { "t", T::Float } },  "glm::mix($r, $1, $2)" },
+            { "min",             T::ThisBinding, { { "other", T::ThisBinding } },                      "glm::min($r, $1)" },
+            { "max",             T::ThisBinding, { { "other", T::ThisBinding } },                      "glm::max($r, $1)" },
+            { "clamp",           T::ThisBinding, { { "low", T::ThisBinding }, { "high", T::ThisBinding } }, "glm::clamp($r, $1, $2)" },
+            { "abs",             T::ThisBinding, {},                                                   "glm::abs($r)" },
+            { "floor",           T::ThisBinding, {},                                                   "glm::floor($r)" },
+            { "ceil",            T::ThisBinding, {},                                                   "glm::ceil($r)" },
+            { "round",           T::ThisBinding, {},                                                   "glm::round($r)" },
+            // 2D only: the heading of the vector, and the 90-degree turn of it.
+            { "angleDeg",        T::Float,       {},                                                   "glm::degrees(glm::atan(($r).y, ($r).x))" },
+            { "perpendicular",   T::ThisBinding, {},                                                   "glm::vec2(-($r).y, ($r).x)" },
         } });
-    (void)(vec2);
     const DSLType vec3 = bindings.registerStruct({ "vec3", "glm::vec3", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float } }, "glm::vec3($1, $2, $3)",
         {
             { "x", T::Float, "$r.x" },
@@ -48,10 +76,27 @@ void registerScriptDslBindings()
             { "z", T::Float, "$r.z" },
         },
         {
-            { "length",     T::Float, {},                              "glm::length($r)" },
-            { "normalized", T::ThisBinding, {},                        "glm::normalize($r)" },
-            { "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
-            { "distance",   T::Float, { { "other", T::ThisBinding } }, "glm::distance($r, $1)" },
+            { "length",          T::Float,       {},                                                   "glm::length($r)" },
+            { "lengthSquared",   T::Float,       {},                                                   "glm::dot($r, $r)" },
+            { "normalized",      T::ThisBinding, {},                                                   "glm::normalize($r)" },
+            { "dot",             T::Float,       { { "other", T::ThisBinding } },                      "glm::dot($r, $1)" },
+            { "cross",           T::ThisBinding, { { "other", T::ThisBinding } },                      "glm::cross($r, $1)" },
+            { "distance",        T::Float,       { { "other", T::ThisBinding } },                      "glm::distance($r, $1)" },
+            { "distanceSquared", T::Float,       { { "other", T::ThisBinding } },                      "glm::dot(($r) - ($1), ($r) - ($1))" },
+            { "scaled",          T::ThisBinding, { { "factor", T::Float } },                           "(($r) * ($1))" },
+            { "negated",         T::ThisBinding, {},                                                   "(-($r))" },
+            { "lerp",            T::ThisBinding, { { "target", T::ThisBinding }, { "t", T::Float } },  "glm::mix($r, $1, $2)" },
+            { "min",             T::ThisBinding, { { "other", T::ThisBinding } },                      "glm::min($r, $1)" },
+            { "max",             T::ThisBinding, { { "other", T::ThisBinding } },                      "glm::max($r, $1)" },
+            { "clamp",           T::ThisBinding, { { "low", T::ThisBinding }, { "high", T::ThisBinding } }, "glm::clamp($r, $1, $2)" },
+            { "abs",             T::ThisBinding, {},                                                   "glm::abs($r)" },
+            { "floor",           T::ThisBinding, {},                                                   "glm::floor($r)" },
+            { "ceil",            T::ThisBinding, {},                                                   "glm::ceil($r)" },
+            { "round",           T::ThisBinding, {},                                                   "glm::round($r)" },
+            // `normal` is expected normalized, matching glm's own contract for these two.
+            { "reflect",         T::ThisBinding, { { "normal", T::ThisBinding } },                     "glm::reflect($r, $1)" },
+            { "refract",         T::ThisBinding, { { "normal", T::ThisBinding }, { "eta", T::Float } },"glm::refract($r, $1, $2)" },
+            { "xy",              vec2,           {},                                                   "glm::vec2(($r).x, ($r).y)" },
         } });
     const DSLType vec4 = bindings.registerStruct({ "vec4", "glm::vec4", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float }, { "w", T::Float } }, "glm::vec4($1, $2, $3, $4)",
         {
@@ -61,12 +106,30 @@ void registerScriptDslBindings()
             { "w", T::Float, "$r.w" },
         },
         {
-            { "length",     T::Float, {},                              "glm::length($r)" },
-            { "normalized", T::ThisBinding, {},                        "glm::normalize($r)" },
-            { "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
-            { "distance",   T::Float, { { "other", T::ThisBinding } }, "glm::distance($r, $1)" },
+            { "length",          T::Float,       {},                                                   "glm::length($r)" },
+            { "lengthSquared",   T::Float,       {},                                                   "glm::dot($r, $r)" },
+            { "normalized",      T::ThisBinding, {},                                                   "glm::normalize($r)" },
+            { "dot",             T::Float,       { { "other", T::ThisBinding } },                      "glm::dot($r, $1)" },
+            { "distance",        T::Float,       { { "other", T::ThisBinding } },                      "glm::distance($r, $1)" },
+            { "distanceSquared", T::Float,       { { "other", T::ThisBinding } },                      "glm::dot(($r) - ($1), ($r) - ($1))" },
+            { "scaled",          T::ThisBinding, { { "factor", T::Float } },                           "(($r) * ($1))" },
+            { "negated",         T::ThisBinding, {},                                                   "(-($r))" },
+            { "lerp",            T::ThisBinding, { { "target", T::ThisBinding }, { "t", T::Float } },  "glm::mix($r, $1, $2)" },
+            { "min",             T::ThisBinding, { { "other", T::ThisBinding } },                      "glm::min($r, $1)" },
+            { "max",             T::ThisBinding, { { "other", T::ThisBinding } },                      "glm::max($r, $1)" },
+            { "clamp",           T::ThisBinding, { { "low", T::ThisBinding }, { "high", T::ThisBinding } }, "glm::clamp($r, $1, $2)" },
+            { "abs",             T::ThisBinding, {},                                                   "glm::abs($r)" },
+            { "floor",           T::ThisBinding, {},                                                   "glm::floor($r)" },
+            { "ceil",            T::ThisBinding, {},                                                   "glm::ceil($r)" },
+            { "round",           T::ThisBinding, {},                                                   "glm::round($r)" },
+            { "xy",              vec2,           {},                                                   "glm::vec2(($r).x, ($r).y)" },
+            { "xyz",             vec3,           {},                                                   "glm::vec3(($r).x, ($r).y, ($r).z)" },
         } });
     (void)(vec4);
+    // glm::quat's own 4-scalar constructor takes (w, x, y, z) -- opposite of vec4's (x, y, z, w) -- so the
+    // positional args reorder in the emit while the DSL's own constructorParams/members stay x, y, z, w for
+    // consistency. That raw form is rarely what an author wants, though: quatFromEuler/quatFromAxisAngle in the
+    // Engine section below are the readable ways to build one.
     const DSLType quat = bindings.registerStruct({ "quat", "glm::quat", { { "x", T::Float }, { "y", T::Float }, { "z", T::Float }, { "w", T::Float } }, "glm::quat($4, $1, $2, $3)",
         {
             { "x", T::Float, "$r.x" },
@@ -75,9 +138,19 @@ void registerScriptDslBindings()
             { "w", T::Float, "$r.w" },
         },
         {
-            { "length",     T::Float, {},                              "glm::length($r)" },
-            { "normalized", T::ThisBinding, {},                        "glm::normalize($r)" },
-            { "dot",        T::Float, { { "other", T::ThisBinding } }, "glm::dot($r, $1)" },
+            { "length",     T::Float,       {},                                                   "glm::length($r)" },
+            { "normalized", T::ThisBinding, {},                                                   "glm::normalize($r)" },
+            { "dot",        T::Float,       { { "other", T::ThisBinding } },                      "glm::dot($r, $1)" },
+            // For a UNIT quaternion the conjugate IS the inverse and is cheaper; inverse is correct regardless.
+            { "inverse",    T::ThisBinding, {},                                                   "glm::inverse($r)" },
+            { "conjugate",  T::ThisBinding, {},                                                   "glm::conjugate($r)" },
+            // Composition is not commutative: a.then(b) applies a first, then b.
+            { "then",       T::ThisBinding, { { "next", T::ThisBinding } },                       "(($1) * ($r))" },
+            { "slerp",      T::ThisBinding, { { "target", T::ThisBinding }, { "t", T::Float } },  "glm::slerp($r, $1, $2)" },
+            { "rotate",     vec3,           { { "v", vec3 } },                                    "(($r) * ($1))" },
+            { "euler",      vec3,           {},                                                   "glm::degrees(glm::eulerAngles($r))" },
+            { "axis",       vec3,           {},                                                   "glm::axis($r)" },
+            { "angleDeg",   T::Float,       {},                                                   "glm::degrees(glm::angle($r))" },
         } });
     bindings.registerObject({ "self", T::Entity, /*sidebarTopLevel*/ true,
         {
@@ -96,18 +169,29 @@ void registerScriptDslBindings()
             { "events",  T::ScriptEvents,      "$r",                         /*writable*/ false }, // special case in transpiler
         } });
 
-    const DSLType sceneType = bindings.registerComponentType("scene", "SceneComponent", EComponentID_Scene);
+    // The child list as its own iterate-only type, so walking it reads as "foreach Entity child in
+    // self.scene.getChildren()" -- a component isn't a collection, and shouldn't be iterable as one. Nothing is
+    // copied to produce it: getChildren's emit is just "$r", so the value IS the SceneComponent handle and
+    // these two templates run straight against it. sceneGetChildAt is null-safe past the end on its own, so the
+    // loop stays sound even if the child list changes mid-iteration.
+    const DSLType entityListType = bindings.registerSequenceType("EntityList", T::Entity,
+        "ctx->sceneGetChildCount($r)", "ctx->sceneGetChildAt($r, $i)");
+
+    const DSLType sceneType = bindings.registerComponentType("scene", "SceneComponent", EComponentID_Scene,
+        "ctx->entityGetSceneComponent($r)");
     bindings.registerObject({ "scene", sceneType, /*sidebarTopLevel*/ false,
         {
-            { "getNumChildren", T::Int,    {},                      ""},
-            { "getChild",       T::Entity, {{ "index", T::Int }},     ""},
-            { "removeChildIdx", T::Void,   {{ "index", T::Int }},     ""},
-            { "removeChild",    T::Void,   {{ "entity", T::Entity }}, ""},
-            { "addChild",       T::Void,   {{ "entity", T::Entity }}, ""},
+            { "getChildren",    entityListType, {},                        "$r"},
+            { "getNumChildren", T::Int,    {},                             "ctx->sceneGetChildCount($r)"},
+            { "getChild",       T::Entity, {{ "index", T::Int }},          "ctx->sceneGetChildAt($r, $1)"},
+            { "removeChildIdx", T::Void,   {{ "index", T::Int }},          "ctx->sceneRemoveChildAt($r, $1)"},
+            { "removeChild",    T::Void,   {{ "entity", T::Entity }},      "ctx->sceneRemoveChild($r, $1)"},
+            { "addChild",       T::Void,   {{ "entity", T::Entity }},      "ctx->sceneAddChild($r, $1)"},
         },
         {} });
 
-    const DSLType physicsType = bindings.registerComponentType("physics", "PhysicsComponent", EComponentID_Physics);
+    const DSLType physicsType = bindings.registerComponentType("physics", "PhysicsComponent", EComponentID_Physics,
+        "ctx->entityGetPhysicsComponent($r)");
     bindings.registerObject({ "physics", physicsType, /*sidebarTopLevel*/ false,
         {
             { "getVelocity",  vec3,   {},                                              "ctx->physicsGetVelocity($r)" },
@@ -118,7 +202,8 @@ void registerScriptDslBindings()
         },
         {} });
 
-    const DSLType audioType = bindings.registerComponentType("audio", "AudioComponent", EComponentID_Audio);
+    const DSLType audioType = bindings.registerComponentType("audio", "AudioComponent", EComponentID_Audio,
+        "ctx->entityGetAudioComponent($r)");
     bindings.registerObject({ "audio", audioType, /*sidebarTopLevel*/ false,
         {
             { "trigger", T::Void, { { "alias", T::String } }, "ctx->audioTrigger($r, self, $1, 0, glm::vec3(0.0f), 1.0f, 1.0f)" },
@@ -126,7 +211,8 @@ void registerScriptDslBindings()
         },
         {} });
 
-    const DSLType forceType = bindings.registerComponentType("force", "ForceComponent", EComponentID_Force);
+    const DSLType forceType = bindings.registerComponentType("force", "ForceComponent", EComponentID_Force,
+        "ctx->entityGetForceComponent($r)");
     bindings.registerObject({ "force", forceType, /*sidebarTopLevel*/ false,
         {
             { "getOutput",   T::Float, {},                          "ctx->forceGetOutput($r)" },
@@ -148,6 +234,11 @@ void registerScriptDslBindings()
             { "rayCast",         T::Float, { { "pos", vec3 }, { "dir", vec3 }, { "maxRayDist", T::Float } }, "ctx->physicsRayCastDistance($1, $2, $3)" },
             { "isKeyDown",       T::Bool,  { { "keyName", T::String } },                                     "(ctx->isKeyDown($1) != 0)" },
             { "sendEvent",       T::Void,  { { "eventName", T::String } },                                   "ctx->sendEvent($1)" },
+            // Building a rotation: the raw quat(x,y,z,w) constructor is technically available but never what an
+            // author means. Angles are DEGREES throughout the DSL surface (quat.euler/angleDeg return them too).
+            { "quatFromEuler",     quat,   { { "eulerDeg", vec3 } },                                 "glm::quat(glm::radians($1))" },
+            { "quatFromAxisAngle", quat,   { { "axis", vec3 }, { "angleDeg", T::Float } },           "glm::angleAxis(glm::radians($2), glm::normalize($1))" },
+            { "quatIdentity",      quat,   {},                                                       "glm::quat(1.0f, 0.0f, 0.0f, 0.0f)" },
             { "setSun",          T::Void,  { { "direction", vec3 }, { "color", vec3 }, { "intensity", T::Float } },                       "ctx->setSun($1, $2, $3)" },
             { "spawnPointLight", T::Void,  { { "position", vec3 }, { "range", T::Float }, { "color", vec3 }, { "intensity", T::Float } }, "ctx->spawnPointLight($1, $2, $3, $4)" },
         },
@@ -165,10 +256,206 @@ void registerScriptDslBindings()
     bindings.registerEntryPoint({ "OnPhysicsEvent",  { { "begin", T::Int }, { "sensor", T::Int } }, ", Entity* other, int begin, int sensor, long long contactId, ScriptData* scriptData", "REGISTER_ON_PHYSICS_EVENT()" });
 }
 
+// ---- engine-owned script arrays (the DSL's `T[]`, see VrArray in ScriptAPI.h) ----------------------------
+// Storage lives HERE, not in the script's ScriptData block, which holds only the handle. That's what makes a
+// hot-reload free: the block survives (same layout id), so the handles survive, so the contents survive with
+// nothing to copy. It's also what keeps a script from ever owning heap memory across a DLL swap.
+//
+// A handle is {index, generation}: freeing bumps the slot's generation, so a stale or garbage id -- e.g. a
+// ScriptData field reinterpreted after a layout change slipped through -- fails lookup and every operation
+// degrades to a no-op or a default. That, plus arrayAt's own range check, is the memory-safety guarantee: no
+// value a script can put in a handle field can make the engine touch memory it doesn't own.
+namespace
+{
+    struct ScriptArray
+    {
+        std::vector<uint8> bytes;        // elements packed raw; elemSize is fixed at first push
+        std::vector<EntityPtr> entities; // Entity elements instead: refcounted, so a destroyed entity reads back
+                                          // as null rather than dangling (bytes stays empty for these)
+        std::vector<std::string> strings; // string elements: copied engine-side, so they don't point into a
+                                           // script DLL's .rdata and dangle when it unloads (bytes stays empty)
+        int elemSize = 0;
+        int elemKind = 0;                // the DSLType value -- decides which of the three stores is in use
+        uint16 generation = 1;           // bumped on free; 0 is never a live generation, so handle 0 is always invalid
+        bool live = false;
+        ScriptComponent* owner = nullptr;
+    };
+
+    std::vector<ScriptArray> g_scriptArrays;
+    std::vector<uint32> g_freeScriptArrays;
+
+    constexpr int kEntityElemKind = static_cast<int>(DSLType::Entity);
+    constexpr int kStringElemKind = static_cast<int>(DSLType::String);
+
+    constexpr uint32 makeArrayHandle(uint32 index, uint16 generation) { return (index + 1u) | (uint32(generation) << 16); }
+    constexpr uint32 arrayHandleIndex(uint32 handle) { return (handle & 0xFFFFu) - 1u; }
+    constexpr uint16 arrayHandleGeneration(uint32 handle) { return uint16(handle >> 16); }
+
+    // The ONLY way a handle becomes a ScriptArray -- everything below goes through it, so a bad id can never
+    // reach the stores.
+    ScriptArray* resolveScriptArray(uint32 handle)
+    {
+        if (handle == 0)
+            return nullptr;
+        const uint32 index = arrayHandleIndex(handle);
+        if (index >= g_scriptArrays.size())
+            return nullptr;
+        ScriptArray& array = g_scriptArrays[index];
+        if (!array.live || array.generation != arrayHandleGeneration(handle))
+            return nullptr;
+        return &array;
+    }
+
+    int scriptArrayCount(const ScriptArray& array)
+    {
+        if (array.elemKind == kEntityElemKind)
+            return static_cast<int>(array.entities.size());
+        if (array.elemKind == kStringElemKind)
+            return static_cast<int>(array.strings.size());
+        return array.elemSize > 0 ? static_cast<int>(array.bytes.size() / array.elemSize) : 0;
+    }
+}
+
+// Frees every array `owner` created and forgets their handles -- called when the component dies, and when its
+// data block is discarded (a layout change), which is the moment those handles stop being reachable.
+void releaseScriptArrays(ScriptComponent& owner)
+{
+    for (uint32 handle : owner.ownedArrays)
+        if (ScriptArray* array = resolveScriptArray(handle); array != nullptr)
+        {
+            array->live = false;
+            ++array->generation; // any surviving copy of this handle is now stale, and resolves to nothing
+            array->bytes.clear();
+            array->bytes.shrink_to_fit();
+            array->entities.clear();
+            array->strings.clear();
+            array->owner = nullptr;
+            g_freeScriptArrays.push_back(arrayHandleIndex(handle));
+        }
+    owner.ownedArrays.clear();
+}
+
 #pragma warning(push)
 #pragma warning(disable: 4190) // for glm types
 extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can call them
 {
+    // ---- string literals ----
+    const char* thunk_internString(const char* text)
+    {
+        if (text == nullptr)
+            return "";
+        // unordered_set is node-based, so an element's address is stable for the life of the set even across
+        // rehashing -- which is exactly what makes the returned pointer safe to keep forever. Never erased:
+        // the set only ever grows to the number of distinct literals across all loaded scripts.
+        static std::unordered_set<std::string> interned;
+        return interned.emplace(text).first->c_str();
+    }
+
+    // ---- script arrays ----
+    void thunk_arrayPush(Entity* owner, VrArray* handle, int elemKind, int elemSize, const void* value)
+    {
+        if (handle == nullptr || owner == nullptr || elemSize <= 0 || value == nullptr)
+            return;
+        ScriptArray* array = resolveScriptArray(*handle);
+        if (array == nullptr)
+        {
+            // Either the first push (handle 0, from a zeroed data block) or a handle that no longer resolves;
+            // both mean "this field has no array", so make one and write its id back through the field.
+            ScriptComponent* component = getComponent<ScriptComponent>(owner);
+            if (component == nullptr)
+                return;
+            uint32 index;
+            if (!g_freeScriptArrays.empty())
+            {
+                index = g_freeScriptArrays.back();
+                g_freeScriptArrays.pop_back();
+            }
+            else
+            {
+                index = static_cast<uint32>(g_scriptArrays.size());
+                g_scriptArrays.emplace_back();
+            }
+            array = &g_scriptArrays[index];
+            array->live = true;
+            array->elemSize = elemSize;
+            array->elemKind = elemKind;
+            array->owner = component;
+            *handle = makeArrayHandle(index, array->generation);
+            component->ownedArrays.push_back(*handle);
+        }
+        // The caller's bytes are its OWN representation (Entity* / const char* / a POD value); the two non-POD
+        // kinds convert into engine-owned storage here rather than being stored as given.
+        if (array->elemKind == kEntityElemKind)
+            array->entities.emplace_back(*static_cast<Entity* const*>(value));
+        else if (array->elemKind == kStringElemKind)
+        {
+            const char* text = *static_cast<const char* const*>(value);
+            array->strings.emplace_back(text != nullptr ? text : "");
+        }
+        else
+        {
+            array->bytes.resize(array->bytes.size() + array->elemSize);
+            std::memcpy(array->bytes.data() + array->bytes.size() - array->elemSize, value, array->elemSize);
+        }
+    }
+
+    int thunk_arrayGet(VrArray handle, int index, int elemSize, void* outValue)
+    {
+        ScriptArray* array = resolveScriptArray(handle);
+        if (array == nullptr || outValue == nullptr || index < 0 || index >= scriptArrayCount(*array))
+            return 0;
+        if (array->elemKind == kEntityElemKind)
+        {
+            // A refcounted element whose entity has since died reads back as null -- testable in the DSL, which
+            // is the whole reason entities are storable at all.
+            *static_cast<Entity**>(outValue) = array->entities[index].get();
+            return 1;
+        }
+        if (array->elemKind == kStringElemKind)
+        {
+            // Points into engine-owned storage, valid until this array is next mutated -- the same contract
+            // entityGetName already has.
+            *static_cast<const char**>(outValue) = array->strings[index].c_str();
+            return 1;
+        }
+        if (elemSize != array->elemSize)
+            return 0; // the caller's T doesn't match what this array holds -- refuse rather than mis-copy
+        std::memcpy(outValue, array->bytes.data() + static_cast<size_t>(index) * array->elemSize, array->elemSize);
+        return 1;
+    }
+
+    void thunk_arraySet(VrArray handle, int index, int elemSize, const void* value)
+    {
+        ScriptArray* array = resolveScriptArray(handle);
+        if (array == nullptr || value == nullptr || index < 0 || index >= scriptArrayCount(*array))
+            return;
+        if (array->elemKind == kEntityElemKind)
+            array->entities[index] = EntityPtr(*static_cast<Entity* const*>(value));
+        else if (array->elemKind == kStringElemKind)
+        {
+            const char* text = *static_cast<const char* const*>(value);
+            array->strings[index] = text != nullptr ? text : "";
+        }
+        else if (elemSize == array->elemSize)
+            std::memcpy(array->bytes.data() + static_cast<size_t>(index) * array->elemSize, value, array->elemSize);
+    }
+
+    int thunk_arrayCount(VrArray handle)
+    {
+        const ScriptArray* array = resolveScriptArray(handle);
+        return array != nullptr ? scriptArrayCount(*array) : 0;
+    }
+
+    void thunk_arrayClear(VrArray handle)
+    {
+        if (ScriptArray* array = resolveScriptArray(handle); array != nullptr)
+        {
+            array->bytes.clear();
+            array->entities.clear();
+            array->strings.clear();
+        }
+    }
+
     // ---- context thunks -----------------------------------------------------
     void thunk_log(const char* message) { Log::info(message ? message : ""); }
     void thunk_logf(const char* message, ...) 

@@ -214,9 +214,16 @@ void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
         scriptModule = loaded;
     }
 
-    if (scriptModule->dataSize != scriptDataSize)
+    // The block is REUSED across a hot-reload only when both its size and its LAYOUT match -- reinterpreting
+    // one layout as another silently corrupts every field, and a VrArray field reinterpreted from something
+    // else would strand the array it named. Reusing it is what makes reload free for arrays: the handles
+    // survive, so the engine-side contents survive with nothing to copy. On a mismatch the old arrays are
+    // released first -- once the block goes, nothing can reach those handles again.
+    if (scriptModule->dataSize != scriptDataSize || scriptModule->dataLayoutId != scriptDataLayoutId)
     {
+        releaseScriptArrays(*this);
         scriptDataSize = scriptModule->dataSize;
+        scriptDataLayoutId = scriptModule->dataLayoutId;
         scriptData = scriptDataSize ? std::make_unique<uint8[]>(scriptDataSize) : nullptr;
 
         // Required-component pointers (//@@require) occupy the FRONT of ScriptData, one 8-byte slot per set bit
@@ -289,6 +296,13 @@ void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
 
     if (scriptModule->onEvent)
         Globals::scriptEvents.unregisterListener(scriptModule, &entity);
+}
+
+// Arrays are released here rather than in destroy(): destroy() is the SCRIPT's teardown hook (it runs
+// OnDestroy, which may still read them) and isn't reached on every path that frees a component.
+ScriptComponent::~ScriptComponent()
+{
+    releaseScriptArrays(*this);
 }
 
 void PhysicsComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)

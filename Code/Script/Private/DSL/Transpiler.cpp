@@ -12,6 +12,10 @@ namespace
 
 	const char* cppTypeName(DSLType type)
 	{
+		// An array is a HANDLE on the script side -- the elements live engine-side (see VrArray in ScriptAPI.h),
+		// which is what lets one sit in ScriptData and survive a hot-reload without being copied.
+		if (dslIsArrayType(type))
+			return "VrArray";
 		// Engine-defined structs carry their own C++ spelling in the registry.
 		if (const BindingStruct* structDef = Globals::scriptBindings.structFor(type); structDef != nullptr)
 			return structDef->cppName;
@@ -23,8 +27,13 @@ namespace
 		case DSLType::Bool:    return "bool";
 		case DSLType::String:  return "const char*";
 		case DSLType::Entity:  return "Entity*"; // the ABI mirror struct (ScriptAPI.h) -- always by pointer, and nullable
-		default:               return "/* unsupported DSLType */ void*"; // the other engine-object kinds never declare values
+		default: break;
 		}
+		// Component handles cross the ABI as opaque void* (every component function takes one), so an
+		// `ifcomponent`-bound variable declares as void* and passes straight through with no cast.
+		if (dslIsComponentType(type))
+			return "void*";
+		return "/* unsupported DSLType */ void*"; // the other engine-object kinds never declare values
 	}
 
 	// The type-appropriate default an unresolved value falls back to -- a committed document never actually
@@ -32,6 +41,8 @@ namespace
 	// both want the SAME rule if one ever slips through, so it's one switch, not two.
 	std::string defaultValueText(DSLType type, const ScriptBindings& bindings)
 	{
+		if (dslIsArrayType(type))
+			return "0"; // no array yet -- the first push creates one and writes its handle back (see VrArray)
 		if (const BindingStruct* structDef = bindings.structFor(type); structDef != nullptr)
 			return std::string(structDef->cppName) + "()";
 		switch (type)
@@ -87,7 +98,10 @@ namespace
 			switch (c.type)
 			{
 			case DSLType::Float:  return floatLiteral(c.value);
-			case DSLType::String: return "\"" + c.value + "\""; // content stored unquoted, no escapes in the DSL
+			// Interned rather than emitted as a bare literal: a literal lives in the script DLL's .rdata and
+			// dangles once that DLL is unloaded, so anything outliving the call (a persistent ScriptData
+			// string, an array element) would break on the next hot-reload. See internString in ScriptAPI.h.
+			case DSLType::String: return "ctx->internString(\"" + c.value + "\")"; // content stored unquoted, no escapes in the DSL
 			case DSLType::Entity: return "nullptr";             // the ONLY Entity constant is `null` (see KeywordNull)
 			default:              return c.value;               // Int/Bool exactly as authored
 			}
@@ -123,6 +137,21 @@ namespace
 					++p;
 					continue;
 				}
+				result += *p;
+			}
+			return result;
+		}
+
+		// A sequence's `at` template: "$r" as usual, plus "$i" for the loop's own index variable (see the
+		// ForEach case). Separate from substituteTemplate because "$i" has no meaning anywhere else.
+		static std::string substituteSequenceIndex(const char* atTemplate, const std::string& receiverName,
+			const std::string& indexName)
+		{
+			std::string result;
+			for (const char* p = atTemplate; *p != '\0'; ++p)
+			{
+				if (*p == '$' && p[1] == 'r') { result += receiverName; ++p; continue; }
+				if (*p == '$' && p[1] == 'i') { result += indexName; ++p; continue; }
 				result += *p;
 			}
 			return result;
@@ -422,6 +451,47 @@ namespace
 					: "else if (" + expressionText(flow->condition) + ")");
 				openBlock();
 				return;
+			case DSLFlowControl::IfComponent:
+			{
+				// The fetch IS the condition, so no separate null check is emitted and the handle can't outlive
+				// the statement. Note C++ scopes a declaration-in-condition across BOTH branches, so an attached
+				// `else` could legally name it here -- the DSL is stricter and doesn't let it be referenced
+				// there at all (see inScopeVariables: the binding dies at this block's end, which is exactly
+				// where the else begins).
+				const DSLSymbol::VariableDeclaration& bound = std::get<DSLSymbol::VariableDeclaration>(flow->forLoopVar->data);
+				const DSLType componentType = std::get<DSLSymbol::TypeDeclaration>(bound.typeSymbol->data).type;
+				const char* fetchEmit = bindings.componentFetchEmit(componentType);
+				const std::string fetchText = (fetchEmit != nullptr)
+					? substituteTemplate(fetchEmit, expressionText(flow->condition), {}) : std::string("nullptr");
+				emitLine("if (" + std::string(cppTypeName(componentType)) + " " + bound.name + " = " + fetchText + ")");
+				openBlock();
+				openScopes.push_back(line.scopeLevel);
+				return;
+			}
+			case DSLFlowControl::ForEach:
+			{
+				// The sequence's count/at emits come from the receiver's own registration (BindingObject's
+				// sequence* fields) -- an array walks the generic handle ABI, an engine collection its own
+				// count/at pair. The index is a generated local the DSL author can't name, so the only way to
+				// index the sequence is the one the loop does, and `at` is range-safe by contract.
+				const DSLSymbol::VariableDeclaration& elem = std::get<DSLSymbol::VariableDeclaration>(flow->forLoopVar->data);
+				const DSLType elemType = std::get<DSLSymbol::TypeDeclaration>(elem.typeSymbol->data).type;
+				const std::string receiver = expressionText(flow->condition);
+				std::string countText, atText;
+				if (const BindingObject* object = bindings.objectFor(dslValueType(flow->condition));
+					object != nullptr && object->sequenceCountEmit != nullptr && object->sequenceAtEmit != nullptr)
+				{
+					countText = substituteTemplate(object->sequenceCountEmit, receiver, {});
+					atText = substituteSequenceIndex(object->sequenceAtEmit, receiver, "vrIdx" + std::to_string(openScopes.size()));
+				}
+				const std::string indexName = "vrIdx" + std::to_string(openScopes.size());
+				emitLine("for (int " + indexName + " = 0, " + indexName + "End = " + countText + "; "
+					+ indexName + " < " + indexName + "End; ++" + indexName + ")");
+				openBlock();
+				emitLine(std::string(cppTypeName(elemType)) + " " + elem.name + " = " + atText + ";");
+				openScopes.push_back(line.scopeLevel);
+				return;
+			}
 			case DSLFlowControl::For:
 				emitLine("for (" + declarationText(flow->forLoopVar) + "; "
 					+ expressionText(flow->forCondition) + "; " + expressionText(flow->forIncrement) + ")");
@@ -447,6 +517,19 @@ std::string Transpiler::transpile(const DSL& document, const ScriptBindings& bin
 	Emitter emitter{ document, bindings };
 
 	emitter.emitLine("// Generated by the DSL transpiler -- do not edit (the source is the //@@dsl block below).");
+
+	// Array access helpers. EVERY read/write/append of a `T[]` goes through one of these, and each one checks
+	// the pointer the engine handed back before touching it -- a stale handle or an out-of-range index resolves
+	// to null there (see VrArray / arrayAt in ScriptAPI.h), so an OOB read yields a default, an OOB write is
+	// dropped, and neither can reach memory the engine doesn't own. Emitted unconditionally: they're templates,
+	// so an unused one costs nothing.
+	emitter.emitLine("");
+	emitter.emitLine("template<class T> static T vrArrGet(const ScriptContext* ctx, VrArray h, int i)");
+	emitter.emitLine("{ T v = T(); ctx->arrayGet(h, i, (int)sizeof(T), &v); return v; }");
+	emitter.emitLine("template<class T> static void vrArrSet(const ScriptContext* ctx, VrArray h, int i, const T& v)");
+	emitter.emitLine("{ ctx->arraySet(h, i, (int)sizeof(T), &v); }");
+	emitter.emitLine("template<class T> static void vrArrPush(const ScriptContext* ctx, Entity* self, VrArray* h, int kind, const T& v)");
+	emitter.emitLine("{ ctx->arrayPush(self, h, kind, (int)sizeof(T), &v); }");
 
 	// self.data's backing struct, plus one cached pointer field per required component (//@@require) the HOST
 	// (not this generated code) fills in straight off getComponent<T>() right after allocating the block
@@ -485,6 +568,26 @@ std::string Transpiler::transpile(const DSL& document, const ScriptBindings& bin
 		{
 			emitter.emitLine("");
 			emitter.emitLine("SCRIPT_EXPORT unsigned int ScriptDataSize(void) { return sizeof(ScriptData); }");
+			// Hashed from the FIELD LAYOUT, not the size: the host reuses an existing data block across a
+			// hot-reload only while this matches, so reinterpreting one layout as another can't happen (see
+			// ScriptDataLayoutIdFn). Required components are part of it -- they occupy the block's leading slots.
+			{
+				uint32 layoutHash = 2166136261u; // FNV-1a over "<type>:<name>;" per field, in layout order
+				const auto hashText = [&layoutHash](const std::string& text)
+				{
+					for (char ch : text)
+					{
+						layoutHash ^= static_cast<uint8>(ch);
+						layoutHash *= 16777619u;
+					}
+				};
+				for (DSLType componentType : requiredSorted)
+					hashText(std::string(bindings.componentTypeName(componentType) ? bindings.componentTypeName(componentType) : "?") + ":*;");
+				for (const DSLDataField& field : document.dataFields)
+					hashText(std::string(dslTypeName(field.type)) + ":" + field.name + ";");
+				emitter.emitLine("SCRIPT_EXPORT unsigned int ScriptDataLayoutId(void) { return "
+					+ std::to_string(layoutHash) + "u; }");
+			}
 			emitter.emitLine("REGISTER_SCRIPT_DATA_SIZE()");
 
 			if (!requiredSorted.empty())

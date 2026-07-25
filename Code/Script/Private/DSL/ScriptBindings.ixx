@@ -129,6 +129,15 @@ export struct BindingObject
 	                                  // (see ScriptBindings::build) -- reachable only via another binding's member
 	std::vector<BindingFunc> functions;
 	std::vector<BindingMember> members;
+	// Makes this object ITERABLE: "foreach Entity child in self.scene" walks it without the author ever seeing
+	// an index, which is what makes an out-of-range access unauthorable. Void elementType = not a sequence.
+	// The two emits are ordinary templates ("$r" = the receiver's expression, plus "$i" for the index in
+	// `atEmit`) so an engine collection becomes iterable for the cost of one row plus whatever count/at pair
+	// the ABI already has -- nothing is copied into script memory. `atEmit` MUST be range-safe on its own
+	// terms (sceneGetChildAt returns null past the end); the loop only ever passes indices below countEmit.
+	DSLType sequenceElementType = DSLType::Void;
+	const char* sequenceCountEmit = nullptr; // "ctx->sceneGetChildCount($r)"
+	const char* sequenceAtEmit = nullptr;    // "ctx->sceneGetChildAt($r, $i)"
 };
 
 export class ScriptBindings
@@ -160,7 +169,18 @@ public:
 	// functions, reachable only by dotting through self.physics, matching the sidebarTopLevel=false pattern --
 	// with no positional-call shape to it (unlike registerStruct), since a component is fetched, never
 	// constructed.
-	DSLType registerComponentType(const char* memberName, const char* typeName, int componentBit);
+	// `fetchEmit` reaches the component off an ARBITRARY entity ("ctx->entityGetPhysicsComponent($r)"), which
+	// can come back null -- what `ifcomponent` emits (see componentFetchEmit). The self.<memberName> member
+	// registered here is the OTHER path: a pointer the host cached for this script, non-null by construction
+	// because //@@require guarantees the component exists, and offered only on a `self` receiver.
+	DSLType registerComponentType(const char* memberName, const char* typeName, int componentBit, const char* fetchEmit);
+	// Registers one SEQUENCE type -- a read-only, iterate-only view over an engine collection, returned by the
+	// accessor that exposes it ("self.scene.getChildren()" -> "EntityList"). Nothing is copied: that accessor's
+	// emit is just "$r", so the value IS its receiver's expression, and these two templates run against it --
+	// `countEmit` with "$r", `atEmit` with "$r" plus "$i" for the loop index. foreach is the only consumer, so
+	// an out-of-range access can't be authored; `atEmit` should still be range-safe on its own terms.
+	// Distinct from an ARRAY (T[]), which is storage the script owns a handle to.
+	DSLType registerSequenceType(const char* name, DSLType elementType, const char* countEmit, const char* atEmit);
 	// Registers one toggleable ScriptAPI entry point (see EntryPointDef) -- same guarantee.
 	void registerEntryPoint(EntryPointDef def);
 
@@ -200,6 +220,12 @@ public:
 	// `type`'s registered name (nullptr if `type` isn't a registered component type) -- the reverse of
 	// registerComponentType/typeByName, what dslTypeName renders a component-type DSLType as.
 	const char* componentTypeName(DSLType type) const;
+	// Same, for a registered SEQUENCE type (nullptr if `type` isn't one).
+	const char* sequenceTypeName(DSLType type) const;
+	// `type`'s "fetch it off this entity" emit template, "$r" being the entity (nullptr if `type` isn't a
+	// registered component type) -- what `ifcomponent` binds its variable from. Distinct from the cached
+	// self.<component> member, which needs no fetch at all; see registerComponentType.
+	const char* componentFetchEmit(DSLType type) const;
 	// `type`'s registered EComponentID bit (-1 if `type` isn't a registered component type) -- what
 	// Transpiler.cpp sorts ScriptData's required-component fields by and folds into ScriptRequiredComponents'
 	// bitmask; see registerComponentType.
@@ -241,6 +267,8 @@ private:
 	std::vector<BindingObject> m_objectDefs;
 	std::vector<const char*> m_componentTypeNames; // index N = DSLType dslComponentType(N)
 	std::vector<int> m_componentBits;              // parallel to m_componentTypeNames -- the EComponentID bit
+	std::vector<const char*> m_componentFetchEmits; // parallel too -- see componentFetchEmit
+	std::vector<const char*> m_sequenceTypeNames;  // index N = DSLType dslSequenceType(N)
 	std::vector<EntryPointDef> m_entryPointDefs;
 
 	// Symbols built from the above by build() -- called once, well after every registration that should be
@@ -248,6 +276,10 @@ private:
 	std::vector<BuiltObject> m_built;
 	std::vector<BuiltStruct> m_builtStructs;     // index N = DSLType dslStructType(N)
 	std::vector<std::pair<const DSLSymbol*, const char*>> m_emits; // function symbol -> emit template
+	// Backing storage for the array types' generated emit templates (see build()). Everything else's emits are
+	// string literals owned by the caller; these are composed per element type, so they need an owner with a
+	// stable address -- unique_ptr, since the vector itself reallocates as more are added.
+	std::vector<std::unique_ptr<std::string>> m_arrayEmits;
 };
 
 // The one registry instance (house singleton pattern) -- registrations (built-in and external alike) accumulate

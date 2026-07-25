@@ -309,6 +309,9 @@ bool ScriptHost::loadDll(CachedScript& slot, const fs::path& dll)
     slot.entries.dataSize = 0;
     if (auto sizeFn = (uint32(*)())GetProcAddress(m, "ScriptDataSize"))
         slot.entries.dataSize = sizeFn();
+    slot.entries.dataLayoutId = 0;
+    if (auto layoutFn = (uint32(*)())GetProcAddress(m, "ScriptDataLayoutId"))
+        slot.entries.dataLayoutId = layoutFn();
     slot.entries.requiredComponents = 0;
     if (auto reqFn = (uint32(*)())GetProcAddress(m, "ScriptRequiredComponents"))
         slot.entries.requiredComponents = reqFn();
@@ -354,6 +357,7 @@ const ScriptModule* ScriptHost::getOrLoad(const std::string& path, bool forceRec
         slot.entries.onEvent        = e->fns[VR_SCRIPT_ON_EVENT];
         slot.entries.onPhysicsEvent = e->fns[VR_SCRIPT_ON_PHYSICS_EVENT];
         slot.entries.dataSize       = e->fns[VR_SCRIPT_DATA_SIZE] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_DATA_SIZE])() : 0;
+        slot.entries.dataLayoutId   = e->fns[VR_SCRIPT_DATA_LAYOUT_ID] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_DATA_LAYOUT_ID])() : 0;
         slot.entries.requiredComponents = e->fns[VR_SCRIPT_REQUIRED_COMPONENTS] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_REQUIRED_COMPONENTS])() : 0;
         slot.entries.eventNames.clear();
         if (void* ec = e->fns[VR_SCRIPT_EVENT_COUNT]; ec && e->fns[VR_SCRIPT_EVENT_NAME])

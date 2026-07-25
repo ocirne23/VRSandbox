@@ -320,6 +320,13 @@ private:
 		FunctionDeclareReturnType, // picking the "-> type" for the function being declared; confirm commits the
 		                           // whole function WITH it (distinct from FunctionReturnType, which edits an
 		                           // already-committed header's return-type span directly)
+		// "foreach <type> <name> in <sequence>", staged like every other flow header -- nothing lands in the
+		// document until the sequence resolves. ForEachSource is a chain compose whose candidates are filtered
+		// to values yielding the picked element type (see sequenceYields).
+		ForEachType, ForEachName, ForEachSource,
+		// "ifcomponent <ComponentType> <name> in <entity>" -- the same three-stage shape as foreach, with the
+		// type picked from the registered component types and the source constrained to an Entity.
+		IfComponentType, IfComponentName, IfComponentSource,
 	};
 
 	// Editing.
@@ -515,6 +522,14 @@ private:
 	std::string forVarDeclPrefix() const;   // forVarPrefix() + the resolved initial value -- the whole loop-var clause
 	std::string forConditionPrefix() const; // forVarDeclPrefix() + ", <name> <op> <value>" -- the whole condition clause too
 	void commitForStatement(); // ForIncrementValue's confirm: commits the whole new for-loop
+	std::string forEachPrefix() const; // "foreach <type> <name> in " -- everything before the sequence
+	void commitForEachStatement(const PendingExprChain& sequence); // ForEachSource's confirm: commits the whole loop
+	// Whether `sequenceType` iterates as `elementType` -- a registered BindingSequence (self.scene) or an array
+	// of it. What ForEachSource filters its candidates by, so only iterable values of the right element type
+	// are offered in the first place.
+	bool sequenceYields(DSLType sequenceType, DSLType elementType) const;
+	std::string ifComponentPrefix() const; // "ifcomponent <Type> <name> in " -- everything before the entity
+	void commitIfComponentStatement(const PendingExprChain& entity); // IfComponentSource's confirm
 	DSLType reassignTargetType() const; // m_reassignTarget's own declared type
 	// Same `terms`/`ops` convention as applyDeclareVariable, for a `name = value` statement instead.
 	void commitReassignStatement(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops);
@@ -751,6 +766,18 @@ private:
 	Candidate m_forIncrementOpCandidate;
 	PendingExprChain m_forIncrementValueChain;
 	DSLSymbol* m_forBuildLoopVar = nullptr; // build-time only: what sentinel loop-var candidates resolve to
+
+	// The staged foreach flow (ForEachType -> ForEachName -> ForEachSource, committed by commitForEachStatement).
+	// Simpler than the for-loop's: the element declaration has no initializer, and the sequence is a single
+	// chain compose. Nothing touches the document until the sequence resolves. The element variable can't be
+	// referenced by the sequence (it isn't in scope until the body), so no sentinel candidate is needed here.
+	DSLType m_forEachElementType = DSLType::Void;
+	std::string m_forEachElementName;
+
+	// The staged ifcomponent flow (IfComponentType -> IfComponentName -> IfComponentSource, committed by
+	// commitIfComponentStatement) -- structurally identical to the foreach one above.
+	DSLType m_ifComponentType = DSLType::Void;
+	std::string m_ifComponentName;
 
 	// Non-null: the condition flow is authoring a NEW elseif branch for the chain this If/ElseIf head opens --
 	// picked as an "elseif" statement candidate INSIDE that branch (m_conditionOriginLine is the blank line it

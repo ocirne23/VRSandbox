@@ -120,7 +120,9 @@ export struct Candidate
 		               // comparison; resolves to a Constant of type Entity holding "null" (Transpiler emits
 		               // "nullptr"). Entity is the only nullable type in the DSL: components are gated by the
 		               // require set, and the other engine objects are always present.
-		Variable, Function, DeclareType, Literal, Comparator, DeclareFunction, KeywordFor, AssignOperator, Reassign,
+		Variable, Function, DeclareType, Literal, Comparator, DeclareFunction, KeywordFor, KeywordForEach,
+		KeywordIfComponent, // "ifcomponent" -- stages a component type, a name, and the entity to fetch from
+		AssignOperator, Reassign,
 		ArithmeticOperator, LogicalOperator,
 		KeywordElseIf, KeywordElse, // offered only on a statement slot INSIDE an if/elseif branch -- confirming
 		                            // grows the chain with a new branch after the enclosing one (the elseif

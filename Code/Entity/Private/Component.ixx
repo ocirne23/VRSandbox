@@ -133,6 +133,12 @@ export struct AnimatorComponent
     void deserialize(const AssetNode&) {}
 };
 
+export struct ScriptComponent;
+// Frees every engine-owned script array the component created (see ScriptComponent::ownedArrays). Defined in
+// ScriptContext.cpp next to the registry itself; called when the component dies and whenever its ScriptData
+// block is discarded, which is the moment the handles inside it stop being reachable.
+void releaseScriptArrays(ScriptComponent& owner);
+
 // References a visual script (.scr) the entity runs each frame. The Script library compiles the file on
 // demand and ticks it with this entity as `self`, so the script's Get/Set Entity nodes read and write
 // this entity's fields. Holds no execution state itself (Entity must not depend on the Script library).
@@ -143,7 +149,16 @@ export struct ScriptComponent
     const ScriptModule* scriptModule = nullptr;
     std::unique_ptr<uint8[]> scriptData;
     uint32 scriptDataSize = 0;
+    uint32 scriptDataLayoutId = 0; // what the block was allocated against -- a reload with a different layout
+                                    // can't reuse it (see ScriptDataLayoutIdFn in ScriptAPI.h)
     bool enabled = true;
+
+    // Every engine-owned array (the DSL's `T[]`) this script created, by handle -- the ScriptData block only
+    // holds the ids, so this is what actually owns the storage and frees it when the component dies or its
+    // data block is discarded. See the array registry in ScriptContext.cpp.
+    std::vector<uint32> ownedArrays;
+
+    ~ScriptComponent();
 
     struct SpawnInfo
     {

@@ -31,22 +31,43 @@ void ScriptBindings::registerObject(BindingObject def)
 	m_objectDefs.push_back(std::move(def));
 }
 
-DSLType ScriptBindings::registerComponentType(const char* memberName, const char* typeName, int componentBit)
+DSLType ScriptBindings::registerComponentType(const char* memberName, const char* typeName, int componentBit, const char* fetchEmit)
 {
 	const DSLType type = dslComponentType(static_cast<int>(m_componentTypeNames.size()));
 	m_componentTypeNames.push_back(typeName);
 	m_componentBits.push_back(componentBit);
+	m_componentFetchEmits.push_back(fetchEmit);
 	// self must already be registered by now (guaranteed by the caller -- see Entity's registerScriptDslBindings)
 	// -- appended to IN PLACE, not re-registered, so every OTHER caller's earlier self.<member>s survive. The
 	// member's own gate IS `type` itself (see DSL::requiredComponents) -- there's nothing else it could sensibly
-	// be. The emit is purely mechanical ("scriptData->" + the member's own name) -- see the .ixx declaration for
-	// why there's no per-call fetch expression anymore: the host caches the pointer itself.
+	// be. Its emit is the host-cached pointer ("scriptData->" + the member's own name), valid precisely because
+	// that gate guarantees the component exists; reaching ANOTHER entity's component goes through `ifcomponent`
+	// and componentFetchEmit instead, which is where the null case is handled.
 	for (BindingObject& object : m_objectDefs)
 		if (object.name != nullptr && std::string_view(object.name) == "self")
 		{
-			object.members.push_back({ memberName, type, "scriptData->" + std::string(memberName), /*writable*/ false, /*requiredComponent*/ type });
+			object.members.push_back({ memberName, type, "scriptData->" + std::string(memberName),
+				/*writable*/ false, /*requiredComponent*/ type });
 			break;
 		}
+	return type;
+}
+
+DSLType ScriptBindings::registerSequenceType(const char* name, DSLType elementType, const char* countEmit, const char* atEmit)
+{
+	const DSLType type = dslSequenceType(static_cast<int>(m_sequenceTypeNames.size()));
+	m_sequenceTypeNames.push_back(name);
+	// A BindingObject like any other, so objectFor/findMember/the editor/the transpiler need no new case -- it
+	// just happens to carry only the sequence templates. Not sidebar-top-level: the only way to get one is the
+	// accessor that returns it.
+	BindingObject object;
+	object.name = name;
+	object.type = type;
+	object.sidebarTopLevel = false;
+	object.sequenceElementType = elementType;
+	object.sequenceCountEmit = countEmit;
+	object.sequenceAtEmit = atEmit;
+	m_objectDefs.push_back(std::move(object));
 	return type;
 }
 
@@ -101,6 +122,48 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 		m_emits.emplace_back(funcSymbol, emit);
 		return funcSymbol;
 	};
+
+	// ARRAY types (T[]) get a synthetic BindingObject each, generated here rather than registered by anyone:
+	// they're derived from the element types, so the set is only knowable once every registration is in. Doing
+	// it this way means arrays need no special-casing downstream at all -- objectFor/findMember/functionSymbols/
+	// emitFor and the whole editor + transpiler treat "int[]" exactly like any other chainable binding.
+	// Appended to m_objectDefs BEFORE the build loop below, so that loop picks them up with everything else
+	// (and nothing holds a pointer into the vector across the append).
+	{
+		std::vector<DSLType> elementTypes{ DSLType::Int, DSLType::Float, DSLType::Bool, DSLType::String, DSLType::Entity };
+		for (size_t i = 0; i < m_structDefs.size(); ++i)
+			elementTypes.push_back(dslStructType(static_cast<int>(i)));
+
+		for (DSLType elementType : elementTypes)
+		{
+			// Every array function routes through the same generic ABI (see VrArray in ScriptAPI.h): "$r" is the
+			// handle field itself, so push takes its ADDRESS to create the array on first use and write the id
+			// back. The generated helpers (see Transpiler's preamble) do the null-check and the cast, which is
+			// what keeps a stale handle or an out-of-range index from ever touching memory.
+			const std::string elementName = dslTypeName(elementType);
+			m_arrayEmits.push_back(std::make_unique<std::string>(
+				"vrArrPush<" + elementName + ">(ctx, self, &$r, " + std::to_string(static_cast<int>(elementType)) + ", $1)"));
+			const char* pushEmit = m_arrayEmits.back()->c_str();
+
+			BindingObject arrayObject;
+			arrayObject.name = "array";   // never shown: sidebarTopLevel is false, so it's only ever reached by
+			arrayObject.type = dslArrayOf(elementType); // dotting into an array-typed value
+			arrayObject.sidebarTopLevel = false;
+			arrayObject.functions = {
+				{ "push",  DSLType::Void, { { "value", elementType } }, pushEmit },
+				{ "clear", DSLType::Void, {},                           "ctx->arrayClear($r)" },
+			};
+			arrayObject.members = {
+				{ "count", DSLType::Int, "ctx->arrayCount($r)", /*writable*/ false },
+			};
+			// An array is iterable by construction -- this is what "foreach int v in self.data.scores" walks.
+			arrayObject.sequenceElementType = elementType;
+			arrayObject.sequenceCountEmit = "ctx->arrayCount($r)";
+			m_arrayEmits.push_back(std::make_unique<std::string>("vrArrGet<" + elementName + ">(ctx, $r, $i)"));
+			arrayObject.sequenceAtEmit = m_arrayEmits.back()->c_str();
+			m_objectDefs.push_back(std::move(arrayObject));
+		}
+	}
 
 	for (size_t i = 0; i < m_structDefs.size(); ++i)
 	{
@@ -190,6 +253,26 @@ const char* ScriptBindings::componentTypeName(DSLType type) const
 	if (index < 0 || index >= static_cast<int>(m_componentTypeNames.size()))
 		return nullptr;
 	return m_componentTypeNames[index];
+}
+
+const char* ScriptBindings::componentFetchEmit(DSLType type) const
+{
+	if (!dslIsComponentType(type))
+		return nullptr;
+	const int index = dslComponentTypeIndex(type);
+	if (index < 0 || index >= static_cast<int>(m_componentFetchEmits.size()))
+		return nullptr;
+	return m_componentFetchEmits[index];
+}
+
+const char* ScriptBindings::sequenceTypeName(DSLType type) const
+{
+	if (!dslIsSequenceType(type))
+		return nullptr;
+	const int index = dslSequenceIndex(type);
+	if (index < 0 || index >= static_cast<int>(m_sequenceTypeNames.size()))
+		return nullptr;
+	return m_sequenceTypeNames[index];
 }
 
 int ScriptBindings::componentBit(DSLType type) const

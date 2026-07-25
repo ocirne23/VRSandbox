@@ -6,6 +6,16 @@ import :ScriptLang;
 
 const char* dslTypeName(DSLType type)
 {
+	// An array renders as its element type plus "[]". Composed on demand into a per-element cache so the
+	// return stays a stable `const char*` like every other branch here (callers hold it as one).
+	if (dslIsArrayType(type))
+	{
+		static std::unordered_map<uint16, std::string> names;
+		auto it = names.find(static_cast<uint16>(type));
+		if (it == names.end())
+			it = names.emplace(static_cast<uint16>(type), std::string(dslTypeName(dslArrayElementType(type))) + "[]").first;
+		return it->second.c_str();
+	}
 	// Struct types are dynamic -- their spelling lives in the registry (see DSLType::FirstStruct).
 	if (const BindingStruct* structDef = Globals::scriptBindings.structFor(type); structDef != nullptr)
 		return structDef->name;
@@ -13,6 +23,9 @@ const char* dslTypeName(DSLType type)
 	// here -- see DSLType::FirstComponentType).
 	if (const char* componentName = Globals::scriptBindings.componentTypeName(type); componentName != nullptr)
 		return componentName;
+	// So are registered sequence types (EntityList and friends -- see registerSequenceType).
+	if (const char* sequenceName = Globals::scriptBindings.sequenceTypeName(type); sequenceName != nullptr)
+		return sequenceName;
 	switch (type)
 	{
 	case DSLType::Void:         return "void";
@@ -42,6 +55,8 @@ namespace
 		case DSLFlowControl::Else:   return "else";
 		case DSLFlowControl::While:  return "while";
 		case DSLFlowControl::For:    return "for";
+		case DSLFlowControl::ForEach:return "foreach";
+		case DSLFlowControl::IfComponent: return "ifcomponent";
 		case DSLFlowControl::Return: return "return";
 		case DSLFlowControl::Break:  return "break";
 		default:                     return "?";
@@ -230,6 +245,22 @@ namespace
 				renderSymbol(fc.forCondition, compact, false, {}, outText, outSpans);
 				outText += ", ";
 				renderSymbol(fc.forIncrement, compact, false, {}, outText, outSpans);
+				break;
+			}
+			if (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfComponent)
+			{
+				// "foreach <type> <name> in <sequence>" / "ifcomponent <Type> <name> in <entity>" -- identical
+				// shape: the bound declaration renders like a function parameter (type + name, never an initial
+				// value -- the construct supplies it), and the source is a plain value slot so it can be
+				// re-edited/replaced like any other.
+				const size_t start = outText.size();
+				outText += flowControlKeyword(fc.control);
+				appendSpan(symbol, outText, start, outSpans, slot);
+				outText += " ";
+				renderSymbol(fc.forLoopVar, compact, /*isFunctionParamContext*/ true, {}, outText, outSpans);
+				outText += " in ";
+				renderSymbol(fc.condition, compact, false,
+					SlotRef{ SlotRef::Kind::FlowControlCondition, symbol, symbol->line }, outText, outSpans);
 				break;
 			}
 			const size_t start = outText.size();
@@ -467,11 +498,19 @@ namespace
 				}
 				// atLine is genuinely nested inside this same block -- its declarations count, fall through.
 			}
+			// A block header that declares its OWN variable (a for counter, a foreach element, an ifcomponent
+			// binding) declares it on the header line -- at the header's own, shallower scopeLevel -- but scopes
+			// it to just the body, so it goes out of scope at the block's end like anything inside it. For
+			// ifcomponent that end is where an `else` begins, which is exactly what keeps the bound component
+			// unreachable there (C++ would leave it in scope across both branches; the DSL must not).
 			const DSLSymbol* head = line.head();
-			if (head != nullptr && head->type == ST::FlowControl
-				&& std::get<DSLSymbol::FlowControl>(head->data).control == DSLFlowControl::For
-				&& atIndex >= dslBlockEnd(file, i))
-				continue; // past this loop's `end` -- its own counter (declared on this header line) is out of scope
+			if (head != nullptr && head->type == ST::FlowControl && atIndex >= dslBlockEnd(file, i))
+			{
+				const DSLFlowControl control = std::get<DSLSymbol::FlowControl>(head->data).control;
+				if (control == DSLFlowControl::For || control == DSLFlowControl::ForEach
+					|| control == DSLFlowControl::IfComponent)
+					continue;
+			}
 			for (const std::unique_ptr<DSLSymbol>& s : line.symbols)
 				if (s->type == ST::VariableDeclaration)
 					result.push_back(s.get());
@@ -511,10 +550,21 @@ namespace
 				continue;
 			const DSLSymbol::VariableDeclaration& v = std::get<DSLSymbol::VariableDeclaration>(var->data);
 			const DSLType varType = std::get<DSLSymbol::TypeDeclaration>(v.typeSymbol->data).type;
-			// Engine-object bindings (self/physics/...) are never plain values or assignment targets --
-			// they're offered as Kind::BindingObject dot-into candidates instead (ScriptEditor appends those,
-			// gated on the script's required-components set).
-			if (dslIsEngineObjectType(varType))
+			// SIDEBAR bindings (self/physics/...) are never plain values or assignment targets -- they're
+			// offered as Kind::BindingObject dot-into candidates instead (ScriptEditor appends those, gated on
+			// the script's required-components set). Told apart from a local by having no owning line: a
+			// sidebar symbol belongs to the registry, not to any statement.
+			//
+			// ONE exception, in the VALUE pass only: `self` is a genuine Entity, and Entity is a real value type
+			// -- it's what `ifcomponent ... in self` takes, what an Entity parameter accepts, and what an
+			// identity comparison names. It stays un-assignable (never offered for Kind::Reassign), and the
+			// component bindings stay dot-into-only since a component isn't a value at all.
+			//
+			// A LOCAL of an engine-object type is a different thing entirely and IS offered -- a foreach
+			// element ("foreach Entity e in ...") is an ordinary variable that happens to be Entity-typed, and
+			// excluding it would leave it unusable: unnameable as a value, and undottable for its members.
+			if (dslIsEngineObjectType(varType) && var->line == nullptr
+				&& !(varType == DSLType::Entity && kind == Candidate::Kind::Variable))
 				continue;
 			if (!accept(varType))
 				continue;
@@ -568,7 +618,8 @@ bool Syntax::isBlockOpener(const DSLSymbol* head)
 		const DSLFlowControl control = std::get<DSLSymbol::FlowControl>(head->data).control;
 		return control == DSLFlowControl::If || control == DSLFlowControl::ElseIf
 			|| control == DSLFlowControl::Else || control == DSLFlowControl::While
-			|| control == DSLFlowControl::For;
+			|| control == DSLFlowControl::For || control == DSLFlowControl::ForEach
+			|| control == DSLFlowControl::IfComponent;
 	}
 	return false;
 }
@@ -628,6 +679,8 @@ std::vector<Candidate> AutoCompleteRules::candidatesFor(DSLType expectedType, co
 		addIfMatches(out, Candidate{ "if", Candidate::Kind::KeywordIf }, typedPrefix);
 		addIfMatches(out, Candidate{ "while", Candidate::Kind::KeywordWhile }, typedPrefix);
 		addIfMatches(out, Candidate{ "for", Candidate::Kind::KeywordFor }, typedPrefix);
+		addIfMatches(out, Candidate{ "foreach", Candidate::Kind::KeywordForEach }, typedPrefix);
+		addIfMatches(out, Candidate{ "ifcomponent", Candidate::Kind::KeywordIfComponent }, typedPrefix);
 		addIfMatches(out, Candidate{ "return", Candidate::Kind::KeywordReturn }, typedPrefix);
 		addIfMatches(out, Candidate{ "break", Candidate::Kind::KeywordBreak }, typedPrefix);
 
@@ -644,9 +697,14 @@ std::vector<Candidate> AutoCompleteRules::candidatesFor(DSLType expectedType, co
 		if (branchHead != nullptr && branchHead->type == ST::FlowControl)
 		{
 			const DSLFlowControl branchControl = std::get<DSLSymbol::FlowControl>(branchHead->data).control;
-			if (branchControl == DSLFlowControl::If || branchControl == DSLFlowControl::ElseIf)
+			// `ifcomponent` takes an `else` (the entity didn't have one) but no `elseif`: an elseif carries a
+			// bool condition, which has nothing to continue from a component fetch.
+			const bool chainable = branchControl == DSLFlowControl::If || branchControl == DSLFlowControl::ElseIf
+				|| branchControl == DSLFlowControl::IfComponent;
+			if (chainable)
 			{
-				addIfMatches(out, Candidate{ "elseif", Candidate::Kind::KeywordElseIf }, typedPrefix);
+				if (branchControl != DSLFlowControl::IfComponent)
+					addIfMatches(out, Candidate{ "elseif", Candidate::Kind::KeywordElseIf }, typedPrefix);
 				bool chainHasElse = false;
 				for (int i = headerIndex; !chainHasElse; )
 				{
@@ -713,11 +771,12 @@ std::vector<Candidate> AutoCompleteRules::candidatesFor(DSLType expectedType, co
 	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::Variable, excludeVariable, matchesExpected);
 	addFunctionCandidates(out, file, builtins, typedPrefix, /*includeParameterized*/ true, matchesExpected);
 
-	// Struct-typed variables that DON'T match the slot are still offered as dot-into WAYPOINTS ("test" in a
-	// Float slot, toward "test.x") -- Kind::BindingObject, consumable only by '.'/confirm into MemberSelect,
-	// never as the bare value (matching ones already appeared as plain Variable candidates above).
+	// Chainable variables that DON'T match the slot are still offered as dot-into WAYPOINTS ("test" in a Float
+	// slot, toward "test.x"; a foreach's Entity element toward "e.pos") -- Kind::BindingObject, consumable only
+	// by '.'/confirm into MemberSelect, never as the bare value (matching ones already appeared as plain
+	// Variable candidates above).
 	addVariableCandidates(out, atLine, file, sidebar, typedPrefix, Candidate::Kind::BindingObject, excludeVariable,
-		[&](DSLType type) { return dslIsStructType(type) && type != expectedType; });
+		[&](DSLType type) { return dslIsChainableType(type) && type != expectedType; });
 
 	// Free-typed literal entry: only offered once what's typed actually reads as a value of the expected type
 	// (any text is valid String content; Int/Float need looksLike*Literal to hold) -- "bla" must never become
@@ -946,9 +1005,15 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 		c.receiver = receiverDecl;
 		addIfMatches(out, c, typedPrefix);
 	}
+	// A component member (self.physics) is the host-cached pointer for THIS script's own entity -- valid only
+	// on `self`, and only while //@@require guarantees the component is there. Any other entity's component is
+	// reached with `ifcomponent`, which handles the "it might not have one" case structurally. Sidebar symbols
+	// have no owning line (see addVariableCandidates), and self is the only entity-typed one.
+	const bool receiverIsSelf = receiverDecl != nullptr && receiverDecl->line == nullptr;
 	for (const BindingMember& member : *members)
 	{
-		if (member.requiredComponent != DSLType::Void && !dslIsComponentRequired(document, member.requiredComponent))
+		if (member.requiredComponent != DSLType::Void
+			&& (!receiverIsSelf || !dslIsComponentRequired(document, member.requiredComponent)))
 			continue;
 		// A member is writable only if the whole path to it is (see `receiverWritable`) -- everything reachable
 		// through a read-only member is read-only too.
@@ -1037,6 +1102,18 @@ DSLType AutoCompleteRules::expectedTypeForSlot(const SlotRef& slot, const DSLScr
 		const DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(slot.parent->data);
 		if (fc.control == DSLFlowControl::Return)
 			return slot.line != nullptr ? enclosingFunctionReturnType(*slot.line, file) : DSLType::Void;
+		if (fc.control == DSLFlowControl::ForEach)
+		{
+			// The sequence, not a condition: an ARRAY of the element type the loop declares. A registered
+			// BindingSequence (self.scene.getChildren()) isn't array-typed, so re-editing that slot in place
+			// isn't offered -- the whole header re-authors through the staged flow instead.
+			if (fc.forLoopVar == nullptr)
+				return DSLType::Void;
+			const DSLSymbol::VariableDeclaration& elem = std::get<DSLSymbol::VariableDeclaration>(fc.forLoopVar->data);
+			return dslArrayOf(std::get<DSLSymbol::TypeDeclaration>(elem.typeSymbol->data).type);
+		}
+		if (fc.control == DSLFlowControl::IfComponent)
+			return DSLType::Entity; // the entity the component is fetched from
 		return DSLType::Bool; // If/ElseIf/While
 	}
 
@@ -1087,6 +1164,50 @@ DSLType AutoCompleteRules::expectedTypeForSlot(const SlotRef& slot, const DSLScr
 	}
 }
 
+namespace
+{
+	// First index PAST the whole if/elseif/else chain opened at `headerIndex` -- dslBlockEnd only reaches the
+	// end of that one BRANCH, since a sibling `else` sits at the header's own scopeLevel.
+	int chainEnd(const DSLScriptFile& file, int headerIndex)
+	{
+		const int level = file.lines[headerIndex]->scopeLevel;
+		for (int i = headerIndex; ; )
+		{
+			const int next = dslBlockEnd(file, i);
+			if (next >= static_cast<int>(file.lines.size()) || file.lines[next]->scopeLevel != level)
+				return next;
+			const DSLSymbol* head = file.lines[next]->head();
+			if (head == nullptr || head->type != ST::FlowControl)
+				return next;
+			const DSLFlowControl c = std::get<DSLSymbol::FlowControl>(head->data).control;
+			if (c != DSLFlowControl::ElseIf && c != DSLFlowControl::Else)
+				return next;
+			i = next;
+		}
+	}
+
+	// Whether `name` is bound by an `ifcomponent` whose CHAIN encloses `atIndex`. Deliberately wider than what
+	// inScopeVariables makes readable: the binding is readable only in the ifcomponent's own branch, but it
+	// stays RESERVED across the sibling `else` too, because the generated C++ scopes the condition declaration
+	// over the entire if/else -- redeclaring the name in the else would silently shadow it there.
+	bool isChainComponentBinding(const std::string& name, const DSLScriptFile& file, int atIndex, DSLSymbol* excludeVariable)
+	{
+		for (int i = atIndex; i >= 0; --i)
+		{
+			const DSLSymbol* head = file.lines[i]->head();
+			if (head == nullptr || head->type != ST::FlowControl)
+				continue;
+			const DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(head->data);
+			if (fc.control != DSLFlowControl::IfComponent || fc.forLoopVar == nullptr || fc.forLoopVar == excludeVariable)
+				continue;
+			if (atIndex < chainEnd(file, i)
+				&& std::get<DSLSymbol::VariableDeclaration>(fc.forLoopVar->data).name == name)
+				return true;
+		}
+		return false;
+	}
+}
+
 bool AutoCompleteRules::isReservedWord(const std::string& name)
 {
 	// Every fixed word the grammar's statement/expression parsers (ScriptLang.cpp's flowControlKeyword,
@@ -1098,7 +1219,8 @@ bool AutoCompleteRules::isReservedWord(const std::string& name)
 	// declaration needs a type before the name, an assignment an operator, a call parens), so a variable/
 	// function actually named "end" can never produce that single-token line -- safe to allow.
 	static const char* const kKeywords[] = {
-		"if", "elseif", "else", "while", "for", "return", "break", "function", "true", "false", "null",
+		"if", "elseif", "else", "while", "for", "foreach", "ifcomponent", "in", "return", "break", "function",
+		"true", "false", "null",
 		"ctx", "self", "ScriptData", "scriptData" // the Transpiler's auto-injected context parameter (see Transpiler::emitFunction)
 	};
 	for (const char* keyword : kKeywords)
@@ -1146,6 +1268,10 @@ bool AutoCompleteRules::isNameInScope(const std::string& name, const DSLCodeLine
 	for (DSLSymbol* var : inScopeVariables(atLine, file, sidebar))
 		if (var != excludeVariable && std::get<DSLSymbol::VariableDeclaration>(var->data).name == name)
 			return true;
+
+	// An enclosing ifcomponent's binding is reserved even where it isn't readable -- see the helper.
+	if (isChainComponentBinding(name, file, atIndex, excludeVariable))
+		return true;
 
 	// Forward: a declaration made AT atLine stays visible for the rest of ITS OWN enclosing block, nested
 	// blocks included (they can always see outward) -- so anything declared from here through that block's

@@ -122,13 +122,37 @@ export enum class DSLType : uint16
 	ThisBinding,
 	FirstComponentType = 128, // + registered component-type index (see dslComponentType/dslComponentTypeIndex)
 	FirstStruct = 256,        // + struct registry index (see dslStructType/dslStructIndex)
+	// + registered SEQUENCE index (see dslSequenceType/registerSequenceType). A read-only, iterate-only view
+	// over an engine collection -- what "self.scene.getChildren()" returns. Distinct from an array because
+	// there's no storage and no handle behind it: the call emits its RECEIVER, and the sequence's own count/at
+	// templates run against that, so iterating one copies nothing. Placed above the struct range, which it
+	// therefore caps (still 16k structs).
+	FirstSequence = 0x4000,
+	// ARRAY of the type in the low bits ("int[]" = ArrayFlag | Int). A composed type rather than a range of its
+	// own, so it stacks on top of everything above -- including the two DYNAMIC ranges, which is why it's a high
+	// bit and not another FirstX constant. Deliberately NOT nestable: one bit means one level, and "int[][]"
+	// isn't representable (nothing offers it either). An array's storage is engine-owned and reached through a
+	// handle (see VrArray in ScriptAPI.h); the DSL sees it as a chainable type carrying count/push/clear.
+	ArrayFlag = 0x8000,
 };
 
 export constexpr bool dslIsComponentType(DSLType type) { return type >= DSLType::FirstComponentType && type < DSLType::FirstStruct; }
 export constexpr int dslComponentTypeIndex(DSLType type) { return static_cast<int>(type) - static_cast<int>(DSLType::FirstComponentType); }
 export constexpr DSLType dslComponentType(int index) { return static_cast<DSLType>(static_cast<int>(DSLType::FirstComponentType) + index); }
 
-export constexpr bool dslIsStructType(DSLType type) { return type >= DSLType::FirstStruct; }
+export constexpr bool dslIsArrayType(DSLType type) { return (static_cast<int>(type) & static_cast<int>(DSLType::ArrayFlag)) != 0; }
+export constexpr DSLType dslArrayElementType(DSLType type) { return static_cast<DSLType>(static_cast<int>(type) & ~static_cast<int>(DSLType::ArrayFlag)); }
+// Arrays don't nest -- an already-array type is returned unchanged rather than gaining a second level.
+export constexpr DSLType dslArrayOf(DSLType elementType) { return static_cast<DSLType>(static_cast<int>(elementType) | static_cast<int>(DSLType::ArrayFlag)); }
+
+export constexpr bool dslIsSequenceType(DSLType type) { return type >= DSLType::FirstSequence && !dslIsArrayType(type); }
+export constexpr int dslSequenceIndex(DSLType type) { return static_cast<int>(type) - static_cast<int>(DSLType::FirstSequence); }
+export constexpr DSLType dslSequenceType(int index) { return static_cast<DSLType>(static_cast<int>(DSLType::FirstSequence) + index); }
+
+export constexpr bool dslIsStructType(DSLType type)
+{
+	return type >= DSLType::FirstStruct && type < DSLType::FirstSequence && !dslIsArrayType(type);
+}
 export constexpr int dslStructIndex(DSLType type) { return static_cast<int>(type) - static_cast<int>(DSLType::FirstStruct); }
 export constexpr DSLType dslStructType(int index) { return static_cast<DSLType>(static_cast<int>(DSLType::FirstStruct) + index); }
 
@@ -142,13 +166,17 @@ export constexpr DSLType dslStructType(int index) { return static_cast<DSLType>(
 export inline bool dslIsEngineObjectType(DSLType type)
 {
 	return type == DSLType::World || type == DSLType::Entity || type == DSLType::ScriptData
-		|| type == DSLType::ScriptEvents || dslIsComponentType(type);
+		|| type == DSLType::ScriptEvents || dslIsComponentType(type) || dslIsSequenceType(type);
 }
 
 // A type with further members/functions reachable by dotting into it -- an engine-defined STRUCT value
-// (vec2/3/4) or a bound engine-object kind (self.physics and friends). What decides whether a member that
-// doesn't itself match a value slot is still offered as a dot-into WAYPOINT rather than excluded outright.
-export inline bool dslIsChainableType(DSLType type) { return dslIsStructType(type) || dslIsEngineObjectType(type); }
+// (vec2/3/4), a bound engine-object kind (self.physics and friends), or an ARRAY (count/push/clear, built per
+// element type by ScriptBindings::build). What decides whether a member that doesn't itself match a value slot
+// is still offered as a dot-into WAYPOINT rather than excluded outright.
+export inline bool dslIsChainableType(DSLType type)
+{
+	return dslIsStructType(type) || dslIsEngineObjectType(type) || dslIsArrayType(type);
+}
 
 export enum class DSLFlowControl
 {
@@ -157,6 +185,11 @@ export enum class DSLFlowControl
 	Else,
 	While,
 	For,
+	ForEach, // "foreach <type> <name> in <sequence>" -- see FlowControl's comment
+	// "ifcomponent <ComponentType> <name> in <entity>" -- binds that entity's component and enters ONLY when it
+	// has one. The DSL's way to reach any entity's components but self's own required ones: the check isn't
+	// something the author can forget, and the bound variable can't exist outside the branch that proved it.
+	IfComponent,
 	Return,
 	Break,
 };
@@ -270,11 +303,18 @@ public:
 	// (a 3-ary node in spirit, without inventing a generic N-ary symbol shape
 	// just for this one construct): forLoopVar's own VariableDeclaration
 	// carries the init clause via its `initialValue` field.
+	// ForEach reuses forLoopVar for its ELEMENT declaration (no initialValue --
+	// the loop supplies each value) and `condition` for the SEQUENCE being
+	// walked: an array-typed value, or a member/receiver registered as a
+	// BindingSequence. No index is ever author-visible, which is what makes it
+	// impossible to author an out-of-range access through one.
+	// IfComponent has the same shape: forLoopVar is the bound COMPONENT
+	// declaration, `condition` the ENTITY it's fetched from.
 	struct FlowControl
 	{
 		DSLFlowControl control;
 		DSLSymbol* condition = nullptr;
-		DSLSymbol* forLoopVar = nullptr;   // For only: -> VariableDeclaration (initialValue = init clause)
+		DSLSymbol* forLoopVar = nullptr;   // For/ForEach: -> VariableDeclaration (For: initialValue = init clause)
 		DSLSymbol* forCondition = nullptr; // For only: -> Expression
 		DSLSymbol* forIncrement = nullptr; // For only: -> Expression
 	};
@@ -467,7 +507,15 @@ export inline int dslEnclosingFunctionHeader(const DSLScriptFile& file, int from
 // One field of the document's own persistent per-instance data (self.data.<name>, see DSL::dataFields) --
 // authored via the SCRIPT DATA sidebar section's add/remove controls, serialized as one .dsl "//@@data <type>
 // <name>" line each. `type` is never an engine-object kind (self.data.self makes no sense) -- only
-// Int/Float/Bool/String or an engine-defined struct (vec2/3/4).
+// Int/Float/Bool/String, an engine-defined struct (vec2/3/4), or an ARRAY of any of those (dslIsArrayType --
+// the field then stores a VrArray handle, and the elements live engine-side; see ScriptAPI.h).
+//
+// ENTITY IS NOT STORABLE, in either form. As a bare field it would dangle the moment the entity died. As an
+// array element the engine could hold a refcounted EntityPtr instead -- memory-safe, but then a script silently
+// keeps entities ALIVE for as long as it remembers them, which turns a forgotten push into an entity leak with
+// nothing to point at. Entities are for iterating and acting on within a frame (foreach over self.scene, a
+// spatial query); remembering one across frames needs a generation-checked handle the engine can invalidate,
+// which doesn't exist yet.
 export struct DSLDataField
 {
 	std::string name;
