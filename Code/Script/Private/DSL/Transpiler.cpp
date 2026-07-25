@@ -512,23 +512,6 @@ namespace
 					: "else if (" + expressionText(flow->condition) + ")");
 				openBlock();
 				return;
-			case DSLFlowControl::IfComponent:
-			{
-				// The fetch IS the condition, so no separate null check is emitted and the handle can't outlive
-				// the statement. Note C++ scopes a declaration-in-condition across BOTH branches, so an attached
-				// `else` could legally name it here -- the DSL is stricter and doesn't let it be referenced
-				// there at all (see inScopeVariables: the binding dies at this block's end, which is exactly
-				// where the else begins).
-				const DSLSymbol::VariableDeclaration& bound = std::get<DSLSymbol::VariableDeclaration>(flow->forLoopVar->data);
-				const DSLType componentType = std::get<DSLSymbol::TypeDeclaration>(bound.typeSymbol->data).type;
-				const char* fetchEmit = bindings.componentFetchEmit(componentType);
-				const std::string fetchText = (fetchEmit != nullptr)
-					? substituteTemplate(fetchEmit, expressionText(flow->condition), {}) : std::string("nullptr");
-				emitLine("if (" + std::string(cppTypeName(componentType)) + " " + bound.name + " = " + fetchText + ")");
-				openBlock();
-				openScopes.push_back({ line.scopeLevel, {} });
-				return;
-			}
 			case DSLFlowControl::ForEach:
 			{
 				// The sequence's count/at emits come from the receiver's own registration (BindingObject's
@@ -564,6 +547,21 @@ namespace
 				const DSLType elemType = std::get<DSLSymbol::TypeDeclaration>(bound.typeSymbol->data).type;
 				const std::string receiver = expressionText(flow->condition);
 				const std::string keyText = (flow->forCondition != nullptr) ? expressionText(flow->forCondition) : std::string();
+
+				// A COMPONENT is fetched off the entity rather than looked up in a container: the fetch call IS
+				// the condition (a null handle is the miss), so it needs no lookup registration of its own --
+				// the component type's own fetch emit is the whole story. Everything downstream is identical.
+				if (dslIsComponentType(elemType))
+				{
+					const char* fetchEmit = bindings.componentFetchEmit(elemType);
+					const std::string fetchText = (fetchEmit != nullptr)
+						? substituteTemplate(fetchEmit, receiver, {}) : std::string("nullptr");
+					emitLine("if (" + std::string(cppTypeName(elemType)) + " " + bound.name + " = " + fetchText + ")");
+					openBlock();
+					openScopes.push_back({ line.scopeLevel, {} });
+					return;
+				}
+
 				const BindingObject* container = bindings.objectFor(dslValueType(flow->condition));
 				const std::string testText = (container != nullptr && container->lookupEmit != nullptr)
 					? substituteElement(container->lookupEmit, receiver, keyText, bound.name) : std::string("false");

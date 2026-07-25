@@ -81,7 +81,7 @@ export struct BindingMember
 	// is "(*scriptData)") or resolves against host-cached state (self.physics is "scriptData->physics"), so
 	// reaching it off any other entity would silently read this script's own. Legal only directly on `self`,
 	// with no member path walked -- enforced in receiverCandidates, ScriptLoader's checkMemberUsable, and the
-	// sidebar tree alike. Another entity's components go through `ifcomponent`; its script data isn't reachable
+	// sidebar tree alike. Another entity's components go through `ifexist`; its script data isn't reachable
 	// at all, which is correct -- a script's data is private to its own instance.
 	bool selfOnly = false;
 	// Void = always available; else this member (e.g. self.physics) is only offered/legal while the script
@@ -207,7 +207,7 @@ public:
 	// with no positional-call shape to it (unlike registerStruct), since a component is fetched, never
 	// constructed.
 	// `fetchEmit` reaches the component off an ARBITRARY entity ("ctx->entityGetPhysicsComponent($r)"), which
-	// can come back null -- what `ifcomponent` emits (see componentFetchEmit). The self.<memberName> member
+	// can come back null -- what `ifexist` emits for a component type (see componentFetchEmit). The self.<memberName> member
 	// registered here is the OTHER path: a pointer the host cached for this script, non-null by construction
 	// because //@@require guarantees the component exists, and offered only on a `self` receiver.
 	DSLType registerComponentType(const char* memberName, const char* typeName, int componentBit, const char* fetchEmit);
@@ -275,7 +275,7 @@ public:
 	// Same, for a registered SEQUENCE type (nullptr if `type` isn't one).
 	const char* sequenceTypeName(DSLType type) const;
 	// `type`'s "fetch it off this entity" emit template, "$r" being the entity (nullptr if `type` isn't a
-	// registered component type) -- what `ifcomponent` binds its variable from. Distinct from the cached
+	// registered component type) -- what `ifexist` binds a component variable from. Distinct from the cached
 	// self.<component> member, which needs no fetch at all; see registerComponentType.
 	const char* componentFetchEmit(DSLType type) const;
 	// `type`'s registered EComponentID bit (-1 if `type` isn't a registered component type) -- what

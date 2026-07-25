@@ -150,7 +150,7 @@ struct VrRayHit
        Animation:StateMachine): a script sets floats/bools/triggers and the graph's own transitions decide what
        plays, rather than a script naming clips directly. The older entitySetAnim* trio does the same thing off
        an Entity and is kept for the visual-script nodes built against it; these take the component handle, so
-       the DSL reaches them through self.animator / `ifcomponent` like every other component. A null handle is a
+       the DSL reaches them through self.animator / `ifexist` like every other component. A null handle is a
        no-op (or a zero/empty read) throughout, same contract as the physics/audio/force blocks. */ \
     X(void*,       entityGetAnimatorComponent,(Entity*, entity)) \
     X(void,        animatorSetFloat,       (void*, animator), (const char*, name), (float, value)) \

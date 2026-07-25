@@ -81,6 +81,7 @@ REGISTER_UPDATE()
 //@@data int num
 //@@data int[] list
 //@@event OnHit
+//@
 //@function OnSpawn()
 //@	printf(string format = "OnSpawn dsl")
 //@end
@@ -100,7 +101,7 @@ REGISTER_UPDATE()
 //@		self.physics.setVelocity(vec3 velocity = vec3(0, 1, 0))
 //@	end
 //@	foreach Entity e in self.scene.children
-//@		ifcomponent PhysicsComponent phys in e
+//@		ifexist PhysicsComponent phys in e
 //@			phys.applyImpulse(vec3 impulse = vec3(1, 2, 3))
 //@		end
 //@	end

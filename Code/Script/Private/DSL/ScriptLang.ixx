@@ -119,9 +119,8 @@ export struct Candidate
 	{
 		KeywordIf, KeywordWhile, KeywordReturn, KeywordBreak, KeywordTrue, KeywordFalse,
 		Variable, Function, DeclareType, Literal, Comparator, DeclareFunction, KeywordFor, KeywordForEach,
-		KeywordIfComponent, // "ifcomponent" -- stages a component type, a name, and the entity to fetch from
-		KeywordIfExist,     // "ifexist" -- stages an element type, a name, the container, and (if it takes one)
-		                    // the key; the DSL's only indexed container read, bounds check included
+		KeywordIfExist,     // "ifexist" -- stages a type, a name, the source, and (if it takes one) the key;
+		                    // the DSL's only read of something that may not be there, check included
 		KeywordRef,    // "ref" -- a MODIFIER, not a pick: offered alongside the type keywords wherever a
 		               // by-reference binding is allowed (a function parameter today), confirming it sets the
 		               // flag and returns to the SAME stage with "ref " in the prefix, awaiting the type
@@ -205,7 +204,7 @@ public:
 	// `receiverIsRoot` = the receiver expression is the root declaration ITSELF, with no member path walked yet.
 	// Component members need it: they're self's HOST-CACHED pointers, so `self.physics` is valid but
 	// `self.parent.physics` is not -- both are Entity-typed and share the same root, and only the path length
-	// tells them apart (the other entity's component is reached with `ifcomponent` instead).
+	// tells them apart (the other entity's component is reached with `ifexist` instead).
 	// `atLine`/`file`/`receiverPath` locate the receiver in the document, which is what the mutate-while-
 	// iterating refusal needs: a container-mutating function (push/clear) isn't offered while a foreach/ifexist
 	// in an enclosing block is reading that same storage.

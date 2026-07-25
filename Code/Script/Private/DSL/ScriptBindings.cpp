@@ -41,7 +41,7 @@ DSLType ScriptBindings::registerComponentType(const char* memberName, const char
 	// -- appended to IN PLACE, not re-registered, so every OTHER caller's earlier self.<member>s survive. The
 	// member's own gate IS `type` itself (see DSL::requiredComponents) -- there's nothing else it could sensibly
 	// be. Its emit is the host-cached pointer ("scriptData->" + the member's own name), valid precisely because
-	// that gate guarantees the component exists; reaching ANOTHER entity's component goes through `ifcomponent`
+	// that gate guarantees the component exists; reaching ANOTHER entity's component goes through `ifexist`
 	// and componentFetchEmit instead, which is where the null case is handled.
 	for (BindingObject& object : m_objectDefs)
 		if (object.name != nullptr && std::string_view(object.name) == "self")
@@ -373,7 +373,7 @@ const char* ScriptBindings::cppTypeName(DSLType type) const
 	default: break;
 	}
 	// Component handles cross the ABI as opaque void* (every component function takes one), so an
-	// `ifcomponent`-bound variable declares as void* and passes straight through with no cast.
+	// component variable bound by `ifexist` declares as void* and passes straight through with no cast.
 	if (dslIsComponentType(type))
 		return "void*";
 	return "/* unsupported DSLType */ void*"; // the other engine-object kinds never declare values

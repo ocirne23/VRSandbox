@@ -76,7 +76,6 @@ namespace
 		case DSLFlowControl::While:  return "while";
 		case DSLFlowControl::For:    return "for";
 		case DSLFlowControl::ForEach:return "foreach";
-		case DSLFlowControl::IfComponent: return "ifcomponent";
 		case DSLFlowControl::IfExist: return "ifexist";
 		case DSLFlowControl::Return: return "return";
 		case DSLFlowControl::Break:  return "break";
@@ -268,11 +267,10 @@ namespace
 				renderSymbol(fc.forIncrement, compact, false, {}, outText, outSpans);
 				break;
 			}
-			if (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfComponent
-				|| fc.control == DSLFlowControl::IfExist)
+			if (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfExist)
 			{
-				// "foreach <type> <name> in <sequence>" / "ifcomponent <Type> <name> in <entity>" /
-				// "ifexist <type> <name> in <container> at <key>" -- one shape: the bound declaration renders
+				// "foreach <type> <name> in <sequence>" / "ifexist <type> <name> in <source> [at <key>]" --
+				// one shape: the bound declaration renders
 				// like a function parameter ([ref] type + name, never an initial value -- the construct supplies
 				// it), and the source is a plain value slot so it can be re-edited/replaced like any other.
 				const size_t start = outText.size();
@@ -528,17 +526,17 @@ namespace
 				}
 				// atLine is genuinely nested inside this same block -- its declarations count, fall through.
 			}
-			// A block header that declares its OWN variable (a for counter, a foreach element, an ifcomponent
+			// A block header that declares its OWN variable (a for counter, a foreach element, an ifexist
 			// binding) declares it on the header line -- at the header's own, shallower scopeLevel -- but scopes
 			// it to just the body, so it goes out of scope at the block's end like anything inside it. For
-			// ifcomponent that end is where an `else` begins, which is exactly what keeps the bound component
+			// ifexist that end is where an `else` begins, which is exactly what keeps the bound value
 			// unreachable there (C++ would leave it in scope across both branches; the DSL must not).
 			const DSLSymbol* head = line.head();
 			if (head != nullptr && head->type == ST::FlowControl && atIndex >= dslBlockEnd(file, i))
 			{
 				const DSLFlowControl control = std::get<DSLSymbol::FlowControl>(head->data).control;
 				if (control == DSLFlowControl::For || control == DSLFlowControl::ForEach
-					|| control == DSLFlowControl::IfComponent || control == DSLFlowControl::IfExist)
+					|| control == DSLFlowControl::IfExist)
 					continue;
 			}
 			for (const std::unique_ptr<DSLSymbol>& s : line.symbols)
@@ -631,7 +629,7 @@ namespace
 			// sidebar symbol belongs to the registry, not to any statement.
 			//
 			// ONE exception, in the VALUE pass only: `self` is a genuine Entity, and Entity is a real value type
-			// -- it's what `ifcomponent ... in self` takes, what an Entity parameter accepts, and what an
+			// -- it's what `ifexist ... in self` takes, what an Entity parameter accepts, and what an
 			// identity comparison names. It stays un-assignable (never offered for Kind::Reassign), and the
 			// component bindings stay dot-into-only since a component isn't a value at all.
 			//
@@ -701,7 +699,7 @@ bool Syntax::isBlockOpener(const DSLSymbol* head)
 		return control == DSLFlowControl::If || control == DSLFlowControl::ElseIf
 			|| control == DSLFlowControl::Else || control == DSLFlowControl::While
 			|| control == DSLFlowControl::For || control == DSLFlowControl::ForEach
-			|| control == DSLFlowControl::IfComponent || control == DSLFlowControl::IfExist;
+			|| control == DSLFlowControl::IfExist;
 	}
 	return false;
 }
@@ -762,7 +760,6 @@ std::vector<Candidate> AutoCompleteRules::candidatesFor(DSLType expectedType, co
 		addIfMatches(out, Candidate{ "while", Candidate::Kind::KeywordWhile }, typedPrefix);
 		addIfMatches(out, Candidate{ "for", Candidate::Kind::KeywordFor }, typedPrefix);
 		addIfMatches(out, Candidate{ "foreach", Candidate::Kind::KeywordForEach }, typedPrefix);
-		addIfMatches(out, Candidate{ "ifcomponent", Candidate::Kind::KeywordIfComponent }, typedPrefix);
 		addIfMatches(out, Candidate{ "ifexist", Candidate::Kind::KeywordIfExist }, typedPrefix);
 		addIfMatches(out, Candidate{ "return", Candidate::Kind::KeywordReturn }, typedPrefix);
 		addIfMatches(out, Candidate{ "break", Candidate::Kind::KeywordBreak }, typedPrefix);
@@ -780,13 +777,13 @@ std::vector<Candidate> AutoCompleteRules::candidatesFor(DSLType expectedType, co
 		if (branchHead != nullptr && branchHead->type == ST::FlowControl)
 		{
 			const DSLFlowControl branchControl = std::get<DSLSymbol::FlowControl>(branchHead->data).control;
-			// `ifcomponent`/`ifexist` take an `else` (the entity had no component / the lookup missed) but no
-			// `elseif`: an elseif carries a bool condition, which has nothing to continue from a fetch.
+			// `ifexist` takes an `else` (the thing wasn't there) but no `elseif`: an elseif carries a bool
+			// condition, which has nothing to continue from a lookup that either found something or didn't.
 			const bool chainable = branchControl == DSLFlowControl::If || branchControl == DSLFlowControl::ElseIf
-				|| branchControl == DSLFlowControl::IfComponent || branchControl == DSLFlowControl::IfExist;
+				|| branchControl == DSLFlowControl::IfExist;
 			if (chainable)
 			{
-				if (branchControl != DSLFlowControl::IfComponent && branchControl != DSLFlowControl::IfExist)
+				if (branchControl != DSLFlowControl::IfExist)
 					addIfMatches(out, Candidate{ "elseif", Candidate::Kind::KeywordElseIf }, typedPrefix);
 				bool chainHasElse = false;
 				for (int i = headerIndex; !chainHasElse; )
@@ -1098,7 +1095,7 @@ std::vector<Candidate> AutoCompleteRules::receiverCandidates(const ScriptBinding
 	}
 	// A component member (self.physics) is the host-cached pointer for THIS script's own entity -- valid only
 	// on `self` ITSELF, and only while //@@require guarantees the component is there. Any other entity's
-	// component is reached with `ifcomponent`, which handles the "it might not have one" case structurally.
+	// component is reached with `ifexist`, which handles the "it might not have one" case structurally.
 	// Sidebar symbols have no owning line (see addVariableCandidates), and self is the only entity-typed one --
 	// but that alone isn't enough: `self.parent` is Entity-typed and rooted at the same sidebar symbol, so the
 	// path must be EMPTY too, or `self.parent.physics` would offer self's own component for another entity.
@@ -1206,16 +1203,16 @@ DSLType AutoCompleteRules::expectedTypeForSlot(const SlotRef& slot, const DSLScr
 			const DSLSymbol::VariableDeclaration& elem = std::get<DSLSymbol::VariableDeclaration>(fc.forLoopVar->data);
 			return dslArrayOf(std::get<DSLSymbol::TypeDeclaration>(elem.typeSymbol->data).type);
 		}
-		if (fc.control == DSLFlowControl::IfComponent)
-			return DSLType::Entity; // the entity the component is fetched from
 		if (fc.control == DSLFlowControl::IfExist)
 		{
-			// The CONTAINER. Like ForEach's sequence, an array of the bound element's type is the only shape
-			// re-editable in place; any other registered lookup re-authors through the staged flow.
+			// The SOURCE. A component is fetched off an ENTITY; otherwise, like ForEach's sequence, an array of
+			// the bound type is the only shape re-editable in place -- any other registered lookup (an optional,
+			// an engine collection) re-authors through the staged flow instead.
 			if (fc.forLoopVar == nullptr)
 				return DSLType::Void;
 			const DSLSymbol::VariableDeclaration& elem = std::get<DSLSymbol::VariableDeclaration>(fc.forLoopVar->data);
-			return dslArrayOf(std::get<DSLSymbol::TypeDeclaration>(elem.typeSymbol->data).type);
+			const DSLType boundType = std::get<DSLSymbol::TypeDeclaration>(elem.typeSymbol->data).type;
+			return dslIsComponentType(boundType) ? DSLType::Entity : dslArrayOf(boundType);
 		}
 		return DSLType::Bool; // If/ElseIf/While
 	}
@@ -1298,11 +1295,11 @@ namespace
 		}
 	}
 
-	// Whether `name` is bound by an `ifcomponent`/`ifexist` whose CHAIN encloses `atIndex`. Deliberately wider
-	// than what inScopeVariables makes readable: the binding is readable only in the construct's own branch, but
-	// it stays RESERVED across the sibling `else` too, because the generated C++ scopes the condition
-	// declaration over the entire if/else -- redeclaring the name in the else would silently shadow it there.
-	bool isChainComponentBinding(const std::string& name, const DSLScriptFile& file, int atIndex, DSLSymbol* excludeVariable)
+	// Whether `name` is bound by an `ifexist` whose CHAIN encloses `atIndex`. Deliberately wider than what
+	// inScopeVariables makes readable: the binding is readable only in the construct's own branch, but it stays
+	// RESERVED across the sibling `else` too, because the generated C++ scopes the condition declaration over
+	// the entire if/else -- redeclaring the name in the else would silently shadow it there.
+	bool isChainBoundName(const std::string& name, const DSLScriptFile& file, int atIndex, DSLSymbol* excludeVariable)
 	{
 		for (int i = atIndex; i >= 0; --i)
 		{
@@ -1310,8 +1307,7 @@ namespace
 			if (head == nullptr || head->type != ST::FlowControl)
 				continue;
 			const DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(head->data);
-			if ((fc.control != DSLFlowControl::IfComponent && fc.control != DSLFlowControl::IfExist)
-				|| fc.forLoopVar == nullptr || fc.forLoopVar == excludeVariable)
+			if (fc.control != DSLFlowControl::IfExist || fc.forLoopVar == nullptr || fc.forLoopVar == excludeVariable)
 				continue;
 			if (atIndex < chainEnd(file, i)
 				&& std::get<DSLSymbol::VariableDeclaration>(fc.forLoopVar->data).name == name)
@@ -1332,7 +1328,7 @@ bool AutoCompleteRules::isReservedWord(const std::string& name)
 	// declaration needs a type before the name, an assignment an operator, a call parens), so a variable/
 	// function actually named "end" can never produce that single-token line -- safe to allow.
 	static const char* const kKeywords[] = {
-		"if", "elseif", "else", "while", "for", "foreach", "ifcomponent", "ifexist", "in", "at", "ref",
+		"if", "elseif", "else", "while", "for", "foreach", "ifexist", "in", "at", "ref",
 		"return", "break", "function", "true", "false", "null",
 		"ctx", "self", "ScriptData", "scriptData" // the Transpiler's auto-injected context parameter (see Transpiler::emitFunction)
 	};
@@ -1382,8 +1378,8 @@ bool AutoCompleteRules::isNameInScope(const std::string& name, const DSLCodeLine
 		if (var != excludeVariable && std::get<DSLSymbol::VariableDeclaration>(var->data).name == name)
 			return true;
 
-	// An enclosing ifcomponent's binding is reserved even where it isn't readable -- see the helper.
-	if (isChainComponentBinding(name, file, atIndex, excludeVariable))
+	// An enclosing ifexist's binding is reserved even where it isn't readable -- see the helper.
+	if (isChainBoundName(name, file, atIndex, excludeVariable))
 		return true;
 
 	// Forward: a declaration made AT atLine stays visible for the rest of ITS OWN enclosing block, nested

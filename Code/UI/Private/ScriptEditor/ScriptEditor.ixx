@@ -325,11 +325,9 @@ private:
 		// filtered to values yielding the picked element type (see sequenceYields). "ref" is offered in the TYPE
 		// stage as a modifier, exactly like a function parameter's (see paramTypeStagePrefix).
 		ForEachType, ForEachName, ForEachSource,
-		// "ifcomponent <ComponentType> <name> in <entity>" -- the same three-stage shape as foreach, with the
-		// type picked from the registered component types and the source constrained to an Entity.
-		IfComponentType, IfComponentName, IfComponentSource,
-		// "ifexist [ref] <type> <name> in <container> at <key>" -- foreach's shape plus a key stage, skipped
-		// for a container whose lookup takes none. The DSL's only indexed container read.
+		// "ifexist [ref] <type> <name> in <source> [at <key>]" -- foreach's shape plus a key stage, skipped for
+		// a source whose lookup takes none (an optional, or a COMPONENT, which is fetched off an entity). The
+		// DSL's only read of something that may not be there.
 		IfExistType, IfExistName, IfExistSource, IfExistKey,
 	};
 
@@ -543,15 +541,13 @@ private:
 	// of it. What ForEachSource filters its candidates by, so only iterable values of the right element type
 	// are offered in the first place.
 	bool sequenceYields(DSLType sequenceType, DSLType elementType) const;
-	std::string ifComponentPrefix() const; // "ifcomponent <Type> <name> in " -- everything before the entity
-	void commitIfComponentStatement(const PendingExprChain& entity); // IfComponentSource's confirm
 	std::string ifExistPrefix() const;    // "ifexist [ref] <type> <name> in " -- everything before the container
 	std::string ifExistKeyPrefix() const; // ...plus the resolved container and " at "
 	// The container the staged flow has resolved so far (null until IfExistSource confirms) -- what the key
 	// stage reads lookupKeyType off, and what decides whether there IS a key stage at all.
 	const BindingObject* ifExistContainer() const;
 	void commitIfExistStatement(const PendingExprChain& key); // IfExistSource/Key's confirm
-	// The re-edit half of both commits above (foreach/ifcomponent headers are structurally identical): applies a
+	// The re-edit half of the commits above (foreach/ifexist headers are structurally identical): applies a
 	// new bound name + source to an EXISTING header, preserving the bound declaration's symbol identity.
 	void rebuildBoundHeaderSource(DSLCodeLine& line, DSLSymbol* boundVar, const std::string& boundName,
 		bool boundIsRef, const PendingExprChain& source);
@@ -698,9 +694,9 @@ private:
 	// tryWidenFlowHeaderEdit), the header-line counterpart of m_redeclareTarget/m_reassignEditExpr. The header
 	// only changes when the staged flow re-confirms IN FULL (no body is seeded -- the block already has one);
 	// Backspacing past the first stage applies the same guarded deletion as Backspacing the keyword itself
-	// (if/while: empty else-chain, body kept un-nested; elseif: own branch empty; for/foreach/ifcomponent: empty
-	// body, plus an empty attached else for ifcomponent; return: unconditional). m_flowEditLoopVar is the
-	// declaration the header BINDS (a for-loop's counter, a foreach element, an ifcomponent component),
+	// (if/while: empty else-chain, body kept un-nested; elseif: own branch empty; for/foreach/ifexist: empty
+	// body, plus an empty attached else for ifexist; return: unconditional). m_flowEditLoopVar is the
+	// declaration the header BINDS (a for-loop's counter, a foreach element, an ifexist binding),
 	// preserved IN PLACE on commit -- body statements reference it, so its identity must survive re-authoring;
 	// its TYPE stays fixed for the same reason (the type stage is never re-entered on a re-edit).
 	DSLCodeLine* m_flowEditLine = nullptr;
@@ -800,11 +796,6 @@ private:
 	DSLType m_forEachElementType = DSLType::Void;
 	std::string m_forEachElementName;
 	bool m_forEachRef = false; // the element binds by reference (write-back on assignment, see the Transpiler)
-
-	// The staged ifcomponent flow (IfComponentType -> IfComponentName -> IfComponentSource, committed by
-	// commitIfComponentStatement) -- structurally identical to the foreach one above.
-	DSLType m_ifComponentType = DSLType::Void;
-	std::string m_ifComponentName;
 
 	// The staged ifexist flow (IfExistType -> IfExistName -> IfExistSource -> IfExistKey, committed by
 	// commitIfExistStatement). The container resolves BEFORE the key, because the container is what declares

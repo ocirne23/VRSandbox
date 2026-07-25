@@ -186,14 +186,11 @@ export enum class DSLFlowControl
 	While,
 	For,
 	ForEach, // "foreach <type> <name> in <sequence>" -- see FlowControl's comment
-	// "ifcomponent <ComponentType> <name> in <entity>" -- binds that entity's component and enters ONLY when it
-	// has one. The DSL's way to reach any entity's components but self's own required ones: the check isn't
-	// something the author can forget, and the bound variable can't exist outside the branch that proved it.
-	IfComponent,
-	// "ifexist <Type> <name> in <container> at <key>" -- binds ONE element of a container (an array element, a
-	// map value, any registered lookup) and enters only when the lookup succeeded. The DSL's ONLY indexed read:
-	// there is no unchecked container access to author, so an out-of-range index can't reach memory -- the
-	// bounds check IS the construct. `at` is optional for a container whose lookup takes no key.
+	// "ifexist <Type> <name> in <source> [at <key>]" -- binds ONE thing that may not be there and enters only
+	// when it was: an array element, a value behind any registered lookup, an optional like self.parent, or an
+	// entity's COMPONENT (`ifexist PhysicsComponent p in e`). The DSL's ONLY such read -- there is no unchecked
+	// form to author -- so an out-of-range index, an absent value and a missing component are one construct
+	// with one answer. `at` applies only to a source whose lookup takes a key.
 	IfExist,
 	Return,
 	Break,
@@ -319,17 +316,17 @@ public:
 	// walked: an array-typed value, or a member/receiver registered as a
 	// BindingSequence. No index is ever author-visible, which is what makes it
 	// impossible to author an out-of-range access through one.
-	// IfComponent has the same shape: forLoopVar is the bound COMPONENT
-	// declaration, `condition` the ENTITY it's fetched from.
-	// IfExist is that shape plus a key: forLoopVar is the bound ELEMENT
-	// declaration, `condition` the CONTAINER, and forCondition the `at` key
-	// (null when the container's lookup takes none). The element declaration's
-	// `isRef` is what asks for a write-back -- see the Transpiler.
+	// IfExist has that shape plus a key: forLoopVar is the bound declaration,
+	// `condition` the SOURCE it comes from (a container, an optional, or the
+	// entity a component is fetched off), and forCondition the `at` key (null
+	// when the source's lookup takes none -- a component fetch never has one).
+	// The bound declaration's `isRef` is what asks for a write-back -- see the
+	// Transpiler.
 	struct FlowControl
 	{
 		DSLFlowControl control;
 		DSLSymbol* condition = nullptr;
-		DSLSymbol* forLoopVar = nullptr;   // For/ForEach/IfComponent/IfExist: -> VariableDeclaration
+		DSLSymbol* forLoopVar = nullptr;   // For/ForEach/IfExist: -> VariableDeclaration
 		DSLSymbol* forCondition = nullptr; // For: -> Expression; IfExist: the `at` key value
 		DSLSymbol* forIncrement = nullptr; // For only: -> Expression
 	};
