@@ -140,7 +140,10 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 			// handle field itself, so push takes its ADDRESS to create the array on first use and write the id
 			// back. The generated helpers (see Transpiler's preamble) do the null-check and the cast, which is
 			// what keeps a stale handle or an out-of-range index from ever touching memory.
-			const std::string elementName = dslTypeName(elementType);
+			// The C++ spelling, NOT the DSL one: the template argument has to be the type the ABI actually
+			// writes through the void* (Entity* / const char* / the value type), and for a struct it has to be
+			// a name that exists in the generated TU ("glm::vec3", not "vec3").
+			const std::string elementName = cppTypeName(elementType);
 			m_arrayEmits.push_back(std::make_unique<std::string>(
 				"vrArrPush<" + elementName + ">(ctx, self, &$r, " + std::to_string(static_cast<int>(elementType)) + ", $1)"));
 			const char* pushEmit = m_arrayEmits.back()->c_str();
@@ -288,6 +291,39 @@ int ScriptBindings::componentBit(DSLType type) const
 std::span<const BindingStruct> ScriptBindings::structs() const
 {
 	return m_structDefs;
+}
+
+// Reads m_structDefs, NOT m_builtStructs (structFor's source): build() needs this while generating the array
+// objects, which happens before the struct loop populates m_builtStructs.
+const char* ScriptBindings::cppTypeName(DSLType type) const
+{
+	// An array is a HANDLE on the script side -- the elements live engine-side (see VrArray in ScriptAPI.h),
+	// which is what lets one sit in ScriptData and survive a hot-reload without being copied.
+	if (dslIsArrayType(type))
+		return "VrArray";
+	// Engine-defined structs carry their own C++ spelling in the registry.
+	if (dslIsStructType(type))
+	{
+		const int index = dslStructIndex(type);
+		if (index >= 0 && index < static_cast<int>(m_structDefs.size()))
+			return m_structDefs[index].cppName;
+		return "/* unregistered struct */ void*";
+	}
+	switch (type)
+	{
+	case DSLType::Void:    return "void";
+	case DSLType::Int:     return "int";
+	case DSLType::Float:   return "float";
+	case DSLType::Bool:    return "bool";
+	case DSLType::String:  return "const char*";
+	case DSLType::Entity:  return "Entity*"; // the ABI mirror struct (ScriptAPI.h) -- always by pointer, and nullable
+	default: break;
+	}
+	// Component handles cross the ABI as opaque void* (every component function takes one), so an
+	// `ifcomponent`-bound variable declares as void* and passes straight through with no cast.
+	if (dslIsComponentType(type))
+		return "void*";
+	return "/* unsupported DSLType */ void*"; // the other engine-object kinds never declare values
 }
 
 const BindingStruct* ScriptBindings::structFor(DSLType type) const

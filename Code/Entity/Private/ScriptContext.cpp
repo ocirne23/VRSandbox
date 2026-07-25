@@ -263,7 +263,7 @@ void registerScriptDslBindings()
 //
 // A handle is {index, generation}: freeing bumps the slot's generation, so a stale or garbage id -- e.g. a
 // ScriptData field reinterpreted after a layout change slipped through -- fails lookup and every operation
-// degrades to a no-op or a default. That, plus arrayAt's own range check, is the memory-safety guarantee: no
+// degrades to a no-op or a default. That, plus each accessor's own range check, is the memory-safety guarantee: no
 // value a script can put in a handle field can make the engine touch memory it doesn't own.
 namespace
 {

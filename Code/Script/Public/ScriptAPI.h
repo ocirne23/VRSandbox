@@ -216,6 +216,31 @@ typedef unsigned int (*ScriptDataLayoutIdFn)(void);
 }
 #endif
 
+// ---- array access helpers ----
+// The typed skin over the type-ERASED array ABI above (void* + elemSize -- one entry point per operation
+// covering every element type, since the table itself is C linkage and APPEND-only). T is the type the ABI
+// actually writes through the void*: `Entity*` for entity elements, `const char*` for strings, the value type
+// otherwise (see ScriptBindings::cppTypeName, which builds the emit templates naming them).
+//
+// They live HERE, not in the transpiler's output, because this header is force-included (/FI) into every
+// script TU -- so generated code carries no preamble, and this is ordinary source instead of emitted strings.
+// Outside the extern "C" block: a template can't have C linkage. Nothing about the ABI changes by adding
+// them, so a cached DLL built against an older header keeps working (it carried its own copy).
+//
+// The parameter is what makes these functions rather than inlinable expressions: `&value` needs an lvalue,
+// and every push/set call site passes an rvalue (`vec3(1,2,3)`, `a + b`, an interned literal). vrArrGet needs
+// one more thing -- storage to write into, in an EXPRESSION position (a `foreach` element initializer) -- and
+// its `T v = T()` is what makes a stale handle or out-of-range index read back as a default: the engine
+// leaves outValue untouched on failure rather than writing garbage.
+#ifdef __cplusplus
+template<class T> T vrArrGet(const ScriptContext* ctx, VrArray h, int i)
+{ T v = T(); ctx->arrayGet(h, i, (int)sizeof(T), &v); return v; }
+template<class T> void vrArrSet(const ScriptContext* ctx, VrArray h, int i, const T& v)
+{ ctx->arraySet(h, i, (int)sizeof(T), &v); }
+template<class T> void vrArrPush(const ScriptContext* ctx, Entity* self, VrArray* h, int kind, const T& v)
+{ ctx->arrayPush(self, h, kind, (int)sizeof(T), &v); }
+#endif
+
 // ---- static/cooked build registry ----
 #if defined(SCRIPT_STATIC_BUILD) || defined(SCRIPTS_STATIC)
 enum VrScriptEntryKind

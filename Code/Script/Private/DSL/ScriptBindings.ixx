@@ -231,6 +231,11 @@ public:
 	// bitmask; see registerComponentType.
 	int componentBit(DSLType type) const;
 
+	// How `type` spells itself in the TRANSPILED C++ -- the single source of truth for that mapping, shared by
+	// the transpiler's own declarations and the array emit templates built in build() (whose element type must
+	// match what the ABI writes: `Entity*` for entities, `const char*` for strings, the value type otherwise).
+	const char* cppTypeName(DSLType type) const;
+
 	// ---- structs ----
 	std::span<const BindingStruct> structs() const; // every struct registered so far, in registration order
 	const BindingStruct* structFor(DSLType type) const; // nullptr for non-struct types
