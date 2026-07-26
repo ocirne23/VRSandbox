@@ -53,18 +53,28 @@ DSLType ScriptBindings::registerComponentType(const char* memberName, const char
 	return type;
 }
 
-DSLType ScriptBindings::registerSequenceType(const char* name, DSLType elementType, const char* countEmit,
-	const char* atEmit, const char* lookupEmit)
+// The three DERIVED access types (sequence / optional / namespace) all take a name from the same range and,
+// except for a namespace, a BindingObject carrying only templates -- which half is filled in is the whole
+// difference between them, and is what dslTypeName reads back to spell each one. This allocates the type and
+// the object; each caller then fills its own half.
+DSLType ScriptBindings::allocateDerivedType(const char* name, BindingObject& outObject)
 {
 	const DSLType type = dslSequenceType(static_cast<int>(m_sequenceTypeNames.size()));
 	m_sequenceTypeNames.push_back(name);
+	outObject.name = name;
+	outObject.type = type;
+	// Never a sidebar root of its own: a derived type is only ever reached through whatever produces one.
+	outObject.sidebarTopLevel = false;
+	return type;
+}
+
+DSLType ScriptBindings::registerSequenceType(const char* name, DSLType elementType, const char* countEmit,
+	const char* atEmit, const char* lookupEmit)
+{
 	// A BindingObject like any other, so objectFor/findMember/the editor/the transpiler need no new case -- it
-	// just happens to carry only the sequence templates. Not sidebar-top-level: the only way to get one is the
-	// accessor that returns it.
+	// just happens to carry only the sequence templates.
 	BindingObject object;
-	object.name = name;
-	object.type = type;
-	object.sidebarTopLevel = false;
+	const DSLType type = allocateDerivedType(name, object);
 	object.sequenceElementType = elementType;
 	object.sequenceCountEmit = countEmit;
 	object.sequenceAtEmit = atEmit;
@@ -82,15 +92,10 @@ DSLType ScriptBindings::registerSequenceType(const char* name, DSLType elementTy
 
 DSLType ScriptBindings::registerOptionalType(const char* name, DSLType valueType, const char* lookupEmit)
 {
-	// Shares the sequence type range: both are DERIVED access types (a BindingObject carrying only templates),
-	// distinguished by which half is filled in -- sequence* makes it iterable, lookup* makes it ifexist-able.
-	// An optional fills only the lookup half, and takes no key.
-	const DSLType type = dslSequenceType(static_cast<int>(m_sequenceTypeNames.size()));
-	m_sequenceTypeNames.push_back(name);
+	// Fills only the lookup half, and takes no key: sequence* is what makes a type iterable, lookup* is what
+	// makes it ifexist-able, and an optional is only ever the latter.
 	BindingObject object;
-	object.name = name;
-	object.type = type;
-	object.sidebarTopLevel = false;
+	const DSLType type = allocateDerivedType(name, object);
 	object.lookupKeyType = DSLType::Void;
 	object.lookupValueType = valueType;
 	object.lookupEmit = lookupEmit;
@@ -100,11 +105,10 @@ DSLType ScriptBindings::registerOptionalType(const char* name, DSLType valueType
 
 DSLType ScriptBindings::registerNamespace(const char* name)
 {
-	// Same derived-type range as sequences/optionals; a namespace fills NEITHER half, which is exactly how
-	// dslTypeName tells the three apart (see there).
-	const DSLType type = dslSequenceType(static_cast<int>(m_sequenceTypeNames.size()));
-	m_sequenceTypeNames.push_back(name);
-	return type;
+	// Fills NEITHER half -- which is exactly how dslTypeName tells the three apart (see there). The object it
+	// allocates is discarded: the caller registers its own, with the functions the namespace groups.
+	BindingObject unused;
+	return allocateDerivedType(name, unused);
 }
 
 void ScriptBindings::registerEntryPoint(EntryPointDef def)

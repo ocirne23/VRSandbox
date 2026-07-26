@@ -783,7 +783,7 @@ namespace
 			// end of the block. Entity elements are handles, not copies, so they stay writable.
 			if (!dslIsEngineObjectType(targetType)
 				&& !std::get<DSLSymbol::VariableDeclaration>(rootDecl->data).isRef
-				&& isElementBinding(rootDecl))
+				&& dslIsElementBinding(rootDecl))
 				return failValue("'" + t[0].text + "' binds a copy -- declare it 'ref' to write through it");
 
 			DSLSymbol* target = push(line, ST::VariableReference, DSLSymbol::VariableReference{ rootDecl });
@@ -994,20 +994,6 @@ namespace
 			scopeVars.push_back(boundVar);
 			return push(line, ST::FlowControl,
 				DSLSymbol::FlowControl{ DSLFlowControl::IfExist, container, boundVar, key });
-		}
-
-		// Whether `varDecl` is the ELEMENT a foreach/ifexist header binds -- the loader twin of ScriptLang's
-		// isElementBinding, and the only kind of binding `ref` means anything on.
-		bool isElementBinding(const DSLSymbol* varDecl) const
-		{
-			if (varDecl == nullptr || varDecl->line == nullptr)
-				return false;
-			const DSLSymbol* head = varDecl->line->head();
-			if (head == nullptr || head->type != ST::FlowControl)
-				return false;
-			const DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(head->data);
-			return fc.forLoopVar == varDecl
-				&& (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfExist);
 		}
 
 		// The loader-side twin of the editor's `ref`-binding rules, shared by ifexist and foreach: a container

@@ -550,7 +550,7 @@ private:
 	// The re-edit half of the commits above (foreach/ifexist headers are structurally identical): applies a
 	// new bound name + source to an EXISTING header, preserving the bound declaration's symbol identity.
 	void rebuildBoundHeaderSource(DSLCodeLine& line, DSLSymbol* boundVar, const std::string& boundName,
-		bool boundIsRef, const PendingExprChain& source);
+		bool boundIsRef, const PendingExprChain& source, const PendingExprChain* key = nullptr);
 	DSLType reassignTargetType() const; // m_reassignTarget's own declared type
 	// Same `terms`/`ops` convention as applyDeclareVariable, for a `name = value` statement instead.
 	void commitReassignStatement(const std::vector<PendingExprTerm>& terms, const std::vector<DSLOperator>& ops);

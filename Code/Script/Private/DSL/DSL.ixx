@@ -499,6 +499,23 @@ export inline bool dslChainToRoot(const DSLSymbol* value, const DSLSymbol*& outR
 	return outRoot != nullptr;
 }
 
+// Whether `varDecl` is the binding a foreach/ifexist HEADER declares, as opposed to an ordinary local or a
+// for-loop counter (which own their storage outright). Those two are the only bindings that stand in for
+// something living somewhere else, which is what makes `ref` meaningful on them and nowhere else -- and what
+// makes a non-ref one refuse to be an assignment target. A predicate about the model, so it lives here rather
+// than being restated by each consumer (ScriptLang's candidate rules and ScriptLoader's parse both ask it).
+export inline bool dslIsElementBinding(const DSLSymbol* varDecl)
+{
+	if (varDecl == nullptr || varDecl->line == nullptr)
+		return false;
+	const DSLSymbol* head = varDecl->line->head();
+	if (head == nullptr || head->type != DSLSymbol::SymbolType::FlowControl)
+		return false;
+	const DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(head->data);
+	return fc.forLoopVar == varDecl
+		&& (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfExist);
+}
+
 // Whether two value expressions name the SAME storage -- same root declaration, same member path.
 export inline bool dslSameStorage(const DSLSymbol* a, const DSLSymbol* b)
 {

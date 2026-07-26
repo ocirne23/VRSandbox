@@ -264,6 +264,13 @@ void registerScriptDslBindings()
         },
         {} });
     // free functions
+    // The result of a radius query, as a collection so it reads like any other ("foreach Entity e in
+    // world.entitiesInRadius(...)"). The exposing FUNCTION's own emit RUNS the query and yields a handle to its
+    // results, so "$r" here is that handle -- and because `foreach` hoists its source into a local (see the
+    // Transpiler), the query runs exactly once per loop while `at` only indexes what it found.
+    const DSLType entityQueryType = bindings.registerSequenceType("EntityQuery", T::Entity,
+        "ctx->worldQueryCount($r)", "ctx->worldQueryResultAt($r, $i)");
+
     // A raycast result. Registered as a plain struct so its fields read normally once a hit is proven, and
     // wrapped in an optional so proving it is the only way in: "ifexist RayHit h in world.rayCast(...)". The
     // constructor takes no arguments -- a RayHit is something the engine hands back, never something a script
@@ -385,6 +392,11 @@ void registerScriptDslBindings()
             // By display name, ROOTS only -- names are not unique, so this is "the first one", and a
             // whole-scene search would be a different and far more expensive operation.
             { "findRootEntity", optionalEntityType, { { "displayName", T::String } },              "ctx->worldFindRootEntity($1)" },
+            // Every entity within the radius, walkable with `foreach`. Nesting is fine -- each query takes its
+            // own slot in a thread-local ring (see worldQueryRadius) -- though a handle held across more than
+            // that ring's worth of further queries reads as empty. Not offered to `ifexist`: indexing one
+            // result of a query you ran for that purpose is what nearestEntity is for.
+            { "entitiesInRadius", entityQueryType, { { "position", vec3 }, { "radius", T::Float } }, "ctx->worldQueryRadius($1, $2)" },
             // Nearest OTHER entity within the radius (pass self as `exclude` to skip yourself).
             { "nearestEntity", optionalEntityType, { { "position", vec3 }, { "maxRadius", T::Float }, { "exclude", T::Entity } }, "ctx->spatialGetNearestEntity($1, $2, $3)" },
 
@@ -768,6 +780,64 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         for (int i = 0; i < count; ++i)
             outEntities[i] = reinterpret_cast<Entity*>(results[i]);
         return count;
+    }
+
+    // ---- radius query results ----
+    // A THREAD-LOCAL ring of result buffers, handed out by generation-tagged handle (the VrArray discipline).
+    // Thread-local because a query's results belong to whoever asked -- scripts run on the main thread today,
+    // but nothing here needs to know that. A ring because queries NEST: a foreach over one may run another in
+    // its body, and each needs its own live buffer. Recycling a slot bumps its generation, so a handle held
+    // across more than kQueryRingSize further queries reads as EMPTY rather than as the results that replaced
+    // its own -- the loop ends early instead of walking someone else's entities.
+    constexpr uint32 kQueryRingSize = 8;
+
+    struct ScriptQueryFrame
+    {
+        std::vector<uint64> results;
+        uint32 generation = 0;
+    };
+
+    // One ring per thread. Handles pack slot + generation into a positive int: `generation * ringSize + slot`,
+    // with generations starting at 1, so the first handle any slot hands out is >= ringSize and 0 is never valid
+    // (a zeroed/absent handle therefore reads as empty).
+    ScriptQueryFrame* queryRing()
+    {
+        thread_local ScriptQueryFrame frames[kQueryRingSize];
+        return frames;
+    }
+
+    ScriptQueryFrame* queryFrameFor(int handle)
+    {
+        if (handle <= 0)
+            return nullptr;
+        ScriptQueryFrame& frame = queryRing()[static_cast<uint32>(handle) % kQueryRingSize];
+        return (frame.generation == static_cast<uint32>(handle) / kQueryRingSize) ? &frame : nullptr;
+    }
+
+    int thunk_worldQueryRadius(glm::vec3 position, float radius)
+    {
+        thread_local uint32 nextSlot = 0;
+        const uint32 slot = nextSlot++ % kQueryRingSize;
+        ScriptQueryFrame& frame = queryRing()[slot];
+        ++frame.generation; // retires any handle still pointing at this slot
+        frame.results.clear();
+        if (radius > 0.0f)
+            Globals::spatialIndex.querySphere(glm::dvec3(position), radius, SpatialLayer_Render, frame.results);
+        return static_cast<int>(frame.generation * kQueryRingSize + slot);
+    }
+
+    int thunk_worldQueryCount(int handle)
+    {
+        const ScriptQueryFrame* frame = queryFrameFor(handle);
+        return frame != nullptr ? static_cast<int>(frame->results.size()) : 0;
+    }
+
+    Entity* thunk_worldQueryResultAt(int handle, int index)
+    {
+        const ScriptQueryFrame* frame = queryFrameFor(handle);
+        if (frame == nullptr || index < 0 || index >= static_cast<int>(frame->results.size()))
+            return nullptr;
+        return reinterpret_cast<Entity*>(frame->results[index]);
     }
 
     Entity* thunk_spatialGetNearestEntity(glm::vec3 position, float maxRadius, Entity* exclude)

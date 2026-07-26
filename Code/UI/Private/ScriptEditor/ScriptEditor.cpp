@@ -3059,7 +3059,6 @@ DSLType ScriptEditor::valueContextExpectedType(ComposeMode mode, bool& outAnyVal
 	case ComposeMode::ForVarValue:
 	case ComposeMode::ForIncrementValue:
 		return m_forVarType;
-		return DSLType::Entity;
 	case ComposeMode::ForEachSource:
 	case ComposeMode::IfExistSource:
 		// Any iterable/lookup-able of the element type -- MemberSelect can't express that constraint (it filters
@@ -3274,26 +3273,15 @@ void ScriptEditor::commitIfExistStatement(const PendingExprChain& key)
 	const bool hasKey = !key.terms.empty();
 	cancelCompose();
 
-	DSLSymbol* originalHead = reAuthoring ? line.head() : nullptr;
-	if (existingBoundVar == nullptr)
-		line.symbols.clear();
-
-	DSLSymbol* containerValue = buildExpressionFromTerms(container.terms, container.ops, line);
-	DSLSymbol* keyValue = hasKey ? buildExpressionFromTerms(key.terms, key.ops, line) : nullptr;
 	if (existingBoundVar != nullptr)
 	{
-		// RE-EDIT: the bound declaration's identity must survive (body statements reference it), same contract
-		// as rebuildBoundHeaderSource -- but ifexist has the extra key field, so it repoints both in place.
-		std::get<DSLSymbol::VariableDeclaration>(existingBoundVar->data).name = elementName;
-		std::get<DSLSymbol::VariableDeclaration>(existingBoundVar->data).isRef = isRef;
-		DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(originalHead->data);
-		fc.condition = containerValue;
-		fc.forCondition = keyValue;
-		restoreHeadAndCollect(line, originalHead);
-		selectExpressionTail(keyValue != nullptr ? keyValue : containerValue);
+		rebuildBoundHeaderSource(line, existingBoundVar, elementName, isRef, container, &key);
 		return;
 	}
 
+	line.symbols.clear();
+	DSLSymbol* containerValue = buildExpressionFromTerms(container.terms, container.ops, line);
+	DSLSymbol* keyValue = hasKey ? buildExpressionFromTerms(key.terms, key.ops, line) : nullptr;
 	DSLSymbol* typeDecl = pushSymbol(line, ST::TypeDeclaration, DSLSymbol::TypeDeclaration{ elementType });
 	DSLSymbol* boundVar = pushSymbol(line, ST::VariableDeclaration,
 		DSLSymbol::VariableDeclaration{ elementName, typeDecl, nullptr, isRef });
@@ -3304,12 +3292,12 @@ void ScriptEditor::commitIfExistStatement(const PendingExprChain& key)
 }
 
 // The re-edit half of commitForEach/IfExistStatement (the headers have the identical shape): only the bound
-// name and the source change. The declaration's symbol IDENTITY must survive -- body statements reference it --
-// so it's mutated in place on the SAME FlowControl head rather than rebuilt, and its TYPE stays fixed for the
-// same reason (the type stage is never re-entered on a re-edit, see m_flowEditLoopVar). Everything the old
-// source left behind is swept by the reachability pass.
+// name, the source, and -- ifexist only -- the key change. The declaration's symbol IDENTITY must survive --
+// body statements reference it -- so it's mutated in place on the SAME FlowControl head rather than rebuilt,
+// and its TYPE stays fixed for the same reason (the type stage is never re-entered on a re-edit, see
+// m_flowEditLoopVar). Everything the old source/key left behind is swept by the reachability pass.
 void ScriptEditor::rebuildBoundHeaderSource(DSLCodeLine& line, DSLSymbol* boundVar, const std::string& boundName,
-	bool boundIsRef, const PendingExprChain& source)
+	bool boundIsRef, const PendingExprChain& source, const PendingExprChain* key)
 {
 	DSLSymbol* originalHead = line.head();
 	if (originalHead == nullptr || originalHead->type != ST::FlowControl)
@@ -3317,9 +3305,13 @@ void ScriptEditor::rebuildBoundHeaderSource(DSLCodeLine& line, DSLSymbol* boundV
 	std::get<DSLSymbol::VariableDeclaration>(boundVar->data).name = boundName;
 	std::get<DSLSymbol::VariableDeclaration>(boundVar->data).isRef = boundIsRef;
 	DSLSymbol* sourceValue = buildExpressionFromTerms(source.terms, source.ops, line);
-	std::get<DSLSymbol::FlowControl>(originalHead->data).condition = sourceValue;
+	DSLSymbol* keyValue = (key != nullptr && !key->terms.empty())
+		? buildExpressionFromTerms(key->terms, key->ops, line) : nullptr;
+	DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(originalHead->data);
+	fc.condition = sourceValue;
+	fc.forCondition = keyValue;
 	restoreHeadAndCollect(line, originalHead);
-	selectExpressionTail(sourceValue); // end of the re-authored header; the body already exists
+	selectExpressionTail(keyValue != nullptr ? keyValue : sourceValue); // header's end; the body already exists
 }
 
 // See the declaration in ScriptEditor.ixx.

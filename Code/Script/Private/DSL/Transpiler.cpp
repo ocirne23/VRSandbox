@@ -90,69 +90,49 @@ namespace
 			}
 		}
 
-		// "$r" -> the receiver's emitted expression, "$1".."$9" -> the argument in that CALLEE-parameter position,
-		// "$*" -> a VARIADIC callee's extra arguments, each preceded by ", " (nothing at all when there are none,
-		// so "ctx->logf($1$*)" is valid with or without a tail -- see BindingFunc::isVariadic).
-		static std::string substituteTemplate(const char* emitTemplate, const std::string& receiverName,
-			const std::vector<std::string>& args, const std::vector<std::string>& varargs = {})
+		// EVERY placeholder an emit template can use, in one place -- the vocabulary itself, so adding one is a
+		// field here plus a case below rather than a fourth near-identical scanner. Unused fields simply never
+		// match: a call's template has no "$i", a sequence's `at` has no "$1", and neither has "$v".
+		struct EmitArgs
+		{
+			std::string receiver;             // "$r" -- the receiver's own emitted expression
+			std::vector<std::string> args;    // "$1".."$9" -- by CALLEE-parameter position (a lookup's key is $1)
+			std::vector<std::string> varargs; // "$*" -- a variadic callee's tail, each preceded by ", "
+			std::string index;                // "$i" -- a sequence walk's own index local
+			std::string boundVar;             // "$v" -- the variable a lookup writes through / reads back
+		};
+
+		static std::string substituteEmit(const char* emitTemplate, const EmitArgs& a)
 		{
 			std::string result;
 			for (const char* p = emitTemplate; *p != '\0'; ++p)
 			{
-				if (*p == '$' && p[1] == 'r')
+				if (*p != '$' || p[1] == '\0')
 				{
-					result += receiverName;
-					++p;
+					result += *p;
 					continue;
 				}
-				if (*p == '$' && p[1] == '*')
+				const char code = p[1];
+				if (code == 'r')      result += a.receiver;
+				else if (code == 'i') result += a.index;
+				else if (code == 'v') result += a.boundVar;
+				else if (code == '*')
 				{
-					for (const std::string& extra : varargs)
+					for (const std::string& extra : a.varargs)
 						result += ", " + extra;
-					++p;
-					continue;
 				}
-				if (*p == '$' && p[1] >= '1' && p[1] <= '9')
+				else if (code >= '1' && code <= '9')
 				{
-					const size_t index = static_cast<size_t>(p[1] - '1');
-					if (index < args.size())
-						result += args[index];
-					++p;
+					const size_t index = static_cast<size_t>(code - '1');
+					if (index < a.args.size())
+						result += a.args[index];
+				}
+				else
+				{
+					result += *p; // not a placeholder at all -- a literal '$' in the emitted C++
 					continue;
 				}
-				result += *p;
-			}
-			return result;
-		}
-
-		// A sequence's `at` template: "$r" as usual, plus "$i" for the loop's own index variable (see the
-		// ForEach case). Separate from substituteTemplate because "$i" has no meaning anywhere else.
-		static std::string substituteSequenceIndex(const char* atTemplate, const std::string& receiverName,
-			const std::string& indexName)
-		{
-			std::string result;
-			for (const char* p = atTemplate; *p != '\0'; ++p)
-			{
-				if (*p == '$' && p[1] == 'r') { result += receiverName; ++p; continue; }
-				if (*p == '$' && p[1] == 'i') { result += indexName; ++p; continue; }
-				result += *p;
-			}
-			return result;
-		}
-
-		// The lookup/write-back templates (BindingObject::lookupEmit / elementSetEmit): "$r" the container,
-		// "$1" the key or index, "$v" the bound variable -- which the generated code has already declared, so
-		// the template can both read it and take its address.
-		static std::string substituteElement(const char* emitTemplate, const std::string& receiverName,
-			const std::string& keyName, const std::string& varName)
-		{
-			std::string result;
-			for (const char* p = emitTemplate; *p != '\0'; ++p)
-			{
-				if (*p == '$' && p[1] == 'r') { result += receiverName; ++p; continue; }
-				if (*p == '$' && p[1] == '1') { result += keyName; ++p; continue; }
-				if (*p == '$' && p[1] == 'v') { result += varName; ++p; continue; }
-				result += *p;
+				++p;
 			}
 			return result;
 		}
@@ -191,7 +171,7 @@ namespace
 				std::vector<std::string> varargs;
 				if (callee.isVariadic && args.size() > callee.parameterVarDeclarations.size())
 					varargs.assign(args.begin() + callee.parameterVarDeclarations.size(), args.end());
-				return substituteTemplate(emitTemplate, receiverName, args, varargs);
+				return substituteEmit(emitTemplate, { receiverName, args, varargs });
 			}
 
 			// A user function: ctx/self/scriptData are auto-threaded through exactly like the callee's own
@@ -222,7 +202,7 @@ namespace
 			if (receiverType == DSLType::ScriptData)
 				return receiverText + "." + m.memberName;
 			if (const BindingMember* member = bindings.findMember(receiverType, m.memberName); member != nullptr)
-				return substituteTemplate(member->emit.c_str(), receiverText, {});
+				return substituteEmit(member->emit.c_str(), { receiverText });
 			return receiverText + "." + m.memberName; // defensive -- authored/loaded members always exist in the registry
 		}
 
@@ -288,6 +268,12 @@ namespace
 			std::string trailing;
 		};
 
+		// Names the hoisted source locals (see the ForEach/IfExist cases). Monotonic per FUNCTION rather than
+		// keyed on nesting depth: two sibling loops at the same depth would otherwise both declare `vrSrc1`, and
+		// unlike the loop index -- which lives in the for-init and is scoped to its own loop -- these sit in the
+		// enclosing block, where a repeated name is a redefinition.
+		int sourceLocalCounter = 0;
+
 		// Whether the block opened at `headerIndex` assigns to `boundVar` anywhere -- directly (`p = ...`) or
 		// through a member (`p.x = ...`). What decides if a `ref` binding needs its write-back at all: a
 		// read-only body pays nothing. Every symbol on a line is a peer in its flat `symbols` list (see DSL.ixx's
@@ -317,9 +303,11 @@ namespace
 		// The write-back statement for a `ref` element binding, or "" when none is needed: the binding isn't
 		// `ref`, the body never assigns to it, the container declared its elements read-only, or the element is
 		// HANDLE-typed (an Entity is already a reference -- writes reach the real object through it, so there is
-		// nothing to copy back). `keyText` is the loop index for a foreach, the `at` key for an ifexist.
+		// nothing to copy back). `receiverText` is the HOISTED source local, never the source expression itself
+		// -- re-evaluating that here would run it a second time; `keyText` is the loop index for a foreach, the
+		// `at` key for an ifexist.
 		std::string elementWriteBack(const DSLCodeLine& line, const DSLSymbol::FlowControl* flow,
-			const DSLSymbol::VariableDeclaration& bound, const std::string& keyText)
+			const DSLSymbol::VariableDeclaration& bound, const std::string& receiverText, const std::string& keyText)
 		{
 			if (!bound.isRef || flow->condition == nullptr)
 				return {};
@@ -332,7 +320,7 @@ namespace
 			const int headerIndex = dslLineIndex(document.file, &line);
 			if (headerIndex < 0 || !blockAssignsTo(flow->forLoopVar, headerIndex))
 				return {};
-			return substituteElement(container->elementSetEmit, expressionText(flow->condition), keyText, bound.name) + ";";
+			return substituteEmit(container->elementSetEmit, { receiverText, { keyText }, {}, {}, bound.name }) + ";";
 		}
 
 		void openBlock()
@@ -411,6 +399,7 @@ namespace
 			// emit just BEFORE the closing brace -- what a `ref` binding's write-back rides on (see IfExist/
 			// ForEach), so the copy back lands at the end of the block whichever way the block is closed.
 			std::vector<OpenScope> openScopes;
+			sourceLocalCounter = 0;
 			for (int i = headerIndex + 1; i < bodyEnd; ++i)
 			{
 				const DSLCodeLine& line = *document.file.lines[i];
@@ -520,20 +509,27 @@ namespace
 				// index the sequence is the one the loop does, and `at` is range-safe by contract.
 				const DSLSymbol::VariableDeclaration& elem = std::get<DSLSymbol::VariableDeclaration>(flow->forLoopVar->data);
 				const DSLType elemType = std::get<DSLSymbol::TypeDeclaration>(elem.typeSymbol->data).type;
-				const std::string receiver = expressionText(flow->condition);
+
+				// The sequence expression is HOISTED into a local first, so it is evaluated exactly ONCE. The
+				// count and `at` templates both substitute the receiver, and `at` runs per element -- without
+				// this, a sequence produced by a CALL (world.entitiesInRadius(...)) would re-run that call for
+				// every element. A field receiver costs nothing extra either way.
+				const std::string sourceName = "vrSrc" + std::to_string(sourceLocalCounter++);
+				emitLine("const auto " + sourceName + " = " + expressionText(flow->condition) + ";");
+
+				const std::string indexName = "vrIdx" + std::to_string(openScopes.size());
 				std::string countText, atText;
 				if (const BindingObject* object = bindings.objectFor(dslValueType(flow->condition));
 					object != nullptr && object->sequenceCountEmit != nullptr && object->sequenceAtEmit != nullptr)
 				{
-					countText = substituteTemplate(object->sequenceCountEmit, receiver, {});
-					atText = substituteSequenceIndex(object->sequenceAtEmit, receiver, "vrIdx" + std::to_string(openScopes.size()));
+					countText = substituteEmit(object->sequenceCountEmit, { sourceName });
+					atText = substituteEmit(object->sequenceAtEmit, { sourceName, {}, {}, indexName });
 				}
-				const std::string indexName = "vrIdx" + std::to_string(openScopes.size());
 				emitLine("for (int " + indexName + " = 0, " + indexName + "End = " + countText + "; "
 					+ indexName + " < " + indexName + "End; ++" + indexName + ")");
 				openBlock();
 				emitLine(std::string(cppTypeName(elemType)) + " " + elem.name + " = " + atText + ";");
-				openScopes.push_back({ line.scopeLevel, elementWriteBack(line, flow, elem, indexName) });
+				openScopes.push_back({ line.scopeLevel, elementWriteBack(line, flow, elem, sourceName, indexName) });
 				return;
 			}
 			case DSLFlowControl::IfExist:
@@ -545,7 +541,11 @@ namespace
 				// isChainComponentBinding) even though it isn't readable in that branch.
 				const DSLSymbol::VariableDeclaration& bound = std::get<DSLSymbol::VariableDeclaration>(flow->forLoopVar->data);
 				const DSLType elemType = std::get<DSLSymbol::TypeDeclaration>(bound.typeSymbol->data).type;
-				const std::string receiver = expressionText(flow->condition);
+				// Hoisted for the same reason as ForEach: with a `ref` binding the source appears in BOTH the
+				// lookup and the write-back, and a source that is a call must not run twice.
+				const std::string sourceName = "vrSrc" + std::to_string(sourceLocalCounter++);
+				emitLine("const auto " + sourceName + " = " + expressionText(flow->condition) + ";");
+				const std::string receiver = sourceName;
 				const std::string keyText = (flow->forCondition != nullptr) ? expressionText(flow->forCondition) : std::string();
 
 				// A COMPONENT is fetched off the entity rather than looked up in a container: the fetch call IS
@@ -555,7 +555,7 @@ namespace
 				{
 					const char* fetchEmit = bindings.componentFetchEmit(elemType);
 					const std::string fetchText = (fetchEmit != nullptr)
-						? substituteTemplate(fetchEmit, receiver, {}) : std::string("nullptr");
+						? substituteEmit(fetchEmit, { receiver }) : std::string("nullptr");
 					emitLine("if (" + std::string(cppTypeName(elemType)) + " " + bound.name + " = " + fetchText + ")");
 					openBlock();
 					openScopes.push_back({ line.scopeLevel, {} });
@@ -564,11 +564,12 @@ namespace
 
 				const BindingObject* container = bindings.objectFor(dslValueType(flow->condition));
 				const std::string testText = (container != nullptr && container->lookupEmit != nullptr)
-					? substituteElement(container->lookupEmit, receiver, keyText, bound.name) : std::string("false");
+					? substituteEmit(container->lookupEmit, { receiver, { keyText }, {}, {}, bound.name })
+					: std::string("false");
 				emitLine("if (" + std::string(cppTypeName(elemType)) + " " + bound.name + " = "
 					+ defaultValueText(elemType, bindings) + "; " + testText + ")");
 				openBlock();
-				openScopes.push_back({ line.scopeLevel, elementWriteBack(line, flow, bound, keyText) });
+				openScopes.push_back({ line.scopeLevel, elementWriteBack(line, flow, bound, sourceName, keyText) });
 				return;
 			}
 			case DSLFlowControl::For:

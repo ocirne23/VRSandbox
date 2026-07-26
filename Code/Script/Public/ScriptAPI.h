@@ -174,7 +174,15 @@ struct VrRayHit
     X(void,        worldDrawLine,          (glm::vec3, from), (glm::vec3, to), (glm::vec3, color)) \
     /* First ROOT entity with this display name, or null. Roots only -- a whole-scene search would be a
        different (and far more expensive) operation, and the name is not unique either way. */ \
-    X(Entity*,     worldFindRootEntity,    (const char*, displayName))
+    X(Entity*,     worldFindRootEntity,    (const char*, displayName)) \
+    /* ---- radius query ---- three calls, because the DSL has no way to hand back a list: the first RUNS the
+       query and returns a HANDLE to its results, the other two read that handle. The results live in a
+       THREAD-LOCAL ring of buffers, so concurrent callers never share one, and the handle is generation-tagged
+       like VrArray -- a nested query takes its own slot, and a handle whose slot has since been recycled reads
+       as empty rather than as someone else's results. 0 is never a valid handle. */ \
+    X(int,         worldQueryRadius,       (glm::vec3, position), (float, radius)) \
+    X(int,         worldQueryCount,        (int, queryHandle)) \
+    X(Entity*,     worldQueryResultAt,     (int, queryHandle), (int, index)) /* null out of range or stale */
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,

@@ -568,21 +568,6 @@ namespace
 	// The two candidate-list builders every "offer values here" branch shares -- one construction point for
 	// Variable/Reassign/Function candidates instead of a copy of these loops per calling context. `accept`
 	// filters by the variable's declared type / the function's return type (always-true lambda = "any").
-	// Whether `varDecl` is the ELEMENT a foreach/ifexist header binds (as opposed to an ordinary local or a
-	// for-loop counter, which own their storage outright). Those two are the only bindings that stand in for
-	// something living in a container, which is what makes `ref` meaningful on them and nowhere else.
-	bool isElementBinding(const DSLSymbol* varDecl, const DSLScriptFile& file)
-	{
-		if (varDecl == nullptr || varDecl->line == nullptr)
-			return false;
-		const DSLSymbol* head = varDecl->line->head();
-		if (head == nullptr || head->type != ST::FlowControl)
-			return false;
-		const DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(head->data);
-		return fc.forLoopVar == varDecl
-			&& (fc.control == DSLFlowControl::ForEach || fc.control == DSLFlowControl::IfExist);
-	}
-
 	// Whether a foreach/ifexist in a block ENCLOSING atLine is reading the storage named by (root, path) --
 	// what makes a container-mutating call (push/clear) refuse to be offered/authored there. See
 	// FunctionDeclaration::mutatesContainer: a diagnostic for a logic mistake, not a safety mechanism.
@@ -644,7 +629,7 @@ namespace
 			// the exact footgun `ref` exists to make visible. Refuse it as an assignment target; the fix the
 			// author wants is to add `ref`. Entity elements are handles, not copies, so they stay writable.
 			if (kind == Candidate::Kind::Reassign && !v.isRef && !dslIsEngineObjectType(varType)
-				&& isElementBinding(var, file))
+				&& dslIsElementBinding(var))
 				continue;
 			if (!accept(varType))
 				continue;

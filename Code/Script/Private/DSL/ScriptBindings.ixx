@@ -233,6 +233,13 @@ public:
 	// makes them reachable ONLY through the prefix; their emits simply never mention "$r", so nothing about the
 	// receiver reaches the generated C++ (which calls glm/std directly).
 	DSLType registerNamespace(const char* name);
+
+private:
+	// Allocates a name + DSLType from the derived-type range and fills in the parts every derived kind shares.
+	// Which half of `outObject` the caller then fills is what distinguishes sequence / optional / namespace.
+	DSLType allocateDerivedType(const char* name, BindingObject& outObject);
+
+public:
 	// Registers one toggleable ScriptAPI entry point (see EntryPointDef) -- same guarantee.
 	void registerEntryPoint(EntryPointDef def);
 
