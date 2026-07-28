@@ -61,15 +61,7 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 	{
 		ctx->physicsSetVelocity(scriptData->physics, glm::vec3(0.0f, 1.0f, 0.0f));
 	}
-	const auto vrSrc0 = scriptData->scene;
-	for (int vrIdx0 = 0, vrIdx0End = ctx->sceneGetChildCount(vrSrc0); vrIdx0 < vrIdx0End; ++vrIdx0)
-	{
-		Entity* e = ctx->sceneGetChildAt(vrSrc0, vrIdx0);
-		if (void* phys = ctx->entityGetPhysicsComponent(e))
-		{
-			ctx->physicsApplyImpulse(phys, glm::vec3(1.0f, 2.0f, 3.0f));
-		}
-	}
+	test(ctx, self, scriptData, 123);
 }
 
 REGISTER_UPDATE()
@@ -121,11 +113,7 @@ static void test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData,
 //@	for int i = 0, i < self.data.num, i += 1
 //@		self.physics.setVelocity(vec3 velocity = vec3(0, 1, 0))
 //@	end
-//@	foreach Entity e in self.scene.children
-//@		ifexist PhysicsComponent phys in e
-//@			phys.applyImpulse(vec3 impulse = vec3(1, 2, 3))
-//@		end
-//@	end
+//@	test(int awa = 123)
 //@end
 //@
 //@function test(int awa)

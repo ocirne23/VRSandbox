@@ -20,6 +20,10 @@ void ScriptEventManager::fireEvent(EventKey key)
 					continue;
 				if (sit->second.entity->isFrozenInTree())
 					continue;
+				// This path calls the script's OnEvent DIRECTLY, bypassing ScriptComponent's own entry points,
+				// so it has to honour //@@require itself (see ScriptComponent::requirementsMet).
+				if (script->requiredComponents & ~uint32(sit->second.entity->typeBits))
+					continue;
 				reinterpret_cast<ScriptOnEventFn>(script->onEvent)(&Globals::scriptContext, sit->second.entity, eventIt->second, sit->second.scriptData);
 			}
 		}

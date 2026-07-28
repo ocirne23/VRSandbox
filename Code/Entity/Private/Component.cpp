@@ -211,54 +211,125 @@ void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
         const ScriptModule* loaded = Globals::scriptHost.getOrLoad(info.scriptPath);
         if (!loaded)
             return;
+
+        // //@@require is a CONTRACT: the script reads each required component through a cached pointer with no
+        // null check (that is the point of requiring it), so it must not run on an entity missing one. The
+        // module is still BOUND here and the refusal is enforced live by requirementsMet() at every entry
+        // point -- a hot-reload mutates this same ScriptModule in place rather than re-running spawn, so a
+        // refusal recorded here would otherwise outlive the edit that fixes it and need an app restart.
+        if (const uint32 missing = loaded->requiredComponents & ~uint32(entity.typeBits))
+        {
+            std::string names;
+            for (uint16 i = 0; i < MaxInlineComponentTypes; ++i)
+                if (missing & (1u << i))
+                    names += (names.empty() ? "" : ", ") + std::string(componentTypeName(EComponentID(i)));
+            Log::error("Script '" + info.scriptPath + "' requires " + names + " -- entity '"
+                + std::string(entity.getName()) + "' has none of that; it will not run until the entity gains"
+                " those components or the script stops requiring them");
+        }
         scriptModule = loaded;
     }
 
-    // The block is REUSED across a hot-reload only when both its size and its LAYOUT match -- reinterpreting
-    // one layout as another silently corrupts every field, and a VrArray field reinterpreted from something
-    // else would strand the array it named. Reusing it is what makes reload free for arrays: the handles
-    // survive, so the engine-side contents survive with nothing to copy. On a mismatch the old arrays are
-    // released first -- once the block goes, nothing can reach those handles again.
-    if (scriptModule->dataSize != scriptDataSize || scriptModule->dataLayoutId != scriptDataLayoutId)
-    {
-        releaseScriptArrays(*this);
-        scriptDataSize = scriptModule->dataSize;
-        scriptDataLayoutId = scriptModule->dataLayoutId;
-        scriptData = scriptDataSize ? std::make_unique<uint8[]>(scriptDataSize) : nullptr;
-
-        // Required-component pointers (//@@require) occupy the FRONT of ScriptData, one 8-byte slot per set bit
-        // in ascending EComponentID order (see ScriptRequiredComponentsFn in ScriptAPI.h) -- filled straight off
-        // getComponent<T>() here, engine-side, so self.physics/audio/force (Transpiler's "scriptData-><name>"
-        // emit) read an already-resolved pointer instead of re-fetching the handle on every access. Field order
-        // here MUST match the generated ScriptData struct's own field order (see Transpiler.cpp) -- components
-        // never move once spawned (fixed inline layout), so this only needs doing once, alongside (re)allocation.
-        if (scriptData && scriptModule->requiredComponents)
-        {
-            void** slot = reinterpret_cast<void**>(scriptData.get());
-            if (scriptModule->requiredComponents & (1u << EComponentID_Physics)) *slot++ = getComponent<PhysicsComponent>(&entity);
-            if (scriptModule->requiredComponents & (1u << EComponentID_Audio))   *slot++ = getComponent<AudioComponent>(&entity);
-            if (scriptModule->requiredComponents & (1u << EComponentID_Force))   *slot++ = getComponent<ForceComponent>(&entity);
-        }
-    }
+    syncScriptData(entity);
 
     if (scriptModule->onEvent)
         Globals::scriptEvents.registerListener(scriptModule, &entity, scriptData.get());
 
-	// OnSpawn runs even for a frozen entity: it is the script's constructor, not a tick.
-	if (scriptModule->onSpawn)
-		reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
+	// OnSpawn runs even for a frozen entity: it is the script's constructor, not a tick. Unmet //@@require
+	// suppresses it -- a constructor is exactly where a script reaches for its components -- and update()
+	// then runs it late, the first frame the entity does qualify.
+	if (requirementsMet(entity))
+	{
+		onSpawnRan = true; // set even without an OnSpawn entry: it marks "this script has begun on this entity"
+		if (scriptModule->onSpawn)
+			reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
+	}
+}
+
+// (Re)allocates ScriptData whenever the bound module's layout no longer matches what the block was allocated
+// against, and refills the //@@require pointer slots. Called at spawn AND from every live entry point: a
+// hot-reload mutates the ScriptModule in place and never re-runs spawn, so a script whose //@@data or
+// //@@require set changed would otherwise leave live entities reading their old block under the new layout.
+// The block is REUSED when size and layout both match -- that is what makes reload free for arrays: the
+// handles survive, so the engine-side contents survive with nothing to copy. On a mismatch the old arrays are
+// released first (once the block goes, nothing can reach those handles again) and the script must construct
+// into the fresh block, so onSpawnRan clears and update() re-runs OnSpawn.
+bool ScriptComponent::syncScriptData(Entity& entity)
+{
+    if (!scriptModule || (scriptModule->dataSize == scriptDataSize && scriptModule->dataLayoutId == scriptDataLayoutId))
+        return false;
+
+    releaseScriptArrays(*this);
+    scriptDataSize = scriptModule->dataSize;
+    scriptDataLayoutId = scriptModule->dataLayoutId;
+    scriptData = scriptDataSize ? std::make_unique<uint8[]>(scriptDataSize) : nullptr;
+    onSpawnRan = false;
+
+    // Required-component pointers (//@@require) occupy the FRONT of ScriptData, one 8-byte slot per set bit in
+    // ascending EComponentID order (see ScriptRequiredComponentsFn in ScriptAPI.h) -- filled straight off
+    // getComponent<T>() here, engine-side, so self.physics/audio/force (Transpiler's "scriptData-><name>" emit)
+    // read an already-resolved pointer instead of re-fetching the handle on every access. EVERY id the mask can
+    // carry needs a branch: a missing one doesn't just leave its own slot unwritten, it shifts every later
+    // component into the wrong slot, and the script then reads one component type as another.
+    if (scriptData && scriptModule->requiredComponents)
+    {
+        void** slot = reinterpret_cast<void**>(scriptData.get());
+        if (scriptModule->requiredComponents & (1u << EComponentID_Scene))    *slot++ = getComponent<SceneComponent>(&entity);
+        if (scriptModule->requiredComponents & (1u << EComponentID_Render))   *slot++ = getComponent<RenderComponent>(&entity);
+        if (scriptModule->requiredComponents & (1u << EComponentID_Animator)) *slot++ = getComponent<AnimatorComponent>(&entity);
+        if (scriptModule->requiredComponents & (1u << EComponentID_Physics))  *slot++ = getComponent<PhysicsComponent>(&entity);
+        if (scriptModule->requiredComponents & (1u << EComponentID_Audio))    *slot++ = getComponent<AudioComponent>(&entity);
+        if (scriptModule->requiredComponents & (1u << EComponentID_Particle)) *slot++ = getComponent<ParticleComponent>(&entity);
+        if (scriptModule->requiredComponents & (1u << EComponentID_Force))    *slot++ = getComponent<ForceComponent>(&entity);
+    }
+    return true;
+}
+
+// The live-path wrapper: the event manager holds the ScriptData pointer it was registered with, so a
+// reallocation has to re-register or every fired event writes into freed memory.
+void ScriptComponent::syncScriptDataLive(Entity& entity)
+{
+    if (syncScriptData(entity) && scriptModule->onEvent)
+    {
+        Globals::scriptEvents.unregisterListener(scriptModule, &entity);
+        Globals::scriptEvents.registerListener(scriptModule, &entity, scriptData.get());
+    }
+}
+
+bool ScriptComponent::requirementsMet(const Entity& entity) const
+{
+    return scriptModule == nullptr || (scriptModule->requiredComponents & ~uint32(entity.typeBits)) == 0;
 }
 
 void ScriptComponent::update(Entity& entity, float deltaSeconds)
 {
-    if (!enabled || !scriptModule || !scriptModule->update || entity.isFrozenInTree())
+    if (!enabled || !scriptModule)
+        return;
+    syncScriptDataLive(entity); // the module may have been recompiled under us since spawn
+    if (!requirementsMet(entity))
+        return;
+
+    // Late construction: an entity that didn't satisfy the //@@require set at spawn -- or whose script has
+    // since dropped the requirement it was missing -- runs OnSpawn the first frame it qualifies. Without this
+    // a script fixed mid-session stays half-initialized on everything already spawned until it is respawned.
+    if (!onSpawnRan)
+    {
+        onSpawnRan = true;
+        if (scriptModule->onSpawn)
+            reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
+    }
+
+    if (!scriptModule->update || entity.isFrozenInTree())
         return;
     reinterpret_cast<ScriptUpdateFn>(scriptModule->update)(&Globals::scriptContext, &entity, deltaSeconds, scriptData.get());
 }
 
 void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
 {
-    if (!enabled || !scriptModule || !scriptModule->onEvent || entity.isFrozenInTree())
+    if (!enabled || !scriptModule)
+        return;
+    syncScriptDataLive(entity); // the module may have been recompiled under us since spawn
+    if (!scriptModule->onEvent || entity.isFrozenInTree() || !requirementsMet(entity))
         return;
     auto it = scriptModule->eventKeyToIndex.find(Globals::scriptEvents.findEventKey(eventName));
     if (it != scriptModule->eventKeyToIndex.end())
@@ -269,7 +340,10 @@ void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
 
 void ScriptComponent::fireEvent(Entity& entity, uint32 eventKey)
 {
-    if (!enabled || !scriptModule || !scriptModule->onEvent || entity.isFrozenInTree())
+    if (!enabled || !scriptModule)
+        return;
+    syncScriptDataLive(entity); // the module may have been recompiled under us since spawn
+    if (!scriptModule->onEvent || entity.isFrozenInTree() || !requirementsMet(entity))
         return;
     auto it = scriptModule->eventKeyToIndex.find(eventKey);
     if (it != scriptModule->eventKeyToIndex.end())
@@ -280,7 +354,10 @@ void ScriptComponent::fireEvent(Entity& entity, uint32 eventKey)
 
 void ScriptComponent::firePhysicsEvent(Entity& entity, Entity* other, bool begin, bool sensor, int64 contactId)
 {
-    if (!enabled || !scriptModule || !scriptModule->onPhysicsEvent || entity.isFrozenInTree())
+    if (!enabled || !scriptModule)
+        return;
+    syncScriptDataLive(entity); // the module may have been recompiled under us since spawn
+    if (!scriptModule->onPhysicsEvent || entity.isFrozenInTree() || !requirementsMet(entity))
         return;
     reinterpret_cast<ScriptOnPhysicsEventFn>(scriptModule->onPhysicsEvent)(
         &Globals::scriptContext, &entity, other, begin ? 1 : 0, sensor ? 1 : 0, contactId, scriptData.get());
@@ -291,7 +368,12 @@ void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
     if (!scriptModule)
         return;
 
-    if (scriptModule->onDestroy)
+    // Paired with OnSpawn HAVING RUN, not with the live requirement check -- a script edited between the two
+    // ends would otherwise tear down what it never built (or skip teardown for what it did). The requirement
+    // is still checked on top: if the script gained a requirement this entity doesn't meet while it was live,
+    // its OnDestroy would reach for a component it no longer has, and a skipped teardown beats a crash.
+    // Engine-owned state (the script's arrays) is released below regardless, so nothing leaks either way.
+    if (scriptModule->onDestroy && onSpawnRan && requirementsMet(entity))
         reinterpret_cast<ScriptOnDestroyFn>(scriptModule->onDestroy)(&Globals::scriptContext, &entity, scriptData.get());
 
     if (scriptModule->onEvent)
