@@ -6,6 +6,8 @@ import Core.Log;
 import Core.Camera;
 import Core.Rect;
 import Core.Transform;
+import Core.Tweaks;
+import Threading;
 
 import RendererVK;
 import :Entity;
@@ -18,16 +20,49 @@ import Animation;
 import Physics;
 import Audio;
 
+static bool s_parallelUpdate = true;
+
 bool World::initialize()
 {
     Globals::assetRegistry.scanDirectory();
+    m_updateStaging.initialize(); // main calls this after JobSystem::initialize
+    Tweak::boolean("Threading", "ParallelEntity", &s_parallelUpdate);
     return true;
 }
 
 void World::update(Renderer& renderer, float deltaSeconds)
 {
-	for (EntityPtr& root : m_rootEntities)
-		root->update(renderer, deltaSeconds);
+    if (!s_parallelUpdate)
+    {
+        for (EntityPtr& root : m_rootEntities)
+            root->update(renderer, deltaSeconds);
+        return;
+    }
+
+    m_updateLevel.clear();
+    for (const EntityPtr& root : m_rootEntities)
+        m_updateLevel.push_back({ root.get(), Transform(), false });
+
+    while (!m_updateLevel.empty())
+    {
+        Globals::jobSystem.parallelFor(0, uint32(m_updateLevel.size()), m_updateCost,
+            [this, &renderer, deltaSeconds](uint32 begin, uint32 end)
+            {
+                EntityUpdateStaging& staging = m_updateStaging.local();
+                for (uint32 i = begin; i < end; ++i)
+                {
+                    const EntityUpdateNode& node = m_updateLevel[i];
+                    node.entity->updateSelf(renderer, node.parentWorld, deltaSeconds, node.frozen, staging.children);
+                }
+            });
+
+        m_updateLevel.clear();
+        m_updateStaging.forEach([this](EntityUpdateStaging& staging)
+            {
+                m_updateLevel.insert(m_updateLevel.end(), staging.children.begin(), staging.children.end());
+                staging.children.clear();
+            });
+    }
 }
 
 static RendererVKLayout::EPipelineIndex parsePipeline(const std::string& name)
@@ -867,6 +902,8 @@ void World::handleEntityChange(EntityChange& change, const Camera& camera, const
         else
             addRootEntity(std::move(e));
     }
+    else if (auto* sap = std::get_if<EntityChange::SpawnAtPosition>(&change.type))
+        addRootEntity(spawnAssetFile(sap->path, Transform(sap->position, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))));
     else if (auto* as = std::get_if<EntityChange::AddSceneEntity>(&change.type))
     {
         EntityPtr e = createEmptyEntity(as->displayName);

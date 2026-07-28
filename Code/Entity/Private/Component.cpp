@@ -309,19 +309,29 @@ void PhysicsComponent::spawn(Entity& entity, const SpawnInfo& info, const Transf
 {
     enabled = info.enabled;
     bodyType = info.bodyType;
-    lastWorld = base;
-    prevPos = currPos = base.pos;
-    prevRot = currRot = base.quat;
     lastStep = Globals::physics.getStepCount();
+
+    // `base` is parent-local for a prefab child; the ancestor chain is already positioned by now.
+    Transform world = base;
+    for (const Entity* p = entity.parent; p; p = p->parent)
+        world = composeTransform(Transform(p->pos, p->scale, p->rot), world);
+
+    shapeScale = world.scale;
+    prevPos = currPos = world.pos;
+    prevRot = currRot = world.quat;
 
     PhysicsBodyDesc desc;
     desc.type = info.bodyType;
-    desc.transform = base; // may be parent-local for child spawns; corrected on the first update
+    desc.transform = world;
     desc.userData = &entity;
     body = Globals::physics.createBody(desc, std::span(&info.shape, 1));
 
     if (info.bodyType == EPhysicsBodyType::Static)
-        occluderData = info.occluders; // registered on the first update, once the true world transform is known
+    {
+        occluderData = info.occluders;
+        if (occluderData)
+            occluder = SpatialOccluder(Globals::occlusionBuffer.addOccluder(occluderData, world));
+    }
 }
 
 void PhysicsComponent::destroy(Entity& entity, const SpawnInfo& info)
@@ -347,25 +357,13 @@ void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
 
     if (suspended)
     {
-        // Re-enabled via SceneComponent: put the body back into the simulation and resync it to the
-        // entity's current world transform (the !synced path below also re-registers the occluder).
         body.setEnabled(true);
         suspended = false;
-        synced = false;
+        if (occluderData)
+            occluder = SpatialOccluder(Globals::occlusionBuffer.addOccluder(occluderData,
+                Transform(body.getPosition(), shapeScale, body.getRotation())));
     }
 
-    const Transform world = composeTransform(parentWorld, Transform(entity.pos, entity.scale, entity.rot));
-    if (!synced)
-    {
-        body.setTransform(world.pos, world.quat);
-        lastWorld = world;
-        prevPos = currPos = world.pos;
-        prevRot = currRot = world.quat;
-        synced = true;
-        if (occluderData)
-            occluder = SpatialOccluder(Globals::occlusionBuffer.addOccluder(occluderData, world));
-        return;
-    }
     if (!enabled)
         return;
 
@@ -384,16 +382,9 @@ void PhysicsComponent::update(Entity& entity, const Transform& parentWorld)
         const float alpha = Globals::physics.getInterpolationAlpha();
         const glm::vec3 pos = glm::mix(prevPos, currPos, alpha);
         const glm::quat rot = glm::slerp(prevRot, currRot, alpha);
-        const Transform local = parentWorld.inverse() * Transform(pos, world.scale, rot);
+        const Transform local = parentWorld.inverse() * Transform(pos, parentWorld.scale * entity.scale, rot);
         entity.pos = local.pos;
         entity.rot = local.quat;
-    }
-    else if (world.pos != lastWorld.pos || world.quat != lastWorld.quat)
-    {
-        body.setTransform(world.pos, world.quat); // entity was moved (gizmo/script); the body follows
-        lastWorld = world;
-        if (occluderData)
-            occluder = SpatialOccluder(Globals::occlusionBuffer.addOccluder(occluderData, world)); // re-bake at the new pose
     }
 }
 

@@ -8,6 +8,16 @@ import RendererVK.fwd;
 
 export struct EntitySpawnTemplate;
 export struct EntityPtr;
+export class Entity;
+
+// One entity queued for the depth-parallel update pass: its parent's composed world transform and the
+// frozen state inherited down the tree.
+export struct EntityUpdateNode
+{
+    Entity* entity = nullptr;
+    Transform parentWorld;
+    bool frozen = false;
+};
 
 export enum EEntityFlags : uint8
 {
@@ -21,6 +31,10 @@ export enum EEntityFlags : uint8
     // subtree becomes its own RootAllocation over its contiguous DFS range and keeps one-chunk freeing.
     EEntityFlag_RootAllocation       = 1 << 3, // first entity of its allocation range; frees it while contiguous
     EEntityFlag_ContiguousAllocation = 1 << 4, // slice still owned by an intact (sub)tree allocation
+    // Latch for updateSelf: this entity's subtree has already been pulled from the simulation while
+    // disabled, so the walk is not repeated every frame. Anything joining the subtree afterwards would
+    // miss that walk, so reparentEntity clears it up the new ancestor chain.
+    EEntityFlag_PhysicsSuspended     = 1 << 5,
 };
 
 export enum EComponentID : uint16
@@ -68,6 +82,11 @@ public:
 
     void update(Renderer& renderer, float deltaSeconds) { updateTree(renderer, Transform(), deltaSeconds); }
 
+    // Non-recursive: ticks this entity's components and emits its enabled children into outChildren as
+    // the next depth level's work. Concurrency-safe against other entities once its parent has run.
+    void updateSelf(Renderer& renderer, const Transform& parentWorld, float deltaSeconds, bool frozen,
+                    std::vector<EntityUpdateNode>& outChildren);
+
     const char* getName() const { return displayName ? displayName.get() : ""; }
     bool hasName() const { return displayName != nullptr; }
     void setName(std::string_view name);
@@ -82,6 +101,8 @@ public:
     // component enables (script/animator/physics) stay independent of this.
     bool isEnabled() const { return (flags & EEntityFlag_Enabled) != 0; }
     void setEnabled(bool on) { flags = on ? uint8(flags | EEntityFlag_Enabled) : uint8(flags & ~EEntityFlag_Enabled); }
+    bool isPhysicsSuspended() const { return (flags & EEntityFlag_PhysicsSuspended) != 0; }
+    void setPhysicsSuspended(bool on) { flags = on ? uint8(flags | EEntityFlag_PhysicsSuspended) : uint8(flags & ~EEntityFlag_PhysicsSuspended); }
     bool isFrozen() const { return (flags & EEntityFlag_Frozen) != 0; }
     void setFrozen(bool on) { flags = on ? uint8(flags | EEntityFlag_Frozen) : uint8(flags & ~EEntityFlag_Frozen); }
     // The flag lives on the frozen (sub)tree's root; entry points invoked outside updateTree's propagation
@@ -204,6 +225,14 @@ export struct EntityChange
         std::string displayName;
         EntityPtr parent;
     };
+    // Script spawn (ctx->spawnEntity). Deferred rather than spawned in the thunk: spawning touches the
+    // World caches, box3d and the renderer, none of which tolerate the parallel entity pass running
+    // around them. Lands on the root list, like the thunk's old reparent-to-null did.
+    struct SpawnAtPosition
+    {
+        std::string path;
+        glm::vec3   position = glm::vec3(0.0f);
+    };
     struct Delete
     {
         EntityPtr entity;
@@ -232,5 +261,5 @@ export struct EntityChange
         EntityPtr oldEntity;
         std::shared_ptr<const EntitySpawnTemplate> tmpl; // freshly assembled from the entity's edited component set
     };
-    std::variant<CreateHierarchy, CreateViewport, AddSceneEntity, Delete, Reparent, SavePrefab, OpenPrefabForEdit, NewPrefab, RespawnEntity> type;
+    std::variant<CreateHierarchy, CreateViewport, AddSceneEntity, SpawnAtPosition, Delete, Reparent, SavePrefab, OpenPrefabForEdit, NewPrefab, RespawnEntity> type;
 };

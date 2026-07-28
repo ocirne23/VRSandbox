@@ -31,9 +31,15 @@ public:
                                // reference a recycled contact
     };
 
-    // Fixed-step accumulator; steps at stepHz with a bounded number of catch-up steps per frame.
-    // Also drains contact/sensor events (see getContactEvents) and advances the step counter.
+    // Applies queued teleports, then runs the fixed-step accumulator: steps at stepHz with a bounded
+    // number of catch-up steps per frame. Also drains contact/sensor events (see getContactEvents)
+    // and advances the step counter.
     void update(double deltaSec, std::function<void(const ContactEvent&)> contactCallback);
+
+    // Thread-safe absolute repositioning: queues the pose, applied at the start of the next update()
+    // before any step. The only way to move a body. Requests apply in call order (last one for a body
+    // wins) and are discarded if the body died before the drain.
+    void teleportBody(const PhysicsBody& body, const glm::vec3& pos, const glm::quat& rot);
 
     PhysicsBody createBody(const PhysicsBodyDesc& desc, std::span<const PhysicsShape> shapes);
 
@@ -99,6 +105,17 @@ public:
 private:
 
     void applyBuoyancy(); // per fixed step, before b3World_Step (box3d clears forces every step)
+    void applyQueuedTeleports(); // main thread, start of update
+
+    struct TeleportRequest
+    {
+        uint64 bodyHandle = 0; // b3BodyId bits
+        glm::vec3 pos = glm::vec3(0.0f);
+        glm::quat rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    };
+    std::mutex m_teleportMutex;
+    std::vector<TeleportRequest> m_teleports;
+    std::vector<TeleportRequest> m_teleportScratch; // swapped with m_teleports at drain, so neither reallocates
 
     uint32 m_worldHandle = 0; // b3WorldId bits
     bool m_initialized = false;

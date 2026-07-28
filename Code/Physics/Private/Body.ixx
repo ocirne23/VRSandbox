@@ -34,13 +34,38 @@ public:
 
     glm::vec3 getPosition() const;
     glm::quat getRotation() const;
-    void setTransform(const glm::vec3& pos, const glm::quat& rot);
+    // No setTransform: repositioning goes through PhysicsWorld::teleportBody.
 
     glm::vec3 getLinearVelocity() const;
     void setLinearVelocity(const glm::vec3& velocity);
-    void applyImpulse(const glm::vec3& impulse); // at the center of mass, wakes the body
+    glm::vec3 getAngularVelocity() const;            // radians/second about each world axis
+    void setAngularVelocity(const glm::vec3& radiansPerSecond);
+
+    // IMPULSES are instantaneous (a hit, a jump); FORCES accumulate over the step and are cleared by box3d
+    // every step, so a continuous push has to be re-applied each frame. Both wake the body. The "AtPoint"
+    // variants take a WORLD-space point and therefore also impart spin -- applying at the center of mass does
+    // not, which is what the plain forms do.
+    void applyImpulse(const glm::vec3& impulse);
+    void applyImpulseAtPoint(const glm::vec3& impulse, const glm::vec3& worldPoint);
+    void applyAngularImpulse(const glm::vec3& impulse);
+    void applyForce(const glm::vec3& force);
+    void applyForceAtPoint(const glm::vec3& force, const glm::vec3& worldPoint);
+    void applyTorque(const glm::vec3& torque);
+
+    float getMass() const;                  // 0 for a static/kinematic body
+    glm::vec3 getCenterOfMass() const;      // world space
+    glm::vec3 getPointVelocity(const glm::vec3& worldPoint) const; // includes the spin contribution
+
+    // Per-body multiplier on world gravity (0 = floats, 1 = normal, negative = falls upward).
+    float getGravityScale() const;
+    void setGravityScale(float scale);
+    float getLinearDamping() const;
+    void setLinearDamping(float damping);
+    float getAngularDamping() const;
+    void setAngularDamping(float damping);
 
     bool isAwake() const;
+    void setAwake(bool awake); // waking is what makes a settled body react to a changed velocity/force
 
 private:
 

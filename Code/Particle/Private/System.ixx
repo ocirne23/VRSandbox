@@ -34,6 +34,7 @@ public:
     void setVelocity(const glm::vec3& velocity);
 
     void setEmitting(bool emitting); // pauses/resumes continuous rates (bursts still fire)
+    bool isEmitting() const;         // false for an invalid/destroyed effect
     void burst();                    // queues every emitter's Burst count this frame
 
 private:

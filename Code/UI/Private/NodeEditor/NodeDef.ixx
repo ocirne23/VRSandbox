@@ -860,9 +860,8 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "", D::Exec, "" } },
         "ctx->physicsApplyImpulse($1, $2);\n#0" });
 
-    // Teleport Body: moves a DYNAMIC body directly (a dynamic body overwrites the entity transform every
-    // frame, so Set Entity has no lasting effect on it). Kinematic/static bodies follow the entity, so
-    // move those with Set Entity instead; on them this node is a no-op.
+    // Teleport Body: queues an absolute pose, applied before the next physics step. The only way to move
+    // a body of any type — Set Entity moves the mesh and leaves the collider behind.
     r.push_back({ "TeleportBody", "Teleport Body", "Physics", true,
         { { "", D::Exec, "" },
             { "Component", D::Pointer, "nullptr" },

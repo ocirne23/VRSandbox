@@ -125,7 +125,12 @@ static void dispatchContactEvents(b3WorldId world, std::function<void(const Phys
 
 void PhysicsWorld::update(double deltaSec, std::function<void(const ContactEvent&)> contactCallback)
 {
-    if (!m_initialized || m_paused)
+    if (!m_initialized)
+        return;
+
+    applyQueuedTeleports(); // before the paused check: placing a body is not simulation
+
+    if (m_paused)
         return;
 
     m_accumulator += float(deltaSec) * m_timeScale;
@@ -146,6 +151,30 @@ void PhysicsWorld::update(double deltaSec, std::function<void(const ContactEvent
     }
     if (m_accumulator >= step)
         m_accumulator = 0.0f; // drop the remainder after a hitch instead of spiraling
+}
+
+void PhysicsWorld::teleportBody(const PhysicsBody& body, const glm::vec3& pos, const glm::quat& rot)
+{
+    if (!body.isValid())
+        return;
+    const std::lock_guard<std::mutex> lock(m_teleportMutex);
+    m_teleports.push_back({ body.m_handle, pos, glm::normalize(rot) });
+}
+
+void PhysicsWorld::applyQueuedTeleports()
+{
+    m_teleportScratch.clear();
+    {
+        const std::lock_guard<std::mutex> lock(m_teleportMutex);
+        m_teleportScratch.swap(m_teleports); // box3d runs outside the lock; producers keep queueing meanwhile
+    }
+
+    for (const TeleportRequest& request : m_teleportScratch)
+    {
+        const b3BodyId id = toBodyId(request.bodyHandle);
+        if (b3Body_IsValid(id))
+            b3Body_SetTransform(id, toB3(request.pos), toB3(request.rot));
+    }
 }
 
 void PhysicsWorld::applyBuoyancy()

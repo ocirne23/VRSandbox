@@ -42,21 +42,32 @@ public:
 		fireEvent(it->second);
 	}
 
+	// Every add* below is called from script thunks, which run on worker threads during the parallel
+	// entity pass; the drain is main-thread. The mutex is held only for the push.
     std::vector<EntityChange> takeEntityChanges()
     {
 		std::vector<EntityChange> changes;
+		const std::lock_guard<std::mutex> lock(m_entityChangeMutex);
 		changes.swap(m_entityChanges);
 		return changes;
     }
 
 	inline void addDestroyRequest(EntityPtr&& entity)
 	{
+		const std::lock_guard<std::mutex> lock(m_entityChangeMutex);
 		m_entityChanges.emplace_back(EntityChange::Delete{ std::move(entity) });
 	}
 
 	inline void addReparentRequest(EntityPtr&& entity, EntityPtr&& newParent)
 	{
+		const std::lock_guard<std::mutex> lock(m_entityChangeMutex);
 		m_entityChanges.emplace_back(EntityChange::Reparent{ std::move(entity), std::move(newParent) });
+	}
+
+	inline void addSpawnRequest(std::string path, const glm::vec3& position)
+	{
+		const std::lock_guard<std::mutex> lock(m_entityChangeMutex);
+		m_entityChanges.emplace_back(EntityChange::SpawnAtPosition{ std::move(path), position });
 	}
 
 private:
@@ -87,6 +98,7 @@ private:
 private:
 
     std::vector<EntityChange> m_entityChanges;
+    std::mutex m_entityChangeMutex;
 
     struct Entry
     {

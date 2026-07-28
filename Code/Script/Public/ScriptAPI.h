@@ -122,7 +122,7 @@ struct VrRayHit
     X(glm::vec3,   physicsGetVelocity,     (void*, physicsComponent)) \
     X(void,        physicsSetVelocity,     (void*, physicsComponent), (glm::vec3, velocity)) \
     X(void,        physicsApplyImpulse,    (void*, physicsComponent), (glm::vec3, impulse)) /* world space, at the center of mass, wakes the body */ \
-    X(void,        physicsTeleport,        (void*, physicsComponent), (glm::vec3, position), (glm::vec3, eulerDeg)) /* dynamic bodies only */ \
+    X(void,        physicsTeleport,        (void*, physicsComponent), (glm::vec3, position), (glm::vec3, eulerDeg)) /* queued; applied before the next physics step */ \
     /* ---- audio component ---- */ \
     X(void*,       entityGetAudioComponent,(Entity*, entity)) \
     X(void,        audioTrigger,           (void*, audioComponent), (Entity*, entity), (const char*, alias), (int, overrideMask), (glm::vec3, position), (float, volume), (float, pitch)) \
@@ -182,7 +182,50 @@ struct VrRayHit
        as empty rather than as someone else's results. 0 is never a valid handle. */ \
     X(int,         worldQueryRadius,       (glm::vec3, position), (float, radius)) \
     X(int,         worldQueryCount,        (int, queryHandle)) \
-    X(Entity*,     worldQueryResultAt,     (int, queryHandle), (int, index)) /* null out of range or stale */
+    X(Entity*,     worldQueryResultAt,     (int, queryHandle), (int, index)) /* null out of range or stale */ \
+    /* ---- physics component (rigid body) ---- every one of these is a no-op / zero read on a null handle or a
+       component whose body isn't valid, so gameplay code never has to guard. Angular quantities are RADIANS
+       here (box3d's own unit); the DSL bindings convert, since the DSL speaks degrees throughout. */ \
+    X(glm::vec3,   physicsGetAngularVelocity,(void*, physicsComponent)) \
+    X(void,        physicsSetAngularVelocity,(void*, physicsComponent), (glm::vec3, radiansPerSecond)) \
+    /* Impulses are instantaneous; forces accumulate over the step and box3d clears them every step, so a
+       continuous push must be re-applied each frame. The AtPoint forms take a WORLD point and impart spin. */ \
+    X(void,        physicsApplyImpulseAtPoint,(void*, physicsComponent), (glm::vec3, impulse), (glm::vec3, worldPoint)) \
+    X(void,        physicsApplyAngularImpulse,(void*, physicsComponent), (glm::vec3, impulse)) \
+    X(void,        physicsApplyForce,      (void*, physicsComponent), (glm::vec3, force)) \
+    X(void,        physicsApplyForceAtPoint,(void*, physicsComponent), (glm::vec3, force), (glm::vec3, worldPoint)) \
+    X(void,        physicsApplyTorque,     (void*, physicsComponent), (glm::vec3, torque)) \
+    X(float,       physicsGetMass,         (void*, physicsComponent)) /* 0 for a static/kinematic body */ \
+    X(glm::vec3,   physicsGetCenterOfMass, (void*, physicsComponent)) /* world space */ \
+    X(glm::vec3,   physicsGetPointVelocity,(void*, physicsComponent), (glm::vec3, worldPoint)) /* includes spin */ \
+    X(glm::vec3,   physicsGetPosition,     (void*, physicsComponent)) /* the SIMULATED pose, not the entity's */ \
+    X(float,       physicsGetGravityScale, (void*, physicsComponent)) \
+    X(void,        physicsSetGravityScale, (void*, physicsComponent), (float, scale)) \
+    X(float,       physicsGetLinearDamping,(void*, physicsComponent)) \
+    X(void,        physicsSetLinearDamping,(void*, physicsComponent), (float, damping)) \
+    X(float,       physicsGetAngularDamping,(void*, physicsComponent)) \
+    X(void,        physicsSetAngularDamping,(void*, physicsComponent), (float, damping)) \
+    X(void,        physicsSetAwake,        (void*, physicsComponent), (int, awake)) \
+    /* ---- particle component ---- the effect follows its entity on its own (ParticleComponent::update), so
+       what a script controls is whether it emits and when it bursts, not where it is. */ \
+    X(void*,       entityGetParticleComponent,(Entity*, entity)) \
+    X(void,        particleBurst,          (void*, particleComponent)) /* every emitter's Burst count, once */ \
+    X(int,         particleGetEmitting,    (void*, particleComponent)) \
+    X(void,        particleSetEmitting,    (void*, particleComponent), (int, emitting)) /* continuous rates only; bursts still fire */ \
+    /* ---- render component ---- READS only, plus the local offset. The node's own transform is recomposed
+       from the entity's world transform every frame (Entity::updateTree), so there is nothing here to write it
+       with: `offset` is the per-instance nudge that survives, and moving the entity is the other way. */ \
+    X(void*,       entityGetRenderComponent,(Entity*, entity)) \
+    X(float,       renderGetBoundsRadius,  (void*, renderComponent)) /* world space; 0 with no mesh */ \
+    X(glm::vec3,   renderGetBoundsCenter,  (void*, renderComponent)) /* world space */ \
+    X(int,         renderIsVisible,        (void*, renderComponent)) /* as of this frame's spatial pass */ \
+    X(int,         renderIsSkinned,        (void*, renderComponent)) \
+    X(glm::vec3,   renderGetOffsetPos,     (void*, renderComponent)) \
+    X(float,       renderGetOffsetScale,   (void*, renderComponent)) \
+    X(glm::quat,   renderGetOffsetRot,     (void*, renderComponent)) \
+    X(void,        renderSetOffsetPos,     (void*, renderComponent), (glm::vec3, position)) \
+    X(void,        renderSetOffsetScale,   (void*, renderComponent), (float, scale)) \
+    X(void,        renderSetOffsetRot,     (void*, renderComponent), (glm::quat, rotation))
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,

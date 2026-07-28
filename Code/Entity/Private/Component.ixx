@@ -56,7 +56,6 @@ export struct SceneComponent
     };
 
     std::vector<EntityPtr> children;
-    bool physicsSuspended = false; // subtree bodies pulled from the simulation while disabled (see updateTree)
 
     // treeCursor: children carve their slices from the tree's single spawn allocation (see Entity::create)
     void spawn(Entity& entity, const SpawnInfo& info, const Transform& base, uint8*& treeCursor);
@@ -193,23 +192,23 @@ export struct ScriptComponent
     }
 };
 
-// A rigid body simulated by the Physics library. Dynamic bodies drive the entity's transform after
-// each step (interpolated between fixed steps); kinematic and static bodies follow the entity when
-// it is moved (gizmo, scripts). The entity's world scale is baked into the collision shape at spawn.
+// A rigid body simulated by the Physics library. The body owns the pose: it is placed once at spawn from
+// the entity's composed world transform, and is only ever moved again by PhysicsWorld::teleportBody.
+// Dynamic bodies write their simulated pose into the entity's local transform each update, interpolated
+// between fixed steps. The entity's world scale is baked into the collision shape at spawn.
 export struct PhysicsComponent
 {
     static constexpr EComponentID getId() { return EComponentID_Physics; }
 
     PhysicsBody body;
-    SpatialOccluder occluder; // static mesh colliders feed the CPU occlusion buffer (synced in update)
+    SpatialOccluder occluder; // static mesh colliders feed the CPU occlusion buffer (registered at spawn)
     std::shared_ptr<const OccluderData> occluderData; // shared object-space triangles behind `occluder`
-    Transform lastWorld;      // last world transform pushed to a non-dynamic body (change detection)
     glm::vec3 prevPos, currPos; // body pose at the previous/current physics step (dynamic interpolation)
     glm::quat prevRot, currRot;
+    float shapeScale = 1.0f;  // world scale baked into the shape at spawn
     uint32 lastStep = 0;
     EPhysicsBodyType bodyType = EPhysicsBodyType::Dynamic;
     bool enabled = true;
-    bool synced = false;      // body is teleported to the entity's true world transform on first update
     bool suspended = false;   // body removed from the simulation (entity disabled via EEntityFlag_Enabled)
 	PhysicsWorld::ContactEvent* pContactEventList = nullptr; // linked list of contact events collected this frame
 

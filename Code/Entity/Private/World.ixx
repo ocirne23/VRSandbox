@@ -15,7 +15,14 @@ import :Component;
 
 import File;
 import Spatial;
+import Threading;
 import :AnimationDescription;
+
+// Per-worker scratch for the depth-parallel entity update: the next level's nodes this worker found.
+export struct EntityUpdateStaging
+{
+    std::vector<EntityUpdateNode> children;
+};
 
 // Flattened collision geometry for one spawnable node (positions + triangle indices, node
 // transforms applied), built transiently from a CollisionSource for hull/mesh physics shapes.
@@ -58,6 +65,8 @@ public:
 
     bool initialize();
 
+    // Breadth-first: one depth level at a time, the whole level concurrently, parents before children.
+    // The "Entity/Update" Parallel tweak switches back to the serial depth-first walk.
     void update(Renderer& renderer, float deltaSeconds);
 
     void handleContactEvent(const PhysicsWorld::ContactEvent& evt)
@@ -175,6 +184,9 @@ private:
     std::shared_ptr<EntitySpawnTemplate> m_emptyTemplate; // blank Scene-only template for editable (non-prefab) entities
     std::vector<std::shared_ptr<const EntitySpawnTemplate>> m_editorTemplates; // ad-hoc templates kept alive via keepTemplateAlive()
     std::vector<EntityPtr> m_rootEntities;
+    std::vector<EntityUpdateNode> m_updateLevel;
+    PerWorker<EntityUpdateStaging> m_updateStaging;
+    JobCost m_updateCost{ 2000 };
     std::function<void(const EntityPtr&, const std::string&)> m_onPrefabOpened;
     std::function<void(const EntityPtr&, const EntityPtr&)> m_onEntityRespawned;
 };

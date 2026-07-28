@@ -79,6 +79,12 @@ void ParticleEffect::setEmitting(bool emitting)
         inst->emitting = emitting;
 }
 
+bool ParticleEffect::isEmitting() const
+{
+    const ParticleSystem::EffectInstance* inst = Globals::particleSystem.findEffect(m_id);
+    return inst != nullptr && inst->emitting;
+}
+
 void ParticleEffect::burst()
 {
     if (ParticleSystem::EffectInstance* inst = Globals::particleSystem.findEffect(m_id))

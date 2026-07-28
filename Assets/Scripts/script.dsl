@@ -60,15 +60,18 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 	{
 		ctx->physicsSetVelocity(scriptData->physics, glm::vec3(0.0f, 1.0f, 0.0f));
 	}
-	for (int vrIdx0 = 0, vrIdx0End = ctx->sceneGetChildCount(scriptData->scene); vrIdx0 < vrIdx0End; ++vrIdx0)
+	const auto vrSrc0 = scriptData->scene;
+	for (int vrIdx0 = 0, vrIdx0End = ctx->sceneGetChildCount(vrSrc0); vrIdx0 < vrIdx0End; ++vrIdx0)
 	{
-		Entity* e = ctx->sceneGetChildAt(scriptData->scene, vrIdx0);
-		if (void* phys = ctx->entityGetPhysicsComponent(e))
+		Entity* e = ctx->sceneGetChildAt(vrSrc0, vrIdx0);
+		const auto vrSrc1 = e;
+		if (void* phys = ctx->entityGetPhysicsComponent(vrSrc1))
 		{
 			ctx->physicsApplyImpulse(phys, glm::vec3(1.0f, 2.0f, 3.0f));
 		}
 	}
-	if (int i = 0; ctx->arrayGet((*scriptData).list, 0, (int)sizeof(i), &i))
+	const auto vrSrc2 = (*scriptData).list;
+	if (int i = 0; ctx->arrayGet(vrSrc2, 0, (int)sizeof(i), &i))
 	{
 		ctx->logf(ctx->internString("%i"), i);
 	}

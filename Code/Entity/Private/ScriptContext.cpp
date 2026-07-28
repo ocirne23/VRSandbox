@@ -234,13 +234,100 @@ void registerScriptDslBindings()
         "ctx->entityGetPhysicsComponent($r)");
     bindings.registerObject({ "physics", physicsType, /*sidebarTopLevel*/ false,
         {
-            { "getVelocity",  vec3,   {},                                              "ctx->physicsGetVelocity($r)" },
-            { "setVelocity",  T::Void, { { "velocity", vec3 } },                       "ctx->physicsSetVelocity($r, $1)" },
-            { "applyImpulse", T::Void, { { "impulse", vec3 } },                        "ctx->physicsApplyImpulse($r, $1)" },
-            { "isAwake",      T::Bool, {},                                             "(ctx->physicsIsAwake($r) != 0)" },
-            { "teleport",     T::Void, { { "position", vec3 }, { "eulerDeg", vec3 } }, "ctx->physicsTeleport($r, $1, $2)" },
+            // READS are members (below), WRITES are functions -- the split every binding here uses, and the
+            // only one that works: a member's emit doubles as an assignment target, so anything backed by a
+            // getter CALL has to be read-only, which leaves a setter function as the way to write it.
+
+            // -- velocity -- angular is DEGREES per second here, radians across the ABI (box3d's own unit)
+            { "setVelocity",        T::Void, { { "velocity", vec3 } },          "ctx->physicsSetVelocity($r, $1)" },
+            { "setAngularVelocity", T::Void, { { "degreesPerSecond", vec3 } },  "ctx->physicsSetAngularVelocity($r, glm::radians($1))" },
+            // A settled body ignores a changed velocity until it wakes. Every apply* below wakes it for you, so
+            // this is only for the cases that don't: a direct velocity write, or forcing a body to sleep.
+            { "setAwake",           T::Void, { { "awake", T::Bool } },          "ctx->physicsSetAwake($r, $1)" },
+
+            // -- impulses -- INSTANTANEOUS: a hit, a jump. At the centre of mass unless a world point is given,
+            // in which case the offset also imparts spin.
+            { "applyImpulse",        T::Void, { { "impulse", vec3 } },                                  "ctx->physicsApplyImpulse($r, $1)" },
+            { "applyImpulseAtPoint", T::Void, { { "impulse", vec3 }, { "worldPoint", vec3 } },          "ctx->physicsApplyImpulseAtPoint($r, $1, $2)" },
+            { "applyAngularImpulse", T::Void, { { "impulse", vec3 } },                                  "ctx->physicsApplyAngularImpulse($r, $1)" },
+
+            // -- forces -- CONTINUOUS: box3d clears accumulated forces every step, so a sustained push (thrust,
+            // wind, a magnet) has to be re-applied every Update. One call is a single step's worth.
+            { "applyForce",        T::Void, { { "force", vec3 } },                                      "ctx->physicsApplyForce($r, $1)" },
+            { "applyForceAtPoint", T::Void, { { "force", vec3 }, { "worldPoint", vec3 } },              "ctx->physicsApplyForceAtPoint($r, $1, $2)" },
+            { "applyTorque",       T::Void, { { "torque", vec3 } },                                     "ctx->physicsApplyTorque($r, $1)" },
+
+            // -- per-body tuning -- gravityScale 0 floats, 1 is normal, negative falls upward
+            { "setGravityScale",   T::Void, { { "scale", T::Float } },      "ctx->physicsSetGravityScale($r, $1)" },
+            { "setLinearDamping",  T::Void, { { "damping", T::Float } },    "ctx->physicsSetLinearDamping($r, $1)" },
+            { "setAngularDamping", T::Void, { { "damping", T::Float } },    "ctx->physicsSetAngularDamping($r, $1)" },
+
+            // Queued: the pose lands at the next physics update, so the reads below still report the old
+            // one for the rest of the frame. The only way to move a body, of any type.
+            { "teleport",          T::Void, { { "position", vec3 }, { "eulerDeg", vec3 } }, "ctx->physicsTeleport($r, $1, $2)" },
+            // Takes an argument, so it stays a function rather than a member. The velocity AT a world point
+            // includes the spin contribution, which is what a contact response or surface drag actually wants.
+            { "getPointVelocity",  vec3,    { { "worldPoint", vec3 } },     "ctx->physicsGetPointVelocity($r, $1)" },
         },
-        {} });
+        {
+            { "velocity",        vec3,     "ctx->physicsGetVelocity($r)",        /*writable*/ false },
+            // Degrees per second, matching setAngularVelocity and the DSL's convention everywhere else.
+            { "angularVelocity", vec3,     "glm::degrees(ctx->physicsGetAngularVelocity($r))", /*writable*/ false },
+            { "mass",            T::Float, "ctx->physicsGetMass($r)",            /*writable*/ false }, // 0 if static/kinematic
+            { "centerOfMass",    vec3,     "ctx->physicsGetCenterOfMass($r)",    /*writable*/ false }, // world space
+            // The SIMULATED pose. Distinct from self.pos, which a dynamic body only catches up to at the end of
+            // the entity update -- reading it mid-frame is how you see where the body actually is right now.
+            { "position",        vec3,     "ctx->physicsGetPosition($r)",        /*writable*/ false },
+            { "awake",           T::Bool,  "(ctx->physicsIsAwake($r) != 0)",     /*writable*/ false },
+            { "gravityScale",    T::Float, "ctx->physicsGetGravityScale($r)",    /*writable*/ false },
+            { "linearDamping",   T::Float, "ctx->physicsGetLinearDamping($r)",   /*writable*/ false },
+            { "angularDamping",  T::Float, "ctx->physicsGetAngularDamping($r)",  /*writable*/ false },
+        } });
+
+    // What a script can know about the mesh, plus the one transform it can meaningfully write. The node's own
+    // transform is NOT here: updateTree recomposes it from the entity's world transform every frame, so a write
+    // would vanish within the same frame. `offset*` is the per-instance nudge that survives that (updateTree
+    // composes world x localTransform), and moving the entity is the other way.
+    const DSLType renderType = bindings.registerComponentType("render", "RenderComponent", EComponentID_Render,
+        "ctx->entityGetRenderComponent($r)");
+    bindings.registerObject({ "render", renderType, /*sidebarTopLevel*/ false,
+        {
+            // The offset the mesh sits at RELATIVE to its entity -- a held item in a hand, a recoil kick, a
+            // breathing scale. Persistent: it is re-composed onto the world transform every update.
+            { "setOffsetPos",   T::Void, { { "position", vec3 } }, "ctx->renderSetOffsetPos($r, $1)" },
+            { "setOffsetScale", T::Void, { { "scale", T::Float } }, "ctx->renderSetOffsetScale($r, $1)" },
+            { "setOffsetRot",   T::Void, { { "rotation", quat } },  "ctx->renderSetOffsetRot($r, $1)" },
+        },
+        {
+            // World-space render bounds -- what "how big is this thing, and where is its middle" asks.
+            { "boundsRadius", T::Float, "ctx->renderGetBoundsRadius($r)",     /*writable*/ false },
+            { "boundsCenter", vec3,     "ctx->renderGetBoundsCenter($r)",     /*writable*/ false },
+            // As of THIS frame's spatial pass: the cheap way to skip work for something off-screen. False when
+            // culling is disabled outright (nothing stamps visibility then), so treat it as a hint, not a fact.
+            { "visible",      T::Bool,  "(ctx->renderIsVisible($r) != 0)",    /*writable*/ false },
+            { "skinned",      T::Bool,  "(ctx->renderIsSkinned($r) != 0)",    /*writable*/ false },
+            { "offsetPos",    vec3,     "ctx->renderGetOffsetPos($r)",        /*writable*/ false },
+            { "offsetScale",  T::Float, "ctx->renderGetOffsetScale($r)",      /*writable*/ false },
+            { "offsetRot",    quat,     "ctx->renderGetOffsetRot($r)",        /*writable*/ false },
+        } });
+
+    // A particle effect follows its entity on its own (ParticleComponent::update keeps the emitters on the
+    // world transform and feeds them its finite-difference velocity), so there is deliberately no position or
+    // velocity here -- move the entity. What is left is the part a script actually decides: emit or not, and
+    // when to fire a one-shot.
+    const DSLType particleType = bindings.registerComponentType("particle", "ParticleComponent", EComponentID_Particle,
+        "ctx->entityGetParticleComponent($r)");
+    bindings.registerObject({ "particle", particleType, /*sidebarTopLevel*/ false,
+        {
+            // One shot of every emitter's authored Burst count. Independent of `emitting`: a burst fires even
+            // while continuous emission is paused, which is what makes it usable as a pure event effect.
+            { "burst",       T::Void, {},                          "ctx->particleBurst($r)" },
+            // Pauses/resumes the CONTINUOUS rates only. Already-live particles keep simulating out.
+            { "setEmitting", T::Void, { { "emitting", T::Bool } }, "ctx->particleSetEmitting($r, $1)" },
+        },
+        {
+            { "emitting", T::Bool, "(ctx->particleGetEmitting($r) != 0)", /*writable*/ false },
+        } });
 
     const DSLType audioType = bindings.registerComponentType("audio", "AudioComponent", EComponentID_Audio,
         "ctx->entityGetAudioComponent($r)");
@@ -253,16 +340,54 @@ void registerScriptDslBindings()
 
     const DSLType forceType = bindings.registerComponentType("force", "ForceComponent", EComponentID_Force,
         "ctx->entityGetForceComponent($r)");
+    // The whole authored shape of a forcefield bubble, plus what the GPU measured about it. Same reads-are-
+    // members / writes-are-functions split as every other component here.
+    //
+    // The bubble spans the "output line" from the emitter to `pos + direction * reach`; every shape control
+    // below redistributes the SAME total output along it rather than adding or removing power (the reference is
+    // a plain sphere, and the fold is pre-applied engine-side), so pinching or narrowing DENSIFIES the field.
+    // `reach` is the one that genuinely scales the total.
+    //
+    // There is no on/off: Force has no such concept, so silencing an emitter is setOutput(0).
     bindings.registerObject({ "force", forceType, /*sidebarTopLevel*/ false,
         {
-            { "getOutput",   T::Float, {},                          "ctx->forceGetOutput($r)" },
-            { "setOutput",   T::Void,  { { "output", T::Float } },  "ctx->forceSetOutput($r, $1)" },
-            { "getReach",    T::Float, {},                          "ctx->forceGetReach($r)" },
-            { "setReach",    T::Void,  { { "reach", T::Float } },   "ctx->forceSetReach($r, $1)" },
-            { "setTeam",     T::Void,  { { "team", T::Int } },      "ctx->forceSetTeam($r, $1)" },
-            { "getPressure", T::Float, {},                          "ctx->forceGetPressure($r)" },
+            { "setOutput",       T::Void, { { "output", T::Float } },      "ctx->forceSetOutput($r, $1)" },
+            // World units, and NOT scaled by the entity -- the span length, so bigger means more total power.
+            { "setReach",        T::Void, { { "reach", T::Float } },       "ctx->forceSetReach($r, $1)" },
+            // 0.5 is an exact sphere spanning the line; 0 and 1 are exact cones pointed at the emitter and at
+            // the target respectively. One "pinch" slider -- reach never changes with it.
+            { "setFocus",        T::Void, { { "focus", T::Float } },       "ctx->forceSetFocus($r, $1)" },
+            // Where along the line the density sits: 0 = at the emitter end, 1 = at the target end.
+            { "setDistribution", T::Void, { { "distribution", T::Float } }, "ctx->forceSetDistribution($r, $1)" },
+            // Pure lateral scale: 1 = round, below 1 pinches cones sharper / spheres prolate.
+            { "setWidth",        T::Void, { { "width", T::Float } },       "ctx->forceSetWidth($r, $1)" },
+            // 0-7. Same-team fields SUM (metaball merging); different teams contest, and the drawn surface is
+            // where they balance.
+            { "setTeam",         T::Void, { { "team", T::Int } },          "ctx->forceSetTeam($r, $1)" },
+            // Both LOCAL to the entity. The emitter sits at the START of the span (offset .. offset + dir*reach).
+            { "setDirection",    T::Void, { { "direction", vec3 } },       "ctx->forceSetLocalDirection($r, $1)" },
+            { "setOffset",       T::Void, { { "offset", vec3 } },          "ctx->forceSetLocalOffset($r, $1)" },
+            // On (the default) pulls the emitter back reach/2 along the axis, so a zero offset centres the
+            // bubble on the entity; off means the span STARTS at the entity.
+            { "setCentered",     T::Void, { { "centered", T::Bool } },     "ctx->forceSetCentered($r, $1)" },
         },
-        {} });
+        {
+            // Authored state -- these read back live, exactly what was last set.
+            { "output",       T::Float, "ctx->forceGetOutput($r)",              /*writable*/ false },
+            { "reach",        T::Float, "ctx->forceGetReach($r)",               /*writable*/ false },
+            { "focus",        T::Float, "ctx->forceGetFocus($r)",               /*writable*/ false },
+            { "distribution", T::Float, "ctx->forceGetDistribution($r)",        /*writable*/ false },
+            { "width",        T::Float, "ctx->forceGetWidth($r)",               /*writable*/ false },
+            { "team",         T::Int,   "ctx->forceGetTeam($r)",                /*writable*/ false },
+            { "direction",    vec3,     "ctx->forceGetLocalDirection($r)",      /*writable*/ false },
+            { "offset",       vec3,     "ctx->forceGetLocalOffset($r)",         /*writable*/ false },
+            { "centered",     T::Bool,  "(ctx->forceGetCentered($r) != 0)",     /*writable*/ false },
+
+            // MEASURED state, latched from a GPU readback and therefore about two frames old -- fine for
+            // reacting to (knockback, territory), wrong for anything that has to agree with this frame exactly.
+            { "appliedForce", vec3,     "ctx->forceGetAppliedForce($r)",        /*writable*/ false },
+            { "pressure",     T::Float, "ctx->forceGetPressure($r)",            /*writable*/ false },
+        } });
     // free functions
     // The result of a radius query, as a collection so it reads like any other ("foreach Entity e in
     // world.entitiesInRadius(...)"). The exposing FUNCTION's own emit RUNS the query and yields a handle to its
@@ -475,8 +600,24 @@ namespace
         ScriptComponent* owner = nullptr;
     };
 
-    std::vector<ScriptArray> g_scriptArrays;
-    std::vector<uint32> g_freeScriptArrays;
+    // Storage is CHUNKED so it never reallocates: a ScriptArray* returned by resolveScriptArray stays valid
+    // while other threads create arrays (a std::vector's growth would dangle every outstanding one). A handle
+    // packs its index into 16 bits, so 64 chunks of 1024 cover the entire address space and the chunk table is
+    // a fixed, never-moving array. Only allocation and the free list take the lock, both cold (an array is
+    // created once per script field, freed when the component dies); the read path is lock-free.
+    // Per-array CONTENTS need no synchronisation at all: a handle lives in its owner's ScriptData and the DSL
+    // only reaches arrays through `self`, so one array is only ever touched by one entity's script.
+    constexpr uint32 kArrayChunkShift = 10;
+    constexpr uint32 kArrayChunkSize  = 1u << kArrayChunkShift;
+    constexpr uint32 kArrayChunkMask  = kArrayChunkSize - 1;
+    constexpr uint32 kMaxScriptArrays = 1u << 16; // the handle's index field
+    constexpr uint32 kArrayChunkCount = kMaxScriptArrays / kArrayChunkSize;
+
+    std::atomic<ScriptArray*> g_arrayChunks[kArrayChunkCount] = {};
+    std::unique_ptr<ScriptArray[]> g_arrayChunkOwners[kArrayChunkCount]; // ownership only; reads go through the atomics
+    std::vector<uint32> g_freeScriptArrays; // guarded by g_scriptArrayMutex
+    uint32 g_scriptArrayCount = 0;          // guarded by g_scriptArrayMutex
+    std::mutex g_scriptArrayMutex;
 
     constexpr int kEntityElemKind = static_cast<int>(DSLType::Entity);
     constexpr int kStringElemKind = static_cast<int>(DSLType::String);
@@ -492,9 +633,12 @@ namespace
         if (handle == 0)
             return nullptr;
         const uint32 index = arrayHandleIndex(handle);
-        if (index >= g_scriptArrays.size())
-            return nullptr;
-        ScriptArray& array = g_scriptArrays[index];
+        if (index >= kMaxScriptArrays)
+            return nullptr; // low 16 bits of 0 underflow the -1; a compare against a constant, not a load
+        ScriptArray* chunk = g_arrayChunks[index >> kArrayChunkShift].load(std::memory_order_acquire);
+        if (chunk == nullptr)
+            return nullptr; // unallocated chunk: the same check the old size() bound was doing
+        ScriptArray& array = chunk[index & kArrayChunkMask];
         if (!array.live || array.generation != arrayHandleGeneration(handle))
             return nullptr;
         return &array;
@@ -524,6 +668,7 @@ void releaseScriptArrays(ScriptComponent& owner)
             array->entities.clear();
             array->strings.clear();
             array->owner = nullptr;
+            const std::lock_guard<std::mutex> lock(g_scriptArrayMutex);
             g_freeScriptArrays.push_back(arrayHandleIndex(handle));
         }
     owner.ownedArrays.clear();
@@ -541,7 +686,16 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         // unordered_set is node-based, so an element's address is stable for the life of the set even across
         // rehashing -- which is exactly what makes the returned pointer safe to keep forever. Never erased:
         // the set only ever grows to the number of distinct literals across all loaded scripts.
+        // Scripts tick in parallel and this is emitted for every literal USE, so the hit path (all but the
+        // first use of each literal) takes the shared lock and the insert re-checks under the exclusive one.
         static std::unordered_set<std::string> interned;
+        static std::shared_mutex mutex;
+        {
+            const std::shared_lock<std::shared_mutex> read(mutex);
+            if (const auto it = interned.find(text); it != interned.end())
+                return it->c_str();
+        }
+        const std::lock_guard<std::shared_mutex> write(mutex);
         return interned.emplace(text).first->c_str();
     }
 
@@ -559,17 +713,27 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
             if (component == nullptr)
                 return;
             uint32 index;
-            if (!g_freeScriptArrays.empty())
             {
-                index = g_freeScriptArrays.back();
-                g_freeScriptArrays.pop_back();
+                const std::lock_guard<std::mutex> lock(g_scriptArrayMutex);
+                if (!g_freeScriptArrays.empty())
+                {
+                    index = g_freeScriptArrays.back();
+                    g_freeScriptArrays.pop_back();
+                }
+                else
+                {
+                    if (g_scriptArrayCount >= kMaxScriptArrays)
+                        return; // registry full: the field keeps handle 0 and every access reads as empty
+                    index = g_scriptArrayCount++;
+                }
+                std::atomic<ScriptArray*>& slot = g_arrayChunks[index >> kArrayChunkShift];
+                if (slot.load(std::memory_order_relaxed) == nullptr)
+                {
+                    g_arrayChunkOwners[index >> kArrayChunkShift] = std::make_unique<ScriptArray[]>(kArrayChunkSize);
+                    slot.store(g_arrayChunkOwners[index >> kArrayChunkShift].get(), std::memory_order_release);
+                }
             }
-            else
-            {
-                index = static_cast<uint32>(g_scriptArrays.size());
-                g_scriptArrays.emplace_back();
-            }
-            array = &g_scriptArrays[index];
+            array = &g_arrayChunks[index >> kArrayChunkShift].load(std::memory_order_acquire)[index & kArrayChunkMask];
             array->live = true;
             array->elemSize = elemSize;
             array->elemKind = elemKind;
@@ -697,14 +861,13 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         Globals::rendererVK.setSunLight(direction, color, intensity);
     }
 
+    // Queued for the main thread, so there is no entity to hand back yet -- the DSL already types this as
+    // `Entity?` and a script reads it through `ifexist`, which simply takes the miss branch.
     Entity* thunk_spawnEntity(const char* assetPath, glm::vec3 position)
     {
         if (!assetPath) return nullptr;
-        EntityPtr spawned = Globals::world.spawnAssetFile(assetPath, Transform(position, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
-        if (!spawned) return nullptr;
-        Entity* raw = spawned.get();
-		Globals::scriptEvents.addReparentRequest(std::move(spawned), EntityPtr(nullptr));
-        return raw;
+        Globals::scriptEvents.addSpawnRequest(assetPath, position);
+        return nullptr;
     }
 
     void thunk_destroyEntity(Entity* e)
@@ -774,7 +937,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     {
         if (!outEntities || maxOut <= 0)
             return 0;
-        static std::vector<uint64> results; // main thread only, like every thunk
+        thread_local std::vector<uint64> results;
         Globals::spatialIndex.querySphere(glm::dvec3(position), radius, SpatialLayer_Render, results);
         const int count = glm::min(int(results.size()), maxOut);
         for (int i = 0; i < count; ++i)
@@ -965,9 +1128,207 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     void thunk_physicsTeleport(void* p, glm::vec3 position, glm::vec3 eulerDeg)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        if (pc->bodyType != EPhysicsBodyType::Dynamic)
-            return; // kinematic/static bodies follow the entity; move those through the Entity mirror
-        pc->body.setTransform(position, glm::quat(glm::radians(eulerDeg)));
+        Globals::physics.teleportBody(pc->body, position, glm::quat(glm::radians(eulerDeg)));
+    }
+
+    // Every physics-component thunk below guards the same two things: a null handle, and a component whose body
+    // was never created or has already been destroyed. Either way the call degrades to a no-op or a zero, so
+    // gameplay code never has to check -- the same contract the rest of the ABI keeps.
+    glm::vec3 thunk_physicsGetAngularVelocity(void* p)
+    {
+        PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
+        return (pc && pc->body.isValid()) ? pc->body.getAngularVelocity() : glm::vec3(0.0f);
+    }
+
+    void thunk_physicsSetAngularVelocity(void* p, glm::vec3 radiansPerSecond)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.setAngularVelocity(radiansPerSecond);
+    }
+
+    void thunk_physicsApplyImpulseAtPoint(void* p, glm::vec3 impulse, glm::vec3 worldPoint)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.applyImpulseAtPoint(impulse, worldPoint);
+    }
+
+    void thunk_physicsApplyAngularImpulse(void* p, glm::vec3 impulse)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.applyAngularImpulse(impulse);
+    }
+
+    void thunk_physicsApplyForce(void* p, glm::vec3 force)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.applyForce(force);
+    }
+
+    void thunk_physicsApplyForceAtPoint(void* p, glm::vec3 force, glm::vec3 worldPoint)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.applyForceAtPoint(force, worldPoint);
+    }
+
+    void thunk_physicsApplyTorque(void* p, glm::vec3 torque)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.applyTorque(torque);
+    }
+
+    float thunk_physicsGetMass(void* p)
+    {
+        PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
+        return (pc && pc->body.isValid()) ? pc->body.getMass() : 0.0f;
+    }
+
+    glm::vec3 thunk_physicsGetCenterOfMass(void* p)
+    {
+        PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
+        return (pc && pc->body.isValid()) ? pc->body.getCenterOfMass() : glm::vec3(0.0f);
+    }
+
+    glm::vec3 thunk_physicsGetPointVelocity(void* p, glm::vec3 worldPoint)
+    {
+        PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
+        return (pc && pc->body.isValid()) ? pc->body.getPointVelocity(worldPoint) : glm::vec3(0.0f);
+    }
+
+    glm::vec3 thunk_physicsGetPosition(void* p)
+    {
+        PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
+        return (pc && pc->body.isValid()) ? pc->body.getPosition() : glm::vec3(0.0f);
+    }
+
+    float thunk_physicsGetGravityScale(void* p)
+    {
+        PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
+        return (pc && pc->body.isValid()) ? pc->body.getGravityScale() : 0.0f;
+    }
+
+    void thunk_physicsSetGravityScale(void* p, float scale)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.setGravityScale(scale);
+    }
+
+    float thunk_physicsGetLinearDamping(void* p)
+    {
+        PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
+        return (pc && pc->body.isValid()) ? pc->body.getLinearDamping() : 0.0f;
+    }
+
+    void thunk_physicsSetLinearDamping(void* p, float damping)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.setLinearDamping(damping);
+    }
+
+    float thunk_physicsGetAngularDamping(void* p)
+    {
+        PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
+        return (pc && pc->body.isValid()) ? pc->body.getAngularDamping() : 0.0f;
+    }
+
+    void thunk_physicsSetAngularDamping(void* p, float damping)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.setAngularDamping(damping);
+    }
+
+    void thunk_physicsSetAwake(void* p, int awake)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            pc->body.setAwake(awake != 0);
+    }
+
+    // ---- render component ----
+    // Reads go through the RenderNode; the offset is the component's own localTransform, which updateTree
+    // composes onto the entity's world transform every frame -- so writing it here is picked up next update
+    // rather than being overwritten, which is exactly why the node transform itself isn't exposed.
+    void* thunk_entityGetRenderComponent(Entity* en) { return en ? getComponent<RenderComponent>(en) : nullptr; }
+
+    float thunk_renderGetBoundsRadius(void* p)
+    {
+        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
+        return (rc != nullptr && rc->node.isValid()) ? rc->node.getWorldBounds().radius : 0.0f;
+    }
+
+    glm::vec3 thunk_renderGetBoundsCenter(void* p)
+    {
+        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
+        return (rc != nullptr && rc->node.isValid()) ? rc->node.getWorldBounds().pos : glm::vec3(0.0f);
+    }
+
+    int thunk_renderIsVisible(void* p)
+    {
+        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
+        if (rc == nullptr || !rc->spatialEntry.isValid())
+            return 0;
+        return Globals::spatialIndex.isVisible(rc->spatialEntry.handle()) ? 1 : 0;
+    }
+
+    int thunk_renderIsSkinned(void* p)
+    {
+        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
+        return (rc != nullptr && rc->node.isValid() && rc->node.isSkinned()) ? 1 : 0;
+    }
+
+    glm::vec3 thunk_renderGetOffsetPos(void* p)
+    {
+        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
+        return rc != nullptr ? rc->localTransform.pos : glm::vec3(0.0f);
+    }
+
+    float thunk_renderGetOffsetScale(void* p)
+    {
+        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
+        return rc != nullptr ? rc->localTransform.scale : 1.0f;
+    }
+
+    glm::quat thunk_renderGetOffsetRot(void* p)
+    {
+        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
+        return rc != nullptr ? rc->localTransform.quat : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    void thunk_renderSetOffsetPos(void* p, glm::vec3 position)
+    {
+        if (RenderComponent* rc = static_cast<RenderComponent*>(p))
+            rc->localTransform.pos = position;
+    }
+
+    void thunk_renderSetOffsetScale(void* p, float scale)
+    {
+        if (RenderComponent* rc = static_cast<RenderComponent*>(p))
+            rc->localTransform.scale = scale;
+    }
+
+    void thunk_renderSetOffsetRot(void* p, glm::quat rotation)
+    {
+        if (RenderComponent* rc = static_cast<RenderComponent*>(p))
+            rc->localTransform.quat = glm::normalize(rotation);
+    }
+
+    // ---- particle component ----
+    void* thunk_entityGetParticleComponent(Entity* en) { return en ? getComponent<ParticleComponent>(en) : nullptr; }
+
+    void thunk_particleBurst(void* p)
+    {
+        if (ParticleComponent* pc = static_cast<ParticleComponent*>(p); pc && pc->effect.isValid())
+            pc->effect.burst();
+    }
+
+    int thunk_particleGetEmitting(void* p)
+    {
+        const ParticleComponent* pc = static_cast<const ParticleComponent*>(p);
+        return (pc != nullptr && pc->effect.isEmitting()) ? 1 : 0;
+    }
+
+    void thunk_particleSetEmitting(void* p, int emitting)
+    {
+        if (ParticleComponent* pc = static_cast<ParticleComponent*>(p); pc && pc->effect.isValid())
+            pc->effect.setEmitting(emitting != 0);
     }
 
     // ---- audio component ----
@@ -1066,12 +1427,14 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     }
 
     // ---- randomness ----
-    // One generator for every script, living HERE rather than in a script DLL: a DLL-local one would reset its
-    // state on each hot-reload, restarting the sequence mid-run. Not seeded from the clock -- a fixed seed means
-    // a run is reproducible, which is worth more during development than unpredictability across launches.
+    // Lives HERE rather than in a script DLL: a DLL-local generator would reset its state on each hot-reload,
+    // restarting the sequence mid-run. ONE GENERATOR PER THREAD -- scripts tick in parallel, and a shared
+    // std::mt19937 is a data race. Seeds come off a fixed base so a run is still reproducible per thread;
+    // the interleaving across threads is not, which parallel script scheduling had already given up.
     std::mt19937& scriptRng()
     {
-        static std::mt19937 rng(0x5eed5eedu);
+        static std::atomic<uint32> nextSeed{ 0x5eed5eedu };
+        thread_local std::mt19937 rng(nextSeed.fetch_add(0x9e3779b9u, std::memory_order_relaxed));
         return rng;
     }
 
