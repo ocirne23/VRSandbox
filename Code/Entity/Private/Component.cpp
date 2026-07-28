@@ -260,7 +260,7 @@ void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
 {
     if (!enabled || !scriptModule || !scriptModule->onEvent || entity.isFrozenInTree())
         return;
-    auto it = scriptModule->eventKeyToIndex.find(Globals::scriptEvents.getEventKeyForName(eventName));
+    auto it = scriptModule->eventKeyToIndex.find(Globals::scriptEvents.findEventKey(eventName));
     if (it != scriptModule->eventKeyToIndex.end())
     {
         reinterpret_cast<ScriptOnEventFn>(scriptModule->onEvent)(&Globals::scriptContext, &entity, it->second, scriptData.get());
