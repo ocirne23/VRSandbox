@@ -757,9 +757,24 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         }
     }
 
-    // Element access once the array is in hand; the handle and hoisted-view entry points below both land here.
-    static int scriptArrayGetAt(ScriptArray* array, int index, int elemSize, void* outValue)
+    // A POD element's own address. Entity and String arrays have no raw element (refcounted EntityPtr /
+    // engine-owned std::string), so they resolve to null and keep the copying accessors below.
+    static void* scriptArrayElemAt(ScriptArray* array, int index, int elemSize)
     {
+        if (array == nullptr || index < 0 || elemSize <= 0 || array->elemSize != elemSize
+            || array->elemKind == kEntityElemKind || array->elemKind == kStringElemKind
+            || index >= scriptArrayCount(*array))
+            return nullptr;
+        return array->bytes.data() + static_cast<size_t>(index) * elemSize;
+    }
+
+    // ENTITY AND STRING elements only -- neither has a raw element the caller could load through (a refcounted
+    // EntityPtr, an engine-owned std::string), so these hand out the derived Entity*/const char* instead. POD
+    // elements go through arrayElem and are loaded/stored directly by the caller, which is why there is no
+    // type-erased copy left in here; a POD array reaching this reads as a miss.
+    int thunk_arrayViewGet(void* view, int index, int elemSize, void* outValue)
+    {
+        ScriptArray* array = static_cast<ScriptArray*>(view);
         if (array == nullptr || outValue == nullptr || index < 0 || index >= scriptArrayCount(*array))
             return 0;
         if (array->elemKind == kEntityElemKind)
@@ -780,14 +795,12 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
             *static_cast<const char**>(outValue) = array->strings[index].c_str();
             return 1;
         }
-        if (elemSize != array->elemSize)
-            return 0; // the caller's T doesn't match what this array holds -- refuse rather than mis-copy
-        std::memcpy(outValue, array->bytes.data() + static_cast<size_t>(index) * array->elemSize, array->elemSize);
-        return 1;
+        return 0;
     }
 
-    static void scriptArraySetAt(ScriptArray* array, int index, int elemSize, const void* value)
+    void thunk_arrayViewSet(void* view, int index, int elemSize, const void* value)
     {
+        ScriptArray* array = static_cast<ScriptArray*>(view);
         if (array == nullptr || value == nullptr || index < 0 || index >= scriptArrayCount(*array))
             return;
         if (array->elemKind == kEntityElemKind)
@@ -797,18 +810,38 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
             const char* text = *static_cast<const char* const*>(value);
             array->strings[index] = text != nullptr ? text : "";
         }
-        else if (elemSize == array->elemSize)
-            std::memcpy(array->bytes.data() + static_cast<size_t>(index) * array->elemSize, value, array->elemSize);
     }
 
+    // The handle forms are the view forms plus a resolve -- one implementation, not two.
     int thunk_arrayGet(VrArray handle, int index, int elemSize, void* outValue)
     {
-        return scriptArrayGetAt(resolveScriptArray(handle), index, elemSize, outValue);
+        return thunk_arrayViewGet(resolveScriptArray(handle), index, elemSize, outValue);
     }
 
     void thunk_arraySet(VrArray handle, int index, int elemSize, const void* value)
     {
-        scriptArraySetAt(resolveScriptArray(handle), index, elemSize, value);
+        thunk_arrayViewSet(resolveScriptArray(handle), index, elemSize, value);
+    }
+
+    // POD element storage, for a foreach to index directly. Refuses anything whose elements are not raw bytes
+    // of exactly this size, so a mismatched T reads as an empty array rather than reinterpreting the storage.
+    VrArraySpan thunk_arraySpan(VrArray handle, int elemSize)
+    {
+        const ScriptArray* array = resolveScriptArray(handle);
+        if (array == nullptr || array->elemKind == kEntityElemKind || array->elemKind == kStringElemKind
+            || array->elemSize != elemSize || elemSize <= 0 || array->bytes.empty())
+            return VrArraySpan{ nullptr, 0 };
+        return VrArraySpan{ const_cast<uint8*>(array->bytes.data()), static_cast<int>(array->bytes.size() / elemSize) };
+    }
+
+    void* thunk_arrayElem(VrArray handle, int index, int elemSize)
+    {
+        return scriptArrayElemAt(resolveScriptArray(handle), index, elemSize);
+    }
+
+    void* thunk_arrayViewElem(void* view, int index, int elemSize)
+    {
+        return scriptArrayElemAt(static_cast<ScriptArray*>(view), index, elemSize);
     }
 
     // The array itself, resolved once for a loop. Safe to hold across the body: the registry's chunked storage
@@ -821,14 +854,20 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         return array != nullptr ? scriptArrayCount(*array) : 0;
     }
 
-    int thunk_arrayViewGet(void* view, int index, int elemSize, void* outValue)
+    void thunk_arrayRemoveAt(VrArray handle, int index)
     {
-        return scriptArrayGetAt(static_cast<ScriptArray*>(view), index, elemSize, outValue);
-    }
-
-    void thunk_arrayViewSet(void* view, int index, int elemSize, const void* value)
-    {
-        scriptArraySetAt(static_cast<ScriptArray*>(view), index, elemSize, value);
+        ScriptArray* array = resolveScriptArray(handle);
+        if (array == nullptr || index < 0 || index >= scriptArrayCount(*array))
+            return;
+        if (array->elemKind == kEntityElemKind)
+            array->entities.erase(array->entities.begin() + index);
+        else if (array->elemKind == kStringElemKind)
+            array->strings.erase(array->strings.begin() + index);
+        else
+        {
+            const auto first = array->bytes.begin() + static_cast<size_t>(index) * array->elemSize;
+            array->bytes.erase(first, first + array->elemSize);
+        }
     }
 
     int thunk_arrayCount(VrArray handle)

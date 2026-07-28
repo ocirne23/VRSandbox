@@ -198,30 +198,71 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 					/*isPositionalCall*/ false, /*isVariadic*/ false, /*mutatesContainer*/ true },
 				{ "clear", DSLType::Void, {},                           "ctx->arrayClear($r)",
 					/*isPositionalCall*/ false, /*isVariadic*/ false, /*mutatesContainer*/ true },
+				// The only way to drop ONE element. Out of range is a no-op, matching every other indexed write
+				// -- `ifexist` is still the only way to READ an element, so nothing here needs a success flag.
+				{ "removeAt", DSLType::Void, { { "index", DSLType::Int } }, "ctx->arrayRemoveAt($r, $1)",
+					/*isPositionalCall*/ false, /*isVariadic*/ false, /*mutatesContainer*/ true },
 			};
 			arrayObject.members = {
 				{ "count", DSLType::Int, "ctx->arrayCount($r)", /*writable*/ false },
 			};
 			// An array is iterable by construction -- this is what "foreach int v in self.data.scores" walks.
-			// The loop resolves the handle once (sequenceBeginEmit) and the count/at emits below take that
-			// resolved array, so iterating N elements does one generation-checked lookup instead of N.
+			// The loop resolves the container ONCE (sequenceBeginEmit) and the count/at emits below read that
+			// local. A POD element type resolves to the raw storage and indexes it directly, so an element costs
+			// a load and the whole loop costs one ABI call; Entity and String elements have no raw element to
+			// point at (refcounted handles / engine-owned std::strings) and keep the checked per-element read.
 			arrayObject.sequenceElementType = elementType;
-			arrayObject.sequenceBeginEmit = "ctx->arrayResolve($r)";
-			arrayObject.sequenceCountEmit = "ctx->arrayViewCount($r)";
-			m_arrayEmits.push_back(std::make_unique<std::string>("vrArrViewGet<" + elementName + ">(ctx, $r, $i)"));
-			arrayObject.sequenceAtEmit = m_arrayEmits.back()->c_str();
+			if (elementType == DSLType::Entity || elementType == DSLType::String)
+			{
+				arrayObject.sequenceBeginEmit = "ctx->arrayResolve($r)";
+				arrayObject.sequenceCountEmit = "ctx->arrayViewCount($r)";
+				m_arrayEmits.push_back(std::make_unique<std::string>("vrArrViewGet<" + elementName + ">(ctx, $r, $i)"));
+				arrayObject.sequenceAtEmit = m_arrayEmits.back()->c_str();
+				// A `ref` write-back goes through the resolved view too. Without this it would fall back to the
+				// handle form, whose receiver is a source local that a begin-emit container no longer declares.
+				m_arrayEmits.push_back(std::make_unique<std::string>("vrArrViewSet<" + elementName + ">(ctx, $r, $1, $v)"));
+				arrayObject.sequenceElementSetEmit = m_arrayEmits.back()->c_str();
+			}
+			else
+			{
+				m_arrayEmits.push_back(std::make_unique<std::string>(
+					"ctx->arraySpan($r, (int)sizeof(" + elementName + "))"));
+				arrayObject.sequenceBeginEmit = m_arrayEmits.back()->c_str();
+				arrayObject.sequenceCountEmit = "$r.count";
+				m_arrayEmits.push_back(std::make_unique<std::string>(
+					"static_cast<const " + elementName + "*>($r.data)[$i]"));
+				arrayObject.sequenceAtEmit = m_arrayEmits.back()->c_str();
+				m_arrayEmits.push_back(std::make_unique<std::string>(
+					"static_cast<" + elementName + "*>($r.data)[$1] = $v"));
+				arrayObject.sequenceElementSetEmit = m_arrayEmits.back()->c_str();
+				m_arrayEmits.push_back(std::make_unique<std::string>(
+					"static_cast<" + elementName + "*>($r.data)[$i]"));
+				arrayObject.sequenceElementRefEmit = m_arrayEmits.back()->c_str();
+			}
 
 			// ...and indexable, but ONLY through `ifexist`: arrayGet's own return value IS the bounds check
 			// (1 on success, outValue untouched otherwise -- see ScriptAPI.h), which is exactly the flag the
 			// construct branches on. There is deliberately no unchecked read anywhere in the DSL.
+			// A POD element resolves to its own ADDRESS and the read is a typed load off it (the pointer IS the
+			// success flag); Entity and String elements have no raw element, so they keep the copying accessors.
 			arrayObject.lookupKeyType = DSLType::Int;
 			arrayObject.lookupValueType = elementType;
-			arrayObject.lookupEmit = "ctx->arrayGet($r, $1, (int)sizeof($v), &$v)";
+			const bool rawElements = elementType != DSLType::Entity && elementType != DSLType::String;
+			arrayObject.lookupEmit = rawElements
+				? "vrArrLoad(ctx, $r, $1, $v)"
+				: "ctx->arrayGet($r, $1, (int)sizeof($v), &$v)";
+			if (rawElements)
+			{
+				m_arrayEmits.push_back(std::make_unique<std::string>("static_cast<" + elementName
+					+ "*>(ctx->arrayElem($r, $1, (int)sizeof(" + elementName + ")))"));
+				arrayObject.lookupRefEmit = m_arrayEmits.back()->c_str();
+			}
 			// Elements are writable via a `ref` binding; the write-back re-resolves the handle and range-checks
 			// at write time, so a body that pushed or cleared drops the write instead of corrupting anything.
 			arrayObject.elementWritable = true;
-			m_arrayEmits.push_back(std::make_unique<std::string>(
-				"vrArrSet<" + elementName + ">(ctx, $r, $1, $v)"));
+			m_arrayEmits.push_back(std::make_unique<std::string>(rawElements
+				? "vrArrStore(ctx, $r, $1, $v)"
+				: "vrArrSet<" + elementName + ">(ctx, $r, $1, $v)"));
 			arrayObject.elementSetEmit = m_arrayEmits.back()->c_str();
 			m_objectDefs.push_back(std::move(arrayObject));
 		}

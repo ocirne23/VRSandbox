@@ -38,6 +38,14 @@ public:
 	// everything outside the markers, the generated code included). False = the file couldn't be opened for
 	// writing. Sidebar bindings/builtins are fixed editor context, never serialized; the require set rides as
 	// the "//@@require" directive line.
+	// Refuses a container mutated while a foreach/ifexist is reading it, directly or through any chain of user
+	// function calls. A SAFETY rule, not a diagnostic: a POD foreach resolves the element storage once and
+	// indexes it raw (see ScriptBindings' sequenceBeginEmit), so growth mid-loop would dangle that span.
+	// Document-level rather than part of the parse, because the editor's save path never parses -- both save()
+	// and load() run it, so no authoring route can produce a script that breaks the rule.
+	// outLineIndex indexes document.file.lines.
+	static bool checkContainerMutations(const DSL& document, std::string& outError, int& outLineIndex);
+
 	static bool save(DSL& document, const std::string& path, const std::string& generatedCode);
 
 	// Parses a file save() wrote and REPLACES document.file.lines (+ requiredComponents, from the file's

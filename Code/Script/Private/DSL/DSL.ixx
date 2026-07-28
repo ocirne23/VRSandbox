@@ -298,10 +298,12 @@ public:
 		// CallArgValue staging). User-declared DSL functions are never variadic -- there's no way to author it.
 		bool isVariadic = false;
 		// Builtin only: this call MUTATES the container it's made on (an array's push/clear). Calling it while
-		// a foreach/ifexist in an enclosing block is reading that same container is refused -- a diagnostic for
-		// a logic mistake, not a safety mechanism (element bindings are copies with a range-checked write-back,
-		// so nothing can corrupt). Mirrors BindingFunc::mutatesContainer, carried here so consumers read it off
-		// the symbol they already have instead of looking the registration back up.
+		// a foreach/ifexist in an enclosing block is reading that same container is refused, DIRECTLY or through
+		// any chain of user function calls (ScriptLoader closes the call graph after parsing; a push through a
+		// parameter poisons that function for every caller). A SAFETY rule, not just a diagnostic: a POD foreach
+		// resolves the element storage once and indexes it raw, so growth mid-loop would dangle the span.
+		// Mirrors BindingFunc::mutatesContainer, carried here so consumers read it off the symbol they already
+		// have instead of looking the registration back up.
 		bool mutatesContainer = false;
 		int numReferences = 0; // maintained by the editor: live FunctionCall count, guards rename/delete
 	};

@@ -252,6 +252,7 @@ namespace
 		// The open block headers enclosing the line being parsed -- owned here (not by the load driver) so
 		// statement parsers can ask what they're nested inside; see checkContainerNotIterated.
 		std::vector<DSLSymbol*> openBlocks;
+
 		DSLType currentReturnType = DSLType::Void;
 		std::string error;                      // first failure -- everything bails out through fail()/failValue()
 
@@ -670,10 +671,10 @@ namespace
 			return push(line, ST::FunctionCall, DSLSymbol::FunctionCall{ funcSymbol, receiverRef, std::move(built) });
 		}
 
-		// Refuses a container-MUTATING call (an array's push/clear) made while a foreach/ifexist in an enclosing
-		// block is iterating that same container -- the loader twin of the editor's own filtering. A diagnostic
-		// for a logic mistake, not a safety mechanism: element bindings are copies with a range-checked
-		// write-back, so what this catches is "your loop won't do what you think", not corruption.
+		// Refuses an array push/clear authored directly inside a foreach/ifexist over that same container --
+		// the loader twin of the editor filtering it out of the candidate list, reported at the offending line.
+		// The same rule ACROSS user function calls is ScriptLoader::checkContainerMutations, which runs over the
+		// whole document on both save and load (a callee body may not be parsed yet when its call is).
 		bool checkContainerNotIterated(const DSLSymbol* funcSymbol, const DSLSymbol* receiver)
 		{
 			if (funcSymbol == nullptr || receiver == nullptr)
@@ -1173,8 +1174,207 @@ namespace
 	};
 }
 
+// Mutate-while-iterating, over a whole DOCUMENT rather than during parsing -- so it runs on the editor's save
+// path (which never parses) as well as on load. Refuses a container mutated while a foreach/ifexist reads it,
+// directly OR through any chain of user function calls: each function's own mutations and callees are
+// collected, the call graph is closed, then every call made from inside a loop is re-checked. A mutation
+// through a PARAMETER makes the array the caller's choice, so it poisons that function for every caller
+// instead of being matched argument-by-argument.
+bool ScriptLoader::checkContainerMutations(const DSL& document, std::string& outError, int& outLineIndex)
+{
+	struct Key
+	{
+		const DSLSymbol* root = nullptr;
+		std::string path;
+		bool operator==(const Key& other) const { return root == other.root && path == other.path; }
+	};
+	struct Mutation
+	{
+		std::vector<Key> paths;
+		std::vector<const DSLSymbol*> calls;
+		bool unknown = false;
+	};
+	struct Site
+	{
+		const DSLSymbol* callee = nullptr;
+		std::vector<Key> iterated;
+		std::string calleeName;
+		std::string blockWord;
+		int lineIndex = 0;
+	};
+
+	const auto storageOf = [](const DSLSymbol* value, Key& out)
+		{
+			const DSLSymbol* root = nullptr;
+			std::string path;
+			if (!dslChainToRoot(value, root, path))
+				return false;
+			out.root = root;
+			out.path = std::move(path);
+			return true;
+		};
+
+	const std::vector<std::unique_ptr<DSLCodeLine>>& lines = document.file.lines;
+	std::unordered_map<const DSLSymbol*, Mutation> mutations;
+	std::vector<Site> sites;
+	const DSLSymbol* currentFunction = nullptr;
+
+	for (int i = 0; i < static_cast<int>(lines.size()); ++i)
+	{
+		const DSLSymbol* head = lines[i]->head();
+		if (head != nullptr && head->type == DSLSymbol::SymbolType::FunctionDeclaration)
+		{
+			currentFunction = head;
+			mutations[head]; // present even with nothing recorded, so a caller's lookup succeeds
+			continue;
+		}
+
+		// Storage every enclosing foreach/ifexist is reading, innermost first.
+		std::vector<Key> iterated;
+		std::string blockWord;
+		for (int enclosing = dslEnclosingBlockHeader(document.file, i); enclosing >= 0;
+			enclosing = dslEnclosingBlockHeader(document.file, enclosing))
+		{
+			const DSLSymbol* openHead = lines[enclosing]->head();
+			if (openHead == nullptr || openHead->type != DSLSymbol::SymbolType::FlowControl)
+				continue;
+			const DSLSymbol::FlowControl& fc = std::get<DSLSymbol::FlowControl>(openHead->data);
+			if (fc.control != DSLFlowControl::ForEach && fc.control != DSLFlowControl::IfExist)
+				continue;
+			if (Key key; storageOf(fc.condition, key))
+			{
+				iterated.push_back(std::move(key));
+				if (blockWord.empty())
+					blockWord = fc.control == DSLFlowControl::ForEach ? "foreach" : "ifexist";
+			}
+		}
+
+		for (const std::unique_ptr<DSLSymbol>& symbol : lines[i]->symbols)
+		{
+			if (symbol->type != DSLSymbol::SymbolType::FunctionCall)
+				continue;
+			const DSLSymbol::FunctionCall& call = std::get<DSLSymbol::FunctionCall>(symbol->data);
+			if (call.functionSymbol == nullptr)
+				continue;
+			const DSLSymbol::FunctionDeclaration& callee = std::get<DSLSymbol::FunctionDeclaration>(call.functionSymbol->data);
+
+			if (callee.mutatesContainer && call.receiver != nullptr)
+			{
+				Key key;
+				const bool resolved = storageOf(call.receiver, key);
+				if (resolved)
+					for (const Key& open : iterated)
+						if (open == key)
+						{
+							outError = "'" + callee.name + "' changes this container while a '"
+								+ (blockWord.empty() ? std::string("foreach") : blockWord) + "' is reading it";
+							outLineIndex = i;
+							return false;
+						}
+				if (currentFunction != nullptr)
+				{
+					Mutation& mutation = mutations[currentFunction];
+					bool throughParameter = false;
+					if (resolved)
+						for (const DSLSymbol* param :
+							std::get<DSLSymbol::FunctionDeclaration>(currentFunction->data).parameterVarDeclarations)
+							throughParameter = throughParameter || (param == key.root);
+					if (!resolved || throughParameter)
+						mutation.unknown = true;
+					else if (std::find(mutation.paths.begin(), mutation.paths.end(), key) == mutation.paths.end())
+						mutation.paths.push_back(std::move(key));
+				}
+			}
+			else if (!callee.requiresReceiver && call.receiver == nullptr)
+			{
+				// A bare-name call: a user function if this document declares it (builtins are receiver-based
+				// or resolve to no declaration line of their own).
+				bool isUser = false;
+				for (const std::unique_ptr<DSLCodeLine>& other : lines)
+					isUser = isUser || (other->head() == call.functionSymbol);
+				if (!isUser)
+					continue;
+				if (currentFunction != nullptr)
+				{
+					Mutation& mutation = mutations[currentFunction];
+					if (std::find(mutation.calls.begin(), mutation.calls.end(), call.functionSymbol) == mutation.calls.end())
+						mutation.calls.push_back(call.functionSymbol);
+				}
+				if (!iterated.empty())
+					sites.push_back({ call.functionSymbol, iterated, callee.name, blockWord, i });
+			}
+		}
+	}
+
+	for (bool changed = true; changed; )
+	{
+		changed = false;
+		for (auto& [function, mutation] : mutations)
+		{
+			const std::vector<const DSLSymbol*> callees = mutation.calls;
+			for (const DSLSymbol* callee : callees)
+			{
+				const auto calleeIt = mutations.find(callee);
+				if (calleeIt == mutations.end())
+					continue;
+				const Mutation inherited = calleeIt->second;
+				Mutation& caller = mutations[function];
+				if (inherited.unknown && !caller.unknown)
+				{
+					caller.unknown = true;
+					changed = true;
+				}
+				for (const Key& key : inherited.paths)
+					if (std::find(caller.paths.begin(), caller.paths.end(), key) == caller.paths.end())
+					{
+						caller.paths.push_back(key);
+						changed = true;
+					}
+				for (const DSLSymbol* nested : inherited.calls)
+					if (std::find(caller.calls.begin(), caller.calls.end(), nested) == caller.calls.end())
+					{
+						caller.calls.push_back(nested);
+						changed = true;
+					}
+			}
+		}
+	}
+
+	for (const Site& site : sites)
+	{
+		const auto it = mutations.find(site.callee);
+		if (it == mutations.end())
+			continue;
+		const std::string word = site.blockWord.empty() ? std::string("foreach") : site.blockWord;
+		if (it->second.unknown)
+		{
+			outError = "'" + site.calleeName + "' changes a container it is given while a '" + word + "' is reading one";
+			outLineIndex = site.lineIndex;
+			return false;
+		}
+		for (const Key& mutated : it->second.paths)
+			if (std::find(site.iterated.begin(), site.iterated.end(), mutated) != site.iterated.end())
+			{
+				outError = "'" + site.calleeName + "' changes this container while a '" + word + "' is reading it";
+				outLineIndex = site.lineIndex;
+				return false;
+			}
+	}
+	return true;
+}
+
 bool ScriptLoader::save(DSL& document, const std::string& path, const std::string& generatedCode)
 {
+	// Nothing that would produce dangling-span C++ gets written. The editor never parses on this path, so this
+	// is the only place the rule can be enforced for an authored document.
+	std::string error;
+	int lineIndex = 0;
+	if (!checkContainerMutations(document, error, lineIndex))
+	{
+		Log::error("ScriptLoader: refusing to save '" + path + "' -- line " + std::to_string(lineIndex + 1) + ": " + error);
+		return false;
+	}
+
 	std::ofstream file(path, std::ios::out | std::ios::binary | std::ios::trunc);
 	if (!file.is_open())
 		return false;
@@ -1493,6 +1693,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	if (!openBlocks.empty())
 		return failAt(blockLines.empty() ? 1 : blockLines.back().fileLineNo, "missing 'end' at end of script");
 
+
 	// Round-trip check: re-render the reconstructed document and compare against what was loaded. A mismatch
 	// still loads (the structure is valid; the usual cause is hand-edited formatting, normalized on the next
 	// save) but every differing line is logged, so a loader bug can never hide.
@@ -1515,6 +1716,17 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 	document.requiredComponents = std::move(requiredComponents);
 	document.dataFields = std::move(dataFields);
 	document.eventNames = std::move(eventNames);
+
+	// The same rule save() enforces, so a hand-edited file can't smuggle in what the editor won't write.
+	std::string mutationError;
+	int badLine = 0;
+	if (!checkContainerMutations(document, mutationError, badLine))
+	{
+		document.file.lines.clear();
+		return failAt(badLine >= 0 && badLine < static_cast<int>(blockLines.size())
+			? blockLines[badLine].fileLineNo : 1, mutationError);
+	}
+
 	result.success = true;
 	return result;
 }

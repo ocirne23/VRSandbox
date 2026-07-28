@@ -19,6 +19,7 @@ SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* s
 SCRIPT_EXPORT void OnDestroy(const ScriptContext* ctx, Entity* self, ScriptData* scriptData);
 SCRIPT_EXPORT void OnEvent(const ScriptContext* ctx, Entity* self, int eventIdx, ScriptData* scriptData);
 SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSeconds, ScriptData* scriptData);
+static void test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int awa);
 
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* scriptData)
 {
@@ -64,20 +65,37 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 	for (int vrIdx0 = 0, vrIdx0End = ctx->sceneGetChildCount(vrSrc0); vrIdx0 < vrIdx0End; ++vrIdx0)
 	{
 		Entity* e = ctx->sceneGetChildAt(vrSrc0, vrIdx0);
-		const auto vrSrc1 = e;
-		if (void* phys = ctx->entityGetPhysicsComponent(vrSrc1))
+		if (void* phys = ctx->entityGetPhysicsComponent(e))
 		{
 			ctx->physicsApplyImpulse(phys, glm::vec3(1.0f, 2.0f, 3.0f));
 		}
 	}
-	const auto vrSrc2 = (*scriptData).list;
-	if (int i = 0; ctx->arrayGet(vrSrc2, 0, (int)sizeof(i), &i))
-	{
-		ctx->logf(ctx->internString("%i"), i);
-	}
 }
 
 REGISTER_UPDATE()
+
+static void test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int awa)
+{
+	if (int* vrPtr1 = static_cast<int*>(ctx->arrayElem((*scriptData).list, 0, (int)sizeof(int))))
+	{
+		int& j = *vrPtr1;
+		j = awa;
+	}
+
+	const auto vrIter2 = ctx->arraySpan((*scriptData).list, (int)sizeof(int));
+	for (int vrIdx0 = 0, vrIdx0End = vrIter2.count; vrIdx0 < vrIdx0End; ++vrIdx0)
+	{
+		int& k = static_cast<int*>(vrIter2.data)[vrIdx0];
+		k = awa;
+	}
+
+	const auto vrIter3 = ctx->arraySpan((*scriptData).list, (int)sizeof(int));
+	for (int vrIdx0 = 0, vrIdx0End = vrIter3.count; vrIdx0 < vrIdx0End; ++vrIdx0)
+	{
+		int& l = static_cast<int*>(vrIter3.data)[vrIdx0];
+		l = 42;
+	}
+}
 
 //@@dsl 1
 //@@require PhysicsComponent, SceneComponent
@@ -108,8 +126,19 @@ REGISTER_UPDATE()
 //@			phys.applyImpulse(vec3 impulse = vec3(1, 2, 3))
 //@		end
 //@	end
-//@	ifexist int i in self.data.list at 0
-//@		printf(string format = "%i", i)
+//@end
+//@
+//@function test(int awa)
+//@	ifexist ref int j in self.data.list at 0
+//@		ref j = awa
+//@	end
+//@	
+//@	foreach ref int k in self.data.list
+//@		ref k = awa
+//@	end
+//@	
+//@	foreach ref int l in self.data.list
+//@		ref l = 42
 //@	end
 //@end
 //@

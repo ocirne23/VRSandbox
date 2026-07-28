@@ -157,6 +157,21 @@ export struct BindingObject
 	// path does real lookup work (an array unpacks a generation-tagged handle every access); a collection whose
 	// at-emit is already a direct call leaves this null and nothing changes.
 	const char* sequenceBeginEmit = nullptr; // "ctx->arrayResolve($r)"
+	// Optional `ref` write-back through the hoisted local rather than the receiver, for containers whose begin
+	// emit already resolved the storage ("$r" = the hoisted local, "$1" = the index, "$v" = the binding). Only
+	// consulted alongside sequenceBeginEmit; without it a `ref` element writes through elementSetEmit below,
+	// which re-resolves from the receiver.
+	const char* sequenceElementSetEmit = nullptr; // "static_cast<T*>($r.data)[$1] = $v"
+	// Optional: the element as a writable LVALUE ("$r" = the hoisted local, "$i" = the index). When a container
+	// declares one, a `ref` binding becomes a C++ reference straight into the storage instead of a copy plus a
+	// write-back at block end -- no load, no store, and no window in which the two can disagree. Needs the same
+	// validity as the hoisted local itself, so it is only meaningful alongside sequenceBeginEmit.
+	const char* sequenceElementRefEmit = nullptr; // "static_cast<T*>($r.data)[$i]"
+
+	// Optional: the `ifexist` twin of sequenceElementRefEmit -- a POINTER to the looked-up element over "$r"
+	// (the receiver) and "$1" (the key), null on a miss. The pointer IS the condition, so a `ref` binding
+	// becomes a reference into the storage with no default-initialized copy and no store at block end.
+	const char* lookupRefEmit = nullptr; // "static_cast<T*>(ctx->arrayElem($r, $1, (int)sizeof(T)))"
 
 	// Makes this object LOOKUP-ABLE by `ifexist`: "ifexist float item in <this> at <key>" binds one element
 	// only when the lookup succeeds, so a failed/out-of-range access can't be written at all. `lookupEmit` is a

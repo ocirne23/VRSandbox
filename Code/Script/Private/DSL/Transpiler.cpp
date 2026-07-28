@@ -306,8 +306,11 @@ namespace
 		// nothing to copy back). `receiverText` is the HOISTED source local, never the source expression itself
 		// -- re-evaluating that here would run it a second time; `keyText` is the loop index for a foreach, the
 		// `at` key for an ifexist.
+		// iterText: the loop's hoisted local (ForEach only, empty elsewhere). A container that resolved its
+		// storage there writes back through it; everything else re-resolves from the receiver.
 		std::string elementWriteBack(const DSLCodeLine& line, const DSLSymbol::FlowControl* flow,
-			const DSLSymbol::VariableDeclaration& bound, const std::string& receiverText, const std::string& keyText)
+			const DSLSymbol::VariableDeclaration& bound, const std::string& receiverText, const std::string& keyText,
+			const std::string& iterText = {})
 		{
 			if (!bound.isRef || flow->condition == nullptr)
 				return {};
@@ -315,10 +318,14 @@ namespace
 			if (dslIsEngineObjectType(elemType))
 				return {}; // a handle, not a copy
 			const BindingObject* container = bindings.objectFor(dslValueType(flow->condition));
-			if (container == nullptr || !container->elementWritable || container->elementSetEmit == nullptr)
+			if (container == nullptr || !container->elementWritable)
 				return {};
 			const int headerIndex = dslLineIndex(document.file, &line);
 			if (headerIndex < 0 || !blockAssignsTo(flow->forLoopVar, headerIndex))
+				return {};
+			if (!iterText.empty() && container->sequenceBeginEmit != nullptr && container->sequenceElementSetEmit != nullptr)
+				return substituteEmit(container->sequenceElementSetEmit, { iterText, { keyText }, {}, {}, bound.name }) + ";";
+			if (container->elementSetEmit == nullptr)
 				return {};
 			return substituteEmit(container->elementSetEmit, { receiverText, { keyText }, {}, {}, bound.name }) + ";";
 		}
@@ -421,8 +428,14 @@ namespace
 
 				emitStatement(line, head, flow, openScopes);
 			}
+			// Blocks still open at the end of the body close here -- `end` lines aren't stored (the formatter
+			// re-derives them), so a block that is the LAST statement in a function is never closed by the
+			// per-line path above. It has to emit the trailing statement too, or a `ref` element's write-back
+			// is silently dropped for exactly the loops that end a function.
 			while (!openScopes.empty())
 			{
+				if (!openScopes.back().trailing.empty())
+					emitLine(openScopes.back().trailing);
 				closeBlock();
 				openScopes.pop_back();
 			}
@@ -515,33 +528,52 @@ namespace
 				// this, a sequence produced by a CALL (world.entitiesInRadius(...)) would re-run that call for
 				// every element. A field receiver costs nothing extra either way.
 				const auto localId = sourceLocalCounter++;
+				const std::string sourceText = expressionText(flow->condition);
 				const std::string sourceName = "vrSrc" + std::to_string(localId);
-				emitLine("const auto " + sourceName + " = " + expressionText(flow->condition) + ";");
+				const BindingObject* sequenceObject = bindings.objectFor(dslValueType(flow->condition));
+				// A container with a begin emit names the source EXACTLY ONCE (the begin emit resolves it, and
+				// count/at then read the resolved local), so it inlines and the hoist local never appears.
+				// Without one, count and at each name it per loop and per element, so it must be hoisted -- a
+				// source that is a call (world.entitiesInRadius(...)) must not run more than once.
+				const bool hoistSource = sequenceObject == nullptr || sequenceObject->sequenceBeginEmit == nullptr;
+				if (hoistSource)
+					emitLine("const auto " + sourceName + " = " + sourceText + ";");
 
 				const std::string indexName = "vrIdx" + std::to_string(openScopes.size());
-				std::string countText, atText;
-				if (const BindingObject* object = bindings.objectFor(dslValueType(flow->condition));
+				std::string countText, atText, iterName, refAtText;
+				if (const BindingObject* object = sequenceObject;
 					object != nullptr && object->sequenceCountEmit != nullptr && object->sequenceAtEmit != nullptr)
 				{
 					// A container declaring a begin emit resolves ONCE here and count/at read that local, so a
-					// per-element lookup (an array's generation-tagged handle unpack) becomes per-loop. The
-					// write-back below deliberately keeps using the HANDLE: it re-resolves and range-checks at
-					// write time, which is what makes a body that pushed or cleared drop the write rather than
-					// corrupt anything.
-					std::string iterName = sourceName;
+					// per-element lookup (an array's generation-tagged handle unpack) becomes per-loop. A `ref`
+					// write-back goes through the same local when the container declares one (see
+					// sequenceElementSetEmit), otherwise it re-resolves from the receiver.
+					iterName = sourceName;
 					if (object->sequenceBeginEmit != nullptr)
 					{
 						iterName = "vrIter" + std::to_string(localId);
-						emitLine("const auto " + iterName + " = " + substituteEmit(object->sequenceBeginEmit, { sourceName }) + ";");
+						emitLine("const auto " + iterName + " = " + substituteEmit(object->sequenceBeginEmit, { sourceText }) + ";");
 					}
 					countText = substituteEmit(object->sequenceCountEmit, { iterName });
 					atText = substituteEmit(object->sequenceAtEmit, { iterName, {}, {}, indexName });
+					// A `ref` element binds STRAIGHT INTO the storage when the container can name it as an
+					// lvalue: no copy in, no write-back out, and no chance of the two drifting apart.
+					if (elem.isRef && object->sequenceBeginEmit != nullptr && object->sequenceElementRefEmit != nullptr)
+						refAtText = substituteEmit(object->sequenceElementRefEmit, { iterName, {}, {}, indexName });
 				}
 				emitLine("for (int " + indexName + " = 0, " + indexName + "End = " + countText + "; "
 					+ indexName + " < " + indexName + "End; ++" + indexName + ")");
 				openBlock();
-				emitLine(std::string(cppTypeName(elemType)) + " " + elem.name + " = " + atText + ";");
-				openScopes.push_back({ line.scopeLevel, elementWriteBack(line, flow, elem, sourceName, indexName) });
+				if (!refAtText.empty())
+				{
+					emitLine(std::string(cppTypeName(elemType)) + "& " + elem.name + " = " + refAtText + ";");
+					openScopes.push_back({ line.scopeLevel, {} }); // the reference IS the write-back
+				}
+				else
+				{
+					emitLine(std::string(cppTypeName(elemType)) + " " + elem.name + " = " + atText + ";");
+					openScopes.push_back({ line.scopeLevel, elementWriteBack(line, flow, elem, sourceName, indexName, iterName) });
+				}
 				return;
 			}
 			case DSLFlowControl::IfExist:
@@ -553,11 +585,12 @@ namespace
 				// isChainComponentBinding) even though it isn't readable in that branch.
 				const DSLSymbol::VariableDeclaration& bound = std::get<DSLSymbol::VariableDeclaration>(flow->forLoopVar->data);
 				const DSLType elemType = std::get<DSLSymbol::TypeDeclaration>(bound.typeSymbol->data).type;
-				// Hoisted for the same reason as ForEach: with a `ref` binding the source appears in BOTH the
-				// lookup and the write-back, and a source that is a call must not run twice.
+				// The source is hoisted into a local ONLY when it is used more than once -- i.e. when a copied
+				// `ref` binding needs a write-back at block end, where re-evaluating a source that is a call
+				// would run it twice. The component fetch and the pointer lookup below each name it exactly
+				// once, so they inline it and the local never appears.
+				const std::string sourceText = expressionText(flow->condition);
 				const std::string sourceName = "vrSrc" + std::to_string(sourceLocalCounter++);
-				emitLine("const auto " + sourceName + " = " + expressionText(flow->condition) + ";");
-				const std::string receiver = sourceName;
 				const std::string keyText = (flow->forCondition != nullptr) ? expressionText(flow->forCondition) : std::string();
 
 				// A COMPONENT is fetched off the entity rather than looked up in a container: the fetch call IS
@@ -567,7 +600,7 @@ namespace
 				{
 					const char* fetchEmit = bindings.componentFetchEmit(elemType);
 					const std::string fetchText = (fetchEmit != nullptr)
-						? substituteEmit(fetchEmit, { receiver }) : std::string("nullptr");
+						? substituteEmit(fetchEmit, { sourceText }) : std::string("nullptr");
 					emitLine("if (" + std::string(cppTypeName(elemType)) + " " + bound.name + " = " + fetchText + ")");
 					openBlock();
 					openScopes.push_back({ line.scopeLevel, {} });
@@ -575,13 +608,36 @@ namespace
 				}
 
 				const BindingObject* container = bindings.objectFor(dslValueType(flow->condition));
+
+				// A `ref` element binds to the storage itself when the container can hand back a pointer: the
+				// pointer IS the miss test, so there is no default-initialized copy to seed and no store to
+				// emit at block end. The pointer lives in the if's init-statement (scoped across an attached
+				// `else`, like the copy it replaces) and the DSL's name is a reference to it inside the body --
+				// which keeps every expression that reads the binding exactly as it was.
+				if (bound.isRef && container != nullptr && container->lookupRefEmit != nullptr)
+				{
+					const std::string pointerName = "vrPtr" + std::to_string(sourceLocalCounter++);
+					emitLine("if (" + std::string(cppTypeName(elemType)) + "* " + pointerName + " = "
+						+ substituteEmit(container->lookupRefEmit, { sourceText, { keyText } }) + ")");
+					openBlock();
+					emitLine(std::string(cppTypeName(elemType)) + "& " + bound.name + " = *" + pointerName + ";");
+					openScopes.push_back({ line.scopeLevel, {} }); // the reference IS the write-back
+					return;
+				}
+
+				// The write-back is resolved BEFORE anything is emitted: it decides whether the source is named
+				// twice, and therefore whether the hoist local is needed at all.
+				const std::string writeBack = elementWriteBack(line, flow, bound, sourceName, keyText);
+				const std::string receiver = writeBack.empty() ? sourceText : sourceName;
+				if (!writeBack.empty())
+					emitLine("const auto " + sourceName + " = " + sourceText + ";");
 				const std::string testText = (container != nullptr && container->lookupEmit != nullptr)
 					? substituteEmit(container->lookupEmit, { receiver, { keyText }, {}, {}, bound.name })
 					: std::string("false");
 				emitLine("if (" + std::string(cppTypeName(elemType)) + " " + bound.name + " = "
 					+ defaultValueText(elemType, bindings) + "; " + testText + ")");
 				openBlock();
-				openScopes.push_back({ line.scopeLevel, elementWriteBack(line, flow, bound, sourceName, keyText) });
+				openScopes.push_back({ line.scopeLevel, writeBack });
 				return;
 			}
 			case DSLFlowControl::For:

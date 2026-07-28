@@ -44,6 +44,18 @@ class SceneComponent;
 // a layout change) fails lookup and every operation degrades to a no-op / default rather than touching memory.
 typedef unsigned int VrArray;
 
+// A POD array's element storage, resolved ONCE for a foreach so the loop indexes memory directly instead of
+// calling per element. Only POD element kinds get one -- Entity elements are refcounted handles and String
+// elements are engine-owned std::strings, neither of which has a raw element to point at.
+// `data` is null and `count` 0 for a stale/empty/non-POD array or an elemSize mismatch, so a loop bounded by
+// `count` never dereferences null. VALID ONLY WHILE THE ARRAY DOES NOT GROW: the DSL refuses push/clear on a
+// container an enclosing foreach is reading, which is what the generated code relies on.
+struct VrArraySpan
+{
+    void* data;
+    int   count;
+};
+
 // One raycast result, returned BY VALUE (a POD of ABI-legal members, like every other type crossing here).
 // `hit` is what the DSL branches on: the whole struct is exposed as a `RayHit?`, so a miss takes the else
 // branch of an `ifexist` and the other fields are only reachable once a hit is proven.
@@ -142,8 +154,8 @@ struct VrRayHit
        unmapped on reload). Values are copied in/out rather than exposing an interior pointer, so no caller can
        hold or corrupt the storage. */ \
     X(void,        arrayPush,              (Entity*, owner), (VrArray*, handle), (int, elemKind), (int, elemSize), (const void*, value)) /* creates on *handle == 0 and writes the new id back through `handle` */ \
-    X(int,         arrayGet,               (VrArray, handle), (int, index), (int, elemSize), (void*, outValue)) /* 1 on success; 0 (outValue untouched) for a stale/empty handle or an out-of-range index -- the ONLY bounds check callers need */ \
-    X(void,        arraySet,               (VrArray, handle), (int, index), (int, elemSize), (const void*, value)) /* no-op when out of range */ \
+    X(int,         arrayGet,               (VrArray, handle), (int, index), (int, elemSize), (void*, outValue)) /* ENTITY/STRING elements only (POD goes through arrayElem): 1 on success, 0 (outValue untouched) for a stale handle, an out-of-range index, a dead entity, or a POD array */ \
+    X(void,        arraySet,               (VrArray, handle), (int, index), (int, elemSize), (const void*, value)) /* Entity/String only; no-op when out of range */ \
     X(int,         arrayCount,             (VrArray, handle)) /* 0 for a stale/empty handle */ \
     X(void,        arrayClear,             (VrArray, handle)) \
     /* ---- AnimatorComponent ---- the state machine's parameters ARE its gameplay interface (see
@@ -231,10 +243,17 @@ struct VrRayHit
        never moves, which is what makes the pointer safe to hold). The view calls re-read the element storage
        every access, so a body that pushes or clears still reads correct data -- what is hoisted is the lookup,
        not the storage. Null view / out of range behave exactly like the handle forms. */ \
+    X(void,        arrayRemoveAt,          (VrArray, handle), (int, index)) /* shifts the tail down; no-op when out of range */ \
+    /* The ELEMENT's address, for POD arrays only -- lets the typed caller load/store it directly instead of
+       handing a void* to a type-erased memcpy. Null for a stale handle, an out-of-range index, an elemSize
+       mismatch, or an Entity/String array (no raw element exists there). Valid until the array grows. */ \
+    X(void*,       arrayElem,              (VrArray, handle), (int, index), (int, elemSize)) \
+    X(void*,       arrayViewElem,          (void*, view), (int, index), (int, elemSize)) \
+    X(VrArraySpan, arraySpan,              (VrArray, handle), (int, elemSize)) /* POD element storage; {null,0} otherwise */ \
     X(void*,       arrayResolve,           (VrArray, handle)) /* null for a stale/empty handle */ \
     X(int,         arrayViewCount,         (void*, view)) \
-    X(int,         arrayViewGet,           (void*, view), (int, index), (int, elemSize), (void*, outValue)) \
-    X(void,        arrayViewSet,           (void*, view), (int, index), (int, elemSize), (const void*, value))
+    X(int,         arrayViewGet,           (void*, view), (int, index), (int, elemSize), (void*, outValue)) /* Entity/String only, as arrayGet */ \
+    X(void,        arrayViewSet,           (void*, view), (int, index), (int, elemSize), (const void*, value)) /* Entity/String only */
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,
@@ -339,6 +358,19 @@ template<class T> void vrArrSet(const ScriptContext* ctx, VrArray h, int i, cons
 { ctx->arraySet(h, i, (int)sizeof(T), &v); }
 template<class T> void vrArrPush(const ScriptContext* ctx, Entity* self, VrArray* h, int kind, const T& v)
 { ctx->arrayPush(self, h, kind, (int)sizeof(T), &v); }
+// POD element access as a typed LOAD/STORE through the element's own address -- no type-erased copy, and the
+// success flag is the pointer itself. vrArrLoad is what an `ifexist ... at <key>` branches on; it leaves `out`
+// untouched on a miss, exactly like arrayGet did.
+template<class T> bool vrArrLoad(const ScriptContext* ctx, VrArray h, int i, T& out)
+{
+    if (const void* element = ctx->arrayElem(h, i, (int)sizeof(T))) { out = *static_cast<const T*>(element); return true; }
+    return false;
+}
+template<class T> void vrArrStore(const ScriptContext* ctx, VrArray h, int i, const T& v)
+{
+    if (void* element = ctx->arrayElem(h, i, (int)sizeof(T))) *static_cast<T*>(element) = v;
+}
+
 // The hoisted-view forms a foreach emits; same defaults-on-failure contract as vrArrGet above.
 template<class T> T vrArrViewGet(const ScriptContext* ctx, void* view, int i)
 { T v = T(); ctx->arrayViewGet(view, i, (int)sizeof(T), &v); return v; }
