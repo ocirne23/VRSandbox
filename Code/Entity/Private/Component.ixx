@@ -159,22 +159,17 @@ export struct ScriptComponent
 
     ~ScriptComponent();
 
-    // Whether the entity still satisfies the script's //@@require set. Checked at EVERY entry point rather
-    // than latched at spawn: a hot-reload mutates the bound ScriptModule in place (spawn never re-runs), so
-    // dropping a requirement from the script takes effect on the next frame instead of needing a restart.
+    // Both are re-checked at EVERY entry point rather than latched at spawn: a hot-reload mutates the bound
+    // ScriptModule in place and never re-runs spawn, so anything latched there outlives the edit that fixes it.
     bool requirementsMet(const Entity& entity) const;
-
-    // (Re)allocates ScriptData when the bound module's layout no longer matches the block's, refills the
-    // //@@require pointer slots, and clears onSpawnRan so the script reconstructs into it. Returns whether it
-    // reallocated. The Live variant also re-registers the event listener, whose stored ScriptData pointer the
-    // reallocation would otherwise dangle -- use it from anything running after spawn.
+    // Reallocates ScriptData on a layout change (refilling the //@@require slots, clearing onSpawnRan);
+    // returns whether it did. The Live variant also re-registers the event listener, whose stored ScriptData
+    // pointer the reallocation would dangle -- use it from anything running after spawn.
     bool syncScriptData(Entity& entity);
     void syncScriptDataLive(Entity& entity);
 
-    // Whether this script has BEGUN on this entity -- set the first time the entity satisfies the //@@require
-    // set, at spawn or later (see ScriptComponent::update). OnDestroy is paired with THIS, not with the live
-    // requirement check: teardown must be conditioned on construction having happened, never re-derived from
-    // current state, or a script edited between the two ends tears down what it never built.
+    // This script has BEGUN on this entity: set the first time it satisfies the //@@require set, at spawn or
+    // later (update() constructs late). OnDestroy pairs with THIS, never with the live requirement check.
     bool onSpawnRan = false;
 
     struct SpawnInfo

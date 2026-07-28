@@ -523,31 +523,23 @@ namespace
 				const DSLSymbol::VariableDeclaration& elem = std::get<DSLSymbol::VariableDeclaration>(flow->forLoopVar->data);
 				const DSLType elemType = std::get<DSLSymbol::TypeDeclaration>(elem.typeSymbol->data).type;
 
-				// The sequence expression is HOISTED into a local first, so it is evaluated exactly ONCE. The
-				// count and `at` templates both substitute the receiver, and `at` runs per element -- without
-				// this, a sequence produced by a CALL (world.entitiesInRadius(...)) would re-run that call for
-				// every element. A field receiver costs nothing extra either way.
+				// The sequence expression is hoisted into a local ONLY when it is named more than once: a
+				// source that is a CALL (world.entitiesInRadius(...)) must not run per element. A container
+				// with a begin emit names it exactly once -- the begin emit resolves it and count/at read that
+				// result -- so there the hoist local never appears at all.
 				const auto localId = sourceLocalCounter++;
 				const std::string sourceText = expressionText(flow->condition);
 				const std::string sourceName = "vrSrc" + std::to_string(localId);
-				const BindingObject* sequenceObject = bindings.objectFor(dslValueType(flow->condition));
-				// A container with a begin emit names the source EXACTLY ONCE (the begin emit resolves it, and
-				// count/at then read the resolved local), so it inlines and the hoist local never appears.
-				// Without one, count and at each name it per loop and per element, so it must be hoisted -- a
-				// source that is a call (world.entitiesInRadius(...)) must not run more than once.
-				const bool hoistSource = sequenceObject == nullptr || sequenceObject->sequenceBeginEmit == nullptr;
-				if (hoistSource)
+				const BindingObject* object = bindings.objectFor(dslValueType(flow->condition));
+				if (object == nullptr || object->sequenceBeginEmit == nullptr)
 					emitLine("const auto " + sourceName + " = " + sourceText + ";");
 
 				const std::string indexName = "vrIdx" + std::to_string(openScopes.size());
 				std::string countText, atText, iterName, refAtText;
-				if (const BindingObject* object = sequenceObject;
-					object != nullptr && object->sequenceCountEmit != nullptr && object->sequenceAtEmit != nullptr)
+				if (object != nullptr && object->sequenceCountEmit != nullptr && object->sequenceAtEmit != nullptr)
 				{
-					// A container declaring a begin emit resolves ONCE here and count/at read that local, so a
-					// per-element lookup (an array's generation-tagged handle unpack) becomes per-loop. A `ref`
-					// write-back goes through the same local when the container declares one (see
-					// sequenceElementSetEmit), otherwise it re-resolves from the receiver.
+					// The begin emit resolves the container once, turning a per-element lookup (an array's
+					// generation-tagged handle unpack) into a per-loop one.
 					iterName = sourceName;
 					if (object->sequenceBeginEmit != nullptr)
 					{
@@ -556,8 +548,8 @@ namespace
 					}
 					countText = substituteEmit(object->sequenceCountEmit, { iterName });
 					atText = substituteEmit(object->sequenceAtEmit, { iterName, {}, {}, indexName });
-					// A `ref` element binds STRAIGHT INTO the storage when the container can name it as an
-					// lvalue: no copy in, no write-back out, and no chance of the two drifting apart.
+					// A `ref` element binds straight into the storage when the container names it as an
+					// lvalue: no copy in, no write-back out, so the two cannot drift.
 					if (elem.isRef && object->sequenceBeginEmit != nullptr && object->sequenceElementRefEmit != nullptr)
 						refAtText = substituteEmit(object->sequenceElementRefEmit, { iterName, {}, {}, indexName });
 				}

@@ -212,11 +212,8 @@ void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
         if (!loaded)
             return;
 
-        // //@@require is a CONTRACT: the script reads each required component through a cached pointer with no
-        // null check (that is the point of requiring it), so it must not run on an entity missing one. The
-        // module is still BOUND here and the refusal is enforced live by requirementsMet() at every entry
-        // point -- a hot-reload mutates this same ScriptModule in place rather than re-running spawn, so a
-        // refusal recorded here would otherwise outlive the edit that fixes it and need an app restart.
+        // Logged once here; the refusal itself is requirementsMet(), re-checked at every entry point. Latching
+        // it would outlive the edit that fixes it -- a hot-reload never re-runs spawn.
         if (const uint32 missing = loaded->requiredComponents & ~uint32(entity.typeBits))
         {
             std::string names;
@@ -246,14 +243,10 @@ void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
 	}
 }
 
-// (Re)allocates ScriptData whenever the bound module's layout no longer matches what the block was allocated
-// against, and refills the //@@require pointer slots. Called at spawn AND from every live entry point: a
-// hot-reload mutates the ScriptModule in place and never re-runs spawn, so a script whose //@@data or
-// //@@require set changed would otherwise leave live entities reading their old block under the new layout.
-// The block is REUSED when size and layout both match -- that is what makes reload free for arrays: the
-// handles survive, so the engine-side contents survive with nothing to copy. On a mismatch the old arrays are
-// released first (once the block goes, nothing can reach those handles again) and the script must construct
-// into the fresh block, so onSpawnRan clears and update() re-runs OnSpawn.
+// The block is REUSED while size and layout both match -- that is what makes a reload free for arrays: the
+// handles survive, so the engine-side contents do. A mismatch releases the old arrays first (once the block
+// goes nothing can reach those handles again) and clears onSpawnRan, so the script reconstructs into the
+// fresh one. Runs at spawn AND live, since a hot-reload mutates the ScriptModule in place, never re-spawning.
 bool ScriptComponent::syncScriptData(Entity& entity)
 {
     if (!scriptModule || (scriptModule->dataSize == scriptDataSize && scriptModule->dataLayoutId == scriptDataLayoutId))
@@ -266,11 +259,8 @@ bool ScriptComponent::syncScriptData(Entity& entity)
     onSpawnRan = false;
 
     // Required-component pointers (//@@require) occupy the FRONT of ScriptData, one 8-byte slot per set bit in
-    // ascending EComponentID order (see ScriptRequiredComponentsFn in ScriptAPI.h) -- filled straight off
-    // getComponent<T>() here, engine-side, so self.physics/audio/force (Transpiler's "scriptData-><name>" emit)
-    // read an already-resolved pointer instead of re-fetching the handle on every access. EVERY id the mask can
-    // carry needs a branch: a missing one doesn't just leave its own slot unwritten, it shifts every later
-    // component into the wrong slot, and the script then reads one component type as another.
+    // ascending EComponentID order, so "scriptData-><name>" reads an already-resolved pointer. EVERY id the
+    // mask can carry needs a branch: a missing one shifts every later component into the wrong slot.
     if (scriptData && scriptModule->requiredComponents)
     {
         void** slot = reinterpret_cast<void**>(scriptData.get());
@@ -368,11 +358,9 @@ void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
     if (!scriptModule)
         return;
 
-    // Paired with OnSpawn HAVING RUN, not with the live requirement check -- a script edited between the two
-    // ends would otherwise tear down what it never built (or skip teardown for what it did). The requirement
-    // is still checked on top: if the script gained a requirement this entity doesn't meet while it was live,
-    // its OnDestroy would reach for a component it no longer has, and a skipped teardown beats a crash.
-    // Engine-owned state (the script's arrays) is released below regardless, so nothing leaks either way.
+    // Paired with OnSpawn HAVING RUN, or a script edited mid-life tears down what it never built. The
+    // requirement is checked on top: a skipped teardown beats reaching for a component it was refused
+    // (the script's arrays are released below either way).
     if (scriptModule->onDestroy && onSpawnRan && requirementsMet(entity))
         reinterpret_cast<ScriptOnDestroyFn>(scriptModule->onDestroy)(&Globals::scriptContext, &entity, scriptData.get());
 
