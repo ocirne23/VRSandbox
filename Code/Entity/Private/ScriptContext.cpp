@@ -757,9 +757,9 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         }
     }
 
-    int thunk_arrayGet(VrArray handle, int index, int elemSize, void* outValue)
+    // Element access once the array is in hand; the handle and hoisted-view entry points below both land here.
+    static int scriptArrayGetAt(ScriptArray* array, int index, int elemSize, void* outValue)
     {
-        ScriptArray* array = resolveScriptArray(handle);
         if (array == nullptr || outValue == nullptr || index < 0 || index >= scriptArrayCount(*array))
             return 0;
         if (array->elemKind == kEntityElemKind)
@@ -786,9 +786,8 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         return 1;
     }
 
-    void thunk_arraySet(VrArray handle, int index, int elemSize, const void* value)
+    static void scriptArraySetAt(ScriptArray* array, int index, int elemSize, const void* value)
     {
-        ScriptArray* array = resolveScriptArray(handle);
         if (array == nullptr || value == nullptr || index < 0 || index >= scriptArrayCount(*array))
             return;
         if (array->elemKind == kEntityElemKind)
@@ -800,6 +799,36 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         }
         else if (elemSize == array->elemSize)
             std::memcpy(array->bytes.data() + static_cast<size_t>(index) * array->elemSize, value, array->elemSize);
+    }
+
+    int thunk_arrayGet(VrArray handle, int index, int elemSize, void* outValue)
+    {
+        return scriptArrayGetAt(resolveScriptArray(handle), index, elemSize, outValue);
+    }
+
+    void thunk_arraySet(VrArray handle, int index, int elemSize, const void* value)
+    {
+        scriptArraySetAt(resolveScriptArray(handle), index, elemSize, value);
+    }
+
+    // The array itself, resolved once for a loop. Safe to hold across the body: the registry's chunked storage
+    // never moves a ScriptArray, and a freed slot stays valid memory that reads back empty.
+    void* thunk_arrayResolve(VrArray handle) { return resolveScriptArray(handle); }
+
+    int thunk_arrayViewCount(void* view)
+    {
+        const ScriptArray* array = static_cast<const ScriptArray*>(view);
+        return array != nullptr ? scriptArrayCount(*array) : 0;
+    }
+
+    int thunk_arrayViewGet(void* view, int index, int elemSize, void* outValue)
+    {
+        return scriptArrayGetAt(static_cast<ScriptArray*>(view), index, elemSize, outValue);
+    }
+
+    void thunk_arrayViewSet(void* view, int index, int elemSize, const void* value)
+    {
+        scriptArraySetAt(static_cast<ScriptArray*>(view), index, elemSize, value);
     }
 
     int thunk_arrayCount(VrArray handle)

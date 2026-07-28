@@ -151,6 +151,12 @@ export struct BindingObject
 	DSLType sequenceElementType = DSLType::Void;
 	const char* sequenceCountEmit = nullptr; // "ctx->sceneGetChildCount($r)"
 	const char* sequenceAtEmit = nullptr;    // "ctx->sceneGetChildAt($r, $i)"
+	// Optional: resolves the receiver ONCE per loop into whatever the count/at pair would otherwise re-resolve
+	// per element ("$r" = the receiver). When set, the foreach hoists it into a local and "$r" in the count/at
+	// emits above is that local instead of the receiver expression. Only worth declaring when the per-element
+	// path does real lookup work (an array unpacks a generation-tagged handle every access); a collection whose
+	// at-emit is already a direct call leaves this null and nothing changes.
+	const char* sequenceBeginEmit = nullptr; // "ctx->arrayResolve($r)"
 
 	// Makes this object LOOKUP-ABLE by `ifexist`: "ifexist float item in <this> at <key>" binds one element
 	// only when the lookup succeeds, so a failed/out-of-range access can't be written at all. `lookupEmit` is a

@@ -514,7 +514,8 @@ namespace
 				// count and `at` templates both substitute the receiver, and `at` runs per element -- without
 				// this, a sequence produced by a CALL (world.entitiesInRadius(...)) would re-run that call for
 				// every element. A field receiver costs nothing extra either way.
-				const std::string sourceName = "vrSrc" + std::to_string(sourceLocalCounter++);
+				const auto localId = sourceLocalCounter++;
+				const std::string sourceName = "vrSrc" + std::to_string(localId);
 				emitLine("const auto " + sourceName + " = " + expressionText(flow->condition) + ";");
 
 				const std::string indexName = "vrIdx" + std::to_string(openScopes.size());
@@ -522,8 +523,19 @@ namespace
 				if (const BindingObject* object = bindings.objectFor(dslValueType(flow->condition));
 					object != nullptr && object->sequenceCountEmit != nullptr && object->sequenceAtEmit != nullptr)
 				{
-					countText = substituteEmit(object->sequenceCountEmit, { sourceName });
-					atText = substituteEmit(object->sequenceAtEmit, { sourceName, {}, {}, indexName });
+					// A container declaring a begin emit resolves ONCE here and count/at read that local, so a
+					// per-element lookup (an array's generation-tagged handle unpack) becomes per-loop. The
+					// write-back below deliberately keeps using the HANDLE: it re-resolves and range-checks at
+					// write time, which is what makes a body that pushed or cleared drop the write rather than
+					// corrupt anything.
+					std::string iterName = sourceName;
+					if (object->sequenceBeginEmit != nullptr)
+					{
+						iterName = "vrIter" + std::to_string(localId);
+						emitLine("const auto " + iterName + " = " + substituteEmit(object->sequenceBeginEmit, { sourceName }) + ";");
+					}
+					countText = substituteEmit(object->sequenceCountEmit, { iterName });
+					atText = substituteEmit(object->sequenceAtEmit, { iterName, {}, {}, indexName });
 				}
 				emitLine("for (int " + indexName + " = 0, " + indexName + "End = " + countText + "; "
 					+ indexName + " < " + indexName + "End; ++" + indexName + ")");

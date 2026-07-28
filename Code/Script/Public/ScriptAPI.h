@@ -225,7 +225,16 @@ struct VrRayHit
     X(glm::quat,   renderGetOffsetRot,     (void*, renderComponent)) \
     X(void,        renderSetOffsetPos,     (void*, renderComponent), (glm::vec3, position)) \
     X(void,        renderSetOffsetScale,   (void*, renderComponent), (float, scale)) \
-    X(void,        renderSetOffsetRot,     (void*, renderComponent), (glm::quat, rotation))
+    X(void,        renderSetOffsetRot,     (void*, renderComponent), (glm::quat, rotation)) \
+    /* ---- array iteration ---- arrayResolve turns a handle into the array itself ONCE, so a foreach pays the
+       handle unpack + generation check per LOOP instead of per element (the registry's storage is chunked and
+       never moves, which is what makes the pointer safe to hold). The view calls re-read the element storage
+       every access, so a body that pushes or clears still reads correct data -- what is hoisted is the lookup,
+       not the storage. Null view / out of range behave exactly like the handle forms. */ \
+    X(void*,       arrayResolve,           (VrArray, handle)) /* null for a stale/empty handle */ \
+    X(int,         arrayViewCount,         (void*, view)) \
+    X(int,         arrayViewGet,           (void*, view), (int, index), (int, elemSize), (void*, outValue)) \
+    X(void,        arrayViewSet,           (void*, view), (int, index), (int, elemSize), (const void*, value))
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,
@@ -330,6 +339,11 @@ template<class T> void vrArrSet(const ScriptContext* ctx, VrArray h, int i, cons
 { ctx->arraySet(h, i, (int)sizeof(T), &v); }
 template<class T> void vrArrPush(const ScriptContext* ctx, Entity* self, VrArray* h, int kind, const T& v)
 { ctx->arrayPush(self, h, kind, (int)sizeof(T), &v); }
+// The hoisted-view forms a foreach emits; same defaults-on-failure contract as vrArrGet above.
+template<class T> T vrArrViewGet(const ScriptContext* ctx, void* view, int i)
+{ T v = T(); ctx->arrayViewGet(view, i, (int)sizeof(T), &v); return v; }
+template<class T> void vrArrViewSet(const ScriptContext* ctx, void* view, int i, const T& v)
+{ ctx->arrayViewSet(view, i, (int)sizeof(T), &v); }
 
 // ---- math helpers ----
 // The `math.*` bindings are otherwise one-to-one glm/std calls emitted inline. These few are here because their

@@ -203,9 +203,12 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 				{ "count", DSLType::Int, "ctx->arrayCount($r)", /*writable*/ false },
 			};
 			// An array is iterable by construction -- this is what "foreach int v in self.data.scores" walks.
+			// The loop resolves the handle once (sequenceBeginEmit) and the count/at emits below take that
+			// resolved array, so iterating N elements does one generation-checked lookup instead of N.
 			arrayObject.sequenceElementType = elementType;
-			arrayObject.sequenceCountEmit = "ctx->arrayCount($r)";
-			m_arrayEmits.push_back(std::make_unique<std::string>("vrArrGet<" + elementName + ">(ctx, $r, $i)"));
+			arrayObject.sequenceBeginEmit = "ctx->arrayResolve($r)";
+			arrayObject.sequenceCountEmit = "ctx->arrayViewCount($r)";
+			m_arrayEmits.push_back(std::make_unique<std::string>("vrArrViewGet<" + elementName + ">(ctx, $r, $i)"));
 			arrayObject.sequenceAtEmit = m_arrayEmits.back()->c_str();
 
 			// ...and indexable, but ONLY through `ifexist`: arrayGet's own return value IS the bounds check
