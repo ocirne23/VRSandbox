@@ -172,11 +172,33 @@ export struct ScriptComponent
     // later (update() constructs late). OnDestroy pairs with THIS, never with the live requirement check.
     bool onSpawnRan = false;
 
+    // AUTHORED initial values for the script's exposed ScriptData fields (the DSL's "//@@data private int num"),
+    // by field name, as TEXT -- the .pre's own form, and the only one available before the script has compiled
+    // and said what type each field is. Applied at spawn and again after any reallocation (applyInitialValues).
+    // Editing a field LIVE in the Properties panel does not come through here: that writes the block directly
+    // and is deliberately never serialized.
+    struct InitialFieldValue
+    {
+        std::string name;
+        std::string value;
+    };
+
     struct SpawnInfo
     {
         std::string scriptPath;
         bool enabled = true;
+        std::vector<InitialFieldValue> initialValues;
     };
+
+    // A COPY of the SpawnInfo's initial values, so they survive template retirement and -- the reason this
+    // exists -- a hot-reload: syncScriptData reallocates and ZEROES the block whenever the layout changes, which
+    // would otherwise silently reset every authored value to zero.
+    std::vector<InitialFieldValue> initialValues;
+
+    // Writes the authored values into the (freshly allocated) block, matching names against the module's
+    // exposed-field table and parsing each text by that field's type. Unknown names and unparseable text are
+    // skipped -- a field renamed in the script stops being applied rather than landing on a neighbour.
+    void applyInitialValues();
 
     void spawn(Entity&, const SpawnInfo& info, const Transform&);
     void destroy(Entity&, const SpawnInfo&);

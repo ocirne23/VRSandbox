@@ -72,6 +72,14 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
                 if (!si->scriptPath.empty())
                     comp.set("Path", si->scriptPath);
                 comp.set("Enabled", si->enabled);
+                // The AUTHORED initial values only (the Entity Editor's). A live edit from the Properties panel
+                // writes the running block and never reaches SpawnInfo, so it deliberately isn't saved here.
+                if (!si->initialValues.empty())
+                {
+                    AssetNode& dataNode = comp.addChild("Data");
+                    for (const ScriptComponent::InitialFieldValue& field : si->initialValues)
+                        dataNode.set(field.name, field.value);
+                }
             }
         }
         else if (id == EComponentID_Scene)

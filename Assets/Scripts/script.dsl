@@ -2,17 +2,23 @@
 
 struct ScriptData
 {
-	SceneComponent* scene;
 	PhysicsComponent* physics;
 	int num = 0;
 	VrArray list = 0;
 };
 
 SCRIPT_EXPORT unsigned int ScriptDataSize(void) { return sizeof(ScriptData); }
-SCRIPT_EXPORT unsigned int ScriptDataLayoutId(void) { return 3713242634u; }
+SCRIPT_EXPORT unsigned int ScriptDataLayoutId(void) { return 2407474620u; }
 REGISTER_SCRIPT_DATA_SIZE()
 
-SCRIPT_EXPORT unsigned int ScriptRequiredComponents(void) { return (1u << 0) | (1u << 3); }
+static const VrScriptField kScriptDataFields[] = {
+	{ "num", VR_FIELD_INT, (int)offsetof(ScriptData, num), VR_FIELD_PRIVATE },
+};
+SCRIPT_EXPORT const VrScriptField* ScriptDataFields(int* outCount)
+{ *outCount = (int)(sizeof(kScriptDataFields) / sizeof(kScriptDataFields[0])); return kScriptDataFields; }
+REGISTER_SCRIPT_DATA_FIELDS()
+
+SCRIPT_EXPORT unsigned int ScriptRequiredComponents(void) { return (1u << 3); }
 REGISTER_SCRIPT_REQUIRED_COMPONENTS()
 
 SCRIPT_EXPORT void OnSpawn(const ScriptContext* ctx, Entity* self, ScriptData* scriptData);
@@ -62,6 +68,7 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 		ctx->physicsSetVelocity(scriptData->physics, glm::vec3(0.0f, 1.0f, 0.0f));
 	}
 	test(ctx, self, scriptData, 123);
+	ctx->logf(ctx->internString("num: %i"), (*scriptData).num);
 }
 
 REGISTER_UPDATE()
@@ -90,8 +97,8 @@ static void test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData,
 }
 
 //@@dsl 1
-//@@require PhysicsComponent, SceneComponent
-//@@data int num
+//@@require PhysicsComponent
+//@@data private int num
 //@@data int[] list
 //@@event OnHit
 //@
@@ -114,6 +121,7 @@ static void test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData,
 //@		self.physics.setVelocity(vec3 velocity = vec3(0, 1, 0))
 //@	end
 //@	test(int awa = 123)
+//@	printf(string format = "num: %i", self.data.num)
 //@end
 //@
 //@function test(int awa)

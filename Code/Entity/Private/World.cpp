@@ -784,6 +784,19 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         auto info = std::make_shared<ScriptComponent::SpawnInfo>();
         if (const AssetNode* n = scriptNode->find("Path"))    info->scriptPath = n->asString();
         if (const AssetNode* n = scriptNode->find("Enabled")) info->enabled = n->asBool();
+        // Authored INITIAL values for the script's exposed fields, one "<name> <value>" child each. Kept as
+        // TEXT: the script hasn't compiled at this point, so nothing here knows what type any of them are --
+        // ScriptComponent::applyInitialValues resolves them against the module's field table once it has.
+        if (const AssetNode* dataNode = scriptNode->find("Data"))
+            for (const AssetNode& fieldNode : dataNode->children)
+            {
+                // Re-joined with ", ": the parser splits a vector value into separate entries, and the text form
+                // is what applyInitialValues parses back -- the same spelling the writer produces.
+                std::string text;
+                for (const std::string& value : fieldNode.values)
+                    text += (text.empty() ? "" : ", ") + value;
+                info->initialValues.push_back({ fieldNode.key, std::move(text) });
+            }
         typeBits |= uint16(1 << EComponentID_Script);
         tmpl.spawnInfos.emplace_back(std::move(info));
     }

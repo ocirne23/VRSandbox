@@ -6692,13 +6692,29 @@ void ScriptEditor::renderSidebarPanel()
 	ImGui::Spacing();
 	ImGui::Separator();
 	// SCRIPT DATA: this document's own persistent per-instance fields (self.data.<name>), authored here and
-	// serialized as .dsl "//@@data <type> <name>" lines (ScriptLoader). Removing a field is refused (same
-	// pattern as everything else in this panel) while the script still references it.
+	// serialized as .dsl "//@@data [private|public] <type> <name>" lines (ScriptLoader). Removing a field is
+	// refused (same pattern as everything else in this panel) while the script still references it.
+	//
+	// VISIBILITY is per field: Hidden (default) keeps it entirely internal, Private/Public expose it to the
+	// editor -- the Properties panel edits it live, the Entity Editor authors its initial value. Arrays can't be
+	// exposed at all (see DSLFieldVisibility), so their combo is disabled rather than silently ignored.
 	ImGui::TextDisabled("SCRIPT DATA");
 	for (size_t i = 0; i < m_document.dataFields.size(); ++i)
 	{
-		const DSLDataField& field = m_document.dataFields[i];
+		DSLDataField& field = m_document.dataFields[i];
 		ImGui::PushID(static_cast<int>(i));
+		const bool exposable = dslCanExposeFieldType(field.type);
+		ImGui::BeginDisabled(!exposable);
+		ImGui::SetNextItemWidth(70.0f);
+		if (ImGui::BeginCombo("##fieldVis", dslFieldVisibilityName(field.visibility)))
+		{
+			for (const DSLFieldVisibility v : { DSLFieldVisibility::Hidden, DSLFieldVisibility::Private, DSLFieldVisibility::Public })
+				if (ImGui::Selectable(dslFieldVisibilityName(v), v == field.visibility))
+					field.visibility = v;
+			ImGui::EndCombo();
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
 		firstSegment = true;
 		seg(kColType, dslTypeName(field.type));
 		seg(kColPunct, " ");

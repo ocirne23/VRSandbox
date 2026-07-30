@@ -55,6 +55,9 @@ private:
 	void renderParticleSection();
 	void renderForceSection();
 	void renderScriptSection();
+	// The INITIAL values of the picked script's exposed ScriptData fields -- serialized into the .pre and
+	// applied at every spawn, unlike the Properties panel's live edits of the same fields.
+	void renderScriptDataSection();
 
 	// Editing an already-live scene entity in place (via "Open Selected") vs. a dedicated one this editor
 	// spawned itself (New / Open by path) — only the latter gets deleted when switching away/closing.

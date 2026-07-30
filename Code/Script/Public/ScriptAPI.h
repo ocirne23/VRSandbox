@@ -7,6 +7,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <cmath>
 #include <cstdarg>
+#include <cstddef> // offsetof -- the generated ScriptDataFields table locates each exposed field with it
 
 #include "ScriptCtxMacros.h"
 
@@ -65,6 +66,40 @@ struct VrRayHit
     glm::vec3 point;    // world-space contact position
     glm::vec3 normal;   // world-space surface normal at `point`
     float     distance; // along the ray from its origin
+};
+
+// ---- exposed ScriptData fields ----
+// A script's ScriptData block is opaque to the engine: it knows the block's SIZE and a layout HASH, nothing
+// about what is in it. This table is how a script describes the fields it chose to expose (the DSL's
+// "//@@data private int num"), so the editor can show and set them by name: one row per non-Hidden field,
+// carrying the offset to reach it and the type to interpret it as.
+//
+// Hidden fields -- the default -- are absent entirely. Arrays never appear: the field would be a VrArray handle
+// whose storage lives engine-side, with nothing for an inspector to show.
+enum VrScriptFieldType
+{
+    VR_FIELD_INT = 0,
+    VR_FIELD_FLOAT,
+    VR_FIELD_BOOL,   // stored as a C++ bool in the block
+    VR_FIELD_STRING, // stored as a const char* into ENGINE-interned text (see internString) -- never freed
+    VR_FIELD_VEC2,
+    VR_FIELD_VEC3,
+    VR_FIELD_VEC4,
+    VR_FIELD_QUAT,
+};
+
+enum VrScriptFieldVisibility
+{
+    VR_FIELD_PRIVATE = 1, // editor-visible: the Properties panel edits it live, the Entity Editor authors it
+    VR_FIELD_PUBLIC  = 2, // ...and, in future, readable from another entity's script
+};
+
+struct VrScriptField
+{
+    const char* name;
+    int         type;       // VrScriptFieldType
+    int         offset;     // byte offset into the ScriptData block
+    int         visibility; // VrScriptFieldVisibility
 };
 
 #pragma warning(push)
@@ -331,6 +366,12 @@ typedef unsigned int (*ScriptRequiredComponentsFn)(void);
 // arrays those handles owned) and starts from a zeroed one. Absent = treat every reload as a layout change.
 typedef unsigned int (*ScriptDataLayoutIdFn)(void);
 
+// Optional export: the script's EXPOSED ScriptData fields (see VrScriptField). Absent, or a count of 0, means
+// the script exposes nothing -- which is every script that never marks a field private/public, so the editor
+// simply has nothing to show. The returned pointer is to static storage in the script and lives as long as the
+// module does; the engine never holds it across a reload.
+typedef const VrScriptField* (*ScriptDataFieldsFn)(int* outCount);
+
 #ifdef __cplusplus
 }
 #endif
@@ -417,6 +458,7 @@ enum VrScriptEntryKind
     VR_SCRIPT_ON_PHYSICS_EVENT,
     VR_SCRIPT_DATA_SIZE,
     VR_SCRIPT_DATA_LAYOUT_ID,
+    VR_SCRIPT_DATA_FIELDS,
     VR_SCRIPT_REQUIRED_COMPONENTS,
     VR_SCRIPT_EVENT_COUNT,
     VR_SCRIPT_EVENT_NAME,
@@ -447,6 +489,7 @@ void vrRegisterScriptEntry(const char* scriptPath, int kind, void* fn);
 #define REGISTER_SCRIPT_DATA_SIZE()  static const int _vrRegDataSize  = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_SIZE,       (void*)&ScriptDataSize), \
                                                                         vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_LAYOUT_ID,  (void*)&ScriptDataLayoutId), 0);
 #define REGISTER_SCRIPT_REQUIRED_COMPONENTS() static const int _vrRegReqComp = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_REQUIRED_COMPONENTS, (void*)&ScriptRequiredComponents), 0);
+#define REGISTER_SCRIPT_DATA_FIELDS() static const int _vrRegDataFields = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_FIELDS, (void*)&ScriptDataFields), 0);
 #define REGISTER_ON_EVENT()          static const int _vrRegOnEvent   = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_EVENT,        (void*)&OnEvent), \
                                                                         vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_EVENT_COUNT,     (void*)&ScriptEventCount), \
                                                                         vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_EVENT_NAME,      (void*)&ScriptEventName), 0);
@@ -457,5 +500,6 @@ void vrRegisterScriptEntry(const char* scriptPath, int kind, void* fn);
 #define REGISTER_ON_PHYSICS_EVENT()
 #define REGISTER_SCRIPT_DATA_SIZE()
 #define REGISTER_SCRIPT_REQUIRED_COMPONENTS()
+#define REGISTER_SCRIPT_DATA_FIELDS()
 #define REGISTER_ON_EVENT()
 #endif

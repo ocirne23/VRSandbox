@@ -16,3 +16,5 @@ Prefab physicsSphere
 	Component Script
 		Path Scripts/script.dsl
 		Enabled true
+		Data
+			num 30

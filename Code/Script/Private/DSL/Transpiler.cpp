@@ -720,6 +720,54 @@ std::string Transpiler::transpile(const DSL& document, const ScriptBindings& bin
 			}
 			emitter.emitLine("REGISTER_SCRIPT_DATA_SIZE()");
 
+			// The EXPOSED fields (see VrScriptField): what lets the editor show and set them by name, since the
+			// engine otherwise knows this block only as a size and a hash. Offsets come from offsetof rather
+			// than being computed here, so the table cannot drift from the struct the compiler actually laid
+			// out. Hidden fields -- the default -- are absent, so a script that exposes nothing emits nothing.
+			{
+				std::vector<const DSLDataField*> exposed;
+				for (const DSLDataField& field : document.dataFields)
+					if (field.visibility != DSLFieldVisibility::Hidden && dslCanExposeFieldType(field.type))
+						exposed.push_back(&field);
+				if (!exposed.empty())
+				{
+					emitter.emitLine("");
+					emitter.emitLine("static const VrScriptField kScriptDataFields[] = {");
+					for (const DSLDataField* field : exposed)
+					{
+						const char* typeCode = "VR_FIELD_INT";
+						switch (field->type)
+						{
+						case DSLType::Float:  typeCode = "VR_FIELD_FLOAT"; break;
+						case DSLType::Bool:   typeCode = "VR_FIELD_BOOL"; break;
+						case DSLType::String: typeCode = "VR_FIELD_STRING"; break;
+						case DSLType::Int:    typeCode = "VR_FIELD_INT"; break;
+						default:
+						{
+							// A struct: matched by its registered DSL name, so a new one only needs a code here
+							// once it is actually exposable.
+							const char* name = dslTypeName(field->type);
+							if (std::string_view(name) == "vec2")      typeCode = "VR_FIELD_VEC2";
+							else if (std::string_view(name) == "vec3") typeCode = "VR_FIELD_VEC3";
+							else if (std::string_view(name) == "vec4") typeCode = "VR_FIELD_VEC4";
+							else if (std::string_view(name) == "quat") typeCode = "VR_FIELD_QUAT";
+							else                                      typeCode = nullptr; // not representable -- skipped
+							break;
+						}
+						}
+						if (typeCode == nullptr)
+							continue;
+						emitter.emitLine("\t{ \"" + field->name + "\", " + typeCode
+							+ ", (int)offsetof(ScriptData, " + field->name + "), "
+							+ (field->visibility == DSLFieldVisibility::Public ? "VR_FIELD_PUBLIC" : "VR_FIELD_PRIVATE") + " },");
+					}
+					emitter.emitLine("};");
+					emitter.emitLine("SCRIPT_EXPORT const VrScriptField* ScriptDataFields(int* outCount)");
+					emitter.emitLine("{ *outCount = (int)(sizeof(kScriptDataFields) / sizeof(kScriptDataFields[0])); return kScriptDataFields; }");
+					emitter.emitLine("REGISTER_SCRIPT_DATA_FIELDS()");
+				}
+			}
+
 			if (!requiredSorted.empty())
 			{
 				std::string bitmask;

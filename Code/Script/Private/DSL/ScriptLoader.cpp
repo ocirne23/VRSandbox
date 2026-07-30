@@ -1397,8 +1397,15 @@ bool ScriptLoader::save(DSL& document, const std::string& path, const std::strin
 		}
 		file << '\n';
 	}
+	// "//@@data [private|public] <type> <name>" -- the keyword is OMITTED for Hidden, which is the default, so
+	// every field authored before visibility existed round-trips byte-identically.
 	for (const DSLDataField& field : document.dataFields)
-		file << "//@@data " << dslTypeName(field.type) << ' ' << field.name << '\n';
+	{
+		file << "//@@data ";
+		if (field.visibility != DSLFieldVisibility::Hidden)
+			file << dslFieldVisibilityName(field.visibility) << ' ';
+		file << dslTypeName(field.type) << ' ' << field.name << '\n';
+	}
 	for (const std::string& eventName : document.eventNames)
 		file << "//@@event " << eventName << '\n';
 	for (const SyntaxLine& line : Syntax::format(document.file, /*compact*/ false))
@@ -1485,19 +1492,34 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 			}
 			if (raw.rfind("//@@data", 0) == 0)
 			{
-				// "//@@data <type> <name>" -- one persistent self.data field, in the exact "type name" shape a
-				// real declaration line uses, so it reuses the same tokenizer/typeFromKeyword machinery.
+				// "//@@data [private|public] <type> <name>" -- one persistent self.data field, the "type name"
+				// part in the exact shape a real declaration line uses, so it reuses the same tokenizer and
+				// typeFromKeyword machinery. The visibility keyword is optional; absent means Hidden.
 				std::string rest = raw.substr(8);
 				rest.erase(0, rest.find_first_not_of(" \t"));
 				std::vector<Token> tokens;
 				std::string tokenError;
 				if (!tokenizeLine(rest, tokens, tokenError))
 					return failAt(lineNo, tokenError);
+				std::span<const Token> fieldTokens(tokens);
+				DSLFieldVisibility visibility = DSLFieldVisibility::Hidden;
+				if (!fieldTokens.empty() && fieldTokens[0].kind == Token::Kind::Identifier)
+				{
+					if (fieldTokens[0].text == "private")      visibility = DSLFieldVisibility::Private;
+					else if (fieldTokens[0].text == "public")  visibility = DSLFieldVisibility::Public;
+					if (visibility != DSLFieldVisibility::Hidden)
+						fieldTokens = fieldTokens.subspan(1);
+				}
 				DSLType type = DSLType::Void;
-				if (tokens.size() != 2 || tokens[0].kind != Token::Kind::Identifier || !typeFromKeyword(tokens[0].text, type)
-					|| tokens[1].kind != Token::Kind::Identifier)
-					return failAt(lineNo, "malformed //@@data line (expected \"//@@data <type> <name>\")");
-				const std::string& fieldName = tokens[1].text;
+				if (fieldTokens.size() != 2 || fieldTokens[0].kind != Token::Kind::Identifier
+					|| !typeFromKeyword(fieldTokens[0].text, type) || fieldTokens[1].kind != Token::Kind::Identifier)
+					return failAt(lineNo, "malformed //@@data line (expected \"//@@data [private|public] <type> <name>\")");
+				const std::string& fieldName = fieldTokens[1].text;
+				// The loader twin of the SCRIPT DATA panel's rule: an array is a handle into engine-side storage,
+				// so there is nothing for an inspector to show or set.
+				if (visibility != DSLFieldVisibility::Hidden && !dslCanExposeFieldType(type))
+					return failAt(lineNo, "'" + std::string(dslTypeName(type)) + "' can't be "
+						+ dslFieldVisibilityName(visibility) + " -- only scalar and struct fields can be exposed");
 				// Entity isn't storable in either form -- see DSLDataField. The loader-side twin of the SCRIPT
 				// DATA panel simply not offering it.
 				if (type == DSLType::Entity || dslArrayElementType(type) == DSLType::Entity)
@@ -1507,7 +1529,7 @@ ScriptLoader::LoadResult ScriptLoader::load(DSL& document, const std::string& pa
 				for (const DSLDataField& existing : dataFields)
 					if (existing.name == fieldName)
 						return failAt(lineNo, "'" + fieldName + "' is declared twice in //@@data");
-				dataFields.push_back(DSLDataField{ fieldName, type });
+				dataFields.push_back(DSLDataField{ fieldName, type, visibility });
 				continue;
 			}
 			if (raw.rfind("//@@event", 0) == 0)

@@ -1,3 +1,8 @@
+module;
+// VrScriptField: ScriptModule carries the exposed-field table as void* (it doesn't depend on the script ABI),
+// so the panel needs the real struct to read it. In the GLOBAL module fragment -- a plain #include after
+// `module UI;` lands in the module purview and collides with the std header units Core re-exports.
+#include "ScriptAPI.h"
 module UI;
 
 import Core;
@@ -5,6 +10,7 @@ import Core.imgui;
 import Core.glm;
 import Entity;
 import RendererVK;
+import Script; // ScriptModule's exposed-field table -- the only description of a ScriptData block's layout
 import :PropertiesPanel;
 
 void PropertiesPanel::render(Entity* selected)
@@ -145,6 +151,68 @@ void PropertiesPanel::render(Entity* selected)
 			ImGui::Text("Enabled");
 			ImGui::SameLine(80.0f);
 			ImGui::Checkbox("##pp_script_enabled", &script->enabled);
+			drawScriptDataFields(*script);
 		}
+	}
+}
+
+// The script's EXPOSED ScriptData fields (the DSL's "//@@data private int num"), edited LIVE: these write
+// straight into the running instance's data block and are deliberately NOT serialized -- the .pre stores the
+// INITIAL value, authored in the Entity Editor, and this is for poking at a live entity.
+//
+// The field table comes from the loaded module (ScriptModule::dataFields), which is the only thing that knows
+// this block's layout -- so nothing shows until the script has compiled, and a script that exposes nothing
+// shows nothing.
+void PropertiesPanel::drawScriptDataFields(ScriptComponent& script)
+{
+	const ScriptModule* module = script.scriptModule;
+	if (module == nullptr || module->dataFields == nullptr || module->numDataFields <= 0)
+		return;
+	// A block allocated against a DIFFERENT layout must not be read with this table: a hot-reload that changed
+	// the fields reallocates on the next entry point, and until then these offsets don't describe it.
+	if (script.scriptData == nullptr || script.scriptDataLayoutId != module->dataLayoutId)
+		return;
+
+	// ScriptModule carries the table as void* (it doesn't depend on the script ABI); this is where it regains
+	// its type, once, rather than at every use below.
+	const VrScriptField* fields = static_cast<const VrScriptField*>(module->dataFields);
+
+	ImGui::SeparatorText("Script Data");
+	for (int i = 0; i < module->numDataFields; ++i)
+	{
+		const VrScriptField& field = fields[i];
+		if (field.offset < 0 || static_cast<uint32>(field.offset) >= script.scriptDataSize)
+			continue; // defensive: a table that doesn't match the block it came with
+		void* value = script.scriptData.get() + field.offset;
+
+		ImGui::PushID(i);
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("%s", field.name);
+		ImGui::SameLine(120.0f);
+		ImGui::SetNextItemWidth(-1.0f);
+		switch (field.type)
+		{
+		case VR_FIELD_INT:   ImGui::DragInt("##v", static_cast<int*>(value)); break;
+		case VR_FIELD_FLOAT: ImGui::DragFloat("##v", static_cast<float*>(value), 0.01f); break;
+		case VR_FIELD_BOOL:  ImGui::Checkbox("##v", static_cast<bool*>(value)); break;
+		case VR_FIELD_VEC2:  ImGui::DragFloat2("##v", static_cast<float*>(value), 0.01f); break;
+		case VR_FIELD_VEC3:  ImGui::DragFloat3("##v", static_cast<float*>(value), 0.01f); break;
+		case VR_FIELD_VEC4:  ImGui::DragFloat4("##v", static_cast<float*>(value), 0.01f); break;
+		case VR_FIELD_QUAT:  ImGui::DragFloat4("##v", &static_cast<glm::quat*>(value)->x, 0.01f); break;
+		case VR_FIELD_STRING:
+		{
+			// The field holds a const char* into ENGINE-interned storage, so a new value has to be interned
+			// rather than copied into the block. Committed on Enter: interning every keystroke would leave a
+			// permanent entry per intermediate spelling (the intern set never shrinks).
+			const char* current = *static_cast<const char* const*>(value);
+			char buffer[256];
+			strncpy_s(buffer, sizeof(buffer), current != nullptr ? current : "", sizeof(buffer) - 1);
+			if (ImGui::InputText("##v", buffer, sizeof(buffer), ImGuiInputTextFlags_EnterReturnsTrue))
+				*static_cast<const char**>(value) = Globals::scriptContext.internString(buffer);
+			break;
+		}
+		default: ImGui::TextDisabled("(unsupported)"); break;
+		}
+		ImGui::PopID();
 	}
 }

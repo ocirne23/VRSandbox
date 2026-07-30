@@ -312,6 +312,14 @@ bool ScriptHost::loadDll(CachedScript& slot, const fs::path& dll)
     slot.entries.dataLayoutId = 0;
     if (auto layoutFn = (uint32(*)())GetProcAddress(m, "ScriptDataLayoutId"))
         slot.entries.dataLayoutId = layoutFn();
+    slot.entries.dataFields = nullptr;
+    slot.entries.numDataFields = 0;
+    // Cast inline rather than through ScriptAPI.h's typedef: this path deliberately doesn't include the ABI
+    // header (only the cooked build does), same as every GetProcAddress above. The table is VrScriptField[]
+    // to whoever consumes it -- void* here, exactly like the entry points.
+    using ScriptDataFieldsPtr = const void* (*)(int*);
+    if (auto fieldsFn = (ScriptDataFieldsPtr)GetProcAddress(m, "ScriptDataFields"))
+        slot.entries.dataFields = fieldsFn(&slot.entries.numDataFields);
     slot.entries.requiredComponents = 0;
     if (auto reqFn = (uint32(*)())GetProcAddress(m, "ScriptRequiredComponents"))
         slot.entries.requiredComponents = reqFn();
@@ -358,6 +366,10 @@ const ScriptModule* ScriptHost::getOrLoad(const std::string& path, bool forceRec
         slot.entries.onPhysicsEvent = e->fns[VR_SCRIPT_ON_PHYSICS_EVENT];
         slot.entries.dataSize       = e->fns[VR_SCRIPT_DATA_SIZE] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_DATA_SIZE])() : 0;
         slot.entries.dataLayoutId   = e->fns[VR_SCRIPT_DATA_LAYOUT_ID] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_DATA_LAYOUT_ID])() : 0;
+        slot.entries.dataFields = nullptr;
+        slot.entries.numDataFields = 0;
+        if (e->fns[VR_SCRIPT_DATA_FIELDS])
+            slot.entries.dataFields = reinterpret_cast<const void* (*)(int*)>(e->fns[VR_SCRIPT_DATA_FIELDS])(&slot.entries.numDataFields);
         slot.entries.requiredComponents = e->fns[VR_SCRIPT_REQUIRED_COMPONENTS] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_REQUIRED_COMPONENTS])() : 0;
         slot.entries.eventNames.clear();
         if (void* ec = e->fns[VR_SCRIPT_EVENT_COUNT]; ec && e->fns[VR_SCRIPT_EVENT_NAME])

@@ -204,6 +204,7 @@ AnimatorComponent::~AnimatorComponent()
 void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {
 	enabled = info.enabled;
+	initialValues = info.initialValues; // kept for re-application after any later reallocation
 
 	if (info.scriptPath.empty())
 		return;
@@ -272,7 +273,72 @@ bool ScriptComponent::syncScriptData(Entity& entity)
         if (scriptModule->requiredComponents & (1u << EComponentID_Particle)) *slot++ = getComponent<ParticleComponent>(&entity);
         if (scriptModule->requiredComponents & (1u << EComponentID_Force))    *slot++ = getComponent<ForceComponent>(&entity);
     }
+
+    // The block was just zeroed, so the authored values have to go back in -- otherwise a hot-reload that
+    // touched //@@data would silently reset every one of them. AFTER the require slots, which occupy the front
+    // of the block and are never fields.
+    applyInitialValues();
     return true;
+}
+
+// Text -> bytes, by each field's own type. Deliberately tolerant: a name that no longer exists in the script, or
+// text that doesn't parse, is skipped rather than guessed at -- an authored value for a since-renamed field
+// should quietly stop applying, never land on whatever field now occupies that offset.
+void ScriptComponent::applyInitialValues()
+{
+    if (initialValues.empty() || scriptData == nullptr || scriptModule == nullptr
+        || scriptModule->dataFields == nullptr || scriptModule->numDataFields <= 0)
+        return;
+    // ScriptModule carries the table as void* (it doesn't depend on the script ABI) -- typed once, here.
+    const VrScriptField* fields = static_cast<const VrScriptField*>(scriptModule->dataFields);
+
+    // Comma-separated floats for the vector/quat kinds, so an authored value reads the way every other vector
+    // in the .pre format does ("1, 2, 3"). A short or unparseable list leaves the field alone.
+    const auto parseFloats = [](const std::string& text, float* out, int count)
+    {
+        int parsed = 0;
+        const char* p = text.c_str();
+        while (parsed < count && *p != '\0')
+        {
+            char* end = nullptr;
+            const float value = std::strtof(p, &end);
+            if (end == p)
+                break;
+            out[parsed++] = value;
+            p = end;
+            while (*p == ',' || *p == ' ' || *p == '\t')
+                ++p;
+        }
+        return parsed == count;
+    };
+
+    for (const InitialFieldValue& authored : initialValues)
+    {
+        const VrScriptField* field = nullptr;
+        for (int i = 0; i < scriptModule->numDataFields && field == nullptr; ++i)
+            if (authored.name == fields[i].name)
+                field = &fields[i];
+        if (field == nullptr || field->offset < 0 || uint32(field->offset) >= scriptDataSize)
+            continue;
+        uint8* slot = scriptData.get() + field->offset;
+
+        switch (field->type)
+        {
+        case VR_FIELD_INT:   *reinterpret_cast<int*>(slot) = std::atoi(authored.value.c_str()); break;
+        case VR_FIELD_FLOAT: *reinterpret_cast<float*>(slot) = std::strtof(authored.value.c_str(), nullptr); break;
+        case VR_FIELD_BOOL:  *reinterpret_cast<bool*>(slot) = (authored.value == "true" || authored.value == "1"); break;
+        // The block holds a const char* into ENGINE-interned storage, never into this component's own string --
+        // the block outlives any particular InitialFieldValue (and a reload replaces the whole vector).
+        case VR_FIELD_STRING:
+            *reinterpret_cast<const char**>(slot) = Globals::scriptContext.internString(authored.value.c_str());
+            break;
+        case VR_FIELD_VEC2:  parseFloats(authored.value, reinterpret_cast<float*>(slot), 2); break;
+        case VR_FIELD_VEC3:  parseFloats(authored.value, reinterpret_cast<float*>(slot), 3); break;
+        case VR_FIELD_VEC4:
+        case VR_FIELD_QUAT:  parseFloats(authored.value, reinterpret_cast<float*>(slot), 4); break;
+        default: break;
+        }
+    }
 }
 
 // The live-path wrapper: the event manager holds the ScriptData pointer it was registered with, so a

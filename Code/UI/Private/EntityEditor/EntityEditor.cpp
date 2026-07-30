@@ -1,3 +1,8 @@
+module;
+// VrScriptField: ScriptModule carries the exposed-field table as void* (it doesn't depend on the script ABI), so
+// the Script Data section needs the real struct to read it. In the GLOBAL module fragment -- a plain #include
+// after `module UI;` lands in the module purview and collides with the std header units Core re-exports.
+#include "ScriptAPI.h"
 module UI;
 
 import Core;
@@ -6,6 +11,7 @@ import Core.glm;
 import Entity;
 import Physics;
 import File;
+import Script; // ScriptHost::getOrLoad + ScriptModule's field table
 import :EntityEditor;
 
 // Copies a std::string into a fixed InputText buffer each frame and writes edits back immediately (same
@@ -1271,12 +1277,131 @@ void EntityEditor::renderScriptSection()
 	if (ImGui::Checkbox("Enabled", &m_scriptDraft.enabled))
 		commitRespawn();
 
+	renderScriptDataSection();
+
 	if (ImGui::Button("Remove Script"))
 	{
 		m_hasScript = false;
 		commitRespawn();
 	}
 	ImGui::PopID();
+}
+
+// The INITIAL values of the picked script's exposed ScriptData fields -- what gets written into the .pre and
+// applied on every spawn. Distinct from the Properties panel, which edits the same fields on a LIVE entity and
+// saves nothing.
+//
+// The field list comes from the module, so the script has to have compiled at least once: getOrLoad returns the
+// cached build when there is one, which is the normal case for a script already on the entity.
+void EntityEditor::renderScriptDataSection()
+{
+	if (m_scriptDraft.scriptPath.empty())
+		return;
+	const ScriptModule* module = Globals::scriptHost.getOrLoad(m_scriptDraft.scriptPath);
+	if (module == nullptr || module->dataFields == nullptr || module->numDataFields <= 0)
+		return;
+	const VrScriptField* fields = static_cast<const VrScriptField*>(module->dataFields);
+
+	ImGui::SeparatorText("Script Data");
+	for (int i = 0; i < module->numDataFields; ++i)
+	{
+		const VrScriptField& field = fields[i];
+
+		// The authored entry for this field, or a fresh one -- a field the .pre says nothing about shows its
+		// type's zero, and only starts being serialized once actually edited.
+		std::string* authored = nullptr;
+		for (ScriptComponent::InitialFieldValue& value : m_scriptDraft.initialValues)
+			if (value.name == field.name)
+				authored = &value.value;
+
+		ImGui::PushID(i);
+		ImGui::AlignTextToFramePadding();
+		ImGui::Text("%s", field.name);
+		ImGui::SameLine(120.0f);
+		ImGui::SetNextItemWidth(-1.0f);
+
+		// Edited through the TEXT form the .pre stores, parsed into a widget-shaped value and printed back --
+		// one representation, so what is shown is exactly what will be written and later applied.
+		const std::string current = (authored != nullptr) ? *authored : std::string();
+		std::string edited;
+		bool changed = false;
+		switch (field.type)
+		{
+		case VR_FIELD_INT:
+		{
+			int value = std::atoi(current.c_str());
+			if (ImGui::DragInt("##v", &value))
+			{
+				edited = std::to_string(value);
+				changed = true;
+			}
+			break;
+		}
+		case VR_FIELD_BOOL:
+		{
+			bool value = (current == "true" || current == "1");
+			if (ImGui::Checkbox("##v", &value))
+			{
+				edited = value ? "true" : "false";
+				changed = true;
+			}
+			break;
+		}
+		case VR_FIELD_STRING:
+		{
+			char buffer[256];
+			strncpy_s(buffer, sizeof(buffer), current.c_str(), sizeof(buffer) - 1);
+			if (ImGui::InputText("##v", buffer, sizeof(buffer), ImGuiInputTextFlags_EnterReturnsTrue))
+			{
+				edited = buffer;
+				changed = true;
+			}
+			break;
+		}
+		default:
+		{
+			// Every remaining kind is 1..4 floats, so one path covers Float/vec2/vec3/vec4/quat.
+			const int count = (field.type == VR_FIELD_FLOAT) ? 1
+				: (field.type == VR_FIELD_VEC2) ? 2
+				: (field.type == VR_FIELD_VEC3) ? 3 : 4;
+			float values[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			{
+				const char* p = current.c_str();
+				for (int c = 0; c < count && *p != '\0'; ++c)
+				{
+					char* end = nullptr;
+					values[c] = std::strtof(p, &end);
+					if (end == p)
+						break;
+					p = end;
+					while (*p == ',' || *p == ' ')
+						++p;
+				}
+			}
+			if (ImGui::DragScalarN("##v", ImGuiDataType_Float, values, count, 0.01f))
+			{
+				char buffer[128];
+				int written = 0;
+				for (int c = 0; c < count; ++c)
+					written += snprintf(buffer + written, sizeof(buffer) - written, c > 0 ? ", %g" : "%g", values[c]);
+				edited = buffer;
+				changed = true;
+			}
+			break;
+		}
+		}
+		ImGui::PopID();
+
+		if (!changed)
+			continue;
+		if (authored != nullptr)
+			*authored = std::move(edited);
+		else
+			m_scriptDraft.initialValues.push_back({ field.name, std::move(edited) });
+		// Respawns like every other draft edit here: the initial value is applied AT spawn, so seeing it take
+		// effect means running the script again from the start.
+		commitRespawn();
+	}
 }
 
 void EntityEditor::renderComponents()
@@ -1459,9 +1584,9 @@ void EntityEditor::commitRespawn()
 
 	if (m_hasScript)
 	{
-		auto info = std::make_shared<ScriptComponent::SpawnInfo>();
-		info->scriptPath = m_scriptDraft.scriptPath;
-		info->enabled = m_scriptDraft.enabled;
+		// Copied WHOLE, like the particle/force drafts above -- rebuilding it field by field silently dropped
+		// anything the struct gained later (which is exactly what happened to the authored initial values).
+		auto info = std::make_shared<ScriptComponent::SpawnInfo>(m_scriptDraft);
 		typeBits |= uint16(1 << EComponentID_Script);
 		infos.push_back(std::move(info));
 	}

@@ -575,10 +575,42 @@ export inline int dslEnclosingFunctionHeader(const DSLScriptFile& file, int from
 // nothing to point at. Entities are for iterating and acting on within a frame (foreach over self.scene, a
 // spatial query); remembering one across frames needs a generation-checked handle the engine can invalidate,
 // which doesn't exist yet.
+// Whether a ScriptData field is visible OUTSIDE the script. Hidden (the default) means the field is purely the
+// script's own state -- nothing else can see it. Private exposes it to the EDITOR (the Properties panel shows it
+// live, the Entity Editor authors its initial value); Public additionally means another entity's script may read
+// it, which nothing implements yet -- it is declared here so the authored data survives until it does.
+//
+// Only SCALAR and STRUCT fields can be anything but Hidden: an array is a VrArray handle whose storage lives
+// engine-side, and there is nothing meaningful for an inspector to show or set. Enforced in the SCRIPT DATA
+// panel and, as always, again in the loader.
+export enum class DSLFieldVisibility : uint8
+{
+	Hidden,
+	Private,
+	Public,
+};
+
+export const char* dslFieldVisibilityName(DSLFieldVisibility visibility)
+{
+	switch (visibility)
+	{
+	case DSLFieldVisibility::Private: return "private";
+	case DSLFieldVisibility::Public:  return "public";
+	default:                          return "hidden";
+	}
+}
+
+// Whether `type` may be exposed at all (see DSLFieldVisibility): arrays cannot.
+export inline bool dslCanExposeFieldType(DSLType type)
+{
+	return !dslIsArrayType(type);
+}
+
 export struct DSLDataField
 {
 	std::string name;
 	DSLType type;
+	DSLFieldVisibility visibility = DSLFieldVisibility::Hidden;
 };
 
 // Top-level document: one script's function bodies plus its sidebar of bound
