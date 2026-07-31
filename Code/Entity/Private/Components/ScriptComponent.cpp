@@ -186,7 +186,7 @@ void ScriptComponent::update(Entity& entity, float deltaSeconds)
             reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
     }
 
-    if (!scriptModule->update || entity.isFrozenInTree())
+    if (!scriptModule->update || entity.isFrozen())
         return;
     reinterpret_cast<ScriptUpdateFn>(scriptModule->update)(&Globals::scriptContext, &entity, deltaSeconds, scriptData.get());
 }
@@ -196,7 +196,7 @@ void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
     if (!enabled || !scriptModule)
         return;
     syncScriptDataLive(entity); // the module may have been recompiled under us since spawn
-    if (!scriptModule->onEvent || entity.isFrozenInTree() || !requirementsMet(entity))
+    if (!scriptModule->onEvent || entity.isFrozen() || !requirementsMet(entity))
         return;
     auto it = scriptModule->eventKeyToIndex.find(Globals::scriptEvents.findEventKey(eventName));
     if (it != scriptModule->eventKeyToIndex.end())
@@ -210,7 +210,7 @@ void ScriptComponent::fireEvent(Entity& entity, uint32 eventKey)
     if (!enabled || !scriptModule)
         return;
     syncScriptDataLive(entity); // the module may have been recompiled under us since spawn
-    if (!scriptModule->onEvent || entity.isFrozenInTree() || !requirementsMet(entity))
+    if (!scriptModule->onEvent || entity.isFrozen() || !requirementsMet(entity))
         return;
     auto it = scriptModule->eventKeyToIndex.find(eventKey);
     if (it != scriptModule->eventKeyToIndex.end())
@@ -224,7 +224,7 @@ void ScriptComponent::firePhysicsEvent(Entity& entity, Entity* other, bool begin
     if (!enabled || !scriptModule)
         return;
     syncScriptDataLive(entity); // the module may have been recompiled under us since spawn
-    if (!scriptModule->onPhysicsEvent || entity.isFrozenInTree() || !requirementsMet(entity))
+    if (!scriptModule->onPhysicsEvent || entity.isFrozen() || !requirementsMet(entity))
         return;
     reinterpret_cast<ScriptOnPhysicsEventFn>(scriptModule->onPhysicsEvent)(
         &Globals::scriptContext, &entity, other, begin ? 1 : 0, sensor ? 1 : 0, contactId, scriptData.get());

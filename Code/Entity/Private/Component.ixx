@@ -82,11 +82,6 @@ export namespace EntityComponentDetail
     inline constexpr uint16 entityBaseOffset = alignUp(uint16(sizeof(Entity)), ComponentAlignment);
 }
 
-inline Entity* SceneComponent::getEntity()
-{
-    return reinterpret_cast<Entity*>(reinterpret_cast<uint8*>(this) - EntityComponentDetail::entityBaseOffset);
-}
-
 inline constexpr uint16 getComponentByteOffset(uint16 typeBits, EComponentID id)
 {
     uint16 offset = EntityComponentDetail::entityBaseOffset;

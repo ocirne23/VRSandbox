@@ -14,6 +14,15 @@ import File;
 import Script; // ScriptHost::getOrLoad + ScriptModule's field table
 import :EntityEditor;
 
+// MSVC WORKAROUND -- do not inline this back into the call sites. With two separate `getComponent<SceneComponent>`
+// uses in this TU the compiler emits that module-linkage specialization TWICE into the object, and the link
+// fails with "LNK1179: duplicate COMDAT ...getComponent@VSceneComponent...::<!Entity>". Funnelling every use
+// through one instantiation point keeps it to a single copy. No other specialization in this object is affected.
+static SceneComponent* sceneComponentOf(Entity* entity)
+{
+	return getComponent<SceneComponent>(entity);
+}
+
 // Copies a std::string into a fixed InputText buffer each frame and writes edits back immediately (same
 // pattern PropertiesPanel uses for displayName) — the caller decides when to actually commit/respawn via
 // ImGui::IsItemDeactivatedAfterEdit() right after this call.
@@ -318,16 +327,7 @@ void EntityEditor::closeCurrent()
 {
 	if (m_editRoot)
 	{
-		// Respawned children carry their own copy of the flag (World::handleEntityChange sets it at create),
-		// so thaw the whole tree, not just the root.
-		auto clearFrozen = [](auto&& self, Entity* e) -> void
-		{
-			e->setFrozen(false);
-			if (SceneComponent* sc = getComponent<SceneComponent>(e))
-				for (const EntityPtr& child : sc->children)
-					self(self, child.get());
-		};
-		clearFrozen(clearFrozen, m_editRoot.get());
+		m_editRoot->setFrozen(false); // thaws the whole subtree (every member carries its own copy of the flag)
 		if (m_ownsEntity)
 			m_changes.push_back({ EntityChange::Delete{ m_editRoot } }); // a dedicated entity this editor spawned
 		else if (m_wasPacked)
@@ -586,7 +586,7 @@ void EntityEditor::renderTreeNode(Entity* node)
 {
 	ImGui::PushID(node);
 
-	SceneComponent* sc = getComponent<SceneComponent>(node);
+	SceneComponent* sc = sceneComponentOf(node);
 	const bool isLocked = node->isPrefabInstance(); // a "Prefab <name>" reference — edit the source file instead
 	const bool hasChildren = !isLocked && sc && !sc->children.empty();
 	const bool isRoot = (node->parent == nullptr);
@@ -718,7 +718,7 @@ void EntityEditor::renderSceneSection()
 		return;
 	ImGui::PushID("scene");
 
-	SceneComponent* sc = getComponent<SceneComponent>(m_selected.get());
+	SceneComponent* sc = sceneComponentOf(m_selected.get());
 
 	ImGui::SetNextItemWidth(160.0f);
 	ImGui::InputTextWithHint("##newchildname", "Child name", m_newChildNameBuf, sizeof(m_newChildNameBuf));

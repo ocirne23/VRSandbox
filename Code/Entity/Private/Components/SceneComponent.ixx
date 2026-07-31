@@ -1,8 +1,8 @@
 export module Entity:SceneComponent;
 
-import :Entity;
 import Core;
 import Core.Transform;
+import :Entity;
 
 export struct SceneComponent
 {

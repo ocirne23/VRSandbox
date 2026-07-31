@@ -134,7 +134,6 @@ int main()
     // deliver itself (dependency points UI -> Entity) route back through these.
     world.setOnPrefabOpened([&ui](const EntityPtr& entity, const std::string& path) { ui.onOpened(entity, path); });
     world.setOnEntityRespawned([&ui](const EntityPtr& oldEntity, const EntityPtr& newEntity) { ui.onEntityRespawned(oldEntity, newEntity); });
-    auto handleEntityChange = [&](EntityChange& change) { world.handleEntityChange(change, camera, ui.getViewportRect()); };
 
     uint32 frameCount = 0;
     uint32 fps = 0;
@@ -164,13 +163,14 @@ int main()
     {
         Globals::time.update();
         const double deltaSec = Globals::time.getDeltaSec();
+
         input.update(deltaSec);
-        cameraController.update(deltaSec);
         ui.update(world.rootEntities(), deltaSec);
 
-        for (const std::string& reloadPath : ui.takeScriptReloadRequests())
-			Globals::scriptHost.getOrLoad(reloadPath, true);
-
+        for (const std::string& reloadPath : ui.takeScriptReloadRequests()) Globals::scriptHost.getOrLoad(reloadPath, true);
+        for (EntityChange& change : scriptEvents.takeEntityChanges()) world.handleEntityChange(change, camera, ui.getViewportRect());
+        for (EntityChange& change : ui.takeEntityChanges())           world.handleEntityChange(change, camera, ui.getViewportRect());
+        Globals::scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
         renderer.setViewportRect(ui.getViewportRect());
 
         if (renderer.isVrEnabled())
@@ -180,20 +180,14 @@ int main()
         }
         else
         {
+            cameraController.update(deltaSec);
             camera = cameraController.getCamera();
         }
 
         gizmo.update(camera, ui.getViewportRect(), ui.getSelectedEntity(), deltaSec);
         audio.setListener(camera);
-        
-        for (EntityChange& change : scriptEvents.takeEntityChanges()) handleEntityChange(change);
-        for (EntityChange& change : ui.takeEntityChanges()) handleEntityChange(change);
 
-        Globals::scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
         physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); }); // fixed-step; entities sync to body poses in their update below
-
-        // Collider wireframes ("Physics/Debug/Draw colliders" tweak): box3d debug draw decomposed into
-        // world-space lines, pushed to the renderer's per-frame debug line overlay.
         if (physics.isDebugDrawEnabled())
             physics.debugDraw(camera.position, [&renderer](const glm::vec3& a, const glm::vec3& b, uint32 color) {
                 renderer.addDebugLine(a, b, color);
@@ -212,9 +206,7 @@ int main()
             IOcclusionTester* occlusion = nullptr;
             if (Globals::occlusionBuffer.isEnabled())
             {
-                // The renderer's projection is REVERSED-Z; the CPU occlusion rasterizer assumes NDC z grows
-                // with distance (farthest-depth blocks, huge "no occluder" sentinel). Flip the z row back to
-                // standard orientation (z' = w - z) so its internal comparisons keep their meaning.
+                // The renderer's projection is REVERSED-Z; Flip the z row back to standard orientation (z' = w - z) so its internal comparisons keep their meaning.
                 glm::mat4 viewProjRelCamera = renderer.getCenterViewProj() * glm::translate(glm::mat4(1.0f), camera.position);
                 for (int c = 0; c < 4; ++c)
                     viewProjRelCamera[c][2] = viewProjRelCamera[c][3] - viewProjRelCamera[c][2];
@@ -254,24 +246,13 @@ int main()
                 renderer.renderNode(render->node);
         }
 
-        // The baked flow directions ease back to the swell's travel heading offshore; the ocean owns that
-        // angle, the terrain owns the flow rule — wire the one value across so both maps bake the same field.
+
         terrain.setFlowWindAngle(ocean.swellTravelAngle());
         terrain.update(renderer, camera);
-        // ... and the collider tiles under/around the camera (clears itself while terrain is disabled).
         terrainCollider.update(camera.position, terrain.activeClimateMaps());
-        // The terrain's baked data map feeds the ocean's water depth/level (shoaling + surf at the
-        // coast, buoyancy) and its height field drives the object scattering (both clear themselves
-        // while terrain is disabled).
         ocean.update(renderer, camera, terrain.activeTerrainData(), terrain.seaLevel());
         scatter.update(renderer, camera, terrain.activeClimateMaps());
-
-        // Particle effects + decals: turns emitter rates/bursts into GPU spawn requests and submits the
-        // live decal set (after world.update so effects follow this frame's entity transforms).
         particleSystem.update(renderer, (float)deltaSec);
-
-        // Forcefield bubbles: test force-balls follow their bodies + feed the read-back force into
-        // physics, then the system pushes live emitter state + query positions and latches readbacks.
         controls.update((float)deltaSec);
         forceSystem.update(renderer, (float)deltaSec);
 
@@ -284,10 +265,8 @@ int main()
     }
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
-    physics.setWaterSurface({}); // the callback captures the stack-local ocean; drop it before it dies
-    // World is a global: without this, the roots would die during static teardown, where the
-    // renderer/physics globals they release into may already be gone (cross-library order is undefined).
+    physics.setWaterSurface({});
     world.clearRootEntities();
-    jobSystem.shutdown(); // join the workers while every global they might touch still lives
+    jobSystem.shutdown();
     return 0;
 }

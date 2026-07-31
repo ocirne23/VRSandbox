@@ -28,14 +28,19 @@ void Entity::setName(std::string_view name)
     displayName[name.size()] = '\0';
 }
 
-void Entity::updateSelf(Renderer& renderer, const Transform& parentWorld, float deltaSeconds, bool frozen,
-                        std::vector<EntityUpdateNode>& outChildren)
+void Entity::setFrozen(bool on)
+{
+    flags = on ? uint8(flags | EEntityFlag_Frozen) : uint8(flags & ~EEntityFlag_Frozen);
+    if (SceneComponent* sc = getComponent<SceneComponent>(this))
+        for (const EntityPtr& child : sc->children)
+            child->setFrozen(on);
+}
+
+void Entity::updateSelf(Renderer& renderer, float deltaSeconds, const Transform& parentWorld, std::vector<EntityUpdateNode>& outChildren)
 {
     SceneComponent* sc = getComponent<SceneComponent>(this);
     if (!isEnabled())
     {
-        // The pruned subtree's physics bodies would keep colliding invisibly: pull them from the
-        // simulation once. Each body re-enables itself in its next update() after re-enable.
         if (!isPhysicsSuspended())
         {
             suspendPhysicsTree(*this);
@@ -46,7 +51,7 @@ void Entity::updateSelf(Renderer& renderer, const Transform& parentWorld, float 
     if (isPhysicsSuspended())
         setPhysicsSuspended(false);
 
-    frozen = frozen || isFrozen();
+    const bool frozen = isFrozen();
 
     if (!frozen)
     {
@@ -104,15 +109,15 @@ void Entity::updateSelf(Renderer& renderer, const Transform& parentWorld, float 
 
     if (sc)
         for (const EntityPtr& child : sc->children)
-            outChildren.push_back({ child.get(), world, frozen });
+            outChildren.push_back({ child.get(), world });
 }
 
-void Entity::updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds, bool frozen)
+void Entity::update(Renderer& renderer, float deltaSeconds, const Transform& parentWorld)
 {
     std::vector<EntityUpdateNode> children;
-    updateSelf(renderer, parentWorld, deltaSeconds, frozen, children);
+    updateSelf(renderer, deltaSeconds, parentWorld, children);
     for (const EntityUpdateNode& child : children)
-        child.entity->updateTree(renderer, child.parentWorld, deltaSeconds, child.frozen);
+        child.entity->update(renderer, deltaSeconds, child.parentWorld);
 }
 
 // Recursive alloc size of the template's entity + its whole SceneComponent child tree, lazily cached on
@@ -149,6 +154,9 @@ EntityPtr Entity::create(const EntitySpawnTemplate& tmpl, const Transform& trans
 {
     void* buffer = treeCursor;
     treeCursor += tmpl.archetype.allocSize; // per-entity sizes are 16-aligned, so a straight bump stays aligned
+
+    if (parent && parent->isFrozen())
+        initialFlags |= EEntityFlag_Frozen; // frozen is a subtree state; a child spawns into it already set
 
     Entity* entity = ::new (buffer) Entity();
     entity->parent = parent; // linked before components spawn (see declaration)
@@ -379,6 +387,10 @@ void Entity::reparentEntity(Entity* newParent)
         for (Entity* p = newParent; p; p = p->parent)
             p->setPhysicsSuspended(false);
     }
+
+    // Frozen is a subtree state, so the moved subtree adopts its new parent's (root = never frozen).
+    if (isFrozen() != (newParent && newParent->isFrozen()))
+        setFrozen(!isFrozen());
 }
 
 Entity* Entity::nearestPrefabInstance()

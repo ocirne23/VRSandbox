@@ -10,20 +10,19 @@ export struct EntitySpawnTemplate;
 export struct EntityPtr;
 export class Entity;
 
-// One entity queued for the depth-parallel update pass: its parent's composed world transform and the
-// frozen state inherited down the tree.
+// One entity queued for the depth-parallel update pass: its parent's composed world transform.
 export struct EntityUpdateNode
 {
     Entity* entity = nullptr;
     Transform parentWorld;
-    bool frozen = false;
 };
 
 export enum EEntityFlags : uint8
 {
     EEntityFlag_PrefabInstance = 1 << 0, // root of a locked prefab instance; cleared by "unpack"
     EEntityFlag_Enabled        = 1 << 1, // off = the entity and its whole subtree stop updating (see updateTree)
-    EEntityFlag_Frozen         = 1 << 2, // scripts/physics/animator don't update this tree (Entity Editor documents)
+    EEntityFlag_Frozen         = 1 << 2, // scripts/physics/animator don't update this entity (Entity Editor documents);
+                                         // carried by every member of the subtree, see setFrozen
     // A spawned prefab tree is ONE EntityAllocator block (see Entity::create). While the tree is intact
     // (no member reparented/deleted out, no external refs at teardown) the root frees the whole block in
     // one call and members skip their own free. A structural break SPLITS the allocation
@@ -81,38 +80,20 @@ public:
     uint8 flags = 0; // EEntityFlags bitmask
     uint8 _unused[3];
 
-    void update(Renderer& renderer, float deltaSeconds) { updateTree(renderer, Transform(), deltaSeconds); }
-
-    // Non-recursive: ticks this entity's components and emits its enabled children into outChildren as
-    // the next depth level's work. Concurrency-safe against other entities once its parent has run.
-    void updateSelf(Renderer& renderer, const Transform& parentWorld, float deltaSeconds, bool frozen,
-                    std::vector<EntityUpdateNode>& outChildren);
-
+    void update(Renderer& renderer, float deltaSeconds, const Transform& parentWorld = Transform());
+    void updateSelf(Renderer& renderer, float deltaSeconds, const Transform& parentWorld, std::vector<EntityUpdateNode>& outChildren);
     const char* getName() const { return displayName ? displayName.get() : ""; }
     bool hasName() const { return displayName != nullptr; }
     void setName(std::string_view name);
-
     void reparentEntity(Entity* newParent);
-
     bool isPrefabInstance() const { return (flags & EEntityFlag_PrefabInstance) != 0; }
     void setPrefabInstance(bool on) { flags = on ? uint8(flags | EEntityFlag_PrefabInstance) : uint8(flags & ~EEntityFlag_PrefabInstance); }
-    // Disabling prunes the whole subtree from updateTree (and suspends its physics bodies); the individual
-    // component enables (script/animator/physics) stay independent of this.
     bool isEnabled() const { return (flags & EEntityFlag_Enabled) != 0; }
     void setEnabled(bool on) { flags = on ? uint8(flags | EEntityFlag_Enabled) : uint8(flags & ~EEntityFlag_Enabled); }
     bool isPhysicsSuspended() const { return (flags & EEntityFlag_PhysicsSuspended) != 0; }
     void setPhysicsSuspended(bool on) { flags = on ? uint8(flags | EEntityFlag_PhysicsSuspended) : uint8(flags & ~EEntityFlag_PhysicsSuspended); }
     bool isFrozen() const { return (flags & EEntityFlag_Frozen) != 0; }
-    void setFrozen(bool on) { flags = on ? uint8(flags | EEntityFlag_Frozen) : uint8(flags & ~EEntityFlag_Frozen); }
-    // The flag lives on the frozen (sub)tree's root; entry points invoked outside updateTree's propagation
-    // (global script events, physics contact events) must check the whole ancestor chain.
-    bool isFrozenInTree() const
-    {
-        for (const Entity* p = this; p; p = p->parent)
-            if (p->isFrozen())
-                return true;
-        return false;
-    }
+    void setFrozen(bool on); // Applies to the whole subtree
     bool isPrefabLocked() const;
     Entity* nearestPrefabInstance();
 
@@ -124,10 +105,13 @@ private:
 	Entity(const Entity&) = delete;
     ~Entity() { assert(refCount == 0); }
 
-    void updateTree(Renderer& renderer, const Transform& parentWorld, float deltaSeconds = 0.0f, bool frozen = false);
-
     void createComponent(EComponentID id, uint16 componentOffset, const void* info, const Transform& base, uint8*& treeCursor);
     void destroyComponent(EComponentID id, uint16 componentOffset, const void* info);
+
+private:
+
+    friend class SceneComponent;
+    friend class World;
 };
 
 export struct EntityPtr

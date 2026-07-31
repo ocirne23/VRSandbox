@@ -18,7 +18,7 @@ void ScriptEventManager::fireEvent(EventKey key)
 				auto eventIt = script->eventKeyToIndex.find(key);
 				if (eventIt == script->eventKeyToIndex.end())
 					continue;
-				if (sit->second.entity->isFrozenInTree())
+				if (sit->second.entity->isFrozen())
 					continue;
 				// This path calls the script's OnEvent DIRECTLY, bypassing ScriptComponent's own entry points,
 				// so it has to honour //@@require itself (see ScriptComponent::requirementsMet).

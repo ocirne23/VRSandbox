@@ -12,18 +12,10 @@ export class ScriptEventManager
 {
 public:
 
-    // Registers the script-(re)load hook on the ScriptHost. Call once at startup from main, AFTER both
-    // Globals singletons exist. This can't live in the constructor: scriptEvents (Entity) and scriptHost
-    // (Script) are globals in different modules with no defined construction order, so scriptHost's own
-    // construction can run later and reset m_scriptLoadedCallback back to its nullptr default, silently
-    // dropping the registration.
-    void initialize();
-
     using EventKey = uint32;
 
-    // Mints a key for a never-seen name. Keys are minted when a script REGISTERS its entry names
-    // (onScriptLoadedCallback, main thread); firing uses findEventKey instead, so no worker ever mutates
-    // the map -- minting on a fire would only produce a key no script has a listener for.
+    void initialize();
+
     EventKey getEventKeyForName(const std::string& eventName)
     {
         {
@@ -38,8 +30,6 @@ public:
         return it->second;
     }
 
-    // Read-only lookup for the fire paths (reachable from worker threads). 0 = no script ever declared
-    // this name, and 0 is never a live key.
     EventKey findEventKey(const std::string& eventName) const
     {
         const std::shared_lock<std::shared_mutex> read(m_eventKeyMutex);
@@ -55,8 +45,6 @@ public:
 			fireEvent(key);
 	}
 
-	// Every add* below is called from script thunks, which run on worker threads during the parallel
-	// entity pass; the drain is main-thread. The mutex is held only for the push.
     std::vector<EntityChange> takeEntityChanges()
     {
 		std::vector<EntityChange> changes;

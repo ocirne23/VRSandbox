@@ -41,7 +41,7 @@ void World::update(Renderer& renderer, float deltaSeconds)
 
     m_updateLevel.clear();
     for (const EntityPtr& root : m_rootEntities)
-        m_updateLevel.push_back({ root.get(), Transform(), false });
+        m_updateLevel.push_back({ root.get(), Transform() });
 
     while (!m_updateLevel.empty())
     {
@@ -52,7 +52,7 @@ void World::update(Renderer& renderer, float deltaSeconds)
                 for (uint32 i = begin; i < end; ++i)
                 {
                     const EntityUpdateNode& node = m_updateLevel[i];
-                    node.entity->updateSelf(renderer, node.parentWorld, deltaSeconds, node.frozen, staging.children);
+                    node.entity->updateSelf(renderer, deltaSeconds, node.parentWorld, staging.children);
                 }
             });
 
@@ -80,62 +80,6 @@ static RendererVKLayout::EPipelineIndex parsePipeline(const std::string& name)
 
 // Artist-authored collision proxies: "Col_Wall" collides in place of "Wall" and is never rendered
 // (the renderer applies the same prefix rule in ObjectContainer::initializeNodes).
-static constexpr std::string_view COLLISION_MESH_PREFIX = "Col_";
-
-static bool isCollisionName(std::string_view name) { return name.starts_with(COLLISION_MESH_PREFIX); }
-
-static glm::mat4 nodeLocalTransform(const INodeData& node)
-{
-    glm::vec3 pos, scale;
-    glm::quat rot;
-    node.getTransform(pos, scale, rot);
-    // The renderer flattens node scale to uniform scale.x (ObjectContainer::initializeNodes); collision
-    // must match what is drawn, not the source data.
-    return glm::translate(glm::mat4(1.0f), pos) * glm::mat4_cast(rot) * glm::scale(glm::mat4(1.0f), glm::vec3(scale.x));
-}
-
-static void buildCollisionSourceNode(const INodeData& node, CollisionSource::Node& out)
-{
-    out.name = node.getName();
-    out.localTransform = nodeLocalTransform(node);
-    for (uint32 m = 0; m < node.getNumMeshes(); ++m)
-        out.meshIndices.push_back(node.getMeshIndex(m));
-    out.children.resize(node.getNumChildren());
-    for (uint32 c = 0; c < node.getNumChildren(); ++c)
-        buildCollisionSourceNode(*node.getChild(c), out.children[c]);
-}
-
-static void gatherProxiedNames(const CollisionSource::Node& node, std::unordered_set<std::string>& outNames)
-{
-    if (isCollisionName(node.name))
-        outNames.insert(node.name.substr(COLLISION_MESH_PREFIX.size()));
-    for (const CollisionSource::Node& child : node.children)
-        gatherProxiedNames(child, outNames);
-}
-
-// Snapshots the collision-relevant parts of a loaded scene (mesh positions/indices + node tree), so
-// hull/mesh physics shapes never need the source file again.
-static std::shared_ptr<const CollisionSource> buildCollisionSource(const ISceneData& sceneData)
-{
-    auto source = std::make_shared<CollisionSource>();
-    source->meshes.resize(sceneData.getNumMeshes());
-    for (uint32 i = 0; i < sceneData.getNumMeshes(); ++i)
-    {
-        const IMeshData* mesh = sceneData.getMesh(i);
-        if (!mesh)
-            continue;
-        CollisionSource::Mesh& outMesh = source->meshes[i];
-        outMesh.name = mesh->getName();
-        outMesh.vertices.assign(mesh->getVertices(), mesh->getVertices() + mesh->getNumVertices());
-        outMesh.indices.assign(mesh->getIndices(), mesh->getIndices() + mesh->getNumIndices());
-        if (isCollisionName(outMesh.name))
-            source->proxiedNames.insert(outMesh.name.substr(COLLISION_MESH_PREFIX.size()));
-    }
-    buildCollisionSourceNode(sceneData.getRootNode(), source->root);
-    gatherProxiedNames(source->root, source->proxiedNames);
-    return source;
-}
-
 // Cook options for the scene cache: the renderer's LOD generation params get baked into the cooked
 // file (and its options hash), so changing the LOD tweaks re-cooks affected scenes on the next load.
 static SceneCookOptions makeSceneCookOptions()
@@ -175,8 +119,8 @@ ObjectContainer* World::loadContainer(const ObjectContainerDesc& desc, bool capt
         return nullptr;
     }
 
-    if (captureCollisionSource && !m_collisionSources.contains(desc.name))
-        m_collisionSources.emplace(desc.name, buildCollisionSource(*sceneData));
+    if (captureCollisionSource)
+        m_collision.captureSource(desc.name, *sceneData);
 
     auto container = std::make_unique<ObjectContainer>();
     if (desc.materialOverrides.present)
@@ -204,7 +148,7 @@ ObjectContainer* World::loadContainer(const ObjectContainerDesc& desc, bool capt
 ObjectContainer* World::getOrLoadContainer(const std::string& name, bool captureCollisionSource)
 {
     if (auto it = m_containers.find(name); it != m_containers.end())
-        return it->second.get(); // already loaded; a late collision request falls back to getOrLoadCollisionSource
+        return it->second.get(); // already loaded; a late collision request falls back to ensureCollisionSource
     if (const ObjectContainerDesc* desc = Globals::assetRegistry.findObjectContainer(name))
         return loadContainer(*desc, captureCollisionSource);
     Log::warning("Scene: unknown ObjectContainer reference '" + name + "'");
@@ -450,113 +394,30 @@ std::shared_ptr<SceneComponent::SpawnInfo> World::buildSceneSpawnInfo(const Asse
     return info;
 }
 
-// Appends a snapshot node subtree's meshes into collision space. Mirrors ObjectContainer's spawn
-// rebasing: a ROOT spawn keeps the scene root's own transform (baked into the render offsets), while a
-// sub-node spawn excludes the start node's transform (the entity transform places the node's pivot).
-static void appendNodeGeometry(const CollisionSource& source, const CollisionSource::Node& node,
-    const glm::mat4& parentTransform, bool skipOwnTransform, PhysicsGeometry& outGeometry)
+// The cache normally gets its snapshot for free while the render container loads. This is the fallback
+// for the other order: the container was already loaded (or isn't loaded at all) when a Hull/Mesh shape
+// asked for geometry, so the source file is imported once more and handed to the cache.
+bool World::ensureCollisionSource(const std::string& containerName)
 {
-    const glm::mat4 transform = skipOwnTransform ? parentTransform : parentTransform * node.localTransform;
-    const bool nodeIsProxy = isCollisionName(node.name);
-    for (uint32 meshIdx : node.meshIndices)
-    {
-        const CollisionSource::Mesh& mesh = source.meshes[meshIdx];
-        // "Col_*" proxy meshes always collide; a render mesh is skipped when a proxy exists for its
-        // (or its node's) name — the proxy replaces it.
-        if (!nodeIsProxy && !isCollisionName(mesh.name)
-            && (source.proxiedNames.contains(mesh.name) || source.proxiedNames.contains(node.name)))
-            continue;
-        const uint32 baseVertex = uint32(outGeometry.vertices.size());
-        for (const glm::vec3& v : mesh.vertices)
-            outGeometry.vertices.push_back(glm::vec3(transform * glm::vec4(v, 1.0f)));
-        for (uint32 index : mesh.indices)
-            outGeometry.indices.push_back(baseVertex + index);
-    }
-    for (const CollisionSource::Node& child : node.children)
-        appendNodeGeometry(source, child, transform, false, outGeometry);
-}
+    if (m_collision.hasSource(containerName))
+        return true;
 
-static const CollisionSource::Node* findNodeByName(const CollisionSource::Node& node, std::string_view name)
-{
-    for (const CollisionSource::Node& child : node.children)
-    {
-        if (name == child.name)
-            return &child;
-        if (const CollisionSource::Node* found = findNodeByName(child, name))
-            return found;
-    }
-    return nullptr;
-}
-
-static PhysicsGeometry buildCollisionGeometry(const CollisionSource& source, const std::string& containerName, const std::string& nodePath)
-{
-    const CollisionSource::Node* startNode = &source.root;
-    if (!nodePath.empty() && nodePath != "ROOT")
-    {
-        if (const CollisionSource::Node* found = findNodeByName(source.root, nodePath.substr(nodePath.find_last_of('/') + 1)))
-            startNode = found;
-        else
-            Log::warning("Physics: node '" + nodePath + "' not found in '" + containerName + "', using ROOT");
-    }
-    PhysicsGeometry geometry;
-    appendNodeGeometry(source, *startNode, glm::mat4(1.0f), startNode != &source.root, geometry);
-    return geometry;
-}
-
-std::shared_ptr<const CollisionSource> World::getOrLoadCollisionSource(const std::string& containerName)
-{
-    if (auto it = m_collisionSources.find(containerName); it != m_collisionSources.end())
-        return it->second;
-
-    // Fallback: the container was loaded before physics needed geometry (or isn't loaded at all),
-    // so the source file is imported once more and the snapshot cached for any further requests.
     const ObjectContainerDesc* desc = Globals::assetRegistry.findObjectContainer(containerName);
     if (!desc)
     {
         Log::warning("Physics: unknown ObjectContainer '" + containerName + "' for collision geometry");
-        return nullptr;
+        return false;
     }
     std::unique_ptr<ISceneData> sceneData = loadSceneData(*desc);
     if (!sceneData)
     {
         Log::warning("Physics: failed to load '" + desc->path + "' for collision geometry");
-        return nullptr;
+        return false;
     }
     Log::info("Physics: container '" + containerName + "' re-imported for collision geometry (loaded before physics needed it)");
 
-    std::shared_ptr<const CollisionSource> source = buildCollisionSource(*sceneData);
-    m_collisionSources.emplace(containerName, source);
-    return source;
-}
-
-std::shared_ptr<PhysicsMesh> World::getOrBuildCollisionMesh(const std::string& containerName, const std::string& nodePath)
-{
-    const std::string key = containerName + "|" + nodePath;
-    if (auto it = m_collisionMeshes.find(key); it != m_collisionMeshes.end())
-        return it->second;
-    std::shared_ptr<const CollisionSource> source = getOrLoadCollisionSource(containerName);
-    if (!source)
-        return nullptr;
-    const PhysicsGeometry geometry = buildCollisionGeometry(*source, containerName, nodePath);
-    if (geometry.indices.size() < 3)
-        return nullptr;
-    glm::vec3 boundsMin(FLT_MAX), boundsMax(-FLT_MAX);
-    for (const glm::vec3& v : geometry.vertices)
-    {
-        boundsMin = glm::min(boundsMin, v);
-        boundsMax = glm::max(boundsMax, v);
-    }
-    Log::info(std::format("Physics: collision mesh '{}': {} verts, {} tris, bounds ({:.2f}, {:.2f}, {:.2f}) - ({:.2f}, {:.2f}, {:.2f})",
-        key, geometry.vertices.size(), geometry.indices.size() / 3,
-        boundsMin.x, boundsMin.y, boundsMin.z, boundsMax.x, boundsMax.y, boundsMax.z));
-    auto mesh = std::make_shared<PhysicsMesh>(Globals::physics.createCollisionMesh(geometry.vertices, geometry.indices));
-    if (!mesh->isValid())
-        return nullptr;
-    m_collisionMeshes.emplace(key, mesh);
-    // The same flattened geometry doubles as the occlusion-culling occluder source (largest triangles).
-    m_occluderData.emplace(key, OcclusionBuffer::extractOccluders(geometry.vertices, geometry.indices,
-        uint32(Globals::occlusionBuffer.getMaxTriangles())));
-    return mesh;
+    m_collision.captureSource(containerName, *sceneData);
+    return true;
 }
 
 std::shared_ptr<PhysicsComponent::SpawnInfo> World::buildPhysicsSpawnInfo(const AssetNode& physicsNode,
@@ -584,9 +445,8 @@ std::shared_ptr<PhysicsComponent::SpawnInfo> World::buildPhysicsSpawnInfo(const 
     // Hull/Mesh pull their geometry from the sibling render mesh's container.
     if (shape.type == EPhysicsShapeType::Hull)
     {
-        if (!containerName.empty())
-            if (std::shared_ptr<const CollisionSource> source = getOrLoadCollisionSource(containerName))
-                shape.hullPoints = buildCollisionGeometry(*source, containerName, nodePath).vertices;
+        if (!containerName.empty() && ensureCollisionSource(containerName))
+            shape.hullPoints = m_collision.buildHullPoints(containerName, nodePath);
         if (shape.hullPoints.size() < 4)
         {
             Log::warning("Scene: entity '" + ownerName + "' has a Hull physics shape but no render geometry, using Box");
@@ -595,13 +455,12 @@ std::shared_ptr<PhysicsComponent::SpawnInfo> World::buildPhysicsSpawnInfo(const 
     }
     else if (shape.type == EPhysicsShapeType::Mesh)
     {
-        if (!containerName.empty())
-            info->mesh = getOrBuildCollisionMesh(containerName, nodePath);
+        if (!containerName.empty() && ensureCollisionSource(containerName))
+            info->mesh = m_collision.getOrBuildMesh(containerName, nodePath);
         if (info->mesh)
         {
             shape.mesh = info->mesh.get();
-            if (auto it = m_occluderData.find(containerName + "|" + nodePath); it != m_occluderData.end())
-                info->occluders = it->second; // static mesh colliders double as occlusion occluders
+            info->occluders = m_collision.getOccluders(containerName, nodePath); // static mesh colliders double as occlusion occluders
         }
         else
         {
@@ -960,9 +819,9 @@ void World::handleEntityChange(EntityChange& change, const Camera& camera, const
         keepTemplateAlive(rs->tmpl);
 
         Transform t(rs->oldEntity->pos, rs->oldEntity->scale, rs->oldEntity->rot);
-        // Pre-set the frozen flag so component spawn already sees it — the parent chain isn't linked
-        // yet during create, so a frozen ancestor can't be discovered there.
-        const uint8 initialFlags = rs->oldEntity->isFrozenInTree() ? uint8(EEntityFlag_Frozen) : uint8(0);
+        // Pre-set the frozen flag so component spawn already sees it — the respawn attaches to its parent
+        // only further down, so create() can't inherit it from there.
+        const uint8 initialFlags = rs->oldEntity->isFrozen() ? uint8(EEntityFlag_Frozen) : uint8(0);
         EntityPtr newEntity = Entity::create(*rs->tmpl, t, initialFlags);
         newEntity->setPrefabInstance(rs->oldEntity->isPrefabInstance()); // keep the editor's unpacked state despite the template's prefabName
 
