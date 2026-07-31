@@ -107,6 +107,11 @@ void Entity::updateSelf(Renderer& renderer, float deltaSeconds, const Transform&
     if (ForceComponent* force = getComponent<ForceComponent>(this))
         force->update(*this, world);
 
+    // Also not frozen-gated: a light is placement, not simulation, so an editor document lights its
+    // own scene while frozen. Pushes are lock-free (addLightInfo/addDebugLine), like renderNode.
+    if (LightComponent* light = getComponent<LightComponent>(this))
+        light->update(*this, renderer, world);
+
     if (sc)
         for (const EntityPtr& child : sc->children)
             outChildren.push_back({ child.get(), world });
@@ -269,6 +274,13 @@ void Entity::createComponent(EComponentID id, uint16 componentOffset, const void
         fc->spawn(*this, *static_cast<const ForceComponent::SpawnInfo*>(info), base);
         break;
     }
+    case EComponentID_Light:
+    {
+        LightComponent* lc = reinterpret_cast<LightComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        new (lc) LightComponent();
+        lc->spawn(*this, *static_cast<const LightComponent::SpawnInfo*>(info), base);
+        break;
+    }
     case EComponentID_Script:
     {
         ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
@@ -332,6 +344,13 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
         ForceComponent* fc = reinterpret_cast<ForceComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
         fc->destroy(*this, *static_cast<const ForceComponent::SpawnInfo*>(info));
         fc->~ForceComponent();
+        break;
+    }
+    case EComponentID_Light:
+    {
+        LightComponent* lc = reinterpret_cast<LightComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        lc->destroy(*this, *static_cast<const LightComponent::SpawnInfo*>(info));
+        lc->~LightComponent();
         break;
     }
     case EComponentID_Script:

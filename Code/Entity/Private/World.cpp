@@ -638,6 +638,41 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         tmpl.spawnInfos.emplace_back(std::move(info));
     }
 
+    if (const AssetNode* lightNode = findComponentNode(node, "Light"))
+    {
+        auto info = std::make_shared<LightComponent::SpawnInfo>();
+        if (const AssetNode* n = lightNode->find("Debug")) info->debugDraw = n->asBool();
+        // One "Light <Type>" child per light; a component with none is pointless, so it's skipped below.
+        for (const AssetNode& entry : lightNode->children)
+        {
+            if (!keyIs(entry, "Light"))
+                continue;
+            LightComponent::LightDesc desc;
+            desc.type = lightTypeFromToken(entry.asString());
+            if (const AssetNode* n = entry.find("Offset"))       desc.offset = n->asVec3(desc.offset);
+            if (const AssetNode* n = entry.find("Direction"))    desc.direction = n->asVec3(desc.direction);
+            if (const AssetNode* n = entry.find("Color"))        desc.color = n->asVec3(desc.color);
+            if (const AssetNode* n = entry.find("Intensity"))    desc.intensity = n->asFloat(0, desc.intensity);
+            if (const AssetNode* n = entry.find("Range"))        desc.range = n->asFloat(0, desc.range);
+            if (const AssetNode* n = entry.find("ConeAngle"))    desc.coneAngle = n->asFloat(0, desc.coneAngle);
+            if (const AssetNode* n = entry.find("EdgeSoftness")) desc.edgeSoftness = n->asFloat(0, desc.edgeSoftness);
+            if (const AssetNode* n = entry.find("Width"))        desc.width = n->asFloat(0, desc.width);
+            if (const AssetNode* n = entry.find("Radius"))       desc.width = n->asFloat(0, desc.width); // Tube spells it Radius
+            if (const AssetNode* n = entry.find("Height"))       desc.height = n->asFloat(0, desc.height);
+            if (const AssetNode* n = entry.find("Length"))       desc.length = n->asFloat(0, desc.length);
+            if (const AssetNode* n = entry.find("Rotation"))     desc.rotation = n->asFloat(0, desc.rotation);
+            if (const AssetNode* n = entry.find("Enabled"))      desc.enabled = n->asBool(0, true);
+            info->lights.push_back(desc);
+        }
+        if (!info->lights.empty())
+        {
+            typeBits |= uint16(1 << EComponentID_Light);
+            tmpl.spawnInfos.emplace_back(std::move(info));
+        }
+        else
+            Log::warning("Scene: entity '" + tmpl.displayName + "' has a Light component without any Light entries, skipping");
+    }
+
     if (const AssetNode* scriptNode = findComponentNode(node, "Script"))
     {
         auto info = std::make_shared<ScriptComponent::SpawnInfo>();
@@ -785,9 +820,9 @@ void World::handleEntityChange(EntityChange& change, const Camera& camera, const
             addRootEntity(std::move(e));
     }
     else if (auto* del = std::get_if<EntityChange::Delete>(&change.type))
-        std::erase_if(m_rootEntities, [&](const EntityPtr& e) { return e.get() == del->entity.get(); });
+        removeRootEntity(del->entity.get());
     else if (auto* rep = std::get_if<EntityChange::Reparent>(&change.type))
-        rep->newParent ? (void)std::erase_if(m_rootEntities, [&](const EntityPtr& e) { return e.get() == rep->entity.get(); }) : addRootEntity(std::move(rep->entity));
+        rep->newParent ? removeRootEntity(rep->entity.get()) : addRootEntity(std::move(rep->entity));
     else if (auto* sp = std::get_if<EntityChange::SavePrefab>(&change.type))
     {
         if (savePrefab(sp->root.get(), sp->path, sp->text))

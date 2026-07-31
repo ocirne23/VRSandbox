@@ -259,6 +259,9 @@ void EntityEditor::refreshDraftsFromEntity()
 	m_hasForce = hasComponent<ForceComponent>(e);
 	m_forceDraft = m_hasForce && getForceSpawnInfo(e) ? *getForceSpawnInfo(e) : ForceComponent::SpawnInfo{};
 
+	m_hasLight = hasComponent<LightComponent>(e);
+	m_lightDraft = m_hasLight && getLightSpawnInfo(e) ? *getLightSpawnInfo(e) : LightComponent::SpawnInfo{};
+
 	m_hasScript = hasComponent<ScriptComponent>(e);
 	m_scriptDraft = m_hasScript && getScriptSpawnInfo(e) ? *getScriptSpawnInfo(e) : ScriptComponent::SpawnInfo{};
 	if (m_hasScript)
@@ -337,7 +340,7 @@ void EntityEditor::closeCurrent()
 	m_selected = EntityPtr();
 	m_path.clear();
 	m_baselineText.clear();
-	m_hasScene = m_hasRender = m_hasAnimator = m_hasPhysics = m_hasAudio = m_hasParticle = m_hasForce = m_hasScript = false;
+	m_hasScene = m_hasRender = m_hasAnimator = m_hasPhysics = m_hasAudio = m_hasParticle = m_hasForce = m_hasLight = m_hasScript = false;
 	m_ownsEntity = true;
 	m_wasPacked = false;
 }
@@ -823,24 +826,23 @@ void EntityEditor::renderRenderSection()
 	ImGui::Text("Local Pos");
 	ImGui::SameLine(100.0f);
 	ImGui::SetNextItemWidth(-1.0f);
-	ImGui::DragFloat3("##localpos", &m_renderDraft.localTransform.pos.x, 0.01f);
-	if (ImGui::IsItemDeactivatedAfterEdit()) commitRespawn();
+	commitDrag(ImGui::DragFloat3("##localpos", &m_renderDraft.localTransform.pos.x, 0.01f));
 
 	ImGui::AlignTextToFramePadding();
 	ImGui::Text("Local Scale");
 	ImGui::SameLine(100.0f);
 	ImGui::SetNextItemWidth(-1.0f);
-	ImGui::DragFloat("##localscale", &m_renderDraft.localTransform.scale, 0.01f, 0.0001f, 10000.0f);
-	if (ImGui::IsItemDeactivatedAfterEdit()) commitRespawn();
+	commitDrag(ImGui::DragFloat("##localscale", &m_renderDraft.localTransform.scale, 0.01f, 0.0001f, 10000.0f));
 
 	glm::vec3 euler = glm::degrees(glm::eulerAngles(m_renderDraft.localTransform.quat));
 	ImGui::AlignTextToFramePadding();
 	ImGui::Text("Local Rot");
 	ImGui::SameLine(100.0f);
 	ImGui::SetNextItemWidth(-1.0f);
-	if (ImGui::DragFloat3("##localrot", &euler.x, 0.5f))
+	const bool rotChanged = ImGui::DragFloat3("##localrot", &euler.x, 0.5f);
+	if (rotChanged)
 		m_renderDraft.localTransform.quat = glm::quat(glm::radians(euler));
-	if (ImGui::IsItemDeactivatedAfterEdit()) commitRespawn();
+	commitDrag(rotChanged);
 
 	if (ImGui::Button("Remove Render"))
 	{
@@ -1163,44 +1165,30 @@ void EntityEditor::renderForceSection()
 	// Every field respawns the entity on commit (the emitter is created from the SpawnInfo), so edits
 	// commit on release rather than per drag frame.
 	int team = int(m_forceDraft.team);
-	if (ImGui::DragInt("Team", &team, 0.1f, 0, 7)) // Force clamps to MAX_FORCE_TEAMS silently
+	const bool teamChanged = ImGui::DragInt("Team", &team, 0.1f, 0, 7); // Force clamps to MAX_FORCE_TEAMS silently
+	if (teamChanged)
 		m_forceDraft.team = uint32(glm::clamp(team, 0, 7));
-	if (ImGui::IsItemDeactivatedAfterEdit())
-		commitRespawn();
+	commitDrag(teamChanged);
 
-	ImGui::DragFloat("Output", &m_forceDraft.output, 0.05f, 0.0f, 1000.0f);
-	if (ImGui::IsItemDeactivatedAfterEdit())
-		commitRespawn();
+	commitDrag(ImGui::DragFloat("Output", &m_forceDraft.output, 0.05f, 0.0f, 1000.0f));
 
-	ImGui::DragFloat("Reach", &m_forceDraft.reach, 0.05f, 0.01f, 10000.0f);
-	if (ImGui::IsItemDeactivatedAfterEdit())
-		commitRespawn();
+	commitDrag(ImGui::DragFloat("Reach", &m_forceDraft.reach, 0.05f, 0.01f, 10000.0f));
 
-	ImGui::SliderFloat("Focus", &m_forceDraft.focus, 0.0f, 1.0f);
-	if (ImGui::IsItemDeactivatedAfterEdit())
-		commitRespawn();
+	commitDrag(ImGui::SliderFloat("Focus", &m_forceDraft.focus, 0.0f, 1.0f));
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("0.5 = sphere spanning the reach line, 0/1 = cones pointed at the emitter/target");
 
-	ImGui::SliderFloat("Distribution", &m_forceDraft.distribution, 0.0f, 1.0f);
-	if (ImGui::IsItemDeactivatedAfterEdit())
-		commitRespawn();
+	commitDrag(ImGui::SliderFloat("Distribution", &m_forceDraft.distribution, 0.0f, 1.0f));
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Where the output density sits along the line (0 = emitter end, 1 = target end)");
 
-	ImGui::DragFloat("Width", &m_forceDraft.width, 0.01f, 0.01f, 4.0f);
-	if (ImGui::IsItemDeactivatedAfterEdit())
-		commitRespawn();
+	commitDrag(ImGui::DragFloat("Width", &m_forceDraft.width, 0.01f, 0.01f, 4.0f));
 
-	ImGui::DragFloat3("Direction", &m_forceDraft.direction.x, 0.01f);
-	if (ImGui::IsItemDeactivatedAfterEdit())
-		commitRespawn();
+	commitDrag(ImGui::DragFloat3("Direction", &m_forceDraft.direction.x, 0.01f));
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Bubble axis in entity space; only matters when Focus != 0.5");
 
-	ImGui::DragFloat3("Offset", &m_forceDraft.offset.x, 0.01f);
-	if (ImGui::IsItemDeactivatedAfterEdit())
-		commitRespawn();
+	commitDrag(ImGui::DragFloat3("Offset", &m_forceDraft.offset.x, 0.01f));
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Entity-space offset from the anchor — Centered: the bubble centre; otherwise the span start");
 
@@ -1212,6 +1200,128 @@ void EntityEditor::renderForceSection()
 	if (ImGui::Button("Remove Force"))
 	{
 		m_hasForce = false;
+		commitRespawn();
+	}
+	ImGui::PopID();
+}
+
+void EntityEditor::renderLightSection()
+{
+	if (!m_hasLight)
+	{
+		if (ImGui::Button("+ Add Light"))
+		{
+			m_hasLight = true;
+			m_lightDraft = LightComponent::SpawnInfo{};
+			m_lightDraft.lights.emplace_back(); // a component with no lights would serialize to nothing
+			commitRespawn();
+		}
+		return;
+	}
+
+	if (!ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen))
+		return;
+	ImGui::PushID("light");
+
+	if (ImGui::Checkbox("Debug geometry", &m_lightDraft.debugDraw))
+		commitRespawn();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Wireframe overlay of each light's reach/shape (the Lights/Debug geometry tweak forces this on for every entity)");
+
+	// One collapsible block per light — the whole point of the component is holding several.
+	int removeIdx = -1;
+	for (size_t i = 0; i < m_lightDraft.lights.size(); ++i)
+	{
+		LightComponent::LightDesc& desc = m_lightDraft.lights[i];
+		ImGui::PushID(int(i));
+
+		const std::string label = std::to_string(i) + ": " + lightTypeToken(desc.type);
+		if (ImGui::TreeNodeEx("##light", ImGuiTreeNodeFlags_DefaultOpen, "%s", label.c_str()))
+		{
+			static const char* typeNames[] = { "Point", "Spot", "Area", "Tube" };
+			int type = int(desc.type);
+			if (ImGui::Combo("Type", &type, typeNames, int(std::size(typeNames))))
+			{
+				desc.type = ELightType(type);
+				commitRespawn();
+			}
+
+			commitDrag(ImGui::ColorEdit3("Color", &desc.color.x));
+
+			commitDrag(ImGui::DragFloat("Intensity", &desc.intensity, 0.25f, 0.0f, 10000.0f));
+
+			commitDrag(ImGui::DragFloat("Range", &desc.range, 0.05f, 0.01f, 10000.0f));
+
+			commitDrag(ImGui::DragFloat3("Offset", &desc.offset.x, 0.01f));
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Entity-space position, scaled and rotated by the entity");
+
+			if (desc.type != ELightType::Point)
+			{
+				const bool dirChanged = ImGui::DragFloat3("Direction", &desc.direction.x, 0.01f);
+				if (dirChanged)
+				{
+					// Re-normalized per drag frame like the Sun Direction tweak, so pulling one axis
+					// swings the aim instead of just lengthening the vector.
+					const float len2 = glm::dot(desc.direction, desc.direction);
+					desc.direction = len2 > 1e-12f ? desc.direction * glm::inversesqrt(len2)
+					                               : glm::vec3(0.0f, 0.0f, -1.0f);
+				}
+				commitDrag(dirChanged);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Aim axis in entity space (kept unit length)");
+			}
+
+			if (desc.type == ELightType::Spot)
+			{
+				commitDrag(ImGui::SliderFloat("Cone angle", &desc.coneAngle, 1.0f, 89.0f, "%.1f deg"));
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Cone HALF-angle");
+				commitDrag(ImGui::SliderFloat("Edge softness", &desc.edgeSoftness, 0.001f, 1.0f));
+			}
+			if (desc.type == ELightType::Area)
+			{
+				commitDrag(ImGui::DragFloat("Width", &desc.width, 0.01f, 0.001f, 1000.0f));
+				commitDrag(ImGui::DragFloat("Height", &desc.height, 0.01f, 0.001f, 1000.0f));
+			}
+			if (desc.type == ELightType::Tube)
+			{
+				commitDrag(ImGui::DragFloat("Radius", &desc.width, 0.01f, 0.001f, 1000.0f));
+				commitDrag(ImGui::DragFloat("Length", &desc.length, 0.01f, 0.001f, 1000.0f));
+			}
+			if (desc.type == ELightType::Area) // a tube is radially symmetric, so roll means nothing there
+			{
+				commitDrag(ImGui::DragFloat("Rotation", &desc.rotation, 0.5f, -180.0f, 180.0f, "%.1f deg"));
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Extra roll about the aim axis, on top of the entity's own rotation");
+			}
+
+			if (ImGui::Checkbox("Enabled", &desc.enabled))
+				commitRespawn();
+
+			if (ImGui::Button("Remove"))
+				removeIdx = int(i);
+
+			ImGui::TreePop();
+		}
+		ImGui::PopID();
+	}
+
+	if (removeIdx >= 0)
+	{
+		m_lightDraft.lights.erase(m_lightDraft.lights.begin() + removeIdx);
+		commitRespawn();
+	}
+
+	if (ImGui::Button("+ Add light"))
+	{
+		m_lightDraft.lights.emplace_back();
+		commitRespawn();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Remove Light"))
+	{
+		m_hasLight = false;
 		commitRespawn();
 	}
 	ImGui::PopID();
@@ -1414,7 +1524,53 @@ void EntityEditor::renderComponents()
 	renderAudioSection();
 	renderParticleSection();
 	renderForceSection();
+	renderLightSection();
 	renderScriptSection();
+}
+
+void EntityEditor::applyDraftsLive()
+{
+	Entity* e = m_selected.get();
+	if (!e)
+		return;
+
+	if (m_hasRender)
+		if (RenderComponent* rc = getComponent<RenderComponent>(e))
+			rc->localTransform = m_renderDraft.localTransform; // recomposed onto the node every update
+
+	if (m_hasForce)
+		if (ForceComponent* fc = getComponent<ForceComponent>(e))
+		{
+			const float len2 = glm::dot(m_forceDraft.direction, m_forceDraft.direction);
+			fc->localDirection = len2 > 1e-12f ? m_forceDraft.direction * glm::inversesqrt(len2)
+			                                   : glm::vec3(0.0f, 0.0f, -1.0f);
+			fc->localOffset = m_forceDraft.offset;
+			fc->centered = m_forceDraft.centered;
+			if (fc->emitter.isValid())
+			{
+				fc->emitter.setTeam(m_forceDraft.team);
+				fc->emitter.setOutput(m_forceDraft.output);
+				fc->emitter.setReach(m_forceDraft.reach);
+				fc->emitter.setFocus(m_forceDraft.focus);
+				fc->emitter.setDistribution(m_forceDraft.distribution);
+				fc->emitter.setWidth(m_forceDraft.width);
+			}
+		}
+
+	if (m_hasLight)
+		if (LightComponent* lc = getComponent<LightComponent>(e))
+		{
+			lc->lights = m_lightDraft.lights; // the whole set is re-pushed to the renderer every frame anyway
+			lc->debugDraw = m_lightDraft.debugDraw;
+		}
+}
+
+void EntityEditor::commitDrag(bool changed)
+{
+	if (changed)
+		applyDraftsLive();
+	if (ImGui::IsItemDeactivatedAfterEdit())
+		commitRespawn();
 }
 
 void EntityEditor::commitRespawn()
@@ -1579,6 +1735,13 @@ void EntityEditor::commitRespawn()
 	{
 		auto info = std::make_shared<ForceComponent::SpawnInfo>(m_forceDraft);
 		typeBits |= uint16(1 << EComponentID_Force);
+		infos.push_back(std::move(info));
+	}
+
+	if (m_hasLight && !m_lightDraft.lights.empty())
+	{
+		auto info = std::make_shared<LightComponent::SpawnInfo>(m_lightDraft);
+		typeBits |= uint16(1 << EComponentID_Light);
 		infos.push_back(std::move(info));
 	}
 

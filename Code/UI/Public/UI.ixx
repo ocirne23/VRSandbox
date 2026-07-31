@@ -2,9 +2,11 @@
 
 import Core;
 import Core.Rect;
+import Core.Camera;
 import Core.glm;
 import Core.SDL;
 import Entity;
+import UI.Gizmo;
 
 import UI.fwd;
 import :imgui_node_editor;
@@ -33,11 +35,21 @@ public:
     UI(const UI&) = delete;
 
     void initialize();
-    void update(const std::vector<EntityPtr>& rootEntities, double deltaSec);
+    void update(const std::vector<EntityPtr>& rootEntities, const Camera& camera, double deltaSec);
     void render();
 	void setRenderStats(const Stats& stats) { m_renderStats = stats; }
 
     Entity* getSelectedEntity() const { return m_sceneView.getSelected(); }
+
+    // ---- Transform gizmo ----
+    // Driven from here; the app owns the storage (the implementation lives in Input, below UI, so it
+    // arrives as an IGizmo). NON-OWNING - the app must clear this before the gizmo goes out of scope.
+    // update() drives it from the panel's own viewport rect + selection; the gizmo ENTITY has to tick
+    // with the rest of the scene, hence the separate call the app makes at that point in the frame
+    // (it needs the renderer, which UI::update has no business holding).
+    void setGizmo(IGizmo* gizmo) { m_gizmo = gizmo; }
+    IGizmo* getGizmo() const { return m_gizmo; }
+    void updateGizmoEntity(Renderer& renderer, float deltaSec);
 
     bool isViewportGrabbed() const { return m_isViewportGrabbed; }
     bool isViewportFocused() const { return m_isViewportFocused; }
@@ -109,6 +121,7 @@ private:
     ed::EditorContext* m_nodeEditorContext = nullptr;
 
 	NodeEditor::Scene m_scene;
+	IGizmo* m_gizmo = nullptr; // non-owning, see setGizmo
 	Stats m_renderStats;
 	AssetBrowser    m_assetBrowser;
 	SceneView       m_sceneView;

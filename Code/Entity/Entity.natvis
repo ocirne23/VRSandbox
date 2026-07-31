@@ -12,7 +12,7 @@
 
     Component order (EComponentID in EntityDef.ixx) — keep in sync when adding a component type:
       Scene 0x01, Render 0x02, Animator 0x04, Physics 0x08,
-      Audio 0x10, Particle 0x20, Force 0x40, Script 0x80
+      Audio 0x10, Particle 0x20, Force 0x40, Light 0x80, Script 0x100
   -->
 
   <Type Name="Entity">
@@ -32,7 +32,7 @@
       <!-- The inline components, folded into one node. Expressions inside a Synthetic still evaluate in
            the Entity's context, so the offset arithmetic below is unchanged by the nesting. -->
       <Synthetic Name="[Components]">
-        <DisplayString>{(int)((typeBits &amp; 0x01) != 0) + (int)((typeBits &amp; 0x02) != 0) + (int)((typeBits &amp; 0x04) != 0) + (int)((typeBits &amp; 0x08) != 0) + (int)((typeBits &amp; 0x10) != 0) + (int)((typeBits &amp; 0x20) != 0) + (int)((typeBits &amp; 0x40) != 0) + (int)((typeBits &amp; 0x80) != 0)} of 8 (typeBits={typeBits,x})</DisplayString>
+        <DisplayString>{(int)((typeBits &amp; 0x01) != 0) + (int)((typeBits &amp; 0x02) != 0) + (int)((typeBits &amp; 0x04) != 0) + (int)((typeBits &amp; 0x08) != 0) + (int)((typeBits &amp; 0x10) != 0) + (int)((typeBits &amp; 0x20) != 0) + (int)((typeBits &amp; 0x40) != 0) + (int)((typeBits &amp; 0x80) != 0) + (int)((typeBits &amp; 0x100) != 0)} of 9 (typeBits={typeBits,x})</DisplayString>
         <Expand>
           <Item Name="[Scene]" Condition="(typeBits &amp; 0x01) != 0">
             *(SceneComponent*)((char*)this
@@ -83,8 +83,8 @@
               + (((typeBits &amp; 0x10) != 0) ? ((sizeof(AudioComponent)+15)&amp;~0xF) : 0)
               + (((typeBits &amp; 0x20) != 0) ? ((sizeof(ParticleComponent)+15)&amp;~0xF) : 0))
           </Item>
-          <Item Name="[Script]" Condition="(typeBits &amp; 0x80) != 0">
-            *(ScriptComponent*)((char*)this
+          <Item Name="[Light]" Condition="(typeBits &amp; 0x80) != 0">
+            *(LightComponent*)((char*)this
               + ((sizeof(Entity)+15)&amp;~0xF)
               + (((typeBits &amp; 0x01) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
               + (((typeBits &amp; 0x02) != 0) ? ((sizeof(RenderComponent)+15)&amp;~0xF) : 0)
@@ -93,6 +93,18 @@
               + (((typeBits &amp; 0x10) != 0) ? ((sizeof(AudioComponent)+15)&amp;~0xF) : 0)
               + (((typeBits &amp; 0x20) != 0) ? ((sizeof(ParticleComponent)+15)&amp;~0xF) : 0)
               + (((typeBits &amp; 0x40) != 0) ? ((sizeof(ForceComponent)+15)&amp;~0xF) : 0))
+          </Item>
+          <Item Name="[Script]" Condition="(typeBits &amp; 0x100) != 0">
+            *(ScriptComponent*)((char*)this
+              + ((sizeof(Entity)+15)&amp;~0xF)
+              + (((typeBits &amp; 0x01) != 0) ? ((sizeof(SceneComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x02) != 0) ? ((sizeof(RenderComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x04) != 0) ? ((sizeof(AnimatorComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x08) != 0) ? ((sizeof(PhysicsComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x10) != 0) ? ((sizeof(AudioComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x20) != 0) ? ((sizeof(ParticleComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x40) != 0) ? ((sizeof(ForceComponent)+15)&amp;~0xF) : 0)
+              + (((typeBits &amp; 0x80) != 0) ? ((sizeof(LightComponent)+15)&amp;~0xF) : 0))
           </Item>
         </Expand>
       </Synthetic>

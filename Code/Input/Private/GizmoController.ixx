@@ -8,33 +8,29 @@ import Core.Transform;
 import Entity;
 
 import Input.fwd;
-
-export enum class EGizmoMode : uint8
-{
-    Translate = 0,
-    Rotate,
-    Scale,
-};
+export import UI.Gizmo; // EGizmoMode + the IGizmo interface the UI owns this through
 
 // Spawns the Gizmo.pre prefab and drives it: follows the scene-panel selection, keeps a constant
 // apparent screen size, switches the visible handle set by mode. Drag interaction is added on top.
-export class GizmoController final
+// Lives here (not in UI) because it needs mouse listeners and viewport focus; the UI owns the instance
+// through IGizmo, see UI.Gizmo.
+export class GizmoController final : public IGizmo
 {
 public:
 
     GizmoController() = default;
-    ~GizmoController();
+    ~GizmoController() override;
     GizmoController(const GizmoController&) = delete;
 
     void initialize(World& world);
-    void update(const Camera& camera, const Rect& viewport, Entity* selected, double deltaSec);
+    void update(const Camera& camera, const Rect& viewport, Entity* selected, double deltaSec) override;
 
-    void setMode(EGizmoMode mode) { m_mode = mode; }
-    EGizmoMode getMode() const { return m_mode; }
+    void setMode(EGizmoMode mode) override { m_mode = mode; }
+    EGizmoMode getMode() const override { return m_mode; }
 
-    Entity* getGizmoEntity() const { return m_gizmo.get(); }
-    bool isVisible() const { return m_visible; }
-    bool isDragging() const { return m_activeHandle != Handle::None; }
+    Entity* getGizmoEntity() const override { return m_gizmo.get(); }
+    bool isVisible() const override { return m_visible && m_selected != nullptr; }
+    bool isDragging() const override { return m_activeHandle != Handle::None; }
 
 private:
 

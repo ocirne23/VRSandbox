@@ -110,8 +110,7 @@ int main()
 
     KeyboardListener* pKeyboardListener = input.addKeyboardListener();
 
-    std::vector<RendererVKLayout::LightInfo> spawnedLights;
-    std::vector<EntityPtr> spawnedLightGeom;
+    std::vector<EntityPtr> spawnedLights; // test lights (keys 1-7); they update + render like any entity
     std::vector<PhysicsJoint> spawnedJoints;
 
     const glm::vec3 spawnOffset = spawnPos - glm::vec3(0, 1, 1);
@@ -121,10 +120,12 @@ int main()
     //world.addRootEntity(world.spawnAssetFile("Entities/particle.pre", Transform(spawnOffset), true));
     //world.addRootEntity(world.spawnAssetFile("Entities/SphereField.pre", Transform(spawnOffset), true));
 
+    // Lives here (the implementation is in Input), driven by the UI, which holds it as an IGizmo.
     GizmoController gizmo;
     gizmo.initialize(world);
+    ui.setGizmo(&gizmo);
 
-    InputControls controls(gizmo, cameraController, world, spawnedLights, spawnedLightGeom, spawnedJoints);
+    InputControls controls(gizmo, cameraController, world, spawnedLights, spawnedJoints);
 
     Camera camera;
     glm::dvec3 lastNearQueryPos(1e30); // last camera position the Near visibility ball was stamped at
@@ -165,7 +166,8 @@ int main()
         const double deltaSec = Globals::time.getDeltaSec();
 
         input.update(deltaSec);
-        ui.update(world.rootEntities(), deltaSec);
+        controls.update((float)deltaSec);
+        ui.update(world.rootEntities(), camera, deltaSec); // also drives the gizmo it owns
 
         for (const std::string& reloadPath : ui.takeScriptReloadRequests()) Globals::scriptHost.getOrLoad(reloadPath, true);
         for (EntityChange& change : scriptEvents.takeEntityChanges()) world.handleEntityChange(change, camera, ui.getViewportRect());
@@ -184,7 +186,6 @@ int main()
             camera = cameraController.getCamera();
         }
 
-        gizmo.update(camera, ui.getViewportRect(), ui.getSelectedEntity(), deltaSec);
         audio.setListener(camera);
 
         physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); }); // fixed-step; entities sync to body poses in their update below
@@ -232,32 +233,15 @@ int main()
 
         world.update(renderer, (float)deltaSec); // serial script prepass + parallel component/tree pass + sink flush
 
-		for (auto& light : spawnedLights)
-		{
-			renderer.addLightInfo(light);
-		}
-
-        for (const EntityPtr& entity : spawnedLightGeom)
-        {
-            if (!entity)
-                continue;
-            RenderComponent* render = getComponent<RenderComponent>(entity);
-            if (render && frustum.sphereInFrustum(render->node.getWorldBounds()))
-                renderer.renderNode(render->node);
-        }
-
-
         terrain.setFlowWindAngle(ocean.swellTravelAngle());
         terrain.update(renderer, camera);
         terrainCollider.update(camera.position, terrain.activeClimateMaps());
         ocean.update(renderer, camera, terrain.activeTerrainData(), terrain.seaLevel());
         scatter.update(renderer, camera, terrain.activeClimateMaps());
         particleSystem.update(renderer, (float)deltaSec);
-        controls.update((float)deltaSec);
         forceSystem.update(renderer, (float)deltaSec);
 
-        if (gizmo.isVisible())
-            gizmo.getGizmoEntity()->update(renderer, (float)deltaSec);
+        ui.updateGizmoEntity(renderer, (float)deltaSec); // the gizmo entity ticks with the rest of the scene
 
         ui.render();
         renderer.present();
@@ -266,6 +250,8 @@ int main()
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
     physics.setWaterSurface({});
+    spawnedLights.clear(); // released before the World's roots: entities must not outlive the globals
+    ui.setGizmo(nullptr);  // UI is a global and the gizmo is on this stack frame — drop the borrow first
     world.clearRootEntities();
     jobSystem.shutdown();
     return 0;

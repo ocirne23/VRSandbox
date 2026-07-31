@@ -103,7 +103,7 @@ void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 
 	ImGui::PushID(entity);
 
-	const bool isSelected = (m_selected == entity);
+	const bool isSelected = (m_selected.get() == entity);
 	const bool isRenaming = (m_renamingEntity == entity);
 
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow
@@ -176,7 +176,7 @@ void SceneView::renderEntityNode(Entity* entity, bool ancestorLocked)
 		ImGui::PopStyleColor(pushedColors);
 
 	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen() && !isRenaming)
-		m_selected = entity;
+		m_selected = EntityPtr(entity);
 
 	if (m_panelFocused && isSelected && !isRenaming && ImGui::IsKeyPressed(ImGuiKey_F2) && !ancestorLocked)
 		beginRename(entity);
@@ -221,7 +221,7 @@ void SceneView::renderContextMenu(Entity* entity, bool locked)
 	if (!ImGui::BeginPopupContextItem("##sv_node_ctx"))
 		return;
 
-	m_selected = entity;
+	m_selected = EntityPtr(entity);
 
 	// An entity can be edited as a whole (renamed/deleted) unless it's an internal part of a locked
 	// prefab instance — i.e. only when its parent isn't itself locked.
@@ -250,11 +250,28 @@ void SceneView::renderContextMenu(Entity* entity, bool locked)
 	ImGui::EndPopup();
 }
 
+// The selection is an owning EntityPtr, so it can never dangle - but an entity deleted from OUTSIDE this
+// panel (a script, the debug light keys, another editor) is gone from the world while the handle keeps it
+// alive. Drop it as soon as its tree is no longer rooted in the world, so the gizmo stops following a
+// detached entity and the entity itself is actually freed.
+void SceneView::pruneSelection(const std::vector<EntityPtr>& rootEntities)
+{
+	if (!m_selected)
+		return;
+	const Entity* root = m_selected.get();
+	while (root->parent)
+		root = root->parent;
+	const bool inWorld = std::any_of(rootEntities.begin(), rootEntities.end(),
+		[root](const EntityPtr& e) { return e.get() == root; });
+	if (!inWorld)
+		m_selected.release();
+}
+
 void SceneView::applyPendingMutations()
 {
 	if (m_pendingDelete)
 	{
-		if (m_selected == m_pendingDelete)        m_selected = nullptr;
+		if (m_selected.get() == m_pendingDelete)  m_selected.release();
 		if (m_renamingEntity == m_pendingDelete)  m_renamingEntity = nullptr;
 		m_changes.push_back({ EntityChange::Delete{ EntityPtr(m_pendingDelete) } }); // own it until polled, before detachFromOwner drops the scene-graph ref
 		detachFromOwner(m_pendingDelete);
@@ -284,6 +301,8 @@ void SceneView::render(const std::vector<EntityPtr>& rootEntities)
 	// here (before BeginChild) so RootAndChildWindows covers the tree's child window too.
 	m_panelFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 
+	pruneSelection(rootEntities);
+
 	renderToolbar();
 	ImGui::Separator();
 
@@ -297,10 +316,9 @@ void SceneView::render(const std::vector<EntityPtr>& rootEntities)
 	if (remainingH > 0.0f)
 		ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, remainingH));
 
-	if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
-		&& !ImGui::IsAnyItemHovered())
+	if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemHovered())
 	{
-		m_selected = nullptr;
+		m_selected.release();
 	}
 
 	if (ImGui::BeginDragDropTargetCustom(

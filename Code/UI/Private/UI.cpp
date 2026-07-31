@@ -64,7 +64,13 @@ bool                 m_FirstFrame = true;    // Flag set for first frame only, s
 ImVector<LinkInfo>   m_Links;                // List of live links. It is dynamic unless you want to create read-only view over nodes.
 int                  m_NextLinkId = 100;
 
-void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
+void UI::updateGizmoEntity(Renderer& renderer, float deltaSec)
+{
+    if (m_gizmo && m_gizmo->isVisible())
+        m_gizmo->getGizmoEntity()->update(renderer, deltaSec);
+}
+
+void UI::update(const std::vector<EntityPtr>& rootEntities, const Camera& camera, double deltaSec)
 {
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -414,6 +420,11 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, double deltaSec)
             m_propertiesPanel.render(m_sceneView.getSelected());
         ImGui::End();
     }
+
+    // Last: the panels above settle this frame's viewport rect and selection, which is exactly what the
+    // gizmo follows.
+    if (m_gizmo)
+        m_gizmo->update(camera, m_viewportRect, m_sceneView.getSelected(), deltaSec);
 }
 
 void UI::copyScriptSelection()

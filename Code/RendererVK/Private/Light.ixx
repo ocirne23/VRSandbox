@@ -42,7 +42,7 @@ export struct TubeLight : RendererVKLayout::LightInfo
 		this->radius = -lightRange;
 		this->color = color * intensity;
 		this->width = tubeRadius;
-		this->direction = glm::normalize(direction) * length * 0.5f; // length encoded in the direction's magnitude
+		this->direction = glm::normalize(direction) * length; // full length encoded in the direction's magnitude; doTubeLight halves it for the half-extent
 		this->rotation = rotation;
 	}
 };

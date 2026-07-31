@@ -39,6 +39,8 @@ public:
 
     // Entity Ownership
     void addRootEntity(EntityPtr entity) { if (entity) m_rootEntities.push_back(std::move(entity)); }
+    // Drops the World's ownership of a root entity (it dies here unless something else still holds it).
+    void removeRootEntity(const Entity* entity) { std::erase_if(m_rootEntities, [entity](const EntityPtr& e) { return e.get() == entity; }); }
     const std::vector<EntityPtr>& rootEntities() const { return m_rootEntities; }
     void clearRootEntities() { m_rootEntities.clear(); }
 

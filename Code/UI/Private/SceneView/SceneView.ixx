@@ -10,8 +10,8 @@ public:
 
 	void render(const std::vector<EntityPtr>& rootEntities);
 
-	Entity* getSelected() const          { return m_selected; }
-	void    setSelected(Entity* entity)  { m_selected = entity; }
+	Entity* getSelected() const          { return m_selected.get(); }
+	void    setSelected(Entity* entity)  { m_selected = EntityPtr(entity); }
 
 	std::vector<EntityChange> takeChanges() { return std::move(m_changes); }
 
@@ -27,10 +27,14 @@ private:
 	void acceptAssetSpawnPayload(Entity* parent); // queues an "ASSET_FILE" drop to spawn under `parent`
 
 	void applyPendingMutations();
+	void pruneSelection(const std::vector<EntityPtr>& rootEntities); // drops a selection deleted from outside the panel
 
 	std::vector<EntityChange> m_changes;                            // panel mutations queued for the app to drain
 
-	Entity* m_selected       = nullptr;
+	// OWNING: the selection outlives whatever deleted the entity (a script, a debug key, another panel),
+	// so nothing downstream - the gizmo above all - can be left holding freed memory. pruneSelection
+	// then drops it on the next render once the entity is no longer in the world.
+	EntityPtr m_selected;
 	Entity* m_renamingEntity = nullptr;
 	bool    m_panelFocused   = false;  // Scene panel (or a child of it) had keyboard focus this frame — gates F2/Delete
 	bool    m_focusRenameNext = false;

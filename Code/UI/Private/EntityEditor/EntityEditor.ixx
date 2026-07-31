@@ -54,6 +54,7 @@ private:
 	void renderAudioSection();
 	void renderParticleSection();
 	void renderForceSection();
+	void renderLightSection();
 	void renderScriptSection();
 	// The INITIAL values of the picked script's exposed ScriptData fields -- serialized into the .pre and
 	// applied at every spawn, unlike the Properties panel's live edits of the same fields.
@@ -87,6 +88,14 @@ private:
 	// Assembles a fresh EntitySpawnTemplate from the current draft state and queues a RespawnEntity for
 	// m_selected (not necessarily the document root — any node in the tree can be edited/respawned).
 	void commitRespawn();
+
+	// Pushes the drafts straight into m_selected's LIVE components, no respawn. Covers only what can be
+	// re-applied in place (render local transform, force emitter, lights); anything baked at spawn
+	// (physics bodies, animator graphs, script data) is untouched and still needs the respawn.
+	void applyDraftsLive();
+	// Standard binding for a draft drag widget: `commitDrag(ImGui::DragFloat(...))`. Live-applies on
+	// every change frame so the viewport tracks the drag, and respawns once on release.
+	void commitDrag(bool changed);
 
 	EntityPtr   m_editRoot; // the document's root entity
 	EntityPtr   m_selected; // entity currently shown in Name/Transform/Components (root or a descendant)
@@ -127,6 +136,7 @@ private:
 	bool m_hasAudio    = false;
 	bool m_hasParticle = false;
 	bool m_hasForce    = false;
+	bool m_hasLight    = false;
 	bool m_hasScript   = false;
 
 	RenderComponent::SpawnInfo   m_renderDraft;
@@ -135,6 +145,7 @@ private:
 	AudioComponent::SpawnInfo    m_audioDraft;
 	ParticleComponent::SpawnInfo m_particleDraft;
 	ForceComponent::SpawnInfo    m_forceDraft;
+	LightComponent::SpawnInfo    m_lightDraft;
 	ScriptComponent::SpawnInfo   m_scriptDraft;
 
 	char m_particleEffectBuf[256] = {}; // edit buffer for m_particleDraft.effectPath

@@ -26,11 +26,10 @@ export class InputControls
 {
 private:
 
-    GizmoController& gizmo;
+    IGizmo& gizmo; // owned by the UI; only the mode hotkeys touch it from here
     FreeFlyCameraController& cameraController;
     World& world; // spawns go through the world's API; it owns the root entity lifetimes
-    std::vector<RendererVKLayout::LightInfo>& spawnedLights;
-    std::vector<EntityPtr>& spawnedLightGeom;
+    std::vector<EntityPtr>& spawnedLights; // test lights (keys 1-7): plain entities with a LightComponent
     std::vector<PhysicsJoint>& spawnedJoints;
     std::vector<ForceEmitter> spawnedForceEmitters; // test forcefields (keys N/M/H/B); RAII, cleared before globals die
     std::vector<ForceQuery> spawnedForceQueries;    // territory-query test grid (key J)
@@ -51,16 +50,52 @@ private:
                                   // 1 = target end); budget-conserving bump
     float width = 1.0f;           // lateral scale (reach untouched): 1 = round, < 1 = narrower/sharper
 
+    std::shared_ptr<EntitySpawnTemplate> lightTmpl; // built once, see lightTemplate()
+
+    // ONE template for every test light: they all share an archetype (a lone Light component), and the
+    // per-light values live on the component, which owns a mutable copy of the SpawnInfo. Built lazily
+    // and handed to World, which keeps it alive because Entity::create only stores a raw pointer to it
+    // (the same contract the Entity Editor's respawns use).
+    const EntitySpawnTemplate& lightTemplate()
+    {
+        if (!lightTmpl)
+        {
+            auto info = std::make_shared<LightComponent::SpawnInfo>();
+            info->lights.emplace_back(); // placeholder; spawnLight overwrites it on the live component
+            info->debugDraw = true;
+            lightTmpl = std::make_shared<EntitySpawnTemplate>();
+            lightTmpl->archetype = makeEntityArchetype(uint16(1 << EComponentID_Light));
+            lightTmpl->spawnInfos.push_back(std::move(info));
+            world.keepTemplateAlive(lightTmpl);
+        }
+        return *lightTmpl;
+    }
+
+    // Spawns a bare entity whose only component is one light, and tracks it for the clear key. The
+    // component draws its own debug wireframes, so there are no proxy meshes to place any more. The
+    // light's values are written onto the live component, NOT into the shared template - so these
+    // entities deliberately don't serialize their light; they are debug spawns, not authoring.
+    EntityPtr spawnLight(const char* name, const glm::vec3& pos, const LightComponent::LightDesc& light)
+    {
+        // Spawned unrotated, so the light's entity-space Direction is already the world one.
+        EntityPtr entity = Entity::create(lightTemplate(), Transform(pos, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+        entity->setName(name);
+        if (LightComponent* lc = getComponent<LightComponent>(entity))
+            lc->lights[0] = light;
+        world.addRootEntity(entity);
+        spawnedLights.push_back(entity);
+        return entity;
+    }
+
 public:
 
     InputControls(
-        GizmoController& gizmo,
+        IGizmo& gizmo,
         FreeFlyCameraController& cameraController,
         World& world,
-        std::vector<RendererVKLayout::LightInfo>& spawnedLights,
-        std::vector<EntityPtr>& spawnedLightGeom,
+        std::vector<EntityPtr>& spawnedLights,
 		std::vector<PhysicsJoint>& spawnedJoints)
-        : gizmo(gizmo), cameraController(cameraController), world(world), spawnedLights(spawnedLights), spawnedLightGeom(spawnedLightGeom), spawnedJoints(spawnedJoints)
+        : gizmo(gizmo), cameraController(cameraController), world(world), spawnedLights(spawnedLights), spawnedJoints(spawnedJoints)
     {
 		Tweak::floatVar("Force/Emitter", "Output", &output, 0.2f, 10.0f, 0.01f); // stay above iso (0.15)
 		Tweak::floatVar("Force/Emitter", "Reach", &reach, 0.1f, 100.0f, 0.1f);
@@ -141,54 +176,60 @@ public:
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
-            spawnedLights.resize(0);
-            spawnedLightGeom.resize(0);
+            for (const EntityPtr& light : spawnedLights)
+                world.removeRootEntity(light);
+            spawnedLights.clear();
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
-            spawnedLights.push_back(PointLight{ cameraController.getPosition(), 25.0f, glm::abs(glm::sphericalRand(1.0f)), 50.0f });
-            spawnedLightGeom.push_back(world.spawn("sphere", Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+            LightComponent::LightDesc light;
+            light.range = 25.0f;
+            light.color = glm::abs(glm::sphericalRand(1.0f));
+            light.intensity = 50.0f;
+            spawnLight("TestPointLight", cameraController.getPosition(), light);
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_3 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
-            spawnedLights.push_back(PointLight{ cameraController.getPosition(), 15.0f + glm::linearRand(0.5f, 1.5f), glm::abs(glm::sphericalRand(1.0f)), 30.0f });
-            spawnedLightGeom.push_back(world.spawn("sphere", Transform(cameraController.getPosition(), 0.1f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+            LightComponent::LightDesc light;
+            light.range = 15.0f + glm::linearRand(0.5f, 1.5f);
+            light.color = glm::abs(glm::sphericalRand(1.0f));
+            light.intensity = 30.0f;
+            spawnLight("TestPointLight", cameraController.getPosition(), light);
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_4 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
-            spawnedLights.push_back(SpotLight{ cameraController.getPosition(), 12.5f, glm::vec3(1.0f, 0.95f, 0.8f), 20.0f, cameraController.getDirection(), glm::radians(25.0f), 0.25f });
-            glm::quat orientation = cameraController.getOrientation();
-            const glm::vec3 camUp = cameraController.getUp();
-            const glm::vec3 camRight = glm::normalize(glm::cross(cameraController.getDirection(), camUp));
-            orientation = glm::angleAxis(glm::radians(90.0f), camRight) * orientation;
-            spawnedLightGeom.push_back(world.spawn("cone", Transform(cameraController.getPosition(), 0.1f, orientation)));
+            LightComponent::LightDesc light;
+            light.type = ELightType::Spot;
+            light.direction = cameraController.getDirection();
+            light.range = 12.5f;
+            light.color = glm::vec3(1.0f, 0.95f, 0.8f);
+            light.intensity = 20.0f;
+            light.coneAngle = 25.0f;
+            light.edgeSoftness = 0.25f;
+            spawnLight("TestSpotLight", cameraController.getPosition(), light);
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_5 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
-            const glm::vec3 dir = cameraController.getDirection();
-            const glm::vec3 camUp = cameraController.getUp();
-            const glm::vec3 up = glm::normalize(camUp);
-            const glm::vec3 ref = glm::abs(up.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
-            const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
-            const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
-            float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-            spawnedLights.push_back(AreaLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 1.0f, 1.0f), 10.0f, camUp, 1.0f, 1.0f, rotation });
-
-            const glm::quat orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * cameraController.getOrientation();
-            spawnedLightGeom.push_back(world.spawn("plane", Transform(cameraController.getPosition(), 0.5f, orientation)));
+            LightComponent::LightDesc light;
+            light.type = ELightType::Area;
+            light.direction = cameraController.getDirection(); // the quad emits along its Direction
+            light.range = 10.0f;
+            light.intensity = 10.0f;
+            light.width = 1.0f;
+            light.height = 1.0f;
+            spawnLight("TestAreaLight", cameraController.getPosition(), light);
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_6 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
-            const glm::vec3 dir = cameraController.getDirection();
-            const glm::vec3 camUp = cameraController.getUp();
-            const glm::vec3 up = glm::normalize(camUp);
-            const glm::vec3 ref = glm::abs(up.y) < 0.999f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
-            const glm::vec3 right0 = glm::normalize(glm::cross(up, ref));
-            const glm::vec3 camRight = glm::normalize(glm::cross(dir, camUp));
-            const float rotation = atan2f(glm::dot(glm::cross(right0, camRight), up), glm::dot(right0, camRight));
-            spawnedLights.push_back(TubeLight{ cameraController.getPosition(), 10.0f, glm::vec3(1.0f, 0.9f, 0.7f), 10.0f, camUp, 0.1f, 1.0f, rotation });
-            const glm::quat orientation = glm::angleAxis(glm::radians(-90.0f), camRight) * cameraController.getOrientation();
-            spawnedLightGeom.push_back(world.spawn("capsule", Transform(cameraController.getPosition(), 0.5f, orientation)));
+            LightComponent::LightDesc light;
+            light.type = ELightType::Tube;
+            light.direction = cameraController.getUp(); // tube axis
+            light.range = 10.0f;
+            light.color = glm::vec3(1.0f, 0.9f, 0.7f);
+            light.intensity = 10.0f;
+            light.width = 0.1f; // tube radius
+            light.length = 1.0f;
+            spawnLight("TestTubeLight", cameraController.getPosition(), light);
         }
 
         // 0: hang a chain of physics cubes in front of the camera (spherical joints, anchored to the world)
@@ -299,9 +340,11 @@ public:
             {
                 int x = 0; int y = 0;
                 glm::vec3 position = glm::vec3(x * 30.0f + glm::linearRand(-11.0f, 11.0f), glm::linearRand(0.0f, 7.0f), y * 20.0f + glm::linearRand(-5.0f, 4.5f));
-                spawnedLights.push_back(PointLight{ position,
-                    glm::linearRand(0.5f, 2.0f), glm::abs(glm::sphericalRand(1.0f)), glm::linearRand(7.0f, 10.0f) });
-                spawnedLightGeom.push_back(world.spawn("sphere", Transform(position, 0.05f, glm::normalize(glm::quat(1.0, 0.0, 0.0, 0)))));
+                LightComponent::LightDesc light;
+                light.range = glm::linearRand(0.5f, 2.0f);
+                light.color = glm::abs(glm::sphericalRand(1.0f));
+                light.intensity = glm::linearRand(7.0f, 10.0f);
+                spawnLight("TestPointLight", position, light);
             }
         }
     }

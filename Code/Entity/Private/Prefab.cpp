@@ -64,6 +64,11 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
             if (const ForceComponent::SpawnInfo* fi = getForceSpawnInfo(entity))
                 writeForceSpawnInfo(*fi, comp);
         }
+        else if (id == EComponentID_Light)
+        {
+            if (const LightComponent::SpawnInfo* li = getLightSpawnInfo(entity))
+                writeLightSpawnInfo(*li, comp);
+        }
         else if (id == EComponentID_Script)
         {
             if (const ScriptComponent::SpawnInfo* si = getScriptSpawnInfo(entity))
