@@ -4,6 +4,11 @@ module;
 
 export module Entity:ScriptContext;
 
+// ScriptContext comes from the ABI header in the global module fragment, so it isn't reachable through
+// `import Entity` on its own -- without this an importer can hold `Globals::scriptContext` but can't
+// name its type.
+export using ::ScriptContext;
+
 export namespace Globals
 {
     ScriptContext scriptContext;

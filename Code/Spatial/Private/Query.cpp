@@ -6,6 +6,7 @@ module Spatial;
 
 import Core;
 import Core.glm;
+import Core.Camera;
 import Core.Frustum;
 
 // Shared hierarchical traversal: descend the per-level grids top-down through the occupancy
@@ -436,4 +437,45 @@ void SpatialIndex::markVisibleSphere(ESpatialPass pass, const glm::dvec3& center
     });
     m_stats.visiblePerPass[passIdx] = int(count);
     m_stats.markVisibleMs += std::chrono::duration<float, std::milli>(Clock::now() - start).count();
+}
+
+void SpatialIndex::update(const Camera& camera, const Frustum& frustum, const glm::mat4& viewProjRelCamera)
+{
+    commitFrame();              // applies cell moves queued during last frame's entity updates
+    setCullMaxDist(camera.far); // cull to exactly the view distance, not a fixed cap
+    if (m_culling.mode == int(ESpatialCullMode::Off) || m_culling.freeze)
+        return;
+
+    const glm::dvec3 cameraPos = glm::dvec3(camera.position);
+    Frustum cullFrustum = rebaseFrustum(frustum, cameraPos);
+    inflateFrustum(cullFrustum, m_culling.margin);
+
+    IOcclusionTester* occlusion = nullptr;
+    if (Globals::occlusionBuffer.isEnabled())
+    {
+        // The renderer's projection is REVERSED-Z; flip the z row back to standard orientation
+        // (z' = w - z) so the rasterizer's internal comparisons keep their meaning.
+        glm::mat4 standardZ = viewProjRelCamera;
+        for (int c = 0; c < 4; ++c)
+            standardZ[c][2] = standardZ[c][3] - standardZ[c][2];
+        Globals::occlusionBuffer.render(standardZ, cameraPos);
+        occlusion = &Globals::occlusionBuffer;
+    }
+
+    // Terrain chunks ride the Main stamp too (TerrainStreamer registers them on their own layer);
+    // they skip the Near ball - main-culled terrain keeps its shadow/GI passes unconditionally.
+    markVisibleSet(ESpatialPass::Main, cullFrustum, cameraPos, m_culling.maxDist + m_culling.margin,
+        SpatialLayer_Render | SpatialLayer_Terrain, occlusion);
+
+    // The Near ball barely changes frame to frame: inflate it by the slack and requery only once the
+    // camera has moved that far. The frame cap keeps off-screen MOVERS from staying unstamped too long
+    // (they can enter the ball without the camera moving).
+    const float nearSlack = m_culling.nearSlack;
+    ++m_framesSinceNearQuery;
+    if (nearSlack <= 0.0f || glm::distance(m_lastNearQueryPos, cameraPos) > double(nearSlack) || m_framesSinceNearQuery >= 30)
+    {
+        markVisibleSphere(ESpatialPass::Near, cameraPos, m_culling.nearRadius + nearSlack, SpatialLayer_Render);
+        m_lastNearQueryPos = cameraPos;
+        m_framesSinceNearQuery = 0;
+    }
 }

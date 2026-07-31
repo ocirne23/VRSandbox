@@ -68,7 +68,10 @@ int main()
     ForceSystem& forceSystem = Globals::forceSystem;
     forceSystem.initialize();
 
-    Globals::scriptHost.setCurrentScriptPath("Scripts/Graph.scr");
+    ScriptContext& scriptContext = Globals::scriptContext;
+    ScriptHost& scriptHost = Globals::scriptHost;
+    scriptHost.setCurrentScriptPath("Scripts/Graph.scr");
+
     ScriptEventManager& scriptEvents = Globals::scriptEvents;
     scriptEvents.initialize();
     registerScriptDslBindings(); // must run before anything touches Globals::scriptBindings (ScriptEditor's build() included)
@@ -85,7 +88,7 @@ int main()
 
     Procedural::OceanGenerator ocean;
     ocean.initialize();
-
+    terrain.setFlowWindAngle(ocean.swellTravelAngle());
     physics.setWaterSurface([&ocean](float x, float z) { return ocean.sampleWaterHeight(x, z); });
 
     VrInput& vrInput = Globals::vrInput;
@@ -120,7 +123,6 @@ int main()
     //world.addRootEntity(world.spawnAssetFile("Entities/particle.pre", Transform(spawnOffset), true));
     //world.addRootEntity(world.spawnAssetFile("Entities/SphereField.pre", Transform(spawnOffset), true));
 
-    // Lives here (the implementation is in Input), driven by the UI, which holds it as an IGizmo.
     GizmoController gizmo;
     gizmo.initialize(world);
     ui.setGizmo(&gizmo);
@@ -128,11 +130,8 @@ int main()
     InputControls controls(gizmo, cameraController, world, spawnedLights, spawnedJoints);
 
     Camera camera;
-    glm::dvec3 lastNearQueryPos(1e30); // last camera position the Near visibility ball was stamped at
-    uint32 framesSinceNearQuery = 0;
+    physics.setDebugDrawCallback([&renderer](const glm::vec3& a, const glm::vec3& b, uint32 color) { renderer.addDebugLine(a, b, color); }, [&camera]() { return camera.position; });
 
-    // World owns the root entities and applies all queued changes; the UI notifications it can't
-    // deliver itself (dependency points UI -> Entity) route back through these.
     world.setOnPrefabOpened([&ui](const EntityPtr& entity, const std::string& path) { ui.onOpened(entity, path); });
     world.setOnEntityRespawned([&ui](const EntityPtr& oldEntity, const EntityPtr& newEntity) { ui.onEntityRespawned(oldEntity, newEntity); });
 
@@ -169,71 +168,17 @@ int main()
         controls.update((float)deltaSec);
         ui.update(world.rootEntities(), camera, deltaSec); // also drives the gizmo it owns
 
-        for (const std::string& reloadPath : ui.takeScriptReloadRequests()) Globals::scriptHost.getOrLoad(reloadPath, true);
+        for (const std::string& reloadPath : ui.takeScriptReloadRequests()) scriptHost.getOrLoad(reloadPath, true);
         for (EntityChange& change : scriptEvents.takeEntityChanges()) world.handleEntityChange(change, camera, ui.getViewportRect());
         for (EntityChange& change : ui.takeEntityChanges())           world.handleEntityChange(change, camera, ui.getViewportRect());
-        Globals::scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
-        renderer.setViewportRect(ui.getViewportRect());
 
-        if (renderer.isVrEnabled())
-        {
-            vrCameraController.update(deltaSec); // thumbstick locomotion; pulls Globals::vrInput
-            camera = vrCameraController.getCamera();
-        }
-        else
-        {
-            cameraController.update(deltaSec);
-            camera = cameraController.getCamera();
-        }
+        scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
+        audio.update(camera);
+        physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); });
 
-        audio.setListener(camera);
-
-        physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); }); // fixed-step; entities sync to body poses in their update below
-        if (physics.isDebugDrawEnabled())
-            physics.debugDraw(camera.position, [&renderer](const glm::vec3& a, const glm::vec3& b, uint32 color) {
-                renderer.addDebugLine(a, b, color);
-            });
-
-        const Frustum& frustum = renderer.beginFrame(camera);
-
-        spatialIndex.commitFrame(); // applies cell moves queued during last frame's entity updates
-        spatialIndex.setCullMaxDist(camera.far); // cull to exactly the view distance, not a fixed cap
-        const SpatialCullingConfig& cullingConfig = spatialIndex.getCullingConfig();
-        if (cullingConfig.mode != int(ESpatialCullMode::Off) && !cullingConfig.freeze)
-        {
-            const glm::dvec3 cameraPos = glm::dvec3(camera.position);
-            Frustum cullFrustum = rebaseFrustum(frustum, cameraPos);
-            inflateFrustum(cullFrustum, cullingConfig.margin);
-            IOcclusionTester* occlusion = nullptr;
-            if (Globals::occlusionBuffer.isEnabled())
-            {
-                // The renderer's projection is REVERSED-Z; Flip the z row back to standard orientation (z' = w - z) so its internal comparisons keep their meaning.
-                glm::mat4 viewProjRelCamera = renderer.getCenterViewProj() * glm::translate(glm::mat4(1.0f), camera.position);
-                for (int c = 0; c < 4; ++c)
-                    viewProjRelCamera[c][2] = viewProjRelCamera[c][3] - viewProjRelCamera[c][2];
-                Globals::occlusionBuffer.render(viewProjRelCamera, cameraPos);
-                occlusion = &Globals::occlusionBuffer;
-            }
-            // Terrain chunks ride the Main stamp too (TerrainStreamer registers them on their own layer);
-            // they skip the Near ball — main-culled terrain keeps its shadow/GI passes unconditionally.
-            spatialIndex.markVisibleSet(ESpatialPass::Main, cullFrustum, cameraPos,
-                cullingConfig.maxDist + cullingConfig.margin, SpatialLayer_Render | SpatialLayer_Terrain, occlusion);
-            // The Near ball barely changes frame to frame: inflate it by the slack and requery only
-            // once the camera has moved that far. The frame cap keeps off-screen MOVERS from staying
-            // unstamped too long (they can enter the ball without the camera moving).
-            const float nearSlack = cullingConfig.nearSlack;
-            ++framesSinceNearQuery;
-            if (nearSlack <= 0.0f || glm::distance(lastNearQueryPos, cameraPos) > double(nearSlack) || framesSinceNearQuery >= 30)
-            {
-                spatialIndex.markVisibleSphere(ESpatialPass::Near, cameraPos, cullingConfig.nearRadius + nearSlack, SpatialLayer_Render);
-                lastNearQueryPos = cameraPos;
-                framesSinceNearQuery = 0;
-            }
-        }
-
+        const Frustum& frustum = renderer.beginFrame(camera, ui.getViewportRect());
+        spatialIndex.update(camera, frustum, renderer.getCenterViewProj() * glm::translate(glm::mat4(1.0f), camera.position)); // translate corrects the reverse-z renderer proj matrix
         world.update(renderer, (float)deltaSec); // serial script prepass + parallel component/tree pass + sink flush
-
-        terrain.setFlowWindAngle(ocean.swellTravelAngle());
         terrain.update(renderer, camera);
         terrainCollider.update(camera.position, terrain.activeClimateMaps());
         ocean.update(renderer, camera, terrain.activeTerrainData(), terrain.seaLevel());
@@ -241,17 +186,14 @@ int main()
         particleSystem.update(renderer, (float)deltaSec);
         forceSystem.update(renderer, (float)deltaSec);
 
-        ui.updateGizmoEntity(renderer, (float)deltaSec); // the gizmo entity ticks with the rest of the scene
-
+        ui.drawGizmoEntity(renderer, (float)deltaSec);
         ui.render();
         renderer.present();
         frameCount++;
     }
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
-    physics.setWaterSurface({});
     spawnedLights.clear(); // released before the World's roots: entities must not outlive the globals
-    ui.setGizmo(nullptr);  // UI is a global and the gizmo is on this stack frame — drop the borrow first
     world.clearRootEntities();
     jobSystem.shutdown();
     return 0;

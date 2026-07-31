@@ -130,9 +130,17 @@ void PhysicsWorld::update(double deltaSec, std::function<void(const ContactEvent
 
     applyQueuedTeleports(); // before the paused check: placing a body is not simulation
 
-    if (m_paused)
-        return;
+    if (!m_paused)
+        stepSimulation(deltaSec, contactCallback);
 
+    // After the steps, so the wireframes match the poses the entities will render from this frame -- and
+    // deliberately NOT gated on paused, since inspecting colliders with the simulation stopped is the point.
+    if (m_debugDrawEnabled && m_debugLine && m_debugViewPos)
+        debugDraw(m_debugViewPos(), m_debugLine);
+}
+
+void PhysicsWorld::stepSimulation(double deltaSec, const std::function<void(const ContactEvent&)>& contactCallback)
+{
     m_accumulator += float(deltaSec) * m_timeScale;
     const float step = 1.0f / float(m_stepHz);
     const b3WorldId world = std::bit_cast<b3WorldId>(m_worldHandle);

@@ -17,11 +17,9 @@ public:
     bool initialize(); // opens the default output device (48kHz stereo) and creates the Steam Audio HRTF
     void shutdown();
 
-    // Call once per frame with the active camera: updates every source's HRTF direction, distance
-    // attenuation and doppler. Master volume is a Tweak under Audio/System.
-	void setListener(Camera& camera, const glm::vec3& velocity = glm::vec3(0.0f));
-    void setListener(const glm::vec3& position, const glm::vec3& forward, const glm::vec3& up,
-        const glm::vec3& velocity = glm::vec3(0.0f));
+    // Call once per frame with the active camera: places the listener and refreshes every source's
+    // HRTF direction, distance attenuation and doppler. Master volume is a Tweak under Audio/System.
+	void update(const Camera& camera, const glm::vec3& listenerVelocity = glm::vec3(0.0f));
 
     AudioBuffer createBuffer(EAudioFormat format, std::span<const std::byte> pcmData, uint32 sampleRate);
     AudioBuffer loadSound(std::string_view path); // WAV/FLAC/MP3, relative to Assets/

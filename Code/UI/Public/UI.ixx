@@ -49,7 +49,7 @@ public:
     // (it needs the renderer, which UI::update has no business holding).
     void setGizmo(IGizmo* gizmo) { m_gizmo = gizmo; }
     IGizmo* getGizmo() const { return m_gizmo; }
-    void updateGizmoEntity(Renderer& renderer, float deltaSec);
+    void drawGizmoEntity(Renderer& renderer, float deltaSec);
 
     bool isViewportGrabbed() const { return m_isViewportGrabbed; }
     bool isViewportFocused() const { return m_isViewportFocused; }

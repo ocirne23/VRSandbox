@@ -33,7 +33,7 @@ public:
 
     // Applies queued teleports, then runs the fixed-step accumulator: steps at stepHz with a bounded
     // number of catch-up steps per frame. Also drains contact/sensor events (see getContactEvents)
-    // and advances the step counter.
+    // and advances the step counter. Also emits the collider wireframes, see setDebugDrawCallback.
     void update(double deltaSec, std::function<void(const ContactEvent&)> contactCallback);
 
     // Thread-safe absolute repositioning: queues the pose, applied at the start of the next update()
@@ -85,15 +85,22 @@ public:
 
     void setGravity(const glm::vec3& gravity);
 
-    // Collider wireframe debug view. When the "Physics/Debug/Draw colliders" tweak is on, the App calls
-    // debugDraw once per frame with a line sink (keeps Physics free of any renderer dependency); every
-    // shape type (box/sphere/capsule/hull/mesh), plus optionally joints/contacts/AABBs, is decomposed
-    // into world-space segments. Drawing is bounded to "Range" around viewPos (mesh triangles are also
-    // CPU-culled per triangle, so a huge static mesh collider doesn't emit its whole wireframe).
-    // Color is packed RGBA8 with R in the low byte (matches GLSL unpackUnorm4x8).
+    // Collider wireframe debug view. The App registers a line sink ONCE (keeps Physics free of any
+    // renderer dependency) plus a source for the view position to draw around -- a callback rather than
+    // an update() argument, because the simulation has no notion of a viewer and shouldn't carry one
+    // through its signature. update() emits into the sink whenever the "Physics/Debug/Draw colliders"
+    // tweak is on; every shape type (box/sphere/capsule/hull/mesh), plus optionally joints/contacts/
+    // AABBs, is decomposed into world-space segments. Drawing is bounded to "Range" around the view
+    // position (mesh triangles are also CPU-culled per triangle, so a huge static mesh collider doesn't
+    // emit its whole wireframe). Color is packed RGBA8 with R in the low byte (matches GLSL unpackUnorm4x8).
     using DebugLineFn = std::function<void(const glm::vec3& a, const glm::vec3& b, uint32 colorRGBA)>;
+    using DebugViewPosFn = std::function<glm::vec3()>;
+    void setDebugDrawCallback(DebugLineFn line, DebugViewPosFn viewPos)
+    {
+        m_debugLine = std::move(line);
+        m_debugViewPos = std::move(viewPos);
+    }
     bool isDebugDrawEnabled() const { return m_debugDrawEnabled; }
-    void debugDraw(const glm::vec3& viewPos, const DebugLineFn& line);
 
     // Fixed-step render interpolation: total steps taken, and the fraction [0,1] of the current frame
     // into the next step (1 when interpolation is disabled via the Tweak).
@@ -106,6 +113,8 @@ private:
 
     void applyBuoyancy(); // per fixed step, before b3World_Step (box3d clears forces every step)
     void applyQueuedTeleports(); // main thread, start of update
+    void stepSimulation(double deltaSec, const std::function<void(const ContactEvent&)>& contactCallback);
+    void debugDraw(const glm::vec3& viewPos, const DebugLineFn& line); // driven by update(), see setDebugDrawCallback
 
     struct TeleportRequest
     {
@@ -136,6 +145,8 @@ private:
     std::vector<uint64> m_buoyancyShapes; // per-step overlap scratch (b3StoreShapeId bits)
 
     // Debug draw tweaks (Physics/Debug)
+    DebugLineFn m_debugLine;       // registered by the App, see setDebugDrawCallback
+    DebugViewPosFn m_debugViewPos; // ditto: where the wireframes are centred/range-culled
     bool m_debugDrawEnabled = false;
     bool m_debugDrawJoints = false;
     bool m_debugDrawContacts = false;

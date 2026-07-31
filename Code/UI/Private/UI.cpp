@@ -64,7 +64,7 @@ bool                 m_FirstFrame = true;    // Flag set for first frame only, s
 ImVector<LinkInfo>   m_Links;                // List of live links. It is dynamic unless you want to create read-only view over nodes.
 int                  m_NextLinkId = 100;
 
-void UI::updateGizmoEntity(Renderer& renderer, float deltaSec)
+void UI::drawGizmoEntity(Renderer& renderer, float deltaSec)
 {
     if (m_gizmo && m_gizmo->isVisible())
         m_gizmo->getGizmoEntity()->update(renderer, deltaSec);

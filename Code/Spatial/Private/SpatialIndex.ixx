@@ -2,6 +2,7 @@ export module Spatial:SpatialIndex;
 
 import Core;
 import Core.glm;
+import Core.Camera;
 import Core.Frustum;
 import Threading;
 import :Morton;
@@ -53,6 +54,15 @@ public:
     void markVisibleSet(ESpatialPass pass, const Frustum& frustumRelCamera, const glm::dvec3& cameraPos, float maxDist,
                         uint32 layerMask, IOcclusionTester* occlusion = nullptr);
     void markVisibleSphere(ESpatialPass pass, const glm::dvec3& center, float radius, uint32 layerMask);
+
+    // THE per-frame visibility pass, in one call (the App's only spatial step): commits the cell moves
+    // queued during last frame's entity updates, tracks the render camera's far plane, then stamps the
+    // Main frustum set - rasterizing the CPU occlusion buffer first when it is enabled - and the Near
+    // ball. The Near ball is requeried only once the camera has moved past its slack, so its hysteresis
+    // state belongs here rather than at the call site.
+    // viewProjRelCamera maps camera-relative world positions to clip space in the renderer's REVERSED-Z
+    // convention; it is flipped back to standard z here, for the occlusion rasterizer only.
+    void update(const Camera& camera, const Frustum& frustum, const glm::mat4& viewProjRelCamera);
 
     // Main pass; a never-stamped entry counts as visible unless it registered with spawnVisible = false
     // (see registerEntry).
@@ -141,6 +151,10 @@ private:
     std::atomic<float> m_topLevelMaxRadius = 0.0f; // largest clamped-oversize radius, inflates top-level tests (CAS-max: updateEntry runs on jobs)
     SpatialCullingConfig m_culling;
     mutable SpatialStats m_stats;
+
+    // Near-ball requery hysteresis, see update.
+    glm::dvec3 m_lastNearQueryPos = glm::dvec3(1e30);
+    uint32     m_framesSinceNearQuery = 0;
     bool m_initialized = false;
 };
 

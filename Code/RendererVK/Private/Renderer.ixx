@@ -133,7 +133,9 @@ public:
 
     bool initialize(Window& window, EValidation validation, EVSync vsync, EVr vr = EVr::DISABLED);
 
-    const Frustum& beginFrame(const Camera& camera); // [Concurrency: SERIAL-OWNER of the render chain]
+    // viewportRect is the editor's viewport sub-rect within the swapchain (ignored in VR, which renders
+    // full-extent); a change to it re-records the command buffers.
+    const Frustum& beginFrame(const Camera& camera, const Rect& viewportRect); // [Concurrency: SERIAL-OWNER of the render chain]
     // passMask (RendererVKLayout::PASS_* bits) selects which culled passes may draw/trace the node
     // this frame: main view, sun shadows, ray tracing (GI/RTAO/RT shadows).
     // [Concurrency: LOCK-FREE - callable from any job between beginFrame and present; on an
@@ -343,7 +345,6 @@ public:
 
     void setWindowMinimized(bool minimized);
     void recreateWindowSurface(Window& window);
-    void setViewportRect(const Rect& rect) { if (Globals::openXR.isEnabled()) return; if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } } // VR renders full-extent (no editor panel sub-rect)
 
     Stats getStats();
 
@@ -363,6 +364,10 @@ private:
     Renderer(const Renderer&&) = delete;
     Renderer& operator=(const Renderer&) = delete;
     Renderer& operator=(const Renderer&&) = delete;
+
+    // Applied by beginFrame from its viewportRect argument, which is the only way to set it. VR renders
+    // full-extent (no editor panel sub-rect), so the rect is ignored there.
+    void setViewportRect(const Rect& rect) { if (Globals::openXR.isEnabled()) return; if (rect != m_viewportRect) { m_viewportRect = rect; setHaveToRecordCommandBuffers(); } }
 
     CommandBuffer& getCurrentCommandBuffer() { return m_perFrameData[m_swapChain.getCurrentFrameIndex()].primaryCommandBuffer; }
 

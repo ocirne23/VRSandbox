@@ -500,8 +500,10 @@ void Renderer::setTerrainSplatClimate(std::span<const glm::vec4> boxes)
     memcpy(m_terrainSplatClimate, boxes.data(), boxes.size() * sizeof(glm::vec4));
 }
 
-const Frustum& Renderer::beginFrame(const Camera& cameraIn)
+const Frustum& Renderer::beginFrame(const Camera& cameraIn, const Rect& viewportRect)
 {
+    setViewportRect(viewportRect); // first: this frame's projection is built from the viewport's aspect below
+
     // This frame slot's fence must be waited BEFORE anything writes its host-visible per-frame buffers
     // (renderNode instance memcpys, LOD meshIdx redirects, firstInstance prefix sums, sparse transform
     // uploads) — the wait inside acquireNextImage happens at the END of the CPU frame, after all those
