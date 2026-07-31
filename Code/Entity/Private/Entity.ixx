@@ -79,6 +79,7 @@ public:
     uint16 refCount = 0;
     uint16 typeBits = 0;
     uint8 flags = 0; // EEntityFlags bitmask
+    uint8 _unused[3];
 
     void update(Renderer& renderer, float deltaSeconds) { updateTree(renderer, Transform(), deltaSeconds); }
 
@@ -91,8 +92,6 @@ public:
     bool hasName() const { return displayName != nullptr; }
     void setName(std::string_view name);
 
-    void serializeComponent(EComponentID id, AssetNode& out);
-    void deserializeComponent(EComponentID id, const AssetNode& in);
     void reparentEntity(Entity* newParent);
 
     bool isPrefabInstance() const { return (flags & EEntityFlag_PrefabInstance) != 0; }

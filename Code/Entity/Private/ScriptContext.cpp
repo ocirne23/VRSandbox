@@ -22,6 +22,7 @@ import Spatial;
 import Script;
 import :Entity;
 import :Component;
+import :ScriptComponent; // releaseScriptArrays (module-linkage, declared next to the component)
 import :World;
 
 void registerScriptDslBindings()

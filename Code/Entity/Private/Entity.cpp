@@ -338,38 +338,6 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
     }
 }
 
-void Entity::serializeComponent(EComponentID id, AssetNode& out)
-{
-    switch (id)
-    {
-    case EComponentID_Scene:  getComponent<SceneComponent>(this)->serialize(out);   break;
-    case EComponentID_Render: getComponent<RenderComponent>(this)->serialize(out);   break;
-    case EComponentID_Animator: getComponent<AnimatorComponent>(this)->serialize(out); break;
-    case EComponentID_Physics: getComponent<PhysicsComponent>(this)->serialize(out);  break;
-    case EComponentID_Audio:  getComponent<AudioComponent>(this)->serialize(out);    break;
-    case EComponentID_Particle: getComponent<ParticleComponent>(this)->serialize(out); break;
-    case EComponentID_Force:  getComponent<ForceComponent>(this)->serialize(out);    break;
-    case EComponentID_Script: getComponent<ScriptComponent>(this)->serialize(out);   break;
-    default: break;
-    }
-}
-
-void Entity::deserializeComponent(EComponentID id, const AssetNode& in)
-{
-    switch (id)
-    {
-    case EComponentID_Scene:  getComponent<SceneComponent>(this)->deserialize(in);   break;
-    case EComponentID_Render: getComponent<RenderComponent>(this)->deserialize(in);   break;
-    case EComponentID_Animator: getComponent<AnimatorComponent>(this)->deserialize(in); break;
-    case EComponentID_Physics: getComponent<PhysicsComponent>(this)->deserialize(in);  break;
-    case EComponentID_Audio:  getComponent<AudioComponent>(this)->deserialize(in);    break;
-    case EComponentID_Particle: getComponent<ParticleComponent>(this)->deserialize(in); break;
-    case EComponentID_Force:  getComponent<ForceComponent>(this)->deserialize(in);    break;
-    case EComponentID_Script: getComponent<ScriptComponent>(this)->deserialize(in);   break;
-    default: break;
-    }
-}
-
 static bool isSelfOrDescendant(Entity* node, Entity* ancestor)
 {
     for (Entity* p = node; p; p = p->parent)

@@ -33,7 +33,6 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
         AssetNode comp;
         comp.key = "Component";
         comp.values.emplace_back(componentTypeName(id));
-        entity->serializeComponent(id, comp); // appends overridable variables as children
 
         if (id == EComponentID_Render)
         {
