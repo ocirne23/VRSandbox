@@ -7,6 +7,7 @@ module Procedural;
 import Core;
 import Core.Log;
 import Threading;
+import Profiling;
 import :GeneratorV3;
 import :Noise;
 import :Diffusion.Laplacian;
@@ -472,6 +473,7 @@ namespace Procedural
 
 			void loadWorker()
 			{
+				Globals::profiler.registerThread("V3 Loader", Profiler::SORT_KEY_BACKGROUND + 2);
 				setStatus("Locating models...");
 				if (!m_assets.load(EAssetSet::Full))
 				{

@@ -7,6 +7,7 @@ module Threading;
 import Core;
 import Core.Log;
 import Core.Windows;
+import Profiling;
 
 // FIBER_FLAG_FLOAT_SWITCH: a macro in winbase.h, doesn't cross the header-unit boundary.
 static constexpr DWORD FiberFlagFloatSwitch = 0x1;
@@ -196,6 +197,14 @@ void JobSystem::workerMain(uint32 contextIndex)
 {
     WorkerContext& ctx = m_contexts[contextIndex];
     t_worker = &ctx;
+    // Eager profiler registration with the worker's own name: initialize()'s SetThreadDescription on
+    // our handle races this thread's first job, and lazy first-scope registration would both read
+    // that name too early AND bill its one-time cost to whatever scope happens to fire first.
+    char profileName[16] = "JobWorker";
+    profileName[9] = char('0' + (contextIndex - 1) / 10);
+    profileName[10] = char('0' + (contextIndex - 1) % 10);
+    profileName[11] = 0;
+    Globals::profiler.registerThread(profileName, Profiler::SORT_KEY_WORKER + (contextIndex - 1));
     ctx.schedulerFiber = ConvertThreadToFiberEx(nullptr, FiberFlagFloatSwitch);
     for (;;)
     {
@@ -683,6 +692,7 @@ void JobSystem::queueTimed(Job* job, double delaySec)
 
 void JobSystem::timerMain()
 {
+    Globals::profiler.registerThread("JobTimer", Profiler::SORT_KEY_BACKGROUND + 3);
     std::unique_lock lock(m_timedMutex);
     while (m_running.load(std::memory_order_relaxed))
     {

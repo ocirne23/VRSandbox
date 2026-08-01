@@ -13,9 +13,11 @@ import Core.Tweaks;
 import Core.Log;
 
 import File;
+import Profiling;
 
 import :RenderNode;
 import :VK;
+import :GpuProfiler;
 import :Allocator;
 import :StagingManager;
 import :TextureManager;
@@ -129,6 +131,8 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
 
     m_swapChain.initialize(m_surface, RendererVKLayout::NUM_FRAMES_IN_FLIGHT, m_vsyncEnabled);
     m_viewportRect.max = glm::ivec2(m_swapChain.getLayout().extent.width, m_swapChain.getLayout().extent.height);
+
+    m_gpuProfiler.initialize(); // needs the device; Globals::profiler was initialized in main before us
 
     Globals::stagingManager.initialize();
     Globals::textureStreamer.initialize();
@@ -511,11 +515,18 @@ const Frustum& Renderer::beginFrame(const Camera& cameraIn, const Rect& viewport
     // invisible while per-frame data is byte-identical, but LOD switches change instance meshIdx en
     // masse and the torn instance/prefix data made the cull's buckets overflow into neighbouring
     // meshes' draw ranges (one-frame flashes with foreign materials).
-    if (!m_swapChain.waitForFrame(m_swapChain.getCurrentFrameIndex()))
     {
-		Log::error("Renderer: failed to wait for frame, recreating swapchain");
-        recreateSwapchain();
+        // GPU-bound frames show up here: the CPU waiting for the frame slot's fence.
+        ProfileScope profileScope("Fence wait", EProfileCategory::Wait);
+        if (!m_swapChain.waitForFrame(m_swapChain.getCurrentFrameIndex()))
+        {
+            Log::error("Renderer: failed to wait for frame, recreating swapchain");
+            recreateSwapchain();
+        }
     }
+
+    // This slot's fence is waited, so its previous submission's GPU timestamps have landed.
+    m_gpuProfiler.collect(m_swapChain.getCurrentFrameIndex());
 
     Globals::openXR.pollEvents();
 
@@ -1200,6 +1211,7 @@ void Renderer::present()
     assert(frameData.mappedFirstInstances.size() >= m_meshInfoCounter);
     assert(m_renderNodeTransforms.size() == 0 || Globals::textureManager.getNumTextures() > 0 && "Attempting to render object without any textures loaded!");
 
+    ProfileScope uploadScope("Per-frame uploads", EProfileCategory::Renderer);
     // Sparse transform upload: only slots that changed since this frame-in-flight last consumed
     // them, gathered from every worker's dirty list.
     Globals::renderNodeDirtyLists.forEach([&](std::array<std::vector<uint32>, RendererVKLayout::NUM_FRAMES_IN_FLIGHT>& lists)
@@ -1283,11 +1295,15 @@ void Renderer::present()
     m_indirectCullComputePipeline.update(frameIdx, m_meshInstanceCounter);
     m_skinningComputePipeline.update(frameIdx, m_skinningPalettes, m_skinningJobs);
     m_lightGridComputePipeline.update(frameIdx, m_lightCounter);
+    uploadScope.stop();
 
-    // Texture streaming step: folds this frame's priority pass, issues/completes mip streaming ops.
-    // Must run before the staging update so stream-in uploads join this frame's staging batch.
-    Globals::textureStreamer.update();
-    Globals::meshStreamer.update();
+    {
+        // Texture streaming step: folds this frame's priority pass, issues/completes mip streaming ops.
+        // Must run before the staging update so stream-in uploads join this frame's staging batch.
+        ProfileScope profileScope("Streamers", EProfileCategory::Renderer);
+        Globals::textureStreamer.update();
+        Globals::meshStreamer.update();
+    }
 
     // Catch texture-array growth from containers loaded AFTER beginFrame (terrain streaming, mid-frame
     // spawns): without this, this frame's record writes past the descriptor capacity beginFrame sized.
@@ -1309,24 +1325,40 @@ void Renderer::present()
         // A container was destroyed this frame; its textures may still be sampled by an in-flight frame,
         // so drain before freeing them. Their bindless slots rewrite to the fallback in recordCommandBuffers
         // below, before anything is submitted.
+        ProfileScope profileScope("Texture free drain", EProfileCategory::Wait);
         auto waitResult = Globals::device.getGraphicsQueue().waitIdle();
         assert(waitResult == vk::Result::eSuccess && "Failed to wait for device idle before freeing textures");
         processPendingTextureFrees();
     }
 
-    vk::Semaphore waitSemaphore = Globals::stagingManager.update();
+    vk::Semaphore waitSemaphore;
+    {
+        ProfileScope profileScope("Staging", EProfileCategory::Renderer);
+        waitSemaphore = Globals::stagingManager.update();
+    }
     if (waitSemaphore != VK_NULL_HANDLE)
 		frameData.primaryCommandBuffer.addWaitSemaphore(waitSemaphore, vk::PipelineStageFlagBits::eAllCommands); // eAllCommands (not just transfer) for GI BLAS
 
-    if (!m_swapChain.acquireNextImage())
     {
-        Globals::openXR.endFrame(nullptr, nullptr, {}, vk::ImageLayout::eUndefined); // balance the begun XR frame
-        recreateSwapchain();
-        return;
+        // Can block on the presentation engine (vsync backpressure lands here or in the fence wait).
+        ProfileScope profileScope("Acquire image", EProfileCategory::Wait);
+        if (!m_swapChain.acquireNextImage())
+        {
+            Globals::openXR.endFrame(nullptr, nullptr, {}, vk::ImageLayout::eUndefined); // balance the begun XR frame
+            recreateSwapchain();
+            return;
+        }
     }
-    recordCommandBuffers();
+    {
+        ProfileScope profileScope("Record command buffers", EProfileCategory::Renderer);
+        recordCommandBuffers();
+    }
 
-    m_swapChain.submitCommandBuffer(getCurrentCommandBuffer());
+    m_gpuProfiler.onSubmit(frameIdx); // CPU-time anchor for the GPU timeline fallback
+    {
+        ProfileScope profileScope("Submit", EProfileCategory::Renderer);
+        m_swapChain.submitCommandBuffer(getCurrentCommandBuffer());
+    }
     // The reset actually reached the GPU with this submission; until here any early-out above
     // (acquire failure -> recreateSwapchain return) keeps it pending for the next frame.
     if (particleResetCarried)
@@ -1337,9 +1369,12 @@ void Renderer::present()
 
     Globals::openXR.endFrame(m_eyeColorImage[0], m_eyeColorImage[1], m_swapChain.getLayout().extent, vk::ImageLayout::ePresentSrcKHR);
 
-    if (!m_swapChain.present())
     {
-        recreateSwapchain();
+        ProfileScope profileScope("Queue present", EProfileCategory::Wait);
+        if (!m_swapChain.present())
+        {
+            recreateSwapchain();
+        }
     }
 }
 
@@ -2722,6 +2757,10 @@ void Renderer::recordCommandBuffers()
 
     CommandBuffer& commandBuffer = frameData.primaryCommandBuffer;
     vk::CommandBuffer vkCommandBuffer = commandBuffer.begin(true);
+    // GPU pass timings: timestamps live in the primary (re-recorded every frame) and OUTSIDE render
+    // passes only; results are collected in beginFrame when this slot's fence is next waited.
+    m_gpuProfiler.beginRecord(vkCommandBuffer, frameIdx);
+    m_gpuProfiler.beginScope(vkCommandBuffer, "GPU Frame");
     // Pending baked-map uploads (fog terrain cascades): copied here in the primary (re-recorded
     // every frame) because the destination ping-pong images were sampled by older submissions — the
     // transitions need an execution dependency on those reads, which the StagingManager's fresh-image
@@ -2742,33 +2781,52 @@ void Renderer::recordCommandBuffers()
         // Skin first: deforms skinned meshes into their output vertex regions, which the cull / G-buffer /
         // forward / shadow passes then consume as ordinary static geometry.
         if (!m_skinningJobs.empty())
+        {
+            m_gpuProfiler.beginScope(vkCommandBuffer, "Skinning");
             vkCommandBuffer.executeCommands(1, &vkSkinningCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
+        }
         // FFT ocean simulation (spectrum -> IFFT -> maps + mips); the G-buffer/forward vertex shaders and
         // the ocean fragment shader sample the maps. Skipped entirely while no ocean is active (the maps
         // rest in SHADER_READ_ONLY, so the samplers stay valid).
         if (m_oceanParams.enabled)
+        {
+            m_gpuProfiler.beginScope(vkCommandBuffer, "Ocean sim");
             vkCommandBuffer.executeCommands(1, &vkOceanSimCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
+        }
+        m_gpuProfiler.beginScope(vkCommandBuffer, "Indirect cull");
         vkCommandBuffer.executeCommands(1, &vkIndirectCullCommandBuffer);
+        m_gpuProfiler.endScope(vkCommandBuffer);
+        m_gpuProfiler.beginScope(vkCommandBuffer, "Light grid");
         vkCommandBuffer.executeCommands(1, &vkLightGridCommandBuffer);
+        m_gpuProfiler.endScope(vkCommandBuffer);
         // Forcefield grid build + force/query compute (Force library readbacks land ~2 frames later).
         if (m_forceFieldParams.enabled)
         {
             vk::CommandBuffer vkForceComputeCommandBuffer = frameData.forceComputeCommandBuffer.getCommandBuffer();
+            m_gpuProfiler.beginScope(vkCommandBuffer, "Force compute");
             vkCommandBuffer.executeCommands(1, &vkForceComputeCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
         }
         // Particle emit/simulate (outside any render pass; reads LAST frame's G-buffer for collision,
         // writes the alive list + indirect draw args the in-pass billboard draw consumes).
         if (m_particlesEnabled)
         {
             vk::CommandBuffer vkParticleSimCommandBuffer = frameData.particleSimCommandBuffer.getCommandBuffer();
+            m_gpuProfiler.beginScope(vkCommandBuffer, "Particle sim");
             vkCommandBuffer.executeCommands(1, &vkParticleSimCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
         }
         // RT sun shadows replace the cascades entirely (forward pass traces, GI uses per-probe sun rays),
         // so skip the shadow cull + cascade render. The primary CB is re-recorded every frame, so the
         // toggle takes effect immediately; the cached secondary CBs just go unexecuted.
         if (!m_rtParams.rtSunShadow)
         {
+            m_gpuProfiler.beginScope(vkCommandBuffer, "Shadow cull");
             vkCommandBuffer.executeCommands(1, &vkShadowCullCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
+            m_gpuProfiler.beginScope(vkCommandBuffer, "Shadow draw");
 
             ShadowMap& shadowMap = frameData.shadowMap;
             vk::ClearValue shadowClear;
@@ -2783,6 +2841,7 @@ void Renderer::recordCommandBuffers()
             vkCommandBuffer.beginRenderPass(shadowRpBegin, vk::SubpassContents::eSecondaryCommandBuffers);
             vkCommandBuffer.executeCommands(1, &vkShadowDrawCommandBuffer);
             vkCommandBuffer.endRenderPass();
+            m_gpuProfiler.endScope(vkCommandBuffer);
         }
         SceneColor& sceneColor = frameData.sceneColor;
         GBuffer& gbuffer = frameData.gbuffer;
@@ -2798,12 +2857,19 @@ void Renderer::recordCommandBuffers()
             // ---- VR: per-eye screen-space chain (gbuffer -> AO -> forward+fog -> TAA), recorded inline ----
             // GI (TLAS build + probe trace) and fog scatter/integrate are shared (built once for the centre
             // view); each eye's gbuffer/AO/forward/TAA then runs against its own images.
+            m_gpuProfiler.beginScope(vkCommandBuffer, "GI");
             vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
             if (m_fogParams.enabled)
+            {
+                m_gpuProfiler.beginScope(vkCommandBuffer, "Volumetric fog");
                 vkCommandBuffer.executeCommands(1, &vkVolumetricFogCommandBuffer);
+                m_gpuProfiler.endScope(vkCommandBuffer);
+            }
 
             for (uint32 eye = 0; eye < m_sceneViewCount; ++eye)
             {
+                m_gpuProfiler.beginScope(vkCommandBuffer, eye == 0 ? "Eye L" : "Eye R");
                 { // G-buffer prepass for this eye (layer eye)
                     const vk::RenderPassBeginInfo gbufferRpBegin{
                         .renderPass = gbuffer.getRenderPass(),
@@ -2865,10 +2931,14 @@ void Renderer::recordCommandBuffers()
                 };
                 vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &colorToTaa });
                 recordTaaInto(commandBuffer, frameIdx, eye); // resolve into this eye's history
+                m_gpuProfiler.endScope(vkCommandBuffer);
             }
 
             // Eye adaptation samples the left eye's resolved colour (shared exposure, no per-eye flicker).
+            m_gpuProfiler.beginScope(vkCommandBuffer, "Eye adaptation");
             vkCommandBuffer.executeCommands(1, &vkEyeAdaptCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
+            m_gpuProfiler.beginScope(vkCommandBuffer, "VR composite");
 
             // Tonemap each eye's TAA-resolved colour into its LDR composite target (copied into the OpenXR
             // eye swapchains in present()). TAA left the resolved images in GENERAL with a write->read barrier.
@@ -2899,10 +2969,12 @@ void Renderer::recordCommandBuffers()
                 m_compositePipeline.record(commandBuffer, eyeComposite);
                 vkCommandBuffer.endRenderPass();
             }
+            m_gpuProfiler.endScope(vkCommandBuffer); // VR composite
         }
         else
         {
             { // Depth + world-normal G-buffer prepass (camera view)
+                m_gpuProfiler.beginScope(vkCommandBuffer, "G-buffer");
                 const vk::RenderPassBeginInfo gbufferRpBegin{
                     .renderPass = gbuffer.getRenderPass(),
                     .framebuffer = gbuffer.getFramebuffer(),
@@ -2914,20 +2986,32 @@ void Renderer::recordCommandBuffers()
                 if (m_meshInfoCounter > 0)
                     vkCommandBuffer.executeCommands(1, &vkGbufferCommandBuffer);
                 vkCommandBuffer.endRenderPass();
+                m_gpuProfiler.endScope(vkCommandBuffer);
             }
+            m_gpuProfiler.beginScope(vkCommandBuffer, "GI");
             vkCommandBuffer.executeCommands(1, &vkGlobalIllumCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
             if (m_rtaoParams.enabled)
+            {
+                m_gpuProfiler.beginScope(vkCommandBuffer, "RTAO");
                 vkCommandBuffer.executeCommands(1, &vkAoCommandBuffer);
+                m_gpuProfiler.endScope(vkCommandBuffer);
+            }
             // Fog scatter/integrate compute; the primary is re-recorded every frame, so the enable toggle
             // takes effect immediately (the integrated grid was cleared to "no fog" at init when disabled).
             if (m_fogParams.enabled)
+            {
+                m_gpuProfiler.beginScope(vkCommandBuffer, "Volumetric fog");
                 vkCommandBuffer.executeCommands(1, &vkVolumetricFogCommandBuffer);
+                m_gpuProfiler.endScope(vkCommandBuffer);
+            }
             m_staticMeshGraphicsPipeline.updateAODescriptor(frameData.staticMeshPipelineDescriptorSet[0].getDescriptorSet(), m_rtaoPipeline.getAOView(frameIdx, 0), m_rtaoPipeline.getAOSampler());
             if (tlas)
                 m_staticMeshGraphicsPipeline.updateTlasDescriptor(frameData.staticMeshPipelineDescriptorSet[0].getDescriptorSet(), tlas);
 
             // Depth-prepass reuse: the scene pass binds the G-buffer depth READ-ONLY; the explicit
             // barriers do the sampled<->attachment layout round-trip. Off = own cleared depth, rebuilt.
+            m_gpuProfiler.beginScope(vkCommandBuffer, "Scene forward");
             if (m_depthPrepassReuse)
                 recordReuseDepthBarrier(vkCommandBuffer, gbuffer.getDepthImage(), 0, true);
             const vk::RenderPassBeginInfo sceneRpBegin{
@@ -2966,6 +3050,7 @@ void Renderer::recordCommandBuffers()
             vkCommandBuffer.endRenderPass();
             if (m_depthPrepassReuse) // prepass depth back to sampled for TAA/fog/next-frame consumers
                 recordReuseDepthBarrier(vkCommandBuffer, gbuffer.getDepthImage(), 0, false);
+            m_gpuProfiler.endScope(vkCommandBuffer); // Scene forward
 
             // SceneColor's render pass has no 0->EXTERNAL dependency of its own (must stay dependency-identical
             // to the swapchain pass, see SceneColor.cpp), so its finalLayout->SHADER_READ_ONLY transition at
@@ -2984,9 +3069,13 @@ void Renderer::recordCommandBuffers()
                 .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
             };
             vkCommandBuffer.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &colorToTaaImg });
+            m_gpuProfiler.beginScope(vkCommandBuffer, "TAA");
             vkCommandBuffer.executeCommands(1, &vkTaaCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
             // Eye adaptation: reads the resolved colour (TAA barrier above), writes the exposure the composite reads.
+            m_gpuProfiler.beginScope(vkCommandBuffer, "Eye adaptation");
             vkCommandBuffer.executeCommands(1, &vkEyeAdaptCommandBuffer);
+            m_gpuProfiler.endScope(vkCommandBuffer);
         }
     }
 
@@ -2999,11 +3088,14 @@ void Renderer::recordCommandBuffers()
         .clearValueCount = (uint32)clearValues.size(),
         .pClearValues = clearValues.data(),
     };
+    m_gpuProfiler.beginScope(vkCommandBuffer, "Composite + UI");
     vkCommandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eSecondaryCommandBuffers);
     if (m_meshInstanceCounter > 0)
         vkCommandBuffer.executeCommands(1, &vkCompositeCommandBuffer);
     vkCommandBuffer.executeCommands(1, &vkImguiCommandBuffer);
     vkCommandBuffer.endRenderPass();
+    m_gpuProfiler.endScope(vkCommandBuffer);
+    m_gpuProfiler.endScope(vkCommandBuffer); // GPU Frame
     commandBuffer.end();
 }
 

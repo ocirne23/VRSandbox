@@ -6,6 +6,7 @@ module RendererVK;
 
 import Core;
 import Core.Tweaks;
+import Profiling;
 import :TextureStreamer;
 import :Device;
 import :Allocator;
@@ -69,6 +70,7 @@ void TextureStreamer::onGpuIdle()
 
 void TextureStreamer::workerRun(std::stop_token stopToken)
 {
+    Globals::profiler.registerThread("TexStream", Profiler::SORT_KEY_BACKGROUND + 0);
     for (;;)
     {
         StreamRequest request;
@@ -79,6 +81,7 @@ void TextureStreamer::workerRun(std::stop_token stopToken)
             request = std::move(m_requests.front());
             m_requests.pop_front();
         }
+        ProfileScope profileScope("Tex mip read", EProfileCategory::Renderer); // after the cv wait: measure the work, not the idle
 
         StreamCompletion completion;
         completion.texIdx = request.texIdx;

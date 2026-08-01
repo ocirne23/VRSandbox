@@ -8,6 +8,7 @@ import Core;
 import Core.glm;
 import Core.Camera;
 import Core.Frustum;
+import Profiling;
 
 // Shared hierarchical traversal: descend the per-level grids top-down through the occupancy
 // masks, classifying each cell's loose bounds (inflated by half a cell - entities extend at most
@@ -441,7 +442,10 @@ void SpatialIndex::markVisibleSphere(ESpatialPass pass, const glm::dvec3& center
 
 void SpatialIndex::update(const Camera& camera, const Frustum& frustum, const glm::mat4& viewProjRelCamera)
 {
-    commitFrame();              // applies cell moves queued during last frame's entity updates
+    {
+        ProfileScope profileScope("Spatial commit", EProfileCategory::Spatial);
+        commitFrame();          // applies cell moves queued during last frame's entity updates
+    }
     setCullMaxDist(camera.far); // cull to exactly the view distance, not a fixed cap
     if (m_culling.mode == int(ESpatialCullMode::Off) || m_culling.freeze)
         return;
@@ -453,6 +457,7 @@ void SpatialIndex::update(const Camera& camera, const Frustum& frustum, const gl
     IOcclusionTester* occlusion = nullptr;
     if (Globals::occlusionBuffer.isEnabled())
     {
+        ProfileScope profileScope("Occlusion raster", EProfileCategory::Spatial);
         // The renderer's projection is REVERSED-Z; flip the z row back to standard orientation
         // (z' = w - z) so the rasterizer's internal comparisons keep their meaning.
         glm::mat4 standardZ = viewProjRelCamera;
@@ -464,8 +469,11 @@ void SpatialIndex::update(const Camera& camera, const Frustum& frustum, const gl
 
     // Terrain chunks ride the Main stamp too (TerrainStreamer registers them on their own layer);
     // they skip the Near ball - main-culled terrain keeps its shadow/GI passes unconditionally.
-    markVisibleSet(ESpatialPass::Main, cullFrustum, cameraPos, m_culling.maxDist + m_culling.margin,
-        SpatialLayer_Render | SpatialLayer_Terrain, occlusion);
+    {
+        ProfileScope profileScope("Mark visible", EProfileCategory::Spatial);
+        markVisibleSet(ESpatialPass::Main, cullFrustum, cameraPos, m_culling.maxDist + m_culling.margin,
+            SpatialLayer_Render | SpatialLayer_Terrain, occlusion);
+    }
 
     // The Near ball barely changes frame to frame: inflate it by the slack and requery only once the
     // camera has moved that far. The frame cap keeps off-screen MOVERS from staying unstamped too long

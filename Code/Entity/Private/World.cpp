@@ -8,6 +8,7 @@ import Core.Rect;
 import Core.Transform;
 import Core.Tweaks;
 import Threading;
+import Profiling;
 
 import RendererVK;
 import :Entity;
@@ -48,6 +49,10 @@ void World::update(Renderer& renderer, float deltaSeconds)
         Globals::jobSystem.parallelFor(0, uint32(m_updateLevel.size()), m_updateCost,
             [this, &renderer, deltaSeconds](uint32 begin, uint32 end)
             {
+                // Per-chunk (not per-entity: thousands of ~us records would flood the rings); safe
+                // because updateSelf never fiber-waits - everything it touches is the audited
+                // thread-safe inline set.
+                ProfileScope profileScope("Entity chunk", EProfileCategory::Entity);
                 EntityUpdateStaging& staging = m_updateStaging.local();
                 for (uint32 i = begin; i < end; ++i)
                 {
@@ -56,12 +61,15 @@ void World::update(Renderer& renderer, float deltaSeconds)
                 }
             });
 
-        m_updateLevel.clear();
-        m_updateStaging.forEach([this](EntityUpdateStaging& staging)
-            {
-                m_updateLevel.insert(m_updateLevel.end(), staging.children.begin(), staging.children.end());
-                staging.children.clear();
-            });
+        {
+            ProfileScope profileScope("Level merge", EProfileCategory::Entity);
+            m_updateLevel.clear();
+            m_updateStaging.forEach([this](EntityUpdateStaging& staging)
+                {
+                    m_updateLevel.insert(m_updateLevel.end(), staging.children.begin(), staging.children.end());
+                    staging.children.clear();
+                });
+        }
     }
 }
 

@@ -69,6 +69,14 @@ bool Device::initialize()
         return false;
     }
 
+    // Optional: calibrated timestamps let the GpuProfiler place GPU pass timings on the CPU timeline
+    // exactly (it falls back to submit-time anchoring without them).
+    if (supportsExtensions({ vk::KHRCalibratedTimestampsExtensionName }))
+    {
+        deviceExtensions.push_back(vk::KHRCalibratedTimestampsExtensionName);
+        m_supportsCalibratedTimestamps = true;
+    }
+
     m_graphicsQueueIndex = UINT32_MAX;
     std::vector<vk::QueueFamilyProperties> queueFamilyProperties = m_physicalDevice.getQueueFamilyProperties();
     for (uint32 i = 0; i < queueFamilyProperties.size(); i++)
@@ -233,6 +241,9 @@ bool Device::initialize()
     pfVkCreateIndirectExecutionSetEXT = (PFN_vkCreateIndirectExecutionSetEXT)m_device.getProcAddr("vkCreateIndirectExecutionSetEXT");
     pfVkDestroyIndirectExecutionSetEXT = (PFN_vkDestroyIndirectExecutionSetEXT)m_device.getProcAddr("vkDestroyIndirectExecutionSetEXT");
     pfVkUpdateIndirectExecutionSetPipelineEXT = (PFN_vkUpdateIndirectExecutionSetPipelineEXT)m_device.getProcAddr("vkUpdateIndirectExecutionSetPipelineEXT");
+
+    if (m_supportsCalibratedTimestamps)
+        pfVkGetCalibratedTimestampsKHR = (PFN_vkGetCalibratedTimestampsKHR)m_device.getProcAddr("vkGetCalibratedTimestampsKHR");
 
     pfVkGetAccelerationStructureBuildSizesKHR = (PFN_vkGetAccelerationStructureBuildSizesKHR)m_device.getProcAddr("vkGetAccelerationStructureBuildSizesKHR");
     pfVkCreateAccelerationStructureKHR = (PFN_vkCreateAccelerationStructureKHR)m_device.getProcAddr("vkCreateAccelerationStructureKHR");

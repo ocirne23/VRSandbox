@@ -6,6 +6,7 @@ module RendererVK;
 
 import Core;
 import Core.glm;
+import Profiling;
 import Core.Tweaks;
 import Core.Log;
 import :MeshStreamer;
@@ -136,6 +137,7 @@ void MeshStreamer::unregisterSets(uint32 firstMeshInfoIdx, uint32 count)
 // main thread only has to allocate ranges and hand the buffers to the staging manager.
 void MeshStreamer::workerRun(std::stop_token stopToken)
 {
+    Globals::profiler.registerThread("MeshStream", Profiler::SORT_KEY_BACKGROUND + 1);
     std::vector<glm::vec3> attributes[5];
     for (;;)
     {
@@ -147,6 +149,7 @@ void MeshStreamer::workerRun(std::stop_token stopToken)
             request = std::move(m_requests.front());
             m_requests.pop_front();
         }
+        ProfileScope profileScope("Mesh re-stream", EProfileCategory::Renderer); // after the cv wait: measure the work, not the idle
 
         StreamInCompletion completion;
         completion.setIdx = request.setIdx;

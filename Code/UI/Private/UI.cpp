@@ -14,6 +14,7 @@ import :SceneView;
 import :PropertiesPanel;
 import :OutputLog;
 import :TweakPanel;
+import :ProfilerPanel;
 import :TextEditor;
 import :ScriptEditor;
 
@@ -116,6 +117,7 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, const Camera& camera
             ImGui::DockBuilderDockWindow("Stats",      dock_id_left_bottom);
             ImGui::DockBuilderDockWindow("Log",        dock_id_left_bottom);
             ImGui::DockBuilderDockWindow("Tweaks",     dock_id_left_bottom);
+            ImGui::DockBuilderDockWindow("Profiler",   dock_id_left_bottom);
             ImGui::DockBuilderDockWindow("Content",       dock_id_down);
             ImGui::DockBuilderDockWindow("Entity Editor",  dock_id_properties);
             ImGui::DockBuilderDockWindow("Script",        dock_id_up);
@@ -312,6 +314,12 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, const Camera& camera
     {
         if (ImGui::Begin("Log"))
             m_outputLog.render();
+        ImGui::End();
+    }
+
+    {
+        if (ImGui::Begin("Profiler"))
+            m_profilerPanel.render();
         ImGui::End();
     }
 

@@ -8,6 +8,7 @@ import Core;
 import Core.glm;
 import Core.Log;
 import Core.Tweaks;
+import Profiling;
 
 import :PhysicsWorld;
 import :Body;
@@ -136,7 +137,10 @@ void PhysicsWorld::update(double deltaSec, std::function<void(const ContactEvent
     // After the steps, so the wireframes match the poses the entities will render from this frame -- and
     // deliberately NOT gated on paused, since inspecting colliders with the simulation stopped is the point.
     if (m_debugDrawEnabled && m_debugLine && m_debugViewPos)
+    {
+        ProfileScope profileScope("Collider debug draw", EProfileCategory::Physics);
         debugDraw(m_debugViewPos(), m_debugLine);
+    }
 }
 
 void PhysicsWorld::stepSimulation(double deltaSec, const std::function<void(const ContactEvent&)>& contactCallback)
@@ -149,8 +153,12 @@ void PhysicsWorld::stepSimulation(double deltaSec, const std::function<void(cons
     int steps = 0;
     while (m_accumulator >= step && steps < maxCatchUpSteps)
     {
+        ProfileScope profileScope("Physics step", EProfileCategory::Physics);
         if (m_waterSurface)
+        {
+            ProfileScope buoyancyScope("Buoyancy", EProfileCategory::Physics);
             applyBuoyancy(); // box3d clears applied forces every step, so this runs per step
+        }
         b3World_Step(world, step, m_subSteps);
         ++m_stepCount;
         dispatchContactEvents(world, contactCallback);

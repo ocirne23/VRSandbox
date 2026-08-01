@@ -86,6 +86,15 @@ export extern "C" void vkUpdateIndirectExecutionSetPipelineEXT(VkDevice device, 
     pfVkUpdateIndirectExecutionSetPipelineEXT(device, indirectExecutionSet, executionSetWriteCount, pExecutionSetWrites);
 }
 
+// VK_KHR_calibrated_timestamps entrypoint (optional extension - GpuProfiler's GPU<->CPU timeline
+// alignment). Loaded in Device::initialize only when the extension is supported; guarded by
+// Device::supportsCalibratedTimestamps() before any call.
+export PFN_vkGetCalibratedTimestampsKHR pfVkGetCalibratedTimestampsKHR = nullptr;
+export extern "C" VkResult vkGetCalibratedTimestampsKHR(VkDevice device, uint32_t timestampCount, const VkCalibratedTimestampInfoKHR* pTimestampInfos, uint64_t* pTimestamps, uint64_t* pMaxDeviation)
+{
+    return pfVkGetCalibratedTimestampsKHR(device, timestampCount, pTimestampInfos, pTimestamps, pMaxDeviation);
+}
+
 // VK_KHR_acceleration_structure entrypoints. Like the DGC functions above, vulkan-1.lib's static
 // loader does not export these, so forward the global C symbols (called by vulkan.hpp's static
 // dispatcher) to function pointers loaded in Device::initialize.

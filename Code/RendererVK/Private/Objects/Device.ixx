@@ -22,6 +22,7 @@ public:
     uint32 getGraphicsQueueIndex() const { return m_graphicsQueueIndex; }
     vk::Queue getGraphicsQueue() const { return m_graphicsQueue; }
     bool supportsExtensions(std::vector<const char*> extensions);
+    bool supportsCalibratedTimestamps() const { return m_supportsCalibratedTimestamps; }
     vk::DeviceSize getNonCoherentAtomSize() const { return m_nonCoherentAtomSize; }
     const vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT& getDeviceGeneratedCommandsProperties() const { return m_deviceGeneratedCommandsProperties; }
 
@@ -34,6 +35,7 @@ private:
     uint32 m_graphicsQueueIndex;
     vk::Queue m_graphicsQueue;
     vk::DeviceSize m_nonCoherentAtomSize;
+    bool m_supportsCalibratedTimestamps = false;
     vk::PhysicalDeviceDeviceGeneratedCommandsPropertiesEXT m_deviceGeneratedCommandsProperties;
 
     std::vector<vk::Format> m_supported2DOptimalFormats;

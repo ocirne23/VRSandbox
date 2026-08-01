@@ -1,0 +1,71 @@
+export module UI:ProfilerPanel;
+
+import Core;
+import Profiling;
+
+// The Profiler window: frame-time graph (click a bar to pause + inspect that frame), a per-thread +
+// GPU flame timeline (wheel zoom, drag pan), and a sortable aggregate stats table. Purely a READER
+// of Globals::profiler - pausing here freezes the panel's snapshot, recording continues.
+export class ProfilerPanel
+{
+public:
+    void render();
+
+private:
+
+    struct TrackView
+    {
+        uint32 trackIdx = 0;
+        uint32 sortKey = 0;
+        const char* name = nullptr; // points at the ProfileTrack's stable name storage
+        uint32 maxDepth = 0;
+        double busyMs = 0.0; // depth-0 time inside the window
+        std::vector<ProfileRecord> records;
+    };
+    struct StatsRow
+    {
+        const char* name = nullptr;
+        uint8 category = 0;
+        uint32 calls = 0;
+        double totalMs = 0.0;
+        double selfMs = 0.0;
+    };
+    struct SmoothedRow
+    {
+        double totalMs = 0.0;
+        double selfMs = 0.0;
+        double calls = 0.0;
+        uint64 lastFrame = 0;
+    };
+
+    void refreshLive();
+    void selectFrame(uint64 frameIdx);
+    void snapshotTracks();
+    void drawToolbar();
+    void drawFrameGraph();
+    void drawTimeline();
+    void drawStatsTable();
+
+    // ---- displayed window ----
+    bool m_paused = false;
+    uint64 m_displayedFrame = 0;         // profiler frame index shown
+    uint64 m_windowStart = 0;            // ticks
+    uint64 m_windowEnd = 0;
+    std::vector<TrackView> m_tracks;
+
+    // ---- timeline view state (ms relative to m_windowStart) ----
+    double m_viewMin = 0.0;
+    double m_viewMax = 16.0;
+    bool m_userView = false;             // user zoomed/panned; stop auto-fitting
+    std::unordered_map<uint32, bool> m_collapsed; // per trackIdx
+
+    // ---- stats state ----
+    int m_trackFilter = -1;              // index into m_tracks, -1 = all
+    bool m_smooth = true;
+    char m_nameFilter[96] = {};
+    std::unordered_map<const char*, SmoothedRow> m_smoothed;
+
+    // scratch (persistent to avoid per-frame allocation)
+    std::vector<StatsRow> m_statsRows;
+    std::vector<uint64> m_childSumScratch;
+};

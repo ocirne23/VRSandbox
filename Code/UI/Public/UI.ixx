@@ -20,6 +20,7 @@ import :PropertiesPanel;
 import :EntityEditor;
 import :OutputLog;
 import :TweakPanel;
+import :ProfilerPanel;
 import :TextEditor;
 import Script;
 import :ScriptEditor;
@@ -129,6 +130,7 @@ private:
 	EntityEditor    m_entityEditor;
 	OutputLog       m_outputLog;
 	TweakPanel      m_tweakPanel;
+	ProfilerPanel   m_profilerPanel;
 	TextEditor      m_textEditor;
 	ScriptEditor    m_scriptEditor;
 };

@@ -12,6 +12,7 @@ import Threading;
 import :Layout;
 import :Instance;
 import :Device;
+import :GpuProfiler;
 import :OpenXRSession;
 import :Allocator;
 import :Surface;
@@ -557,6 +558,7 @@ private:
     Device m_device;
     Surface m_surface;
     SwapChain m_swapChain;
+    GpuProfiler m_gpuProfiler;
     RenderPass m_renderPass;
     Framebuffers m_framebuffers;
 	GpuCrashTracker m_gpuCrashTracker;

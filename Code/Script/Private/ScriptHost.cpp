@@ -8,6 +8,7 @@ module Script;
 import Core;
 import Core.Windows;
 import Core.Log;
+import Profiling;
 
 #ifdef SCRIPTS_STATIC
 // Cooked build: scripts compiled into the engine (App-Scripts aggregate) register their entry-point functions here
@@ -351,6 +352,9 @@ const ScriptModule* ScriptHost::getOrLoad(const std::string& path, bool forceRec
     auto it = scripts.find(key);
     if (it != scripts.end() && !forceRecompile)
         return &it->second.entries;
+
+    // Only actual (re)compiles/loads are recorded - the cached path above returns before this.
+    ProfileScope profileScope("Script compile", EProfileCategory::Script);
 
 #ifdef SCRIPTS_STATIC
     // Cooked build: the script is baked into the engine binary and self-registered — resolve it from the registry
