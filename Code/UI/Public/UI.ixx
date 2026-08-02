@@ -21,6 +21,7 @@ import :EntityEditor;
 import :OutputLog;
 import :TweakPanel;
 import :ProfilerPanel;
+import :MemoryPanel;
 import :TextEditor;
 import Script;
 import :ScriptEditor;
@@ -131,6 +132,7 @@ private:
 	OutputLog       m_outputLog;
 	TweakPanel      m_tweakPanel;
 	ProfilerPanel   m_profilerPanel;
+	MemoryPanel     m_memoryPanel;
 	TextEditor      m_textEditor;
 	ScriptEditor    m_scriptEditor;
 };

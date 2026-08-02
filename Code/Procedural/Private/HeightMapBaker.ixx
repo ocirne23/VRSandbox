@@ -481,6 +481,8 @@ export namespace Procedural
 				reachNow, reachOnNow, flowNow, flowOnNow, {} });
 			m_bakeInFlight = true;
 			Globals::jobSystem.submit([bake = m_bake]() {
+				ProfileScope profileScope("HeightMapBaker::update", EProfileCategory::Procedural);
+
 				const std::shared_ptr<const ITerrainSampler>& maps = bake->maps;
 				const glm::vec2 center = bake->center, ranges = bake->ranges;
 				const uint32 res = bake->res, numCascades = bake->numCascades, channels = bake->channels;

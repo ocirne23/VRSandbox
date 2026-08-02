@@ -1,12 +1,18 @@
-module Profiling;
+module Core.Profiler;
 
 import Core;
+import Core.Allocator;
 import Core.Windows;
 
 // The calling thread's track, set only by registerThread (registration is always explicit). Safe
 // under /GT because every access re-reads it through the accessor in the same call; the one hazard
 // (a ProfileScope spanning a fiber wait) is asserted in the scope destructor instead.
 static thread_local ProfileTrack* t_profileTrack = nullptr;
+
+Profiler::Profiler()
+{
+    initialize();
+}
 
 void Profiler::initialize()
 {
@@ -30,7 +36,64 @@ void Profiler::initialize()
     m_ticksPerMs = m_ticksPerQpc * (double)m_qpcFreq / 1000.0;
     m_msPerTick = 1.0 / m_ticksPerMs;
 
-    registerThread("Main", SORT_KEY_MAIN);
+    // Everything from here (the profiler constructs FIRST after the allocator) until
+    // endStaticInit() at the top of main() runs under a synthetic "Static init" scope: static
+    // initializers' allocations (Assimp schema tables, engine globals, ...) attribute to their own
+    // path instead of "<unscoped>", and the whole phase gets a timed record.
+    ProfileTrack* mainTrack = registerThread("Main", SORT_KEY_MAIN);
+    if (mainTrack != nullptr)
+    {
+        m_staticInitStart = tick();
+        mainTrack->m_openNames[0] = "Static init";
+        mainTrack->m_openCategories[0] = (uint8)EProfileCategory::Core;
+        mainTrack->m_openStarts[0] = m_staticInitStart;
+        mainTrack->m_openDepth = 1;
+    }
+}
+
+void Profiler::suspendScopes(ProfileScopeStack& out, uint32 baseDepth)
+{
+    ProfileTrack* track = threadTrack();
+    const uint64 now = tick();
+    assert(track->m_openDepth <= ProfileTrack::MAX_OPEN_DEPTH && "scopes past MAX_OPEN_DEPTH cannot migrate with a parking fiber");
+    const uint32 depth = std::min(track->m_openDepth, ProfileTrack::MAX_OPEN_DEPTH);
+    out.depth = 0;
+    for (uint32 i = baseDepth; i < depth; ++i)
+    {
+        out.names[out.depth] = track->m_openNames[i];
+        out.categories[out.depth] = track->m_openCategories[i];
+        out.depth++;
+        // Close this scope's current on-thread segment: the thread genuinely stops running it here.
+        track->push(track->m_openStarts[i], now, track->m_openNames[i], (uint16)i, (EProfileCategory)track->m_openCategories[i]);
+    }
+    track->m_openDepth = baseDepth;
+}
+
+uint32 Profiler::resumeScopes(const ProfileScopeStack& saved)
+{
+    ProfileTrack* track = threadTrack();
+    const uint64 now = tick();
+    const uint32 base = track->m_openDepth;
+    assert(base + saved.depth <= ProfileTrack::MAX_OPEN_DEPTH && "resumed fiber scopes overflow the open-scope stack");
+    for (uint32 i = 0; i < saved.depth && base + i < ProfileTrack::MAX_OPEN_DEPTH; ++i)
+    {
+        track->m_openNames[base + i] = saved.names[i];
+        track->m_openCategories[base + i] = saved.categories[i];
+        track->m_openStarts[base + i] = now; // fresh segment
+    }
+    track->m_openDepth = base + saved.depth;
+    return base;
+}
+
+void Profiler::endStaticInit()
+{
+    ProfileTrack* track = threadTrack();
+    if (track == nullptr || m_staticInitStart == 0)
+        return;
+    assert(track->m_openDepth == 1 && "endStaticInit: unbalanced scopes opened during static init");
+    track->m_openDepth = 0;
+    track->push(m_staticInitStart, tick(), "Static init", 0, EProfileCategory::Core);
+    m_staticInitStart = 0;
 }
 
 void Profiler::endFrame()
@@ -78,6 +141,11 @@ ProfileTrack* Profiler::createNamedTrack(const char* name, uint32 sortKey)
 
 ProfileTrack* Profiler::registerTrack(const char* name, uint32 threadId, uint32 sortKey)
 {
+    // The track + its ring are PERMANENT profiler infrastructure, and on a freshly registering
+    // thread they allocate before t_profileTrack exists - suppress the memory hooks so they don't
+    // land misattributed in "<other threads>"/"<unscoped>".
+    MemoryHookSuppress suppressTracking;
+
     while (m_registerLock.exchange(1, std::memory_order_acquire) != 0)
         std::this_thread::yield();
 

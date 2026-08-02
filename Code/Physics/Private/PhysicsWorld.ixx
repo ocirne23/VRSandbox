@@ -31,15 +31,33 @@ public:
                                // reference a recycled contact
     };
 
-    // Applies queued teleports, then runs the fixed-step accumulator: steps at stepHz with a bounded
-    // number of catch-up steps per frame. Also drains contact/sensor events (see getContactEvents)
-    // and advances the step counter. Also emits the collider wireframes, see setDebugDrawCallback.
+    // Applies queued body commands (teleports, velocities, impulses, ...), then runs the fixed-step
+    // accumulator: steps at stepHz with a bounded number of catch-up steps per frame. Also drains
+    // contact/sensor events (see getContactEvents) and advances the step counter. Also emits the
+    // collider wireframes, see setDebugDrawCallback.
     void update(double deltaSec, std::function<void(const ContactEvent&)> contactCallback);
 
     // Thread-safe absolute repositioning: queues the pose, applied at the start of the next update()
     // before any step. The only way to move a body. Requests apply in call order (last one for a body
     // wins) and are discarded if the body died before the drain.
     void teleportBody(const PhysicsBody& body, const glm::vec3& pos, const glm::quat& rot);
+
+    // Thread-safe DEFERRED body writes, same contract as teleportBody: queued, applied in call order
+    // at the start of the next update(), dropped if the body died. Every box3d body write can WAKE
+    // the body, which mutates the world's shared solver sets - never thread-safe off the main
+    // thread - so anything that can run on a job (the script thunks during the parallel entity
+    // pass) must go through here. Reads meanwhile still see the pre-write values (one frame of
+    // latency, like teleport). `a` is the velocity/impulse/force/torque, `b` the world-space point
+    // for the AtPoint variants.
+    enum class EBodyCommand : uint8
+    {
+        Teleport, SetLinearVelocity, SetAngularVelocity, ApplyImpulse, ApplyImpulseAtPoint,
+        ApplyAngularImpulse, ApplyForce, ApplyForceAtPoint, ApplyTorque,
+        SetGravityScale, SetLinearDamping, SetAngularDamping, SetAwake, // scalar in a.x
+        SetWorldGravity,
+    };
+    void queueBodyCommand(const PhysicsBody& body, EBodyCommand type, const glm::vec3& a, const glm::vec3& b = glm::vec3(0.0f));
+    void queueSetGravity(const glm::vec3& gravity); // world gravity via the same queue (no body)
 
     PhysicsBody createBody(const PhysicsBodyDesc& desc, std::span<const PhysicsShape> shapes);
 
@@ -112,19 +130,21 @@ public:
 private:
 
     void applyBuoyancy(); // per fixed step, before b3World_Step (box3d clears forces every step)
-    void applyQueuedTeleports(); // main thread, start of update
+    void applyQueuedCommands(); // main thread, start of update
     void stepSimulation(double deltaSec, const std::function<void(const ContactEvent&)>& contactCallback);
     void debugDraw(const glm::vec3& viewPos, const DebugLineFn& line); // driven by update(), see setDebugDrawCallback
 
-    struct TeleportRequest
+    struct BodyCommand
     {
-        uint64 bodyHandle = 0; // b3BodyId bits
-        glm::vec3 pos = glm::vec3(0.0f);
-        glm::quat rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        uint64 bodyHandle = 0; // b3BodyId bits (unused for SetWorldGravity)
+        EBodyCommand type = EBodyCommand::Teleport;
+        glm::vec3 a = glm::vec3(0.0f);   // pos / velocity / impulse / force / torque / gravity
+        glm::vec3 b = glm::vec3(0.0f);   // world point for the AtPoint variants
+        glm::quat rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // Teleport only
     };
-    std::mutex m_teleportMutex;
-    std::vector<TeleportRequest> m_teleports;
-    std::vector<TeleportRequest> m_teleportScratch; // swapped with m_teleports at drain, so neither reallocates
+    std::mutex m_commandMutex;
+    std::vector<BodyCommand> m_commands;
+    std::vector<BodyCommand> m_commandScratch; // swapped with m_commands at drain, so neither reallocates
 
     uint32 m_worldHandle = 0; // b3WorldId bits
     bool m_initialized = false;

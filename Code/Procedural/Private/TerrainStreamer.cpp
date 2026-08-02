@@ -393,6 +393,7 @@ namespace Procedural
 		// render with the flat-color fallback until updateTerrainTextures registers the finished set.
 		Globals::jobSystem.submit([this]
 		{
+			ProfileScope profileScope("TerrainStreamer::bakeTerrainTexCache", EProfileCategory::Procedural);
 			bakeTerrainTexCache(m_texBakeStop);
 			m_texBakeDone.store(!m_texBakeStop.load(std::memory_order_relaxed), std::memory_order_release);
 		}, EJobPriority::Low, &m_texBakeCounter, "terrainTexBake");
@@ -603,6 +604,8 @@ namespace Procedural
 	{
 		for (;;)
 		{
+			ProfileScope profileScope("TerrainStreamer::pumpJob", EProfileCategory::Procedural);
+
 			Request req;
 			bool haveWork = false;
 			{
@@ -694,10 +697,15 @@ namespace Procedural
 			res.lod = req.params.lod;
 			if (req.maps)
 			{
+				// generateChunk can fiber-park inside (V3 sampler JobMutex / per-tile JobEvent) - safe
+				// to scope since the JobSystem migrates the open-scope stack with the fiber; the
+				// timeline shows the on-thread segments, parked time is not counted.
+				ProfileScope genScope("TerrainStreamer::generateChunk", EProfileCategory::Procedural);
 				TerrainChunkMesh mesh;
 				generateChunk(*req.maps, req.params, mesh);
 				if (!mesh.indices.empty())
 				{
+					ProfileScope meshScope("TerrainStreamer::createMeshScene", EProfileCategory::Procedural); // pure, never parks
 					MeshGeometryDesc geom;
 					geom.positions = mesh.positions.data();
 					geom.normals = mesh.normals.data();

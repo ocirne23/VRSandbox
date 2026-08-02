@@ -7,7 +7,6 @@ module Threading;
 import Core;
 import Core.Log;
 import Core.Windows;
-import Profiling;
 
 // FIBER_FLAG_FLOAT_SWITCH: a macro in winbase.h, doesn't cross the header-unit boundary.
 static constexpr DWORD FiberFlagFloatSwitch = 0x1;
@@ -37,6 +36,8 @@ static void pushMust(MPMCQueue<T>& queue, const T& value)
 
 void JobSystem::initialize(const JobSystemDesc& desc)
 {
+    ProfileScope scope("JobSystem::initialize", EProfileCategory::Threading);
+
     assert(!isInitialized());
     const uint32 hardware = std::max(2u, std::thread::hardware_concurrency());
     m_numWorkers = desc.numWorkers ? desc.numWorkers : std::max(1u, hardware - 2);
@@ -94,6 +95,8 @@ void JobSystem::initialize(const JobSystemDesc& desc)
 
 void JobSystem::shutdown()
 {
+    ProfileScope scope("JobSystem::shutdown", EProfileCategory::Threading);
+
     if (!isInitialized() || !m_running.exchange(false))
         return;
     {
@@ -134,6 +137,8 @@ void JobSystem::shutdown()
 
 JobSystemStats JobSystem::getStats() const
 {
+    ProfileScope scope("JobSystem::getStats", EProfileCategory::Threading);
+
     JobSystemStats stats;
     stats.numWorkers = m_numWorkers;
     stats.numFibers = m_numFibers;
@@ -172,6 +177,18 @@ void JobSystem::runFiber(WorkerContext& ctx, Fiber* fiber)
 {
     assert(fiber->debugRunning.exchange(1, std::memory_order_acq_rel) == 0 && "fiber running on two workers");
     fiber->returnFiber = ctx.schedulerFiber;
+    // Profile scopes ride the fiber: a resumed park replays the scopes it suspended (possibly onto
+    // a different thread's track), a fresh job starts with none. profileBase remembers THIS
+    // thread's open depth so a later park strips only the fiber's own scopes.
+    if (fiber->state == Fiber::EState::Parked)
+    {
+        fiber->profileBase = Globals::profiler.resumeScopes(fiber->profileScopes);
+    }
+    else
+    {
+        fiber->profileScopes.depth = 0;
+        fiber->profileBase = Globals::profiler.threadTrack()->m_openDepth;
+    }
     fiber->state = Fiber::EState::Running;
     ctx.currentFiber = fiber;
     SwitchToFiber(fiber->handle);
@@ -205,6 +222,7 @@ void JobSystem::workerMain(uint32 contextIndex)
     profileName[10] = char('0' + (contextIndex - 1) % 10);
     profileName[11] = 0;
     Globals::profiler.registerThread(profileName, Profiler::SORT_KEY_WORKER + (contextIndex - 1));
+
     ctx.schedulerFiber = ConvertThreadToFiberEx(nullptr, FiberFlagFloatSwitch);
     for (;;)
     {
@@ -557,6 +575,9 @@ void JobSystem::fiberWait(JobCounter& counter, WorkerContext& ctx)
         return;
     }
     ctx.numParked++;
+    // Carry the open scopes with the fiber (closes their on-thread segments). Ordered before the
+    // switch-out, so switchDone's release publish covers the write for whoever resumes us.
+    Globals::profiler.suspendScopes(fiber->profileScopes, fiber->profileBase);
     SwitchToFiber(fiber->returnFiber);
     // resumed - possibly on a different worker thread - after the counter reached zero
 }
@@ -636,6 +657,8 @@ void JobSystem::lockJobMutexSlow(JobMutex& mutex)
             mutex.m_waiters = &node;
             mutex.m_listLock.store(0, std::memory_order_release);
             ctx->numParked++;
+            // Same scope migration as fiberWait: publication rides switchDone
+            Globals::profiler.suspendScopes(fiber->profileScopes, fiber->profileBase);
             SwitchToFiber(fiber->returnFiber);
             // resumed by an unlock (possibly on another worker); barging: retry the lock
         }

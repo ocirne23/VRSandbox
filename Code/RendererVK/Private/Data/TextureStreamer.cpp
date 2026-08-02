@@ -6,7 +6,6 @@ module RendererVK;
 
 import Core;
 import Core.Tweaks;
-import Profiling;
 import :TextureStreamer;
 import :Device;
 import :Allocator;
@@ -14,6 +13,15 @@ import :StagingManager;
 import :TextureManager;
 import :Texture;
 import :Layout;
+
+// StreamRequest carries an owned, null-terminated copy of the source path (unique_ptr<const char[]>)
+// instead of referencing the meta's std::string across the worker thread.
+static std::unique_ptr<const char[]> copyPathString(const std::string& path)
+{
+    std::unique_ptr<char[]> buffer = std::make_unique<char[]>(path.size() + 1);
+    memcpy(buffer.get(), path.c_str(), path.size() + 1);
+    return buffer;
+}
 
 bool TextureStreamer::initialize()
 {
@@ -71,6 +79,8 @@ void TextureStreamer::onGpuIdle()
 void TextureStreamer::workerRun(std::stop_token stopToken)
 {
     Globals::profiler.registerThread("TexStream", Profiler::SORT_KEY_BACKGROUND + 0);
+    //ProfileScope profileScope("TextureStreamer::workerRun", EProfileCategory::Renderer);
+
     for (;;)
     {
         StreamRequest request;
@@ -92,7 +102,7 @@ void TextureStreamer::workerRun(std::stop_token stopToken)
         completion.data = std::unique_ptr<uint8[]>(new uint8[request.byteCount]);
 
         FILE* pFile = nullptr;
-        fopen_s(&pFile, request.filePath.c_str(), "rb");
+        fopen_s(&pFile, request.filePath.get(), "rb");
         if (pFile)
         {
             completion.ok = _fseeki64(pFile, (int64)request.fileOffset, SEEK_SET) == 0
@@ -315,7 +325,7 @@ void TextureStreamer::issueOps()
                 .opId = state.opId,
                 .fileOffset = state.meta.mips[state.targetTop].fileOffset,
                 .byteCount = (uint32)readBytes,
-                .filePath = state.meta.filePath,
+                .filePath = copyPathString(state.meta.filePath),
             });
         }
         return true;

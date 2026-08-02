@@ -21,6 +21,42 @@ import Core;
 std::atomic<size_t> g_alignedAllocMemory = 0;
 export size_t getAlignedAllocatedSize() { return g_alignedAllocMemory.load(); }
 
+// Allocation tracking hooks (installed by the Memory library's MemoryTracker; Core stays
+// dependency-free). Called on EVERY allocate/deallocate that flows through the engine allocators
+// and the aligned operator new/delete paths - null until installed, one relaxed load + branch of
+// overhead. Contract: the alloc hook fires AFTER a successful allocation, the free hook BEFORE the
+// memory is actually released (so a recycled address can never race its own map entry). Hook
+// implementations must never allocate through these paths themselves.
+export using MemoryAllocHook = void(*)(void* ptr, size_t size);
+export using MemoryFreeHook = void(*)(void* ptr);
+export std::atomic<MemoryAllocHook> g_memoryAllocHook = nullptr;
+export std::atomic<MemoryFreeHook> g_memoryFreeHook = nullptr;
+
+// Per-thread hook suppression for tracking INFRASTRUCTURE allocations (a profiler track + its
+// ring is allocated on a freshly registered thread BEFORE that thread's TLS track pointer exists,
+// so tracking it would misfile permanent memory under "<other threads>"/"<unscoped>"). Only for
+// allocations that are never freed - a suppressed alloc that later frees unsuppressed is a
+// harmless map miss, but a tracked alloc freed under suppression would leak its counts.
+export inline thread_local int32 g_memoryHookSuppress = 0;
+export struct MemoryHookSuppress final
+{
+    MemoryHookSuppress() { ++g_memoryHookSuppress; }
+    ~MemoryHookSuppress() { --g_memoryHookSuppress; }
+};
+
+export inline void callMemoryAllocHook(void* ptr, size_t size)
+{
+    if (MemoryAllocHook hook = g_memoryAllocHook.load(std::memory_order_relaxed)) [[unlikely]]
+        if (g_memoryHookSuppress == 0)
+            hook(ptr, size);
+}
+export inline void callMemoryFreeHook(void* ptr)
+{
+    if (MemoryFreeHook hook = g_memoryFreeHook.load(std::memory_order_relaxed)) [[unlikely]]
+        if (g_memoryHookSuppress == 0)
+            hook(ptr);
+}
+
 export template<typename T, typename Alloc>
 class STLAllocator final
 {
@@ -39,7 +75,9 @@ public:
         else
         {
             g_alignedAllocMemory += n;
-            return reinterpret_cast<T*>(_aligned_malloc(n, alignof(T)));
+            T* p = reinterpret_cast<T*>(_aligned_malloc(n, alignof(T)));
+            callMemoryAllocHook(p, n);
+            return p;
         }
     }
     void deallocate(T* p, [[maybe_unused]] std::size_t n = 0)
@@ -48,6 +86,7 @@ public:
             m_allocator.deallocate((void*)p);
         else
         {
+            callMemoryFreeHook(p);
             g_alignedAllocMemory -= _aligned_msize(p, alignof(T), 0);
             _aligned_free(p);
         }
@@ -113,11 +152,13 @@ public:
         AllocationTail* pTail = (AllocationTail*)((uint8_t*)(pAllocation)+sizeWithHeader - sizeof(AllocationTail));
         pTail->checkVal = AllocationTail::CHECK;
 #endif
+        callMemoryAllocHook(pAllocation + 1, size);
         return pAllocation + 1;
     }
 
     virtual void deallocate(void* ptr)
     {
+        callMemoryFreeHook(ptr); // before the release: a recycled address must not race its own tracking entry
         AllocationHeader* pAllocation = static_cast<AllocationHeader*>(ptr) - 1;
 #ifdef TRACK_ALLOCATION_SIZE
         m_usedSize -= pAllocation->size;
@@ -212,6 +253,7 @@ public:
         AllocationTail* pTail = (AllocationTail*)((uint8_t*)(pAllocation + 1) + size);
         pTail->checkVal = AllocationTail::CHECK;
 #endif
+        callMemoryAllocHook(pAllocation + 1, size);
         return reinterpret_cast<void*>(pAllocation + 1);
     }
 
@@ -228,6 +270,7 @@ public:
 
     virtual void deallocate(void* ptr) override
     {
+        callMemoryFreeHook(ptr); // before the release: a recycled address must not race its own tracking entry
         AllocationHeader* pAllocation = reinterpret_cast<AllocationHeader*>(ptr) - 1;
         const size_t size = pAllocation->size;
 
@@ -557,7 +600,9 @@ void* operator new(std::size_t n, std::align_val_t align)
     else
     {
         g_alignedAllocMemory += n;
-        return _aligned_malloc(n, (size_t)align);
+        void* p = _aligned_malloc(n, (size_t)align);
+        callMemoryAllocHook(p, n);
+        return p;
     }
 }
 
@@ -573,7 +618,9 @@ void* operator new[](std::size_t n, std::align_val_t align)
     else
     {
         g_alignedAllocMemory += n;
-        return _aligned_malloc(n, (size_t)align);
+        void* p = _aligned_malloc(n, (size_t)align);
+        callMemoryAllocHook(p, n);
+        return p;
     }
 }
 
@@ -591,6 +638,7 @@ void operator delete(void* p, std::align_val_t align)
             return Globals::allocator.deallocate(p);
         else
         {
+            callMemoryFreeHook(p);
             g_alignedAllocMemory -= _aligned_msize(p, (size_t)align, 0);
             return _aligned_free(p);
         }
@@ -611,6 +659,7 @@ void operator delete[](void* p, std::align_val_t align)
             return Globals::allocator.deallocate(p);
         else
         {
+            callMemoryFreeHook(p);
             g_alignedAllocMemory -= _aligned_msize(p, (size_t)align, 0);
             return _aligned_free(p);
         }

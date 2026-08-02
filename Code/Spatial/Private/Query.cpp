@@ -8,7 +8,6 @@ import Core;
 import Core.glm;
 import Core.Camera;
 import Core.Frustum;
-import Profiling;
 
 // Shared hierarchical traversal: descend the per-level grids top-down through the occupancy
 // masks, classifying each cell's loose bounds (inflated by half a cell - entities extend at most

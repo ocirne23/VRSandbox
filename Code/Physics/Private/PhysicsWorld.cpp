@@ -8,7 +8,6 @@ import Core;
 import Core.glm;
 import Core.Log;
 import Core.Tweaks;
-import Profiling;
 
 import :PhysicsWorld;
 import :Body;
@@ -129,7 +128,7 @@ void PhysicsWorld::update(double deltaSec, std::function<void(const ContactEvent
     if (!m_initialized)
         return;
 
-    applyQueuedTeleports(); // before the paused check: placing a body is not simulation
+    applyQueuedCommands(); // before the paused check: placing a body / setting its state is authoring, not simulation
 
     if (!m_paused)
         stepSimulation(deltaSec, contactCallback);
@@ -173,23 +172,59 @@ void PhysicsWorld::teleportBody(const PhysicsBody& body, const glm::vec3& pos, c
 {
     if (!body.isValid())
         return;
-    const std::lock_guard<std::mutex> lock(m_teleportMutex);
-    m_teleports.push_back({ body.m_handle, pos, glm::normalize(rot) });
+    const std::lock_guard<std::mutex> lock(m_commandMutex);
+    m_commands.push_back(BodyCommand{ .bodyHandle = body.m_handle, .type = EBodyCommand::Teleport, .a = pos, .rot = glm::normalize(rot) });
 }
 
-void PhysicsWorld::applyQueuedTeleports()
+void PhysicsWorld::queueBodyCommand(const PhysicsBody& body, EBodyCommand type, const glm::vec3& a, const glm::vec3& b)
 {
-    m_teleportScratch.clear();
+    if (!body.isValid())
+        return;
+    const std::lock_guard<std::mutex> lock(m_commandMutex);
+    m_commands.push_back(BodyCommand{ .bodyHandle = body.m_handle, .type = type, .a = a, .b = b });
+}
+
+void PhysicsWorld::queueSetGravity(const glm::vec3& gravity)
+{
+    const std::lock_guard<std::mutex> lock(m_commandMutex);
+    m_commands.push_back(BodyCommand{ .type = EBodyCommand::SetWorldGravity, .a = gravity });
+}
+
+void PhysicsWorld::applyQueuedCommands()
+{
+    m_commandScratch.clear();
     {
-        const std::lock_guard<std::mutex> lock(m_teleportMutex);
-        m_teleportScratch.swap(m_teleports); // box3d runs outside the lock; producers keep queueing meanwhile
+        const std::lock_guard<std::mutex> lock(m_commandMutex);
+        m_commandScratch.swap(m_commands); // box3d runs outside the lock; producers keep queueing meanwhile
     }
 
-    for (const TeleportRequest& request : m_teleportScratch)
+    for (const BodyCommand& command : m_commandScratch)
     {
-        const b3BodyId id = toBodyId(request.bodyHandle);
-        if (b3Body_IsValid(id))
-            b3Body_SetTransform(id, toB3(request.pos), toB3(request.rot));
+        if (command.type == EBodyCommand::SetWorldGravity)
+        {
+            setGravity(command.a);
+            continue;
+        }
+        const b3BodyId id = toBodyId(command.bodyHandle);
+        if (!b3Body_IsValid(id)) // the body may have died since the queue call
+            continue;
+        switch (command.type)
+        {
+        case EBodyCommand::Teleport:            b3Body_SetTransform(id, toB3(command.a), toB3(command.rot)); break;
+        case EBodyCommand::SetLinearVelocity:   b3Body_SetLinearVelocity(id, toB3(command.a)); break;
+        case EBodyCommand::SetAngularVelocity:  b3Body_SetAngularVelocity(id, toB3(command.a)); break;
+        case EBodyCommand::ApplyImpulse:        b3Body_ApplyLinearImpulseToCenter(id, toB3(command.a), true); break;
+        case EBodyCommand::ApplyImpulseAtPoint: b3Body_ApplyLinearImpulse(id, toB3(command.a), toB3(command.b), true); break;
+        case EBodyCommand::ApplyAngularImpulse: b3Body_ApplyAngularImpulse(id, toB3(command.a), true); break;
+        case EBodyCommand::ApplyForce:          b3Body_ApplyForceToCenter(id, toB3(command.a), true); break;
+        case EBodyCommand::ApplyForceAtPoint:   b3Body_ApplyForce(id, toB3(command.a), toB3(command.b), true); break;
+        case EBodyCommand::ApplyTorque:         b3Body_ApplyTorque(id, toB3(command.a), true); break;
+        case EBodyCommand::SetGravityScale:     b3Body_SetGravityScale(id, command.a.x); break;
+        case EBodyCommand::SetLinearDamping:    b3Body_SetLinearDamping(id, command.a.x); break;
+        case EBodyCommand::SetAngularDamping:   b3Body_SetAngularDamping(id, command.a.x); break;
+        case EBodyCommand::SetAwake:            b3Body_SetAwake(id, command.a.x != 0.0f); break;
+        case EBodyCommand::SetWorldGravity:     break; // handled above
+        }
     }
 }
 

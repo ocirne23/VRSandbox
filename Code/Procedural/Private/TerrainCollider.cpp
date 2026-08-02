@@ -140,6 +140,8 @@ namespace Procedural
 		m_buildInFlight = true;
 		Globals::jobSystem.submit([this, maps, coord = bestCoord, key, generation, tileSize, res]()
 		{
+			ProfileScope profileScope("TerrainCollider::update", EProfileCategory::Procedural);
+
 			BuildResult out;
 			out.key = key;
 			out.coord = coord;

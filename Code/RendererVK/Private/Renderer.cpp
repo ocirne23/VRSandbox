@@ -13,7 +13,6 @@ import Core.Tweaks;
 import Core.Log;
 
 import File;
-import Profiling;
 
 import :RenderNode;
 import :VK;
@@ -46,6 +45,8 @@ Renderer::~Renderer()
 
 bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, EVr vr)
 {
+    ProfileScope scope("Renderer::initialize", EProfileCategory::Renderer);
+
     // Disable layers we don't care about for now to eliminate potential issues
     _putenv("DISABLE_LAYER_NV_OPTIMUS_1=True");
     _putenv("DISABLE_VULKAN_OW_OVERLAY_LAYER=True");

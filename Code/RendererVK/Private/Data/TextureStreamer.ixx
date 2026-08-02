@@ -141,7 +141,7 @@ private:
         uint32 opId = 0;
         uint64 fileOffset = 0;
         uint32 byteCount = 0;
-        std::string filePath;
+        std::unique_ptr<const char[]> filePath; // owned copy (null-terminated); the meta's string must not be referenced cross-thread
     };
     struct StreamCompletion
     {

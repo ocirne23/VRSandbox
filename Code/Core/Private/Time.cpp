@@ -17,6 +17,7 @@ static uint64 m_lastCheckedBucket = 0;
 
 void Time::addTimer(Timer* pTimer)
 {
+    ProfileScope scope("Timer::addTimer", EProfileCategory::Core);
     const auto currentTime = Globals::time.getCurrentTime();
     if (pTimer->m_endTime <= currentTime)
     {
@@ -46,6 +47,7 @@ void Time::addTimer(Timer* pTimer)
 
 void Time::removeTimer(Timer* pTimer) 
 {
+    ProfileScope scope("Timer::removeTimer", EProfileCategory::Core);
     const uint64 bucket = (uint64)std::chrono::duration_cast<std::chrono::seconds>(pTimer->m_endTime.time_since_epoch()).count();
     auto it = m_timerBuckets.find(bucket);
     if (it != m_timerBuckets.end())
@@ -68,6 +70,8 @@ void Time::removeTimer(Timer* pTimer)
 
 void Time::processTimers()
 {
+    ProfileScope scope("Timer::processTimers", EProfileCategory::Core);
+
     const auto currentTime = Globals::time.getCurrentTime();
     const uint64 currentBucket = (uint64)std::chrono::duration_cast<std::chrono::seconds>(currentTime.time_since_epoch()).count();
     for (uint64 bucket = m_lastCheckedBucket; bucket <= currentBucket; ++bucket)

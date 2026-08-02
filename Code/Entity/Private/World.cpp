@@ -8,7 +8,6 @@ import Core.Rect;
 import Core.Transform;
 import Core.Tweaks;
 import Threading;
-import Profiling;
 
 import RendererVK;
 import :Entity;
@@ -52,7 +51,7 @@ void World::update(Renderer& renderer, float deltaSeconds)
                 // Per-chunk (not per-entity: thousands of ~us records would flood the rings); safe
                 // because updateSelf never fiber-waits - everything it touches is the audited
                 // thread-safe inline set.
-                ProfileScope profileScope("Entity chunk", EProfileCategory::Entity);
+                ProfileScope profileScope("Entity Update", EProfileCategory::Entity);
                 EntityUpdateStaging& staging = m_updateStaging.local();
                 for (uint32 i = begin; i < end; ++i)
                 {

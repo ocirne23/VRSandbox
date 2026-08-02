@@ -974,7 +974,11 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         return (pc && pc->body.isValid()) ? pc : nullptr;
     }
 
-    void thunk_physicsSetGravity(glm::vec3 gravity) { Globals::physics.setGravity(gravity); }
+    // Scripts tick on WORKER threads during the parallel entity pass, and every box3d write can
+    // wake a body (mutating the world's shared solver sets - main-thread-only). So ALL box3d
+    // writes below queue through PhysicsWorld's command queue, applied at the start of the next
+    // physics.update() - one frame of latency, like teleport; reads meanwhile see pre-write values.
+    void thunk_physicsSetGravity(glm::vec3 gravity) { Globals::physics.queueSetGravity(gravity); }
 
     int thunk_physicsRayCast(glm::vec3 origin, glm::vec3 translation, glm::vec3* outPoint, glm::vec3* outNormal, float* outFraction)
     {
@@ -1184,14 +1188,16 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         return static_cast<PhysicsComponent*>(p)->body.getLinearVelocity(); 
     }
 
-    void thunk_physicsSetVelocity(void* p, glm::vec3 v) 
-    { 
-        static_cast<PhysicsComponent*>(p)->body.setLinearVelocity(v); 
+    void thunk_physicsSetVelocity(void* p, glm::vec3 v)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, v);
     }
 
-    void thunk_physicsApplyImpulse(void* p, glm::vec3 v) 
-    { 
-        static_cast<PhysicsComponent*>(p)->body.applyImpulse(v); 
+    void thunk_physicsApplyImpulse(void* p, glm::vec3 v)
+    {
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyImpulse, v);
     }
 
     void thunk_physicsTeleport(void* p, glm::vec3 position, glm::vec3 eulerDeg)
@@ -1212,37 +1218,37 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     void thunk_physicsSetAngularVelocity(void* p, glm::vec3 radiansPerSecond)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.setAngularVelocity(radiansPerSecond);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, radiansPerSecond);
     }
 
     void thunk_physicsApplyImpulseAtPoint(void* p, glm::vec3 impulse, glm::vec3 worldPoint)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.applyImpulseAtPoint(impulse, worldPoint);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyImpulseAtPoint, impulse, worldPoint);
     }
 
     void thunk_physicsApplyAngularImpulse(void* p, glm::vec3 impulse)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.applyAngularImpulse(impulse);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyAngularImpulse, impulse);
     }
 
     void thunk_physicsApplyForce(void* p, glm::vec3 force)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.applyForce(force);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyForce, force);
     }
 
     void thunk_physicsApplyForceAtPoint(void* p, glm::vec3 force, glm::vec3 worldPoint)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.applyForceAtPoint(force, worldPoint);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyForceAtPoint, force, worldPoint);
     }
 
     void thunk_physicsApplyTorque(void* p, glm::vec3 torque)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.applyTorque(torque);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyTorque, torque);
     }
 
     float thunk_physicsGetMass(void* p)
@@ -1278,7 +1284,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     void thunk_physicsSetGravityScale(void* p, float scale)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.setGravityScale(scale);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetGravityScale, glm::vec3(scale, 0.0f, 0.0f));
     }
 
     float thunk_physicsGetLinearDamping(void* p)
@@ -1290,7 +1296,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     void thunk_physicsSetLinearDamping(void* p, float damping)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.setLinearDamping(damping);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetLinearDamping, glm::vec3(damping, 0.0f, 0.0f));
     }
 
     float thunk_physicsGetAngularDamping(void* p)
@@ -1302,13 +1308,13 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     void thunk_physicsSetAngularDamping(void* p, float damping)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.setAngularDamping(damping);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetAngularDamping, glm::vec3(damping, 0.0f, 0.0f));
     }
 
     void thunk_physicsSetAwake(void* p, int awake)
     {
         if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
-            pc->body.setAwake(awake != 0);
+            Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetAwake, glm::vec3(awake != 0 ? 1.0f : 0.0f, 0.0f, 0.0f));
     }
 
     // ---- render component ----

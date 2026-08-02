@@ -23,6 +23,14 @@ struct Fiber
     EState state = EState::Idle;
     std::atomic<uint32> switchDone = 0;  // parked fiber has fully switched out; resumers spin on this
     std::atomic<uint32> debugRunning = 0; // debug-only tripwire: a fiber must never run on two workers
+
+    // Open profile scopes travel WITH the fiber across a park (saved on the parking thread before
+    // the switch-out, replayed by runFiber on whichever thread resumes it - see
+    // Profiler::suspendScopes/resumeScopes). profileBase is the resuming thread's own open depth
+    // at fiber entry: a later suspend strips only the scopes above it, leaving e.g. the main
+    // helper's outer scopes intact. Publication rides the existing switchDone protocol.
+    ProfileScopeStack profileScopes;
+    uint32 profileBase = 0;
 };
 
 struct alignas(64) WorkerContext

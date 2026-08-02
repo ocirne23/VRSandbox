@@ -20,7 +20,7 @@ import Physics;
 import Audio;
 import Spatial;
 import Threading;
-import Profiling;
+import Memory;
 
 import App.InputControls;
 import Procedural;
@@ -29,10 +29,13 @@ import Force;
 
 int main()
 {
+    Globals::profiler.endStaticInit(); // closes the "Static init" scope opened at the profiler's static-init construction; must precede any main() scope
+
+    ProfileScope initScope("main() initialize", EProfileCategory::App);
+
     FileSystem::initialize();
 
-    Profiler& profiler = Globals::profiler;
-    profiler.initialize(); // before anything spawns threads or profiles; registers this thread as "Main"
+    Profiler& profiler = Globals::profiler;  // Profiler + MemoryTracker self-initialize at static init
 
     Window window;
     window.initialize("Vulkan", glm::ivec2(5, 35), glm::ivec2(1920, 1080));
@@ -163,8 +166,12 @@ int main()
         return Timer::REPEAT;
     });
 
+    initScope.stop();
+
     while (running)
     {
+        ProfileScope mainLoopScope("main loop", EProfileCategory::App);
+
         Globals::time.update();
         const double deltaSec = Globals::time.getDeltaSec();
 

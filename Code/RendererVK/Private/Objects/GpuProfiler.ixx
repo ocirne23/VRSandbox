@@ -1,7 +1,6 @@
 export module RendererVK:GpuProfiler;
 
 import Core;
-import Profiling;
 import :VK;
 import :Layout;
 

@@ -112,7 +112,7 @@ private:
     struct StreamInRequest
     {
         uint32 setIdx = 0;
-        std::string filePath;
+        std::unique_ptr<const char[]> filePath; // owned copy (null-terminated); m_files must not be referenced cross-thread
         uint32 numVertices = 0;
         uint64 srcAttributeOffsets[5] = {};
         uint32 numLevels = 0;

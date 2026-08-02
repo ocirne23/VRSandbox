@@ -2,7 +2,6 @@ module UI;
 
 import Core;
 import Core.imgui;
-import Profiling;
 import :ProfilerPanel;
 
 namespace
@@ -169,13 +168,6 @@ void ProfilerPanel::drawToolbar()
         if (ImGui::Button("Pause "))
             m_paused = true;
     }
-    ImGui::SameLine();
-    bool enabled = profiler.isEnabled();
-    if (ImGui::Checkbox("Record", &enabled))
-        profiler.setEnabled(enabled);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Master switch for scope recording (all threads)");
-
     const double frameMs = (double)(m_windowEnd - m_windowStart) * profiler.getMsPerTick();
     ImGui::SameLine();
     ImGui::Text("Frame %llu  |  %.2f ms (%.0f fps)", (unsigned long long)m_displayedFrame, frameMs, frameMs > 0.0 ? 1000.0 / frameMs : 0.0);

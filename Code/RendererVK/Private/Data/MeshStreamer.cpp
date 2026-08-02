@@ -6,13 +6,21 @@ module RendererVK;
 
 import Core;
 import Core.glm;
-import Profiling;
 import Core.Tweaks;
 import Core.Log;
 import :MeshStreamer;
 import :MeshDataManager;
 import :Renderer;
 import :Layout;
+
+// StreamInRequest carries an owned, null-terminated copy of the cache path (unique_ptr<const char[]>)
+// instead of referencing m_files' std::string across the worker thread.
+static std::unique_ptr<const char[]> copyPathString(const std::string& path)
+{
+    std::unique_ptr<char[]> buffer = std::make_unique<char[]>(path.size() + 1);
+    memcpy(buffer.get(), path.c_str(), path.size() + 1);
+    return buffer;
+}
 
 bool MeshStreamer::initialize()
 {
@@ -137,7 +145,9 @@ void MeshStreamer::unregisterSets(uint32 firstMeshInfoIdx, uint32 count)
 // main thread only has to allocate ranges and hand the buffers to the staging manager.
 void MeshStreamer::workerRun(std::stop_token stopToken)
 {
-    Globals::profiler.registerThread("MeshStream", Profiler::SORT_KEY_BACKGROUND + 1);
+    Globals::profiler.registerThread("MeshStreamer", Profiler::SORT_KEY_BACKGROUND + 1);
+
+    ProfileScope dumb("MeshStreamer::workerRun", EProfileCategory::Renderer); // just for attributes[5] debug iterator allocator..
     std::vector<glm::vec3> attributes[5];
     for (;;)
     {
@@ -155,7 +165,7 @@ void MeshStreamer::workerRun(std::stop_token stopToken)
         completion.setIdx = request.setIdx;
 
         FILE* pFile = nullptr;
-        fopen_s(&pFile, request.filePath.c_str(), "rb");
+        fopen_s(&pFile, request.filePath.get(), "rb");
         if (pFile)
         {
             bool ok = true;
@@ -282,7 +292,7 @@ void MeshStreamer::issueStreamIns()
 
         StreamInRequest request;
         request.setIdx = setIdx;
-        request.filePath = m_files[set.fileId];
+        request.filePath = copyPathString(m_files[set.fileId]);
         request.numVertices = set.numVertices;
         memcpy(request.srcAttributeOffsets, set.srcAttributeOffsets, sizeof(request.srcAttributeOffsets));
         request.numLevels = set.numLevels;

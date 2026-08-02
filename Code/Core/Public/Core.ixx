@@ -1,5 +1,7 @@
 export module Core;
 
+export import Core.Profiler;
+
 export typedef signed char        int8;
 export typedef short              int16;
 export typedef int                int32;

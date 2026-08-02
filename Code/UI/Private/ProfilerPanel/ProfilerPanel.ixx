@@ -1,7 +1,6 @@
 export module UI:ProfilerPanel;
 
 import Core;
-import Profiling;
 
 // The Profiler window: frame-time graph (click a bar to pause + inspect that frame), a per-thread +
 // GPU flame timeline (wheel zoom, drag pan), and a sortable aggregate stats table. Purely a READER

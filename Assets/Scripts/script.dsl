@@ -68,7 +68,6 @@ SCRIPT_EXPORT void Update(const ScriptContext* ctx, Entity* self, float deltaSec
 		ctx->physicsSetVelocity(scriptData->physics, glm::vec3(0.0f, 1.0f, 0.0f));
 	}
 	test(ctx, self, scriptData, 123);
-	ctx->logf(ctx->internString("num: %i"), (*scriptData).num);
 }
 
 REGISTER_UPDATE()
@@ -121,7 +120,6 @@ static void test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData,
 //@		self.physics.setVelocity(vec3 velocity = vec3(0, 1, 0))
 //@	end
 //@	test(int awa = 123)
-//@	printf(string format = "num: %i", self.data.num)
 //@end
 //@
 //@function test(int awa)

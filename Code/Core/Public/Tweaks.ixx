@@ -50,7 +50,11 @@ public:
 		return instance;
 	}
 
-	void registerVar(const TweakVar& var) { m_vars.push_back(var); }
+	void registerVar(const TweakVar& var) 
+	{
+		ProfileScope scope("TweakRegistry::registerVar", EProfileCategory::Core);
+		m_vars.push_back(var); 
+	}
 
 	const std::vector<TweakVar>& vars() const { return m_vars; }
 

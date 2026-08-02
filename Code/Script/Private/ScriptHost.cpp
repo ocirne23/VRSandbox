@@ -8,7 +8,6 @@ module Script;
 import Core;
 import Core.Windows;
 import Core.Log;
-import Profiling;
 
 #ifdef SCRIPTS_STATIC
 // Cooked build: scripts compiled into the engine (App-Scripts aggregate) register their entry-point functions here

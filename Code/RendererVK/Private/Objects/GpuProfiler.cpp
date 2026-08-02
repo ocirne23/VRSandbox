@@ -2,7 +2,6 @@ module RendererVK;
 
 import Core;
 import Core.Log;
-import Profiling;
 
 import :VK;
 import :Device;
