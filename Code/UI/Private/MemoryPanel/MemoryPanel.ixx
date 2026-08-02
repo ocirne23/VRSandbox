@@ -1,7 +1,7 @@
 export module UI:MemoryPanel;
 
 import Core;
-import Memory;
+import Core.MemoryTracker;
 
 // The Memory window: a squarified treemap of the MemoryTracker's attribution tree - one nested box
 // per profile-scope path, box AREA proportional to the bytes attributed there, children nested

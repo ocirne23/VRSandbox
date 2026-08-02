@@ -1,4 +1,4 @@
-export module Memory:Tracker;
+export module Core.MemoryTracker;
 
 import Core;
 import Core.Allocator;

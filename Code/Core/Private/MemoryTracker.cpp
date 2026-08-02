@@ -2,7 +2,7 @@ module;
 
 #include <intrin.h> // _mm_pause for the shard/node spinlocks
 
-module Memory;
+module Core.MemoryTracker;
 
 import Core;
 import Core.Allocator;

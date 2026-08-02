@@ -4,7 +4,7 @@ import Core;
 import Core.Allocator;
 import Core.imgui;
 import Core.Windows;
-import Memory;
+import Core.MemoryTracker;
 import :MemoryPanel;
 
 namespace

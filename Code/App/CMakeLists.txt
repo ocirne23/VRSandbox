@@ -7,7 +7,7 @@ add_executable(${PROJECT_NAME} ${PROJECT_PRIVATE_FILES})
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER Apps)
 set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "/ignore:4099")
 
-target_link_libraries(${PROJECT_NAME} PRIVATE Core Animation RendererVK UI Entity File Input Script Physics Network Audio Spatial Threading Memory Procedural Particle Force AppScripts)
+target_link_libraries(${PROJECT_NAME} PRIVATE Core Animation RendererVK UI Entity File Input Script Physics Network Audio Spatial Threading Procedural Particle Force AppScripts)
 
 # Cooked build: AppScripts' whole job is the scripts' static-init registrations (vrRegisterScriptEntry). Nothing
 # references its symbols, so a normal static-lib link dead-strips the entire object and NO script registers.
