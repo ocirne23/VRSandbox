@@ -127,7 +127,7 @@ void PhysicsWorld::update(double deltaSec, std::function<void(const ContactEvent
 {
     if (!m_initialized)
         return;
-    ProfileScope profileScope("Physics", EProfileCategory::Physics);
+    ProfileScope updateScope("Physics", EProfileCategory::Physics);
 
     applyQueuedCommands(); // before the paused check: placing a body / setting its state is authoring, not simulation
 
