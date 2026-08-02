@@ -32,7 +32,7 @@ bool World::initialize()
 
 void World::update(Renderer& renderer, float deltaSeconds)
 {
-    ProfileScope profileScope("World update", EProfileCategory::Entity);
+    ProfileScope updateScope("World update", EProfileCategory::Entity);
     if (!s_parallelUpdate)
     {
         for (EntityPtr& root : m_rootEntities)

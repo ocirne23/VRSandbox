@@ -71,6 +71,12 @@ export struct ProfileRecord
 };
 static_assert(sizeof(ProfileRecord) == 32);
 
+// Pause = freeze the DATA, not the bookkeeping: while set, ring pushes and frame marks drop, so
+// everything already recorded (the full frame history) stays inspectable instead of being
+// overwritten. Scope open/close and the open-name stacks keep running - fiber migration and the
+// Memory tracker's attribution stay live. Toggled by the Profiler panel via Profiler::setPaused.
+export inline std::atomic<bool> g_profilerPaused = false;
+
 // A single-writer/many-reader ring of ProfileRecords: one per registered thread, plus named tracks
 // (the renderer's GPU track). The owner writes records + a monotonic release cursor; readers
 // (Profiler::snapshotTrack, main thread) copy behind the cursor and detect being lapped. NEVER
@@ -91,6 +97,8 @@ public:
 
     void push(uint64_t start, uint64_t end, const char* name, uint16_t depth, EProfileCategory category)
     {
+        if (g_profilerPaused.load(std::memory_order_relaxed)) [[unlikely]]
+            return; // paused: the recorded data is frozen for inspection
         const uint64_t idx = m_cursor.load(std::memory_order_relaxed);
         ProfileRecord& record = m_records[idx & (CAPACITY - 1)];
         record.start = start;
@@ -167,6 +175,11 @@ public:
     Profiler();
 
     void endFrame();   // once per frame from the main loop: frame mark + clock re-anchor
+
+    // See g_profilerPaused. Resuming lays down a fresh frame boundary, so the paused gap shows as
+    // a single (saturated) bar in the frame graph instead of polluting the next real frame.
+    void setPaused(bool paused);
+    bool isPaused() const { return g_profilerPaused.load(std::memory_order_relaxed); }
 
     // Closes the synthetic "Static init" scope the constructor opened on the Main track - call
     // FIRST THING in main(). Between the two, every static initializer's allocation attributes to

@@ -37,7 +37,7 @@ private:
         uint64 lastFrame = 0;
     };
 
-    void refreshLive();
+    void refresh();
     void selectFrame(uint64 frameIdx);
     void snapshotTracks();
     void drawToolbar();
@@ -45,11 +45,18 @@ private:
     void drawTimeline();
     void drawStatsTable();
 
+    // ---- auto pause ----
+    bool m_autoPause = false;
+    float m_autoPauseMs = 33.4f;
+    uint64 m_autoPauseChecked = 0; // newest frame index already tested (reset on enable/resume so history/the pause gap can't trigger)
+
     // ---- displayed window ----
     bool m_paused = false;
     uint64 m_displayedFrame = 0;         // profiler frame index shown
-    uint64 m_windowStart = 0;            // ticks
+    uint64 m_windowStart = 0;            // ticks; the FRAME window (stats aggregate exactly this)
     uint64 m_windowEnd = 0;
+    uint64 m_snapshotStart = 0;          // ticks; frame window expanded by the zoom/pan view, what snapshotTracks copies
+    uint64 m_snapshotEnd = 0;
     std::vector<TrackView> m_tracks;
 
     // ---- timeline view state (ms relative to m_windowStart) ----
@@ -57,6 +64,7 @@ private:
     double m_viewMax = 16.0;
     bool m_userView = false;             // user zoomed/panned; stop auto-fitting
     std::unordered_map<uint32, bool> m_collapsed; // per trackIdx
+    std::unordered_map<uint32, uint32> m_trackMaxDepth; // per trackIdx, monotonic: lane count stays constant so tracks don't shift vertically frame to frame
 
     // ---- stats state ----
     int m_trackFilter = -1;              // index into m_tracks, -1 = all

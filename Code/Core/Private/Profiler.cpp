@@ -112,8 +112,25 @@ void Profiler::endFrame()
     m_tickAnchor = t;
     m_qpcAnchor = (uint64)qpc.QuadPart;
 
-    m_frameMarks[m_frameCount % FRAME_HISTORY] = t;
-    m_frameCount++;
+    // Paused: the clock keeps calibrating (cheap, keeps GPU alignment fresh for the resume) but
+    // frame marks stop - the frame graph freezes on the recorded history.
+    if (!g_profilerPaused.load(std::memory_order_relaxed))
+    {
+        m_frameMarks[m_frameCount % FRAME_HISTORY] = t;
+        m_frameCount++;
+    }
+}
+
+void Profiler::setPaused(bool paused)
+{
+    const bool wasPaused = g_profilerPaused.exchange(paused, std::memory_order_relaxed);
+    if (wasPaused && !paused)
+    {
+        // Resume: a fresh boundary here turns the whole paused stretch into one frame-graph bar
+        // (saturated, honest) and lets the next real frame measure cleanly.
+        m_frameMarks[m_frameCount % FRAME_HISTORY] = tick();
+        m_frameCount++;
+    }
 }
 
 ProfileTrack* Profiler::threadTrack()
@@ -176,20 +193,28 @@ bool Profiler::snapshotTrack(uint32 trackIdx, uint64 tMin, uint64 tMax, std::vec
     while (i > lo)
     {
         --i;
-        const ProfileRecord record = track.getRecord(i);
-        if (record.end < tMin) // i stays on this record: it was read, so the lapped check must cover it
+        ProfileRecord record = track.getRecord(i);
+        if (record.end < tMin)
             break;
         if (record.start <= tMax)
+        {
+            record._pad1 = (uint32)(cursor - i); // age of the source slot, for the lap salvage below
             out.push_back(record);
+        }
     }
 
-    // Lapped check: everything we read must still be inside the ring NOW. i is the oldest index read.
-    const uint64 cursorAfter = track.getCursor();
-    const uint64 validLo = cursorAfter > ProfileTrack::CAPACITY ? cursorAfter - ProfileTrack::CAPACITY : 0;
-    if (i < validLo)
+    // Lap salvage: slots older than the writer's CURRENT tail may have been overwritten while we
+    // copied - drop just those (ages grow along out, so they are a suffix) and keep the rest. The
+    // old all-or-nothing discard made busy tracks flicker out of wide zoomed-out views entirely,
+    // every time the writer advanced past the scan's oldest index.
+    const uint64 written = track.getCursor() - cursor;
+    if (written >= ProfileTrack::CAPACITY)
     {
-        out.clear();
+        out.clear(); // writer lapped the whole ring mid-copy - nothing trustworthy
         return false;
     }
+    const uint32 maxValidAge = (uint32)(ProfileTrack::CAPACITY - written);
+    while (!out.empty() && out.back()._pad1 > maxValidAge)
+        out.pop_back();
     return true;
 }

@@ -125,9 +125,9 @@ static void dispatchContactEvents(b3WorldId world, std::function<void(const Phys
 
 void PhysicsWorld::update(double deltaSec, std::function<void(const ContactEvent&)> contactCallback)
 {
-    ProfileScope profileScope("Physics", EProfileCategory::Physics);
     if (!m_initialized)
         return;
+    ProfileScope profileScope("Physics", EProfileCategory::Physics);
 
     applyQueuedCommands(); // before the paused check: placing a body / setting its state is authoring, not simulation
 

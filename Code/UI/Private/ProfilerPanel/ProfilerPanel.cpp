@@ -31,9 +31,10 @@ namespace
 
     void formatTime(char* buf, size_t bufSize, double ms)
     {
-        if (ms >= 1.0)
+        const double absMs = ms < 0.0 ? -ms : ms; // unit from the magnitude: negative offsets (ruler left of the frame start) must not fall through to ns
+        if (absMs >= 1.0)
             sprintf_s(buf, bufSize, "%.2f ms", ms);
-        else if (ms >= 0.001)
+        else if (absMs >= 0.001)
             sprintf_s(buf, bufSize, "%.1f us", ms * 1000.0);
         else
             sprintf_s(buf, bufSize, "%.0f ns", ms * 1e6);
@@ -64,12 +65,40 @@ void ProfilerPanel::render()
         return;
     }
 
-    if (!m_paused)
-        refreshLive();
+    // Auto pause: stop on the first NEW frame exceeding the threshold. Only frames <= frameCount-3
+    // are tested - pausing freezes the rings, so pausing sooner would drop the spike frame's own
+    // GPU records (they land when its frame slot's fence is next waited). The rings comfortably
+    // retain those 2 extra frames, so nothing of the spike is lost.
+    if (m_autoPause && !m_paused)
+    {
+        const uint64 frameCount = profiler.getFrameCount();
+        const uint64 newest = frameCount - 3;
+        if (m_autoPauseChecked < newest)
+        {
+            const uint64 first = std::max<uint64>(m_autoPauseChecked + 1, newest > 64 ? newest - 64 : 1);
+            for (uint64 f = first; f <= newest; ++f)
+            {
+                const double frameMs = (double)(profiler.getFrameMark(f) - profiler.getFrameMark(f - 1)) * profiler.getMsPerTick();
+                if (frameMs > (double)m_autoPauseMs)
+                {
+                    selectFrame(f); // pauses + displays the offending frame
+                    break;
+                }
+            }
+            m_autoPauseChecked = newest;
+        }
+    }
+
+    refresh(); // every UI frame, paused too: zoom/pan may need a wider snapshot of the (frozen) rings
 
     // Space toggles pause while the panel has focus.
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Space, false))
+    {
         m_paused = !m_paused;
+        Globals::profiler.setPaused(m_paused); // freezes ring writes + frame marks with it
+        if (!m_paused)
+            m_autoPauseChecked = Globals::profiler.getFrameCount(); // skip the pause-gap frame
+    }
 
     drawToolbar();
     drawFrameGraph();
@@ -90,15 +119,32 @@ void ProfilerPanel::render()
     }
 }
 
-void ProfilerPanel::refreshLive()
+void ProfilerPanel::refresh()
 {
-    // Show a frame the GPU has fully caught up on: timestamps come back when their frame slot's
-    // fence is next waited (~NUM_FRAMES_IN_FLIGHT frames), so 3 frames back is always complete.
     Profiler& profiler = Globals::profiler;
-    const uint64 frame = profiler.getFrameCount() - 3;
-    m_displayedFrame = frame;
-    m_windowStart = profiler.getFrameMark(frame - 1);
-    m_windowEnd = profiler.getFrameMark(frame);
+    if (!m_paused)
+    {
+        // Show a frame the GPU has fully caught up on: timestamps come back when their frame slot's
+        // fence is next waited (~NUM_FRAMES_IN_FLIGHT frames), so 3 frames back is always complete.
+        m_displayedFrame = profiler.getFrameCount() - 3;
+    }
+    m_windowStart = profiler.getFrameMark(m_displayedFrame - 1);
+    m_windowEnd = profiler.getFrameMark(m_displayedFrame);
+
+    // Snapshot the VISIBLE range, not just the frame window: a zoomed-out/panned view shows
+    // neighboring frames' records too (snapshotting only the frame made them flicker in and out
+    // as the live window slid forward each frame).
+    double loMs = 0.0;
+    double hiMs = (double)(m_windowEnd - m_windowStart) * profiler.getMsPerTick();
+    if (m_userView)
+    {
+        loMs = std::min(loMs, m_viewMin);
+        hiMs = std::max(hiMs, m_viewMax);
+    }
+    const double ticksPerMs = profiler.getTicksPerMs();
+    const int64 lo = (int64)m_windowStart + (int64)(loMs * ticksPerMs);
+    m_snapshotStart = (uint64)std::max<int64>(lo, 0);
+    m_snapshotEnd = m_windowStart + (uint64)(std::max(hiMs, 0.0) * ticksPerMs);
     snapshotTracks();
 }
 
@@ -109,11 +155,9 @@ void ProfilerPanel::selectFrame(uint64 frameIdx)
     if (frameIdx < 1 || frameIdx >= frameCount || frameCount - frameIdx >= Profiler::FRAME_HISTORY - 1)
         return;
     m_paused = true;
+    profiler.setPaused(true);
     m_displayedFrame = frameIdx;
-    m_windowStart = profiler.getFrameMark(frameIdx - 1);
-    m_windowEnd = profiler.getFrameMark(frameIdx);
-    m_userView = false;
-    snapshotTracks();
+    m_userView = false; // refresh() next render re-windows + re-snapshots around the selection
 }
 
 void ProfilerPanel::snapshotTracks()
@@ -125,9 +169,13 @@ void ProfilerPanel::snapshotTracks()
     {
         TrackView view;
         view.trackIdx = i;
-        if (!profiler.snapshotTrack(i, m_windowStart, m_windowEnd, view.records) || view.records.empty())
-            continue;
+        profiler.snapshotTrack(i, m_snapshotStart, m_snapshotEnd, view.records);
         const ProfileTrack& track = profiler.getTrack(i);
+        // Keep tracks that have EVER recorded even when this window is empty - an idle worker shows
+        // a stable empty lane instead of flickering in and out of the list frame to frame. Only
+        // tracks that never recorded anything (registered-but-unprofiled service threads) stay hidden.
+        if (view.records.empty() && track.getCursor() == 0)
+            continue;
         view.name = track.getName();
         view.sortKey = track.getSortKey();
 
@@ -148,6 +196,12 @@ void ProfilerPanel::snapshotTracks()
                     view.busyMs += (double)(clampedEnd - clampedStart) * msPerTick;
             }
         }
+        // Lane count from the deepest nesting EVER seen on this track, not just this window: the
+        // vertical offsets between tracks stay constant instead of shifting when one frame nests
+        // deeper than its neighbors.
+        uint32& cachedMaxDepth = m_trackMaxDepth[view.trackIdx];
+        cachedMaxDepth = std::max(cachedMaxDepth, view.maxDepth);
+        view.maxDepth = cachedMaxDepth;
         m_tracks.push_back(std::move(view));
     }
     std::sort(m_tracks.begin(), m_tracks.end(), [](const TrackView& a, const TrackView& b)
@@ -161,13 +215,29 @@ void ProfilerPanel::drawToolbar()
     if (m_paused)
     {
         if (ImGui::Button("Resume"))
+        {
             m_paused = false;
+            profiler.setPaused(false);
+            m_autoPauseChecked = profiler.getFrameCount(); // skip the pause-gap frame (one huge bar) - it must not re-trigger auto pause
+        }
     }
     else
     {
         if (ImGui::Button("Pause "))
+        {
             m_paused = true;
+            Globals::profiler.setPaused(true); // freezes ring writes + frame marks: the whole frame history stays inspectable
+        }
     }
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Auto pause >", &m_autoPause) && m_autoPause)
+        m_autoPauseChecked = profiler.getFrameCount(); // only frames completed from now on can trigger, not history
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(64.0f);
+    ImGui::DragFloat("##autoPauseMs", &m_autoPauseMs, 0.5f, 1.0f, 1000.0f, "%.1f ms");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Pause recording when a frame exceeds this time.\nTriggers 2 frames late so the spike frame's GPU data is complete (still fully retained).");
+
     const double frameMs = (double)(m_windowEnd - m_windowStart) * profiler.getMsPerTick();
     ImGui::SameLine();
     ImGui::Text("Frame %llu  |  %.2f ms (%.0f fps)", (unsigned long long)m_displayedFrame, frameMs, frameMs > 0.0 ? 1000.0 / frameMs : 0.0);
@@ -294,10 +364,12 @@ void ProfilerPanel::drawTimeline()
     }
     if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         m_userView = false;
-    // clamp
+    // clamp: maxSpan equals the full [minView, maxView] range, so the viewMin bounds can never
+    // invert (std::clamp with hi < lo is UB and made wide zoom-outs snap/oscillate)
     {
-        const double span = std::clamp(m_viewMax - m_viewMin, kMinViewSpanMs, windowMs * 8.0);
-        m_viewMin = std::clamp(m_viewMin, -windowMs * 2.0, windowMs * 3.0 - span);
+        const double maxView = windowMs * 30.0; // +-30 frames of context around the displayed one
+        const double span = std::clamp(m_viewMax - m_viewMin, kMinViewSpanMs, maxView * 2.0);
+        m_viewMin = std::clamp(m_viewMin, -maxView, maxView - span);
         m_viewMax = m_viewMin + span;
         pxPerMs = width / span;
     }
@@ -320,7 +392,7 @@ void ProfilerPanel::drawTimeline()
     }
     // frame boundary lines (the displayed frame's own boundaries + neighbors when panned out)
     const uint64 frameCount = profiler.getFrameCount();
-    for (uint64 f = m_displayedFrame > 4 ? m_displayedFrame - 4 : 1; f <= m_displayedFrame + 4 && f < frameCount; ++f)
+    for (uint64 f = m_displayedFrame > 64 ? m_displayedFrame - 64 : 1; f <= m_displayedFrame + 64 && f < frameCount; ++f)
     {
         if (frameCount - f >= Profiler::FRAME_HISTORY)
             continue;
@@ -347,7 +419,11 @@ void ProfilerPanel::drawTimeline()
         drawList->AddText(ImVec2(canvasPos.x + 6.0f, y + 2.0f), kColHeaderText, headerBuf);
         const bool headerHovered = hovered && mousePos.y >= y && mousePos.y < y + kTrackHeaderHeight;
         if (headerHovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && io.MouseDragMaxDistanceSqr[0] < 9.0f)
+        {
             collapsed = !collapsed;
+            if (collapsed)
+                m_trackMaxDepth[view.trackIdx] = 0; // folding resets the sticky lane count: expanding re-learns from what's actually displayed
+        }
         y += kTrackHeaderHeight;
 
         if (collapsed)
@@ -468,6 +544,8 @@ void ProfilerPanel::drawStatsTable()
         for (uint32 i = 0; i < numRecords; ++i)
         {
             const ProfileRecord& record = records[i];
+            if (record.end < m_windowStart || record.start > m_windowEnd)
+                continue; // the snapshot covers the zoomed VIEW; stats aggregate exactly the frame window
             uint32 rowIdx;
             auto it = rowByName.find(record.name);
             if (it != rowByName.end())
