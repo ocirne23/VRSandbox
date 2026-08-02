@@ -441,6 +441,7 @@ void SpatialIndex::markVisibleSphere(ESpatialPass pass, const glm::dvec3& center
 
 void SpatialIndex::update(const Camera& camera, const Frustum& frustum, const glm::mat4& viewProjRelCamera)
 {
+    ProfileScope updateScope("Spatial", EProfileCategory::Spatial);
     {
         ProfileScope profileScope("Spatial commit", EProfileCategory::Spatial);
         commitFrame();          // applies cell moves queued during last frame's entity updates

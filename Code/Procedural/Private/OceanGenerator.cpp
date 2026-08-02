@@ -382,6 +382,7 @@ namespace Procedural
 	void OceanGenerator::update(Renderer& renderer, const Camera& camera,
 	                           std::shared_ptr<const BakedTerrainData> terrainData, float seaLevel)
 	{
+		ProfileScope profileScope("Ocean", EProfileCategory::Procedural);
 		// ONE sea level, owned by the terrain (see the header). Adopted here every frame rather than
 		// tweaked separately: this used to be its own slider, and the two silently forked — the water plane
 		// moved while the terrain kept reporting its water at the old datum, which does not merely look

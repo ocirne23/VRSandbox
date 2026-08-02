@@ -789,6 +789,7 @@ namespace Procedural
 
 	void TerrainStreamer::update(Renderer& renderer, const Camera& camera)
 	{
+		ProfileScope profileScope("Terrain", EProfileCategory::Procedural);
 		//m_terrainMapFarRange = camera.far;
 		if (m_configDirty)
 		{

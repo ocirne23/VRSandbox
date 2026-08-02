@@ -121,6 +121,7 @@ public:
     // Call after world.update (body poses synced), before forceSystem.update pushes emitter state.
     void update(float deltaSec)
     {
+        ProfileScope profileScope("Input controls", EProfileCategory::App);
         for (ForceBall& ball : forceBalls)
         {
             if (!ball.entity || !ball.emitter.isValid())

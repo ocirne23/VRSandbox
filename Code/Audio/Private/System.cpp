@@ -86,6 +86,7 @@ void AudioSystem::shutdown()
 
 void AudioSystem::update(const Camera& camera, const glm::vec3& listenerVelocity)
 {
+    ProfileScope profileScope("Audio", EProfileCategory::Audio);
     if (!m_initialized)
         return;
     const glm::mat4 camToWorld = glm::inverse(camera.viewMatrix);

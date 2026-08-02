@@ -3,6 +3,7 @@ module UI;
 import Core;
 import Core.Allocator;
 import Core.imgui;
+import Core.Windows;
 import Memory;
 import :MemoryPanel;
 
@@ -192,6 +193,20 @@ void MemoryPanel::drawHeader()
     formatBytes(bytesBuf2, sizeof(bytesBuf2), (double)tracker.getTrackedBytes());
     ImGui::SameLine();
     ImGui::Text("engine: %s  |  tracked: %s in %u allocs, %u paths", bytesBuf, bytesBuf2, tracker.getTrackedCount(), tracker.getNumNodes());
+
+    // Whole process, for perspective: the gap vs "engine" is everything the hooks can't see
+    // (driver + host-visible GPU memory, onnxruntime, raw-malloc C libs, images, stacks, heap
+    // overhead - see getProcessMemoryUsage's commit/working-set distinction).
+    SIZE_T processPrivate = 0, processWorkingSet = 0;
+    if (getProcessMemoryUsage(processPrivate, processWorkingSet))
+    {
+        formatBytes(bytesBuf, sizeof(bytesBuf), (double)processPrivate);
+        formatBytes(bytesBuf2, sizeof(bytesBuf2), (double)processWorkingSet);
+        ImGui::SameLine();
+        ImGui::TextDisabled("|  process: %s commit, %s working set", bytesBuf, bytesBuf2);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Whole-process memory (what Task Manager shows). The difference vs 'engine' is\nmemory the allocator hooks never see: GPU driver + host-visible allocations,\nonnxruntime/DirectML, raw-malloc C libraries, mapped images, stacks, heap overhead.");
+    }
     if (tracker.getDroppedAllocs() > 0)
     {
         ImGui::SameLine();

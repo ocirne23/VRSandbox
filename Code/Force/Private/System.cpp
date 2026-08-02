@@ -406,6 +406,7 @@ void ForceSystem::destroyQuery(uint64 handle)
 
 void ForceSystem::update(Renderer& renderer, float)
 {
+    ProfileScope profileScope("Force", EProfileCategory::Force);
     renderer.setForceFieldParams(m_params);
     for (EmitterInstance& inst : m_emitters)
     {

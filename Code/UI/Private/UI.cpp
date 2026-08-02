@@ -68,12 +68,14 @@ int                  m_NextLinkId = 100;
 
 void UI::drawGizmoEntity(Renderer& renderer, float deltaSec)
 {
+    ProfileScope profileScope("Gizmo entity", EProfileCategory::UI);
     if (m_gizmo && m_gizmo->isVisible())
         m_gizmo->getGizmoEntity()->update(renderer, deltaSec);
 }
 
 void UI::update(const std::vector<EntityPtr>& rootEntities, const Camera& camera, double deltaSec)
 {
+    ProfileScope profileScope("UI update", EProfileCategory::UI);
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 
@@ -481,5 +483,6 @@ void UI::requestOpenScript(const std::string& path)
 
 void UI::render()
 {
+    ProfileScope profileScope("UI render", EProfileCategory::UI);
     ImGui::Render();
 }

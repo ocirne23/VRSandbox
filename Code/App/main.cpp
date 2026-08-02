@@ -175,87 +175,43 @@ int main()
         Globals::time.update();
         const double deltaSec = Globals::time.getDeltaSec();
 
+        input.update(deltaSec);
+        controls.update((float)deltaSec);
+        if (renderer.isVrEnabled())
         {
-            ProfileScope scope("Input", EProfileCategory::Input);
-            input.update(deltaSec);
-            controls.update((float)deltaSec);
-            if (renderer.isVrEnabled())
-            {
-                vrCameraController.update(deltaSec); // thumbstick locomotion; pulls Globals::vrInput
-                camera = vrCameraController.getCamera();
-            }
-            else
-            {
-                cameraController.update(deltaSec);
-                camera = cameraController.getCamera();
-            }
+            vrCameraController.update(deltaSec); // thumbstick locomotion; pulls Globals::vrInput
+            camera = vrCameraController.getCamera();
         }
+        else
         {
-            ProfileScope scope("UI update", EProfileCategory::UI);
-            ui.update(world.rootEntities(), camera, deltaSec); // also drives the gizmo it owns
+            cameraController.update(deltaSec);
+            camera = cameraController.getCamera();
         }
-        {
-            ProfileScope scope("Entity changes", EProfileCategory::Entity);
-            for (const std::string& reloadPath : ui.takeScriptReloadRequests()) scriptHost.getOrLoad(reloadPath, true);
-            for (EntityChange& change : scriptEvents.takeEntityChanges()) world.handleEntityChange(change, camera, ui.getViewportRect());
-            for (EntityChange& change : ui.takeEntityChanges())           world.handleEntityChange(change, camera, ui.getViewportRect());
-        }
-        {
-            ProfileScope scope("Script context", EProfileCategory::Script);
-            scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
-        }
-        {
-            ProfileScope scope("Audio", EProfileCategory::Audio);
-            audio.update(camera);
-        }
-        {
-            ProfileScope scope("Physics", EProfileCategory::Physics);
-            physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); });
-        }
+        ui.update(world.rootEntities(), camera, deltaSec); // also drives the gizmo it owns
 
-        const Frustum* frustum = nullptr;
-        {
-            ProfileScope scope("Begin frame", EProfileCategory::Renderer);
-            frustum = &renderer.beginFrame(camera, ui.getViewportRect());
-        }
-        {
-            ProfileScope scope("Spatial", EProfileCategory::Spatial);
-            spatialIndex.update(camera, *frustum, renderer.getCenterViewProj() * glm::translate(glm::mat4(1.0f), camera.position)); // translate corrects the reverse-z renderer proj matrix
-        }
-        {
-            ProfileScope scope("World update", EProfileCategory::Entity);
-            world.update(renderer, (float)deltaSec); // serial script prepass + parallel component/tree pass + sink flush
-        }
-        {
-            ProfileScope scope("Terrain", EProfileCategory::Procedural);
-            terrain.update(renderer, camera);
-            terrainCollider.update(camera.position, terrain.activeClimateMaps());
-        }
-        {
-            ProfileScope scope("Ocean", EProfileCategory::Procedural);
-            ocean.update(renderer, camera, terrain.activeTerrainData(), terrain.seaLevel());
-        }
-        {
-            ProfileScope scope("Scatter", EProfileCategory::Procedural);
-            scatter.update(renderer, camera, terrain.activeClimateMaps());
-        }
-        {
-            ProfileScope scope("Particles", EProfileCategory::Particle);
-            particleSystem.update(renderer, (float)deltaSec);
-        }
-        {
-            ProfileScope scope("Force", EProfileCategory::Force);
-            forceSystem.update(renderer, (float)deltaSec);
-        }
-        {
-            ProfileScope scope("UI render", EProfileCategory::UI);
-            ui.drawGizmoEntity(renderer, (float)deltaSec);
-            ui.render();
-        }
-        {
-            ProfileScope scope("Present", EProfileCategory::Renderer);
-            renderer.present();
-        }
+        for (const std::string& reloadPath : ui.takeScriptReloadRequests()) scriptHost.getOrLoad(reloadPath, true);
+        for (EntityChange& change : scriptEvents.takeEntityChanges()) world.handleEntityChange(change, camera, ui.getViewportRect());
+        for (EntityChange& change : ui.takeEntityChanges())           world.handleEntityChange(change, camera, ui.getViewportRect());
+
+        scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
+        audio.update(camera);
+        physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); });
+
+        const Frustum& frustum = renderer.beginFrame(camera, ui.getViewportRect());
+        spatialIndex.update(camera, frustum, renderer.getCenterViewProj() * glm::translate(glm::mat4(1.0f), camera.position)); // translate corrects the reverse-z renderer proj matrix
+        world.update(renderer, (float)deltaSec); // serial script prepass + parallel component/tree pass + sink flush
+        terrain.update(renderer, camera);
+        terrainCollider.update(camera.position, terrain.activeClimateMaps());
+        ocean.update(renderer, camera, terrain.activeTerrainData(), terrain.seaLevel());
+        scatter.update(renderer, camera, terrain.activeClimateMaps());
+        particleSystem.update(renderer, (float)deltaSec);
+        forceSystem.update(renderer, (float)deltaSec);
+
+        ui.drawGizmoEntity(renderer, (float)deltaSec);
+        ui.render();
+        renderer.present();
+
+        mainLoopScope.stop(); // before the frame mark, so the record stays inside this frame's window
         profiler.endFrame();
         frameCount++;
     }

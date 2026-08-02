@@ -507,6 +507,7 @@ void Renderer::setTerrainSplatClimate(std::span<const glm::vec4> boxes)
 
 const Frustum& Renderer::beginFrame(const Camera& cameraIn, const Rect& viewportRect)
 {
+    ProfileScope beginFrameScope("Begin frame", EProfileCategory::Renderer);
     setViewportRect(viewportRect); // first: this frame's projection is built from the viewport's aspect below
 
     // This frame slot's fence must be waited BEFORE anything writes its host-visible per-frame buffers
@@ -1189,6 +1190,7 @@ void Renderer::setSunLight(const glm::vec3& direction, const glm::vec3& color, f
 
 void Renderer::present()
 {
+    ProfileScope presentScope("Present", EProfileCategory::Renderer);
     if(m_windowMinimized)
     {
         m_debugLineVerts.forEach([](std::vector<DebugLinePipeline::LineVertex>& verts) { verts.clear(); });

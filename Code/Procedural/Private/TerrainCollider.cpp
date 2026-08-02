@@ -32,6 +32,7 @@ namespace Procedural
 
 	void TerrainCollider::update(const glm::vec3& focusPos, std::shared_ptr<const ITerrainSampler> maps)
 	{
+		ProfileScope profileScope("Terrain collider", EProfileCategory::Procedural);
 		// Drain the in-flight build FIRST: even on a reset frame the result must be consumed, and a
 		// completed tile should land the same frame it finishes.
 		BuildResult done;

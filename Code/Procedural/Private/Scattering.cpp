@@ -500,6 +500,7 @@ namespace Procedural
 
 	void ScatterSystem::update(Renderer& renderer, const Camera& camera, const std::shared_ptr<const ITerrainSampler>& maps)
 	{
+		ProfileScope profileScope("Scatter", EProfileCategory::Procedural);
 		// The sampler's identity doubles as the terrain's config generation: a rebuilt field (or terrain
 		// toggling off -> nullptr) invalidates every placement.
 		const bool mapsChanged = maps.get() != m_lastMaps;

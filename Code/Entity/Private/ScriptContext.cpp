@@ -1585,6 +1585,7 @@ ScriptContext::ScriptContext()
 
 void ScriptContext::update(const Camera& camera, float newDeltaSeconds, float newElapsedSeconds)
 {
+    ProfileScope profileScope("Script context", EProfileCategory::Script);
     deltaSeconds = newDeltaSeconds;
     elapsedSeconds = newElapsedSeconds;
 

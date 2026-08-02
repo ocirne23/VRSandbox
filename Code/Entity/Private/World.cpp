@@ -32,6 +32,7 @@ bool World::initialize()
 
 void World::update(Renderer& renderer, float deltaSeconds)
 {
+    ProfileScope profileScope("World update", EProfileCategory::Entity);
     if (!s_parallelUpdate)
     {
         for (EntityPtr& root : m_rootEntities)
@@ -803,6 +804,7 @@ EntityPtr World::createEmptyEntity(const std::string& name)
 
 void World::handleEntityChange(EntityChange& change, const Camera& camera, const Rect& viewportRect)
 {
+    ProfileScope profileScope("Entity change", EProfileCategory::Entity);
     if (auto* cv = std::get_if<EntityChange::CreateViewport>(&change.type))
     {
         const glm::vec3 worldPos = camera.screenToWorld(viewportRect, cv->screenPos);

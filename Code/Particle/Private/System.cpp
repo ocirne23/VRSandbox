@@ -192,6 +192,7 @@ void ParticleSystem::destroyEffect(uint64 id)
 
 void ParticleSystem::update(Renderer& renderer, float deltaSec)
 {
+    ProfileScope profileScope("Particles", EProfileCategory::Particle);
     // Effects: refresh every emitter slot's GPU config from its desc + instance transform (so live
     // .pfx edits and moving emitters both just work) and turn rates/bursts into spawn requests.
     for (EffectInstance& inst : m_effects)

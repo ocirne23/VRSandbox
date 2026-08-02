@@ -26,6 +26,7 @@ void Input::update_MT(double deltaSec)
 
 void Input::update(double deltaSec)
 {
+    ProfileScope profileScope("Input", EProfileCategory::Input);
     ImGuiIO& imguiIO = ImGui::GetIO();
 
     SDL_Event evt;
