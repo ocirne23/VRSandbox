@@ -69,7 +69,7 @@ DSLType ScriptBindings::allocateDerivedType(const char* name, BindingObject& out
 }
 
 DSLType ScriptBindings::registerSequenceType(const char* name, DSLType elementType, const char* countEmit,
-	const char* atEmit, const char* lookupEmit)
+	const char* atEmit, const char* lookupEmit, const char* elementSetEmit)
 {
 	// A BindingObject like any other, so objectFor/findMember/the editor/the transpiler need no new case -- it
 	// just happens to carry only the sequence templates.
@@ -80,11 +80,18 @@ DSLType ScriptBindings::registerSequenceType(const char* name, DSLType elementTy
 	object.sequenceAtEmit = atEmit;
 	if (lookupEmit != nullptr)
 	{
-		// Indexable from `ifexist` too. Elements stay READ-ONLY: this is a view over an engine collection, not
-		// storage the script owns, so there is no write-back to offer and `ref` is refused on it.
+		// Indexable from `ifexist` too.
 		object.lookupKeyType = DSLType::Int;
 		object.lookupValueType = elementType;
 		object.lookupEmit = lookupEmit;
+	}
+	// Without a write-back the elements stay READ-ONLY (a view over an engine collection, not storage the
+	// script owns) and `ref` is refused; with one, `foreach ref`/`ifexist ref` bind a copy that the block's
+	// end applies back through it.
+	if (elementSetEmit != nullptr)
+	{
+		object.elementWritable = true;
+		object.elementSetEmit = elementSetEmit;
 	}
 	m_objectDefs.push_back(std::move(object));
 	return type;

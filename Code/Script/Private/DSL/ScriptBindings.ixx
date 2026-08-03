@@ -240,8 +240,11 @@ public:
 	// "$1" for the key and "$v" for the bound variable, which is what makes it usable from `ifexist` as well as
 	// `foreach`. `atEmit` must be range-safe on its own terms; `lookupEmit` must REPORT the miss.
 	// Distinct from an ARRAY (T[]), which is storage the script owns a handle to and can write through.
+	// `elementSetEmit` (optional) makes the elements WRITABLE: a statement over "$r", "$1" (the index) and "$v"
+	// that applies the bound element back to the engine ("ctx->lightSetAt($r, $1, &$v)") -- what a `ref`
+	// binding's block-end write-back emits. Without it the view stays read-only and `ref` is refused.
 	DSLType registerSequenceType(const char* name, DSLType elementType, const char* countEmit, const char* atEmit,
-		const char* lookupEmit = nullptr);
+		const char* lookupEmit = nullptr, const char* elementSetEmit = nullptr);
 	// Registers one OPTIONAL type -- a value that may not be there ("self.parent" at the root). Spelled
 	// "<value>?" (see dslTypeName) and reachable ONLY through `ifexist`, which is the point: it is not a value
 	// of its own, so it cannot be read, passed, or dotted into without the existence check having succeeded,

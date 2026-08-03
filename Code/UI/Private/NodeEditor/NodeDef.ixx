@@ -750,6 +750,67 @@ export const std::vector<NodeDef>& nodeRegistry()
         "?5{ctx->forceSetDistribution($1, $5);\n}?6{ctx->forceSetWidth($1, $6);\n}?7{ctx->forceSetTeam($1, $7);\n}"
         "?8{ctx->forceSetLocalDirection($1, $8);\n}?9{ctx->forceSetLocalOffset($1, $9);\n}?10{ctx->forceSetCentered($1, $10);\n}#0" });
 
+    // ---- light component (same shape as the force nodes: resolve the handle once, then indexed get/set) ----
+    // Get Light Component: resolves the entity's LightComponent ONCE in the if-condition and branches on it —
+    // true runs when the entity has one, break continues past the if either way. Feed the Component pin into
+    // Get/Set Light; Count is the number of lights on it, the valid Index range for both.
+    r.push_back({ "GetLightComponent", "Get Light Component", "Light", true,
+        { { "", D::Exec, "" }, { "Entity", D::Entity, "self" } },
+        { { "true", D::Exec, "" }, { "break", D::Exec, "" },
+            { "Component", D::Pointer, "", 0, "lightComp@" },
+            { "Count", D::Int, "", 0, "ctx->lightGetCount(lightComp@)" } },
+        "if (void* lightComp@ = ctx->entityGetLightComponent($1))\n{\n"
+        + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
+
+    // Get Light: reads one light (by Index) off the Component handle. Valid is true when the handle is non-null
+    // AND the index is in range; the pins read type defaults otherwise (vrLightAt's contract). Each connected
+    // pin copies the light out and picks its field; Offset/Direction are entity-space.
+    r.push_back({ "GetLight", "Get Light", "Light", false,
+        { { "Component", D::Pointer, "nullptr" }, { "Index", D::Int, "0" } },
+        { { "Valid",     D::Bool,  "", 0, "($1 >= 0 && $1 < ctx->lightGetCount($0))" },
+            { "Enabled",   D::Bool,  "", 0, "vrLightAt(ctx, $0, $1).enabled" },
+            { "Color",     D::Vec3,  "", 0, "vrLightAt(ctx, $0, $1).color" },
+            { "Intensity", D::Float, "", 0, "vrLightAt(ctx, $0, $1).intensity" },
+            { "Range",     D::Float, "", 0, "vrLightAt(ctx, $0, $1).range" },
+            { "Offset",    D::Vec3,  "", 0, "vrLightAt(ctx, $0, $1).offset" },
+            { "Direction", D::Vec3,  "", 0, "vrLightAt(ctx, $0, $1).direction" },
+            // Shape params -- each read by ONE type (Spot: Cone Angle/Edge Softness; Area: Width/Height/
+            // Rotation; Tube: Width = radius, Length); the others report the stored-but-unused value.
+            { "Cone Angle",    D::Float, "", 0, "vrLightAt(ctx, $0, $1).coneAngle" },
+            { "Edge Softness", D::Float, "", 0, "vrLightAt(ctx, $0, $1).edgeSoftness" },
+            { "Width",         D::Float, "", 0, "vrLightAt(ctx, $0, $1).width" },
+            { "Height",        D::Float, "", 0, "vrLightAt(ctx, $0, $1).height" },
+            { "Length",        D::Float, "", 0, "vrLightAt(ctx, $0, $1).length" },
+            { "Rotation",      D::Float, "", 0, "vrLightAt(ctx, $0, $1).rotation" } },
+        "" });
+
+    // Set Light: copies the light out, overwrites only the fields you actually connect (?k conditional blocks,
+    // like Set Force), and copies it back through lightSetAt -- the one write path, where the host clamps and
+    // re-normalizes. A null handle or out-of-range index no-ops on both sides of the round trip.
+    r.push_back({ "SetLight", "Set Light", "Light", true,
+        { { "", D::Exec, "" },
+            { "Component", D::Pointer, "nullptr" },
+            { "Index",     D::Int,   "0" },
+            { "Enabled",   D::Bool,  "true" },
+            { "Color",     D::Vec3,  "glm::vec3{ 1.0f, 1.0f, 1.0f }" },
+            { "Intensity", D::Float, "20.0f" },
+            { "Range",     D::Float, "10.0f" },
+            { "Offset",    D::Vec3,  "glm::vec3{ 0.0f, 0.0f, 0.0f }" },
+            { "Direction", D::Vec3,  "glm::vec3{ 0.0f, 0.0f, -1.0f }" },
+            { "Cone Angle",    D::Float, "25.0f" },
+            { "Edge Softness", D::Float, "0.1f" },
+            { "Width",         D::Float, "1.0f" },
+            { "Height",        D::Float, "1.0f" },
+            { "Length",        D::Float, "1.0f" },
+            { "Rotation",      D::Float, "0.0f" } },
+        { { "", D::Exec, "" } },
+        "VrLight light@ = vrLightAt(ctx, $1, $2);\n"
+        "?3{light@.enabled = $3;\n}?4{light@.color = $4;\n}?5{light@.intensity = $5;\n}"
+        "?6{light@.range = $6;\n}?7{light@.offset = $7;\n}?8{light@.direction = $8;\n}"
+        "?9{light@.coneAngle = $9;\n}?10{light@.edgeSoftness = $10;\n}?11{light@.width = $11;\n}"
+        "?12{light@.height = $12;\n}?13{light@.length = $13;\n}?14{light@.rotation = $14;\n}"
+        "ctx->lightSetAt($1, $2, &light@);\n#0" });
+
     // Set Entity: writes only the inputs you actually connect (the ?k{...} conditional blocks). Position/
     // Scale/Rotation assign straight into the Entity mirror; Rotation converts degrees -> quat with glm::.
     r.push_back({ "SetEntity", "Set Entity", "Entity", true,

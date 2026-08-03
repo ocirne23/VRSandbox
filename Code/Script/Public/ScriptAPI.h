@@ -36,6 +36,7 @@ class PhysicsComponent;
 class AudioComponent;
 class ForceComponent;
 class SceneComponent;
+class LightComponent;
 
 // Handle to an engine-owned dynamic array (the DSL's `T[]`). A plain POD id so it can live in a script's
 // persistent ScriptData block: the ELEMENTS live engine-side, keyed by this id, which means a hot-reload that
@@ -55,6 +56,26 @@ struct VrArraySpan
 {
     void* data;
     int   count;
+};
+
+// One light of a LightComponent, crossed BY VALUE as a whole (the DSL's `Light` struct): lightGetAt copies
+// one out, lightSetAt applies one back (with the host clamping/normalizing, so a script can't store a shape
+// the renderer degenerates on). The light's TYPE is not here -- it decides which shape fields mean anything
+// and stays authoring-only; writing a field the type ignores is harmlessly stored. Angles in DEGREES.
+struct VrLight
+{
+    glm::vec3 color;
+    float     intensity;
+    float     range;        // world units, NOT scaled by the entity
+    glm::vec3 offset;       // entity-space position
+    glm::vec3 direction;    // entity-space aim axis (Spot/Area/Tube)
+    float     coneAngle;    // Spot: cone HALF-angle
+    float     edgeSoftness; // Spot
+    float     width;        // Area width / Tube radius
+    float     height;       // Area
+    float     length;       // Tube
+    float     rotation;     // Area: extra roll about the aim axis
+    bool      enabled;
 };
 
 // One raycast result, returned BY VALUE (a POD of ABI-legal members, like every other type crossing here).
@@ -288,7 +309,17 @@ struct VrScriptField
     X(void*,       arrayResolve,           (VrArray, handle)) /* null for a stale/empty handle */ \
     X(int,         arrayViewCount,         (void*, view)) \
     X(int,         arrayViewGet,           (void*, view), (int, index), (int, elemSize), (void*, outValue)) /* Entity/String only, as arrayGet */ \
-    X(void,        arrayViewSet,           (void*, view), (int, index), (int, elemSize), (const void*, value)) /* Entity/String only */
+    X(void,        arrayViewSet,           (void*, view), (int, index), (int, elemSize), (const void*, value)) /* Entity/String only */ \
+    /* ---- light component ---- a LIST of lights on one entity, addressed by index [0, lightGetCount).
+       Whole-light access only, through the VrLight mirror (see there): lightGetAt's return value IS the
+       bounds check (1 on success, outLight untouched otherwise), which is what ifexist branches on;
+       lightSetAt clamps/normalizes and no-ops out of range, so scripts need no bounds proof. Writes land
+       on the live component (lights re-upload every frame). Node/DSL emits that touch single fields go
+       copy-out / edit / copy-in through the same pair. */ \
+    X(void*,       entityGetLightComponent,(Entity*, entity)) \
+    X(int,         lightGetCount,          (void*, lightComponent)) \
+    X(int,         lightGetAt,             (void*, lightComponent), (int, index), (VrLight*, outLight)) \
+    X(void,        lightSetAt,             (void*, lightComponent), (int, index), (const VrLight*, light))
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,
@@ -417,6 +448,11 @@ template<class T> T vrArrViewGet(const ScriptContext* ctx, void* view, int i)
 { T v = T(); ctx->arrayViewGet(view, i, (int)sizeof(T), &v); return v; }
 template<class T> void vrArrViewSet(const ScriptContext* ctx, void* view, int i, const T& v)
 { ctx->arrayViewSet(view, i, (int)sizeof(T), &v); }
+
+// One light BY VALUE, for the foreach at-emit over self.light.lights (defaults-on-failure like vrArrGet;
+// ifexist goes through ctx->lightGetAt directly, whose return value is the existence check).
+inline VrLight vrLightAt(const ScriptContext* ctx, void* lightComponent, int i)
+{ VrLight v{}; ctx->lightGetAt(lightComponent, i, &v); return v; }
 
 // ---- math helpers ----
 // The `math.*` bindings are otherwise one-to-one glm/std calls emitted inline. These few are here because their

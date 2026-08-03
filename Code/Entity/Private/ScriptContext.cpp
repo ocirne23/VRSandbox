@@ -389,6 +389,62 @@ void registerScriptDslBindings()
             { "appliedForce", vec3,     "ctx->forceGetAppliedForce($r)",        /*writable*/ false },
             { "pressure",     T::Float, "ctx->forceGetPressure($r)",            /*writable*/ false },
         } });
+
+    // One light as a VALUE the DSL can hold, iterate and edit whole: `Light` mirrors VrLight (ScriptAPI.h).
+    // Every member is writable ON THE COPY -- what makes an edit land is writing it back through a `ref`
+    // binding (below), where the host clamps/normalizes (lightSetAt), so no per-member validation lives here.
+    // Angles in degrees; range/width/height/length are world units, NOT scaled by the entity; offset/direction
+    // are entity-space. Shape params are each read by ONE type (Spot: coneAngle/edgeSoftness; Area: width/
+    // height/rotation; Tube: width = radius, length) and harmlessly stored for the others; the TYPE itself
+    // stays authoring-only.
+    const DSLType lightStructType = bindings.registerStruct({ "Light", "VrLight", {}, "VrLight()",
+        {
+            { "enabled",      T::Bool,  "$r.enabled" },
+            { "color",        vec3,     "$r.color" },
+            { "intensity",    T::Float, "$r.intensity" },
+            { "range",        T::Float, "$r.range" },
+            { "offset",       vec3,     "$r.offset" },
+            { "direction",    vec3,     "$r.direction" },
+            { "coneAngle",    T::Float, "$r.coneAngle" },
+            { "edgeSoftness", T::Float, "$r.edgeSoftness" },
+            { "width",        T::Float, "$r.width" },
+            { "height",       T::Float, "$r.height" },
+            { "length",       T::Float, "$r.length" },
+            { "rotation",     T::Float, "$r.rotation" },
+        },
+        {
+            // Intent-named shape setters: the raw fields are OVERLOADED per light type (width is an area's
+            // width but a tube's radius), so these spell out which shape is being authored and set its fields
+            // together. They mutate the receiver (the bound copy -- a `ref` binding is what makes it land).
+            { "setSpotCone",  T::Void, { { "coneAngleDeg", T::Float }, { "edgeSoftness", T::Float } },
+                "(void)($r.coneAngle = $1, $r.edgeSoftness = $2)" },
+            { "setAreaSize",  T::Void, { { "width", T::Float }, { "height", T::Float } },
+                "(void)($r.width = $1, $r.height = $2)" },
+            { "setTubeShape", T::Void, { { "radius", T::Float }, { "length", T::Float } },
+                "(void)($r.width = $1, $r.length = $2)" }, // radius rides the width field
+            // The tube reading of the overloaded width field, so a script never has to know the aliasing.
+            { "tubeRadius",   T::Float, {}, "$r.width" },
+        } });
+
+    // The component's light list as a WRITABLE sequence: `foreach [ref] Light l in self.light.lights` and
+    // `ifexist [ref] Light l in self.light.lights at <i>` are the whole access surface -- the list never
+    // grows or shrinks from a script, so there is no push/clear and iteration is always safe. lightGetAt's
+    // return value is the existence check; a non-ref binding is a copy, a `ref` one writes back through
+    // lightSetAt at block end.
+    const DSLType lightListType = bindings.registerSequenceType("LightList", lightStructType,
+        "ctx->lightGetCount($r)", "vrLightAt(ctx, $r, $i)",
+        "(ctx->lightGetAt($r, $1, &$v) != 0)", "ctx->lightSetAt($r, $1, &$v)");
+
+    const DSLType lightType = bindings.registerComponentType("light", "LightComponent", EComponentID_Light,
+        "ctx->entityGetLightComponent($r)");
+    bindings.registerObject({ "light", lightType, /*sidebarTopLevel*/ false,
+        {},
+        {
+            // The collection itself, scene.children-style ("self.light.lights"); the member's value IS the
+            // component handle, so the sequence emits run straight against it.
+            { "lights", lightListType, "$r", /*writable*/ false },
+            { "count",  T::Int, "ctx->lightGetCount($r)", /*writable*/ false },
+        } });
     // free functions
     // The result of a radius query, as a collection so it reads like any other ("foreach Entity e in
     // world.entitiesInRadius(...)"). The exposing FUNCTION's own emit RUNS the query and yields a handle to its
@@ -1128,6 +1184,60 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
             const float len2 = glm::dot(v, v);
             fc->localDirection = len2 > 1e-12f ? v * glm::inversesqrt(len2) : glm::vec3(0.0f, 0.0f, -1.0f);
         }
+    }
+
+    // ---- light component ----
+    // Per-index access into the component's light list; find() bounds-checks, so a bad index reads type
+    // defaults and writes nothing. Writes go straight onto the live descs -- the whole list re-uploads to
+    // the renderer every update, so there is nothing else to poke.
+    void* thunk_entityGetLightComponent(Entity* en) { return en ? getComponent<LightComponent>(en) : nullptr; }
+    LightComponent::LightDesc* asLightDesc(void* p, int index)
+    {
+        LightComponent* lc = static_cast<LightComponent*>(p);
+        return (lc && index >= 0) ? lc->find(size_t(index)) : nullptr;
+    }
+
+    int thunk_lightGetCount(void* p) { LightComponent* lc = static_cast<LightComponent*>(p); return lc ? int(lc->lights.size()) : 0; }
+
+    // lightSetAt is the ONE write path (the DSL's `ref` write-back, the Set Light node's copy-in), so every
+    // clamp lives there and nowhere else.
+    int thunk_lightGetAt(void* p, int i, VrLight* out)
+    {
+        LightComponent::LightDesc* d = asLightDesc(p, i);
+        if (!d || !out)
+            return 0;
+        out->color = d->color;
+        out->intensity = d->intensity;
+        out->range = d->range;
+        out->offset = d->offset;
+        out->direction = d->direction;
+        out->coneAngle = d->coneAngle;
+        out->edgeSoftness = d->edgeSoftness;
+        out->width = d->width;
+        out->height = d->height;
+        out->length = d->length;
+        out->rotation = d->rotation;
+        out->enabled = d->enabled;
+        return 1;
+    }
+    void thunk_lightSetAt(void* p, int i, const VrLight* v)
+    {
+        LightComponent::LightDesc* d = asLightDesc(p, i);
+        if (!d || !v)
+            return;
+        d->color = glm::max(v->color, glm::vec3(0.0f));
+        d->intensity = glm::max(v->intensity, 0.0f);
+        d->range = glm::max(v->range, 0.0f);
+        d->offset = v->offset;
+        const float len2 = glm::dot(v->direction, v->direction);
+        d->direction = len2 > 1e-12f ? v->direction * glm::inversesqrt(len2) : glm::vec3(0.0f, 0.0f, -1.0f);
+        d->coneAngle = glm::clamp(v->coneAngle, 0.0f, 89.0f);
+        d->edgeSoftness = glm::clamp(v->edgeSoftness, 0.001f, 1.0f);
+        d->width = glm::max(v->width, 0.001f);
+        d->height = glm::max(v->height, 0.001f);
+        d->length = glm::max(v->length, 0.001f);
+        d->rotation = v->rotation;
+        d->enabled = v->enabled;
     }
 
     // ---- scene component ----
