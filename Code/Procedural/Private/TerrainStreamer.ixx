@@ -114,7 +114,8 @@ export namespace Procedural
 		int   m_chunkSize = 1024;
 		int   m_lod0Res = 512;
 		int   m_ringRadius = 32;   // max generation range from the camera chunk, in chunks
-		float m_lodStep = 1.0f;   // LOD0 band width in chunks (fractional ok); each next LOD band is twice as wide (geometric)
+		float m_lodStep = 0.3f;   // LOD0 band width in chunks (fractional ok); each next LOD band is twice as wide (geometric)
+		float m_fullResDist = 0.3f; // chunks whose nearest edge is within this many chunks are always LOD0; bands start beyond it
 		int   m_maxLod = 4;
 		float m_seaLevel = 0.0f;
 		float m_skirtDepth = 5.0f;
@@ -239,8 +240,10 @@ export namespace Procedural
 		// first publish (everything queued before that would drop, but the first publish precedes the
 		// first append under the same lock).
 		glm::ivec2 m_ringCam{ 0, 0 };
+		glm::vec2  m_ringCamPos{ 0.0f, 0.0f }; // snapped camera position in chunk units (edge-distance LOD)
 		int    m_ringR = -1;
 		float  m_ringLodStep = 1.0f;
+		float  m_ringFullRes = 0.5f;
 		uint32 m_ringMaxLod = 0;
 		std::vector<Result>     m_results;      // filled by worker, drained on the main thread
 		std::vector<Result>     m_readyBacklog; // main-thread only: generated chunks over the per-frame upload cap
@@ -256,6 +259,8 @@ export namespace Procedural
 		int    m_lastRingCZ = INT_MIN;
 		int    m_lastRingR = -1;
 		float  m_lastRingLodStep = 0.0f;
+		float  m_lastRingFullRes = -1.0f;
+		glm::vec2 m_lastRingCamPos{ 1e30f, 1e30f };
 		uint32 m_lastRingMaxLod = 0xFFFFFFFFu;
 		// The enqueue scan re-runs only when the ring moved or a key left pending/residency (its
 		// result is identical otherwise) - skips (2R+1)^2 hash probes per idle frame.

@@ -18,16 +18,28 @@ import :TerrainChunk;
 
 namespace
 {
-	// GEOMETRIC LOD bands: lod = floor(log2(1 + cheb/lodStep)) — lodStep rings of LOD0, then 2*lodStep
-	// of LOD1, 4*lodStep of LOD2, ... capped at maxLod. Each LOD halves mesh density while a feature's
-	// screen size halves per distance DOUBLING, so doubling band widths keeps the on-screen triangle
-	// density roughly constant (linear bands over-detailed the mid rings). This is THE ring-LOD function:
-	// enqueue, queue staleness, result validation and eviction all derive from it.
-	uint32 ringLodAt(int cheb, float lodStep, uint32 maxLod)
+	// Chebyshev distance (in chunk units) from the camera to the NEAREST EDGE of a chunk's footprint —
+	// 0 while the camera stands inside/on it. Distance to the edge, not to the center ring: a neighbor's
+	// near boundary can be a whole chunk away when the camera sits centered, or right underfoot at the
+	// boundary, and the LOD should follow that continuously instead of stepping per camera-chunk crossing.
+	// camChunks must be the SNAPPED camera position (see update()) so every caller sees the same value.
+	float chunkEdgeDist(glm::vec2 camChunks, glm::ivec2 coord)
 	{
-		// Float step: fractional values place band boundaries between rings (steps < 1 pull the coarser
-		// bands inside the first rings). Deterministic across all callers — same function, same inputs.
-		const float k = (float)cheb / glm::max(lodStep, 0.01f);
+		const float dx = glm::max(glm::max((float)coord.x - camChunks.x, camChunks.x - (float)(coord.x + 1)), 0.0f);
+		const float dz = glm::max(glm::max((float)coord.y - camChunks.y, camChunks.y - (float)(coord.y + 1)), 0.0f);
+		return glm::max(dx, dz);
+	}
+
+	// GEOMETRIC LOD bands over edge distance: lod = floor(log2(1 + d/lodStep)) — lodStep chunks of LOD0,
+	// then 2*lodStep of LOD1, 4*lodStep of LOD2, ... capped at maxLod. Each LOD halves mesh density while
+	// a feature's screen size halves per distance DOUBLING, so doubling band widths keeps the on-screen
+	// triangle density roughly constant (linear bands over-detailed the mid rings). This is THE ring-LOD
+	// function: enqueue, queue staleness, result validation and eviction all derive from it.
+	uint32 ringLodAt(float edgeDist, float fullRes, float lodStep, uint32 maxLod)
+	{
+		// Everything whose edge is within fullRes chunks is unconditionally LOD0 — without it a chunk
+		// whose boundary you are standing on could already be a level down.
+		const float k = glm::max(edgeDist - fullRes, 0.0f) / glm::max(lodStep, 0.01f);
 		const int lod = (int)std::floor(std::log2(1.0f + k));
 		return glm::min(maxLod, (uint32)glm::max(lod, 0));
 	}
@@ -236,6 +248,7 @@ namespace Procedural
 		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 128, 1024, 1.0f, dirty);
 		Tweak::intVar("Terrain", "Range (chunks)", &m_ringRadius, 1, 64, 1.0f); // max generation radius from the camera chunk
 		Tweak::floatVar("Terrain", "LOD step (chunks)", &m_lodStep, 0.1f, 4.0f, 0.1f); // LOD0 band width; each next band doubles
+		Tweak::floatVar("Terrain", "Full-res distance (chunks)", &m_fullResDist, 0.0f, 8.0f, 0.05f); // edge distance forced to LOD0 before bands begin
 		Tweak::intVar("Terrain", "Max LOD", &m_maxLod, 0, 6, 1.0f);
 		Tweak::intVar("Terrain", "Uploads/frame", &m_maxUploadsPerFrame, 1, 32, 1.0f);
 		// Concurrent generation jobs: >1 lets warm-tile mesh builds overlap a cold V3 tile wait
@@ -634,7 +647,7 @@ namespace Procedural
 					Request& r = m_requests[i];
 					const glm::ivec2 d = r.params.coord - m_ringCam;
 					const int cheb = glm::max(glm::abs(d.x), glm::abs(d.y));
-					if (cheb > m_ringR || r.params.lod != ringLodAt(cheb, m_ringLodStep, m_ringMaxLod))
+					if (cheb > m_ringR || r.params.lod != ringLodAt(chunkEdgeDist(m_ringCamPos, r.params.coord), m_ringFullRes, m_ringLodStep, m_ringMaxLod))
 					{
 						Result drop;
 						drop.key = r.key;
@@ -835,7 +848,13 @@ namespace Procedural
 		const int camCZ = (int)std::floor(camera.position.z / chunkSize);
 		const int R = glm::max(1, m_ringRadius);
 		const float lodStep = glm::max(0.01f, m_lodStep);
+		const float fullRes = glm::max(0.0f, m_fullResDist);
 		const uint32 maxLod = (uint32)glm::max(0, m_maxLod);
+		// Camera position in chunk units, SNAPPED to a quarter-chunk lattice: edge-distance LOD makes the
+		// wanted set a function of the camera POSITION, not just its chunk, and the snap both bounds how
+		// often the scan re-runs and gives the worker one exact value to judge staleness against.
+		const glm::vec2 camChunks(std::floor(camera.position.x / chunkSize * 4.0f) * 0.25f,
+		                          std::floor(camera.position.z / chunkSize * 4.0f) * 0.25f);
 
 		// Chunk mesh coverage: chunks span +-R around the camera's chunk, so a disk of R*chunkSize around
 		// the camera is guaranteed resident whatever its position within its own chunk — the fence for
@@ -876,11 +895,11 @@ namespace Procedural
 		const auto ringLod = [&](glm::ivec2 coord) -> int
 		{
 			const int cheb = glm::max(glm::abs(coord.x - camCX), glm::abs(coord.y - camCZ));
-			return cheb <= R ? (int)ringLodAt(cheb, lodStep, maxLod) : -1;
+			return cheb <= R ? (int)ringLodAt(chunkEdgeDist(camChunks, coord), fullRes, lodStep, maxLod) : -1;
 		};
 
-		const bool ringMoved = camCX != m_lastRingCX || camCZ != m_lastRingCZ
-			|| R != m_lastRingR || lodStep != m_lastRingLodStep || maxLod != m_lastRingMaxLod;
+		const bool ringMoved = camChunks != m_lastRingCamPos || camCX != m_lastRingCX || camCZ != m_lastRingCZ
+			|| R != m_lastRingR || lodStep != m_lastRingLodStep || fullRes != m_lastRingFullRes || maxLod != m_lastRingMaxLod;
 
 		// --- Enqueue any ring chunk that is neither resident nor already in flight. The scan is a
 		// pure function of (ring, residents, pending), so it only re-runs when one of them changed.
@@ -892,9 +911,8 @@ namespace Procedural
 			{
 				for (int dx = -R; dx <= R; ++dx)
 				{
-					const int cheb = glm::max(dx < 0 ? -dx : dx, dz < 0 ? -dz : dz);
-					const uint32 lod = ringLodAt(cheb, lodStep, maxLod);
 					const glm::ivec2 coord(camCX + dx, camCZ + dz);
+					const uint32 lod = ringLodAt(chunkEdgeDist(camChunks, coord), fullRes, lodStep, maxLod);
 					const uint64 key = chunkKey(coord, lod);
 					if (m_residents.count(key) || m_pending.count(key))
 						continue;
@@ -921,13 +939,16 @@ namespace Procedural
 		// decides properly a moment later.
 		// What it DOES owe the worker is the ring state to judge against, published under the same lock.
 		m_lastRingCX = camCX; m_lastRingCZ = camCZ;
-		m_lastRingR = R; m_lastRingLodStep = lodStep; m_lastRingMaxLod = maxLod;
+		m_lastRingR = R; m_lastRingLodStep = lodStep; m_lastRingFullRes = fullRes; m_lastRingMaxLod = maxLod;
+		m_lastRingCamPos = camChunks;
 		if (ringMoved || !newRequests.empty())
 		{
 			std::lock_guard<std::mutex> lk(m_mutex);
 			m_ringCam = glm::ivec2(camCX, camCZ);
+			m_ringCamPos = camChunks;
 			m_ringR = R;
 			m_ringLodStep = lodStep;
+			m_ringFullRes = fullRes;
 			m_ringMaxLod = maxLod;
 			for (Request& r : newRequests)
 				m_requests.push_back(std::move(r));
