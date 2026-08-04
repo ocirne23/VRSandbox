@@ -159,16 +159,13 @@ bool NetHost::send(NetPeerId id, std::span<const uint8> data, ENetDelivery deliv
         return true;
     }
 
-    // A peer that keeps its connection alive but stops ACKING makes this window grow forever, and
-    // the app has no way to know (send() succeeded). Unbounded remote-controlled memory growth, so
-    // it is a disconnect: past the cap the peer is either broken or hostile, and either way the
-    // reliable stream it is holding up can never be completed.
+    // a peer that stays connected but stops ACKING would grow this window forever
     if (sendChannel.window.size() >= m_config.maxQueuedReliablePerChannel)
     {
         if (!peer.sendWindowOverflow)
         {
-            peer.sendWindowOverflow = true; // acted on in update(): freeing a peer mid-send would
-                                            // pull the ground out from under sendToAll's loop
+            peer.sendWindowOverflow = true; // acted on in update(): freeing a peer here would break
+                                            // sendToAll's loop
             Log::warning("NetHost: peer " + peer.address.toString() + " reliable backlog over "
                 + std::to_string(m_config.maxQueuedReliablePerChannel) + " on channel "
                 + std::to_string(channel) + ", disconnecting");
@@ -241,10 +238,8 @@ void NetHost::update(double deltaSec)
             break;
         ++m_accumPacketsReceived;
         m_accumBytesReceived += size;
-        // Global ceiling first: without it a big enough flood makes ONE update() unbounded (the
-        // socket keeps yielding packets), which stalls the frame even if every packet is then
-        // dropped. The excess stays in the socket buffer and is dropped by the OS, which is correct
-        // — we are past capacity either way, and a bounded frame keeps the server responsive.
+        // global ceiling: per-address limits alone still let one update() run unbounded, since the
+        // socket keeps yielding. Excess stays in the socket buffer for the OS to drop.
         if (++m_packetsThisUpdate > m_config.maxPacketsPerUpdate)
         {
             ++m_accumPacketsDropped;
@@ -511,8 +506,7 @@ void NetHost::handleChallengeResponse(const NetAddress& from, NetPeerId id, NetR
     }
     if (id == InvalidNetPeerId)
     {
-        // one machine must not be able to occupy every slot: the challenge proves the address is
-        // reachable, but nothing stops a real host from completing the handshake on many ports
+        // the challenge proves reachability, not scarcity: one host can handshake from many ports
         if (m_config.maxPeersPerIp != 0 && countPeersOnIp(from.ip) >= m_config.maxPeersPerIp)
         {
             sendDeny(from, clientSalt);
@@ -541,14 +535,13 @@ void NetHost::handleChallengeResponse(const NetAddress& from, NetPeerId id, NetR
     emitConnected(id);
 }
 
-// Per-source token bucket. Runs BEFORE parsing, decryption or any allocation, so the cost of a
-// flooded packet is a hash and a compare. Unconnected senders are limited too — that is the point:
-// handshake requests are the cheapest thing to flood and the responder answers every one.
+// Per-source token bucket, before any parsing/decryption/allocation. Unconnected senders included:
+// handshake requests are the cheapest thing to flood. Fixed table — a per-address map would grow
+// with every forged sender.
 bool NetHost::rateLimitAllows(const NetAddress& from)
 {
     const uint64 key = from.key();
-    // splitmix-style finalizer: raw address bits cluster hard (sequential ports, one subnet), and a
-    // clustered index would pile a whole attacking range into one bucket while leaving others idle
+    // finalizer: raw address bits cluster by subnet/port and would pile a range into one bucket
     uint64 hash = key * 0x9e3779b97f4a7c15ull;
     hash ^= hash >> 29;
     hash *= 0xbf58476d1ce4e5b9ull;
@@ -558,11 +551,15 @@ bool NetHost::rateLimitAllows(const NetAddress& from)
     const float burst = float(std::max(1u, m_config.packetBurstPerAddress));
     if (bucket.addressKey != key)
     {
-        // slot belongs to another address: steal it only once its owner has gone quiet enough to
-        // have refilled, so a flooder cannot evict an active peer's bucket and reset its own budget
-        const float refilled = float(m_time - bucket.lastRefill) * float(m_config.maxPacketsPerSecPerAddress);
-        if (bucket.tokens + refilled < burst)
-            return false;
+        // unused slots claim immediately (an empty bucket never "refills", so testing it would
+        // reject every new address); occupied ones only yield once their owner has gone quiet long
+        // enough to have refilled, or a flooder could evict an active peer and reset its own budget
+        if (bucket.addressKey != 0)
+        {
+            const float refilled = float(m_time - bucket.lastRefill) * float(m_config.maxPacketsPerSecPerAddress);
+            if (bucket.tokens + refilled < burst)
+                return false;
+        }
         bucket.addressKey = key;
         bucket.tokens = burst;
         bucket.lastRefill = m_time;

@@ -48,21 +48,22 @@ static float s_maxVel = 50.0f;    // velocity quantization range (m/s); sent per
 static float s_maxAngVel = 50.0f; // angular velocity quantization range (rad/s)
 static bool  s_showStats = true;
 
-// claim validation (server) + claim send rate (client); the rate doubles as the server's per-seq
-// time base for the displacement budget, so both sides should agree on it. 20 matches the physics
-// step and the snapshot rate — one shared network cadence.
-static float s_claimRateHz = 20.0f;
-static float s_maxClaimSpeed = 60.0f;     // m/s the movement token bucket refills at (bucket cap = half a
-                                          // second of it). Must exceed the fastest LEGITIMATE motion,
-                                          // free fall included — the re-anchor rule used to mask that
-                                          // and no longer does, so 20 would reject long drops
+// Thinning limit, not a clock: claims fire on physics step boundaries (see send()), so this only
+// caps them lower and above the step rate never binds. The two ends need not agree — the
+// displacement budget is wall-clock, so an inflated rate buys nothing.
+static float s_maxUpdateHz = 20.0f;
+static float s_maxClaimSpeed = 60.0f;     // m/s the movement token bucket refills at (cap = half a second
+                                          // of it); must exceed the fastest LEGITIMATE motion, free fall included
 static float s_maxClaimVelocity = 50.0f;  // cap on the claimed velocity magnitude
 static float s_claimTeleportCap = 10.0f;  // hard displacement cap regardless of elapsed time
 static bool  s_claimPathRaycast = true;   // reject claims whose path crosses world geometry
 static int   s_forcedTicks = 30;          // snapshot ticks the owner stays force-corrected after a rejection
 static float s_claimReanchorRadius = 2.0f; // a claim this close to the twin's CURRENT state always accepts (guaranteed rejection recovery)
 static int   s_claimRedundancy = 4;       // past claims carried in EVERY packet (<= ring capacity 8): a claim survives unless this many consecutive packets drop
-static float s_claimLeadTicks = 0.5f;     // constant forward extrapolation (in snapshot ticks) applied when re-emitting claims — buys back the claim-hold latency without reintroducing timeline jitter (constant shift, smooth owner velocity)
+// Claim passthrough: re-emit an accepted claim extrapolated this far forward along its velocity,
+// cancelling the hold until the next snapshot tick. Must stay CONSTANT — a varying, arrival-phase
+// dependent shift is what makes remote motion pulse. Higher = prediction, and overshoot on turns.
+static float s_ownerPredictTicks = 0.5f;
 
 // proximity ownership transfer (server): a server-owned dynamic body near a client's PRIMARY owned
 // body transfers to that client (its physics then drives the object, claims-validated); it reverts
@@ -74,16 +75,13 @@ static float s_releaseDelaySec = 1.0f;
 static float s_arbitrateSec = 1.0f;  // player-vs-player contact: how long both primaries stay server-arbitrated (refreshed per contact)
 static float s_contestSec = 1.5f;    // object touched by two DISTINCT clients within this window = contested -> server-owned until it decays
 
-// EVERY float that arrives from the wire must pass this before it reaches physics or a transform.
-// NaN defeats validation silently: every comparison against NaN is false, so a NaN position sails
-// through the whole plausibility gate ("not greater than the cap") and lands in b3Body_SetTransform,
-// poisoning the solver for every player and re-broadcasting itself in the next snapshot.
+// Every wire float passes this before reaching physics or a transform: NaN defeats the plausibility
+// gate silently, since every comparison against it is false ("not greater than the cap").
 static bool isFinite(float v) { return std::isfinite(v); }
 static bool isFinite(const glm::vec3& v) { return isFinite(v.x) && isFinite(v.y) && isFinite(v.z); }
 static bool isFinite(const glm::quat& q) { return isFinite(q.x) && isFinite(q.y) && isFinite(q.z) && isFinite(q.w); }
 
-// a wire quaternion must also be UNIT: box3d builds a rotation matrix from it, so an unnormalized
-// (or zero) quat skews/collapses the body's frame. The unquantized path reads 4 raw floats.
+// wire quaternions must also be UNIT — box3d builds a rotation matrix from it
 static bool sanitizeRotation(glm::quat& q)
 {
     if (!isFinite(q))
@@ -183,7 +181,7 @@ void NetworkManager::registerTweaks()
     Tweak::floatVar("Network/Correction", "Rot snap threshold (deg)", &m_params.rotSnapThresholdDeg, 0.0f, 180.0f, 0.5f);
     Tweak::floatVar("Network/Correction", "Blend rate", &m_params.blendRate, 0.0f, 30.0f, 0.1f);
     Tweak::boolean("Network/Correction", "Extrapolate", &m_params.extrapolate);
-    Tweak::floatVar("Network/Correction", "Remote interp (ticks)", &m_params.remoteInterpTicks, 0.0f, 8.0f, 0.1f);
+    Tweak::intVar("Network/Correction", "Remote interp (ticks)", &m_params.remoteInterpTicks, 2, 8);
     Tweak::floatVar("Network/Correction", "Interaction radius", &m_params.interactionRadius, 0.0f, 10.0f, 0.05f);
     Tweak::floatVar("Network/Correction", "Interaction linger", &m_params.interactionLinger, 0.0f, 3.0f, 0.05f);
     Tweak::floatVar("Network/Correction", "Push pos gain", &m_params.pushPosGain, 0.0f, 30.0f, 0.1f);
@@ -203,15 +201,17 @@ void NetworkManager::registerTweaks()
     Tweak::floatVar("Network/Ownership", "Arbitrate window", &s_arbitrateSec, 0.0f, 5.0f, 0.05f);
     Tweak::floatVar("Network/Ownership", "Contest window", &s_contestSec, 0.0f, 5.0f, 0.05f);
 
-    Tweak::floatVar("Network/Validation", "Claim rate Hz", &s_claimRateHz, 1.0f, 120.0f, 0.5f);
+    Tweak::floatVar("Network/Player", "Max update Hz", &s_maxUpdateHz, 1.0f, 120.0f, 0.5f);
     Tweak::floatVar("Network/Validation", "Max speed", &s_maxClaimSpeed, 0.0f, 200.0f, 0.5f);
     Tweak::floatVar("Network/Validation", "Max velocity", &s_maxClaimVelocity, 0.0f, 500.0f, 0.5f);
     Tweak::floatVar("Network/Validation", "Teleport cap", &s_claimTeleportCap, 0.0f, 100.0f, 0.5f);
     Tweak::boolean("Network/Validation", "Path raycast", &s_claimPathRaycast);
     Tweak::intVar("Network/Validation", "Forced ticks", &s_forcedTicks, 1, 255);
     Tweak::floatVar("Network/Validation", "Re-anchor radius", &s_claimReanchorRadius, 0.1f, 10.0f, 0.1f);
-    Tweak::intVar("Network/Validation", "Claim redundancy", &s_claimRedundancy, 1, 8);
-    Tweak::floatVar("Network/Validation", "Claim lead (ticks)", &s_claimLeadTicks, 0.0f, 2.0f, 0.05f);
+    // NOT validation: redundancy is the owning CLIENT's send-side loss margin, and claim lead is a
+    // SERVER emit-side timeline shift. Same miscategorisation "Claim rate Hz" had before it moved.
+    Tweak::intVar("Network/Player", "Claim redundancy", &s_claimRedundancy, 1, 8);
+    Tweak::floatVar("Network", "Owner predict (ticks)", &s_ownerPredictTicks, 0.0f, 2.0f, 0.05f);
 
     // live-editable transport link simulation (outgoing packets)
     NetHostConfig& config = m_host.config();
@@ -699,6 +699,8 @@ void NetworkManager::sendClaims()
         record.input = comp->state->input;
         if (dynamicBody)
         {
+            // the raw stepped pose, not the interpolated render pose — that one trails the sim by
+            // up to a step, and smoothing belongs on the observer's playback buffer
             record.pos = physics->body.getPosition();
             record.rot = physics->body.getRotation();
             record.linVel = physics->body.getLinearVelocity();
@@ -851,9 +853,8 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
             continue; // redundant resend of a claim we already processed
 
         // ---- plausibility gate (Network/Validation tweaks) ----
-        // refill the movement bucket from the wall clock BEFORE validating (once per non-duplicate
-        // claim, whatever the packet rate). Bucket cap = half a second of travel: enough that a lag
-        // spike delivering several claims at once still passes, far too little to bank a teleport.
+        // refill from the WALL CLOCK before validating: seq numbers and packet rate are both
+        // attacker-controlled, so any per-claim budget mints displacement per packet sent
         {
             NetEntityState::ServerState& sv = comp->state->server;
             const float refill = float(m_netTime - sv.claimBudgetTime) * s_maxClaimSpeed;
@@ -865,14 +866,11 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
         const bool recovering = m_serverTick < comp->state->server.forcedUntilTick;
         if (recovering && glm::length(pos - twinPos) < s_claimReanchorRadius)
         {
-            // RE-ANCHOR, and ONLY while we are actively force-correcting this owner: claiming to be
-            // where the server already has you is the anti-deadlock rule that guarantees rejection
-            // recovery (a stale anchor separated from the twin by a wall would otherwise veto
-            // forever — a permanently stuck player).
-            // It is gated on `recovering` because it is a VALIDATION BYPASS: accepted claims pin the
-            // twin, so during normal play every claim lands within the radius of the twin it just
-            // moved, and an attacker could walk `radius` metres per PACKET — at an unthrottled send
-            // rate that is unbounded speed, straight through walls, with the budget never consulted.
+            // Anti-deadlock: claiming to be where the server already has you always accepts, so a
+            // stale anchor (separated from the twin by a wall = permanent RejectedPath) cannot veto
+            // forever. Gated on `recovering` because it is a validation BYPASS — accepted claims pin
+            // the twin, so ungated every normal claim takes this path and an attacker walks the
+            // radius per packet, through walls, at whatever rate it sends.
         }
         else if (comp->state->server.lastAcceptedClaimSeq == 0)
         {
@@ -1167,10 +1165,8 @@ void NetworkManager::sendSpawnTo(NetPeerId peer, const DynamicSpawn& record)
 
 void NetworkManager::handleEventMessage(NetPeerId peer, std::span<const uint8> bytes)
 {
-    // AUTHENTICATION: a transport-connected peer that never completed Hello/Welcome is not a player.
-    // Without this gate anyone who can open a connection can fire any named script event on the
-    // server AND have it relayed to every client — remote arbitrary gameplay triggering, plus an
-    // N-way reliable-channel flood amplifier.
+    // a transport-connected peer that never completed Hello/Welcome is not a player: ungated, anyone
+    // who can open a connection fires arbitrary script events and gets them relayed to every client
     if (m_role == ENetRole::Server)
     {
         if (!m_peerClients.contains(peer))
@@ -1181,8 +1177,7 @@ void NetworkManager::handleEventMessage(NetPeerId peer, std::span<const uint8> b
 
     NetReader reader(bytes.subspan(1));
     const std::string_view name = reader.readString();
-    // bound the name: it is attacker-controlled and reaches the log ring. Legitimate event names are
-    // short identifiers; anything longer is a flood attempt, not a typo
+    // the name is attacker-controlled and reaches the log ring
     if (reader.overflowed() || name.empty() || name.size() > MaxEventNameLength)
         return;
     Log::info("Network: event '" + std::string(name) + "' received");
@@ -1342,12 +1337,16 @@ void NetworkManager::send(double deltaSec)
     }
     else if (m_serverPeer != InvalidNetPeerId && m_host.isConnected(m_serverPeer) && m_localClientId != 0)
     {
-        // owner claims for locally-owned entities, at their own fixed rate
-        const double interval = 1.0 / double(glm::clamp(s_claimRateHz, 1.0f, 240.0f));
-        m_claimAccum = glm::min(m_claimAccum + deltaSec, interval * 4.0);
-        while (m_claimAccum >= interval)
+        // Claims are PHASE-LOCKED to the physics step: one claim per step, which is exactly the
+        // information the sim produces. A free-running clock at the same nominal Hz beats against
+        // the step clock instead, duplicating one step pose and skipping another. Physics paused =
+        // no steps = no claims.
+        const uint32 stepCount = Globals::physics.getStepCount();
+        const double minInterval = 1.0 / double(glm::clamp(s_maxUpdateHz, 1.0f, 240.0f));
+        if (stepCount != m_lastClaimStep && m_netTime - m_lastClaimTime >= minInterval * 0.999)
         {
-            m_claimAccum -= interval;
+            m_lastClaimStep = stepCount;
+            m_lastClaimTime = m_netTime;
             sendClaims();
         }
     }
@@ -1442,21 +1441,15 @@ void NetworkManager::sendSnapshotTick()
             rot = physics->body.getRotation();
             linVel = physics->body.getLinearVelocity();
             angVel = physics->body.getAngularVelocity();
-            // CLAIM PASSTHROUGH (client-owned, normal operation): re-emit the owner's accepted claim
-            // state instead of the twin's pose. The twin is teleport-pinned at claim ARRIVAL times
-            // and fixed-stepped in between, so its sampled pose age wobbles ±1 tick as the owner /
-            // network / server clock phases drift — remote clients replay that as speed pulsing. The
-            // owner's claim samples are uniformly spaced on ITS clock; a tick with no fresh claim
-            // extrapolates by the claim velocity (exact for constant motion), bounded at 3 ticks
-            // before falling back to the twin (which the claims pin, so the handover jump is small).
-            // Forced/arbitrated/asleep records keep the twin — that IS the authoritative state then.
+            // CLAIM PASSTHROUGH: re-emit the owner's accepted claim rather than sampling the twin,
+            // whose pose age wobbles ±1 tick as the owner/network/server clocks drift (remote
+            // clients replay that wobble as speed pulsing). Ticks with no fresh claim extrapolate by
+            // its velocity. Forced/arbitrated/asleep keep the twin — the authoritative state then.
             if (comp->ownerClientId != 0 && comp->state->server.claimStreamSeq != 0 && !asleep && forcedFlag == 0)
             {
-                // extrapolation budget: when snapshots outpace claims (e.g. 60 Hz snapshots over
-                // 20 Hz claims on a 20 Hz sim), the STEADY-STATE gap is already snapshotHz/claimHz-1
-                // ticks — the cap must cover that plus a lost claim packet, or routine loss pops the
-                // stream back to the twin mid-gap
-                const uint8 extrapCap = uint8(glm::clamp(s_snapshotHz / glm::max(1.0f, s_claimRateHz), 1.0f, 8.0f)) + 3;
+                // snapshots may outpace claims, so the cap must cover that steady-state gap plus a
+                // lost packet, or routine loss pops the stream back to the twin mid-gap
+                const uint8 extrapCap = uint8(glm::clamp(s_snapshotHz / glm::max(1.0f, s_maxUpdateHz), 1.0f, 8.0f)) + 3;
                 if (comp->state->server.claimStreamSentSeq != comp->state->server.claimStreamSeq)
                 {
                     comp->state->server.claimStreamSentSeq = comp->state->server.claimStreamSeq;
@@ -1480,12 +1473,10 @@ void NetworkManager::sendSnapshotTick()
                     rot = comp->state->server.claimStreamRot;
                     linVel = comp->state->server.claimStreamLinVel;
                     angVel = comp->state->server.claimStreamAngVel;
-                    // constant lead: a fixed timeline shift adds no jitter (unlike the twin's
-                    // arrival-phase-dependent step extrapolation this passthrough replaced).
-                    // Applied at emit only — never accumulated into claimStream state
-                    if (s_claimLeadTicks > 0.0f)
+                    // at emit only, never accumulated into claimStream state
+                    if (s_ownerPredictTicks > 0.0f)
                     {
-                        const float lead = s_claimLeadTicks / glm::clamp(s_snapshotHz, 1.0f, 240.0f);
+                        const float lead = s_ownerPredictTicks / glm::clamp(s_snapshotHz, 1.0f, 240.0f);
                         pos += linVel * lead;
                         const float angSpeed = glm::length(angVel);
                         if (angSpeed > 1e-4f)

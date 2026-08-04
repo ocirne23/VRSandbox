@@ -162,10 +162,8 @@ private:
 
     const uint8* consume(size_t numBytes)
     {
-        // subtraction, NOT `m_pos + numBytes > size()`: numBytes comes from the wire (a varint length
-        // in readString/readBytes), and an attacker sending ~2^64 wraps that addition to a small
-        // value, passes the check, and gets a span/string_view of astronomical length over a tiny
-        // packet — an unauthenticated remote OOB read + crash. m_pos <= size() always holds here.
+        // subtraction, not `m_pos + numBytes > size()`: numBytes is a wire-supplied length and near
+        // 2^64 that addition wraps past the check
         if (numBytes > m_data.size() - m_pos)
         {
             m_overflowed = true;

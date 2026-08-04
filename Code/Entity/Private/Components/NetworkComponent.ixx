@@ -67,12 +67,10 @@ export struct NetInputState
     glm::vec3 look = glm::vec3(0.0f);
 };
 
-// The mutable per-entity sync state, allocated at spawn ONLY inside a session (role != None) — the
-// inline component carries just identity, so single-player spawns of networked prefabs pay ~nothing.
-// Grouped by the role the fields serve; a process only ever exercises its own role's groups.
-// THREADING: written by NetworkManager on the main thread (receive() runs BEFORE the parallel entity
-// pass, send() after), read/written by NetworkComponent::update on job workers for its OWN entity
-// only — the same publish-then-read contract the fields had when they lived inline.
+// Mutable per-entity sync state, heap-allocated only inside a session so single-player spawns of
+// networked prefabs pay nothing. THREADING: NetworkManager writes it on the main thread (receive()
+// before the parallel entity pass, send() after); NetworkComponent::update reads/writes only its
+// own entity's copy from job workers.
 export struct NetEntityState
 {
     // ---- shared by both roles ----
@@ -85,38 +83,29 @@ export struct NetEntityState
     // the claim stream carries both.
     bool transferredOwnership = false;
 
-    // body has been awake since the last asleep record: send one final record at rest. Serves the
-    // server's snapshot policy and the owning client's claim policy — never both on one entity in
-    // one process, but both roles use it, so it stays outside the union
+    // awake since the last asleep record: send one final record at rest. Both roles use it (server
+    // for snapshots, owning client for claims), so it stays outside the union
     bool sleepDirty = true;
 
-    // ---- role-exclusive state: a process is ONE role for its whole life, so exactly one union
-    // member is ever active (chosen at construction; both are trivially destructible) ----
+    // ---- role-exclusive: a process is ONE role for its whole life, so exactly one member is ever
+    // active. Reading the other one is a bug. ----
 
     struct ServerState
     {
         // validation state (meaningful only for client-owned entities)
         uint32 lastClaimSeq = 0;         // newest claim seq seen (dedups the redundant resends)
         uint32 lastAcceptedClaimSeq = 0;
-        // Movement TOKEN BUCKET (metres of displacement the owner may still spend). Refilled at
-        // maxClaimSpeed per second of SERVER WALL CLOCK and capped, so total displacement over any
-        // window is bounded by speed x window + cap no matter how many packets arrive in it. A
-        // per-claim budget cannot do that: sequence numbers and packet rate are both attacker-
-        // controlled, so anything denominated per-claim mints movement per packet sent.
+        // metres of displacement still spendable, refilled at maxClaimSpeed per second of wall
+        // clock: bounds total movement over any window regardless of how many packets arrive in it
         float claimBudget = 0.0f;
-        double claimBudgetTime = 0.0; // wall clock the bucket was last refilled at
+        double claimBudgetTime = 0.0;
         glm::vec3 lastAcceptedClaimPos = glm::vec3(0.0f); // displacement-budget anchor: what was last ACCEPTED, not the live twin (contacts/corrections perturb it)
         EClaimResult lastClaimResult = EClaimResult::None;
         uint16 violations = 0;           // rejected-claim count (saturating) — cheat telemetry
         uint32 forcedUntilTick = 0;      // while serverTick < this, this entity's snapshot records carry NetRecFlag_Forced
 
-        // CLAIM PASSTHROUGH — the newest ACCEPTED claim state, re-emitted by snapshot ticks in
-        // place of the twin body's pose. The twin is teleport-pinned at claim ARRIVAL times and
-        // advances by fixed steps in between, so its pose age wobbles ±1 tick as the owner/network/
-        // server clock phases drift — remote clients replay that wobble as speed pulsing. The
-        // owner's own claim samples are uniformly spaced on ITS clock; ticks with no fresh claim
-        // extrapolate by the claim velocity (exact for constant motion), bounded before falling back
-        // to the twin. Forced/arbitrated/asleep records always sample the twin (authoritative then).
+        // newest ACCEPTED claim, re-emitted by snapshot ticks in place of the twin's pose (see
+        // sendSnapshotTick) — the twin's pose age wobbles with clock drift and reads as pulsing
         glm::vec3 claimStreamPos = glm::vec3(0.0f);
         glm::quat claimStreamRot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
         glm::vec3 claimStreamLinVel = glm::vec3(0.0f);
@@ -209,10 +198,8 @@ export struct NetworkComponent
     uint32 netId = 0;         // 0 = local-inert (client-local content / single player); anything else is server-minted
     uint32 ownerClientId = 0; // 0 = server-owned; else the clientId whose claims drive this entity (set via NetworkManager::setOwner, carried in the Spawn message — never authored)
 
-    // all mutable sync state (see NetEntityState) — null outside a session (role None, or a
-    // registration that came back local-inert). Everyone who registered the entity has one:
-    // NetworkManager only touches components in its registry, so it never null-checks; the
-    // component's own update() and outside readers (editor, input) must.
+    // null outside a session (role None, or a local-inert registration). NetworkManager only
+    // touches registered components so it never null-checks; update() and outside readers must.
     std::unique_ptr<NetEntityState> state;
 
     // Local, ServerOwned, LocalOwner or RemoteOwner — from THIS process's perspective (see the enum)

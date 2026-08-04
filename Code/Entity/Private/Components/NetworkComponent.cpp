@@ -142,7 +142,7 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
         // and overshoots stops; no target tuning fixes that). The body teleport-follows the
         // interpolated path with matched velocities so contacts stay plausible; a loss gap at the
         // playback cursor falls through to the physical push for that frame.
-        if (params.remoteInterpTicks > 0.0f && authority() == ENetAuthority::RemoteOwner
+        if (authority() == ENetAuthority::RemoteOwner
             && net.remoteBuffer != nullptr && net.remoteBuffer->count >= 2)
         {
             const NetSnapshotRing& ring = *net.remoteBuffer;
@@ -155,7 +155,7 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
             if (net.playbackTick < oldestValid || net.playbackTick > newest)
                 net.playbackTick = glm::max(newest - 1.0f, oldestValid);
             net.playbackTick += Globals::networkManager.serverSnapshotHz() * deltaSeconds; // advance in server tick units
-            const float targetPlayback = newest - params.remoteInterpTicks;
+            const float targetPlayback = newest - float(params.remoteInterpTicks);
             net.playbackTick += (targetPlayback - net.playbackTick) * glm::min(1.0f, deltaSeconds * 4.0f); // gentle drift re-anchor
             // cap at newest-1: a bracketing NEXT snapshot always exists there. Clamping to newest let
             // ordinary snapshot-arrival jitter break the bracket and fall through to the chase for a

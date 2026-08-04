@@ -55,8 +55,8 @@ import :NetworkComponent; // NetInputState in the claim ring; no cycle — the c
 //                    the window). The last "Claim redundancy" claims ride in EVERY packet
 //                    (redundancy beats a reliable channel under loss: no head-of-line stall), the
 //                    server dedups by seq. The server VALIDATES each claim (Network/Validation tweaks:
-//                    displacement budget from seq-elapsed x max speed, velocity cap, trajectory
-//                    raycast, hard teleport cap) — accepted claims overwrite its twin and flow to the
+//                    a wall-clock movement token bucket refilled at max speed, velocity cap,
+//                    trajectory raycast, hard teleport cap) — accepted claims overwrite its twin and flow to the
 //                    other clients as normal snapshots; rejections bump `violations` and arm
 //                    NetRecFlag_Forced on the owner's records so the owner gets dragged back.
 // Spawn/Despawn ride the session channel so they order after Welcome; a late joiner gets every live
@@ -78,13 +78,11 @@ export struct NetSyncParams
     float rotSnapThresholdDeg = 45.0f;
     float blendRate = 10.0f;          // NON-physics entities: exponential blend rate toward the target
     bool extrapolate = true;          // dead-reckon the pose target by linVel * timeSinceSnapshot
-    // REMOTE-OWNED entities (other players) skip the chase entirely and play the owner's recorded
-    // trajectory THIS many snapshot ticks in the past, interpolating between buffered snapshots —
-    // exact reproduction of starts/stops (no lag-chase, no overshoot) at the cost of a fixed small
-    // display delay. 0 = fall back to the physical-push chase. Loss gaps at the playback cursor
-    // also fall back to the push for that frame. 1 tick of slack suffices since claim passthrough
-    // made the stream uniform (2 was sized to absorb sender-side timeline jitter).
-    float remoteInterpTicks = 1.0f;
+    // REMOTE-OWNED entities (other players) skip the chase and replay the owner's recorded
+    // trajectory this many snapshot ticks in the past, interpolating between buffered snapshots.
+    // Tweak minimum is 2 — the cursor clamps to `newest - 1`, so 1 leaves it no headroom and
+    // playback advances only on snapshot arrival. Loss gaps fall through to the push for a frame.
+    int remoteInterpTicks = 2;
 
     // PHYSICAL PUSH (the correction for dynamic bodies): between deadzone and snap the body is
     // steered by bounded impulses through the sim — position/rotation error becomes corrective
@@ -290,7 +288,10 @@ private:
         uint32 validCount = 0;
     };
     std::unordered_map<uint32, ClaimRing> m_claimRings; // by netId, created on demand for owned entities
-    double m_claimAccum = 0.0;
+    // claims are phase-locked to the physics step (see send()): the step counter they last fired on,
+    // and the wall clock, which only serves the "Max update Hz" thinning limit
+    uint32 m_lastClaimStep = 0;
+    double m_lastClaimTime = 0.0;
     std::vector<glm::vec3> m_localOwnedBodyPositions;   // see localOwnedBodyPositions()
     float m_serverSnapshotHz = 20.0f;                   // see serverSnapshotHz()
     // remote-owned entities' snapshot history for interpolation playback: unique_ptr values keep the
