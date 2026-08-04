@@ -183,19 +183,19 @@ public:
         for (const EntityPtr& root : world.rootEntities())
         {
             NetworkComponent* net = getComponent<NetworkComponent>(root.get());
-            if (!net || net->authority() != ENetAuthority::LocalOwner)
+            if (!net || !net->state || net->authority() != ENetAuthority::LocalOwner)
                 continue;
-            if (net->transferredOwnership)
+            if (net->state->transferredOwnership)
                 continue; // proximity-transferred objects: our sim drives them, but they are not the player
-            net->input.buttons = jumpDown ? NetInputButton_Jump : 0u;
-            net->input.move = move;
-            net->input.look = cameraController.getDirection();
+            net->state->input.buttons = jumpDown ? NetInputButton_Jump : 0u;
+            net->state->input.move = move;
+            net->state->input.look = cameraController.getDirection();
 
             // Server reasserting itself (claims rejected): YIELD — steering against the forced
             // correction keeps the error large, breeds fresh rejections, and turns the resync into a
             // tug-of-war that only ends when the player releases the keys. Yielding lets it resolve
             // in one quick snap; records stop carrying Forced the moment claims are accepted again.
-            if (net->targetFlags & NetRecFlag_Forced)
+            if (net->state->client.targetFlags & NetRecFlag_Forced)
                 continue;
 
             PhysicsComponent* pc = getComponent<PhysicsComponent>(root.get());

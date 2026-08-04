@@ -1234,9 +1234,16 @@ void EntityEditor::renderNetworkSection()
 		ImGui::Text("netId: %u  authority: %s", net->netId, authorityNames[glm::min(int(net->authority()), 3)]);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Server-minted at spawn and replicated to clients; never stored in the .pre.\n0/Local = this instance is client-local (or single player) and never syncs");
-		if (net->ownerClientId != 0)
-			ImGui::Text("owner: client %u  claim: %s  violations: %u",
-				net->ownerClientId, claimNames[glm::min(int(net->lastClaimResult), 5)], uint32(net->violations));
+		if (net->ownerClientId != 0 && net->state)
+		{
+			// claim/violation state is the server union member — only valid to read there
+			if (Globals::networkManager.role() == ENetRole::Server)
+				ImGui::Text("owner: client %u  claim: %s  violations: %u", net->ownerClientId,
+					claimNames[glm::min(int(net->state->server.lastClaimResult), 5)], uint32(net->state->server.violations));
+			else
+				ImGui::Text("owner: client %u%s", net->ownerClientId,
+					net->state->transferredOwnership ? "  (transferred)" : "");
+		}
 	}
 
 	if (ImGui::Button("Remove Network"))

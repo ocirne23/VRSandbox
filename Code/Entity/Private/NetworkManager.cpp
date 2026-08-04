@@ -336,7 +336,7 @@ void NetworkManager::receive(double deltaSec)
                         // (its primaries are torn down by the app's onClientLeft right after)
                         const std::lock_guard<std::mutex> lock(m_entityMutex);
                         for (const auto& [netId, replicated] : m_entities)
-                            if (replicated.comp->ownerClientId == clientId && replicated.comp->transferredOwnership)
+                            if (replicated.comp->ownerClientId == clientId && replicated.comp->state->transferredOwnership)
                                 transferOwnership(netId, replicated.comp, 0);
                     }
                     if (m_onClientLeft)
@@ -462,7 +462,7 @@ void NetworkManager::handleSessionMessage(NetPeerId peer, NetReader& reader, uin
         {
             const std::lock_guard<std::mutex> lock(m_entityMutex);
             for (const auto& [netId, replicated] : m_entities)
-                if (replicated.comp->transferredOwnership)
+                if (replicated.comp->state->transferredOwnership)
                 {
                     uint8 ownerBuffer[16];
                     NetWriter ownerWriter(ownerBuffer);
@@ -594,8 +594,8 @@ void NetworkManager::setOwner(Entity& root, uint32 clientId)
         if (NetworkComponent* comp = getComponent<NetworkComponent>(&entity))
         {
             comp->ownerClientId = clientId;
-            comp->lastAcceptedClaimSeq = 0; // next claim seeds the validation anchor
-            comp->claimStreamSeq = 0;       // don't pass a previous owner's claims through
+            comp->state->server.lastAcceptedClaimSeq = 0; // next claim seeds the validation anchor
+            comp->state->server.claimStreamSeq = 0;       // don't pass a previous owner's claims through
         }
         if (SceneComponent* scene = getComponent<SceneComponent>(&entity))
             for (const EntityPtr& child : scene->children)
@@ -633,17 +633,17 @@ void NetworkManager::sendClaims()
             // costs nothing upstream (sleepDirty serves both policies: the server uses it for
             // snapshots, the owning client here — different processes, never the same entity role)
             if (physics->body.isAwake())
-                comp->sleepDirty = true;
-            else if (comp->sleepDirty)
-                comp->sleepDirty = false;
+                comp->state->sleepDirty = true;
+            else if (comp->state->sleepDirty)
+                comp->state->sleepDirty = false;
             else
                 continue;
         }
 
         ClaimRing& ring = m_claimRings[netId];
-        const uint32 seq = ++comp->claimSeq;
+        const uint32 seq = ++comp->state->client.claimSeq;
         ClaimRecord& record = ring.records[seq % ClaimRedundancy];
-        record.input = comp->input;
+        record.input = comp->state->input;
         if (dynamicBody)
         {
             record.pos = physics->body.getPosition();
@@ -787,7 +787,7 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
         const glm::quat rot = claims[i].rot;
         const glm::vec3 linVel = claims[i].linVel;
         const glm::vec3 angVel = claims[i].angVel;
-        if (seq <= comp->lastClaimSeq && comp->lastClaimSeq != 0)
+        if (seq <= comp->state->server.lastClaimSeq && comp->state->server.lastClaimSeq != 0)
             continue; // redundant resend of a claim we already processed
 
         // ---- plausibility gate (Network/Validation tweaks) ----
@@ -801,7 +801,7 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
             // could veto forever — e.g. anchor and twin separated by a wall = permanent RejectedPath,
             // a permanently stuck player
         }
-        else if (comp->lastAcceptedClaimSeq == 0)
+        else if (comp->state->server.lastAcceptedClaimSeq == 0)
         {
             // first claim seeds the anchor — validated against the twin's CURRENT authoritative state
             // (the server just spawned/handed it over), or an attacker's opening claim could teleport
@@ -811,10 +811,10 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
         }
         else
         {
-            const glm::vec3 delta = pos - comp->lastAcceptedClaimPos;
+            const glm::vec3 delta = pos - comp->state->server.lastAcceptedClaimPos;
             const float displacement = glm::length(delta);
             // seq-based elapsed time: dropped packets grant exactly the time they took, no more
-            const float elapsed = glm::clamp(float(seq - comp->lastAcceptedClaimSeq) * claimInterval, claimInterval, 2.0f);
+            const float elapsed = glm::clamp(float(seq - comp->state->server.lastAcceptedClaimSeq) * claimInterval, claimInterval, 2.0f);
             if (displacement > s_claimTeleportCap)
                 result = EClaimResult::RejectedTeleport;
             else if (displacement > s_maxClaimSpeed * elapsed)
@@ -822,7 +822,7 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
             else if (glm::length(linVel) > s_maxClaimVelocity)
                 result = EClaimResult::RejectedVelocity;
             else if (s_claimPathRaycast && displacement > 0.01f
-                && Globals::physics.castRayClosest(comp->lastAcceptedClaimPos, delta, PhysicsLayers::All,
+                && Globals::physics.castRayClosest(comp->state->server.lastAcceptedClaimPos, delta, PhysicsLayers::All,
                     dynamicBody ? &physics->body : nullptr, true /*staticOnly*/).hit)
                 // trajectory crosses STATIC world geometry (wall teleport). The twin's own body is
                 // excluded (it stands in this very path) and so is every other dynamic body — a
@@ -831,23 +831,23 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
                 result = EClaimResult::RejectedPath;
         }
 
-        comp->lastClaimResult = result;
+        comp->state->server.lastClaimResult = result;
         if (result == EClaimResult::Accepted)
         {
             // authority is back with the owner: stop forcing corrections IMMEDIATELY. Leaving the
             // window armed after acceptance drags the owner toward its own RTT-old state for the
             // remainder — a constant backward pull while moving ("stuck in mud")
-            comp->forcedUntilTick = 0;
-            comp->lastAcceptedClaimSeq = seq;
-            comp->lastAcceptedClaimPos = pos;
-            comp->input = input; // server-side gameplay reads the owner's intent from here
+            comp->state->server.forcedUntilTick = 0;
+            comp->state->server.lastAcceptedClaimSeq = seq;
+            comp->state->server.lastAcceptedClaimPos = pos;
+            comp->state->input = input; // server-side gameplay reads the owner's intent from here
             // claim passthrough source: snapshots re-emit this instead of sampling the twin
-            comp->claimStreamPos = pos;
-            comp->claimStreamRot = rot;
-            comp->claimStreamLinVel = linVel;
-            comp->claimStreamAngVel = angVel;
-            comp->claimStreamSeq = seq;
-            if (dynamicBody && comp->arbitratedUntilTick > m_serverTick)
+            comp->state->server.claimStreamPos = pos;
+            comp->state->server.claimStreamRot = rot;
+            comp->state->server.claimStreamLinVel = linVel;
+            comp->state->server.claimStreamAngVel = angVel;
+            comp->state->server.claimStreamSeq = seq;
+            if (dynamicBody && comp->state->server.arbitratedUntilTick > m_serverTick)
             {
                 // ARBITRATION (player-vs-player contact): the solver owns the pose — the claim
                 // becomes bounded velocity INTENT, so the shoving contest resolves with real
@@ -872,29 +872,29 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
         }
         else
         {
-            if (comp->violations < 0xffff)
-                ++comp->violations;
+            if (comp->state->server.violations < 0xffff)
+                ++comp->state->server.violations;
             // reassert server authority: the owner's snapshot records carry Forced for a while, and
             // the owner's correction gate obeys them — dragging it back to the authoritative state
-            comp->forcedUntilTick = m_serverTick + uint32(glm::max(1, s_forcedTicks));
+            comp->state->server.forcedUntilTick = m_serverTick + uint32(glm::max(1, s_forcedTicks));
         }
     }
-    comp->lastClaimSeq = glm::max(comp->lastClaimSeq, newestSeq);
+    comp->state->server.lastClaimSeq = glm::max(comp->state->server.lastClaimSeq, newestSeq);
 }
 
 void NetworkManager::transferOwnership(uint32 netId, NetworkComponent* comp, uint32 newOwnerClientId)
 {
     comp->ownerClientId = newOwnerClientId;
-    comp->transferredOwnership = newOwnerClientId != 0;
-    comp->releaseTimer = 0.0f;
+    comp->state->transferredOwnership = newOwnerClientId != 0;
+    comp->state->server.releaseTimer = 0.0f;
     // the next claim re-seeds against the twin's live state; without the reset the new owner's low
     // sequence numbers would be dropped as duplicates of the previous owner's
-    comp->lastClaimSeq = 0;
-    comp->lastAcceptedClaimSeq = 0;
-    comp->lastClaimResult = EClaimResult::None;
-    comp->forcedUntilTick = 0;
-    comp->claimStreamSeq = 0; // don't pass the previous owner's claims through
-    comp->claimStreamSentSeq = 0;
+    comp->state->server.lastClaimSeq = 0;
+    comp->state->server.lastAcceptedClaimSeq = 0;
+    comp->state->server.lastClaimResult = EClaimResult::None;
+    comp->state->server.forcedUntilTick = 0;
+    comp->state->server.claimStreamSeq = 0; // don't pass the previous owner's claims through
+    comp->state->server.claimStreamSentSeq = 0;
 
     uint8 buffer[16];
     NetWriter writer(buffer);
@@ -916,7 +916,7 @@ void NetworkManager::updateOwnershipTransfers(double deltaSec)
     for (const auto& [netId, replicated] : m_entities)
     {
         const NetworkComponent* comp = replicated.comp;
-        if (comp->ownerClientId == 0 || comp->transferredOwnership)
+        if (comp->ownerClientId == 0 || comp->state->transferredOwnership)
             continue;
         const PhysicsComponent* physics = getComponent<PhysicsComponent>(replicated.entity);
         if (physics && physics->bodyType == EPhysicsBodyType::Dynamic && physics->body.isValid())
@@ -931,8 +931,8 @@ void NetworkManager::updateOwnershipTransfers(double deltaSec)
     {
         NetworkComponent* comp = replicated.comp;
         // contest-history aging (cheap, every networked entity — the slots are inline)
-        comp->contestAges[0] += float(deltaSec);
-        comp->contestAges[1] += float(deltaSec);
+        comp->state->server.contestAges[0] += float(deltaSec);
+        comp->state->server.contestAges[1] += float(deltaSec);
         const PhysicsComponent* physics = getComponent<PhysicsComponent>(replicated.entity);
         if (!physics || physics->bodyType != EPhysicsBodyType::Dynamic || !physics->body.isValid())
             continue;
@@ -940,7 +940,7 @@ void NetworkManager::updateOwnershipTransfers(double deltaSec)
 
         if (comp->ownerClientId == 0)
         {
-            if (comp->contestedUntilTick > m_serverTick)
+            if (comp->state->server.contestedUntilTick > m_serverTick)
                 continue; // contested: stays server-owned until the window decays
             if (!physics->body.isAwake())
                 continue; // sleeping props stay server-owned (near-zero cost) — the contact steal
@@ -954,7 +954,7 @@ void NetworkManager::updateOwnershipTransfers(double deltaSec)
                     break;
                 }
         }
-        else if (comp->transferredOwnership)
+        else if (comp->state->transferredOwnership)
         {
             // release with hysteresis once away from the owner's primaries (an owner's own primary
             // never releases — it is one of the sources, at distance zero from itself)
@@ -963,8 +963,8 @@ void NetworkManager::updateOwnershipTransfers(double deltaSec)
                 if (clientId == comp->ownerClientId)
                     nearestSq = glm::min(nearestSq, glm::dot(sourcePos - pos, sourcePos - pos));
             if (nearestSq < releaseRadiusSq)
-                comp->releaseTimer = 0.0f;
-            else if ((comp->releaseTimer += float(deltaSec)) > s_releaseDelaySec)
+                comp->state->server.releaseTimer = 0.0f;
+            else if ((comp->state->server.releaseTimer += float(deltaSec)) > s_releaseDelaySec)
                 transferOwnership(netId, comp, 0);
         }
     }
@@ -983,39 +983,39 @@ void NetworkManager::stealOwnershipOnContact(Entity& object, uint32 byClientId)
     // window: their twins' poses become solver-owned (claims apply as velocity intent, see
     // handleClaimMessage) so the shoving contest resolves with real contacts in ONE place, and each
     // owner softly corrects toward the arbitrated result while still steering
-    if (comp->ownerClientId != 0 && !comp->transferredOwnership)
+    if (comp->ownerClientId != 0 && !comp->state->transferredOwnership)
     {
         if (comp->ownerClientId == byClientId)
             return;
         const uint32 until = m_serverTick + ticksFromSec(s_arbitrateSec);
-        comp->arbitratedUntilTick = until;
+        comp->state->server.arbitratedUntilTick = until;
         const std::lock_guard<std::mutex> lock(m_entityMutex);
         for (const auto& [netId, replicated] : m_entities) // the toucher's own primary arbitrates too
-            if (replicated.comp->ownerClientId == byClientId && !replicated.comp->transferredOwnership)
-                replicated.comp->arbitratedUntilTick = until;
+            if (replicated.comp->ownerClientId == byClientId && !replicated.comp->state->transferredOwnership)
+                replicated.comp->state->server.arbitratedUntilTick = until;
         return;
     }
 
     // OBJECT: track the last two DISTINCT clients to touch it (ages ticked in updateOwnershipTransfers)
-    if (comp->contestClients[0] != byClientId)
+    if (comp->state->server.contestClients[0] != byClientId)
     {
-        comp->contestClients[1] = comp->contestClients[0];
-        comp->contestAges[1] = comp->contestAges[0];
-        comp->contestClients[0] = byClientId;
+        comp->state->server.contestClients[1] = comp->state->server.contestClients[0];
+        comp->state->server.contestAges[1] = comp->state->server.contestAges[0];
+        comp->state->server.contestClients[0] = byClientId;
     }
-    comp->contestAges[0] = 0.0f;
+    comp->state->server.contestAges[0] = 0.0f;
 
     // both slots fresh with distinct clients = CONTESTED: the server owns it while the contest lasts
     // (the last-collider ping-pong would re-seed the twin between two clients' versions every hit)
-    if (comp->contestClients[1] != 0 && comp->contestClients[1] != comp->contestClients[0]
-        && comp->contestAges[1] < s_contestSec)
+    if (comp->state->server.contestClients[1] != 0 && comp->state->server.contestClients[1] != comp->state->server.contestClients[0]
+        && comp->state->server.contestAges[1] < s_contestSec)
     {
-        comp->contestedUntilTick = m_serverTick + ticksFromSec(s_contestSec);
+        comp->state->server.contestedUntilTick = m_serverTick + ticksFromSec(s_contestSec);
         if (comp->ownerClientId != 0)
             transferOwnership(comp->netId, comp, 0);
         return;
     }
-    if (comp->contestedUntilTick > m_serverTick)
+    if (comp->state->server.contestedUntilTick > m_serverTick)
         return; // contest cooling down: stays server-owned until the window decays
     if (comp->ownerClientId == byClientId)
         return; // already ours
@@ -1038,12 +1038,12 @@ void NetworkManager::handleOwnerChangeMessage(NetReader& reader)
         comp->ownerClientId = newOwnerClientId;
         // "transferred" client-side means "owned, but not one of my primaries": the claim stream
         // carries it, player control (which drives primaries only) leaves it alone
-        comp->transferredOwnership = newOwnerClientId != 0 && newOwnerClientId == m_localClientId;
+        comp->state->transferredOwnership = newOwnerClientId != 0 && newOwnerClientId == m_localClientId;
         if (newOwnerClientId == m_localClientId)
         {
             // now OURS: drop the interpolation history recorded while someone else owned it — a
             // stale ring reaching the playback path would teleport the entity into the past
-            comp->remoteBuffer = nullptr;
+            comp->state->client.remoteBuffer = nullptr;
             m_remoteBuffers.erase(netId);
         }
     }
@@ -1164,7 +1164,7 @@ void NetworkManager::handleSnapshot(NetReader& reader)
         if (it == m_entities.end())
             continue; // expected transient: the unreliable snapshot outran the reliable Spawn, or the Despawn already landed
         NetworkComponent* comp = it->second.comp;
-        if (comp->hasTarget && tick <= comp->serverTick)
+        if (comp->state->client.hasTarget && tick <= comp->state->client.serverTick)
             continue; // stale (reordered unreliable packet)
         // remote-owned entities also record into their interpolation ring (another player's entity:
         // the observer plays this history back a couple of ticks behind — see NetSnapshotRing)
@@ -1176,16 +1176,16 @@ void NetworkManager::handleSnapshot(NetReader& reader)
             ring->records[tick % NetSnapshotRing::Capacity] = { tick, pos, rot, linVel, angVel };
             ring->newestTick = glm::max(ring->newestTick, tick);
             ring->count = glm::min(ring->count + 1, NetSnapshotRing::Capacity);
-            comp->remoteBuffer = ring.get();
+            comp->state->client.remoteBuffer = ring.get();
         }
-        comp->targetPos = pos;
-        comp->targetRot = rot;
-        comp->targetLinVel = linVel;
-        comp->targetAngVel = angVel;
-        comp->targetFlags = recFlags;
-        comp->serverTick = tick;
-        comp->timeSinceSnapshot = 0.0f;
-        comp->hasTarget = true;
+        comp->state->client.targetPos = pos;
+        comp->state->client.targetRot = rot;
+        comp->state->client.targetLinVel = linVel;
+        comp->state->client.targetAngVel = angVel;
+        comp->state->client.targetFlags = recFlags;
+        comp->state->client.serverTick = tick;
+        comp->state->client.timeSinceSnapshot = 0.0f;
+        comp->state->client.hasTarget = true;
     }
 }
 
@@ -1321,9 +1321,9 @@ void NetworkManager::sendSnapshotTick()
             && physics->body.isValid() && !physics->suspended && physics->enabled;
 
         // owner must accept corrections while its claims are being rejected (non-owners ignore both bits)
-        uint8 forcedFlag = (comp->ownerClientId != 0 && m_serverTick < comp->forcedUntilTick)
+        uint8 forcedFlag = (comp->ownerClientId != 0 && m_serverTick < comp->state->server.forcedUntilTick)
             ? NetRecFlag_Forced : uint8(0);
-        if (comp->ownerClientId != 0 && m_serverTick < comp->arbitratedUntilTick)
+        if (comp->ownerClientId != 0 && m_serverTick < comp->state->server.arbitratedUntilTick)
             forcedFlag |= NetRecFlag_Arbitrated; // owner: soft-correct toward the solver-owned pose while steering
 
         glm::vec3 pos;
@@ -1338,9 +1338,9 @@ void NetworkManager::sendSnapshotTick()
             // client hard-syncs and sleeps too — after that only the keyframe rotation refreshes
             const bool asleep = !physics->body.isAwake();
             if (!asleep)
-                comp->sleepDirty = true;
-            else if (comp->sleepDirty)
-                comp->sleepDirty = false;
+                comp->state->sleepDirty = true;
+            else if (comp->state->sleepDirty)
+                comp->state->sleepDirty = false;
             else if (!keyframe)
                 continue;
             recFlags |= NetRecFlag_Physics | (asleep ? NetRecFlag_Asleep : 0);
@@ -1356,31 +1356,36 @@ void NetworkManager::sendSnapshotTick()
             // extrapolates by the claim velocity (exact for constant motion), bounded at 3 ticks
             // before falling back to the twin (which the claims pin, so the handover jump is small).
             // Forced/arbitrated/asleep records keep the twin — that IS the authoritative state then.
-            if (comp->ownerClientId != 0 && comp->claimStreamSeq != 0 && !asleep && forcedFlag == 0)
+            if (comp->ownerClientId != 0 && comp->state->server.claimStreamSeq != 0 && !asleep && forcedFlag == 0)
             {
-                if (comp->claimStreamSentSeq != comp->claimStreamSeq)
+                // extrapolation budget: when snapshots outpace claims (e.g. 60 Hz snapshots over
+                // 20 Hz claims on a 20 Hz sim), the STEADY-STATE gap is already snapshotHz/claimHz-1
+                // ticks — the cap must cover that plus a lost claim packet, or routine loss pops the
+                // stream back to the twin mid-gap
+                const uint8 extrapCap = uint8(glm::clamp(s_snapshotHz / glm::max(1.0f, s_claimRateHz), 1.0f, 8.0f)) + 3;
+                if (comp->state->server.claimStreamSentSeq != comp->state->server.claimStreamSeq)
                 {
-                    comp->claimStreamSentSeq = comp->claimStreamSeq;
-                    comp->claimStreamExtrapTicks = 0;
+                    comp->state->server.claimStreamSentSeq = comp->state->server.claimStreamSeq;
+                    comp->state->server.claimStreamExtrapTicks = 0;
                 }
-                else if (comp->claimStreamExtrapTicks < 3)
+                else if (comp->state->server.claimStreamExtrapTicks < extrapCap)
                 {
-                    ++comp->claimStreamExtrapTicks;
+                    ++comp->state->server.claimStreamExtrapTicks;
                     const float dt = 1.0f / glm::clamp(s_snapshotHz, 1.0f, 240.0f);
-                    comp->claimStreamPos += comp->claimStreamLinVel * dt; // chains across gap ticks
-                    const float angSpeed = glm::length(comp->claimStreamAngVel);
+                    comp->state->server.claimStreamPos += comp->state->server.claimStreamLinVel * dt; // chains across gap ticks
+                    const float angSpeed = glm::length(comp->state->server.claimStreamAngVel);
                     if (angSpeed > 1e-4f)
-                        comp->claimStreamRot = glm::normalize(
-                            glm::angleAxis(angSpeed * dt, comp->claimStreamAngVel / angSpeed) * comp->claimStreamRot);
+                        comp->state->server.claimStreamRot = glm::normalize(
+                            glm::angleAxis(angSpeed * dt, comp->state->server.claimStreamAngVel / angSpeed) * comp->state->server.claimStreamRot);
                 }
                 else
-                    comp->claimStreamSeq = 0; // stream went stale: back to twin until claims resume
-                if (comp->claimStreamSeq != 0)
+                    comp->state->server.claimStreamSeq = 0; // stream went stale: back to twin until claims resume
+                if (comp->state->server.claimStreamSeq != 0)
                 {
-                    pos = comp->claimStreamPos;
-                    rot = comp->claimStreamRot;
-                    linVel = comp->claimStreamLinVel;
-                    angVel = comp->claimStreamAngVel;
+                    pos = comp->state->server.claimStreamPos;
+                    rot = comp->state->server.claimStreamRot;
+                    linVel = comp->state->server.claimStreamLinVel;
+                    angVel = comp->state->server.claimStreamAngVel;
                     // constant lead: a fixed timeline shift adds no jitter (unlike the twin's
                     // arrival-phase-dependent step extrapolation this passthrough replaced).
                     // Applied at emit only — never accumulated into claimStream state
@@ -1398,15 +1403,15 @@ void NetworkManager::sendSnapshotTick()
         else
         {
             // entity-LOCAL transform: moved-since-last-send + the keyframe rotation for convergence
-            const glm::vec3 posDelta = entity->pos - comp->lastSentPos;
+            const glm::vec3 posDelta = entity->pos - comp->state->server.lastSentPos;
             const bool moved = glm::dot(posDelta, posDelta) > posEpsilonSq
-                || quatAngleDeg(entity->rot, comp->lastSentRot) > s_sendRotEpsilonDeg;
+                || quatAngleDeg(entity->rot, comp->state->server.lastSentRot) > s_sendRotEpsilonDeg;
             if (!keyframe && !moved)
                 continue;
             pos = entity->pos;
             rot = entity->rot;
-            comp->lastSentPos = pos;
-            comp->lastSentRot = rot;
+            comp->state->server.lastSentPos = pos;
+            comp->state->server.lastSentRot = rot;
         }
 
         constexpr size_t MaxRecordBytes = 5 + 1 + 12 + 16 + 24; // varint id + flags + pos + raw quat + raw velocities
