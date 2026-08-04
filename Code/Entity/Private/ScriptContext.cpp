@@ -593,6 +593,8 @@ void registerScriptDslBindings()
             { "sendEventTo", T::Void, { { "entity", T::Entity }, { "eventName", T::String } },     "ctx->sendEventToEntity($1, $2)" },
             // fires locally AND across the network (server -> clients / client -> server + relay); single player = sendEvent
             { "sendNetworkEvent", T::Void, { { "eventName", T::String } },                         "ctx->sendNetworkEvent($1)" },
+            // who fired the event being handled (0 = server); server-stamped, unforgeable
+            { "networkEventSender", T::Int, { },                                                   "int(ctx->networkEventSender())" },
 
             // -- sky / lighting --
             { "setSun",          T::Void, { { "direction", vec3 }, { "color", vec3 }, { "intensity", T::Float } },                      "ctx->setSun($1, $2, $3)" },
@@ -1156,6 +1158,10 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         if (eventName)
             Globals::networkManager.fireNetworkEvent(eventName);
     }
+    unsigned int thunk_networkEventSender()
+    {
+        return Globals::networkManager.currentEventSender();
+    }
     void thunk_sendEventToEntity(Entity* en, const char* eventName)
     {
         if (!en || !eventName)
@@ -1699,6 +1705,7 @@ ScriptContext::ScriptContext()
 #define SCRIPT_CTX_INIT(ret, name, ...) , name(&thunk_##name)
     SCRIPT_CTX_FUNCS(SCRIPT_CTX_INIT)
 #undef SCRIPT_CTX_INIT
+    , networkEventSender(&thunk_networkEventSender) // hand-declared (zero-arg), see ScriptAPI.h
 {
     deltaSeconds = 0.0f;
     elapsedSeconds = 0.0f;

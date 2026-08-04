@@ -171,6 +171,8 @@ int main(int argc, char* argv[])
         else if (arg == "--port" && i + 1 < argc)         netPort = uint16(std::atoi(argv[++i]));
         else if (arg == "--tickrate" && i + 1 < argc)     tickHz = std::atoi(argv[++i]);
         else if (arg == "--headless")                     headless = true;
+        // both ends must agree, or the handshake denies with a clear reason
+        else if (arg == "--no-encrypt")                   NetworkManager::setEncryption(false);
         else Log::warning("Unknown command line argument: " + std::string(arg));
     }
     if (headless && launchMode == ELaunchMode::Server)

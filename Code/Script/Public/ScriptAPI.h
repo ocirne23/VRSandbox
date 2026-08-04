@@ -329,6 +329,7 @@ struct VrScriptField
 extern "C" {
     void thunk_log(const char* message);       // log/logf are outside SCRIPT_CTX_FUNCS (see there); declared by hand
     void thunk_vlogf(const char* fmt, va_list ap);
+    unsigned int thunk_networkEventSender(void); // zero-arg, so also outside the table
 #define SCRIPT_CTX_DECL(ret, name, ...) ret thunk_##name (SCRIPT_CTX_PARAMS(__VA_ARGS__));
     SCRIPT_CTX_FUNCS(SCRIPT_CTX_DECL)
 #undef SCRIPT_CTX_DECL
@@ -355,6 +356,7 @@ typedef struct ScriptContext
 #define SCRIPT_CTX_METHOD(ret, name, ...) ret name (SCRIPT_CTX_PARAMS(__VA_ARGS__)) const { return thunk_##name (SCRIPT_CTX_ARGS(__VA_ARGS__)); }
     SCRIPT_CTX_FUNCS(SCRIPT_CTX_METHOD)
 #undef SCRIPT_CTX_METHOD
+    unsigned int networkEventSender() const { return thunk_networkEventSender(); }
 #else
     void  (* const log)(const char* message);
     void  (* const logf)(const char* message, ...);
@@ -362,6 +364,11 @@ typedef struct ScriptContext
 #define SCRIPT_CTX_PTR(ret, name, ...) ret (* const name) (SCRIPT_CTX_PARAMS(__VA_ARGS__));
     SCRIPT_CTX_FUNCS(SCRIPT_CTX_PTR)
 #undef SCRIPT_CTX_PTR
+    // Zero-arg, so it cannot live in the table above (see ScriptCtxMacros.h). APPENDED here, after
+    // the generated pointers, so existing cached DLLs keep their offsets.
+    // Who fired the event being handled: 0 = the server (or a local single-player fire), else the
+    // originating client. Server-stamped from the receiving connection, so it cannot be forged.
+    unsigned int (* const networkEventSender)(void);
 
 #ifdef __cplusplus
 #ifndef SCRIPT_BUILD

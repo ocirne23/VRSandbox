@@ -10,8 +10,8 @@ import Physics;
 // Bump on ANY wire format change: the transport handshake denies mismatched protocol ids, so old
 // builds fail to connect instead of misparsing. GameNetVersion rides in Hello/Welcome purely so the
 // mismatch produces a readable log line when the protocolId was forgotten.
-constexpr uint32 GameProtocolId = 0x56525339; // "VRS9": compact claims (quantized payload, shared look, tweakable redundancy)
-constexpr uint16 GameNetVersion = 8;
+constexpr uint32 GameProtocolId = 0x56525342; // "VRSB": event sender id, server->client only
+constexpr uint16 GameNetVersion = 10;
 
 enum class ENetMsg : uint8
 {
@@ -47,6 +47,11 @@ static float s_sendRotEpsilonDeg = 0.1f;
 static float s_maxVel = 50.0f;    // velocity quantization range (m/s); sent per message so both ends agree
 static float s_maxAngVel = 50.0f; // angular velocity quantization range (rad/s)
 static bool  s_showStats = true;
+// ECDH handshake + AES-128-GCM on every payload packet. Not a tweak: the transport reads it at
+// open() and it cannot change on a live host, and both ends must agree or the handshake denies.
+// Without it a peer is identified only by source address, so anyone able to forge one (trivial on a
+// shared LAN) can inject packets as another player. Costs +16 B/packet and well under 1% of a core.
+static bool  s_encrypt = true;
 
 // Thinning limit, not a clock: claims fire on physics step boundaries (see send()), so this only
 // caps them lower and above the step rate never binds. The two ends need not agree — the
@@ -54,7 +59,8 @@ static bool  s_showStats = true;
 static float s_maxUpdateHz = 20.0f;
 static float s_maxClaimSpeed = 60.0f;     // m/s the movement token bucket refills at (cap = half a second
                                           // of it); must exceed the fastest LEGITIMATE motion, free fall included
-static float s_maxClaimVelocity = 50.0f;  // cap on the claimed velocity magnitude
+static float s_maxClaimVelocity = 50.0f;  // cap on the claimed linear velocity magnitude
+static float s_maxClaimAngVel = 50.0f;    // ...and angular (rad/s); both applied on every accept path
 static float s_claimTeleportCap = 10.0f;  // hard displacement cap regardless of elapsed time
 static bool  s_claimPathRaycast = true;   // reject claims whose path crosses world geometry
 static int   s_forcedTicks = 30;          // snapshot ticks the owner stays force-corrected after a rejection
@@ -204,6 +210,7 @@ void NetworkManager::registerTweaks()
     Tweak::floatVar("Network/Player", "Max update Hz", &s_maxUpdateHz, 1.0f, 120.0f, 0.5f);
     Tweak::floatVar("Network/Validation", "Max speed", &s_maxClaimSpeed, 0.0f, 200.0f, 0.5f);
     Tweak::floatVar("Network/Validation", "Max velocity", &s_maxClaimVelocity, 0.0f, 500.0f, 0.5f);
+    Tweak::floatVar("Network/Validation", "Max ang velocity", &s_maxClaimAngVel, 0.0f, 500.0f, 0.5f);
     Tweak::floatVar("Network/Validation", "Teleport cap", &s_claimTeleportCap, 0.0f, 100.0f, 0.5f);
     Tweak::boolean("Network/Validation", "Path raycast", &s_claimPathRaycast);
     Tweak::intVar("Network/Validation", "Forced ticks", &s_forcedTicks, 1, 255);
@@ -220,6 +227,11 @@ void NetworkManager::registerTweaks()
     Tweak::floatVar("Network/Link sim", "Jitter (ms)", &config.simJitterMs, 0.0f, 500.0f, 1.0f);
 }
 
+void NetworkManager::setEncryption(bool enabled)
+{
+    s_encrypt = enabled;
+}
+
 bool NetworkManager::startServer(uint16 port)
 {
     assert(m_role == ENetRole::None);
@@ -227,13 +239,15 @@ bool NetworkManager::startServer(uint16 port)
     NetHostConfig config;
     config.protocolId = GameProtocolId;
     config.acceptIncoming = true;
+    config.encrypt = s_encrypt;
     if (!m_host.open(port, config))
     {
         Log::error("Network: failed to open server port " + std::to_string(port));
         return false;
     }
     m_role = ENetRole::Server;
-    Log::info("Network: SERVER listening on port " + std::to_string(m_host.getLocalPort()));
+    Log::info("Network: SERVER listening on port " + std::to_string(m_host.getLocalPort())
+        + (s_encrypt ? " (encrypted)" : " (UNENCRYPTED)"));
     return true;
 }
 
@@ -265,6 +279,7 @@ bool NetworkManager::startClient(const std::string& address, uint16 defaultPort)
     NetHostConfig config;
     config.protocolId = GameProtocolId;
     config.acceptIncoming = false;
+    config.encrypt = s_encrypt;
     if (!m_host.open(0, config))
     {
         Log::error("Network: failed to open client socket");
@@ -273,7 +288,8 @@ bool NetworkManager::startClient(const std::string& address, uint16 defaultPort)
     m_serverAddress = addr; // kept for auto-reconnect
     m_serverPeer = m_host.connect(addr);
     m_role = ENetRole::Client;
-    Log::info("Network: CLIENT connecting to " + addr.toString());
+    Log::info("Network: CLIENT connecting to " + addr.toString()
+        + (s_encrypt ? " (encrypted)" : " (UNENCRYPTED)"));
     return true;
 }
 
@@ -864,7 +880,14 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
         EClaimResult result = EClaimResult::Accepted;
         const glm::vec3 twinPos = dynamicBody ? physics->body.getPosition() : entity->pos;
         const bool recovering = m_serverTick < comp->state->server.forcedUntilTick;
-        if (recovering && glm::length(pos - twinPos) < s_claimReanchorRadius)
+        // Velocity caps apply on EVERY path. An accepted claim hands its velocity to the solver
+        // verbatim, and the two branches below deliberately skip the displacement gate — so leaving
+        // the caps inside the third one made every re-anchor and every FIRST claim a free impulse.
+        // Ownership transfer resets the anchor, which made the first-claim case repeatable on demand.
+        // Angular had no cap at all, and the quantization range is attacker-declared (up to 1000).
+        if (glm::length(linVel) > s_maxClaimVelocity || glm::length(angVel) > s_maxClaimAngVel)
+            result = EClaimResult::RejectedVelocity;
+        else if (recovering && glm::length(pos - twinPos) < s_claimReanchorRadius)
         {
             // Anti-deadlock: claiming to be where the server already has you always accepts, so a
             // stale anchor (separated from the twin by a wall = permanent RejectedPath) cannot veto
@@ -888,8 +911,6 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
                 result = EClaimResult::RejectedTeleport;
             else if (displacement > comp->state->server.claimBudget)
                 result = EClaimResult::RejectedSpeed;
-            else if (glm::length(linVel) > s_maxClaimVelocity)
-                result = EClaimResult::RejectedVelocity;
             else if (s_claimPathRaycast && displacement > 0.01f
                 && Globals::physics.castRayClosest(comp->state->server.lastAcceptedClaimPos, delta, PhysicsLayers::All,
                     dynamicBody ? &physics->body : nullptr, true /*staticOnly*/).hit)
@@ -1176,16 +1197,33 @@ void NetworkManager::handleEventMessage(NetPeerId peer, std::span<const uint8> b
         return; // clients accept events only from the server they are welcomed by
 
     NetReader reader(bytes.subspan(1));
+    // IDENTITY: the server takes it from the connection the packet arrived on (a client-supplied one
+    // would be a free impersonation), and the wire carries no such field in that direction. A client
+    // reads it, because the origin is a third party its own connection knows nothing about, and only
+    // the server ever writes that copy.
+    const uint32 senderClientId = m_role == ENetRole::Server ? m_peerClients[peer]
+                                                             : uint32(reader.readVarUInt());
     const std::string_view name = reader.readString();
     // the name is attacker-controlled and reaches the log ring
     if (reader.overflowed() || name.empty() || name.size() > MaxEventNameLength)
         return;
-    Log::info("Network: event '" + std::string(name) + "' received");
-    Globals::scriptEvents.fireEvent(std::string(name));
-    if (m_role == ENetRole::Server) // relay to every other ready client, bytes forwarded as-is
+
+    Log::info("Network: event '" + std::string(name) + "' from client " + std::to_string(senderClientId));
+    fireEventAttributed(name, senderClientId);
+    if (m_role == ENetRole::Server) // re-serialized, not forwarded raw: the id must be ours, not theirs
         for (const NetPeerId other : m_readyPeers)
             if (other != peer)
-                m_host.send(other, bytes, ENetDelivery::Reliable, ChannelEvent);
+                sendEventTo(other, name, senderClientId);
+}
+
+// Fires a named event with `senderClientId` readable for its duration (scripts query it through
+// ctx->networkEventSender). Dispatch is synchronous, so a plain scoped set is enough.
+void NetworkManager::fireEventAttributed(std::string_view name, uint32 senderClientId)
+{
+    const uint32 previous = m_currentEventSender;
+    m_currentEventSender = senderClientId;
+    Globals::scriptEvents.fireEvent(std::string(name));
+    m_currentEventSender = previous;
 }
 
 void NetworkManager::handleSnapshot(NetReader& reader)
@@ -1295,10 +1333,10 @@ void NetworkManager::send(double deltaSec)
         if (m_role == ENetRole::Server)
         {
             for (const NetPeerId peer : m_readyPeers)
-                sendEventTo(peer, name);
+                sendEventTo(peer, name, 0); // 0 = originated on the server itself
         }
         else if (m_serverPeer != InvalidNetPeerId && m_host.isConnected(m_serverPeer))
-            sendEventTo(m_serverPeer, name); // the server re-fires locally and relays to other clients
+            sendEventTo(m_serverPeer, name, 0); // unused client-side: our identity is the connection
     }
 
     if (m_role == ENetRole::Server)
@@ -1536,7 +1574,8 @@ void NetworkManager::fireNetworkEvent(std::string_view name)
 {
     if (name.empty())
         return;
-    Globals::scriptEvents.fireEvent(std::string(name)); // same worker-safety contract as thunk_sendEvent
+    // locally originated: we are the sender (0 on a server, our clientId on a client)
+    fireEventAttributed(name, m_localClientId); // same worker-safety contract as thunk_sendEvent
     if (m_role == ENetRole::None)
         return;
     // NetHost is single-threaded and this is reachable from worker-thread script thunks during the
@@ -1545,11 +1584,16 @@ void NetworkManager::fireNetworkEvent(std::string_view name)
     m_pendingOutgoingEvents.emplace_back(name);
 }
 
-void NetworkManager::sendEventTo(NetPeerId peer, std::string_view name)
+// The sender id is present ONLY server->client. A client's own identity is already implied by the
+// connection it sends on, so writing one would be a field the receiver must ignore — and an ignored
+// client-writable identity is one refactor away from being trusted. Absent, it cannot be.
+void NetworkManager::sendEventTo(NetPeerId peer, std::string_view name, uint32 senderClientId)
 {
     uint8 buffer[512];
     NetWriter writer(buffer);
     writer.write<uint8>(uint8(ENetMsg::Event));
+    if (m_role == ENetRole::Server)
+        writer.writeVarUInt(senderClientId); // who it originated from — the connection can't say
     writer.writeString(name);
     if (writer.overflowed())
     {

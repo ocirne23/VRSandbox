@@ -40,7 +40,9 @@ import :NetworkComponent; // NetInputState in the claim ring; no cycle — the c
 //                    LOCAL pos/rot. Chunked under "Snapshot max bytes"; every chunk repeats the tick,
 //                    staleness is dropped PER ENTITY (record tick <= last applied), so chunk
 //                    reordering is harmless (UnreliableSequenced would drop sibling chunks instead).
-//   ch1 Reliable:    Event [u8][string name]
+//   ch1 Reliable:    Event [u8][varuint senderClientId (server->client ONLY)][string name] — a
+//                    client sends no id: its identity is the connection, and an ignored
+//                    client-writable one is a refactor away from being trusted
 //   ch2 Reliable:    Hello (client->server) [u8][u16 version]
 //                    Welcome (server->client) [u8][u16 version][varuint serverTick][f32 snapshotHz][varuint yourClientId]
 //                    Deny [u8][string reason]
@@ -171,7 +173,16 @@ public:
     // client -> server, which relays to the other clients). Role None = local fire only.
     // Callable from job workers (script thunks tick in the parallel entity pass): the network half
     // queues under a mutex and send() drains it on the main thread — NetHost is single-threaded.
+    // Must be set BEFORE startServer/startClient — the transport reads it at open() and it cannot
+    // change on a live host. Both ends must match or the handshake denies (a clean failure).
+    static void setEncryption(bool enabled);
+
     void fireNetworkEvent(std::string_view name);
+
+    // Who fired the event currently being dispatched: 0 = the server (or a local single-player
+    // fire), else the originating client. Only meaningful INSIDE an event handler. Server-stamped
+    // from the receiving peer, so a client cannot claim to be someone else.
+    uint32 currentEventSender() const { return m_currentEventSender; }
 
     // NetworkComponent registration (main thread; spawns/destroys never run inside the parallel pass).
     // Returns the assigned netId — ids are a CODE abstraction, never authored in data, and only the
@@ -215,7 +226,8 @@ private:
     // client-side interaction grace covers second-order contact instead).
     void updateOwnershipTransfers(double deltaSec);
     void sendSnapshotTick();
-    void sendEventTo(NetPeerId peer, std::string_view name);
+    void sendEventTo(NetPeerId peer, std::string_view name, uint32 senderClientId);
+    void fireEventAttributed(std::string_view name, uint32 senderClientId);
     void sendSpawnTo(NetPeerId peer, const DynamicSpawn& rec); // transform refreshed from the live entity when possible
 
     struct Replicated
@@ -261,6 +273,7 @@ private:
 
     // clientIds: stable per connection, minted by the server at Hello (peer ids recycle, clientIds don't)
     uint32 m_localClientId = 0; // client: from the Welcome; always 0 on the server
+    uint32 m_currentEventSender = 0; // see currentEventSender()
     uint32 m_nextClientId = 1;  // server
     std::unordered_map<NetPeerId, uint32> m_peerClients; // server: ready peer -> clientId (erased on Disconnected)
     std::function<void(uint32 clientId)> m_onClientJoined; // server, main thread

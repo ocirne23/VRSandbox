@@ -241,6 +241,46 @@ static int fuzzHost(uint32 iterations, uint64 seed)
         return 1;
     }
 
+    // Smoke test for the ENCRYPTED path (the game's default): two real hosts must complete the ECDH
+    // handshake and exchange a sealed payload. The fuzz phases below run plaintext because forging
+    // packets requires the key, so without this the encrypted path would go untested here entirely.
+    {
+        NetHostConfig secureConfig = config;
+        secureConfig.encrypt = true;
+        secureConfig.protocolId = config.protocolId + 1; // isolated from the plaintext server below
+        NetHost secureServer, secureClient;
+        if (!secureServer.open(0, secureConfig) || !secureClient.open(0, secureConfig))
+        {
+            printf("[host] FAIL: could not open encrypted hosts\n");
+            return 1;
+        }
+        const NetPeerId peer = secureClient.connect(NetAddress::loopback(secureServer.getLocalPort()));
+        bool connected = false, delivered = false;
+        for (int i = 0; i < 400 && !delivered; ++i)
+        {
+            secureServer.update(0.005);
+            secureClient.update(0.005);
+            for (const NetEvent& evt : secureServer.takeEvents())
+                if (evt.type == ENetEventType::Message)
+                    delivered = true;
+            for (const NetEvent& evt : secureClient.takeEvents())
+                if (evt.type == ENetEventType::Connected)
+                {
+                    connected = true;
+                    const uint8 payload[] = { 1, 2, 3, 4 };
+                    secureClient.send(peer, payload, ENetDelivery::Reliable, 2);
+                }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!connected || !delivered)
+        {
+            printf("[host] FAIL: encrypted handshake/payload did not complete (connected=%d delivered=%d)\n",
+                int(connected), int(delivered));
+            return 1;
+        }
+        printf("[host] encrypted handshake + sealed payload ok\n");
+    }
+
     // regression: a brand-new address must connect on its FIRST packet, at the default limits
     {
         UdpSocket early;
@@ -333,7 +373,9 @@ static int fuzzGame(const NetAddress& target, uint32 iterations, uint64 seed)
 {
     printf("[game] target %s, %u iterations, seed %llu\n", target.toString().c_str(), iterations,
         (unsigned long long)seed);
-    printf("[game] run a server first:  App.exe --server --headless\n");
+    // --no-encrypt is required: this mode speaks the handshake by hand and does not implement ECDH,
+    // and an encrypted server denies a plaintext one. The parsers behind it are identical either way.
+    printf("[game] run a server first:  App.exe --server --headless --no-encrypt\n");
     Rng rng(seed);
 
     UdpSocket socket;
@@ -344,7 +386,7 @@ static int fuzzGame(const NetAddress& target, uint32 iterations, uint64 seed)
     }
     // must match GameProtocolId in NetworkManager.cpp — bumped on every wire change, which is the
     // signal to re-run this mode
-    constexpr uint32 GameProtocolId = 0x56525339; // "VRS9"
+    constexpr uint32 GameProtocolId = 0x56525342; // "VRSB"
     if (!handshake(socket, target, GameProtocolId, rng.next()))
     {
         printf("[game] FAIL: no handshake — is the server running, and is GameProtocolId current?\n");
@@ -363,7 +405,7 @@ static int fuzzGame(const NetAddress& target, uint32 iterations, uint64 seed)
         writer.write<uint16>(0);                  // message seq
         writer.writeVarUInt(3);
         writer.write<uint8>(1);      // ENetMsg::Hello
-        writer.write<uint16>(8);     // GameNetVersion
+        writer.write<uint16>(10);    // GameNetVersion
         sendPayload(socket, target, seq++, writer.data());
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
