@@ -50,6 +50,12 @@ private:
                                   // 1 = target end); budget-conserving bump
     float width = 1.0f;           // lateral scale (reach untouched): 1 = round, < 1 = narrower/sharper
 
+    bool playerControl = false;      // key C: WASD/Space drive the locally-owned entity, camera flight paused
+    bool playerJumpWasDown = false;  // Space edge detection
+    float playerMoveSpeed = 8.0f;    // m/s horizontal target (keep under Network/Validation "Max speed")
+    float playerAccel = 60.0f;       // m/s^2 velocity steering
+    float playerJumpSpeed = 6.0f;
+
     std::shared_ptr<EntitySpawnTemplate> lightTmpl; // built once, see lightTemplate()
 
     // ONE template for every test light: they all share an archetype (a lone Light component), and the
@@ -104,6 +110,10 @@ public:
 		Tweak::floatVar("Force/Emitter", "Distribution", &distribution, 0.0f, 1.0f, 0.01f);
 		Tweak::floatVar("Force/Emitter", "Width", &width, 0.05f, 2.0f, 0.01f);
 
+		Tweak::floatVar("Network/Player", "Move speed", &playerMoveSpeed, 0.5f, 30.0f, 0.1f);
+		Tweak::floatVar("Network/Player", "Accel", &playerAccel, 1.0f, 200.0f, 0.5f);
+		Tweak::floatVar("Network/Player", "Jump speed", &playerJumpSpeed, 0.5f, 20.0f, 0.1f);
+
         auto& input = Globals::input;
         pKeyboardListener = input.addKeyboardListener();
         pKeyboardListener->onKeyPressed = [this](const SDL_KeyboardEvent& evt) { handleKeyEvent(evt); };
@@ -122,6 +132,8 @@ public:
     void update(float deltaSec)
     {
         ProfileScope profileScope("Input controls", EProfileCategory::App);
+        if (playerControl)
+            updatePlayerControl(deltaSec);
         for (ForceBall& ball : forceBalls)
         {
             if (!ball.entity || !ball.emitter.isValid())
@@ -134,6 +146,78 @@ public:
             const float pressure = ball.emitter.getPressure();
             if (glm::dot(force, force) > 1e-8f)
                 pc->body.applyImpulse(force * deltaSec * 10000.0f * pressure);
+        }
+    }
+
+    // Drives every locally-owned dynamic-body entity with WASD/Space while player control (key C)
+    // is on. The owning client simulates its own body — full responsiveness at any RTT: horizontal
+    // velocity steering (frame-rate independent, snappy), Space jumps off a ground raycast. The
+    // sampled intent lands in comp->input (streamed with the claims, mirrored server-side for
+    // gameplay), and the claim stream carries the resulting body state to the server. Main thread,
+    // before physics.update, so the direct body setters are the sanctioned path.
+    void updatePlayerControl(float deltaSec)
+    {
+        if (Globals::networkManager.role() != ENetRole::Client)
+            return; // only clients own entities
+        Input& input = Globals::input;
+        if (!input.isWindowHasFocus() || !Globals::ui.isViewportFocused())
+            return;
+
+        glm::vec3 forward = cameraController.getDirection();
+        forward.y = 0.0f; // camera-relative planar movement
+        const float forwardLen = glm::length(forward);
+        forward = forwardLen > 1e-4f ? forward / forwardLen : glm::vec3(0.0f, 0.0f, -1.0f);
+        const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        glm::vec3 move(0.0f);
+        if (input.isKeyDown(SDL_SCANCODE_W)) move += forward;
+        if (input.isKeyDown(SDL_SCANCODE_S)) move -= forward;
+        if (input.isKeyDown(SDL_SCANCODE_D)) move += right;
+        if (input.isKeyDown(SDL_SCANCODE_A)) move -= right;
+        if (glm::dot(move, move) > 1e-8f)
+            move = glm::normalize(move);
+        const bool jumpDown = input.isKeyDown(SDL_SCANCODE_SPACE);
+        const bool jumpPressed = jumpDown && !playerJumpWasDown;
+        playerJumpWasDown = jumpDown;
+
+        for (const EntityPtr& root : world.rootEntities())
+        {
+            NetworkComponent* net = getComponent<NetworkComponent>(root.get());
+            if (!net || net->authority() != ENetAuthority::LocalOwner)
+                continue;
+            if (net->transferredOwnership)
+                continue; // proximity-transferred objects: our sim drives them, but they are not the player
+            net->input.buttons = jumpDown ? NetInputButton_Jump : 0u;
+            net->input.move = move;
+            net->input.look = cameraController.getDirection();
+
+            // Server reasserting itself (claims rejected): YIELD — steering against the forced
+            // correction keeps the error large, breeds fresh rejections, and turns the resync into a
+            // tug-of-war that only ends when the player releases the keys. Yielding lets it resolve
+            // in one quick snap; records stop carrying Forced the moment claims are accepted again.
+            if (net->targetFlags & NetRecFlag_Forced)
+                continue;
+
+            PhysicsComponent* pc = getComponent<PhysicsComponent>(root.get());
+            if (!pc || pc->bodyType != EPhysicsBodyType::Dynamic || !pc->body.isValid())
+                continue;
+            glm::vec3 vel = pc->body.getLinearVelocity();
+            glm::vec3 dv = glm::vec3(move.x * playerMoveSpeed - vel.x, 0.0f, move.z * playerMoveSpeed - vel.z);
+            const float maxDv = playerAccel * deltaSec;
+            const float dvLen = glm::length(dv);
+            if (dvLen > maxDv && dvLen > 1e-6f)
+                dv *= maxDv / dvLen;
+            vel.x += dv.x;
+            vel.z += dv.z;
+            if (jumpPressed)
+            {
+                // grounded = something under the cube within half its extent + a margin (a ray cast
+                // from inside a convex shape doesn't hit that shape itself)
+                const glm::vec3 pos = pc->body.getPosition();
+                if (Globals::physics.castRayClosest(pos, glm::vec3(0.0f, -(root->scale + 0.3f), 0.0f)).hit)
+                    vel.y = playerJumpSpeed;
+            }
+            pc->body.setLinearVelocity(vel);
         }
     }
 
@@ -169,6 +253,32 @@ public:
 			Globals::scriptHost.reloadCurrentScript(); // F6: recompile + hot-reload the script the Script panel is editing
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_K && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             Globals::networkManager.fireNetworkEvent("NetPing"); // K: network-event smoke test (fires on every connected instance)
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_C && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN
+            && (evt.mod & SDL_KMOD_CTRL) == 0) // plain C only — Ctrl+C stays copy
+        {
+            // C: toggle player control — WASD/Space drive the locally-owned entity instead of flying
+            // the camera (mouse-look stays); see updatePlayerControl
+            playerControl = !playerControl;
+            cameraController.setMovementEnabled(!playerControl);
+            Log::info(playerControl ? "Player control ON: WASD/Space drive your entity (C to release)"
+                                    : "Player control OFF: camera flight restored");
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_U && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
+        {
+            // U: runtime-spawn a networked physics cube thrown from the camera — on a server the spawn
+            // replicates to every client (Spawn message + physics sync + Despawn). Clients can't author
+            // server state, so it's refused there rather than spawning a local unsynced ghost.
+            if (Globals::networkManager.role() == ENetRole::Client)
+                Log::info("Network: U ignored on a client (spawns are server-authoritative)");
+            else
+            {
+                const glm::vec3 dir = cameraController.getDirection();
+                EntityPtr cube = world.spawnAssetFile("Entities/Debug/netPhysCube.pre", Transform(cameraController.getPosition() + dir), true);
+                if (PhysicsComponent* pc = getComponent<PhysicsComponent>(cube.get()))
+                    pc->body.setLinearVelocity(dir * 12.0f);
+                world.addRootEntity(std::move(cube));
+            }
+        }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_P && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             renderer.toggleGiProbeDebug();          // P: show/hide GI probe debug cubes
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_O && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)

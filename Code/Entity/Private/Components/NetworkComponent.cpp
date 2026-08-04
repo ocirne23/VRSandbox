@@ -14,19 +14,10 @@ static float quatAngleDeg(const glm::quat& a, const glm::quat& b)
 
 void NetworkComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {
-    uint32 id = info.id;
-    if (id >= 0x80000000u)
-    {
-        Log::warning("Network: entity '" + std::string(entity.getName()) + "' authored Id " + std::to_string(id)
-            + " is in the reserved dynamic-spawn range, masking to " + std::to_string(id & 0x7fffffffu));
-        id &= 0x7fffffffu;
-    }
-    if (id == 0)
-        id = Globals::networkManager.deriveAutoId(entity);
-    // registration runs in every role (None included): the registry is what pairs entities when a
-    // session starts, and it keeps editor respawns consistent
-    netId = id;
-    Globals::networkManager.registerEntity(netId, &entity, this);
+    // the manager is the only id authority: on the server this mints an id and replicates the spawn
+    // to clients; on a client it adopts the incoming server id while executing a replicated Spawn;
+    // everywhere else (client-local content, single player) it returns 0 = local-inert, never synced
+    netId = Globals::networkManager.registerEntity(entity, this);
     lastSentPos = glm::vec3(FLT_MAX); // force the first change-detection send
 }
 
@@ -35,9 +26,26 @@ void NetworkComponent::destroy(Entity& entity, const SpawnInfo&)
     Globals::networkManager.unregisterEntity(netId, this);
 }
 
+ENetAuthority NetworkComponent::authority() const
+{
+    if (netId == 0)
+        return ENetAuthority::Local;
+    if (ownerClientId == 0)
+        return ENetAuthority::ServerOwned;
+    return ownerClientId == Globals::networkManager.localClientId() ? ENetAuthority::LocalOwner
+                                                                    : ENetAuthority::RemoteOwner;
+}
+
 void NetworkComponent::update(Entity& entity, float deltaSeconds)
 {
     if (Globals::networkManager.role() != ENetRole::Client || !hasTarget)
+        return;
+
+    // LOCAL OWNER: this process's claims are the authority — simulate freely and ignore the server's
+    // corrections UNLESS the record is Forced (rejected claims: the hard resync below) or Arbitrated
+    // (player-vs-player contact: the server solver owns the pose, soft-correct toward it while the
+    // player keeps steering — input stays live, see updatePlayerControl which yields only on Forced)
+    if (authority() == ENetAuthority::LocalOwner && !(targetFlags & (NetRecFlag_Forced | NetRecFlag_Arbitrated)))
         return;
 
     timeSinceSnapshot += deltaSeconds;
@@ -54,8 +62,54 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
         if (!(targetFlags & NetRecFlag_Physics))
             return; // the server's twin has no live dynamic body (suspended there?) — don't fight it
         PhysicsWorld& physicsWorld = Globals::physics;
+
+        // LOCAL OWNER under a FORCED record: the server rejected our claims, so hard-resync STRAIGHT
+        // to the authoritative state instead of riding the correction ladder. Simpler and faster: the
+        // very next claim then matches the twin, the re-anchor rule accepts it, and Forced clears —
+        // the whole episode resolves in about one claim tick. Gentleness is for replicas; a rejected
+        // owner wants a crisp snap. (An ARBITRATED-only record falls through to the soft push ladder
+        // below instead — shoving contests correct gently while the player keeps steering.)
+        if (authority() == ENetAuthority::LocalOwner && (targetFlags & NetRecFlag_Forced))
+        {
+            physicsWorld.teleportBody(physics->body, targetPos, targetRot);
+            physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, targetLinVel);
+            physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, targetAngVel);
+            physics->prevPos = physics->currPos = targetPos; // see the snap-path comment below
+            physics->prevRot = physics->currRot = targetRot;
+            if (newSnapshot)
+                lastAppliedTick = serverTick;
+            return;
+        }
+
         const glm::vec3 bodyPos = physics->body.getPosition();
         const glm::quat bodyRot = physics->body.getRotation();
+
+        // LOCAL INTERACTION GRACE: while one of OUR claim-driven bodies is near this server-owned
+        // body, corrections would drag it toward the server's RTT-old (pre-push) state and fight the
+        // shove the player is applying right now — suspend them and let the local sim rule. The
+        // server's twin receives the same push ~an RTT later (through the claim-followed player
+        // body), so once the grace lingers out the residual error is small and reconciles normally.
+        // STRICTLY ServerOwned: a RemoteOwner entity (another player's cube) is claim-driven by ITS
+        // owner — our local shoves on it are never honored, so suspending its corrections only
+        // fabricates seconds of false local control ("I took over their player"). Never applies to
+        // a Forced LocalOwner either (that's the server reasserting itself).
+        if (params.interactionRadius > 0.0f && authority() == ENetAuthority::ServerOwned)
+        {
+            const float radiusSq = params.interactionRadius * params.interactionRadius;
+            for (const glm::vec3& ownedPos : Globals::networkManager.localOwnedBodyPositions())
+                if (glm::dot(ownedPos - bodyPos, ownedPos - bodyPos) < radiusSq)
+                {
+                    localInteractionGrace = params.interactionLinger;
+                    break;
+                }
+        }
+        if (localInteractionGrace > 0.0f && authority() == ENetAuthority::ServerOwned)
+        {
+            localInteractionGrace -= deltaSeconds;
+            // deliberately does NOT touch lastAppliedTick: when the grace ends, the newest
+            // snapshot's velocities/sleep apply once and normal correction resumes
+            return;
+        }
 
         if (targetFlags & NetRecFlag_Asleep)
         {
@@ -76,33 +130,151 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
             return;
         }
 
+        // REMOTE PLAYERS: buffered interpolation playback — exact reproduction of the owner's
+        // trajectory a fixed couple of ticks behind, instead of physics-chasing the newest state
+        // (a capped-accel body following a delayed, input-spiky signal inherently lag-chases starts
+        // and overshoots stops; no target tuning fixes that). The body teleport-follows the
+        // interpolated path with matched velocities so contacts stay plausible; a loss gap at the
+        // playback cursor falls through to the physical push for that frame.
+        if (params.remoteInterpTicks > 0.0f && ownerClientId != 0 && remoteBuffer != nullptr && remoteBuffer->count >= 2)
+        {
+            const NetSnapshotRing& ring = *remoteBuffer;
+            const float newest = float(ring.newestTick);
+            const float oldestValid = newest - float(glm::min(ring.count, NetSnapshotRing::Capacity) - 1);
+            // (re)engage at the PRESENT when the cursor sits outside the buffered window (first frames
+            // after an ownership transfer, or after a long loss burst) — the anchor below then slides
+            // it back into the full delay over a few hundred ms instead of snapping the entity into
+            // the past, which read as a jump the moment a player started pushing a prop
+            if (playbackTick < oldestValid || playbackTick > newest)
+                playbackTick = glm::max(newest - 1.0f, oldestValid);
+            playbackTick += Globals::networkManager.serverSnapshotHz() * deltaSeconds; // advance in server tick units
+            const float targetPlayback = newest - params.remoteInterpTicks;
+            playbackTick += (targetPlayback - playbackTick) * glm::min(1.0f, deltaSeconds * 4.0f); // gentle drift re-anchor
+            // cap at newest-1: a bracketing NEXT snapshot always exists there. Clamping to newest let
+            // ordinary snapshot-arrival jitter break the bracket and fall through to the chase for a
+            // frame — the source of the residual stop-overshoot flicker. Snapshots stalling now pause
+            // the playback instead of chasing.
+            playbackTick = glm::clamp(playbackTick, oldestValid, glm::max(newest - 1.0f, oldestValid));
+            const uint32 tick0 = uint32(glm::max(0.0f, glm::floor(playbackTick)));
+            const NetSnapshotRecord& r0 = ring.records[tick0 % NetSnapshotRing::Capacity];
+            const NetSnapshotRecord& r1 = ring.records[(tick0 + 1) % NetSnapshotRing::Capacity];
+            if (r0.tick == tick0 && r1.tick == tick0 + 1) // both bracketing ticks present (ring-wrap + loss validation)
+            {
+                const float alpha = glm::clamp(playbackTick - float(tick0), 0.0f, 1.0f);
+                const glm::vec3 pos = glm::mix(r0.pos, r1.pos, alpha);
+                const glm::quat rot = glm::slerp(r0.rot, r1.rot, alpha);
+                physicsWorld.teleportBody(physics->body, pos, rot);
+                physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, glm::mix(r0.linVel, r1.linVel, alpha));
+                physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, glm::mix(r0.angVel, r1.angVel, alpha));
+                physics->prevPos = physics->currPos = pos; // teleports apply next physics.update; see the snap-path comment
+                physics->prevRot = physics->currRot = rot;
+                if (newSnapshot)
+                    lastAppliedTick = serverTick;
+                return;
+            }
+        }
+
         glm::vec3 target = targetPos;
         if (params.extrapolate)
-            target += targetLinVel * glm::min(timeSinceSnapshot, 0.25f); // dead-reckon between snapshots, capped
-
-        const float posErr = glm::length(target - bodyPos);
-        const float rotErrDeg = quatAngleDeg(bodyRot, targetRot);
-        const bool snap = posErr > params.posSnapThreshold || rotErrDeg > params.rotSnapThresholdDeg;
-        if (snap || posErr > params.posDeadzone || rotErrDeg > params.rotDeadzoneDeg)
         {
-            glm::vec3 newPos;
-            glm::quat newRot;
-            if (snap)
-            {
-                newPos = target;
-                newRot = targetRot;
-            }
-            else
-            {
-                const float blend = 1.0f - glm::exp(-params.blendRate * deltaSeconds);
-                newPos = glm::mix(bodyPos, target, blend);
-                newRot = glm::slerp(bodyRot, targetRot, blend);
-            }
-            physicsWorld.teleportBody(physics->body, newPos, newRot);
+            // dead-reckon by snapshot age PLUS the pipeline lead (fixed claim/tick estimate + live
+            // half-RTT): the target then approximates the remote owner's CURRENT position, so the
+            // corrective term handles genuine divergence instead of chasing systematic lag (which
+            // stacked catch-up speed on the stale velocity — remote players read as ~2x-accelerating).
+            // The lead is DAMPED by velocity consistency (extrapolationScale): leading into a brake
+            // or turn is what overshoots, so it only applies while the motion is steady.
+            const float lead = (params.remoteLeadSec + Globals::networkManager.serverHalfRttSec()) * extrapolationScale;
+            target += targetLinVel * glm::min(timeSinceSnapshot + lead, 0.35f);
+        }
+
+        const glm::vec3 posErrVec = target - bodyPos;
+        const float posErr = glm::length(posErrVec);
+        const float rotErrDeg = quatAngleDeg(bodyRot, targetRot);
+
+        // The non-physical teleport resync is the LAST resort: in push mode only an absurd position
+        // error reaches it (posTeleportThreshold; the catch-up push below handles everything closer —
+        // teleporting into a space another desynced body still occupies would depenetration-fling
+        // both apart into fresh desync). In legacy blend mode the snap threshold keeps its original
+        // teleport meaning.
+        const bool teleport = params.physicalPush
+            ? posErr > params.posTeleportThreshold
+            : (posErr > params.posSnapThreshold || rotErrDeg > params.rotSnapThresholdDeg);
+        if (teleport)
+        {
+            physicsWorld.teleportBody(physics->body, target, targetRot);
+            physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, targetLinVel);
+            physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, targetAngVel);
             // The teleport applies at the NEXT physics.update and prev/curr only refresh on step
             // boundaries — stomping them makes PhysicsComponent::update (right after this, same
             // entity) show the corrected pose this frame instead of lerping from stale state.
-            physics->prevPos = physics->currPos = newPos;
+            physics->prevPos = physics->currPos = target;
+            physics->prevRot = physics->currRot = targetRot;
+            if (newSnapshot)
+                lastAppliedTick = serverTick;
+            return;
+        }
+
+        if (params.physicalPush)
+        {
+            // steer the body back through the simulation: position/rotation error becomes corrective
+            // velocity on top of the server's, delivered as a bounded impulse (NudgeVelocity caps the
+            // velocity change at the accel limit x dt). No teleports, no raw velocity sets — contacts,
+            // stacking and gameplay impulses compose with the correction instead of being erased.
+            // Past the snap threshold the push enters CATCH-UP: gains and caps boosted so multi-meter
+            // errors still converge quickly, through legitimate contacts.
+            // ARBITRATED OWNER (we reach here as LocalOwner only via an Arbitrated record): the local
+            // contact with the opponent's replica supplies the feel — correct only REAL divergence
+            // (big deadzone, halved gains) or the correction drags against the player's live input.
+            const bool arbitratedOwner = authority() == ENetAuthority::LocalOwner;
+            const float posDeadzone = arbitratedOwner ? glm::max(params.posDeadzone, params.arbitrateDeadzone) : params.posDeadzone;
+            const float rotDeadzoneDeg = arbitratedOwner ? glm::max(params.rotDeadzoneDeg, 15.0f) : params.rotDeadzoneDeg;
+            const float ownerGainScale = arbitratedOwner ? 0.5f : 1.0f;
+            const bool pushPos = posErr > posDeadzone;
+            const bool pushRot = rotErrDeg > rotDeadzoneDeg;
+            if (pushPos || pushRot)
+            {
+                const bool catchUp = posErr > params.posSnapThreshold || rotErrDeg > params.rotSnapThresholdDeg;
+                const float boost = (catchUp ? glm::max(1.0f, params.pushCatchUpBoost) : 1.0f) * ownerGainScale;
+                glm::vec3 desiredLin = targetLinVel;
+                if (pushPos)
+                {
+                    glm::vec3 corrective = posErrVec * (params.pushPosGain * boost);
+                    const float maxVel = params.pushMaxVel * boost;
+                    const float len = glm::length(corrective);
+                    if (len > maxVel && len > 1e-6f)
+                        corrective *= maxVel / len;
+                    desiredLin += corrective;
+                }
+                glm::vec3 desiredAng = targetAngVel;
+                if (pushRot)
+                {
+                    glm::quat errQuat = targetRot * glm::inverse(bodyRot);
+                    if (errQuat.w < 0.0f)
+                        errQuat = -errQuat; // shortest arc
+                    glm::vec3 corrective = glm::axis(errQuat) * glm::angle(errQuat) * (params.pushRotGain * boost);
+                    const float maxAngVel = params.pushMaxAngVel * boost;
+                    const float len = glm::length(corrective);
+                    if (len > maxAngVel && len > 1e-6f)
+                        corrective *= maxAngVel / len;
+                    desiredAng += corrective;
+                }
+                physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::NudgeVelocity,
+                    desiredLin, desiredAng,
+                    glm::vec3(params.pushMaxAccel * boost * deltaSeconds, params.pushMaxAngAccel * boost * deltaSeconds, 0.0f));
+            }
+            if (newSnapshot)
+                lastAppliedTick = serverTick;
+            return;
+        }
+
+        // legacy blend mode ("Physical push" off): exponential teleport-blend toward the target
+        if (posErr > params.posDeadzone || rotErrDeg > params.rotDeadzoneDeg)
+        {
+            const float blend = 1.0f - glm::exp(-params.blendRate * deltaSeconds);
+            const glm::vec3 newPos = glm::mix(bodyPos, target, blend);
+            const glm::quat newRot = glm::slerp(bodyRot, targetRot, blend);
+            physicsWorld.teleportBody(physics->body, newPos, newRot);
+            physics->prevPos = physics->currPos = newPos; // see the snap-path comment
             physics->prevRot = physics->currRot = newRot;
         }
         if (newSnapshot)
@@ -120,6 +292,15 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
 
     // non-physics (or kinematic/static body: the entity transform syncs, the collider stays put —
     // teleportBody is the engine-wide rule for moving colliders); targets are entity-LOCAL here
+    if (authority() == ENetAuthority::LocalOwner && (targetFlags & NetRecFlag_Forced))
+    {
+        // rejected owner: same crisp hard-resync as the physics path above
+        entity.pos = targetPos;
+        entity.rot = targetRot;
+        if (newSnapshot)
+            lastAppliedTick = serverTick;
+        return;
+    }
     const float posErr = glm::length(targetPos - entity.pos);
     const float rotErrDeg = quatAngleDeg(entity.rot, targetRot);
 
@@ -153,6 +334,6 @@ const NetworkComponent::SpawnInfo* getNetworkSpawnInfo(const Entity* entity)
 
 void writeNetworkSpawnInfo(const NetworkComponent::SpawnInfo& info, AssetNode& out)
 {
-    // always emitted: Prefab.cpp drops component nodes with no children entirely
-    out.addChild("Id").values.emplace_back(std::to_string(info.id));
+    // nothing to serialize: the component is pure presence (ids are code-assigned) — Prefab.cpp
+    // special-cases Network in its empty-component skip, like Scene
 }

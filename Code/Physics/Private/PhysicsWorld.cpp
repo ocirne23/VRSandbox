@@ -177,12 +177,12 @@ void PhysicsWorld::teleportBody(const PhysicsBody& body, const glm::vec3& pos, c
     m_commands.push_back(BodyCommand{ .bodyHandle = body.m_handle, .type = EBodyCommand::Teleport, .a = pos, .rot = glm::normalize(rot) });
 }
 
-void PhysicsWorld::queueBodyCommand(const PhysicsBody& body, EBodyCommand type, const glm::vec3& a, const glm::vec3& b)
+void PhysicsWorld::queueBodyCommand(const PhysicsBody& body, EBodyCommand type, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c)
 {
     if (!body.isValid())
         return;
     const std::lock_guard<std::mutex> lock(m_commandMutex);
-    m_commands.push_back(BodyCommand{ .bodyHandle = body.m_handle, .type = type, .a = a, .b = b });
+    m_commands.push_back(BodyCommand{ .bodyHandle = body.m_handle, .type = type, .a = a, .b = b, .c = c });
 }
 
 void PhysicsWorld::queueSetGravity(const glm::vec3& gravity)
@@ -224,6 +224,19 @@ void PhysicsWorld::applyQueuedCommands()
         case EBodyCommand::SetLinearDamping:    b3Body_SetLinearDamping(id, command.a.x); break;
         case EBodyCommand::SetAngularDamping:   b3Body_SetAngularDamping(id, command.a.x); break;
         case EBodyCommand::SetAwake:            b3Body_SetAwake(id, command.a.x != 0.0f); break;
+        case EBodyCommand::NudgeVelocity:
+        {
+            const auto capped = [](const glm::vec3& delta, float maxLen)
+            {
+                const float len = glm::length(delta);
+                return (len > maxLen && len > 1e-6f) ? delta * (maxLen / len) : delta;
+            };
+            const glm::vec3 dv = capped(command.a - toGlm(b3Body_GetLinearVelocity(id)), command.c.x);
+            b3Body_ApplyLinearImpulseToCenter(id, toB3(dv * b3Body_GetMass(id)), true);
+            const glm::vec3 angVel = toGlm(b3Body_GetAngularVelocity(id));
+            b3Body_SetAngularVelocity(id, toB3(angVel + capped(command.b - angVel, command.c.y)));
+            break;
+        }
         case EBodyCommand::SetWorldGravity:     break; // handled above
         }
     }
@@ -495,7 +508,34 @@ PhysicsJoint PhysicsWorld::createWeldJoint(const PhysicsBody& a, const PhysicsBo
     return PhysicsJoint(std::bit_cast<uint64>(b3CreateWeldJoint(std::bit_cast<b3WorldId>(m_worldHandle), &def)));
 }
 
-PhysicsWorld::RayHit PhysicsWorld::castRayClosest(const glm::vec3& origin, const glm::vec3& translation, uint64 maskBits) const
+namespace
+{
+    struct FilteredRayContext
+    {
+        uint64 ignoreBodyBits = 0;
+        bool staticOnly = false;
+        PhysicsWorld::RayHit hit;
+    };
+    // closest-hit semantics per the b3CastResultFcn contract: returning the fraction clips the ray,
+    // so later callbacks only fire for strictly closer hits; -1 filters a shape out
+    float filteredClosestRayFcn(b3ShapeId shapeId, b3Pos point, b3Vec3 normal, float fraction, uint64_t, int, int, void* context)
+    {
+        FilteredRayContext* ctx = static_cast<FilteredRayContext*>(context);
+        const b3BodyId body = b3Shape_GetBody(shapeId);
+        if (std::bit_cast<uint64>(body) == ctx->ignoreBodyBits)
+            return -1.0f;
+        if (ctx->staticOnly && b3Body_GetType(body) != b3_staticBody)
+            return -1.0f;
+        ctx->hit.hit = true;
+        ctx->hit.fraction = fraction;
+        ctx->hit.point = toGlm(point);
+        ctx->hit.normal = toGlm(normal);
+        return fraction;
+    }
+}
+
+PhysicsWorld::RayHit PhysicsWorld::castRayClosest(const glm::vec3& origin, const glm::vec3& translation, uint64 maskBits,
+    const PhysicsBody* ignoreBody, bool staticOnly) const
 {
     RayHit outHit;
     if (!m_initialized)
@@ -503,6 +543,13 @@ PhysicsWorld::RayHit PhysicsWorld::castRayClosest(const glm::vec3& origin, const
     b3QueryFilter filter = b3DefaultQueryFilter();
     filter.categoryBits = PhysicsLayers::All; // pass every shape's own mask; maskBits alone decides what the ray sees
     filter.maskBits = maskBits;
+    if ((ignoreBody != nullptr && ignoreBody->isValid()) || staticOnly)
+    {
+        FilteredRayContext context{ .ignoreBodyBits = ignoreBody && ignoreBody->isValid() ? ignoreBody->m_handle : 0, .staticOnly = staticOnly };
+        b3World_CastRay(std::bit_cast<b3WorldId>(m_worldHandle), toB3(origin), toB3(translation), filter,
+            &filteredClosestRayFcn, &context);
+        return context.hit;
+    }
     const b3RayResult result = b3World_CastRayClosest(std::bit_cast<b3WorldId>(m_worldHandle),
         toB3(origin), toB3(translation), filter);
     outHit.hit = result.hit;

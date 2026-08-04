@@ -1225,13 +1225,19 @@ void EntityEditor::renderNetworkSection()
 		return;
 	ImGui::PushID("network");
 
-	int id = int(m_networkDraft.id);
-	const bool idChanged = ImGui::DragInt("Id", &id, 1.0f, 0, 0x7fffffff);
-	if (idChanged)
-		m_networkDraft.id = uint32(glm::max(id, 0));
-	commitDrag(idChanged);
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Pairs this entity with its server/client counterpart. 0 = auto-derive from the entity's\nname path (fragile across scene edits) - explicit ids are recommended for real content");
+	// nothing to author: netIds/ownership are code abstractions, minted only by the server —
+	// surface the live state read-only for debugging
+	if (const NetworkComponent* net = getComponent<NetworkComponent>(m_selected.get()))
+	{
+		static constexpr const char* authorityNames[] = { "Local (not synced)", "ServerOwned", "LocalOwner", "RemoteOwner" };
+		static constexpr const char* claimNames[] = { "-", "Accepted", "RejectedSpeed", "RejectedVelocity", "RejectedPath", "RejectedTeleport" };
+		ImGui::Text("netId: %u  authority: %s", net->netId, authorityNames[glm::min(int(net->authority()), 3)]);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Server-minted at spawn and replicated to clients; never stored in the .pre.\n0/Local = this instance is client-local (or single player) and never syncs");
+		if (net->ownerClientId != 0)
+			ImGui::Text("owner: client %u  claim: %s  violations: %u",
+				net->ownerClientId, claimNames[glm::min(int(net->lastClaimResult), 5)], uint32(net->violations));
+	}
 
 	if (ImGui::Button("Remove Network"))
 	{

@@ -697,12 +697,10 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             Log::warning("Scene: entity '" + tmpl.displayName + "' has a Light component without any Light entries, skipping");
     }
 
-    if (const AssetNode* networkNode = findComponentNode(node, "Network"))
+    if (findComponentNode(node, "Network")) // pure presence: netIds are assigned in code, never authored
     {
-        auto info = std::make_shared<NetworkComponent::SpawnInfo>();
-        if (const AssetNode* n = networkNode->find("Id")) info->id = uint32(glm::max(n->asInt(), 0));
         typeBits |= uint16(1 << EComponentID_Network);
-        tmpl.spawnInfos.emplace_back(std::move(info));
+        tmpl.spawnInfos.emplace_back(std::make_shared<NetworkComponent::SpawnInfo>());
     }
 
     if (const AssetNode* scriptNode = findComponentNode(node, "Script"))

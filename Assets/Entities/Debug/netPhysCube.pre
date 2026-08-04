@@ -1,0 +1,16 @@
+// Runtime-spawnable networked physics cube: on a LIVE server the Network component gets a dynamic
+// netId at spawn and the spawn replicates to every client (Spawn message + transform/physics sync
+// + Despawn on destroy). Key U in the App throws one ahead of the camera, server-side only.
+Prefab netPhysCube
+	Scale 0.25
+	Component Render
+		ObjectContainer wireshapes
+		Node Cube
+		Type StaticMesh
+	Component Physics
+		Body Dynamic
+		Shape Box
+		HalfExtents 1 1 1
+		Restitution 0.4
+		Density 400
+	Component Network

@@ -119,7 +119,7 @@ void FreeFlyCameraController::update(double deltaTime)
         m_mousePosUpdated = false;
     }
 
-    if (viewportActive)
+    if (viewportActive && m_movementEnabled)
     {
         const float boost = input.isKeyDown(SDL_SCANCODE_LSHIFT) ? m_boostMultiplier : 1.0f;
 

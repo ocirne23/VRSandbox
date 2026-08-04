@@ -55,8 +55,14 @@ public:
         ApplyAngularImpulse, ApplyForce, ApplyForceAtPoint, ApplyTorque,
         SetGravityScale, SetLinearDamping, SetAngularDamping, SetAwake, // scalar in a.x
         SetWorldGravity,
+        // Bounded velocity steering toward a target (network correction "push"): a = target linear
+        // velocity, b = target angular velocity, c.x/c.y = max linear/angular velocity change applied
+        // THIS drain. The linear half lands as a center impulse of at most mass*c.x (composes with the
+        // sim like any hit); the angular half is the exact result the ideal angular impulse I*dw would
+        // produce, applied as a capped velocity add (the inertia tensor cancels out of the math).
+        NudgeVelocity,
     };
-    void queueBodyCommand(const PhysicsBody& body, EBodyCommand type, const glm::vec3& a, const glm::vec3& b = glm::vec3(0.0f));
+    void queueBodyCommand(const PhysicsBody& body, EBodyCommand type, const glm::vec3& a, const glm::vec3& b = glm::vec3(0.0f), const glm::vec3& c = glm::vec3(0.0f));
     void queueSetGravity(const glm::vec3& gravity); // world gravity via the same queue (no body)
 
     PhysicsBody createBody(const PhysicsBodyDesc& desc, std::span<const PhysicsShape> shapes);
@@ -85,7 +91,13 @@ public:
         glm::vec3 point = glm::vec3(0.0f);
         glm::vec3 normal = glm::vec3(0.0f);
     };
-    RayHit castRayClosest(const glm::vec3& origin, const glm::vec3& translation, uint64 maskBits = PhysicsLayers::All) const;
+    // ignoreBody skips every shape of that body — needed when the ray travels between two poses of
+    // the body itself (network claim validation): box3d's closest-cast only ignores overlap AT the
+    // origin, so the body's own surface a step ahead would count as a hit. staticOnly restricts hits
+    // to static bodies (same caller: a DYNAMIC body in a movement claim's path is something the
+    // claimant can legitimately push, never a wall to validate against).
+    RayHit castRayClosest(const glm::vec3& origin, const glm::vec3& translation, uint64 maskBits = PhysicsLayers::All,
+        const PhysicsBody* ignoreBody = nullptr, bool staticOnly = false) const;
 
     // Buoyancy: with a water surface set (the App wires the ocean's CPU height field), every dynamic
     // body gets probe-based buoyancy + drag before each fixed step — bodies denser than water sink,
@@ -139,7 +151,8 @@ private:
         uint64 bodyHandle = 0; // b3BodyId bits (unused for SetWorldGravity)
         EBodyCommand type = EBodyCommand::Teleport;
         glm::vec3 a = glm::vec3(0.0f);   // pos / velocity / impulse / force / torque / gravity
-        glm::vec3 b = glm::vec3(0.0f);   // world point for the AtPoint variants
+        glm::vec3 b = glm::vec3(0.0f);   // world point for the AtPoint variants / NudgeVelocity target angular velocity
+        glm::vec3 c = glm::vec3(0.0f);   // NudgeVelocity caps (max dV, max dW)
         glm::quat rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // Teleport only
     };
     std::mutex m_commandMutex;

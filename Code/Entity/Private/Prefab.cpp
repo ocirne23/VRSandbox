@@ -96,9 +96,9 @@ static void writeEntityBody(Entity* entity, AssetNode& node, const std::string& 
                 for (const EntityPtr& child : sc->children)
                     writeSceneChild(child, comp);
 
-        // Scene is written even when empty: it is what makes the entity able to hold children, and it
-        // serializes nothing of its own now that Enabled lives on the entity.
-        if (comp.children.empty() && id != EComponentID_Scene)
+        // Scene and Network are written even when empty: Scene is what makes the entity able to hold
+        // children, and Network is pure presence (netIds are code-assigned, nothing to serialize).
+        if (comp.children.empty() && id != EComponentID_Scene && id != EComponentID_Network)
             continue;
         node.children.push_back(std::move(comp));
     }

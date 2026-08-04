@@ -30,6 +30,43 @@ import Core.Windows;
 static std::atomic<bool> g_headlessRunning = true;
 static BOOL __stdcall headlessCtrlHandler(DWORD) { g_headlessRunning = false; return TRUE; } // any console ctrl event = clean shutdown
 
+// Server: per-player entities. Each joining client gets a claim-driven cube it OWNS — on the owning
+// client, gizmo-dragging it is authoritative movement (streamed as claims, validated server-side;
+// drag implausibly fast and the server rejects + force-corrects). Torn down when the client leaves;
+// the despawn replicates to everyone else. Main thread (fired from networkManager.receive).
+static void setupServerJoinCallbacks()
+{
+    Globals::networkManager.setOnClientJoined([](uint32 clientId)
+        {
+            World& world = Globals::world;
+            EntityPtr player = world.spawnAssetFile("Entities/Debug/netPlayerCube.pre",
+                Transform(glm::vec3(0, 10.0f, 0)), true);
+            if (!player)
+                return;
+            player->setName("Player " + std::to_string(clientId));
+            Globals::networkManager.setOwner(*player, clientId);
+            // ownership STEALING: whatever this player's body collides with becomes theirs (last
+            // collider wins, other players' primaries excluded) — needs ContactEvents on the shapes
+            if (PhysicsComponent* pc = getComponent<PhysicsComponent>(player.get()))
+                pc->onContact = [clientId](Entity& other, bool begin)
+                {
+                    if (begin)
+                        Globals::networkManager.stealOwnershipOnContact(other, clientId);
+                };
+            world.addRootEntity(std::move(player));
+        });
+    Globals::networkManager.setOnClientLeft([](uint32 clientId)
+        {
+            World& world = Globals::world;
+            std::vector<Entity*> owned; // collected first: removeRootEntity mutates the list being walked
+            for (const EntityPtr& root : world.rootEntities())
+                if (const NetworkComponent* comp = getComponent<NetworkComponent>(root.get()); comp && comp->ownerClientId == clientId)
+                    owned.push_back(root.get());
+            for (Entity* entity : owned)
+                world.removeRootEntity(entity);
+        });
+}
+
 // Dedicated server without a window, renderer, UI or input. World::setHeadless makes every template
 // carry only Scene/Physics/Script/Network components, so nothing ever touches the uninitialized
 // renderer global (it exists — static init_seg — but initialize never runs) and no GPU resource is
@@ -59,9 +96,10 @@ static int runHeadlessServer(uint16 netPort, int tickHz)
         Globals::jobSystem.shutdown();
         return 1;
     }
+    setupServerJoinCallbacks();
 
     World& world = Globals::world;
-    world.addRootEntity(world.spawnAssetFile("Entities/Debug/networkTest.pre", Transform(glm::vec3(50.0f, 85.0f, 2320.0f)), true));
+    world.addRootEntity(world.spawnAssetFile("Entities/Debug/networkTest.pre", Transform(glm::vec3(0, 0, 0)), true));
 
     SetConsoleCtrlHandler(&headlessCtrlHandler, TRUE);
     Log::info("Headless server running at " + std::to_string(tickHz) + " Hz - Ctrl+C to stop");
@@ -155,9 +193,9 @@ int main(int argc, char* argv[])
     JobSystem& jobSystem = Globals::jobSystem;
     jobSystem.initialize();
 
-    const glm::vec3 spawnPos = glm::vec3(50.0f, 80.0f, 2327.0f);
+    const glm::vec3 spawnPos = glm::vec3(-1.5f, 14.0f, -7.1f);
     FreeFlyCameraController cameraController;
-    cameraController.initialize(spawnPos, glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    cameraController.initialize(spawnPos, glm::vec3(0.0f, 4.0f, 0.0f));
 
     Renderer& renderer = Globals::rendererVK;
     renderer.initialize(window, EValidation::DISABLED, EVSync::ENABLED, EVr::DISABLED); // ENABLED DISABLED
@@ -204,6 +242,8 @@ int main(int argc, char* argv[])
             jobSystem.shutdown();
             return 1;
         }
+        if (launchMode == ELaunchMode::Server)
+            setupServerJoinCallbacks();
     }
 
     Procedural::TerrainStreamer terrain;
@@ -246,18 +286,18 @@ int main(int argc, char* argv[])
     std::vector<EntityPtr> spawnedLights; // test lights (keys 1-7); they update + render like any entity
     std::vector<PhysicsJoint> spawnedJoints;
 
-    const glm::vec3 spawnOffset = spawnPos - glm::vec3(0, 1, 1);
     //world.addRootEntity(world.spawnAssetFile("Entities/sponza.pre", Transform(spawnOffset), true));
     //world.addRootEntity(world.spawnAssetFile("Entities/skysphere.pre", Transform(spawnOffset), true));
     //world.addRootEntity(world.spawnAssetFile("Entities/character.pre", Transform(spawnOffset), true));
     //world.addRootEntity(world.spawnAssetFile("Entities/particle.pre", Transform(spawnOffset), true));
     //world.addRootEntity(world.spawnAssetFile("Entities/SphereField.pre", Transform(spawnOffset), true));
 
-    if (launchMode != ELaunchMode::Single)
+    if (launchMode == ELaunchMode::Server)
     {
-        // both sides must spawn the SAME scene at the SAME fixed transform: entities pair purely by netId,
-        // so a camera-relative spawn would desync the two worlds
-        world.addRootEntity(world.spawnAssetFile("Entities/Debug/networkTest.pre", Transform(glm::vec3(50.0f, 85.0f, 2320.0f)), true));
+        // networked entities are SERVER-OWNED: only the server places the shared scene — its Network
+        // components register, get server ids, and materialize on every client via Spawn replication
+        // (a client's own scene can be arbitrarily different; it spawns nothing shared)
+        world.addRootEntity(world.spawnAssetFile("Entities/Debug/networkTest.pre", Transform(glm::vec3(0, 0, 0)), true));
     }
 
     GizmoController gizmo;

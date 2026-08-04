@@ -4,12 +4,23 @@ import Core;
 import Core.glm;
 import Network;
 import :Entity;
+import :NetworkComponent; // NetInputState in the claim ring; no cycle — the component never imports the manager
 
 // Server-authoritative entity sync over the Network library's reliable-UDP NetHost. One manager per
 // process, role picked at startup: Server opens a listening host, Client connects out, None (single
-// player) leaves everything inert. NetworkComponents register themselves here by netId; the server
-// streams local pos/rot snapshots for registered entities at "Network/Snapshot Hz" and clients
-// blend/snap their copies toward the received targets (NetworkComponent::update). Named script events
+// player) leaves everything inert.
+//
+// OWNERSHIP MODEL: every networked entity is SERVER-OWNED. A NetworkComponent registering on the
+// server — scene load or runtime, no distinction — gets a server-assigned netId and a spawn record,
+// and materializes on every client through a reliable Spawn message (late joiners get all live
+// records replayed after their Welcome). Clients never invent ids: a NetworkComponent registering
+// client-side OUTSIDE an incoming Spawn (shared prefab reused as client-local content) stays
+// LOCAL-INERT — netId 0, not in the registry, never synced. Client-only and server-only entities are
+// simply entities without a NetworkComponent (or client-local ones); the two scenes can differ
+// arbitrarily because nothing outside the networked set needs to correspond, and identity is the
+// server's id alone. Shared static scenery that doesn't move needs no NetworkComponent at all — only
+// STATE is networked, and the server streams pos/rot snapshots for registered entities at
+// "Network/Snapshot Hz" which clients correct toward (NetworkComponent::update). Named script events
 // travel the same connection (fireNetworkEvent): fired locally, sent to the other side, and relayed
 // server-side to every other client — so an "On Event" script entry reacts identically everywhere.
 //
@@ -30,13 +41,22 @@ import :Entity;
 //                    staleness is dropped PER ENTITY (record tick <= last applied), so chunk
 //                    reordering is harmless (UnreliableSequenced would drop sibling chunks instead).
 //   ch1 Reliable:    Event [u8][string name]
-//   ch2 Reliable:    Hello (client->server) [u8][u16 version][varuint count][u32 checksum]
-//                    Welcome (server->client) [u8][u16 version][varuint serverTick][f32 snapshotHz][varuint count][u32 checksum]
+//   ch2 Reliable:    Hello (client->server) [u8][u16 version]
+//                    Welcome (server->client) [u8][u16 version][varuint serverTick][f32 snapshotHz][varuint yourClientId]
 //                    Deny [u8][string reason]
-// The netId count/checksum exchange detects scene mismatch (both sides load the same scene this
-// milestone — no spawn replication yet); mismatch warns and proceeds, the server stays authoritative.
-
-export struct NetworkComponent;
+//                    Spawn (server->client) [u8][varuint baseId][varuint componentCount][varuint ownerClientId][string path][pos 3xf32][rot 4xf32][f32 scale]
+//                    Despawn (server->client) [u8][varuint baseId]
+//   ch3 Unreliable:  Claim (owner->server) [u8][varuint netId][varuint newestSeq][u8 count] + count
+//                    records oldest->newest, each [u32 buttons][move 3xf32][look 3xf32][pos 3xf32]
+//                    [rot 4xf32][linVel 3xf32][angVel 3xf32] — the last N claims ride in EVERY packet
+//                    (redundancy beats a reliable channel under loss: no head-of-line stall), the
+//                    server dedups by seq. The server VALIDATES each claim (Network/Validation tweaks:
+//                    displacement budget from seq-elapsed x max speed, velocity cap, trajectory
+//                    raycast, hard teleport cap) — accepted claims overwrite its twin and flow to the
+//                    other clients as normal snapshots; rejections bump `violations` and arm
+//                    NetRecFlag_Forced on the owner's records so the owner gets dragged back.
+// Spawn/Despawn ride the session channel so they order after Welcome; a late joiner gets every live
+// spawn record replayed right after its Welcome — that replay IS how the networked world arrives.
 
 export enum class ENetRole : uint8
 {
@@ -49,12 +69,58 @@ export enum class ENetRole : uint8
 export struct NetSyncParams
 {
     float posDeadzone = 0.01f;        // below: local state free-runs
-    float posSnapThreshold = 2.0f;    // above: hard snap to target
+    // Physical-push mode: entering the CATCH-UP band (boosted push). Legacy blend mode: hard snap.
+    float posSnapThreshold = 2.0f;
     float rotDeadzoneDeg = 0.5f;
     float rotSnapThresholdDeg = 45.0f;
-    float blendRate = 10.0f;          // exponential blend rate between deadzone and snap
-    bool syncVelocities = true;       // apply the server's velocities once per received snapshot
-    bool extrapolate = true;          // dead-reckon the pose target by linVel * timeSinceSnapshot
+    float blendRate = 10.0f;          // legacy blend mode: exponential teleport-blend rate between deadzone and snap
+    bool syncVelocities = true;       // legacy blend mode: apply the server's velocities once per received snapshot
+    bool extrapolate = true;          // dead-reckon the pose target by linVel * (timeSinceSnapshot + lead)
+    // Fixed part of the extrapolation LEAD (half-RTT is added dynamically): approximates the
+    // claim-interval + server-tick pipeline so the target tracks the remote owner's CURRENT position.
+    // Without it the corrective term chases a systematically lagged target and its catch-up speed
+    // stacks on the stale velocity — remote players read as accelerating ~2x. Trade: a lead
+    // slightly overshoots hard stops/turns; tune toward 0 if that bothers more than the lag chase.
+    float remoteLeadSec = 0.05f;
+    // REMOTE-OWNED entities (other players) skip the chase entirely and play the owner's recorded
+    // trajectory THIS many snapshot ticks in the past, interpolating between buffered snapshots —
+    // exact reproduction of starts/stops (no lag-chase, no overshoot) at the cost of a fixed small
+    // display delay. 0 = fall back to the physical-push chase. Loss gaps at the playback cursor
+    // also fall back to the push for that frame.
+    float remoteInterpTicks = 2.0f;
+
+    // PHYSICAL PUSH (default correction for dynamic bodies): between deadzone and snap the body is
+    // steered by bounded impulses through the sim — position/rotation error becomes corrective
+    // velocity on top of the server's, applied via EBodyCommand::NudgeVelocity with a per-second
+    // acceleration cap. Past the snap threshold the push enters CATCH-UP: gains and caps are
+    // multiplied by pushCatchUpBoost so multi-meter errors still correct THROUGH the sim — a body
+    // plows around obstacles with legitimate contacts instead of teleporting into them (a teleport
+    // into an occupied space would depenetration-fling both bodies into fresh desync). The true
+    // teleport resync survives as the LAST resort, at posTeleportThreshold only (rotation alone
+    // never teleports — a wrong orientation can't materialize inside anything). Off = the legacy
+    // teleport-blend path, where posSnapThreshold keeps its original hard-snap meaning.
+    // LOCAL INTERACTION GRACE: while a server-owned body sits within this radius of one of OUR
+    // claim-driven bodies, the client suspends its corrections — they would drag it toward the
+    // server's RTT-old (pre-push) state and fight the shove the player is applying right now. The
+    // server receives the same push ~an RTT later through the claim-followed player twin, and the
+    // normal corrections reconcile the residue once the grace lingers out. 0 = off.
+    float interactionRadius = 1.5f;
+    float interactionLinger = 0.5f;   // seconds the grace persists after leaving the radius
+
+    bool physicalPush = true;
+    float pushPosGain = 5.0f;         // corrective velocity per meter of position error (1/s)
+    float pushRotGain = 5.0f;         // corrective angular velocity per radian of rotation error (1/s)
+    float pushMaxVel = 10.0f;         // cap on the corrective (error-driven) velocity term (m/s)
+    float pushMaxAngVel = 10.0f;      // cap on the corrective angular term (rad/s)
+    float pushMaxAccel = 60.0f;       // how hard the push may change the body's velocity (m/s^2; keep > gravity)
+    float pushMaxAngAccel = 60.0f;    // (rad/s^2)
+    float pushCatchUpBoost = 4.0f;    // gain/cap multiplier in the catch-up band (snap..teleport threshold)
+    float posTeleportThreshold = 10.0f; // beyond this the non-physical teleport resync fires after all
+    // ARBITRATED OWNER (player-vs-player contact): the local feel comes from the local contact with
+    // the opponent's replica — the server correction only reconciles REAL divergence (you actually
+    // lost ground), so it runs with this much larger deadzone and halved gains; a tight deadzone
+    // would micro-correct the pipeline lag and drag against the player's input for the whole window
+    float arbitrateDeadzone = 0.4f;
 };
 
 export class NetworkManager
@@ -74,6 +140,42 @@ public:
     bool isAuthority() const { return m_role != ENetRole::Client; }
     const NetSyncParams& params() const { return m_params; }
 
+    // This process's stable clientId: server-minted per connection, delivered in the Welcome.
+    // 0 on the server / before the Welcome — which is what makes ownerClientId == localClientId()
+    // false everywhere except on the actual owner (plain aligned read, safe from job workers).
+    uint32 localClientId() const { return m_localClientId; }
+
+    // Client: this frame's positions of locally-owned dynamic bodies, rebuilt in receive() (main
+    // thread, before the entity pass) — NetworkComponent::update reads them on job workers to arm
+    // the interaction grace. Same publish-then-read-only contract as the snapshot targets.
+    std::span<const glm::vec3> localOwnedBodyPositions() const { return m_localOwnedBodyPositions; }
+
+    // Client: half the RTT to the server, cached in receive() (NetHost itself is not worker-safe) —
+    // the dynamic part of the extrapolation lead. 0 on the server / before the handshake.
+    float serverHalfRttSec() const { return m_cachedHalfRttSec; }
+
+    // Client: the server's snapshot rate from the Welcome (falls back to our own tweak) — the
+    // remote-interpolation playback clock advances in the SERVER's tick units.
+    float serverSnapshotHz() const { return m_serverSnapshotHz; }
+
+    // Server: hand a networked entity (tree) to a client — its claims then drive it, validated by
+    // the plausibility gate. Sets ownerClientId on every NetworkComponent in the tree and stamps the
+    // spawn record so clients learn ownership with the Spawn message. Call right after spawning
+    // (same frame, before send() announces); live ownership TRANSFER after announce is future work.
+    void setOwner(Entity& root, uint32 clientId);
+
+    // Server: fired on the main thread when a client completes the handshake / disconnects — the
+    // App's hook for spawning and tearing down per-player entities. joined runs AFTER the Welcome
+    // and world replay are queued, so anything spawned inside arrives in the same session stream.
+    void setOnClientJoined(std::function<void(uint32 clientId)> callback) { m_onClientJoined = std::move(callback); }
+    void setOnClientLeft(std::function<void(uint32 clientId)> callback) { m_onClientLeft = std::move(callback); }
+
+    // Server: contact-driven ownership STEAL — the last player to collide with an object owns it,
+    // even inside the previous owner's transfer bubble. Wired as the primaries' PhysicsComponent
+    // onContact hook (main.cpp); steals from the server AND from other clients, but never another
+    // client's PRIMARY (their player). Main thread (contact dispatch runs inside physics.update).
+    void stealOwnershipOnContact(Entity& object, uint32 byClientId);
+
     void receive(double deltaSec); // main thread, before script/physics/world updates
     void send(double deltaSec);    // main thread, after world.update
 
@@ -84,28 +186,49 @@ public:
     void fireNetworkEvent(std::string_view name);
 
     // NetworkComponent registration (main thread; spawns/destroys never run inside the parallel pass).
-    // An occupied id is REPLACED (with a warning): the Entity Editor's respawn creates the new entity
-    // while the old one is still registered, so a collision there is the stale twin, not a duplicate —
-    // and unregister erases only when the component pointer still matches, so the old entity's later
-    // destroy can't take the new registration down with it.
-    void registerEntity(uint32 netId, Entity* entity, NetworkComponent* comp);
+    // Returns the assigned netId — ids are a CODE abstraction, never authored in data, and only the
+    // SERVER mints them: registration on the server (scene load or runtime alike) assigns the next id
+    // and creates/extends the root's spawn record, which is what makes the entity appear on every
+    // client; a client registering while executing a replicated Spawn takes the server's ids
+    // (sequential in tree spawn order, deterministic DFS on both sides); any other registration
+    // (client-local content, single player) returns 0 = LOCAL-INERT, kept out of the registry — no
+    // conflict is possible because there is exactly one id authority. An occupied id is REPLACED
+    // (with a warning): the Entity Editor's respawn creates the new entity while the old one is still
+    // registered, so a collision there is the stale twin, not a duplicate — and unregister erases
+    // only when the component pointer still matches, so the old entity's later destroy can't take the
+    // new registration down with it. Unregistering a BASE id on the server queues the matching
+    // Despawn (child ids of a partially-destroyed replicated tree are deliberately ignored — despawn
+    // is all-or-nothing at the root).
+    uint32 registerEntity(Entity& entity, NetworkComponent* comp);
     void unregisterEntity(uint32 netId, const NetworkComponent* comp);
-    // fnv1a over the root-to-entity name path, probed until free — deterministic across machines
-    // because spawn order is (same scene, main-thread spawning).
-    uint32 deriveAutoId(const Entity& entity);
 
     // "SERVER 2 peers | out 12.4 KB/s" — empty when role None or the stats tweak is off
     std::string getStatusText() const;
 
 private:
 
+    struct DynamicSpawn; // defined below with the registry members
+
     void sendHello();
     void handleSessionMessage(NetPeerId peer, NetReader& reader, uint8 msgType);
     void handleEventMessage(NetPeerId peer, std::span<const uint8> bytes);
     void handleSnapshot(NetReader& reader);
+    void handleSpawnMessage(NetReader& reader);   // client: execute a replicated spawn with forced ids
+    void handleDespawnMessage(NetReader& reader); // client: destroy the replicated root
+    void handleClaimMessage(NetPeerId peer, NetReader& reader); // server: validate + apply an owner's claims
+    void handleOwnerChangeMessage(NetReader& reader);           // client: adopt a per-entity ownership change
+    void sendClaims();                            // client: stream claims for locally-owned entities
+    // Server: per-entity ownership handover — resets the claim/validation state (the next claim
+    // re-seeds against the twin) and broadcasts OwnerChange; 0 reverts to server-owned.
+    void transferOwnership(uint32 netId, NetworkComponent* comp, uint32 newOwnerClientId);
+    // Server, per frame: server-owned dynamics near a client's PRIMARY owned body transfer to that
+    // client; transferred ones revert after "Release delay" outside "Release radius". Primaries only
+    // as sources — chained transfer through a pushed cube would deadlock release on piles (the
+    // client-side interaction grace covers second-order contact instead).
+    void updateOwnershipTransfers(double deltaSec);
     void sendSnapshotTick();
     void sendEventTo(NetPeerId peer, std::string_view name);
-    uint32 registryChecksum() const; // XOR of netId * 2654435761u over the registry
+    void sendSpawnTo(NetPeerId peer, const DynamicSpawn& rec); // transform refreshed from the live entity when possible
 
     struct Replicated
     {
@@ -116,10 +239,75 @@ private:
     ENetRole m_role = ENetRole::None;
     NetHost m_host;
     NetPeerId m_serverPeer = InvalidNetPeerId; // client role: the one outgoing connection
+    NetAddress m_serverAddress;                // client role: kept for auto-reconnect
     std::vector<NetPeerId> m_readyPeers;       // server role: peers past Hello (ids recycle — cleared on Disconnected)
 
     std::map<uint32, Replicated> m_entities;   // ordered: deterministic round-robin cursor
     mutable std::mutex m_entityMutex;
+
+    // Server: one record per live replicated spawn — scene load and runtime alike (announced to
+    // clients, replayed to late joiners; that replay is how the networked world arrives at connect).
+    // Component ids are baseId..baseId+componentCount-1, contiguous because a tree spawn registers
+    // synchronously on the main thread with nothing interleaving.
+    struct DynamicSpawn
+    {
+        uint32 baseId = 0;
+        uint32 componentCount = 0;
+        uint32 ownerClientId = 0; // whole-tree ownership, applied by the client to every component of the spawn
+        std::string path;      // what the client spawns (template sourceFile, prefab name fallback)
+        glm::vec3 spawnPos = glm::vec3(0.0f);
+        glm::quat spawnRot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        float spawnScale = 1.0f;
+    };
+    std::map<uint32, DynamicSpawn> m_dynamicSpawns;              // by baseId (server)
+    std::unordered_map<const Entity*, uint32> m_dynamicRootIds;  // root -> baseId, grouping WITHIN one spawn call; purged every send() (entity pointers may recycle)
+    std::vector<uint32> m_pendingSpawnAnnounce;                  // announced by send(); client duplicate-guard makes replay+announce overlap harmless
+    std::vector<uint32> m_pendingDespawn;
+    uint32 m_nextNetId = 1;    // server-minted, the only id authority; 0 = local-inert (never registered)
+
+    // Client: id assignment scope while executing one replicated Spawn (main thread, synchronous)
+    uint32 m_incomingSpawnBase = 0;
+    uint32 m_incomingSpawnCount = 0;
+    uint32 m_incomingSpawnCursor = 0;
+    uint32 m_incomingSpawnOwner = 0;
+
+    // clientIds: stable per connection, minted by the server at Hello (peer ids recycle, clientIds don't)
+    uint32 m_localClientId = 0; // client: from the Welcome; always 0 on the server
+    uint32 m_nextClientId = 1;  // server
+    std::unordered_map<NetPeerId, uint32> m_peerClients; // server: ready peer -> clientId (erased on Disconnected)
+    std::function<void(uint32 clientId)> m_onClientJoined; // server, main thread
+    std::function<void(uint32 clientId)> m_onClientLeft;
+
+    // Client: recent claim payloads per locally-owned entity — every Claim packet carries the whole
+    // ring, so a claim only vanishes if ClaimRedundancy consecutive packets drop
+    struct ClaimRecord
+    {
+        NetInputState input;
+        glm::vec3 pos;
+        glm::quat rot;
+        glm::vec3 linVel;
+        glm::vec3 angVel;
+    };
+    static constexpr uint32 ClaimRedundancy = 8;
+    struct ClaimRing
+    {
+        ClaimRecord records[ClaimRedundancy]; // indexed seq % ClaimRedundancy
+        uint32 newestSeq = 0;
+        // valid consecutive records ending at newestSeq — the packet's record count comes from THIS,
+        // never from the (monotonic, episode-spanning) claim sequence: a re-acquired entity's first
+        // packet must not replay the previous episode's stale positions (the server's dedup is reset
+        // on ownership change, so it would apply them — teleporting the twin to where the object WAS)
+        uint32 validCount = 0;
+    };
+    std::unordered_map<uint32, ClaimRing> m_claimRings; // by netId, created on demand for owned entities
+    double m_claimAccum = 0.0;
+    std::vector<glm::vec3> m_localOwnedBodyPositions;   // see localOwnedBodyPositions()
+    float m_cachedHalfRttSec = 0.0f;                    // see serverHalfRttSec()
+    float m_serverSnapshotHz = 20.0f;                   // see serverSnapshotHz()
+    // remote-owned entities' snapshot history for interpolation playback: unique_ptr values keep the
+    // rings' addresses stable (components hold raw pointers across map growth)
+    std::map<uint32, std::unique_ptr<NetSnapshotRing>> m_remoteBuffers;
+    std::vector<std::pair<uint32, glm::vec3>> m_transferSources; // server scan scratch: clientId + primary body position
 
     std::vector<std::string> m_pendingOutgoingEvents; // filled from any thread, drained by send()
     std::mutex m_eventMutex;
@@ -129,7 +317,8 @@ private:
     double m_snapshotAccum = 0.0;
     uint32 m_serverTick = 0;
     bool m_warnedUnknownRecFlags = false;
-    std::vector<uint32> m_warnedUnknownIds;    // client: log each unknown incoming netId once
+    // no unknown-id warning list: an unknown snapshot id is always a Spawn in flight or a Despawn
+    // that already landed — expected transients, the reliable spawn stream is the source of truth
 };
 
 export namespace Globals
