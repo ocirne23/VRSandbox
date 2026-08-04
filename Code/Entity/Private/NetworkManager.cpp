@@ -55,6 +55,7 @@ static bool  s_claimPathRaycast = true;   // reject claims whose path crosses wo
 static int   s_forcedTicks = 30;          // snapshot ticks the owner stays force-corrected after a rejection
 static float s_claimReanchorRadius = 2.0f; // a claim this close to the twin's CURRENT state always accepts (guaranteed rejection recovery)
 static int   s_claimRedundancy = 4;       // past claims carried in EVERY packet (<= ring capacity 8): a claim survives unless this many consecutive packets drop
+static float s_claimLeadTicks = 0.5f;     // constant forward extrapolation (in snapshot ticks) applied when re-emitting claims — buys back the claim-hold latency without reintroducing timeline jitter (constant shift, smooth owner velocity)
 
 // proximity ownership transfer (server): a server-owned dynamic body near a client's PRIMARY owned
 // body transfers to that client (its physics then drives the object, claims-validated); it reverts
@@ -181,6 +182,7 @@ void NetworkManager::registerTweaks()
     Tweak::intVar("Network/Validation", "Forced ticks", &s_forcedTicks, 1, 255);
     Tweak::floatVar("Network/Validation", "Re-anchor radius", &s_claimReanchorRadius, 0.1f, 10.0f, 0.1f);
     Tweak::intVar("Network/Validation", "Claim redundancy", &s_claimRedundancy, 1, 8);
+    Tweak::floatVar("Network/Validation", "Claim lead (ticks)", &s_claimLeadTicks, 0.0f, 2.0f, 0.05f);
 
     // live-editable transport link simulation (outgoing packets)
     NetHostConfig& config = m_host.config();
@@ -1379,6 +1381,17 @@ void NetworkManager::sendSnapshotTick()
                     rot = comp->claimStreamRot;
                     linVel = comp->claimStreamLinVel;
                     angVel = comp->claimStreamAngVel;
+                    // constant lead: a fixed timeline shift adds no jitter (unlike the twin's
+                    // arrival-phase-dependent step extrapolation this passthrough replaced).
+                    // Applied at emit only — never accumulated into claimStream state
+                    if (s_claimLeadTicks > 0.0f)
+                    {
+                        const float lead = s_claimLeadTicks / glm::clamp(s_snapshotHz, 1.0f, 240.0f);
+                        pos += linVel * lead;
+                        const float angSpeed = glm::length(angVel);
+                        if (angSpeed > 1e-4f)
+                            rot = glm::normalize(glm::angleAxis(angSpeed * lead, angVel / angSpeed) * rot);
+                    }
                 }
             }
         }

@@ -82,8 +82,9 @@ export struct NetSyncParams
     // trajectory THIS many snapshot ticks in the past, interpolating between buffered snapshots —
     // exact reproduction of starts/stops (no lag-chase, no overshoot) at the cost of a fixed small
     // display delay. 0 = fall back to the physical-push chase. Loss gaps at the playback cursor
-    // also fall back to the push for that frame.
-    float remoteInterpTicks = 2.0f;
+    // also fall back to the push for that frame. 1 tick of slack suffices since claim passthrough
+    // made the stream uniform (2 was sized to absorb sender-side timeline jitter).
+    float remoteInterpTicks = 1.0f;
 
     // PHYSICAL PUSH (the correction for dynamic bodies): between deadzone and snap the body is
     // steered by bounded impulses through the sim — position/rotation error becomes corrective
