@@ -151,13 +151,10 @@ void NetworkManager::registerTweaks()
     Tweak::floatVar("Network/Correction", "Rot deadzone (deg)", &m_params.rotDeadzoneDeg, 0.0f, 30.0f, 0.1f);
     Tweak::floatVar("Network/Correction", "Rot snap threshold (deg)", &m_params.rotSnapThresholdDeg, 0.0f, 180.0f, 0.5f);
     Tweak::floatVar("Network/Correction", "Blend rate", &m_params.blendRate, 0.0f, 30.0f, 0.1f);
-    Tweak::boolean("Network/Correction", "Sync velocities", &m_params.syncVelocities);
     Tweak::boolean("Network/Correction", "Extrapolate", &m_params.extrapolate);
-    Tweak::floatVar("Network/Correction", "Remote lead (s)", &m_params.remoteLeadSec, 0.0f, 0.3f, 0.005f);
     Tweak::floatVar("Network/Correction", "Remote interp (ticks)", &m_params.remoteInterpTicks, 0.0f, 8.0f, 0.1f);
     Tweak::floatVar("Network/Correction", "Interaction radius", &m_params.interactionRadius, 0.0f, 10.0f, 0.05f);
     Tweak::floatVar("Network/Correction", "Interaction linger", &m_params.interactionLinger, 0.0f, 3.0f, 0.05f);
-    Tweak::boolean("Network/Correction", "Physical push", &m_params.physicalPush);
     Tweak::floatVar("Network/Correction", "Push pos gain", &m_params.pushPosGain, 0.0f, 30.0f, 0.1f);
     Tweak::floatVar("Network/Correction", "Push rot gain", &m_params.pushRotGain, 0.0f, 30.0f, 0.1f);
     Tweak::floatVar("Network/Correction", "Push max vel", &m_params.pushMaxVel, 0.0f, 100.0f, 0.5f);
@@ -270,11 +267,6 @@ void NetworkManager::receive(double deltaSec)
     if (m_role == ENetRole::None)
         return;
     ProfileScope scope("NetworkManager::receive", EProfileCategory::Network);
-
-    // cache the extrapolation lead's dynamic half (NetHost is not worker-safe; the component reads
-    // the plain float during the parallel pass)
-    m_cachedHalfRttSec = m_role == ENetRole::Client && m_serverPeer != InvalidNetPeerId && m_host.isConnected(m_serverPeer)
-        ? m_host.getPeerRttMs(m_serverPeer) * 0.0005f : 0.0f;
 
     // publish this frame's locally-owned body positions for the interaction grace (see the accessor);
     // rebuilt before the entity pass so the parallel component updates read a stable snapshot
@@ -429,6 +421,21 @@ void NetworkManager::handleSessionMessage(NetPeerId peer, NetReader& reader, uin
         }
         if (std::find(m_readyPeers.begin(), m_readyPeers.end(), peer) == m_readyPeers.end())
             m_readyPeers.push_back(peer);
+        // duplicate Hello from an already-ready peer (the reliable channel dedups packets, so only a
+        // misbehaving client sends two): resend the Welcome with the EXISTING id and do nothing else —
+        // minting a fresh id would leak the old one and fire onClientJoined again (a second player)
+        if (const auto existing = m_peerClients.find(peer); existing != m_peerClients.end())
+        {
+            uint8 dupBuffer[32];
+            NetWriter dupWriter(dupBuffer);
+            dupWriter.write<uint8>(uint8(ENetMsg::Welcome));
+            dupWriter.write<uint16>(GameNetVersion);
+            dupWriter.writeVarUInt(m_serverTick);
+            dupWriter.write<float>(s_snapshotHz);
+            dupWriter.writeVarUInt(existing->second);
+            m_host.send(peer, dupWriter.data(), ENetDelivery::Reliable, ChannelSession);
+            break;
+        }
         const uint32 clientId = m_nextClientId++;
         m_peerClients[peer] = clientId; // stable per connection — peer ids recycle, clientIds don't
         uint8 buffer[32];
@@ -760,7 +767,7 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
                 // becomes bounded velocity INTENT, so the shoving contest resolves with real
                 // contacts server-side instead of two teleport-pinned bodies interpenetrating
                 Globals::physics.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::NudgeVelocity,
-                    linVel, angVel, glm::vec3(s_maxClaimSpeed * 0.5f, s_maxClaimSpeed * 0.5f, 0.0f));
+                    linVel, angVel, glm::vec3(s_maxClaimSpeed * 0.5f, s_maxAngVel * 0.5f, 0.0f));
             }
             else if (dynamicBody)
             {
@@ -941,6 +948,13 @@ void NetworkManager::handleOwnerChangeMessage(NetReader& reader)
         // "transferred" client-side means "owned, but not one of my primaries": the claim stream
         // carries it, player control (which drives primaries only) leaves it alone
         comp->transferredOwnership = newOwnerClientId != 0 && newOwnerClientId == m_localClientId;
+        if (newOwnerClientId == m_localClientId)
+        {
+            // now OURS: drop the interpolation history recorded while someone else owned it — a
+            // stale ring reaching the playback path would teleport the entity into the past
+            comp->remoteBuffer = nullptr;
+            m_remoteBuffers.erase(netId);
+        }
     }
 }
 
@@ -1061,13 +1075,6 @@ void NetworkManager::handleSnapshot(NetReader& reader)
         NetworkComponent* comp = it->second.comp;
         if (comp->hasTarget && tick <= comp->serverTick)
             continue; // stale (reordered unreliable packet)
-        // extrapolation-lead damping from velocity consistency: 1 while successive snapshots agree
-        // (steady cruise — leading is pure win), collapsing as they diverge (brake/turn/impact —
-        // leading there is what overshoots). A player's brake spans 2-3 snapshots, so this engages
-        // before most of the would-be overshoot.
-        const float velDelta = glm::length(linVel - comp->targetLinVel);
-        const float speed = glm::length(linVel);
-        comp->extrapolationScale = speed / (speed + 2.0f * velDelta + 1e-4f);
         // remote-owned entities also record into their interpolation ring (another player's entity:
         // the observer plays this history back a couple of ticks behind — see NetSnapshotRing)
         if ((recFlags & NetRecFlag_Physics) && comp->ownerClientId != 0 && comp->ownerClientId != m_localClientId)

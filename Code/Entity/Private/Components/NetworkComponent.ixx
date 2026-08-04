@@ -138,12 +138,6 @@ export struct NetworkComponent
     uint32 serverTick = 0;          // tick of the applied record (per-entity stale-drop for reordered packets)
     uint32 lastAppliedTick = 0;     // one-shot latch: velocities/sleep apply once per new snapshot
     float timeSinceSnapshot = 0.0f;
-    // 0..1 damping on the extrapolation LEAD, from velocity consistency across snapshots (written by
-    // handleSnapshot, main thread): full lead while cruising steadily, collapsed while the velocity
-    // is changing — dead reckoning can only extrapolate the past, and leading into a brake/turn is
-    // exactly what reads as overshoot-and-pull-back on remote players
-    float extrapolationScale = 1.0f;
-
     // remote-owned entities: interpolation playback state (see NetSnapshotRing above)
     NetSnapshotRing* remoteBuffer = nullptr; // manager-owned, set by handleSnapshot (main thread)
     float playbackTick = 0.0f;               // fractional tick the observer is currently displaying

@@ -69,19 +69,11 @@ export enum class ENetRole : uint8
 export struct NetSyncParams
 {
     float posDeadzone = 0.01f;        // below: local state free-runs
-    // Physical-push mode: entering the CATCH-UP band (boosted push). Legacy blend mode: hard snap.
-    float posSnapThreshold = 2.0f;
+    float posSnapThreshold = 2.0f;    // entering the push's CATCH-UP band (boosted gains/caps)
     float rotDeadzoneDeg = 0.5f;
     float rotSnapThresholdDeg = 45.0f;
-    float blendRate = 10.0f;          // legacy blend mode: exponential teleport-blend rate between deadzone and snap
-    bool syncVelocities = true;       // legacy blend mode: apply the server's velocities once per received snapshot
-    bool extrapolate = true;          // dead-reckon the pose target by linVel * (timeSinceSnapshot + lead)
-    // Fixed part of the extrapolation LEAD (half-RTT is added dynamically): approximates the
-    // claim-interval + server-tick pipeline so the target tracks the remote owner's CURRENT position.
-    // Without it the corrective term chases a systematically lagged target and its catch-up speed
-    // stacks on the stale velocity — remote players read as accelerating ~2x. Trade: a lead
-    // slightly overshoots hard stops/turns; tune toward 0 if that bothers more than the lag chase.
-    float remoteLeadSec = 0.05f;
+    float blendRate = 10.0f;          // NON-physics entities: exponential blend rate toward the target
+    bool extrapolate = true;          // dead-reckon the pose target by linVel * timeSinceSnapshot
     // REMOTE-OWNED entities (other players) skip the chase entirely and play the owner's recorded
     // trajectory THIS many snapshot ticks in the past, interpolating between buffered snapshots —
     // exact reproduction of starts/stops (no lag-chase, no overshoot) at the cost of a fixed small
@@ -89,7 +81,7 @@ export struct NetSyncParams
     // also fall back to the push for that frame.
     float remoteInterpTicks = 2.0f;
 
-    // PHYSICAL PUSH (default correction for dynamic bodies): between deadzone and snap the body is
+    // PHYSICAL PUSH (the correction for dynamic bodies): between deadzone and snap the body is
     // steered by bounded impulses through the sim — position/rotation error becomes corrective
     // velocity on top of the server's, applied via EBodyCommand::NudgeVelocity with a per-second
     // acceleration cap. Past the snap threshold the push enters CATCH-UP: gains and caps are
@@ -97,8 +89,7 @@ export struct NetSyncParams
     // plows around obstacles with legitimate contacts instead of teleporting into them (a teleport
     // into an occupied space would depenetration-fling both bodies into fresh desync). The true
     // teleport resync survives as the LAST resort, at posTeleportThreshold only (rotation alone
-    // never teleports — a wrong orientation can't materialize inside anything). Off = the legacy
-    // teleport-blend path, where posSnapThreshold keeps its original hard-snap meaning.
+    // never teleports — a wrong orientation can't materialize inside anything).
     // LOCAL INTERACTION GRACE: while a server-owned body sits within this radius of one of OUR
     // claim-driven bodies, the client suspends its corrections — they would drag it toward the
     // server's RTT-old (pre-push) state and fight the shove the player is applying right now. The
@@ -107,7 +98,6 @@ export struct NetSyncParams
     float interactionRadius = 1.5f;
     float interactionLinger = 0.5f;   // seconds the grace persists after leaving the radius
 
-    bool physicalPush = true;
     float pushPosGain = 5.0f;         // corrective velocity per meter of position error (1/s)
     float pushRotGain = 5.0f;         // corrective angular velocity per radian of rotation error (1/s)
     float pushMaxVel = 10.0f;         // cap on the corrective (error-driven) velocity term (m/s)
@@ -137,7 +127,6 @@ public:
     void shutdown();
 
     ENetRole role() const { return m_role; }
-    bool isAuthority() const { return m_role != ENetRole::Client; }
     const NetSyncParams& params() const { return m_params; }
 
     // This process's stable clientId: server-minted per connection, delivered in the Welcome.
@@ -149,10 +138,6 @@ public:
     // thread, before the entity pass) — NetworkComponent::update reads them on job workers to arm
     // the interaction grace. Same publish-then-read-only contract as the snapshot targets.
     std::span<const glm::vec3> localOwnedBodyPositions() const { return m_localOwnedBodyPositions; }
-
-    // Client: half the RTT to the server, cached in receive() (NetHost itself is not worker-safe) —
-    // the dynamic part of the extrapolation lead. 0 on the server / before the handshake.
-    float serverHalfRttSec() const { return m_cachedHalfRttSec; }
 
     // Client: the server's snapshot rate from the Welcome (falls back to our own tweak) — the
     // remote-interpolation playback clock advances in the SERVER's tick units.
@@ -302,7 +287,6 @@ private:
     std::unordered_map<uint32, ClaimRing> m_claimRings; // by netId, created on demand for owned entities
     double m_claimAccum = 0.0;
     std::vector<glm::vec3> m_localOwnedBodyPositions;   // see localOwnedBodyPositions()
-    float m_cachedHalfRttSec = 0.0f;                    // see serverHalfRttSec()
     float m_serverSnapshotHz = 20.0f;                   // see serverSnapshotHz()
     // remote-owned entities' snapshot history for interpolation playback: unique_ptr values keep the
     // rings' addresses stable (components hold raw pointers across map growth)

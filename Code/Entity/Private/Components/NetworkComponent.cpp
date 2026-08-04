@@ -136,7 +136,8 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
         // and overshoots stops; no target tuning fixes that). The body teleport-follows the
         // interpolated path with matched velocities so contacts stay plausible; a loss gap at the
         // playback cursor falls through to the physical push for that frame.
-        if (params.remoteInterpTicks > 0.0f && ownerClientId != 0 && remoteBuffer != nullptr && remoteBuffer->count >= 2)
+        if (params.remoteInterpTicks > 0.0f && authority() == ENetAuthority::RemoteOwner
+            && remoteBuffer != nullptr && remoteBuffer->count >= 2)
         {
             const NetSnapshotRing& ring = *remoteBuffer;
             const float newest = float(ring.newestTick);
@@ -176,30 +177,16 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
 
         glm::vec3 target = targetPos;
         if (params.extrapolate)
-        {
-            // dead-reckon by snapshot age PLUS the pipeline lead (fixed claim/tick estimate + live
-            // half-RTT): the target then approximates the remote owner's CURRENT position, so the
-            // corrective term handles genuine divergence instead of chasing systematic lag (which
-            // stacked catch-up speed on the stale velocity — remote players read as ~2x-accelerating).
-            // The lead is DAMPED by velocity consistency (extrapolationScale): leading into a brake
-            // or turn is what overshoots, so it only applies while the motion is steady.
-            const float lead = (params.remoteLeadSec + Globals::networkManager.serverHalfRttSec()) * extrapolationScale;
-            target += targetLinVel * glm::min(timeSinceSnapshot + lead, 0.35f);
-        }
+            target += targetLinVel * glm::min(timeSinceSnapshot, 0.25f); // dead-reckon between snapshots, capped
 
         const glm::vec3 posErrVec = target - bodyPos;
         const float posErr = glm::length(posErrVec);
         const float rotErrDeg = quatAngleDeg(bodyRot, targetRot);
 
-        // The non-physical teleport resync is the LAST resort: in push mode only an absurd position
-        // error reaches it (posTeleportThreshold; the catch-up push below handles everything closer —
-        // teleporting into a space another desynced body still occupies would depenetration-fling
-        // both apart into fresh desync). In legacy blend mode the snap threshold keeps its original
-        // teleport meaning.
-        const bool teleport = params.physicalPush
-            ? posErr > params.posTeleportThreshold
-            : (posErr > params.posSnapThreshold || rotErrDeg > params.rotSnapThresholdDeg);
-        if (teleport)
+        // The non-physical teleport resync is the LAST resort: only an absurd position error reaches
+        // it (the catch-up push below handles everything closer — teleporting into a space another
+        // desynced body still occupies would depenetration-fling both apart into fresh desync).
+        if (posErr > params.posTeleportThreshold)
         {
             physicsWorld.teleportBody(physics->body, target, targetRot);
             physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, targetLinVel);
@@ -214,79 +201,53 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
             return;
         }
 
-        if (params.physicalPush)
+        // PHYSICAL PUSH: position/rotation error becomes corrective velocity on top of the server's,
+        // delivered as a bounded impulse (NudgeVelocity caps the velocity change at the accel limit
+        // x dt). No teleports, no raw velocity sets — contacts, stacking and gameplay impulses
+        // compose with the correction instead of being erased. Past the snap threshold the push
+        // enters CATCH-UP: gains and caps boosted so multi-meter errors still converge quickly.
+        // ARBITRATED OWNER (we reach here as LocalOwner only via an Arbitrated record): the local
+        // contact with the opponent's replica supplies the feel — correct only REAL divergence
+        // (big deadzone, halved gains) or the correction drags against the player's live input.
+        const bool arbitratedOwner = authority() == ENetAuthority::LocalOwner;
+        const float posDeadzone = arbitratedOwner ? glm::max(params.posDeadzone, params.arbitrateDeadzone) : params.posDeadzone;
+        const float rotDeadzoneDeg = arbitratedOwner ? glm::max(params.rotDeadzoneDeg, 15.0f) : params.rotDeadzoneDeg;
+        const float ownerGainScale = arbitratedOwner ? 0.5f : 1.0f;
+        const bool pushPos = posErr > posDeadzone;
+        const bool pushRot = rotErrDeg > rotDeadzoneDeg;
+        if (pushPos || pushRot)
         {
-            // steer the body back through the simulation: position/rotation error becomes corrective
-            // velocity on top of the server's, delivered as a bounded impulse (NudgeVelocity caps the
-            // velocity change at the accel limit x dt). No teleports, no raw velocity sets — contacts,
-            // stacking and gameplay impulses compose with the correction instead of being erased.
-            // Past the snap threshold the push enters CATCH-UP: gains and caps boosted so multi-meter
-            // errors still converge quickly, through legitimate contacts.
-            // ARBITRATED OWNER (we reach here as LocalOwner only via an Arbitrated record): the local
-            // contact with the opponent's replica supplies the feel — correct only REAL divergence
-            // (big deadzone, halved gains) or the correction drags against the player's live input.
-            const bool arbitratedOwner = authority() == ENetAuthority::LocalOwner;
-            const float posDeadzone = arbitratedOwner ? glm::max(params.posDeadzone, params.arbitrateDeadzone) : params.posDeadzone;
-            const float rotDeadzoneDeg = arbitratedOwner ? glm::max(params.rotDeadzoneDeg, 15.0f) : params.rotDeadzoneDeg;
-            const float ownerGainScale = arbitratedOwner ? 0.5f : 1.0f;
-            const bool pushPos = posErr > posDeadzone;
-            const bool pushRot = rotErrDeg > rotDeadzoneDeg;
-            if (pushPos || pushRot)
+            const bool catchUp = posErr > params.posSnapThreshold || rotErrDeg > params.rotSnapThresholdDeg;
+            const float boost = (catchUp ? glm::max(1.0f, params.pushCatchUpBoost) : 1.0f) * ownerGainScale;
+            glm::vec3 desiredLin = targetLinVel;
+            if (pushPos)
             {
-                const bool catchUp = posErr > params.posSnapThreshold || rotErrDeg > params.rotSnapThresholdDeg;
-                const float boost = (catchUp ? glm::max(1.0f, params.pushCatchUpBoost) : 1.0f) * ownerGainScale;
-                glm::vec3 desiredLin = targetLinVel;
-                if (pushPos)
-                {
-                    glm::vec3 corrective = posErrVec * (params.pushPosGain * boost);
-                    const float maxVel = params.pushMaxVel * boost;
-                    const float len = glm::length(corrective);
-                    if (len > maxVel && len > 1e-6f)
-                        corrective *= maxVel / len;
-                    desiredLin += corrective;
-                }
-                glm::vec3 desiredAng = targetAngVel;
-                if (pushRot)
-                {
-                    glm::quat errQuat = targetRot * glm::inverse(bodyRot);
-                    if (errQuat.w < 0.0f)
-                        errQuat = -errQuat; // shortest arc
-                    glm::vec3 corrective = glm::axis(errQuat) * glm::angle(errQuat) * (params.pushRotGain * boost);
-                    const float maxAngVel = params.pushMaxAngVel * boost;
-                    const float len = glm::length(corrective);
-                    if (len > maxAngVel && len > 1e-6f)
-                        corrective *= maxAngVel / len;
-                    desiredAng += corrective;
-                }
-                physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::NudgeVelocity,
-                    desiredLin, desiredAng,
-                    glm::vec3(params.pushMaxAccel * boost * deltaSeconds, params.pushMaxAngAccel * boost * deltaSeconds, 0.0f));
+                glm::vec3 corrective = posErrVec * (params.pushPosGain * boost);
+                const float maxVel = params.pushMaxVel * boost;
+                const float len = glm::length(corrective);
+                if (len > maxVel && len > 1e-6f)
+                    corrective *= maxVel / len;
+                desiredLin += corrective;
             }
-            if (newSnapshot)
-                lastAppliedTick = serverTick;
-            return;
-        }
-
-        // legacy blend mode ("Physical push" off): exponential teleport-blend toward the target
-        if (posErr > params.posDeadzone || rotErrDeg > params.rotDeadzoneDeg)
-        {
-            const float blend = 1.0f - glm::exp(-params.blendRate * deltaSeconds);
-            const glm::vec3 newPos = glm::mix(bodyPos, target, blend);
-            const glm::quat newRot = glm::slerp(bodyRot, targetRot, blend);
-            physicsWorld.teleportBody(physics->body, newPos, newRot);
-            physics->prevPos = physics->currPos = newPos; // see the snap-path comment
-            physics->prevRot = physics->currRot = newRot;
+            glm::vec3 desiredAng = targetAngVel;
+            if (pushRot)
+            {
+                glm::quat errQuat = targetRot * glm::inverse(bodyRot);
+                if (errQuat.w < 0.0f)
+                    errQuat = -errQuat; // shortest arc
+                glm::vec3 corrective = glm::axis(errQuat) * glm::angle(errQuat) * (params.pushRotGain * boost);
+                const float maxAngVel = params.pushMaxAngVel * boost;
+                const float len = glm::length(corrective);
+                if (len > maxAngVel && len > 1e-6f)
+                    corrective *= maxAngVel / len;
+                desiredAng += corrective;
+            }
+            physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::NudgeVelocity,
+                desiredLin, desiredAng,
+                glm::vec3(params.pushMaxAccel * boost * deltaSeconds, params.pushMaxAngAccel * boost * deltaSeconds, 0.0f));
         }
         if (newSnapshot)
-        {
             lastAppliedTick = serverTick;
-            if (params.syncVelocities)
-            {
-                // once per snapshot, not per frame: between snapshots the local sim integrates freely
-                physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, targetLinVel);
-                physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, targetAngVel);
-            }
-        }
         return;
     }
 
