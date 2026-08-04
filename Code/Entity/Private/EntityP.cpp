@@ -58,6 +58,10 @@ void Entity::updateSelf(Renderer& renderer, float deltaSeconds, const Transform&
         if (ScriptComponent* script = getComponent<ScriptComponent>(this))
             script->update(*this, deltaSeconds);
 
+        // before Physics/composeTransform: a client-side correction to pos/rot lands this same frame
+        if (NetworkComponent* network = getComponent<NetworkComponent>(this))
+            network->update(*this, deltaSeconds);
+
         if (AnimatorComponent* animator = getComponent<AnimatorComponent>(this))
             animator->update(*this, renderer, deltaSeconds); // advance animation + refresh skinning palette
 
@@ -281,6 +285,13 @@ void Entity::createComponent(EComponentID id, uint16 componentOffset, const void
         lc->spawn(*this, *static_cast<const LightComponent::SpawnInfo*>(info), base);
         break;
     }
+    case EComponentID_Network:
+    {
+        NetworkComponent* nc = reinterpret_cast<NetworkComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        new (nc) NetworkComponent();
+        nc->spawn(*this, *static_cast<const NetworkComponent::SpawnInfo*>(info), base);
+        break;
+    }
     case EComponentID_Script:
     {
         ScriptComponent* scr = reinterpret_cast<ScriptComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
@@ -351,6 +362,13 @@ void Entity::destroyComponent(EComponentID id, uint16 componentOffset, const voi
         LightComponent* lc = reinterpret_cast<LightComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
         lc->destroy(*this, *static_cast<const LightComponent::SpawnInfo*>(info));
         lc->~LightComponent();
+        break;
+    }
+    case EComponentID_Network:
+    {
+        NetworkComponent* nc = reinterpret_cast<NetworkComponent*>(reinterpret_cast<uint8*>(this) + componentOffset);
+        nc->destroy(*this, *static_cast<const NetworkComponent::SpawnInfo*>(info));
+        nc->~NetworkComponent();
         break;
     }
     case EComponentID_Script:

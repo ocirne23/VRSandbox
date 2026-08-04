@@ -262,6 +262,9 @@ void EntityEditor::refreshDraftsFromEntity()
 	m_hasLight = hasComponent<LightComponent>(e);
 	m_lightDraft = m_hasLight && getLightSpawnInfo(e) ? *getLightSpawnInfo(e) : LightComponent::SpawnInfo{};
 
+	m_hasNetwork = hasComponent<NetworkComponent>(e);
+	m_networkDraft = m_hasNetwork && getNetworkSpawnInfo(e) ? *getNetworkSpawnInfo(e) : NetworkComponent::SpawnInfo{};
+
 	m_hasScript = hasComponent<ScriptComponent>(e);
 	m_scriptDraft = m_hasScript && getScriptSpawnInfo(e) ? *getScriptSpawnInfo(e) : ScriptComponent::SpawnInfo{};
 	if (m_hasScript)
@@ -1205,6 +1208,39 @@ void EntityEditor::renderForceSection()
 	ImGui::PopID();
 }
 
+void EntityEditor::renderNetworkSection()
+{
+	if (!m_hasNetwork)
+	{
+		if (ImGui::Button("+ Add Network"))
+		{
+			m_hasNetwork = true;
+			m_networkDraft = NetworkComponent::SpawnInfo{};
+			commitRespawn();
+		}
+		return;
+	}
+
+	if (!ImGui::CollapsingHeader("Network", ImGuiTreeNodeFlags_DefaultOpen))
+		return;
+	ImGui::PushID("network");
+
+	int id = int(m_networkDraft.id);
+	const bool idChanged = ImGui::DragInt("Id", &id, 1.0f, 0, 0x7fffffff);
+	if (idChanged)
+		m_networkDraft.id = uint32(glm::max(id, 0));
+	commitDrag(idChanged);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Pairs this entity with its server/client counterpart. 0 = auto-derive from the entity's\nname path (fragile across scene edits) - explicit ids are recommended for real content");
+
+	if (ImGui::Button("Remove Network"))
+	{
+		m_hasNetwork = false;
+		commitRespawn();
+	}
+	ImGui::PopID();
+}
+
 void EntityEditor::renderLightSection()
 {
 	if (!m_hasLight)
@@ -1525,6 +1561,7 @@ void EntityEditor::renderComponents()
 	renderParticleSection();
 	renderForceSection();
 	renderLightSection();
+	renderNetworkSection();
 	renderScriptSection();
 }
 
@@ -1742,6 +1779,13 @@ void EntityEditor::commitRespawn()
 	{
 		auto info = std::make_shared<LightComponent::SpawnInfo>(m_lightDraft);
 		typeBits |= uint16(1 << EComponentID_Light);
+		infos.push_back(std::move(info));
+	}
+
+	if (m_hasNetwork)
+	{
+		auto info = std::make_shared<NetworkComponent::SpawnInfo>(m_networkDraft);
+		typeBits |= uint16(1 << EComponentID_Network);
 		infos.push_back(std::move(info));
 	}
 

@@ -1,0 +1,165 @@
+// Network sync test scene, spawned by --server / --connect at a FIXED transform (main.cpp) so both
+// sides hold identical entities: entities pair by explicit netIds. Gizmo-drag a render-only cube on
+// the SERVER and the client copy follows at the snapshot rate; drag one on the CLIENT and it returns
+// to the server's state on the next keyframe (nothing sends client -> server). The dynamic physics
+// cubes (Ids 10+) drop onto the static ground and tumble: both sides simulate, the client corrects
+// its bodies toward the server's poses/velocities and sleeps them when the server's sleep. Press K
+// on either instance to fire the "NetPing" network event (logged on every connected instance).
+Prefab networkTest
+	Name "Network Test"
+	Position 0 0 0
+	Rotation 0 -0 0
+	Scale 1
+	Component Scene
+		Entity NetCube1
+			Position -6 0 0
+			Scale 0.5
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+			Component Network
+				Id 1
+		Entity NetCube2
+			Position -4 0 0
+			Scale 0.5
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+			Component Network
+				Id 2
+		Entity NetCube3
+			Position -2 0 0
+			Scale 0.5
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+			Component Network
+				Id 3
+		Entity NetCube4
+			Position 0 0 0
+			Scale 0.5
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+			Component Network
+				Id 4
+		Entity NetCube5
+			Position 2 0 0
+			Scale 0.5
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+			Component Network
+				Id 5
+		Entity NetCube6
+			Position 4 0 0
+			Scale 0.5
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+			Component Network
+				Id 6
+		Entity NetCube7
+			Position 6 0 0
+			Scale 0.5
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+			Component Network
+				Id 7
+		Entity NetCube8
+			Position 8 0 0
+			Scale 0.5
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+			Component Network
+				Id 8
+		Entity NetMarker
+			Position 0 2 0
+			Component Render
+				ObjectContainer baseshapes
+				Node Cube
+				Type StaticMesh
+			Component Network
+				Id 100
+		Entity NetGround
+			Position 1 -1 3
+			Scale 8
+			Component Render
+				ObjectContainer baseshapes
+				Node Plane
+				Type StaticMesh
+			Component Physics
+				Body Static
+				Shape Box
+				HalfExtents 0.5 0.05 0.5
+				Offset 0 -0.05 0
+		Entity NetPhysCube1
+			Position 0.6 3 3.2
+			Scale 0.25
+			Component Render
+				ObjectContainer wireshapes
+				Node Cube
+				Type StaticMesh
+			Component Physics
+				Body Dynamic
+				Shape Box
+				HalfExtents 1 1 1
+				Restitution 0.3
+				Density 400
+			Component Network
+				Id 10
+		Entity NetPhysCube2
+			Position 1.4 4.2 2.8
+			Scale 0.25
+			Component Render
+				ObjectContainer wireshapes
+				Node Cube
+				Type StaticMesh
+			Component Physics
+				Body Dynamic
+				Shape Box
+				HalfExtents 1 1 1
+				Restitution 0.3
+				Density 400
+			Component Network
+				Id 11
+		Entity NetPhysCube3
+			Position 0.9 5.4 3.1
+			Scale 0.25
+			Component Render
+				ObjectContainer wireshapes
+				Node Cube
+				Type StaticMesh
+			Component Physics
+				Body Dynamic
+				Shape Box
+				HalfExtents 1 1 1
+				Restitution 0.5
+				Density 400
+			Component Network
+				Id 12
+		Entity NetPhysCube4
+			Position 1.2 6.6 2.9
+			Scale 0.25
+			Component Render
+				ObjectContainer wireshapes
+				Node Cube
+				Type StaticMesh
+			Component Physics
+				Body Dynamic
+				Shape Box
+				HalfExtents 1 1 1
+				Restitution 0.5
+				Density 400
+			Component Network
+				Id 13

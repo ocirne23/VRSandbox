@@ -591,6 +591,8 @@ void registerScriptDslBindings()
             // -- events -- global, or delivered to one entity's own script
             { "sendEvent",   T::Void, { { "eventName", T::String } },                              "ctx->sendEvent($1)" },
             { "sendEventTo", T::Void, { { "entity", T::Entity }, { "eventName", T::String } },     "ctx->sendEventToEntity($1, $2)" },
+            // fires locally AND across the network (server -> clients / client -> server + relay); single player = sendEvent
+            { "sendNetworkEvent", T::Void, { { "eventName", T::String } },                         "ctx->sendNetworkEvent($1)" },
 
             // -- sky / lighting --
             { "setSun",          T::Void, { { "direction", vec3 }, { "color", vec3 }, { "intensity", T::Float } },                      "ctx->setSun($1, $2, $3)" },
@@ -978,11 +980,15 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
 
     void thunk_spawnPointLight(glm::vec3 position, float range, glm::vec3 color, float intensity)
     {
+        if (!Globals::rendererVK.isInitialized()) // headless server: no mapped light buffers to write
+            return;
         Globals::rendererVK.addPointLight(PointLight(position, range, color, intensity));
     }
 
     void thunk_setSun(glm::vec3 direction, glm::vec3 color, float intensity)
     {
+        if (!Globals::rendererVK.isInitialized())
+            return;
         Globals::rendererVK.setSunLight(direction, color, intensity);
     }
 
@@ -1142,6 +1148,13 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     {
         if (eventName)
             Globals::scriptEvents.fireEvent(eventName); // broadcast to every listener of this event
+    }
+    void thunk_sendNetworkEvent(const char* eventName)
+    {
+        // worker-safe: the local fire matches thunk_sendEvent, the network half only queues (mutex-guarded,
+        // drained by NetworkManager::send on the main thread — NetHost itself is single-threaded)
+        if (eventName)
+            Globals::networkManager.fireNetworkEvent(eventName);
     }
     void thunk_sendEventToEntity(Entity* en, const char* eventName)
     {
@@ -1662,6 +1675,8 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
 
     void thunk_worldDrawLine(glm::vec3 from, glm::vec3 to, glm::vec3 color)
     {
+        if (!Globals::rendererVK.isInitialized()) // headless server: the debug-line PerWorker staging doesn't exist
+            return;
         // The DSL speaks in linear 0..1 colours like everything else here; the renderer wants packed 0xAABBGGRR.
         const auto channel = [](float v) { return static_cast<uint32>(glm::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
         Globals::rendererVK.addDebugLine(from, to,

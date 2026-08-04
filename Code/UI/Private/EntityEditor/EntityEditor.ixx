@@ -55,6 +55,7 @@ private:
 	void renderParticleSection();
 	void renderForceSection();
 	void renderLightSection();
+	void renderNetworkSection();
 	void renderScriptSection();
 	// The INITIAL values of the picked script's exposed ScriptData fields -- serialized into the .pre and
 	// applied at every spawn, unlike the Properties panel's live edits of the same fields.
@@ -137,6 +138,7 @@ private:
 	bool m_hasParticle = false;
 	bool m_hasForce    = false;
 	bool m_hasLight    = false;
+	bool m_hasNetwork  = false;
 	bool m_hasScript   = false;
 
 	RenderComponent::SpawnInfo   m_renderDraft;
@@ -146,6 +148,7 @@ private:
 	ParticleComponent::SpawnInfo m_particleDraft;
 	ForceComponent::SpawnInfo    m_forceDraft;
 	LightComponent::SpawnInfo    m_lightDraft;
+	NetworkComponent::SpawnInfo  m_networkDraft;
 	ScriptComponent::SpawnInfo   m_scriptDraft;
 
 	char m_particleEffectBuf[256] = {}; // edit buffer for m_particleDraft.effectPath

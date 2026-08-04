@@ -234,6 +234,9 @@ public:
     // ---- Frame history (main thread) ----
     uint64_t getFrameCount() const { return m_frameCount; } // completed endFrame calls
     uint64_t getFrameMark(uint64_t frameIdx) const { return m_frameMarks[frameIdx % FRAME_HISTORY]; } // tick at END of frame frameIdx
+    // True for the pseudo-frame spanning a pause (laid down by setPaused(false)): its duration is
+    // the paused wall time, not a real frame - the panel excludes it from scaling/selection.
+    bool isFrameGap(uint64_t frameIdx) const { return m_frameIsGap[frameIdx % FRAME_HISTORY] != 0; }
 
     // ---- Track reading (main thread) ----
     uint32_t getNumTracks() const { return m_numTracks.load(std::memory_order_acquire); }
@@ -253,6 +256,7 @@ private:
     std::atomic<uint32_t> m_registerLock = 0; // registration-only spinlock
 
     std::array<uint64_t, FRAME_HISTORY> m_frameMarks = {};
+    std::array<uint8_t, FRAME_HISTORY> m_frameIsGap = {}; // parallel to m_frameMarks, see isFrameGap
     uint64_t m_frameCount = 0;
     uint64_t m_staticInitStart = 0; // "Static init" scope open since the constructor; 0 once closed
 

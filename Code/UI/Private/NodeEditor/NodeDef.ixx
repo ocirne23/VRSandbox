@@ -1043,6 +1043,13 @@ export const std::vector<NodeDef>& nodeRegistry()
         { { "", D::Exec, "" } },
         "ctx->sendEventToEntity($1, $2);\n#0" });
 
+    // Send Network Event: fires locally like Send Event AND across the network (server -> all clients,
+    // client -> server which relays to the other clients); in single player it degrades to Send Event.
+    r.push_back({ "SendNetworkEvent", "Send Network Event", "Events", true,
+        { { "", D::Exec, "" }, { "Event", D::String, "" } },
+        { { "", D::Exec, "" } },
+        "ctx->sendNetworkEvent($1);\n#0" });
+
     return r;
     }();
     return registry;

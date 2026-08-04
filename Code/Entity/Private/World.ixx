@@ -32,6 +32,15 @@ public:
     bool initialize();
     void update(Renderer& renderer, float deltaSeconds);
 
+    // Headless server mode: set BEFORE any spawn. Templates then carry only Scene/Physics/Script/
+    // Network components — everything renderer-touching (Render/Animator/Light/Particle/Force) and
+    // Audio is dropped at build time, so updateSelf never dereferences the (uninitialized) renderer
+    // and no GPU resource is ever created. Hull/Mesh collision still works: the Render node's
+    // container NAME is parsed textually and the geometry comes from the renderer-free
+    // ensureCollisionSource import.
+    void setHeadless(bool headless) { m_headless = headless; }
+    bool isHeadless() const { return m_headless; }
+
     // Entity Creation
     EntityPtr spawn(const std::string& name, const Transform& base);
     EntityPtr spawnAssetFile(const std::string& path, const Transform& base, bool overrideDefaultTransform = true);
@@ -119,6 +128,7 @@ private:
     std::shared_ptr<EntitySpawnTemplate> m_emptyTemplate; // blank Scene-only template for editable (non-prefab) entities
     std::vector<std::shared_ptr<const EntitySpawnTemplate>> m_editorTemplates; // ad-hoc templates kept alive via keepTemplateAlive()
     std::vector<EntityPtr> m_rootEntities;
+    bool m_headless = false;
     std::vector<EntityUpdateNode> m_updateLevel;
     PerWorker<EntityUpdateStaging> m_updateStaging;
     JobCost m_updateCost{ 2000 };

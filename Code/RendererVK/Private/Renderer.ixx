@@ -133,6 +133,9 @@ public:
     ~Renderer();
 
     bool initialize(Window& window, EValidation validation, EVSync vsync, EVr vr = EVr::DISABLED);
+    // False in headless server mode (the global exists — static init_seg — but initialize never ran).
+    // Anything that may run headless and would touch GPU/mapped state must gate on this.
+    bool isInitialized() const { return m_initialized; }
 
     // viewportRect is the editor's viewport sub-rect within the swapchain (ignored in VR, which renders
     // full-extent); a change to it re-records the command buffers.
@@ -647,6 +650,7 @@ private:
 
     glm::ivec2 m_windowSize;
     Rect m_viewportRect = Rect();
+    bool m_initialized = false;
     bool m_windowMinimized = false;
     bool m_vsyncEnabled = true;
     bool m_wireframe = false; // "Renderer/Wireframe" tweak: forward scene variants rasterize as lines

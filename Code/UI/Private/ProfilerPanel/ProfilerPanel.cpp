@@ -78,6 +78,8 @@ void ProfilerPanel::render()
             const uint64 first = std::max<uint64>(m_autoPauseChecked + 1, newest > 64 ? newest - 64 : 1);
             for (uint64 f = first; f <= newest; ++f)
             {
+                if (profiler.isFrameGap(f))
+                    continue; // pause gap, not a real frame
                 const double frameMs = (double)(profiler.getFrameMark(f) - profiler.getFrameMark(f - 1)) * profiler.getMsPerTick();
                 if (frameMs > (double)m_autoPauseMs)
                 {
@@ -126,7 +128,12 @@ void ProfilerPanel::refresh()
     {
         // Show a frame the GPU has fully caught up on: timestamps come back when their frame slot's
         // fence is next waited (~NUM_FRAMES_IN_FLIGHT frames), so 3 frames back is always complete.
-        m_displayedFrame = profiler.getFrameCount() - 3;
+        // Never a pause-gap pseudo-frame - its window spans the paused stretch and would compress
+        // the timeline for the one frame it passes through the live slot.
+        uint64 frame = profiler.getFrameCount() - 3;
+        while (frame > 1 && profiler.isFrameGap(frame))
+            --frame;
+        m_displayedFrame = frame;
     }
     m_windowStart = profiler.getFrameMark(m_displayedFrame - 1);
     m_windowEnd = profiler.getFrameMark(m_displayedFrame);
@@ -272,10 +279,12 @@ void ProfilerPanel::drawFrameGraph()
     const uint64 historyLimit = Profiler::FRAME_HISTORY - 2;
     const uint64 oldest = latest > std::min<uint64>(numBars, historyLimit) ? latest - std::min<uint64>(numBars, historyLimit) : 1;
 
-    // Scale to the worst frame in view (min 20ms so a smooth 60fps doesn't fill the graph).
+    // Scale to the worst REAL frame in view (min 20ms so a smooth 60fps doesn't fill the graph).
+    // Pause-gap pseudo-frames span the whole paused stretch and would compress everything else.
     double maxMs = 20.0;
     for (uint64 f = oldest; f <= latest; ++f)
-        maxMs = std::max(maxMs, (double)(profiler.getFrameMark(f) - profiler.getFrameMark(f - 1)) * msPerTick);
+        if (!profiler.isFrameGap(f))
+            maxMs = std::max(maxMs, (double)(profiler.getFrameMark(f) - profiler.getFrameMark(f - 1)) * msPerTick);
 
     // 60fps reference line
     const float refY = canvasPos.y + kFrameGraphHeight * (1.0f - (float)(16.667 / maxMs));
@@ -285,9 +294,15 @@ void ProfilerPanel::drawFrameGraph()
     uint64 hoveredFrame = 0;
     for (uint64 f = oldest; f <= latest; ++f)
     {
-        const double ms = (double)(profiler.getFrameMark(f) - profiler.getFrameMark(f - 1)) * msPerTick;
         const float x1 = canvasPos.x + width - (float)(latest - f) * barWidth;
         const float x0 = x1 - barWidth + 1.0f;
+        if (profiler.isFrameGap(f))
+        {
+            // pause gap: a dim full-height sliver marking the discontinuity, not a data bar
+            drawList->AddRectFilled(ImVec2(x0, canvasPos.y), ImVec2(x1, canvasPos.y + kFrameGraphHeight), 0xFF3A3A3E);
+            continue;
+        }
+        const double ms = (double)(profiler.getFrameMark(f) - profiler.getFrameMark(f - 1)) * msPerTick;
         const float h = kFrameGraphHeight * (float)std::min(ms / maxMs, 1.0);
         uint32 color = 0xFF50C878;                    // green
         if (ms > 33.4)      color = 0xFF5060E8;       // red

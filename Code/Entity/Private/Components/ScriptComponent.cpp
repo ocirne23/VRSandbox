@@ -84,6 +84,7 @@ bool ScriptComponent::syncScriptData(Entity& entity)
         if (scriptModule->requiredComponents & (1u << EComponentID_Particle)) *slot++ = getComponent<ParticleComponent>(&entity);
         if (scriptModule->requiredComponents & (1u << EComponentID_Force))    *slot++ = getComponent<ForceComponent>(&entity);
         if (scriptModule->requiredComponents & (1u << EComponentID_Light))    *slot++ = getComponent<LightComponent>(&entity);
+        if (scriptModule->requiredComponents & (1u << EComponentID_Network))  *slot++ = getComponent<NetworkComponent>(&entity);
     }
 
     // The block was just zeroed, so the authored values have to go back in -- otherwise a hot-reload that

@@ -588,15 +588,28 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
     std::string renderContainerName; // physics hull/mesh shapes (below), and the animator, source from here
     std::string renderNodePath;
     if (const AssetNode* renderNode = findComponentNode(node, "Render"))
-        if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.displayName, wantsCollisionGeometry))
+    {
+        if (m_headless)
+        {
+            // no RenderComponent (no ObjectContainer load — that path is all renderer), but a Hull/Mesh
+            // physics shape still needs to know WHERE its geometry lives: the names are enough, the
+            // geometry itself comes from ensureCollisionSource's renderer-free import below
+            if (const AssetNode* containerNode = renderNode->find("ObjectContainer"))
+            {
+                renderContainerName = containerNode->asString();
+                renderNodePath = renderNode->find("Node") ? renderNode->find("Node")->asString() : std::string();
+            }
+        }
+        else if (std::shared_ptr<RenderComponent::SpawnInfo> info = buildRenderSpawnInfo(*renderNode, tmpl.displayName, wantsCollisionGeometry))
         {
             renderContainerName = info->containerName;
             renderNodePath = info->nodePath;
             typeBits |= uint16(1 << EComponentID_Render);
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
+    }
 
-    if (const AssetNode* animatorNode = findComponentNode(node, "Animator"))
+    if (const AssetNode* animatorNode = findComponentNode(node, "Animator"); animatorNode && !m_headless)
         if (std::shared_ptr<AnimatorComponent::SpawnInfo> info = buildAnimatorSpawnInfo(*animatorNode, renderContainerName, tmpl.displayName))
         {
             typeBits |= uint16(1 << EComponentID_Animator);
@@ -609,14 +622,17 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         tmpl.spawnInfos.emplace_back(buildPhysicsSpawnInfo(*physicsNode, renderContainerName, renderNodePath, tmpl.displayName));
     }
 
-    if (const AssetNode* audioNode = findComponentNode(node, "Audio"))
+    // Headless drops everything below except Network/Script: Audio would load buffers on an
+    // uninitialized device, Particle/Force/Light create renderer emitter slots / push to mapped
+    // buffers. Scripts reaching an absent component no-op through the null-handle ABI contract.
+    if (const AssetNode* audioNode = findComponentNode(node, "Audio"); audioNode && !m_headless)
         if (std::shared_ptr<AudioComponent::SpawnInfo> info = buildAudioSpawnInfo(*audioNode, tmpl.displayName))
         {
             typeBits |= uint16(1 << EComponentID_Audio);
             tmpl.spawnInfos.emplace_back(std::move(info));
         }
 
-    if (const AssetNode* particleNode = findComponentNode(node, "Particle"))
+    if (const AssetNode* particleNode = findComponentNode(node, "Particle"); particleNode && !m_headless)
     {
         auto info = std::make_shared<ParticleComponent::SpawnInfo>();
         if (const AssetNode* n = particleNode->find("Effect"))   info->effectPath = n->asString();
@@ -630,7 +646,7 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
             Log::warning("Scene: entity '" + tmpl.displayName + "' has a Particle component without an Effect path, skipping");
     }
 
-    if (const AssetNode* forceNode = findComponentNode(node, "Force"))
+    if (const AssetNode* forceNode = findComponentNode(node, "Force"); forceNode && !m_headless)
     {
         auto info = std::make_shared<ForceComponent::SpawnInfo>();
         if (const AssetNode* n = forceNode->find("Team"))         info->team = uint32(glm::max(n->asInt(), 0));
@@ -646,7 +662,7 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         tmpl.spawnInfos.emplace_back(std::move(info));
     }
 
-    if (const AssetNode* lightNode = findComponentNode(node, "Light"))
+    if (const AssetNode* lightNode = findComponentNode(node, "Light"); lightNode && !m_headless)
     {
         auto info = std::make_shared<LightComponent::SpawnInfo>();
         if (const AssetNode* n = lightNode->find("Debug")) info->debugDraw = n->asBool();
@@ -679,6 +695,14 @@ void World::buildTemplate(const AssetNode& node, EntitySpawnTemplate& tmpl)
         }
         else
             Log::warning("Scene: entity '" + tmpl.displayName + "' has a Light component without any Light entries, skipping");
+    }
+
+    if (const AssetNode* networkNode = findComponentNode(node, "Network"))
+    {
+        auto info = std::make_shared<NetworkComponent::SpawnInfo>();
+        if (const AssetNode* n = networkNode->find("Id")) info->id = uint32(glm::max(n->asInt(), 0));
+        typeBits |= uint16(1 << EComponentID_Network);
+        tmpl.spawnInfos.emplace_back(std::move(info));
     }
 
     if (const AssetNode* scriptNode = findComponentNode(node, "Script"))

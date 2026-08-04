@@ -26,3 +26,34 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         "${CMAKE_SOURCE_DIR}/Dependencies/Dll/onnxruntime.dll"
         "${CMAKE_SOURCE_DIR}/Dependencies/Dll/DirectML.dll"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>")
+
+# Launch App with networking args from Visual Studio: set run-server / run-client as the Startup
+# Project and F5 (the run-cooked pattern — VS runs the debugger command below, and building the
+# target just builds App; the target's own build step is a no-op so nothing launches twice). Run
+# both instances by starting one, then right-click the other target -> Debug -> Start New Instance.
+add_custom_target(run-server COMMAND ${CMAKE_COMMAND} -E true VERBATIM)
+add_dependencies(run-server App)
+set_target_properties(run-server PROPERTIES
+	FOLDER Apps
+	EXCLUDE_FROM_ALL TRUE
+	VS_DEBUGGER_COMMAND "$<TARGET_FILE:App>"
+	VS_DEBUGGER_COMMAND_ARGUMENTS "--server"
+	VS_DEBUGGER_WORKING_DIRECTORY "${ROOT_DIR}")
+
+add_custom_target(run-client COMMAND ${CMAKE_COMMAND} -E true VERBATIM)
+add_dependencies(run-client App)
+set_target_properties(run-client PROPERTIES
+	FOLDER Apps
+	EXCLUDE_FROM_ALL TRUE
+	VS_DEBUGGER_COMMAND "$<TARGET_FILE:App>"
+	VS_DEBUGGER_COMMAND_ARGUMENTS "--connect 127.0.0.1"
+	VS_DEBUGGER_WORKING_DIRECTORY "${ROOT_DIR}")
+
+add_custom_target(run-headless COMMAND ${CMAKE_COMMAND} -E true VERBATIM)
+add_dependencies(run-headless App)
+set_target_properties(run-headless PROPERTIES
+	FOLDER Apps
+	EXCLUDE_FROM_ALL TRUE
+	VS_DEBUGGER_COMMAND "$<TARGET_FILE:App>"
+	VS_DEBUGGER_COMMAND_ARGUMENTS "--server --headless"
+	VS_DEBUGGER_WORKING_DIRECTORY "${ROOT_DIR}")

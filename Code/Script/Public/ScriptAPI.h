@@ -319,7 +319,10 @@ struct VrScriptField
     X(void*,       entityGetLightComponent,(Entity*, entity)) \
     X(int,         lightGetCount,          (void*, lightComponent)) \
     X(int,         lightGetAt,             (void*, lightComponent), (int, index), (VrLight*, outLight)) \
-    X(void,        lightSetAt,             (void*, lightComponent), (int, index), (const VrLight*, light))
+    X(void,        lightSetAt,             (void*, lightComponent), (int, index), (const VrLight*, light)) \
+    /* ---- network ---- fires the named event locally AND across the network (server -> all clients,
+       client -> server which relays to the other clients); in single player it degrades to sendEvent. */ \
+    X(void,        sendNetworkEvent,       (const char*, eventName))
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,

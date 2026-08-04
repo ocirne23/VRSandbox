@@ -116,6 +116,7 @@ void Profiler::endFrame()
     // frame marks stop - the frame graph freezes on the recorded history.
     if (!g_profilerPaused.load(std::memory_order_relaxed))
     {
+        m_frameIsGap[m_frameCount % FRAME_HISTORY] = 0; // slot recycled from an old gap frame
         m_frameMarks[m_frameCount % FRAME_HISTORY] = t;
         m_frameCount++;
     }
@@ -126,8 +127,10 @@ void Profiler::setPaused(bool paused)
     const bool wasPaused = g_profilerPaused.exchange(paused, std::memory_order_relaxed);
     if (wasPaused && !paused)
     {
-        // Resume: a fresh boundary here turns the whole paused stretch into one frame-graph bar
-        // (saturated, honest) and lets the next real frame measure cleanly.
+        // Resume: a fresh boundary lets the next real frame measure cleanly. The pseudo-frame this
+        // creates spans the whole paused stretch - flag it so the panel excludes it from the frame
+        // graph's scale instead of compressing every real bar around it.
+        m_frameIsGap[m_frameCount % FRAME_HISTORY] = 1;
         m_frameMarks[m_frameCount % FRAME_HISTORY] = tick();
         m_frameCount++;
     }

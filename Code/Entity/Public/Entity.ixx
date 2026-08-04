@@ -6,5 +6,6 @@ export import :Component;
 export import :AssetRegistry;
 export import :Prefab;
 export import :World;
+export import :NetworkManager;
 export import :ScriptEventManager;
 export import :ScriptContext;

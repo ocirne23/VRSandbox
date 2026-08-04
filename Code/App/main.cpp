@@ -25,10 +25,120 @@ import App.InputControls;
 import Procedural;
 import Particle;
 import Force;
+import Core.Windows;
 
-int main()
+static std::atomic<bool> g_headlessRunning = true;
+static BOOL __stdcall headlessCtrlHandler(DWORD) { g_headlessRunning = false; return TRUE; } // any console ctrl event = clean shutdown
+
+// Dedicated server without a window, renderer, UI or input. World::setHeadless makes every template
+// carry only Scene/Physics/Script/Network components, so nothing ever touches the uninitialized
+// renderer global (it exists — static init_seg — but initialize never runs) and no GPU resource is
+// created; Hull/Mesh colliders still build from the renderer-free collision import. Deliberately
+// skipped for now (documented divergences from a rendering server): terrain/ocean/scatter and the
+// terrain collider (camera-centered streaming — a dedicated server needs per-player rings, future
+// work; the test scene carries its own ground), buoyancy (reads the GPU ocean), audio, spatial
+// entries (only RenderComponents register, so script radius queries see nothing server-side).
+static int runHeadlessServer(uint16 netPort, int tickHz)
+{
+    ProfileScope initScope("headless initialize", EProfileCategory::App);
+
+    FileSystem::initialize();
+    Globals::jobSystem.initialize();
+    Globals::world.initialize();
+    Globals::world.setHeadless(true); // BEFORE any spawn: gates template building
+    Globals::physics.initialize();
+    Globals::spatialIndex.initialize();    // stays empty, but script spatial queries must be safe to run
+    Globals::occlusionBuffer.initialize(); // static mesh colliders register occluders at spawn
+    Globals::scriptEvents.initialize();
+    registerScriptDslBindings();
+
+    NetworkManager& networkManager = Globals::networkManager;
+    networkManager.registerTweaks(); // no tweak UI headless; registering keeps one init path and is harmless
+    if (!networkManager.startServer(netPort))
+    {
+        Globals::jobSystem.shutdown();
+        return 1;
+    }
+
+    World& world = Globals::world;
+    world.addRootEntity(world.spawnAssetFile("Entities/Debug/networkTest.pre", Transform(glm::vec3(50.0f, 85.0f, 2320.0f)), true));
+
+    SetConsoleCtrlHandler(&headlessCtrlHandler, TRUE);
+    Log::info("Headless server running at " + std::to_string(tickHz) + " Hz - Ctrl+C to stop");
+    initScope.stop();
+
+    Camera camera; // scripts read a camera (position/sun queries) — headless has no real one, divergence accepted
+    camera.viewMatrix = glm::mat4(1.0f); // members have no default initializers (garbage would NaN the script camera thunks)
+    camera.position = glm::vec3(0.0f);
+    uint32 tickCount = 0;
+    Timer statusTimer(std::chrono::seconds(5), [&](Timer&) {
+        Log::info("Headless: " + std::to_string(tickCount / 5) + " ticks/s | " + networkManager.getStatusText());
+        tickCount = 0;
+        return Timer::REPEAT;
+    });
+
+    const std::chrono::microseconds tickInterval(uint64(1000000.0 / glm::clamp(tickHz, 10, 240)));
+    while (g_headlessRunning)
+    {
+        const auto frameStart = std::chrono::steady_clock::now();
+        {
+            ProfileScope mainLoopScope("main loop", EProfileCategory::App);
+
+            Globals::time.update();
+            const double deltaSec = Globals::time.getDeltaSec();
+
+            for (EntityChange& change : Globals::scriptEvents.takeEntityChanges())
+                world.handleEntityChange(change, camera, Rect());
+
+            networkManager.receive(deltaSec);
+            Globals::scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
+            Globals::physics.update(deltaSec, [&world](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); });
+            world.update(Globals::rendererVK, (float)deltaSec); // renderer passed through but never dereferenced (headless archetypes)
+            networkManager.send(deltaSec);
+            ++tickCount;
+        }
+        Globals::profiler.endFrame();
+
+        // coarse Sleep-based tick limiter: precision doesn't matter — the physics accumulator and the
+        // snapshot accumulator both absorb jitter, this only stops the loop from spinning a core
+        while (g_headlessRunning && std::chrono::steady_clock::now() - frameStart < tickInterval)
+            Sleep(1);
+    }
+
+    Log::info("Headless server shutting down");
+    world.clearRootEntities(); // NetworkComponents unregister here, before the manager closes its host
+    networkManager.shutdown();
+    Globals::jobSystem.shutdown();
+    return 0;
+}
+
+int main(int argc, char* argv[])
 {
     Globals::profiler.endStaticInit(); // closes the "Static init" scope opened at the profiler's static-init construction; must precede any main() scope
+
+    // --server [--port N] [--headless] [--tickrate N] hosts an authoritative session; --connect
+    // <ip[:port]> joins one; no flags = single player (networking fully inert). Same executable for
+    // all of them; --headless runs the server without window/renderer/UI (server only).
+    enum class ELaunchMode { Single, Server, Client };
+    ELaunchMode launchMode = ELaunchMode::Single;
+    uint16 netPort = 27888;
+    int tickHz = 60;
+    std::string connectAddress;
+    bool headless = false;
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string_view arg = argv[i];
+        if (arg == "--server")                            launchMode = ELaunchMode::Server;
+        else if (arg == "--connect" && i + 1 < argc)      { launchMode = ELaunchMode::Client; connectAddress = argv[++i]; }
+        else if (arg == "--port" && i + 1 < argc)         netPort = uint16(std::atoi(argv[++i]));
+        else if (arg == "--tickrate" && i + 1 < argc)     tickHz = std::atoi(argv[++i]);
+        else if (arg == "--headless")                     headless = true;
+        else Log::warning("Unknown command line argument: " + std::string(arg));
+    }
+    if (headless && launchMode == ELaunchMode::Server)
+        return runHeadlessServer(netPort, tickHz);
+    if (headless)
+        Log::warning("--headless only applies to --server, ignoring");
 
     ProfileScope initScope("main() initialize", EProfileCategory::App);
 
@@ -82,6 +192,20 @@ int main()
     scriptEvents.initialize();
     registerScriptDslBindings(); // must run before anything touches Globals::scriptBindings (ScriptEditor's build() included)
 
+    NetworkManager& networkManager = Globals::networkManager;
+    networkManager.registerTweaks(); // the "Network" tweak section exists in single player too
+    if (launchMode != ELaunchMode::Single)
+    {
+        const bool started = launchMode == ELaunchMode::Server
+            ? networkManager.startServer(netPort)
+            : networkManager.startClient(connectAddress, netPort);
+        if (!started)
+        {
+            jobSystem.shutdown();
+            return 1;
+        }
+    }
+
     Procedural::TerrainStreamer terrain;
     terrain.initialize();
 
@@ -129,6 +253,13 @@ int main()
     //world.addRootEntity(world.spawnAssetFile("Entities/particle.pre", Transform(spawnOffset), true));
     //world.addRootEntity(world.spawnAssetFile("Entities/SphereField.pre", Transform(spawnOffset), true));
 
+    if (launchMode != ELaunchMode::Single)
+    {
+        // both sides must spawn the SAME scene at the SAME fixed transform: entities pair purely by netId,
+        // so a camera-relative spawn would desync the two worlds
+        world.addRootEntity(world.spawnAssetFile("Entities/Debug/networkTest.pre", Transform(glm::vec3(50.0f, 85.0f, 2320.0f)), true));
+    }
+
     GizmoController gizmo;
     gizmo.initialize(world);
     ui.setGizmo(&gizmo);
@@ -152,8 +283,10 @@ int main()
     Timer titleUpdateTimer(std::chrono::milliseconds(100), [&](Timer& timer) {
             glm::vec3 pos = cameraController.getPosition();
             glm::vec3 dir = cameraController.getDirection();
-            char windowTitleBuf[256];
-            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "FPS: %i mem: %.2fmb instances: %i meshtypes: %i materials: %i lights: %i, pos: %.1f, %.1f, %.1f, dir: %.1f, %.1f, %.1f",
+            const std::string netStatus = networkManager.getStatusText(); // empty in single player
+            char windowTitleBuf[320];
+            sprintf_s(windowTitleBuf, sizeof(windowTitleBuf), "%s%sFPS: %i mem: %.2fmb instances: %i meshtypes: %i materials: %i lights: %i, pos: %.1f, %.1f, %.1f, dir: %.1f, %.1f, %.1f",
+                netStatus.c_str(), netStatus.empty() ? "" : " | ",
                 fps, (double)(Globals::allocator.getUsedSize() + getAlignedAllocatedSize()) / 1024.0 / 1024.0,
                 renderer.getNumMeshInstances(), renderer.getNumMeshTypes(), renderer.getNumMaterials(), (int)spawnedLights.size(), pos.x, pos.y, pos.z, dir.x, dir.y, dir.z);
             window.setTitle(windowTitleBuf);
@@ -192,6 +325,8 @@ int main()
         for (EntityChange& change : scriptEvents.takeEntityChanges()) world.handleEntityChange(change, camera, ui.getViewportRect());
         for (EntityChange& change : ui.takeEntityChanges())           world.handleEntityChange(change, camera, ui.getViewportRect());
 
+        networkManager.receive(deltaSec); // snapshot targets + events land before the sim/entity updates read them
+
         scriptContext.update(camera, (float)deltaSec, (float)Globals::time.getElapsedSec());
         audio.update(camera);
         physics.update(deltaSec, [&](const PhysicsWorld::ContactEvent& evt) { world.handleContactEvent(evt); });
@@ -199,6 +334,7 @@ int main()
         const Frustum& frustum = renderer.beginFrame(camera, ui.getViewportRect());
         spatialIndex.update(camera, frustum, renderer.getCenterViewProj() * glm::translate(glm::mat4(1.0f), camera.position)); // translate corrects the reverse-z renderer proj matrix
         world.update(renderer, (float)deltaSec); // serial script prepass + parallel component/tree pass + sink flush
+        networkManager.send(deltaSec); // server: snapshot entities at their post-update poses; both roles: flush queued packets
         terrain.update(renderer, camera);
         terrainCollider.update(camera.position, terrain.activeClimateMaps());
         ocean.update(renderer, camera, terrain.activeTerrainData(), terrain.seaLevel());
@@ -218,7 +354,8 @@ int main()
     input.removeKeyboardListener(pKeyboardListener);
     input.removeSystemEventListener(pSystemEventListener);
     spawnedLights.clear(); // released before the World's roots: entities must not outlive the globals
-    world.clearRootEntities();
+    world.clearRootEntities(); // NetworkComponents unregister here, before the manager closes its host
+    networkManager.shutdown();
     jobSystem.shutdown();
     return 0;
 }

@@ -324,6 +324,7 @@ bool Renderer::initialize(Window& window, EValidation validation, EVSync vsync, 
 
     m_gpuCrashTracker.Initialize(false);
 
+    m_initialized = true; // headless server mode never calls initialize; renderer-touching paths gate on this
     return true;
 }
 
