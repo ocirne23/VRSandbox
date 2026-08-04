@@ -70,7 +70,9 @@ bool NetHost::open(uint16 port, const NetHostConfig& config)
     m_statsWindowStart = 0.0;
     m_stats = {};
     m_accumBytesSent = m_accumBytesReceived = 0;
-    m_accumPacketsSent = m_accumPacketsReceived = 0;
+    m_accumPacketsSent = m_accumPacketsReceived = m_accumPacketsDropped = 0;
+    for (RateBucket& bucket : m_rateBuckets)
+        bucket = {};
     uint8 seed[8];
     cryptoRandom(seed);
     memcpy(&m_rngState, seed, sizeof(m_rngState));
@@ -157,6 +159,23 @@ bool NetHost::send(NetPeerId id, std::span<const uint8> data, ENetDelivery deliv
         return true;
     }
 
+    // A peer that keeps its connection alive but stops ACKING makes this window grow forever, and
+    // the app has no way to know (send() succeeded). Unbounded remote-controlled memory growth, so
+    // it is a disconnect: past the cap the peer is either broken or hostile, and either way the
+    // reliable stream it is holding up can never be completed.
+    if (sendChannel.window.size() >= m_config.maxQueuedReliablePerChannel)
+    {
+        if (!peer.sendWindowOverflow)
+        {
+            peer.sendWindowOverflow = true; // acted on in update(): freeing a peer mid-send would
+                                            // pull the ground out from under sendToAll's loop
+            Log::warning("NetHost: peer " + peer.address.toString() + " reliable backlog over "
+                + std::to_string(m_config.maxQueuedReliablePerChannel) + " on channel "
+                + std::to_string(channel) + ", disconnecting");
+        }
+        return false;
+    }
+
     // Reliable: single message when it fits, otherwise a run of fragments on consecutive seqs
     const auto pushReliable = [&](uint8 kind, uint16 fragIndex, uint16 fragCount, std::span<const uint8> chunk)
     {
@@ -214,6 +233,7 @@ void NetHost::update(double deltaSec)
 
     uint8 buffer[NetMaxRawPacketSize];
     NetAddress from;
+    m_packetsThisUpdate = 0;
     while (true)
     {
         const int size = m_socket.receiveFrom(buffer, from);
@@ -221,8 +241,19 @@ void NetHost::update(double deltaSec)
             break;
         ++m_accumPacketsReceived;
         m_accumBytesReceived += size;
-        if (size > 0)
+        // Global ceiling first: without it a big enough flood makes ONE update() unbounded (the
+        // socket keeps yielding packets), which stalls the frame even if every packet is then
+        // dropped. The excess stays in the socket buffer and is dropped by the OS, which is correct
+        // — we are past capacity either way, and a bounded frame keeps the server responsive.
+        if (++m_packetsThisUpdate > m_config.maxPacketsPerUpdate)
+        {
+            ++m_accumPacketsDropped;
+            continue;
+        }
+        if (size > 0 && rateLimitAllows(from))
             handlePacket(from, std::span<const uint8>(buffer, size));
+        else if (size > 0)
+            ++m_accumPacketsDropped;
     }
 
     for (NetPeerId id = 0; id < m_peers.size(); ++id)
@@ -246,7 +277,13 @@ void NetHost::update(double deltaSec)
         }
         else if (peer.state == NetPeer::EState::Connected)
         {
-            if (m_time - peer.lastReceiveTime > m_config.timeoutSec)
+            if (peer.sendWindowOverflow)
+            {
+                sendDisconnectPackets(peer, false);
+                emitDisconnected(id, ENetDisconnectReason::Overflow);
+                freePeer(id);
+            }
+            else if (m_time - peer.lastReceiveTime > m_config.timeoutSec)
             {
                 sendDisconnectPackets(peer, false);
                 emitDisconnected(id, ENetDisconnectReason::Timeout);
@@ -281,7 +318,8 @@ void NetHost::update(double deltaSec)
         m_stats.packetsReceivedPerSec = uint32(m_accumPacketsReceived / window);
         m_stats.bytesSentPerSec = uint32(m_accumBytesSent / window);
         m_stats.bytesReceivedPerSec = uint32(m_accumBytesReceived / window);
-        m_accumPacketsSent = m_accumPacketsReceived = 0;
+        m_stats.packetsDroppedPerSec = uint32(m_accumPacketsDropped / window);
+        m_accumPacketsSent = m_accumPacketsReceived = m_accumPacketsDropped = 0;
         m_accumBytesSent = m_accumBytesReceived = 0;
         m_statsWindowStart = m_time;
     }
@@ -473,6 +511,13 @@ void NetHost::handleChallengeResponse(const NetAddress& from, NetPeerId id, NetR
     }
     if (id == InvalidNetPeerId)
     {
+        // one machine must not be able to occupy every slot: the challenge proves the address is
+        // reachable, but nothing stops a real host from completing the handshake on many ports
+        if (m_config.maxPeersPerIp != 0 && countPeersOnIp(from.ip) >= m_config.maxPeersPerIp)
+        {
+            sendDeny(from, clientSalt);
+            return;
+        }
         id = allocPeer(from);
         if (id == InvalidNetPeerId)
         {
@@ -494,6 +539,53 @@ void NetHost::handleChallengeResponse(const NetAddress& from, NetPeerId id, NetR
     peer.lastReceiveTime = m_time;
     sendAccept(peer);
     emitConnected(id);
+}
+
+// Per-source token bucket. Runs BEFORE parsing, decryption or any allocation, so the cost of a
+// flooded packet is a hash and a compare. Unconnected senders are limited too — that is the point:
+// handshake requests are the cheapest thing to flood and the responder answers every one.
+bool NetHost::rateLimitAllows(const NetAddress& from)
+{
+    const uint64 key = from.key();
+    // splitmix-style finalizer: raw address bits cluster hard (sequential ports, one subnet), and a
+    // clustered index would pile a whole attacking range into one bucket while leaving others idle
+    uint64 hash = key * 0x9e3779b97f4a7c15ull;
+    hash ^= hash >> 29;
+    hash *= 0xbf58476d1ce4e5b9ull;
+    hash ^= hash >> 32;
+    RateBucket& bucket = m_rateBuckets[hash % RateBucketCount];
+
+    const float burst = float(std::max(1u, m_config.packetBurstPerAddress));
+    if (bucket.addressKey != key)
+    {
+        // slot belongs to another address: steal it only once its owner has gone quiet enough to
+        // have refilled, so a flooder cannot evict an active peer's bucket and reset its own budget
+        const float refilled = float(m_time - bucket.lastRefill) * float(m_config.maxPacketsPerSecPerAddress);
+        if (bucket.tokens + refilled < burst)
+            return false;
+        bucket.addressKey = key;
+        bucket.tokens = burst;
+        bucket.lastRefill = m_time;
+    }
+    else
+    {
+        bucket.tokens = std::min(burst,
+            bucket.tokens + float(m_time - bucket.lastRefill) * float(m_config.maxPacketsPerSecPerAddress));
+        bucket.lastRefill = m_time;
+    }
+    if (bucket.tokens < 1.0f)
+        return false;
+    bucket.tokens -= 1.0f;
+    return true;
+}
+
+uint32 NetHost::countPeersOnIp(uint32 ip) const
+{
+    uint32 count = 0;
+    for (const NetPeer& peer : m_peers)
+        if (peer.state != NetPeer::EState::Free && peer.address.ip == ip)
+            ++count;
+    return count;
 }
 
 void NetHost::handlePacket(const NetAddress& from, std::span<const uint8> bytes)
@@ -1009,6 +1101,7 @@ void NetHost::freePeer(NetPeerId id)
     peer.recvChannels.clear();
     peer.unreliableQueue.clear();
     peer.sentPackets.clear();
+    peer.sendWindowOverflow = false; // slots recycle — never inherit the previous occupant's state
 }
 
 float NetHost::rand01()

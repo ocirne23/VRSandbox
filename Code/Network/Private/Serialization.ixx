@@ -70,7 +70,7 @@ public:
     // advance the cursor and return the destination, null (+overflow) if it doesn't fit
     uint8* reserve(size_t numBytes)
     {
-        if (m_pos + numBytes > m_buffer.size())
+        if (numBytes > m_buffer.size() - m_pos) // overflow-safe, see NetReader::consume
         {
             m_overflowed = true;
             return nullptr;
@@ -162,7 +162,11 @@ private:
 
     const uint8* consume(size_t numBytes)
     {
-        if (m_pos + numBytes > m_data.size())
+        // subtraction, NOT `m_pos + numBytes > size()`: numBytes comes from the wire (a varint length
+        // in readString/readBytes), and an attacker sending ~2^64 wraps that addition to a small
+        // value, passes the check, and gets a span/string_view of astronomical length over a tiny
+        // packet — an unauthenticated remote OOB read + crash. m_pos <= size() always holds here.
+        if (numBytes > m_data.size() - m_pos)
         {
             m_overflowed = true;
             return nullptr;

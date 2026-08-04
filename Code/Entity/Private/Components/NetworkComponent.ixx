@@ -98,6 +98,13 @@ export struct NetEntityState
         // validation state (meaningful only for client-owned entities)
         uint32 lastClaimSeq = 0;         // newest claim seq seen (dedups the redundant resends)
         uint32 lastAcceptedClaimSeq = 0;
+        // Movement TOKEN BUCKET (metres of displacement the owner may still spend). Refilled at
+        // maxClaimSpeed per second of SERVER WALL CLOCK and capped, so total displacement over any
+        // window is bounded by speed x window + cap no matter how many packets arrive in it. A
+        // per-claim budget cannot do that: sequence numbers and packet rate are both attacker-
+        // controlled, so anything denominated per-claim mints movement per packet sent.
+        float claimBudget = 0.0f;
+        double claimBudgetTime = 0.0; // wall clock the bucket was last refilled at
         glm::vec3 lastAcceptedClaimPos = glm::vec3(0.0f); // displacement-budget anchor: what was last ACCEPTED, not the live twin (contacts/corrections perturb it)
         EClaimResult lastClaimResult = EClaimResult::None;
         uint16 violations = 0;           // rejected-claim count (saturating) — cheat telemetry

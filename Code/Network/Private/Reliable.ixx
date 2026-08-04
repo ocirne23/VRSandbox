@@ -56,6 +56,7 @@ export enum class ENetDisconnectReason : uint8
     Timeout,       // nothing received for timeoutSec
     ConnectFailed, // handshake ran out of time
     Denied,        // remote host is full, refuses incoming, or the encrypt setting mismatches
+    Overflow,      // peer stopped acking while we kept queueing reliable messages for it
 };
 
 export using NetPeerId = uint16;
@@ -86,6 +87,18 @@ export struct NetHostConfig
     double resendMinSec = 0.05;        // reliable retransmit clamp
     double resendMaxSec = 0.5;
 
+    // ---- abuse limits (hostile senders; all enforced before any per-packet work) ----
+    // Packet rate is what costs CPU, so it is budgeted per SOURCE ADDRESS in a fixed-size table
+    // (a per-address map would itself be the memory attack). Generous vs real traffic: one peer at
+    // 60 Hz snapshots + claims + acks runs well under 200/s.
+    uint32 maxPacketsPerSecPerAddress = 400;
+    uint32 packetBurstPerAddress = 200;   // bucket cap: absorbs legitimate bursts after a stall
+    uint32 maxPacketsPerUpdate = 8192;    // global work ceiling per update() — a flood cannot make
+                                          // one frame unbounded no matter how many addresses it uses
+    uint16 maxPeersPerIp = 4;             // one machine must not be able to eat every connection slot
+    uint32 maxQueuedReliablePerChannel = 1024; // a peer that stops acking while we keep queueing is
+                                               // an unbounded memory sink — disconnect it instead
+
     // debug link simulation, applied to outgoing packets (live-editable)
     float simPacketLoss = 0.0f;        // 0..1 chance to drop
     float simLatencyMs = 0.0f;
@@ -98,6 +111,7 @@ export struct NetHostStats
     uint32 packetsReceivedPerSec = 0;
     uint32 bytesSentPerSec = 0;
     uint32 bytesReceivedPerSec = 0;
+    uint32 packetsDroppedPerSec = 0; // rate-limited away — sustained nonzero means a flood (or limits set too tight)
 };
 
 // protocol internals shared between interface and implementation
@@ -124,6 +138,7 @@ struct NetPeer
     double lastReceiveTime = 0.0;
     double lastSendTime = 0.0;
     bool ackDirty = false; // received a payload packet since our last send -> ack promptly
+    bool sendWindowOverflow = false; // queued reliable backlog blew past the cap: drop the peer in update()
 
     uint64 localSeq = 0;      // outgoing payload packet counter; low 16 bits go on the wire
     uint64 remoteSeq = 0;     // highest received packet counter (reconstructed)
@@ -218,6 +233,8 @@ public:
 
 private:
 
+    bool rateLimitAllows(const NetAddress& from); // per-source token bucket, before any parsing
+    uint32 countPeersOnIp(uint32 ip) const;
     void handlePacket(const NetAddress& from, std::span<const uint8> bytes);
     void handleConnectRequest(const NetAddress& from, NetPeerId id, NetReader& reader);
     void handleChallengeResponse(const NetAddress& from, NetPeerId id, NetReader& reader);
@@ -259,6 +276,20 @@ private:
     };
     std::vector<DelayedSend> m_delayedSends; // link simulation
     uint64 m_rngState = 0;
+
+    // Fixed-size rate-limit table: FIXED because the thing being defended against is an attacker
+    // who varies its source address — a per-address map would grow with every forged sender. Two
+    // addresses colliding on a slot merely share a (generous) budget.
+    static constexpr uint32 RateBucketCount = 512;
+    struct RateBucket
+    {
+        uint64 addressKey = 0;
+        float tokens = 0.0f;
+        double lastRefill = 0.0;
+    };
+    RateBucket m_rateBuckets[RateBucketCount];
+    uint32 m_packetsThisUpdate = 0;
+    uint32 m_accumPacketsDropped = 0;
 
     NetHostStats m_stats;
     double m_statsWindowStart = 0.0;

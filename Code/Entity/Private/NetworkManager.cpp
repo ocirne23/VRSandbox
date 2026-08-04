@@ -26,6 +26,10 @@ enum class ENetMsg : uint8
     OwnerChange, // server -> client, ch2: [varuint netId][varuint ownerClientId] (per ENTITY, unlike Spawn's per-tree owner)
 };
 
+constexpr size_t MaxEventNameLength = 64; // wire-received event names; real ones are identifiers
+constexpr size_t MaxClients = 32;         // connection-slot cap: each accepted client costs a world
+                                          // replay + whatever the app spawns for it in onClientJoined
+
 constexpr uint8 SnapshotFlag_Quantized = 1 << 0;
 constexpr uint8 ChannelSnapshot = 0;
 constexpr uint8 ChannelEvent = 1;
@@ -48,7 +52,10 @@ static bool  s_showStats = true;
 // time base for the displacement budget, so both sides should agree on it. 20 matches the physics
 // step and the snapshot rate — one shared network cadence.
 static float s_claimRateHz = 20.0f;
-static float s_maxClaimSpeed = 20.0f;     // m/s displacement budget over the claimed interval
+static float s_maxClaimSpeed = 60.0f;     // m/s the movement token bucket refills at (bucket cap = half a
+                                          // second of it). Must exceed the fastest LEGITIMATE motion,
+                                          // free fall included — the re-anchor rule used to mask that
+                                          // and no longer does, so 20 would reject long drops
 static float s_maxClaimVelocity = 50.0f;  // cap on the claimed velocity magnitude
 static float s_claimTeleportCap = 10.0f;  // hard displacement cap regardless of elapsed time
 static bool  s_claimPathRaycast = true;   // reject claims whose path crosses world geometry
@@ -66,6 +73,27 @@ static float s_releaseRadius = 4.0f;
 static float s_releaseDelaySec = 1.0f;
 static float s_arbitrateSec = 1.0f;  // player-vs-player contact: how long both primaries stay server-arbitrated (refreshed per contact)
 static float s_contestSec = 1.5f;    // object touched by two DISTINCT clients within this window = contested -> server-owned until it decays
+
+// EVERY float that arrives from the wire must pass this before it reaches physics or a transform.
+// NaN defeats validation silently: every comparison against NaN is false, so a NaN position sails
+// through the whole plausibility gate ("not greater than the cap") and lands in b3Body_SetTransform,
+// poisoning the solver for every player and re-broadcasting itself in the next snapshot.
+static bool isFinite(float v) { return std::isfinite(v); }
+static bool isFinite(const glm::vec3& v) { return isFinite(v.x) && isFinite(v.y) && isFinite(v.z); }
+static bool isFinite(const glm::quat& q) { return isFinite(q.x) && isFinite(q.y) && isFinite(q.z) && isFinite(q.w); }
+
+// a wire quaternion must also be UNIT: box3d builds a rotation matrix from it, so an unnormalized
+// (or zero) quat skews/collapses the body's frame. The unquantized path reads 4 raw floats.
+static bool sanitizeRotation(glm::quat& q)
+{
+    if (!isFinite(q))
+        return false;
+    const float len = glm::length(q);
+    if (len < 1e-4f)
+        return false;
+    q /= len;
+    return true;
+}
 
 static float quatAngleDeg(const glm::quat& a, const glm::quat& b)
 {
@@ -126,6 +154,7 @@ static const char* disconnectReasonName(ENetDisconnectReason reason)
     case ENetDisconnectReason::Timeout:       return "timeout";
     case ENetDisconnectReason::ConnectFailed: return "connect failed";
     case ENetDisconnectReason::Denied:        return "denied";
+    case ENetDisconnectReason::Overflow:      return "reliable backlog overflow";
     default:                                  return "none";
     }
 }
@@ -271,6 +300,7 @@ void NetworkManager::receive(double deltaSec)
     if (m_role == ENetRole::None)
         return;
     ProfileScope scope("NetworkManager::receive", EProfileCategory::Network);
+    m_netTime += deltaSec;
 
     // publish this frame's locally-owned body positions for the interaction grace (see the accessor);
     // rebuilt before the entity pass so the parallel component updates read a stable snapshot
@@ -423,6 +453,19 @@ void NetworkManager::handleSessionMessage(NetPeerId peer, NetReader& reader, uin
             m_host.disconnect(peer);
             break;
         }
+        // slot cap: accepting a client costs a full world replay plus whatever the app spawns for it
+        // (a player body), and nothing else bounds how many connections one attacker opens
+        if (!m_peerClients.contains(peer) && m_peerClients.size() >= MaxClients)
+        {
+            Log::warning("Network: refusing client, server full (" + std::to_string(MaxClients) + ")");
+            uint8 fullBuffer[64];
+            NetWriter fullWriter(fullBuffer);
+            fullWriter.write<uint8>(uint8(ENetMsg::Deny));
+            fullWriter.writeString("server full");
+            m_host.send(peer, fullWriter.data(), ENetDelivery::Reliable, ChannelSession);
+            m_host.disconnect(peer);
+            break;
+        }
         if (std::find(m_readyPeers.begin(), m_readyPeers.end(), peer) == m_readyPeers.end())
             m_readyPeers.push_back(peer);
         // duplicate Hello from an already-ready peer (the reliable channel dedups packets, so only a
@@ -540,6 +583,16 @@ void NetworkManager::handleSpawnMessage(NetReader& reader)
     const float scale = reader.read<float>();
     if (reader.overflowed() || baseId == 0 || count == 0 || path.empty())
         return;
+    if (!isFinite(pos) || !isFinite(rot) || !isFinite(scale) || scale <= 0.0f)
+        return;
+    // the path goes to the asset loader, so keep it inside Assets/: a hostile server must not be
+    // able to aim a client's file reads anywhere on its disk
+    if (path.size() > 256 || path.find("..") != std::string::npos || path.find(':') != std::string::npos
+        || path.front() == '/' || path.front() == '\\')
+    {
+        Log::warning("Network: rejecting replicated spawn with suspicious path '" + path + "'");
+        return;
+    }
     {
         const std::lock_guard<std::mutex> lock(m_entityMutex);
         if (m_entities.contains(baseId))
@@ -770,12 +823,19 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
         }
     }
     const glm::vec3 look = reader.read<glm::vec3>();
-    if (reader.overflowed())
+    if (reader.overflowed() || !isFinite(look))
         return;
     for (uint32 i = 0; i < count; ++i)
-        claims[i].input.look = look;
+    {
+        // hostile-input gate: non-finite values would pass every plausibility test below (all
+        // comparisons against NaN are false) and reach the solver; a non-unit quat skews the body
+        ParsedClaim& claim = claims[i];
+        if (!isFinite(claim.pos) || !isFinite(claim.linVel) || !isFinite(claim.angVel)
+            || !isFinite(claim.input.move) || !sanitizeRotation(claim.rot))
+            return;
+        claim.input.look = look;
+    }
 
-    const float claimInterval = 1.0f / glm::clamp(s_claimRateHz, 1.0f, 240.0f);
     PhysicsComponent* physics = getComponent<PhysicsComponent>(entity);
     const bool dynamicBody = physics && physics->bodyType == EPhysicsBodyType::Dynamic && physics->body.isValid();
 
@@ -791,15 +851,28 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
             continue; // redundant resend of a claim we already processed
 
         // ---- plausibility gate (Network/Validation tweaks) ----
+        // refill the movement bucket from the wall clock BEFORE validating (once per non-duplicate
+        // claim, whatever the packet rate). Bucket cap = half a second of travel: enough that a lag
+        // spike delivering several claims at once still passes, far too little to bank a teleport.
+        {
+            NetEntityState::ServerState& sv = comp->state->server;
+            const float refill = float(m_netTime - sv.claimBudgetTime) * s_maxClaimSpeed;
+            sv.claimBudget = glm::min(sv.claimBudget + glm::max(0.0f, refill), s_maxClaimSpeed * 0.5f);
+            sv.claimBudgetTime = m_netTime;
+        }
         EClaimResult result = EClaimResult::Accepted;
         const glm::vec3 twinPos = dynamicBody ? physics->body.getPosition() : entity->pos;
-        if (glm::length(pos - twinPos) < s_claimReanchorRadius)
+        const bool recovering = m_serverTick < comp->state->server.forcedUntilTick;
+        if (recovering && glm::length(pos - twinPos) < s_claimReanchorRadius)
         {
-            // claiming to be where the server ALREADY has you is always acceptable (zero cheat
-            // value), and it is the RE-ANCHOR that guarantees rejection recovery: Forced corrections
-            // converge the owner onto the twin by construction, and without this rule a stale anchor
-            // could veto forever — e.g. anchor and twin separated by a wall = permanent RejectedPath,
-            // a permanently stuck player
+            // RE-ANCHOR, and ONLY while we are actively force-correcting this owner: claiming to be
+            // where the server already has you is the anti-deadlock rule that guarantees rejection
+            // recovery (a stale anchor separated from the twin by a wall would otherwise veto
+            // forever — a permanently stuck player).
+            // It is gated on `recovering` because it is a VALIDATION BYPASS: accepted claims pin the
+            // twin, so during normal play every claim lands within the radius of the twin it just
+            // moved, and an attacker could walk `radius` metres per PACKET — at an unthrottled send
+            // rate that is unbounded speed, straight through walls, with the budget never consulted.
         }
         else if (comp->state->server.lastAcceptedClaimSeq == 0)
         {
@@ -813,11 +886,9 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
         {
             const glm::vec3 delta = pos - comp->state->server.lastAcceptedClaimPos;
             const float displacement = glm::length(delta);
-            // seq-based elapsed time: dropped packets grant exactly the time they took, no more
-            const float elapsed = glm::clamp(float(seq - comp->state->server.lastAcceptedClaimSeq) * claimInterval, claimInterval, 2.0f);
             if (displacement > s_claimTeleportCap)
                 result = EClaimResult::RejectedTeleport;
-            else if (displacement > s_maxClaimSpeed * elapsed)
+            else if (displacement > comp->state->server.claimBudget)
                 result = EClaimResult::RejectedSpeed;
             else if (glm::length(linVel) > s_maxClaimVelocity)
                 result = EClaimResult::RejectedVelocity;
@@ -839,6 +910,10 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
             // remainder — a constant backward pull while moving ("stuck in mud")
             comp->state->server.forcedUntilTick = 0;
             comp->state->server.lastAcceptedClaimSeq = seq;
+            // spend the bucket on what this claim actually moved (the re-anchor and first-claim
+            // paths spend too — otherwise they would be a free displacement channel)
+            comp->state->server.claimBudget = glm::max(0.0f,
+                comp->state->server.claimBudget - glm::length(pos - comp->state->server.lastAcceptedClaimPos));
             comp->state->server.lastAcceptedClaimPos = pos;
             comp->state->input = input; // server-side gameplay reads the owner's intent from here
             // claim passthrough source: snapshots re-emit this instead of sampling the twin
@@ -895,6 +970,8 @@ void NetworkManager::transferOwnership(uint32 netId, NetworkComponent* comp, uin
     comp->state->server.forcedUntilTick = 0;
     comp->state->server.claimStreamSeq = 0; // don't pass the previous owner's claims through
     comp->state->server.claimStreamSentSeq = 0;
+    comp->state->server.claimBudget = 0.0f; // fresh movement bucket, refilled from now
+    comp->state->server.claimBudgetTime = m_netTime;
 
     uint8 buffer[16];
     NetWriter writer(buffer);
@@ -1090,9 +1167,23 @@ void NetworkManager::sendSpawnTo(NetPeerId peer, const DynamicSpawn& record)
 
 void NetworkManager::handleEventMessage(NetPeerId peer, std::span<const uint8> bytes)
 {
+    // AUTHENTICATION: a transport-connected peer that never completed Hello/Welcome is not a player.
+    // Without this gate anyone who can open a connection can fire any named script event on the
+    // server AND have it relayed to every client — remote arbitrary gameplay triggering, plus an
+    // N-way reliable-channel flood amplifier.
+    if (m_role == ENetRole::Server)
+    {
+        if (!m_peerClients.contains(peer))
+            return;
+    }
+    else if (peer != m_serverPeer || m_localClientId == 0)
+        return; // clients accept events only from the server they are welcomed by
+
     NetReader reader(bytes.subspan(1));
     const std::string_view name = reader.readString();
-    if (reader.overflowed() || name.empty())
+    // bound the name: it is attacker-controlled and reaches the log ring. Legitimate event names are
+    // short identifiers; anything longer is a flood attempt, not a typo
+    if (reader.overflowed() || name.empty() || name.size() > MaxEventNameLength)
         return;
     Log::info("Network: event '" + std::string(name) + "' received");
     Globals::scriptEvents.fireEvent(std::string(name));
@@ -1159,6 +1250,9 @@ void NetworkManager::handleSnapshot(NetReader& reader)
         }
         if (reader.overflowed())
             return;
+        glm::quat sanitizedRot = rot;
+        if (!isFinite(pos) || !isFinite(linVel) || !isFinite(angVel) || !sanitizeRotation(sanitizedRot))
+            return; // same rule as claims: non-finite state must never reach a body or a transform
 
         const auto it = m_entities.find(netId);
         if (it == m_entities.end())
@@ -1173,13 +1267,13 @@ void NetworkManager::handleSnapshot(NetReader& reader)
             std::unique_ptr<NetSnapshotRing>& ring = m_remoteBuffers[netId];
             if (!ring)
                 ring = std::make_unique<NetSnapshotRing>();
-            ring->records[tick % NetSnapshotRing::Capacity] = { tick, pos, rot, linVel, angVel };
+            ring->records[tick % NetSnapshotRing::Capacity] = { tick, pos, sanitizedRot, linVel, angVel };
             ring->newestTick = glm::max(ring->newestTick, tick);
             ring->count = glm::min(ring->count + 1, NetSnapshotRing::Capacity);
             comp->state->client.remoteBuffer = ring.get();
         }
         comp->state->client.targetPos = pos;
-        comp->state->client.targetRot = rot;
+        comp->state->client.targetRot = sanitizedRot;
         comp->state->client.targetLinVel = linVel;
         comp->state->client.targetAngVel = angVel;
         comp->state->client.targetFlags = recFlags;
@@ -1567,7 +1661,10 @@ std::string NetworkManager::getStatusText() const
     const auto kbs = [](uint32 bytesPerSec) { return std::to_string((bytesPerSec * 10) / 1024 / 10) + "." + std::to_string((bytesPerSec * 10 / 1024) % 10); };
     if (m_role == ENetRole::Server)
         return "SERVER " + std::to_string(m_host.getConnectedCount()) + " peers | out " + kbs(stats.bytesSentPerSec)
-            + " KB/s in " + kbs(stats.bytesReceivedPerSec) + " KB/s";
+            + " KB/s in " + kbs(stats.bytesReceivedPerSec) + " KB/s"
+            // sustained nonzero = someone is flooding us (or the limits are set too tight for the
+            // configured rates) — worth seeing without opening a panel
+            + (stats.packetsDroppedPerSec != 0 ? " | DROPPED " + std::to_string(stats.packetsDroppedPerSec) + "/s" : "");
     if (m_serverPeer == InvalidNetPeerId || !m_host.isConnected(m_serverPeer))
         return "CLIENT connecting...";
     return "CLIENT rtt " + std::to_string(int(m_host.getPeerRttMs(m_serverPeer))) + " ms loss "

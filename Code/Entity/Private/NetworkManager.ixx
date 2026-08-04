@@ -304,6 +304,9 @@ private:
     NetSyncParams m_params;
     uint32 m_roundRobinCursor = 0;
     double m_snapshotAccum = 0.0;
+    double m_netTime = 0.0; // seconds since start, advanced in receive() — the WALL CLOCK the claim
+                            // displacement budget is measured against (sequence numbers are
+                            // attacker-controlled, so they can only ever narrow the budget)
     uint32 m_serverTick = 0;
     bool m_warnedUnknownRecFlags = false;
     // no unknown-id warning list: an unknown snapshot id is always a Spawn in flight or a Despawn
