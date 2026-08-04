@@ -101,6 +101,21 @@ export struct NetworkComponent
     uint16 violations = 0;           // rejected-claim count (saturating) — cheat telemetry
     uint32 forcedUntilTick = 0;      // while serverTick < this, this entity's snapshot records carry NetRecFlag_Forced
 
+    // server: CLAIM PASSTHROUGH — the newest ACCEPTED claim state, re-emitted by snapshot ticks in
+    // place of the twin body's pose. The twin is teleport-pinned at claim ARRIVAL times and advances
+    // by fixed steps in between, so its pose age wobbles ±1 tick as the owner/network/server clock
+    // phases drift — remote clients replay that wobble as speed pulsing. The owner's own claim
+    // samples are uniformly spaced on ITS clock; ticks with no fresh claim extrapolate by the claim
+    // velocity (exact for constant motion), bounded before falling back to the twin. Forced /
+    // arbitrated / asleep records always sample the twin (that's the authoritative state then).
+    glm::vec3 claimStreamPos = glm::vec3(0.0f);
+    glm::quat claimStreamRot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    glm::vec3 claimStreamLinVel = glm::vec3(0.0f);
+    glm::vec3 claimStreamAngVel = glm::vec3(0.0f);
+    uint32 claimStreamSeq = 0;     // seq of the stored state; 0 = none since (re)transfer
+    uint32 claimStreamSentSeq = 0; // last seq a snapshot emitted (same twice = extrapolate)
+    uint8 claimStreamExtrapTicks = 0;
+
     // owner-side (client): next outgoing claim sequence (the redundancy ring lives in the manager —
     // only a handful of entities are ever locally owned, the inline component shouldn't tax them all)
     uint32 claimSeq = 0;

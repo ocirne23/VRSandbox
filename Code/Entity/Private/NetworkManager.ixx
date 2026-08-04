@@ -46,9 +46,13 @@ import :NetworkComponent; // NetInputState in the claim ring; no cycle — the c
 //                    Deny [u8][string reason]
 //                    Spawn (server->client) [u8][varuint baseId][varuint componentCount][varuint ownerClientId][string path][pos 3xf32][rot 4xf32][f32 scale]
 //                    Despawn (server->client) [u8][varuint baseId]
-//   ch3 Unreliable:  Claim (owner->server) [u8][varuint netId][varuint newestSeq][u8 count] + count
-//                    records oldest->newest, each [u32 buttons][move 3xf32][look 3xf32][pos 3xf32]
-//                    [rot 4xf32][linVel 3xf32][angVel 3xf32] — the last N claims ride in EVERY packet
+//   ch3 Unreliable:  Claim (owner->server) [u8][varuint netId][varuint newestSeq][u8 count]
+//                    [u8 flags bit0=quantized][f32 maxVel][f32 maxAngVel (quantized only — the
+//                    owner's live ranges, so the server decodes with what was encoded)] + count
+//                    records oldest->newest, each [u32 buttons][move 3xf32][pos 3xf32]
+//                    [rot u32 smallest-three | 4xf32][linVel + angVel 3xu16 over ±range | 3xf32]
+//                    + ONE trailing [look 3xf32] applied to every record (it barely changes across
+//                    the window). The last "Claim redundancy" claims ride in EVERY packet
 //                    (redundancy beats a reliable channel under loss: no head-of-line stall), the
 //                    server dedups by seq. The server VALIDATES each claim (Network/Validation tweaks:
 //                    displacement budget from seq-elapsed x max speed, velocity cap, trajectory

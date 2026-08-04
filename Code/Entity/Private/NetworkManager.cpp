@@ -10,8 +10,8 @@ import Physics;
 // Bump on ANY wire format change: the transport handshake denies mismatched protocol ids, so old
 // builds fail to connect instead of misparsing. GameNetVersion rides in Hello/Welcome purely so the
 // mismatch produces a readable log line when the protocolId was forgotten.
-constexpr uint32 GameProtocolId = 0x56525338; // "VRS8": server arbitration (Arbitrated record flag)
-constexpr uint16 GameNetVersion = 7;
+constexpr uint32 GameProtocolId = 0x56525339; // "VRS9": compact claims (quantized payload, shared look, tweakable redundancy)
+constexpr uint16 GameNetVersion = 8;
 
 enum class ENetMsg : uint8
 {
@@ -54,6 +54,7 @@ static float s_claimTeleportCap = 10.0f;  // hard displacement cap regardless of
 static bool  s_claimPathRaycast = true;   // reject claims whose path crosses world geometry
 static int   s_forcedTicks = 30;          // snapshot ticks the owner stays force-corrected after a rejection
 static float s_claimReanchorRadius = 2.0f; // a claim this close to the twin's CURRENT state always accepts (guaranteed rejection recovery)
+static int   s_claimRedundancy = 4;       // past claims carried in EVERY packet (<= ring capacity 8): a claim survives unless this many consecutive packets drop
 
 // proximity ownership transfer (server): a server-owned dynamic body near a client's PRIMARY owned
 // body transfers to that client (its physics then drives the object, claims-validated); it reverts
@@ -179,6 +180,7 @@ void NetworkManager::registerTweaks()
     Tweak::boolean("Network/Validation", "Path raycast", &s_claimPathRaycast);
     Tweak::intVar("Network/Validation", "Forced ticks", &s_forcedTicks, 1, 255);
     Tweak::floatVar("Network/Validation", "Re-anchor radius", &s_claimReanchorRadius, 0.1f, 10.0f, 0.1f);
+    Tweak::intVar("Network/Validation", "Claim redundancy", &s_claimRedundancy, 1, 8);
 
     // live-editable transport link simulation (outgoing packets)
     NetHostConfig& config = m_host.config();
@@ -591,6 +593,7 @@ void NetworkManager::setOwner(Entity& root, uint32 clientId)
         {
             comp->ownerClientId = clientId;
             comp->lastAcceptedClaimSeq = 0; // next claim seeds the validation anchor
+            comp->claimStreamSeq = 0;       // don't pass a previous owner's claims through
         }
         if (SceneComponent* scene = getComponent<SceneComponent>(&entity))
             for (const EntityPtr& child : scene->children)
@@ -619,12 +622,27 @@ void NetworkManager::sendClaims()
             continue;
         Entity* entity = replicated.entity;
 
+        const PhysicsComponent* physics = getComponent<PhysicsComponent>(entity);
+        const bool dynamicBody = physics && physics->bodyType == EPhysicsBodyType::Dynamic && physics->body.isValid();
+        if (dynamicBody)
+        {
+            // claim-side twin of the snapshot sleep policy: every tick while awake, ONE final
+            // rest-pose claim on the awake->asleep edge, then silence — an owned-but-settled object
+            // costs nothing upstream (sleepDirty serves both policies: the server uses it for
+            // snapshots, the owning client here — different processes, never the same entity role)
+            if (physics->body.isAwake())
+                comp->sleepDirty = true;
+            else if (comp->sleepDirty)
+                comp->sleepDirty = false;
+            else
+                continue;
+        }
+
         ClaimRing& ring = m_claimRings[netId];
         const uint32 seq = ++comp->claimSeq;
         ClaimRecord& record = ring.records[seq % ClaimRedundancy];
         record.input = comp->input;
-        const PhysicsComponent* physics = getComponent<PhysicsComponent>(entity);
-        if (physics && physics->bodyType == EPhysicsBodyType::Dynamic && physics->body.isValid())
+        if (dynamicBody)
         {
             record.pos = physics->body.getPosition();
             record.rot = physics->body.getRotation();
@@ -641,24 +659,44 @@ void NetworkManager::sendClaims()
         ring.newestSeq = seq;
         ring.validCount = glm::min(ring.validCount + 1, ClaimRedundancy);
 
-        const uint32 count = ring.validCount;
+        // compact wire form: rot/velocities quantized like snapshots (the live-tweakable ranges ride
+        // in the packet so the server always decodes with what we encoded), and `look` is sent ONCE
+        // per packet (temporally it barely changes across the redundancy window)
+        const uint32 count = glm::min(ring.validCount, uint32(glm::clamp(s_claimRedundancy, 1, int(ClaimRedundancy))));
+        const float maxVel = glm::max(1.0f, s_maxVel);
+        const float maxAngVel = glm::max(1.0f, s_maxAngVel);
         uint8 buffer[1024];
         NetWriter writer(buffer);
         writer.write<uint8>(uint8(ENetMsg::Claim));
         writer.writeVarUInt(netId);
         writer.writeVarUInt(seq);
         writer.write<uint8>(uint8(count));
+        writer.write<uint8>(s_quantize ? uint8(1) : uint8(0));
+        if (s_quantize)
+        {
+            writer.write<float>(maxVel);
+            writer.write<float>(maxAngVel);
+        }
         for (uint32 i = 0; i < count; ++i) // oldest -> newest
         {
             const ClaimRecord& rec = ring.records[(seq - count + 1 + i) % ClaimRedundancy];
             writer.write<uint32>(rec.input.buttons);
             writer.write(rec.input.move);
-            writer.write(rec.input.look);
             writer.write(rec.pos);
-            writer.write(rec.rot);
-            writer.write(rec.linVel);
-            writer.write(rec.angVel);
+            if (s_quantize)
+            {
+                writer.write<uint32>(packQuat(rec.rot));
+                for (int c = 0; c < 3; ++c) writer.writeQuantized<uint16>(rec.linVel[c], -maxVel, maxVel);
+                for (int c = 0; c < 3; ++c) writer.writeQuantized<uint16>(rec.angVel[c], -maxAngVel, maxAngVel);
+            }
+            else
+            {
+                writer.write(rec.rot);
+                writer.write(rec.linVel);
+                writer.write(rec.angVel);
+            }
         }
+        writer.write(record.input.look); // newest look, applied to every record server-side
         assert(!writer.overflowed());
         m_host.send(m_serverPeer, writer.data(), ENetDelivery::Unreliable, ChannelClaim);
     }
@@ -674,8 +712,17 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
     const uint32 netId = uint32(reader.readVarUInt());
     const uint32 newestSeq = uint32(reader.readVarUInt());
     const uint32 count = reader.read<uint8>();
-    if (reader.overflowed() || netId == 0 || count == 0 || count > ClaimRedundancy)
+    const uint8 claimFlags = reader.read<uint8>();
+    if (reader.overflowed() || netId == 0 || count == 0 || count > ClaimRedundancy || (claimFlags & ~1))
         return;
+    const bool quantized = (claimFlags & 1) != 0;
+    float maxVel = 50.0f;
+    float maxAngVel = 50.0f;
+    if (quantized) // the owner encoded with ITS live ranges; decode with the same
+    {
+        maxVel = glm::clamp(reader.read<float>(), 1.0f, 1000.0f);
+        maxAngVel = glm::clamp(reader.read<float>(), 1.0f, 1000.0f);
+    }
 
     Entity* entity = nullptr;
     NetworkComponent* comp = nullptr;
@@ -690,6 +737,42 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
     if (!comp || comp->ownerClientId != senderClientId)
         return; // unknown entity, or a client claiming something it doesn't own (spoof) — drop
 
+    // parse everything first: `look` rides once at the tail (it barely changes over the redundancy
+    // window) and applies to every record
+    struct ParsedClaim
+    {
+        NetInputState input;
+        glm::vec3 pos;
+        glm::quat rot;
+        glm::vec3 linVel;
+        glm::vec3 angVel;
+    };
+    ParsedClaim claims[ClaimRedundancy];
+    for (uint32 i = 0; i < count; ++i) // oldest -> newest
+    {
+        ParsedClaim& claim = claims[i];
+        claim.input.buttons = reader.read<uint32>();
+        claim.input.move = reader.read<glm::vec3>();
+        claim.pos = reader.read<glm::vec3>();
+        if (quantized)
+        {
+            claim.rot = unpackQuat(reader.read<uint32>());
+            for (int c = 0; c < 3; ++c) claim.linVel[c] = reader.readQuantized<uint16>(-maxVel, maxVel);
+            for (int c = 0; c < 3; ++c) claim.angVel[c] = reader.readQuantized<uint16>(-maxAngVel, maxAngVel);
+        }
+        else
+        {
+            claim.rot = reader.read<glm::quat>();
+            claim.linVel = reader.read<glm::vec3>();
+            claim.angVel = reader.read<glm::vec3>();
+        }
+    }
+    const glm::vec3 look = reader.read<glm::vec3>();
+    if (reader.overflowed())
+        return;
+    for (uint32 i = 0; i < count; ++i)
+        claims[i].input.look = look;
+
     const float claimInterval = 1.0f / glm::clamp(s_claimRateHz, 1.0f, 240.0f);
     PhysicsComponent* physics = getComponent<PhysicsComponent>(entity);
     const bool dynamicBody = physics && physics->bodyType == EPhysicsBodyType::Dynamic && physics->body.isValid();
@@ -697,16 +780,11 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
     for (uint32 i = 0; i < count; ++i) // oldest -> newest
     {
         const uint32 seq = newestSeq - count + 1 + i;
-        NetInputState input;
-        input.buttons = reader.read<uint32>();
-        input.move = reader.read<glm::vec3>();
-        input.look = reader.read<glm::vec3>();
-        const glm::vec3 pos = reader.read<glm::vec3>();
-        const glm::quat rot = reader.read<glm::quat>();
-        const glm::vec3 linVel = reader.read<glm::vec3>();
-        const glm::vec3 angVel = reader.read<glm::vec3>();
-        if (reader.overflowed())
-            return;
+        const NetInputState& input = claims[i].input;
+        const glm::vec3 pos = claims[i].pos;
+        const glm::quat rot = claims[i].rot;
+        const glm::vec3 linVel = claims[i].linVel;
+        const glm::vec3 angVel = claims[i].angVel;
         if (seq <= comp->lastClaimSeq && comp->lastClaimSeq != 0)
             continue; // redundant resend of a claim we already processed
 
@@ -761,6 +839,12 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
             comp->lastAcceptedClaimSeq = seq;
             comp->lastAcceptedClaimPos = pos;
             comp->input = input; // server-side gameplay reads the owner's intent from here
+            // claim passthrough source: snapshots re-emit this instead of sampling the twin
+            comp->claimStreamPos = pos;
+            comp->claimStreamRot = rot;
+            comp->claimStreamLinVel = linVel;
+            comp->claimStreamAngVel = angVel;
+            comp->claimStreamSeq = seq;
             if (dynamicBody && comp->arbitratedUntilTick > m_serverTick)
             {
                 // ARBITRATION (player-vs-player contact): the solver owns the pose — the claim
@@ -807,6 +891,8 @@ void NetworkManager::transferOwnership(uint32 netId, NetworkComponent* comp, uin
     comp->lastAcceptedClaimSeq = 0;
     comp->lastClaimResult = EClaimResult::None;
     comp->forcedUntilTick = 0;
+    comp->claimStreamSeq = 0; // don't pass the previous owner's claims through
+    comp->claimStreamSentSeq = 0;
 
     uint8 buffer[16];
     NetWriter writer(buffer);
@@ -854,8 +940,11 @@ void NetworkManager::updateOwnershipTransfers(double deltaSec)
         {
             if (comp->contestedUntilTick > m_serverTick)
                 continue; // contested: stays server-owned until the window decays
-            // server-owned: hand it to the first client whose primary body is close enough — its
-            // physics then drives the object (claims), so pushing it feels local to that player
+            if (!physics->body.isAwake())
+                continue; // sleeping props stay server-owned (near-zero cost) — the contact steal
+                          // takes over the instant a player actually hits one, grace covers the RTT
+            // server-owned AND moving: hand it to the first client whose primary body is close
+            // enough — its physics then drives the object, so pushing it feels local to that player
             for (const auto& [clientId, sourcePos] : m_transferSources)
                 if (glm::dot(sourcePos - pos, sourcePos - pos) < transferRadiusSq)
                 {
@@ -1257,6 +1346,41 @@ void NetworkManager::sendSnapshotTick()
             rot = physics->body.getRotation();
             linVel = physics->body.getLinearVelocity();
             angVel = physics->body.getAngularVelocity();
+            // CLAIM PASSTHROUGH (client-owned, normal operation): re-emit the owner's accepted claim
+            // state instead of the twin's pose. The twin is teleport-pinned at claim ARRIVAL times
+            // and fixed-stepped in between, so its sampled pose age wobbles ±1 tick as the owner /
+            // network / server clock phases drift — remote clients replay that as speed pulsing. The
+            // owner's claim samples are uniformly spaced on ITS clock; a tick with no fresh claim
+            // extrapolates by the claim velocity (exact for constant motion), bounded at 3 ticks
+            // before falling back to the twin (which the claims pin, so the handover jump is small).
+            // Forced/arbitrated/asleep records keep the twin — that IS the authoritative state then.
+            if (comp->ownerClientId != 0 && comp->claimStreamSeq != 0 && !asleep && forcedFlag == 0)
+            {
+                if (comp->claimStreamSentSeq != comp->claimStreamSeq)
+                {
+                    comp->claimStreamSentSeq = comp->claimStreamSeq;
+                    comp->claimStreamExtrapTicks = 0;
+                }
+                else if (comp->claimStreamExtrapTicks < 3)
+                {
+                    ++comp->claimStreamExtrapTicks;
+                    const float dt = 1.0f / glm::clamp(s_snapshotHz, 1.0f, 240.0f);
+                    comp->claimStreamPos += comp->claimStreamLinVel * dt; // chains across gap ticks
+                    const float angSpeed = glm::length(comp->claimStreamAngVel);
+                    if (angSpeed > 1e-4f)
+                        comp->claimStreamRot = glm::normalize(
+                            glm::angleAxis(angSpeed * dt, comp->claimStreamAngVel / angSpeed) * comp->claimStreamRot);
+                }
+                else
+                    comp->claimStreamSeq = 0; // stream went stale: back to twin until claims resume
+                if (comp->claimStreamSeq != 0)
+                {
+                    pos = comp->claimStreamPos;
+                    rot = comp->claimStreamRot;
+                    linVel = comp->claimStreamLinVel;
+                    angVel = comp->claimStreamAngVel;
+                }
+            }
         }
         else
         {
