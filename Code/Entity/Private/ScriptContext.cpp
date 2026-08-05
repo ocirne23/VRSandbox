@@ -592,7 +592,8 @@ void registerScriptDslBindings()
             { "sendEvent",   T::Void, { { "eventName", T::String } },                              "ctx->sendEvent($1)" },
             { "sendEventTo", T::Void, { { "entity", T::Entity }, { "eventName", T::String } },     "ctx->sendEventToEntity($1, $2)" },
             // fires locally AND across the network (server -> clients / client -> server + relay); single player = sendEvent
-            { "sendNetworkEvent", T::Void, { { "eventName", T::String } },                         "ctx->sendNetworkEvent($1)" },
+            // `self` rides along so the server's event filter sees which entity fired it
+            { "sendNetworkEvent", T::Void, { { "eventName", T::String } },                         "ctx->sendNetworkEventFrom(self, $1)" },
             // who fired the event being handled (0 = server); server-stamped, unforgeable
             { "networkEventSender", T::Int, { },                                                   "int(ctx->networkEventSender())" },
 
@@ -1157,6 +1158,11 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         // drained by NetworkManager::send on the main thread — NetHost itself is single-threaded)
         if (eventName)
             Globals::networkManager.fireNetworkEvent(eventName);
+    }
+    void thunk_sendNetworkEventFrom(Entity* sender, const char* eventName)
+    {
+        if (eventName)
+            Globals::networkManager.fireNetworkEvent(eventName, {}, sender);
     }
     unsigned int thunk_networkEventSender()
     {

@@ -10,8 +10,8 @@ import Physics;
 // Bump on ANY wire format change: the transport handshake denies mismatched protocol ids, so old
 // builds fail to connect instead of misparsing. GameNetVersion rides in Hello/Welcome purely so the
 // mismatch produces a readable log line when the protocolId was forgotten.
-constexpr uint32 GameProtocolId = 0x56525342; // "VRSB": event sender id, server->client only
-constexpr uint16 GameNetVersion = 10;
+constexpr uint32 GameProtocolId = 0x56525343; // "VRSC": events carry a payload + sender netId
+constexpr uint16 GameNetVersion = 11;
 
 enum class ENetMsg : uint8
 {
@@ -26,7 +26,8 @@ enum class ENetMsg : uint8
     OwnerChange, // server -> client, ch2: [varuint netId][varuint ownerClientId] (per ENTITY, unlike Spawn's per-tree owner)
 };
 
-constexpr size_t MaxEventNameLength = 64; // wire-received event names; real ones are identifiers
+constexpr size_t MaxEventNameLength = 64;  // wire-received event names; real ones are identifiers
+constexpr size_t MaxEventDataBytes = 1024; // payload cap: bounded so one event stays in one packet
 constexpr size_t MaxClients = 32;         // connection-slot cap: each accepted client costs a world
                                           // replay + whatever the app spawns for it in onClientJoined
 
@@ -1203,27 +1204,58 @@ void NetworkManager::handleEventMessage(NetPeerId peer, std::span<const uint8> b
     // the server ever writes that copy.
     const uint32 senderClientId = m_role == ENetRole::Server ? m_peerClients[peer]
                                                              : uint32(reader.readVarUInt());
+    const uint32 senderNetId = uint32(reader.readVarUInt());
     const std::string_view name = reader.readString();
-    // the name is attacker-controlled and reaches the log ring
-    if (reader.overflowed() || name.empty() || name.size() > MaxEventNameLength)
+    const size_t dataSize = size_t(reader.readVarUInt());
+    // both are attacker-controlled; the name also reaches the log ring
+    if (reader.overflowed() || name.empty() || name.size() > MaxEventNameLength || dataSize > MaxEventDataBytes)
+        return;
+    const std::span<const uint8> data = reader.readBytes(dataSize);
+    if (reader.overflowed())
         return;
 
+    // AUTHORIZATION (server only): a connected player firing an event it shouldn't is not stopped by
+    // identity, only by this. Dropped events are not relayed either, so nothing observes them.
+    if (m_role == ENetRole::Server && m_eventFilter
+        && !m_eventFilter(senderClientId, name, data, findOwnedEntity(senderNetId, senderClientId)))
+    {
+        Log::warning("Network: event '" + std::string(name) + "' from client "
+            + std::to_string(senderClientId) + " refused by the event filter");
+        return;
+    }
+
     Log::info("Network: event '" + std::string(name) + "' from client " + std::to_string(senderClientId));
-    fireEventAttributed(name, senderClientId);
+    fireEventAttributed(name, senderClientId, data);
     if (m_role == ENetRole::Server) // re-serialized, not forwarded raw: the id must be ours, not theirs
         for (const NetPeerId other : m_readyPeers)
             if (other != peer)
-                sendEventTo(other, name, senderClientId);
+                sendEventTo(other, name, senderClientId, senderNetId, data);
+}
+
+// The netId comes off the wire, so it is a CLAIM. Resolving it without the ownership check would let
+// a client pin its events on any entity it likes, including another player's.
+Entity* NetworkManager::findOwnedEntity(uint32 netId, uint32 clientId) const
+{
+    if (netId == 0 || clientId == 0)
+        return nullptr;
+    const std::lock_guard<std::mutex> lock(m_entityMutex);
+    const auto it = m_entities.find(netId);
+    if (it == m_entities.end() || it->second.comp->ownerClientId != clientId)
+        return nullptr;
+    return it->second.entity;
 }
 
 // Fires a named event with `senderClientId` readable for its duration (scripts query it through
 // ctx->networkEventSender). Dispatch is synchronous, so a plain scoped set is enough.
-void NetworkManager::fireEventAttributed(std::string_view name, uint32 senderClientId)
+void NetworkManager::fireEventAttributed(std::string_view name, uint32 senderClientId, std::span<const uint8> data)
 {
-    const uint32 previous = m_currentEventSender;
+    const uint32 previousSender = m_currentEventSender;
+    const std::span<const uint8> previousData = m_currentEventData;
     m_currentEventSender = senderClientId;
+    m_currentEventData = data;
     Globals::scriptEvents.fireEvent(std::string(name));
-    m_currentEventSender = previous;
+    m_currentEventSender = previousSender;
+    m_currentEventData = previousData;
 }
 
 void NetworkManager::handleSnapshot(NetReader& reader)
@@ -1323,20 +1355,21 @@ void NetworkManager::send(double deltaSec)
     ProfileScope scope("NetworkManager::send", EProfileCategory::Network);
 
     // outgoing events queued this frame (worker-thread script thunks can't touch NetHost themselves)
-    std::vector<std::string> pendingEvents;
+    std::vector<PendingEvent> pendingEvents;
     {
         const std::lock_guard<std::mutex> lock(m_eventMutex);
         pendingEvents.swap(m_pendingOutgoingEvents);
     }
-    for (const std::string& name : pendingEvents)
+    for (const PendingEvent& event : pendingEvents)
     {
         if (m_role == ENetRole::Server)
         {
             for (const NetPeerId peer : m_readyPeers)
-                sendEventTo(peer, name, 0); // 0 = originated on the server itself
+                sendEventTo(peer, event.name, 0, event.senderNetId, event.data); // 0 = from the server
         }
         else if (m_serverPeer != InvalidNetPeerId && m_host.isConnected(m_serverPeer))
-            sendEventTo(m_serverPeer, name, 0); // unused client-side: our identity is the connection
+            // client id unused here: our identity is the connection we send on
+            sendEventTo(m_serverPeer, event.name, 0, event.senderNetId, event.data);
     }
 
     if (m_role == ENetRole::Server)
@@ -1570,31 +1603,46 @@ void NetworkManager::sendSnapshotTick()
     flushMessage();
 }
 
-void NetworkManager::fireNetworkEvent(std::string_view name)
+void NetworkManager::fireNetworkEvent(std::string_view name, std::span<const uint8> data, Entity* sender)
 {
-    if (name.empty())
+    if (name.empty() || data.size() > MaxEventDataBytes)
+    {
+        if (!name.empty())
+            Log::warning("Network: event '" + std::string(name) + "' payload over "
+                + std::to_string(MaxEventDataBytes) + " bytes, dropped");
         return;
+    }
     // locally originated: we are the sender (0 on a server, our clientId on a client)
-    fireEventAttributed(name, m_localClientId); // same worker-safety contract as thunk_sendEvent
+    fireEventAttributed(name, m_localClientId, data); // same worker-safety contract as thunk_sendEvent
     if (m_role == ENetRole::None)
         return;
+    uint32 senderNetId = 0;
+    if (sender)
+        if (const NetworkComponent* comp = getComponent<NetworkComponent>(sender))
+            senderNetId = comp->netId; // assigned at spawn and never changes — safe to read off-thread
     // NetHost is single-threaded and this is reachable from worker-thread script thunks during the
     // parallel entity pass — queue, send() drains on the main thread the same frame
     const std::lock_guard<std::mutex> lock(m_eventMutex);
-    m_pendingOutgoingEvents.emplace_back(name);
+    m_pendingOutgoingEvents.push_back({ std::string(name), { data.begin(), data.end() }, senderNetId });
 }
 
-// The sender id is present ONLY server->client. A client's own identity is already implied by the
-// connection it sends on, so writing one would be a field the receiver must ignore — and an ignored
-// client-writable identity is one refactor away from being trusted. Absent, it cannot be.
-void NetworkManager::sendEventTo(NetPeerId peer, std::string_view name, uint32 senderClientId)
+// The sender CLIENT id is present ONLY server->client. A client's own identity is already implied by
+// the connection it sends on, so writing one would be a field the receiver must ignore — and an
+// ignored client-writable identity is one refactor away from being trusted. Absent, it cannot be.
+// The sender NET id travels both ways: it names the entity that fired the event, which no connection
+// can imply. It is client-supplied, so the server only trusts it after checking ownership.
+void NetworkManager::sendEventTo(NetPeerId peer, std::string_view name, uint32 senderClientId,
+    uint32 senderNetId, std::span<const uint8> data)
 {
-    uint8 buffer[512];
+    uint8 buffer[MaxEventDataBytes + 256];
     NetWriter writer(buffer);
     writer.write<uint8>(uint8(ENetMsg::Event));
     if (m_role == ENetRole::Server)
         writer.writeVarUInt(senderClientId); // who it originated from — the connection can't say
+    writer.writeVarUInt(senderNetId);
     writer.writeString(name);
+    writer.writeVarUInt(data.size());
+    writer.writeBytes(data);
     if (writer.overflowed())
     {
         Log::warning("Network: event name too long, not sent: " + std::string(name.substr(0, 64)));

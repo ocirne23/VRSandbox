@@ -40,9 +40,11 @@ import :NetworkComponent; // NetInputState in the claim ring; no cycle — the c
 //                    LOCAL pos/rot. Chunked under "Snapshot max bytes"; every chunk repeats the tick,
 //                    staleness is dropped PER ENTITY (record tick <= last applied), so chunk
 //                    reordering is harmless (UnreliableSequenced would drop sibling chunks instead).
-//   ch1 Reliable:    Event [u8][varuint senderClientId (server->client ONLY)][string name] — a
-//                    client sends no id: its identity is the connection, and an ignored
-//                    client-writable one is a refactor away from being trusted
+//   ch1 Reliable:    Event [u8][varuint senderClientId (server->client ONLY)][varuint senderNetId]
+//                    [string name][varuint dataLen][data] — a client sends no CLIENT id: its identity
+//                    is the connection, and an ignored client-writable one is a refactor away from
+//                    being trusted. The NET id names the entity that fired it and travels both ways;
+//                    being client-supplied, the server resolves it only after an ownership check.
 //   ch2 Reliable:    Hello (client->server) [u8][u16 version]
 //                    Welcome (server->client) [u8][u16 version][varuint serverTick][f32 snapshotHz][varuint yourClientId]
 //                    Deny [u8][string reason]
@@ -177,12 +179,30 @@ public:
     // change on a live host. Both ends must match or the handshake denies (a clean failure).
     static void setEncryption(bool enabled);
 
-    void fireNetworkEvent(std::string_view name);
+    // `sender` is the entity firing it (a script's `self`); its netId travels with the event so the
+    // receiving server can hand it to the filter. Payload is copied — the queue outlives the call.
+    void fireNetworkEvent(std::string_view name, std::span<const uint8> data = {}, Entity* sender = nullptr);
 
     // Who fired the event currently being dispatched: 0 = the server (or a local single-player
     // fire), else the originating client. Only meaningful INSIDE an event handler. Server-stamped
     // from the receiving peer, so a client cannot claim to be someone else.
     uint32 currentEventSender() const { return m_currentEventSender; }
+
+    // The event's payload, valid for the duration of its dispatch (a view into the receive buffer —
+    // copy anything you keep). Empty for events fired without one.
+    std::span<const uint8> currentEventData() const { return m_currentEventData; }
+
+    // SERVER-SIDE AUTHORIZATION for events arriving from clients. Identity alone doesn't stop a
+    // legitimately connected player from firing an event they shouldn't — this is the check that
+    // does. Return false to drop it: neither fired locally nor relayed, as if it never arrived.
+    // `sender` is the entity that fired the event (the script's `self`), resolved from the netId on
+    // the wire. It is non-null ONLY when that entity is really owned by `clientId` — the netId is
+    // client-supplied, so anything else would let a client attribute its events to someone else's
+    // entity. Server-originated events bypass the filter. With none installed everything is allowed,
+    // matching the behaviour that predates this hook — install one before any event grants state.
+    using EventFilterFn = std::function<bool(uint32 clientId, std::string_view name,
+        std::span<const uint8> data, Entity* sender)>;
+    void setEventFilter(EventFilterFn callback) { m_eventFilter = std::move(callback); }
 
     // NetworkComponent registration (main thread; spawns/destroys never run inside the parallel pass).
     // Returns the assigned netId — ids are a CODE abstraction, never authored in data, and only the
@@ -226,8 +246,10 @@ private:
     // client-side interaction grace covers second-order contact instead).
     void updateOwnershipTransfers(double deltaSec);
     void sendSnapshotTick();
-    void sendEventTo(NetPeerId peer, std::string_view name, uint32 senderClientId);
-    void fireEventAttributed(std::string_view name, uint32 senderClientId);
+    void sendEventTo(NetPeerId peer, std::string_view name, uint32 senderClientId, uint32 senderNetId,
+        std::span<const uint8> data);
+    void fireEventAttributed(std::string_view name, uint32 senderClientId, std::span<const uint8> data);
+    Entity* findOwnedEntity(uint32 netId, uint32 clientId) const; // null unless clientId really owns it
     void sendSpawnTo(NetPeerId peer, const DynamicSpawn& rec); // transform refreshed from the live entity when possible
 
     struct Replicated
@@ -274,6 +296,8 @@ private:
     // clientIds: stable per connection, minted by the server at Hello (peer ids recycle, clientIds don't)
     uint32 m_localClientId = 0; // client: from the Welcome; always 0 on the server
     uint32 m_currentEventSender = 0; // see currentEventSender()
+    std::span<const uint8> m_currentEventData;
+    EventFilterFn m_eventFilter; // server, see setEventFilter
     uint32 m_nextClientId = 1;  // server
     std::unordered_map<NetPeerId, uint32> m_peerClients; // server: ready peer -> clientId (erased on Disconnected)
     std::function<void(uint32 clientId)> m_onClientJoined; // server, main thread
@@ -312,7 +336,9 @@ private:
     std::map<uint32, std::unique_ptr<NetSnapshotRing>> m_remoteBuffers;
     std::vector<std::pair<uint32, glm::vec3>> m_transferSources; // server scan scratch: clientId + primary body position
 
-    std::vector<std::string> m_pendingOutgoingEvents; // filled from any thread, drained by send()
+    // netId, not Entity*: the sender may be destroyed between the queueing thread and the drain
+    struct PendingEvent { std::string name; std::vector<uint8> data; uint32 senderNetId = 0; };
+    std::vector<PendingEvent> m_pendingOutgoingEvents; // filled from any thread, drained by send()
     std::mutex m_eventMutex;
 
     NetSyncParams m_params;
