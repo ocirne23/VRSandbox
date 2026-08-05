@@ -6,7 +6,6 @@ import Core.Log;
 import Core.Camera;
 import Core.Rect;
 import Core.Transform;
-import Core.Tweaks;
 import Threading;
 
 import RendererVK;
@@ -20,26 +19,16 @@ import Animation;
 import Physics;
 import Audio;
 
-static bool s_parallelUpdate = true;
-
 bool World::initialize()
 {
     Globals::assetRegistry.scanDirectory();
     m_updateStaging.initialize(); // main calls this after JobSystem::initialize
-    Tweak::boolean("Threading", "ParallelEntity", &s_parallelUpdate);
     return true;
 }
 
 void World::update(Renderer& renderer, float deltaSeconds)
 {
     ProfileScope updateScope("World update", EProfileCategory::Entity);
-    if (!s_parallelUpdate)
-    {
-        for (EntityPtr& root : m_rootEntities)
-            root->update(renderer, deltaSeconds);
-        return;
-    }
-
     m_updateLevel.clear();
     for (const EntityPtr& root : m_rootEntities)
         m_updateLevel.push_back({ root.get(), Transform() });
