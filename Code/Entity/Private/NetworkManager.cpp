@@ -69,6 +69,10 @@ static bool  s_encrypt = true;
 static float s_maxUpdateHz = 20.0f;
 static float s_maxClaimSpeed = 60.0f;     // m/s the movement token bucket refills at (cap = half a second
                                           // of it); must exceed the fastest LEGITIMATE motion, free fall included
+// How hard the server's twin chases an accepted claim (1/sec — 1/step closes the gap in one step).
+// It follows through the solver rather than being teleported onto the claim; see handleClaimMessage.
+static float s_twinFollowGain = 10.0f;
+static float s_twinResyncDistance = 2.0f; // past this the follow can't close it: hard teleport
 static float s_maxClaimVelocity = 50.0f;  // cap on the claimed linear velocity magnitude
 static float s_maxClaimAngVel = 50.0f;    // ...and angular (rad/s); both applied on every accept path
 static float s_claimTeleportCap = 10.0f;  // hard displacement cap regardless of elapsed time
@@ -219,6 +223,8 @@ void NetworkManager::registerTweaks()
 
     Tweak::floatVar("Network/Player", "Max update Hz", &s_maxUpdateHz, 1.0f, 120.0f, 0.5f);
     Tweak::floatVar("Network/Validation", "Max speed", &s_maxClaimSpeed, 0.0f, 200.0f, 0.5f);
+    Tweak::floatVar("Network", "Twin follow gain", &s_twinFollowGain, 0.0f, 40.0f, 0.5f);
+    Tweak::floatVar("Network", "Twin resync (m)", &s_twinResyncDistance, 0.1f, 20.0f, 0.1f);
     Tweak::floatVar("Network/Validation", "Max velocity", &s_maxClaimVelocity, 0.0f, 500.0f, 0.5f);
     Tweak::floatVar("Network/Validation", "Max ang velocity", &s_maxClaimAngVel, 0.0f, 500.0f, 0.5f);
     Tweak::floatVar("Network/Validation", "Teleport cap", &s_claimTeleportCap, 0.0f, 100.0f, 0.5f);
@@ -961,11 +967,38 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
             }
             else if (dynamicBody)
             {
-                Globals::physics.teleportBody(physics->body, pos, rot);
-                Globals::physics.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, linVel);
-                Globals::physics.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, angVel);
-                physics->prevPos = physics->currPos = pos;
-                physics->prevRot = physics->currRot = rot;
+                // FOLLOW THE CLAIM THROUGH THE SIM, don't teleport-pin the twin. A teleport per claim
+                // collapsed the render interpolation (prev/curr both became the claim pose, so the
+                // rendered twin froze then jumped) and, because claims are sampled on the OWNER's
+                // step clock while the server steps on its own, it yanked the twin backwards whenever
+                // two server steps fell between two claims — the pulsing visible on the server's own
+                // view. Nothing needs the hard pin: other clients get the owner's exact stream from
+                // the claim passthrough, and the twin only has to be approximately right for
+                // server-side collisions. Bounded velocity also stops hammering box3d with a
+                // teleport every frame, which is better for contact stability.
+                const glm::quat twinRot = physics->body.getRotation();
+                glm::vec3 desiredLin = linVel + (pos - twinPos) * s_twinFollowGain;
+                if (const float speed = glm::length(desiredLin); speed > s_maxClaimVelocity && speed > 1e-6f)
+                    desiredLin *= s_maxClaimVelocity / speed;
+                glm::quat rotError = rot * glm::inverse(twinRot);
+                if (rotError.w < 0.0f)
+                    rotError = -rotError; // shortest arc
+                glm::vec3 desiredAng = angVel + glm::axis(rotError) * glm::angle(rotError) * s_twinFollowGain;
+                if (const float rate = glm::length(desiredAng); rate > s_maxClaimAngVel && rate > 1e-6f)
+                    desiredAng *= s_maxClaimAngVel / rate;
+                Globals::physics.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::NudgeVelocity,
+                    desiredLin, desiredAng, glm::vec3(s_maxClaimVelocity, s_maxClaimAngVel, 0.0f));
+
+                // hard resync only for divergence the follow can't close (spawn, ownership handover,
+                // a long stall). This one IS a teleport, so it stomps the interpolation state.
+                if (glm::length(pos - twinPos) > s_twinResyncDistance)
+                {
+                    Globals::physics.teleportBody(physics->body, pos, rot);
+                    Globals::physics.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, linVel);
+                    Globals::physics.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, angVel);
+                    physics->prevPos = physics->currPos = pos;
+                    physics->prevRot = physics->currRot = rot;
+                }
             }
             else
             {
