@@ -1,5 +1,13 @@
 module;
 
+// 1 (default): script entry points run under the SEH guards below -- a hardware fault in script code disables
+// the script instead of crashing the engine. 0: the invokers call the entry points raw (a script fault then
+// crashes like any other engine fault -- e.g. to get a clean crash dump at the faulting instruction).
+#define OC_SCRIPT_FAULT_CONTAINMENT 1
+
+#if OC_SCRIPT_FAULT_CONTAINMENT
+#include <excpt.h>
+#endif
 #include "ScriptAPI.h"
 
 module Entity;
@@ -11,6 +19,137 @@ import :Entity;
 import :ScriptContext;
 import :ScriptEventManager;
 import Script;
+
+// ---- SEH fault containment -------------------------------------------------------------------------------
+// A script is generated C++, but it runs author logic: an integer divide by zero, INT_MIN / -1, or a stale
+// pointer held across frames raises a hardware exception that would kill the whole engine. Every entry-point
+// call goes through the invokers below instead: the fault is caught with STRUCTURED exception handling (no
+// C++ exceptions involved -- works with /EH off, and on x64 the __try is table-based, zero cost until a fault
+// actually fires), the module is marked `faulted`, and requirementsMet then skips it at every entry point --
+// including OnDestroy, since the script's own state may be half-written at the fault -- until a successful
+// recompile clears the flag. The __try helpers must stay free of objects with destructors (C2712), so they
+// only return the exception code and the plain C++ wrappers below them do the logging.
+namespace
+{
+#if OC_SCRIPT_FAULT_CONTAINMENT
+    int scriptFaultFilter(unsigned long code)
+    {
+        switch (code)
+        {
+        case 0xC0000005: // access violation (a stale Entity* / component pointer)
+        case 0xC0000006: // in-page error
+        case 0xC000001D: // illegal instruction
+        case 0xC000008C: // array bounds exceeded
+        case 0xC000008D: // float denormal operand   -- the six float faults only exist if someone unmasks
+        case 0xC000008E: // float divide by zero        the FP control word; masked (the default, and what
+        case 0xC000008F: // float inexact result        the engine wants) float math produces inf/NaN and
+        case 0xC0000090: // float invalid operation     never raises
+        case 0xC0000091: // float overflow
+        case 0xC0000092: // float stack check
+        case 0xC0000093: // float underflow
+        case 0xC0000094: // integer divide by zero -- the common one
+        case 0xC0000095: // integer overflow (INT_MIN / -1)
+        case 0xC0000096: // privileged instruction
+            return EXCEPTION_EXECUTE_HANDLER;
+        }
+        // Everything else keeps its normal path: breakpoints/single-step stay with the debugger, C++
+        // exceptions (0xE06D7363) stay fatal as they are today, and stack overflow stays fatal because the
+        // guard page is spent -- continuing after it would fault unrecoverably anyway.
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    // OnSpawn and OnDestroy share one shape, so one invoker serves both.
+    unsigned long sehInvoke(ScriptOnSpawnFn fn, Entity* entity, void* data)
+    {
+        __try { fn(&Globals::scriptContext, entity, data); }
+        __except (scriptFaultFilter(_exception_code())) { return _exception_code(); }
+        return 0;
+    }
+    unsigned long sehInvoke(ScriptUpdateFn fn, Entity* entity, float deltaSeconds, void* data)
+    {
+        __try { fn(&Globals::scriptContext, entity, deltaSeconds, data); }
+        __except (scriptFaultFilter(_exception_code())) { return _exception_code(); }
+        return 0;
+    }
+    unsigned long sehInvoke(ScriptOnEventFn fn, Entity* entity, int eventIdx, void* data)
+    {
+        __try { fn(&Globals::scriptContext, entity, eventIdx, data); }
+        __except (scriptFaultFilter(_exception_code())) { return _exception_code(); }
+        return 0;
+    }
+    unsigned long sehInvoke(ScriptOnPhysicsEventFn fn, Entity* entity, Entity* other, int begin, int sensor, long long contactId, void* data)
+    {
+        __try { fn(&Globals::scriptContext, entity, other, begin, sensor, contactId, data); }
+        __except (scriptFaultFilter(_exception_code())) { return _exception_code(); }
+        return 0;
+    }
+#else
+    // Containment off: raw calls, same signatures so the wrappers below don't change. Never returns nonzero,
+    // so reportScriptFault and the `faulted` gate are dead paths (the flag then simply never sets).
+    unsigned long sehInvoke(ScriptOnSpawnFn fn, Entity* entity, void* data)                    { fn(&Globals::scriptContext, entity, data); return 0; }
+    unsigned long sehInvoke(ScriptUpdateFn fn, Entity* entity, float deltaSeconds, void* data) { fn(&Globals::scriptContext, entity, deltaSeconds, data); return 0; }
+    unsigned long sehInvoke(ScriptOnEventFn fn, Entity* entity, int eventIdx, void* data)      { fn(&Globals::scriptContext, entity, eventIdx, data); return 0; }
+    unsigned long sehInvoke(ScriptOnPhysicsEventFn fn, Entity* entity, Entity* other, int begin, int sensor, long long contactId, void* data)
+    {
+        fn(&Globals::scriptContext, entity, other, begin, sensor, contactId, data); return 0;
+    }
+#endif
+
+    void reportScriptFault(const ScriptModule* module, Entity& entity, const char* entry, unsigned long code)
+    {
+        module->faulted = true;
+        char hex[16];
+        std::snprintf(hex, sizeof(hex), "0x%08lX", code);
+        const char* name = entity.getName();
+        Log::error("Script '" + module->scriptPath + "' faulted (" + hex + ") in " + entry + " on entity '"
+            + (name ? name : "<unnamed>") + "' -- disabled until it is recompiled (F6 / Compile & Run)");
+    }
+}
+
+bool invokeScriptOnSpawn(const ScriptModule* module, Entity& entity, void* scriptData)
+{
+    const unsigned long code = sehInvoke(reinterpret_cast<ScriptOnSpawnFn>(module->onSpawn), &entity, scriptData);
+    if (code == 0)
+        return true;
+    reportScriptFault(module, entity, "OnSpawn", code);
+    return false;
+}
+
+bool invokeScriptOnDestroy(const ScriptModule* module, Entity& entity, void* scriptData)
+{
+    const unsigned long code = sehInvoke(reinterpret_cast<ScriptOnSpawnFn>(module->onDestroy), &entity, scriptData);
+    if (code == 0)
+        return true;
+    reportScriptFault(module, entity, "OnDestroy", code);
+    return false;
+}
+
+bool invokeScriptUpdate(const ScriptModule* module, Entity& entity, float deltaSeconds, void* scriptData)
+{
+    const unsigned long code = sehInvoke(reinterpret_cast<ScriptUpdateFn>(module->update), &entity, deltaSeconds, scriptData);
+    if (code == 0)
+        return true;
+    reportScriptFault(module, entity, "Update", code);
+    return false;
+}
+
+bool invokeScriptOnEvent(const ScriptModule* module, Entity& entity, int eventIdx, void* scriptData)
+{
+    const unsigned long code = sehInvoke(reinterpret_cast<ScriptOnEventFn>(module->onEvent), &entity, eventIdx, scriptData);
+    if (code == 0)
+        return true;
+    reportScriptFault(module, entity, "OnEvent", code);
+    return false;
+}
+
+bool invokeScriptOnPhysicsEvent(const ScriptModule* module, Entity& entity, Entity* other, int begin, int sensor, int64 contactId, void* scriptData)
+{
+    const unsigned long code = sehInvoke(reinterpret_cast<ScriptOnPhysicsEventFn>(module->onPhysicsEvent), &entity, other, begin, sensor, contactId, scriptData);
+    if (code == 0)
+        return true;
+    reportScriptFault(module, entity, "OnPhysicsEvent", code);
+    return false;
+}
 
 void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transform& base)
 {
@@ -51,7 +190,7 @@ void ScriptComponent::spawn(Entity& entity, const SpawnInfo& info, const Transfo
 	{
 		onSpawnRan = true; // set even without an OnSpawn entry: it marks "this script has begun on this entity"
 		if (scriptModule->onSpawn)
-			reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
+			invokeScriptOnSpawn(scriptModule, entity, scriptData.get());
 	}
 }
 
@@ -167,7 +306,11 @@ void ScriptComponent::syncScriptDataLive(Entity& entity)
 
 bool ScriptComponent::requirementsMet(const Entity& entity) const
 {
-    return scriptModule == nullptr || (scriptModule->requiredComponents & ~uint32(entity.typeBits)) == 0;
+    // Also the fault gate: a module that hardware-faulted (see the SEH invokers above) stops qualifying at
+    // every entry point at once -- OnDestroy included, since its data may be half-written -- until a
+    // successful recompile clears the flag.
+    return scriptModule == nullptr
+        || (!scriptModule->faulted && (scriptModule->requiredComponents & ~uint32(entity.typeBits)) == 0);
 }
 
 void ScriptComponent::update(Entity& entity, float deltaSeconds)
@@ -184,13 +327,13 @@ void ScriptComponent::update(Entity& entity, float deltaSeconds)
     if (!onSpawnRan)
     {
         onSpawnRan = true;
-        if (scriptModule->onSpawn)
-            reinterpret_cast<ScriptOnSpawnFn>(scriptModule->onSpawn)(&Globals::scriptContext, &entity, scriptData.get());
+        if (scriptModule->onSpawn && !invokeScriptOnSpawn(scriptModule, entity, scriptData.get()))
+            return; // faulted in its constructor -- don't run the first Update on half-built state
     }
 
     if (!scriptModule->update || entity.isFrozen())
         return;
-    reinterpret_cast<ScriptUpdateFn>(scriptModule->update)(&Globals::scriptContext, &entity, deltaSeconds, scriptData.get());
+    invokeScriptUpdate(scriptModule, entity, deltaSeconds, scriptData.get());
 }
 
 void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
@@ -203,7 +346,7 @@ void ScriptComponent::fireEvent(Entity& entity, const std::string& eventName)
     auto it = scriptModule->eventKeyToIndex.find(Globals::scriptEvents.findEventKey(eventName));
     if (it != scriptModule->eventKeyToIndex.end())
     {
-        reinterpret_cast<ScriptOnEventFn>(scriptModule->onEvent)(&Globals::scriptContext, &entity, it->second, scriptData.get());
+        invokeScriptOnEvent(scriptModule, entity, it->second, scriptData.get());
     }
 }
 
@@ -217,7 +360,7 @@ void ScriptComponent::fireEvent(Entity& entity, uint32 eventKey)
     auto it = scriptModule->eventKeyToIndex.find(eventKey);
     if (it != scriptModule->eventKeyToIndex.end())
     {
-        reinterpret_cast<ScriptOnEventFn>(scriptModule->onEvent)(&Globals::scriptContext, &entity, it->second, scriptData.get());
+        invokeScriptOnEvent(scriptModule, entity, it->second, scriptData.get());
     }
 }
 
@@ -228,8 +371,7 @@ void ScriptComponent::firePhysicsEvent(Entity& entity, Entity* other, bool begin
     syncScriptDataLive(entity); // the module may have been recompiled under us since spawn
     if (!scriptModule->onPhysicsEvent || entity.isFrozen() || !requirementsMet(entity))
         return;
-    reinterpret_cast<ScriptOnPhysicsEventFn>(scriptModule->onPhysicsEvent)(
-        &Globals::scriptContext, &entity, other, begin ? 1 : 0, sensor ? 1 : 0, contactId, scriptData.get());
+    invokeScriptOnPhysicsEvent(scriptModule, entity, other, begin ? 1 : 0, sensor ? 1 : 0, contactId, scriptData.get());
 }
 
 void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
@@ -241,7 +383,7 @@ void ScriptComponent::destroy(Entity& entity, const SpawnInfo& info)
     // requirement is checked on top: a skipped teardown beats reaching for a component it was refused
     // (the script's arrays are released below either way).
     if (scriptModule->onDestroy && onSpawnRan && requirementsMet(entity))
-        reinterpret_cast<ScriptOnDestroyFn>(scriptModule->onDestroy)(&Globals::scriptContext, &entity, scriptData.get());
+        invokeScriptOnDestroy(scriptModule, entity, scriptData.get());
 
     if (scriptModule->onEvent)
         Globals::scriptEvents.unregisterListener(scriptModule, &entity);

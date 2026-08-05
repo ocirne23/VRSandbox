@@ -37,6 +37,12 @@ export struct ScriptModule
     uint32 requiredComponents = 0; // EComponentID bitmask (0 = none), from ScriptRequiredComponents()
 	std::vector<std::string> eventNames; // in the order the script declared them
 
+	// Set when an entry point hardware-faulted (caught by Entity's SEH-guarded invokers -- integer divide by
+	// zero, a stale pointer). Every entry-point gate skips a faulted module; the next successful (re)load
+	// clears it, so F6 / Compile & Run is also the recovery path. Mutable for the same reason as the map
+	// below; a plain bool because concurrent sets from parallel-ticking scripts are a benign race.
+	mutable bool faulted = false;
+
 	// Global EventKey -> this script's local OnEvent index (the position its compiled OnEvent switch expects).
 	// Owned/filled by ScriptEventManager in onScriptLoadedCallback and rebuilt on every reload (indices can
 	// shift when events are added/removed/reordered); mutable so it can be written through the const ScriptModule*

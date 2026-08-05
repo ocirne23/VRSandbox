@@ -11,6 +11,16 @@ export struct ScriptComponent;
 // block is discarded, which is the moment the handles inside it stop being reachable.
 void releaseScriptArrays(ScriptComponent& owner);
 
+// SEH-guarded entry-point invokers (defined in ScriptComponent.cpp): run the script function and catch
+// hardware faults (integer divide by zero, a stale pointer) so a broken script disables itself instead of
+// killing the engine. On a fault they mark the module `faulted` -- which requirementsMet folds in, so every
+// entry point everywhere skips it until a successful recompile clears the flag -- and return false.
+bool invokeScriptOnSpawn(const ScriptModule* module, Entity& entity, void* scriptData);
+bool invokeScriptOnDestroy(const ScriptModule* module, Entity& entity, void* scriptData);
+bool invokeScriptUpdate(const ScriptModule* module, Entity& entity, float deltaSeconds, void* scriptData);
+bool invokeScriptOnEvent(const ScriptModule* module, Entity& entity, int eventIdx, void* scriptData);
+bool invokeScriptOnPhysicsEvent(const ScriptModule* module, Entity& entity, Entity* other, int begin, int sensor, int64 contactId, void* scriptData);
+
 // References a visual script (.scr) the entity runs each frame. The Script library compiles the file on
 // demand and ticks it with this entity as `self`, so the script's Get/Set Entity nodes read and write
 // this entity's fields. Holds no execution state itself (Entity must not depend on the Script library).

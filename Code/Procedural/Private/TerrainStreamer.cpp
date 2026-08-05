@@ -242,7 +242,9 @@ namespace Procedural
 	{
 		auto dirty = [this]() { m_configDirty = true; };
 
-		Tweak::boolean("Terrain", "Enabled", &m_enabled);
+		// Dirty so rebuildMaps runs on toggle: enabling is what kicks the V3 model load (disabled terrain
+		// never loads the 2.28 GB of models onto the GPU).
+		Tweak::boolean("Terrain", "Enabled", &m_enabled, dirty);
 		Tweak::intVar("Terrain", "Seed", &m_seed, 0, 1000000, 1.0f, dirty);
 		Tweak::intVar("Terrain", "Chunk size (m)", &m_chunkSize, 128, 1024, 1.0f, dirty);
 		Tweak::intVar("Terrain", "LOD0 resolution", &m_lod0Res, 128, 1024, 1.0f, dirty);
@@ -525,6 +527,20 @@ namespace Procedural
 
 	void TerrainStreamer::rebuildMaps()
 	{
+		// Disabled = no generator and, crucially, NO MODEL KICK: constructing TerrainGenV3 (even the throwaway
+		// "kick" below) is what starts the 2.28 GB GPU load, so a disabled terrain must never reach it. The
+		// Enabled tweak is registered dirty, so flipping it on lands back here and starts the load then.
+		// There is no unload API — models loaded during an earlier enabled stretch stay resident.
+		if (!m_enabled)
+		{
+			m_v3AwaitingModels = false;
+			std::lock_guard<std::mutex> lk(m_mutex);
+			m_maps = nullptr;
+			++m_generation;
+			m_requests.clear();
+			return;
+		}
+
 		// The generator can't sample anything until its models are resident. Constructing it is what kicks
 		// the download/load off, so do that unconditionally, but only PUBLISH it once ready — otherwise
 		// every chunk built in the meantime would bake a flat sea-level world into the resident cache and

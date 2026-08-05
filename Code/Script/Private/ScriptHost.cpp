@@ -306,6 +306,7 @@ bool ScriptHost::loadDll(CachedScript& slot, const fs::path& dll)
     slot.entries.onDestroy = onDestroy;
     slot.entries.onEvent = onEvent;
     slot.entries.onPhysicsEvent = onPhysicsEvent;
+    slot.entries.faulted = false; // a successful (re)load is the one thing that clears a fault
     slot.entries.dataSize = 0;
     if (auto sizeFn = (uint32(*)())GetProcAddress(m, "ScriptDataSize"))
         slot.entries.dataSize = sizeFn();

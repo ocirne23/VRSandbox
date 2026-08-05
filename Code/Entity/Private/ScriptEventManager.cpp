@@ -5,6 +5,7 @@ module;
 module Entity;
 
 import Script;
+import :ScriptComponent; // invokeScriptOnEvent (module-linkage, declared next to the component)
 
 void ScriptEventManager::fireEvent(EventKey key)
 {
@@ -21,10 +22,10 @@ void ScriptEventManager::fireEvent(EventKey key)
 				if (sit->second.entity->isFrozen())
 					continue;
 				// This path calls the script's OnEvent DIRECTLY, bypassing ScriptComponent's own entry points,
-				// so it has to honour //@@require itself (see ScriptComponent::requirementsMet).
-				if (script->requiredComponents & ~uint32(sit->second.entity->typeBits))
+				// so it has to honour //@@require and the fault gate itself (see ScriptComponent::requirementsMet).
+				if (script->faulted || (script->requiredComponents & ~uint32(sit->second.entity->typeBits)))
 					continue;
-				reinterpret_cast<ScriptOnEventFn>(script->onEvent)(&Globals::scriptContext, sit->second.entity, eventIt->second, sit->second.scriptData);
+				invokeScriptOnEvent(script, *sit->second.entity, eventIt->second, sit->second.scriptData);
 			}
 		}
 	}

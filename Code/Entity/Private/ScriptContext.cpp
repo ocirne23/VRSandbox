@@ -1036,7 +1036,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         if (!en)
             return nullptr;
         PhysicsComponent* pc = getComponent<PhysicsComponent>(en);
-        return (pc && pc->body.isValid()) ? pc : nullptr;
+        return (pc->body.isValid()) ? pc : nullptr;
     }
 
     // Scripts tick on WORKER threads during the parallel entity pass, and every box3d write can
@@ -1180,35 +1180,32 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     void* thunk_entityGetForceComponent(Entity* en) { return en ? getComponent<ForceComponent>(en) : nullptr; }
     ForceComponent* asForce(void* p) { return static_cast<ForceComponent*>(p); }
 
-    float thunk_forceGetOutput(void* p)       { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getOutput() : 0.0f; }
-    float thunk_forceGetReach(void* p)        { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getReach() : 0.0f; }
-    float thunk_forceGetFocus(void* p)        { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getFocus() : 0.5f; }
-    float thunk_forceGetDistribution(void* p) { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getDistribution() : 0.5f; }
-    float thunk_forceGetWidth(void* p)        { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getWidth() : 1.0f; }
-    int   thunk_forceGetTeam(void* p)         { ForceComponent* fc = asForce(p); return fc ? int(fc->emitter.getTeam()) : 0; }
-    glm::vec3 thunk_forceGetAppliedForce(void* p) { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getAppliedForce() : glm::vec3(0.0f); }
-    float thunk_forceGetPressure(void* p)     { ForceComponent* fc = asForce(p); return fc ? fc->emitter.getPressure() : 0.0f; }
-    glm::vec3 thunk_forceGetLocalDirection(void* p) { ForceComponent* fc = asForce(p); return fc ? fc->localDirection : glm::vec3(0.0f, 0.0f, -1.0f); }
-    glm::vec3 thunk_forceGetLocalOffset(void* p)    { ForceComponent* fc = asForce(p); return fc ? fc->localOffset : glm::vec3(0.0f); }
-    int   thunk_forceGetCentered(void* p)           { ForceComponent* fc = asForce(p); return (fc && fc->centered) ? 1 : 0; }
+    float thunk_forceGetOutput(void* p)       { return asForce(p)->emitter.getOutput(); }
+    float thunk_forceGetReach(void* p)        { return asForce(p)->emitter.getReach(); }
+    float thunk_forceGetFocus(void* p)        { return asForce(p)->emitter.getFocus(); }
+    float thunk_forceGetDistribution(void* p) { return asForce(p)->emitter.getDistribution(); }
+    float thunk_forceGetWidth(void* p)        { return asForce(p)->emitter.getWidth(); }
+    int   thunk_forceGetTeam(void* p)         { return int(asForce(p)->emitter.getTeam()); }
+    glm::vec3 thunk_forceGetAppliedForce(void* p) { return asForce(p)->emitter.getAppliedForce(); }
+    float thunk_forceGetPressure(void* p)     { return asForce(p)->emitter.getPressure(); }
+    glm::vec3 thunk_forceGetLocalDirection(void* p) { return asForce(p)->localDirection; }
+    glm::vec3 thunk_forceGetLocalOffset(void* p)    { return asForce(p)->localOffset; }
+    int   thunk_forceGetCentered(void* p)           { return asForce(p)->centered ? 1 : 0; }
 
-    void thunk_forceSetOutput(void* p, float v)       { if (ForceComponent* fc = asForce(p)) fc->emitter.setOutput(v); }
-    void thunk_forceSetReach(void* p, float v)        { if (ForceComponent* fc = asForce(p)) fc->emitter.setReach(v); }
-    void thunk_forceSetFocus(void* p, float v)        { if (ForceComponent* fc = asForce(p)) fc->emitter.setFocus(v); }
-    void thunk_forceSetDistribution(void* p, float v) { if (ForceComponent* fc = asForce(p)) fc->emitter.setDistribution(v); }
-    void thunk_forceSetWidth(void* p, float v)        { if (ForceComponent* fc = asForce(p)) fc->emitter.setWidth(v); }
-    void thunk_forceSetTeam(void* p, int v)           { if (ForceComponent* fc = asForce(p)) fc->emitter.setTeam(uint32(glm::max(v, 0))); }
-    void thunk_forceSetLocalOffset(void* p, glm::vec3 v) { if (ForceComponent* fc = asForce(p)) fc->localOffset = v; }
-    void thunk_forceSetCentered(void* p, int v)       { if (ForceComponent* fc = asForce(p)) fc->centered = (v != 0); }
+    void thunk_forceSetOutput(void* p, float v)       { asForce(p)->emitter.setOutput(v); }
+    void thunk_forceSetReach(void* p, float v)        { asForce(p)->emitter.setReach(v); }
+    void thunk_forceSetFocus(void* p, float v)        { asForce(p)->emitter.setFocus(v); }
+    void thunk_forceSetDistribution(void* p, float v) { asForce(p)->emitter.setDistribution(v); }
+    void thunk_forceSetWidth(void* p, float v)        { asForce(p)->emitter.setWidth(v); }
+    void thunk_forceSetTeam(void* p, int v)           { asForce(p)->emitter.setTeam(uint32(glm::max(v, 0))); }
+    void thunk_forceSetLocalOffset(void* p, glm::vec3 v) { asForce(p)->localOffset = v; }
+    void thunk_forceSetCentered(void* p, int v)       { asForce(p)->centered = (v != 0); }
 
     void thunk_forceSetLocalDirection(void* p, glm::vec3 v)
     {
-        if (ForceComponent* fc = asForce(p))
-        {
-            // Match spawn: store a unit axis so the per-frame follow doesn't scale the field direction.
-            const float len2 = glm::dot(v, v);
-            fc->localDirection = len2 > 1e-12f ? v * glm::inversesqrt(len2) : glm::vec3(0.0f, 0.0f, -1.0f);
-        }
+        // Match spawn: store a unit axis so the per-frame follow doesn't scale the field direction.
+        const float len2 = glm::dot(v, v);
+        asForce(p)->localDirection = len2 > 1e-12f ? v * glm::inversesqrt(len2) : glm::vec3(0.0f, 0.0f, -1.0f);
     }
 
     // ---- light component ----
@@ -1219,10 +1216,10 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     LightComponent::LightDesc* asLightDesc(void* p, int index)
     {
         LightComponent* lc = static_cast<LightComponent*>(p);
-        return (lc && index >= 0) ? lc->find(size_t(index)) : nullptr;
+        return index >= 0 ? lc->find(size_t(index)) : nullptr;
     }
 
-    int thunk_lightGetCount(void* p) { LightComponent* lc = static_cast<LightComponent*>(p); return lc ? int(lc->lights.size()) : 0; }
+    int thunk_lightGetCount(void* p) { return int(static_cast<LightComponent*>(p)->lights.size()); }
 
     // lightSetAt is the ONE write path (the DSL's `ref` write-back, the Set Light node's copy-in), so every
     // clamp lives there and nowhere else.
@@ -1269,11 +1266,11 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     SceneComponent* asScene(void* p) { return static_cast<SceneComponent*>(p); }
     void* thunk_entityGetSceneComponent(Entity* en) { return en ? getComponent<SceneComponent>(en) : nullptr; }
 
-    int thunk_sceneGetChildCount(void* p) { SceneComponent* sc = asScene(p); return sc ? (int)sc->children.size() : 0; }
+    int thunk_sceneGetChildCount(void* p) { return (int)asScene(p)->children.size(); }
     Entity* thunk_sceneFindChild(void* p, const char* name)
     {
         SceneComponent* sc = asScene(p);
-        if (!sc || !name) return nullptr;
+        if (!name) return nullptr;
         for (const EntityPtr& child : sc->children)
             if (std::string_view(child->getName()) == name)
                 return child.get();
@@ -1282,7 +1279,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     Entity* thunk_sceneGetChildAt(void* p, int index)
     {
         SceneComponent* sc = asScene(p);
-        if (sc && index >= 0 && index < (int)sc->children.size())
+        if (index >= 0 && index < (int)sc->children.size())
             return sc->children[index].get();
         return nullptr;
     }
@@ -1290,7 +1287,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     void thunk_sceneAddChild(void* p, Entity* child)
     {
         SceneComponent* sc = asScene(p);
-        if (!sc || !child) return;
+        if (!child) return;
         Entity* parent = sc->getEntity();
         if (child->parent != parent) return;
         Globals::scriptEvents.addReparentRequest(EntityPtr(child), EntityPtr(parent));
@@ -1299,7 +1296,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     void thunk_sceneRemoveChild(void* p, Entity* child)
     {
         SceneComponent* sc = asScene(p);
-        if (!sc || !child) return;
+        if (!child) return;
         Entity* parent = sc->getEntity();
         if (child->parent != parent) return;
         Globals::scriptEvents.addReparentRequest(EntityPtr(child), EntityPtr(nullptr));
@@ -1325,13 +1322,13 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
 
     void thunk_physicsSetVelocity(void* p, glm::vec3 v)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, v);
     }
 
     void thunk_physicsApplyImpulse(void* p, glm::vec3 v)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyImpulse, v);
     }
 
@@ -1341,114 +1338,114 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         Globals::physics.teleportBody(pc->body, position, glm::quat(glm::radians(eulerDeg)));
     }
 
-    // Every physics-component thunk below guards the same two things: a null handle, and a component whose body
-    // was never created or has already been destroyed. Either way the call degrades to a no-op or a zero, so
-    // gameplay code never has to check -- the same contract the rest of the ABI keeps.
+    // Every physics-component thunk below guards a body that was never created or has already been destroyed.
+    // Either way the call degrades to a no-op or a zero, so gameplay code never has to check -- the same
+    // contract the rest of the ABI keeps.
     glm::vec3 thunk_physicsGetAngularVelocity(void* p)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        return (pc && pc->body.isValid()) ? pc->body.getAngularVelocity() : glm::vec3(0.0f);
+        return (pc->body.isValid()) ? pc->body.getAngularVelocity() : glm::vec3(0.0f);
     }
 
     void thunk_physicsSetAngularVelocity(void* p, glm::vec3 radiansPerSecond)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, radiansPerSecond);
     }
 
     void thunk_physicsApplyImpulseAtPoint(void* p, glm::vec3 impulse, glm::vec3 worldPoint)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyImpulseAtPoint, impulse, worldPoint);
     }
 
     void thunk_physicsApplyAngularImpulse(void* p, glm::vec3 impulse)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyAngularImpulse, impulse);
     }
 
     void thunk_physicsApplyForce(void* p, glm::vec3 force)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyForce, force);
     }
 
     void thunk_physicsApplyForceAtPoint(void* p, glm::vec3 force, glm::vec3 worldPoint)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyForceAtPoint, force, worldPoint);
     }
 
     void thunk_physicsApplyTorque(void* p, glm::vec3 torque)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::ApplyTorque, torque);
     }
 
     float thunk_physicsGetMass(void* p)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        return (pc && pc->body.isValid()) ? pc->body.getMass() : 0.0f;
+        return (pc->body.isValid()) ? pc->body.getMass() : 0.0f;
     }
 
     glm::vec3 thunk_physicsGetCenterOfMass(void* p)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        return (pc && pc->body.isValid()) ? pc->body.getCenterOfMass() : glm::vec3(0.0f);
+        return (pc->body.isValid()) ? pc->body.getCenterOfMass() : glm::vec3(0.0f);
     }
 
     glm::vec3 thunk_physicsGetPointVelocity(void* p, glm::vec3 worldPoint)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        return (pc && pc->body.isValid()) ? pc->body.getPointVelocity(worldPoint) : glm::vec3(0.0f);
+        return (pc->body.isValid()) ? pc->body.getPointVelocity(worldPoint) : glm::vec3(0.0f);
     }
 
     glm::vec3 thunk_physicsGetPosition(void* p)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        return (pc && pc->body.isValid()) ? pc->body.getPosition() : glm::vec3(0.0f);
+        return (pc->body.isValid()) ? pc->body.getPosition() : glm::vec3(0.0f);
     }
 
     float thunk_physicsGetGravityScale(void* p)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        return (pc && pc->body.isValid()) ? pc->body.getGravityScale() : 0.0f;
+        return (pc->body.isValid()) ? pc->body.getGravityScale() : 0.0f;
     }
 
     void thunk_physicsSetGravityScale(void* p, float scale)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetGravityScale, glm::vec3(scale, 0.0f, 0.0f));
     }
 
     float thunk_physicsGetLinearDamping(void* p)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        return (pc && pc->body.isValid()) ? pc->body.getLinearDamping() : 0.0f;
+        return (pc->body.isValid()) ? pc->body.getLinearDamping() : 0.0f;
     }
 
     void thunk_physicsSetLinearDamping(void* p, float damping)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetLinearDamping, glm::vec3(damping, 0.0f, 0.0f));
     }
 
     float thunk_physicsGetAngularDamping(void* p)
     {
         PhysicsComponent* pc = static_cast<PhysicsComponent*>(p);
-        return (pc && pc->body.isValid()) ? pc->body.getAngularDamping() : 0.0f;
+        return (pc->body.isValid()) ? pc->body.getAngularDamping() : 0.0f;
     }
 
     void thunk_physicsSetAngularDamping(void* p, float damping)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetAngularDamping, glm::vec3(damping, 0.0f, 0.0f));
     }
 
     void thunk_physicsSetAwake(void* p, int awake)
     {
-        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc && pc->body.isValid())
+        if (PhysicsComponent* pc = static_cast<PhysicsComponent*>(p); pc->body.isValid())
             Globals::physics.queueBodyCommand(pc->body, PhysicsWorld::EBodyCommand::SetAwake, glm::vec3(awake != 0 ? 1.0f : 0.0f, 0.0f, 0.0f));
     }
 
@@ -1461,19 +1458,19 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     float thunk_renderGetBoundsRadius(void* p)
     {
         const RenderComponent* rc = static_cast<const RenderComponent*>(p);
-        return (rc != nullptr && rc->node.isValid()) ? rc->node.getWorldBounds().radius : 0.0f;
+        return rc->node.isValid() ? rc->node.getWorldBounds().radius : 0.0f;
     }
 
     glm::vec3 thunk_renderGetBoundsCenter(void* p)
     {
         const RenderComponent* rc = static_cast<const RenderComponent*>(p);
-        return (rc != nullptr && rc->node.isValid()) ? rc->node.getWorldBounds().pos : glm::vec3(0.0f);
+        return rc->node.isValid() ? rc->node.getWorldBounds().pos : glm::vec3(0.0f);
     }
 
     int thunk_renderIsVisible(void* p)
     {
         const RenderComponent* rc = static_cast<const RenderComponent*>(p);
-        if (rc == nullptr || !rc->spatialEntry.isValid())
+        if (!rc->spatialEntry.isValid())
             return 0;
         return Globals::spatialIndex.isVisible(rc->spatialEntry.handle()) ? 1 : 0;
     }
@@ -1481,43 +1478,37 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     int thunk_renderIsSkinned(void* p)
     {
         const RenderComponent* rc = static_cast<const RenderComponent*>(p);
-        return (rc != nullptr && rc->node.isValid() && rc->node.isSkinned()) ? 1 : 0;
+        return (rc->node.isValid() && rc->node.isSkinned()) ? 1 : 0;
     }
 
     glm::vec3 thunk_renderGetOffsetPos(void* p)
     {
-        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
-        return rc != nullptr ? rc->localTransform.pos : glm::vec3(0.0f);
+        return static_cast<const RenderComponent*>(p)->localTransform.pos;
     }
 
     float thunk_renderGetOffsetScale(void* p)
     {
-        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
-        return rc != nullptr ? rc->localTransform.scale : 1.0f;
+        return static_cast<const RenderComponent*>(p)->localTransform.scale;
     }
 
     glm::quat thunk_renderGetOffsetRot(void* p)
     {
-        const RenderComponent* rc = static_cast<const RenderComponent*>(p);
-        return rc != nullptr ? rc->localTransform.quat : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        return static_cast<const RenderComponent*>(p)->localTransform.quat;
     }
 
     void thunk_renderSetOffsetPos(void* p, glm::vec3 position)
     {
-        if (RenderComponent* rc = static_cast<RenderComponent*>(p))
-            rc->localTransform.pos = position;
+        static_cast<RenderComponent*>(p)->localTransform.pos = position;
     }
 
     void thunk_renderSetOffsetScale(void* p, float scale)
     {
-        if (RenderComponent* rc = static_cast<RenderComponent*>(p))
-            rc->localTransform.scale = scale;
+        static_cast<RenderComponent*>(p)->localTransform.scale = scale;
     }
 
     void thunk_renderSetOffsetRot(void* p, glm::quat rotation)
     {
-        if (RenderComponent* rc = static_cast<RenderComponent*>(p))
-            rc->localTransform.quat = glm::normalize(rotation);
+        static_cast<RenderComponent*>(p)->localTransform.quat = glm::normalize(rotation);
     }
 
     // ---- particle component ----
@@ -1525,19 +1516,18 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
 
     void thunk_particleBurst(void* p)
     {
-        if (ParticleComponent* pc = static_cast<ParticleComponent*>(p); pc && pc->effect.isValid())
+        if (ParticleComponent* pc = static_cast<ParticleComponent*>(p); pc->effect.isValid())
             pc->effect.burst();
     }
 
     int thunk_particleGetEmitting(void* p)
     {
-        const ParticleComponent* pc = static_cast<const ParticleComponent*>(p);
-        return (pc != nullptr && pc->effect.isEmitting()) ? 1 : 0;
+        return static_cast<const ParticleComponent*>(p)->effect.isEmitting() ? 1 : 0;
     }
 
     void thunk_particleSetEmitting(void* p, int emitting)
     {
-        if (ParticleComponent* pc = static_cast<ParticleComponent*>(p); pc && pc->effect.isValid())
+        if (ParticleComponent* pc = static_cast<ParticleComponent*>(p); pc->effect.isValid())
             pc->effect.setEmitting(emitting != 0);
     }
 
@@ -1547,7 +1537,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     void thunk_audioTrigger(void* p, Entity* en, const char* alias, int overrideMask, glm::vec3 position, float volume, float pitch)
     {
         AudioComponent* ac = static_cast<AudioComponent*>(p);
-        if (!ac || !en || !alias)
+        if (!en || !alias)
             return;
         AudioComponent::TriggerOverrides overrides;
         if (overrideMask & 1) overrides.position = position;
@@ -1558,8 +1548,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
 
     void thunk_audioStop(void* p, const char* alias)
     {
-        if (AudioComponent* ac = static_cast<AudioComponent*>(p))
-            ac->stopSound(alias ? alias : "");
+        static_cast<AudioComponent*>(p)->stopSound(alias ? alias : "");
     }
 
     // ---- animator component ----
@@ -1569,7 +1558,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     AnimStateMachine* animatorMachineOf(void* p)
     {
         AnimatorComponent* ac = static_cast<AnimatorComponent*>(p);
-        return (ac != nullptr && ac->hasStateMachine) ? &ac->stateMachine : nullptr;
+        return ac->hasStateMachine ? &ac->stateMachine : nullptr;
     }
 
     void* thunk_entityGetAnimatorComponent(Entity* en) { return en ? getComponent<AnimatorComponent>(en) : nullptr; }
@@ -1620,20 +1609,17 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
 
     float thunk_animatorGetSpeed(void* p)
     {
-        const AnimatorComponent* ac = static_cast<const AnimatorComponent*>(p);
-        return ac != nullptr ? ac->resolvePlaybackSpeed() : 0.0f;
+        return static_cast<const AnimatorComponent*>(p)->resolvePlaybackSpeed();
     }
 
     int thunk_animatorGetEnabled(void* p)
     {
-        const AnimatorComponent* ac = static_cast<const AnimatorComponent*>(p);
-        return (ac != nullptr && ac->enabled) ? 1 : 0;
+        return static_cast<const AnimatorComponent*>(p)->enabled ? 1 : 0;
     }
 
     void thunk_animatorSetEnabled(void* p, int enabled)
     {
-        if (AnimatorComponent* ac = static_cast<AnimatorComponent*>(p))
-            ac->enabled = enabled != 0;
+        static_cast<AnimatorComponent*>(p)->enabled = enabled != 0;
     }
 
     // ---- randomness ----
