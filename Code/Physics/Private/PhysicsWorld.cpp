@@ -322,6 +322,9 @@ PhysicsBody PhysicsWorld::createBody(const PhysicsBodyDesc& desc, std::span<cons
     bodyDef.rotation = toB3(glm::normalize(desc.transform.quat));
     bodyDef.linearVelocity = toB3(desc.linearVelocity);
     bodyDef.userData = desc.userData;
+    bodyDef.motionLocks.angularX = desc.lockRotation;
+    bodyDef.motionLocks.angularY = desc.lockRotation;
+    bodyDef.motionLocks.angularZ = desc.lockRotation;
 
     const b3BodyId body = b3CreateBody(std::bit_cast<b3WorldId>(m_worldHandle), &bodyDef);
     if (B3_IS_NULL(body))

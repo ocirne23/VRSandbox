@@ -51,4 +51,6 @@ export struct PhysicsBodyDesc
     Transform transform;                          // world placement; transform.scale is baked into the shape dimensions
     glm::vec3 linearVelocity = glm::vec3(0.0f);
     void* userData = nullptr;                     // reported back through ContactEvent (the engine stores Entity* here)
+    bool lockRotation = false;                    // solver-level lock on all angular axes: the body never rotates
+                                                  // (upright character capsules); contacts apply no torque
 };

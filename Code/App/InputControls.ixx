@@ -50,11 +50,20 @@ private:
                                   // 1 = target end); budget-conserving bump
     float width = 1.0f;           // lateral scale (reach untouched): 1 = round, < 1 = narrower/sharper
 
-    bool playerControl = false;      // key C: WASD/Space drive the locally-owned entity, camera flight paused
+    bool playerControl = false;      // key C: WASD/Space drive the player entity, camera flight paused
     bool playerJumpWasDown = false;  // Space edge detection
     float playerMoveSpeed = 8.0f;    // m/s horizontal target (keep under Network/Validation "Max speed")
     float playerAccel = 60.0f;       // m/s^2 velocity steering
     float playerJumpSpeed = 6.0f;
+
+    // Local player capsule (single player / server): key C spawns + possesses an upright capsule body
+    // (playerCapsule.pre, LockRotation), key V switches first/third person. On a network client key C
+    // keeps its meaning of driving the locally-owned entity instead (see updatePlayerControl).
+    EntityPtr playerEntity;
+    bool playerThirdPerson = true;   // start visible; V toggles
+    float playerEyeHeight = 0.55f;   // metres above the capsule center
+    float playerThirdDistance = 3.5f;
+    float playerSprintMult = 2.0f;   // LShift multiplier on Move speed
 
     std::shared_ptr<EntitySpawnTemplate> lightTmpl; // built once, see lightTemplate()
 
@@ -114,6 +123,10 @@ public:
 		Tweak::floatVar("Network/Player", "Accel", &playerAccel, 1.0f, 200.0f, 0.5f);
 		Tweak::floatVar("Network/Player", "Jump speed", &playerJumpSpeed, 0.5f, 20.0f, 0.1f);
 
+		Tweak::floatVar("Player", "Eye height", &playerEyeHeight, 0.0f, 2.0f, 0.05f);
+		Tweak::floatVar("Player", "Third person dist", &playerThirdDistance, 0.5f, 10.0f, 0.1f);
+		Tweak::floatVar("Player", "Sprint mult", &playerSprintMult, 1.0f, 5.0f, 0.1f);
+
         auto& input = Globals::input;
         pKeyboardListener = input.addKeyboardListener();
         pKeyboardListener->onKeyPressed = [this](const SDL_KeyboardEvent& evt) { handleKeyEvent(evt); };
@@ -133,7 +146,12 @@ public:
     {
         ProfileScope profileScope("Input controls", EProfileCategory::App);
         if (playerControl)
-            updatePlayerControl(deltaSec);
+        {
+            if (Globals::networkManager.role() == ENetRole::Client)
+                updatePlayerControl(deltaSec);
+            else
+                updateLocalPlayer(deltaSec);
+        }
         for (ForceBall& ball : forceBalls)
         {
             if (!ball.entity || !ball.emitter.isValid())
@@ -147,6 +165,36 @@ public:
             if (glm::dot(force, force) > 1e-8f)
                 pc->body.applyImpulse(force * deltaSec * 10000.0f * pressure);
         }
+    }
+
+    // Distance from the body center to the shape's lowest point, world units — grounds the jump
+    // raycast for any player shape (capsule, cube, sphere).
+    static float shapeBottomDistance(const Entity* entity, const PhysicsComponent& pc)
+    {
+        const PhysicsComponent::SpawnInfo* si = getPhysicsSpawnInfo(entity);
+        float d = 1.0f;
+        if (si)
+            switch (si->shape.type)
+            {
+            case EPhysicsShapeType::Box:     d = si->shape.halfExtents.y; break;
+            case EPhysicsShapeType::Sphere:  d = si->shape.radius; break;
+            case EPhysicsShapeType::Capsule: d = si->shape.halfHeight + si->shape.radius; break;
+            default: break;
+            }
+        return d * pc.shapeScale;
+    }
+
+    // The client's own player entity: the ONE locally-owned primary (proximity-transferred objects
+    // are owned too, but they are not the player).
+    Entity* findLocalNetPlayer()
+    {
+        for (const EntityPtr& root : world.rootEntities())
+        {
+            NetworkComponent* net = getComponent<NetworkComponent>(root.get());
+            if (net && net->state && net->authority() == ENetAuthority::LocalOwner && !net->state->transferredOwnership)
+                return root.get();
+        }
+        return nullptr;
     }
 
     // Drives every locally-owned dynamic-body entity with WASD/Space while player control (key C)
@@ -211,14 +259,115 @@ public:
             vel.z += dv.z;
             if (jumpPressed)
             {
-                // grounded = something under the cube within half its extent + a margin (a ray cast
-                // from inside a convex shape doesn't hit that shape itself)
+                // grounded = something under the shape's bottom within a small margin; the ray
+                // ignores the body's own shapes so it can start inside them
                 const glm::vec3 pos = pc->body.getPosition();
-                if (Globals::physics.castRayClosest(pos, glm::vec3(0.0f, -(root->scale + 0.3f), 0.0f)).hit)
+                const float bottom = shapeBottomDistance(root.get(), *pc);
+                if (Globals::physics.castRayClosest(pos, glm::vec3(0.0f, -(bottom + 0.3f), 0.0f), PhysicsLayers::All, &pc->body).hit)
                     vel.y = playerJumpSpeed;
             }
             pc->body.setLinearVelocity(vel);
         }
+    }
+
+    // Drives the local player capsule (single player / server): camera-relative WASD velocity
+    // steering on the upright capsule body, Space jumps off a ground raycast, LShift sprints.
+    // Main thread, before physics.update, so the direct body setters are the sanctioned path.
+    void updateLocalPlayer(float deltaSec)
+    {
+        Input& input = Globals::input;
+        if (!input.isWindowHasFocus() || !Globals::ui.isViewportFocused())
+            return;
+        PhysicsComponent* pc = playerEntity ? getComponent<PhysicsComponent>(playerEntity.get()) : nullptr;
+        if (!pc || pc->bodyType != EPhysicsBodyType::Dynamic || !pc->body.isValid())
+            return;
+
+        glm::vec3 forward = cameraController.getDirection();
+        forward.y = 0.0f; // camera-relative planar movement
+        const float forwardLen = glm::length(forward);
+        forward = forwardLen > 1e-4f ? forward / forwardLen : glm::vec3(0.0f, 0.0f, -1.0f);
+        const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        glm::vec3 move(0.0f);
+        if (input.isKeyDown(SDL_SCANCODE_W)) move += forward;
+        if (input.isKeyDown(SDL_SCANCODE_S)) move -= forward;
+        if (input.isKeyDown(SDL_SCANCODE_D)) move += right;
+        if (input.isKeyDown(SDL_SCANCODE_A)) move -= right;
+        if (glm::dot(move, move) > 1e-8f)
+            move = glm::normalize(move);
+        const float speed = playerMoveSpeed * (input.isKeyDown(SDL_SCANCODE_LSHIFT) ? playerSprintMult : 1.0f);
+
+        glm::vec3 vel = pc->body.getLinearVelocity();
+        glm::vec3 dv = glm::vec3(move.x * speed - vel.x, 0.0f, move.z * speed - vel.z);
+        const float maxDv = playerAccel * deltaSec;
+        const float dvLen = glm::length(dv);
+        if (dvLen > maxDv && dvLen > 1e-6f)
+            dv *= maxDv / dvLen;
+        vel.x += dv.x;
+        vel.z += dv.z;
+
+        const bool jumpDown = input.isKeyDown(SDL_SCANCODE_SPACE);
+        if (jumpDown && !playerJumpWasDown)
+        {
+            // grounded = something under the capsule bottom within a small margin; the ray ignores
+            // the capsule's own shapes so it can start inside them
+            const float bottom = shapeBottomDistance(playerEntity.get(), *pc);
+            const glm::vec3 pos = pc->body.getPosition();
+            if (Globals::physics.castRayClosest(pos, glm::vec3(0.0f, -(bottom + 0.3f), 0.0f), PhysicsLayers::All, &pc->body).hit)
+                vel.y = playerJumpSpeed;
+        }
+        playerJumpWasDown = jumpDown;
+        pc->body.setLinearVelocity(vel);
+    }
+
+    // Key C outside a client session: spawn + possess the capsule, or hand the camera back.
+    void setLocalPlayerPossessed(bool possess)
+    {
+        if (possess)
+        {
+            const glm::vec3 dir = cameraController.getDirection();
+            playerEntity = world.spawnAssetFile("Entities/Debug/playerCapsule.pre",
+                Transform(cameraController.getPosition() + dir * 2.0f), true);
+            if (playerEntity)
+                world.addRootEntity(playerEntity);
+            playerJumpWasDown = true; // swallow a Space held through the toggle
+        }
+        else if (playerEntity)
+        {
+            if (PhysicsComponent* pc = getComponent<PhysicsComponent>(playerEntity.get()); pc && pc->body.isValid())
+                cameraController.setPosition(pc->body.getPosition() + glm::vec3(0.0f, playerEyeHeight, 0.0f));
+            world.removeRootEntity(playerEntity);
+            playerEntity = EntityPtr();
+        }
+    }
+
+    // Replaces the frame camera with the possessed capsule's view: first person at eye height, or a
+    // third-person follow pulled in by a wall raycast. Called from main right after the fly camera
+    // produced the frame camera, so everything downstream (UI picking, audio listener, renderer)
+    // sees the player view. The pose interpolates with the same prev/curr/alpha the render mesh
+    // used LAST frame - one sim step behind this frame's mesh, a smooth constant offset.
+    void applyPlayerCamera(Camera& camera)
+    {
+        if (!playerControl)
+            return;
+        Entity* player = Globals::networkManager.role() == ENetRole::Client
+            ? findLocalNetPlayer() // the client-owned primary the server spawned for us
+            : playerEntity.get();
+        PhysicsComponent* pc = player ? getComponent<PhysicsComponent>(player) : nullptr;
+        if (!pc || !pc->body.isValid())
+            return;
+        const float alpha = Globals::physics.getInterpolationAlpha();
+        const glm::vec3 pos = glm::mix(pc->prevPos, pc->currPos, alpha);
+        const glm::vec3 dir = cameraController.getDirection();
+        glm::vec3 eye = pos + glm::vec3(0.0f, playerEyeHeight, 0.0f);
+        if (playerThirdPerson)
+        {
+            const glm::vec3 back = -dir * playerThirdDistance;
+            const PhysicsWorld::RayHit hit = Globals::physics.castRayClosest(eye, back, PhysicsLayers::All, &pc->body);
+            eye += hit.hit ? back * glm::max(hit.fraction - 0.1f, 0.0f) : back;
+        }
+        camera.position = eye;
+        camera.viewMatrix = glm::lookAt(eye, eye + dir, glm::vec3(0.0f, 1.0f, 0.0f));
     }
 
     void handleKeyEvent(const SDL_KeyboardEvent& evt)
@@ -254,14 +403,29 @@ public:
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_K && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
             Globals::networkManager.fireNetworkEvent("NetPing"); // K: network-event smoke test (fires on every connected instance)
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_C && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN
-            && (evt.mod & SDL_KMOD_CTRL) == 0) // plain C only — Ctrl+C stays copy
+            && !evt.repeat && (evt.mod & SDL_KMOD_CTRL) == 0) // plain C only — Ctrl+C stays copy
         {
-            // C: toggle player control — WASD/Space drive the locally-owned entity instead of flying
-            // the camera (mouse-look stays); see updatePlayerControl
+            // C: toggle player control — WASD/Space drive the player instead of flying the camera
+            // (mouse-look stays). On a client that is the locally-owned networked entity (see
+            // updatePlayerControl); otherwise a local upright capsule is spawned and possessed.
             playerControl = !playerControl;
             cameraController.setMovementEnabled(!playerControl);
-            Log::info(playerControl ? "Player control ON: WASD/Space drive your entity (C to release)"
-                                    : "Player control OFF: camera flight restored");
+            if (Globals::networkManager.role() == ENetRole::Client)
+                Log::info(playerControl ? "Player control ON: WASD/Space drive your entity (C to release)"
+                                        : "Player control OFF: camera flight restored");
+            else
+            {
+                setLocalPlayerPossessed(playerControl);
+                Log::info(playerControl ? "Player control ON: WASD/Space/LShift drive the capsule, V toggles first/third person (C to release)"
+                                        : "Player control OFF: camera flight restored");
+            }
+        }
+        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_V && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN
+            && !evt.repeat && (evt.mod & SDL_KMOD_CTRL) == 0) // plain V only — Ctrl+V stays paste
+        {
+            playerThirdPerson = !playerThirdPerson;
+            if (playerControl)
+                Log::info(playerThirdPerson ? "Player camera: third person" : "Player camera: first person");
         }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_U && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {

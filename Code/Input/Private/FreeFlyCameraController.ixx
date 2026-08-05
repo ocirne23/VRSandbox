@@ -22,6 +22,9 @@ public:
     // Off = mouse-look only: the WASD/Space/Ctrl fly keys are released to whoever borrowed them
     // (player control routes them to the owned entity while active — see InputControls key C)
     void setMovementEnabled(bool enabled) { m_movementEnabled = enabled; }
+    // Hard reposition (view matrix refreshes on the next update): player control hands the camera
+    // back where the possessed capsule left it instead of popping to the pre-possession spot
+    void setPosition(const glm::vec3& position) { m_position = position; }
 
     glm::vec3 getPosition() const { return m_position; }
     glm::vec3 getDirection() const { return m_direction; }

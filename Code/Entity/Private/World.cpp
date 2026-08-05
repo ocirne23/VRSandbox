@@ -491,6 +491,7 @@ std::shared_ptr<PhysicsComponent::SpawnInfo> World::buildPhysicsSpawnInfo(const 
     }
     if (const AssetNode* n = physicsNode.find("Group"))       shape.groupIndex = n->asInt();
     if (const AssetNode* n = physicsNode.find("MaxHullVertices")) shape.maxHullVertices = n->asInt(0, shape.maxHullVertices);
+    if (const AssetNode* n = physicsNode.find("LockRotation"))  info->lockRotation = n->asBool();
     if (const AssetNode* n = physicsNode.find("Sensor"))        shape.isSensor = n->asBool();
     if (const AssetNode* n = physicsNode.find("ContactEvents")) shape.contactEvents = n->asBool();
     if (const AssetNode* n = physicsNode.find("Enabled"))     info->enabled = n->asBool();

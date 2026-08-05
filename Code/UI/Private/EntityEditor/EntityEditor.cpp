@@ -975,6 +975,9 @@ void EntityEditor::renderPhysicsSection()
 	ImGui::SameLine();
 	if (ImGui::Checkbox("Contact Events", &m_physicsDraft.shape.contactEvents))
 		commitRespawn();
+	ImGui::SameLine();
+	if (ImGui::Checkbox("Lock Rotation", &m_physicsDraft.lockRotation))
+		commitRespawn();
 
 	ImGui::SetNextItemWidth(160.0f);
 	inputTextStd("Layer", m_physicsDraft.layer);
@@ -1726,6 +1729,8 @@ void EntityEditor::commitRespawn()
 		node.set("Restitution", m_physicsDraft.shape.restitution);
 		node.set("Sensor", m_physicsDraft.shape.isSensor);
 		node.set("ContactEvents", m_physicsDraft.shape.contactEvents);
+		if (m_physicsDraft.lockRotation)
+			node.set("LockRotation", m_physicsDraft.lockRotation);
 		if (!m_physicsDraft.layer.empty())
 			node.set("Layer", m_physicsDraft.layer);
 		if (!m_physicsDraft.collidesWith.empty())

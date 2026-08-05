@@ -30,16 +30,16 @@ import Core.Windows;
 static std::atomic<bool> g_headlessRunning = true;
 static BOOL __stdcall headlessCtrlHandler(DWORD) { g_headlessRunning = false; return TRUE; } // any console ctrl event = clean shutdown
 
-// Server: per-player entities. Each joining client gets a claim-driven cube it OWNS — on the owning
-// client, gizmo-dragging it is authoritative movement (streamed as claims, validated server-side;
-// drag implausibly fast and the server rejects + force-corrects). Torn down when the client leaves;
-// the despawn replicates to everyone else. Main thread (fired from networkManager.receive).
+// Server: per-player entities. Each joining client gets a claim-driven upright capsule it OWNS — on
+// the owning client, gizmo-dragging it is authoritative movement (streamed as claims, validated
+// server-side; drag implausibly fast and the server rejects + force-corrects). Torn down when the
+// client leaves; the despawn replicates to everyone else. Main thread (fired from networkManager.receive).
 static void setupServerJoinCallbacks()
 {
     Globals::networkManager.setOnClientJoined([](uint32 clientId)
         {
             World& world = Globals::world;
-            EntityPtr player = world.spawnAssetFile("Entities/Debug/netPlayerCube.pre",
+            EntityPtr player = world.spawnAssetFile("Entities/Debug/netPlayerCapsule.pre",
                 Transform(glm::vec3(0, 10.0f, 0)), true);
             if (!player)
                 return;
@@ -360,6 +360,7 @@ int main(int argc, char* argv[])
         {
             cameraController.update(deltaSec);
             camera = cameraController.getCamera();
+            controls.applyPlayerCamera(camera); // possessed capsule view (first/third person), see InputControls
         }
         ui.update(world.rootEntities(), camera, deltaSec); // also drives the gizmo it owns
 

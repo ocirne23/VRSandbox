@@ -1,0 +1,24 @@
+// Per-player capsule: spawned by the server when a client joins, OWNED by that client. The owning
+// client drives it with WASD/Space (key C toggles player control — the free-fly camera releases
+// those keys; V toggles first/third person), simulating it LOCALLY for full responsiveness; the
+// claim stream carries the resulting body state to the server, validated by the Network/Validation
+// plausibility gate (move implausibly fast or through geometry and the server rejects +
+// force-corrects). Everyone else sees it as a normal replica. LockRotation keeps it upright inside
+// the solver on every instance (owner, server twin, replicas).
+Prefab netPlayerCapsule
+	Scale 0.4
+	Component Render
+		ObjectContainer wireshapes
+		Node Capsule
+		Type StaticMesh
+	Component Physics
+		Body Dynamic
+		Shape Capsule
+		Radius 1
+		HalfHeight 1
+		Density 120
+		Friction 0.3
+		Restitution 0
+		LockRotation true
+		ContactEvents true
+	Component Network

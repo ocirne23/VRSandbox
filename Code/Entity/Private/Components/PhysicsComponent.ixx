@@ -41,6 +41,7 @@ export struct PhysicsComponent
         std::vector<std::string> collidesWith; // named layers this body collides with ("All"/"None" allowed), empty = all
         std::shared_ptr<PhysicsMesh> mesh;     // Shape Mesh: keeps the shared collision BVH alive (shape.mesh points at it)
         std::shared_ptr<const OccluderData> occluders; // Shape Mesh + Static: occlusion-culling occluder triangles
+        bool lockRotation = false;             // dynamic body never rotates (upright character capsules)
         bool enabled = true;
     };
 

@@ -1,0 +1,17 @@
+Prefab playerCapsule
+	Position 0 0 0
+	Rotation 0 0 0
+	Scale 0.4
+	Component Render
+		ObjectContainer baseshapes
+		Node Capsule
+		Type StaticMesh
+	Component Physics
+		Body Dynamic
+		Shape Capsule
+		Radius 1
+		HalfHeight 1
+		Density 120
+		Friction 0.3
+		Restitution 0
+		LockRotation true

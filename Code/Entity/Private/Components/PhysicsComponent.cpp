@@ -26,6 +26,7 @@ void PhysicsComponent::spawn(Entity& entity, const SpawnInfo& info, const Transf
     desc.type = info.bodyType;
     desc.transform = world;
     desc.userData = &entity;
+    desc.lockRotation = info.lockRotation;
     body = Globals::physics.createBody(desc, std::span(&info.shape, 1));
 
     if (info.bodyType == EPhysicsBodyType::Static)
@@ -147,6 +148,7 @@ void writePhysicsSpawnInfo(const PhysicsComponent::SpawnInfo& info, AssetNode& o
         out.set("Shape", "Mesh"); // BVH re-derived from the render mesh on load
         break;
     }
+    if (info.lockRotation)   out.set("LockRotation", info.lockRotation);
     if (shape.isSensor)      out.set("Sensor", shape.isSensor);
     if (shape.contactEvents) out.set("ContactEvents", shape.contactEvents);
     if (shape.offset != defaults.offset)           out.set("Offset", shape.offset);
