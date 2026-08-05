@@ -26,8 +26,15 @@ enum class ENetMsg : uint8
     OwnerChange, // server -> client, ch2: [varuint netId][varuint ownerClientId] (per ENTITY, unlike Spawn's per-tree owner)
 };
 
-constexpr size_t MaxEventNameLength = 64;  // wire-received event names; real ones are identifiers
+constexpr size_t MaxEventNameLength = 64;  // event names; real ones are identifiers
 constexpr size_t MaxEventDataBytes = 1024; // payload cap: bounded so one event stays in one packet
+// type byte + senderClientId + senderNetId + name length + name + payload length (varints are <= 5B
+// at these magnitudes). Both caps are enforced before send, so a valid event always fits.
+constexpr size_t MaxEventMessageBytes = 1 + 5 + 5 + 5 + MaxEventNameLength + 5 + MaxEventDataBytes;
+// Events are reliable, so exceeding this would only fragment (correct, just more packets) — the
+// assert exists to make that a DECISION rather than something a grown header does behind our backs.
+static_assert(MaxEventMessageBytes <= netMaxSinglePacketMessage(NetHostConfig{}.maxPacketSize, true),
+    "an event no longer fits one packet: raise maxPacketSize, lower the caps, or accept fragmenting");
 constexpr size_t MaxClients = 32;         // connection-slot cap: each accepted client costs a world
                                           // replay + whatever the app spawns for it in onClientJoined
 
@@ -40,7 +47,9 @@ constexpr uint8 ChannelClaim = 3;
 // ---- tweaks (server send policy; correction thresholds live in NetSyncParams) ------------------
 static float s_snapshotHz = 20.0f;       // matches the physics fixed step
 static bool  s_quantize = true;
-static int   s_snapshotMaxBytes = 1100;  // stay under the transport's unreliable drop ceiling (~1175)
+// Snapshots are UNRELIABLE, so an oversized one is DROPPED, not fragmented — this must stay under
+// the transport's single-packet budget, which is why the cap is derived rather than written down.
+static int   s_snapshotMaxBytes = int(netMaxSinglePacketMessage(NetHostConfig{}.maxPacketSize, true)) - 64;
 static int   s_maxEntitiesPerTick = 200;
 static int   s_keyframeEveryTicks = 20;  // unmoved entities refresh on this rotation (drift/late-join repair)
 static float s_sendPosEpsilon = 0.001f;
@@ -1605,11 +1614,14 @@ void NetworkManager::sendSnapshotTick()
 
 void NetworkManager::fireNetworkEvent(std::string_view name, std::span<const uint8> data, Entity* sender)
 {
-    if (name.empty() || data.size() > MaxEventDataBytes)
+    // the same caps the receiver enforces — otherwise an event that is valid to send is rejected on
+    // arrival, which is a far more confusing failure than refusing it here
+    if (name.empty() || name.size() > MaxEventNameLength || data.size() > MaxEventDataBytes)
     {
         if (!name.empty())
-            Log::warning("Network: event '" + std::string(name) + "' payload over "
-                + std::to_string(MaxEventDataBytes) + " bytes, dropped");
+            Log::warning("Network: event '" + std::string(name.substr(0, MaxEventNameLength))
+                + "' exceeds the name (" + std::to_string(MaxEventNameLength) + "B) or payload ("
+                + std::to_string(MaxEventDataBytes) + "B) cap, dropped");
         return;
     }
     // locally originated: we are the sender (0 on a server, our clientId on a client)
@@ -1634,7 +1646,7 @@ void NetworkManager::fireNetworkEvent(std::string_view name, std::span<const uin
 void NetworkManager::sendEventTo(NetPeerId peer, std::string_view name, uint32 senderClientId,
     uint32 senderNetId, std::span<const uint8> data)
 {
-    uint8 buffer[MaxEventDataBytes + 256];
+    uint8 buffer[MaxEventMessageBytes];
     NetWriter writer(buffer);
     writer.write<uint8>(uint8(ENetMsg::Event));
     if (m_role == ENetRole::Server)

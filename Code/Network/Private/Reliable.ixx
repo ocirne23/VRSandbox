@@ -114,12 +114,24 @@ export struct NetHostStats
     uint32 packetsDroppedPerSec = 0; // rate-limited away — sustained nonzero means a flood (or limits set too tight)
 };
 
-// protocol internals shared between interface and implementation
-constexpr uint32 NetPacketHeaderSize = 1 + 2;      // type + wire seq; ack fields live in the (sealed) body
-constexpr uint32 NetPacketAckSize = 2 + 4;
+// protocol internals shared between interface and implementation. The framing sizes are exported so
+// callers can derive their own message caps from them (see netMaxSinglePacketMessage).
+export constexpr uint32 NetPacketHeaderSize = 1 + 2; // type + wire seq; ack fields live in the (sealed) body
+export constexpr uint32 NetPacketAckSize = 2 + 4;
+export constexpr uint32 NetReliableMsgHeaderSize = 6; // kind + seq + varint length
 constexpr uint32 NetMaxRawPacketSize = 1500;
 constexpr uint32 NetReliableWindow = 256;          // per channel: messages in flight / receive reorder window
 constexpr uint32 NetSentPacketRing = 1024;
+
+// Largest message that still rides in ONE packet. Bigger RELIABLE messages fragment transparently
+// (correct, just more packets that must all arrive); bigger UNRELIABLE ones are DROPPED, as there is
+// nothing to reassemble them with. Derive limits from this rather than hardcoding a margin, which
+// silently rots the moment any header here grows.
+export constexpr uint32 netMaxSinglePacketMessage(uint32 maxPacketSize, bool encrypted)
+{
+    return maxPacketSize - NetPacketHeaderSize - NetPacketAckSize
+        - (encrypted ? NetCryptoTagSize : 0) - NetReliableMsgHeaderSize;
+}
 
 struct NetPeer
 {
