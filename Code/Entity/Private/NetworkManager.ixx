@@ -10,24 +10,17 @@ import :NetworkComponent; // NetInputState in the claim ring; no cycle — the c
 // process, role picked at startup: Server opens a listening host, Client connects out, None (single
 // player) leaves everything inert.
 //
-// OWNERSHIP MODEL: every networked entity is SERVER-OWNED. A NetworkComponent registering on the
-// server — scene load or runtime, no distinction — gets a server-assigned netId and a spawn record,
-// and materializes on every client through a reliable Spawn message (late joiners get all live
-// records replayed after their Welcome). Clients never invent ids: a NetworkComponent registering
-// client-side OUTSIDE an incoming Spawn (shared prefab reused as client-local content) stays
-// LOCAL-INERT — netId 0, not in the registry, never synced. Client-only and server-only entities are
-// simply entities without a NetworkComponent (or client-local ones); the two scenes can differ
-// arbitrarily because nothing outside the networked set needs to correspond, and identity is the
-// server's id alone. Shared static scenery that doesn't move needs no NetworkComponent at all — only
-// STATE is networked, and the server streams pos/rot snapshots for registered entities at
-// "Network/Snapshot Hz" which clients correct toward (NetworkComponent::update). Named script events
-// travel the same connection (fireNetworkEvent): fired locally, sent to the other side, and relayed
-// server-side to every other client — so an "On Event" script entry reacts identically everywhere.
+// OWNERSHIP MODEL: every networked entity is SERVER-OWNED and the server mints every netId. A
+// component registering on the server (scene load or runtime alike) gets an id plus a spawn record
+// replicated to clients — late joiners get all live records replayed after their Welcome, which is
+// how the networked world arrives. A client registering OUTSIDE an incoming Spawn stays LOCAL-INERT
+// (netId 0, never synced), so client-only and server-only entities are just entities the other side
+// doesn't have, the two scenes can differ arbitrarily, and id conflicts are structurally impossible.
+// Only STATE is networked: static scenery that never moves needs no NetworkComponent.
 //
-// Threading: every NetHost call happens on the main thread (receive() before the entity/physics
-// updates, send() after world.update — see main.cpp). Snapshot decode writes component target state
-// on the main thread too, so NetworkComponent::update (parallel entity pass) only ever reads it.
-// The registry mutex is insurance for spawn/destroy, which are main-thread today.
+// Threading: every NetHost call is main-thread (receive() before the entity/physics updates, send()
+// after world.update). Snapshot decode writes component target state on the main thread too, so
+// NetworkComponent::update only ever reads it from workers.
 //
 // Wire protocol (GameProtocolId bumps on ANY format change — the transport handshake denies
 // mismatched ids, which is the version gate):
@@ -88,20 +81,14 @@ export struct NetSyncParams
     // playback advances only on snapshot arrival. Loss gaps fall through to the push for a frame.
     int remoteInterpTicks = 2;
 
-    // PHYSICAL PUSH (the correction for dynamic bodies): between deadzone and snap the body is
-    // steered by bounded impulses through the sim — position/rotation error becomes corrective
-    // velocity on top of the server's, applied via EBodyCommand::NudgeVelocity with a per-second
-    // acceleration cap. Past the snap threshold the push enters CATCH-UP: gains and caps are
-    // multiplied by pushCatchUpBoost so multi-meter errors still correct THROUGH the sim — a body
-    // plows around obstacles with legitimate contacts instead of teleporting into them (a teleport
-    // into an occupied space would depenetration-fling both bodies into fresh desync). The true
-    // teleport resync survives as the LAST resort, at posTeleportThreshold only (rotation alone
-    // never teleports — a wrong orientation can't materialize inside anything).
-    // LOCAL INTERACTION GRACE: while a server-owned body sits within this radius of one of OUR
-    // claim-driven bodies, the client suspends its corrections — they would drag it toward the
-    // server's RTT-old (pre-push) state and fight the shove the player is applying right now. The
-    // server receives the same push ~an RTT later through the claim-followed player twin, and the
-    // normal corrections reconcile the residue once the grace lingers out. 0 = off.
+    // PHYSICAL PUSH (dynamic bodies): error becomes corrective velocity on top of the server's, as
+    // bounded impulses through the sim. Past the snap threshold gains/caps are multiplied by
+    // pushCatchUpBoost so multi-meter errors still correct THROUGH the sim — teleporting into an
+    // occupied space would depenetration-fling both bodies into fresh desync. The teleport resync is
+    // the LAST resort, position error only (a wrong orientation can't materialize inside anything).
+    // INTERACTION GRACE: a server-owned body within this radius of one of OUR claim-driven bodies
+    // suspends its corrections — they'd fight the shove the player is applying with the server's
+    // RTT-old pre-push state. The twin gets the same push an RTT later. 0 = off.
     float interactionRadius = 1.5f;
     float interactionLinger = 0.5f;   // seconds the grace persists after leaving the radius
 
@@ -179,8 +166,8 @@ public:
     // change on a live host. Both ends must match or the handshake denies (a clean failure).
     static void setEncryption(bool enabled);
 
-    // `sender` is the entity firing it (a script's `self`); its netId travels with the event so the
-    // receiving server can hand it to the filter. Payload is copied — the queue outlives the call.
+    // `sender` (a script's `self`) travels as a netId so the receiving server can hand it to the
+    // filter. Payload is copied — the queue outlives the call.
     void fireNetworkEvent(std::string_view name, std::span<const uint8> data = {}, Entity* sender = nullptr);
 
     // Who fired the event currently being dispatched: 0 = the server (or a local single-player
@@ -192,32 +179,21 @@ public:
     // copy anything you keep). Empty for events fired without one.
     std::span<const uint8> currentEventData() const { return m_currentEventData; }
 
-    // SERVER-SIDE AUTHORIZATION for events arriving from clients. Identity alone doesn't stop a
-    // legitimately connected player from firing an event they shouldn't — this is the check that
-    // does. Return false to drop it: neither fired locally nor relayed, as if it never arrived.
-    // `sender` is the entity that fired the event (the script's `self`), resolved from the netId on
-    // the wire. It is non-null ONLY when that entity is really owned by `clientId` — the netId is
-    // client-supplied, so anything else would let a client attribute its events to someone else's
-    // entity. Server-originated events bypass the filter. With none installed everything is allowed,
-    // matching the behaviour that predates this hook — install one before any event grants state.
+    // Authorizes events arriving FROM clients — identity alone doesn't stop a connected player
+    // firing an event it shouldn't. False drops it: neither fired nor relayed. `sender` is the
+    // entity that fired it, non-null ONLY when `clientId` really owns it (the netId is
+    // client-supplied). Server-originated events bypass. No filter = everything allowed, so install
+    // one before any event grants state.
     using EventFilterFn = std::function<bool(uint32 clientId, std::string_view name,
         std::span<const uint8> data, Entity* sender)>;
     void setEventFilter(EventFilterFn callback) { m_eventFilter = std::move(callback); }
 
-    // NetworkComponent registration (main thread; spawns/destroys never run inside the parallel pass).
-    // Returns the assigned netId — ids are a CODE abstraction, never authored in data, and only the
-    // SERVER mints them: registration on the server (scene load or runtime alike) assigns the next id
-    // and creates/extends the root's spawn record, which is what makes the entity appear on every
-    // client; a client registering while executing a replicated Spawn takes the server's ids
-    // (sequential in tree spawn order, deterministic DFS on both sides); any other registration
-    // (client-local content, single player) returns 0 = LOCAL-INERT, kept out of the registry — no
-    // conflict is possible because there is exactly one id authority. An occupied id is REPLACED
-    // (with a warning): the Entity Editor's respawn creates the new entity while the old one is still
-    // registered, so a collision there is the stale twin, not a duplicate — and unregister erases
-    // only when the component pointer still matches, so the old entity's later destroy can't take the
-    // new registration down with it. Unregistering a BASE id on the server queues the matching
-    // Despawn (child ids of a partially-destroyed replicated tree are deliberately ignored — despawn
-    // is all-or-nothing at the root).
+    // Main thread only. Returns the assigned netId, or 0 = LOCAL-INERT for any registration that
+    // isn't the server minting one or a client adopting one from a replicated Spawn.
+    // An occupied id is REPLACED with a warning — the Entity Editor respawns before destroying, so a
+    // collision there is the stale twin; unregister erases only when the component pointer still
+    // matches, or that stale twin's destroy would take the new registration down with it.
+    // Unregistering a BASE id queues the Despawn; despawn is all-or-nothing at the root.
     uint32 registerEntity(Entity& entity, NetworkComponent* comp);
     void unregisterEntity(uint32 netId, const NetworkComponent* comp);
 
@@ -325,10 +301,7 @@ private:
         uint32 validCount = 0;
     };
     std::unordered_map<uint32, ClaimRing> m_claimRings; // by netId, created on demand for owned entities
-    // claims are phase-locked to the physics step (see send()): the step counter they last fired on,
-    // and the wall clock, which only serves the "Max update Hz" thinning limit
-    uint32 m_lastClaimStep = 0;
-    double m_lastClaimTime = 0.0;
+    uint32 m_lastClaimStep = 0; // claims are phase-locked to the physics step; see send()
     std::vector<glm::vec3> m_localOwnedBodyPositions;   // see localOwnedBodyPositions()
     float m_serverSnapshotHz = 20.0f;                   // see serverSnapshotHz()
     // remote-owned entities' snapshot history for interpolation playback: unique_ptr values keep the

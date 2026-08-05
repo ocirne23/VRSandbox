@@ -136,6 +136,7 @@ public:
     // into the next step (1 when interpolation is disabled via the Tweak).
     uint32 getStepCount() const { return m_stepCount; }
     float getInterpolationAlpha() const;
+    int getStepHz() const { return m_stepHz; } // for code that must pace itself in whole steps
 
     bool isInitialized() const { return m_initialized; }
 

@@ -896,20 +896,16 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
         EClaimResult result = EClaimResult::Accepted;
         const glm::vec3 twinPos = dynamicBody ? physics->body.getPosition() : entity->pos;
         const bool recovering = m_serverTick < comp->state->server.forcedUntilTick;
-        // Velocity caps apply on EVERY path. An accepted claim hands its velocity to the solver
-        // verbatim, and the two branches below deliberately skip the displacement gate — so leaving
-        // the caps inside the third one made every re-anchor and every FIRST claim a free impulse.
-        // Ownership transfer resets the anchor, which made the first-claim case repeatable on demand.
-        // Angular had no cap at all, and the quantization range is attacker-declared (up to 1000).
+        // On EVERY path: the two branches below skip the displacement gate by design, and an
+        // accepted claim hands its velocity to the solver verbatim (ownership transfer resets the
+        // anchor, so the first-claim case would be repeatable on demand).
         if (glm::length(linVel) > s_maxClaimVelocity || glm::length(angVel) > s_maxClaimAngVel)
             result = EClaimResult::RejectedVelocity;
         else if (recovering && glm::length(pos - twinPos) < s_claimReanchorRadius)
         {
-            // Anti-deadlock: claiming to be where the server already has you always accepts, so a
-            // stale anchor (separated from the twin by a wall = permanent RejectedPath) cannot veto
-            // forever. Gated on `recovering` because it is a validation BYPASS — accepted claims pin
-            // the twin, so ungated every normal claim takes this path and an attacker walks the
-            // radius per packet, through walls, at whatever rate it sends.
+            // Anti-deadlock: a stale anchor walled off from the twin would veto forever. Gated on
+            // `recovering` because it BYPASSES validation — ungated, every normal claim lands here
+            // (accepted claims pin the twin) and an attacker walks the radius per packet.
         }
         else if (comp->state->server.lastAcceptedClaimSeq == 0)
         {
@@ -967,15 +963,11 @@ void NetworkManager::handleClaimMessage(NetPeerId peer, NetReader& reader)
             }
             else if (dynamicBody)
             {
-                // FOLLOW THE CLAIM THROUGH THE SIM, don't teleport-pin the twin. A teleport per claim
-                // collapsed the render interpolation (prev/curr both became the claim pose, so the
-                // rendered twin froze then jumped) and, because claims are sampled on the OWNER's
-                // step clock while the server steps on its own, it yanked the twin backwards whenever
-                // two server steps fell between two claims — the pulsing visible on the server's own
-                // view. Nothing needs the hard pin: other clients get the owner's exact stream from
-                // the claim passthrough, and the twin only has to be approximately right for
-                // server-side collisions. Bounded velocity also stops hammering box3d with a
-                // teleport every frame, which is better for contact stability.
+                // Follow the claim through the SOLVER rather than teleport-pinning it. Pinning
+                // collapsed the render interpolation and, since claims ride the OWNER's step clock
+                // while the server steps on its own, dragged the twin backwards whenever two server
+                // steps fell between two claims. The twin only has to be approximately right for
+                // server-side collisions — other clients get the owner's stream via passthrough.
                 const glm::quat twinRot = physics->body.getRotation();
                 glm::vec3 desiredLin = linVel + (pos - twinPos) * s_twinFollowGain;
                 if (const float speed = glm::length(desiredLin); speed > s_maxClaimVelocity && speed > 1e-6f)
@@ -1454,12 +1446,18 @@ void NetworkManager::send(double deltaSec)
         // information the sim produces. A free-running clock at the same nominal Hz beats against
         // the step clock instead, duplicating one step pose and skipping another. Physics paused =
         // no steps = no claims.
+        // Thinning counted in STEPS, never wall clock: a step boundary falls partway through a
+        // frame while m_netTime advances in whole ones, so a time comparison at the step rate
+        // measures just-under-interval and drops that step's claim entirely. Achievable rates are
+        // the step rate over a whole number. A frame taking several steps claims only the newest
+        // pose (accepted — it is already running below the physics rate).
         const uint32 stepCount = Globals::physics.getStepCount();
-        const double minInterval = 1.0 / double(glm::clamp(s_maxUpdateHz, 1.0f, 240.0f));
-        if (stepCount != m_lastClaimStep && m_netTime - m_lastClaimTime >= minInterval * 0.999)
+        const int stepHz = glm::max(1, Globals::physics.getStepHz());
+        const uint32 stepsPerClaim = uint32(glm::max(1.0f,
+            glm::round(float(stepHz) / glm::clamp(s_maxUpdateHz, 1.0f, 240.0f))));
+        if (stepCount - m_lastClaimStep >= stepsPerClaim)
         {
             m_lastClaimStep = stepCount;
-            m_lastClaimTime = m_netTime;
             sendClaims();
         }
     }
@@ -1671,11 +1669,9 @@ void NetworkManager::fireNetworkEvent(std::string_view name, std::span<const uin
     m_pendingOutgoingEvents.push_back({ std::string(name), { data.begin(), data.end() }, senderNetId });
 }
 
-// The sender CLIENT id is present ONLY server->client. A client's own identity is already implied by
-// the connection it sends on, so writing one would be a field the receiver must ignore — and an
-// ignored client-writable identity is one refactor away from being trusted. Absent, it cannot be.
-// The sender NET id travels both ways: it names the entity that fired the event, which no connection
-// can imply. It is client-supplied, so the server only trusts it after checking ownership.
+// The CLIENT id is server->client only: a client's identity is implied by its connection, and an
+// ignored client-writable identity field is a refactor away from being trusted. The NET id names the
+// firing entity, which no connection implies, so it travels both ways — and is checked for ownership.
 void NetworkManager::sendEventTo(NetPeerId peer, std::string_view name, uint32 senderClientId,
     uint32 senderNetId, std::span<const uint8> data)
 {

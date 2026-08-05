@@ -69,12 +69,9 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
             return; // the server's twin has no live dynamic body (suspended there?) — don't fight it
         PhysicsWorld& physicsWorld = Globals::physics;
 
-        // LOCAL OWNER under a FORCED record: the server rejected our claims, so hard-resync STRAIGHT
-        // to the authoritative state instead of riding the correction ladder. Simpler and faster: the
-        // very next claim then matches the twin, the re-anchor rule accepts it, and Forced clears —
-        // the whole episode resolves in about one claim tick. Gentleness is for replicas; a rejected
-        // owner wants a crisp snap. (An ARBITRATED-only record falls through to the soft push ladder
-        // below instead — shoving contests correct gently while the player keeps steering.)
+        // FORCED owner (claims rejected): hard-resync rather than ride the correction ladder — the
+        // next claim then matches the twin, the re-anchor accepts it, and Forced clears within about
+        // a tick. An ARBITRATED-only record falls through to the soft push so steering stays live.
         if (authority() == ENetAuthority::LocalOwner && (net.targetFlags & NetRecFlag_Forced))
         {
             physicsWorld.teleportBody(physics->body, net.targetPos, net.targetRot);
@@ -91,15 +88,11 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
         const glm::vec3 bodyPos = physics->body.getPosition();
         const glm::quat bodyRot = physics->body.getRotation();
 
-        // LOCAL INTERACTION GRACE: while one of OUR claim-driven bodies is near this server-owned
-        // body, corrections would drag it toward the server's RTT-old (pre-push) state and fight the
-        // shove the player is applying right now — suspend them and let the local sim rule. The
-        // server's twin receives the same push ~an RTT later (through the claim-followed player
-        // body), so once the grace lingers out the residual error is small and reconciles normally.
-        // STRICTLY ServerOwned: a RemoteOwner entity (another player's cube) is claim-driven by ITS
-        // owner — our local shoves on it are never honored, so suspending its corrections only
-        // fabricates seconds of false local control ("I took over their player"). Never applies to
-        // a Forced LocalOwner either (that's the server reasserting itself).
+        // INTERACTION GRACE: corrections on a body we are actively shoving would drag it toward the
+        // server's RTT-old pre-push state; the twin gets the same push an RTT later, so the residue
+        // reconciles once the grace lingers out. STRICTLY ServerOwned — a RemoteOwner entity is
+        // driven by ITS owner's claims, so suspending its corrections only fabricates false local
+        // control over another player's cube.
         if (params.interactionRadius > 0.0f && authority() == ENetAuthority::ServerOwned)
         {
             const float radiusSq = params.interactionRadius * params.interactionRadius;
@@ -138,12 +131,10 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
             return;
         }
 
-        // REMOTE PLAYERS: buffered interpolation playback — exact reproduction of the owner's
-        // trajectory a fixed couple of ticks behind, instead of physics-chasing the newest state
-        // (a capped-accel body following a delayed, input-spiky signal inherently lag-chases starts
-        // and overshoots stops; no target tuning fixes that). The body teleport-follows the
-        // interpolated path with matched velocities so contacts stay plausible; a loss gap at the
-        // playback cursor falls through to the physical push for that frame.
+        // REMOTE PLAYERS: replay the owner's recorded trajectory a couple of ticks behind instead
+        // of chasing the newest state — a capped-accel body following a delayed, input-spiky signal
+        // lag-chases starts and overshoots stops, and no target tuning fixes that. A loss gap at the
+        // cursor falls through to the push for that frame.
         if (authority() == ENetAuthority::RemoteOwner
             && net.remoteBuffer != nullptr && net.remoteBuffer->count >= 2)
         {
@@ -177,12 +168,9 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
                 physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, glm::mix(r0.angVel, r1.angVel, alpha));
                 physics->prevPos = physics->currPos = pos;
                 physics->prevRot = physics->currRot = rot;
-                // CLAIM THE STEP. PhysicsComponent::update runs next on this entity and, on any
-                // frame where the sim stepped, would overwrite curr with body.getPosition() — which
-                // still holds LAST frame's teleport, since teleports apply at the next
-                // physics.update. It would then render mix(thisFramePose, lastFramePose), i.e.
-                // backward, on stepping frames and correctly on the others: the pulsing. The
-                // playback pose is authoritative for a remote entity, so suppress that refresh.
+                // Claim the step: PhysicsComponent::update runs next and would otherwise overwrite
+                // curr with body.getPosition(), which still holds LAST frame's teleport (they apply
+                // at the next physics.update) — rendering backward on stepping frames only.
                 physics->lastStep = Globals::physics.getStepCount();
                 if (newSnapshot)
                     net.lastAppliedTick = net.serverTick;
@@ -217,14 +205,11 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
             return;
         }
 
-        // PHYSICAL PUSH: position/rotation error becomes corrective velocity on top of the server's,
-        // delivered as a bounded impulse (NudgeVelocity caps the velocity change at the accel limit
-        // x dt). No teleports, no raw velocity sets — contacts, stacking and gameplay impulses
-        // compose with the correction instead of being erased. Past the snap threshold the push
-        // enters CATCH-UP: gains and caps boosted so multi-meter errors still converge quickly.
-        // ARBITRATED OWNER (we reach here as LocalOwner only via an Arbitrated record): the local
-        // contact with the opponent's replica supplies the feel — correct only REAL divergence
-        // (big deadzone, halved gains) or the correction drags against the player's live input.
+        // PHYSICAL PUSH: error becomes corrective velocity on top of the server's, as a bounded
+        // impulse — so contacts, stacking and gameplay impulses compose with the correction instead
+        // of being erased. Past the snap threshold it enters CATCH-UP (boosted gains/caps).
+        // ARBITRATED owner: correct only REAL divergence (big deadzone, halved gains) or the
+        // correction drags against the player's live input.
         const bool arbitratedOwner = authority() == ENetAuthority::LocalOwner;
         const float posDeadzone = arbitratedOwner ? glm::max(params.posDeadzone, params.arbitrateDeadzone) : params.posDeadzone;
         const float rotDeadzoneDeg = arbitratedOwner ? glm::max(params.rotDeadzoneDeg, 15.0f) : params.rotDeadzoneDeg;

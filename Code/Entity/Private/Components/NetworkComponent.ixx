@@ -34,12 +34,9 @@ export enum class EClaimResult : uint8
     RejectedTeleport, // displacement over the hard cap regardless of elapsed time
 };
 
-// Buffered snapshot history for a REMOTE-OWNED entity (another player): the observer plays the
-// owner's exact recorded trajectory a couple of ticks in the past instead of physics-chasing the
-// newest state — a capped-accel body following a delayed, input-spiky signal inherently lag-chases
-// starts and overshoots stops. Slots carry their own tick (ring wrap + packet loss validation).
-// Owned by NetworkManager (stable unique_ptr storage), written main-thread in handleSnapshot,
-// read by NetworkComponent::update on job workers — publish-then-read-only like the targets.
+// Snapshot history for a REMOTE-OWNED entity, replayed a couple of ticks behind (see
+// NetworkComponent::update). Slots carry their own tick for ring-wrap and loss validation. Owned by
+// NetworkManager for stable addresses; written main-thread, read from workers.
 export struct NetSnapshotRecord
 {
     uint32 tick = 0;
@@ -177,20 +174,13 @@ export struct NetEntityState
 static_assert(std::is_trivially_destructible_v<NetEntityState::ServerState>
     && std::is_trivially_destructible_v<NetEntityState::ClientState>);
 
-// Marks the entity as SERVER-OWNED networked state ("Component Network" in .pre files — pure
-// PRESENCE, no authored data: netIds are a code abstraction minted only by the server). On the
-// server, registration (scene load or runtime alike) assigns an id and replicates the spawn to every
-// client; on a client, the component either carries the server's id (spawned by a replicated Spawn)
-// or stays LOCAL-INERT with netId 0 (client-local content — never synced, never conflicts). On the
-// server the component only carries send bookkeeping (NetworkManager reads the live state on the
-// main thread); on a client
-// update() corrects toward the latest received target by the "Network/Correction" thresholds
-// (deadzone / exponential blend / hard snap). DYNAMIC-body entities sync the BODY: the server
-// snapshots the body's world pose + velocities, and the client corrects through the thread-safe
-// PhysicsWorld command queue (teleport + velocity sets; velocities/sleep apply once per snapshot,
-// the pose blend runs continuously) — PhysicsComponent::update rewrites entity.pos/rot from the body
-// right after, so correcting the entity directly would be overwritten. Kinematic/static bodies use
-// the entity-transform path (the collider stays put — teleportBody is the engine-wide rule).
+// Marks the entity as networked state ("Component Network" in .pre is pure PRESENCE — netIds are
+// minted only by the server). A client's component either carries the server's id, or stays
+// LOCAL-INERT with netId 0 (client-local content, never synced). update() runs client-side only and
+// corrects toward the latest target by the "Network/Correction" thresholds. DYNAMIC bodies sync the
+// BODY through the thread-safe PhysicsWorld queue — PhysicsComponent::update rewrites entity.pos/rot
+// from the body right after, so correcting the entity directly would be overwritten. Kinematic and
+// static bodies use the entity-transform path.
 export struct NetworkComponent
 {
     static constexpr EComponentID getId() { return EComponentID_Network; }
