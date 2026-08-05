@@ -28,7 +28,7 @@ export struct ScriptModule
     uint32 dataLayoutId = 0;   // hash of ScriptData's field layout, from ScriptDataLayoutId() -- a reload that
                                 // changes it can't reuse an existing block (see ScriptDataLayoutIdFn)
     // The script's EXPOSED ScriptData fields, from ScriptDataFields() -- an array of ScriptAPI.h's
-    // VrScriptField, typed as void* here for the same reason the entry points are: this library doesn't depend
+    // OcScriptField, typed as void* here for the same reason the entry points are: this library doesn't depend
     // on the script ABI, and the consumer (the editor) casts. Points into the module's own static storage, so it
     // is valid exactly as long as this module is -- never cache it across a reload. Null when the script exposes
     // nothing, which is every script that never marks a field private/public.

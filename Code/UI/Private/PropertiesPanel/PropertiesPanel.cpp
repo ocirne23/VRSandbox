@@ -1,5 +1,5 @@
 module;
-// VrScriptField: ScriptModule carries the exposed-field table as void* (it doesn't depend on the script ABI),
+// OcScriptField: ScriptModule carries the exposed-field table as void* (it doesn't depend on the script ABI),
 // so the panel needs the real struct to read it. In the GLOBAL module fragment -- a plain #include after
 // `module UI;` lands in the module purview and collides with the std header units Core re-exports.
 #include "ScriptAPI.h"
@@ -175,12 +175,12 @@ void PropertiesPanel::drawScriptDataFields(ScriptComponent& script)
 
 	// ScriptModule carries the table as void* (it doesn't depend on the script ABI); this is where it regains
 	// its type, once, rather than at every use below.
-	const VrScriptField* fields = static_cast<const VrScriptField*>(module->dataFields);
+	const OcScriptField* fields = static_cast<const OcScriptField*>(module->dataFields);
 
 	ImGui::SeparatorText("Script Data");
 	for (int i = 0; i < module->numDataFields; ++i)
 	{
-		const VrScriptField& field = fields[i];
+		const OcScriptField& field = fields[i];
 		if (field.offset < 0 || static_cast<uint32>(field.offset) >= script.scriptDataSize)
 			continue; // defensive: a table that doesn't match the block it came with
 		void* value = script.scriptData.get() + field.offset;
@@ -192,14 +192,14 @@ void PropertiesPanel::drawScriptDataFields(ScriptComponent& script)
 		ImGui::SetNextItemWidth(-1.0f);
 		switch (field.type)
 		{
-		case VR_FIELD_INT:   ImGui::DragInt("##v", static_cast<int*>(value)); break;
-		case VR_FIELD_FLOAT: ImGui::DragFloat("##v", static_cast<float*>(value), 0.01f); break;
-		case VR_FIELD_BOOL:  ImGui::Checkbox("##v", static_cast<bool*>(value)); break;
-		case VR_FIELD_VEC2:  ImGui::DragFloat2("##v", static_cast<float*>(value), 0.01f); break;
-		case VR_FIELD_VEC3:  ImGui::DragFloat3("##v", static_cast<float*>(value), 0.01f); break;
-		case VR_FIELD_VEC4:  ImGui::DragFloat4("##v", static_cast<float*>(value), 0.01f); break;
-		case VR_FIELD_QUAT:  ImGui::DragFloat4("##v", &static_cast<glm::quat*>(value)->x, 0.01f); break;
-		case VR_FIELD_STRING:
+		case OC_FIELD_INT:   ImGui::DragInt("##v", static_cast<int*>(value)); break;
+		case OC_FIELD_FLOAT: ImGui::DragFloat("##v", static_cast<float*>(value), 0.01f); break;
+		case OC_FIELD_BOOL:  ImGui::Checkbox("##v", static_cast<bool*>(value)); break;
+		case OC_FIELD_VEC2:  ImGui::DragFloat2("##v", static_cast<float*>(value), 0.01f); break;
+		case OC_FIELD_VEC3:  ImGui::DragFloat3("##v", static_cast<float*>(value), 0.01f); break;
+		case OC_FIELD_VEC4:  ImGui::DragFloat4("##v", static_cast<float*>(value), 0.01f); break;
+		case OC_FIELD_QUAT:  ImGui::DragFloat4("##v", &static_cast<glm::quat*>(value)->x, 0.01f); break;
+		case OC_FIELD_STRING:
 		{
 			// The field holds a const char* into ENGINE-interned storage, so a new value has to be interned
 			// rather than copied into the block. Committed on Enter: interning every keystroke would leave a

@@ -44,7 +44,7 @@ class LightComponent;
 // 0 = no array yet -- a zeroed ScriptData block is therefore a set of empty arrays, and the first push creates
 // one lazily. The id is generation-tagged engine-side, so a STALE or garbage value (a reinterpreted field after
 // a layout change) fails lookup and every operation degrades to a no-op / default rather than touching memory.
-typedef unsigned int VrArray;
+typedef unsigned int OcArray;
 
 // A POD array's element storage, resolved ONCE for a foreach so the loop indexes memory directly instead of
 // calling per element. Only POD element kinds get one -- Entity elements are refcounted handles and String
@@ -52,7 +52,7 @@ typedef unsigned int VrArray;
 // `data` is null and `count` 0 for a stale/empty/non-POD array or an elemSize mismatch, so a loop bounded by
 // `count` never dereferences null. VALID ONLY WHILE THE ARRAY DOES NOT GROW: the DSL refuses push/clear on a
 // container an enclosing foreach is reading, which is what the generated code relies on.
-struct VrArraySpan
+struct OcArraySpan
 {
     void* data;
     int   count;
@@ -62,7 +62,7 @@ struct VrArraySpan
 // one out, lightSetAt applies one back (with the host clamping/normalizing, so a script can't store a shape
 // the renderer degenerates on). The light's TYPE is not here -- it decides which shape fields mean anything
 // and stays authoring-only; writing a field the type ignores is harmlessly stored. Angles in DEGREES.
-struct VrLight
+struct OcLight
 {
     glm::vec3 color;
     float     intensity;
@@ -81,7 +81,7 @@ struct VrLight
 // One raycast result, returned BY VALUE (a POD of ABI-legal members, like every other type crossing here).
 // `hit` is what the DSL branches on: the whole struct is exposed as a `RayHit?`, so a miss takes the else
 // branch of an `ifexist` and the other fields are only reachable once a hit is proven.
-struct VrRayHit
+struct OcRayHit
 {
     int       hit;      // 0 = nothing within range; every other field is then meaningless
     glm::vec3 point;    // world-space contact position
@@ -95,32 +95,32 @@ struct VrRayHit
 // "//@@data private int num"), so the editor can show and set them by name: one row per non-Hidden field,
 // carrying the offset to reach it and the type to interpret it as.
 //
-// Hidden fields -- the default -- are absent entirely. Arrays never appear: the field would be a VrArray handle
+// Hidden fields -- the default -- are absent entirely. Arrays never appear: the field would be a OcArray handle
 // whose storage lives engine-side, with nothing for an inspector to show.
-enum VrScriptFieldType
+enum OcScriptFieldType
 {
-    VR_FIELD_INT = 0,
-    VR_FIELD_FLOAT,
-    VR_FIELD_BOOL,   // stored as a C++ bool in the block
-    VR_FIELD_STRING, // stored as a const char* into ENGINE-interned text (see internString) -- never freed
-    VR_FIELD_VEC2,
-    VR_FIELD_VEC3,
-    VR_FIELD_VEC4,
-    VR_FIELD_QUAT,
+    OC_FIELD_INT = 0,
+    OC_FIELD_FLOAT,
+    OC_FIELD_BOOL,   // stored as a C++ bool in the block
+    OC_FIELD_STRING, // stored as a const char* into ENGINE-interned text (see internString) -- never freed
+    OC_FIELD_VEC2,
+    OC_FIELD_VEC3,
+    OC_FIELD_VEC4,
+    OC_FIELD_QUAT,
 };
 
-enum VrScriptFieldVisibility
+enum OcScriptFieldVisibility
 {
-    VR_FIELD_PRIVATE = 1, // editor-visible: the Properties panel edits it live, the Entity Editor authors it
-    VR_FIELD_PUBLIC  = 2, // ...and, in future, readable from another entity's script
+    OC_FIELD_PRIVATE = 1, // editor-visible: the Properties panel edits it live, the Entity Editor authors it
+    OC_FIELD_PUBLIC  = 2, // ...and, in future, readable from another entity's script
 };
 
-struct VrScriptField
+struct OcScriptField
 {
     const char* name;
-    int         type;       // VrScriptFieldType
+    int         type;       // OcScriptFieldType
     int         offset;     // byte offset into the ScriptData block
-    int         visibility; // VrScriptFieldVisibility
+    int         visibility; // OcScriptFieldVisibility
 };
 
 #pragma warning(push)
@@ -202,18 +202,18 @@ struct VrScriptField
        distinct literals scripts contain -- a small, finite set -- so it never needs freeing. Strings from
        ELSEWHERE (entityGetName and friends) are not interned and still only live as long as their owner. */ \
     X(const char*, internString,           (const char*, text)) \
-    /* ---- engine-owned dynamic arrays (see VrArray) ---- generic over the element type: the caller passes the
+    /* ---- engine-owned dynamic arrays (see OcArray) ---- generic over the element type: the caller passes the
        element's size and a pointer to/for the value, so one set of functions serves every T the DSL can hold.
        `elemKind` is DSLType's own value for the element -- the engine needs it because two kinds aren't stored
        as the caller's bytes at all: Entity elements become refcounted EntityPtrs (a destroyed entity then reads
        back null instead of dangling) and string elements are COPIED engine-side (a script DLL's .rdata is
        unmapped on reload). Values are copied in/out rather than exposing an interior pointer, so no caller can
        hold or corrupt the storage. */ \
-    X(void,        arrayPush,              (Entity*, owner), (VrArray*, handle), (int, elemKind), (int, elemSize), (const void*, value)) /* creates on *handle == 0 and writes the new id back through `handle` */ \
-    X(int,         arrayGet,               (VrArray, handle), (int, index), (int, elemSize), (void*, outValue)) /* ENTITY/STRING elements only (POD goes through arrayElem): 1 on success, 0 (outValue untouched) for a stale handle, an out-of-range index, a dead entity, or a POD array */ \
-    X(void,        arraySet,               (VrArray, handle), (int, index), (int, elemSize), (const void*, value)) /* Entity/String only; no-op when out of range */ \
-    X(int,         arrayCount,             (VrArray, handle)) /* 0 for a stale/empty handle */ \
-    X(void,        arrayClear,             (VrArray, handle)) \
+    X(void,        arrayPush,              (Entity*, owner), (OcArray*, handle), (int, elemKind), (int, elemSize), (const void*, value)) /* creates on *handle == 0 and writes the new id back through `handle` */ \
+    X(int,         arrayGet,               (OcArray, handle), (int, index), (int, elemSize), (void*, outValue)) /* ENTITY/STRING elements only (POD goes through arrayElem): 1 on success, 0 (outValue untouched) for a stale handle, an out-of-range index, a dead entity, or a POD array */ \
+    X(void,        arraySet,               (OcArray, handle), (int, index), (int, elemSize), (const void*, value)) /* Entity/String only; no-op when out of range */ \
+    X(int,         arrayCount,             (OcArray, handle)) /* 0 for a stale/empty handle */ \
+    X(void,        arrayClear,             (OcArray, handle)) \
     /* ---- AnimatorComponent ---- the state machine's parameters ARE its gameplay interface (see
        Animation:StateMachine): a script sets floats/bools/triggers and the graph's own transitions decide what
        plays, rather than a script naming clips directly. The older entitySetAnim* trio does the same thing off
@@ -235,7 +235,7 @@ struct VrScriptField
     /* ---- world ---- the ambient state a script acts on rather than owns. physicsRayCast (above) reports its
        hit through out-pointers, which the DSL has no spelling for; this returns the same information by value
        so it can be exposed as a `RayHit?` and read only after the hit is proven. */ \
-    X(VrRayHit,    worldRayCast,           (glm::vec3, origin), (glm::vec3, direction), (float, maxDistance)) /* direction need not be normalized */ \
+    X(OcRayHit,    worldRayCast,           (glm::vec3, origin), (glm::vec3, direction), (float, maxDistance)) /* direction need not be normalized */ \
     X(glm::vec3,   worldGetSunDirection,   (int, unused)) /* the arity macros have no zero-parameter form; pass 0 */ \
     /* One world-space debug line for this frame only (the renderer's per-frame list, cleared every present) --
        drawn unlit and depth-tested. `color` is 0xAABBGGRR. */ \
@@ -246,7 +246,7 @@ struct VrScriptField
     /* ---- radius query ---- three calls, because the DSL has no way to hand back a list: the first RUNS the
        query and returns a HANDLE to its results, the other two read that handle. The results live in a
        THREAD-LOCAL ring of buffers, so concurrent callers never share one, and the handle is generation-tagged
-       like VrArray -- a nested query takes its own slot, and a handle whose slot has since been recycled reads
+       like OcArray -- a nested query takes its own slot, and a handle whose slot has since been recycled reads
        as empty rather than as someone else's results. 0 is never a valid handle. */ \
     X(int,         worldQueryRadius,       (glm::vec3, position), (float, radius)) \
     X(int,         worldQueryCount,        (int, queryHandle)) \
@@ -299,27 +299,27 @@ struct VrScriptField
        never moves, which is what makes the pointer safe to hold). The view calls re-read the element storage
        every access, so a body that pushes or clears still reads correct data -- what is hoisted is the lookup,
        not the storage. Null view / out of range behave exactly like the handle forms. */ \
-    X(void,        arrayRemoveAt,          (VrArray, handle), (int, index)) /* shifts the tail down; no-op when out of range */ \
+    X(void,        arrayRemoveAt,          (OcArray, handle), (int, index)) /* shifts the tail down; no-op when out of range */ \
     /* The ELEMENT's address, for POD arrays only -- lets the typed caller load/store it directly instead of
        handing a void* to a type-erased memcpy. Null for a stale handle, an out-of-range index, an elemSize
        mismatch, or an Entity/String array (no raw element exists there). Valid until the array grows. */ \
-    X(void*,       arrayElem,              (VrArray, handle), (int, index), (int, elemSize)) \
+    X(void*,       arrayElem,              (OcArray, handle), (int, index), (int, elemSize)) \
     X(void*,       arrayViewElem,          (void*, view), (int, index), (int, elemSize)) \
-    X(VrArraySpan, arraySpan,              (VrArray, handle), (int, elemSize)) /* POD element storage; {null,0} otherwise */ \
-    X(void*,       arrayResolve,           (VrArray, handle)) /* null for a stale/empty handle */ \
+    X(OcArraySpan, arraySpan,              (OcArray, handle), (int, elemSize)) /* POD element storage; {null,0} otherwise */ \
+    X(void*,       arrayResolve,           (OcArray, handle)) /* null for a stale/empty handle */ \
     X(int,         arrayViewCount,         (void*, view)) \
     X(int,         arrayViewGet,           (void*, view), (int, index), (int, elemSize), (void*, outValue)) /* Entity/String only, as arrayGet */ \
     X(void,        arrayViewSet,           (void*, view), (int, index), (int, elemSize), (const void*, value)) /* Entity/String only */ \
     /* ---- light component ---- a LIST of lights on one entity, addressed by index [0, lightGetCount).
-       Whole-light access only, through the VrLight mirror (see there): lightGetAt's return value IS the
+       Whole-light access only, through the OcLight mirror (see there): lightGetAt's return value IS the
        bounds check (1 on success, outLight untouched otherwise), which is what ifexist branches on;
        lightSetAt clamps/normalizes and no-ops out of range, so scripts need no bounds proof. Writes land
        on the live component (lights re-upload every frame). Node/DSL emits that touch single fields go
        copy-out / edit / copy-in through the same pair. */ \
     X(void*,       entityGetLightComponent,(Entity*, entity)) \
     X(int,         lightGetCount,          (void*, lightComponent)) \
-    X(int,         lightGetAt,             (void*, lightComponent), (int, index), (VrLight*, outLight)) \
-    X(void,        lightSetAt,             (void*, lightComponent), (int, index), (const VrLight*, light)) \
+    X(int,         lightGetAt,             (void*, lightComponent), (int, index), (OcLight*, outLight)) \
+    X(void,        lightSetAt,             (void*, lightComponent), (int, index), (const OcLight*, light)) \
     /* ---- network ---- fires the named event locally AND across the network (server -> all clients,
        client -> server which relays to the other clients); in single player it degrades to sendEvent. */ \
     X(void,        sendNetworkEvent,       (const char*, eventName)) \
@@ -405,16 +405,16 @@ typedef unsigned int (*ScriptRequiredComponentsFn)(void);
 
 // Optional export: a hash of ScriptData's LAYOUT (every field's type and name, in order). Size alone can't tell
 // a layout change from a no-op -- "int a; int b;" and "float a; float b;" are the same size, and reinterpreting
-// one as the other silently corrupts every field, VrArray handles included. The host keeps a script's existing
+// one as the other silently corrupts every field, OcArray handles included. The host keeps a script's existing
 // data block across a hot-reload only while this value matches; otherwise it drops the block (freeing the
 // arrays those handles owned) and starts from a zeroed one. Absent = treat every reload as a layout change.
 typedef unsigned int (*ScriptDataLayoutIdFn)(void);
 
-// Optional export: the script's EXPOSED ScriptData fields (see VrScriptField). Absent, or a count of 0, means
+// Optional export: the script's EXPOSED ScriptData fields (see OcScriptField). Absent, or a count of 0, means
 // the script exposes nothing -- which is every script that never marks a field private/public, so the editor
 // simply has nothing to show. The returned pointer is to static storage in the script and lives as long as the
 // module does; the engine never holds it across a reload.
-typedef const VrScriptField* (*ScriptDataFieldsFn)(int* outCount);
+typedef const OcScriptField* (*ScriptDataFieldsFn)(int* outCount);
 
 #ifdef __cplusplus
 }
@@ -432,62 +432,62 @@ typedef const VrScriptField* (*ScriptDataFieldsFn)(int* outCount);
 // them, so a cached DLL built against an older header keeps working (it carried its own copy).
 //
 // The parameter is what makes these functions rather than inlinable expressions: `&value` needs an lvalue,
-// and every push/set call site passes an rvalue (`vec3(1,2,3)`, `a + b`, an interned literal). vrArrGet needs
+// and every push/set call site passes an rvalue (`vec3(1,2,3)`, `a + b`, an interned literal). ocArrGet needs
 // one more thing -- storage to write into, in an EXPRESSION position (a `foreach` element initializer) -- and
 // its `T v = T()` is what makes a stale handle or out-of-range index read back as a default: the engine
 // leaves outValue untouched on failure rather than writing garbage.
 #ifdef __cplusplus
-template<class T> T vrArrGet(const ScriptContext* ctx, VrArray h, int i)
+template<class T> T ocArrGet(const ScriptContext* ctx, OcArray h, int i)
 { T v = T(); ctx->arrayGet(h, i, (int)sizeof(T), &v); return v; }
-template<class T> void vrArrSet(const ScriptContext* ctx, VrArray h, int i, const T& v)
+template<class T> void ocArrSet(const ScriptContext* ctx, OcArray h, int i, const T& v)
 { ctx->arraySet(h, i, (int)sizeof(T), &v); }
-template<class T> void vrArrPush(const ScriptContext* ctx, Entity* self, VrArray* h, int kind, const T& v)
+template<class T> void ocArrPush(const ScriptContext* ctx, Entity* self, OcArray* h, int kind, const T& v)
 { ctx->arrayPush(self, h, kind, (int)sizeof(T), &v); }
 // POD element access as a typed LOAD/STORE through the element's own address -- no type-erased copy, and the
-// success flag is the pointer itself. vrArrLoad is what an `ifexist ... at <key>` branches on; it leaves `out`
+// success flag is the pointer itself. ocArrLoad is what an `ifexist ... at <key>` branches on; it leaves `out`
 // untouched on a miss, exactly like arrayGet did.
-template<class T> bool vrArrLoad(const ScriptContext* ctx, VrArray h, int i, T& out)
+template<class T> bool ocArrLoad(const ScriptContext* ctx, OcArray h, int i, T& out)
 {
     if (const void* element = ctx->arrayElem(h, i, (int)sizeof(T))) { out = *static_cast<const T*>(element); return true; }
     return false;
 }
-template<class T> void vrArrStore(const ScriptContext* ctx, VrArray h, int i, const T& v)
+template<class T> void ocArrStore(const ScriptContext* ctx, OcArray h, int i, const T& v)
 {
     if (void* element = ctx->arrayElem(h, i, (int)sizeof(T))) *static_cast<T*>(element) = v;
 }
 
-// The hoisted-view forms a foreach emits; same defaults-on-failure contract as vrArrGet above.
-template<class T> T vrArrViewGet(const ScriptContext* ctx, void* view, int i)
+// The hoisted-view forms a foreach emits; same defaults-on-failure contract as ocArrGet above.
+template<class T> T ocArrViewGet(const ScriptContext* ctx, void* view, int i)
 { T v = T(); ctx->arrayViewGet(view, i, (int)sizeof(T), &v); return v; }
-template<class T> void vrArrViewSet(const ScriptContext* ctx, void* view, int i, const T& v)
+template<class T> void ocArrViewSet(const ScriptContext* ctx, void* view, int i, const T& v)
 { ctx->arrayViewSet(view, i, (int)sizeof(T), &v); }
 
-// One light BY VALUE, for the foreach at-emit over self.light.lights (defaults-on-failure like vrArrGet;
+// One light BY VALUE, for the foreach at-emit over self.light.lights (defaults-on-failure like ocArrGet;
 // ifexist goes through ctx->lightGetAt directly, whose return value is the existence check).
-inline VrLight vrLightAt(const ScriptContext* ctx, void* lightComponent, int i)
-{ VrLight v{}; ctx->lightGetAt(lightComponent, i, &v); return v; }
+inline OcLight ocLightAt(const ScriptContext* ctx, void* lightComponent, int i)
+{ OcLight v{}; ctx->lightGetAt(lightComponent, i, &v); return v; }
 
 // ---- math helpers ----
 // The `math.*` bindings are otherwise one-to-one glm/std calls emitted inline. These few are here because their
 // formula USES AN ARGUMENT MORE THAN ONCE: substituting the argument's expression twice would evaluate it twice,
 // so `math.remap(rollDice(), ...)` would roll two different numbers. A function parameter evaluates once.
 // Angles are DEGREES throughout the DSL surface, so these are too.
-inline float vrInverseLerp(float a, float b, float v) { return (b == a) ? 0.0f : (v - a) / (b - a); }
-inline float vrRemap(float v, float inMin, float inMax, float outMin, float outMax)
-{ return outMin + vrInverseLerp(inMin, inMax, v) * (outMax - outMin); }
-inline float vrMoveTowards(float current, float target, float maxDelta)
+inline float ocInverseLerp(float a, float b, float v) { return (b == a) ? 0.0f : (v - a) / (b - a); }
+inline float ocRemap(float v, float inMin, float inMax, float outMin, float outMax)
+{ return outMin + ocInverseLerp(inMin, inMax, v) * (outMax - outMin); }
+inline float ocMoveTowards(float current, float target, float maxDelta)
 { const float d = target - current; return (d * d <= maxDelta * maxDelta) ? target : current + (d < 0.0f ? -maxDelta : maxDelta); }
 // The signed difference from `a` to `b`, always in [-180, 180] -- the short way around.
-inline float vrDeltaAngle(float a, float b)
+inline float ocDeltaAngle(float a, float b)
 { float d = std::fmod(b - a, 360.0f); if (d > 180.0f) d -= 360.0f; if (d < -180.0f) d += 360.0f; return d; }
-inline float vrWrapAngle(float deg) { return vrDeltaAngle(0.0f, deg); }
-inline float vrLerpAngle(float a, float b, float t) { return a + vrDeltaAngle(a, b) * t; }
-inline float vrMoveTowardsAngle(float current, float target, float maxDelta)
-{ return current + vrMoveTowards(0.0f, vrDeltaAngle(current, target), maxDelta); }
+inline float ocWrapAngle(float deg) { return ocDeltaAngle(0.0f, deg); }
+inline float ocLerpAngle(float a, float b, float t) { return a + ocDeltaAngle(a, b) * t; }
+inline float ocMoveTowardsAngle(float current, float target, float maxDelta)
+{ return current + ocMoveTowards(0.0f, ocDeltaAngle(current, target), maxDelta); }
 // Uniform on the unit sphere (z picked uniformly, then the ring around it -- equal-area, unlike normalizing
 // three uniform components). Built on randomFloat rather than being its own ABI row: the engine owns the one
 // generator, and this is pure arithmetic on top of it.
-inline glm::vec3 vrRandomUnitVector(const ScriptContext* ctx)
+inline glm::vec3 ocRandomUnitVector(const ScriptContext* ctx)
 {
     const float z = ctx->randomFloat(-1.0f, 1.0f);
     const float a = ctx->randomFloat(0.0f, 6.28318530718f);
@@ -498,25 +498,25 @@ inline glm::vec3 vrRandomUnitVector(const ScriptContext* ctx)
 
 // ---- static/cooked build registry ----
 #if defined(SCRIPT_STATIC_BUILD) || defined(SCRIPTS_STATIC)
-enum VrScriptEntryKind
+enum OcScriptEntryKind
 {
-    VR_SCRIPT_ON_SPAWN = 0,
-    VR_SCRIPT_UPDATE,
-    VR_SCRIPT_ON_DESTROY,
-    VR_SCRIPT_ON_EVENT,
-    VR_SCRIPT_ON_PHYSICS_EVENT,
-    VR_SCRIPT_DATA_SIZE,
-    VR_SCRIPT_DATA_LAYOUT_ID,
-    VR_SCRIPT_DATA_FIELDS,
-    VR_SCRIPT_REQUIRED_COMPONENTS,
-    VR_SCRIPT_EVENT_COUNT,
-    VR_SCRIPT_EVENT_NAME,
-    VR_SCRIPT_ENTRY_COUNT
+    OC_SCRIPT_ON_SPAWN = 0,
+    OC_SCRIPT_UPDATE,
+    OC_SCRIPT_ON_DESTROY,
+    OC_SCRIPT_ON_EVENT,
+    OC_SCRIPT_ON_PHYSICS_EVENT,
+    OC_SCRIPT_DATA_SIZE,
+    OC_SCRIPT_DATA_LAYOUT_ID,
+    OC_SCRIPT_DATA_FIELDS,
+    OC_SCRIPT_REQUIRED_COMPONENTS,
+    OC_SCRIPT_EVENT_COUNT,
+    OC_SCRIPT_EVENT_NAME,
+    OC_SCRIPT_ENTRY_COUNT
 };
 #ifdef __cplusplus
 extern "C" {
 #endif
-void vrRegisterScriptEntry(const char* scriptPath, int kind, void* fn);
+void ocRegisterScriptEntry(const char* scriptPath, int kind, void* fn);
 #ifdef __cplusplus
 }
 #endif
@@ -531,17 +531,17 @@ void vrRegisterScriptEntry(const char* scriptPath, int kind, void* fn);
 
 // Each .scr/.dsl emits a REGISTER_*() after the entry points it defines.
 #if defined(SCRIPT_STATIC_BUILD)
-#define REGISTER_ON_SPAWN()          static const int _vrRegOnSpawn   = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_SPAWN,         (void*)&OnSpawn), 0);
-#define REGISTER_UPDATE()            static const int _vrRegUpdate    = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_UPDATE,          (void*)&Update), 0);
-#define REGISTER_ON_DESTROY()        static const int _vrRegOnDestroy = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_DESTROY,      (void*)&OnDestroy), 0);
-#define REGISTER_ON_PHYSICS_EVENT()  static const int _vrRegOnPhys    = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_PHYSICS_EVENT,(void*)&OnPhysicsEvent), 0);
-#define REGISTER_SCRIPT_DATA_SIZE()  static const int _vrRegDataSize  = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_SIZE,       (void*)&ScriptDataSize), \
-                                                                        vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_LAYOUT_ID,  (void*)&ScriptDataLayoutId), 0);
-#define REGISTER_SCRIPT_REQUIRED_COMPONENTS() static const int _vrRegReqComp = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_REQUIRED_COMPONENTS, (void*)&ScriptRequiredComponents), 0);
-#define REGISTER_SCRIPT_DATA_FIELDS() static const int _vrRegDataFields = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_DATA_FIELDS, (void*)&ScriptDataFields), 0);
-#define REGISTER_ON_EVENT()          static const int _vrRegOnEvent   = (vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_ON_EVENT,        (void*)&OnEvent), \
-                                                                        vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_EVENT_COUNT,     (void*)&ScriptEventCount), \
-                                                                        vrRegisterScriptEntry(VR_CURRENT_SCRIPT, VR_SCRIPT_EVENT_NAME,      (void*)&ScriptEventName), 0);
+#define REGISTER_ON_SPAWN()          static const int _ocRegOnSpawn   = (ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_ON_SPAWN,         (void*)&OnSpawn), 0);
+#define REGISTER_UPDATE()            static const int _ocRegUpdate    = (ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_UPDATE,          (void*)&Update), 0);
+#define REGISTER_ON_DESTROY()        static const int _ocRegOnDestroy = (ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_ON_DESTROY,      (void*)&OnDestroy), 0);
+#define REGISTER_ON_PHYSICS_EVENT()  static const int _ocRegOnPhys    = (ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_ON_PHYSICS_EVENT,(void*)&OnPhysicsEvent), 0);
+#define REGISTER_SCRIPT_DATA_SIZE()  static const int _ocRegDataSize  = (ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_DATA_SIZE,       (void*)&ScriptDataSize), \
+                                                                        ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_DATA_LAYOUT_ID,  (void*)&ScriptDataLayoutId), 0);
+#define REGISTER_SCRIPT_REQUIRED_COMPONENTS() static const int _ocRegReqComp = (ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_REQUIRED_COMPONENTS, (void*)&ScriptRequiredComponents), 0);
+#define REGISTER_SCRIPT_DATA_FIELDS() static const int _ocRegDataFields = (ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_DATA_FIELDS, (void*)&ScriptDataFields), 0);
+#define REGISTER_ON_EVENT()          static const int _ocRegOnEvent   = (ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_ON_EVENT,        (void*)&OnEvent), \
+                                                                        ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_EVENT_COUNT,     (void*)&ScriptEventCount), \
+                                                                        ocRegisterScriptEntry(OC_CURRENT_SCRIPT, OC_SCRIPT_EVENT_NAME,      (void*)&ScriptEventName), 0);
 #else
 #define REGISTER_ON_SPAWN()
 #define REGISTER_UPDATE()

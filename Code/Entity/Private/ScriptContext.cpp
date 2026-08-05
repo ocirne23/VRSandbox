@@ -390,14 +390,14 @@ void registerScriptDslBindings()
             { "pressure",     T::Float, "ctx->forceGetPressure($r)",            /*writable*/ false },
         } });
 
-    // One light as a VALUE the DSL can hold, iterate and edit whole: `Light` mirrors VrLight (ScriptAPI.h).
+    // One light as a VALUE the DSL can hold, iterate and edit whole: `Light` mirrors OcLight (ScriptAPI.h).
     // Every member is writable ON THE COPY -- what makes an edit land is writing it back through a `ref`
     // binding (below), where the host clamps/normalizes (lightSetAt), so no per-member validation lives here.
     // Angles in degrees; range/width/height/length are world units, NOT scaled by the entity; offset/direction
     // are entity-space. Shape params are each read by ONE type (Spot: coneAngle/edgeSoftness; Area: width/
     // height/rotation; Tube: width = radius, length) and harmlessly stored for the others; the TYPE itself
     // stays authoring-only.
-    const DSLType lightStructType = bindings.registerStruct({ "Light", "VrLight", {}, "VrLight()",
+    const DSLType lightStructType = bindings.registerStruct({ "Light", "OcLight", {}, "OcLight()",
         {
             { "enabled",      T::Bool,  "$r.enabled" },
             { "color",        vec3,     "$r.color" },
@@ -432,7 +432,7 @@ void registerScriptDslBindings()
     // return value is the existence check; a non-ref binding is a copy, a `ref` one writes back through
     // lightSetAt at block end.
     const DSLType lightListType = bindings.registerSequenceType("LightList", lightStructType,
-        "ctx->lightGetCount($r)", "vrLightAt(ctx, $r, $i)",
+        "ctx->lightGetCount($r)", "ocLightAt(ctx, $r, $i)",
         "(ctx->lightGetAt($r, $1, &$v) != 0)", "ctx->lightSetAt($r, $1, &$v)");
 
     const DSLType lightType = bindings.registerComponentType("light", "LightComponent", EComponentID_Light,
@@ -457,7 +457,7 @@ void registerScriptDslBindings()
     // wrapped in an optional so proving it is the only way in: "ifexist RayHit h in world.rayCast(...)". The
     // constructor takes no arguments -- a RayHit is something the engine hands back, never something a script
     // builds -- and every field is read-only for the same reason.
-    const DSLType rayHitType = bindings.registerStruct({ "RayHit", "VrRayHit", {}, "VrRayHit()",
+    const DSLType rayHitType = bindings.registerStruct({ "RayHit", "OcRayHit", {}, "OcRayHit()",
         {
             { "point",    vec3,     "$r.point",    /*writable*/ false },
             { "normal",   vec3,     "$r.normal",   /*writable*/ false },
@@ -503,12 +503,12 @@ void registerScriptDslBindings()
             // -- interpolation / ranges --
             { "lerp",         T::Float, { { "a", T::Float }, { "b", T::Float }, { "t", T::Float } }, "glm::mix($1, $2, $3)" },
             // 0 when the input range is empty, rather than a division by zero.
-            { "inverseLerp",  T::Float, { { "a", T::Float }, { "b", T::Float }, { "value", T::Float } }, "vrInverseLerp($1, $2, $3)" },
-            { "remap",        T::Float, { { "value", T::Float }, { "inMin", T::Float }, { "inMax", T::Float }, { "outMin", T::Float }, { "outMax", T::Float } }, "vrRemap($1, $2, $3, $4, $5)" },
+            { "inverseLerp",  T::Float, { { "a", T::Float }, { "b", T::Float }, { "value", T::Float } }, "ocInverseLerp($1, $2, $3)" },
+            { "remap",        T::Float, { { "value", T::Float }, { "inMin", T::Float }, { "inMax", T::Float }, { "outMin", T::Float }, { "outMax", T::Float } }, "ocRemap($1, $2, $3, $4, $5)" },
             { "step",         T::Float, { { "edge", T::Float }, { "x", T::Float } },                 "glm::step($1, $2)" },
             { "smoothstep",   T::Float, { { "edge0", T::Float }, { "edge1", T::Float }, { "x", T::Float } }, "glm::smoothstep($1, $2, $3)" },
             // Frame-rate independent approach: never overshoots the target.
-            { "moveTowards",  T::Float, { { "current", T::Float }, { "target", T::Float }, { "maxDelta", T::Float } }, "vrMoveTowards($1, $2, $3)" },
+            { "moveTowards",  T::Float, { { "current", T::Float }, { "target", T::Float }, { "maxDelta", T::Float } }, "ocMoveTowards($1, $2, $3)" },
 
             // -- trigonometry (degrees in, degrees out) --
             { "sin",        T::Float, { { "angleDeg", T::Float } },                                 "glm::sin(glm::radians($1))" },
@@ -523,15 +523,15 @@ void registerScriptDslBindings()
             { "toDegrees",  T::Float, { { "radians", T::Float } },                                  "glm::degrees($1)" },
 
             // -- angles -- the wrap-around cases hand-rolled arithmetic gets wrong
-            { "wrapAngle",        T::Float, { { "angleDeg", T::Float } },                           "vrWrapAngle($1)" },      // -> [-180, 180]
-            { "deltaAngle",       T::Float, { { "fromDeg", T::Float }, { "toDeg", T::Float } },     "vrDeltaAngle($1, $2)" }, // the short way around
-            { "lerpAngle",        T::Float, { { "a", T::Float }, { "b", T::Float }, { "t", T::Float } }, "vrLerpAngle($1, $2, $3)" },
-            { "moveTowardsAngle", T::Float, { { "currentDeg", T::Float }, { "targetDeg", T::Float }, { "maxDelta", T::Float } }, "vrMoveTowardsAngle($1, $2, $3)" },
+            { "wrapAngle",        T::Float, { { "angleDeg", T::Float } },                           "ocWrapAngle($1)" },      // -> [-180, 180]
+            { "deltaAngle",       T::Float, { { "fromDeg", T::Float }, { "toDeg", T::Float } },     "ocDeltaAngle($1, $2)" }, // the short way around
+            { "lerpAngle",        T::Float, { { "a", T::Float }, { "b", T::Float }, { "t", T::Float } }, "ocLerpAngle($1, $2, $3)" },
+            { "moveTowardsAngle", T::Float, { { "currentDeg", T::Float }, { "targetDeg", T::Float }, { "maxDelta", T::Float } }, "ocMoveTowardsAngle($1, $2, $3)" },
 
             // -- randomness -- one engine-side stream, so a hot-reload does not restart the sequence
             { "randomFloat",      T::Float, { { "min", T::Float }, { "max", T::Float } },           "ctx->randomFloat($1, $2)" },
             { "randomInt",        T::Int,   { { "min", T::Int }, { "max", T::Int } },               "ctx->randomInt($1, $2)" }, // both ends inclusive
-            { "randomUnitVector", vec3,     {},                                                     "vrRandomUnitVector(ctx)" },
+            { "randomUnitVector", vec3,     {},                                                     "ocRandomUnitVector(ctx)" },
 
             // -- rotations -- the constructors that used to sit at top level
             { "quatFromEuler",     quat,   { { "eulerDeg", vec3 } },                                "glm::quat(glm::radians($1))" },
@@ -637,7 +637,7 @@ void registerScriptDslBindings()
     bindings.registerEntryPoint({ "OnPhysicsEvent",  { { "begin", T::Int }, { "sensor", T::Int } }, ", Entity* other, int begin, int sensor, long long contactId, ScriptData* scriptData", "REGISTER_ON_PHYSICS_EVENT()" });
 }
 
-// ---- engine-owned script arrays (the DSL's `T[]`, see VrArray in ScriptAPI.h) ----------------------------
+// ---- engine-owned script arrays (the DSL's `T[]`, see OcArray in ScriptAPI.h) ----------------------------
 // Storage lives HERE, not in the script's ScriptData block, which holds only the handle. That's what makes a
 // hot-reload free: the block survives (same layout id), so the handles survive, so the contents survive with
 // nothing to copy. It's also what keeps a script from ever owning heap memory across a DLL swap.
@@ -762,7 +762,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     }
 
     // ---- script arrays ----
-    void thunk_arrayPush(Entity* owner, VrArray* handle, int elemKind, int elemSize, const void* value)
+    void thunk_arrayPush(Entity* owner, OcArray* handle, int elemKind, int elemSize, const void* value)
     {
         if (handle == nullptr || owner == nullptr || elemSize <= 0 || value == nullptr)
             return;
@@ -875,28 +875,28 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     }
 
     // The handle forms are the view forms plus a resolve -- one implementation, not two.
-    int thunk_arrayGet(VrArray handle, int index, int elemSize, void* outValue)
+    int thunk_arrayGet(OcArray handle, int index, int elemSize, void* outValue)
     {
         return thunk_arrayViewGet(resolveScriptArray(handle), index, elemSize, outValue);
     }
 
-    void thunk_arraySet(VrArray handle, int index, int elemSize, const void* value)
+    void thunk_arraySet(OcArray handle, int index, int elemSize, const void* value)
     {
         thunk_arrayViewSet(resolveScriptArray(handle), index, elemSize, value);
     }
 
     // POD element storage, for a foreach to index directly. Refuses anything whose elements are not raw bytes
     // of exactly this size, so a mismatched T reads as an empty array rather than reinterpreting the storage.
-    VrArraySpan thunk_arraySpan(VrArray handle, int elemSize)
+    OcArraySpan thunk_arraySpan(OcArray handle, int elemSize)
     {
         const ScriptArray* array = resolveScriptArray(handle);
         if (array == nullptr || array->elemKind == kEntityElemKind || array->elemKind == kStringElemKind
             || array->elemSize != elemSize || elemSize <= 0 || array->bytes.empty())
-            return VrArraySpan{ nullptr, 0 };
-        return VrArraySpan{ const_cast<uint8*>(array->bytes.data()), static_cast<int>(array->bytes.size() / elemSize) };
+            return OcArraySpan{ nullptr, 0 };
+        return OcArraySpan{ const_cast<uint8*>(array->bytes.data()), static_cast<int>(array->bytes.size() / elemSize) };
     }
 
-    void* thunk_arrayElem(VrArray handle, int index, int elemSize)
+    void* thunk_arrayElem(OcArray handle, int index, int elemSize)
     {
         return scriptArrayElemAt(resolveScriptArray(handle), index, elemSize);
     }
@@ -908,7 +908,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
 
     // The array itself, resolved once for a loop. Safe to hold across the body: the registry's chunked storage
     // never moves a ScriptArray, and a freed slot stays valid memory that reads back empty.
-    void* thunk_arrayResolve(VrArray handle) { return resolveScriptArray(handle); }
+    void* thunk_arrayResolve(OcArray handle) { return resolveScriptArray(handle); }
 
     int thunk_arrayViewCount(void* view)
     {
@@ -916,7 +916,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         return array != nullptr ? scriptArrayCount(*array) : 0;
     }
 
-    void thunk_arrayRemoveAt(VrArray handle, int index)
+    void thunk_arrayRemoveAt(OcArray handle, int index)
     {
         ScriptArray* array = resolveScriptArray(handle);
         if (array == nullptr || index < 0 || index >= scriptArrayCount(*array))
@@ -932,13 +932,13 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         }
     }
 
-    int thunk_arrayCount(VrArray handle)
+    int thunk_arrayCount(OcArray handle)
     {
         const ScriptArray* array = resolveScriptArray(handle);
         return array != nullptr ? scriptArrayCount(*array) : 0;
     }
 
-    void thunk_arrayClear(VrArray handle)
+    void thunk_arrayClear(OcArray handle)
     {
         if (ScriptArray* array = resolveScriptArray(handle); array != nullptr)
         {
@@ -1084,7 +1084,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     }
 
     // ---- radius query results ----
-    // A THREAD-LOCAL ring of result buffers, handed out by generation-tagged handle (the VrArray discipline).
+    // A THREAD-LOCAL ring of result buffers, handed out by generation-tagged handle (the OcArray discipline).
     // Thread-local because a query's results belong to whoever asked -- scripts run on the main thread today,
     // but nothing here needs to know that. A ring because queries NEST: a foreach over one may run another in
     // its body, and each needs its own live buffer. Recycling a slot bumps its generation, so a handle held
@@ -1226,7 +1226,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
 
     // lightSetAt is the ONE write path (the DSL's `ref` write-back, the Set Light node's copy-in), so every
     // clamp lives there and nowhere else.
-    int thunk_lightGetAt(void* p, int i, VrLight* out)
+    int thunk_lightGetAt(void* p, int i, OcLight* out)
     {
         LightComponent::LightDesc* d = asLightDesc(p, i);
         if (!d || !out)
@@ -1245,7 +1245,7 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
         out->enabled = d->enabled;
         return 1;
     }
-    void thunk_lightSetAt(void* p, int i, const VrLight* v)
+    void thunk_lightSetAt(void* p, int i, const OcLight* v)
     {
         LightComponent::LightDesc* d = asLightDesc(p, i);
         if (!d || !v)
@@ -1656,9 +1656,9 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
     }
 
     // ---- world ----
-    VrRayHit thunk_worldRayCast(glm::vec3 origin, glm::vec3 direction, float maxDistance)
+    OcRayHit thunk_worldRayCast(glm::vec3 origin, glm::vec3 direction, float maxDistance)
     {
-        VrRayHit out{};
+        OcRayHit out{};
         const float len = glm::length(direction);
         if (len <= 0.0f || maxDistance <= 0.0f)
             return out; // a degenerate ray misses rather than asserting -- gameplay code shouldn't have to guard

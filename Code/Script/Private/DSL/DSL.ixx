@@ -132,7 +132,7 @@ export enum class DSLType : uint16
 	// own, so it stacks on top of everything above -- including the two DYNAMIC ranges, which is why it's a high
 	// bit and not another FirstX constant. Deliberately NOT nestable: one bit means one level, and "int[][]"
 	// isn't representable (nothing offers it either). An array's storage is engine-owned and reached through a
-	// handle (see VrArray in ScriptAPI.h); the DSL sees it as a chainable type carrying count/push/clear.
+	// handle (see OcArray in ScriptAPI.h); the DSL sees it as a chainable type carrying count/push/clear.
 	ArrayFlag = 0x8000,
 };
 
@@ -567,7 +567,7 @@ export inline int dslEnclosingFunctionHeader(const DSLScriptFile& file, int from
 // authored via the SCRIPT DATA sidebar section's add/remove controls, serialized as one .dsl "//@@data <type>
 // <name>" line each. `type` is never an engine-object kind (self.data.self makes no sense) -- only
 // Int/Float/Bool/String, an engine-defined struct (vec2/3/4), or an ARRAY of any of those (dslIsArrayType --
-// the field then stores a VrArray handle, and the elements live engine-side; see ScriptAPI.h).
+// the field then stores a OcArray handle, and the elements live engine-side; see ScriptAPI.h).
 //
 // ENTITY IS NOT STORABLE, in either form. As a bare field it would dangle the moment the entity died. As an
 // array element the engine could hold a refcounted EntityPtr instead -- memory-safe, but then a script silently
@@ -580,7 +580,7 @@ export inline int dslEnclosingFunctionHeader(const DSLScriptFile& file, int from
 // live, the Entity Editor authors its initial value); Public additionally means another entity's script may read
 // it, which nothing implements yet -- it is declared here so the authored data survives until it does.
 //
-// Only SCALAR and STRUCT fields can be anything but Hidden: an array is a VrArray handle whose storage lives
+// Only SCALAR and STRUCT fields can be anything but Hidden: an array is a OcArray handle whose storage lives
 // engine-side, and there is nothing meaningful for an inspector to show or set. Enforced in the SCRIPT DATA
 // panel and, as always, again in the loader.
 export enum class DSLFieldVisibility : uint8

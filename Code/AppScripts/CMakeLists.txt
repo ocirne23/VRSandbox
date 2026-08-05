@@ -23,14 +23,14 @@ if(SCRIPTS_STATIC)
 	string(APPEND AGG "#pragma warning(disable: 4505) // unreferenced function with internal linkage has been removed \n\n")
 	foreach(scr ${SCRIPT_FILES})
 		get_filename_component(stem ${scr} NAME_WE)
-		get_filename_component(ext ${scr} EXT) # ".scr" or ".dsl" -- VR_CURRENT_SCRIPT must match the REAL asset
+		get_filename_component(ext ${scr} EXT) # ".scr" or ".dsl" -- OC_CURRENT_SCRIPT must match the REAL asset
 		                                        # path (ScriptComponent::scriptPath/findStaticEntries' lookup), not
 		                                        # a hardcoded extension
-		string(APPEND AGG "#define VR_CURRENT_SCRIPT \"Scripts/${stem}${ext}\"\n")
+		string(APPEND AGG "#define OC_CURRENT_SCRIPT \"Scripts/${stem}${ext}\"\n")
 		string(APPEND AGG "namespace Script_${stem} {\n")
 		string(APPEND AGG "#include \"${scr}\"\n")
 		string(APPEND AGG "}\n")
-		string(APPEND AGG "#undef VR_CURRENT_SCRIPT\n\n")
+		string(APPEND AGG "#undef OC_CURRENT_SCRIPT\n\n")
 	endforeach()
 	string(APPEND AGG "#pragma warning(pop)\n")
 

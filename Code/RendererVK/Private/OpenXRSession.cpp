@@ -70,7 +70,7 @@ bool OpenXRSession::initInstanceAndSystem()
     XrInstanceCreateInfo createInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
     createInfo.applicationInfo.apiVersion = XR_API_VERSION_1_0;
     copyFixed(createInfo.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "App");
-    copyFixed(createInfo.applicationInfo.engineName, XR_MAX_ENGINE_NAME_SIZE, "VRSandbox");
+    copyFixed(createInfo.applicationInfo.engineName, XR_MAX_ENGINE_NAME_SIZE, "OctEngine");
     createInfo.enabledExtensionCount = (uint32)(sizeof(enabledExtensions) / sizeof(enabledExtensions[0]));
     createInfo.enabledExtensionNames = enabledExtensions;
 

@@ -122,7 +122,7 @@ bool Instance::initialize(Window& window, bool enableValidationLayers)
             extensions.push_back(ext.c_str());
     }
 
-    vk::ApplicationInfo appInfo{ .pApplicationName = "App", .applicationVersion = VK_MAKE_VERSION(1, 0, 0), .pEngineName = "VRSandbox", .engineVersion = VK_MAKE_VERSION(1, 0, 0), .apiVersion = m_apiVersion };
+    vk::ApplicationInfo appInfo{ .pApplicationName = "App", .applicationVersion = VK_MAKE_VERSION(1, 0, 0), .pEngineName = "OctEngine", .engineVersion = VK_MAKE_VERSION(1, 0, 0), .apiVersion = m_apiVersion };
     vk::InstanceCreateInfo createInfo{ .pApplicationInfo = &appInfo };
 
     vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo{

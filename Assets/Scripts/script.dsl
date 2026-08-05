@@ -4,17 +4,17 @@ struct ScriptData
 {
 	PhysicsComponent* physics;
 	int num = 0;
-	VrArray list = 0;
+	OcArray list = 0;
 };
 
 SCRIPT_EXPORT unsigned int ScriptDataSize(void) { return sizeof(ScriptData); }
 SCRIPT_EXPORT unsigned int ScriptDataLayoutId(void) { return 2407474620u; }
 REGISTER_SCRIPT_DATA_SIZE()
 
-static const VrScriptField kScriptDataFields[] = {
-	{ "num", VR_FIELD_INT, (int)offsetof(ScriptData, num), VR_FIELD_PRIVATE },
+static const OcScriptField kScriptDataFields[] = {
+	{ "num", OC_FIELD_INT, (int)offsetof(ScriptData, num), OC_FIELD_PRIVATE },
 };
-SCRIPT_EXPORT const VrScriptField* ScriptDataFields(int* outCount)
+SCRIPT_EXPORT const OcScriptField* ScriptDataFields(int* outCount)
 { *outCount = (int)(sizeof(kScriptDataFields) / sizeof(kScriptDataFields[0])); return kScriptDataFields; }
 REGISTER_SCRIPT_DATA_FIELDS()
 
@@ -74,23 +74,23 @@ REGISTER_UPDATE()
 
 static void test(const ScriptContext* ctx, Entity* self, ScriptData* scriptData, int awa)
 {
-	if (int* vrPtr1 = static_cast<int*>(ctx->arrayElem((*scriptData).list, 0, (int)sizeof(int))))
+	if (int* ocPtr1 = static_cast<int*>(ctx->arrayElem((*scriptData).list, 0, (int)sizeof(int))))
 	{
-		int& j = *vrPtr1;
+		int& j = *ocPtr1;
 		j = awa;
 	}
 
-	const auto vrIter2 = ctx->arraySpan((*scriptData).list, (int)sizeof(int));
-	for (int vrIdx0 = 0, vrIdx0End = vrIter2.count; vrIdx0 < vrIdx0End; ++vrIdx0)
+	const auto ocIter2 = ctx->arraySpan((*scriptData).list, (int)sizeof(int));
+	for (int ocIdx0 = 0, ocIdx0End = ocIter2.count; ocIdx0 < ocIdx0End; ++ocIdx0)
 	{
-		int& k = static_cast<int*>(vrIter2.data)[vrIdx0];
+		int& k = static_cast<int*>(ocIter2.data)[ocIdx0];
 		k = awa;
 	}
 
-	const auto vrIter3 = ctx->arraySpan((*scriptData).list, (int)sizeof(int));
-	for (int vrIdx0 = 0, vrIdx0End = vrIter3.count; vrIdx0 < vrIdx0End; ++vrIdx0)
+	const auto ocIter3 = ctx->arraySpan((*scriptData).list, (int)sizeof(int));
+	for (int ocIdx0 = 0, ocIdx0End = ocIter3.count; ocIdx0 < ocIdx0End; ++ocIdx0)
 	{
-		int& l = static_cast<int*>(vrIter3.data)[vrIdx0];
+		int& l = static_cast<int*>(ocIter3.data)[ocIdx0];
 		l = 42;
 	}
 }

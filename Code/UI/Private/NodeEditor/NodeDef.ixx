@@ -763,25 +763,25 @@ export const std::vector<NodeDef>& nodeRegistry()
         + std::string(1, INDENT_UP) + "#0" + std::string(1, INDENT_DOWN) + "}\n#1" });
 
     // Get Light: reads one light (by Index) off the Component handle. Valid is true when the handle is non-null
-    // AND the index is in range; the pins read type defaults otherwise (vrLightAt's contract). Each connected
+    // AND the index is in range; the pins read type defaults otherwise (ocLightAt's contract). Each connected
     // pin copies the light out and picks its field; Offset/Direction are entity-space.
     r.push_back({ "GetLight", "Get Light", "Light", false,
         { { "Component", D::Pointer, "nullptr" }, { "Index", D::Int, "0" } },
         { { "Valid",     D::Bool,  "", 0, "($1 >= 0 && $1 < ctx->lightGetCount($0))" },
-            { "Enabled",   D::Bool,  "", 0, "vrLightAt(ctx, $0, $1).enabled" },
-            { "Color",     D::Vec3,  "", 0, "vrLightAt(ctx, $0, $1).color" },
-            { "Intensity", D::Float, "", 0, "vrLightAt(ctx, $0, $1).intensity" },
-            { "Range",     D::Float, "", 0, "vrLightAt(ctx, $0, $1).range" },
-            { "Offset",    D::Vec3,  "", 0, "vrLightAt(ctx, $0, $1).offset" },
-            { "Direction", D::Vec3,  "", 0, "vrLightAt(ctx, $0, $1).direction" },
+            { "Enabled",   D::Bool,  "", 0, "ocLightAt(ctx, $0, $1).enabled" },
+            { "Color",     D::Vec3,  "", 0, "ocLightAt(ctx, $0, $1).color" },
+            { "Intensity", D::Float, "", 0, "ocLightAt(ctx, $0, $1).intensity" },
+            { "Range",     D::Float, "", 0, "ocLightAt(ctx, $0, $1).range" },
+            { "Offset",    D::Vec3,  "", 0, "ocLightAt(ctx, $0, $1).offset" },
+            { "Direction", D::Vec3,  "", 0, "ocLightAt(ctx, $0, $1).direction" },
             // Shape params -- each read by ONE type (Spot: Cone Angle/Edge Softness; Area: Width/Height/
             // Rotation; Tube: Width = radius, Length); the others report the stored-but-unused value.
-            { "Cone Angle",    D::Float, "", 0, "vrLightAt(ctx, $0, $1).coneAngle" },
-            { "Edge Softness", D::Float, "", 0, "vrLightAt(ctx, $0, $1).edgeSoftness" },
-            { "Width",         D::Float, "", 0, "vrLightAt(ctx, $0, $1).width" },
-            { "Height",        D::Float, "", 0, "vrLightAt(ctx, $0, $1).height" },
-            { "Length",        D::Float, "", 0, "vrLightAt(ctx, $0, $1).length" },
-            { "Rotation",      D::Float, "", 0, "vrLightAt(ctx, $0, $1).rotation" } },
+            { "Cone Angle",    D::Float, "", 0, "ocLightAt(ctx, $0, $1).coneAngle" },
+            { "Edge Softness", D::Float, "", 0, "ocLightAt(ctx, $0, $1).edgeSoftness" },
+            { "Width",         D::Float, "", 0, "ocLightAt(ctx, $0, $1).width" },
+            { "Height",        D::Float, "", 0, "ocLightAt(ctx, $0, $1).height" },
+            { "Length",        D::Float, "", 0, "ocLightAt(ctx, $0, $1).length" },
+            { "Rotation",      D::Float, "", 0, "ocLightAt(ctx, $0, $1).rotation" } },
         "" });
 
     // Set Light: copies the light out, overwrites only the fields you actually connect (?k conditional blocks,
@@ -804,7 +804,7 @@ export const std::vector<NodeDef>& nodeRegistry()
             { "Length",        D::Float, "1.0f" },
             { "Rotation",      D::Float, "0.0f" } },
         { { "", D::Exec, "" } },
-        "VrLight light@ = vrLightAt(ctx, $1, $2);\n"
+        "OcLight light@ = ocLightAt(ctx, $1, $2);\n"
         "?3{light@.enabled = $3;\n}?4{light@.color = $4;\n}?5{light@.intensity = $5;\n}"
         "?6{light@.range = $6;\n}?7{light@.offset = $7;\n}?8{light@.direction = $8;\n}"
         "?9{light@.coneAngle = $9;\n}?10{light@.edgeSoftness = $10;\n}?11{light@.width = $11;\n}"

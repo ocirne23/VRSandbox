@@ -14,7 +14,7 @@ import Core.Log;
 // at static-init via the REGISTER_*() macros in each .scr. A Meyers singleton so it is constructed before any
 // registrar runs, whatever the cross-TU init order. ScriptHost::getOrLoad resolves script paths against this
 // instead of invoking cl / LoadLibrary.
-struct StaticScriptFns { void* fns[VR_SCRIPT_ENTRY_COUNT] = {}; };
+struct StaticScriptFns { void* fns[OC_SCRIPT_ENTRY_COUNT] = {}; };
 
 static std::unordered_map<std::string, StaticScriptFns>& staticScriptRegistry()
 {
@@ -27,7 +27,7 @@ static const StaticScriptFns* findStaticEntries(const std::string& path)
     auto& reg = staticScriptRegistry();
     if (auto it = reg.find(path); it != reg.end())
         return &it->second;
-    // Lenient match: prefabs spell the path "Scripts/X.scr"; the aggregate registered whatever VR_CURRENT_SCRIPT
+    // Lenient match: prefabs spell the path "Scripts/X.scr"; the aggregate registered whatever OC_CURRENT_SCRIPT
     // held. Compare on forward-slash-normalized paths, allowing one to be a tail of the other (rel vs abs).
     std::string norm = path;
     for (char& c : norm) if (c == '\\') c = '/';
@@ -43,9 +43,9 @@ static const StaticScriptFns* findStaticEntries(const std::string& path)
 
 // Called from each script's REGISTER_*() macro (declared in ScriptAPI.h). extern "C" + file scope so it is one
 // external symbol the App-Scripts aggregate links against.
-extern "C" void vrRegisterScriptEntry(const char* scriptPath, int kind, void* fn)
+extern "C" void ocRegisterScriptEntry(const char* scriptPath, int kind, void* fn)
 {
-    if (scriptPath && fn && kind >= 0 && kind < VR_SCRIPT_ENTRY_COUNT)
+    if (scriptPath && fn && kind >= 0 && kind < OC_SCRIPT_ENTRY_COUNT)
         staticScriptRegistry()[scriptPath].fns[kind] = fn;
 }
 #endif
@@ -315,7 +315,7 @@ bool ScriptHost::loadDll(CachedScript& slot, const fs::path& dll)
     slot.entries.dataFields = nullptr;
     slot.entries.numDataFields = 0;
     // Cast inline rather than through ScriptAPI.h's typedef: this path deliberately doesn't include the ABI
-    // header (only the cooked build does), same as every GetProcAddress above. The table is VrScriptField[]
+    // header (only the cooked build does), same as every GetProcAddress above. The table is OcScriptField[]
     // to whoever consumes it -- void* here, exactly like the entry points.
     using ScriptDataFieldsPtr = const void* (*)(int*);
     if (auto fieldsFn = (ScriptDataFieldsPtr)GetProcAddress(m, "ScriptDataFields"))
@@ -362,22 +362,22 @@ const ScriptModule* ScriptHost::getOrLoad(const std::string& path, bool forceRec
     {
         CachedScript& slot = scripts.emplace(key, CachedScript{}).first->second;
         slot.entries.scriptPath     = path;
-        slot.entries.onSpawn        = e->fns[VR_SCRIPT_ON_SPAWN];
-        slot.entries.update         = e->fns[VR_SCRIPT_UPDATE];
-        slot.entries.onDestroy      = e->fns[VR_SCRIPT_ON_DESTROY];
-        slot.entries.onEvent        = e->fns[VR_SCRIPT_ON_EVENT];
-        slot.entries.onPhysicsEvent = e->fns[VR_SCRIPT_ON_PHYSICS_EVENT];
-        slot.entries.dataSize       = e->fns[VR_SCRIPT_DATA_SIZE] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_DATA_SIZE])() : 0;
-        slot.entries.dataLayoutId   = e->fns[VR_SCRIPT_DATA_LAYOUT_ID] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_DATA_LAYOUT_ID])() : 0;
+        slot.entries.onSpawn        = e->fns[OC_SCRIPT_ON_SPAWN];
+        slot.entries.update         = e->fns[OC_SCRIPT_UPDATE];
+        slot.entries.onDestroy      = e->fns[OC_SCRIPT_ON_DESTROY];
+        slot.entries.onEvent        = e->fns[OC_SCRIPT_ON_EVENT];
+        slot.entries.onPhysicsEvent = e->fns[OC_SCRIPT_ON_PHYSICS_EVENT];
+        slot.entries.dataSize       = e->fns[OC_SCRIPT_DATA_SIZE] ? reinterpret_cast<unsigned int(*)()>(e->fns[OC_SCRIPT_DATA_SIZE])() : 0;
+        slot.entries.dataLayoutId   = e->fns[OC_SCRIPT_DATA_LAYOUT_ID] ? reinterpret_cast<unsigned int(*)()>(e->fns[OC_SCRIPT_DATA_LAYOUT_ID])() : 0;
         slot.entries.dataFields = nullptr;
         slot.entries.numDataFields = 0;
-        if (e->fns[VR_SCRIPT_DATA_FIELDS])
-            slot.entries.dataFields = reinterpret_cast<const void* (*)(int*)>(e->fns[VR_SCRIPT_DATA_FIELDS])(&slot.entries.numDataFields);
-        slot.entries.requiredComponents = e->fns[VR_SCRIPT_REQUIRED_COMPONENTS] ? reinterpret_cast<unsigned int(*)()>(e->fns[VR_SCRIPT_REQUIRED_COMPONENTS])() : 0;
+        if (e->fns[OC_SCRIPT_DATA_FIELDS])
+            slot.entries.dataFields = reinterpret_cast<const void* (*)(int*)>(e->fns[OC_SCRIPT_DATA_FIELDS])(&slot.entries.numDataFields);
+        slot.entries.requiredComponents = e->fns[OC_SCRIPT_REQUIRED_COMPONENTS] ? reinterpret_cast<unsigned int(*)()>(e->fns[OC_SCRIPT_REQUIRED_COMPONENTS])() : 0;
         slot.entries.eventNames.clear();
-        if (void* ec = e->fns[VR_SCRIPT_EVENT_COUNT]; ec && e->fns[VR_SCRIPT_EVENT_NAME])
+        if (void* ec = e->fns[OC_SCRIPT_EVENT_COUNT]; ec && e->fns[OC_SCRIPT_EVENT_NAME])
         {
-            auto nameFn = reinterpret_cast<const char*(*)(int)>(e->fns[VR_SCRIPT_EVENT_NAME]);
+            auto nameFn = reinterpret_cast<const char*(*)(int)>(e->fns[OC_SCRIPT_EVENT_NAME]);
             for (int i = 0, n = reinterpret_cast<int(*)()>(ec)(); i < n; ++i)
                 slot.entries.eventNames.emplace_back(nameFn(i));
         }

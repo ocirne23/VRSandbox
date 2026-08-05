@@ -29,7 +29,7 @@ namespace Procedural::Diffusion
 		// fails to attach THROWS, and is reported below as an explicit error plus "inference provider: CPU".
 		Ort::Env& ortEnv()
 		{
-			static Ort::Env env(ORT_LOGGING_LEVEL_ERROR, "VRSandbox.Diffusion");
+			static Ort::Env env(ORT_LOGGING_LEVEL_ERROR, "OctEngine.Diffusion");
 			return env;
 		}
 

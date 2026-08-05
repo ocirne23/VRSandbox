@@ -9,7 +9,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS "/ignore:4099")
 
 target_link_libraries(${PROJECT_NAME} PRIVATE Core Animation RendererVK UI Entity File Input Script Physics Network Audio Spatial Threading Procedural Particle Force AppScripts)
 
-# Cooked build: AppScripts' whole job is the scripts' static-init registrations (vrRegisterScriptEntry). Nothing
+# Cooked build: AppScripts' whole job is the scripts' static-init registrations (ocRegisterScriptEntry). Nothing
 # references its symbols, so a normal static-lib link dead-strips the entire object and NO script registers.
 # /WHOLEARCHIVE forces it in so the initializers run. (No-op when AppScripts is the INTERFACE stub, hence the guard.)
 if(SCRIPTS_STATIC)

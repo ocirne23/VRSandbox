@@ -103,7 +103,7 @@ void ScriptComponent::applyInitialValues()
         || scriptModule->dataFields == nullptr || scriptModule->numDataFields <= 0)
         return;
     // ScriptModule carries the table as void* (it doesn't depend on the script ABI) -- typed once, here.
-    const VrScriptField* fields = static_cast<const VrScriptField*>(scriptModule->dataFields);
+    const OcScriptField* fields = static_cast<const OcScriptField*>(scriptModule->dataFields);
 
     // Comma-separated floats for the vector/quat kinds, so an authored value reads the way every other vector
     // in the .pre format does ("1, 2, 3"). A short or unparseable list leaves the field alone.
@@ -127,7 +127,7 @@ void ScriptComponent::applyInitialValues()
 
     for (const InitialFieldValue& authored : initialValues)
     {
-        const VrScriptField* field = nullptr;
+        const OcScriptField* field = nullptr;
         for (int i = 0; i < scriptModule->numDataFields && field == nullptr; ++i)
             if (authored.name == fields[i].name)
                 field = &fields[i];
@@ -137,18 +137,18 @@ void ScriptComponent::applyInitialValues()
 
         switch (field->type)
         {
-        case VR_FIELD_INT:   *reinterpret_cast<int*>(slot) = std::atoi(authored.value.c_str()); break;
-        case VR_FIELD_FLOAT: *reinterpret_cast<float*>(slot) = std::strtof(authored.value.c_str(), nullptr); break;
-        case VR_FIELD_BOOL:  *reinterpret_cast<bool*>(slot) = (authored.value == "true" || authored.value == "1"); break;
+        case OC_FIELD_INT:   *reinterpret_cast<int*>(slot) = std::atoi(authored.value.c_str()); break;
+        case OC_FIELD_FLOAT: *reinterpret_cast<float*>(slot) = std::strtof(authored.value.c_str(), nullptr); break;
+        case OC_FIELD_BOOL:  *reinterpret_cast<bool*>(slot) = (authored.value == "true" || authored.value == "1"); break;
         // The block holds a const char* into ENGINE-interned storage, never into this component's own string --
         // the block outlives any particular InitialFieldValue (and a reload replaces the whole vector).
-        case VR_FIELD_STRING:
+        case OC_FIELD_STRING:
             *reinterpret_cast<const char**>(slot) = Globals::scriptContext.internString(authored.value.c_str());
             break;
-        case VR_FIELD_VEC2:  parseFloats(authored.value, reinterpret_cast<float*>(slot), 2); break;
-        case VR_FIELD_VEC3:  parseFloats(authored.value, reinterpret_cast<float*>(slot), 3); break;
-        case VR_FIELD_VEC4:
-        case VR_FIELD_QUAT:  parseFloats(authored.value, reinterpret_cast<float*>(slot), 4); break;
+        case OC_FIELD_VEC2:  parseFloats(authored.value, reinterpret_cast<float*>(slot), 2); break;
+        case OC_FIELD_VEC3:  parseFloats(authored.value, reinterpret_cast<float*>(slot), 3); break;
+        case OC_FIELD_VEC4:
+        case OC_FIELD_QUAT:  parseFloats(authored.value, reinterpret_cast<float*>(slot), 4); break;
         default: break;
         }
     }

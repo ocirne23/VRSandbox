@@ -10,7 +10,7 @@ import Physics;
 // Bump on ANY wire format change: the transport handshake denies mismatched protocol ids, so old
 // builds fail to connect instead of misparsing. GameNetVersion rides in Hello/Welcome purely so the
 // mismatch produces a readable log line when the protocolId was forgotten.
-constexpr uint32 GameProtocolId = 0x56525343; // "VRSC": events carry a payload + sender netId
+constexpr uint32 GameProtocolId = 0x4F435343; // "OCSC": events carry a payload + sender netId
 constexpr uint16 GameNetVersion = 11;
 
 enum class ENetMsg : uint8

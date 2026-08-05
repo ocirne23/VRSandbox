@@ -1,6 +1,6 @@
 cmake_minimum_required (VERSION 3.14)
 
-project(VRSandbox CXX)
+project(OctEngine CXX)
 
 set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}")
 

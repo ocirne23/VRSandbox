@@ -75,7 +75,7 @@ export struct NetEvent
 
 export struct NetHostConfig
 {
-    uint32 protocolId = 0x56525331;    // "VRS1" — must match on both ends
+    uint32 protocolId = 0x4F435331;    // "OCS1" — must match on both ends
     uint16 maxPeers = 32;              // total connection slots (incoming + outgoing)
     bool acceptIncoming = true;        // false = pure client (p2p simultaneous connect still works)
     bool encrypt = false;              // ECDH handshake + AES-128-GCM per packet (+16B); must match on both ends

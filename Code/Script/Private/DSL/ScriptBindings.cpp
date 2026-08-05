@@ -184,7 +184,7 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 
 		for (DSLType elementType : elementTypes)
 		{
-			// Every array function routes through the same generic ABI (see VrArray in ScriptAPI.h): "$r" is the
+			// Every array function routes through the same generic ABI (see OcArray in ScriptAPI.h): "$r" is the
 			// handle field itself, so push takes its ADDRESS to create the array on first use and write the id
 			// back. The generated helpers (see Transpiler's preamble) do the null-check and the cast, which is
 			// what keeps a stale handle or an out-of-range index from ever touching memory.
@@ -193,7 +193,7 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 			// a name that exists in the generated TU ("glm::vec3", not "vec3").
 			const std::string elementName = cppTypeName(elementType);
 			m_arrayEmits.push_back(std::make_unique<std::string>(
-				"vrArrPush<" + elementName + ">(ctx, self, &$r, " + std::to_string(static_cast<int>(elementType)) + ", $1)"));
+				"ocArrPush<" + elementName + ">(ctx, self, &$r, " + std::to_string(static_cast<int>(elementType)) + ", $1)"));
 			const char* pushEmit = m_arrayEmits.back()->c_str();
 
 			BindingObject arrayObject;
@@ -223,11 +223,11 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 			{
 				arrayObject.sequenceBeginEmit = "ctx->arrayResolve($r)";
 				arrayObject.sequenceCountEmit = "ctx->arrayViewCount($r)";
-				m_arrayEmits.push_back(std::make_unique<std::string>("vrArrViewGet<" + elementName + ">(ctx, $r, $i)"));
+				m_arrayEmits.push_back(std::make_unique<std::string>("ocArrViewGet<" + elementName + ">(ctx, $r, $i)"));
 				arrayObject.sequenceAtEmit = m_arrayEmits.back()->c_str();
 				// A `ref` write-back goes through the resolved view too. Without this it would fall back to the
 				// handle form, whose receiver is a source local that a begin-emit container no longer declares.
-				m_arrayEmits.push_back(std::make_unique<std::string>("vrArrViewSet<" + elementName + ">(ctx, $r, $1, $v)"));
+				m_arrayEmits.push_back(std::make_unique<std::string>("ocArrViewSet<" + elementName + ">(ctx, $r, $1, $v)"));
 				arrayObject.sequenceElementSetEmit = m_arrayEmits.back()->c_str();
 			}
 			else
@@ -256,7 +256,7 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 			arrayObject.lookupValueType = elementType;
 			const bool rawElements = elementType != DSLType::Entity && elementType != DSLType::String;
 			arrayObject.lookupEmit = rawElements
-				? "vrArrLoad(ctx, $r, $1, $v)"
+				? "ocArrLoad(ctx, $r, $1, $v)"
 				: "ctx->arrayGet($r, $1, (int)sizeof($v), &$v)";
 			if (rawElements)
 			{
@@ -268,8 +268,8 @@ void ScriptBindings::build(std::vector<std::unique_ptr<DSLSymbol>>& sidebarOut, 
 			// at write time, so a body that pushed or cleared drops the write instead of corrupting anything.
 			arrayObject.elementWritable = true;
 			m_arrayEmits.push_back(std::make_unique<std::string>(rawElements
-				? "vrArrStore(ctx, $r, $1, $v)"
-				: "vrArrSet<" + elementName + ">(ctx, $r, $1, $v)"));
+				? "ocArrStore(ctx, $r, $1, $v)"
+				: "ocArrSet<" + elementName + ">(ctx, $r, $1, $v)"));
 			arrayObject.elementSetEmit = m_arrayEmits.back()->c_str();
 			m_objectDefs.push_back(std::move(arrayObject));
 		}
@@ -405,10 +405,10 @@ std::span<const BindingStruct> ScriptBindings::structs() const
 // objects, which happens before the struct loop populates m_builtStructs.
 const char* ScriptBindings::cppTypeName(DSLType type) const
 {
-	// An array is a HANDLE on the script side -- the elements live engine-side (see VrArray in ScriptAPI.h),
+	// An array is a HANDLE on the script side -- the elements live engine-side (see OcArray in ScriptAPI.h),
 	// which is what lets one sit in ScriptData and survive a hot-reload without being copied.
 	if (dslIsArrayType(type))
-		return "VrArray";
+		return "OcArray";
 	// Engine-defined structs carry their own C++ spelling in the registry.
 	if (dslIsStructType(type))
 	{

@@ -1,5 +1,5 @@
 module;
-// VrScriptField: ScriptModule carries the exposed-field table as void* (it doesn't depend on the script ABI), so
+// OcScriptField: ScriptModule carries the exposed-field table as void* (it doesn't depend on the script ABI), so
 // the Script Data section needs the real struct to read it. In the GLOBAL module fragment -- a plain #include
 // after `module UI;` lands in the module purview and collides with the std header units Core re-exports.
 #include "ScriptAPI.h"
@@ -1459,12 +1459,12 @@ void EntityEditor::renderScriptDataSection()
 	const ScriptModule* module = Globals::scriptHost.getOrLoad(m_scriptDraft.scriptPath);
 	if (module == nullptr || module->dataFields == nullptr || module->numDataFields <= 0)
 		return;
-	const VrScriptField* fields = static_cast<const VrScriptField*>(module->dataFields);
+	const OcScriptField* fields = static_cast<const OcScriptField*>(module->dataFields);
 
 	ImGui::SeparatorText("Script Data");
 	for (int i = 0; i < module->numDataFields; ++i)
 	{
-		const VrScriptField& field = fields[i];
+		const OcScriptField& field = fields[i];
 
 		// The authored entry for this field, or a fresh one -- a field the .pre says nothing about shows its
 		// type's zero, and only starts being serialized once actually edited.
@@ -1486,7 +1486,7 @@ void EntityEditor::renderScriptDataSection()
 		bool changed = false;
 		switch (field.type)
 		{
-		case VR_FIELD_INT:
+		case OC_FIELD_INT:
 		{
 			int value = std::atoi(current.c_str());
 			if (ImGui::DragInt("##v", &value))
@@ -1496,7 +1496,7 @@ void EntityEditor::renderScriptDataSection()
 			}
 			break;
 		}
-		case VR_FIELD_BOOL:
+		case OC_FIELD_BOOL:
 		{
 			bool value = (current == "true" || current == "1");
 			if (ImGui::Checkbox("##v", &value))
@@ -1506,7 +1506,7 @@ void EntityEditor::renderScriptDataSection()
 			}
 			break;
 		}
-		case VR_FIELD_STRING:
+		case OC_FIELD_STRING:
 		{
 			char buffer[256];
 			strncpy_s(buffer, sizeof(buffer), current.c_str(), sizeof(buffer) - 1);
@@ -1520,9 +1520,9 @@ void EntityEditor::renderScriptDataSection()
 		default:
 		{
 			// Every remaining kind is 1..4 floats, so one path covers Float/vec2/vec3/vec4/quat.
-			const int count = (field.type == VR_FIELD_FLOAT) ? 1
-				: (field.type == VR_FIELD_VEC2) ? 2
-				: (field.type == VR_FIELD_VEC3) ? 3 : 4;
+			const int count = (field.type == OC_FIELD_FLOAT) ? 1
+				: (field.type == OC_FIELD_VEC2) ? 2
+				: (field.type == OC_FIELD_VEC3) ? 3 : 4;
 			float values[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 			{
 				const char* p = current.c_str();
