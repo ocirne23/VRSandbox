@@ -82,6 +82,7 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
             physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, net.targetAngVel);
             physics->prevPos = physics->currPos = net.targetPos; // see the snap-path comment below
             physics->prevRot = physics->currRot = net.targetRot;
+            physics->lastStep = Globals::physics.getStepCount(); // see the playback path
             if (newSnapshot)
                 net.lastAppliedTick = net.serverTick;
             return;
@@ -131,6 +132,7 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
                 physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, glm::vec3(0.0f));
                 physics->prevPos = physics->currPos = net.targetPos;
                 physics->prevRot = physics->currRot = net.targetRot;
+                physics->lastStep = Globals::physics.getStepCount(); // see the playback path
             }
             physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAwake, glm::vec3(0.0f));
             return;
@@ -173,8 +175,15 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
                 physicsWorld.teleportBody(physics->body, pos, rot);
                 physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetLinearVelocity, glm::mix(r0.linVel, r1.linVel, alpha));
                 physicsWorld.queueBodyCommand(physics->body, PhysicsWorld::EBodyCommand::SetAngularVelocity, glm::mix(r0.angVel, r1.angVel, alpha));
-                physics->prevPos = physics->currPos = pos; // teleports apply next physics.update; see the snap-path comment
+                physics->prevPos = physics->currPos = pos;
                 physics->prevRot = physics->currRot = rot;
+                // CLAIM THE STEP. PhysicsComponent::update runs next on this entity and, on any
+                // frame where the sim stepped, would overwrite curr with body.getPosition() — which
+                // still holds LAST frame's teleport, since teleports apply at the next
+                // physics.update. It would then render mix(thisFramePose, lastFramePose), i.e.
+                // backward, on stepping frames and correctly on the others: the pulsing. The
+                // playback pose is authoritative for a remote entity, so suppress that refresh.
+                physics->lastStep = Globals::physics.getStepCount();
                 if (newSnapshot)
                     net.lastAppliedTick = net.serverTick;
                 return;
@@ -202,6 +211,7 @@ void NetworkComponent::update(Entity& entity, float deltaSeconds)
             // entity) show the corrected pose this frame instead of lerping from stale state.
             physics->prevPos = physics->currPos = target;
             physics->prevRot = physics->currRot = net.targetRot;
+            physics->lastStep = Globals::physics.getStepCount(); // see the playback path
             if (newSnapshot)
                 net.lastAppliedTick = net.serverTick;
             return;
