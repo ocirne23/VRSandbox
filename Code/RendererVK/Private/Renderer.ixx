@@ -825,8 +825,6 @@ private:
 
 export namespace Globals
 {
-#pragma warning(disable: 4075)
-#pragma init_seg(".CRT$XCU3")
+OC_INIT_SEG(OC_SEG_VK_RENDERER)
     Renderer rendererVK;
-#pragma warning(default: 4075)
 } // namespace Globals

@@ -52,6 +52,42 @@ public:
     virtual void joyPovMoved(const SDL_JoyHatEvent& arg, int index) {}
 };
 
+// RAII handle to a registered listener: Input::add*Listener returns one, the destructor unregisters.
+// Move-only; assign the callback slots through -> (the listener object itself is owned by Input and
+// address-stable). Must not outlive Globals::input (a static-teardown holder needs init_seg ordering).
+export template<typename T>
+class InputListenerHandle final
+{
+public:
+    InputListenerHandle() = default;
+    ~InputListenerHandle() { reset(); }
+    InputListenerHandle(InputListenerHandle&& other) noexcept : m_listener(std::exchange(other.m_listener, nullptr)) {}
+    InputListenerHandle& operator=(InputListenerHandle&& other) noexcept
+    {
+        if (this != &other)
+        {
+            reset();
+            m_listener = std::exchange(other.m_listener, nullptr);
+        }
+        return *this;
+    }
+    InputListenerHandle(const InputListenerHandle&) = delete;
+    InputListenerHandle& operator=(const InputListenerHandle&) = delete;
+
+    T* operator->() const { return m_listener; }
+    explicit operator bool() const { return m_listener != nullptr; }
+    void reset(); // unregisters now; defined below Globals::input
+
+private:
+    friend class Input;
+    explicit InputListenerHandle(T* listener) : m_listener(listener) {}
+    T* m_listener = nullptr;
+};
+
+export using MouseListenerHandle       = InputListenerHandle<MouseListener>;
+export using KeyboardListenerHandle    = InputListenerHandle<KeyboardListener>;
+export using SystemEventListenerHandle = InputListenerHandle<SystemEventListener>;
+
 export class Input final
 {
 public:
@@ -82,45 +118,16 @@ public:
     bool wantMouseVisible() const          { return m_wantMouseVisible; }
     bool isMouseCaptured() const           { return m_mouseCaptured; }
 
-    MouseListener* addMouseListener()             { return m_mouseListeners.emplace_back(std::make_unique<MouseListener>()).get(); }
-    KeyboardListener* addKeyboardListener()       { return m_keyboardListeners.emplace_back(std::make_unique<KeyboardListener>()).get(); }
-    SystemEventListener* addSystemEventListener() { return m_systemEventListeners.emplace_back(std::make_unique<SystemEventListener>()).get(); }
-
-    void removeMouseListener(const MouseListener* listener)
-    {
-        for (auto it = m_mouseListeners.begin(); it != m_mouseListeners.end(); ++it)
-        {
-            if (it->get() == listener)
-            {
-                m_mouseListeners.erase(it);
-                return;
-            }
-        }
-    }
-    void removeKeyboardListener(const KeyboardListener* listener)
-    {
-        for (auto it = m_keyboardListeners.begin(); it != m_keyboardListeners.end(); ++it)
-        {
-            if (it->get() == listener)
-            {
-                m_keyboardListeners.erase(it);
-                return;
-            }
-        }
-    }
-    void removeSystemEventListener(const SystemEventListener* listener)
-    {
-        for (auto it = m_systemEventListeners.begin(); it != m_systemEventListeners.end(); ++it)
-        {
-            if (it->get() == listener)
-            {
-                m_systemEventListeners.erase(it);
-                return;
-            }
-        }
-    }
+    [[nodiscard]] MouseListenerHandle addMouseListener()             { return MouseListenerHandle(m_mouseListeners.emplace_back(std::make_unique<MouseListener>()).get()); }
+    [[nodiscard]] KeyboardListenerHandle addKeyboardListener()       { return KeyboardListenerHandle(m_keyboardListeners.emplace_back(std::make_unique<KeyboardListener>()).get()); }
+    [[nodiscard]] SystemEventListenerHandle addSystemEventListener() { return SystemEventListenerHandle(m_systemEventListeners.emplace_back(std::make_unique<SystemEventListener>()).get()); }
 
 private:
+
+    template<typename T> friend class InputListenerHandle;
+    void removeListener(const MouseListener* listener)       { std::erase_if(m_mouseListeners,       [listener](const auto& l) { return l.get() == listener; }); }
+    void removeListener(const KeyboardListener* listener)    { std::erase_if(m_keyboardListeners,    [listener](const auto& l) { return l.get() == listener; }); }
+    void removeListener(const SystemEventListener* listener) { std::erase_if(m_systemEventListeners, [listener](const auto& l) { return l.get() == listener; }); }
 
     const bool* m_pKeyStates = nullptr;
     std::vector<std::unique_ptr<MouseListener>>    m_mouseListeners;
@@ -137,4 +144,14 @@ private:
 export namespace Globals
 {
     Input input;
+}
+
+export template<typename T>
+void InputListenerHandle<T>::reset()
+{
+    if (m_listener)
+    {
+        Globals::input.removeListener(m_listener);
+        m_listener = nullptr;
+    }
 }

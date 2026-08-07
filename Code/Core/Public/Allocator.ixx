@@ -570,8 +570,7 @@ while (!m_usedBits[i].compare_exchange_weak(expected, expected | bitMasks[i], st
 */
 
 // Earliest possible static initialization for allocator
-#pragma warning(disable: 4075)
-#pragma init_seg(".CRT$XCA")
+OC_INIT_SEG(OC_SEG_CORE_ALLOCATOR)
 
 export namespace Globals
 {
@@ -583,7 +582,6 @@ export namespace Globals
 #endif
 }
 
-#pragma warning(default: 4075)
 
 extern "C++"
 {

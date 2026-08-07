@@ -7,6 +7,13 @@
 // the solver on every instance (owner, server twin, replicas).
 Prefab netPlayerCapsule
 	Scale 0.4
+	Component Scene
+		// Character visual at the capsule bottom; Scale 2.5 cancels the root's 0.4 so the model
+		// keeps its authored size. Animated/yawed from the capsule's movement by PlayerBody.scr —
+		// position-delta based, so replicas on other clients animate too.
+		Prefab playerBody
+			Position 0 -2 0
+			Scale 2.5
 	Component Render
 		ObjectContainer wireshapes
 		Node Capsule

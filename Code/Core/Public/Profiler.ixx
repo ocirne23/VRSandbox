@@ -275,13 +275,11 @@ private:
 // Static-init order (lexicographic CRT section sort): allocator (.CRT$XCA) -> profiler (XCA2) ->
 // memory tracker (XCA3) -> everything else. The constructor registers "Main" + calibrates, so a
 // ProfileScope in any later global's initializer (Tweak registration statics etc.) is valid.
-#pragma warning(disable: 4075)
-#pragma init_seg(".CRT$XCA1")
+OC_INIT_SEG(OC_SEG_CORE_PROFILER)
 export namespace Globals
 {
     Profiler profiler;
 }
-#pragma warning(default: 4075)
 
 // RAII scope marker - the thing user code sprinkles into functions:
 //     ProfileScope scope("SkinPalettes", EProfileCategory::Animation);

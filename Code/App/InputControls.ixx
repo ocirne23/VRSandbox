@@ -29,8 +29,6 @@ private:
     IGizmo& gizmo; // owned by the UI; only the mode hotkeys touch it from here
     FreeFlyCameraController& cameraController;
     World& world; // spawns go through the world's API; it owns the root entity lifetimes
-    std::vector<EntityPtr>& spawnedLights; // test lights (keys 1-7): plain entities with a LightComponent
-    std::vector<PhysicsJoint>& spawnedJoints;
     std::vector<ForceEmitter> spawnedForceEmitters; // test forcefields (keys N/M/H/B); RAII, cleared before globals die
     std::vector<ForceQuery> spawnedForceQueries;    // territory-query test grid (key J)
     struct ForceBall // physics body carrying a forcefield: enemy bubbles knock it back (key F)
@@ -39,7 +37,7 @@ private:
         ForceEmitter emitter;
     };
     std::vector<ForceBall> forceBalls;
-    KeyboardListener* pKeyboardListener;
+    KeyboardListenerHandle pKeyboardListener; // unregisters itself on destruction
     
     float output = 1.0f;          // must exceed the iso threshold (default 0.15) or no bubble exists
     float reach = 4.0f;           // TOTAL extent: the bubble spans pos .. pos + dir * reach
@@ -98,7 +96,6 @@ private:
         if (LightComponent* lc = getComponent<LightComponent>(entity))
             lc->lights[0] = light;
         world.addRootEntity(entity);
-        spawnedLights.push_back(entity);
         return entity;
     }
 
@@ -107,10 +104,8 @@ public:
     InputControls(
         IGizmo& gizmo,
         FreeFlyCameraController& cameraController,
-        World& world,
-        std::vector<EntityPtr>& spawnedLights,
-		std::vector<PhysicsJoint>& spawnedJoints)
-        : gizmo(gizmo), cameraController(cameraController), world(world), spawnedLights(spawnedLights), spawnedJoints(spawnedJoints)
+        World& world)
+        : gizmo(gizmo), cameraController(cameraController), world(world)
     {
 		Tweak::floatVar("Force/Emitter", "Output", &output, 0.2f, 10.0f, 0.01f); // stay above iso (0.15)
 		Tweak::floatVar("Force/Emitter", "Reach", &reach, 0.1f, 100.0f, 0.1f);
@@ -132,12 +127,6 @@ public:
         pKeyboardListener->onKeyPressed = [this](const SDL_KeyboardEvent& evt) { handleKeyEvent(evt); };
         pKeyboardListener->onKeyReleased = [this](const SDL_KeyboardEvent& evt) { handleKeyEvent(evt); };
     }
-
-	~InputControls()
-	{
-		auto& input = Globals::input;
-		input.removeKeyboardListener(pKeyboardListener);
-	}
 
     // Per-frame maintenance of the test force-balls: the emitter follows the simulated body and the
     // GPU-read-back applied force (opposing bubbles pressing on it) feeds back as a physics impulse.
@@ -451,12 +440,6 @@ public:
         {
             renderer.setSunLight(-cameraController.getDirection(), glm::vec3(1.0f), 5.0f); // aim the sun along the camera forward
         }
-        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_1 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-        {
-            for (const EntityPtr& light : spawnedLights)
-                world.removeRootEntity(light);
-            spawnedLights.clear();
-        }
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_2 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {
             LightComponent::LightDesc light;
@@ -507,26 +490,6 @@ public:
             light.width = 0.1f; // tube radius
             light.length = 1.0f;
             spawnLight("TestTubeLight", cameraController.getPosition(), light);
-        }
-
-        // 0: hang a chain of physics cubes in front of the camera (spherical joints, anchored to the world)
-        if (evt.scancode == SDL_Scancode::SDL_SCANCODE_0 && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
-        {
-            const glm::vec3 anchor = cameraController.getPosition() + cameraController.getDirection() * 2.0f;
-            PhysicsBody* prevBody = &Globals::physics.staticBody();
-            glm::vec3 pivot = anchor;
-            for (int i = 0; i < 8; ++i)
-            {
-                const glm::vec3 pos = anchor - glm::vec3(0.0f, 0.35f * float(i) + 0.175f, 0.0f);
-                EntityPtr e = world.spawn("physicsCube", Transform(pos, 0.25f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
-                PhysicsComponent* pc = e ? getComponent<PhysicsComponent>(e) : nullptr;
-                if (!pc || !pc->body.isValid())
-                    break;
-                spawnedJoints.push_back(Globals::physics.createSphericalJoint(*prevBody, pc->body, pivot));
-                prevBody = &pc->body;
-                pivot = pos - glm::vec3(0.0f, 0.175f, 0.0f);
-                world.addRootEntity(std::move(e));
-            }
         }
         // 8/9: throw a dynamic physics cube/sphere from the camera
         if ((evt.scancode == SDL_Scancode::SDL_SCANCODE_8 || evt.scancode == SDL_Scancode::SDL_SCANCODE_9) && evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)

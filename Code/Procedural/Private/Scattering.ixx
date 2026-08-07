@@ -207,3 +207,9 @@ export namespace Procedural
 		int m_lastRingR = -1;
 	};
 }
+
+export namespace Globals
+{
+OC_INIT_SEG(OC_SEG_PROCEDURAL)
+	Procedural::ScatterSystem scatter;
+}

@@ -56,8 +56,6 @@ private:
 
 export namespace Globals
 {
-#pragma warning(disable: 4075)
-#pragma init_seg(".CRT$XCU4")
+OC_INIT_SEG(OC_SEG_VK_DATA)
     TextureManager textureManager;
-#pragma warning(default: 4075)
 }

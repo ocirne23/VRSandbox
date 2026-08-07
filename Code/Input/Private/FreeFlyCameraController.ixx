@@ -5,13 +5,13 @@ import Core.glm;
 import Core.Camera;
 
 import Input.fwd;
+import :Input; // MouseListenerHandle
 
 export class FreeFlyCameraController final
 {
 public:
 
     FreeFlyCameraController() {}
-    ~FreeFlyCameraController();
     FreeFlyCameraController(const FreeFlyCameraController&) = delete;
 
     void initialize(glm::vec3 position, glm::vec3 lookAt, glm::vec3 up = glm::vec3(0, 1, 0));
@@ -44,7 +44,7 @@ public:
 
 private:
 
-    MouseListener* m_mouseListener = nullptr;
+    MouseListenerHandle m_mouseListener; // unregisters itself on destruction
 
     bool m_isMouseDown = false;
     bool m_mousePosUpdated = false;

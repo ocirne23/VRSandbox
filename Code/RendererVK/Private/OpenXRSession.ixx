@@ -136,8 +136,6 @@ export namespace Globals
 {
     // After the Vulkan device (XCU2) so its teardown (which uses the live VkDevice handle) runs before
     // the device is destroyed, and before/with the Renderer (XCU3) that drives it.
-#pragma warning(disable: 4075)
-#pragma init_seg(".CRT$XCU3")
+OC_INIT_SEG(OC_SEG_VK_RENDERER)
     OpenXRSession openXR;
-#pragma warning(default: 4075)
 }

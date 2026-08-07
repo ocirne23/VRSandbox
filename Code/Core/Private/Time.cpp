@@ -52,7 +52,7 @@ void Time::removeTimer(Timer* pTimer)
     auto it = m_timerBuckets.find(bucket);
     if (it != m_timerBuckets.end())
     {
-        std::vector<Timer*> timers = it->second;
+        std::vector<Timer*>& timers = it->second; // REFERENCE: a copy here silently discarded the removal
         // swap and pop
         auto itTimer = std::find(timers.begin(), timers.end(), pTimer);
         if (itTimer != timers.end())

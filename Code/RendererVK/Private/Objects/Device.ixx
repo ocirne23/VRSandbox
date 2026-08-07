@@ -43,8 +43,6 @@ private:
 
 export namespace Globals
 {
-#pragma warning(disable: 4075)
-#pragma init_seg(".CRT$XCU2")
+OC_INIT_SEG(OC_SEG_VK_DEVICE)
     Device device;
-#pragma warning(default: 4075)
 }

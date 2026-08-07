@@ -62,7 +62,8 @@ export class JobSystem final
 public:
 
     void initialize(const JobSystemDesc& desc = {});
-    void shutdown(); // call from main before globals tear down; joins workers, drops leftovers
+    void shutdown(); // idempotent; joins workers, drops leftovers. Runs from ~JobSystem via init_seg ordering
+    ~JobSystem() { shutdown(); } // atexit runs on the main thread, so the helper-context teardown is valid
 
     bool isInitialized() const { return m_numContexts != 0; }
     uint32 getNumWorkers() const { return m_numWorkers; }
@@ -273,5 +274,9 @@ private:
 
 export namespace Globals
 {
+// Teardown ordering lives in InitSeg.h. Every EntityPtr holder destructs BEFORE this: destroying an
+// entity reaches PerWorker::local(), which needs the main thread's live worker context. ~JobSystem
+// then joins the workers before the renderer and the plain-seg globals they might touch go down.
+OC_INIT_SEG(OC_SEG_JOB_SYSTEM)
     JobSystem jobSystem;
 }

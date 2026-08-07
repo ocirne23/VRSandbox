@@ -231,3 +231,9 @@ export namespace Procedural
 		float m_dryGridRange = 0.0f;
 	};
 }
+
+export namespace Globals
+{
+OC_INIT_SEG(OC_SEG_PROCEDURAL)
+	Procedural::OceanGenerator ocean;
+}

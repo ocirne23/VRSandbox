@@ -177,7 +177,7 @@ static const char* disconnectReasonName(ENetDisconnectReason reason)
     }
 }
 
-void NetworkManager::registerTweaks()
+void NetworkManager::initialize()
 {
     static bool s_registered = false;
     if (s_registered)
@@ -251,7 +251,6 @@ void NetworkManager::setEncryption(bool enabled)
 bool NetworkManager::startServer(uint16 port)
 {
     assert(m_role == ENetRole::None);
-    registerTweaks();
     NetHostConfig config;
     config.protocolId = GameProtocolId;
     config.acceptIncoming = true;
@@ -270,7 +269,6 @@ bool NetworkManager::startServer(uint16 port)
 bool NetworkManager::startClient(const std::string& address, uint16 defaultPort)
 {
     assert(m_role == ENetRole::None);
-    registerTweaks();
     NetAddress addr = NetAddress::fromString(address);
     if (!addr.isValid())
     {

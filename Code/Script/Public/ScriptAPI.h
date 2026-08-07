@@ -37,6 +37,7 @@ class AudioComponent;
 class ForceComponent;
 class SceneComponent;
 class LightComponent;
+class AnimatorComponent;
 
 // Handle to an engine-owned dynamic array (the DSL's `T[]`). A plain POD id so it can live in a script's
 // persistent ScriptData block: the ELEMENTS live engine-side, keyed by this id, which means a hot-reload that

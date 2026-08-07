@@ -95,10 +95,8 @@ private:
 // After the allocator (.CRT$XCA) and the profiler (XCA2); before every ordinary global, whose
 // static-init allocations then flow through the installed hooks. Constructed-early also means
 // destructed-LAST, so the hooks stay valid through the other globals' teardown frees.
-#pragma warning(disable: 4075)
-#pragma init_seg(".CRT$XCA3")
+OC_INIT_SEG(OC_SEG_CORE_MEMORY_TRACKER)
 export namespace Globals
 {
     MemoryTracker memoryTracker;
 }
-#pragma warning(default: 4075)

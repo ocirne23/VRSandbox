@@ -71,3 +71,9 @@ export namespace Procedural
 		void* m_terrainUserData = nullptr;
 	};
 }
+
+export namespace Globals
+{
+OC_INIT_SEG(OC_SEG_PROCEDURAL)
+	Procedural::TerrainCollider terrainCollider;
+}

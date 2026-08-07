@@ -21,12 +21,6 @@ namespace
     }
 }
 
-FreeFlyCameraController::~FreeFlyCameraController()
-{
-    if (m_mouseListener)
-        Globals::input.removeMouseListener(m_mouseListener);
-}
-
 void FreeFlyCameraController::initialize(glm::vec3 position, glm::vec3 lookAt, glm::vec3 up)
 {
     m_position = position;

@@ -267,3 +267,9 @@ export namespace Procedural
 		bool   m_ringScanNeeded = true;
 	};
 }
+
+export namespace Globals
+{
+OC_INIT_SEG(OC_SEG_PROCEDURAL)
+	Procedural::TerrainStreamer terrain;
+}

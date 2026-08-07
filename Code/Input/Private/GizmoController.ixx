@@ -8,6 +8,7 @@ import Core.Transform;
 import Entity;
 
 import Input.fwd;
+import :Input; // MouseListenerHandle
 export import UI.Gizmo; // EGizmoMode + the IGizmo interface the UI owns this through
 
 // Spawns the Gizmo.pre prefab and drives it: follows the scene-panel selection, keeps a constant
@@ -52,8 +53,8 @@ private:
     void   beginDrag(Handle handle, const Ray& ray);
     void   continueDrag(const Ray& ray);
 
-    MouseListener* m_mouseListener = nullptr;
-    EntityPtr      m_gizmo;
+    MouseListenerHandle m_mouseListener; // unregisters itself on destruction
+    EntityPtr           m_gizmo;
     Entity*        m_selected = nullptr;
 
     EGizmoMode m_mode = EGizmoMode::Translate;

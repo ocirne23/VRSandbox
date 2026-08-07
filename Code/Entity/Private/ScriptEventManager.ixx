@@ -117,6 +117,9 @@ private:
 
 export namespace Globals
 {
+// The deferred EntityChange queue holds EntityPtrs (requests queued after the last drain) —
+// releasing them needs the job system and networkManager still alive, see InitSeg.h.
+OC_INIT_SEG(OC_SEG_SCRIPT_EVENTS)
     ScriptEventManager scriptEvents;
 }
 

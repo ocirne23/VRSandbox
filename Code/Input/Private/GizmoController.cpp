@@ -105,8 +105,8 @@ namespace
 
 GizmoController::~GizmoController()
 {
-    if (m_mouseListener)
-        Globals::input.removeMouseListener(m_mouseListener);
+    if (Globals::ui.getGizmo() == this) // the UI's reference is non-owning; detach before it dangles
+        Globals::ui.setGizmo(nullptr);
 }
 
 void GizmoController::initialize(World& world)

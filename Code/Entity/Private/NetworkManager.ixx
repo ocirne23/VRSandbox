@@ -113,12 +113,13 @@ public:
 
     // Registers the "Network" tweak block; call once at startup regardless of role so the
     // section exists in single player too.
-    void registerTweaks();
+    void initialize();
 
     bool startServer(uint16 port);
     // Accepts "ip[:port]" or "hostname[:port]" (blocking DNS); defaultPort fills a missing port.
     bool startClient(const std::string& address, uint16 defaultPort);
-    void shutdown();
+    void shutdown(); // idempotent (a never-started host closes as a no-op); also runs from ~NetworkManager
+    ~NetworkManager() { shutdown(); } // init_seg XCU6: after ~World's NetworkComponents unregister, before ~JobSystem
 
     ENetRole role() const { return m_role; }
     const NetSyncParams& params() const { return m_params; }
@@ -328,5 +329,8 @@ private:
 
 export namespace Globals
 {
+// Destructs after every entity holder (their NetworkComponents unregister through the still-open
+// host) and before jobSystem — see InitSeg.h.
+OC_INIT_SEG(OC_SEG_NETWORK_MANAGER)
     NetworkManager networkManager;
 }

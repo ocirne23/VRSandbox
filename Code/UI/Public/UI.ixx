@@ -45,7 +45,7 @@ public:
 
     // ---- Transform gizmo ----
     // Driven from here; the app owns the storage (the implementation lives in Input, below UI, so it
-    // arrives as an IGizmo). NON-OWNING - the app must clear this before the gizmo goes out of scope.
+    // arrives as an IGizmo). NON-OWNING - the GizmoController detaches itself here in its destructor.
     // update() drives it from the panel's own viewport rect + selection; the gizmo ENTITY has to tick
     // with the rest of the scene, hence the separate call the app makes at that point in the frame
     // (it needs the renderer, which UI::update has no business holding).
@@ -139,5 +139,9 @@ private:
 
 export namespace Globals
 {
+// The FIRST engine global to destruct (see InitSeg.h) — the panels hold EntityPtrs (Scene selection,
+// Entity Editor document, pending prefab save) and EntityChange queues, released while everything an
+// entity destructor touches is still alive.
+OC_INIT_SEG(OC_SEG_UI)
     UI ui;
 }

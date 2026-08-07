@@ -138,5 +138,11 @@ private:
 
 export namespace Globals
 {
+// ~World destroys the root entities (their components need spatialIndex/physics/audio/renderer/
+// networkManager and the job system's main-thread context — all destruct later, see InitSeg.h) and
+// then the caches (ObjectContainers → Renderer::removeObjectContainer, audio buffers →
+// Globals::audio). Members destruct in reverse declaration order, so m_rootEntities empties before
+// the caches they reference.
+OC_INIT_SEG(OC_SEG_WORLD)
     World world;
 }
