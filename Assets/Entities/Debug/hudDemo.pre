@@ -1,0 +1,5 @@
+Prefab hudDemo
+	Position 0 0 0
+	Component Script
+		Path Scripts/HudDemo.scr
+		Enabled true

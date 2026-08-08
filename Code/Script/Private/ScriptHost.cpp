@@ -341,7 +341,10 @@ bool ScriptHost::loadDll(CachedScript& slot, const fs::path& dll)
         }
     }
 
-    m_scriptLoadedCallback(&slot.entries, oldEventNames);
+    // Null when no ScriptEventManager wired one in (DslCompiler's check-compile) -- same guard as the
+    // static-registry path.
+    if (m_scriptLoadedCallback)
+        m_scriptLoadedCallback(&slot.entries, oldEventNames);
 
     return true;
 }

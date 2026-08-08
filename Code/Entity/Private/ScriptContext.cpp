@@ -11,6 +11,7 @@ import Core.glm;
 import Core.Log;
 import Core.Time;
 import Core.SDL;
+import Core.GameHud;
 import Core.Sphere;
 import Core.Transform;
 import Core.Camera;
@@ -613,6 +614,36 @@ void registerScriptDslBindings()
             // Seconds since startup -- the same clock deltaSeconds comes from, already on the context.
             { "time",         T::Float, "ctx->elapsedSeconds",          /*writable*/ false },
             { "camera",       cameraType, "ctx",                        /*writable*/ false }, // "$r" unused by its members
+        } });
+
+    // The in-game HUD overlay (Core.GameHud): a hotbar the number keys drive plus bars/counters at the
+    // top left. GLOBAL state, deliberately not a component -- one screen, one HUD -- so like `world` it
+    // lives under its own top-level name. Keys 1..9,0 select slots 0..9 while the hotbar is active
+    // (visible AND any slot assigned) and fire the global "Hotbar Select" script event, so a script
+    // reacts by subscribing to that event and reading hud.selectedSlot. Bars/counters are keyed by
+    // their display name; insertion order is display order; colors are linear 0..1 RGB.
+    const DSLType hudType = bindings.registerNamespace("hud");
+    bindings.registerObject({ "hud", hudType, /*sidebarTopLevel*/ true,
+        {
+            // count > 0 draws a Minecraft-style stack number in the slot corner.
+            { "setSlot",          T::Void, { { "slot", T::Int }, { "label", T::String }, { "count", T::Int } }, "ctx->hudSetSlot($1, $2, $3)" },
+            { "setSlotCount",     T::Void, { { "slot", T::Int }, { "count", T::Int } },                        "ctx->hudSetSlotCount($1, $2)" },
+            { "clearSlot",        T::Void, { { "slot", T::Int } },                                             "ctx->hudClearSlot($1)" },
+            { "selectSlot",       T::Void, { { "slot", T::Int } },                                             "ctx->hudSelectSlot($1)" },
+            // Explicit off-switch: the hotbar only draws (and the number keys only select) while visible
+            // AND any slot is assigned, so an empty HUD leaves the testbed number keys untouched.
+            { "setHotbarVisible", T::Void, { { "visible", T::Bool } },                                         "ctx->hudSetHotbarVisible($1)" },
+            // Creates or updates the named bar; value clamps to 0..maxValue.
+            { "setBar",           T::Void, { { "name", T::String }, { "value", T::Float }, { "maxValue", T::Float }, { "color", vec3 } }, "ctx->hudSetBar($1, $2, $3, $4)" },
+            { "removeBar",        T::Void, { { "name", T::String } },                                          "ctx->hudRemoveBar($1)" },
+            // decimals 0 = integer display.
+            { "setCounter",       T::Void, { { "name", T::String }, { "value", T::Float }, { "decimals", T::Int }, { "color", vec3 } }, "ctx->hudSetCounter($1, $2, $3, $4)" },
+            { "removeCounter",    T::Void, { { "name", T::String } },                                          "ctx->hudRemoveCounter($1)" },
+            // Removes every slot, bar and counter -- what an OnDestroy typically calls.
+            { "clear",            T::Void, {},                                                                 "ctx->hudClear(0)" },
+        },
+        {
+            { "selectedSlot", T::Int, "ctx->hudGetSelectedSlot(0)", /*writable*/ false },
         } });
 
     bindings.registerObject({ nullptr, T::Void, /*sidebarTopLevel*/ false,
@@ -1687,6 +1718,37 @@ extern "C" // The thunks have C linkage (external) so the cooked App-Scripts can
             return minValue;
         return std::uniform_int_distribution<int>(minValue, maxValue)(scriptRng()); // both ends inclusive
     }
+
+    // ---- game HUD ----
+    // Straight passthroughs to Core.GameHud (mutex-guarded, so worker-thread script ticks are fine; the
+    // labels copy into engine-owned std::strings, so a script DLL's .rdata never outlives its call here).
+    void thunk_hudSetSlot(int slotIndex, const char* label, int count) { Globals::gameHud.setSlot(slotIndex, label != nullptr ? label : "", count); }
+    void thunk_hudSetSlotCount(int slotIndex, int count)               { Globals::gameHud.setSlotCount(slotIndex, count); }
+    void thunk_hudClearSlot(int slotIndex)                             { Globals::gameHud.clearSlot(slotIndex); }
+    void thunk_hudSelectSlot(int slotIndex)                            { Globals::gameHud.selectSlot(slotIndex); }
+    int  thunk_hudGetSelectedSlot(int)                                 { return Globals::gameHud.getSelectedSlot(); }
+    void thunk_hudSetHotbarVisible(int visible)                        { Globals::gameHud.setHotbarVisible(visible != 0); }
+    void thunk_hudSetBar(const char* name, float value, float maxValue, glm::vec3 color)
+    {
+        if (name != nullptr)
+            Globals::gameHud.setBar(name, value, maxValue, color);
+    }
+    void thunk_hudRemoveBar(const char* name)
+    {
+        if (name != nullptr)
+            Globals::gameHud.removeBar(name);
+    }
+    void thunk_hudSetCounter(const char* name, float value, int decimals, glm::vec3 color)
+    {
+        if (name != nullptr)
+            Globals::gameHud.setCounter(name, value, decimals, color);
+    }
+    void thunk_hudRemoveCounter(const char* name)
+    {
+        if (name != nullptr)
+            Globals::gameHud.removeCounter(name);
+    }
+    void thunk_hudClear(int) { Globals::gameHud.clearAll(); }
 
 }
 #pragma warning(pop)

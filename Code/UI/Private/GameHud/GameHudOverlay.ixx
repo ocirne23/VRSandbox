@@ -1,0 +1,158 @@
+export module UI:GameHudOverlay;
+
+import Core;
+import Core.imgui;
+import Core.glm;
+import Core.Rect;
+import Core.GameHud;
+import Core.Tweaks;
+
+// Draws the in-game HUD (Core.GameHud is the model; scripts write it) OVER the viewport: a
+// Minecraft-style hotbar bottom-center (keys 1..9,0 select -- see InputControls) and bars/counters
+// stacked from the top left. Pure ImDrawList painting into the Viewport window's draw list -- no
+// ImGui widgets, so it never takes focus or eats input. UI::update calls render() while the
+// Viewport window is current.
+export class GameHudOverlay final
+{
+public:
+
+	void registerTweaks()
+	{
+		Tweak::boolean("HUD", "Enabled", &m_enabled);
+		Tweak::floatVar("HUD", "Scale", &m_scale, 0.5f, 3.0f, 0.05f);
+		Tweak::floatVar("HUD", "Opacity", &m_opacity, 0.1f, 1.0f, 0.05f);
+	}
+
+	void render(const Rect& viewport)
+	{
+		if (!m_enabled)
+			return;
+		const glm::ivec2 size = viewport.getSize();
+		if (size.x <= 0 || size.y <= 0)
+			return;
+		const GameHud::Snapshot hud = Globals::gameHud.snapshot();
+		if (!hud.hotbarActive && hud.bars.empty() && hud.counters.empty())
+			return;
+
+		ImDrawList* dl = ImGui::GetWindowDrawList();
+		const ImVec2 vpMin((float)viewport.min.x, (float)viewport.min.y);
+		const ImVec2 vpMax((float)viewport.max.x, (float)viewport.max.y);
+		dl->PushClipRect(vpMin, vpMax, true);
+
+		ImFont* font = ImGui::GetFont();
+		const float s = m_scale;
+		const float alpha = m_opacity;
+		const auto col = [alpha](float r, float g, float b, float a)
+		{
+			return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, a * alpha));
+		};
+		const auto colV = [alpha](const glm::vec3& c, float a)
+		{
+			return ImGui::ColorConvertFloat4ToU32(ImVec4(c.x, c.y, c.z, a * alpha));
+		};
+		// Every string draws twice, shadow first -- the HUD sits over arbitrary scene content.
+		const auto text = [&](ImVec2 pos, float fontSize, ImU32 color, const char* str)
+		{
+			dl->AddText(font, fontSize, ImVec2(pos.x + 1.0f, pos.y + 1.0f), col(0.0f, 0.0f, 0.0f, 0.7f), str);
+			dl->AddText(font, fontSize, pos, color, str);
+		};
+		const float fontSize = ImGui::GetFontSize() * s;
+		constexpr float noWrap = 1.0e30f; // CalcTextSizeA max width: never wrap
+		char buf[64];
+
+		// ---- top left: bars, then counters, each entry under the previous ----
+		{
+			const float margin = 14.0f * s;
+			const float rowW = 230.0f * s;
+			const float barH = 20.0f * s;
+			const float gap = 6.0f * s;
+			const float x = vpMin.x + margin;
+			float y = vpMin.y + margin;
+			for (const HudBar& bar : hud.bars)
+			{
+				const ImVec2 bMin(x, y), bMax(x + rowW, y + barH);
+				dl->AddRectFilled(bMin, bMax, col(0.06f, 0.06f, 0.08f, 0.75f), 4.0f * s);
+				const float frac = glm::clamp(bar.value / bar.maxValue, 0.0f, 1.0f); // maxValue > 0 guaranteed by setBar
+				if (frac > 0.0f)
+					dl->AddRectFilled(bMin, ImVec2(x + rowW * frac, y + barH), colV(bar.color, 0.9f), 4.0f * s);
+				dl->AddRect(bMin, bMax, col(0.0f, 0.0f, 0.0f, 0.9f), 4.0f * s, 0, 1.5f * s);
+				const float textY = y + (barH - fontSize) * 0.5f;
+				text(ImVec2(x + 6.0f * s, textY), fontSize, col(1.0f, 1.0f, 1.0f, 1.0f), bar.name.c_str());
+				formatBarValue(buf, sizeof(buf), bar.value, bar.maxValue);
+				const ImVec2 valSize = font->CalcTextSizeA(fontSize, noWrap, 0.0f, buf);
+				text(ImVec2(x + rowW - valSize.x - 6.0f * s, textY), fontSize, col(1.0f, 1.0f, 1.0f, 1.0f), buf);
+				y += barH + gap;
+			}
+			for (const HudCounter& counter : hud.counters)
+			{
+				snprintf(buf, sizeof(buf), "%.*f", counter.decimals, counter.value);
+				text(ImVec2(x, y), fontSize, col(0.85f, 0.85f, 0.85f, 1.0f), counter.name.c_str());
+				const ImVec2 valSize = font->CalcTextSizeA(fontSize, noWrap, 0.0f, buf);
+				text(ImVec2(x + rowW - valSize.x, y), fontSize, colV(counter.color, 1.0f), buf);
+				y += fontSize + gap * 0.7f;
+			}
+		}
+
+		// ---- bottom center: the hotbar ----
+		if (hud.hotbarActive)
+		{
+			const float slot = 46.0f * s;
+			const float pad = 5.0f * s;
+			const float totalW = GameHud::NumSlots * slot + (GameHud::NumSlots - 1) * pad;
+			const float y = vpMax.y - slot - 14.0f * s;
+			const float keyFontSize = fontSize * 0.72f;
+			float x = vpMin.x + ((vpMax.x - vpMin.x) - totalW) * 0.5f;
+			for (int i = 0; i < GameHud::NumSlots; ++i, x += slot + pad)
+			{
+				const HudSlot& hudSlot = hud.slots[i];
+				const bool selected = i == hud.selectedSlot;
+				const ImVec2 sMin(x, y), sMax(x + slot, y + slot);
+				dl->AddRectFilled(sMin, sMax, col(0.06f, 0.06f, 0.08f, selected ? 0.85f : 0.65f), 5.0f * s);
+				if (selected)
+					dl->AddRect(ImVec2(sMin.x - 2.0f * s, sMin.y - 2.0f * s), ImVec2(sMax.x + 2.0f * s, sMax.y + 2.0f * s),
+						col(1.0f, 1.0f, 1.0f, 0.95f), 6.0f * s, 0, 2.5f * s);
+				else
+					dl->AddRect(sMin, sMax, col(0.5f, 0.5f, 0.55f, 0.6f), 5.0f * s, 0, 1.0f * s);
+				// the key that selects this slot, top left corner (slot 9 is key 0)
+				snprintf(buf, sizeof(buf), "%d", (i + 1) % 10);
+				text(ImVec2(sMin.x + 3.0f * s, sMin.y + 2.0f * s), keyFontSize, col(0.7f, 0.7f, 0.7f, 0.9f), buf);
+				if (!hudSlot.used)
+					continue;
+				// item label centered, shrunk to fit when long (icons can come later; text always works)
+				if (!hudSlot.label.empty())
+				{
+					float labelSize = fontSize * 0.85f;
+					ImVec2 ts = font->CalcTextSizeA(labelSize, noWrap, 0.0f, hudSlot.label.c_str());
+					const float maxW = slot - 6.0f * s;
+					if (ts.x > maxW)
+					{
+						labelSize *= maxW / ts.x;
+						ts = font->CalcTextSizeA(labelSize, noWrap, 0.0f, hudSlot.label.c_str());
+					}
+					text(ImVec2(x + (slot - ts.x) * 0.5f, y + (slot - ts.y) * 0.5f), labelSize, col(1.0f, 1.0f, 1.0f, 1.0f), hudSlot.label.c_str());
+				}
+				if (hudSlot.count > 0) // stack count, bottom right
+				{
+					snprintf(buf, sizeof(buf), "%d", hudSlot.count);
+					const ImVec2 cs = font->CalcTextSizeA(keyFontSize, noWrap, 0.0f, buf);
+					text(ImVec2(sMax.x - cs.x - 3.0f * s, sMax.y - cs.y - 2.0f * s), keyFontSize, col(1.0f, 0.95f, 0.6f, 1.0f), buf);
+				}
+			}
+		}
+
+		dl->PopClipRect();
+	}
+
+private:
+
+	// "72 / 100": integers when the values are whole, one decimal otherwise.
+	static void formatBarValue(char* buf, size_t bufSize, float value, float maxValue)
+	{
+		const bool whole = glm::abs(value - glm::round(value)) < 0.001f && glm::abs(maxValue - glm::round(maxValue)) < 0.001f;
+		snprintf(buf, bufSize, whole ? "%.0f / %.0f" : "%.1f / %.1f", value, maxValue);
+	}
+
+	bool  m_enabled = true;
+	float m_scale = 1.0f;
+	float m_opacity = 0.9f;
+};

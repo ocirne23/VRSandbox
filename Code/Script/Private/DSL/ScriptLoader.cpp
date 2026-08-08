@@ -815,8 +815,11 @@ namespace
 						return failValue("no member '" + memberName + "' to assign to");
 					// Every hop must be writable, not just the last: everything reachable through a read-only
 					// member is read-only too ("self.parent.pos = ..." would mutate an object the script only
-					// has read access to). self.data is the exception, handled by its own branch above.
-					if (!member->writable)
+					// has read access to). The `data` member is the one exception (see the editor's twin in
+					// AutoCompleteRules): it is read-only because the BLOCK can't be replaced wholesale, not
+					// because its contents are -- so a read-only ScriptData hop passes when another hop follows
+					// (the field branch above then owns the write), while "self.data = ..." itself still refuses.
+					if (!member->writable && !(member->type == DSLType::ScriptData && i < opAt - 1))
 						return failValue("member '" + memberName + "' is read-only");
 					// i == 2 is the FIRST hop here (the target's own name is at 0, its '.' at 1).
 					if (!checkMemberUsable(ownerName, memberName, *member, rootDecl, i == 2))

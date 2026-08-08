@@ -23,6 +23,7 @@ import :TweakPanel;
 import :ProfilerPanel;
 import :MemoryPanel;
 import :TextEditor;
+import :GameHudOverlay;
 import Script;
 import :ScriptEditor;
 
@@ -135,6 +136,7 @@ private:
 	MemoryPanel     m_memoryPanel;
 	TextEditor      m_textEditor;
 	ScriptEditor    m_scriptEditor;
+	GameHudOverlay  m_gameHudOverlay; // in-game HUD painted over the viewport (Core.GameHud is the model)
 };
 
 export namespace Globals

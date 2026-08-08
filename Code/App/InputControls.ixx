@@ -5,6 +5,7 @@ import Core.Allocator;
 import Core.Log;
 import Core.Window;
 import Core.SDL;
+import Core.GameHud;
 import Core.Frustum;
 import Core.Time;
 import Core.glm;
@@ -371,6 +372,19 @@ public:
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_D) scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "D Down" : "D Up");
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_LSHIFT) scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "LShift Down" : "LShift Up");
         if (evt.scancode == SDL_Scancode::SDL_SCANCODE_SPACE)  scriptEvents.fireEvent(evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN ? "Space Down" : "Space Up");
+
+        // Hotbar slot selection: while the game HUD's hotbar is ACTIVE (visible + any slot assigned by a
+        // script), keys 1..9,0 select slots 0..9 and fire the global "Hotbar Select" script event; the
+        // testbed spawn keys on those scancodes are skipped via the return. With no hotbar the testbed
+        // keys keep their meaning. SDL scancodes 1..9,0 are contiguous (SDL_SCANCODE_1 .. SDL_SCANCODE_0).
+        if (evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN && !evt.repeat
+            && evt.scancode >= SDL_Scancode::SDL_SCANCODE_1 && evt.scancode <= SDL_Scancode::SDL_SCANCODE_0
+            && (evt.mod & SDL_KMOD_CTRL) == 0 && Globals::gameHud.isHotbarActive())
+        {
+            Globals::gameHud.selectSlot(int(evt.scancode) - int(SDL_Scancode::SDL_SCANCODE_1));
+            scriptEvents.fireEvent("Hotbar Select"); // re-pressing the selected slot fires again ("use item")
+            return;
+        }
 
         if (evt.type == SDL_EventType::SDL_EVENT_KEY_DOWN)
         {

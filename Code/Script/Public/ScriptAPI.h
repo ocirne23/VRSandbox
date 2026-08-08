@@ -326,7 +326,23 @@ struct OcScriptField
     X(void,        sendNetworkEvent,       (const char*, eventName)) \
     /* As above, but attributes the event to the entity firing it (a script's `self`). The netId
        travels with the event so the receiving server can hand the entity to its event filter. */ \
-    X(void,        sendNetworkEventFrom,   (Entity*, sender), (const char*, eventName))
+    X(void,        sendNetworkEventFrom,   (Entity*, sender), (const char*, eventName)) \
+    /* ---- game HUD ---- the in-game viewport overlay (Core.GameHud): a 10-slot hotbar (keys 1..9,0 ->
+       slots 0..9; a press fires the global "Hotbar Select" script event) plus bars and numeric counters
+       stacked from the top left. GLOBAL state -- one screen, one HUD -- so nothing here takes an entity.
+       Bars/counters are keyed by their display name; insertion order is display order. Colors are linear
+       0..1 RGB. Thread-safe (mutex-guarded state); harmless headless (state is written, nothing draws). */ \
+    X(void,        hudSetSlot,             (int, slotIndex), (const char*, label), (int, count)) /* assigns the slot; count > 0 draws a stack number */ \
+    X(void,        hudSetSlotCount,        (int, slotIndex), (int, count)) /* no-op on an unassigned slot */ \
+    X(void,        hudClearSlot,           (int, slotIndex)) \
+    X(void,        hudSelectSlot,          (int, slotIndex)) /* clamped to 0..9 */ \
+    X(int,         hudGetSelectedSlot,     (int, unused)) /* the arity macros have no zero-parameter form; pass 0 */ \
+    X(void,        hudSetHotbarVisible,    (int, visible)) /* explicit off-switch; the hotbar only shows while visible AND any slot is assigned */ \
+    X(void,        hudSetBar,              (const char*, name), (float, value), (float, maxValue), (glm::vec3, color)) /* creates or updates; value clamps to 0..maxValue */ \
+    X(void,        hudRemoveBar,           (const char*, name)) \
+    X(void,        hudSetCounter,          (const char*, name), (float, value), (int, decimals), (glm::vec3, color)) /* decimals 0 = integer display */ \
+    X(void,        hudRemoveCounter,       (const char*, name)) \
+    X(void,        hudClear,               (int, unused)) /* removes every slot, bar and counter */
 
 #if defined(SCRIPT_STATIC_BUILD)
 // Cooked build: the engine thunks the inline ctx methods forward to (defined extern "C" in ScriptContext.cpp,

@@ -18,6 +18,7 @@ import :ProfilerPanel;
 import :MemoryPanel;
 import :TextEditor;
 import :ScriptEditor;
+import :GameHudOverlay;
 
 UI::~UI()
 {
@@ -38,6 +39,7 @@ void UI::initialize()
 
     m_scene.initialize();
     m_assetBrowser.initialize();
+    m_gameHudOverlay.registerTweaks();
 }
 
 struct LinkInfo
@@ -168,6 +170,10 @@ void UI::update(const std::vector<EntityPtr>& rootEntities, const Camera& camera
                 }
                 ImGui::EndDragDropTarget();
             }
+
+            // In-game HUD, painted into this window's draw list so it stays clipped to the viewport
+            // and never takes focus (pure drawing, no widgets).
+            m_gameHudOverlay.render(m_viewportRect);
         }
 
         ImGui::End();
